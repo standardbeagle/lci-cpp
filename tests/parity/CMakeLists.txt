@@ -1,17 +1,17 @@
 # tests/parity/CMakeLists.txt
 # Parity harness: drives both Go and C++ lci binaries side-by-side.
 
-# Locate Go reference binary
+# Locate Go reference binary.
+# `find_program` is a no-op if LCI_GO_PATH already has a non-NOTFOUND cache value,
+# so user overrides via -DLCI_GO_PATH=... are preserved automatically.
 if(NOT LCI_GO_PATH)
-    find_program(_LCI_GO_FOUND NAMES lci-linux-amd64 lci HINTS
-        /home/beagle/work/core/lci
-        /usr/local/bin
-        ENV PATH)
-    if(_LCI_GO_FOUND)
-        set(LCI_GO_PATH "${_LCI_GO_FOUND}" CACHE FILEPATH
-            "Path to Go reference lci binary for parity tests" FORCE)
-    endif()
+    set(LCI_GO_PATH "LCI_GO_PATH-NOTFOUND" CACHE FILEPATH
+        "Path to Go reference lci binary for parity tests" FORCE)
 endif()
+find_program(LCI_GO_PATH NAMES lci-linux-amd64 lci HINTS
+    /home/beagle/work/core/lci
+    /usr/local/bin
+    ENV PATH)
 
 if(NOT LCI_GO_PATH)
     message(WARNING "LCI_GO_PATH not set and Go lci binary not found — parity tests will be skipped")
@@ -54,6 +54,7 @@ target_link_libraries(parity_runner PRIVATE
     lci_parity_runner_lib
     CLI11::CLI11
 )
+add_dependencies(parity_runner lci)
 
 # ---- Unit tests for the diff engine ----
 add_executable(parity_unit_tests
@@ -67,8 +68,10 @@ target_link_libraries(parity_unit_tests PRIVATE
     lci_parity_runner_lib
     GTest::gtest_main
 )
-add_test(NAME parity_unit_tests COMMAND parity_unit_tests)
-set_tests_properties(parity_unit_tests PROPERTIES LABELS "parity")
+include(GoogleTest)
+gtest_discover_tests(parity_unit_tests
+    PROPERTIES LABELS "parity"
+)
 
 # ---- Per-descriptor parity tests ----
 file(GLOB_RECURSE PARITY_DESCS CONFIGURE_DEPENDS
