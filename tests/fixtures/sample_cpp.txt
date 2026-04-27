@@ -1,0 +1,38 @@
+#pragma once
+
+#include <string>
+#include <vector>
+
+namespace sample {
+
+// Config holds application configuration.
+struct Config {
+    std::string name;
+    int port = 8080;
+    bool debug = false;
+};
+
+// Server is a simple HTTP server skeleton.
+class Server {
+  public:
+    explicit Server(Config config) : config_(std::move(config)) {}
+
+    void start() { running_ = true; }
+    void stop() { running_ = false; }
+    [[nodiscard]] bool is_running() const { return running_; }
+
+    void add_route(std::string path) {
+        routes_.push_back(std::move(path));
+    }
+
+    [[nodiscard]] const std::vector<std::string>& routes() const {
+        return routes_;
+    }
+
+  private:
+    Config config_;
+    bool running_ = false;
+    std::vector<std::string> routes_;
+};
+
+}  // namespace sample

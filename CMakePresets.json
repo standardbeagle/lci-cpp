@@ -1,0 +1,173 @@
+{
+    "version": 6,
+    "cmakeMinimumRequired": {
+        "major": 3,
+        "minor": 25,
+        "patch": 0
+    },
+    "configurePresets": [
+        {
+            "name": "base",
+            "hidden": true,
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+            }
+        },
+        {
+            "name": "debug",
+            "inherits": "base",
+            "displayName": "Debug",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        },
+        {
+            "name": "release",
+            "inherits": "base",
+            "displayName": "Release",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release"
+            }
+        },
+        {
+            "name": "sanitizer",
+            "inherits": "base",
+            "displayName": "Sanitizer (ASan + UBSan)",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_CXX_FLAGS": "-fsanitize=address,undefined -fno-omit-frame-pointer",
+                "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=address,undefined"
+            }
+        },
+        {
+            "name": "tsan",
+            "inherits": "base",
+            "displayName": "Sanitizer (TSan)",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_CXX_FLAGS": "-fsanitize=thread -fno-omit-frame-pointer",
+                "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=thread"
+            }
+        },
+        {
+            "name": "msan",
+            "inherits": "base",
+            "displayName": "Sanitizer (MSan)",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_CXX_FLAGS": "-fsanitize=memory -fno-omit-frame-pointer -fsanitize-memory-track-origins=2",
+                "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=memory"
+            }
+        },
+        {
+            "name": "fuzz",
+            "inherits": "base",
+            "displayName": "Fuzz (libFuzzer + ASan)",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_CXX_FLAGS": "-fno-omit-frame-pointer",
+                "LCI_ENABLE_FUZZING": "ON"
+            }
+        },
+        {
+            "name": "ci",
+            "inherits": "release",
+            "displayName": "CI (warnings-as-errors)",
+            "cacheVariables": {
+                "LCI_WARNINGS_AS_ERRORS": "ON"
+            }
+        },
+        {
+            "name": "vcpkg",
+            "inherits": "release",
+            "displayName": "Release with vcpkg",
+            "cacheVariables": {
+                "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+            }
+        },
+        {
+            "name": "macos-universal",
+            "inherits": "release",
+            "displayName": "macOS Universal Binary (arm64 + x86_64)",
+            "cacheVariables": {
+                "LCI_UNIVERSAL_BINARY": "ON"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "debug",
+            "configurePreset": "debug"
+        },
+        {
+            "name": "release",
+            "configurePreset": "release"
+        },
+        {
+            "name": "sanitizer",
+            "configurePreset": "sanitizer"
+        },
+        {
+            "name": "tsan",
+            "configurePreset": "tsan"
+        },
+        {
+            "name": "msan",
+            "configurePreset": "msan"
+        },
+        {
+            "name": "fuzz",
+            "configurePreset": "fuzz"
+        },
+        {
+            "name": "ci",
+            "configurePreset": "ci"
+        },
+        {
+            "name": "vcpkg",
+            "configurePreset": "vcpkg"
+        },
+        {
+            "name": "macos-universal",
+            "configurePreset": "macos-universal"
+        }
+    ],
+    "testPresets": [
+        {
+            "name": "debug",
+            "configurePreset": "debug",
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "release",
+            "configurePreset": "release",
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "sanitizer",
+            "configurePreset": "sanitizer",
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "tsan",
+            "configurePreset": "tsan",
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "msan",
+            "configurePreset": "msan",
+            "output": {
+                "outputOnFailure": true
+            }
+        }
+    ]
+}

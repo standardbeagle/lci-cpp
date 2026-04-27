@@ -1,0 +1,27 @@
+"""Sample Python module for testing."""
+
+from typing import List, Optional
+
+
+class DataProcessor:
+    """Processes data items."""
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self._items: List[str] = []
+
+    def add_item(self, item: str) -> None:
+        self._items.append(item)
+
+    def process(self) -> List[str]:
+        return [f"{self.name}: {item}" for item in self._items]
+
+    def find(self, query: str) -> Optional[str]:
+        for item in self._items:
+            if query in item:
+                return item
+        return None
+
+
+def create_processor(name: str) -> DataProcessor:
+    return DataProcessor(name)

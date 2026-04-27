@@ -1,0 +1,209 @@
+#include <lci/cli/commands.h>
+
+#include <chrono>
+#include <cstdio>
+#include <iostream>
+#include <string>
+
+#include <nlohmann/json.hpp>
+
+namespace lci {
+namespace cli {
+
+int run_search(const GlobalFlags& flags, const std::string& pattern,
+               int max_lines, bool case_insensitive, bool json_output,
+               bool light, bool compact_search, bool /*use_regex*/,
+               const std::string& /*exclude_pattern*/,
+               const std::string& /*include_pattern*/,
+               bool /*invert_match*/, bool /*count_per_file*/,
+               bool /*files_only*/, bool /*word_boundary*/,
+               int /*max_count_per_file*/, bool /*include_ids*/,
+               bool /*no_ids*/, bool /*comments_only*/, bool /*code_only*/,
+               bool /*strings_only*/, const std::string& /*rank_by*/,
+               const std::string& /*context_filter*/) {
+    Config cfg;
+    if (std::string err = load_config_with_overrides(flags, cfg); !err.empty()) {
+        std::cerr << "Error: " << err << "\n";
+        return 1;
+    }
+
+    std::string conn_err;
+    auto client = ensure_server_running(cfg, conn_err);
+    if (!client) {
+        std::cerr << "Error: " << conn_err << "\n";
+        return 1;
+    }
+
+    if (light) {
+        std::cerr
+            << "WARNING: --light flag is deprecated. Use 'lci grep' instead.\n\n";
+    }
+
+    auto start = std::chrono::steady_clock::now();
+
+    std::string search_err;
+    auto result = client->search(pattern, 500, case_insensitive, false,
+                                 search_err);
+
+    auto elapsed = std::chrono::steady_clock::now() - start;
+    double elapsed_ms =
+        static_cast<double>(
+            std::chrono::duration_cast<std::chrono::microseconds>(elapsed)
+                .count()) /
+        1000.0;
+
+    if (!result) {
+        std::cerr << "Error: search failed: " << search_err << "\n";
+        return 1;
+    }
+
+    auto& j = *result;
+
+    if (json_output) {
+        nlohmann::json output;
+        output["query"] = pattern;
+        output["time_ms"] = elapsed_ms;
+        output["results"] = j.value("results", nlohmann::json::array());
+        output["count"] =
+            j.value("results", nlohmann::json::array()).size();
+        std::cout << output.dump(2) << "\n";
+        return 0;
+    }
+
+    auto results = j.value("results", nlohmann::json::array());
+
+    if (compact_search) {
+        std::printf("Found %zu matches in %.1fms (compact mode)\n\n",
+                    results.size(), elapsed_ms);
+        for (auto& r : results) {
+            std::string path = r.value("path", "");
+            int line = r.value("line", 0);
+            auto context = r.value("context", nlohmann::json::object());
+            int start_line = context.value("start_line", 0);
+            auto lines = context.value("lines", nlohmann::json::array());
+            for (size_t i = 0; i < lines.size(); ++i) {
+                int line_num = start_line + static_cast<int>(i);
+                if (line_num == line) {
+                    std::printf("%s:%d: %s\n", path.c_str(), line_num,
+                                lines[i].get<std::string>().c_str());
+                    break;
+                }
+            }
+        }
+        return 0;
+    }
+
+    std::printf("Found %zu results in %.1fms (standard mode)\n\n",
+                results.size(), elapsed_ms);
+
+    for (auto& r : results) {
+        std::string path = r.value("path", "");
+        int line = r.value("line", 0);
+        auto context = r.value("context", nlohmann::json::object());
+        std::string block_name = context.value("block_name", "");
+        std::string block_type = context.value("block_type", "");
+        int start_line = context.value("start_line", 0);
+        auto lines = context.value("lines", nlohmann::json::array());
+
+        std::printf("%s:%d", path.c_str(), line);
+        if (!block_name.empty()) {
+            std::printf(" (in %s %s)", block_type.c_str(), block_name.c_str());
+        }
+        std::printf("\n");
+
+        for (size_t i = 0; i < lines.size(); ++i) {
+            int line_num = start_line + static_cast<int>(i);
+            if (line_num == line) {
+                std::printf("  > %4d | %s\n", line_num,
+                            lines[i].get<std::string>().c_str());
+            } else {
+                std::printf("    %4d | %s\n", line_num,
+                            lines[i].get<std::string>().c_str());
+            }
+        }
+        std::printf("\n");
+    }
+
+    (void)max_lines;
+    return 0;
+}
+
+int run_grep(const GlobalFlags& flags, const std::string& pattern,
+             int max_results, int /*context_lines*/, bool case_insensitive,
+             bool json_output, const std::string& /*exclude_pattern*/,
+             const std::string& /*include_pattern*/, bool /*exclude_tests*/,
+             bool /*exclude_comments*/, bool /*use_regex*/) {
+    Config cfg;
+    if (std::string err = load_config_with_overrides(flags, cfg); !err.empty()) {
+        std::cerr << "Error: " << err << "\n";
+        return 1;
+    }
+
+    std::string conn_err;
+    auto client = ensure_server_running(cfg, conn_err);
+    if (!client) {
+        std::cerr << "Error: " << conn_err << "\n";
+        return 1;
+    }
+
+    auto start = std::chrono::steady_clock::now();
+
+    std::string search_err;
+    auto result =
+        client->search(pattern, max_results, case_insensitive, false,
+                       search_err);
+
+    auto elapsed = std::chrono::steady_clock::now() - start;
+    double elapsed_ms =
+        static_cast<double>(
+            std::chrono::duration_cast<std::chrono::microseconds>(elapsed)
+                .count()) /
+        1000.0;
+
+    if (!result) {
+        std::cerr << "Error: search failed: " << search_err << "\n";
+        return 1;
+    }
+
+    auto& j = *result;
+
+    if (json_output) {
+        nlohmann::json output;
+        output["query"] = pattern;
+        output["time_ms"] = elapsed_ms;
+        output["results"] = j.value("results", nlohmann::json::array());
+        output["count"] =
+            j.value("results", nlohmann::json::array()).size();
+        output["mode"] = "grep";
+        std::cout << output.dump(2) << "\n";
+        return 0;
+    }
+
+    auto results = j.value("results", nlohmann::json::array());
+
+    std::printf("Found %zu matches in %.1fms (grep mode)\n\n",
+                results.size(), elapsed_ms);
+
+    for (auto& r : results) {
+        std::string path = r.value("path", "");
+        int line = r.value("line", 0);
+        int column = r.value("column", 0);
+        auto context = r.value("context", nlohmann::json::object());
+        int start_line = context.value("start_line", 0);
+        auto lines = context.value("lines", nlohmann::json::array());
+
+        for (size_t i = 0; i < lines.size(); ++i) {
+            int line_num = start_line + static_cast<int>(i);
+            if (line_num == line) {
+                std::printf("%s:%d:%d:%s\n", path.c_str(), line_num, column,
+                            lines[i].get<std::string>().c_str());
+                break;
+            }
+        }
+    }
+
+    return 0;
+}
+
+}  // namespace cli
+}  // namespace lci

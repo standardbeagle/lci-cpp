@@ -1,0 +1,28 @@
+Checks: >
+    -*,
+    bugprone-*,
+    -bugprone-easily-swappable-parameters,
+    clang-analyzer-*,
+    cppcoreguidelines-*,
+    -cppcoreguidelines-avoid-magic-numbers,
+    -cppcoreguidelines-pro-bounds-array-to-pointer-decay,
+    misc-*,
+    -misc-non-private-member-variables-in-classes,
+    modernize-*,
+    -modernize-use-trailing-return-type,
+    performance-*,
+    readability-*,
+    -readability-magic-numbers,
+    -readability-identifier-length
+
+WarningsAsErrors: ''
+
+HeaderFilterRegex: 'include/lci/.*'
+
+CheckOptions:
+  - key: readability-function-cognitive-complexity.Threshold
+    value: 25
+  - key: cppcoreguidelines-special-member-functions.AllowSoleDefaultDtor
+    value: true
+  - key: modernize-use-auto.MinTypeNameLength
+    value: 5

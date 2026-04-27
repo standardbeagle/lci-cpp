@@ -1,0 +1,302 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux GCC - debug, release, sanitizer (ASan+UBSan), TSan
+          - os: ubuntu-24.04
+            compiler: gcc
+            cc: gcc-13
+            cxx: g++-13
+            preset: debug
+          - os: ubuntu-24.04
+            compiler: gcc
+            cc: gcc-13
+            cxx: g++-13
+            preset: release
+          - os: ubuntu-24.04
+            compiler: gcc
+            cc: gcc-13
+            cxx: g++-13
+            preset: sanitizer
+          - os: ubuntu-24.04
+            compiler: gcc
+            cc: gcc-13
+            cxx: g++-13
+            preset: tsan
+
+          # Linux Clang - debug, release, sanitizer (ASan+UBSan), TSan
+          - os: ubuntu-24.04
+            compiler: clang
+            cc: clang-18
+            cxx: clang++-18
+            preset: debug
+          - os: ubuntu-24.04
+            compiler: clang
+            cc: clang-18
+            cxx: clang++-18
+            preset: release
+          - os: ubuntu-24.04
+            compiler: clang
+            cc: clang-18
+            cxx: clang++-18
+            preset: sanitizer
+          - os: ubuntu-24.04
+            compiler: clang
+            cc: clang-18
+            cxx: clang++-18
+            preset: tsan
+
+          # macOS Apple Clang - debug, release, universal binary
+          - os: macos-latest
+            compiler: appleclang
+            cc: cc
+            cxx: c++
+            preset: debug
+          - os: macos-latest
+            compiler: appleclang
+            cc: cc
+            cxx: c++
+            preset: release
+          - os: macos-latest
+            compiler: appleclang
+            cc: cc
+            cxx: c++
+            preset: macos-universal
+
+          # Windows MSVC - debug, release
+          - os: windows-latest
+            compiler: msvc
+            preset: debug
+          - os: windows-latest
+            compiler: msvc
+            preset: release
+
+    runs-on: ${{ matrix.os }}
+    name: ${{ matrix.compiler }} / ${{ matrix.preset }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Export GitHub Actions cache variables
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      - name: Set up vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: "01f602195983451bc83e72f4214af2cbc495aa94"
+
+      - name: Set up ccache
+        uses: hendrikmuhs/ccache-action@v1
+        with:
+          key: ${{ matrix.os }}-${{ matrix.compiler }}-${{ matrix.preset }}
+
+      - name: Install Linux compilers
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build
+          if [ "${{ matrix.compiler }}" = "gcc" ]; then
+            sudo apt-get install -y gcc-13 g++-13
+          elif [ "${{ matrix.compiler }}" = "clang" ]; then
+            sudo apt-get install -y clang-18
+          fi
+
+      - name: Install macOS tools
+        if: runner.os == 'macOS'
+        run: brew install ninja ccache
+
+      - name: Configure (Unix)
+        if: runner.os != 'Windows'
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+        run: |
+          cmake --preset ${{ matrix.preset }} \
+            -G Ninja \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake
+
+      - name: Configure (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          cmake --preset ${{ matrix.preset }} `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+
+      - name: Build
+        run: cmake --build build/${{ matrix.preset }} --parallel
+
+      - name: Test
+        run: ctest --test-dir build/${{ matrix.preset }} --output-on-failure --parallel
+
+      - name: Upload release binary
+        if: (matrix.preset == 'release' || matrix.preset == 'macos-universal') && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: lci-${{ matrix.os }}-${{ matrix.compiler }}-${{ matrix.preset }}
+          path: build/${{ matrix.preset }}/src/lci*
+          retention-days: 7
+
+  benchmarks:
+    runs-on: ubuntu-24.04
+    name: benchmarks
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Export GitHub Actions cache variables
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      - name: Set up vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: "01f602195983451bc83e72f4214af2cbc495aa94"
+
+      - name: Set up ccache
+        uses: hendrikmuhs/ccache-action@v1
+        with:
+          key: ubuntu-24.04-gcc-benchmarks
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-13 g++-13 ninja-build
+
+      - name: Configure
+        env:
+          CC: gcc-13
+          CXX: g++-13
+        run: |
+          cmake --preset release \
+            -G Ninja \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake
+
+      - name: Build benchmarks
+        run: cmake --build build/release --target lci_benchmarks --parallel
+
+      - name: Run benchmarks
+        run: |
+          ./build/release/tests/lci_benchmarks \
+            --benchmark_format=json \
+            --benchmark_out=benchmark_results.json \
+            --benchmark_min_time=0.1s
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: benchmark_results.json
+          retention-days: 30
+
+  fuzz:
+    runs-on: ubuntu-24.04
+    name: fuzz (10 min)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Export GitHub Actions cache variables
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      - name: Set up vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: "01f602195983451bc83e72f4214af2cbc495aa94"
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-18 ninja-build
+
+      - name: Configure
+        env:
+          CC: clang-18
+          CXX: clang++-18
+        run: |
+          cmake --preset fuzz \
+            -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake
+
+      - name: Build fuzz targets
+        run: cmake --build build/fuzz --parallel
+
+      - name: Fuzz regex classifier (200s)
+        run: |
+          mkdir -p corpus/regex
+          ./build/fuzz/tests/fuzz_regex_classifier corpus/regex -max_total_time=200
+
+      - name: Fuzz trigram extract (200s)
+        run: |
+          mkdir -p corpus/trigram
+          ./build/fuzz/tests/fuzz_trigram_extract corpus/trigram -max_total_time=200
+
+      - name: Fuzz search input (200s)
+        run: |
+          mkdir -p corpus/search
+          ./build/fuzz/tests/fuzz_search_input corpus/search -max_total_time=200
+
+  clang-tidy:
+    runs-on: ubuntu-24.04
+    name: clang-tidy
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Export GitHub Actions cache variables
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      - name: Set up vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: "01f602195983451bc83e72f4214af2cbc495aa94"
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-18 clang-tidy-18 ninja-build
+
+      - name: Configure
+        env:
+          CC: clang-18
+          CXX: clang++-18
+        run: |
+          cmake --preset ci \
+            -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake
+
+      - name: Run clang-tidy
+        run: |
+          find src include -name '*.cpp' -o -name '*.h' | \
+            xargs clang-tidy-18 -p build/ci --warnings-as-errors='*'

@@ -1,0 +1,296 @@
+#include <lci/indexing/master_index.h>
+
+#include <algorithm>
+#include <string_view>
+
+namespace lci {
+
+// -- Public search methods ----------------------------------------------------
+
+std::vector<SearchResult> MasterIndex::search(const std::string& pattern,
+                                               int max_context_lines) const {
+    SearchOptions options;
+    options.max_context_lines = max_context_lines;
+    return search_with_options(pattern, options);
+}
+
+std::vector<SearchResult> MasterIndex::search_with_options(
+    const std::string& pattern,
+    const SearchOptions& options) const {
+    SearchOptions opts = options;
+
+    auto err = validate_search_input(pattern, opts);
+    if (!err.empty()) return {};
+
+    err = validate_search_components();
+    if (!err.empty()) return {};
+
+    auto candidates = get_all_file_ids();
+    if (candidates.empty()) return {};
+
+    auto results = execute_search(pattern, candidates, opts);
+    search_count_.fetch_add(1, std::memory_order_relaxed);
+    return results;
+}
+
+std::vector<FileID> MasterIndex::find_candidate_files(
+    const std::string& pattern, bool case_insensitive) const {
+    return trigram_index_.find_candidates_with_options(pattern, case_insensitive);
+}
+
+std::vector<SearchResult> MasterIndex::search_definitions(
+    const std::string& pattern) const {
+    SearchOptions options;
+    options.declaration_only = true;
+    options.max_context_lines = 5;
+    return search_with_options(pattern, options);
+}
+
+std::vector<SearchResult> MasterIndex::search_references(
+    const std::string& symbol) const {
+    SearchOptions options;
+    options.usage_only = true;
+    options.max_context_lines = 5;
+    return search_with_options(symbol, options);
+}
+
+std::string MasterIndex::get_file_path(FileID file_id) const {
+    return id_to_path(file_id);
+}
+
+std::vector<FileID> MasterIndex::get_all_file_ids() const {
+    auto snap = load_snapshot();
+    std::vector<FileID> ids;
+    ids.reserve(snap->file_map.size());
+    for (const auto& [path, fid] : snap->file_map) {
+        ids.push_back(fid);
+    }
+    return ids;
+}
+
+// -- Validation helpers -------------------------------------------------------
+
+std::string MasterIndex::validate_search_input(
+    const std::string& pattern, SearchOptions& options) const {
+    if (pattern.empty()) {
+        return "search pattern cannot be empty";
+    }
+    if (pattern.size() > 1000) {
+        return "search pattern too long";
+    }
+    if (options.max_results < 0) {
+        return "max results cannot be negative";
+    }
+    if (options.max_results == 0) {
+        options.max_results = 100;
+    }
+    return {};
+}
+
+std::string MasterIndex::validate_search_components() const {
+    // Trigram index is always available (owned by value).
+    // Reference tracker is always available (owned by value).
+    return {};
+}
+
+// -- Search execution ---------------------------------------------------------
+
+std::vector<SearchResult> MasterIndex::execute_search(
+    const std::string& pattern,
+    const std::vector<FileID>& candidates,
+    const SearchOptions& options) const {
+
+    // Acquire read locks on the indexes we will query.
+    IndexLockManager::ReadGuard trigram_lock(lock_manager_, IndexType::Trigram);
+    IndexLockManager::ReadGuard postings_lock(lock_manager_, IndexType::Postings);
+    IndexLockManager::ReadGuard ref_lock(lock_manager_, IndexType::Reference);
+    IndexLockManager::ReadGuard content_lock(lock_manager_, IndexType::Content);
+
+    if (!trigram_lock.locked() || !postings_lock.locked() ||
+        !ref_lock.locked() || !content_lock.locked()) {
+        return {};
+    }
+
+    // Try trigram candidates first to narrow the file list.
+    auto trigram_candidates = trigram_index_.find_candidates_with_options(
+        pattern, options.case_insensitive);
+
+    absl::flat_hash_set<FileID> candidate_set(candidates.begin(),
+                                               candidates.end());
+    std::vector<FileID> filtered;
+
+    if (!trigram_candidates.empty()) {
+        filtered.reserve(trigram_candidates.size());
+        for (FileID fid : trigram_candidates) {
+            if (candidate_set.contains(fid)) {
+                filtered.push_back(fid);
+            }
+        }
+    }
+
+    // If trigram filtering yielded nothing, try the postings index.
+    if (filtered.empty()) {
+        std::vector<FileID> postings_files;
+        absl::flat_hash_map<FileID, int> postings_offsets;
+        postings_index_.find(pattern, options.case_insensitive,
+                             postings_files, postings_offsets);
+        for (FileID fid : postings_files) {
+            if (candidate_set.contains(fid)) {
+                filtered.push_back(fid);
+            }
+        }
+    }
+
+    // If neither index narrows candidates, scan all candidates directly.
+    // This handles short patterns and ensures text search always works.
+    if (filtered.empty() && !options.declaration_only && !options.usage_only) {
+        filtered = candidates;
+    }
+
+    std::vector<SearchResult> results;
+
+    for (FileID fid : filtered) {
+        if (static_cast<int>(results.size()) >= options.max_results) break;
+
+        // For declaration_only: search symbol names.
+        if (options.declaration_only) {
+            auto symbols = ref_tracker_.find_symbols_by_name(pattern);
+            for (const auto* sym : symbols) {
+                if (sym->symbol.file_id != fid) continue;
+                if (static_cast<int>(results.size()) >= options.max_results) break;
+
+                SearchResult r;
+                r.file_id = fid;
+                r.path = id_to_path(fid);
+                r.line = sym->symbol.line;
+                r.column = 0;
+                r.context = extract_context(fid, sym->symbol.line,
+                                             options.max_context_lines);
+                results.push_back(std::move(r));
+            }
+            continue;
+        }
+
+        // For usage_only: search references to matching symbols.
+        if (options.usage_only) {
+            auto symbols = ref_tracker_.find_symbols_by_name(pattern);
+            for (const auto* sym : symbols) {
+                auto refs = ref_tracker_.get_symbol_references(
+                    sym->id, "incoming");
+                for (const auto& ref : refs) {
+                    if (ref.file_id != fid) continue;
+                    if (static_cast<int>(results.size()) >= options.max_results) break;
+
+                    SearchResult r;
+                    r.file_id = fid;
+                    r.path = id_to_path(fid);
+                    r.line = ref.line;
+                    r.column = ref.column;
+                    r.context = extract_context(fid, ref.line,
+                                                 options.max_context_lines);
+                    results.push_back(std::move(r));
+                }
+            }
+            continue;
+        }
+
+        // General text search: scan file content for pattern matches.
+        auto content_sv = file_content_store_->get_content(fid);
+        if (content_sv.empty()) continue;
+
+        std::string_view pat_sv(pattern);
+        size_t pos = 0;
+        while (pos < content_sv.size()) {
+            size_t found;
+            if (options.case_insensitive) {
+                found = std::string::npos;
+                for (size_t i = pos; i + pat_sv.size() <= content_sv.size(); ++i) {
+                    bool match = true;
+                    for (size_t j = 0; j < pat_sv.size(); ++j) {
+                        auto a = static_cast<unsigned char>(content_sv[i + j]);
+                        auto b = static_cast<unsigned char>(pat_sv[j]);
+                        if (std::tolower(a) != std::tolower(b)) {
+                            match = false;
+                            break;
+                        }
+                    }
+                    if (match) {
+                        found = i;
+                        break;
+                    }
+                }
+            } else {
+                found = content_sv.find(pat_sv, pos);
+            }
+
+            if (found == std::string_view::npos) break;
+            if (static_cast<int>(results.size()) >= options.max_results) break;
+
+            // Compute line number from offset.
+            int line = 1;
+            int col = 0;
+            for (size_t i = 0; i < found; ++i) {
+                if (content_sv[i] == '\n') {
+                    ++line;
+                    col = 0;
+                } else {
+                    ++col;
+                }
+            }
+
+            SearchResult r;
+            r.file_id = fid;
+            r.path = id_to_path(fid);
+            r.line = line;
+            r.column = col;
+            r.context = extract_context(fid, line, options.max_context_lines);
+            results.push_back(std::move(r));
+
+            pos = found + 1;
+        }
+    }
+
+    return results;
+}
+
+SearchContext MasterIndex::extract_context(FileID file_id, int match_line,
+                                            int max_context_lines) const {
+    SearchContext ctx;
+    if (max_context_lines <= 0) return ctx;
+
+    auto content_sv = file_content_store_->get_content(file_id);
+    if (content_sv.empty()) return ctx;
+
+    // Split content into lines.
+    std::vector<std::string_view> lines;
+    size_t start = 0;
+    for (size_t i = 0; i < content_sv.size(); ++i) {
+        if (content_sv[i] == '\n') {
+            lines.emplace_back(content_sv.data() + start, i - start);
+            start = i + 1;
+        }
+    }
+    if (start < content_sv.size()) {
+        lines.emplace_back(content_sv.data() + start,
+                           content_sv.size() - start);
+    }
+
+    int total_lines = static_cast<int>(lines.size());
+    int line_idx = match_line - 1;  // Convert 1-based to 0-based.
+    if (line_idx < 0) line_idx = 0;
+    if (line_idx >= total_lines) line_idx = total_lines - 1;
+
+    int ctx_start = std::max(0, line_idx - max_context_lines);
+    int ctx_end = std::min(total_lines - 1, line_idx + max_context_lines);
+
+    ctx.start_line = ctx_start + 1;  // Back to 1-based.
+    ctx.end_line = ctx_end + 1;
+
+    for (int i = ctx_start; i <= ctx_end; ++i) {
+        ctx.lines.emplace_back(lines[static_cast<size_t>(i)]);
+    }
+
+    return ctx;
+}
+
+}  // namespace lci

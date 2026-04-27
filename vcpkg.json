@@ -1,0 +1,13 @@
+{
+    "name": "lci",
+    "version-semver": "0.1.0",
+    "description": "Lightning Code Index - fast semantic code search",
+    "dependencies": [
+        "tree-sitter",
+        "nlohmann-json",
+        "cli11",
+        "cpp-httplib",
+        "xxhash",
+        "abseil"
+    ]
+}
