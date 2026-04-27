@@ -109,6 +109,12 @@ CapturedOutput run_cli(const std::string& binary_path,
     }
     close(in_pipe[1]);
 
+    // Drain stdout/stderr concurrently to avoid deadlock when child output
+    // exceeds the pipe buffer (default 64 KiB on Linux).
+    std::string stdout_buf, stderr_buf;
+    std::thread out_reader([&]{ stdout_buf = read_all(out_pipe[0]); });
+    std::thread err_reader([&]{ stderr_buf = read_all(err_pipe[0]); });
+
     CapturedOutput cap;
     auto deadline = std::chrono::steady_clock::now() +
                     std::chrono::seconds(timeout_seconds);
@@ -125,10 +131,15 @@ CapturedOutput run_cli(const std::string& binary_path,
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
 
-    cap.stdout_data = read_all(out_pipe[0]);
-    cap.stderr_data = read_all(err_pipe[0]);
+    // Joining the readers will block until EOF on each pipe; child exit (or
+    // SIGKILL on timeout) closes the write ends, so this always terminates.
+    out_reader.join();
+    err_reader.join();
     close(out_pipe[0]);
     close(err_pipe[0]);
+
+    cap.stdout_data = std::move(stdout_buf);
+    cap.stderr_data = std::move(stderr_buf);
 
     if (WIFEXITED(status))   cap.exit_code = WEXITSTATUS(status);
     else                     cap.exit_code = -1;
