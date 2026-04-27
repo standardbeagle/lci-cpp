@@ -69,7 +69,8 @@ CapturedOutput run_cli(const std::string& binary_path,
         close(err_pipe[0]); close(err_pipe[1]);
 
         for (const auto& [k, v] : inv.env) {
-            setenv(k.c_str(), v.c_str(), 1);
+            std::string subst_v = substitute(v, corpus_path);
+            setenv(k.c_str(), subst_v.c_str(), 1);
         }
         if (!inv.cwd.empty()) {
             std::string cwd = substitute(inv.cwd, corpus_path);
