@@ -1,22 +1,13 @@
 #include "diff_engine/canonicalize.h"
 
 #include <cstdio>
-#include <sstream>
 
 namespace lci::parity {
 
 namespace {
 
-// Returns true if `path` matches any of the given JSONPath-lite expressions.
-// Patterns supported:
-//   "field"               — exact top-level field name
-//   "a.b"                 — nested field
-//   "results[].file"      — array element field (matches any index)
-bool path_matches(const std::vector<std::string>& patterns,
-                  const std::string& path) {
-    for (const auto& p : patterns) {
-        if (p == path) return true;
-    }
+bool path_in(const std::vector<std::string>& patterns, const std::string& p) {
+    for (const auto& q : patterns) if (q == p) return true;
     return false;
 }
 
@@ -28,7 +19,7 @@ void strip_paths_recursive(nlohmann::json& node,
         for (auto it = node.begin(); it != node.end(); ++it) {
             std::string child_path =
                 current_path.empty() ? it.key() : current_path + "." + it.key();
-            if (path_matches(patterns, child_path)) {
+            if (path_in(patterns, child_path)) {
                 to_remove.push_back(it.key());
             } else {
                 strip_paths_recursive(it.value(), patterns, child_path);
@@ -55,15 +46,11 @@ void rewrite_paths_recursive(nlohmann::json& node,
     } else if (node.is_string()) {
         std::string s = node.get<std::string>();
         if (s.size() >= corpus_prefix.size() &&
-            s.compare(0, corpus_prefix.size(), corpus_prefix) == 0) {
+            s.compare(0, corpus_prefix.size(), corpus_prefix) == 0 &&
+            (s.size() == corpus_prefix.size() || s[corpus_prefix.size()] == '/')) {
             node = std::string("${CORPUS}") + s.substr(corpus_prefix.size());
         }
     }
-}
-
-bool path_in(const std::vector<std::string>& patterns, const std::string& p) {
-    for (const auto& q : patterns) if (q == p) return true;
-    return false;
 }
 
 void normalize_floats_recursive(nlohmann::json& node,
