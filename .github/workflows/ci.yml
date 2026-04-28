@@ -146,6 +146,21 @@ jobs:
       - name: Test
         run: ctest --test-dir build/${{ matrix.preset }} --output-on-failure --parallel
 
+      - name: Build parity targets
+        if: matrix.preset == 'release'
+        run: cmake --build build/${{ matrix.preset }} --target parity_runner parity_unit_tests --parallel
+
+      - name: Prep parity corpora
+        if: matrix.preset == 'release'
+        run: ./tests/parity/corpora/prep_real.sh
+
+      - name: Run parity tests
+        if: matrix.preset == 'release'
+        continue-on-error: true
+        run: ctest --test-dir build/${{ matrix.preset }} -L parity --output-on-failure --parallel
+        env:
+          LCI_GO_PATH: ${{ env.LCI_GO_PATH || '/usr/local/bin/lci' }}
+
       - name: Upload release binary
         if: (matrix.preset == 'release' || matrix.preset == 'macos-universal') && github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v4
