@@ -1,6 +1,7 @@
 #include "runner/modes/http.h"
 
 #include <httplib.h>
+#include <nlohmann/json.hpp>
 
 #include <cerrno>
 #include <chrono>
@@ -66,6 +67,24 @@ bool wait_for_socket(const std::string& sock_path,
     return false;
 }
 
+// Poll /status until ready:true or budget expires.
+// Go's server guards most endpoints behind index readiness, so we must
+// wait before sending the real request.
+bool wait_for_ready(httplib::Client& cli, std::chrono::milliseconds budget) {
+    auto end = std::chrono::steady_clock::now() + budget;
+    while (std::chrono::steady_clock::now() < end) {
+        auto res = cli.Get("/status");
+        if (res && res->status == 200) {
+            try {
+                auto j = nlohmann::json::parse(res->body);
+                if (j.contains("ready") && j["ready"].get<bool>()) return true;
+            } catch (...) {}
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    return false;
+}
+
 void kill_server(pid_t pid, const std::string& sock_path) {
     if (pid <= 0) return;
     ::kill(pid, SIGTERM);
@@ -120,6 +139,15 @@ CapturedOutput run_http(const std::string& binary_path,
     cli.set_address_family(AF_UNIX);
     cli.set_connection_timeout(10);
     cli.set_read_timeout(30);
+    // Go's net/http rejects requests whose Host header contains the socket
+    // path (which is what httplib sends by default for Unix sockets).
+    // Override with a valid Host so both Go and C++ servers accept the request.
+    cli.set_default_headers({{"Host", "localhost"}});
+
+    // Wait up to 10 s for the index to be ready. Go guards most endpoints
+    // behind index readiness and returns 503 until complete; C++ responds
+    // immediately. Poll /status so both binaries are measured post-ready.
+    wait_for_ready(cli, std::chrono::seconds(10));
 
     // invocation.args[0] is the URL path (e.g. "/status", "/search").
     // invocation.stdin_data is the POST body (empty → GET).
