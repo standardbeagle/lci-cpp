@@ -157,19 +157,40 @@ ToolResult handle_info(const nlohmann::json& params) {
         return make_json_response(data);
     }
 
-    // Default: overview of all tools
+    // Default: overview of all tools.
+    // Output shape matches Go's `internal/mcp` info handler verbatim — the
+    // descriptor at tests/parity/descriptors/mcp/info/basic.parity.json
+    // compares the full text of result.content[0].text against Go's canon.
+    // Field-by-field changes here must be mirrored in the Go reference.
     nlohmann::json data;
-    data["server"] = "Lightning Code Index MCP";
-    data["tagline"] = "Sub-millisecond in-memory semantic code search";
     data["available_tools"] = {
         "search - semantic code search",
-        "find_files - file/path search with fuzzy matching",
+        "files - file/path search with fuzzy matching",
         "get_context - detailed context for results",
+        "context - save/load code manifests with callees+purity",
+        "list_symbols - enumerate and filter symbols (the 'ls' for code)",
+        "inspect_symbol - deep inspect a single symbol",
+        "browse_file - file outline view with all symbols",
+        "semantic_annotations - find code by semantic tags",
+        "code_insight - comprehensive codebase analysis (includes git "
+        "analysis modes)",
+        "side_effects - query function purity and side effects",
+        "index_stats - index status and health monitoring",
+        "debug_info - deep debug information for troubleshooting",
+        "git_analysis - analyze git changes for quality issues",
         "info [tool] - help for specific tool (use 'info version' for "
         "server info)",
     };
     data["quick_start"] =
         "Use 'search' tool with a pattern. Use 'info search' for details.";
+    data["server"] = "Lightning Code Index MCP";
+    data["tagline"] = "Sub-millisecond in-memory semantic code search";
+    data["why_use_lci"] = {
+        "Faster than grep/rg (everything pre-indexed in memory)",
+        "Smarter than find (understands code structure)",
+        "Available everywhere (no IDE needed)",
+        "Perfect for AI (MCP protocol, semantic output)",
+    };
     return make_json_response(data);
 }
 

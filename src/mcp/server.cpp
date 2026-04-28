@@ -7,6 +7,8 @@
 #include <sstream>
 #include <string>
 
+#include <lci/mcp/handlers_core.h>
+
 namespace lci {
 namespace mcp {
 
@@ -53,7 +55,7 @@ ToolResult stub_handler(const std::string& tool_name,
 }  // namespace
 
 void McpServer::register_tools() {
-    // 1. info
+    // 1. info — real handler (no indexer required; pure metadata).
     add_tool(
         {"info",
          "Get detailed help and examples for any tool. Use 'info' for "
@@ -63,7 +65,7 @@ void McpServer::register_tools() {
            "'get_context', 'version')",
            ""}},
          {}},
-        [](const nlohmann::json& p) { return stub_handler("info", p); });
+        [](const nlohmann::json& p) { return handle_info(p); });
 
     // 2. search
     add_tool(
