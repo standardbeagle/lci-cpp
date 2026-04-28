@@ -2,3 +2,6 @@ build/
 .cache/
 compile_commands.json
 .worktrees/
+
+# dartai loop state (machine-local)
+.dartai/
