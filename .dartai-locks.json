@@ -1,3 +1,17 @@
 {
-  "claims": {}
+  "claims": {
+    "93QVaecTt7lt": {
+      "runner_instance_id": "beagle-ab-475579",
+      "runner_email": "andybrummer@standardbeagle.com",
+      "claimed_at": "2026-04-28T17:15:00Z",
+      "agent_id": "beagle-ab-475579",
+      "parent_loop_id": "gi2QSUHJ79si",
+      "purpose": "parity 9/9 — http/ping descriptor inversion (1 failure)",
+      "source_event": {
+        "loop_id": "gi2QSUHJ79si",
+        "task_id": "93QVaecTt7lt",
+        "conversation_id": null
+      }
+    }
+  }
 }
