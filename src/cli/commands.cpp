@@ -1,5 +1,6 @@
 #include <lci/cli/commands.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
@@ -7,6 +8,7 @@
 #include <iostream>
 #include <string>
 
+#include <lci/indexing/pipeline_scanner.h>
 #include <nlohmann/json.hpp>
 
 namespace lci {
@@ -152,29 +154,42 @@ int run_list(const GlobalFlags& flags, bool verbose) {
         return 1;
     }
 
-    std::string conn_err;
-    auto client = ensure_server_running(cfg, conn_err);
-    if (!client) {
-        std::cerr << "Error: " << conn_err << "\n";
-        return 1;
+    // List files that *would* be indexed by walking the project root through
+    // the same FileScanner used by the indexing pipeline. This matches the Go
+    // implementation (cmd/lci listCommand → MasterIndex.ListFiles), which also
+    // performs a stand-alone scan rather than querying the running server.
+    //
+    // Output contract (Go-compatible):
+    //   - stdout: one absolute file path per line; verbose mode appends
+    //     "(priority: N, size: B bytes)".
+    //   - stderr: "\nTotal: N files would be indexed\n" summary in non-verbose
+    //     mode (parity descriptors only capture stdout, but we keep it for
+    //     interactive parity with the Go binary).
+    FileScanner scanner(cfg);
+    auto tasks = scanner.scan();
+
+    // FileScanner returns tasks sorted by indexing priority (desc) then path
+    // (asc); the Go list command emits files in lexical scan order
+    // (filepath.Walk), so re-sort by path here for parity.
+    std::sort(tasks.begin(), tasks.end(),
+              [](const FileTask& a, const FileTask& b) {
+                  return a.path < b.path;
+              });
+
+    for (const auto& task : tasks) {
+        if (verbose) {
+            std::printf("%s (priority: %d, size: %lld bytes)\n",
+                        task.path.c_str(), task.priority,
+                        static_cast<long long>(task.size));
+        } else {
+            std::printf("%s\n", task.path.c_str());
+        }
     }
 
-    std::string stats_err;
-    auto stats = client->get_stats(stats_err);
-    if (!stats) {
-        std::cerr << "Error: " << stats_err << "\n";
-        return 1;
+    if (!verbose) {
+        std::fprintf(stderr, "\nTotal: %zu files would be indexed\n",
+                     tasks.size());
     }
-
-    if (verbose) {
-        std::printf("Indexed files: %d\n", stats->file_count);
-        std::printf("Symbols: %d\n", stats->symbol_count);
-        std::printf("Index size: %s\n",
-                    format_bytes(stats->index_size_bytes).c_str());
-    } else {
-        std::printf("Files: %d\n", stats->file_count);
-    }
-
     return 0;
 }
 

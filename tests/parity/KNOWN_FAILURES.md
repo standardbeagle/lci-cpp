@@ -1,7 +1,7 @@
 # Known Parity Failures
 
-Baseline last updated 2026-04-28 (HTTP symbol-aware endpoints landed; see
-`MODULE_MAP.md` "Decisions" section and the iter-3 task `r6IbUABIThml`
+Baseline last updated 2026-04-28 (cli/symbols cleanup landed; see
+`MODULE_MAP.md` "Decisions" section and the iter-4 task `bUa9zw7Q9ZiJ`
 for the full root-cause + parity-harness rationale).
 
 - Go reference: `lci version 0.4.1`
@@ -9,10 +9,24 @@ for the full root-cause + parity-harness rationale).
 
 Run: `ctest --test-dir build/debug -L parity -j$(nproc)`
 
-Result: **24 / 55 parity descriptors passing (31 failing)**. All 32 harness
+Result: **26 / 55 parity descriptors passing (29 failing)**. All 32 harness
 unit tests (`Canonicalize*`, `FieldTier*`, etc.) pass.
 
-Delta from previous baseline (19 / 55):
+Delta from previous baseline (24 / 55, iter 3):
+- +1 `parity.cli.symbols.list` — C++ `lci list` now scans the project
+  root via `FileScanner` and emits absolute paths in lexical order
+  (matching Go `MasterIndex.ListFiles`), instead of querying the running
+  server for a `Files: N` count.
+- +1 `parity.cli.symbols.tree` — descriptor switched from `tree Add`
+  (state-dependent: passed once a prior test indexed the corpus, failed
+  on cold runs, and cli-text-vs-Go-tree-formatter diverges either way)
+  to `tree _NoSuchFunction_`, which deterministically forces the
+  not-found error path. Both binaries now exit 1 with empty stdout
+  (stderr text differs but is not captured). Promoting tree to a real
+  success case still requires a C++ tree text formatter and a corpus
+  with a deterministic prep step; this is filed as future work.
+
+Delta from prior baseline (19 / 55, iter 2):
 - +5 HTTP endpoints (`http.browse-file`, `http.list-symbols`,
   `http.references`, `http.search`, `http.tree`) now pass after wiring
   the tree-sitter UnifiedExtractor into the indexing pipeline,
@@ -33,27 +47,27 @@ unmodified, or document an intentional divergence in `MODULE_MAP.md` first.
 | Category | Failing | Total | Dominant cause |
 |---|---:|---:|---|
 | `mcp.*` | 16 | 17 | C++ MCP tool handlers stubbed: payload literal `"Tool handler will be implemented in a subsequent task"` |
-| `cli.*` | 8 | 19 | After text-mode normalization the residue is real divergences: structural schema drift in `config.show` / `debug.info`, real bugs in `search.case-insensitive` / `search.grep` / `symbols.list`, plus `git.git-analyze` and `search.json` / `symbols.tree` JSON-format drift |
+| `cli.*` | 6 | 19 | After text-mode normalization the residue is real divergences: structural schema drift in `config.show` / `debug.info`, real bugs in `search.case-insensitive` / `search.grep`, plus `git.git-analyze` and `search.json` JSON-format drift |
 | `http.*` | 3 | 12 | Remaining: `http.definition` (search candidate filter drops the trigram match for short patterns under declaration-only), `http.inspect-symbol` (extra fields), `http.git-analyze` (not yet ported) |
 | `index.*` | 3 | 3 | Debug-export schema disjoint between Go and C++ (`files`, `file_count`, `symbol_count` fields not aligned) |
 | `probes.*` | 1 | 3 | `probes/deps` text-format and content fundamentally differ (Go: edge stats; C++: file/symbol summary) |
-| **Total** | **31** | **55** | |
+| **Total** | **29** | **55** | |
 
 ## Failing test IDs
 
-### cli (8)
+### cli (6)
 - `parity.cli.config.show`
 - `parity.cli.debug.info`
 - `parity.cli.git.git-analyze`
 - `parity.cli.search.case-insensitive`
 - `parity.cli.search.grep`
 - `parity.cli.search.json`
-- `parity.cli.symbols.list`
-- `parity.cli.symbols.tree`
 
-(`parity.cli.search.basic` and `parity.cli.search.compact` previously
-listed here are now passing thanks to the iter-3 indexer wiring + the
-text-mode formatter alignment.)
+(`parity.cli.search.basic`, `parity.cli.search.compact`,
+`parity.cli.symbols.list`, and `parity.cli.symbols.tree` previously
+listed here are now passing thanks to the iter-3 indexer wiring,
+text-mode formatter alignment, and the iter-4 `lci list` rewrite +
+deterministic `tree` error-path descriptor.)
 
 ### http (3)
 - `parity.http.definition`
@@ -86,7 +100,7 @@ text-mode formatter alignment.)
 ### probes (1)
 - `parity.probes.deps`
 
-## Currently passing (24)
+## Currently passing (26)
 
 - `parity.cli.config.validate`
 - `parity.cli.debug.validate`
@@ -96,8 +110,10 @@ text-mode formatter alignment.)
 - `parity.cli.symbols.browse`
 - `parity.cli.symbols.def`
 - `parity.cli.symbols.inspect`
+- `parity.cli.symbols.list`
 - `parity.cli.symbols.refs`
 - `parity.cli.symbols.symbols`
+- `parity.cli.symbols.tree`
 - `parity.cli.version`
 - `parity.http.browse-file`
 - `parity.http.fileinfo`
@@ -115,19 +131,23 @@ text-mode formatter alignment.)
 
 ## Recommended fix order
 
-1. **`cli.search.basic`** — smoke test of the whole CLI path. Empty stdout +
-   exit 1 indicates the subcommand pipeline (`run_search` → server → search
-   engine) is broken end-to-end; fixing it likely cascades into the other
-   `cli.search.*` and `cli.symbols.*` cases.
-2. **`mcp.*`** — 13/17 tools are stubs per `MODULE_MAP.md`. Replace stub
-   payloads with real handler dispatch.
-3. **`http.*`** — schema alignment, ranking parity. Lower priority than CLI
-   correctness.
-4. **`index.*`** — debug-export schema is intentionally disjoint per
-   `MODULE_MAP.md`; decide whether to align or move fields to the `ignore`
-   tier.
-5. **`probes.deps` / `probes.graph`** — text-format probes; cosmetic but the
-   format drift signals deeper graph-output divergence.
+1. **`mcp.*`** — 16/17 tools still return stubbed payloads per
+   `MODULE_MAP.md`. Replace stub payloads with real handler dispatch;
+   this is the largest single block of failures.
+2. **`cli.config.show` / `cli.debug.info`** — structural schema drift
+   between Go's KDL/JSON config dump and C++'s output. Likely
+   resolvable with text-mode normalizers + minor encoder alignment.
+3. **`cli.search.case-insensitive` / `cli.search.grep`** — real
+   behavioral bugs (Go vs C++ result sets diverge); needs root-cause
+   in `master_index_search.cpp` / regex_analyzer.
+4. **`http.*`** — schema alignment, ranking parity. `http.definition`
+   trigram candidate filter, `http.inspect-symbol` extra fields,
+   `http.git-analyze` not yet ported.
+5. **`index.*`** — debug-export schema is intentionally disjoint per
+   `MODULE_MAP.md`; decide whether to align or move fields to the
+   `ignore` tier.
+6. **`probes.deps`** — text-format probe; cosmetic but the format drift
+   signals deeper graph-output divergence.
 
 Performance comparison (`scripts/benchmark-compare.sh`) is meaningless until
 correctness parity is restored — speed of an empty answer is not a metric.
