@@ -34,6 +34,7 @@ target_compile_features(lci_parity_diff PUBLIC cxx_std_20)
 # ---- Runner library (subprocess + mode handlers) ----
 add_library(lci_parity_runner_lib STATIC
     runner/descriptor.cpp
+    runner/modes/subst.cpp
     runner/modes/cli.cpp
     runner/modes/mcp.cpp
     runner/modes/http.cpp
@@ -88,4 +89,12 @@ foreach(D ${PARITY_DESCS})
         LABELS "parity"
         ENVIRONMENT "LCI_GO=${LCI_GO_PATH};LCI_CPP=$<TARGET_FILE:lci>;PARITY_CORPORA=${CMAKE_CURRENT_SOURCE_DIR}/corpora;PARITY_FAILURES=${CMAKE_BINARY_DIR}/parity-failures"
         TIMEOUT 120)
+    # HTTP descriptors share /tmp/lci-server-<hash>.sock per corpus.
+    # Serialize them to avoid spawn races. Probe descriptors and other
+    # modes don't need this.
+    if(D MATCHES ".*/descriptors/http/.*")
+        # Simpler: use one global lock for all http tests; HTTP suite is small.
+        set_tests_properties(parity.${TID} PROPERTIES
+            RESOURCE_LOCK "parity-http-socket")
+    endif()
 endforeach()

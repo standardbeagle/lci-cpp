@@ -19,8 +19,12 @@ link_if_needed() {
     echo "linked: $link -> $target"
 }
 
-link_if_needed "/home/beagle/work/core/lci"      "$HERE/lci-go-repo"
-link_if_needed "/home/beagle/work/core/lci-cpp"  "$HERE/lci-cpp-repo"
-link_if_needed "/home/beagle/work/core/lci-test" "$HERE/lci-test"
+LCI_GO_REPO="${LCI_GO_REPO:-/home/beagle/work/core/lci}"
+LCI_CPP_REPO="${LCI_CPP_REPO:-/home/beagle/work/core/lci-cpp}"
+LCI_TEST_REPO="${LCI_TEST_REPO:-/home/beagle/work/core/lci-test}"
+
+link_if_needed "$LCI_GO_REPO"   "$HERE/lci-go-repo"
+link_if_needed "$LCI_CPP_REPO"  "$HERE/lci-cpp-repo"
+link_if_needed "$LCI_TEST_REPO" "$HERE/lci-test"
 
 echo "OK"

@@ -1,4 +1,5 @@
 #include "runner/modes/cli.h"
+#include "runner/modes/subst.h"
 
 #include <fcntl.h>
 #include <signal.h>
@@ -14,19 +15,6 @@
 namespace lci::parity {
 
 namespace {
-
-std::string substitute(const std::string& s, const std::string& corpus_path) {
-    std::string out = s;
-    auto replace = [&](const std::string& token, const std::string& with) {
-        size_t pos = 0;
-        while ((pos = out.find(token, pos)) != std::string::npos) {
-            out.replace(pos, token.size(), with);
-            pos += with.size();
-        }
-    };
-    replace("${CORPUS}", corpus_path);
-    return out;
-}
 
 std::string read_all(int fd) {
     std::string out;

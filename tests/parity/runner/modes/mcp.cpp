@@ -1,4 +1,5 @@
 #include "runner/modes/mcp.h"
+#include "runner/modes/subst.h"
 
 #include <fcntl.h>
 #include <signal.h>
@@ -22,19 +23,6 @@ const char* kInitializeBody =
 
 const char* kInitializedNotification =
     "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\",\"params\":{}}";
-
-std::string substitute(const std::string& s, const std::string& corpus_path) {
-    std::string out = s;
-    auto replace = [&](const std::string& token, const std::string& with) {
-        size_t pos = 0;
-        while ((pos = out.find(token, pos)) != std::string::npos) {
-            out.replace(pos, token.size(), with);
-            pos += with.size();
-        }
-    };
-    replace("${CORPUS}", corpus_path);
-    return out;
-}
 
 ssize_t write_all(int fd, const std::string& data) {
     size_t total = 0;
