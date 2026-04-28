@@ -316,6 +316,10 @@ FileID FileContentStore::path_to_id(const std::string& path) const {
 // -- Write API ----------------------------------------------------------------
 
 FileID FileContentStore::load_file(const std::string& path, std::string_view content) {
+    // Serialize the load-mutate-swap so concurrent writers cannot drop
+    // entries by basing their copy on an out-of-date snapshot.
+    std::lock_guard<std::mutex> write_lock(write_mu_);
+
     auto snap = std::make_shared<FileContentSnapshot>(*load_snapshot());
 
     uint64_t new_hash = XXH64(content.data(), content.size(), 0);
@@ -364,6 +368,8 @@ FileID FileContentStore::load_file(const std::string& path, std::string_view con
 std::vector<FileID> FileContentStore::batch_load_files(
     const std::vector<std::pair<std::string, std::string_view>>& files) {
     if (files.empty()) return {};
+
+    std::lock_guard<std::mutex> write_lock(write_mu_);
 
     auto snap = std::make_shared<FileContentSnapshot>(*load_snapshot());
     std::vector<FileID> ids;
@@ -418,6 +424,8 @@ std::vector<FileID> FileContentStore::batch_load_files(
 }
 
 void FileContentStore::invalidate_file(const std::string& path) {
+    std::lock_guard<std::mutex> write_lock(write_mu_);
+
     auto snap = std::make_shared<FileContentSnapshot>(*load_snapshot());
     FileID id = snap->path_to_id(path);
     if (id == 0) return;
@@ -440,6 +448,8 @@ void FileContentStore::invalidate_file(const std::string& path) {
 }
 
 void FileContentStore::invalidate_file_by_id(FileID file_id) {
+    std::lock_guard<std::mutex> write_lock(write_mu_);
+
     auto snap = std::make_shared<FileContentSnapshot>(*load_snapshot());
     const auto& fc = snap->find_by_id(file_id);
     if (!fc) return;
@@ -460,6 +470,7 @@ void FileContentStore::invalidate_file_by_id(FileID file_id) {
 }
 
 void FileContentStore::clear() {
+    std::lock_guard<std::mutex> write_lock(write_mu_);
     snapshot_.store(std::make_shared<FileContentSnapshot>(), std::memory_order_release);
     current_memory_.store(0, std::memory_order_relaxed);
     next_id_.store(0, std::memory_order_relaxed);

@@ -35,6 +35,7 @@ void load_tiers(const nlohmann::json& j, TierMap& m) {
     if (j.contains("timed"))  m.timed  = str_array(j.at("timed"));
     if (j.contains("ids"))    m.ids    = str_array(j.at("ids"));
     if (j.contains("ignore")) m.ignore = str_array(j.at("ignore"));
+    if (j.contains("sort_arrays")) m.sort_arrays = str_array(j.at("sort_arrays"));
 }
 
 void load_text_normalize(const nlohmann::json& j, DescriptorTextNormalize& tn) {

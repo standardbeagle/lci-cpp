@@ -1,21 +1,28 @@
 # Known Parity Failures
 
-Baseline last updated 2026-04-28 (text-mode normalization landed; see
-`MODULE_MAP.md` "Decisions" section for the rationale).
+Baseline last updated 2026-04-28 (HTTP symbol-aware endpoints landed; see
+`MODULE_MAP.md` "Decisions" section and the iter-3 task `r6IbUABIThml`
+for the full root-cause + parity-harness rationale).
 
 - Go reference: `lci version 0.4.1`
 - C++ port: `lci 0.1.0`
 
 Run: `ctest --test-dir build/debug -L parity -j$(nproc)`
 
-Result: **19 / 55 parity descriptors passing (36 failing)**. All 32 harness
+Result: **24 / 55 parity descriptors passing (31 failing)**. All 32 harness
 unit tests (`Canonicalize*`, `FieldTier*`, etc.) pass.
 
-Delta from previous baseline (12 / 55):
-- +5 from descriptor-driven text normalizers (`cli/config/validate`,
-  `cli/debug/validate`, `cli/search/{basic,compact,regex}`).
-- +2 from default-on text normalizers (timing scrub + corpus-prefix
-  rewrite) catching descriptors whose only divergence was timing/path noise.
+Delta from previous baseline (19 / 55):
+- +5 HTTP endpoints (`http.browse-file`, `http.list-symbols`,
+  `http.references`, `http.search`, `http.tree`) now pass after wiring
+  the tree-sitter UnifiedExtractor into the indexing pipeline,
+  serializing FileContentStore writes (latent race), assigning FileIDs
+  in producer-thread scan order, and fixing minor schema drift on the
+  endpoints' JSON encoders.
+- New parity-harness primitive: `tiers.sort_arrays` (descriptor key)
+  asks the canonicalizer to sort named arrays before tier comparison so
+  Go-side hash-map iteration order does not flake the test bed. Used
+  for `http.list-symbols`, `http.references`, `http.search`.
 
 These failures are real port regressions, not harness bugs. Do not silence by
 adjusting tiers. Fix the C++ implementation until the descriptor passes
@@ -26,11 +33,11 @@ unmodified, or document an intentional divergence in `MODULE_MAP.md` first.
 | Category | Failing | Total | Dominant cause |
 |---|---:|---:|---|
 | `mcp.*` | 16 | 17 | C++ MCP tool handlers stubbed: payload literal `"Tool handler will be implemented in a subsequent task"` |
-| `cli.*` | 11 | 19 | After text-mode normalization the residue is real divergences: structural schema drift in `config.show` / `debug.info`, real bugs in `search.case-insensitive` / `search.grep` / `symbols.list`, plus `git.git-analyze` and `search.json` / `symbols.tree` JSON-format drift |
-| `http.*` | 8 | 12 | HTTP response schema drift — score/path/match fields diverge, type mismatches (object vs null) |
+| `cli.*` | 8 | 19 | After text-mode normalization the residue is real divergences: structural schema drift in `config.show` / `debug.info`, real bugs in `search.case-insensitive` / `search.grep` / `symbols.list`, plus `git.git-analyze` and `search.json` / `symbols.tree` JSON-format drift |
+| `http.*` | 3 | 12 | Remaining: `http.definition` (search candidate filter drops the trigram match for short patterns under declaration-only), `http.inspect-symbol` (extra fields), `http.git-analyze` (not yet ported) |
 | `index.*` | 3 | 3 | Debug-export schema disjoint between Go and C++ (`files`, `file_count`, `symbol_count` fields not aligned) |
 | `probes.*` | 1 | 3 | `probes/deps` text-format and content fundamentally differ (Go: edge stats; C++: file/symbol summary) |
-| **Total** | **36** | **55** | |
+| **Total** | **31** | **55** | |
 
 ## Failing test IDs
 
@@ -44,15 +51,14 @@ unmodified, or document an intentional divergence in `MODULE_MAP.md` first.
 - `parity.cli.symbols.list`
 - `parity.cli.symbols.tree`
 
-### http (8)
-- `parity.http.browse-file`
+(`parity.cli.search.basic` and `parity.cli.search.compact` previously
+listed here are now passing thanks to the iter-3 indexer wiring + the
+text-mode formatter alignment.)
+
+### http (3)
 - `parity.http.definition`
 - `parity.http.git-analyze`
 - `parity.http.inspect-symbol`
-- `parity.http.list-symbols`
-- `parity.http.references`
-- `parity.http.search`
-- `parity.http.tree`
 
 ### mcp (16)
 - `parity.mcp.browse_file.basic`
@@ -80,7 +86,7 @@ unmodified, or document an intentional divergence in `MODULE_MAP.md` first.
 ### probes (1)
 - `parity.probes.deps`
 
-## Currently passing (19)
+## Currently passing (24)
 
 - `parity.cli.config.validate`
 - `parity.cli.debug.validate`
@@ -93,11 +99,16 @@ unmodified, or document an intentional divergence in `MODULE_MAP.md` first.
 - `parity.cli.symbols.refs`
 - `parity.cli.symbols.symbols`
 - `parity.cli.version`
+- `parity.http.browse-file`
 - `parity.http.fileinfo`
+- `parity.http.list-symbols`
 - `parity.http.ping`
+- `parity.http.references`
 - `parity.http.reindex`
+- `parity.http.search`
 - `parity.http.stats`
 - `parity.http.status`
+- `parity.http.tree`
 - `parity.mcp.info.basic`
 - `parity.probes.export`
 - `parity.probes.graph`

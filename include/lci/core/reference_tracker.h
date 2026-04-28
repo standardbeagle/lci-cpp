@@ -260,6 +260,12 @@ class ReferenceTracker {
     /// Set to non-zero during bulk indexing to skip locking.
     std::atomic<int32_t> bulk_indexing{0};
 
+    /// Returns a mutable reference to the underlying SymbolStore so
+    /// post-processing stages (e.g. integrator metadata enrichment) can
+    /// update fields not surfaced by `process_file`. Const callers should
+    /// continue to go through the typed accessors above.
+    SymbolStore& symbol_store_mut() { return symbols_; }
+
   private:
     SymbolStore symbols_;
     absl::flat_hash_map<uint64_t, Reference> references_;

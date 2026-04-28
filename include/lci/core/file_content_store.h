@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -162,6 +163,15 @@ class FileContentStore {
   private:
     /// Current snapshot, atomically swapped on writes.
     std::atomic<std::shared_ptr<FileContentSnapshot>> snapshot_;
+
+    /// Serializes write-side snapshot mutations. Reads are lock-free
+    /// against the atomic shared_ptr; the mutex only orders the
+    /// load-mutate-swap dance in load_file / batch_load_files /
+    /// invalidate_* / clear so concurrent writers cannot lose entries.
+    /// Without it, two threads racing through `load_file` both clone the
+    /// same prior snapshot, append independently, and the second store
+    /// drops whatever the first appended.
+    mutable std::mutex write_mu_;
 
     /// Memory tracking.
     std::atomic<int64_t> current_memory_{0};

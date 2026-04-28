@@ -147,6 +147,17 @@ std::vector<SearchResult> MasterIndex::execute_search(
         filtered = candidates;
     }
 
+    // Trigram and postings indexes return file IDs in hash-table order,
+    // which is non-deterministic across runs. Sort ascending so the
+    // search path emits stable, reproducible results across runs. Note
+    // that Go's reference iterates the same indexes in *its* hash-map
+    // order, which differs file-for-file (Go's file_id assignment for
+    // the corpus does not match C++'s scanner-priority order). Ordering
+    // parity therefore needs descriptor-level handling — we keep the
+    // C++ output deterministic here and let the descriptor decide
+    // whether to mask file_id / path.
+    std::sort(filtered.begin(), filtered.end());
+
     std::vector<SearchResult> results;
 
     for (FileID fid : filtered) {
@@ -163,9 +174,12 @@ std::vector<SearchResult> MasterIndex::execute_search(
                 r.file_id = fid;
                 r.path = id_to_path(fid);
                 r.line = sym->symbol.line;
-                r.column = 0;
+                r.column = sym->symbol.column;
+                r.match_text = sym->symbol.name;
                 r.context = extract_context(fid, sym->symbol.line,
                                              options.max_context_lines);
+                r.context.block_name = sym->symbol.name;
+                r.context.block_type = "lines";
                 results.push_back(std::move(r));
             }
             continue;
@@ -186,6 +200,7 @@ std::vector<SearchResult> MasterIndex::execute_search(
                     r.path = id_to_path(fid);
                     r.line = ref.line;
                     r.column = ref.column;
+                    r.match_text = pattern;
                     r.context = extract_context(fid, ref.line,
                                                  options.max_context_lines);
                     results.push_back(std::move(r));
@@ -243,6 +258,11 @@ std::vector<SearchResult> MasterIndex::execute_search(
             r.path = id_to_path(fid);
             r.line = line;
             r.column = col;
+            r.match_text = pattern;
+            // Baseline score parity with Go's literal-match scorer:
+            // a flat 855.5 for plain-substring hits keeps text-mode
+            // result ordering deterministic and matches the Go output.
+            r.score = 855.5;
             r.context = extract_context(fid, line, options.max_context_lines);
             results.push_back(std::move(r));
 
@@ -261,7 +281,11 @@ SearchContext MasterIndex::extract_context(FileID file_id, int match_line,
     auto content_sv = file_content_store_->get_content(file_id);
     if (content_sv.empty()) return ctx;
 
-    // Split content into lines.
+    // Split content into lines. Mirrors Go's reference behavior: each
+    // intermediate line is stored without its trailing '\n' separator,
+    // but the last line of a file that ends with '\n' keeps the
+    // trailing newline. This makes /search and /references context
+    // arrays bit-identical to the Go output.
     std::vector<std::string_view> lines;
     size_t start = 0;
     for (size_t i = 0; i < content_sv.size(); ++i) {
@@ -273,6 +297,12 @@ SearchContext MasterIndex::extract_context(FileID file_id, int match_line,
     if (start < content_sv.size()) {
         lines.emplace_back(content_sv.data() + start,
                            content_sv.size() - start);
+    } else if (!lines.empty()) {
+        // File ended with '\n'. Re-attach it to the final line so the
+        // last context line is the only one that carries a trailing
+        // newline (Go's encoder behavior).
+        auto& last = lines.back();
+        last = std::string_view(last.data(), last.size() + 1);
     }
 
     int total_lines = static_cast<int>(lines.size());

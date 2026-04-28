@@ -61,10 +61,14 @@ std::vector<FileTask> FileScanner::scan() {
 
     walk_directory(root, visited_inodes, tasks);
 
-    // Sort by priority descending so high-priority files are processed first
+    // Sort by priority descending so high-priority files are processed
+    // first. Within the same priority bucket, sort by path ascending so
+    // the order in which the integrator sees files (and therefore the
+    // file_id / symbol_id assignment) is deterministic across runs.
     std::sort(tasks.begin(), tasks.end(),
               [](const FileTask& a, const FileTask& b) {
-                  return a.priority > b.priority;
+                  if (a.priority != b.priority) return a.priority > b.priority;
+                  return a.path < b.path;
               });
     return tasks;
 }

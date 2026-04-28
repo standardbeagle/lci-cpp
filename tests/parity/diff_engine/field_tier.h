@@ -13,6 +13,12 @@ struct TierMap {
     std::vector<std::string> timed;
     std::vector<std::string> ids;
     std::vector<std::string> ignore;
+    // Array paths whose elements should be sorted (by canonical JSON
+    // dump) before tier comparison runs. Use this when the upstream
+    // producer emits an array in non-deterministic order — e.g. Go
+    // hash-map iteration in /list-symbols, /search, /references — and
+    // the parity test should verify content rather than position.
+    std::vector<std::string> sort_arrays;
 };
 
 // Returns the tier for a given JSONPath-lite path. Default = Stable

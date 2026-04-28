@@ -120,6 +120,29 @@ void FileIntegrator::merge_symbols(ProcessedFile& file) {
             file.file_id, file.path, file.symbols,
             file.references, file.scopes);
 
+        // Enrich EnhancedSymbols with parser-only metadata (complexity,
+        // signature, doc comment). ReferenceTracker stores these as zero
+        // defaults; we look them up by (line, column) coordinates and
+        // write back via the symbol_store update path.
+        if (!enhanced.empty() && !file.symbol_metadata.empty()) {
+            auto& store = ref_tracker_->symbol_store_mut();
+            for (auto& es : enhanced) {
+                for (const auto& meta : file.symbol_metadata) {
+                    if (meta.line != es.symbol.line ||
+                        meta.column != es.symbol.column) {
+                        continue;
+                    }
+                    if (meta.complexity > 0) es.complexity = meta.complexity;
+                    if (!meta.signature.empty()) es.signature = meta.signature;
+                    if (!meta.doc_comment.empty()) {
+                        es.doc_comment = meta.doc_comment;
+                    }
+                    store.set(es.id, es);
+                    break;
+                }
+            }
+        }
+
         if (symbol_location_index_ != nullptr && !enhanced.empty()) {
             symbol_location_index_->index_file_symbols(
                 file.file_id, file.symbols, enhanced);

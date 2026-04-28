@@ -22,6 +22,17 @@ struct FileTask {
     int priority{};
 };
 
+/// Per-position metadata captured from a parser pass.
+/// Keyed by 1-based (line, column) so the integrator can match it back to
+/// Symbol entries (which carry the same coordinates).
+struct ProcessedSymbolMetadata {
+    int line{};
+    int column{};
+    int complexity{};
+    std::string signature;
+    std::string doc_comment;
+};
+
 /// Result of processing a single file through the pipeline.
 struct ProcessedFile {
     std::string path;
@@ -30,6 +41,7 @@ struct ProcessedFile {
     std::vector<EnhancedSymbol> enhanced_symbols;
     std::vector<Reference> references;
     std::vector<ScopeInfo> scopes;
+    std::vector<ProcessedSymbolMetadata> symbol_metadata;
     BucketedTrigramResult bucketed_trigrams;
     std::vector<int> line_offsets;
     std::string language;

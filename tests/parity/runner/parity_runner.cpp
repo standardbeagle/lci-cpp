@@ -147,6 +147,7 @@ int run_cli_descriptor(const Descriptor& d) {
             auto cpp_j = nlohmann::json::parse(cpp_out.stdout_data);
             CanonicalizeOptions co;
             co.ignore_paths  = d.tiers.ignore;
+            co.sort_array_paths = d.tiers.sort_arrays;
             co.corpus_prefix = corpus_path;
             co.preserve_number_paths = d.tiers.ranked;
             co.preserve_number_paths.insert(co.preserve_number_paths.end(),
@@ -220,6 +221,7 @@ int run_mcp_descriptor(const Descriptor& d) {
         auto cj = nlohmann::json::parse(cpp.stdout_data);
         CanonicalizeOptions co;
         co.ignore_paths  = d.tiers.ignore;
+        co.sort_array_paths = d.tiers.sort_arrays;
         co.corpus_prefix = corpus_path;
         co.preserve_number_paths = d.tiers.ranked;
         co.preserve_number_paths.insert(co.preserve_number_paths.end(),
@@ -295,6 +297,7 @@ int run_index_descriptor(const Descriptor& d) {
         auto cpp_j = nlohmann::json::parse(cpp_out.stdout_data);
         CanonicalizeOptions co;
         co.ignore_paths  = d.tiers.ignore;
+        co.sort_array_paths = d.tiers.sort_arrays;
         co.corpus_prefix = corpus_path;
         co.preserve_number_paths = d.tiers.ranked;
         co.preserve_number_paths.insert(co.preserve_number_paths.end(),
@@ -377,6 +380,7 @@ int run_http_descriptor(const Descriptor& d) {
             auto cpp_j = nlohmann::json::parse(cpp_out.stdout_data);
             CanonicalizeOptions co;
             co.ignore_paths  = d.tiers.ignore;
+            co.sort_array_paths = d.tiers.sort_arrays;
             co.corpus_prefix = corpus_path;
             co.preserve_number_paths = d.tiers.ranked;
             co.preserve_number_paths.insert(co.preserve_number_paths.end(),

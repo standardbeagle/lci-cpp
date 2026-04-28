@@ -85,6 +85,14 @@ bool MasterIndex::index_directory(const std::string& root) {
     // Run the pipeline.
     Pipeline pipeline(config_, file_service_,
                       &trigram_index_, &ref_tracker_, &postings_index_);
+
+    // Wire the integrator with auxiliary indexes so symbol-aware paths
+    // (import resolution, symbol location index) are populated as
+    // ProcessedFile results stream through. Without this, `merge_symbols`
+    // skips imports and the symbol location index stays empty.
+    pipeline.integrator().set_file_content_store(file_content_store_.get());
+    pipeline.integrator().set_symbol_location_index(&symbol_location_index_);
+
     pipeline.run();
 
     // Post-pipeline: resolve cross-file references.

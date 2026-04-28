@@ -18,6 +18,14 @@ struct CanonicalizeOptions {
     // the descriptor's tier map, so the diff engine can apply tolerances.
     std::vector<std::string> preserve_number_paths;
 
+    // Array paths whose elements should be sorted (by their canonical
+    // JSON dump) before comparison. Used when the producer is allowed
+    // to emit elements in any order — e.g. Go's map-iteration order in
+    // /list-symbols, /search, /references — and the parity test should
+    // verify multiset content rather than positional equality. Path
+    // syntax matches `ignore_paths` (e.g. "symbols", "results").
+    std::vector<std::string> sort_array_paths;
+
     // Absolute corpus prefix to rewrite to "${CORPUS}".
     // Empty string disables rewriting.
     std::string corpus_prefix;

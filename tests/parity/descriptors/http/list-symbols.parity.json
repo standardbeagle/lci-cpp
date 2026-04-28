@@ -11,9 +11,15 @@
   },
   "capture": ["stdout", "exit"],
   "parse": "json",
+  "_comment_sort_arrays": "Go iterates the symbol map in hash-order, which is non-deterministic across runs. Sort the symbols array on both sides so we verify multiset content rather than positional equality. object_id is masked because Go and C++ assign sequential SymbolIDs in different file-integration orders (see the http/search descriptor for the parallel file_id story).",
   "tiers": {
     "stable": [],
-    "ignore": ["pid", "start_time", "version", "uptime_ms", "elapsed_ms", "request_id", "timestamp", "schema_version"]
+    "ignore": [
+      "pid", "start_time", "version", "uptime_ms", "elapsed_ms",
+      "request_id", "timestamp", "schema_version",
+      "symbols[].object_id"
+    ],
+    "sort_arrays": ["symbols"]
   },
   "tolerances": {"score_abs": 0.05, "timed_max_ms": 60000},
   "expect_exit": 200

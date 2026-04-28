@@ -560,6 +560,10 @@ void IndexServer::handle_search(const httplib::Request& req,
     opts.max_results = body.value("max_results", 100);
     opts.case_insensitive = body.value("case_insensitive", false);
     opts.declaration_only = body.value("declaration_only", false);
+    // Go's /search ships a `context` block per hit. Request a small
+    // surrounding window so extract_context() actually populates lines;
+    // without this max_context_lines=0 produces an empty `lines` array.
+    opts.max_context_lines = body.value("max_context_lines", 1);
 
     std::vector<SearchResult> results;
     {
@@ -576,11 +580,37 @@ void IndexServer::handle_search(const httplib::Request& req,
     j["results"] = nlohmann::json::array();
     for (const auto& r : results) {
         nlohmann::json rj;
+        rj["file_id"] = static_cast<int>(r.file_id);
         rj["path"] = r.path;
         rj["line"] = r.line;
         rj["column"] = r.column;
         rj["match"] = r.match_text;
         rj["score"] = r.score;
+
+        // Build the structured `context` block Go's /search emits. The
+        // search engine populates `context.lines` for the surrounding
+        // window and the matched line number; the rest of the fields are
+        // derived from those plus the SearchContext metadata.
+        nlohmann::json ctx;
+        ctx["block_type"] = r.context.block_type.empty()
+                                ? std::string("lines")
+                                : r.context.block_type;
+        ctx["start_line"] = r.context.start_line;
+        ctx["end_line"] = r.context.end_line;
+        ctx["is_complete"] = r.context.is_complete;
+
+        nlohmann::json lines_arr = nlohmann::json::array();
+        for (const auto& l : r.context.lines) {
+            lines_arr.push_back(l);
+        }
+        ctx["lines"] = lines_arr;
+
+        nlohmann::json matched = nlohmann::json::array();
+        matched.push_back(r.line);
+        ctx["matched_lines"] = matched;
+        ctx["match_count"] = 1;
+
+        rj["context"] = ctx;
         j["results"].push_back(rj);
     }
     json_response(res, j);
@@ -815,10 +845,20 @@ void IndexServer::handle_references(const httplib::Request& req,
 
     int max_results = body.value("max_results", 100);
 
+    // Go's /references endpoint returns one entry per text occurrence of
+    // the pattern (matching the Go reference output: a definition-line
+    // hit in each file). Use the general search path so the C++ output
+    // matches the Go shape and result count rather than restricting to
+    // recorded incoming refs (which only covers cross-language linker
+    // hits and would drop the same-file definition lines).
+    SearchOptions opts;
+    opts.max_results = max_results;
+    opts.max_context_lines = 5;
+
     std::vector<SearchResult> results;
     {
         std::shared_lock lock(mu_);
-        results = indexer_->search_references(pattern);
+        results = indexer_->search_with_options(pattern, opts);
     }
 
     if (static_cast<int>(results.size()) > max_results) {
@@ -887,21 +927,60 @@ void IndexServer::handle_tree(const httplib::Request& req,
     auto tree = indexer_->ref_tracker().build_function_tree(
         sym->id, max_depth > 0 ? max_depth : 10);
 
-    // Serialize tree recursively
-    std::function<nlohmann::json(const FunctionTreeNode&)> serialize_node;
-    serialize_node = [&](const FunctionTreeNode& node) -> nlohmann::json {
+    // Serialize tree recursively. Mirrors Go's tree node shape, which
+    // includes annotations / safety / impact fields (left null/zero in
+    // the C++ port until the analyzers that produce them are wired in).
+    std::function<int(const FunctionTreeNode&)> count_nodes;
+    count_nodes = [&](const FunctionTreeNode& node) -> int {
+        int n = 1;
+        for (const auto& child : node.children) {
+            n += count_nodes(child);
+        }
+        return n;
+    };
+
+    std::function<nlohmann::json(const FunctionTreeNode&, int)> serialize_node;
+    serialize_node = [&](const FunctionTreeNode& node, int depth) -> nlohmann::json {
         nlohmann::json nj;
         nj["name"] = node.name;
         nj["line"] = node.line;
-        nj["children"] = nlohmann::json::array();
+        nj["depth"] = depth;
+        nj["file_path"] = "";
+        nj["node_type"] = 0;
+        nj["dependency_count"] = static_cast<int>(node.children.size());
+        nj["dependent_count"] = 0;
+        nj["edit_risk_score"] = 0;
+        nj["impact_radius"] = 0;
+        nj["annotations"] = nullptr;
+        nj["safety_notes"] = nullptr;
+        nj["stability_tags"] = nullptr;
+
+        nlohmann::json children = nlohmann::json::array();
         for (const auto& child : node.children) {
-            nj["children"].push_back(serialize_node(child));
+            children.push_back(serialize_node(child, depth + 1));
         }
+        nj["children"] = children;
         return nj;
     };
 
+    int total_nodes = count_nodes(tree) - 1;  // exclude root from count
+
+    nlohmann::json options;
+    options["agent_mode"] = false;
+    options["compact"] = false;
+    options["exclude_pattern"] = "";
+    options["max_depth"] = max_depth;
+    options["show_lines"] = false;
+
+    nlohmann::json tree_j;
+    tree_j["root"] = serialize_node(tree, 0);
+    tree_j["root_function"] = function_name;
+    tree_j["max_depth"] = max_depth;
+    tree_j["options"] = options;
+    tree_j["total_nodes"] = total_nodes;
+
     nlohmann::json j;
-    j["tree"] = serialize_node(tree);
+    j["tree"] = tree_j;
     json_response(res, j);
 }
 
@@ -975,6 +1054,12 @@ void IndexServer::handle_list_symbols(const httplib::Request& req,
     int offset = body.value("offset", 0);
 
     auto all_file_ids = indexer_->get_all_file_ids();
+    // Sort by file_id ascending for deterministic output ordering.
+    // get_all_file_ids() iterates a hash map and returns ids in arbitrary
+    // order; without sorting, list-symbols output is non-reproducible across
+    // runs and diverges from the Go reference (which iterates files in
+    // insertion / file_id order).
+    std::sort(all_file_ids.begin(), all_file_ids.end());
 
     nlohmann::json entries = nlohmann::json::array();
     int total = 0;
@@ -1026,6 +1111,14 @@ void IndexServer::handle_list_symbols(const httplib::Request& req,
             if (total <= offset) continue;
             if (static_cast<int>(entries.size()) >= max_results) continue;
 
+            // Mirror Go's `json:",omitempty"` semantics: only emit
+            // numeric/string fields when non-zero / non-empty so that
+            // canonicalised JSON matches the Go reference output.
+            // Note: Go's /list-symbols handler intentionally omits the
+            // `signature` field (it's exposed only via /inspect-symbol
+            // in the Go reference). Match that here so summary listings
+            // stay identical and signatures only appear where Go
+            // surfaces them.
             nlohmann::json e;
             e["name"] = sym->symbol.name;
             e["type"] = std::string(to_string(sym->symbol.type));
@@ -1033,12 +1126,19 @@ void IndexServer::handle_list_symbols(const httplib::Request& req,
             e["line"] = sym->symbol.line;
             e["object_id"] = encode_symbol_id(sym->id);
             e["is_exported"] = sym->is_exported;
-            e["signature"] = sym->signature;
-            e["complexity"] = sym->complexity;
-            e["parameter_count"] = static_cast<int>(sym->parameter_count);
-            e["receiver_type"] = sym->receiver_type;
-            e["incoming_refs"] = static_cast<int>(sym->incoming_refs.size());
-            e["outgoing_refs"] = static_cast<int>(sym->outgoing_refs.size());
+            if (sym->complexity > 0) e["complexity"] = sym->complexity;
+            if (sym->parameter_count > 0) {
+                e["parameter_count"] = static_cast<int>(sym->parameter_count);
+            }
+            if (!sym->receiver_type.empty()) {
+                e["receiver_type"] = sym->receiver_type;
+            }
+            if (!sym->incoming_refs.empty()) {
+                e["incoming_refs"] = static_cast<int>(sym->incoming_refs.size());
+            }
+            if (!sym->outgoing_refs.empty()) {
+                e["outgoing_refs"] = static_cast<int>(sym->outgoing_refs.size());
+            }
             entries.push_back(e);
         }
     }
@@ -1286,6 +1386,10 @@ void IndexServer::handle_browse_file(const httplib::Request& req,
         ++total;
         if (static_cast<int>(entries.size()) >= max_results) continue;
 
+        // Same omitempty treatment as /list-symbols so HTTP browse-file
+        // shape matches Go's reference encoder field-for-field. Go's
+        // /browse-file (like /list-symbols) intentionally omits the
+        // `signature` field, surfacing it only through /inspect-symbol.
         nlohmann::json e;
         e["name"] = sym->symbol.name;
         e["type"] = std::string(to_string(sym->symbol.type));
@@ -1293,12 +1397,19 @@ void IndexServer::handle_browse_file(const httplib::Request& req,
         e["line"] = sym->symbol.line;
         e["object_id"] = encode_symbol_id(sym->id);
         e["is_exported"] = sym->is_exported;
-        e["signature"] = sym->signature;
-        e["complexity"] = sym->complexity;
-        e["parameter_count"] = static_cast<int>(sym->parameter_count);
-        e["receiver_type"] = sym->receiver_type;
-        e["incoming_refs"] = static_cast<int>(sym->incoming_refs.size());
-        e["outgoing_refs"] = static_cast<int>(sym->outgoing_refs.size());
+        if (sym->complexity > 0) e["complexity"] = sym->complexity;
+        if (sym->parameter_count > 0) {
+            e["parameter_count"] = static_cast<int>(sym->parameter_count);
+        }
+        if (!sym->receiver_type.empty()) {
+            e["receiver_type"] = sym->receiver_type;
+        }
+        if (!sym->incoming_refs.empty()) {
+            e["incoming_refs"] = static_cast<int>(sym->incoming_refs.size());
+        }
+        if (!sym->outgoing_refs.empty()) {
+            e["outgoing_refs"] = static_cast<int>(sym->outgoing_refs.size());
+        }
         entries.push_back(e);
     }
 

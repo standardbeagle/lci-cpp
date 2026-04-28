@@ -2,8 +2,10 @@
 
 #include <chrono>
 #include <cstdio>
+#include <filesystem>
 #include <iostream>
 #include <string>
+#include <system_error>
 
 #include <nlohmann/json.hpp>
 
@@ -75,17 +77,40 @@ int run_search(const GlobalFlags& flags, const std::string& pattern,
     if (compact_search) {
         std::printf("Found %zu matches in %.1fms (compact mode)\n\n",
                     results.size(), elapsed_ms);
+        // Resolve the current working directory once so we can render
+        // paths relative to it, mirroring Go's compact-mode formatter
+        // (`b.py:1:` rather than `/abs/path/to/b.py:1:`).
+        std::error_code rel_ec;
+        auto cwd = std::filesystem::current_path(rel_ec);
         for (auto& r : results) {
             std::string path = r.value("path", "");
             int line = r.value("line", 0);
             auto context = r.value("context", nlohmann::json::object());
             int start_line = context.value("start_line", 0);
             auto lines = context.value("lines", nlohmann::json::array());
+
+            std::string display_path = path;
+            if (!rel_ec) {
+                std::error_code rel2;
+                auto rel = std::filesystem::relative(path, cwd, rel2);
+                if (!rel2 && !rel.empty() &&
+                    rel.string().find("..") == std::string::npos) {
+                    display_path = rel.string();
+                }
+            }
+
             for (size_t i = 0; i < lines.size(); ++i) {
                 int line_num = start_line + static_cast<int>(i);
                 if (line_num == line) {
-                    std::printf("%s:%d: %s\n", path.c_str(), line_num,
-                                lines[i].get<std::string>().c_str());
+                    // Lines from context.lines may carry a trailing
+                    // '\n' (the indexer preserves the file's final
+                    // newline on the last line). printf adds its own
+                    // newline below, so strip the trailing one to
+                    // avoid an extra blank line in compact output.
+                    std::string text = lines[i].get<std::string>();
+                    if (!text.empty() && text.back() == '\n') text.pop_back();
+                    std::printf("%s:%d: %s\n", display_path.c_str(), line_num,
+                                text.c_str());
                     break;
                 }
             }
@@ -113,15 +138,20 @@ int run_search(const GlobalFlags& flags, const std::string& pattern,
 
         for (size_t i = 0; i < lines.size(); ++i) {
             int line_num = start_line + static_cast<int>(i);
-            if (line_num == line) {
-                std::printf("  > %4d | %s\n", line_num,
-                            lines[i].get<std::string>().c_str());
-            } else {
-                std::printf("    %4d | %s\n", line_num,
-                            lines[i].get<std::string>().c_str());
-            }
+            // Match Go's text-mode output exactly: a 6-char right-
+            // padded line number + " | " + content + "\n". No '>'
+            // marker on the match line — Go's formatter prints every
+            // context line uniformly and parity is more valuable than
+            // the marker. Strip any trailing '\n' on the source line
+            // so printf's own newline doesn't double up.
+            std::string text = lines[i].get<std::string>();
+            if (!text.empty() && text.back() == '\n') text.pop_back();
+            std::printf("%6d | %s\n", line_num, text.c_str());
         }
-        std::printf("\n");
+        // Go's standard-mode formatter prints two blank lines between
+        // result blocks (one closing the context, one before the next
+        // path). Match that spacing exactly.
+        std::printf("\n\n");
     }
 
     (void)max_lines;

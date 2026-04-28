@@ -1,6 +1,9 @@
 #include <lci/indexing/pipeline.h>
 
+#include <algorithm>
 #include <thread>
+#include <utility>
+#include <vector>
 
 namespace lci {
 
@@ -33,11 +36,18 @@ void Pipeline::run() {
     BoundedQueue<FileTask> task_queue(task_buf);
     BoundedQueue<ProcessedFile> result_queue(result_buf);
 
-    // Producer: feed scanned tasks into the task queue.
+    // Producer: pre-load files into the content store *in scan order* so
+    // FileIDs are assigned deterministically (alphabetical within a
+    // priority tier). Without this, worker threads race to call
+    // load_file_from_disk and the resulting file_id assignment depends
+    // on thread scheduling — which then propagates into symbol_id
+    // ordering and HTTP/MCP response ordering. Loading here adds a
+    // small serialization point but keeps per-file parsing in workers.
     std::thread producer([&] {
         for (auto& task : tasks) {
             if (stop_flag_.load(std::memory_order_acquire)) break;
             progress_.increment_scanned();
+            (void)file_service_->load_file_from_disk(task.path);
             if (!task_queue.push(std::move(task))) break;
         }
         task_queue.close();
@@ -49,22 +59,40 @@ void Pipeline::run() {
         processor.process(task_queue, result_queue);
     });
 
-    // Stage 3: Integrate results (runs on this thread).
-    ProcessedFile result;
-    while (result_queue.pop(result)) {
-        if (stop_flag_.load(std::memory_order_acquire)) break;
-        progress_.increment_processed(result.path);
-        if (!result.has_error && result.file_id != 0) {
-            integrator_.integrate_file(result);
-            progress_.increment_integrated();
-        } else if (result.has_error) {
-            Error err;
-            err.type = ErrorType::Indexing;
-            err.file_path = result.path;
-            err.message = result.error.message;
-            err.operation = result.stage;
-            progress_.add_error(std::move(err));
+    // Stage 3: Integrate results (runs on this thread). Buffer all
+    // ProcessedFile outputs from the worker pool, then sort by file_id
+    // (assigned deterministically by the producer above) so symbol_id
+    // assignment in ref_tracker.process_file follows the same scan
+    // order. This mirrors Go's reference indexer ordering and keeps
+    // HTTP / MCP responses bit-stable across runs.
+    std::vector<ProcessedFile> buffered;
+    {
+        ProcessedFile result;
+        while (result_queue.pop(result)) {
+            if (stop_flag_.load(std::memory_order_acquire)) break;
+            progress_.increment_processed(result.path);
+            if (result.has_error) {
+                Error err;
+                err.type = ErrorType::Indexing;
+                err.file_path = result.path;
+                err.message = result.error.message;
+                err.operation = result.stage;
+                progress_.add_error(std::move(err));
+                continue;
+            }
+            if (result.file_id == 0) continue;
+            buffered.push_back(std::move(result));
         }
+    }
+
+    std::sort(buffered.begin(), buffered.end(),
+              [](const ProcessedFile& a, const ProcessedFile& b) {
+                  return a.file_id < b.file_id;
+              });
+
+    for (auto& result : buffered) {
+        integrator_.integrate_file(result);
+        progress_.increment_integrated();
     }
 
     producer.join();

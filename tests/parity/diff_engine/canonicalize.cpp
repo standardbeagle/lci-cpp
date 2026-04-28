@@ -192,6 +192,35 @@ void apply_replace_rules(std::string& line,
     }
 }
 
+void sort_arrays_recursive(nlohmann::json& node,
+                           const std::vector<std::string>& patterns,
+                           std::string current_path) {
+    if (node.is_object()) {
+        for (auto it = node.begin(); it != node.end(); ++it) {
+            std::string child_path = current_path.empty()
+                                         ? it.key()
+                                         : current_path + "." + it.key();
+            sort_arrays_recursive(it.value(), patterns, child_path);
+        }
+    } else if (node.is_array()) {
+        std::string array_path = current_path + "[]";
+        for (auto& elem : node) {
+            sort_arrays_recursive(elem, patterns, array_path);
+        }
+        if (path_in(patterns, current_path)) {
+            // Stable sort by canonical JSON dump so equal-content
+            // elements keep their relative order. The dump uses sorted
+            // keys and "%.6g" floats by virtue of nlohmann::json's
+            // canonical ordering plus our prior normalization passes.
+            std::stable_sort(node.begin(), node.end(),
+                             [](const nlohmann::json& a,
+                                const nlohmann::json& b) {
+                                 return a.dump() < b.dump();
+                             });
+        }
+    }
+}
+
 } // namespace
 
 nlohmann::json canonicalize_json(const nlohmann::json& in,
@@ -201,6 +230,11 @@ nlohmann::json canonicalize_json(const nlohmann::json& in,
     rewrite_paths_recursive(out, opts.corpus_prefix);
     normalize_floats_recursive(out, opts.preserve_number_paths, "");
     out = sort_keys_recursive(out);
+    // Apply array sort *after* key normalization so the canonical dump
+    // used as the sort key is stable across runs.
+    if (!opts.sort_array_paths.empty()) {
+        sort_arrays_recursive(out, opts.sort_array_paths, "");
+    }
     return out;
 }
 

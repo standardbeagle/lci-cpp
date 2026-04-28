@@ -11,9 +11,15 @@
   },
   "capture": ["stdout", "exit"],
   "parse": "json",
+  "_comment_ignore": "object_id and file.file_id are sequential synthetic IDs assigned during indexing; Go's filesystem-readdir order differs from C++'s scanner ordering so the integers diverge run-to-run. The semantic content (path, line, name, type, exported, refs) all match — mask the IDs and verify everything else.",
   "tiers": {
     "stable": [],
-    "ignore": ["pid", "start_time", "version", "uptime_ms", "elapsed_ms", "request_id", "timestamp", "schema_version"]
+    "ignore": [
+      "pid", "start_time", "version", "uptime_ms", "elapsed_ms",
+      "request_id", "timestamp", "schema_version",
+      "file.file_id",
+      "symbols[].object_id"
+    ]
   },
   "tolerances": {"score_abs": 0.05, "timed_max_ms": 60000},
   "expect_exit": 200

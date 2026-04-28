@@ -1,11 +1,78 @@
 #include <lci/indexing/pipeline_processor.h>
 
+#include <lci/parser/parser.h>
+#include <lci/parser/parser_pool.h>
+#include <lci/parser/unified_extractor.h>
+
+#include <tree_sitter/api.h>
+
 #include <chrono>
 #include <filesystem>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace lci {
+
+namespace {
+
+/// Extracts symbols, references, and scopes from a file's content via
+/// tree-sitter + UnifiedExtractor. Populates `result` in place. Falls
+/// through silently if the language is unsupported or parsing fails so
+/// that trigram/postings indexing still proceeds.
+void run_unified_extraction(ProcessedFile& result,
+                            std::string_view content,
+                            const std::string& path) {
+    auto ext = std::filesystem::path(path).extension().string();
+    if (ext.empty()) return;
+
+    parser::Language lang{};
+    if (!parser::language_from_extension(ext, lang)) {
+        return;  // Unsupported language: trigrams still index for text search.
+    }
+
+    parser::PooledParser parser_guard(lang);
+    if (!parser_guard) return;
+
+    TSTree* tree = ts_parser_parse_string(
+        parser_guard.get(), nullptr, content.data(),
+        static_cast<uint32_t>(content.size()));
+    if (tree == nullptr) return;
+
+    parser::UnifiedExtractor extractor;
+    extractor.init(content, result.file_id, ext, path);
+    extractor.extract(tree);
+    auto extracted = extractor.get_results();
+    ts_tree_delete(tree);
+
+    // Build a position-keyed metadata index so the integrator can enrich
+    // EnhancedSymbol records (complexity, signature, doc comment) without
+    // changing the ReferenceTracker API. Symbol coordinates and the
+    // declaration / complexity keys all use 1-based lines and columns.
+    result.symbol_metadata.reserve(extracted.symbols.size());
+    for (const auto& sym : extracted.symbols) {
+        ProcessedSymbolMetadata meta;
+        meta.line = sym.line;
+        meta.column = sym.column;
+        for (const auto& [pk, cx] : extracted.complexity) {
+            if (pk.line == sym.line && pk.column == sym.column) {
+                meta.complexity = cx;
+                break;
+            }
+        }
+        auto [signature, doc_comment] =
+            extractor.lookup_declaration(sym.line, sym.column);
+        meta.signature.assign(signature);
+        meta.doc_comment.assign(doc_comment);
+        result.symbol_metadata.push_back(std::move(meta));
+    }
+
+    result.symbols = std::move(extracted.symbols);
+    result.references = std::move(extracted.references);
+    result.scopes = std::move(extracted.scopes);
+}
+
+}  // namespace
 
 FileProcessor::FileProcessor(
     const Config& config,
@@ -13,7 +80,25 @@ FileProcessor::FileProcessor(
     TrigramIndex* trigram_index)
     : config_(config),
       file_service_(std::move(file_service)),
-      trigram_index_(trigram_index) {}
+      trigram_index_(trigram_index) {
+    // Warm tree-sitter grammar tables on the main thread so the first
+    // parse on a worker thread does not pay a cold-start cost. The
+    // grammar init functions are documented thread-safe; touching them
+    // and driving a one-byte parse keeps the worker pool's first batch
+    // hot without measurable overhead on small corpora.
+    for (int i = 0; i < parser::kLanguageCount; ++i) {
+        auto lang = static_cast<parser::Language>(i);
+        const TSLanguage* ts_lang = parser::get_ts_language(lang);
+        if (ts_lang == nullptr) continue;
+
+        parser::UniqueParser p = parser::make_parser(lang);
+        if (!p) continue;
+
+        constexpr const char* kWarmInput = " ";
+        TSTree* tree = ts_parser_parse_string(p.get(), nullptr, kWarmInput, 1);
+        if (tree != nullptr) ts_tree_delete(tree);
+    }
+}
 
 void FileProcessor::process(
     BoundedQueue<FileTask>& tasks,
@@ -87,6 +172,12 @@ ProcessedFile FileProcessor::process_file(int /*worker_id*/,
     }
 
     result.file_id = file_id;
+
+    // Parse the file and extract symbols, references, and scopes via
+    // tree-sitter. This populates the symbol-aware data the integrator
+    // feeds into ReferenceTracker. Without this step, browse-file,
+    // list-symbols, references, and tree endpoints all return empty.
+    run_unified_extraction(result, content, task.path);
 
     // Bucket trigrams during processing (zero-lock per-file)
     if (trigram_index_ != nullptr && content.size() >= 3) {
