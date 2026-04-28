@@ -40,6 +40,22 @@ std::string resolve_corpus(const std::string& key) {
     return (fs::path(base) / key).string();
 }
 
+const char* mode_name(Mode m) {
+    switch (m) {
+        case Mode::Cli:   return "cli";
+        case Mode::Mcp:   return "mcp";
+        case Mode::Http:  return "http";
+        case Mode::Index: return "index";
+    }
+    return "unknown";
+}
+
+McpFraming framing_for_binary(const std::string& bin) {
+    auto go = env_or("LCI_GO");
+    if (!go.empty() && bin == go) return McpFraming::Ndjson;
+    return McpFraming::ContentLength;
+}
+
 void write_dump(const fs::path& dump_dir,
                 const Descriptor& d,
                 const std::string& go_raw,
@@ -51,7 +67,7 @@ void write_dump(const fs::path& dump_dir,
     {
         std::ofstream f(dump_dir / "desc.json");
         f << nlohmann::json{{"id", d.id}, {"corpus", d.corpus},
-                            {"mode", "cli"}}.dump(2);
+                            {"mode", mode_name(d.mode)}}.dump(2);
     }
     std::ofstream(dump_dir / "go.raw")  << go_raw;
     std::ofstream(dump_dir / "cpp.raw") << cpp_raw;
@@ -162,8 +178,8 @@ int run_mcp_descriptor(const Descriptor& d) {
         return 2;
     }
 
-    auto go  = run_mcp(go_bin,  d, corpus_path);
-    auto cpp = run_mcp(cpp_bin, d, corpus_path);
+    auto go  = run_mcp(go_bin,  d, corpus_path, framing_for_binary(go_bin));
+    auto cpp = run_mcp(cpp_bin, d, corpus_path, framing_for_binary(cpp_bin));
 
     if (go.timed_out || cpp.timed_out) {
         std::cerr << "infra: mcp timeout\n";

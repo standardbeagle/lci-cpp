@@ -4,6 +4,7 @@
 #include <signal.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <cctype>
 #include <cerrno>
 #include <chrono>
 #include <cstring>
@@ -14,10 +15,26 @@ namespace lci::parity {
 
 namespace {
 
-const char* kInitializeFrame =
+const char* kInitializeBody =
     "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\","
-    "\"params\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{},"
-    "\"clientInfo\":{\"name\":\"parity_runner\",\"version\":\"1.0\"}}}\n";
+    "\"params\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},"
+    "\"clientInfo\":{\"name\":\"parity_runner\",\"version\":\"1.0\"}}}";
+
+const char* kInitializedNotification =
+    "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\",\"params\":{}}";
+
+std::string substitute(const std::string& s, const std::string& corpus_path) {
+    std::string out = s;
+    auto replace = [&](const std::string& token, const std::string& with) {
+        size_t pos = 0;
+        while ((pos = out.find(token, pos)) != std::string::npos) {
+            out.replace(pos, token.size(), with);
+            pos += with.size();
+        }
+    };
+    replace("${CORPUS}", corpus_path);
+    return out;
+}
 
 ssize_t write_all(int fd, const std::string& data) {
     size_t total = 0;
@@ -50,12 +67,72 @@ std::string read_one_line(int fd, std::chrono::steady_clock::time_point deadline
     return out;
 }
 
+// Encode a JSON-RPC frame in the chosen framing.
+std::string encode_frame(const std::string& body, McpFraming f) {
+    if (f == McpFraming::Ndjson) {
+        return body.back() == '\n' ? body : body + "\n";
+    }
+    // Content-Length
+    return "Content-Length: " + std::to_string(body.size()) + "\r\n\r\n" + body;
+}
+
+// Read one decoded frame from fd. Blocks (up to deadline) until a complete
+// frame is available. Returns empty string on EOF/timeout.
+std::string read_frame(int fd, McpFraming f,
+                       std::chrono::steady_clock::time_point deadline) {
+    if (f == McpFraming::Ndjson) {
+        return read_one_line(fd, deadline);
+    }
+    // Content-Length: read headers until blank line, parse Content-Length, read body.
+    std::string headers;
+    while (std::chrono::steady_clock::now() < deadline) {
+        char c;
+        ssize_t n = ::read(fd, &c, 1);
+        if (n == 1) {
+            headers.push_back(c);
+            if (headers.size() >= 4 &&
+                headers.compare(headers.size() - 4, 4, "\r\n\r\n") == 0) break;
+        } else if (n == 0) {
+            return std::string();
+        } else {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                continue;
+            }
+            return std::string();
+        }
+    }
+    // Parse Content-Length
+    size_t len = 0;
+    auto pos = headers.find("Content-Length:");
+    if (pos == std::string::npos) return std::string();
+    pos += sizeof("Content-Length:") - 1;
+    while (pos < headers.size() && (headers[pos] == ' ' || headers[pos] == '\t')) ++pos;
+    while (pos < headers.size() && std::isdigit(static_cast<unsigned char>(headers[pos]))) {
+        len = len * 10 + (headers[pos++] - '0');
+    }
+    std::string body;
+    body.reserve(len);
+    while (body.size() < len && std::chrono::steady_clock::now() < deadline) {
+        char buf[4096];
+        size_t want = std::min(sizeof(buf), len - body.size());
+        ssize_t n = ::read(fd, buf, want);
+        if (n > 0) body.append(buf, static_cast<size_t>(n));
+        else if (n == 0) break;
+        else if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        } else break;
+    }
+    return body;
+}
+
 } // namespace
 
 CapturedOutput run_mcp(const std::string& binary_path,
                        const Descriptor&  d,
                        const std::string& corpus_path,
-                       int timeout_seconds) {
+                       McpFraming         framing,
+                       int                timeout_seconds) {
     int out_pipe[2], in_pipe[2], err_pipe[2];
     if (pipe(out_pipe) || pipe(in_pipe) || pipe(err_pipe)) {
         throw std::runtime_error(std::string("pipe failed: ") + strerror(errno));
@@ -72,14 +149,28 @@ CapturedOutput run_mcp(const std::string& binary_path,
         close(in_pipe[0]);  close(in_pipe[1]);
         close(out_pipe[0]); close(out_pipe[1]);
         close(err_pipe[0]); close(err_pipe[1]);
-        for (const auto& [k, v] : d.invocation.env) setenv(k.c_str(), v.c_str(), 1);
-        if (!corpus_path.empty()) chdir(corpus_path.c_str());
 
-        std::vector<std::string> args = d.invocation.args;
+        for (const auto& [k, v] : d.invocation.env) {
+            std::string subst_v = substitute(v, corpus_path);
+            setenv(k.c_str(), subst_v.c_str(), 1);
+        }
+        if (!d.invocation.cwd.empty()) {
+            std::string cwd = substitute(d.invocation.cwd, corpus_path);
+            if (chdir(cwd.c_str()) != 0) _exit(127);
+        } else if (!corpus_path.empty()) {
+            chdir(corpus_path.c_str());
+        }
+
+        std::vector<std::string> sub_args;
+        sub_args.reserve(d.invocation.args.size());
+        for (const auto& a : d.invocation.args)
+            sub_args.push_back(substitute(a, corpus_path));
+
         std::vector<char*> argv;
+        argv.reserve(sub_args.size() + 2);
         std::string prog = binary_path;
         argv.push_back(prog.data());
-        for (auto& a : args) argv.push_back(a.data());
+        for (auto& a : sub_args) argv.push_back(a.data());
         argv.push_back(nullptr);
         execvp(prog.c_str(), argv.data());
         _exit(127);
@@ -89,40 +180,54 @@ CapturedOutput run_mcp(const std::string& binary_path,
     close(out_pipe[1]);
     close(err_pipe[1]);
     fcntl(out_pipe[0], F_SETFL, O_NONBLOCK);
+    fcntl(err_pipe[0], F_SETFL, O_NONBLOCK);
 
     auto deadline = std::chrono::steady_clock::now() +
                     std::chrono::seconds(timeout_seconds);
 
-    write_all(in_pipe[1], kInitializeFrame);
-    std::string init_resp = read_one_line(out_pipe[0], deadline);
+    // MCP handshake
+    write_all(in_pipe[1], encode_frame(kInitializeBody, framing));
+    std::string init_resp = read_frame(out_pipe[0], framing, deadline);
     (void)init_resp; // we don't validate beyond non-empty
+
+    write_all(in_pipe[1], encode_frame(kInitializedNotification, framing));
 
     // Send the descriptor's stdin payload (the tool-call JSON-RPC).
     if (!d.invocation.stdin_data.empty()) {
-        std::string body = d.invocation.stdin_data;
-        if (body.back() != '\n') body.push_back('\n');
-        write_all(in_pipe[1], body);
+        write_all(in_pipe[1], encode_frame(d.invocation.stdin_data, framing));
     }
-    std::string call_resp = read_one_line(out_pipe[0], deadline);
+
+    // Drain stderr concurrently while reading the tool-call response.
+    std::string stderr_buf;
+    std::thread err_reader([&] {
+        char buf[4096];
+        while (true) {
+            ssize_t n = ::read(err_pipe[0], buf, sizeof(buf));
+            if (n > 0) stderr_buf.append(buf, static_cast<size_t>(n));
+            else if (n == 0) break;
+            else if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            } else break;
+        }
+    });
+
+    std::string call_resp = read_frame(out_pipe[0], framing, deadline);
 
     close(in_pipe[1]);
     ::kill(pid, SIGTERM);
     int status = 0;
     waitpid(pid, &status, 0);
 
+    // Signal EOF to err_reader by closing read end after child has exited.
+    close(err_pipe[0]);
+    err_reader.join();
+    close(out_pipe[0]);
+
     CapturedOutput cap;
     cap.stdout_data = call_resp;
-    cap.exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : 0;
-    cap.timed_out = std::chrono::steady_clock::now() > deadline;
-
-    char buf[4096];
-    while (true) {
-        ssize_t n = ::read(err_pipe[0], buf, sizeof(buf));
-        if (n <= 0) break;
-        cap.stderr_data.append(buf, static_cast<size_t>(n));
-    }
-    close(out_pipe[0]);
-    close(err_pipe[0]);
+    cap.stderr_data = std::move(stderr_buf);
+    cap.exit_code   = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+    cap.timed_out   = std::chrono::steady_clock::now() > deadline;
     return cap;
 }
 
