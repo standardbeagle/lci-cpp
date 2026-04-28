@@ -1,0 +1,21 @@
+{
+  "id": "cli/search/json",
+  "mode": "cli",
+  "corpus": "multi-lang",
+  "go_binary": "${LCI_GO}",
+  "cpp_binary": "${LCI_CPP}",
+  "invocation": {
+    "args": ["search", "--json", "add"],
+    "cwd": "${CORPUS}"
+  },
+  "capture": ["stdout", "exit"],
+  "parse": "json",
+  "tiers": {
+    "stable": ["results[].file", "results[].line", "results[].symbol", "total"],
+    "ranked": ["results[].score"],
+    "timed":  ["elapsed_ms"],
+    "ignore": ["server_pid", "version", "request_id"]
+  },
+  "tolerances": {"score_abs": 0.05, "timed_max_ms": 60000},
+  "expect_exit": 0
+}
