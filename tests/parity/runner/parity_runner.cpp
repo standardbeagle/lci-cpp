@@ -76,6 +76,24 @@ TextCanonicalizeOptions text_opts_for(const Descriptor& d,
     return o;
 }
 
+// Drop any line whose content contains one of the strip patterns.  Used
+// to pre-clean stdout before JSON parsing when one binary emits debug or
+// banner preamble lines that the other does not (e.g. Go's
+// "DEBUG: verbose=..." print in `lci search --json`).  Reuses
+// canonicalize_text with a strip-only options block so the line-matching
+// rules stay identical to text-mode behavior.  No-op when patterns is
+// empty.
+std::string strip_preamble_lines(const std::string& in,
+                                 const std::vector<std::string>& patterns) {
+    if (patterns.empty()) return in;
+    TextCanonicalizeOptions opts;
+    opts.scrub_timing = false;        // leave numeric tokens alone
+    opts.strip_emoji_prefix = false;
+    opts.strip_lines = patterns;
+    // corpus_prefix and replace left empty.
+    return canonicalize_text(in, opts);
+}
+
 void write_dump(const fs::path& dump_dir,
                 const Descriptor& d,
                 const std::string& go_raw,
@@ -143,8 +161,17 @@ int run_cli_descriptor(const Descriptor& d) {
     DiffResult dr;
     if (d.parse == ParseStyle::Json) {
         try {
-            auto go_j  = nlohmann::json::parse(go_out.stdout_data);
-            auto cpp_j = nlohmann::json::parse(cpp_out.stdout_data);
+            // Pre-strip preamble lines (e.g. Go's "DEBUG: verbose=..."
+            // print in `lci search --json`) before JSON parse.  The
+            // descriptor opts in via text_normalize.strip_lines; with no
+            // patterns this is a no-op and existing descriptors are
+            // unaffected.
+            std::string go_raw  = strip_preamble_lines(go_out.stdout_data,
+                                                       d.text_normalize.strip_lines);
+            std::string cpp_raw = strip_preamble_lines(cpp_out.stdout_data,
+                                                       d.text_normalize.strip_lines);
+            auto go_j  = nlohmann::json::parse(go_raw);
+            auto cpp_j = nlohmann::json::parse(cpp_raw);
             CanonicalizeOptions co;
             co.ignore_paths  = d.tiers.ignore;
             co.sort_array_paths = d.tiers.sort_arrays;

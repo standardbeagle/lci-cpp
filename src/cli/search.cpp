@@ -62,12 +62,35 @@ int run_search(const GlobalFlags& flags, const std::string& pattern,
     auto& j = *result;
 
     if (json_output) {
+        // Match Go's `lci search --json` wire format faithfully:
+        //   - Each result element is wrapped in `{"result": {...}}` (Go's
+        //     `searchtypes.StandardResult` has a `Result GrepResult
+        //     json:"result"` tag — the wrapper is part of the contract).
+        //   - Paths are emitted relative to cwd (Go calls
+        //     `pathutil.ToRelativeStandardResults(results, projectRoot)`).
+        //   - Top-level `mode` is "standard" (Go's standard-results path
+        //     adds `"mode": "standard"`; integrated-mode would override).
+        std::error_code rel_ec;
+        auto cwd = std::filesystem::current_path(rel_ec);
+        auto raw_results = j.value("results", nlohmann::json::array());
+        nlohmann::json wrapped = nlohmann::json::array();
+        for (auto& r : raw_results) {
+            std::string path = r.value("path", "");
+            if (!rel_ec && !path.empty()) {
+                std::error_code ec;
+                auto rel = std::filesystem::relative(path, cwd, ec);
+                if (!ec) {
+                    r["path"] = rel.string();
+                }
+            }
+            wrapped.push_back(nlohmann::json{{"result", r}});
+        }
         nlohmann::json output;
         output["query"] = pattern;
         output["time_ms"] = elapsed_ms;
-        output["results"] = j.value("results", nlohmann::json::array());
-        output["count"] =
-            j.value("results", nlohmann::json::array()).size();
+        output["count"] = wrapped.size();
+        output["results"] = wrapped;
+        output["mode"] = "standard";
         std::cout << output.dump(2) << "\n";
         return 0;
     }

@@ -296,3 +296,59 @@ out of scope here).
 Pattern matches iter-4 / `cli/symbols/tree`
 (`tree _NoSuchFunction_`) — deterministic miss path forces both
 binaries down the same error-handling branch.
+
+### Decision: cli/search/json parity 8/9 (2026-04-28, Iter 8, xncBvJdVpsFT)
+
+**Chosen: faithful CLI port + descriptor strip-lines hook.**
+
+Baseline reality check overturned the task description. Both
+binaries already exit 0; the actual failure was an unparseable
+`stdout` because Go writes `DEBUG: verbose=...` (cmd/lci/search.go:49,
+unconditional) before the JSON body. Beyond that, the JSON shape
+diverged structurally: Go wraps each result in `{"result": {...}}`
+(per `searchtypes.StandardResult` having `Result GrepResult json:"result"`),
+adds top-level `"mode": "standard"`, and converts paths to
+relative via `pathutil.ToRelativeStandardResults`. C++ CLI
+emitted a flat shape with absolute paths and no `mode` field.
+
+Two changes:
+
+1. **C++ CLI port** (`src/cli/search.cpp` json_output branch):
+   wrap each result in `{"result": ...}`, rewrite `path` to
+   relative-to-cwd, add `"mode": "standard"`. This makes the C++
+   `lci search --json` wire format a faithful port of Go's CLI
+   contract. The HTTP `/search` endpoint is unaffected — both
+   binaries already agree on the flat server-side shape there.
+
+2. **Runner pre-parse strip-lines hook**
+   (`tests/parity/runner/parity_runner.cpp::strip_preamble_lines`):
+   when a CLI descriptor sets `text_normalize.strip_lines`,
+   apply it to raw stdout before `nlohmann::json::parse`. This
+   reuses `canonicalize_text` with a strip-only options block so
+   the line-matching rules stay consistent with text-mode
+   behavior. With no patterns it is a no-op — existing JSON
+   descriptors are unaffected. This is the cleanest cross-binary
+   fix for upstream debug pollution we don't own.
+
+3. **Descriptor**
+   (`tests/parity/descriptors/cli/search/json.parity.json`):
+   added `text_normalize.strip_lines: ["DEBUG: verbose="]`,
+   rewrote tier paths to address the wrapped shape
+   (`results[].result.<x>` not `results[].<x>`), masked
+   `file_id` (same scanner-ordering divergence as
+   `http/search`) and `context` (producer-specific window
+   bytes), added `sort_arrays: ["results"]` (Go's
+   trigram-index hash-iteration order).
+
+Result: `parity.cli.search.json` — failing → green, 10/10
+stable runs. Parity score 30/55 → 31/55. Non-parity unit suite
+1456/1456 passing both before and after.
+
+Why not pure descriptor honesty (move the whole payload to
+`ignore` like the iter-5 escape hatch)? Because the content
+*is* equivalent once you peel the wrapper — `path`, `line`,
+`column`, `match`, `score` all match across binaries. Hiding
+that behind an empty `ignore`-tier diff would silently regress
+to "both exit 0" and lose the value of the parity test. The
+real fix was a small CLI port + a generally useful runner
+feature.

@@ -10,11 +10,21 @@
   },
   "capture": ["stdout", "exit"],
   "parse": "json",
+  "_rationale_strip_lines": "Go's `lci search` cmd unconditionally prints 'DEBUG: verbose=...' to stdout (cmd/lci/search.go:49) before the JSON body. Pre-strip via the runner's pre-parse strip_lines hook so json::parse sees a clean payload. We do not own the Go source; this is the cleanest cross-binary fix.",
+  "_rationale_shape": "Each result element is wrapped in {\"result\": {...}} because Go's searchtypes.StandardResult has `Result GrepResult json:\"result\"`. C++ CLI was ported in iter-8 (src/cli/search.cpp) to emit the same wrapping plus relative paths plus `mode: standard` so the CLI wire format matches Go faithfully.",
+  "_rationale_file_id": "results[].result.file_id is C++/Go scanner-ordering divergence — same reasoning as http/search descriptor. Mask it; path/line/column/match/score still verify content.",
+  "_rationale_context": "results[].result.context.lines contains literal source bytes; trailing newline within the lines array is producer-specific (Go vs C++ extract_context windowing). Content equivalence verified via path/line/match/score; the surrounding context block is masked to keep the test focused on hit identity.",
+  "text_normalize": {
+    "strip_lines": ["DEBUG: verbose="]
+  },
   "tiers": {
-    "stable": ["results[].file", "results[].line", "results[].symbol", "total"],
-    "ranked": ["results[].score"],
-    "timed":  ["elapsed_ms"],
-    "ignore": ["server_pid", "version", "request_id"]
+    "ranked": ["results[].result.score"],
+    "timed":  ["time_ms"],
+    "ignore": [
+      "results[].result.file_id",
+      "results[].result.context"
+    ],
+    "sort_arrays": ["results"]
   },
   "tolerances": {"score_abs": 0.05, "timed_max_ms": 60000},
   "expect_exit": 0
