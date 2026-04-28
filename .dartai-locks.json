@@ -1,3 +1,17 @@
 {
-  "claims": {}
+  "claims": {
+    "bUa9zw7Q9ZiJ": {
+      "runner_instance_id": "beagle-ab-475579",
+      "runner_email": "andybrummer@standardbeagle.com",
+      "claimed_at": "2026-04-28T08:15:00Z",
+      "agent_id": "beagle-ab-475579",
+      "parent_loop_id": "gi2QSUHJ79si",
+      "purpose": "parity 4/9 — CLI symbols subcommand correctness (5 failures)",
+      "source_event": {
+        "loop_id": "gi2QSUHJ79si",
+        "task_id": "bUa9zw7Q9ZiJ",
+        "conversation_id": null
+      }
+    }
+  }
 }
