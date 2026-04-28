@@ -1,0 +1,29 @@
+{
+  "id": "index/lci-cpp-repo",
+  "mode": "index",
+  "corpus": "lci-cpp-repo",
+  "go_binary": "${LCI_GO}",
+  "cpp_binary": "${LCI_CPP}",
+  "invocation": {"args": [], "cwd": "${CORPUS}"},
+  "capture": ["stdout","exit"],
+  "parse": "json",
+  "tiers": {
+    "stable": [
+      "files[].path",
+      "files[].language",
+      "symbols[].name",
+      "symbols[].kind",
+      "symbols[].file",
+      "symbols[].line",
+      "refs[].symbol",
+      "refs[].file",
+      "refs[].line",
+      "trigram_count",
+      "file_count",
+      "symbol_count"
+    ],
+    "ignore": ["index_version","build_time","host","schema_version","build_duration_ms","memory_rss_mb","uptime_seconds","avg_search_time_ms","ready","root","search_count","index_size_bytes","summary","extractors","resolvers","dependencies"]
+  },
+  "tolerances": {"score_abs": 0.0, "timed_max_ms": 60000},
+  "expect_exit": 0
+}
