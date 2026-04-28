@@ -1,3 +1,17 @@
 {
-  "claims": {}
+  "claims": {
+    "r6IbUABIThml": {
+      "runner_instance_id": "beagle-ab-475579",
+      "runner_email": "andybrummer@standardbeagle.com",
+      "claimed_at": "2026-04-28T07:00:00Z",
+      "agent_id": "beagle-ab-475579",
+      "parent_loop_id": "gi2QSUHJ79si",
+      "purpose": "parity 3/9 — HTTP handlers empty/wrong payloads (5 failures)",
+      "source_event": {
+        "loop_id": "gi2QSUHJ79si",
+        "task_id": "r6IbUABIThml",
+        "conversation_id": null
+      }
+    }
+  }
 }
