@@ -4,6 +4,7 @@
 #include "runner/descriptor.h"
 #include "runner/modes/cli.h"
 #include "runner/modes/index.h"
+#include "runner/modes/http.h"
 #include "runner/modes/mcp.h"
 
 #include <CLI/CLI.hpp>
@@ -304,6 +305,102 @@ int run_index_descriptor(const Descriptor& d) {
     return 0;
 }
 
+int run_http_descriptor(const Descriptor& d) {
+    std::string corpus_path = resolve_corpus(d.corpus);
+    std::string go_bin  = substitute_binary(d.go_binary);
+    std::string cpp_bin = substitute_binary(d.cpp_binary);
+
+    if (go_bin.empty() || cpp_bin.empty()) {
+        std::cerr << "infra: LCI_GO or LCI_CPP not set\n";
+        return 2;
+    }
+
+    // Run sequentially: Go then C++. Both servers use the same socket path
+    // (derived from corpus_path via an identical hash in both binaries), so
+    // they must not run concurrently.
+    auto go_out  = run_http(go_bin,  d, corpus_path);
+    auto cpp_out = run_http(cpp_bin, d, corpus_path);
+
+    if (go_out.timed_out || cpp_out.timed_out) {
+        std::cerr << "infra: http server timeout\n";
+        return 2;
+    }
+
+    // For HTTP mode, expect_exit holds the expected HTTP status code.
+    if (d.expect_exit != go_out.exit_code || d.expect_exit != cpp_out.exit_code) {
+        std::string reason = "http-status mismatch: expected " +
+                             std::to_string(d.expect_exit) +
+                             " got go=" + std::to_string(go_out.exit_code) +
+                             " cpp=" + std::to_string(cpp_out.exit_code);
+        std::cerr << reason << "\n";
+        DiffResult dr;
+        dr.passed = false;
+        dr.reasons.push_back(reason);
+        fs::path dump_dir =
+            fs::path(env_or("PARITY_FAILURES", "build/parity-failures")) / d.id;
+        write_dump(dump_dir, d, go_out.stdout_data, cpp_out.stdout_data,
+                   nlohmann::json(nullptr), nlohmann::json(nullptr), dr);
+        std::cerr << "dump: " << dump_dir << "\n";
+        return 1;
+    }
+
+    DiffOptions opts;
+    opts.tiers        = d.tiers;
+    opts.score_abs    = d.tolerances.score_abs;
+    opts.timed_max_ms = d.tolerances.timed_max_ms;
+    opts.id_pattern   = d.id_pattern;
+
+    nlohmann::json go_canon, cpp_canon;
+    DiffResult dr;
+    if (d.parse == ParseStyle::Json) {
+        try {
+            auto go_j  = nlohmann::json::parse(go_out.stdout_data);
+            auto cpp_j = nlohmann::json::parse(cpp_out.stdout_data);
+            CanonicalizeOptions co;
+            co.ignore_paths  = d.tiers.ignore;
+            co.corpus_prefix = corpus_path;
+            co.preserve_number_paths = d.tiers.ranked;
+            co.preserve_number_paths.insert(co.preserve_number_paths.end(),
+                                            d.tiers.timed.begin(),
+                                            d.tiers.timed.end());
+            go_canon  = canonicalize_json(go_j,  co);
+            cpp_canon = canonicalize_json(cpp_j, co);
+            dr = compare(go_canon, cpp_canon, opts);
+        } catch (const std::exception& e) {
+            std::cerr << "infra: http json parse failed: " << e.what()
+                      << "\ngo: "  << go_out.stdout_data.substr(0, 200)
+                      << "\ncpp: " << cpp_out.stdout_data.substr(0, 200) << "\n";
+            return 2;
+        }
+    } else if (d.parse == ParseStyle::Text) {
+        std::string a = canonicalize_text(go_out.stdout_data);
+        std::string b = canonicalize_text(cpp_out.stdout_data);
+        dr.passed = (a == b);
+        if (!dr.passed) {
+            dr.reasons.push_back("text mismatch");
+            dr.unified_diff = a + "\n--- vs ---\n" + b;
+        }
+        go_canon  = a;
+        cpp_canon = b;
+    } else {
+        // ExitOnly — status code already checked above.
+        dr.passed = true;
+    }
+
+    if (!dr.passed) {
+        fs::path dump_dir =
+            fs::path(env_or("PARITY_FAILURES", "build/parity-failures")) / d.id;
+        write_dump(dump_dir, d, go_out.stdout_data, cpp_out.stdout_data,
+                   go_canon, cpp_canon, dr);
+        std::cerr << "FAIL " << d.id << " (" << dr.reasons.size() << " reasons)\n";
+        for (const auto& r : dr.reasons) std::cerr << "  - " << r << "\n";
+        std::cerr << "dump: " << dump_dir << "\n";
+        return 1;
+    }
+    std::cout << "PASS " << d.id << "\n";
+    return 0;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -326,9 +423,7 @@ int main(int argc, char** argv) {
     switch (d.mode) {
         case Mode::Cli:   return run_cli_descriptor(d);
         case Mode::Mcp:   return run_mcp_descriptor(d);
-        case Mode::Http:
-            std::cerr << "mode not yet implemented in this phase\n";
-            return 2;
+        case Mode::Http:  return run_http_descriptor(d);
         case Mode::Index: return run_index_descriptor(d);
     }
     return 2;
