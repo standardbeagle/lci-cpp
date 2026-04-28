@@ -27,7 +27,15 @@ CapturedOutput run_index_export(const std::string& binary_path,
     inv.cwd  = corpus_path;
     inv.env  = d.invocation.env;
 
-    CapturedOutput cap = run_cli(binary_path, inv, corpus_path);
+    // Index export over real-repo corpora can take >60s on the Go side:
+    // Go's `debug export` re-indexes from scratch with SymbolLinkerEngine
+    // (not the running server) and takes ~4m15s on the Go-self repo
+    // (~600 files). Lift the per-binary cap to 360s so lci-go-repo
+    // doesn't trip the default 60s timeout. The outer CTest TIMEOUT is
+    // set to 420s for index/* in tests/parity/CMakeLists.txt.
+    constexpr int kIndexExportTimeoutSeconds = 360;
+    CapturedOutput cap = run_cli(binary_path, inv, corpus_path,
+                                 kIndexExportTimeoutSeconds);
 
     if (cap.exit_code == 0) {
         std::ifstream f(tmp_path, std::ios::binary);

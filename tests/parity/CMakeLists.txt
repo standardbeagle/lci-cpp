@@ -89,6 +89,16 @@ foreach(D ${PARITY_DESCS})
         LABELS "parity"
         ENVIRONMENT "LCI_GO=${LCI_GO_PATH};LCI_CPP=$<TARGET_FILE:lci>;PARITY_CORPORA=${CMAKE_CURRENT_SOURCE_DIR}/corpora;PARITY_FAILURES=${CMAKE_BINARY_DIR}/parity-failures"
         TIMEOUT 120)
+    # Index mode runs both binaries' debug-export, which re-indexes the
+    # whole corpus from scratch. Go's debug-export on the Go-self repo
+    # takes ~4m15s (no server reuse, no parallelism). Give index/*
+    # descriptors a 420s outer (CTest) budget; the parity_runner already
+    # enforces a 360s per-binary cap internally (so go+cpp = up to ~720s
+    # worst case but well under the 420s wall thanks to C++ being instant).
+    if(D MATCHES ".*/descriptors/index/.*")
+        set_tests_properties(parity.${TID} PROPERTIES
+            TIMEOUT 420)
+    endif()
     # HTTP descriptors share /tmp/lci-server-<hash>.sock per corpus.
     # Serialize them to avoid spawn races. Probe descriptors and other
     # modes don't need this.

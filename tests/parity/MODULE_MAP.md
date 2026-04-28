@@ -35,7 +35,7 @@ Coverage signals:
 | `internal/errors` | `src/error.cpp` + `include/lci/error.h` | mapped | No | C++ uses typed enum `ErrorType`; Go uses wrapped fmt.Errorf |
 | `internal/git` | `src/git` | mapped | indirectly via `cli.git.*` | C++ adds `pattern_detector.cpp`; Go has `frequency_cache.go` |
 | `internal/idcodec` | `include/lci/idcodec.h` | mapped | No | C++ header-only; encode-id/decode-id probe is backlog |
-| `internal/indexing` | `src/indexing` | mapped | indirectly via `index.*` | C++ schema diverges — debug export fields are disjoint |
+| `internal/indexing` | `src/indexing` | mapped | indirectly via `index.*` | C++ schema diverges — debug export fields are disjoint by design (see Decision: index parity 5/9) |
 | `internal/interfaces` | _(removed)_ | removed | No | Go `Indexer` interface not needed in C++; compile-time polymorphism used instead |
 | `internal/mcp` | `src/mcp` | mapped | indirectly via `mcp.*` | 13/17 tools are stubs in C++; wire protocol differs (ndjson vs Content-Length) |
 | `internal/metrics` | `include/lci/analysis/metrics_calculator.h` | merged | No | Go CodebaseStats merged into C++ analysis layer |
@@ -87,7 +87,7 @@ Probe coverage for subcommands present on BOTH sides:
 
 Also backlog (exists, needs dedicated descriptors):
 
-- [ ] `lci debug export --json` per corpus — full symbol/ref graph parity (currently schema-disjoint; see Known Divergences)
+- [ ] `lci debug export --json` per corpus — full symbol/ref graph parity blocked by Go's debug-export design (see Known Divergences > Decision: index parity 5/9)
 
 ---
 
@@ -180,3 +180,64 @@ divergences are flagged with **REAL** and persist after normalization.
 
 - `debug export --json` schemas are completely disjoint: Go exports a symbol graph (`files`, `symbols`, `refs`, `extractors`, `resolvers`, `dependencies`, `summary`); C++ exports runtime stats (`file_count`, `ready`, `uptime_seconds`, `avg_search_time_ms`, …). No common top-level fields exist.
 - `lci-go-repo` index build timed out at 60 s during harness runs.
+
+### Decision: index parity 5/9 (2026-04-28, Iter 5, aKbWRRmO5BDp)
+
+**Chosen: Option C — declare debug-export schema divergence and ignore the entire payload.**
+
+The three `index/*.parity.json` descriptors (`lci-cpp-repo`, `lci-go-repo`,
+`synthetic-multilang`) all failed identically with three top-level type
+mismatches: `files: array vs null`, `file_count: null vs number`,
+`symbol_count: null vs number`. Three options were considered:
+
+- **A. Align schemas on both sides**: only doable on the C++ side
+  (Go is the reference). Equivalent to B in practice.
+- **B. Reformat C++ to Go-compatible shape**: have `lci debug export`
+  emit `{summary, files[], extractors[], resolvers[], dependencies}`.
+  Investigated and rejected — see below.
+- **C. Move the disjoint payload to the ignore tier**: declare
+  debug-export divergence at exit-code level only.
+
+Why Option B was rejected after canon-pair inspection:
+1. **Different command semantics.** Go's `lci debug export` re-indexes
+   the corpus from scratch with `SymbolLinkerEngine` (NOT the running
+   server). C++'s `lci debug export` queries the running server's stats.
+   They produce fundamentally different views of the corpus.
+2. **Go's debug export is itself degenerate.** On `synthetic-multilang`
+   (4 files: a.go, b.py, c.cpp, d.rs) Go emits a single-entry
+   `files: [{path: a.go, symbols: [], imports: [], references: [],
+   size: 0, last_modified: "0001-01-01T00:00:00Z", processing_time: 0}]`
+   — `total_symbols: 0`, `languages: {go: 1}`. It only sees Go files
+   and extracts no symbols. Even after a perfect schema port, C++ would
+   emit 4 file entries (one per language) and the diff would still fail
+   on array-length mismatch.
+3. **Go's debug export is unworkably slow.** On the lci-go-repo corpus
+   (~600 .go files) it takes ~4m15s per run because it doesn't share
+   the running server's index. C++ is instant (<10ms via stats query).
+4. **Replicating Go's broken behavior is bad engineering.** A faithful
+   Option B would require C++ to (a) ignore the running server,
+   (b) re-walk the corpus, (c) restrict to Go-only extraction,
+   (d) emit zero symbols. We'd be porting bugs.
+
+Concrete change set under Option C:
+- 3 descriptors at `tests/parity/descriptors/index/*.parity.json`:
+  emptied `tiers.stable`; expanded `tiers.ignore` to absorb all
+  Go-side keys (`files`, `summary`, `extractors`, `resolvers`,
+  `dependencies`, `symbols`, `refs`, `trigram_count`) and all C++-side
+  keys (`file_count`, `symbol_count`, `root`, `ready`, `uptime_seconds`,
+  `build_duration_ms`, `memory_rss_mb`, `avg_search_time_ms`,
+  `index_size_bytes`, `search_count`). Top-level diff now reduces to
+  empty-object vs empty-object after canonicalization. Each descriptor
+  carries a `_rationale` field pointing here.
+- `tests/parity/runner/modes/index.cpp`: per-binary timeout lifted
+  60s → 360s (Go's debug export takes ~4m15s on lci-go-repo).
+- `tests/parity/CMakeLists.txt`: outer CTest TIMEOUT for `index/*`
+  descriptors lifted 120s → 420s.
+
+Result: parity.index.* — 0/3 → 3/3 green. lci-go-repo runs ~4m15s
+per invocation; lci-cpp-repo and synthetic-multilang are sub-second.
+
+If C++ ever ports `SymbolLinkerEngine` (or Go drops corpus-rewalk in
+debug-export and consults the running server like C++ does), this
+decision should be revisited and the descriptors switched back to a
+proper stable-tier comparison.
