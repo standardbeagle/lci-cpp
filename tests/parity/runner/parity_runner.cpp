@@ -3,6 +3,7 @@
 #include "diff_engine/diff.h"
 #include "runner/descriptor.h"
 #include "runner/modes/cli.h"
+#include "runner/modes/index.h"
 #include "runner/modes/mcp.h"
 
 #include <CLI/CLI.hpp>
@@ -228,6 +229,81 @@ int run_mcp_descriptor(const Descriptor& d) {
     return 0;
 }
 
+int run_index_descriptor(const Descriptor& d) {
+    std::string corpus_path = resolve_corpus(d.corpus);
+    std::string go_bin  = substitute_binary(d.go_binary);
+    std::string cpp_bin = substitute_binary(d.cpp_binary);
+
+    if (go_bin.empty() || cpp_bin.empty()) {
+        std::cerr << "infra: LCI_GO or LCI_CPP not set\n";
+        return 2;
+    }
+
+    auto go_out  = run_index_export(go_bin,  d, corpus_path);
+    auto cpp_out = run_index_export(cpp_bin, d, corpus_path);
+
+    if (go_out.timed_out || cpp_out.timed_out) {
+        std::cerr << "infra: index export timeout\n";
+        return 2;
+    }
+    if (d.expect_exit != go_out.exit_code || d.expect_exit != cpp_out.exit_code) {
+        std::string reason = "exit-code mismatch: expected " + std::to_string(d.expect_exit)
+                           + " got go=" + std::to_string(go_out.exit_code)
+                           + " cpp=" + std::to_string(cpp_out.exit_code);
+        std::cerr << reason << "\n";
+        DiffResult dr;
+        dr.passed = false;
+        dr.reasons.push_back(reason);
+        fs::path dump_dir =
+            fs::path(env_or("PARITY_FAILURES", "build/parity-failures")) / d.id;
+        write_dump(dump_dir, d, go_out.stdout_data, cpp_out.stdout_data,
+                   nlohmann::json(nullptr), nlohmann::json(nullptr), dr);
+        std::cerr << "dump: " << dump_dir << "\n";
+        return 1;
+    }
+
+    nlohmann::json go_canon, cpp_canon;
+    DiffOptions opts;
+    opts.tiers        = d.tiers;
+    opts.score_abs    = d.tolerances.score_abs;
+    opts.timed_max_ms = d.tolerances.timed_max_ms;
+    opts.id_pattern   = d.id_pattern;
+
+    DiffResult dr;
+    try {
+        auto go_j  = nlohmann::json::parse(go_out.stdout_data);
+        auto cpp_j = nlohmann::json::parse(cpp_out.stdout_data);
+        CanonicalizeOptions co;
+        co.ignore_paths  = d.tiers.ignore;
+        co.corpus_prefix = corpus_path;
+        co.preserve_number_paths = d.tiers.ranked;
+        co.preserve_number_paths.insert(co.preserve_number_paths.end(),
+                                        d.tiers.timed.begin(),
+                                        d.tiers.timed.end());
+        go_canon  = canonicalize_json(go_j,  co);
+        cpp_canon = canonicalize_json(cpp_j, co);
+        dr = compare(go_canon, cpp_canon, opts);
+    } catch (const std::exception& e) {
+        std::cerr << "infra: index export json parse failed: " << e.what()
+                  << "\ngo: "  << go_out.stdout_data.substr(0, 200)
+                  << "\ncpp: " << cpp_out.stdout_data.substr(0, 200) << "\n";
+        return 2;
+    }
+
+    if (!dr.passed) {
+        fs::path dump_dir =
+            fs::path(env_or("PARITY_FAILURES", "build/parity-failures")) / d.id;
+        write_dump(dump_dir, d, go_out.stdout_data, cpp_out.stdout_data,
+                   go_canon, cpp_canon, dr);
+        std::cerr << "FAIL " << d.id << " (" << dr.reasons.size() << " reasons)\n";
+        for (const auto& r : dr.reasons) std::cerr << "  - " << r << "\n";
+        std::cerr << "dump: " << dump_dir << "\n";
+        return 1;
+    }
+    std::cout << "PASS " << d.id << "\n";
+    return 0;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -251,9 +327,9 @@ int main(int argc, char** argv) {
         case Mode::Cli:   return run_cli_descriptor(d);
         case Mode::Mcp:   return run_mcp_descriptor(d);
         case Mode::Http:
-        case Mode::Index:
             std::cerr << "mode not yet implemented in this phase\n";
             return 2;
+        case Mode::Index: return run_index_descriptor(d);
     }
     return 2;
 }
