@@ -37,6 +37,29 @@ void load_tiers(const nlohmann::json& j, TierMap& m) {
     if (j.contains("ignore")) m.ignore = str_array(j.at("ignore"));
 }
 
+void load_text_normalize(const nlohmann::json& j, DescriptorTextNormalize& tn) {
+    if (!j.is_object()) return;
+    tn.explicitly_set = true;
+    if (j.contains("scrub_timing"))        tn.scrub_timing        = j.at("scrub_timing").get<bool>();
+    if (j.contains("rewrite_corpus_path")) tn.rewrite_corpus_path = j.at("rewrite_corpus_path").get<bool>();
+    if (j.contains("strip_emoji_prefix"))  tn.strip_emoji_prefix  = j.at("strip_emoji_prefix").get<bool>();
+    if (j.contains("strip_lines"))         tn.strip_lines         = str_array(j.at("strip_lines"));
+    if (j.contains("replace")) {
+        const auto& arr = j.at("replace");
+        if (!arr.is_array()) {
+            throw std::runtime_error("text_normalize.replace must be array");
+        }
+        for (const auto& e : arr) {
+            if (!e.is_object() || !e.contains("pattern") || !e.contains("with")) {
+                throw std::runtime_error(
+                    "text_normalize.replace entries must be {pattern, with}");
+            }
+            tn.replace.emplace_back(e.at("pattern").get<std::string>(),
+                                    e.at("with").get<std::string>());
+        }
+    }
+}
+
 void require(const nlohmann::json& j, const std::string& key) {
     if (!j.contains(key)) {
         throw std::runtime_error("descriptor missing required field: " + key);
@@ -85,6 +108,10 @@ Descriptor parse_descriptor(const std::string& json_text) {
     }
     d.expect_exit = j.value("expect_exit", 0);
     d.id_pattern  = j.value("id_pattern",  std::string());
+
+    if (j.contains("text_normalize")) {
+        load_text_normalize(j.at("text_normalize"), d.text_normalize);
+    }
     return d;
 }
 

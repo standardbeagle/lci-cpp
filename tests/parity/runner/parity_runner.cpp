@@ -58,6 +58,24 @@ McpFraming framing_for_binary(const std::string& bin) {
     return McpFraming::ContentLength;
 }
 
+// Build text-mode canonicalize options from a descriptor, threading the
+// runtime corpus path in for path rewriting.  When the descriptor omits
+// a text_normalize block we still apply the safe defaults — trailing-
+// whitespace trim, timing scrub, and corpus-path rewrite — because these
+// are universally correct for text-mode parity comparison.
+TextCanonicalizeOptions text_opts_for(const Descriptor& d,
+                                      const std::string& corpus_path) {
+    TextCanonicalizeOptions o;
+    o.scrub_timing       = d.text_normalize.scrub_timing;
+    o.strip_emoji_prefix = d.text_normalize.strip_emoji_prefix;
+    o.strip_lines        = d.text_normalize.strip_lines;
+    o.replace            = d.text_normalize.replace;
+    if (d.text_normalize.rewrite_corpus_path) {
+        o.corpus_prefix = corpus_path;
+    }
+    return o;
+}
+
 void write_dump(const fs::path& dump_dir,
                 const Descriptor& d,
                 const std::string& go_raw,
@@ -142,8 +160,9 @@ int run_cli_descriptor(const Descriptor& d) {
             return 2;
         }
     } else if (d.parse == ParseStyle::Text) {
-        std::string a = canonicalize_text(go_out.stdout_data);
-        std::string b = canonicalize_text(cpp_out.stdout_data);
+        auto tco = text_opts_for(d, corpus_path);
+        std::string a = canonicalize_text(go_out.stdout_data,  tco);
+        std::string b = canonicalize_text(cpp_out.stdout_data, tco);
         dr.passed = (a == b);
         if (!dr.passed) {
             dr.reasons.push_back("text mismatch");
@@ -373,8 +392,9 @@ int run_http_descriptor(const Descriptor& d) {
             return 2;
         }
     } else if (d.parse == ParseStyle::Text) {
-        std::string a = canonicalize_text(go_out.stdout_data);
-        std::string b = canonicalize_text(cpp_out.stdout_data);
+        auto tco = text_opts_for(d, corpus_path);
+        std::string a = canonicalize_text(go_out.stdout_data,  tco);
+        std::string b = canonicalize_text(cpp_out.stdout_data, tco);
         dr.passed = (a == b);
         if (!dr.passed) {
             dr.reasons.push_back("text mismatch");

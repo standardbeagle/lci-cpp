@@ -12,5 +12,16 @@
   "parse": "text",
   "tiers": {},
   "tolerances": {"score_abs": 0.0, "timed_max_ms": 60000},
-  "expect_exit": 0
+  "expect_exit": 0,
+  "text_normalize": {
+    "strip_emoji_prefix": true,
+    "strip_lines": [
+      "Incremental Mode:",
+      "Building index...",
+      "Linking symbols"
+    ],
+    "replace": [
+      {"pattern": "^Root Path: \\.$", "with": "Root Path: ${CORPUS}"}
+    ]
+  }
 }

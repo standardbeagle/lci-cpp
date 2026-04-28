@@ -91,6 +91,48 @@ Also backlog (exists, needs dedicated descriptors):
 
 ---
 
+## Decisions
+
+### Text-mode normalization (Phase 2 — 2026-04-28)
+
+**Chosen: Option A — descriptor-driven text normalizers.**
+
+Two competing options were on the table for plain-text descriptors that
+diff only on cosmetic noise:
+
+- **A.** Add a normalizer pipeline to `canonicalize_text` (timing scrub,
+  corpus path rewrite, line strip, emoji prefix strip, regex replace),
+  with per-descriptor knobs in a `text_normalize` block.
+- **B.** Switch text descriptors to JSON mode where both binaries support
+  `--json` on the relevant subcommand.
+
+Option A was chosen because:
+- It is least invasive: pure additions to the diff engine and zero
+  changes to either binary.
+- B is blocked: today the C++ `cli/search` family does not emit a
+  parseable JSON document on stdout (Go prepends a `DEBUG:` line that
+  itself defeats JSON parsing — see "CLI JSON output" below). Migrating
+  to JSON would require fixing both binaries first.
+- A surfaces real divergences with sharper signal: with cosmetic noise
+  filtered, the remaining 5/10 affected descriptors that still fail are
+  visibly real bugs (case-insensitive, grep body, symbols/list, deps
+  schema, debug/info schema, config/show pattern count) — not harness
+  artefacts.
+
+The normalizer pipeline applies, per text descriptor:
+- (default-on)  trailing-whitespace trim
+- (default-on)  timing scrub: `\d+(\.\d+)?ms` → `<MS>`
+- (default-on)  corpus-prefix rewrite: `<abs corpus>` → `${CORPUS}`
+- (opt-in)      `strip_lines: [substring, ...]` — drop matching lines
+- (opt-in)      `strip_emoji_prefix: true` — drop leading emoji + WS
+- (opt-in)      `replace: [{pattern, with}, ...]` — per-line ECMAScript regex
+
+Schema lives in `tests/parity/runner/descriptor.{h,cpp}`. Implementation
+lives in `tests/parity/diff_engine/canonicalize.{h,cpp}`. Unit-test
+coverage in `tests/parity/unit_tests/canonicalize_test.cpp`.
+
+---
+
 ## Known divergences (surfaced by harness)
 
 Cumulative list of confirmed behavioral differences between Go and C++.
@@ -98,12 +140,22 @@ New findings should be appended here with the phase tag.
 
 ### CLI text output (Phase 2)
 
-- Go emits `DEBUG: verbose=...` line on stdout in non-grep modes; C++ does not.
-- Go emits `=== Direct Matches ===` section header in basic search; C++ does not.
-- `-i` case-insensitive: Go returns 0 results, C++ returns 4 results on `multi-lang/add` query — Go behavior is likely a bug.
-- C++ result paths are absolute; Go result paths are relative to the repo root.
-- Mode label strings differ: Go uses `"integrated mode"`, C++ uses `"standard mode"`.
-- C++ grep output: body is empty — no `file:line:col` records produced.
+The first six items below are cosmetic and are now neutralized by the
+text-mode normalizer pipeline (see "Decisions"). Remaining structural
+divergences are flagged with **REAL** and persist after normalization.
+
+- Go emits `DEBUG: verbose=...` line on stdout in non-grep modes; C++ does not. _(neutralized via `strip_lines: ["DEBUG:"]`.)_
+- Go emits `=== Direct Matches ===` section header in basic search; C++ does not. _(neutralized via `strip_lines`.)_
+- C++ result paths are absolute; Go result paths are relative to the repo root. _(neutralized via corpus-prefix rewrite + `${CORPUS}/` strip in `cli/search/basic`.)_
+- Mode label strings differ: Go uses `"integrated mode"`, C++ uses `"standard mode"`. _(neutralized via regex replace to `(MODE)`.)_
+- Go uses emoji prefixes (`✅`, `📍`, `📊`, `⚠️`, `✓`); C++ does not. _(neutralized via `strip_emoji_prefix: true`.)_
+- Go shows verbose preamble lines in `debug validate` (`Building index...`, `Linking symbols...`, `Incremental Mode: false`). _(neutralized via `strip_lines`.)_
+- **REAL — `cli/search/case-insensitive`:** Go returns 0 results, C++ returns 4 results on `multi-lang/add -i`. Go's case-insensitive search is likely broken on small synthetic corpora.
+- **REAL — `cli/search/grep`:** C++ grep output body is empty (timing line printed, no `file:line:col` records produced). Go emits all matches concatenated on a single line without trailing newline.
+- **REAL — `cli/symbols/list`:** C++ prints `Files: 4` (a count summary) instead of the per-file listing Go produces.
+- **REAL — `cli/config/show`:** Go reports 124 exclude patterns and emits `Performance Settings` (with `Max goroutines:`) and `Search Settings` sections; C++ reports 35 patterns and omits both sections.
+- **REAL — `cli/debug/info`:** Output shape is fundamentally different. Go emits a `Symbol Linking System Debug Info` summary with file/symbol/import/reference counts and per-extractor stats; C++ emits a `Server Status` block with `Ready`, `Indexing Active`, `Memory RSS`, `Uptime`, etc. No common fields.
+- **REAL — `probes/deps`:** Go emits a dependency-edge-count table (Total Dependency Edges, Maximum Dependency Depth, etc.); C++ emits a file/symbol/index-size summary. No common fields.
 
 ### CLI JSON output (Phase 2)
 

@@ -3,7 +3,9 @@
 #include <nlohmann/json.hpp>
 
 using lci::parity::canonicalize_json;
+using lci::parity::canonicalize_text;
 using lci::parity::CanonicalizeOptions;
+using lci::parity::TextCanonicalizeOptions;
 using nlohmann::json;
 
 TEST(CanonicalizeJson, SortsObjectKeysRecursively) {
@@ -56,6 +58,140 @@ TEST(CanonicalizeJson, RewritesAbsoluteCorpusPathsToToken) {
 }
 
 TEST(CanonicalizeText, TrimsTrailingWhitespacePerLine) {
-    using lci::parity::canonicalize_text;
-    EXPECT_EQ(canonicalize_text("a   \nb\t \nc"), "a\nb\nc");
+    EXPECT_EQ(canonicalize_text("a   \nb\t \nc", {}), "a\nb\nc");
+}
+
+// -------- Text normalization tests --------
+
+TEST(CanonicalizeText, ScrubsTimingMillisecondsByDefault) {
+    TextCanonicalizeOptions opts;
+    EXPECT_EQ(canonicalize_text("Found 2 results in 1.0ms (mode)", opts),
+              "Found 2 results in <MS> (mode)");
+    EXPECT_EQ(canonicalize_text("Found 2 results in 2.4ms\n", opts),
+              "Found 2 results in <MS>\n");
+    EXPECT_EQ(canonicalize_text("elapsed: 134ms done", opts),
+              "elapsed: <MS> done");
+    // Multiple occurrences on one line both replaced.
+    EXPECT_EQ(canonicalize_text("a 1.0ms b 2.5ms c", opts),
+              "a <MS> b <MS> c");
+}
+
+TEST(CanonicalizeText, TimingScrubCanBeDisabled) {
+    TextCanonicalizeOptions opts;
+    opts.scrub_timing = false;
+    EXPECT_EQ(canonicalize_text("Found 2 results in 1.0ms", opts),
+              "Found 2 results in 1.0ms");
+}
+
+TEST(CanonicalizeText, RewritesCorpusPrefixToToken) {
+    TextCanonicalizeOptions opts;
+    opts.corpus_prefix = "/home/u/corpus";
+    EXPECT_EQ(canonicalize_text("Root Path: /home/u/corpus\n", opts),
+              "Root Path: ${CORPUS}\n");
+    EXPECT_EQ(canonicalize_text("/home/u/corpus/a.go:1\n", opts),
+              "${CORPUS}/a.go:1\n");
+}
+
+TEST(CanonicalizeText, EmptyCorpusPrefixIsIgnored) {
+    TextCanonicalizeOptions opts;
+    opts.corpus_prefix = "";
+    EXPECT_EQ(canonicalize_text("/home/u/corpus/a.go", opts),
+              "/home/u/corpus/a.go");
+}
+
+TEST(CanonicalizeText, StripsLinesContainingSubstring) {
+    TextCanonicalizeOptions opts;
+    opts.strip_lines = {"DEBUG:", "Building index...", "Linking symbols"};
+    std::string in =
+        "DEBUG: verbose=false, compact=false\n"
+        "Building index...\n"
+        "Linking symbols and graph...\n"
+        "Found 2 results in 1.0ms (mode)\n"
+        "ok\n";
+    std::string expected =
+        "Found 2 results in <MS> (mode)\n"
+        "ok\n";
+    EXPECT_EQ(canonicalize_text(in, opts), expected);
+}
+
+TEST(CanonicalizeText, StripsLinesAlsoWorksOnFinalLineWithoutNewline) {
+    TextCanonicalizeOptions opts;
+    opts.strip_lines = {"DEBUG:"};
+    EXPECT_EQ(canonicalize_text("DEBUG: tail", opts), "");
+    EXPECT_EQ(canonicalize_text("keep\nDEBUG: tail", opts), "keep\n");
+}
+
+TEST(CanonicalizeText, StripsLeadingEmojiPrefix) {
+    TextCanonicalizeOptions opts;
+    opts.strip_emoji_prefix = true;
+    // Common Go emoji prefixes followed by a space.
+    EXPECT_EQ(canonicalize_text("\xE2\x9C\x85 Configuration file is valid\n", opts),
+              "Configuration file is valid\n");
+    EXPECT_EQ(canonicalize_text("\xF0\x9F\x93\x8D Config source: .lci.kdl\n", opts),
+              "Config source: .lci.kdl\n");
+    EXPECT_EQ(canonicalize_text("\xF0\x9F\x93\x8A Settings: 10000\n", opts),
+              "Settings: 10000\n");
+    EXPECT_EQ(canonicalize_text("\xE2\x9A\xA0\xEF\xB8\x8F  Warnings:\n", opts),
+              "Warnings:\n");
+    EXPECT_EQ(canonicalize_text("\xE2\x9C\x93 All checks passed\n", opts),
+              "All checks passed\n");
+}
+
+TEST(CanonicalizeText, EmojiPrefixDisabledByDefault) {
+    TextCanonicalizeOptions opts;  // default: strip_emoji_prefix=false
+    EXPECT_EQ(canonicalize_text("\xE2\x9C\x85 ok\n", opts),
+              "\xE2\x9C\x85 ok\n");
+}
+
+TEST(CanonicalizeText, AppliesRegexReplacements) {
+    TextCanonicalizeOptions opts;
+    opts.replace.push_back({R"(\(integrated mode[^)]*\))", "(MODE)"});
+    opts.replace.push_back({R"(\(standard mode\))", "(MODE)"});
+    EXPECT_EQ(canonicalize_text("Found 2 in 1ms (integrated mode - foo)\n", opts),
+              "Found 2 in <MS> (MODE)\n");
+    EXPECT_EQ(canonicalize_text("Found 2 in 2ms (standard mode)\n", opts),
+              "Found 2 in <MS> (MODE)\n");
+}
+
+TEST(CanonicalizeText, CombinesAllNormalizers) {
+    TextCanonicalizeOptions opts;
+    opts.corpus_prefix = "/abs/corpus";
+    opts.strip_lines = {"DEBUG:", "=== Direct Matches ==="};
+    opts.replace.push_back({R"(\(integrated mode[^)]*\))", "(MODE)"});
+    opts.replace.push_back({R"(\(standard mode\))", "(MODE)"});
+
+    std::string go_in =
+        "DEBUG: verbose=false\n"
+        "Found 2 results in 1.0ms (integrated mode - no assembly matches)\n"
+        "\n"
+        "=== Direct Matches ===\n"
+        "d.rs:1\n"
+        "\n"
+        "b.py:1\n";
+    std::string cpp_in =
+        "Found 2 results in 2.4ms (standard mode)\n"
+        "\n"
+        "/abs/corpus/d.rs:1\n"
+        "\n"
+        "/abs/corpus/b.py:1\n";
+
+    auto go_canon  = canonicalize_text(go_in, opts);
+    auto cpp_canon = canonicalize_text(cpp_in, opts);
+    // After normalization the file paths in the cpp side rewrite to ${CORPUS}/d.rs.
+    // Go side has bare basenames; this test just confirms each side normalizes
+    // correctly — convergence to identical strings is the descriptor's job
+    // when paths are also bare on the Go side. Here we accept divergence in
+    // that one dimension and verify the other normalizers fired.
+    EXPECT_EQ(go_canon,
+              "Found 2 results in <MS> (MODE)\n"
+              "\n"
+              "d.rs:1\n"
+              "\n"
+              "b.py:1\n");
+    EXPECT_EQ(cpp_canon,
+              "Found 2 results in <MS> (MODE)\n"
+              "\n"
+              "${CORPUS}/d.rs:1\n"
+              "\n"
+              "${CORPUS}/b.py:1\n");
 }

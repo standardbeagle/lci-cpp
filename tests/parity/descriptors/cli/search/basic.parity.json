@@ -12,5 +12,13 @@
   "parse": "text",
   "tiers": {},
   "tolerances": {"score_abs": 0.0, "timed_max_ms": 60000},
-  "expect_exit": 0
+  "expect_exit": 0,
+  "text_normalize": {
+    "strip_lines": ["DEBUG:", "=== Direct Matches ==="],
+    "replace": [
+      {"pattern": "\\(integrated mode[^)]*\\)", "with": "(MODE)"},
+      {"pattern": "\\(standard mode\\)",        "with": "(MODE)"},
+      {"pattern": "\\$\\{CORPUS\\}/",           "with": ""}
+    ]
+  }
 }

@@ -1,8 +1,10 @@
 #pragma once
 
+#include "diff_engine/canonicalize.h"
 #include "diff_engine/diff.h"
 #include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace lci::parity {
@@ -15,6 +17,19 @@ struct Invocation {
     std::string stdin_data;
     std::map<std::string, std::string> env;
     std::string cwd;        // may contain "${CORPUS}"
+};
+
+// Descriptor-level text-mode knobs.  These mirror the runtime
+// TextCanonicalizeOptions but with raw JSON-friendly types: when the
+// runner constructs a TextCanonicalizeOptions for a comparison it copies
+// these and fills in the corpus_prefix from the runtime corpus path.
+struct DescriptorTextNormalize {
+    bool                                                explicitly_set = false;
+    bool                                                scrub_timing       = true;
+    bool                                                rewrite_corpus_path = true;
+    bool                                                strip_emoji_prefix = false;
+    std::vector<std::string>                            strip_lines;
+    std::vector<std::pair<std::string, std::string>>    replace;
 };
 
 struct Descriptor {
@@ -33,6 +48,7 @@ struct Descriptor {
     } tolerances;
     int         expect_exit = 0;
     std::string id_pattern;  // for ids tier (optional)
+    DescriptorTextNormalize text_normalize;
 };
 
 // Throws std::runtime_error on schema or type errors. The input is the raw
