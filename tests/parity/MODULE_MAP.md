@@ -63,13 +63,27 @@ These seven algorithmic probes are defined in the design spec
 (`docs/superpowers/specs/2026-04-27-lci-cpp-vs-go-parity-verification-design.md`, §Algorithmic targets).
 Each probe = one `mode: cli` descriptor driving a `lci debug …` sub-command.
 
-- [ ] `lci debug trigrams <input>` — sorted trigram list; same input must produce same set or search recall diverges
-- [ ] `lci debug score <query> <doc-id>` — BM25/IDF/weight breakdown; required for ranking parity
-- [ ] `lci debug walk <dir>` — included file paths; validates include/exclude rule alignment
-- [ ] `lci debug link <file>` — name→def edges; validates symbollinker output
-- [ ] `lci debug annotate <symbol>` — semantic annotation labels; validates `mcp.semantic_annotations` parity
-- [ ] `lci debug regex-analyze <pattern>` — literal/prefix/anchor flags; validates search planner pre-filter
-- [ ] `lci debug encode-id <symbol>` / `decode-id <id>` — cross-binary ID stability (if exposed)
+Surveyed 2026-04-27: neither binary exposes any of the seven as a `debug` subcommand or
+as a top-level subcommand.  Both binaries offer exactly five `debug` subcommands:
+`info`, `validate`, `deps`, `export`, `graph`.
+
+- [x] `lci debug trigrams <input>` — go: NO, cpp: NO — neither implements; needs both
+- [x] `lci debug score <query> <doc-id>` — go: NO, cpp: NO — neither implements; needs both
+- [x] `lci debug walk <dir>` — go: NO, cpp: NO — neither implements; needs both
+- [x] `lci debug link <file>` — go: NO, cpp: NO — neither implements; needs both
+- [x] `lci debug annotate <symbol>` — go: NO, cpp: NO — neither implements; needs both
+- [x] `lci debug regex-analyze <pattern>` — go: NO, cpp: NO — neither implements; needs both
+- [x] `lci debug encode-id <symbol>` / `decode-id <id>` — go: NO, cpp: NO — neither implements; needs both
+
+Probe coverage for subcommands present on BOTH sides:
+
+| subcommand | go | cpp | descriptor | parse | notes |
+|---|---|---|---|---|---|
+| `debug info` | YES | YES | `cli/debug/info.parity.json` | text | structural divergence (phase 2) |
+| `debug validate` | YES | YES | `cli/debug/validate.parity.json` | text | structural divergence (phase 2) |
+| `debug deps` | YES | YES | `probes/deps.parity.json` | text | Go=edge-count table; C++=file/symbol/index stats — will diff |
+| `debug export` | YES | YES | `probes/export.parity.json` | exit-only | writes to file; stdout is status text; JSON schemas are disjoint |
+| `debug graph` | YES | YES | `probes/graph.parity.json` | exit-only | writes to file; stdout is status text; DOT structure differs |
 
 Also backlog (exists, needs dedicated descriptors):
 
@@ -100,6 +114,9 @@ New findings should be appended here with the phase tag.
 
 - `config show`: Go reports 124 exclude patterns; C++ reports 35. Go also emits `Performance Settings` and `Search Settings` sections that C++ omits entirely.
 - `debug info` and `debug validate`: structural divergence; field names and nesting do not align.
+- `debug deps`: Go emits a dependency-edge-count table (Total Dependency Edges, Maximum Dependency Depth, etc.); C++ emits a file/symbol/index-size summary. No common fields. (`probes/deps` fails text comparison — confirmed divergence.)
+- `debug export`: writes JSON to file; Go schema has top-level keys `summary`, `files`, `symbols`, `refs`, `extractors`, `resolvers`, `dependencies`; C++ schema has `avg_search_time_ms`, `file_count`, `ready`, `uptime_seconds`, etc. Completely disjoint. (`probes/export` is exit-only; JSON content comparison is not possible until C++ adopts Go schema.)
+- `debug graph`: writes DOT to file; Go produces a node-per-file graph with `rankdir=TB`; C++ produces a summary placeholder node with `rankdir=LR` and no file-level nodes. (`probes/graph` is exit-only.)
 
 ### MCP (Phase 3)
 

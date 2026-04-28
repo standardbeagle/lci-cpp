@@ -1,0 +1,16 @@
+{
+  "id": "probes/export",
+  "mode": "cli",
+  "corpus": "multi-lang",
+  "go_binary": "${LCI_GO}",
+  "cpp_binary": "${LCI_CPP}",
+  "invocation": {
+    "args": ["debug", "export", "--output", "/tmp/lci-parity-debug-export.json"],
+    "cwd": "${CORPUS}"
+  },
+  "capture": ["stdout", "exit"],
+  "parse": "exit-only",
+  "tiers": {},
+  "tolerances": {"score_abs": 0.0, "timed_max_ms": 60000},
+  "expect_exit": 0
+}
