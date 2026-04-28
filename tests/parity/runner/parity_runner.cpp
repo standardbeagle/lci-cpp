@@ -81,9 +81,18 @@ int run_cli_descriptor(const Descriptor& d) {
         return 2;
     }
     if (d.expect_exit != go_out.exit_code || d.expect_exit != cpp_out.exit_code) {
-        std::cerr << "exit-code mismatch: expected " << d.expect_exit
-                  << " got go=" << go_out.exit_code
-                  << " cpp=" << cpp_out.exit_code << "\n";
+        std::string reason = "exit-code mismatch: expected " + std::to_string(d.expect_exit)
+                           + " got go=" + std::to_string(go_out.exit_code)
+                           + " cpp=" + std::to_string(cpp_out.exit_code);
+        std::cerr << reason << "\n";
+        DiffResult dr;
+        dr.passed = false;
+        dr.reasons.push_back(reason);
+        fs::path dump_dir =
+            fs::path(env_or("PARITY_FAILURES", "build/parity-failures")) / d.id;
+        write_dump(dump_dir, d, go_out.stdout_data, cpp_out.stdout_data,
+                   nlohmann::json(nullptr), nlohmann::json(nullptr), dr);
+        std::cerr << "dump: " << dump_dir << "\n";
         return 1;
     }
 
