@@ -3,6 +3,7 @@
 #include "diff_engine/diff.h"
 #include "runner/descriptor.h"
 #include "runner/modes/cli.h"
+#include "runner/modes/mcp.h"
 
 #include <CLI/CLI.hpp>
 #include <nlohmann/json.hpp>
@@ -151,6 +152,66 @@ int run_cli_descriptor(const Descriptor& d) {
     return 0;
 }
 
+int run_mcp_descriptor(const Descriptor& d) {
+    std::string corpus_path = resolve_corpus(d.corpus);
+    std::string go_bin  = substitute_binary(d.go_binary);
+    std::string cpp_bin = substitute_binary(d.cpp_binary);
+
+    if (go_bin.empty() || cpp_bin.empty()) {
+        std::cerr << "infra: LCI_GO or LCI_CPP not set\n";
+        return 2;
+    }
+
+    auto go  = run_mcp(go_bin,  d, corpus_path);
+    auto cpp = run_mcp(cpp_bin, d, corpus_path);
+
+    if (go.timed_out || cpp.timed_out) {
+        std::cerr << "infra: mcp timeout\n";
+        return 2;
+    }
+
+    DiffOptions opts;
+    opts.tiers        = d.tiers;
+    opts.score_abs    = d.tolerances.score_abs;
+    opts.timed_max_ms = d.tolerances.timed_max_ms;
+    opts.id_pattern   = d.id_pattern;
+
+    nlohmann::json go_canon, cpp_canon;
+    DiffResult dr;
+    try {
+        auto gj = nlohmann::json::parse(go.stdout_data);
+        auto cj = nlohmann::json::parse(cpp.stdout_data);
+        CanonicalizeOptions co;
+        co.ignore_paths  = d.tiers.ignore;
+        co.corpus_prefix = corpus_path;
+        co.preserve_number_paths = d.tiers.ranked;
+        co.preserve_number_paths.insert(co.preserve_number_paths.end(),
+                                        d.tiers.timed.begin(),
+                                        d.tiers.timed.end());
+        go_canon  = canonicalize_json(gj, co);
+        cpp_canon = canonicalize_json(cj, co);
+        dr = compare(go_canon, cpp_canon, opts);
+    } catch (const std::exception& e) {
+        std::cerr << "infra: mcp parse failed: " << e.what()
+                  << "\ngo: "  << go.stdout_data
+                  << "\ncpp: " << cpp.stdout_data << "\n";
+        return 2;
+    }
+
+    if (!dr.passed) {
+        fs::path dump_dir =
+            fs::path(env_or("PARITY_FAILURES", "build/parity-failures")) / d.id;
+        write_dump(dump_dir, d, go.stdout_data, cpp.stdout_data,
+                   go_canon, cpp_canon, dr);
+        std::cerr << "FAIL " << d.id << " (" << dr.reasons.size() << " reasons)\n";
+        for (const auto& r : dr.reasons) std::cerr << "  - " << r << "\n";
+        std::cerr << "dump: " << dump_dir << "\n";
+        return 1;
+    }
+    std::cout << "PASS " << d.id << "\n";
+    return 0;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -172,7 +233,7 @@ int main(int argc, char** argv) {
 
     switch (d.mode) {
         case Mode::Cli:   return run_cli_descriptor(d);
-        case Mode::Mcp:
+        case Mode::Mcp:   return run_mcp_descriptor(d);
         case Mode::Http:
         case Mode::Index:
             std::cerr << "mode not yet implemented in this phase\n";
