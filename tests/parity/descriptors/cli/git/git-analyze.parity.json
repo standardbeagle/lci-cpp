@@ -1,0 +1,19 @@
+{
+  "id": "cli/git/git-analyze",
+  "mode": "cli",
+  "corpus": "lci-go-repo",
+  "go_binary": "${LCI_GO}",
+  "cpp_binary": "${LCI_CPP}",
+  "invocation": {
+    "args": ["git-analyze", "--json", "--scope", "wip"],
+    "cwd": "${CORPUS}"
+  },
+  "capture": ["stdout", "exit"],
+  "parse": "json",
+  "tiers": {
+    "timed": ["elapsed_ms"],
+    "ignore": ["server_pid", "version", "request_id"]
+  },
+  "tolerances": {"score_abs": 0.0, "timed_max_ms": 60000},
+  "expect_exit": 0
+}
