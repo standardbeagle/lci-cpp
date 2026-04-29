@@ -1,0 +1,10 @@
+{
+  "result": {
+    "content": [
+      {
+        "text": "{\"available_tools\":[\"search - semantic code search\",\"files - file/path search with fuzzy matching\",\"get_context - detailed context for results\",\"context - save/load code manifests with callees+purity\",\"list_symbols - enumerate and filter symbols (the 'ls' for code)\",\"inspect_symbol - deep inspect a single symbol\",\"browse_file - file outline view with all symbols\",\"semantic_annotations - find code by semantic tags\",\"code_insight - comprehensive codebase analysis (includes git analysis modes)\",\"side_effects - query function purity and side effects\",\"index_stats - index status and health monitoring\",\"debug_info - deep debug information for troubleshooting\",\"git_analysis - analyze git changes for quality issues\",\"info [tool] - help for specific tool (use 'info version' for server info)\"],\"quick_start\":\"Use 'search' tool with a pattern. Use 'info search' for details.\",\"server\":\"Lightning Code Index MCP\",\"tagline\":\"Sub-millisecond in-memory semantic code search\",\"why_use_lci\":[\"Faster than grep/rg (everything pre-indexed in memory)\",\"Smarter than find (understands code structure)\",\"Available everywhere (no IDE needed)\",\"Perfect for AI (MCP protocol, semantic output)\"]}",
+        "type": "text"
+      }
+    ]
+  }
+}

@@ -1,0 +1,10 @@
+digraph dependencies {
+    rankdir=LR;
+    node [shape=box, style=filled, fillcolor=lightblue];
+    label="LCI Dependency Graph";
+    labelloc=t;
+
+    // Generated from index with 4 files, 4 symbols
+    // Use 'lci inspect <symbol>' or 'lci tree <function>' for detailed dependencies
+    info [label="Files: 4\nSymbols: 4\nIndex: 0 bytes"];
+}

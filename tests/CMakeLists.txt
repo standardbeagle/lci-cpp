@@ -104,19 +104,27 @@ add_executable(lci_integration_tests
     integration/search_parity_test.cpp
     integration/server_lifecycle_test.cpp
     integration/mcp_tools_integration_test.cpp
+    integration/spec_runner.cpp
+    integration/spec_migration_test.cpp
 )
 target_include_directories(lci_integration_tests PRIVATE
     "${CMAKE_SOURCE_DIR}/include"
     "${CMAKE_BINARY_DIR}/generated"
     "${CMAKE_CURRENT_SOURCE_DIR}"
 )
+target_compile_definitions(lci_integration_tests PRIVATE
+    LCI_TESTS_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+)
 target_link_libraries(lci_integration_tests PRIVATE
     lci_lib
+    lci_parity_runner_lib
     GTest::gtest_main
 )
 
 gtest_discover_tests(lci_integration_tests
-    PROPERTIES LABELS "integration"
+    PROPERTIES
+        LABELS "integration"
+        ENVIRONMENT "LCI_CPP=$<TARGET_FILE:lci>;PARITY_CORPORA=${CMAKE_CURRENT_SOURCE_DIR}/parity/corpora"
 )
 
 # ---------------------------------------------------------------------------

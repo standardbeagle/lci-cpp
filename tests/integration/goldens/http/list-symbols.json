@@ -1,0 +1,42 @@
+{
+  "has_more": false,
+  "showing": 4,
+  "symbols": [
+    {
+      "complexity": 1,
+      "file": "${CORPUS}/a.go",
+      "is_exported": true,
+      "line": 3,
+      "name": "Add",
+      "outgoing_refs": 2,
+      "type": "function"
+    },
+    {
+      "complexity": 1,
+      "file": "${CORPUS}/b.py",
+      "incoming_refs": 1,
+      "is_exported": true,
+      "line": 1,
+      "name": "add",
+      "outgoing_refs": 8,
+      "type": "function"
+    },
+    {
+      "complexity": 1,
+      "file": "${CORPUS}/c.cpp",
+      "is_exported": true,
+      "line": 1,
+      "name": "add",
+      "type": "function"
+    },
+    {
+      "complexity": 1,
+      "file": "${CORPUS}/d.rs",
+      "is_exported": true,
+      "line": 1,
+      "name": "add",
+      "type": "function"
+    }
+  ],
+  "total": 4
+}
