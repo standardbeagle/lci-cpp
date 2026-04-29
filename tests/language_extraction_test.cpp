@@ -393,6 +393,36 @@ TEST(LanguageExtractionTest, Cpp) {
     EXPECT_GE(r.imports.size(), 2u);
 }
 
+TEST(LanguageExtractionTest, CppReferences) {
+    constexpr std::string_view kCppRefsSrc = R"(class SlabAllocator {};
+
+inline void put_to_tier() {}
+
+inline void use_ref() {
+    put_to_tier();
+    SlabAllocator allocator;
+}
+)";
+
+    auto r = extract(Language::Cpp, ".hpp", kCppRefsSrc, "alloc.hpp");
+
+    bool saw_call = false;
+    bool saw_type_usage = false;
+    for (const auto& ref : r.references) {
+        if (ref.type == ReferenceType::Call &&
+            ref.referenced_name == "put_to_tier") {
+            saw_call = true;
+        }
+        if (ref.type == ReferenceType::Usage &&
+            ref.referenced_name == "SlabAllocator") {
+            saw_type_usage = true;
+        }
+    }
+
+    EXPECT_TRUE(saw_call);
+    EXPECT_TRUE(saw_type_usage);
+}
+
 // ---------------------------------------------------------------------------
 // C
 // ---------------------------------------------------------------------------

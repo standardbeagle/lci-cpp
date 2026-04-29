@@ -10,6 +10,63 @@
 
 namespace lci::parser {
 
+namespace {
+
+bool is_cpp_family_extension(std::string_view ext) {
+    return ext == ".c" || ext == ".cpp" || ext == ".cc" || ext == ".cxx" ||
+           ext == ".h" || ext == ".hpp";
+}
+
+TSNode pick_cpp_reference_leaf(TSNode node) {
+    if (ts_node_is_null(node)) return node;
+
+    const char* raw_type = ts_node_type(node);
+    std::string_view node_type(raw_type ? raw_type : "");
+
+    if (node_type == "field_expression") {
+        TSNode field = ts_node_child_by_field_name(
+            node, "field", static_cast<uint32_t>(std::strlen("field")));
+        if (!ts_node_is_null(field)) return field;
+    }
+
+    if (node_type == "qualified_identifier" || node_type == "scoped_identifier" ||
+        node_type == "template_function" || node_type == "template_method") {
+        for (const char* field_name : {"name", "field"}) {
+            TSNode child = ts_node_child_by_field_name(
+                node, field_name,
+                static_cast<uint32_t>(std::strlen(field_name)));
+            if (!ts_node_is_null(child)) return pick_cpp_reference_leaf(child);
+        }
+    }
+
+    uint32_t child_count = ts_node_named_child_count(node);
+    for (uint32_t i = child_count; i > 0; --i) {
+        TSNode child = ts_node_named_child(node, i - 1);
+        if (ts_node_is_null(child)) continue;
+        std::string_view child_type(ts_node_type(child));
+        if (child_type == "identifier" || child_type == "field_identifier" ||
+            child_type == "type_identifier" ||
+            child_type == "namespace_identifier" ||
+            child_type == "destructor_name") {
+            return child;
+        }
+    }
+
+    return node;
+}
+
+bool is_cpp_type_declaration_name_context(TSNode node) {
+    TSNode parent = ts_node_parent(node);
+    if (ts_node_is_null(parent)) return false;
+
+    std::string_view parent_type(ts_node_type(parent));
+    return parent_type == "class_specifier" || parent_type == "struct_specifier" ||
+           parent_type == "enum_specifier" ||
+           parent_type == "namespace_definition";
+}
+
+}  // namespace
+
 // ---------------------------------------------------------------------------
 // UnifiedExtractor: init / reset / extract
 // ---------------------------------------------------------------------------
@@ -1423,6 +1480,24 @@ void UnifiedExtractor::process_reference_node(TSNode node,
         process_js_reference(node, node_type);
     } else if (ext_ == ".py") {
         process_python_reference(node, node_type);
+    } else if (is_cpp_family_extension(ext_)) {
+        if (node_type == "call_expression") {
+            TSNode func = ts_node_child_by_field_name(
+                node, "function",
+                static_cast<uint32_t>(std::strlen("function")));
+            if (!ts_node_is_null(func)) {
+                references_.push_back(create_reference(
+                    pick_cpp_reference_leaf(func), ReferenceType::Call,
+                    RefStrength::Tight));
+            }
+        } else if ((node_type == "type_identifier" ||
+                    node_type == "qualified_identifier" ||
+                    node_type == "scoped_identifier") &&
+                   !is_cpp_type_declaration_name_context(node)) {
+            references_.push_back(create_reference(
+                pick_cpp_reference_leaf(node), ReferenceType::Usage,
+                RefStrength::Loose));
+        }
     }
 }
 

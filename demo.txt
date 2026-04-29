@@ -1,0 +1,46 @@
+CLI verification
+================
+
+Run these commands from the repo root:
+
+  cmake --build build/debug -- -j4
+
+Regular CLI checks
+------------------
+
+  build/debug/src/lci search add
+  build/debug/src/lci symbols --kind func --max 5
+  build/debug/src/lci inspect Add
+  build/debug/src/lci browse CMakeLists.txt
+  build/debug/src/lci git-analyze --scope wip --json
+
+Parity-focused CLI checks
+-------------------------
+
+  cd tests/parity/corpora/synthetic/multi-lang
+  ../../../../../build/debug/src/lci search add
+  ../../../../../build/debug/src/lci symbols --kind func --max 5
+  ../../../../../build/debug/src/lci inspect Add
+  ../../../../../build/debug/src/lci browse a.go
+
+What to look for
+----------------
+
+1. search add returns function matches instead of an error.
+2. symbols shows the synthetic functions.
+3. inspect Add returns symbol details for the Go sample.
+4. browse a.go returns the file outline.
+5. git-analyze --scope wip --json returns a real JSON report.
+
+MCP parity check
+----------------
+
+If you want the parity-backed MCP check from the CLI:
+
+  ctest --test-dir build/debug -L parity -R '^parity\.mcp\.' --output-on-failure -j4
+
+Quick file review
+-----------------
+
+  cat demo.txt
+  less demo.txt

@@ -409,5 +409,37 @@ TEST(MasterIndexTest, StatsAfterIndexing) {
     EXPECT_GT(stats.indexing_time_ns, 0);
 }
 
+TEST(MasterIndexTest, CppHeaderReferencesPopulateEnhancedSymbols) {
+    TempDir dir;
+    dir.write_file("alloc.hpp",
+                   "class SlabAllocator {};\n"
+                   "\n"
+                   "inline void put_to_tier() {}\n"
+                   "\n"
+                   "inline void use_ref() {\n"
+                   "    put_to_tier();\n"
+                   "    SlabAllocator allocator;\n"
+                   "}\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    const auto* put_to_tier = mi.ref_tracker().find_symbol_by_name("put_to_tier");
+    ASSERT_NE(put_to_tier, nullptr);
+    EXPECT_GE(put_to_tier->incoming_refs.size(), 1u);
+
+    const auto* use_ref = mi.ref_tracker().find_symbol_by_name("use_ref");
+    ASSERT_NE(use_ref, nullptr);
+    EXPECT_GE(use_ref->outgoing_refs.size(), 1u);
+
+    const auto* slab_allocator =
+        mi.ref_tracker().find_symbol_by_name("SlabAllocator");
+    ASSERT_NE(slab_allocator, nullptr);
+    EXPECT_GE(slab_allocator->incoming_refs.size(), 1u);
+}
+
 }  // namespace
 }  // namespace lci
