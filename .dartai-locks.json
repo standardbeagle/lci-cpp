@@ -1,3 +1,17 @@
 {
-  "claims": {}
+  "claims": {
+    "GO325uKyoLMK": {
+      "runner_instance_id": "beagle-ab-475579",
+      "runner_email": "andybrummer@standardbeagle.com",
+      "claimed_at": "2026-04-28T20:35:00Z",
+      "agent_id": "beagle-ab-475579",
+      "parent_loop_id": "gi2QSUHJ79si",
+      "purpose": "migration 1/8 — extract spec_diff library",
+      "source_event": {
+        "loop_id": "gi2QSUHJ79si",
+        "task_id": "GO325uKyoLMK",
+        "conversation_id": null
+      }
+    }
+  }
 }
