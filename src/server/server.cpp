@@ -8,6 +8,8 @@
 
 #include <lci/core/reference_tracker.h>
 #include <lci/file_info.h>
+#include <lci/git/analyzer.h>
+#include <lci/git/provider.h>
 #include <lci/idcodec.h>
 #include <lci/indexing/master_index.h>
 #include <lci/search/search_engine.h>
@@ -987,7 +989,7 @@ void IndexServer::handle_tree(const httplib::Request& req,
 // -- Endpoint: /git-analyze ---------------------------------------------------
 
 void IndexServer::handle_git_analyze(const httplib::Request& req,
-                                      httplib::Response& res) {
+                                       httplib::Response& res) {
     if (!require_ready(res)) return;
 
     nlohmann::json body;
@@ -1004,10 +1006,98 @@ void IndexServer::handle_git_analyze(const httplib::Request& req,
         return;
     }
 
-    // Git analysis is not yet ported to C++.
-    // Return a stub response indicating the feature is pending.
+    git::Provider provider;
+    if (!git::Provider::create(config_.project.root, provider)) {
+        error_response(res, 400, "not a git repository");
+        return;
+    }
+
+    git::AnalysisParams params = git::AnalysisParams::defaults();
+    if (scope == "staged") {
+        params.scope = git::AnalysisScope::Staged;
+    } else if (scope == "wip") {
+        params.scope = git::AnalysisScope::WIP;
+    } else if (scope == "commit") {
+        params.scope = git::AnalysisScope::Commit;
+    } else if (scope == "range") {
+        params.scope = git::AnalysisScope::Range;
+    } else {
+        error_response(res, 400, "invalid scope");
+        return;
+    }
+
+    params.base_ref = body.value("base_ref", "");
+    params.target_ref = body.value("target_ref", "");
+    params.similarity_threshold = body.value("similarity_threshold", 0.8);
+    params.max_findings = body.value("max_findings", 20);
+    if (body.contains("focus") && body["focus"].is_array()) {
+        params.focus = body["focus"].get<std::vector<std::string>>();
+    }
+
+    git::Analyzer analyzer(provider, *indexer_);
+    git::AnalysisReport report;
+    if (!analyzer.analyze(params, report)) {
+        error_response(res, 500, "git analyze failed");
+        return;
+    }
+
+    auto symbol_to_json = [](const git::SymbolInfo& symbol) {
+        nlohmann::json out;
+        out["name"] = symbol.name;
+        out["type"] = symbol.type;
+        out["file_path"] = symbol.file_path;
+        out["line"] = symbol.line;
+        if (symbol.end_line > 0) out["end_line"] = symbol.end_line;
+        if (symbol.complexity > 0) out["complexity"] = symbol.complexity;
+        if (symbol.lines_of_code > 0) out["lines_of_code"] = symbol.lines_of_code;
+        if (symbol.nesting_depth > 0) out["nesting_depth"] = symbol.nesting_depth;
+        return out;
+    };
+
+    auto metrics_to_json = [&](const git::MetricsFinding& finding) {
+        nlohmann::json out;
+        out["severity"] = std::string(git::to_string(finding.severity));
+        out["description"] = finding.description;
+        out["symbol"] = symbol_to_json(finding.symbol);
+        out["issue_type"] = std::string(git::to_string(finding.issue_type));
+        out["issue"] = finding.issue;
+        out["suggestion"] = finding.suggestion;
+        if (finding.new_metrics) {
+            out["new_metrics"] = {
+                {"complexity", finding.new_metrics->complexity},
+                {"lines_of_code", finding.new_metrics->lines_of_code},
+                {"nesting_depth", finding.new_metrics->nesting_depth},
+            };
+        }
+        return out;
+    };
+
     nlohmann::json j;
-    j["error"] = "git-analyze not yet implemented in C++ port";
+    j["summary"] = {
+        {"files_changed", report.summary.files_changed},
+        {"symbols_added", report.summary.symbols_added},
+        {"symbols_modified", report.summary.symbols_modified},
+        {"symbols_deleted", report.summary.symbols_deleted},
+        {"duplicates_found", report.summary.duplicates_found},
+        {"naming_issues_found", report.summary.naming_issues_found},
+        {"metrics_issues_found", report.summary.metrics_issues_found},
+        {"risk_score", report.summary.risk_score},
+        {"top_recommendation", report.summary.top_recommendation},
+    };
+
+    if (!report.metrics_issues.empty()) {
+        j["metrics_issues"] = nlohmann::json::array();
+        for (const auto& finding : report.metrics_issues) {
+            j["metrics_issues"].push_back(metrics_to_json(finding));
+        }
+    }
+
+    j["metadata"] = {
+        {"base_ref", report.metadata.base_ref},
+        {"target_ref", report.metadata.target_ref},
+        {"scope", std::string(git::to_string(report.metadata.scope))},
+    };
+
     json_response(res, j);
 }
 

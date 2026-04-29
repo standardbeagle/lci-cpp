@@ -468,7 +468,21 @@ nlohmann::json McpServer::handle_request(const nlohmann::json& request) {
     } else if (method == "tools/list") {
         response["result"] = handle_tools_list(request);
     } else if (method == "tools/call") {
-        response["result"] = handle_tools_call(request);
+        auto params = request.value("params", nlohmann::json::object());
+        auto tool_name = params.value("name", "");
+
+        auto it = std::find_if(
+            registered_tools_.begin(), registered_tools_.end(),
+            [&](const RegisteredTool& reg) {
+                return reg.definition.name == tool_name;
+            });
+        if (it == registered_tools_.end()) {
+            response["error"] = {{"code", -32602},
+                                 {"message", "unknown tool \"" + tool_name +
+                                                 "\""}};
+        } else {
+            response["result"] = handle_tools_call(request);
+        }
     } else if (method == "ping") {
         response["result"] = nlohmann::json::object();
     } else {
@@ -512,7 +526,9 @@ nlohmann::json McpServer::handle_tools_call(const nlohmann::json& request) {
     auto arguments = params.value("arguments", nlohmann::json::object());
 
     // Find the registered tool
-    for (const auto& reg : registered_tools_) {
+    for (auto it = registered_tools_.rbegin(); it != registered_tools_.rend();
+         ++it) {
+        const auto& reg = *it;
         if (reg.definition.name == tool_name) {
             // Exception recovery wrapping
             try {

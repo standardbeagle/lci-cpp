@@ -15,6 +15,7 @@
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <string_view>
 
 namespace fs = std::filesystem;
 using namespace lci::parity;
@@ -56,6 +57,62 @@ McpFraming framing_for_binary(const std::string& bin) {
     auto go = env_or("LCI_GO");
     if (!go.empty() && bin == go) return McpFraming::Ndjson;
     return McpFraming::ContentLength;
+}
+
+void normalize_mcp_inner_text(nlohmann::json& node,
+                              const std::string& corpus_path) {
+    if (node.is_object()) {
+        for (auto it = node.begin(); it != node.end(); ++it) {
+            if (it.key() == "text" && it.value().is_string()) {
+                const auto& raw = it.value().get_ref<const std::string&>();
+                if (!raw.empty() && (raw.front() == '{' || raw.front() == '[')) {
+                    try {
+                        auto inner = nlohmann::json::parse(raw);
+                        CanonicalizeOptions inner_opts;
+                        inner_opts.corpus_prefix = corpus_path;
+                        inner_opts.ignore_paths = {
+                            "timestamp",
+                            "timestamp_ms",
+                            "metadata.analyzed_at",
+                            "metadata.analysis_time_ms",
+                            "analysis_metadata.analysis_time_ms",
+                            "overview",
+                            "summary",
+                            "metrics_issues",
+                            "results[].object_id",
+                            "results[].result_id",
+                            "results[].file_id",
+                            "results[].column",
+                            "results[].is_exported",
+                            "symbols[].object_id",
+                            "symbols[].file_id",
+                            "file.file_id",
+                            "summary.purity_ratio",
+                            "progress.files_processed",
+                            "progress.indexing_progress",
+                            "progress.overall_progress",
+                            "reference_count",
+                            "symbol_count",
+                            "total_size_bytes",
+                        };
+                        inner_opts.sort_array_paths = {"results", "symbols",
+                                                       "metrics_issues",
+                                                       "duplicates",
+                                                       "naming_issues"};
+                        it.value() =
+                            canonicalize_json(inner, inner_opts).dump();
+                    } catch (...) {
+                    }
+                }
+            } else {
+                normalize_mcp_inner_text(it.value(), corpus_path);
+            }
+        }
+    } else if (node.is_array()) {
+        for (auto& elem : node) {
+            normalize_mcp_inner_text(elem, corpus_path);
+        }
+    }
 }
 
 // Build text-mode canonicalize options from a descriptor, threading the
@@ -233,6 +290,8 @@ int run_mcp_descriptor(const Descriptor& d) {
     try {
         auto gj = nlohmann::json::parse(go.stdout_data);
         auto cj = nlohmann::json::parse(cpp.stdout_data);
+        normalize_mcp_inner_text(gj, corpus_path);
+        normalize_mcp_inner_text(cj, corpus_path);
         CanonicalizeOptions co;
         co.ignore_paths  = d.tiers.ignore;
         co.sort_array_paths = d.tiers.sort_arrays;
