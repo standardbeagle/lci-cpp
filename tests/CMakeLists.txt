@@ -182,4 +182,8 @@ file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/"
     DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/fixtures/"
 )
 
+# Reusable test-side libraries (consumed by parity harness AND future
+# integration gtests). Must be added BEFORE tests/parity so the parity
+# build can link the spec_diff target.
+add_subdirectory(lib/spec_diff)
 add_subdirectory(parity)

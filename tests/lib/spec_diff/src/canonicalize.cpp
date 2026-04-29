@@ -1,11 +1,12 @@
-#include "diff_engine/canonicalize.h"
+// tests/lib/spec_diff/src/canonicalize.cpp
+#include "spec_diff/canonicalize.h"
 
 #include <algorithm>
 #include <cstdio>
 #include <regex>
 #include <string>
 
-namespace lci::parity {
+namespace spec_diff {
 
 namespace {
 
@@ -82,9 +83,6 @@ void normalize_floats_recursive(nlohmann::json& node,
 
 nlohmann::json sort_keys_recursive(const nlohmann::json& in) {
     if (in.is_object()) {
-        // Walk keys in sorted order via nlohmann's ordered map view —
-        // nlohmann::json already sorts keys when re-emitting via dump if we
-        // construct a fresh object insertion-ordered with sorted keys.
         std::vector<std::string> keys;
         for (auto it = in.begin(); it != in.end(); ++it) keys.push_back(it.key());
         std::sort(keys.begin(), keys.end());
@@ -104,7 +102,6 @@ nlohmann::json sort_keys_recursive(const nlohmann::json& in) {
 
 // ---------- text-mode helpers ----------
 
-// Match "<digits>ms" or "<digits>.<digits>ms".  ECMAScript flavor.
 const std::regex& timing_re() {
     static const std::regex re(R"(\d+(\.\d+)?ms)",
                                std::regex::ECMAScript | std::regex::optimize);
@@ -141,10 +138,9 @@ void rewrite_corpus_prefix_inplace(std::string& line,
 void strip_emoji_prefix_inplace(std::string& line) {
     if (line.empty()) return;
     auto u = static_cast<unsigned char>(line[0]);
-    if (u < 0x80) return;  // ASCII — nothing to strip.
+    if (u < 0x80) return;  // ASCII -- nothing to strip.
 
     size_t i = 0;
-    // Consume one UTF-8 codepoint.
     auto cp_len = [](unsigned char c) -> size_t {
         if ((c & 0x80) == 0x00) return 1;
         if ((c & 0xE0) == 0xC0) return 2;
@@ -164,11 +160,9 @@ void strip_emoji_prefix_inplace(std::string& line) {
         i += 3;
     }
 
-    // Require whitespace after the emoji — otherwise it's probably not a
-    // prefix glyph, leave the line alone.
+    // Require whitespace after the emoji.
     if (i >= line.size() || (line[i] != ' ' && line[i] != '\t')) return;
 
-    // Consume whitespace run.
     while (i < line.size() && (line[i] == ' ' || line[i] == '\t')) ++i;
 
     line.erase(0, i);
@@ -185,8 +179,6 @@ bool line_has_strip_substring(const std::string& line,
 void apply_replace_rules(std::string& line,
                          const std::vector<std::pair<std::string, std::string>>& rules) {
     for (const auto& [pat, rep] : rules) {
-        // Compile per-call.  Acceptable: descriptors carry only a handful
-        // of rules and parity tests run once per descriptor.
         std::regex re(pat, std::regex::ECMAScript | std::regex::optimize);
         line = std::regex_replace(line, re, rep);
     }
@@ -208,10 +200,6 @@ void sort_arrays_recursive(nlohmann::json& node,
             sort_arrays_recursive(elem, patterns, array_path);
         }
         if (path_in(patterns, current_path)) {
-            // Stable sort by canonical JSON dump so equal-content
-            // elements keep their relative order. The dump uses sorted
-            // keys and "%.6g" floats by virtue of nlohmann::json's
-            // canonical ordering plus our prior normalization passes.
             std::stable_sort(node.begin(), node.end(),
                              [](const nlohmann::json& a,
                                 const nlohmann::json& b) {
@@ -230,8 +218,6 @@ nlohmann::json canonicalize_json(const nlohmann::json& in,
     rewrite_paths_recursive(out, opts.corpus_prefix);
     normalize_floats_recursive(out, opts.preserve_number_paths, "");
     out = sort_keys_recursive(out);
-    // Apply array sort *after* key normalization so the canonical dump
-    // used as the sort key is stable across runs.
     if (!opts.sort_array_paths.empty()) {
         sort_arrays_recursive(out, opts.sort_array_paths, "");
     }
@@ -249,7 +235,6 @@ std::string canonicalize_text(std::string_view in,
             (nl == std::string_view::npos) ? in.substr(pos)
                                            : in.substr(pos, nl - pos);
 
-        // Trim trailing whitespace (space, tab, CR).
         size_t end = raw.size();
         while (end > 0 && (raw[end - 1] == ' ' || raw[end - 1] == '\t' ||
                            raw[end - 1] == '\r')) {
@@ -257,12 +242,10 @@ std::string canonicalize_text(std::string_view in,
         }
         std::string line(raw.substr(0, end));
 
-        // strip_lines BEFORE other transforms so that strip patterns can
-        // match the original DEBUG/banner text without worrying about
-        // timing scrub or path rewrites mangling them first.
+        // strip_lines BEFORE other transforms so strip patterns match
+        // the original DEBUG/banner text without being mangled by timing
+        // scrub or path rewrites first.
         if (line_has_strip_substring(line, opts.strip_lines)) {
-            // Also drop the trailing newline that would have followed
-            // this line, so we don't leave a blank line behind.
             if (nl == std::string_view::npos) break;
             pos = nl + 1;
             continue;
@@ -281,4 +264,15 @@ std::string canonicalize_text(std::string_view in,
     return out;
 }
 
-} // namespace lci::parity
+std::string strip_preamble_lines(const std::string& in,
+                                 const std::vector<std::string>& patterns) {
+    if (patterns.empty()) return in;
+    TextCanonicalizeOptions opts;
+    opts.scrub_timing       = false;  // leave numeric tokens alone
+    opts.strip_emoji_prefix = false;
+    opts.strip_lines        = patterns;
+    // corpus_prefix and replace left empty.
+    return canonicalize_text(in, opts);
+}
+
+} // namespace spec_diff

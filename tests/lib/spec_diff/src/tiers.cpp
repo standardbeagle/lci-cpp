@@ -1,9 +1,10 @@
-#include "diff_engine/field_tier.h"
+// tests/lib/spec_diff/src/tiers.cpp
+#include "spec_diff/tiers.h"
 
 #include <algorithm>
 #include <cctype>
 
-namespace lci::parity {
+namespace spec_diff {
 
 namespace {
 bool contains(const std::vector<std::string>& v, const std::string& s) {
@@ -12,7 +13,7 @@ bool contains(const std::vector<std::string>& v, const std::string& s) {
 } // namespace
 
 FieldTier classify_path(const TierMap& m, const std::string& path) {
-    // Order: explicit ignore → ids → timed → ranked → stable → default Stable
+    // Order: explicit ignore -> ids -> timed -> ranked -> stable -> default Stable.
     if (contains(m.ignore, path)) return FieldTier::Ignore;
     if (contains(m.ids, path))    return FieldTier::Id;
     if (contains(m.timed, path))  return FieldTier::Timed;
@@ -43,4 +44,4 @@ std::string normalize_indexes(const std::string& path) {
     return out;
 }
 
-} // namespace lci::parity
+} // namespace spec_diff

@@ -1,3 +1,9 @@
+// tests/lib/spec_diff/include/spec_diff/canonicalize.h
+//
+// Canonicalization pipeline for both structured (JSON) and unstructured
+// (text) outputs prior to spec_diff comparison. Pure functions: data in,
+// canonical form out. No subprocess, no binary paths, no parity-runner
+// concepts.
 #pragma once
 
 #include <nlohmann/json.hpp>
@@ -6,7 +12,7 @@
 #include <utility>
 #include <vector>
 
-namespace lci::parity {
+namespace spec_diff {
 
 struct CanonicalizeOptions {
     // JSONPath-lite expressions to strip before comparison.
@@ -14,16 +20,15 @@ struct CanonicalizeOptions {
     std::vector<std::string> ignore_paths;
 
     // Paths whose numeric values must be preserved as numbers (not
-    // stringified). Typically the union of ranked + timed paths from
-    // the descriptor's tier map, so the diff engine can apply tolerances.
+    // stringified). Typically the union of ranked + timed paths from the
+    // tier map, so the diff engine can apply tolerances.
     std::vector<std::string> preserve_number_paths;
 
     // Array paths whose elements should be sorted (by their canonical
     // JSON dump) before comparison. Used when the producer is allowed
-    // to emit elements in any order — e.g. Go's map-iteration order in
-    // /list-symbols, /search, /references — and the parity test should
-    // verify multiset content rather than positional equality. Path
-    // syntax matches `ignore_paths` (e.g. "symbols", "results").
+    // to emit elements in any order and the diff should verify multiset
+    // content rather than positional equality. Path syntax matches
+    // `ignore_paths` (e.g. "symbols", "results").
     std::vector<std::string> sort_array_paths;
 
     // Absolute corpus prefix to rewrite to "${CORPUS}".
@@ -33,15 +38,14 @@ struct CanonicalizeOptions {
 
 // Options controlling text-mode normalization.  The defaults always trim
 // trailing whitespace and scrub timing tokens, since both are universally
-// safe for text-mode parity comparison.  Per-descriptor knobs let the
-// runner enable path rewriting and surgical line/regex strips so that two
-// binaries emitting semantically equivalent text — but with cosmetic
-// divergence (debug preambles, banner mode strings, leading emoji) — can
-// be compared without weakening the failure signal.
+// safe for parity comparison.  Per-spec knobs let callers enable path
+// rewriting and surgical line/regex strips so that two producers emitting
+// semantically equivalent text — but with cosmetic divergence (debug
+// preambles, banner mode strings, leading emoji) — can be compared
+// without weakening the failure signal.
 struct TextCanonicalizeOptions {
     // Replace any occurrence of "<n>ms" or "<n.n>ms" with "<MS>".
-    // Default true: timing values are non-deterministic and cannot be
-    // compared verbatim.
+    // Default true: timing values are non-deterministic.
     bool scrub_timing = true;
 
     // Rewrite occurrences of `corpus_prefix` (and its trailing "/") to
@@ -54,24 +58,21 @@ struct TextCanonicalizeOptions {
     std::vector<std::string> strip_lines;
 
     // Strip a leading emoji + (optional) variation-selector + whitespace
-    // from each line.  Catches Go-side prefixes like "✅ ", "📍 ",
-    // "📊 ", "⚠️  ", and "✓ " that C++ does not emit.
+    // from each line.
     bool strip_emoji_prefix = false;
 
-    // Per-descriptor regex replacements applied to each line in order.
+    // Per-spec regex replacements applied to each line in order.
     // Each pair is {ECMAScript regex pattern, replacement template}.
-    // Used to collapse banner/mode strings such as
-    // "(integrated mode - no assembly matches)" and "(standard mode)"
-    // to a common token like "(MODE)".
     std::vector<std::pair<std::string, std::string>> replace;
 };
 
 // Canonicalize a JSON value:
-//   - Object keys recursively sorted (handled implicitly by nlohmann::json::dump
-//     with no flags — but we walk and re-emit explicitly to be deterministic).
-//   - Floats normalized to "%.6g" string form (stored as JSON string).
-//   - String values inside objects/arrays get corpus-prefix rewrite if non-empty.
+//   - Object keys recursively sorted.
+//   - Floats normalized to "%.6g" string form (stored as JSON string)
+//     unless their path is in preserve_number_paths.
+//   - Strings get corpus-prefix rewrite if non-empty.
 //   - JSONPath-lite ignore_paths are stripped.
+//   - sort_array_paths sorted last so the canonical dump is stable.
 nlohmann::json canonicalize_json(const nlohmann::json& in,
                                  const CanonicalizeOptions& opts);
 
@@ -83,4 +84,13 @@ nlohmann::json canonicalize_json(const nlohmann::json& in,
 std::string canonicalize_text(std::string_view in,
                               const TextCanonicalizeOptions& opts);
 
-} // namespace lci::parity
+// Convenience wrapper: drop any line whose content contains one of the
+// strip patterns, while leaving every other text feature intact (no
+// timing scrub, no path rewrite, no emoji strip, no regex). Useful for
+// pre-cleaning stdout BEFORE structured JSON parsing when one producer
+// emits debug preamble lines that the other does not. No-op when
+// patterns is empty.
+std::string strip_preamble_lines(const std::string& in,
+                                 const std::vector<std::string>& patterns);
+
+} // namespace spec_diff

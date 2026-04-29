@@ -1,11 +1,12 @@
-#include "diff_engine/diff.h"
+// tests/lib/spec_diff/src/diff.cpp
+#include "spec_diff/diff.h"
 
 #include <algorithm>
 #include <cmath>
 #include <regex>
 #include <sstream>
 
-namespace lci::parity {
+namespace spec_diff {
 
 namespace {
 
@@ -14,13 +15,10 @@ void walk(const nlohmann::json& a, const nlohmann::json& b,
           DiffResult& r) {
     auto tier = classify_path(opts.tiers, normalize_indexes(path));
 
-    // Ignore tier: skip outright.
     if (tier == FieldTier::Ignore) return;
 
-    // Both null: equal.
     if (a.is_null() && b.is_null()) return;
 
-    // Type mismatch always fails (unless ignored).
     if (a.type() != b.type()) {
         r.passed = false;
         r.reasons.push_back(path + ": type mismatch (" +
@@ -30,7 +28,6 @@ void walk(const nlohmann::json& a, const nlohmann::json& b,
     }
 
     if (a.is_object()) {
-        // Union of keys
         std::vector<std::string> keys;
         for (auto it = a.begin(); it != a.end(); ++it) keys.push_back(it.key());
         for (auto it = b.begin(); it != b.end(); ++it) {
@@ -62,7 +59,6 @@ void walk(const nlohmann::json& a, const nlohmann::json& b,
         return;
     }
 
-    // Leaf comparison per tier.
     switch (tier) {
         case FieldTier::Stable: {
             if (a != b) {
@@ -73,7 +69,6 @@ void walk(const nlohmann::json& a, const nlohmann::json& b,
             return;
         }
         case FieldTier::Ranked: {
-            // Score must be number; absolute diff within tolerance.
             if (!a.is_number() || !b.is_number()) {
                 r.passed = false;
                 r.reasons.push_back(path + ": ranked tier expects number");
@@ -129,7 +124,7 @@ void walk(const nlohmann::json& a, const nlohmann::json& b,
 std::string make_unified_diff(const std::string& a, const std::string& b) {
     if (a == b) return "";
     std::ostringstream os;
-    os << "--- go\n+++ cpp\n";
+    os << "--- expected\n+++ actual\n";
     std::vector<std::string> al, bl;
     std::istringstream as(a), bs(b);
     std::string line;
@@ -150,15 +145,15 @@ std::string make_unified_diff(const std::string& a, const std::string& b) {
 
 } // namespace
 
-DiffResult compare(const nlohmann::json& go,
-                   const nlohmann::json& cpp,
-                   const DiffOptions& opts) {
+DiffResult diff(const nlohmann::json& expected,
+                const nlohmann::json& actual,
+                const DiffOptions& opts) {
     DiffResult r;
-    walk(go, cpp, opts, "", r);
+    walk(expected, actual, opts, "", r);
     if (!r.passed) {
-        r.unified_diff = make_unified_diff(go.dump(2), cpp.dump(2));
+        r.unified_diff = make_unified_diff(expected.dump(2), actual.dump(2));
     }
     return r;
 }
 
-} // namespace lci::parity
+} // namespace spec_diff

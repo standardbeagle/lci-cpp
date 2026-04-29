@@ -19,17 +19,9 @@ if(NOT LCI_GO_PATH)
 endif()
 message(STATUS "Parity: using Go binary at ${LCI_GO_PATH}")
 
-# ---- Diff engine library (pure functions, unit-testable) ----
-add_library(lci_parity_diff STATIC
-    diff_engine/canonicalize.cpp
-    diff_engine/field_tier.cpp
-    diff_engine/diff.cpp
-)
-target_include_directories(lci_parity_diff PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}
-)
-target_link_libraries(lci_parity_diff PUBLIC nlohmann_json::nlohmann_json)
-target_compile_features(lci_parity_diff PUBLIC cxx_std_20)
+# Canonicalization + tier-aware diff lives in tests/lib/spec_diff (built
+# at the tests/ scope so the future integration suite can link it too).
+# The parity runner just consumes spec_diff as its diff engine.
 
 # ---- Runner library (subprocess + mode handlers) ----
 add_library(lci_parity_runner_lib STATIC
@@ -44,10 +36,11 @@ target_include_directories(lci_parity_runner_lib PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
 target_link_libraries(lci_parity_runner_lib PUBLIC
-    lci_parity_diff
+    spec_diff
     nlohmann_json::nlohmann_json
     httplib::httplib
 )
+target_compile_features(lci_parity_runner_lib PUBLIC cxx_std_20)
 
 # ---- Runner executable ----
 add_executable(parity_runner runner/parity_runner.cpp)
@@ -65,7 +58,7 @@ add_executable(parity_unit_tests
     unit_tests/descriptor_test.cpp
 )
 target_link_libraries(parity_unit_tests PRIVATE
-    lci_parity_diff
+    spec_diff
     lci_parity_runner_lib
     GTest::gtest_main
 )

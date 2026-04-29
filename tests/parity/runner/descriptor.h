@@ -1,13 +1,20 @@
 #pragma once
 
-#include "diff_engine/canonicalize.h"
-#include "diff_engine/diff.h"
+#include "spec_diff/canonicalize.h"
+#include "spec_diff/diff.h"
 #include <map>
 #include <string>
 #include <utility>
 #include <vector>
 
 namespace lci::parity {
+
+// Pull spec_diff names (TierMap, CanonicalizeOptions, TextCanonicalizeOptions,
+// DiffOptions, DiffResult, FieldTier, classify_path, normalize_indexes,
+// canonicalize_json, canonicalize_text, strip_preamble_lines, compare/diff)
+// into lci::parity so the parity runner code can keep referencing them
+// unqualified after the diff engine moved to tests/lib/spec_diff.
+using namespace ::spec_diff;
 
 enum class Mode { Cli, Mcp, Http, Index };
 enum class ParseStyle { Json, Text, ExitOnly };

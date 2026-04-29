@@ -1,9 +1,14 @@
+// tests/lib/spec_diff/include/spec_diff/tiers.h
+//
+// Field-tier classification for structured (JSON) parity / golden diffs.
+// Pure data; no dependency on subprocess runners, binary paths, or any
+// parity-harness-specific concept.
 #pragma once
 
 #include <string>
 #include <vector>
 
-namespace lci::parity {
+namespace spec_diff {
 
 enum class FieldTier { Stable, Ranked, Timed, Id, Ignore };
 
@@ -15,9 +20,8 @@ struct TierMap {
     std::vector<std::string> ignore;
     // Array paths whose elements should be sorted (by canonical JSON
     // dump) before tier comparison runs. Use this when the upstream
-    // producer emits an array in non-deterministic order — e.g. Go
-    // hash-map iteration in /list-symbols, /search, /references — and
-    // the parity test should verify content rather than position.
+    // producer emits an array in non-deterministic order (e.g. hash-map
+    // iteration) and the diff should verify content rather than position.
     std::vector<std::string> sort_arrays;
 };
 
@@ -29,4 +33,4 @@ FieldTier classify_path(const TierMap& m, const std::string& path);
 // Helper: rewrite "[N]" to "[]" for any integer N in the path.
 std::string normalize_indexes(const std::string& path);
 
-} // namespace lci::parity
+} // namespace spec_diff

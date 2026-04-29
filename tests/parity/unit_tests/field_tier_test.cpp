@@ -1,4 +1,5 @@
-#include "diff_engine/field_tier.h"
+#include "spec_diff/tiers.h"
+#include "runner/descriptor.h"  // pulls spec_diff into lci::parity
 #include <gtest/gtest.h>
 
 using lci::parity::FieldTier;

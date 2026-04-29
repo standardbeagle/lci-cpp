@@ -1,6 +1,6 @@
 // tests/parity/runner/parity_runner.cpp
-#include "diff_engine/canonicalize.h"
-#include "diff_engine/diff.h"
+#include "spec_diff/canonicalize.h"
+#include "spec_diff/diff.h"
 #include "runner/descriptor.h"
 #include "runner/modes/cli.h"
 #include "runner/modes/index.h"
@@ -76,23 +76,10 @@ TextCanonicalizeOptions text_opts_for(const Descriptor& d,
     return o;
 }
 
-// Drop any line whose content contains one of the strip patterns.  Used
-// to pre-clean stdout before JSON parsing when one binary emits debug or
-// banner preamble lines that the other does not (e.g. Go's
-// "DEBUG: verbose=..." print in `lci search --json`).  Reuses
-// canonicalize_text with a strip-only options block so the line-matching
-// rules stay identical to text-mode behavior.  No-op when patterns is
-// empty.
-std::string strip_preamble_lines(const std::string& in,
-                                 const std::vector<std::string>& patterns) {
-    if (patterns.empty()) return in;
-    TextCanonicalizeOptions opts;
-    opts.scrub_timing = false;        // leave numeric tokens alone
-    opts.strip_emoji_prefix = false;
-    opts.strip_lines = patterns;
-    // corpus_prefix and replace left empty.
-    return canonicalize_text(in, opts);
-}
+// Pre-strip preamble lines (e.g. Go's "DEBUG: verbose=..." print in
+// `lci search --json`) before JSON parse. Provided by spec_diff;
+// referenced unqualified via the `using namespace ::spec_diff;` shim
+// in runner/descriptor.h.
 
 void write_dump(const fs::path& dump_dir,
                 const Descriptor& d,
