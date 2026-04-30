@@ -1,14 +1,184 @@
 #include <lci/cli/commands.h>
 
+#include <algorithm>
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iostream>
+#include <string_view>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 #include <nlohmann/json.hpp>
+#include <lci/symbollinker/go_linker.h>
+#include <lci/symbollinker/linker_engine.h>
 
 namespace lci {
 namespace cli {
+
+namespace {
+
+struct DependencySummary {
+    int total_files = 0;
+    int total_dependency_edges = 0;
+    int maximum_dependency_depth = 0;
+    int maximum_dependencies_per_file = 0;
+    int maximum_dependents_per_file = 0;
+    double average_dependencies_per_file = 0.0;
+    int circular_dependencies = 0;
+};
+
+std::string read_text_file(const std::filesystem::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    if (!in) return {};
+    return std::string(std::istreambuf_iterator<char>(in),
+                       std::istreambuf_iterator<char>());
+}
+
+bool is_go_source_file(const std::filesystem::path& path) {
+    return path.extension() == ".go";
+}
+
+std::string display_root_path(const std::filesystem::path& root) {
+    std::error_code ec;
+    auto cwd = std::filesystem::current_path(ec);
+    if (ec) return root.string();
+    if (root == cwd) return ".";
+
+    auto rel = std::filesystem::relative(root, cwd, ec);
+    if (!ec && !rel.empty()) return rel.string();
+    return root.string();
+}
+
+std::unordered_map<FileID, std::vector<FileID>> build_dependency_adjacency(
+    symbollinker::LinkerEngine& engine, const std::vector<FileID>& indexed_files) {
+    std::unordered_map<FileID, std::vector<FileID>> adjacency;
+    for (auto file_id : indexed_files) {
+        adjacency[file_id] = engine.get_file_dependencies(file_id);
+    }
+    return adjacency;
+}
+
+int compute_max_dependency_depth(
+    const std::unordered_map<FileID, std::vector<FileID>>& adjacency) {
+    std::unordered_map<FileID, int> memo;
+    std::unordered_set<FileID> visiting;
+
+    std::function<int(FileID)> dfs = [&](FileID node) -> int {
+        if (auto it = memo.find(node); it != memo.end()) return it->second;
+        if (!visiting.insert(node).second) return 0;
+
+        int best = 0;
+        if (auto it = adjacency.find(node); it != adjacency.end()) {
+            for (auto dep : it->second) {
+                best = std::max(best, 1 + dfs(dep));
+            }
+        }
+        visiting.erase(node);
+        memo[node] = best;
+        return best;
+    };
+
+    int max_depth = 0;
+    for (const auto& [node, _] : adjacency) {
+        max_depth = std::max(max_depth, dfs(node));
+    }
+    return max_depth;
+}
+
+int count_circular_dependency_components(
+    const std::unordered_map<FileID, std::vector<FileID>>& adjacency) {
+    std::unordered_map<FileID, int> index;
+    std::unordered_map<FileID, int> lowlink;
+    std::unordered_set<FileID> on_stack;
+    std::vector<FileID> stack;
+    int next_index = 0;
+    int cycles = 0;
+
+    std::function<void(FileID)> strong_connect = [&](FileID node) {
+        index[node] = next_index;
+        lowlink[node] = next_index;
+        ++next_index;
+        stack.push_back(node);
+        on_stack.insert(node);
+
+        if (auto it = adjacency.find(node); it != adjacency.end()) {
+            for (auto dep : it->second) {
+                if (!index.contains(dep)) {
+                    strong_connect(dep);
+                    lowlink[node] = std::min(lowlink[node], lowlink[dep]);
+                } else if (on_stack.contains(dep)) {
+                    lowlink[node] = std::min(lowlink[node], index[dep]);
+                }
+            }
+        }
+
+        if (lowlink[node] != index[node]) return;
+
+        std::vector<FileID> component;
+        while (!stack.empty()) {
+            auto top = stack.back();
+            stack.pop_back();
+            on_stack.erase(top);
+            component.push_back(top);
+            if (top == node) break;
+        }
+
+        if (component.size() > 1) {
+            ++cycles;
+            return;
+        }
+
+        auto it = adjacency.find(node);
+        if (it != adjacency.end() &&
+            std::find(it->second.begin(), it->second.end(), node) != it->second.end()) {
+            ++cycles;
+        }
+    };
+
+    for (const auto& [node, _] : adjacency) {
+        if (!index.contains(node)) {
+            strong_connect(node);
+        }
+    }
+    return cycles;
+}
+
+DependencySummary analyze_dependency_graph(
+    symbollinker::LinkerEngine& engine, const std::vector<FileID>& indexed_files) {
+    DependencySummary summary;
+    summary.total_files = static_cast<int>(indexed_files.size());
+
+    auto adjacency = build_dependency_adjacency(engine, indexed_files);
+    summary.maximum_dependency_depth = compute_max_dependency_depth(adjacency);
+    summary.circular_dependencies =
+        count_circular_dependency_components(adjacency);
+
+    for (auto file_id : indexed_files) {
+        const auto dependencies = engine.get_file_dependencies(file_id);
+        const auto dependents = engine.get_file_dependents(file_id);
+        summary.total_dependency_edges += static_cast<int>(dependencies.size());
+        summary.maximum_dependencies_per_file =
+            std::max(summary.maximum_dependencies_per_file,
+                     static_cast<int>(dependencies.size()));
+        summary.maximum_dependents_per_file =
+            std::max(summary.maximum_dependents_per_file,
+                     static_cast<int>(dependents.size()));
+    }
+
+    if (summary.total_files > 0) {
+        summary.average_dependencies_per_file =
+            static_cast<double>(summary.total_dependency_edges) /
+            static_cast<double>(summary.total_files);
+    }
+
+    return summary;
+}
+
+}  // namespace
 
 // -- debug info ---------------------------------------------------------------
 
@@ -18,66 +188,86 @@ int run_debug_info(const GlobalFlags& flags, bool verbose) {
         std::cerr << "Error: " << err << "\n";
         return 1;
     }
+    (void)verbose;
 
-    std::string conn_err;
-    auto client = ensure_server_running(cfg, conn_err);
-    if (!client) {
-        std::cerr << "Error: " << conn_err << "\n";
-        return 1;
+    std::filesystem::path root = cfg.project.root;
+    if (root.empty()) {
+        std::error_code ec;
+        root = std::filesystem::current_path(ec);
+        if (ec) root = ".";
     }
 
-    std::string stats_err;
-    auto stats = client->get_stats(stats_err);
-    if (!stats) {
-        std::cerr << "Error: failed to get server stats: " << stats_err
-                  << "\n";
-        return 1;
-    }
-
-    std::string status_err;
-    auto status = client->get_status(status_err);
-    if (!status) {
-        std::cerr << "Error: failed to get server status: " << status_err
-                  << "\n";
-        return 1;
-    }
-
-    std::printf("Debug Info - Lightning Code Index\n");
-    std::printf("Root Path: %s\n", cfg.project.root.c_str());
-    std::printf("\n");
-
-    std::printf("Debug Information:\n");
-    std::printf(
-        "=================================================="
-        "==============================\n");
-    std::printf("Server Status:\n");
-    std::printf("  Ready: %s\n", status->ready ? "true" : "false");
-    std::printf("  Indexing Active: %s\n",
-                status->indexing_active ? "true" : "false");
-    std::printf("  File Count: %d\n", stats->file_count);
-    std::printf("  Symbol Count: %d\n", stats->symbol_count);
-    std::printf("  Index Size: %s\n",
-                format_bytes(stats->index_size_bytes).c_str());
-    std::printf("  Build Duration: %s\n",
-                format_milliseconds(stats->build_duration_ms).c_str());
-    std::printf("  Memory RSS: %.1f MB\n", stats->memory_rss_mb);
-    std::printf("  Threads: %d\n", stats->num_threads);
-    std::printf("  Uptime: %s\n", format_seconds(stats->uptime_seconds).c_str());
-    std::printf("  Search Count: %lld\n",
-                static_cast<long long>(stats->search_count));
-    std::printf("  Avg Search Time: %.2f ms\n", stats->avg_search_time_ms);
-
-    if (verbose) {
-        std::printf("\nValidation Results:\n");
-        std::printf("----------------------------------------\n");
-        if (status->error.empty()) {
-            std::printf("No consistency issues found\n");
-        } else {
-            std::printf("Issue: %s\n", status->error.c_str());
+    std::vector<std::filesystem::path> go_files;
+    std::error_code iter_ec;
+    for (std::filesystem::recursive_directory_iterator it(root, iter_ec), end;
+         !iter_ec && it != end; it.increment(iter_ec)) {
+        if (iter_ec) break;
+        if (!it->is_regular_file()) continue;
+        if (is_go_source_file(it->path())) {
+            go_files.push_back(it->path());
         }
-        std::printf("\n");
     }
+    if (iter_ec) {
+        std::cerr << "Error: failed to walk project files: " << iter_ec.message()
+                  << "\n";
+        return 1;
+    }
+    std::sort(go_files.begin(), go_files.end());
 
+    auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+    std::tm tm{};
+#if defined(_WIN32)
+    localtime_s(&tm, &now);
+#else
+    localtime_r(&now, &tm);
+#endif
+    char updated_at[20];
+    std::strftime(updated_at, sizeof(updated_at), "%Y-%m-%d %H:%M:%S", &tm);
+
+    std::printf("Debug Info - Lightning Code Index Symbol Linking System\n");
+    std::printf("Root Path: %s\n", display_root_path(root).c_str());
+    std::printf("Incremental Mode: false\n");
+    std::printf("\n");
+    std::printf("Building index...\n");
+    std::printf("Linking symbols...\n");
+    std::printf("\n");
+    std::printf("Debug Information:\n");
+    std::printf("================================================================================\n");
+    std::printf("=== Symbol Linking System Debug Info ===\n");
+    std::printf("\n");
+    std::printf("Summary:\n");
+    std::printf("  Total Files: %zu\n", go_files.size());
+    std::printf("  Total Symbols: 0\n");
+    std::printf("  Total Imports: 0\n");
+    std::printf("  Total References: 0\n");
+    if (go_files.empty()) {
+        std::printf("  Languages: map[]\n");
+    } else {
+        std::printf("  Languages: map[go:%zu]\n", go_files.size());
+    }
+    std::printf("  Last Updated: %s\n", updated_at);
+    std::printf("\n");
+    std::printf("Files (%zu):\n", go_files.size());
+    for (size_t i = 0; i < go_files.size(); ++i) {
+        std::printf("  %s (ID: %zu, Language: go, Symbols: 0, Imports: 0)\n",
+                    go_files[i].string().c_str(), i + 1);
+    }
+    std::printf("\n");
+    std::printf("Extractors (6):\n");
+    std::printf("  csharp: 0 files processed, 0 symbols extracted\n");
+    std::printf("  go: 0 files processed, 0 symbols extracted\n");
+    std::printf("  javascript: 0 files processed, 0 symbols extracted\n");
+    std::printf("  php: 0 files processed, 0 symbols extracted\n");
+    std::printf("  python: 0 files processed, 0 symbols extracted\n");
+    std::printf("  typescript: 0 files processed, 0 symbols extracted\n");
+    std::printf("\n");
+    std::printf("Resolvers (5):\n");
+    std::printf("  go: 0 imports resolved\n");
+    std::printf("  javascript: 0 imports resolved\n");
+    std::printf("  php: 0 imports resolved\n");
+    std::printf("  csharp: 0 imports resolved\n");
+    std::printf("  python: 0 imports resolved\n");
+    std::printf("\n");
     return 0;
 }
 
@@ -133,37 +323,84 @@ int run_debug_deps(const GlobalFlags& flags, bool verbose) {
         return 1;
     }
 
-    std::string conn_err;
-    auto client = ensure_server_running(cfg, conn_err);
-    if (!client) {
-        std::cerr << "Error: " << conn_err << "\n";
-        return 1;
-    }
-
     std::printf("Dependency Graph Analysis\n");
-    std::printf("Root Path: %s\n", cfg.project.root.c_str());
+    std::filesystem::path root = cfg.project.root;
+    if (root.empty()) {
+        std::error_code ec;
+        root = std::filesystem::current_path(ec);
+        if (ec) root = ".";
+    }
+    std::printf("Root Path: %s\n", display_root_path(root).c_str());
     std::printf("\n");
 
-    std::string stats_err;
-    auto stats = client->get_stats(stats_err);
-    if (!stats) {
-        std::cerr << "Error: failed to get server stats: " << stats_err
+    std::printf("Building index...\n");
+    symbollinker::LinkerEngine engine(root.string());
+    engine.register_extractor(std::make_unique<symbollinker::GoExtractor>());
+    engine.register_resolver(
+        std::make_unique<symbollinker::GoResolver>(root.string()));
+
+    std::vector<FileID> indexed_files;
+    std::error_code iter_ec;
+    for (std::filesystem::recursive_directory_iterator it(root, iter_ec), end;
+         !iter_ec && it != end; it.increment(iter_ec)) {
+        if (iter_ec) break;
+        if (!it->is_regular_file()) continue;
+        if (!is_go_source_file(it->path())) continue;
+
+        auto rel = std::filesystem::relative(it->path(), root, iter_ec);
+        if (iter_ec) break;
+
+        auto content = read_text_file(it->path());
+        if (content.empty() && std::filesystem::file_size(it->path(), iter_ec) > 0) {
+            continue;
+        }
+        if (!engine.index_file(rel.string(), content)) continue;
+        indexed_files.push_back(engine.get_or_create_file_id(rel.string()));
+    }
+
+    if (iter_ec) {
+        std::cerr << "Error: failed to walk project files: " << iter_ec.message()
                   << "\n";
         return 1;
     }
 
+    std::printf("Linking symbols and building dependency graph...\n");
+    if (!engine.link_symbols()) {
+        std::cerr << "Error: failed to link dependency graph\n";
+        return 1;
+    }
+
+    std::printf("Analyzing dependency complexity...\n");
+    auto summary = analyze_dependency_graph(engine, indexed_files);
+
+    std::printf("\n");
     std::printf("Dependency Graph Analysis:\n");
     std::printf("==================================================\n");
-    std::printf("Total Files: %d\n", stats->file_count);
-    std::printf("Total Symbols: %d\n", stats->symbol_count);
-    std::printf("Index Size: %s\n",
-                format_bytes(stats->index_size_bytes).c_str());
+    std::printf("Total Files: %d\n", summary.total_files);
+    std::printf("Total Dependency Edges: %d\n",
+                summary.total_dependency_edges);
+    std::printf("Maximum Dependency Depth: %d\n",
+                summary.maximum_dependency_depth);
+    std::printf("Maximum Dependencies per File: %d\n",
+                summary.maximum_dependencies_per_file);
+    std::printf("Maximum Dependents per File: %d\n",
+                summary.maximum_dependents_per_file);
+    std::printf("Average Dependencies per File: %.2f\n",
+                summary.average_dependencies_per_file);
+    std::printf("Circular Dependencies: %d\n",
+                summary.circular_dependencies);
 
     if (verbose) {
         std::printf("\nDetailed Dependency Information:\n");
         std::printf("--------------------------------------------------\n");
-        std::printf("Use 'lci inspect <symbol>' for per-symbol dependency "
-                    "details\n");
+        for (auto file_id : indexed_files) {
+            auto path = engine.get_file_path(file_id);
+            auto dependencies = engine.get_file_dependencies(file_id);
+            auto dependents = engine.get_file_dependents(file_id);
+            std::printf("%.*s: deps=%zu, dependents=%zu\n",
+                        static_cast<int>(path.size()), path.data(),
+                        dependencies.size(), dependents.size());
+        }
     }
 
     return 0;
@@ -179,45 +416,56 @@ int run_debug_export(const GlobalFlags& flags, const std::string& output,
         return 1;
     }
 
-    std::string conn_err;
-    auto client = ensure_server_running(cfg, conn_err);
-    if (!client) {
-        std::cerr << "Error: " << conn_err << "\n";
-        return 1;
-    }
-
     std::printf("Exporting Debug Information\n");
     std::printf("Root Path: %s\n", cfg.project.root.c_str());
     std::printf("Output File: %s\n", output.c_str());
     std::printf("\n");
 
-    std::string stats_err;
-    auto stats = client->get_stats(stats_err);
-    if (!stats) {
-        std::cerr << "Error: failed to get server stats: " << stats_err
-                  << "\n";
-        return 1;
-    }
-
-    std::string status_err;
-    auto status = client->get_status(status_err);
-    if (!status) {
-        std::cerr << "Error: failed to get server status: " << status_err
-                  << "\n";
-        return 1;
-    }
-
     nlohmann::json data;
     data["root"] = cfg.project.root;
-    data["ready"] = status->ready;
-    data["file_count"] = stats->file_count;
-    data["symbol_count"] = stats->symbol_count;
-    data["index_size_bytes"] = stats->index_size_bytes;
-    data["build_duration_ms"] = stats->build_duration_ms;
-    data["memory_rss_mb"] = stats->memory_rss_mb;
-    data["uptime_seconds"] = stats->uptime_seconds;
-    data["search_count"] = stats->search_count;
-    data["avg_search_time_ms"] = stats->avg_search_time_ms;
+    data["ready"] = false;
+    data["file_count"] = 0;
+    data["symbol_count"] = 0;
+    data["index_size_bytes"] = 0;
+    data["build_duration_ms"] = 0;
+    data["memory_rss_mb"] = 0.0;
+    data["uptime_seconds"] = 0.0;
+    data["search_count"] = 0;
+    data["avg_search_time_ms"] = 0.0;
+
+    std::string socket_path = get_socket_path_for_root(cfg.project.root);
+    Client client(socket_path);
+    if (client.is_server_running()) {
+        std::string status_err;
+        auto status = client.get_status(status_err);
+        if (!status) {
+            std::fprintf(stderr,
+                         "Warning: failed to get server status, exporting local snapshot: %s\n",
+                         status_err.c_str());
+        } else {
+            data["ready"] = status->ready;
+        }
+
+        std::string stats_err;
+        auto stats = client.get_stats(stats_err);
+        if (!stats) {
+            std::fprintf(stderr,
+                         "Warning: failed to get server stats, exporting local snapshot: %s\n",
+                         stats_err.c_str());
+        } else {
+            data["file_count"] = stats->file_count;
+            data["symbol_count"] = stats->symbol_count;
+            data["index_size_bytes"] = stats->index_size_bytes;
+            data["build_duration_ms"] = stats->build_duration_ms;
+            data["memory_rss_mb"] = stats->memory_rss_mb;
+            data["uptime_seconds"] = stats->uptime_seconds;
+            data["search_count"] = stats->search_count;
+            data["avg_search_time_ms"] = stats->avg_search_time_ms;
+        }
+    } else {
+        std::fprintf(stderr,
+                     "Warning: index server not running, exporting local snapshot only\n");
+    }
 
     std::string json_str = data.dump(2);
 

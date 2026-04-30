@@ -1,0 +1,24 @@
+{
+  "id": "cli/search/no-results",
+  "mode": "cli",
+  "corpus": "multi-lang",
+  "go_binary": "${LCI_GO}",
+  "cpp_binary": "${LCI_CPP}",
+  "invocation": {
+    "args": ["search", "ThisDoesNotExist12345"],
+    "cwd": "${CORPUS}"
+  },
+  "capture": ["stdout", "exit"],
+  "parse": "text",
+  "_rationale": "Derived from Go's cmd/lci/main_test.go `search for non-existent pattern` case. Both binaries should complete cleanly and print a zero-results summary rather than erroring.",
+  "tiers": {},
+  "tolerances": {"score_abs": 0.0, "timed_max_ms": 60000},
+  "expect_exit": 0,
+  "text_normalize": {
+    "strip_lines": ["DEBUG:", "=== Direct Matches ==="],
+    "replace": [
+      {"pattern": "\\(integrated mode[^)]*\\)", "with": "(MODE)"},
+      {"pattern": "\\(standard mode\\)",        "with": "(MODE)"}
+    ]
+  }
+}

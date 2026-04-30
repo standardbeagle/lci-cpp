@@ -1,0 +1,17 @@
+{
+  "id": "cli/symbols/browse-stats",
+  "mode": "cli",
+  "corpus": "multi-lang",
+  "go_binary": "${LCI_GO}",
+  "cpp_binary": "${LCI_CPP}",
+  "invocation": {
+    "args": ["browse", "a.go", "--stats"],
+    "cwd": "${CORPUS}"
+  },
+  "capture": ["stdout", "exit"],
+  "parse": "text",
+  "_rationale": "Go and C++ diverge on browse text output when `--stats` is enabled. Go omits an explicit stats summary line for this corpus; C++ injects one. Added as an intentionally red QA parity test.",
+  "tiers": {},
+  "tolerances": {"score_abs": 0.0, "timed_max_ms": 60000},
+  "expect_exit": 0
+}

@@ -2,10 +2,15 @@
 
 #include <algorithm>
 #include <chrono>
+#include <filesystem>
 #include <string>
 
 #include <absl/container/flat_hash_map.h>
 #include <absl/container/flat_hash_set.h>
+#include <lci/parser/parser.h>
+#include <lci/parser/parser_pool.h>
+#include <lci/parser/unified_extractor.h>
+#include <tree_sitter/api.h>
 
 namespace lci {
 namespace git {
@@ -84,6 +89,20 @@ std::string to_lower(std::string_view s) {
     return out;
 }
 
+int compute_nesting_depth(std::string_view content) {
+    int depth = 0;
+    int max_depth = 0;
+    for (char ch : content) {
+        if (ch == '{') {
+            ++depth;
+            max_depth = std::max(max_depth, depth);
+        } else if (ch == '}' && depth > 0) {
+            --depth;
+        }
+    }
+    return max_depth > 0 ? max_depth - 1 : 0;
+}
+
 }  // namespace
 
 // ============================================================================
@@ -160,28 +179,49 @@ bool Analyzer::parse_changed_files(const std::vector<ChangedFile>& files,
             continue;
         }
 
-        // Extract symbols from the file using the master index's symbol store.
-        // The Analyzer relies on the index having parsed the file already.
-        auto file_id = index_.path_to_id(file.path);
-        if (file_id == 0) continue;
+        auto ext = std::filesystem::path(file.path).extension().string();
+        parser::Language lang{};
+        if (!parser::language_from_extension(ext, lang)) continue;
 
-        auto& sym_loc = index_.symbol_location_index();
-        // We iterate all symbols for this file via the symbol store.
-        auto& sym_store = const_cast<SymbolLocationIndex&>(sym_loc);
-        (void)sym_store;
+        parser::PooledParser parser_guard(lang);
+        if (!parser_guard) continue;
 
-        // Simplified: add a SymbolInfo entry per file for metrics analysis.
-        // Full symbol extraction requires the parser, which is outside scope
-        // of this port. The Go version uses TreeSitterParser directly; here
-        // we use what's already indexed.
-        SymbolInfo si;
-        si.file_path = file.path;
-        si.name = file.path;
-        si.type = "file";
-        si.line = 1;
-        si.lines_of_code = static_cast<int>(
-            std::count(content.begin(), content.end(), '\n') + 1);
-        out.push_back(std::move(si));
+        TSTree* tree = ts_parser_parse_string(
+            parser_guard.get(), nullptr, content.data(),
+            static_cast<uint32_t>(content.size()));
+        if (tree == nullptr) continue;
+
+        parser::UnifiedExtractor extractor;
+        extractor.init(content, FileID{1}, ext, file.path);
+        extractor.extract(tree);
+        auto extracted = extractor.get_results();
+        ts_tree_delete(tree);
+
+        for (const auto& sym : extracted.symbols) {
+            auto type = std::string(to_string(sym.type));
+            if (type != "function" && type != "method") continue;
+
+            SymbolInfo si;
+            si.name = sym.name;
+            si.type = type;
+            si.file_path = file.path;
+            si.line = sym.line;
+            si.end_line = sym.end_line;
+            si.lines_of_code = (sym.end_line >= sym.line)
+                                   ? (sym.end_line - sym.line + 1)
+                                   : 1;
+            si.content = extract_symbol_content(content, sym.line, sym.end_line);
+            si.nesting_depth = compute_nesting_depth(si.content);
+
+            for (const auto& [pk, cx] : extracted.complexity) {
+                if (pk.line == sym.line && pk.column == sym.column) {
+                    si.complexity = cx;
+                    break;
+                }
+            }
+
+            out.push_back(std::move(si));
+        }
     }
     return true;
 }
@@ -191,12 +231,29 @@ void Analyzer::get_existing_symbols(std::vector<SymbolInfo>& out) {
     for (auto fid : file_ids) {
         std::string path = index_.get_file_path(fid);
         if (path.empty()) continue;
+        auto content = index_.file_content_store().get_content(fid);
+        auto symbols = index_.ref_tracker().get_file_enhanced_symbols(fid);
+        for (const auto* sym : symbols) {
+            if (sym == nullptr) continue;
 
-        SymbolInfo si;
-        si.file_path = path;
-        si.name = path;
-        si.type = "file";
-        out.push_back(std::move(si));
+            auto type = std::string(to_string(sym->symbol.type));
+            if (type != "function" && type != "method") continue;
+
+            SymbolInfo si;
+            si.name = sym->symbol.name;
+            si.type = type;
+            si.file_path = path;
+            si.line = sym->symbol.line;
+            si.end_line = sym->symbol.end_line;
+            si.complexity = sym->complexity;
+            si.lines_of_code = (sym->symbol.end_line >= sym->symbol.line)
+                                   ? (sym->symbol.end_line - sym->symbol.line + 1)
+                                   : 1;
+            si.content = extract_symbol_content(content, sym->symbol.line,
+                                                sym->symbol.end_line);
+            si.nesting_depth = compute_nesting_depth(si.content);
+            out.push_back(std::move(si));
+        }
     }
 }
 
@@ -608,13 +665,15 @@ void Analyzer::check_metrics(const std::vector<SymbolInfo>& new_symbols,
             MetricsFinding f;
             f.severity = determine_metrics_severity(
                 MetricsIssueType::HighComplexity, new_m, thresholds);
-            f.description = "Function '" + sym.name + "' has high complexity (" +
+            f.description = "Function '" + sym.name +
+                            "' has high cyclomatic complexity (" +
                             std::to_string(sym.complexity) + ")";
             f.symbol = sym;
             f.issue_type = MetricsIssueType::HighComplexity;
             f.issue = "Cyclomatic complexity of " + std::to_string(sym.complexity) +
                       " exceeds threshold of " + std::to_string(thresholds.high_complexity);
-            f.suggestion = "Break into smaller, more focused functions";
+            f.suggestion =
+                "Consider breaking this function into smaller, more focused functions";
             out.push_back(std::move(f));
         }
 
@@ -629,7 +688,8 @@ void Analyzer::check_metrics(const std::vector<SymbolInfo>& new_symbols,
             f.issue = "Function has " + std::to_string(sym.lines_of_code) +
                       " lines, exceeding threshold of " +
                       std::to_string(thresholds.long_function);
-            f.suggestion = "Extract parts into smaller helper functions";
+            f.suggestion =
+                "Extract parts of this function into smaller helper functions";
             out.push_back(std::move(f));
         }
 
@@ -643,7 +703,8 @@ void Analyzer::check_metrics(const std::vector<SymbolInfo>& new_symbols,
             f.issue_type = MetricsIssueType::DeepNesting;
             f.issue = "Nesting depth of " + std::to_string(sym.nesting_depth) +
                       " exceeds threshold of " + std::to_string(thresholds.deep_nesting);
-            f.suggestion = "Reduce nesting with early returns or extracted functions";
+            f.suggestion =
+                "Reduce nesting by using early returns, extracting functions, or simplifying conditions";
             out.push_back(std::move(f));
         }
 
@@ -734,6 +795,7 @@ void Analyzer::build_report(const std::vector<ChangedFile>& files,
     out.metadata.base_ref = std::move(base_ref);
     out.metadata.target_ref = std::move(target_ref);
     out.metadata.scope = params.scope;
+    out.metadata.analyzed_at = std::chrono::system_clock::now();
     out.metadata.analysis_time_ms = elapsed_ms;
 }
 
@@ -748,6 +810,7 @@ void Analyzer::empty_report(const AnalysisParams& params, int64_t elapsed_ms,
     out.metadata.base_ref = std::move(base_ref);
     out.metadata.target_ref = std::move(target_ref);
     out.metadata.scope = params.scope;
+    out.metadata.analyzed_at = std::chrono::system_clock::now();
     out.metadata.analysis_time_ms = elapsed_ms;
 }
 

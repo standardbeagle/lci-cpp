@@ -100,8 +100,13 @@ std::unique_ptr<Client> ensure_server_running(const Config& cfg,
 
     std::fprintf(stderr, "Waiting for index server to be ready...\n");
 
+    int ready_timeout_sec = cfg.performance.indexing_timeout_sec > 0
+                                ? cfg.performance.indexing_timeout_sec
+                                : 30;
+
     std::string wait_err;
-    if (!client->wait_for_ready(std::chrono::milliseconds(30000), wait_err)) {
+    if (!client->wait_for_ready(std::chrono::seconds(ready_timeout_sec),
+                                wait_err)) {
         error = "server did not become ready: " + wait_err;
         return nullptr;
     }

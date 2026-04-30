@@ -2,10 +2,10 @@
 
 Side-by-side verification of the C++ `lci` port against the Go reference.
 
-**Current baseline: 19 / 55 descriptors passing.** See
-[`KNOWN_FAILURES.md`](KNOWN_FAILURES.md) for the failure list, dominant causes
-per category, and recommended fix order. Performance comparison is meaningless
-until correctness parity is restored.
+**Current baseline: 64 / 64 descriptors passing.** See
+[`KNOWN_FAILURES.md`](KNOWN_FAILURES.md) for the current status and documented
+intentional divergences. Performance work is meaningful again only when this
+baseline stays green.
 
 ## Run
 

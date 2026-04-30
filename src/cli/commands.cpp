@@ -54,7 +54,22 @@ int run_def(const GlobalFlags& flags, const std::string& symbol) {
 
 // -- refs command -------------------------------------------------------------
 
-int run_refs(const GlobalFlags& flags, const std::string& symbol) {
+int run_refs(const GlobalFlags& flags, const std::string& symbol,
+             bool json_output) {
+    if (json_output) {
+        std::cout
+            << "Incorrect Usage: flag provided but not defined: -json\n\n"
+            << "NAME:\n"
+            << "   lci refs - Find symbol references\n\n"
+            << "USAGE:\n"
+            << "   lci refs command [command options] \n\n"
+            << "COMMANDS:\n"
+            << "   help, h  Shows a list of commands or help for one command\n\n"
+            << "OPTIONS:\n"
+            << "   --help, -h  show help\n";
+        return 1;
+    }
+
     Config cfg;
     if (std::string err = load_config_with_overrides(flags, cfg); !err.empty()) {
         std::cerr << "Error: " << err << "\n";
@@ -381,6 +396,10 @@ int run_config_show(const GlobalFlags& flags, const std::string& format) {
         std::cerr << "Error: " << err << "\n";
         return 1;
     }
+    if (std::string err = validate_config(cfg); !err.empty()) {
+        std::cerr << "Error: " << err << "\n";
+        return 1;
+    }
 
     if (format == "json") {
         nlohmann::json j;
@@ -429,7 +448,15 @@ int run_config_show(const GlobalFlags& flags, const std::string& format) {
 
     std::printf("Performance Settings:\n");
     std::printf("  Max memory:        %d MB\n", cfg.performance.max_memory_mb);
+    std::printf("  Max goroutines:    %d\n", cfg.performance.max_goroutines);
     std::printf("  Debounce:          %d ms\n", cfg.performance.debounce_ms);
+    std::printf("\n");
+
+    std::printf("Search Settings:\n");
+    std::printf("  Max results:       %d\n", cfg.search.max_results);
+    std::printf("  Max context lines: %d\n", cfg.search.max_context_lines);
+    std::printf("  Enable fuzzy:      %s\n",
+                cfg.search.enable_fuzzy ? "true" : "false");
     std::printf("\n");
 
     std::printf("Include Patterns (%zu):\n", cfg.include.size());
@@ -541,8 +568,13 @@ int run_git_analyze(const GlobalFlags& flags, const std::string& scope,
         return 1;
     }
 
+    const auto& report =
+        (result->contains("report") && (*result)["report"].is_object())
+            ? (*result)["report"]
+            : *result;
+
     if (json_output) {
-        std::cout << result->dump(2) << "\n";
+        std::cout << report.dump(2) << "\n";
         return 0;
     }
 
@@ -550,8 +582,8 @@ int run_git_analyze(const GlobalFlags& flags, const std::string& scope,
     std::printf("Git Change Analysis\n");
     std::printf("==================\n\n");
 
-    if (result->contains("summary")) {
-        auto& summary = (*result)["summary"];
+    if (report.contains("summary")) {
+        auto& summary = report["summary"];
         std::printf("Summary\n");
         std::printf("-------\n");
         std::printf("Files changed: %d | Symbols: +%d ~%d\n",
@@ -572,8 +604,8 @@ int run_git_analyze(const GlobalFlags& flags, const std::string& scope,
         }
     }
 
-    if (result->contains("duplicates") && (*result)["duplicates"].is_array()) {
-        auto& dups = (*result)["duplicates"];
+    if (report.contains("duplicates") && report["duplicates"].is_array()) {
+        auto& dups = report["duplicates"];
         if (!dups.empty()) {
             std::printf("\nDuplicates\n");
             std::printf("----------\n");
@@ -606,9 +638,9 @@ int run_git_analyze(const GlobalFlags& flags, const std::string& scope,
         }
     }
 
-    if (result->contains("naming_issues") &&
-        (*result)["naming_issues"].is_array()) {
-        auto& issues = (*result)["naming_issues"];
+    if (report.contains("naming_issues") &&
+        report["naming_issues"].is_array()) {
+        auto& issues = report["naming_issues"];
         if (!issues.empty()) {
             std::printf("\nNaming Issues\n");
             std::printf("-------------\n");
@@ -633,8 +665,8 @@ int run_git_analyze(const GlobalFlags& flags, const std::string& scope,
         }
     }
 
-    if (result->contains("metadata")) {
-        auto& meta = (*result)["metadata"];
+    if (report.contains("metadata")) {
+        auto& meta = report["metadata"];
         std::printf("\nAnalysis: %s -> %s (%dms)\n",
                     meta.value("base_ref", "").c_str(),
                     meta.value("target_ref", "").c_str(),
@@ -752,7 +784,7 @@ int run_inspect(const GlobalFlags& flags, const std::string& name,
     req.name = name;
     req.type = type;
     req.file = file;
-    req.include = include_sections;
+    req.include = include_sections.empty() ? "signature" : include_sections;
 
     std::string insp_err;
     auto result = client->inspect_symbol(req, insp_err);
@@ -898,7 +930,10 @@ int run_browse(const GlobalFlags& flags, const std::string& file_path,
     req.kind = kind;
     req.sort = sort;
     req.show_imports = show_imports;
-    req.show_stats = show_stats;
+    // Go's browse surface accepts --stats but does not currently enrich the
+    // CLI/JSON payload with a dedicated stats block for this command path.
+    // Keep C++ aligned with that contract instead of emitting extra fields.
+    req.show_stats = false;
     if (exported) {
         req.exported = true;
     }

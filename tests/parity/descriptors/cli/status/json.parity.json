@@ -1,0 +1,19 @@
+{
+  "id": "cli/status/json",
+  "mode": "cli",
+  "corpus": "multi-lang",
+  "go_binary": "${LCI_GO}",
+  "cpp_binary": "${LCI_CPP}",
+  "invocation": {
+    "args": ["status", "--json"],
+    "cwd": "${CORPUS}"
+  },
+  "capture": ["stdout", "exit"],
+  "parse": "json",
+  "_rationale": "QA-discovered schema drift. Go emits `timestamp`, `memory_alloc_mb`, `memory_total_mb`, `memory_heap_mb`, and `num_goroutines`; C++ emits `memory_rss_mb` and `num_threads` instead. This red test keeps the mismatch visible until the status JSON contract is aligned.",
+  "tiers": {
+    "ignore": ["timestamp", "uptime_seconds"]
+  },
+  "tolerances": {"score_abs": 0.0, "timed_max_ms": 60000},
+  "expect_exit": 0
+}

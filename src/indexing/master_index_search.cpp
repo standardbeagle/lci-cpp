@@ -111,6 +111,108 @@ std::vector<SearchResult> MasterIndex::execute_search(
         return {};
     }
 
+    if (options.declaration_only) {
+        auto symbols = ref_tracker_.find_symbols_by_name(pattern);
+        std::sort(symbols.begin(), symbols.end(),
+                  [](const EnhancedSymbol* lhs, const EnhancedSymbol* rhs) {
+                      if (lhs->symbol.file_id != rhs->symbol.file_id) {
+                          return lhs->symbol.file_id < rhs->symbol.file_id;
+                      }
+                      if (lhs->symbol.line != rhs->symbol.line) {
+                          return lhs->symbol.line < rhs->symbol.line;
+                      }
+                      if (lhs->symbol.column != rhs->symbol.column) {
+                          return lhs->symbol.column < rhs->symbol.column;
+                      }
+                      return lhs->id < rhs->id;
+                  });
+
+        std::vector<SearchResult> results;
+        results.reserve(symbols.size());
+        for (const auto* sym : symbols) {
+            if (static_cast<int>(results.size()) >= options.max_results) break;
+
+            SearchContext ctx =
+                extract_context(sym->symbol.file_id, sym->symbol.line,
+                                options.max_context_lines);
+            int column = sym->symbol.column;
+            if (!ctx.lines.empty()) {
+                const int line_idx = sym->symbol.line - ctx.start_line;
+                if (line_idx >= 0 &&
+                    line_idx < static_cast<int>(ctx.lines.size())) {
+                    const std::string& line_text =
+                        ctx.lines[static_cast<size_t>(line_idx)];
+                    const size_t pos = line_text.find(sym->symbol.name);
+                    if (pos != std::string::npos) {
+                        column = static_cast<int>(pos);
+                    }
+                }
+            }
+
+            SearchResult r;
+            r.file_id = sym->symbol.file_id;
+            r.path = id_to_path(sym->symbol.file_id);
+            r.line = sym->symbol.line;
+            r.column = column;
+            r.match_text = sym->symbol.name;
+            r.context = std::move(ctx);
+            r.context.block_name = sym->symbol.name;
+            r.context.block_type = "lines";
+            results.push_back(std::move(r));
+        }
+        return results;
+    }
+
+    if (options.usage_only) {
+        auto symbols = ref_tracker_.find_symbols_by_name(pattern);
+        std::sort(symbols.begin(), symbols.end(),
+                  [](const EnhancedSymbol* lhs, const EnhancedSymbol* rhs) {
+                      if (lhs->symbol.file_id != rhs->symbol.file_id) {
+                          return lhs->symbol.file_id < rhs->symbol.file_id;
+                      }
+                      if (lhs->symbol.line != rhs->symbol.line) {
+                          return lhs->symbol.line < rhs->symbol.line;
+                      }
+                      if (lhs->symbol.column != rhs->symbol.column) {
+                          return lhs->symbol.column < rhs->symbol.column;
+                      }
+                      return lhs->id < rhs->id;
+                  });
+
+        std::vector<SearchResult> results;
+        for (const auto* sym : symbols) {
+            auto refs = ref_tracker_.get_symbol_references(sym->id, "incoming");
+            std::sort(refs.begin(), refs.end(),
+                      [](const auto& lhs, const auto& rhs) {
+                          if (lhs.file_id != rhs.file_id) {
+                              return lhs.file_id < rhs.file_id;
+                          }
+                          if (lhs.line != rhs.line) {
+                              return lhs.line < rhs.line;
+                          }
+                          return lhs.column < rhs.column;
+                      });
+
+            for (const auto& ref : refs) {
+                if (static_cast<int>(results.size()) >= options.max_results) {
+                    return results;
+                }
+
+                SearchResult r;
+                r.file_id = ref.file_id;
+                r.path = id_to_path(ref.file_id);
+                r.line = ref.line;
+                r.column = ref.column;
+                r.match_text = pattern;
+                r.context =
+                    extract_context(ref.file_id, ref.line,
+                                    options.max_context_lines);
+                results.push_back(std::move(r));
+            }
+        }
+        return results;
+    }
+
     // Try trigram candidates first to narrow the file list.
     auto trigram_candidates = trigram_index_.find_candidates_with_options(
         pattern, options.case_insensitive);
@@ -162,52 +264,6 @@ std::vector<SearchResult> MasterIndex::execute_search(
 
     for (FileID fid : filtered) {
         if (static_cast<int>(results.size()) >= options.max_results) break;
-
-        // For declaration_only: search symbol names.
-        if (options.declaration_only) {
-            auto symbols = ref_tracker_.find_symbols_by_name(pattern);
-            for (const auto* sym : symbols) {
-                if (sym->symbol.file_id != fid) continue;
-                if (static_cast<int>(results.size()) >= options.max_results) break;
-
-                SearchResult r;
-                r.file_id = fid;
-                r.path = id_to_path(fid);
-                r.line = sym->symbol.line;
-                r.column = sym->symbol.column;
-                r.match_text = sym->symbol.name;
-                r.context = extract_context(fid, sym->symbol.line,
-                                             options.max_context_lines);
-                r.context.block_name = sym->symbol.name;
-                r.context.block_type = "lines";
-                results.push_back(std::move(r));
-            }
-            continue;
-        }
-
-        // For usage_only: search references to matching symbols.
-        if (options.usage_only) {
-            auto symbols = ref_tracker_.find_symbols_by_name(pattern);
-            for (const auto* sym : symbols) {
-                auto refs = ref_tracker_.get_symbol_references(
-                    sym->id, "incoming");
-                for (const auto& ref : refs) {
-                    if (ref.file_id != fid) continue;
-                    if (static_cast<int>(results.size()) >= options.max_results) break;
-
-                    SearchResult r;
-                    r.file_id = fid;
-                    r.path = id_to_path(fid);
-                    r.line = ref.line;
-                    r.column = ref.column;
-                    r.match_text = pattern;
-                    r.context = extract_context(fid, ref.line,
-                                                 options.max_context_lines);
-                    results.push_back(std::move(r));
-                }
-            }
-            continue;
-        }
 
         // General text search: scan file content for pattern matches.
         auto content_sv = file_content_store_->get_content(fid);

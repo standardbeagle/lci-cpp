@@ -77,7 +77,8 @@ int run_mcp(const GlobalFlags& flags);
 int run_def(const GlobalFlags& flags, const std::string& symbol);
 
 /// refs subcommand: find symbol references. Returns 0 on success, non-zero on error.
-int run_refs(const GlobalFlags& flags, const std::string& symbol);
+int run_refs(const GlobalFlags& flags, const std::string& symbol,
+             bool json_output);
 
 /// tree subcommand: display call hierarchy. Returns 0 on success, non-zero on error.
 int run_tree(const GlobalFlags& flags, const std::string& function_name,

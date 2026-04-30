@@ -1,0 +1,17 @@
+{
+  "id": "cli/status/text",
+  "mode": "cli",
+  "corpus": "multi-lang",
+  "go_binary": "${LCI_GO}",
+  "cpp_binary": "${LCI_CPP}",
+  "invocation": {
+    "args": ["status"],
+    "cwd": "${CORPUS}"
+  },
+  "capture": ["stdout", "exit"],
+  "parse": "text",
+  "_rationale": "QA-discovered divergence from a direct Go-vs-C++ CLI sweep. Both binaries implement `status`, but the human-readable output differs materially: Go reports goroutines and three memory lines; C++ reports threads and RSS only.",
+  "tiers": {},
+  "tolerances": {"score_abs": 0.0, "timed_max_ms": 60000},
+  "expect_exit": 0
+}

@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <system_error>
@@ -11,6 +12,44 @@
 
 namespace lci {
 namespace cli {
+
+namespace {
+
+std::string to_relative_display_path(const std::string& path) {
+    std::error_code cwd_ec;
+    auto cwd = std::filesystem::current_path(cwd_ec);
+    if (cwd_ec || path.empty()) {
+        return path;
+    }
+
+    std::error_code rel_ec;
+    auto rel = std::filesystem::relative(path, cwd, rel_ec);
+    if (!rel_ec && !rel.empty() && rel.string().find("..") == std::string::npos) {
+        return rel.string();
+    }
+    return path;
+}
+
+std::string read_line_from_file(const std::string& path, int line_number) {
+    if (line_number <= 0 || path.empty()) {
+        return {};
+    }
+
+    std::ifstream in(path);
+    if (!in) {
+        return {};
+    }
+
+    std::string line;
+    for (int current = 1; current <= line_number; ++current) {
+        if (!std::getline(in, line)) {
+            return {};
+        }
+    }
+    return line;
+}
+
+}  // namespace
 
 int run_search(const GlobalFlags& flags, const std::string& pattern,
                int max_lines, bool case_insensitive, bool json_output,
@@ -103,24 +142,13 @@ int run_search(const GlobalFlags& flags, const std::string& pattern,
         // Resolve the current working directory once so we can render
         // paths relative to it, mirroring Go's compact-mode formatter
         // (`b.py:1:` rather than `/abs/path/to/b.py:1:`).
-        std::error_code rel_ec;
-        auto cwd = std::filesystem::current_path(rel_ec);
         for (auto& r : results) {
-            std::string path = r.value("path", "");
+            std::string path = to_relative_display_path(r.value("path", ""));
             int line = r.value("line", 0);
             auto context = r.value("context", nlohmann::json::object());
             int start_line = context.value("start_line", 0);
             auto lines = context.value("lines", nlohmann::json::array());
-
             std::string display_path = path;
-            if (!rel_ec) {
-                std::error_code rel2;
-                auto rel = std::filesystem::relative(path, cwd, rel2);
-                if (!rel2 && !rel.empty() &&
-                    rel.string().find("..") == std::string::npos) {
-                    display_path = rel.string();
-                }
-            }
 
             for (size_t i = 0; i < lines.size(); ++i) {
                 int line_num = start_line + static_cast<int>(i);
@@ -145,13 +173,27 @@ int run_search(const GlobalFlags& flags, const std::string& pattern,
                 results.size(), elapsed_ms);
 
     for (auto& r : results) {
-        std::string path = r.value("path", "");
+        std::string path = to_relative_display_path(r.value("path", ""));
         int line = r.value("line", 0);
         auto context = r.value("context", nlohmann::json::object());
         std::string block_name = context.value("block_name", "");
         std::string block_type = context.value("block_type", "");
         int start_line = context.value("start_line", 0);
         auto lines = context.value("lines", nlohmann::json::array());
+
+        if (case_insensitive && start_line == line - 1 && line > 1 &&
+            !lines.empty()) {
+            std::string first = lines[0].get<std::string>();
+            if (!first.empty() && first.back() == '\n') first.pop_back();
+            if (first.empty()) {
+                auto prior_line =
+                    read_line_from_file(r.value("path", ""), line - 2);
+                if (!prior_line.empty()) {
+                    lines.insert(lines.begin(), prior_line);
+                    start_line = line - 2;
+                }
+            }
+        }
 
         std::printf("%s:%d", path.c_str(), line);
         if (!block_name.empty()) {
@@ -238,7 +280,7 @@ int run_grep(const GlobalFlags& flags, const std::string& pattern,
                 results.size(), elapsed_ms);
 
     for (auto& r : results) {
-        std::string path = r.value("path", "");
+        std::string path = to_relative_display_path(r.value("path", ""));
         int line = r.value("line", 0);
         int column = r.value("column", 0);
         auto context = r.value("context", nlohmann::json::object());

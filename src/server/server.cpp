@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <ctime>
 #include <filesystem>
 #include <functional>
 #include <thread>
@@ -1068,12 +1069,18 @@ void IndexServer::handle_git_analyze(const httplib::Request& req,
                 {"lines_of_code", finding.new_metrics->lines_of_code},
                 {"nesting_depth", finding.new_metrics->nesting_depth},
             };
+        } else {
+            out["new_metrics"] = {
+                {"complexity", finding.symbol.complexity},
+                {"lines_of_code", finding.symbol.lines_of_code},
+                {"nesting_depth", finding.symbol.nesting_depth},
+            };
         }
         return out;
     };
 
-    nlohmann::json j;
-    j["summary"] = {
+    nlohmann::json report_j;
+    report_j["summary"] = {
         {"files_changed", report.summary.files_changed},
         {"symbols_added", report.summary.symbols_added},
         {"symbols_modified", report.summary.symbols_modified},
@@ -1086,18 +1093,33 @@ void IndexServer::handle_git_analyze(const httplib::Request& req,
     };
 
     if (!report.metrics_issues.empty()) {
-        j["metrics_issues"] = nlohmann::json::array();
+        report_j["metrics_issues"] = nlohmann::json::array();
         for (const auto& finding : report.metrics_issues) {
-            j["metrics_issues"].push_back(metrics_to_json(finding));
+            report_j["metrics_issues"].push_back(metrics_to_json(finding));
         }
     }
 
-    j["metadata"] = {
+    auto analyzed_at = std::chrono::system_clock::to_time_t(report.metadata.analyzed_at);
+    std::tm analyzed_tm{};
+#ifdef _WIN32
+    gmtime_s(&analyzed_tm, &analyzed_at);
+#else
+    gmtime_r(&analyzed_at, &analyzed_tm);
+#endif
+    char analyzed_buf[32];
+    std::strftime(analyzed_buf, sizeof(analyzed_buf), "%Y-%m-%dT%H:%M:%SZ",
+                  &analyzed_tm);
+
+    report_j["metadata"] = {
         {"base_ref", report.metadata.base_ref},
         {"target_ref", report.metadata.target_ref},
         {"scope", std::string(git::to_string(report.metadata.scope))},
+        {"analysis_time_ms", report.metadata.analysis_time_ms},
+        {"analyzed_at", std::string(analyzed_buf)},
     };
 
+    nlohmann::json j;
+    j["report"] = std::move(report_j);
     json_response(res, j);
 }
 
@@ -1301,6 +1323,11 @@ void IndexServer::handle_inspect_symbol(const httplib::Request& req,
         matched = filtered;
     }
 
+    auto include_raw = body.value("include", "");
+    const bool include_signature =
+        include_raw == "all" || include_raw == "signature" ||
+        include_raw.find("signature") != std::string::npos;
+
     auto& tracker = indexer_->ref_tracker();
 
     nlohmann::json symbols = nlohmann::json::array();
@@ -1314,18 +1341,36 @@ void IndexServer::handle_inspect_symbol(const httplib::Request& req,
         e["file"] = fp;
         e["line"] = sym->symbol.line;
         e["is_exported"] = sym->is_exported;
-        e["signature"] = sym->signature;
-        e["doc_comment"] = sym->doc_comment;
         e["complexity"] = sym->complexity;
-        e["parameter_count"] = static_cast<int>(sym->parameter_count);
-        e["receiver_type"] = sym->receiver_type;
-        e["incoming_refs"] = static_cast<int>(sym->incoming_refs.size());
         e["outgoing_refs"] = static_cast<int>(sym->outgoing_refs.size());
-        e["annotations"] = sym->annotations;
+        if (include_signature && !sym->signature.empty()) {
+            e["signature"] = sym->signature;
+        }
+        if (!sym->doc_comment.empty()) {
+            e["doc_comment"] = sym->doc_comment;
+        }
+        if (sym->parameter_count > 0) {
+            e["parameter_count"] = static_cast<int>(sym->parameter_count);
+        }
+        if (!sym->receiver_type.empty()) {
+            e["receiver_type"] = sym->receiver_type;
+        }
+        if (!sym->incoming_refs.empty()) {
+            e["incoming_refs"] = static_cast<int>(sym->incoming_refs.size());
+        }
+        if (!sym->annotations.empty()) {
+            e["annotations"] = sym->annotations;
+        }
 
         // Callers/callees
-        e["callers"] = tracker.get_caller_names(sym->id);
-        e["callees"] = tracker.get_callee_names(sym->id);
+        auto callers = tracker.get_caller_names(sym->id);
+        if (!callers.empty()) {
+            e["callers"] = callers;
+        }
+        auto callees = tracker.get_callee_names(sym->id);
+        if (!callees.empty()) {
+            e["callees"] = callees;
+        }
 
         // Type hierarchy
         auto rels = tracker.get_type_relationships(sym->id);

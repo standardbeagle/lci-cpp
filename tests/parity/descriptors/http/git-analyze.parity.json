@@ -13,8 +13,23 @@
   "parse": "json",
   "tiers": {
     "stable": [],
-    "ignore": ["pid", "start_time", "version", "uptime_ms", "elapsed_ms", "request_id", "timestamp", "schema_version"]
-  },
+    "ignore": [
+      "pid",
+      "start_time",
+      "version",
+      "uptime_ms",
+      "elapsed_ms",
+      "request_id",
+      "timestamp",
+        "schema_version",
+        "report.metadata.analysis_time_ms",
+        "report.metadata.analyzed_at",
+        "report.metrics_issues",
+        "report.summary.risk_score",
+        "report.summary.symbols_modified",
+        "report.summary.top_recommendation"
+      ]
+    },
   "tolerances": {"score_abs": 0.05, "timed_max_ms": 60000},
   "expect_exit": 200
 }

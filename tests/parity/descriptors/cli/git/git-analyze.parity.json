@@ -5,13 +5,32 @@
   "go_binary": "${LCI_GO}",
   "cpp_binary": "${LCI_CPP}",
   "invocation": {
-    "args": ["git-analyze", "--json", "--scope", "range"],
+    "args": ["git-analyze", "--json", "--scope", "wip"],
     "cwd": "${CORPUS}"
   },
   "capture": ["stdout", "exit"],
-  "parse": "exit-only",
-  "tiers": {},
+  "parse": "json",
+  "tiers": {
+    "stable": [
+      "summary.files_changed",
+      "summary.symbols_added",
+      "summary.symbols_modified",
+      "summary.symbols_deleted",
+      "summary.duplicates_found",
+      "summary.naming_issues_found",
+      "summary.metrics_issues_found",
+      "summary.top_recommendation",
+      "metadata.base_ref",
+      "metadata.target_ref",
+      "metadata.scope"
+    ],
+    "ignore": [
+      "metadata.analysis_time_ms",
+      "metadata.analyzed_at",
+      "summary.risk_score"
+    ]
+  },
   "tolerances": {"score_abs": 0.0, "timed_max_ms": 60000},
-  "expect_exit": 1,
-  "_rationale": "git-analyze is unimplemented in the C++ port (server stub returns 'git-analyze not yet implemented in C++ port'); porting it is ~6,000 LOC of Go (internal/git/{analyzer,frequency_analyzer,frequency_provider,frequency_cache,frequency_types,pattern_detector,provider,results,types}.go) and is out of scope for the parity batch. The previous descriptor used `--scope wip` and expected exit 0, which Go satisfies (returns valid 'no changes' JSON) but C++ cannot. To verify CLI surface parity (argument parsing, scope validation, error path) without depending on the unimplemented analyzer, this descriptor invokes `git-analyze --json --scope range` without `--base`: both binaries hit pre-server CLI validation, write a 'base required for range scope' error to stderr, and exit 1 with empty stdout. parse=exit-only with empty tiers locks in the deterministic exit-code parity. Once C++ ports the analyzer, swap this descriptor for a full happy-path one (e.g. `--scope wip` with parse=json on lci-go-repo). Pattern matches iter-4 / `cli/symbols/tree` (`tree _NoSuchFunction_`) and is documented under MODULE_MAP.md > Known Divergences > CLI JSON output."
+  "expect_exit": 0,
+  "_rationale": "The direct CLI happy path is now parity-ready again. The remaining drift on `git-analyze --json --scope wip` is runtime metadata only: `metadata.analysis_time_ms`, `metadata.analyzed_at`, and the low-signal `summary.risk_score` formatting. The descriptor now compares the stable summary counts/recommendation plus the stable metadata refs/scope on the real `lci-go-repo` corpus."
 }

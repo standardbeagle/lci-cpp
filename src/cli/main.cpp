@@ -235,8 +235,12 @@ int main(int argc, char* argv[]) {
 
     std::string refs_symbol;
     refs_cmd->add_option("symbol", refs_symbol, "Symbol name")->required();
+    bool refs_json = false;
+    refs_cmd->add_flag("--json", refs_json, "Output as JSON")->group("");
 
-    refs_cmd->callback([&]() { std::exit(run_refs(gflags, refs_symbol)); });
+    refs_cmd->callback([&]() {
+        std::exit(run_refs(gflags, refs_symbol, refs_json));
+    });
 
     // -- Tree subcommand ------------------------------------------------------
     auto* tree_cmd =
