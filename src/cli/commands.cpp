@@ -7,9 +7,12 @@
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <string_view>
 
 #include <lci/indexing/pipeline_scanner.h>
 #include <nlohmann/json.hpp>
+
+#include "symbol_filters.h"
 
 namespace lci {
 namespace cli {
@@ -678,6 +681,177 @@ int run_git_analyze(const GlobalFlags& flags, const std::string& scope,
 
 // -- symbols command ----------------------------------------------------------
 
+namespace {
+
+// Returns true if `s` contains glob metacharacters. A bare substring
+// returns false and is intended to be passed to the server's substring
+// file filter unchanged.
+bool sym_is_glob_pattern(std::string_view s) {
+    for (char c : s) {
+        if (c == '*' || c == '?' || c == '[') return true;
+    }
+    return false;
+}
+
+// Single-segment glob matcher (Go `filepath.Match` semantics for the
+// simple forms `lci symbols --file` accepts). `*` matches any run of
+// non-`/`, `?` matches any single non-`/`. Iterative implementation with
+// star-backtracking; no recursion.
+bool sym_glob_match(std::string_view pattern, std::string_view text) {
+    size_t px = 0, tx = 0;
+    size_t star_px = std::string_view::npos;
+    size_t star_tx = 0;
+
+    while (tx < text.size()) {
+        if (px < pattern.size() && pattern[px] == '*') {
+            // Single * — does not cross '/'.
+            star_px = px + 1;
+            star_tx = tx;
+            ++px;
+            continue;
+        }
+        if (px < pattern.size() && pattern[px] == '?') {
+            if (text[tx] != '/') {
+                ++px;
+                ++tx;
+                continue;
+            }
+        } else if (px < pattern.size() && pattern[px] == text[tx]) {
+            ++px;
+            ++tx;
+            continue;
+        }
+        // Backtrack to last star (but only if neither side has crossed '/').
+        if (star_px != std::string_view::npos && text[star_tx] != '/') {
+            px = star_px;
+            ++star_tx;
+            tx = star_tx;
+            continue;
+        }
+        return false;
+    }
+    while (px < pattern.size() && pattern[px] == '*') ++px;
+    return px == pattern.size();
+}
+
+bool sym_glob_match_path_or_basename(std::string_view pattern,
+                                     std::string_view path) {
+    if (sym_glob_match(pattern, path)) return true;
+    auto slash = path.find_last_of('/');
+    if (slash == std::string_view::npos) return false;
+    return sym_glob_match(pattern, path.substr(slash + 1));
+}
+
+nlohmann::json sym_apply_file_glob(nlohmann::json symbols,
+                                   std::string_view pattern) {
+    if (pattern.empty()) return symbols;
+    if (!symbols.is_array()) return symbols;
+    nlohmann::json out = nlohmann::json::array();
+    for (auto& s : symbols) {
+        std::string fpath = s.value("file", "");
+        if (sym_glob_match_path_or_basename(pattern, fpath)) {
+            out.push_back(std::move(s));
+        }
+    }
+    return out;
+}
+
+// Sort key extractors — each returns a comparable tuple. Stable sort over
+// the input array, secondary key is original index (preserved by
+// std::stable_sort).
+nlohmann::json sym_sort_symbols(nlohmann::json symbols,
+                                std::string_view sort_key) {
+    if (sort_key.empty()) return symbols;
+    if (!symbols.is_array()) return symbols;
+
+    auto vec = symbols.get<std::vector<nlohmann::json>>();
+
+    if (sort_key == "complexity") {
+        std::stable_sort(vec.begin(), vec.end(),
+                         [](const nlohmann::json& a, const nlohmann::json& b) {
+                             return a.value("complexity", 0) >
+                                    b.value("complexity", 0);
+                         });
+    } else if (sort_key == "refs") {
+        std::stable_sort(
+            vec.begin(), vec.end(),
+            [](const nlohmann::json& a, const nlohmann::json& b) {
+                int ra = a.value("incoming_refs", 0) +
+                         a.value("outgoing_refs", 0);
+                int rb = b.value("incoming_refs", 0) +
+                         b.value("outgoing_refs", 0);
+                return ra > rb;
+            });
+    } else if (sort_key == "line") {
+        std::stable_sort(
+            vec.begin(), vec.end(),
+            [](const nlohmann::json& a, const nlohmann::json& b) {
+                std::string fa = a.value("file", "");
+                std::string fb = b.value("file", "");
+                if (fa != fb) return fa < fb;
+                return a.value("line", 0) < b.value("line", 0);
+            });
+    } else if (sort_key == "params") {
+        std::stable_sort(vec.begin(), vec.end(),
+                         [](const nlohmann::json& a, const nlohmann::json& b) {
+                             return a.value("parameter_count", 0) >
+                                    b.value("parameter_count", 0);
+                         });
+    } else {
+        // Default + unknown -> name (ascending).
+        std::stable_sort(vec.begin(), vec.end(),
+                         [](const nlohmann::json& a, const nlohmann::json& b) {
+                             return a.value("name", "") < b.value("name", "");
+                         });
+    }
+
+    nlohmann::json out = nlohmann::json::array();
+    for (auto& s : vec) out.push_back(std::move(s));
+    return out;
+}
+
+nlohmann::json sym_apply_max_limit(nlohmann::json symbols, int max_results) {
+    if (max_results <= 0) return symbols;
+    if (!symbols.is_array()) return symbols;
+    if (static_cast<int>(symbols.size()) <= max_results) return symbols;
+    nlohmann::json out = nlohmann::json::array();
+    for (int i = 0; i < max_results; ++i) {
+        out.push_back(std::move(symbols[i]));
+    }
+    return out;
+}
+
+}  // namespace
+
+namespace symbol_filters {
+
+bool is_glob_pattern(std::string_view s) { return sym_is_glob_pattern(s); }
+
+bool glob_match(std::string_view pattern, std::string_view text) {
+    return sym_glob_match(pattern, text);
+}
+
+bool glob_match_path_or_basename(std::string_view pattern,
+                                 std::string_view path) {
+    return sym_glob_match_path_or_basename(pattern, path);
+}
+
+nlohmann::json apply_file_glob(nlohmann::json symbols,
+                               std::string_view pattern) {
+    return sym_apply_file_glob(std::move(symbols), pattern);
+}
+
+nlohmann::json sort_symbols(nlohmann::json symbols,
+                            std::string_view sort_key) {
+    return sym_sort_symbols(std::move(symbols), sort_key);
+}
+
+nlohmann::json apply_max_limit(nlohmann::json symbols, int max_results) {
+    return sym_apply_max_limit(std::move(symbols), max_results);
+}
+
+}  // namespace symbol_filters
+
 int run_symbols(const GlobalFlags& flags, const std::string& kind,
                 bool exported, const std::string& file,
                 const std::string& name, const std::string& receiver,
@@ -696,13 +870,25 @@ int run_symbols(const GlobalFlags& flags, const std::string& kind,
         return 1;
     }
 
+    // Decide whether the --file value is a glob (`*`, `?`, `[`) or a plain
+    // substring. The C++ server only does substring matching on `file`, so
+    // a glob like `*.cpp` would drop almost everything if forwarded. We keep
+    // server-side filtering for non-glob inputs (faster) and post-process
+    // glob inputs client-side.
+    const bool file_is_glob = sym_is_glob_pattern(file);
+
     ListSymbolsRequest req;
     req.kind = kind;
-    req.file = file;
+    if (!file_is_glob) {
+        req.file = file;
+    }
     req.name = name;
     req.receiver = receiver;
     req.sort = sort;
-    req.max = max_results;
+    // Always pull the server's max page (server caps at 500). We apply the
+    // user's --max client-side after sort/glob so post-processing sees the
+    // full candidate set, not a server-truncated head.
+    req.max = 500;
     if (exported) {
         req.exported = true;
     }
@@ -720,43 +906,60 @@ int run_symbols(const GlobalFlags& flags, const std::string& kind,
         return 1;
     }
 
+    // Client-side post-processing: glob file filter, sort, then --max.
+    nlohmann::json symbols_arr = nlohmann::json::array();
+    if (result->contains("symbols") && (*result)["symbols"].is_array()) {
+        symbols_arr = (*result)["symbols"];
+    }
+    if (file_is_glob) {
+        symbols_arr = sym_apply_file_glob(std::move(symbols_arr), file);
+    }
+    symbols_arr = sym_sort_symbols(std::move(symbols_arr), sort);
+
+    int total_after_filter = static_cast<int>(symbols_arr.size());
+    int effective_max = max_results > 0 ? max_results : 50;
+    symbols_arr = sym_apply_max_limit(std::move(symbols_arr), effective_max);
+
+    // Update the response envelope so JSON consumers see the post-processed
+    // counts and ordering. `total` reflects the count after client-side
+    // filtering (including glob); `showing` is what we're emitting now;
+    // `has_more` is true iff the user's --max truncated the set.
+    int showing = static_cast<int>(symbols_arr.size());
+    (*result)["symbols"] = symbols_arr;
+    (*result)["total"] = total_after_filter;
+    (*result)["showing"] = showing;
+    (*result)["has_more"] = showing < total_after_filter;
+
     if (json_output) {
         std::cout << result->dump(2) << "\n";
         return 0;
     }
 
     // Text output matching Go implementation
-    if (result->contains("symbols") && (*result)["symbols"].is_array()) {
-        for (const auto& sym : (*result)["symbols"]) {
-            std::string sig = sym.value("signature", "");
-            if (sig.empty()) {
-                sig = sym.value("name", "");
-            }
-            std::string exp_str;
-            if (sym.value("is_exported", false)) {
-                exp_str = " [exported]";
-            }
-            std::string comp_str;
-            int comp = sym.value("complexity", 0);
-            if (comp > 0) {
-                char buf[32];
-                std::snprintf(buf, sizeof(buf), " (complexity:%d)", comp);
-                comp_str = buf;
-            }
-            std::printf("%s:%d: %s %s%s%s\n",
-                        sym.value("file", "").c_str(),
-                        sym.value("line", 0),
-                        sym.value("type", "").c_str(), sig.c_str(),
-                        exp_str.c_str(), comp_str.c_str());
+    for (const auto& sym : symbols_arr) {
+        std::string sig = sym.value("signature", "");
+        if (sig.empty()) {
+            sig = sym.value("name", "");
         }
+        std::string exp_str;
+        if (sym.value("is_exported", false)) {
+            exp_str = " [exported]";
+        }
+        std::string comp_str;
+        int comp = sym.value("complexity", 0);
+        if (comp > 0) {
+            char buf[32];
+            std::snprintf(buf, sizeof(buf), " (complexity:%d)", comp);
+            comp_str = buf;
+        }
+        std::printf("%s:%d: %s %s%s%s\n", sym.value("file", "").c_str(),
+                    sym.value("line", 0), sym.value("type", "").c_str(),
+                    sig.c_str(), exp_str.c_str(), comp_str.c_str());
     }
 
-    bool has_more = result->value("has_more", false);
-    if (has_more) {
-        int showing = result->value("showing", 0);
-        int total = result->value("total", 0);
+    if (showing < total_after_filter) {
         std::fprintf(stderr, "\n(%d of %d shown, use --max to see more)\n",
-                     showing, total);
+                     showing, total_after_filter);
     }
 
     return 0;

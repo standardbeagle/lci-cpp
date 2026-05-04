@@ -10,6 +10,7 @@
 #include <lci/cli/commands.h>
 
 #include "../src/cli/grep_filters.h"
+#include "../src/cli/symbol_filters.h"
 
 namespace lci {
 namespace cli {
@@ -603,6 +604,226 @@ TEST(SearchWidenToEnclosingBlock, ZeroOrInvertedRangeIgnored) {
     ASSERT_EQ(widened.size(), 2u);
     EXPECT_TRUE(widened[0]["context"]["keep"].get<bool>());
     EXPECT_TRUE(widened[1]["context"]["keep"].get<bool>());
+}
+
+// -- symbol_filters tests -----------------------------------------------------
+
+namespace sf = ::lci::cli::symbol_filters;
+
+TEST(SymbolFiltersIsGlob, DetectsStar) {
+    EXPECT_TRUE(sf::is_glob_pattern("*.cpp"));
+    EXPECT_TRUE(sf::is_glob_pattern("src/*.h"));
+}
+
+TEST(SymbolFiltersIsGlob, DetectsQuestionMark) {
+    EXPECT_TRUE(sf::is_glob_pattern("foo.?pp"));
+}
+
+TEST(SymbolFiltersIsGlob, DetectsCharClass) {
+    EXPECT_TRUE(sf::is_glob_pattern("foo.[ch]pp"));
+}
+
+TEST(SymbolFiltersIsGlob, BareSubstringIsNotGlob) {
+    EXPECT_FALSE(sf::is_glob_pattern("commands.cpp"));
+    EXPECT_FALSE(sf::is_glob_pattern("src/cli"));
+    EXPECT_FALSE(sf::is_glob_pattern(""));
+}
+
+TEST(SymbolFiltersGlobMatch, StarDoesNotCrossSlash) {
+    EXPECT_TRUE(sf::glob_match("*.cpp", "main.cpp"));
+    EXPECT_FALSE(sf::glob_match("*.cpp", "src/main.cpp"));
+}
+
+TEST(SymbolFiltersGlobMatch, QuestionMarkMatchesOneNonSlash) {
+    EXPECT_TRUE(sf::glob_match("foo.?pp", "foo.cpp"));
+    EXPECT_TRUE(sf::glob_match("foo.?pp", "foo.hpp"));
+    EXPECT_FALSE(sf::glob_match("foo.?pp", "foo.pp"));
+    EXPECT_FALSE(sf::glob_match("foo.??", "foo./x"));
+}
+
+TEST(SymbolFiltersGlobMatch, ExactMatch) {
+    EXPECT_TRUE(sf::glob_match("commands.cpp", "commands.cpp"));
+    EXPECT_FALSE(sf::glob_match("commands.cpp", "commands.h"));
+}
+
+TEST(SymbolFiltersGlobMatch, EmptyPatternMatchesEmptyOnly) {
+    EXPECT_TRUE(sf::glob_match("", ""));
+    EXPECT_FALSE(sf::glob_match("", "anything"));
+}
+
+TEST(SymbolFiltersGlobMatch, TrailingStar) {
+    EXPECT_TRUE(sf::glob_match("foo*", "foobar"));
+    EXPECT_TRUE(sf::glob_match("foo*", "foo"));
+    EXPECT_FALSE(sf::glob_match("foo*", "foo/bar"));
+}
+
+TEST(SymbolFiltersGlobMatch, LeadingStar) {
+    EXPECT_TRUE(sf::glob_match("*foo", "barfoo"));
+    EXPECT_TRUE(sf::glob_match("*foo", "foo"));
+    EXPECT_FALSE(sf::glob_match("*foo", "bar/foo"));
+}
+
+TEST(SymbolFiltersGlobPathOrBasename, FullPathHit) {
+    EXPECT_TRUE(sf::glob_match_path_or_basename("src/cli/*.cpp",
+                                                "src/cli/commands.cpp"));
+}
+
+TEST(SymbolFiltersGlobPathOrBasename, BasenameFallback) {
+    // *.cpp will not match a path with a slash, but matches the basename.
+    EXPECT_TRUE(sf::glob_match_path_or_basename("*.cpp",
+                                                "src/cli/commands.cpp"));
+}
+
+TEST(SymbolFiltersGlobPathOrBasename, NoMatchReturnsFalse) {
+    EXPECT_FALSE(sf::glob_match_path_or_basename("*.go",
+                                                 "src/cli/commands.cpp"));
+}
+
+TEST(SymbolFiltersApplyFileGlob, EmptyPatternIsPassthrough) {
+    nlohmann::json arr = nlohmann::json::array();
+    arr.push_back({{"file", "a.cpp"}, {"name", "x"}});
+    arr.push_back({{"file", "b.go"}, {"name", "y"}});
+    auto out = sf::apply_file_glob(arr, "");
+    EXPECT_EQ(out.size(), 2u);
+}
+
+TEST(SymbolFiltersApplyFileGlob, FiltersByExtension) {
+    nlohmann::json arr = nlohmann::json::array();
+    arr.push_back({{"file", "src/a.cpp"}, {"name", "a"}});
+    arr.push_back({{"file", "src/b.go"}, {"name", "b"}});
+    arr.push_back({{"file", "src/c.cpp"}, {"name", "c"}});
+    auto out = sf::apply_file_glob(arr, "*.cpp");
+    ASSERT_EQ(out.size(), 2u);
+    EXPECT_EQ(out[0]["name"].get<std::string>(), "a");
+    EXPECT_EQ(out[1]["name"].get<std::string>(), "c");
+}
+
+TEST(SymbolFiltersApplyFileGlob, MissingFileFieldIsDropped) {
+    nlohmann::json arr = nlohmann::json::array();
+    arr.push_back({{"name", "noFile"}});
+    arr.push_back({{"file", "x.cpp"}, {"name", "ok"}});
+    auto out = sf::apply_file_glob(arr, "*.cpp");
+    ASSERT_EQ(out.size(), 1u);
+    EXPECT_EQ(out[0]["name"].get<std::string>(), "ok");
+}
+
+TEST(SymbolFiltersSort, EmptyKeyIsPassthrough) {
+    nlohmann::json arr = nlohmann::json::array();
+    arr.push_back({{"name", "z"}});
+    arr.push_back({{"name", "a"}});
+    auto out = sf::sort_symbols(arr, "");
+    EXPECT_EQ(out[0]["name"].get<std::string>(), "z");
+    EXPECT_EQ(out[1]["name"].get<std::string>(), "a");
+}
+
+TEST(SymbolFiltersSort, NameAscending) {
+    nlohmann::json arr = nlohmann::json::array();
+    arr.push_back({{"name", "zebra"}});
+    arr.push_back({{"name", "apple"}});
+    arr.push_back({{"name", "mango"}});
+    auto out = sf::sort_symbols(arr, "name");
+    EXPECT_EQ(out[0]["name"].get<std::string>(), "apple");
+    EXPECT_EQ(out[1]["name"].get<std::string>(), "mango");
+    EXPECT_EQ(out[2]["name"].get<std::string>(), "zebra");
+}
+
+TEST(SymbolFiltersSort, ComplexityDescending) {
+    nlohmann::json arr = nlohmann::json::array();
+    arr.push_back({{"name", "a"}, {"complexity", 3}});
+    arr.push_back({{"name", "b"}, {"complexity", 10}});
+    arr.push_back({{"name", "c"}, {"complexity", 5}});
+    auto out = sf::sort_symbols(arr, "complexity");
+    EXPECT_EQ(out[0]["name"].get<std::string>(), "b");
+    EXPECT_EQ(out[1]["name"].get<std::string>(), "c");
+    EXPECT_EQ(out[2]["name"].get<std::string>(), "a");
+}
+
+TEST(SymbolFiltersSort, RefsDescendingIsSumOfIncomingPlusOutgoing) {
+    nlohmann::json arr = nlohmann::json::array();
+    arr.push_back({{"name", "a"}, {"incoming_refs", 1}, {"outgoing_refs", 2}});
+    arr.push_back({{"name", "b"}, {"incoming_refs", 5}, {"outgoing_refs", 5}});
+    arr.push_back({{"name", "c"}, {"incoming_refs", 10}});
+    auto out = sf::sort_symbols(arr, "refs");
+    EXPECT_EQ(out[0]["name"].get<std::string>(), "b");  // 10
+    EXPECT_EQ(out[1]["name"].get<std::string>(), "c");  // 10 (tie, stable)
+    EXPECT_EQ(out[2]["name"].get<std::string>(), "a");  // 3
+}
+
+TEST(SymbolFiltersSort, LineAscendingThenFile) {
+    nlohmann::json arr = nlohmann::json::array();
+    arr.push_back({{"name", "a"}, {"file", "z.cpp"}, {"line", 5}});
+    arr.push_back({{"name", "b"}, {"file", "a.cpp"}, {"line", 100}});
+    arr.push_back({{"name", "c"}, {"file", "a.cpp"}, {"line", 1}});
+    auto out = sf::sort_symbols(arr, "line");
+    EXPECT_EQ(out[0]["name"].get<std::string>(), "c");  // a.cpp:1
+    EXPECT_EQ(out[1]["name"].get<std::string>(), "b");  // a.cpp:100
+    EXPECT_EQ(out[2]["name"].get<std::string>(), "a");  // z.cpp:5
+}
+
+TEST(SymbolFiltersSort, ParamsDescending) {
+    nlohmann::json arr = nlohmann::json::array();
+    arr.push_back({{"name", "a"}, {"parameter_count", 1}});
+    arr.push_back({{"name", "b"}, {"parameter_count", 7}});
+    arr.push_back({{"name", "c"}, {"parameter_count", 3}});
+    auto out = sf::sort_symbols(arr, "params");
+    EXPECT_EQ(out[0]["name"].get<std::string>(), "b");
+    EXPECT_EQ(out[1]["name"].get<std::string>(), "c");
+    EXPECT_EQ(out[2]["name"].get<std::string>(), "a");
+}
+
+TEST(SymbolFiltersSort, UnknownKeyFallsBackToName) {
+    nlohmann::json arr = nlohmann::json::array();
+    arr.push_back({{"name", "z"}});
+    arr.push_back({{"name", "a"}});
+    auto out = sf::sort_symbols(arr, "fizzbuzz");
+    EXPECT_EQ(out[0]["name"].get<std::string>(), "a");
+    EXPECT_EQ(out[1]["name"].get<std::string>(), "z");
+}
+
+TEST(SymbolFiltersSort, StableForEqualKeys) {
+    nlohmann::json arr = nlohmann::json::array();
+    arr.push_back({{"name", "first"}, {"complexity", 5}});
+    arr.push_back({{"name", "second"}, {"complexity", 5}});
+    arr.push_back({{"name", "third"}, {"complexity", 5}});
+    auto out = sf::sort_symbols(arr, "complexity");
+    EXPECT_EQ(out[0]["name"].get<std::string>(), "first");
+    EXPECT_EQ(out[1]["name"].get<std::string>(), "second");
+    EXPECT_EQ(out[2]["name"].get<std::string>(), "third");
+}
+
+TEST(SymbolFiltersMaxLimit, ZeroIsPassthrough) {
+    nlohmann::json arr = nlohmann::json::array();
+    for (int i = 0; i < 5; ++i) {
+        arr.push_back({{"name", std::to_string(i)}});
+    }
+    auto out = sf::apply_max_limit(arr, 0);
+    EXPECT_EQ(out.size(), 5u);
+}
+
+TEST(SymbolFiltersMaxLimit, NegativeIsPassthrough) {
+    nlohmann::json arr = nlohmann::json::array();
+    arr.push_back({{"name", "x"}});
+    auto out = sf::apply_max_limit(arr, -1);
+    EXPECT_EQ(out.size(), 1u);
+}
+
+TEST(SymbolFiltersMaxLimit, TruncatesToMax) {
+    nlohmann::json arr = nlohmann::json::array();
+    for (int i = 0; i < 10; ++i) {
+        arr.push_back({{"name", std::to_string(i)}});
+    }
+    auto out = sf::apply_max_limit(arr, 3);
+    ASSERT_EQ(out.size(), 3u);
+    EXPECT_EQ(out[0]["name"].get<std::string>(), "0");
+    EXPECT_EQ(out[2]["name"].get<std::string>(), "2");
+}
+
+TEST(SymbolFiltersMaxLimit, MaxLargerThanInputIsPassthrough) {
+    nlohmann::json arr = nlohmann::json::array();
+    arr.push_back({{"name", "a"}});
+    arr.push_back({{"name", "b"}});
+    auto out = sf::apply_max_limit(arr, 100);
+    EXPECT_EQ(out.size(), 2u);
 }
 
 }  // namespace
