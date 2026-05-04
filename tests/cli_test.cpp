@@ -10,6 +10,7 @@
 #include <lci/cli/commands.h>
 
 #include "../src/cli/grep_filters.h"
+#include "../src/cli/query_parser.h"
 #include "../src/cli/symbol_filters.h"
 #include "../src/cli/tree_formatter.h"
 
@@ -1153,6 +1154,311 @@ TEST(TreeFormatterText, MaxDepthZeroMeansNoCutoff) {
     std::string out = tf::format_text(tree, opts);
     // All four nodes appear.
     EXPECT_NE(out.find("inner"), std::string::npos);
+}
+
+// -- query_parser tests -------------------------------------------------------
+//
+// Pure parsing/filtering logic; no server needed. Covers the four directives
+// (`file:`, `kind:`, `symbol:`, `-term`), the bare-term passthrough, and the
+// JSON post-filter helpers that consume the server's `/search` shape.
+
+namespace qp = ::lci::cli::query_parser;
+
+TEST(QueryParserParse, BareTermsHaveNoDirectives) {
+    auto p = qp::parse("auth login");
+    EXPECT_EQ(p.content_query, "auth login");
+    EXPECT_TRUE(p.empty_directives());
+    EXPECT_TRUE(p.file_glob.empty());
+    EXPECT_TRUE(p.kinds.empty());
+    EXPECT_TRUE(p.symbols.empty());
+    EXPECT_TRUE(p.exclusions.empty());
+}
+
+TEST(QueryParserParse, EmptyQueryProducesEmptyParse) {
+    auto p = qp::parse("");
+    EXPECT_TRUE(p.content_query.empty());
+    EXPECT_TRUE(p.empty_directives());
+}
+
+TEST(QueryParserParse, FileDirectiveExtracted) {
+    auto p = qp::parse("file:*.cpp auth");
+    EXPECT_EQ(p.file_glob, "*.cpp");
+    EXPECT_EQ(p.content_query, "auth");
+}
+
+TEST(QueryParserParse, FileDirectiveLastWriteWins) {
+    auto p = qp::parse("file:*.cpp file:*.hpp auth");
+    EXPECT_EQ(p.file_glob, "*.hpp");
+    EXPECT_EQ(p.content_query, "auth");
+}
+
+TEST(QueryParserParse, KindDirectiveExtracted) {
+    auto p = qp::parse("kind:function Request");
+    ASSERT_EQ(p.kinds.size(), 1u);
+    EXPECT_EQ(p.kinds[0], "function");
+    EXPECT_EQ(p.content_query, "Request");
+}
+
+TEST(QueryParserParse, MultipleKindDirectivesPreserved) {
+    auto p = qp::parse("kind:function kind:method auth");
+    ASSERT_EQ(p.kinds.size(), 2u);
+    EXPECT_EQ(p.kinds[0], "function");
+    EXPECT_EQ(p.kinds[1], "method");
+}
+
+TEST(QueryParserParse, SymbolDirectiveExtracted) {
+    auto p = qp::parse("symbol:Request -test");
+    ASSERT_EQ(p.symbols.size(), 1u);
+    EXPECT_EQ(p.symbols[0], "Request");
+    ASSERT_EQ(p.exclusions.size(), 1u);
+    EXPECT_EQ(p.exclusions[0], "test");
+    EXPECT_TRUE(p.content_query.empty());
+}
+
+TEST(QueryParserParse, ExclusionExtracted) {
+    auto p = qp::parse("auth -deprecated -legacy");
+    EXPECT_EQ(p.content_query, "auth");
+    ASSERT_EQ(p.exclusions.size(), 2u);
+    EXPECT_EQ(p.exclusions[0], "deprecated");
+    EXPECT_EQ(p.exclusions[1], "legacy");
+}
+
+TEST(QueryParserParse, BareDashIsContent) {
+    // A lone "-" is too ambiguous to treat as exclusion (no term to drop).
+    // Keeping it as a content token avoids silently swallowing user input.
+    auto p = qp::parse("- foo");
+    EXPECT_EQ(p.content_query, "- foo");
+    EXPECT_TRUE(p.exclusions.empty());
+}
+
+TEST(QueryParserParse, UnknownColonPrefixIsContent) {
+    // `http://example` should NOT be misclassified as the unknown `http:`
+    // directive; it's a literal substring users want to find.
+    auto p = qp::parse("http://example");
+    EXPECT_EQ(p.content_query, "http://example");
+    EXPECT_TRUE(p.empty_directives());
+}
+
+TEST(QueryParserParse, MultipleDirectivesComposeWithBareTerms) {
+    auto p = qp::parse("file:*.cpp kind:function symbol:Handler -test auth");
+    EXPECT_EQ(p.file_glob, "*.cpp");
+    ASSERT_EQ(p.kinds.size(), 1u);
+    EXPECT_EQ(p.kinds[0], "function");
+    ASSERT_EQ(p.symbols.size(), 1u);
+    EXPECT_EQ(p.symbols[0], "Handler");
+    ASSERT_EQ(p.exclusions.size(), 1u);
+    EXPECT_EQ(p.exclusions[0], "test");
+    EXPECT_EQ(p.content_query, "auth");
+}
+
+TEST(QueryParserParse, DirectiveOnlyQueryHasEmptyContent) {
+    auto p = qp::parse("file:*.cpp kind:function");
+    EXPECT_EQ(p.content_query, "");
+    EXPECT_FALSE(p.empty_directives());
+}
+
+TEST(QueryParserParse, MultipleSpacesCollapse) {
+    auto p = qp::parse("  auth   login  ");
+    EXPECT_EQ(p.content_query, "auth login");
+}
+
+TEST(QueryParserGlob, StarMatchesAnyChars) {
+    EXPECT_TRUE(qp::glob_match("*.cpp", "search.cpp"));
+    EXPECT_TRUE(qp::glob_match("*.cpp", ".cpp"));
+    EXPECT_FALSE(qp::glob_match("*.cpp", "search.hpp"));
+}
+
+TEST(QueryParserGlob, QuestionMatchesOneChar) {
+    EXPECT_TRUE(qp::glob_match("a?c", "abc"));
+    EXPECT_FALSE(qp::glob_match("a?c", "ac"));
+    EXPECT_FALSE(qp::glob_match("a?c", "abbc"));
+}
+
+TEST(QueryParserGlob, MixedStarAndLiterals) {
+    EXPECT_TRUE(qp::glob_match("src/*/main.cpp", "src/cli/main.cpp"));
+    EXPECT_TRUE(qp::glob_match("*test*", "auth_test_helper"));
+    EXPECT_FALSE(qp::glob_match("src/*/main.cpp", "src/main.cpp"));
+}
+
+TEST(QueryParserGlob, PathsWithoutSlashMatchBasename) {
+    EXPECT_TRUE(qp::path_matches_glob("*.cpp",
+                                      "/abs/path/src/cli/search.cpp"));
+    EXPECT_FALSE(qp::path_matches_glob("*.cpp",
+                                       "/abs/path/src/cli/search.hpp"));
+}
+
+TEST(QueryParserGlob, PathsWithSlashMatchFullPath) {
+    EXPECT_TRUE(qp::path_matches_glob("src/*/search.cpp",
+                                      "src/cli/search.cpp"));
+    EXPECT_FALSE(qp::path_matches_glob("src/*/search.cpp",
+                                       "tests/cli/search.cpp"));
+}
+
+TEST(QueryParserGlob, EmptyPatternMatchesEverything) {
+    EXPECT_TRUE(qp::path_matches_glob("", "anything.cpp"));
+    EXPECT_TRUE(qp::path_matches_glob("", ""));
+}
+
+// -- Filter helpers (JSON post-filtering) -------------------------------------
+
+namespace {
+nlohmann::json make_result(const std::string& path, const std::string& match,
+                           const std::string& block_type = "",
+                           const std::string& block_name = "") {
+    nlohmann::json r;
+    r["path"] = path;
+    r["match"] = match;
+    r["line"] = 1;
+    nlohmann::json ctx;
+    ctx["block_type"] = block_type;
+    ctx["block_name"] = block_name;
+    r["context"] = ctx;
+    return r;
+}
+}  // namespace
+
+TEST(QueryParserFilters, FileFilterDropsNonMatching) {
+    nlohmann::json results = nlohmann::json::array();
+    results.push_back(make_result("src/cli/search.cpp", "auth"));
+    results.push_back(make_result("src/cli/search.hpp", "auth"));
+    results.push_back(make_result("tests/cli/search.cpp", "auth"));
+
+    auto filtered = qp::apply_file_filter(results, "*.cpp");
+    EXPECT_EQ(filtered.size(), 2u);
+    EXPECT_EQ(filtered[0].value("path", ""), "src/cli/search.cpp");
+    EXPECT_EQ(filtered[1].value("path", ""), "tests/cli/search.cpp");
+}
+
+TEST(QueryParserFilters, FileFilterPathGlob) {
+    nlohmann::json results = nlohmann::json::array();
+    results.push_back(make_result("src/cli/search.cpp", "auth"));
+    results.push_back(make_result("src/server/server.cpp", "auth"));
+    results.push_back(make_result("tests/cli/foo.cpp", "auth"));
+
+    auto filtered = qp::apply_file_filter(results, "src/*/*.cpp");
+    EXPECT_EQ(filtered.size(), 2u);
+    EXPECT_EQ(filtered[0].value("path", ""), "src/cli/search.cpp");
+    EXPECT_EQ(filtered[1].value("path", ""), "src/server/server.cpp");
+}
+
+TEST(QueryParserFilters, FileFilterEmptyGlobPassesThrough) {
+    nlohmann::json results = nlohmann::json::array();
+    results.push_back(make_result("a.cpp", "x"));
+    auto filtered = qp::apply_file_filter(results, "");
+    EXPECT_EQ(filtered.size(), 1u);
+}
+
+TEST(QueryParserFilters, KindFilterDropsNonMatching) {
+    nlohmann::json results = nlohmann::json::array();
+    results.push_back(make_result("a.cpp", "x", "function", "foo"));
+    results.push_back(make_result("a.cpp", "x", "class", "Bar"));
+    results.push_back(make_result("a.cpp", "x", "function", "baz"));
+
+    auto filtered = qp::apply_kind_filter(results, {"function"});
+    EXPECT_EQ(filtered.size(), 2u);
+    EXPECT_EQ(filtered[0].at("context").value("block_name", ""), "foo");
+    EXPECT_EQ(filtered[1].at("context").value("block_name", ""), "baz");
+}
+
+TEST(QueryParserFilters, KindFilterIsCaseInsensitive) {
+    nlohmann::json results = nlohmann::json::array();
+    results.push_back(make_result("a.cpp", "x", "Function", "foo"));
+    results.push_back(make_result("a.cpp", "x", "FUNCTION", "bar"));
+
+    auto filtered = qp::apply_kind_filter(results, {"function"});
+    EXPECT_EQ(filtered.size(), 2u);
+}
+
+TEST(QueryParserFilters, KindFilterMultipleKindsORed) {
+    nlohmann::json results = nlohmann::json::array();
+    results.push_back(make_result("a.cpp", "x", "function", "foo"));
+    results.push_back(make_result("a.cpp", "x", "class", "Bar"));
+    results.push_back(make_result("a.cpp", "x", "method", "baz"));
+
+    auto filtered = qp::apply_kind_filter(results, {"function", "class"});
+    EXPECT_EQ(filtered.size(), 2u);
+}
+
+TEST(QueryParserFilters, SymbolFilterSubstringMatch) {
+    nlohmann::json results = nlohmann::json::array();
+    results.push_back(make_result("a.cpp", "x", "function", "Request"));
+    results.push_back(make_result("a.cpp", "x", "function", "RequestHandler"));
+    results.push_back(make_result("a.cpp", "x", "function", "Response"));
+
+    auto filtered = qp::apply_symbol_filter(results, {"Request"});
+    EXPECT_EQ(filtered.size(), 2u);
+}
+
+TEST(QueryParserFilters, SymbolFilterCaseInsensitive) {
+    nlohmann::json results = nlohmann::json::array();
+    results.push_back(make_result("a.cpp", "x", "function", "MyHandler"));
+    results.push_back(make_result("a.cpp", "x", "function", "myhandler"));
+
+    auto filtered = qp::apply_symbol_filter(results, {"HANDLER"});
+    EXPECT_EQ(filtered.size(), 2u);
+}
+
+TEST(QueryParserFilters, ExclusionDropsMatchTermInLine) {
+    nlohmann::json results = nlohmann::json::array();
+    results.push_back(make_result("a.cpp", "auth login", "", ""));
+    results.push_back(make_result("a.cpp", "auth test_login", "", ""));
+
+    auto filtered = qp::apply_exclusion_filter(results, {"test"});
+    EXPECT_EQ(filtered.size(), 1u);
+    EXPECT_EQ(filtered[0].value("match", ""), "auth login");
+}
+
+TEST(QueryParserFilters, ExclusionDropsMatchTermInPath) {
+    nlohmann::json results = nlohmann::json::array();
+    results.push_back(make_result("src/auth.cpp", "Request", "", ""));
+    results.push_back(make_result("tests/auth_test.cpp", "Request", "", ""));
+
+    auto filtered = qp::apply_exclusion_filter(results, {"test"});
+    EXPECT_EQ(filtered.size(), 1u);
+    EXPECT_EQ(filtered[0].value("path", ""), "src/auth.cpp");
+}
+
+TEST(QueryParserFilters, ExclusionMultipleTermsAnyDrops) {
+    nlohmann::json results = nlohmann::json::array();
+    results.push_back(make_result("a.cpp", "Request", "", ""));
+    results.push_back(make_result("a.cpp", "Request_legacy", "", ""));
+    results.push_back(make_result("deprecated/a.cpp", "Request", "", ""));
+
+    auto filtered = qp::apply_exclusion_filter(results,
+                                               {"legacy", "deprecated"});
+    EXPECT_EQ(filtered.size(), 1u);
+    EXPECT_EQ(filtered[0].value("path", ""), "a.cpp");
+    EXPECT_EQ(filtered[0].value("match", ""), "Request");
+}
+
+TEST(QueryParserFilters, ApplyAllComposesFilters) {
+    nlohmann::json results = nlohmann::json::array();
+    results.push_back(make_result("src/cli/search.cpp", "auth login",
+                                  "function", "Request"));
+    results.push_back(make_result("src/cli/search.hpp", "auth login",
+                                  "function", "Request"));  // wrong ext
+    results.push_back(make_result("src/cli/search.cpp", "test login",
+                                  "function", "Request"));  // exclusion
+    results.push_back(make_result("src/cli/search.cpp", "auth login",
+                                  "class", "Request"));     // wrong kind
+    results.push_back(make_result("src/cli/search.cpp", "auth login",
+                                  "function", "Other"));    // wrong symbol
+
+    auto p = qp::parse("file:*.cpp kind:function symbol:Request -test auth");
+    auto filtered = qp::apply_all(results, p);
+    EXPECT_EQ(filtered.size(), 1u);
+    EXPECT_EQ(filtered[0].value("path", ""), "src/cli/search.cpp");
+    EXPECT_EQ(filtered[0].value("match", ""), "auth login");
+}
+
+TEST(QueryParserFilters, ApplyAllPassThroughWithNoDirectives) {
+    nlohmann::json results = nlohmann::json::array();
+    results.push_back(make_result("a.cpp", "x"));
+    results.push_back(make_result("b.cpp", "y"));
+
+    auto p = qp::parse("auth");
+    auto filtered = qp::apply_all(results, p);
+    EXPECT_EQ(filtered.size(), 2u);
 }
 
 }  // namespace

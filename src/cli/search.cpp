@@ -30,6 +30,7 @@
 #include <lci/search/search_options.h>
 
 #include "grep_filters.h"
+#include "query_parser.h"
 
 #include <algorithm>
 #include <cctype>
@@ -690,15 +691,42 @@ int run_search(const GlobalFlags& flags, const std::string& pattern,
 
     auto start = std::chrono::steady_clock::now();
 
+    // -- Advanced query syntax parsing --------------------------------------
+    //
+    // Strip directives like `file:*.cpp`, `kind:function`, `symbol:Request`,
+    // and `-term` exclusions out of the positional pattern before forwarding
+    // to the trigram engine. The directives become post-filters applied to
+    // the server's result rows; the bare content terms (rejoined with
+    // single spaces) become the actual search pattern.
+    //
+    // `--patterns` entries (`-e`) skip directive parsing — they're an
+    // explicit OR list, and giving a `kind:function` value to the engine
+    // there would be a confusing footgun. Most users reach for `--patterns`
+    // when they already know the literal strings they want.
+    auto parsed_query = query_parser::parse(pattern);
+    // When directives were extracted, the parsed `content_query` is the
+    // authoritative bare-term pattern (possibly empty if every token was a
+    // directive). When NO directives were present, the raw `pattern` flows
+    // through unchanged so existing queries pay zero overhead and there's no
+    // chance of `parse()` reshaping a literal string the user typed.
+    std::string effective_pattern =
+        parsed_query.empty_directives() ? pattern : parsed_query.content_query;
+
     // Multi-pattern fan-out: same algorithm as `lci grep` so OR semantics
     // are identical between the two commands. See `search_union_patterns`.
     std::vector<std::string> all_patterns;
-    if (!pattern.empty()) all_patterns.push_back(pattern);
+    if (!effective_pattern.empty()) all_patterns.push_back(effective_pattern);
     for (const auto& p : extra_patterns) {
         if (!p.empty()) all_patterns.push_back(p);
     }
     if (all_patterns.empty()) {
-        std::cerr << "Error: at least one pattern is required\n";
+        // Edge case: query was `file:*.cpp` with no bare terms. The trigram
+        // engine cannot run without a pattern, so ask the user to add one.
+        // Mirrors Go's behavior where `parseQuerySyntax` of a directive-only
+        // query returns an empty `contentPattern` and the engine errors out.
+        std::cerr << "Error: at least one search term is required "
+                     "(directives like `file:`, `kind:`, `symbol:` cannot "
+                     "stand alone)\n";
         return 1;
     }
 
@@ -725,6 +753,19 @@ int run_search(const GlobalFlags& flags, const std::string& pattern,
     }
 
     auto& j = *result;
+
+    // -- Advanced query directive post-filter --------------------------------
+    //
+    // Apply file/kind/symbol/exclusion filters extracted from the original
+    // pattern. This runs first — before grep-style and enhanced-mode
+    // pipelines — so every downstream branch (count, files-only,
+    // invert-match, enhanced/assembly) sees the directive-narrowed set.
+    // Pass-through (no allocations beyond the move) when no directives were
+    // present, so existing queries pay no overhead.
+    if (!parsed_query.empty_directives()) {
+        auto raw = j.value("results", nlohmann::json::array());
+        j["results"] = query_parser::apply_all(std::move(raw), parsed_query);
+    }
 
     // -- Grep-filter post-processing for `lci search` ------------------------
     //
