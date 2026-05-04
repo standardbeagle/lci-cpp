@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <string>
 #include <string_view>
 
@@ -13,6 +14,7 @@
 #include <nlohmann/json.hpp>
 
 #include "symbol_filters.h"
+#include "tree_formatter.h"
 
 namespace lci {
 namespace cli {
@@ -108,9 +110,57 @@ int run_refs(const GlobalFlags& flags, const std::string& symbol,
 
 // -- tree command -------------------------------------------------------------
 
+namespace {
+
+// Stamps `complexity` and `lines_of_code` onto every node in the tree
+// rooted at `node`, looking up each node's enclosing symbol via the
+// /browse-file endpoint. Cached per file so a tree with N nodes spread
+// across F files makes at most F server round-trips, not N.
+//
+// Resilient to lookup failures: a file whose browse-file response is
+// empty / errors out is left unannotated. The formatter then simply
+// omits the metric segment for that node.
+void annotate_tree_metrics(Client& client, nlohmann::json& node,
+                           std::map<std::string, nlohmann::json>& cache) {
+    if (!node.is_object()) return;
+    std::string fp = node.value("file_path", "");
+    std::string name = node.value("name", "");
+    if (!fp.empty() && !name.empty()) {
+        auto it = cache.find(fp);
+        if (it == cache.end()) {
+            BrowseFileRequest req;
+            req.file = fp;
+            req.max = 1000;
+            std::string err;
+            auto resp = client.browse_file(req, err);
+            cache[fp] = resp.value_or(nlohmann::json());
+            it = cache.find(fp);
+        }
+        if (!it->second.is_null() && it->second.is_object()) {
+            auto syms = it->second.value("symbols",
+                                          nlohmann::json::array());
+            for (const auto& s : syms) {
+                if (s.value("name", "") != name) continue;
+                int cx = s.value("complexity", 0);
+                int loc = s.value("lines_of_code", 0);
+                if (cx > 0) node["complexity"] = cx;
+                if (loc > 0) node["lines_of_code"] = loc;
+                break;
+            }
+        }
+    }
+    if (node.contains("children") && node["children"].is_array()) {
+        for (auto& child : node["children"]) {
+            annotate_tree_metrics(client, child, cache);
+        }
+    }
+}
+
+}  // namespace
+
 int run_tree(const GlobalFlags& flags, const std::string& function_name,
              int max_depth, bool show_lines, bool compact, bool json_output,
-             bool agent_mode, bool /*metrics*/, const std::string& exclude) {
+             bool agent_mode, bool metrics, const std::string& exclude) {
     Config cfg;
     if (std::string err = load_config_with_overrides(flags, cfg); !err.empty()) {
         std::cerr << "Error: " << err << "\n";
@@ -148,7 +198,38 @@ int run_tree(const GlobalFlags& flags, const std::string& function_name,
                 .count()) /
         1000.0;
 
+    // The /tree response is `{"tree": {...inner shape: root, root_function,
+    // options, total_nodes, max_depth...}}` (server.cpp:991-993). Unwrap
+    // once so both formatters and JSON output operate on the inner shape.
+    nlohmann::json* inner = nullptr;
+    if (tree->contains("tree") && (*tree)["tree"].is_object()) {
+        inner = &(*tree)["tree"];
+    } else if (tree->contains("root")) {
+        // Defensive: a future server change might emit the inner shape
+        // directly. Treat the whole response as the inner shape.
+        inner = &(*tree);
+    }
+
+    // Stamp `complexity` and `lines_of_code` onto each node when --metrics
+    // is on. We do this for both text and JSON output paths so the JSON
+    // shape advertised to consumers is consistent regardless of mode.
+    if (metrics && inner && inner->contains("root") &&
+        (*inner)["root"].is_object()) {
+        std::map<std::string, nlohmann::json> file_cache;
+        annotate_tree_metrics(*client, (*inner)["root"], file_cache);
+    }
+
     if (json_output) {
+        // Reflect the user's display flags in the response options block
+        // (the server returns a default block; we override the bits the
+        // CLI controls so JSON consumers can introspect what was rendered).
+        if (inner && inner->contains("options") &&
+            (*inner)["options"].is_object()) {
+            (*inner)["options"]["agent_mode"] = agent_mode;
+            (*inner)["options"]["compact"] = compact;
+            (*inner)["options"]["show_lines"] = show_lines;
+            (*inner)["options"]["metrics"] = metrics;
+        }
         nlohmann::json output;
         output["function"] = function_name;
         output["time_ms"] = elapsed_ms;
@@ -157,9 +238,28 @@ int run_tree(const GlobalFlags& flags, const std::string& function_name,
         return 0;
     }
 
+    // Pick output mode. Compact wins over agent which wins over default
+    // text -- mirrors Go's determineFormat (cmd/lci/main.go:1160) where
+    // json > compact > text, with agent layered on top.
+    tree_formatter::Options opts;
+    if (compact) {
+        opts.mode = tree_formatter::Mode::Compact;
+    } else if (agent_mode) {
+        opts.mode = tree_formatter::Mode::Agent;
+    } else {
+        opts.mode = tree_formatter::Mode::Text;
+    }
+    opts.show_lines = show_lines;
+    opts.metrics = metrics;
+    opts.max_depth = max_depth;
+
     std::printf("Function call tree for '%s' (generated in %.1fms)\n\n",
                 function_name.c_str(), elapsed_ms);
-    std::cout << tree->dump(2) << "\n";
+    if (inner) {
+        std::cout << tree_formatter::format_tree(*inner, opts);
+    } else {
+        std::cout << "No tree data available\n";
+    }
     return 0;
 }
 

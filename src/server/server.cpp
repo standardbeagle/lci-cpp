@@ -954,7 +954,12 @@ void IndexServer::handle_tree(const httplib::Request& req,
         nj["name"] = node.name;
         nj["line"] = node.line;
         nj["depth"] = depth;
-        nj["file_path"] = "";
+        // Resolve file_path from the node's file_id so CLI consumers can
+        // render `[path:line]` annotations and look up per-symbol metrics
+        // via /browse-file. Empty string for unresolved nodes (root with
+        // no symbol bound, recursion guards, etc.).
+        nj["file_path"] =
+            node.file_id != 0 ? indexer_->get_file_path(node.file_id) : "";
         nj["node_type"] = 0;
         nj["dependency_count"] = static_cast<int>(node.children.size());
         nj["dependent_count"] = 0;

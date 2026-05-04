@@ -11,6 +11,7 @@
 
 #include "../src/cli/grep_filters.h"
 #include "../src/cli/symbol_filters.h"
+#include "../src/cli/tree_formatter.h"
 
 namespace lci {
 namespace cli {
@@ -824,6 +825,334 @@ TEST(SymbolFiltersMaxLimit, MaxLargerThanInputIsPassthrough) {
     arr.push_back({{"name", "b"}});
     auto out = sf::apply_max_limit(arr, 100);
     EXPECT_EQ(out.size(), 2u);
+}
+
+// ---------------------------------------------------------------------------
+// tree_formatter helpers
+// ---------------------------------------------------------------------------
+
+namespace tf = ::lci::cli::tree_formatter;
+
+namespace {
+
+// Builds a small canonical tree response shape:
+//
+//   main (depth=0, file=src/a.cpp:10)
+//   ├─ helper (depth=1, file=src/a.cpp:20)
+//   │   └─ inner (depth=2, file=src/b.cpp:5)
+//   └─ other  (depth=1, file=src/a.cpp:30)
+//
+// Matches /tree's output (server.cpp:984-989). `complexity` and
+// `lines_of_code` are stamped only on `helper` to exercise the partial
+// metrics annotation path.
+nlohmann::json make_sample_tree() {
+    auto inner = nlohmann::json{
+        {"name", "inner"}, {"line", 5}, {"depth", 2},
+        {"file_path", "src/b.cpp"}, {"children", nlohmann::json::array()}};
+    auto helper = nlohmann::json{
+        {"name", "helper"}, {"line", 20}, {"depth", 1},
+        {"file_path", "src/a.cpp"}, {"complexity", 7}, {"lines_of_code", 12},
+        {"children", nlohmann::json::array({inner})}};
+    auto other = nlohmann::json{
+        {"name", "other"}, {"line", 30}, {"depth", 1},
+        {"file_path", "src/a.cpp"}, {"children", nlohmann::json::array()}};
+    auto root = nlohmann::json{
+        {"name", "main"}, {"line", 10}, {"depth", 0},
+        {"file_path", "src/a.cpp"},
+        {"children", nlohmann::json::array({helper, other})}};
+    return nlohmann::json{
+        {"root", root}, {"root_function", "main"}, {"max_depth", 5},
+        {"total_nodes", 3}};
+}
+
+}  // namespace
+
+// -- node_annotations ---------------------------------------------------------
+
+TEST(TreeFormatterAnnotations, ShowLinesEmitsBracketedFileColonLine) {
+    nlohmann::json node = {{"name", "f"}, {"line", 42},
+                           {"file_path", "src/x.cpp"}};
+    tf::Options opts;
+    opts.show_lines = true;
+    EXPECT_EQ(tf::node_annotations(node, opts), " [src/x.cpp:42]");
+}
+
+TEST(TreeFormatterAnnotations, ShowLinesEmptyWhenLineZero) {
+    nlohmann::json node = {{"name", "f"}, {"line", 0},
+                           {"file_path", "src/x.cpp"}};
+    tf::Options opts;
+    opts.show_lines = true;
+    EXPECT_EQ(tf::node_annotations(node, opts), "");
+}
+
+TEST(TreeFormatterAnnotations, MetricsBothFields) {
+    nlohmann::json node = {{"name", "f"}, {"complexity", 5},
+                           {"lines_of_code", 20}};
+    tf::Options opts;
+    opts.metrics = true;
+    EXPECT_EQ(tf::node_annotations(node, opts), " (complexity:5, lines:20)");
+}
+
+TEST(TreeFormatterAnnotations, MetricsOnlyComplexity) {
+    nlohmann::json node = {{"name", "f"}, {"complexity", 5}};
+    tf::Options opts;
+    opts.metrics = true;
+    EXPECT_EQ(tf::node_annotations(node, opts), " (complexity:5)");
+}
+
+TEST(TreeFormatterAnnotations, MetricsOnlyLinesOfCode) {
+    nlohmann::json node = {{"name", "f"}, {"lines_of_code", 12}};
+    tf::Options opts;
+    opts.metrics = true;
+    EXPECT_EQ(tf::node_annotations(node, opts), " (lines:12)");
+}
+
+TEST(TreeFormatterAnnotations, MetricsOmittedWhenZero) {
+    nlohmann::json node = {{"name", "f"}, {"complexity", 0},
+                           {"lines_of_code", 0}};
+    tf::Options opts;
+    opts.metrics = true;
+    EXPECT_EQ(tf::node_annotations(node, opts), "");
+}
+
+TEST(TreeFormatterAnnotations, ComposableShowLinesPlusMetrics) {
+    nlohmann::json node = {{"name", "f"}, {"line", 42},
+                           {"file_path", "src/x.cpp"}, {"complexity", 3},
+                           {"lines_of_code", 8}};
+    tf::Options opts;
+    opts.show_lines = true;
+    opts.metrics = true;
+    EXPECT_EQ(tf::node_annotations(node, opts),
+              " [src/x.cpp:42] (complexity:3, lines:8)");
+}
+
+TEST(TreeFormatterAnnotations, EmptyWhenNoFlagsSet) {
+    nlohmann::json node = {{"name", "f"}, {"line", 42},
+                           {"file_path", "src/x.cpp"}, {"complexity", 5}};
+    tf::Options opts;
+    EXPECT_EQ(tf::node_annotations(node, opts), "");
+}
+
+// -- format_compact -----------------------------------------------------------
+
+TEST(TreeFormatterCompact, LinearChainJoinedWithArrow) {
+    auto tree = make_sample_tree();
+    std::string out = tf::format_compact(tree);
+    // Mirrors Go's collectCompactParts (tree_formatter.go:204): recurse
+    // into the first child fully, then append `(+N more)` for the
+    // remaining siblings of the current level. For the sample tree:
+    //   main -> first child helper -> first child inner (no children) ->
+    //   then since main has 1 extra sibling -> "(+1 more)".
+    // UTF-8 arrow `→` = e2 86 92.
+    EXPECT_EQ(out, "main \xe2\x86\x92 helper \xe2\x86\x92 inner "
+                   "\xe2\x86\x92 (+1 more)");
+}
+
+TEST(TreeFormatterCompact, EmptyTreeReturnsEmpty) {
+    nlohmann::json empty = nlohmann::json::object();
+    EXPECT_EQ(tf::format_compact(empty), "");
+}
+
+TEST(TreeFormatterCompact, SingleNodeNoChildren) {
+    nlohmann::json tree = {
+        {"root", {{"name", "solo"}, {"children", nlohmann::json::array()}}},
+        {"root_function", "solo"}};
+    EXPECT_EQ(tf::format_compact(tree), "solo");
+}
+
+TEST(TreeFormatterCompact, MultipleSiblingsOnlyFirstFollowed) {
+    nlohmann::json tree = {
+        {"root",
+         {{"name", "r"},
+          {"children",
+           nlohmann::json::array(
+               {{{"name", "a"}, {"children", nlohmann::json::array()}},
+                {{"name", "b"}, {"children", nlohmann::json::array()}},
+                {{"name", "c"}, {"children", nlohmann::json::array()}}})}}}};
+    // Linear follow + sibling count for the others.
+    EXPECT_EQ(tf::format_compact(tree), "r \xe2\x86\x92 a \xe2\x86\x92 "
+                                         "(+2 more)");
+}
+
+// -- format_text --------------------------------------------------------------
+
+TEST(TreeFormatterText, IncludesHeaderAndRootFunction) {
+    auto tree = make_sample_tree();
+    tf::Options opts;
+    opts.mode = tf::Mode::Text;
+    std::string out = tf::format_text(tree, opts);
+    EXPECT_NE(out.find("Function tree for 'main'"), std::string::npos);
+    EXPECT_NE(out.find("Total nodes: 3"), std::string::npos);
+    EXPECT_NE(out.find("Max depth: 5"), std::string::npos);
+}
+
+TEST(TreeFormatterText, RootGlyphIsRightArrow) {
+    auto tree = make_sample_tree();
+    tf::Options opts;
+    opts.mode = tf::Mode::Text;
+    std::string out = tf::format_text(tree, opts);
+    // Root line uses `→ ` glyph (UTF-8: e2 86 92 + space).
+    EXPECT_NE(out.find("\xe2\x86\x92 main"), std::string::npos);
+}
+
+TEST(TreeFormatterText, BranchGlyphsForChildren) {
+    auto tree = make_sample_tree();
+    tf::Options opts;
+    opts.mode = tf::Mode::Text;
+    std::string out = tf::format_text(tree, opts);
+    // `helper` is the first of two siblings -> `├─→`. `other` is last
+    // -> `└─→`.
+    EXPECT_NE(out.find("\xe2\x94\x9c\xe2\x94\x80\xe2\x86\x92 helper"),
+              std::string::npos);
+    EXPECT_NE(out.find("\xe2\x94\x94\xe2\x94\x80\xe2\x86\x92 other"),
+              std::string::npos);
+}
+
+TEST(TreeFormatterText, ShowLinesAddsBracketedAnnotation) {
+    auto tree = make_sample_tree();
+    tf::Options opts;
+    opts.mode = tf::Mode::Text;
+    opts.show_lines = true;
+    std::string out = tf::format_text(tree, opts);
+    EXPECT_NE(out.find("main [src/a.cpp:10]"), std::string::npos);
+    EXPECT_NE(out.find("helper [src/a.cpp:20]"), std::string::npos);
+    EXPECT_NE(out.find("inner [src/b.cpp:5]"), std::string::npos);
+}
+
+TEST(TreeFormatterText, MetricsAddsComplexityAnnotation) {
+    auto tree = make_sample_tree();
+    tf::Options opts;
+    opts.mode = tf::Mode::Text;
+    opts.metrics = true;
+    std::string out = tf::format_text(tree, opts);
+    // `helper` is the only node with metrics in the sample tree.
+    EXPECT_NE(out.find("helper (complexity:7, lines:12)"), std::string::npos);
+    // No metrics annotation for nodes without complexity/lines_of_code:
+    // they should still emit `(depth=N)` from the depth tag, but not a
+    // metrics block. Confirm the metrics segment specifically is absent.
+    EXPECT_EQ(out.find("inner (complexity"), std::string::npos);
+    EXPECT_EQ(out.find("inner (lines:"), std::string::npos);
+}
+
+TEST(TreeFormatterText, DepthTagAppendedToEveryNode) {
+    auto tree = make_sample_tree();
+    tf::Options opts;
+    opts.mode = tf::Mode::Text;
+    std::string out = tf::format_text(tree, opts);
+    EXPECT_NE(out.find("main (depth=0)"), std::string::npos);
+    EXPECT_NE(out.find("helper (depth=1)"), std::string::npos);
+    EXPECT_NE(out.find("other (depth=1)"), std::string::npos);
+    EXPECT_NE(out.find("inner (depth=2)"), std::string::npos);
+}
+
+TEST(TreeFormatterText, EmptyTreeReturnsPlaceholder) {
+    nlohmann::json empty = nlohmann::json::object();
+    tf::Options opts;
+    opts.mode = tf::Mode::Text;
+    EXPECT_EQ(tf::format_text(empty, opts), "No tree data available\n");
+}
+
+// -- agent mode (ASCII-only) --------------------------------------------------
+
+TEST(TreeFormatterAgent, NoUnicodeBoxDrawingChars) {
+    auto tree = make_sample_tree();
+    tf::Options opts;
+    opts.mode = tf::Mode::Agent;
+    std::string out = tf::format_text(tree, opts);
+    // No box-drawing chars or arrows should appear.
+    EXPECT_EQ(out.find("\xe2\x86\x92"), std::string::npos)
+        << "agent mode must not emit `→` arrows";
+    EXPECT_EQ(out.find("\xe2\x94\x9c"), std::string::npos)
+        << "agent mode must not emit `├` branch chars";
+    EXPECT_EQ(out.find("\xe2\x94\x94"), std::string::npos)
+        << "agent mode must not emit `└` branch chars";
+    EXPECT_EQ(out.find("\xe2\x94\x82"), std::string::npos)
+        << "agent mode must not emit `│` continuation bars";
+}
+
+TEST(TreeFormatterAgent, NodesIndentedByTwoSpacesPerLevel) {
+    auto tree = make_sample_tree();
+    tf::Options opts;
+    opts.mode = tf::Mode::Agent;
+    std::string out = tf::format_text(tree, opts);
+    // Root: no indent. Depth-1 children: 2-space indent. Depth-2: 4 spaces.
+    EXPECT_NE(out.find("\nmain "), std::string::npos);
+    EXPECT_NE(out.find("\n  helper"), std::string::npos);
+    EXPECT_NE(out.find("\n    inner"), std::string::npos);
+    EXPECT_NE(out.find("\n  other"), std::string::npos);
+}
+
+TEST(TreeFormatterAgent, ComposableWithShowLinesAndMetrics) {
+    auto tree = make_sample_tree();
+    tf::Options opts;
+    opts.mode = tf::Mode::Agent;
+    opts.show_lines = true;
+    opts.metrics = true;
+    std::string out = tf::format_text(tree, opts);
+    // helper has both file/line and metrics in our sample.
+    EXPECT_NE(out.find("helper [src/a.cpp:20] (complexity:7, lines:12)"),
+              std::string::npos);
+    // inner has only file/line (no metrics in sample).
+    EXPECT_NE(out.find("inner [src/b.cpp:5]"), std::string::npos);
+    // Confirm still ASCII-only.
+    EXPECT_EQ(out.find("\xe2\x86\x92"), std::string::npos);
+}
+
+// -- format_tree dispatcher ---------------------------------------------------
+
+TEST(TreeFormatterDispatch, CompactModeGoesThroughFormatCompact) {
+    auto tree = make_sample_tree();
+    tf::Options opts;
+    opts.mode = tf::Mode::Compact;
+    std::string out = tf::format_tree(tree, opts);
+    // Compact mode emits a single line ending with newline.
+    EXPECT_NE(out.find("main \xe2\x86\x92 helper"), std::string::npos);
+    EXPECT_EQ(out.back(), '\n');
+    // No tree header in compact mode.
+    EXPECT_EQ(out.find("Function tree for"), std::string::npos);
+}
+
+TEST(TreeFormatterDispatch, TextModeGoesThroughFormatText) {
+    auto tree = make_sample_tree();
+    tf::Options opts;
+    opts.mode = tf::Mode::Text;
+    std::string out = tf::format_tree(tree, opts);
+    EXPECT_NE(out.find("Function tree for 'main'"), std::string::npos);
+}
+
+TEST(TreeFormatterDispatch, AgentModeGoesThroughFormatTextAgent) {
+    auto tree = make_sample_tree();
+    tf::Options opts;
+    opts.mode = tf::Mode::Agent;
+    std::string out = tf::format_tree(tree, opts);
+    EXPECT_NE(out.find("Function tree for 'main'"), std::string::npos);
+    // ASCII-only.
+    EXPECT_EQ(out.find("\xe2\x86\x92"), std::string::npos);
+}
+
+// -- max_depth client-side cutoff --------------------------------------------
+
+TEST(TreeFormatterText, MaxDepthCutsOffDeeperNodes) {
+    auto tree = make_sample_tree();
+    tf::Options opts;
+    opts.mode = tf::Mode::Text;
+    opts.max_depth = 1;
+    std::string out = tf::format_text(tree, opts);
+    EXPECT_NE(out.find("main"), std::string::npos);
+    EXPECT_NE(out.find("helper"), std::string::npos);
+    EXPECT_NE(out.find("other"), std::string::npos);
+    EXPECT_EQ(out.find("inner"), std::string::npos)
+        << "max_depth=1 must not emit depth-2 nodes";
+}
+
+TEST(TreeFormatterText, MaxDepthZeroMeansNoCutoff) {
+    auto tree = make_sample_tree();
+    tf::Options opts;
+    opts.mode = tf::Mode::Text;
+    opts.max_depth = 0;
+    std::string out = tf::format_text(tree, opts);
+    // All four nodes appear.
+    EXPECT_NE(out.find("inner"), std::string::npos);
 }
 
 }  // namespace
