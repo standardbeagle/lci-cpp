@@ -76,6 +76,14 @@ int main(int argc, char* argv[]) {
     search_cmd->add_flag("--invert-match", search_invert_match,
                          "Show lines that don't match");
 
+    // Multiple patterns OR'd together (grep -e). `--patterns` long-only
+    // because the positional arg `pattern` already occupies that name in
+    // CLI11's flag namespace.
+    std::vector<std::string> search_patterns;
+    search_cmd->add_option("--patterns", search_patterns,
+                           "Additional patterns OR'd with the positional "
+                           "pattern (grep -e). Repeat for each extra pattern.");
+
     bool search_count = false;
     search_cmd->add_flag("--count", search_count,
                          "Return match count per file");
@@ -115,14 +123,30 @@ int main(int argc, char* argv[]) {
     search_cmd->add_option("--context-filter", search_context_filter,
                            "Filter results by context pattern");
 
+    // -- Enhanced output modes (parity with lci Go cmd/lci/search.go) --------
+    // Mutually exclusive presentation flags layered on top of the existing
+    // --json / --compact-search / --max-lines flow.
+    //   --enhanced : metrics + breadcrumbs per match (Go displayEnhancedResults)
+    //   --assembly : surrounding function/class context per match (Go
+    //                displayStandardResultsWithAssembly standard path)
+    bool search_enhanced = false;
+    search_cmd->add_flag("--enhanced", search_enhanced,
+                         "Show complexity metrics and breadcrumbs per match");
+
+    bool search_assembly = false;
+    search_cmd->add_flag("--assembly", search_assembly,
+                         "Show surrounding function/class context per match");
+
     search_cmd->callback([&]() {
         std::exit(run_search(
             gflags, search_pattern, search_max_lines, search_case_insensitive,
             search_json, search_light, search_compact, search_regex,
-            search_exclude, search_include, search_invert_match, search_count,
+            search_exclude, search_include, search_invert_match,
+            search_patterns, search_count,
             search_files_only, search_word_boundary, search_max_count,
             search_ids, search_no_ids, search_comments_only, search_code_only,
-            search_strings_only, search_rank_by, search_context_filter));
+            search_strings_only, search_rank_by, search_context_filter,
+            search_enhanced, search_assembly));
     });
 
     // -- Grep subcommand ------------------------------------------------------
@@ -138,9 +162,12 @@ int main(int argc, char* argv[]) {
     grep_cmd->add_option("-n,--max-results", grep_max_results,
                          "Max number of results");
 
-    int grep_context = 3;
+    // Default 0 (off): match-line only, parity with Go's `displayGrepResults`
+    // which ignores --context in text mode. Users opt in with `--context N`,
+    // and N>0 enables grep -C-style before/after context rendering.
+    int grep_context = 0;
     grep_cmd->add_option("-C,--context", grep_context,
-                         "Lines of context around matches");
+                         "Lines of context around matches (grep -C N)");
 
     bool grep_case_insensitive = false;
     grep_cmd->add_flag("-i,--case-insensitive", grep_case_insensitive,
@@ -169,11 +196,39 @@ int main(int argc, char* argv[]) {
     grep_cmd->add_flag("-R,--regex", grep_regex,
                        "Interpret pattern as extended regex");
 
+    // -- Grep-compatible filter flags (parity with `lci search` and Go CLI) --
+    bool grep_invert_match = false;
+    grep_cmd->add_flag("-v,--invert-match", grep_invert_match,
+                       "Show lines that don't match (grep -v)");
+
+    // `--patterns` only — Go's CLI also accepts `--pattern` as an alias, but
+    // CLI11 treats positional + flag names as the same namespace, so we'd
+    // collide with the required positional `pattern` argument above.
+    std::vector<std::string> grep_patterns;
+    grep_cmd->add_option("--patterns", grep_patterns,
+                         "Additional patterns OR'd with the positional pattern "
+                         "(grep -e). Repeat the flag for each extra pattern.");
+
+    bool grep_count = false;
+    grep_cmd->add_flag("-c,--count", grep_count,
+                       "Print match count per file instead of match lines "
+                       "(grep -c)");
+
+    bool grep_files_only = false;
+    grep_cmd->add_flag("-l,--files-with-matches", grep_files_only,
+                       "Print only filenames containing matches (grep -l)");
+
+    int grep_max_count = 0;
+    grep_cmd->add_option("-M,--max-count", grep_max_count,
+                         "Stop after N matches per file (grep -m, 0=unlimited)");
+
     grep_cmd->callback([&]() {
         std::exit(run_grep(gflags, grep_pattern, grep_max_results,
                            grep_context, grep_case_insensitive, grep_json,
                            grep_exclude, grep_include, grep_exclude_tests,
-                           grep_exclude_comments, grep_regex));
+                           grep_exclude_comments, grep_regex,
+                           grep_invert_match, grep_patterns, grep_count,
+                           grep_files_only, grep_max_count));
     });
 
     // -- Status subcommand ----------------------------------------------------

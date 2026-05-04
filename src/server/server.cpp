@@ -598,6 +598,12 @@ void IndexServer::handle_search(const httplib::Request& req,
         ctx["block_type"] = r.context.block_type.empty()
                                 ? std::string("lines")
                                 : r.context.block_type;
+        // `block_name` is the enclosing function/class/struct identifier when
+        // the search engine could resolve one for the match. Always emit the
+        // key (empty string when no enclosing block) so CLI consumers can rely
+        // on the field being present and the JSON shape stays stable across
+        // matches with and without semantic context.
+        ctx["block_name"] = r.context.block_name;
         ctx["start_line"] = r.context.start_line;
         ctx["end_line"] = r.context.end_line;
         ctx["is_complete"] = r.context.is_complete;
@@ -1340,6 +1346,15 @@ void IndexServer::handle_inspect_symbol(const httplib::Request& req,
         e["type"] = std::string(to_string(sym->symbol.type));
         e["file"] = fp;
         e["line"] = sym->symbol.line;
+        // Symbol bounds: emit `end_line` (and derived `lines_of_code`) when the
+        // extractor populated it. Consumed by the CLI's `--enhanced` /
+        // `--assembly` modes to render the surrounding block. Omitted with
+        // `>` parity to git-analyze (which uses the same gating).
+        if (sym->symbol.end_line > sym->symbol.line) {
+            e["end_line"] = sym->symbol.end_line;
+            e["lines_of_code"] =
+                sym->symbol.end_line - sym->symbol.line + 1;
+        }
         e["is_exported"] = sym->is_exported;
         e["complexity"] = sym->complexity;
         e["outgoing_refs"] = static_cast<int>(sym->outgoing_refs.size());
@@ -1530,6 +1545,15 @@ void IndexServer::handle_browse_file(const httplib::Request& req,
         e["type"] = std::string(to_string(sym->symbol.type));
         e["file"] = target_path;
         e["line"] = sym->symbol.line;
+        // Same end_line/lines_of_code emission as /list-symbols so the CLI's
+        // enhanced/assembly output modes can resolve enclosing-block bounds
+        // via either entry point. Gated on `end_line > line` to avoid
+        // poisoning consumers with unset zero-bounds rows.
+        if (sym->symbol.end_line > sym->symbol.line) {
+            e["end_line"] = sym->symbol.end_line;
+            e["lines_of_code"] =
+                sym->symbol.end_line - sym->symbol.line + 1;
+        }
         e["object_id"] = encode_symbol_id(sym->id);
         e["is_exported"] = sym->is_exported;
         if (sym->complexity > 0) e["complexity"] = sym->complexity;

@@ -42,24 +42,54 @@ bool is_mcp_mode();
 // -- Subcommand entry points --------------------------------------------------
 
 /// search/grep subcommand. Returns 0 on success, non-zero on error.
+///
+/// `extra_patterns` corresponds to the `--patterns` flag (grep -e): each
+/// entry is OR'd with the positional `pattern` to form a single result set.
+///
+/// Output mode flags (mutually exclusive — first listed wins):
+///   - `enhanced`: per-match block with breadcrumb (`block_type block_name`),
+///     complexity/lines metrics for the enclosing symbol, and a
+///     match-line-marked context window. Matches Go's
+///     `displayEnhancedResults` in cmd/lci/search.go:616.
+///   - `assembly`: per-match block with the surrounding function/class
+///     context (widened to the enclosing block when the engine resolved one,
+///     otherwise the server-default window). Matches Go's
+///     `displayStandardResultsWithAssembly` standard-mode path
+///     (cmd/lci/search.go:353); the C++ build has no AssemblySearchEngine,
+///     so the optional "Possible String Assembly" section is omitted.
 int run_search(const GlobalFlags& flags, const std::string& pattern,
                int max_lines, bool case_insensitive, bool json_output,
                bool light, bool compact_search, bool use_regex,
                const std::string& exclude_pattern,
                const std::string& include_pattern,
-               bool invert_match, bool count_per_file,
+               bool invert_match,
+               const std::vector<std::string>& extra_patterns,
+               bool count_per_file,
                bool files_only, bool word_boundary,
                int max_count_per_file, bool include_ids, bool no_ids,
                bool comments_only, bool code_only,
                bool strings_only, const std::string& rank_by,
-               const std::string& context_filter);
+               const std::string& context_filter,
+               bool enhanced, bool assembly);
 
 /// grep subcommand. Returns 0 on success, non-zero on error.
+///
+/// Grep-compatible filter flags (all post-process matches returned by the
+/// server; the server itself only honors `case_insensitive`):
+///   - `invert_match`     : grep -v, list lines that do NOT match.
+///   - `extra_patterns`   : grep -e, OR additional patterns into a single query.
+///   - `count_per_file`   : grep -c, emit "path: N" per file.
+///   - `files_only`       : grep -l, emit only paths with at least one match.
+///   - `max_count_per_file`: grep -m, cap matches per file (0 = unlimited).
 int run_grep(const GlobalFlags& flags, const std::string& pattern,
              int max_results, int context_lines, bool case_insensitive,
              bool json_output, const std::string& exclude_pattern,
              const std::string& include_pattern, bool exclude_tests,
-             bool exclude_comments, bool use_regex);
+             bool exclude_comments, bool use_regex,
+             bool invert_match,
+             const std::vector<std::string>& extra_patterns,
+             bool count_per_file, bool files_only,
+             int max_count_per_file);
 
 /// status subcommand. Returns 0 on success, non-zero on error.
 int run_status(const GlobalFlags& flags, bool json_output, bool verbose);

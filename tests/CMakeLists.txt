@@ -118,6 +118,7 @@ target_compile_definitions(lci_integration_tests PRIVATE
 target_link_libraries(lci_integration_tests PRIVATE
     lci_lib
     lci_parity_runner_lib
+    spec_diff
     GTest::gtest_main
 )
 

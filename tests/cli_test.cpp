@@ -1,12 +1,15 @@
 #include <gtest/gtest.h>
 
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <string>
 
 #include <nlohmann/json.hpp>
 
 #include <lci/cli/commands.h>
+
+#include "../src/cli/grep_filters.h"
 
 namespace lci {
 namespace cli {
@@ -260,6 +263,346 @@ TEST(CliGitAnalyzeTest, RangeScopeRequiresBase) {
     GlobalFlags flags;
     int rc = run_git_analyze(flags, "range", "", "", {}, 0.8, 20, false);
     EXPECT_EQ(rc, 1);
+}
+
+// -- grep filter helpers ------------------------------------------------------
+//
+// Direct unit tests for the pure helpers that back `lci grep --context N`,
+// `--exclude-tests`, and `--exclude-comments`. These avoid the server hop so
+// the heuristics can be exercised exhaustively without indexing a corpus.
+
+namespace gf = ::lci::cli::grep_filters;
+
+TEST(GrepFiltersComment, LineSlashSlashIsComment) {
+    EXPECT_TRUE(gf::line_looks_like_comment("// hello"));
+    EXPECT_TRUE(gf::line_looks_like_comment("    // indented"));
+    EXPECT_TRUE(gf::line_looks_like_comment("\t// tabbed"));
+}
+
+TEST(GrepFiltersComment, LineHashIsComment) {
+    EXPECT_TRUE(gf::line_looks_like_comment("# python"));
+    EXPECT_TRUE(gf::line_looks_like_comment("  #include"));  // matches Go heuristic
+}
+
+TEST(GrepFiltersComment, LineSlashStarIsComment) {
+    EXPECT_TRUE(gf::line_looks_like_comment("/* opening"));
+    EXPECT_TRUE(gf::line_looks_like_comment("   /* indented opener"));
+}
+
+TEST(GrepFiltersComment, LineWithStarSlashIsComment) {
+    // Block comment closer anywhere on the line counts as "in a comment"
+    // (the line crossed the close marker, so its tail is the comment body).
+    EXPECT_TRUE(gf::line_looks_like_comment("done */"));
+    EXPECT_TRUE(gf::line_looks_like_comment("payload */ trailing"));
+}
+
+TEST(GrepFiltersComment, PlainCodeIsNotComment) {
+    EXPECT_FALSE(gf::line_looks_like_comment("int x = 42;"));
+    EXPECT_FALSE(gf::line_looks_like_comment("    foo(\"//\", x);"));
+    EXPECT_FALSE(gf::line_looks_like_comment("string s = \"# not a comment\";"));
+}
+
+TEST(GrepFiltersComment, EmptyOrWhitespaceIsNotComment) {
+    EXPECT_FALSE(gf::line_looks_like_comment(""));
+    EXPECT_FALSE(gf::line_looks_like_comment("   "));
+    EXPECT_FALSE(gf::line_looks_like_comment("\t\t"));
+}
+
+TEST(GrepFiltersComment, MultilineBlockBodyNotDetected) {
+    // Known limitation matched with Go: a line inside `/* ... */` that
+    // doesn't contain `/*` or `*/` is NOT classified as a comment.
+    EXPECT_FALSE(gf::line_looks_like_comment("inside block comment"));
+}
+
+TEST(GrepFiltersTests, BasenameUnderscoreTestSuffix) {
+    EXPECT_TRUE(gf::path_is_test("src/foo_test.cpp"));
+    EXPECT_TRUE(gf::path_is_test("/abs/path/widget_test.go"));
+    EXPECT_TRUE(gf::path_is_test("module_test.py"));
+}
+
+TEST(GrepFiltersTests, BasenameDotTestOrSpec) {
+    EXPECT_TRUE(gf::path_is_test("src/foo.test.ts"));
+    EXPECT_TRUE(gf::path_is_test("src/foo.spec.js"));
+}
+
+TEST(GrepFiltersTests, BasenameTestPrefix) {
+    EXPECT_TRUE(gf::path_is_test("src/test_foo.py"));
+    EXPECT_TRUE(gf::path_is_test("src/test_widget.cpp"));
+}
+
+TEST(GrepFiltersTests, CapitalTestSuffix) {
+    EXPECT_TRUE(gf::path_is_test("src/FooTest.cpp"));
+    EXPECT_TRUE(gf::path_is_test("src/FooTests.cpp"));
+    EXPECT_TRUE(gf::path_is_test("BarTest.java"));
+}
+
+TEST(GrepFiltersTests, TestsDirectoryComponent) {
+    EXPECT_TRUE(gf::path_is_test("tests/foo.cpp"));
+    EXPECT_TRUE(gf::path_is_test("tests/sub/bar.cpp"));
+    EXPECT_TRUE(gf::path_is_test("/abs/path/tests/baz.cpp"));
+    EXPECT_TRUE(gf::path_is_test("test/foo.cpp"));
+}
+
+TEST(GrepFiltersTests, TestlikeButNotTest) {
+    // Word "testing" in path but not as a directory component or marker.
+    EXPECT_FALSE(gf::path_is_test("src/testing_utils.cpp"));
+    EXPECT_FALSE(gf::path_is_test("src/protest_handler.cpp"));
+    EXPECT_FALSE(gf::path_is_test("src/contests.cpp"));
+    // "Test" buried mid-stem (not a suffix) should not match.
+    EXPECT_FALSE(gf::path_is_test("src/TestHelper.cpp"));
+}
+
+TEST(GrepFiltersTests, PlainSourceFiles) {
+    EXPECT_FALSE(gf::path_is_test("src/foo.cpp"));
+    EXPECT_FALSE(gf::path_is_test("src/main.go"));
+    EXPECT_FALSE(gf::path_is_test("src/util.py"));
+}
+
+TEST(GrepFiltersApplyExcludeTests, FiltersTestPaths) {
+    nlohmann::json results = nlohmann::json::array();
+    results.push_back({{"path", "src/foo.cpp"}, {"line", 10}});
+    results.push_back({{"path", "src/foo_test.cpp"}, {"line", 5}});
+    results.push_back({{"path", "tests/bar.cpp"}, {"line", 3}});
+    results.push_back({{"path", "src/main.go"}, {"line", 1}});
+
+    auto filtered = gf::apply_exclude_tests(results);
+    ASSERT_EQ(filtered.size(), 2u);
+    EXPECT_EQ(filtered[0]["path"].get<std::string>(), "src/foo.cpp");
+    EXPECT_EQ(filtered[1]["path"].get<std::string>(), "src/main.go");
+}
+
+TEST(GrepFiltersApplyExcludeTests, EmptyInputProducesEmpty) {
+    auto filtered = gf::apply_exclude_tests(nlohmann::json::array());
+    EXPECT_TRUE(filtered.is_array());
+    EXPECT_EQ(filtered.size(), 0u);
+}
+
+TEST(GrepFiltersApplyExcludeTests, AllTestPathsDropped) {
+    nlohmann::json results = nlohmann::json::array();
+    results.push_back({{"path", "tests/a.cpp"}, {"line", 1}});
+    results.push_back({{"path", "src/foo_test.cpp"}, {"line", 2}});
+    auto filtered = gf::apply_exclude_tests(results);
+    EXPECT_EQ(filtered.size(), 0u);
+}
+
+TEST(GrepFiltersApplyExcludeComments, UsesEmbeddedContext) {
+    // When the result carries an embedded context block with the matching
+    // line text, the helper inspects it without touching the disk. Build a
+    // result whose match line begins with `//` and another that doesn't.
+    nlohmann::json comment_row;
+    comment_row["path"] = "/no/such/file.cpp";
+    comment_row["line"] = 1;
+    comment_row["context"] = {{"start_line", 1}, {"lines", {"// commented match"}}};
+
+    nlohmann::json code_row;
+    code_row["path"] = "/no/such/file.cpp";
+    code_row["line"] = 2;
+    code_row["context"] = {{"start_line", 2}, {"lines", {"int x = 1;"}}};
+
+    nlohmann::json results = nlohmann::json::array({comment_row, code_row});
+    auto filtered = gf::apply_exclude_comments(results);
+    ASSERT_EQ(filtered.size(), 1u);
+    EXPECT_EQ(filtered[0]["line"].get<int>(), 2);
+}
+
+TEST(GrepFiltersWidenContext, ZeroIsPassthrough) {
+    nlohmann::json input = nlohmann::json::array();
+    input.push_back({{"path", "/anything"}, {"line", 1}});
+    auto out = gf::widen_context_blocks(input, 0);
+    EXPECT_EQ(out, input);
+}
+
+TEST(GrepFiltersWidenContext, ReadsLinesFromDisk) {
+    namespace fs = std::filesystem;
+    auto tmp = fs::temp_directory_path() / "lci_grep_widen_test.txt";
+    {
+        std::ofstream out(tmp);
+        out << "line1\nline2\nline3\nline4\nline5\n";
+    }
+
+    nlohmann::json results = nlohmann::json::array();
+    nlohmann::json row;
+    row["path"] = tmp.string();
+    row["line"] = 3;
+    row["context"] = nlohmann::json::object();
+    results.push_back(row);
+
+    auto widened = gf::widen_context_blocks(results, 1);
+    ASSERT_EQ(widened.size(), 1u);
+    auto& ctx = widened[0]["context"];
+    EXPECT_EQ(ctx["start_line"].get<int>(), 2);
+    EXPECT_EQ(ctx["end_line"].get<int>(), 4);
+    ASSERT_EQ(ctx["lines"].size(), 3u);
+    EXPECT_EQ(ctx["lines"][0].get<std::string>(), "line2");
+    EXPECT_EQ(ctx["lines"][1].get<std::string>(), "line3");
+    EXPECT_EQ(ctx["lines"][2].get<std::string>(), "line4");
+    ASSERT_EQ(ctx["matched_lines"].size(), 1u);
+    EXPECT_EQ(ctx["matched_lines"][0].get<int>(), 3);
+
+    fs::remove(tmp);
+}
+
+TEST(GrepFiltersWidenContext, ClampsStartToOne) {
+    namespace fs = std::filesystem;
+    auto tmp = fs::temp_directory_path() / "lci_grep_widen_clamp_test.txt";
+    {
+        std::ofstream out(tmp);
+        out << "first\nsecond\nthird\n";
+    }
+
+    nlohmann::json results = nlohmann::json::array();
+    nlohmann::json row;
+    row["path"] = tmp.string();
+    row["line"] = 1;
+    results.push_back(row);
+
+    auto widened = gf::widen_context_blocks(results, 5);
+    ASSERT_EQ(widened.size(), 1u);
+    auto& ctx = widened[0]["context"];
+    EXPECT_EQ(ctx["start_line"].get<int>(), 1);
+    // `to` was 6 but file has only 3 lines — end_line should reflect what we read.
+    EXPECT_EQ(ctx["end_line"].get<int>(), 3);
+    EXPECT_EQ(ctx["lines"].size(), 3u);
+
+    fs::remove(tmp);
+}
+
+TEST(GrepFiltersWidenContext, MissingFileLeavesRowUnchanged) {
+    nlohmann::json results = nlohmann::json::array();
+    nlohmann::json row;
+    row["path"] = "/no/such/file/should/exist.cpp";
+    row["line"] = 1;
+    row["context"] = {{"sentinel", "unchanged"}};
+    results.push_back(row);
+
+    auto widened = gf::widen_context_blocks(results, 3);
+    ASSERT_EQ(widened.size(), 1u);
+    EXPECT_EQ(widened[0]["context"]["sentinel"].get<std::string>(), "unchanged");
+}
+
+// -- Enhanced/assembly output helpers ---------------------------------------
+//
+// Pure formatting routines that back `lci search --enhanced` and
+// `--assembly`. These tests pin the exact output strings against Go's
+// reference formatters in cmd/lci/search.go (displayEnhancedResults at L616,
+// displayStandardResultsWithAssembly at L353).
+
+TEST(SearchFormatBreadcrumb, BothFieldsPopulated) {
+    EXPECT_EQ(gf::format_breadcrumb("function", "myFunc"), "function myFunc");
+    EXPECT_EQ(gf::format_breadcrumb("class", "Widget"), "class Widget");
+    EXPECT_EQ(gf::format_breadcrumb("method", "Foo::bar"), "method Foo::bar");
+}
+
+TEST(SearchFormatBreadcrumb, OnlyTypeOrName) {
+    EXPECT_EQ(gf::format_breadcrumb("function", ""), "function");
+    EXPECT_EQ(gf::format_breadcrumb("", "loneSymbol"), "loneSymbol");
+}
+
+TEST(SearchFormatBreadcrumb, BothEmptyReturnsEmpty) {
+    EXPECT_EQ(gf::format_breadcrumb("", ""), "");
+}
+
+TEST(SearchFormatMetricsLine, AllFieldsZero) {
+    EXPECT_EQ(gf::format_metrics_line(0, 0, 0), "");
+}
+
+TEST(SearchFormatMetricsLine, OnlyComplexity) {
+    EXPECT_EQ(gf::format_metrics_line(7, 0, 0), "complexity: 7");
+}
+
+TEST(SearchFormatMetricsLine, OnlyLines) {
+    EXPECT_EQ(gf::format_metrics_line(0, 42, 0), "lines: 42");
+}
+
+TEST(SearchFormatMetricsLine, OnlyRefs) {
+    EXPECT_EQ(gf::format_metrics_line(0, 0, 5), "refs: 5");
+}
+
+TEST(SearchFormatMetricsLine, AllThreeJoinedInGoOrder) {
+    EXPECT_EQ(gf::format_metrics_line(7, 42, 5),
+              "complexity: 7 | lines: 42 | refs: 5");
+}
+
+TEST(SearchFormatMetricsLine, NegativeFieldsSkipped) {
+    // Metrics fields come from server-side counters; negatives indicate
+    // "unknown" upstream. The formatter treats any non-positive value as
+    // absent, matching Go's `> 0` gate (search.go:692).
+    EXPECT_EQ(gf::format_metrics_line(-1, 0, 0), "");
+    EXPECT_EQ(gf::format_metrics_line(0, -1, 5), "refs: 5");
+}
+
+TEST(SearchWidenToEnclosingBlock, RowWithEnclosingBoundsWidens) {
+    namespace fs = std::filesystem;
+    auto tmp = fs::temp_directory_path() / "lci_search_widen_enclosing.txt";
+    {
+        std::ofstream out(tmp);
+        out << "a\nb\nc\nd\ne\nf\ng\n";  // 7 lines
+    }
+
+    nlohmann::json results = nlohmann::json::array();
+    nlohmann::json row;
+    row["path"] = tmp.string();
+    row["line"] = 4;
+    row["enclosing_start"] = 2;
+    row["enclosing_end"] = 6;
+    nlohmann::json ctx;
+    ctx["block_type"] = "function";
+    ctx["block_name"] = "midFn";
+    row["context"] = ctx;
+    results.push_back(row);
+
+    auto widened = gf::widen_to_enclosing_block(results);
+    ASSERT_EQ(widened.size(), 1u);
+    auto& w = widened[0]["context"];
+    EXPECT_EQ(w["start_line"].get<int>(), 2);
+    EXPECT_EQ(w["end_line"].get<int>(), 6);
+    EXPECT_EQ(w["block_type"].get<std::string>(), "function");
+    EXPECT_EQ(w["block_name"].get<std::string>(), "midFn");
+    ASSERT_EQ(w["lines"].size(), 5u);
+    EXPECT_EQ(w["lines"][0].get<std::string>(), "b");
+    EXPECT_EQ(w["lines"][4].get<std::string>(), "f");
+    ASSERT_EQ(w["matched_lines"].size(), 1u);
+    EXPECT_EQ(w["matched_lines"][0].get<int>(), 4);
+
+    fs::remove(tmp);
+}
+
+TEST(SearchWidenToEnclosingBlock, MissingBoundsLeftUnchanged) {
+    nlohmann::json results = nlohmann::json::array();
+    nlohmann::json row;
+    row["path"] = "/no/such/file";
+    row["line"] = 1;
+    row["context"] = {{"sentinel", "untouched"}};
+    results.push_back(row);
+
+    auto widened = gf::widen_to_enclosing_block(results);
+    ASSERT_EQ(widened.size(), 1u);
+    EXPECT_EQ(widened[0]["context"]["sentinel"].get<std::string>(),
+              "untouched");
+}
+
+TEST(SearchWidenToEnclosingBlock, ZeroOrInvertedRangeIgnored) {
+    nlohmann::json results = nlohmann::json::array();
+    nlohmann::json zero;
+    zero["path"] = "/no/such/file";
+    zero["line"] = 1;
+    zero["enclosing_start"] = 0;
+    zero["enclosing_end"] = 5;
+    zero["context"] = {{"keep", true}};
+    results.push_back(zero);
+
+    nlohmann::json inverted;
+    inverted["path"] = "/no/such/file";
+    inverted["line"] = 1;
+    inverted["enclosing_start"] = 10;
+    inverted["enclosing_end"] = 5;
+    inverted["context"] = {{"keep", true}};
+    results.push_back(inverted);
+
+    auto widened = gf::widen_to_enclosing_block(results);
+    ASSERT_EQ(widened.size(), 2u);
+    EXPECT_TRUE(widened[0]["context"]["keep"].get<bool>());
+    EXPECT_TRUE(widened[1]["context"]["keep"].get<bool>());
 }
 
 }  // namespace
