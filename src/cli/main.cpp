@@ -117,11 +117,12 @@ int main(int argc, char* argv[]) {
 
     std::string search_rank_by;
     search_cmd->add_option("--rank-by", search_rank_by,
-                           "Rank results by: relevance, proximity, similarity");
+                           "Rank results by: relevance | recency | file-type");
 
     std::string search_context_filter;
     search_cmd->add_option("--context-filter", search_context_filter,
-                           "Filter results by context pattern");
+                           "Filter results by enclosing context: "
+                           "function | class | top-level");
 
     // -- Enhanced output modes (parity with lci Go cmd/lci/search.go) --------
     // Mutually exclusive presentation flags layered on top of the existing

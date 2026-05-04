@@ -31,6 +31,7 @@
 
 #include "grep_filters.h"
 #include "query_parser.h"
+#include "rank_options.h"
 
 #include <algorithm>
 #include <cctype>
@@ -668,8 +669,8 @@ int run_search(const GlobalFlags& flags, const std::string& pattern,
                bool files_only, bool /*word_boundary*/,
                int max_count_per_file, bool /*include_ids*/,
                bool /*no_ids*/, bool /*comments_only*/, bool /*code_only*/,
-               bool /*strings_only*/, const std::string& /*rank_by*/,
-               const std::string& /*context_filter*/,
+               bool /*strings_only*/, const std::string& rank_by,
+               const std::string& context_filter,
                bool enhanced, bool assembly) {
     Config cfg;
     if (std::string err = load_config_with_overrides(flags, cfg); !err.empty()) {
@@ -765,6 +766,51 @@ int run_search(const GlobalFlags& flags, const std::string& pattern,
     if (!parsed_query.empty_directives()) {
         auto raw = j.value("results", nlohmann::json::array());
         j["results"] = query_parser::apply_all(std::move(raw), parsed_query);
+    }
+
+    // -- --context-filter / --rank-by ----------------------------------------
+    //
+    // Applied in this order so the re-rank sorts the *kept* set (no point
+    // re-ranking rows that the context filter is about to drop). Both flags
+    // pass results through unchanged when their value is empty, so existing
+    // queries pay no overhead.
+    //
+    // Unrecognized values warn on stderr and fall through to pass-through
+    // rather than failing the search outright — this matches CLI11's
+    // permissive `add_option` (no `check()` constraint) and avoids breaking
+    // user scripts on a typo.
+    {
+        auto ctx_filter = rank_options::parse_context_filter(context_filter);
+        if (!context_filter.empty() &&
+            ctx_filter == rank_options::ContextFilter::Unknown) {
+            std::cerr << "Warning: unknown --context-filter value '"
+                      << context_filter
+                      << "' (expected: function | class | top-level); "
+                         "no filtering applied\n";
+        }
+        if (ctx_filter != rank_options::ContextFilter::None &&
+            ctx_filter != rank_options::ContextFilter::Unknown) {
+            auto raw = j.value("results", nlohmann::json::array());
+            j["results"] = rank_options::apply_context_filter(std::move(raw),
+                                                              ctx_filter);
+        }
+
+        auto strategy = rank_options::parse_strategy(rank_by);
+        if (!rank_by.empty() &&
+            strategy == rank_options::RankStrategy::Unknown) {
+            std::cerr << "Warning: unknown --rank-by value '" << rank_by
+                      << "' (expected: relevance | recency | file-type); "
+                         "using default relevance\n";
+            strategy = rank_options::RankStrategy::Relevance;
+        }
+        // `relevance` is still applied (defensive resort) when the user
+        // asked for it explicitly. When `--rank-by` was not provided at
+        // all, skip even the resort to keep the legacy fast path's output
+        // bit-identical for anyone diffing against prior runs.
+        if (!rank_by.empty()) {
+            auto raw = j.value("results", nlohmann::json::array());
+            j["results"] = rank_options::apply_rank(std::move(raw), strategy);
+        }
     }
 
     // -- Grep-filter post-processing for `lci search` ------------------------

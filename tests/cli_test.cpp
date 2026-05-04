@@ -1,6 +1,10 @@
 #include <gtest/gtest.h>
 
+#include <unistd.h>
+
+#include <chrono>
 #include <cstdio>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -11,6 +15,7 @@
 
 #include "../src/cli/grep_filters.h"
 #include "../src/cli/query_parser.h"
+#include "../src/cli/rank_options.h"
 #include "../src/cli/symbol_filters.h"
 #include "../src/cli/tree_formatter.h"
 
@@ -1459,6 +1464,333 @@ TEST(QueryParserFilters, ApplyAllPassThroughWithNoDirectives) {
     auto p = qp::parse("auth");
     auto filtered = qp::apply_all(results, p);
     EXPECT_EQ(filtered.size(), 2u);
+}
+
+// -- rank_options tests ------------------------------------------------------
+//
+// Pure ranking and context-filter logic. No server needed. Covers strategy
+// parsing (relevance/recency/file-type + aliases), context filter parsing
+// (function/class/top-level + aliases), the block_type matrix, and the JSON
+// re-rank helpers. `apply_recency` is exercised against real temp files so
+// the mtime sort path (the one with I/O) is verified end-to-end.
+
+namespace ro = ::lci::cli::rank_options;
+
+TEST(RankOptionsParseStrategy, EmptyDefaultsToRelevance) {
+    EXPECT_EQ(ro::parse_strategy(""), ro::RankStrategy::Relevance);
+}
+
+TEST(RankOptionsParseStrategy, RelevanceRecognized) {
+    EXPECT_EQ(ro::parse_strategy("relevance"), ro::RankStrategy::Relevance);
+    EXPECT_EQ(ro::parse_strategy("RELEVANCE"), ro::RankStrategy::Relevance);
+}
+
+TEST(RankOptionsParseStrategy, RecencyRecognized) {
+    EXPECT_EQ(ro::parse_strategy("recency"), ro::RankStrategy::Recency);
+    EXPECT_EQ(ro::parse_strategy("Recency"), ro::RankStrategy::Recency);
+}
+
+TEST(RankOptionsParseStrategy, FileTypeRecognizedHyphenAndUnderscore) {
+    EXPECT_EQ(ro::parse_strategy("file-type"), ro::RankStrategy::FileType);
+    EXPECT_EQ(ro::parse_strategy("file_type"), ro::RankStrategy::FileType);
+    EXPECT_EQ(ro::parse_strategy("FILE-TYPE"), ro::RankStrategy::FileType);
+}
+
+TEST(RankOptionsParseStrategy, UnknownStrategy) {
+    EXPECT_EQ(ro::parse_strategy("proximity"), ro::RankStrategy::Unknown);
+    EXPECT_EQ(ro::parse_strategy("foo"), ro::RankStrategy::Unknown);
+}
+
+TEST(RankOptionsParseContext, EmptyIsNone) {
+    EXPECT_EQ(ro::parse_context_filter(""), ro::ContextFilter::None);
+}
+
+TEST(RankOptionsParseContext, FunctionAliases) {
+    EXPECT_EQ(ro::parse_context_filter("function"), ro::ContextFilter::Function);
+    EXPECT_EQ(ro::parse_context_filter("FUNCTION"), ro::ContextFilter::Function);
+    EXPECT_EQ(ro::parse_context_filter("method"), ro::ContextFilter::Function);
+    EXPECT_EQ(ro::parse_context_filter("func"), ro::ContextFilter::Function);
+}
+
+TEST(RankOptionsParseContext, ClassAliases) {
+    EXPECT_EQ(ro::parse_context_filter("class"), ro::ContextFilter::Class);
+    EXPECT_EQ(ro::parse_context_filter("struct"), ro::ContextFilter::Class);
+    EXPECT_EQ(ro::parse_context_filter("interface"), ro::ContextFilter::Class);
+    EXPECT_EQ(ro::parse_context_filter("trait"), ro::ContextFilter::Class);
+    EXPECT_EQ(ro::parse_context_filter("impl"), ro::ContextFilter::Class);
+    EXPECT_EQ(ro::parse_context_filter("record"), ro::ContextFilter::Class);
+}
+
+TEST(RankOptionsParseContext, TopLevelAliases) {
+    EXPECT_EQ(ro::parse_context_filter("top-level"), ro::ContextFilter::TopLevel);
+    EXPECT_EQ(ro::parse_context_filter("top_level"), ro::ContextFilter::TopLevel);
+    EXPECT_EQ(ro::parse_context_filter("toplevel"), ro::ContextFilter::TopLevel);
+    EXPECT_EQ(ro::parse_context_filter("top"), ro::ContextFilter::TopLevel);
+    EXPECT_EQ(ro::parse_context_filter("global"), ro::ContextFilter::TopLevel);
+}
+
+TEST(RankOptionsParseContext, UnknownContext) {
+    EXPECT_EQ(ro::parse_context_filter("module"), ro::ContextFilter::Unknown);
+    EXPECT_EQ(ro::parse_context_filter("loop"), ro::ContextFilter::Unknown);
+}
+
+TEST(RankOptionsBlockTypeMatch, FunctionMatrix) {
+    EXPECT_TRUE(ro::block_type_matches(ro::ContextFilter::Function, "function"));
+    EXPECT_TRUE(ro::block_type_matches(ro::ContextFilter::Function, "method"));
+    EXPECT_TRUE(ro::block_type_matches(ro::ContextFilter::Function, "constructor"));
+    EXPECT_FALSE(ro::block_type_matches(ro::ContextFilter::Function, "class"));
+    EXPECT_FALSE(ro::block_type_matches(ro::ContextFilter::Function, ""));
+    EXPECT_FALSE(ro::block_type_matches(ro::ContextFilter::Function, "lines"));
+}
+
+TEST(RankOptionsBlockTypeMatch, ClassMatrix) {
+    EXPECT_TRUE(ro::block_type_matches(ro::ContextFilter::Class, "class"));
+    EXPECT_TRUE(ro::block_type_matches(ro::ContextFilter::Class, "struct"));
+    EXPECT_TRUE(ro::block_type_matches(ro::ContextFilter::Class, "interface"));
+    EXPECT_TRUE(ro::block_type_matches(ro::ContextFilter::Class, "trait"));
+    EXPECT_TRUE(ro::block_type_matches(ro::ContextFilter::Class, "impl"));
+    EXPECT_TRUE(ro::block_type_matches(ro::ContextFilter::Class, "record"));
+    EXPECT_FALSE(ro::block_type_matches(ro::ContextFilter::Class, "function"));
+    EXPECT_FALSE(ro::block_type_matches(ro::ContextFilter::Class, ""));
+}
+
+TEST(RankOptionsBlockTypeMatch, TopLevelMatrix) {
+    EXPECT_TRUE(ro::block_type_matches(ro::ContextFilter::TopLevel, ""));
+    EXPECT_TRUE(ro::block_type_matches(ro::ContextFilter::TopLevel, "lines"));
+    EXPECT_TRUE(ro::block_type_matches(ro::ContextFilter::TopLevel, "context"));
+    EXPECT_FALSE(ro::block_type_matches(ro::ContextFilter::TopLevel, "function"));
+    EXPECT_FALSE(ro::block_type_matches(ro::ContextFilter::TopLevel, "class"));
+}
+
+TEST(RankOptionsBlockTypeMatch, NoneAndUnknownPassThrough) {
+    EXPECT_TRUE(ro::block_type_matches(ro::ContextFilter::None, "anything"));
+    EXPECT_TRUE(ro::block_type_matches(ro::ContextFilter::Unknown, "anything"));
+}
+
+TEST(RankOptionsBlockTypeMatch, CaseInsensitive) {
+    EXPECT_TRUE(ro::block_type_matches(ro::ContextFilter::Function, "FUNCTION"));
+    EXPECT_TRUE(ro::block_type_matches(ro::ContextFilter::Class, "Struct"));
+    EXPECT_TRUE(ro::block_type_matches(ro::ContextFilter::TopLevel, "Lines"));
+}
+
+TEST(RankOptionsContextFilter, FunctionDropsNonMatching) {
+    nlohmann::json results = nlohmann::json::array();
+    results.push_back(make_result("a.cpp", "auth", "function", "login"));
+    results.push_back(make_result("b.cpp", "auth", "class", "Login"));
+    results.push_back(make_result("c.cpp", "auth", "method", "login"));
+    results.push_back(make_result("d.cpp", "auth", "lines", ""));
+
+    auto kept = ro::apply_context_filter(results, ro::ContextFilter::Function);
+    EXPECT_EQ(kept.size(), 2u);
+    EXPECT_EQ(kept[0].value("path", ""), "a.cpp");
+    EXPECT_EQ(kept[1].value("path", ""), "c.cpp");
+}
+
+TEST(RankOptionsContextFilter, ClassDropsNonMatching) {
+    nlohmann::json results = nlohmann::json::array();
+    results.push_back(make_result("a.cpp", "auth", "function", "login"));
+    results.push_back(make_result("b.cpp", "auth", "class", "Login"));
+    results.push_back(make_result("c.cpp", "auth", "struct", "Foo"));
+    results.push_back(make_result("d.cpp", "auth", "interface", "I"));
+
+    auto kept = ro::apply_context_filter(results, ro::ContextFilter::Class);
+    EXPECT_EQ(kept.size(), 3u);
+    EXPECT_EQ(kept[0].value("path", ""), "b.cpp");
+    EXPECT_EQ(kept[1].value("path", ""), "c.cpp");
+    EXPECT_EQ(kept[2].value("path", ""), "d.cpp");
+}
+
+TEST(RankOptionsContextFilter, TopLevelMatchesEmptyAndSentinel) {
+    nlohmann::json results = nlohmann::json::array();
+    results.push_back(make_result("a.cpp", "auth", "function", "login"));
+    results.push_back(make_result("b.cpp", "auth", "", ""));
+    results.push_back(make_result("c.cpp", "auth", "lines", ""));
+    results.push_back(make_result("d.cpp", "auth", "context", ""));
+
+    auto kept = ro::apply_context_filter(results, ro::ContextFilter::TopLevel);
+    EXPECT_EQ(kept.size(), 3u);
+    EXPECT_EQ(kept[0].value("path", ""), "b.cpp");
+    EXPECT_EQ(kept[1].value("path", ""), "c.cpp");
+    EXPECT_EQ(kept[2].value("path", ""), "d.cpp");
+}
+
+TEST(RankOptionsContextFilter, NonePassesThrough) {
+    nlohmann::json results = nlohmann::json::array();
+    results.push_back(make_result("a.cpp", "x"));
+    results.push_back(make_result("b.cpp", "y"));
+
+    auto kept = ro::apply_context_filter(results, ro::ContextFilter::None);
+    EXPECT_EQ(kept.size(), 2u);
+}
+
+TEST(RankOptionsContextFilter, UnknownPassesThrough) {
+    nlohmann::json results = nlohmann::json::array();
+    results.push_back(make_result("a.cpp", "x", "function"));
+    results.push_back(make_result("b.cpp", "y", "class"));
+
+    auto kept = ro::apply_context_filter(results, ro::ContextFilter::Unknown);
+    EXPECT_EQ(kept.size(), 2u);
+}
+
+TEST(RankOptionsContextFilter, EmptyResultsProducesEmpty) {
+    nlohmann::json results = nlohmann::json::array();
+    auto kept = ro::apply_context_filter(results, ro::ContextFilter::Function);
+    EXPECT_EQ(kept.size(), 0u);
+}
+
+// -- Re-rank helpers ---------------------------------------------------------
+
+namespace {
+nlohmann::json scored_result(const std::string& path, double score) {
+    nlohmann::json r;
+    r["path"] = path;
+    r["match"] = "x";
+    r["line"] = 1;
+    r["score"] = score;
+    nlohmann::json ctx;
+    ctx["block_type"] = "function";
+    ctx["block_name"] = "f";
+    r["context"] = ctx;
+    return r;
+}
+}  // namespace
+
+TEST(RankOptionsRelevance, SortsByScoreDescending) {
+    nlohmann::json results = nlohmann::json::array();
+    results.push_back(scored_result("a.cpp", 10.0));
+    results.push_back(scored_result("b.cpp", 50.0));
+    results.push_back(scored_result("c.cpp", 30.0));
+
+    auto sorted = ro::apply_rank(results, ro::RankStrategy::Relevance);
+    ASSERT_EQ(sorted.size(), 3u);
+    EXPECT_EQ(sorted[0].value("path", ""), "b.cpp");  // 50
+    EXPECT_EQ(sorted[1].value("path", ""), "c.cpp");  // 30
+    EXPECT_EQ(sorted[2].value("path", ""), "a.cpp");  // 10
+}
+
+TEST(RankOptionsRelevance, StableOnTies) {
+    nlohmann::json results = nlohmann::json::array();
+    results.push_back(scored_result("a.cpp", 10.0));
+    results.push_back(scored_result("b.cpp", 10.0));
+    results.push_back(scored_result("c.cpp", 10.0));
+
+    auto sorted = ro::apply_rank(results, ro::RankStrategy::Relevance);
+    ASSERT_EQ(sorted.size(), 3u);
+    EXPECT_EQ(sorted[0].value("path", ""), "a.cpp");
+    EXPECT_EQ(sorted[1].value("path", ""), "b.cpp");
+    EXPECT_EQ(sorted[2].value("path", ""), "c.cpp");
+}
+
+TEST(RankOptionsFileType, BoostsCodeOverDocsAndConfig) {
+    nlohmann::json results = nlohmann::json::array();
+    // Pure file-type re-rank: code (boost) > config (small boost) > unknown (0)
+    // > docs (penalty). Engine score is irrelevant — file-type wins.
+    results.push_back(scored_result("README.md", 9999.0));     // doc penalty
+    results.push_back(scored_result("config.json", 1.0));      // config boost
+    results.push_back(scored_result("src/main.cpp", 1.0));     // code boost
+
+    auto sorted = ro::apply_rank(results, ro::RankStrategy::FileType);
+    ASSERT_EQ(sorted.size(), 3u);
+    EXPECT_EQ(sorted[0].value("path", ""), "src/main.cpp");
+    EXPECT_EQ(sorted[1].value("path", ""), "config.json");
+    EXPECT_EQ(sorted[2].value("path", ""), "README.md");
+}
+
+TEST(RankOptionsFileType, PreservesOriginalScore) {
+    nlohmann::json results = nlohmann::json::array();
+    results.push_back(scored_result("a.cpp", 42.5));
+
+    auto sorted = ro::apply_rank(results, ro::RankStrategy::FileType);
+    ASSERT_EQ(sorted.size(), 1u);
+    EXPECT_TRUE(sorted[0].contains("original_score"));
+    EXPECT_DOUBLE_EQ(sorted[0]["original_score"].get<double>(), 42.5);
+    // New score is the file-type score for `.cpp` (kCodeFileBoost=50.0).
+    EXPECT_DOUBLE_EQ(sorted[0]["score"].get<double>(), 50.0);
+}
+
+TEST(RankOptionsRecency, SortsByFileMtimeDescending) {
+    // Create three temp files in deterministic mtime order so the sort
+    // is verifiable. Use std::filesystem to set mtime explicitly so the
+    // test is robust against fast-filesystem timestamp granularity.
+    namespace fs = std::filesystem;
+    auto tmpdir = fs::temp_directory_path() /
+                  ("lci_rank_test_" + std::to_string(::getpid()));
+    fs::create_directories(tmpdir);
+
+    auto write_file = [&](const std::string& name, std::string_view body) {
+        auto p = tmpdir / name;
+        std::ofstream(p.string()) << body;
+        return p.string();
+    };
+
+    auto path_a = write_file("a.cpp", "old");
+    auto path_b = write_file("b.cpp", "newest");
+    auto path_c = write_file("c.cpp", "middle");
+
+    auto now = fs::file_time_type::clock::now();
+    fs::last_write_time(path_a, now - std::chrono::hours(48));
+    fs::last_write_time(path_b, now);
+    fs::last_write_time(path_c, now - std::chrono::hours(24));
+
+    nlohmann::json results = nlohmann::json::array();
+    results.push_back(scored_result(path_a, 100.0));  // engine says best
+    results.push_back(scored_result(path_b, 1.0));    // newest
+    results.push_back(scored_result(path_c, 50.0));   // middle
+
+    auto sorted = ro::apply_rank(results, ro::RankStrategy::Recency);
+    ASSERT_EQ(sorted.size(), 3u);
+    EXPECT_EQ(sorted[0].value("path", ""), path_b);  // now
+    EXPECT_EQ(sorted[1].value("path", ""), path_c);  // -24h
+    EXPECT_EQ(sorted[2].value("path", ""), path_a);  // -48h
+    // mtime_epoch is stamped on each row.
+    EXPECT_GT(sorted[0].value("mtime_epoch", static_cast<int64_t>(0)),
+              sorted[1].value("mtime_epoch", static_cast<int64_t>(0)));
+
+    fs::remove_all(tmpdir);
+}
+
+TEST(RankOptionsRecency, MissingFilesSinkToBottom) {
+    nlohmann::json results = nlohmann::json::array();
+    results.push_back(scored_result("/tmp/lci_does_not_exist_42.cpp", 100.0));
+    // Use the source file we know exists at runtime — the test binary's
+    // cwd is the build dir, but absolute paths under /tmp don't resolve,
+    // so use one we can reliably stat: argv[0] of the test process.
+    // Simpler: create a temp file and reference it.
+    namespace fs = std::filesystem;
+    auto tmpfile = fs::temp_directory_path() /
+                   ("lci_rank_real_" + std::to_string(::getpid()) + ".cpp");
+    std::ofstream(tmpfile.string()) << "real";
+
+    results.push_back(scored_result(tmpfile.string(), 1.0));
+
+    auto sorted = ro::apply_rank(results, ro::RankStrategy::Recency);
+    ASSERT_EQ(sorted.size(), 2u);
+    EXPECT_EQ(sorted[0].value("path", ""), tmpfile.string());  // real file first
+    EXPECT_EQ(sorted[1].value("path", ""),
+              "/tmp/lci_does_not_exist_42.cpp");                // mtime=0 last
+    EXPECT_EQ(sorted[1].value("mtime_epoch", static_cast<int64_t>(-1)),
+              static_cast<int64_t>(0));
+
+    fs::remove(tmpfile);
+}
+
+TEST(RankOptionsApplyRank, UnknownStrategyPassesThrough) {
+    nlohmann::json results = nlohmann::json::array();
+    results.push_back(scored_result("a.cpp", 1.0));
+    results.push_back(scored_result("b.cpp", 100.0));
+
+    // Unknown strategies should not reshape or drop results.
+    auto out = ro::apply_rank(results, ro::RankStrategy::Unknown);
+    ASSERT_EQ(out.size(), 2u);
+    EXPECT_EQ(out[0].value("path", ""), "a.cpp");
+    EXPECT_EQ(out[1].value("path", ""), "b.cpp");
+}
+
+TEST(RankOptionsApplyRank, EmptyResultsProducesEmpty) {
+    nlohmann::json results = nlohmann::json::array();
+    EXPECT_EQ(ro::apply_rank(results, ro::RankStrategy::Relevance).size(), 0u);
+    EXPECT_EQ(ro::apply_rank(results, ro::RankStrategy::Recency).size(), 0u);
+    EXPECT_EQ(ro::apply_rank(results, ro::RankStrategy::FileType).size(), 0u);
 }
 
 }  // namespace
