@@ -1,3 +1,17 @@
 {
-  "claims": {}
+  "claims": {
+    "FBnizJStOMR9": {
+      "runner_instance_id": "DESKTOP-NPIOPS6-499902",
+      "runner_email": "andybrummer@standardbeagle.com",
+      "claimed_at": "2026-05-04T13:35:00Z",
+      "agent_id": "DESKTOP-NPIOPS6-499902",
+      "parent_loop_id": "gizjYzWWxUEj",
+      "purpose": "lci-cpp parity loop iteration 2 (reclaim after interrupt)",
+      "source_event": {
+        "loop_id": "gizjYzWWxUEj",
+        "task_id": "FBnizJStOMR9",
+        "conversation_id": null
+      }
+    }
+  }
 }
