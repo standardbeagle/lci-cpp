@@ -1,0 +1,21 @@
+{
+  "count": 1,
+  "symbols": [
+    {
+      "complexity": 1,
+      "file": "${CORPUS}/a.go",
+      "is_exported": true,
+      "line": 3,
+      "name": "Add",
+      "object_id": "B",
+      "outgoing_refs": 2,
+      "scope_chain": [
+        "multi-lang",
+        "a.go",
+        "Add"
+      ],
+      "signature": "func Add(a, b int) int",
+      "type": "function"
+    }
+  ]
+}

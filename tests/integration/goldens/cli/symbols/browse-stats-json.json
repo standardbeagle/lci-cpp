@@ -1,0 +1,20 @@
+{
+  "file": {
+    "file_id": 1,
+    "language": "go",
+    "path": "${CORPUS}/a.go"
+  },
+  "symbols": [
+    {
+      "complexity": 1,
+      "file": "${CORPUS}/a.go",
+      "is_exported": true,
+      "line": 3,
+      "name": "Add",
+      "object_id": "B",
+      "outgoing_refs": 2,
+      "type": "function"
+    }
+  ],
+  "total": 1
+}

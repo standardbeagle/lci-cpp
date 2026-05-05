@@ -1,0 +1,28 @@
+{
+  "id": "cli/symbols/inspect-missing-json",
+  "golden": "goldens/cli/symbols/inspect-missing-json.json",
+  "mode": "cli",
+  "corpus": "multi-lang",
+  "go_binary": "${LCI_GO}",
+  "cpp_binary": "${LCI_CPP}",
+  "invocation": {
+    "args": [
+      "inspect",
+      "--json",
+      "ThisDoesNotExist12345"
+    ],
+    "cwd": "${CORPUS}"
+  },
+  "capture": [
+    "stdout",
+    "exit"
+  ],
+  "parse": "json",
+  "_rationale": "Missing-symbol edge case based on Go CLI tests' 'non-existent function' behavior: both binaries should return a successful empty JSON payload (`count: 0`, `symbols: []`) rather than a command error.",
+  "tiers": {},
+  "tolerances": {
+    "score_abs": 0.0,
+    "timed_max_ms": 60000
+  },
+  "expect_exit": 0
+}

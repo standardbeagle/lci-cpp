@@ -1,0 +1,4 @@
+File: ${CORPUS}/a.go (go)
+
+Symbols (1):
+     3: function   Add [exported]

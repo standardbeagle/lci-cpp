@@ -1,0 +1,46 @@
+{
+  "id": "cli/search/basic",
+  "golden": "goldens/cli/search/basic.txt",
+  "mode": "cli",
+  "corpus": "multi-lang",
+  "go_binary": "${LCI_GO}",
+  "cpp_binary": "${LCI_CPP}",
+  "invocation": {
+    "args": [
+      "search",
+      "add"
+    ],
+    "cwd": "${CORPUS}"
+  },
+  "capture": [
+    "stdout",
+    "exit"
+  ],
+  "parse": "text",
+  "tiers": {},
+  "tolerances": {
+    "score_abs": 0.0,
+    "timed_max_ms": 60000
+  },
+  "expect_exit": 0,
+  "text_normalize": {
+    "strip_lines": [
+      "DEBUG:",
+      "=== Direct Matches ==="
+    ],
+    "replace": [
+      {
+        "pattern": "\\(integrated mode[^)]*\\)",
+        "with": "(MODE)"
+      },
+      {
+        "pattern": "\\(standard mode\\)",
+        "with": "(MODE)"
+      },
+      {
+        "pattern": "\\$\\{CORPUS\\}/",
+        "with": ""
+      }
+    ]
+  }
+}

@@ -1,0 +1,4 @@
+${CORPUS}/a.go
+${CORPUS}/b.py
+${CORPUS}/c.cpp
+${CORPUS}/d.rs

@@ -1,0 +1,6 @@
+Validating Symbol Linking System
+Root Path: ${CORPUS}
+
+Running consistency checks...
+All consistency checks passed!
+The symbol linking system is operating correctly.

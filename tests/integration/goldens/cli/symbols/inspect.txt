@@ -1,0 +1,5 @@
+Add (function) ${CORPUS}/a.go:3
+  Signature: func Add(a, b int) int
+  Complexity: 1
+  Scope: multi-lang > a.go > Add
+  Refs: 0 incoming, 2 outgoing

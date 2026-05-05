@@ -1,0 +1,17 @@
+Lightning Code Index Server Status
+==================================
+
+Status: Ready
+
+Index Statistics:
+  Files indexed:    4
+  Symbols indexed:  4
+  Index size:       0 bytes
+
+Server Runtime:
+  Goroutines:       0
+
+Memory Usage:
+  Allocated:        0.0 MB
+  Heap:             0.0 MB
+  Total system:     0.0 MB

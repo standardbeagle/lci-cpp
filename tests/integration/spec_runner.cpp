@@ -6,6 +6,9 @@
 #include "runner/modes/index.h"
 #include "runner/modes/mcp.h"
 
+#include <nlohmann/json.hpp>
+
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <optional>
@@ -302,6 +305,172 @@ void ExpectSpecMatches(const SpecCase& spec_case) {
         std::error_code ec;
         fs::remove(*artifact_path, ec);
     }
+}
+
+namespace {
+
+// Resolve a "golden" field value from a spec.json. Accepts:
+//   * absolute paths (used as-is)
+//   * paths starting with "tests/" or "integration/" — resolved against
+//     the tests/ source directory
+//   * any other relative path — resolved first against the spec file's
+//     directory, falling back to tests/integration/<value>.
+//
+// Returns a path relative to the tests/ source directory (the form
+// SpecCase.golden_rel_path expects). Throws if the value is empty.
+std::string ResolveGoldenPath(const fs::path& spec_path,
+                              const std::string& golden_value) {
+    if (golden_value.empty()) {
+        throw std::runtime_error("spec missing required field: golden");
+    }
+
+    const fs::path tests_dir = TestsSourceDir();
+    fs::path resolved;
+    fs::path candidate(golden_value);
+
+    if (candidate.is_absolute()) {
+        resolved = candidate;
+    } else {
+        // Try sibling-of-spec first.
+        const fs::path sibling = spec_path.parent_path() / candidate;
+        if (fs::exists(sibling) || fs::exists(sibling.parent_path())) {
+            resolved = sibling;
+        } else if (golden_value.rfind("tests/", 0) == 0) {
+            // Path expressed from repo root: strip "tests/" and resolve under
+            // tests_dir.
+            resolved = tests_dir / fs::path(golden_value.substr(6));
+        } else {
+            // Fallback: treat as relative to tests/integration/.
+            resolved = tests_dir / "integration" / candidate;
+        }
+    }
+
+    // Convert back to a path relative to tests_dir (SpecCase.golden_rel_path
+    // is always interpreted as TestsSourceDir() / golden_rel_path).
+    std::error_code ec;
+    fs::path rel = fs::relative(resolved, tests_dir, ec);
+    if (ec || rel.empty() || *rel.begin() == "..") {
+        // Could not be expressed under tests_dir; fall through to absolute.
+        return resolved.lexically_normal().string();
+    }
+    return rel.lexically_normal().string();
+}
+
+SpecCase::ActualSource ParseActualSource(const std::string& value) {
+    if (value == "stdout") return SpecCase::ActualSource::Stdout;
+    if (value == "output_file") return SpecCase::ActualSource::OutputFile;
+    throw std::runtime_error(
+        "spec field 'actual_source' must be 'stdout' or 'output_file' (got '"
+        + value + "')");
+}
+
+std::optional<spec_diff::SpecDescriptor::Parse> ParseParseOverride(
+    const std::string& value) {
+    if (value == "json") return spec_diff::SpecDescriptor::Parse::Json;
+    if (value == "text") return spec_diff::SpecDescriptor::Parse::Text;
+    throw std::runtime_error(
+        "spec field 'parse_override' must be 'json' or 'text' (got '" + value
+        + "')");
+}
+
+}  // namespace
+
+SpecCase LoadIntegrationSpec(const fs::path& spec_path) {
+    if (!fs::exists(spec_path)) {
+        throw std::runtime_error("spec file does not exist: "
+                                 + spec_path.string());
+    }
+
+    nlohmann::json j;
+    try {
+        j = nlohmann::json::parse(Slurp(spec_path));
+    } catch (const std::exception& error) {
+        throw std::runtime_error("failed to parse spec " + spec_path.string()
+                                 + ": " + error.what());
+    }
+
+    if (!j.is_object()) {
+        throw std::runtime_error("spec must be a JSON object: "
+                                 + spec_path.string());
+    }
+
+    if (!j.contains("golden") || !j.at("golden").is_string()) {
+        throw std::runtime_error(
+            "spec missing required string field 'golden': "
+            + spec_path.string());
+    }
+
+    SpecCase spec_case;
+
+    const fs::path tests_dir = TestsSourceDir();
+    std::error_code ec;
+    fs::path desc_rel = fs::relative(spec_path, tests_dir, ec);
+    if (ec || desc_rel.empty()) {
+        throw std::runtime_error(
+            "spec path is not under LCI_TESTS_SOURCE_DIR: "
+            + spec_path.string());
+    }
+    spec_case.descriptor_rel_path = desc_rel.lexically_normal().string();
+
+    spec_case.golden_rel_path = ResolveGoldenPath(
+        spec_path, j.at("golden").get<std::string>());
+
+    if (j.contains("actual_source")) {
+        if (!j.at("actual_source").is_string()) {
+            throw std::runtime_error(
+                "spec field 'actual_source' must be a string: "
+                + spec_path.string());
+        }
+        spec_case.actual_source =
+            ParseActualSource(j.at("actual_source").get<std::string>());
+    }
+
+    if (j.contains("parse_override")) {
+        if (!j.at("parse_override").is_string()) {
+            throw std::runtime_error(
+                "spec field 'parse_override' must be a string: "
+                + spec_path.string());
+        }
+        spec_case.parse_override =
+            ParseParseOverride(j.at("parse_override").get<std::string>());
+    }
+
+    return spec_case;
+}
+
+std::vector<SpecCase> DiscoverIntegrationSpecs(const fs::path& root_dir) {
+    if (!fs::is_directory(root_dir)) {
+        throw std::runtime_error("integration spec root is not a directory: "
+                                 + root_dir.string());
+    }
+
+    std::vector<fs::path> spec_paths;
+    for (auto& entry : fs::recursive_directory_iterator(root_dir)) {
+        if (!entry.is_regular_file()) continue;
+        const std::string name = entry.path().filename().string();
+        constexpr std::string_view suffix = ".spec.json";
+        if (name.size() <= suffix.size()) continue;
+        if (name.compare(name.size() - suffix.size(), suffix.size(), suffix)
+            != 0) {
+            continue;
+        }
+        spec_paths.push_back(entry.path());
+    }
+
+    std::sort(spec_paths.begin(), spec_paths.end());
+
+    std::vector<SpecCase> cases;
+    cases.reserve(spec_paths.size());
+    for (const auto& path : spec_paths) {
+        cases.push_back(LoadIntegrationSpec(path));
+    }
+    return cases;
+}
+
+std::vector<SpecCase> DiscoverIntegrationSpecsFromTestsDir(
+    const std::string& subdir) {
+    fs::path root = TestsSourceDir() / "integration" / subdir;
+    return DiscoverIntegrationSpecs(root);
 }
 
 }  // namespace lci::integration

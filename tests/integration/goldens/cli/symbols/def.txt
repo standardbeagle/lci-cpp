@@ -1,0 +1,1 @@
+${CORPUS}/a.go:3: lines Add

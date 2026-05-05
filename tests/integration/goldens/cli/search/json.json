@@ -1,0 +1,35 @@
+{
+  "count": 3,
+  "mode": "standard",
+  "query": "add",
+  "results": [
+    {
+      "result": {
+        "column": 4,
+        "line": 1,
+        "match": "add",
+        "path": "b.py",
+        "score": 855.5
+      }
+    },
+    {
+      "result": {
+        "column": 4,
+        "line": 1,
+        "match": "add",
+        "path": "c.cpp",
+        "score": 855.5
+      }
+    },
+    {
+      "result": {
+        "column": 7,
+        "line": 1,
+        "match": "add",
+        "path": "d.rs",
+        "score": 855.5
+      }
+    }
+  ],
+  "time_ms": 0.867
+}

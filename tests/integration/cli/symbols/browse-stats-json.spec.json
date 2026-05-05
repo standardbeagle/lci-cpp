@@ -1,0 +1,29 @@
+{
+  "id": "cli/symbols/browse-stats-json",
+  "golden": "goldens/cli/symbols/browse-stats-json.json",
+  "mode": "cli",
+  "corpus": "multi-lang",
+  "go_binary": "${LCI_GO}",
+  "cpp_binary": "${LCI_CPP}",
+  "invocation": {
+    "args": [
+      "browse",
+      "--json",
+      "a.go",
+      "--stats"
+    ],
+    "cwd": "${CORPUS}"
+  },
+  "capture": [
+    "stdout",
+    "exit"
+  ],
+  "parse": "json",
+  "_rationale": "Go browse JSON omits a `stats` object for this case; C++ includes a populated `stats` block. This red parity case pins the discrepancy instead of relying on manual comparison.",
+  "tiers": {},
+  "tolerances": {
+    "score_abs": 0.0,
+    "timed_max_ms": 60000
+  },
+  "expect_exit": 0
+}

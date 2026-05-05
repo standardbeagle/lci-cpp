@@ -1,0 +1,28 @@
+{
+  "id": "cli/symbols/inspect-json",
+  "golden": "goldens/cli/symbols/inspect-json.json",
+  "mode": "cli",
+  "corpus": "multi-lang",
+  "go_binary": "${LCI_GO}",
+  "cpp_binary": "${LCI_CPP}",
+  "invocation": {
+    "args": [
+      "inspect",
+      "--json",
+      "Add"
+    ],
+    "cwd": "${CORPUS}"
+  },
+  "capture": [
+    "stdout",
+    "exit"
+  ],
+  "parse": "json",
+  "_rationale": "QA sweep found CLI inspect JSON still diverges on a found symbol. C++ emits extra empty/default fields (`annotations`, `callers`, `callees`, `incoming_refs`, `parameter_count`, `receiver_type`, etc.) that Go omits. This red test complements the existing HTTP inspect-symbol failure at the CLI surface.",
+  "tiers": {},
+  "tolerances": {
+    "score_abs": 0.0,
+    "timed_max_ms": 60000
+  },
+  "expect_exit": 0
+}

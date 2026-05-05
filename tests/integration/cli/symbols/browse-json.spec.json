@@ -1,0 +1,28 @@
+{
+  "id": "cli/symbols/browse-json",
+  "golden": "goldens/cli/symbols/browse-json.json",
+  "mode": "cli",
+  "corpus": "multi-lang",
+  "go_binary": "${LCI_GO}",
+  "cpp_binary": "${LCI_CPP}",
+  "invocation": {
+    "args": [
+      "browse",
+      "--json",
+      "a.go"
+    ],
+    "cwd": "${CORPUS}"
+  },
+  "capture": [
+    "stdout",
+    "exit"
+  ],
+  "parse": "json",
+  "_rationale": "Adds explicit coverage for the CLI browse JSON path, which is implemented in the Go command layer but was not represented in parity descriptors. This locks in the compact file/symbol JSON shape already shared by both binaries on the synthetic corpus.",
+  "tiers": {},
+  "tolerances": {
+    "score_abs": 0.0,
+    "timed_max_ms": 60000
+  },
+  "expect_exit": 0
+}
