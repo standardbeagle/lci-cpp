@@ -16,6 +16,7 @@
 
 #ifndef _WIN32
 #include <sys/un.h>
+#include <unistd.h>
 #endif
 
 namespace lci {
@@ -161,20 +162,81 @@ func (c *Calculator) Reset() {
 TEST(SocketPathTest, DefaultPath) {
     auto path = get_socket_path();
     EXPECT_FALSE(path.empty());
-    EXPECT_NE(path.find("lci-server.sock"), std::string::npos);
+#ifdef _WIN32
+    // Windows: TCP fallback "localhost:<port>".
+    EXPECT_NE(path.find("localhost:"), std::string::npos);
+#else
+    // POSIX: filename incorporates uid so two users on the same host
+    // get distinct default sockets.
+    auto expected_uid = std::to_string(static_cast<unsigned>(::getuid()));
+    EXPECT_NE(path.find("lci-" + expected_uid + ".sock"), std::string::npos);
+#endif
 }
 
 TEST(SocketPathTest, ProjectSpecificPath) {
     auto path1 = get_socket_path_for_root("/project/a");
     auto path2 = get_socket_path_for_root("/project/b");
     EXPECT_NE(path1, path2);
-    EXPECT_NE(path1.find("lci-server-"), std::string::npos);
+#ifdef _WIN32
+    EXPECT_NE(path1.find("localhost:"), std::string::npos);
+#else
+    EXPECT_NE(path1.find("lci-"), std::string::npos);
+    EXPECT_NE(path1.find(".sock"), std::string::npos);
+#endif
 }
 
 TEST(SocketPathTest, EmptyRootFallsBack) {
     auto path = get_socket_path_for_root("");
     EXPECT_EQ(path, get_socket_path());
 }
+
+#ifndef _WIN32
+TEST(SocketPathTest, FilenameIncorporatesUid) {
+    // Per acceptance criterion: socket path must incorporate the uid.
+    auto uid_str = std::to_string(static_cast<unsigned>(::getuid()));
+    auto default_path = get_socket_path();
+    auto project_path = get_socket_path_for_root("/some/project/root");
+
+    // Both forms must embed the uid as a -<uid>- or -<uid>. token so two
+    // users on the same host never collide regardless of project root.
+    EXPECT_NE(default_path.find("-" + uid_str + "."), std::string::npos)
+        << "default path: " << default_path;
+    EXPECT_NE(project_path.find("-" + uid_str + "-"), std::string::npos)
+        << "project path: " << project_path;
+}
+
+TEST(SocketPathTest, ProjectSpecificPathIsDeterministic) {
+    // Per acceptance criterion: same user, same project always gets same
+    // socket path.
+    auto p1 = get_socket_path_for_root("/repo/foo");
+    auto p2 = get_socket_path_for_root("/repo/foo");
+    EXPECT_EQ(p1, p2);
+}
+
+TEST(SocketPathTest, FilenameFitsSunPathLimit) {
+    // Linux's sockaddr_un.sun_path is 108 bytes including the NUL
+    // terminator. The path generation must stay safely under that even
+    // for absurdly long project roots.
+    sockaddr_un sa{};
+    const std::size_t sun_path_max = sizeof(sa.sun_path);
+    auto p_default = get_socket_path();
+    auto p_project = get_socket_path_for_root(
+        "/very/long/project/root/path/that/exercises/the/hash/input");
+    EXPECT_LT(p_default.size() + 1, sun_path_max)
+        << "default path too long: " << p_default;
+    EXPECT_LT(p_project.size() + 1, sun_path_max)
+        << "project path too long: " << p_project;
+}
+
+TEST(SocketPathTest, DifferentProjectsProduceDistinctPaths) {
+    // Per acceptance criterion: same user, different projects -> different
+    // sockets (already implied by ProjectSpecificPath but pinned here as a
+    // distinct AC anchor).
+    auto p1 = get_socket_path_for_root("/work/proj-a");
+    auto p2 = get_socket_path_for_root("/work/proj-b");
+    EXPECT_NE(p1, p2);
+}
+#endif
 
 // -- Build ID tests -----------------------------------------------------------
 

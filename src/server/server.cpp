@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <ctime>
 #include <filesystem>
 #include <functional>
@@ -43,12 +44,64 @@ namespace lci {
 static constexpr int kWindowsBasePort = 43519;
 #endif
 
-std::string get_socket_path() {
+namespace {
+
+/// Returns a per-user identifier embedded in the socket path so two users
+/// running lci against the same project (or with no project root) get
+/// distinct sockets. On POSIX this is the numeric uid from getuid(); on
+/// Windows there is no uid, so we hash the username (or the USERNAME env
+/// var as a fallback) into the same 32-bit space the project hash uses.
+uint32_t current_user_id() {
 #ifdef _WIN32
-    return "localhost:" + std::to_string(kWindowsBasePort);
+    // Use USERNAME env var (set by the OS for every interactive Windows
+    // session); fall back to "default" so the function never returns 0
+    // for an unidentified user, which could otherwise alias with a
+    // user whose hashed name happens to be 0.
+    const char* user = std::getenv("USERNAME");
+    if (user == nullptr || *user == '\0') {
+        user = std::getenv("USER");  // MSYS / Git Bash on Windows
+    }
+    if (user == nullptr || *user == '\0') {
+        user = "default";
+    }
+    uint32_t h = 2166136261u;  // FNV-1a 32-bit offset basis
+    for (const char* p = user; *p != '\0'; ++p) {
+        h ^= static_cast<uint32_t>(static_cast<unsigned char>(*p));
+        h *= 16777619u;
+    }
+    return h;
 #else
-    auto tmp = std::filesystem::temp_directory_path();
-    return (tmp / "lci-server.sock").string();
+    return static_cast<uint32_t>(::getuid());
+#endif
+}
+
+/// 32-bit polynomial hash (same algorithm previously used inline) of an
+/// absolute project root path. Extracted so the default-path branch can
+/// share it with the project-specific branch.
+uint32_t hash_project_root(const std::string& abs_root) {
+    uint32_t h = 0;
+    for (char c : abs_root) {
+        h = h * 31 + static_cast<uint32_t>(c);
+    }
+    return h;
+}
+
+}  // namespace
+
+std::string get_socket_path() {
+    const uint32_t uid = current_user_id();
+#ifdef _WIN32
+    // Per-user offset within the 1000-port project window so two users on
+    // the same Windows host don't both bind kWindowsBasePort.
+    const int port = kWindowsBasePort + static_cast<int>(uid % 1000);
+    return "localhost:" + std::to_string(port);
+#else
+    // Format: /<tmp>/lci-<uid>.sock — fits well under the 108-char
+    // sun_path limit even with long TMPDIR settings (uid is at most 10
+    // decimal digits for uint32, total fixed prefix is ~17 chars).
+    char buf[64];
+    std::snprintf(buf, sizeof(buf), "lci-%u.sock", uid);
+    return (std::filesystem::temp_directory_path() / buf).string();
 #endif
 }
 
@@ -61,17 +114,23 @@ std::string get_socket_path_for_root(const std::string& root) {
     if (ec) {
         return get_socket_path();
     }
-    auto abs_str = abs_root.string();
-    uint32_t hash = 0;
-    for (char c : abs_str) {
-        hash = hash * 31 + static_cast<uint32_t>(c);
-    }
+    const std::string abs_str = abs_root.string();
+    const uint32_t hash = hash_project_root(abs_str);
+    const uint32_t uid = current_user_id();
 #ifdef _WIN32
-    int port = kWindowsBasePort + static_cast<int>(hash % 1000);
+    // Combine uid and project hash into the per-port offset so two users
+    // on the same project (or the same user across projects) both get
+    // distinct ports without overflowing the 1000-slot window.
+    const uint32_t mixed = (uid * 2654435761u) ^ hash;
+    const int port = kWindowsBasePort + static_cast<int>(mixed % 1000);
     return "localhost:" + std::to_string(port);
 #else
-    char buf[32];
-    std::snprintf(buf, sizeof(buf), "lci-server-%08x.sock", hash);
+    // Format: /<tmp>/lci-<uid>-<hash>.sock — e.g. /tmp/lci-1000-deadbeef.sock
+    // Maximum length with /tmp prefix is /tmp/lci-4294967295-ffffffff.sock = 33
+    // chars, well under the 108-byte sun_path limit. Even an unusually long
+    // TMPDIR like /var/folders/abc/T/ leaves ~80 chars of headroom.
+    char buf[64];
+    std::snprintf(buf, sizeof(buf), "lci-%u-%08x.sock", uid, hash);
     return (std::filesystem::temp_directory_path() / buf).string();
 #endif
 }
