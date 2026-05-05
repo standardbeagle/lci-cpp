@@ -21,7 +21,8 @@
   "tiers": {
     "ignore": [
       "timestamp",
-      "uptime_seconds"
+      "uptime_seconds",
+      "build_duration_ms"
     ]
   },
   "tolerances": {
