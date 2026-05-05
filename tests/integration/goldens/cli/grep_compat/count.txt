@@ -1,0 +1,5 @@
+Found matches in 3 file(s) in <MS> (grep -c)
+
+calculator.cpp: 2
+calculator.h: 1
+calculator_test.cpp: 1

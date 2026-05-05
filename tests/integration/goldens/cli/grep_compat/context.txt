@@ -1,0 +1,18 @@
+Found 4 matches in <MS> (grep mode)
+
+calculator.cpp-1-// Calculator implementation file.
+calculator.cpp:2:17:// Provides Add, Subtract, Multiply functions.
+calculator.cpp-3-#include "calculator.h"
+--
+calculator.cpp-8-
+calculator.cpp:9:4:int Subtract(int a, int b) {
+calculator.cpp-10-    // subtract b from a
+--
+calculator.h-4-int Add(int a, int b);
+calculator.h:5:4:int Subtract(int a, int b);
+calculator.h-6-int Multiply(int a, int b);
+--
+calculator_test.cpp-8-void test_subtract() {
+calculator_test.cpp:9:17:    int result = Subtract(5, 2);
+calculator_test.cpp-10-}
+--

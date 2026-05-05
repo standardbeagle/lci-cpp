@@ -1,0 +1,30 @@
+Found 28 matches in <MS> (invert-match mode)
+
+calculator.cpp:1:0:// Calculator implementation file.
+calculator.cpp:3:0:#include "calculator.h"
+calculator.cpp:4:0:
+calculator.cpp:6:0:    return a + b;
+calculator.cpp:7:0:}
+calculator.cpp:8:0:
+calculator.cpp:9:0:int Subtract(int a, int b) {
+calculator.cpp:10:0:    // subtract b from a
+calculator.cpp:11:0:    return a - b;
+calculator.cpp:12:0:}
+calculator.cpp:13:0:
+calculator.cpp:14:0:int Multiply(int a, int b) {
+calculator.cpp:15:0:    return a * b;
+calculator.cpp:16:0:}
+calculator.h:1:0:// Calculator header.
+calculator.h:2:0:#pragma once
+calculator.h:3:0:
+calculator.h:5:0:int Subtract(int a, int b);
+calculator.h:6:0:int Multiply(int a, int b);
+calculator_test.cpp:1:0:// Tests for calculator.
+calculator_test.cpp:2:0:#include "calculator.h"
+calculator_test.cpp:3:0:
+calculator_test.cpp:4:0:void test_add() {
+calculator_test.cpp:6:0:}
+calculator_test.cpp:7:0:
+calculator_test.cpp:8:0:void test_subtract() {
+calculator_test.cpp:9:0:    int result = Subtract(5, 2);
+calculator_test.cpp:10:0:}

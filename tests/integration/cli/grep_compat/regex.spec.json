@@ -1,0 +1,28 @@
+{
+  "id": "cli/grep_compat/regex",
+  "golden": "goldens/cli/grep_compat/regex.txt",
+  "mode": "cli",
+  "corpus": "integration/cli/grep_compat/corpus",
+  "go_binary": "${LCI_GO}",
+  "cpp_binary": "${LCI_CPP}",
+  "invocation": {
+    "args": [
+      "grep",
+      "-R",
+      "Subtract"
+    ],
+    "cwd": "${CORPUS}"
+  },
+  "capture": [
+    "stdout",
+    "exit"
+  ],
+  "parse": "text",
+  "tiers": {},
+  "tolerances": {
+    "score_abs": 0.0,
+    "timed_max_ms": 60000
+  },
+  "expect_exit": 0,
+  "_rationale": "Pins the `-R/--regex` flag plumbing. Note: the C++ run_grep currently ignores the regex flag (src/cli/search.cpp passes `/*use_regex*/` and falls back to literal substring match), so this spec uses a pattern that resolves the same way under literal and regex semantics. The spec exists primarily to lock the flag's exit code and output shape so a future regex implementation lands a deliberate golden update."
+}

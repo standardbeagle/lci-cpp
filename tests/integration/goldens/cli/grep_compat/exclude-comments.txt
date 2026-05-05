@@ -1,0 +1,5 @@
+Found 3 matches in <MS> (grep mode)
+
+calculator.cpp:5:4:int Add(int a, int b) {
+calculator.h:4:4:int Add(int a, int b);
+calculator_test.cpp:5:17:    int result = Add(2, 3);

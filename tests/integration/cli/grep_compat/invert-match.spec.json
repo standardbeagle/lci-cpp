@@ -1,0 +1,28 @@
+{
+  "id": "cli/grep_compat/invert-match",
+  "golden": "goldens/cli/grep_compat/invert-match.txt",
+  "mode": "cli",
+  "corpus": "integration/cli/grep_compat/corpus",
+  "go_binary": "${LCI_GO}",
+  "cpp_binary": "${LCI_CPP}",
+  "invocation": {
+    "args": [
+      "grep",
+      "-v",
+      "Add"
+    ],
+    "cwd": "${CORPUS}"
+  },
+  "capture": [
+    "stdout",
+    "exit"
+  ],
+  "parse": "text",
+  "tiers": {},
+  "tolerances": {
+    "score_abs": 0.0,
+    "timed_max_ms": 60000
+  },
+  "expect_exit": 0,
+  "_rationale": "Pins `-v/--invert-match`: every line in every file that matched the original literal `Add` query must be excluded, and the surviving non-match lines emitted with the `(invert-match mode)` summary. The 28-row output covers calculator.cpp, calculator.h, calculator_test.cpp non-matching lines."
+}

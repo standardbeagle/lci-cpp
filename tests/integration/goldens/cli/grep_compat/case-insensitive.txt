@@ -1,0 +1,7 @@
+Found 5 matches in <MS> (grep mode)
+
+calculator.cpp:2:12:// Provides Add, Subtract, Multiply functions.
+calculator.cpp:5:4:int Add(int a, int b) {
+calculator.h:4:4:int Add(int a, int b);
+calculator_test.cpp:4:10:void test_add() {
+calculator_test.cpp:5:17:    int result = Add(2, 3);

@@ -1,0 +1,28 @@
+{
+  "id": "cli/grep_compat/count",
+  "golden": "goldens/cli/grep_compat/count.txt",
+  "mode": "cli",
+  "corpus": "integration/cli/grep_compat/corpus",
+  "go_binary": "${LCI_GO}",
+  "cpp_binary": "${LCI_CPP}",
+  "invocation": {
+    "args": [
+      "grep",
+      "-c",
+      "Add"
+    ],
+    "cwd": "${CORPUS}"
+  },
+  "capture": [
+    "stdout",
+    "exit"
+  ],
+  "parse": "text",
+  "tiers": {},
+  "tolerances": {
+    "score_abs": 0.0,
+    "timed_max_ms": 60000
+  },
+  "expect_exit": 0,
+  "_rationale": "Pins `-c/--count` aggregation: per-file match count, alphabetical file order, `Found matches in N file(s) in <MS> (grep -c)` summary header."
+}

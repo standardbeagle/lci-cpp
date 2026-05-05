@@ -1,0 +1,29 @@
+{
+  "id": "cli/grep_compat/multi-pattern",
+  "golden": "goldens/cli/grep_compat/multi-pattern.txt",
+  "mode": "cli",
+  "corpus": "integration/cli/grep_compat/corpus",
+  "go_binary": "${LCI_GO}",
+  "cpp_binary": "${LCI_CPP}",
+  "invocation": {
+    "args": [
+      "grep",
+      "Add",
+      "--patterns",
+      "Subtract"
+    ],
+    "cwd": "${CORPUS}"
+  },
+  "capture": [
+    "stdout",
+    "exit"
+  ],
+  "parse": "text",
+  "tiers": {},
+  "tolerances": {
+    "score_abs": 0.0,
+    "timed_max_ms": 60000
+  },
+  "expect_exit": 0,
+  "_rationale": "Pins `--patterns` (grep -e equivalent) OR'ing: positional `Add` plus extra `Subtract` should yield the union (4 + 3 = 7 unique hits). C++ run_grep fans out one literal search per pattern then merges by (path, line); the order is positional-pattern hits first, then extras, with first-occurrence-wins dedup."
+}

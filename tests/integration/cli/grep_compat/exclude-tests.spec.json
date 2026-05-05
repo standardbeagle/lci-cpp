@@ -1,0 +1,28 @@
+{
+  "id": "cli/grep_compat/exclude-tests",
+  "golden": "goldens/cli/grep_compat/exclude-tests.txt",
+  "mode": "cli",
+  "corpus": "integration/cli/grep_compat/corpus",
+  "go_binary": "${LCI_GO}",
+  "cpp_binary": "${LCI_CPP}",
+  "invocation": {
+    "args": [
+      "grep",
+      "--exclude-tests",
+      "Add"
+    ],
+    "cwd": "${CORPUS}"
+  },
+  "capture": [
+    "stdout",
+    "exit"
+  ],
+  "parse": "text",
+  "tiers": {},
+  "tolerances": {
+    "score_abs": 0.0,
+    "timed_max_ms": 60000
+  },
+  "expect_exit": 0,
+  "_rationale": "Pins `--exclude-tests` filtering. Note: the path heuristic in src/cli/search.cpp::path_is_test() flags any path with a `tests/` directory component (an intentional safety net for projects with the convention `tests/foo.cpp`). Because this corpus is itself stored under the lci-cpp `tests/` tree, ALL three files match the heuristic and the result set drops to zero. The spec deliberately pins this 0-result behavior — it confirms the flag is plumbed through and the heuristic fires on directory components, not just basename markers. Basename-only test detection is exercised separately by tests/cli_test.cpp::path_is_test unit tests."
+}

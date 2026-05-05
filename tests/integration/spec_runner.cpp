@@ -75,6 +75,17 @@ std::string ResolveCorpus(const std::string& key) {
     if (fs::is_directory(synthetic)) {
         return synthetic.string();
     }
+    // Spec-local corpora: a key containing a slash is interpreted as a path
+    // relative to LCI_TESTS_SOURCE_DIR so suites can co-locate corpus
+    // fixtures with their descriptors (e.g. `integration/cli/grep_compat/corpus`
+    // for the grep_compat suite). Falls through to the legacy
+    // `<base>/<key>` resolution if the relative path does not exist.
+    if (key.find('/') != std::string::npos) {
+        const fs::path local = TestsSourceDir() / key;
+        if (fs::is_directory(local)) {
+            return local.string();
+        }
+    }
     return (base / key).string();
 }
 

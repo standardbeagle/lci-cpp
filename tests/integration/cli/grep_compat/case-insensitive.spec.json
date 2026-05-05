@@ -1,0 +1,28 @@
+{
+  "id": "cli/grep_compat/case-insensitive",
+  "golden": "goldens/cli/grep_compat/case-insensitive.txt",
+  "mode": "cli",
+  "corpus": "integration/cli/grep_compat/corpus",
+  "go_binary": "${LCI_GO}",
+  "cpp_binary": "${LCI_CPP}",
+  "invocation": {
+    "args": [
+      "grep",
+      "-i",
+      "ADD"
+    ],
+    "cwd": "${CORPUS}"
+  },
+  "capture": [
+    "stdout",
+    "exit"
+  ],
+  "parse": "text",
+  "tiers": {},
+  "tolerances": {
+    "score_abs": 0.0,
+    "timed_max_ms": 60000
+  },
+  "expect_exit": 0,
+  "_rationale": "Pins `-i/--case-insensitive` matching. Searching for uppercase ADD must hit both the capitalized C++ Add() and the lowercase test_add() helper, plus the comment line. Stable result set is 5 hits across calculator.cpp / calculator.h / calculator_test.cpp."
+}

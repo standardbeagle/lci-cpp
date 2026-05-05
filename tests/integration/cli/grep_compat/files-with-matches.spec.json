@@ -1,0 +1,28 @@
+{
+  "id": "cli/grep_compat/files-with-matches",
+  "golden": "goldens/cli/grep_compat/files-with-matches.txt",
+  "mode": "cli",
+  "corpus": "integration/cli/grep_compat/corpus",
+  "go_binary": "${LCI_GO}",
+  "cpp_binary": "${LCI_CPP}",
+  "invocation": {
+    "args": [
+      "grep",
+      "-l",
+      "Add"
+    ],
+    "cwd": "${CORPUS}"
+  },
+  "capture": [
+    "stdout",
+    "exit"
+  ],
+  "parse": "text",
+  "tiers": {},
+  "tolerances": {
+    "score_abs": 0.0,
+    "timed_max_ms": 60000
+  },
+  "expect_exit": 0,
+  "_rationale": "Pins `-l/--files-with-matches`: filenames only, one per line, alphabetical, with the `Found N file(s) with matches in <MS> (grep -l)` summary header."
+}
