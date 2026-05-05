@@ -9,6 +9,8 @@
 #include <string_view>
 #include <vector>
 
+#include <absl/container/flat_hash_map.h>
+
 #include <lci/string_ref.h>
 #include <lci/types.h>
 
@@ -37,6 +39,14 @@ struct FileContent {
 /// Immutable snapshot of the file content store.
 /// Holds the mapping from FileID to FileContent and path-to-ID lookup.
 /// Snapshots are swapped atomically for lock-free reads.
+///
+/// Lookup performance:
+///   - find_by_id / find_by_path / path_to_id are O(1) average via the
+///     id_index_ / path_index_ hash maps that store entry positions.
+///   - The index maps must be kept in sync with `entries` whenever entries
+///     are added, replaced, or erased. Use rebuild_indices() after any
+///     mutation that may invalidate positions (e.g. erase / LRU eviction)
+///     and update_index_for_*() helpers for in-place edits.
 struct FileContentSnapshot {
     struct Entry {
         FileID file_id{};
@@ -46,6 +56,11 @@ struct FileContentSnapshot {
 
     std::vector<Entry> entries;
     std::vector<FileID> access_order;
+
+    /// Position-in-entries indexes for O(1) lookup. Both maps must be
+    /// kept consistent with `entries` after any mutation.
+    absl::flat_hash_map<FileID, size_t> id_index;
+    absl::flat_hash_map<std::string, size_t> path_index;
 
     /// Finds a FileContent by file ID. Returns nullptr if not found.
     const std::shared_ptr<FileContent>& find_by_id(FileID id) const;
@@ -58,6 +73,10 @@ struct FileContentSnapshot {
 
     /// Returns the number of files in the snapshot.
     size_t file_count() const { return entries.size(); }
+
+    /// Rebuilds id_index / path_index from `entries`. Call after any mutation
+    /// that may shift positions (erase, LRU eviction, bulk rebuilds).
+    void rebuild_indices();
 };
 
 /// Classification of update operations.

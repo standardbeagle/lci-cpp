@@ -117,25 +117,34 @@ std::array<uint8_t, 32> compute_sha256(std::string_view data) {
 // -- FileContentSnapshot ------------------------------------------------------
 
 const std::shared_ptr<FileContent>& FileContentSnapshot::find_by_id(FileID id) const {
-    for (const auto& e : entries) {
-        if (e.file_id == id) return e.content;
-    }
-    return kNullContent;
+    auto it = id_index.find(id);
+    if (it == id_index.end()) return kNullContent;
+    return entries[it->second].content;
 }
 
 const std::shared_ptr<FileContent>& FileContentSnapshot::find_by_path(
     const std::string& path) const {
-    for (const auto& e : entries) {
-        if (e.path == path) return e.content;
-    }
-    return kNullContent;
+    auto it = path_index.find(path);
+    if (it == path_index.end()) return kNullContent;
+    return entries[it->second].content;
 }
 
 FileID FileContentSnapshot::path_to_id(const std::string& path) const {
-    for (const auto& e : entries) {
-        if (e.path == path) return e.file_id;
+    auto it = path_index.find(path);
+    if (it == path_index.end()) return 0;
+    return entries[it->second].file_id;
+}
+
+void FileContentSnapshot::rebuild_indices() {
+    id_index.clear();
+    path_index.clear();
+    id_index.reserve(entries.size());
+    path_index.reserve(entries.size());
+    for (size_t i = 0; i < entries.size(); ++i) {
+        const auto& e = entries[i];
+        id_index[e.file_id] = i;
+        path_index[e.path] = i;
     }
-    return 0;
 }
 
 // -- compute_line_offsets -----------------------------------------------------
@@ -194,26 +203,31 @@ void FileContentStore::enforce_memory_limit(std::shared_ptr<FileContentSnapshot>
     if (current <= max_memory_bytes_) return;
 
     size_t evict_idx = 0;
+    bool any_evicted = false;
     while (current > max_memory_bytes_ && evict_idx < snap->access_order.size()) {
         FileID evict_id = snap->access_order[evict_idx];
         ++evict_idx;
 
-        auto it = std::find_if(snap->entries.begin(), snap->entries.end(),
-                               [evict_id](const FileContentSnapshot::Entry& e) {
-                                   return e.file_id == evict_id;
-                               });
-        if (it == snap->entries.end()) continue;
+        auto map_it = snap->id_index.find(evict_id);
+        if (map_it == snap->id_index.end()) continue;
 
-        int64_t file_size = estimate_memory(*it->content);
+        size_t pos = map_it->second;
+        int64_t file_size = estimate_memory(*snap->entries[pos].content);
         current -= file_size;
         current_memory_.fetch_sub(file_size, std::memory_order_relaxed);
-        snap->entries.erase(it);
+        snap->entries.erase(snap->entries.begin() +
+                            static_cast<ptrdiff_t>(pos));
+        any_evicted = true;
     }
 
     if (evict_idx > 0) {
         snap->access_order.erase(snap->access_order.begin(),
                                  snap->access_order.begin() +
                                      static_cast<ptrdiff_t>(evict_idx));
+    }
+    // Erasing entries shifts positions, so the index maps must be rebuilt.
+    if (any_evicted) {
+        snap->rebuild_indices();
     }
 }
 
@@ -336,27 +350,27 @@ FileID FileContentStore::load_file(const std::string& path, std::string_view con
     FileID file_id;
     if (existing_id != 0) {
         file_id = existing_id;
-        const auto& old_fc = snap->find_by_id(file_id);
-        if (old_fc) {
-            int64_t old_size = estimate_memory(*old_fc);
+        // O(1) lookup of old entry via id_index; replace content in place.
+        // Position is preserved so id_index / path_index stay valid.
+        auto map_it = snap->id_index.find(file_id);
+        if (map_it != snap->id_index.end()) {
+            auto& entry = snap->entries[map_it->second];
+            int64_t old_size = estimate_memory(*entry.content);
             current_memory_.fetch_sub(old_size, std::memory_order_relaxed);
-        }
-        // Replace the entry in-place.
-        auto fc = make_file_content(file_id, content);
-        int64_t new_size = estimate_memory(*fc);
-        current_memory_.fetch_add(new_size, std::memory_order_relaxed);
-        for (auto& entry : snap->entries) {
-            if (entry.file_id == file_id) {
-                entry.content = std::move(fc);
-                break;
-            }
+            auto fc = make_file_content(file_id, content);
+            int64_t new_size = estimate_memory(*fc);
+            current_memory_.fetch_add(new_size, std::memory_order_relaxed);
+            entry.content = std::move(fc);
         }
     } else {
         file_id = static_cast<FileID>(next_id_.fetch_add(1, std::memory_order_relaxed) + 1);
         auto fc = make_file_content(file_id, content);
         int64_t new_size = estimate_memory(*fc);
         current_memory_.fetch_add(new_size, std::memory_order_relaxed);
+        size_t new_pos = snap->entries.size();
         snap->entries.push_back({file_id, path, std::move(fc)});
+        snap->id_index[file_id] = new_pos;
+        snap->path_index[path] = new_pos;
     }
 
     snap->access_order.push_back(file_id);
@@ -391,23 +405,23 @@ std::vector<FileID> FileContentStore::batch_load_files(
         FileID file_id;
         if (existing_id != 0) {
             file_id = existing_id;
-            const auto& old_fc = snap->find_by_id(file_id);
-            if (old_fc) {
-                total_delta -= estimate_memory(*old_fc);
-            }
-            auto fc = make_file_content(file_id, content);
-            total_delta += estimate_memory(*fc);
-            for (auto& entry : snap->entries) {
-                if (entry.file_id == file_id) {
-                    entry.content = std::move(fc);
-                    break;
-                }
+            // O(1) lookup; replace in place to keep index positions stable.
+            auto map_it = snap->id_index.find(file_id);
+            if (map_it != snap->id_index.end()) {
+                auto& entry = snap->entries[map_it->second];
+                total_delta -= estimate_memory(*entry.content);
+                auto fc = make_file_content(file_id, content);
+                total_delta += estimate_memory(*fc);
+                entry.content = std::move(fc);
             }
         } else {
             file_id = static_cast<FileID>(next_id_.fetch_add(1, std::memory_order_relaxed) + 1);
             auto fc = make_file_content(file_id, content);
             total_delta += estimate_memory(*fc);
+            size_t new_pos = snap->entries.size();
             snap->entries.push_back({file_id, path, std::move(fc)});
+            snap->id_index[file_id] = new_pos;
+            snap->path_index[path] = new_pos;
         }
 
         snap->access_order.push_back(file_id);
@@ -444,6 +458,8 @@ void FileContentStore::invalidate_file(const std::string& path) {
         std::remove(snap->access_order.begin(), snap->access_order.end(), id),
         snap->access_order.end());
 
+    // Erase shifts subsequent positions, so the index maps must be rebuilt.
+    snap->rebuild_indices();
     snapshot_.store(std::move(snap), std::memory_order_release);
 }
 
@@ -466,6 +482,8 @@ void FileContentStore::invalidate_file_by_id(FileID file_id) {
         std::remove(snap->access_order.begin(), snap->access_order.end(), file_id),
         snap->access_order.end());
 
+    // Erase shifts subsequent positions, so the index maps must be rebuilt.
+    snap->rebuild_indices();
     snapshot_.store(std::move(snap), std::memory_order_release);
 }
 

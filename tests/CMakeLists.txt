@@ -62,10 +62,12 @@ add_executable(lci_tests
     mcp_handlers_context_test.cpp
     cli_test.cpp
     git_test.cpp
+    index_performance_test.cpp
 )
 target_include_directories(lci_tests PRIVATE
     "${CMAKE_SOURCE_DIR}/include"
     "${CMAKE_BINARY_DIR}/generated"
+    "${CMAKE_CURRENT_SOURCE_DIR}/helpers"
 )
 target_link_libraries(lci_tests PRIVATE
     lci_lib
