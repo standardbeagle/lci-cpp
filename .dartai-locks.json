@@ -1,3 +1,17 @@
 {
-  "claims": {}
+  "claims": {
+    "eWEmQo0sTQeH": {
+      "runner_instance_id": "DESKTOP-NPIOPS6-499902",
+      "runner_email": "andybrummer@standardbeagle.com",
+      "claimed_at": "2026-05-05T00:50:00Z",
+      "agent_id": "DESKTOP-NPIOPS6-499902",
+      "parent_loop_id": "gizjYzWWxUEj",
+      "purpose": "lci-cpp parity loop iteration 14",
+      "source_event": {
+        "loop_id": "gizjYzWWxUEj",
+        "task_id": "eWEmQo0sTQeH",
+        "conversation_id": null
+      }
+    }
+  }
 }
