@@ -9,20 +9,11 @@ namespace {
 
 // ---------------------------------------------------------------------------
 // One-off explicit tests for migration anchors that still live next to their
-// parity descriptors (index/probes/mcp). These will be moved to the
-// directory-walking pattern in the matching migration tasks (5/8 - 8/8).
-// http/* moved to the parametrized IntegrationHttpSpec block below in
-// migration 4/8.
+// parity descriptors (probes/mcp). These will be moved to the
+// directory-walking pattern in the matching migration tasks (6/8 - 8/8).
+// cli/* moved in migration 3/8, http/* in migration 4/8, index/* in
+// migration 5/8 (see IntegrationIndexSpec block below).
 // ---------------------------------------------------------------------------
-
-TEST(SpecMigrationTest, IndexSyntheticMultilang) {
-    ExpectSpecMatches({
-        .descriptor_rel_path = "parity/descriptors/index/synthetic-multilang.parity.json",
-        .golden_rel_path = "integration/goldens/index/synthetic-multilang.json",
-        .actual_source = SpecCase::ActualSource::Stdout,
-        .parse_override = std::nullopt,
-    });
-}
 
 TEST(SpecMigrationTest, ProbesGraph) {
     ExpectSpecMatches({
@@ -103,6 +94,30 @@ INSTANTIATE_TEST_SUITE_P(
     All,
     IntegrationHttpSpec,
     ::testing::ValuesIn(DiscoverIntegrationSpecsFromTestsDir("http")),
+    [](const ::testing::TestParamInfo<SpecCase>& param_info) {
+        return SpecCaseInstanceName(param_info.param);
+    });
+
+// ---------------------------------------------------------------------------
+// Parametrized integration suite for index/*: walks tests/integration/index/
+// recursively for *.spec.json files. Same pattern as IntegrationCliSpec /
+// IntegrationHttpSpec — adding a new index case is just dropping a new
+// <name>.spec.json + goldens/index/<name>.json into the tree. Two of the
+// three parity index descriptors (lci-cpp-repo, lci-go-repo) are
+// intentionally not migrated because their corpora are live git checkouts;
+// see tests/integration/index/KNOWN_DIVERGENCE.md for rationale.
+// ---------------------------------------------------------------------------
+
+class IntegrationIndexSpec : public ::testing::TestWithParam<SpecCase> {};
+
+TEST_P(IntegrationIndexSpec, MatchesGolden) {
+    ExpectSpecMatches(GetParam());
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    All,
+    IntegrationIndexSpec,
+    ::testing::ValuesIn(DiscoverIntegrationSpecsFromTestsDir("index")),
     [](const ::testing::TestParamInfo<SpecCase>& param_info) {
         return SpecCaseInstanceName(param_info.param);
     });
