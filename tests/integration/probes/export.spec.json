@@ -1,0 +1,29 @@
+{
+  "id": "probes/export",
+  "golden": "goldens/probes/export.json",
+  "mode": "cli",
+  "corpus": "multi-lang",
+  "go_binary": "${LCI_GO}",
+  "cpp_binary": "${LCI_CPP}",
+  "invocation": {
+    "args": ["debug", "export", "--output", "/tmp/lci-parity-debug-export.json"],
+    "cwd": "${CORPUS}"
+  },
+  "capture": ["stdout", "exit"],
+  "parse": "exit-only",
+  "actual_source": "output_file",
+  "parse_override": "json",
+  "_rationale": "debug export payload (file_count, symbol_count, build_duration_ms, memory_rss_mb, uptime_seconds, ready, root, …) is volatile because the C++ port queries a live in-process server that may or may not be ready in the spawned subprocess. The parity descriptor is `parse: exit-only` for the same reason — the integration test mirrors that by ignoring every emitted field and asserting exit==0 only. Identical Decision-C divergence as `index/synthetic-multilang`; see `tests/integration/index/KNOWN_DIVERGENCE.md` for the rationale.",
+  "tiers": {
+    "stable": [],
+    "ignore": [
+      "avg_search_time_ms", "build_duration_ms", "build_time", "file_count",
+      "host", "index_size_bytes", "index_version", "memory_rss_mb", "ready",
+      "root", "schema_version", "search_count", "summary", "symbol_count",
+      "trigram_count", "uptime_seconds", "extractors", "resolvers",
+      "dependencies", "files", "symbols", "refs"
+    ]
+  },
+  "tolerances": {"score_abs": 0.0, "timed_max_ms": 60000},
+  "expect_exit": 0
+}
