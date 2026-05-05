@@ -381,5 +381,47 @@ TEST(FileContentStoreTest, Sha256HelloWorld) {
     EXPECT_EQ(hash[3], 0xb9);
 }
 
+// Regression: enforce_memory_limit must not corrupt the store when more than
+// one entry is evicted in a single call. The earlier implementation looked up
+// each evict_id's position in id_index after the prior erase had already
+// shifted positions, removing the wrong entry from the vector.
+TEST(FileContentStoreTest, MultiEvictionPreservesRemainingEntries) {
+    // 1 KB cap forces eviction once a few ~600-byte files coexist.
+    const int64_t kLimit = 1024;
+    FileContentStore store(kLimit);
+
+    const std::string payload(600, 'x');
+    FileID id_a = store.load_file("a.go", payload);
+    FileID id_b = store.load_file("b.go", payload);
+    FileID id_c = store.load_file("c.go", payload);
+    FileID id_d = store.load_file("d.go", payload);
+    FileID id_e = store.load_file("e.go", payload);
+
+    // Most recent loads must remain reachable through both lookup paths.
+    EXPECT_NE(store.get_file(id_e), nullptr);
+    EXPECT_EQ(store.path_to_id("e.go"), id_e);
+
+    // Memory accounting agrees with surviving content (single-counting).
+    EXPECT_LE(store.get_memory_usage(), kLimit + 700);
+
+    // Any lookup that succeeds for an evicted id must return the same id —
+    // the previous bug erased a different row, leaving stale id_index
+    // pointers that mapped one id to another id's content.
+    auto check_consistency = [&](FileID id, const std::string& path) {
+        auto fp = store.get_file(id);
+        if (fp != nullptr) {
+            EXPECT_EQ(fp->file_id, id);
+        }
+        FileID via_path = store.path_to_id(path);
+        if (via_path != 0) {
+            EXPECT_EQ(via_path, id);
+        }
+    };
+    check_consistency(id_a, "a.go");
+    check_consistency(id_b, "b.go");
+    check_consistency(id_c, "c.go");
+    check_consistency(id_d, "d.go");
+}
+
 }  // namespace
 }  // namespace lci

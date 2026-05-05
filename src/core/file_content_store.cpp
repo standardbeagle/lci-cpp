@@ -4,6 +4,7 @@
 #include <array>
 #include <cstring>
 
+#include <absl/container/flat_hash_set.h>
 #include <xxhash.h>
 
 namespace lci {
@@ -202,8 +203,11 @@ void FileContentStore::enforce_memory_limit(std::shared_ptr<FileContentSnapshot>
     int64_t current = current_memory_.load(std::memory_order_relaxed);
     if (current <= max_memory_bytes_) return;
 
+    // Collect ids to evict in a first pass using the read-only id_index,
+    // then erase them in a single pass. Erasing one at a time would
+    // invalidate id_index positions for subsequent lookups.
+    absl::flat_hash_set<FileID> evict_set;
     size_t evict_idx = 0;
-    bool any_evicted = false;
     while (current > max_memory_bytes_ && evict_idx < snap->access_order.size()) {
         FileID evict_id = snap->access_order[evict_idx];
         ++evict_idx;
@@ -215,9 +219,18 @@ void FileContentStore::enforce_memory_limit(std::shared_ptr<FileContentSnapshot>
         int64_t file_size = estimate_memory(*snap->entries[pos].content);
         current -= file_size;
         current_memory_.fetch_sub(file_size, std::memory_order_relaxed);
-        snap->entries.erase(snap->entries.begin() +
-                            static_cast<ptrdiff_t>(pos));
-        any_evicted = true;
+        evict_set.insert(evict_id);
+    }
+
+    if (evict_set.empty() && evict_idx == 0) return;
+
+    if (!evict_set.empty()) {
+        snap->entries.erase(
+            std::remove_if(snap->entries.begin(), snap->entries.end(),
+                           [&](const FileContentSnapshot::Entry& e) {
+                               return evict_set.contains(e.file_id);
+                           }),
+            snap->entries.end());
     }
 
     if (evict_idx > 0) {
@@ -225,8 +238,9 @@ void FileContentStore::enforce_memory_limit(std::shared_ptr<FileContentSnapshot>
                                  snap->access_order.begin() +
                                      static_cast<ptrdiff_t>(evict_idx));
     }
+
     // Erasing entries shifts positions, so the index maps must be rebuilt.
-    if (any_evicted) {
+    if (!evict_set.empty()) {
         snap->rebuild_indices();
     }
 }

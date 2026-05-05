@@ -5,6 +5,7 @@
 
 #include <cerrno>
 #include <chrono>
+#include <cstdint>
 #include <cstring>
 #include <fcntl.h>
 #include <filesystem>
@@ -20,16 +21,19 @@ namespace lci::parity {
 
 namespace {
 
-// Replicates the identical hash algorithm used by both Go and C++ lci binaries:
-//   hash = hash * 31 + uint32(c)   for each char in abs_path
-// producing /tmp/lci-server-<08hex>.sock.
+// Replicates the identical socket-path scheme the C++ lci binary computes
+// in src/server/server.cpp: `lci-<uid>-<8hex>.sock` where the hash is the
+// 32-bit polynomial hash (h = h*31 + c) of the absolute project root.
+// The Go binary follows the same format so both servers bind the same
+// socket when given the same --root.
 std::string compute_socket_path(const std::string& abs_corpus) {
     uint32_t hash = 0;
     for (unsigned char c : abs_corpus) {
         hash = hash * 31u + static_cast<uint32_t>(c);
     }
-    char buf[32];
-    std::snprintf(buf, sizeof(buf), "lci-server-%08x.sock", hash);
+    const auto uid = static_cast<uint32_t>(::getuid());
+    char buf[64];
+    std::snprintf(buf, sizeof(buf), "lci-%u-%08x.sock", uid, hash);
     return (fs::temp_directory_path() / buf).string();
 }
 

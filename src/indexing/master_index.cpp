@@ -64,16 +64,19 @@ bool MasterIndex::index_directory(const std::string& root) {
 
     std::lock_guard<std::mutex> bulk_lock(bulk_mu_);
 
-    int32_t expected = 0;
-    if (!is_indexing_.compare_exchange_strong(expected, 1)) {
-        return false;
+    // Clear-and-claim under stop_mu_: a concurrent `request_stop()` either
+    // runs entirely before this block (its stale flag is overwritten —
+    // intended, no run was in flight) or entirely after (it observes
+    // is_indexing_=1 and either forwards into the now-published pipeline
+    // or sets stop_requested_=true for the second-stage check below).
+    {
+        std::lock_guard<std::mutex> stop_lock(stop_mu_);
+        int32_t expected = 0;
+        if (!is_indexing_.compare_exchange_strong(expected, 1)) {
+            return false;
+        }
+        stop_requested_.store(false, std::memory_order_release);
     }
-
-    // Clear any stale stop signal from a prior run. Done after the
-    // is_indexing_ CAS so a `request_stop()` racing with the start of
-    // this call still wins (it sees is_indexing_=1 and forwards into the
-    // pipeline below).
-    stop_requested_.store(false, std::memory_order_release);
 
     auto start = std::chrono::steady_clock::now();
 
