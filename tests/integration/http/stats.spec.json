@@ -1,0 +1,35 @@
+{
+  "id": "http/stats",
+  "golden": "goldens/http/stats.json",
+  "mode": "http",
+  "corpus": "multi-lang",
+  "go_binary": "${LCI_GO}",
+  "cpp_binary": "${LCI_CPP}",
+  "invocation": {
+    "args": ["/stats"],
+    "cwd": "${CORPUS}"
+  },
+  "capture": ["stdout", "exit"],
+  "parse": "json",
+  "tiers": {
+    "stable": ["index_size_bytes"],
+    "ignore": [
+      "pid", "start_time", "uptime_ms", "elapsed_ms", "request_id",
+      "timestamp", "schema_version",
+      "uptime_seconds",
+      "build_duration_ms",
+      "file_count",
+      "symbol_count",
+      "memory_alloc_mb",
+      "memory_total_mb",
+      "memory_heap_mb",
+      "memory_rss_mb",
+      "num_goroutines",
+      "num_threads",
+      "search_count",
+      "avg_search_time_ms"
+    ]
+  },
+  "tolerances": {"score_abs": 0.05, "timed_max_ms": 60000},
+  "expect_exit": 200
+}

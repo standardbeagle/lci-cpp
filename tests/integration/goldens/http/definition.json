@@ -1,0 +1,11 @@
+{
+  "definitions": [
+    {
+      "column": 5,
+      "file_path": "${CORPUS}/a.go",
+      "line": 3,
+      "name": "Add",
+      "type": "lines"
+    }
+  ]
+}

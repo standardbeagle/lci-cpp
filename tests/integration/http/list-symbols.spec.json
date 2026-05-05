@@ -1,0 +1,28 @@
+{
+  "id": "http/list-symbols",
+  "golden": "goldens/http/list-symbols.json",
+  "mode": "http",
+  "corpus": "multi-lang",
+  "go_binary": "${LCI_GO}",
+  "cpp_binary": "${LCI_CPP}",
+  "invocation": {
+    "args": ["/list-symbols"],
+    "stdin": "{\"max\":5}",
+    "cwd": "${CORPUS}"
+  },
+  "capture": ["stdout", "exit"],
+  "parse": "json",
+  "_rationale_sort_arrays": "Even within a single C++ binary the symbols array can come back in trigram-iteration order which is map-bucket dependent. Sort by canonical content so the integration test verifies multiset equality rather than positional equality.",
+  "_rationale_object_id_ignore": "object_id is a sequential synthetic SymbolID assigned during indexing; ordering depends on file-integration order which can vary across runs.",
+  "tiers": {
+    "stable": [],
+    "ignore": [
+      "pid", "start_time", "version", "uptime_ms", "elapsed_ms",
+      "request_id", "timestamp", "schema_version",
+      "symbols[].object_id"
+    ],
+    "sort_arrays": ["symbols"]
+  },
+  "tolerances": {"score_abs": 0.05, "timed_max_ms": 60000},
+  "expect_exit": 200
+}

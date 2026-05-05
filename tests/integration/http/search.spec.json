@@ -1,0 +1,28 @@
+{
+  "id": "http/search",
+  "golden": "goldens/http/search.json",
+  "mode": "http",
+  "corpus": "multi-lang",
+  "go_binary": "${LCI_GO}",
+  "cpp_binary": "${LCI_CPP}",
+  "invocation": {
+    "args": ["/search"],
+    "stdin": "{\"pattern\":\"add\"}",
+    "cwd": "${CORPUS}"
+  },
+  "capture": ["stdout", "exit"],
+  "parse": "json",
+  "_rationale_results_file_id": "results[].file_id is a sequential synthetic FileID assigned during indexing; scanner-completion ordering can vary across runs even within the same C++ binary.",
+  "_rationale_sort_arrays": "Trigram-index map iteration is not order-stable across runs; sort the results array so we verify multiset content rather than positional equality.",
+  "tiers": {
+    "stable": [],
+    "ignore": [
+      "pid", "start_time", "version", "uptime_ms", "elapsed_ms",
+      "request_id", "timestamp", "schema_version",
+      "results[].file_id"
+    ],
+    "sort_arrays": ["results"]
+  },
+  "tolerances": {"score_abs": 0.05, "timed_max_ms": 60000},
+  "expect_exit": 200
+}

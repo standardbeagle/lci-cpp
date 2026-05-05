@@ -1,0 +1,41 @@
+{
+  "id": "http/fileinfo",
+  "golden": "goldens/http/fileinfo.json",
+  "mode": "http",
+  "corpus": "multi-lang",
+  "go_binary": "${LCI_GO}",
+  "cpp_binary": "${LCI_CPP}",
+  "invocation": {
+    "args": ["/fileinfo"],
+    "stdin": "{\"file_id\":1}",
+    "cwd": "${CORPUS}"
+  },
+  "capture": ["stdout", "exit"],
+  "parse": "json",
+  "_rationale_file_info_ignore": "file_info contains a large internal blob whose fields (Path, Checksum, FastHash, ContentHash, Blocks, EnhancedSymbols, Imports, References, ScopeHierarchy, CharMask, perf_data, LastModified, ID, file_id, symbol_count) are synthetic / scanner-order / per-run varying. Mask the entire internal blob — the structural shape (presence of file_info object) is what we verify here.",
+  "tiers": {
+    "stable": [],
+    "ignore": [
+      "pid", "start_time", "uptime_ms", "elapsed_ms", "request_id",
+      "timestamp", "schema_version",
+      "file_info.ID",
+      "file_info.Path",
+      "file_info.path",
+      "file_info.file_id",
+      "file_info.symbol_count",
+      "file_info.LastModified",
+      "file_info.Checksum",
+      "file_info.FastHash",
+      "file_info.ContentHash",
+      "file_info.Blocks",
+      "file_info.EnhancedSymbols",
+      "file_info.Imports",
+      "file_info.References",
+      "file_info.ScopeHierarchy",
+      "file_info.CharMask",
+      "file_info.perf_data"
+    ]
+  },
+  "tolerances": {"score_abs": 0.05, "timed_max_ms": 60000},
+  "expect_exit": 200
+}

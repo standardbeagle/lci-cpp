@@ -1,0 +1,21 @@
+{
+  "id": "http/inspect-symbol",
+  "golden": "goldens/http/inspect-symbol.json",
+  "mode": "http",
+  "corpus": "multi-lang",
+  "go_binary": "${LCI_GO}",
+  "cpp_binary": "${LCI_CPP}",
+  "invocation": {
+    "args": ["/inspect-symbol"],
+    "stdin": "{\"name\":\"Add\"}",
+    "cwd": "${CORPUS}"
+  },
+  "capture": ["stdout", "exit"],
+  "parse": "json",
+  "tiers": {
+    "stable": [],
+    "ignore": ["pid", "start_time", "version", "uptime_ms", "elapsed_ms", "request_id", "timestamp", "schema_version"]
+  },
+  "tolerances": {"score_abs": 0.05, "timed_max_ms": 60000},
+  "expect_exit": 200
+}

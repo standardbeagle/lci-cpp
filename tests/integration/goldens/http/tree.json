@@ -1,0 +1,29 @@
+{
+  "tree": {
+    "max_depth": 0,
+    "options": {
+      "agent_mode": false,
+      "compact": false,
+      "exclude_pattern": "",
+      "max_depth": 0,
+      "show_lines": false
+    },
+    "root": {
+      "annotations": null,
+      "children": [],
+      "dependency_count": 0,
+      "dependent_count": 0,
+      "depth": 0,
+      "edit_risk_score": 0,
+      "file_path": "${CORPUS}/a.go",
+      "impact_radius": 0,
+      "line": 3,
+      "name": "Add",
+      "node_type": 0,
+      "safety_notes": null,
+      "stability_tags": null
+    },
+    "root_function": "Add",
+    "total_nodes": 0
+  }
+}

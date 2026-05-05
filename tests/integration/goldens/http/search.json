@@ -1,0 +1,68 @@
+{
+  "results": [
+    {
+      "column": 4,
+      "context": {
+        "block_name": "",
+        "block_type": "lines",
+        "end_line": 1,
+        "is_complete": true,
+        "lines": [
+          "int add(int a, int b) { return a + b; }\n"
+        ],
+        "match_count": 1,
+        "matched_lines": [
+          1
+        ],
+        "start_line": 1
+      },
+      "line": 1,
+      "match": "add",
+      "path": "${CORPUS}/c.cpp",
+      "score": "855.5"
+    },
+    {
+      "column": 4,
+      "context": {
+        "block_name": "",
+        "block_type": "lines",
+        "end_line": 2,
+        "is_complete": true,
+        "lines": [
+          "def add(a: int, b: int) -> int:",
+          "    return a + b\n"
+        ],
+        "match_count": 1,
+        "matched_lines": [
+          1
+        ],
+        "start_line": 1
+      },
+      "line": 1,
+      "match": "add",
+      "path": "${CORPUS}/b.py",
+      "score": "855.5"
+    },
+    {
+      "column": 7,
+      "context": {
+        "block_name": "",
+        "block_type": "lines",
+        "end_line": 1,
+        "is_complete": true,
+        "lines": [
+          "pub fn add(a: i32, b: i32) -> i32 { a + b }\n"
+        ],
+        "match_count": 1,
+        "matched_lines": [
+          1
+        ],
+        "start_line": 1
+      },
+      "line": 1,
+      "match": "add",
+      "path": "${CORPUS}/d.rs",
+      "score": "855.5"
+    }
+  ]
+}

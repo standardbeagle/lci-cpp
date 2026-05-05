@@ -1,0 +1,23 @@
+{
+  "id": "http/references",
+  "golden": "goldens/http/references.json",
+  "mode": "http",
+  "corpus": "multi-lang",
+  "go_binary": "${LCI_GO}",
+  "cpp_binary": "${LCI_CPP}",
+  "invocation": {
+    "args": ["/references"],
+    "stdin": "{\"pattern\":\"add\"}",
+    "cwd": "${CORPUS}"
+  },
+  "capture": ["stdout", "exit"],
+  "parse": "json",
+  "_rationale_sort_arrays": "Trigram-index map iteration is not order-stable across runs; sort the references array so we verify content rather than position.",
+  "tiers": {
+    "stable": [],
+    "ignore": ["pid", "start_time", "version", "uptime_ms", "elapsed_ms", "request_id", "timestamp", "schema_version"],
+    "sort_arrays": ["references"]
+  },
+  "tolerances": {"score_abs": 0.05, "timed_max_ms": 60000},
+  "expect_exit": 200
+}

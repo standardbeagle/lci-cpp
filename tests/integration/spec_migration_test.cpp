@@ -9,18 +9,11 @@ namespace {
 
 // ---------------------------------------------------------------------------
 // One-off explicit tests for migration anchors that still live next to their
-// parity descriptors (http/index/probes/mcp). These will be moved to the
-// directory-walking pattern in the matching migration tasks (4/8 - 8/8).
+// parity descriptors (index/probes/mcp). These will be moved to the
+// directory-walking pattern in the matching migration tasks (5/8 - 8/8).
+// http/* moved to the parametrized IntegrationHttpSpec block below in
+// migration 4/8.
 // ---------------------------------------------------------------------------
-
-TEST(SpecMigrationTest, HttpListSymbols) {
-    ExpectSpecMatches({
-        .descriptor_rel_path = "parity/descriptors/http/list-symbols.parity.json",
-        .golden_rel_path = "integration/goldens/http/list-symbols.json",
-        .actual_source = SpecCase::ActualSource::Stdout,
-        .parse_override = std::nullopt,
-    });
-}
 
 TEST(SpecMigrationTest, IndexSyntheticMultilang) {
     ExpectSpecMatches({
@@ -89,6 +82,27 @@ INSTANTIATE_TEST_SUITE_P(
     All,
     IntegrationCliSpec,
     ::testing::ValuesIn(DiscoverIntegrationSpecsFromTestsDir("cli")),
+    [](const ::testing::TestParamInfo<SpecCase>& param_info) {
+        return SpecCaseInstanceName(param_info.param);
+    });
+
+// ---------------------------------------------------------------------------
+// Parametrized integration suite for http/*: walks tests/integration/http/
+// recursively for *.spec.json files. Same pattern as IntegrationCliSpec —
+// adding a new http endpoint to the harness is just dropping a new
+// <name>.spec.json + goldens/http/<name>.json into the tree.
+// ---------------------------------------------------------------------------
+
+class IntegrationHttpSpec : public ::testing::TestWithParam<SpecCase> {};
+
+TEST_P(IntegrationHttpSpec, MatchesGolden) {
+    ExpectSpecMatches(GetParam());
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    All,
+    IntegrationHttpSpec,
+    ::testing::ValuesIn(DiscoverIntegrationSpecsFromTestsDir("http")),
     [](const ::testing::TestParamInfo<SpecCase>& param_info) {
         return SpecCaseInstanceName(param_info.param);
     });

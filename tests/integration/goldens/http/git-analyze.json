@@ -1,0 +1,17 @@
+{
+  "report": {
+    "metadata": {
+      "base_ref": "HEAD",
+      "scope": "wip",
+      "target_ref": "WORKING"
+    },
+    "summary": {
+      "duplicates_found": 0,
+      "files_changed": 1,
+      "metrics_issues_found": 0,
+      "naming_issues_found": 0,
+      "symbols_added": 0,
+      "symbols_deleted": 0
+    }
+  }
+}
