@@ -1,0 +1,10 @@
+{
+  "result": {
+    "content": [
+      {
+        "text": "{\"mode\":\"summary\",\"results\":null,\"summary\":{\"impure_functions\":0,\"pure_functions\":4,\"purity_ratio\":1.0,\"total_functions\":4},\"total_count\":4}",
+        "type": "text"
+      }
+    ]
+  }
+}

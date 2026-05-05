@@ -1,0 +1,10 @@
+{
+  "result": {
+    "content": [
+      {
+        "text": "{\"max_results\":50,\"results\":[{\"column\":1,\"file\":\"/home/beagle/work/core/lci-cpp/tests/parity/corpora/synthetic/multi-lang/a.go\",\"is_exported\":true,\"line\":3,\"match\":\"Add\",\"object_id\":\"B\",\"result_id\":\"result_1_3\",\"score\":855.5,\"symbol_name\":\"Add\",\"symbol_type\":\"function\"},{\"column\":1,\"file\":\"/home/beagle/work/core/lci-cpp/tests/parity/corpora/synthetic/multi-lang/b.py\",\"is_exported\":true,\"line\":1,\"match\":\"add\",\"object_id\":\"C\",\"result_id\":\"result_2_1\",\"score\":855.5,\"symbol_name\":\"add\",\"symbol_type\":\"function\"},{\"column\":1,\"file\":\"/home/beagle/work/core/lci-cpp/tests/parity/corpora/synthetic/multi-lang/c.cpp\",\"is_exported\":true,\"line\":1,\"match\":\"add\",\"object_id\":\"E\",\"result_id\":\"result_3_1\",\"score\":855.5,\"symbol_name\":\"add\",\"symbol_type\":\"function\"},{\"column\":1,\"file\":\"/home/beagle/work/core/lci-cpp/tests/parity/corpora/synthetic/multi-lang/d.rs\",\"is_exported\":true,\"line\":1,\"match\":\"add\",\"object_id\":\"D\",\"result_id\":\"result_4_1\",\"score\":855.5,\"symbol_name\":\"add\",\"symbol_type\":\"function\"}],\"showing\":4,\"total_matches\":4}",
+        "type": "text"
+      }
+    ]
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "result": {
+    "content": [
+      {
+        "text": "{\"file\":{\"file_id\":1,\"language\":\"go\",\"path\":\"/home/beagle/work/core/lci-cpp/tests/parity/corpora/synthetic/multi-lang/a.go\"},\"symbols\":[{\"complexity\":1,\"file\":\"/home/beagle/work/core/lci-cpp/tests/parity/corpora/synthetic/multi-lang/a.go\",\"is_exported\":true,\"line\":3,\"name\":\"Add\",\"object_id\":\"B\",\"type\":\"function\"}],\"total\":1}",
+        "type": "text"
+      }
+    ]
+  }
+}

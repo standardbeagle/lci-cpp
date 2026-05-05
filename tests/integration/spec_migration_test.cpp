@@ -8,22 +8,12 @@ namespace lci::integration {
 namespace {
 
 // ---------------------------------------------------------------------------
-// One-off explicit tests for migration anchors that still live next to their
-// parity descriptors (mcp/*). These will be moved to the directory-walking
-// pattern in the matching migration tasks (7/8 - 8/8).
-// cli/* moved in migration 3/8, http/* in migration 4/8, index/* in
-// migration 5/8, probes/* in migration 6/8 (see IntegrationProbesSpec block
-// below).
+// Migration anchors moved to the directory-walking pattern across migrations
+// 3/8 - 7/8: cli/* (3/8), http/* (4/8), index/* (5/8), probes/* (6/8),
+// mcp/* (7/8 — see IntegrationMcpSpec block below). The last anchor
+// (SpecMigrationTest.McpInfoBasic) was retired when mcp/* was mass-migrated
+// to tests/integration/mcp/<tool>/basic.spec.json + matching golden.
 // ---------------------------------------------------------------------------
-
-TEST(SpecMigrationTest, McpInfoBasic) {
-    ExpectSpecMatches({
-        .descriptor_rel_path = "parity/descriptors/mcp/info/basic.parity.json",
-        .golden_rel_path = "integration/goldens/mcp/info/basic.json",
-        .actual_source = SpecCase::ActualSource::Stdout,
-        .parse_override = std::nullopt,
-    });
-}
 
 // ---------------------------------------------------------------------------
 // Parametrized integration suite: walks tests/integration/cli/ recursively
@@ -133,6 +123,39 @@ INSTANTIATE_TEST_SUITE_P(
     All,
     IntegrationProbesSpec,
     ::testing::ValuesIn(DiscoverIntegrationSpecsFromTestsDir("probes")),
+    [](const ::testing::TestParamInfo<SpecCase>& param_info) {
+        return SpecCaseInstanceName(param_info.param);
+    });
+
+// ---------------------------------------------------------------------------
+// Parametrized integration suite for mcp/*: walks tests/integration/mcp/
+// recursively for *.spec.json files. Same pattern as the cli/http/index/
+// probes blocks above — adding a new MCP tool case is just dropping a new
+// <tool>/<name>.spec.json + goldens/mcp/<tool>/<name>.json into the tree.
+//
+// Replaces the explicit SpecMigrationTest.McpInfoBasic anchor that lived
+// here through migrations 3/8 - 6/8. Each spec drives the C++ MCP server
+// over stdio (Content-Length framing) with a deterministic
+// initialize → notifications/initialized → tools/call sequence and pins
+// result.content[].type + result.content[].text against a captured golden.
+//
+// The parity oracle suite (`ctest -L parity -R parity\.mcp`) remains the
+// authoritative cross-port check between the Go reference binary and this
+// C++ port; the integration suite intentionally pins ONLY the C++ side
+// against itself, so it stays green even when parity is red and provides
+// a regression signal independent of the Go reference's release cadence.
+// ---------------------------------------------------------------------------
+
+class IntegrationMcpSpec : public ::testing::TestWithParam<SpecCase> {};
+
+TEST_P(IntegrationMcpSpec, MatchesGolden) {
+    ExpectSpecMatches(GetParam());
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    All,
+    IntegrationMcpSpec,
+    ::testing::ValuesIn(DiscoverIntegrationSpecsFromTestsDir("mcp")),
     [](const ::testing::TestParamInfo<SpecCase>& param_info) {
         return SpecCaseInstanceName(param_info.param);
     });

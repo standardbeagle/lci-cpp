@@ -1,0 +1,10 @@
+{
+  "result": {
+    "content": [
+      {
+        "text": "{\"has_more\":false,\"showing\":4,\"symbols\":[{\"complexity\":1,\"file\":\"/home/beagle/work/core/lci-cpp/tests/parity/corpora/synthetic/multi-lang/a.go\",\"is_exported\":true,\"line\":3,\"name\":\"Add\",\"object_id\":\"B\",\"type\":\"function\"},{\"complexity\":1,\"file\":\"/home/beagle/work/core/lci-cpp/tests/parity/corpora/synthetic/multi-lang/b.py\",\"is_exported\":true,\"line\":1,\"name\":\"add\",\"object_id\":\"C\",\"type\":\"function\"},{\"complexity\":1,\"file\":\"/home/beagle/work/core/lci-cpp/tests/parity/corpora/synthetic/multi-lang/c.cpp\",\"is_exported\":true,\"line\":1,\"name\":\"add\",\"object_id\":\"E\",\"type\":\"function\"},{\"complexity\":1,\"file\":\"/home/beagle/work/core/lci-cpp/tests/parity/corpora/synthetic/multi-lang/d.rs\",\"is_exported\":true,\"line\":1,\"name\":\"add\",\"object_id\":\"D\",\"type\":\"function\"}],\"total\":4}",
+        "type": "text"
+      }
+    ]
+  }
+}
