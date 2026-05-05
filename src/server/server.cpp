@@ -340,20 +340,37 @@ bool IndexServer::start() {
     register_handlers();
     start_time_ = std::chrono::steady_clock::now();
 
-    // Start background indexing if we own the index
+    // Start background indexing if we own the index. The thread is
+    // tracked (not detached) so shutdown() can signal cancellation via
+    // MasterIndex::request_stop() and join cleanly. Detaching here
+    // would leave indexing running after the server destructor returned
+    // and could touch freed members.
+    //
+    // The lambda mirrors handle_reindex: a cancelled run (stop
+    // requested) leaves `indexing_active_` set so the superseding
+    // /reindex thread is responsible for clearing it; a clean shutdown
+    // clears the flag so /status reports accurately.
     if (owned_indexer_ && !search_engine_) {
         indexing_active_.store(true, std::memory_order_release);
-        std::thread([this] {
+        swap_indexing_thread(std::thread([this] {
             indexer_->index_directory(config_.project.root);
+
+            if (indexer_->stop_requested()) {
+                return;
+            }
+            if (!running_.load(std::memory_order_acquire)) {
+                indexing_active_.store(false, std::memory_order_release);
+                return;
+            }
 
             auto engine = std::make_unique<SearchEngine>(*indexer_);
             {
-                std::unique_lock lock(mu_);
+                std::unique_lock engine_lock(mu_);
                 owned_search_engine_ = std::move(engine);
                 search_engine_ = owned_search_engine_.get();
             }
             indexing_active_.store(false, std::memory_order_release);
-        }).detach();
+        }));
     }
 
 #ifdef _WIN32
@@ -429,6 +446,12 @@ bool IndexServer::shutdown(std::chrono::milliseconds /*timeout*/) {
         listen_thread_.join();
     }
 
+    // Cooperatively cancel any in-flight indexing and join its thread
+    // before continuing teardown. Without this, a long-running indexing
+    // run could outlive the server (use-after-free on indexer_,
+    // owned_indexer_, mu_, etc.).
+    cancel_indexing_thread();
+
 #ifndef _WIN32
     // Remove socket file (Unix domain socket only)
     std::error_code ec;
@@ -443,6 +466,59 @@ bool IndexServer::shutdown(std::chrono::milliseconds /*timeout*/) {
     shutdown_cv_.notify_all();
 
     return true;
+}
+
+void IndexServer::cancel_indexing_thread() {
+    swap_indexing_thread(std::thread{});
+}
+
+void IndexServer::swap_indexing_thread(std::thread new_thread) {
+    // Atomic cancel-and-replace: serialised on `indexing_thread_mu_`
+    // so two concurrent callers cannot race to overwrite a joinable
+    // thread (overwriting a joinable thread calls std::terminate) and
+    // so the new thread does not start its real work until the prior
+    // run has been fully joined. Without joining under the lock, the
+    // displaced thread keeps running concurrently with the new one and
+    // both contend on `index_directory()` — the second loses the
+    // is_indexing_ CAS and returns silently, leaving the index in the
+    // state produced by the cancelled run.
+    //
+    // The lambda body does not acquire `indexing_thread_mu_`, so
+    // holding it across the join cannot deadlock. Reindex requests
+    // queued behind a long-running prior run wait their turn here,
+    // which is the desired behaviour: the user's intent is "discard
+    // the in-flight run, run again from scratch", and that requires
+    // ordering.
+    //
+    // Shutdown safety: if `running_` is false the server is shutting
+    // down (or already torn down). Refuse to install a new thread —
+    // doing so would leave a joinable thread alive past `~IndexServer`
+    // and trigger `std::terminate` from the member destructor. This
+    // closes the race where an in-flight handler's call here lands
+    // after shutdown's `cancel_indexing_thread()` has already drained
+    // the slot.
+    std::lock_guard<std::mutex> lock(indexing_thread_mu_);
+    if (indexing_thread_.joinable()) {
+        // Forward cooperative cancellation into the active pipeline
+        // so the worker pool, scanner, and integrator exit at their
+        // next checkpoint instead of running to completion.
+        if (indexer_ != nullptr) {
+            indexer_->request_stop();
+        }
+        indexing_thread_.join();
+    }
+    if (!running_.load(std::memory_order_acquire) && new_thread.joinable()) {
+        // Caller raced with shutdown. Cancel and drain the
+        // just-launched thread under the lock so it cannot outlive
+        // the server. Joining here is safe because the lambda body
+        // never acquires `indexing_thread_mu_`.
+        if (indexer_ != nullptr) {
+            indexer_->request_stop();
+        }
+        new_thread.join();
+        return;
+    }
+    indexing_thread_ = std::move(new_thread);
 }
 
 // -- Handler registration -----------------------------------------------------
@@ -792,11 +868,23 @@ void IndexServer::handle_reindex(const httplib::Request& req,
         root_path = config_.project.root;
     }
 
-    // Start re-indexing in background
+    // Atomically cancel any prior in-flight indexing run and install
+    // the fresh one. Without atomic cancel-and-replace, two concurrent
+    // reindex requests would race: both could observe an empty slot
+    // and try to install their own thread, terminating the process on
+    // the second assignment to a joinable thread. swap_indexing_thread
+    // serialises this on `indexing_thread_mu_`.
+    //
+    // `indexing_active_` is set to true *before* the swap so observers
+    // never see a transient false between "cancelled prior run" and
+    // "started new run". The lambda only clears it when the run reaches
+    // completion (either by publishing a new search engine or by
+    // observing shutdown); a cancelled run leaves the flag set so the
+    // successor thread covers it.
     indexing_active_.store(true, std::memory_order_release);
-    std::thread([this, root_path] {
+    swap_indexing_thread(std::thread([this, root_path] {
         {
-            std::unique_lock lock(mu_);
+            std::unique_lock engine_lock(mu_);
             search_engine_ = nullptr;
             owned_search_engine_.reset();
         }
@@ -804,14 +892,27 @@ void IndexServer::handle_reindex(const httplib::Request& req,
         indexer_->clear();
         indexer_->index_directory(root_path);
 
+        // Bail out (without clearing indexing_active_) if a successor
+        // reindex superseded us — the successor is responsible for
+        // clearing the flag once it publishes its own engine. If the
+        // server is shutting down, clear the flag so /status is
+        // accurate during the brief window before the server exits.
+        if (indexer_->stop_requested()) {
+            return;
+        }
+        if (!running_.load(std::memory_order_acquire)) {
+            indexing_active_.store(false, std::memory_order_release);
+            return;
+        }
+
         auto engine = std::make_unique<SearchEngine>(*indexer_);
         {
-            std::unique_lock lock(mu_);
+            std::unique_lock engine_lock(mu_);
             owned_search_engine_ = std::move(engine);
             search_engine_ = owned_search_engine_.get();
         }
         indexing_active_.store(false, std::memory_order_release);
-    }).detach();
+    }));
 
     nlohmann::json j;
     j["success"] = true;

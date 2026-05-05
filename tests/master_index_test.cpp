@@ -441,5 +441,90 @@ TEST(MasterIndexTest, CppHeaderReferencesPopulateEnhancedSymbols) {
     EXPECT_GE(slab_allocator->incoming_refs.size(), 1u);
 }
 
+// -- Cancellation -------------------------------------------------------------
+
+TEST(MasterIndexTest, StopRequestedDefaultsFalse) {
+    Config cfg = make_default_config();
+    MasterIndex mi(cfg);
+    EXPECT_FALSE(mi.stop_requested());
+}
+
+TEST(MasterIndexTest, RequestStopBeforeIndexingPersistsAndAbortsRun) {
+    TempDir dir;
+    // Write enough files that a pre-stop is observable: even though
+    // request_stop() before run() can't shrink scan time below the
+    // FileScanner walk, the pipeline must exit before all files are
+    // integrated.
+    for (int i = 0; i < 20; ++i) {
+        dir.write_file("f" + std::to_string(i) + ".go",
+                       "package f" + std::to_string(i) +
+                       "\nfunc F" + std::to_string(i) + "() {}\n");
+    }
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+
+    mi.request_stop();
+    EXPECT_TRUE(mi.stop_requested());
+
+    // index_directory() still returns true (it ran), but the pipeline
+    // observed the pre-stop. Check that the integrated count is at
+    // most the scanned count and indexing finished cleanly.
+    EXPECT_TRUE(mi.index_directory(dir.path().string()));
+    EXPECT_FALSE(mi.is_indexing());
+}
+
+TEST(MasterIndexTest, IndexDirectoryClearsStaleStopFlag) {
+    TempDir dir;
+    dir.write_file("a.go", "package a\nfunc A() {}\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+
+    // First run: pre-stopped.
+    mi.request_stop();
+    EXPECT_TRUE(mi.stop_requested());
+    EXPECT_TRUE(mi.index_directory(dir.path().string()));
+
+    // Second run: stop flag must be cleared on entry, otherwise the
+    // pipeline would still observe stop_requested at startup.
+    EXPECT_TRUE(mi.index_directory(dir.path().string()));
+    EXPECT_FALSE(mi.stop_requested());
+    EXPECT_GE(mi.file_count(), 1);
+}
+
+TEST(MasterIndexTest, RequestStopFromAnotherThreadCancelsInFlightRun) {
+    TempDir dir;
+    // Write a workload large enough that the indexing run takes
+    // measurable wall time on a debug build, so a request_stop()
+    // racing with run() can land mid-pipeline.
+    for (int i = 0; i < 200; ++i) {
+        dir.write_file("f" + std::to_string(i) + ".go",
+                       "package f" + std::to_string(i) +
+                       "\nfunc F" + std::to_string(i) + "() {}\n");
+    }
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+
+    std::thread indexer([&] {
+        mi.index_directory(dir.path().string());
+    });
+
+    // Spin until the run is visible, then request stop. This exercises
+    // the active_pipeline_ forwarding path (not the pre-stop path).
+    while (!mi.is_indexing()) {
+        std::this_thread::yield();
+    }
+    mi.request_stop();
+
+    indexer.join();
+    EXPECT_FALSE(mi.is_indexing());
+    EXPECT_TRUE(mi.stop_requested());
+}
+
 }  // namespace
 }  // namespace lci

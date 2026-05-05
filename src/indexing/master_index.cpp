@@ -69,6 +69,12 @@ bool MasterIndex::index_directory(const std::string& root) {
         return false;
     }
 
+    // Clear any stale stop signal from a prior run. Done after the
+    // is_indexing_ CAS so a `request_stop()` racing with the start of
+    // this call still wins (it sees is_indexing_=1 and forwards into the
+    // pipeline below).
+    stop_requested_.store(false, std::memory_order_release);
+
     auto start = std::chrono::steady_clock::now();
 
     // Clear existing data for a full reindex.
@@ -93,7 +99,24 @@ bool MasterIndex::index_directory(const std::string& root) {
     pipeline.integrator().set_file_content_store(file_content_store_.get());
     pipeline.integrator().set_symbol_location_index(&symbol_location_index_);
 
+    // Publish the active pipeline so `request_stop()` can forward into
+    // it from another thread. Re-check stop_requested_ under the lock
+    // to avoid losing a stop request that arrived between the CAS above
+    // and the pipeline construction.
+    {
+        std::lock_guard<std::mutex> stop_lock(stop_mu_);
+        active_pipeline_ = &pipeline;
+        if (stop_requested_.load(std::memory_order_acquire)) {
+            pipeline.request_stop();
+        }
+    }
+
     pipeline.run();
+
+    {
+        std::lock_guard<std::mutex> stop_lock(stop_mu_);
+        active_pipeline_ = nullptr;
+    }
 
     // Post-pipeline: resolve cross-file references.
     ref_tracker_.process_all_references();
@@ -133,6 +156,22 @@ bool MasterIndex::index_directory(const std::string& root) {
 
     is_indexing_.store(0, std::memory_order_release);
     return true;
+}
+
+void MasterIndex::request_stop() {
+    // Set the persistent flag first so an `index_directory` call that
+    // hasn't yet published its pipeline pointer still observes the stop
+    // request when it acquires `stop_mu_`.
+    stop_requested_.store(true, std::memory_order_release);
+
+    std::lock_guard<std::mutex> stop_lock(stop_mu_);
+    if (active_pipeline_ != nullptr) {
+        active_pipeline_->request_stop();
+    }
+}
+
+bool MasterIndex::stop_requested() const {
+    return stop_requested_.load(std::memory_order_acquire);
 }
 
 // -- Single-file operations ---------------------------------------------------

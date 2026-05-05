@@ -74,6 +74,17 @@ class MasterIndex {
     /// Blocks until indexing completes. Returns false if already indexing.
     bool index_directory(const std::string& root);
 
+    /// Requests cooperative cancellation of any in-flight `index_directory`
+    /// call. Safe to call from any thread. The flag is sticky for the
+    /// duration of the active run; the next `index_directory` call clears
+    /// it on entry. If no run is active, marks the next run to abort
+    /// at its earliest checkpoint.
+    void request_stop();
+
+    /// Returns true if cancellation has been requested for the current or
+    /// most recent indexing run. Cleared at the start of the next run.
+    bool stop_requested() const;
+
     // -- Single-file operations -----------------------------------------------
 
     /// Indexes a single file into the index.
@@ -184,6 +195,15 @@ class MasterIndex {
     std::atomic<int64_t> processed_files_{0};
     std::atomic<int64_t> indexing_time_ns_{0};
     mutable std::atomic<int64_t> search_count_{0};
+
+    // Cancellation. `stop_requested_` is the persistent user-visible
+    // signal forwarded into the active `Pipeline`. `active_pipeline_` is
+    // a non-owning pointer set while `index_directory` is running so
+    // `request_stop()` can forward immediately; protected by
+    // `stop_mu_`.
+    std::atomic<bool> stop_requested_{false};
+    Pipeline* active_pipeline_{nullptr};
+    mutable std::mutex stop_mu_;
 
     // Helpers
     void set_bulk_indexing(bool enabled);

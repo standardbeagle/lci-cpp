@@ -350,5 +350,57 @@ TEST_F(ServerLifecycleTest, ConcurrentRequestsDuringOperation) {
     EXPECT_EQ(failure_count.load(), 0);
 }
 
+// -- Lifecycle: shutdown cleanly cancels in-flight indexing -------------------
+//
+// Verifies the indexing thread is tracked (not detached) and joined on
+// shutdown. Without this, a long indexing run could touch freed members
+// after the server destructor returned.
+TEST(ServerCancellationTest, ShutdownJoinsInFlightIndexing) {
+    std::filesystem::path tmp = std::filesystem::temp_directory_path() /
+        ("lci_shutdown_cancel_" + std::to_string(::getpid()));
+    std::filesystem::create_directories(tmp);
+
+    auto cleanup = [&] {
+        std::error_code ec;
+        std::filesystem::remove_all(tmp, ec);
+    };
+
+    // Write enough files that startup indexing is still in flight when
+    // we call shutdown(). 200 small files is enough on debug builds
+    // without making the test slow on release builds (it just means
+    // shutdown sees a quick run that already finished).
+    for (int i = 0; i < 200; ++i) {
+        std::ofstream f(tmp / ("f" + std::to_string(i) + ".go"));
+        f << "package f" << i << "\nfunc F" << i << "() {}\n";
+    }
+
+    Config cfg;
+    cfg.project.root = tmp.string();
+    cfg.project.name = "shutdown-cancel-test";
+
+    auto server = std::make_unique<IndexServer>(cfg);
+
+    auto sock = (std::filesystem::temp_directory_path() /
+                 ("lci_shutdown_cancel_" +
+                  std::to_string(::getpid()) + ".sock"))
+                    .string();
+    server->set_socket_path(sock);
+
+    ASSERT_TRUE(server->start());
+
+    // Issue shutdown immediately. The server must cancel the in-flight
+    // initial-indexing thread and join it before returning. If the
+    // thread were detached, the join would be skipped and shutdown
+    // could return while indexing was still mutating the indexer.
+    bool clean = server->shutdown(std::chrono::milliseconds{5000});
+    EXPECT_TRUE(clean);
+    EXPECT_FALSE(server->is_running());
+
+    server.reset();
+    cleanup();
+    std::error_code ec;
+    std::filesystem::remove(sock, ec);
+}
+
 }  // namespace
 }  // namespace lci

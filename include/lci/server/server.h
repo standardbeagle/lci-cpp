@@ -352,6 +352,28 @@ class IndexServer {
     bool shutdown_requested_{false};
 
     std::thread listen_thread_;
+
+    // Background indexing thread. Owns the in-flight indexing run
+    // (initial start-up index or any /reindex request). Tracked by the
+    // server so shutdown can request cooperative cancellation and join
+    // before destruction. `indexing_thread_mu_` serialises the
+    // cancel/swap/join sequence across concurrent reindex requests and
+    // the shutdown path; without serialising the assignment with the
+    // cancel, two callers could race and overwrite a joinable thread,
+    // which terminates the process.
+    std::thread indexing_thread_;
+    std::mutex indexing_thread_mu_;
+
+    // Cancels and joins any background indexing thread. Safe to call
+    // multiple times. Called from shutdown().
+    void cancel_indexing_thread();
+
+    // Cancels any in-flight indexing run, joins its thread, and
+    // installs `new_thread` as the active indexing thread. Atomic with
+    // respect to other callers; the prior thread is joined under the
+    // same lock that gates the swap so concurrent callers serialise
+    // through this function rather than racing on `indexing_thread_`.
+    void swap_indexing_thread(std::thread new_thread);
 };
 
 }  // namespace lci
