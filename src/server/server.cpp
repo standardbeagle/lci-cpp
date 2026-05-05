@@ -665,12 +665,38 @@ void IndexServer::handle_status(const httplib::Request& /*req*/,
         sc = stats.total_symbols;
     }
 
+    // Live indexing progress. Reads through MasterIndex::get_progress
+    // which atomically forwards to the active pipeline's
+    // ProgressTracker (lock-free hot path) when a run is in flight, or
+    // returns an idle/zero snapshot otherwise. Polling /status during
+    // a long index reports increasing files_scanned without racing the
+    // pipeline writer.
+    auto progress = indexer_->get_progress();
+    auto phase_to_string =
+        [](MasterIndex::IndexingPhase phase) -> const char* {
+            switch (phase) {
+                case MasterIndex::IndexingPhase::Scanning: return "scanning";
+                case MasterIndex::IndexingPhase::Indexing: return "indexing";
+                case MasterIndex::IndexingPhase::Merging:  return "merging";
+                case MasterIndex::IndexingPhase::Idle:     return "idle";
+            }
+            return "idle";
+        };
+
+    nlohmann::json indexing_progress;
+    indexing_progress["phase"] = phase_to_string(progress.phase);
+    indexing_progress["files_scanned"] = progress.files_scanned;
+    indexing_progress["files_total"] = progress.files_total;
+    indexing_progress["percent_complete"] = progress.percent_complete;
+    indexing_progress["elapsed_ms"] = progress.elapsed_ms;
+
     nlohmann::json j;
     j["ready"] = ready;
     j["file_count"] = fc;
     j["symbol_count"] = sc;
     j["indexing_active"] = active;
     j["progress"] = ready ? 1.0 : 0.0;
+    j["indexing_progress"] = std::move(indexing_progress);
     json_response(res, j);
 }
 

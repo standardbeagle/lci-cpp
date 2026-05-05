@@ -87,6 +87,7 @@ IndexingProgress ProgressTracker::get_progress() const {
     return IndexingProgress{
         .files_processed = static_cast<int>(processed),
         .total_files = static_cast<int>(total),
+        .files_scanned = static_cast<int>(scanned),
         .current_file = std::move(file),
         .files_per_second = fps,
         .estimated_time_left = std::chrono::seconds(eta_seconds),

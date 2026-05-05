@@ -16,6 +16,7 @@
 #include <lci/core/trigram.h>
 #include <lci/indexing/index_locks.h>
 #include <lci/indexing/pipeline.h>
+#include <lci/indexing/pipeline_progress.h>
 #include <lci/search/search_options.h>
 #include <lci/types.h>
 
@@ -117,6 +118,36 @@ class MasterIndex {
     MasterIndexStats get_stats() const;
     int file_count() const;
     bool is_indexing() const;
+
+    /// Phase of the indexing pipeline as observed by external monitors
+    /// such as /status. Maps the underlying ProgressTracker state into
+    /// the four-state machine that callers expose to users.
+    enum class IndexingPhase {
+        Idle,      // no run active
+        Scanning,  // file discovery (Scanner stage)
+        Indexing,  // processing files (Processor stage)
+        Merging,   // post-scan, all files processed but run still
+                   // wrapping up (Integrator drain / postings flush)
+    };
+
+    /// Live snapshot of indexing progress designed for /status polling.
+    ///
+    /// All fields are 0 / Idle when no run is active. When a run is in
+    /// flight the snapshot is read directly from the active Pipeline's
+    /// ProgressTracker, which uses atomics on the hot path so reads
+    /// don't block writers.
+    struct IndexingProgressSnapshot {
+        IndexingPhase phase{IndexingPhase::Idle};
+        int files_scanned{0};
+        int files_total{0};
+        int percent_complete{0};  // clamped to [0, 100]
+        int64_t elapsed_ms{0};
+    };
+
+    /// Returns a snapshot of the current indexing run, or an idle
+    /// snapshot when no run is in flight. Thread-safe — readers may
+    /// poll while the pipeline is active without racing the writer.
+    IndexingProgressSnapshot get_progress() const;
 
     // -- Sub-index access (non-owning) ----------------------------------------
 

@@ -17,7 +17,8 @@
       "pid", "start_time", "uptime_ms", "elapsed_ms", "request_id",
       "timestamp", "schema_version",
       "progress",
-      "symbol_count"
+      "symbol_count",
+      "indexing_progress.elapsed_ms"
     ]
   },
   "tolerances": {"score_abs": 0.05, "timed_max_ms": 60000},

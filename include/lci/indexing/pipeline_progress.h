@@ -15,6 +15,7 @@ namespace lci {
 struct IndexingProgress {
     int files_processed{};
     int total_files{};
+    int files_scanned{};
     std::string current_file;
     double files_per_second{};
     std::chrono::seconds estimated_time_left{};

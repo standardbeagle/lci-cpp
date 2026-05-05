@@ -277,6 +277,31 @@ TEST_F(ServerTest, StatusEndpoint) {
     EXPECT_FALSE(j["indexing_active"].get<bool>());
 }
 
+TEST_F(ServerTest, StatusEndpointReportsIndexingProgress) {
+    // /status must always include the indexing_progress object so a
+    // long-running poller doesn't have to special-case "no run yet".
+    // After fixture setup the indexer has finished, so the snapshot
+    // should be the documented idle/zero shape.
+    auto j = post("/status");
+    ASSERT_TRUE(j.contains("indexing_progress"));
+    auto ip = j["indexing_progress"];
+    ASSERT_TRUE(ip.is_object());
+
+    // Required keys (acceptance contract).
+    ASSERT_TRUE(ip.contains("phase"));
+    ASSERT_TRUE(ip.contains("files_scanned"));
+    ASSERT_TRUE(ip.contains("files_total"));
+    ASSERT_TRUE(ip.contains("percent_complete"));
+    ASSERT_TRUE(ip.contains("elapsed_ms"));
+
+    // Idle invariant: phase=idle, every numeric field 0.
+    EXPECT_EQ(ip["phase"].get<std::string>(), "idle");
+    EXPECT_EQ(ip["files_scanned"].get<int>(), 0);
+    EXPECT_EQ(ip["files_total"].get<int>(), 0);
+    EXPECT_EQ(ip["percent_complete"].get<int>(), 0);
+    EXPECT_EQ(ip["elapsed_ms"].get<int64_t>(), 0);
+}
+
 TEST_F(ServerTest, SearchEndpoint) {
     auto j = post("/search", {{"pattern", "Add"}});
     ASSERT_TRUE(j.contains("results"));

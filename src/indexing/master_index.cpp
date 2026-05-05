@@ -174,6 +174,96 @@ bool MasterIndex::stop_requested() const {
     return stop_requested_.load(std::memory_order_acquire);
 }
 
+MasterIndex::IndexingProgressSnapshot MasterIndex::get_progress() const {
+    IndexingProgressSnapshot snap{};
+
+    // Fast path: no active run -> idle, zero counters. We check
+    // is_indexing_ first to avoid a needless mutex acquisition on the
+    // common /status read path. The active_pipeline_ pointer is only
+    // valid while is_indexing_ is set, but we still take stop_mu_ before
+    // dereferencing it: a racing index_directory() return clears
+    // is_indexing_ and the pipeline pointer, and the lock provides the
+    // happens-before edge guaranteeing we see a consistent state.
+    if (is_indexing_.load(std::memory_order_acquire) == 0) {
+        return snap;
+    }
+
+    std::lock_guard<std::mutex> lock(stop_mu_);
+    if (active_pipeline_ == nullptr) {
+        // Race: the run finished between the is_indexing_ check and the
+        // lock. Report idle rather than reading a stale tracker — the
+        // pipeline lives on the index_directory() stack frame and its
+        // ProgressTracker may be torn down once the lock is released
+        // again.
+        return snap;
+    }
+
+    auto pipeline_progress = active_pipeline_->get_progress();
+
+    // Phase derivation.
+    //
+    // The ProgressTracker exposes is_scanning (1 while scan_directory
+    // walks the tree, 0 once set_total has flipped it). After scanning
+    // completes the Processor stage drains files; once
+    // processed >= total we treat the residual time as "merging" — the
+    // Integrator is finishing posting-list flushes and the symbol/ref
+    // joins. This three-way derivation (scanning vs indexing vs merging)
+    // matches how the JSON consumer reasons about user-visible progress.
+    if (pipeline_progress.is_scanning) {
+        snap.phase = IndexingPhase::Scanning;
+    } else if (pipeline_progress.total_files == 0 ||
+               pipeline_progress.files_processed >=
+                   pipeline_progress.total_files) {
+        // Empty corpus (total==0 after set_total) and post-process
+        // (processed>=total) both surface as Merging — the Pipeline is
+        // wrapping up its final stages and there is no per-file
+        // progress left for the user to observe.
+        snap.phase = IndexingPhase::Merging;
+    } else {
+        snap.phase = IndexingPhase::Indexing;
+    }
+
+    // The acceptance JSON uses "files_scanned" for the live counter.
+    // Map to ProgressTracker semantics:
+    //   - During scan: surface the Scanner's live scanned-files counter
+    //     so /status polling shows discovery moving even before
+    //     set_total flips the phase. files_total stays 0 until the
+    //     scanner finishes (we don't know the final count yet), which
+    //     is the documented "scanning" semantics.
+    //   - After scan (indexing/merging): surface files_processed since
+    //     the scanner counter is frozen at the total and the user wants
+    //     to see the Processor stage advancing.
+    if (pipeline_progress.is_scanning) {
+        snap.files_scanned = pipeline_progress.files_scanned;
+    } else {
+        snap.files_scanned = pipeline_progress.files_processed;
+    }
+    snap.files_total = pipeline_progress.total_files;
+
+    // Percent-complete: clamp to [0, 100]. During scanning we expose 0
+    // (we don't know total yet); during indexing it's processed/total;
+    // during merging it's pinned at 100 because every file has been
+    // processed and the residual work is index-side bookkeeping that
+    // the user shouldn't interpret as additional file progress.
+    if (snap.phase == IndexingPhase::Scanning) {
+        snap.percent_complete = 0;
+    } else if (snap.phase == IndexingPhase::Merging) {
+        snap.percent_complete = 100;
+    } else if (snap.files_total > 0) {
+        int pct = static_cast<int>(
+            (static_cast<int64_t>(snap.files_scanned) * 100) /
+            snap.files_total);
+        if (pct < 0) pct = 0;
+        if (pct > 100) pct = 100;
+        snap.percent_complete = pct;
+    } else {
+        snap.percent_complete = 0;
+    }
+
+    snap.elapsed_ms = pipeline_progress.elapsed.count();
+    return snap;
+}
+
 // -- Single-file operations ---------------------------------------------------
 
 bool MasterIndex::index_file(const std::string& path) {
