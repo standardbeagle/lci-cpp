@@ -202,41 +202,56 @@ std::string FileScanner::detect_language(std::string_view path) {
     return "unknown";
 }
 
+namespace {
+
+// Recursive glob matcher with proper `/` boundary handling.
+//   `?` matches any single non-`/` char
+//   `*` matches zero or more non-`/` chars
+//   `**` (or `**/`) matches any number of path components, including
+//        crossing `/` boundaries (matches "zero or more components")
+//   anything else is a literal.
+bool match_glob_at(std::string_view pattern, size_t px,
+                   std::string_view path, size_t tx) {
+    while (px < pattern.size()) {
+        char c = pattern[px];
+        if (c == '*') {
+            bool double_star =
+                (px + 1 < pattern.size() && pattern[px + 1] == '*');
+            if (double_star) {
+                size_t next_px = px + 2;
+                if (next_px < pattern.size() && pattern[next_px] == '/') {
+                    ++next_px;
+                }
+                // ** matches zero or more characters across any boundary.
+                for (size_t end = tx; end <= path.size(); ++end) {
+                    if (match_glob_at(pattern, next_px, path, end)) return true;
+                }
+                return false;
+            }
+            // Single `*`: match zero or more non-`/` chars then continue.
+            size_t next_px = px + 1;
+            for (size_t end = tx;; ++end) {
+                if (match_glob_at(pattern, next_px, path, end)) return true;
+                if (end >= path.size() || path[end] == '/') break;
+            }
+            return false;
+        }
+        if (c == '?') {
+            if (tx >= path.size() || path[tx] == '/') return false;
+            ++px; ++tx;
+            continue;
+        }
+        if (tx >= path.size() || c != path[tx]) return false;
+        ++px; ++tx;
+    }
+    return tx == path.size();
+}
+
+}  // namespace
+
 bool FileScanner::match_glob(std::string_view pattern,
                              std::string_view path) {
-    size_t px = 0, tx = 0;
-    size_t star_px = std::string_view::npos;
-    size_t star_tx = 0;
-
-    while (tx < path.size()) {
-        if (px < pattern.size() && pattern[px] == '*') {
-            if (px + 1 < pattern.size() && pattern[px + 1] == '*') {
-                px += 2;
-                if (px < pattern.size() && pattern[px] == '/') ++px;
-                star_px = px;
-                star_tx = tx;
-                continue;
-            }
-            star_px = px + 1;
-            star_tx = tx;
-            ++px;
-            continue;
-        }
-        if (px < pattern.size() && pattern[px] == '?') {
-            if (path[tx] != '/') { ++px; ++tx; continue; }
-        } else if (px < pattern.size() && pattern[px] == path[tx]) {
-            ++px; ++tx; continue;
-        }
-        if (star_px != std::string_view::npos) {
-            px = star_px;
-            ++star_tx;
-            tx = star_tx;
-            continue;
-        }
-        return false;
-    }
-    while (px < pattern.size() && pattern[px] == '*') ++px;
-    return px == pattern.size();
+    return match_glob_at(pattern, 0, path, 0);
 }
 
 // -- pipeline_types free functions -------------------------------------------

@@ -897,5 +897,139 @@ TEST(PipelineTest, StopRequestedDefaultsFalse) {
     EXPECT_FALSE(pipeline.stop_requested());
 }
 
+// ============================================================================
+// match_glob: comprehensive boundary tests.
+// `?` matches single non-`/` char. `*` matches zero or more non-`/` chars.
+// `**` matches zero or more characters across any boundary (multi-component).
+// ============================================================================
+
+TEST(MatchGlob, LiteralExactMatch) {
+    EXPECT_TRUE(FileScanner::match_glob("foo.go", "foo.go"));
+    EXPECT_FALSE(FileScanner::match_glob("foo.go", "bar.go"));
+    EXPECT_FALSE(FileScanner::match_glob("foo.go", "foo.gob"));
+    EXPECT_FALSE(FileScanner::match_glob("foo.go", "afoo.go"));
+}
+
+TEST(MatchGlob, EmptyPatternMatchesEmptyPath) {
+    EXPECT_TRUE(FileScanner::match_glob("", ""));
+    EXPECT_FALSE(FileScanner::match_glob("", "foo"));
+    EXPECT_FALSE(FileScanner::match_glob("foo", ""));
+}
+
+TEST(MatchGlob, QuestionMarkMatchesSingleNonSlashChar) {
+    EXPECT_TRUE(FileScanner::match_glob("a?c", "abc"));
+    EXPECT_TRUE(FileScanner::match_glob("a?c", "axc"));
+    EXPECT_FALSE(FileScanner::match_glob("a?c", "abbc"));
+    EXPECT_FALSE(FileScanner::match_glob("a?c", "a/c"))
+        << "`?` must not match path separator";
+    EXPECT_FALSE(FileScanner::match_glob("a?c", "ac"));
+}
+
+TEST(MatchGlob, SingleStarMatchesZeroOrMoreNonSlashChars) {
+    EXPECT_TRUE(FileScanner::match_glob("a*c", "ac"));
+    EXPECT_TRUE(FileScanner::match_glob("a*c", "abc"));
+    EXPECT_TRUE(FileScanner::match_glob("a*c", "abbbbc"));
+    EXPECT_FALSE(FileScanner::match_glob("a*c", "a/c"))
+        << "single `*` must not cross `/`";
+    EXPECT_FALSE(FileScanner::match_glob("a*c", "abcd"));
+}
+
+TEST(MatchGlob, SingleStarStaysWithinComponent) {
+    // Critical regression test: `*` rejects '/'.
+    EXPECT_FALSE(FileScanner::match_glob("test_*", "dir/test_x"));
+    EXPECT_TRUE(FileScanner::match_glob("test_*", "test_x"));
+    EXPECT_FALSE(FileScanner::match_glob("test_*", "test_x/y.go"))
+        << "`*` after literal must stop at path boundary";
+}
+
+TEST(MatchGlob, DoubleStarMatchesAcrossComponents) {
+    EXPECT_TRUE(FileScanner::match_glob("**/foo.go", "foo.go"));
+    EXPECT_TRUE(FileScanner::match_glob("**/foo.go", "a/foo.go"));
+    EXPECT_TRUE(FileScanner::match_glob("**/foo.go", "a/b/c/foo.go"));
+    EXPECT_FALSE(FileScanner::match_glob("**/foo.go", "foo.go.bak"));
+    EXPECT_FALSE(FileScanner::match_glob("**/foo.go", "bar.go"));
+}
+
+TEST(MatchGlob, DoubleStarSlashMatchesZeroPathComponents) {
+    EXPECT_TRUE(FileScanner::match_glob("**/foo", "foo"));
+    EXPECT_TRUE(FileScanner::match_glob("**/foo", "a/foo"));
+    EXPECT_TRUE(FileScanner::match_glob("**/foo", "a/b/foo"));
+}
+
+TEST(MatchGlob, DoubleStarAtEndMatchesEntireSubtree) {
+    EXPECT_TRUE(FileScanner::match_glob("logs/**", "logs/app.log"));
+    EXPECT_TRUE(FileScanner::match_glob("logs/**", "logs/sub/deep/x.log"));
+    EXPECT_FALSE(FileScanner::match_glob("logs/**", "other/app.log"));
+}
+
+TEST(MatchGlob, TestStarPatternStaysInBasename) {
+    // Key bug-fix case: `**/test_*` must match a basename starting with
+    // `test_` but NOT match an intermediate path component containing
+    // `test_` as a substring.
+    EXPECT_TRUE(FileScanner::match_glob("**/test_*", "test_helper.go"));
+    EXPECT_TRUE(FileScanner::match_glob("**/test_*", "src/test_helper.go"));
+    EXPECT_TRUE(FileScanner::match_glob("**/test_*", "a/b/test_x.py"));
+
+    // Bug regression guards:
+    EXPECT_FALSE(FileScanner::match_glob("**/test_*",
+                                          "lci_watcher_test_42/main.go"))
+        << "intermediate component containing 'test_' must not match **/test_*";
+    EXPECT_FALSE(FileScanner::match_glob("**/test_*",
+                                          "atest_helper/x.go"));
+}
+
+TEST(MatchGlob, StarUnderscoreTestStarMatchesAnywhereInBasename) {
+    EXPECT_TRUE(FileScanner::match_glob("**/*_test.go", "pkg/foo_test.go"));
+    EXPECT_TRUE(FileScanner::match_glob("**/*_test.go", "foo_test.go"));
+    EXPECT_TRUE(FileScanner::match_glob("**/*_test.go", "a/b/c/x_test.go"));
+    EXPECT_FALSE(FileScanner::match_glob("**/*_test.go", "pkg/foo.go"));
+    EXPECT_FALSE(FileScanner::match_glob("**/*_test.go", "pkg/test.go"));
+    EXPECT_FALSE(FileScanner::match_glob("**/*_test.go", "pkg/foo_test.py"));
+}
+
+TEST(MatchGlob, NodeModulesAtAnyDepth) {
+    EXPECT_TRUE(FileScanner::match_glob("**/node_modules/**",
+                                         "node_modules/lodash/index.js"));
+    EXPECT_TRUE(FileScanner::match_glob("**/node_modules/**",
+                                         "frontend/node_modules/x.js"));
+    EXPECT_TRUE(FileScanner::match_glob("**/node_modules/**",
+                                         "a/b/node_modules/c/d.js"));
+    EXPECT_FALSE(FileScanner::match_glob("**/node_modules/**",
+                                         "src/node_modules"))
+        << "trailing /** requires at least one component after node_modules";
+}
+
+TEST(MatchGlob, DotDirectoryExclusion) {
+    EXPECT_TRUE(FileScanner::match_glob("**/.git/**", ".git/HEAD"));
+    EXPECT_TRUE(FileScanner::match_glob("**/.git/**", "src/.git/config"));
+    EXPECT_FALSE(FileScanner::match_glob("**/.git/**", "git/HEAD"));
+}
+
+TEST(MatchGlob, MinifiedJsPattern) {
+    EXPECT_TRUE(FileScanner::match_glob("**/*.min.js", "vendor/lib.min.js"));
+    EXPECT_TRUE(FileScanner::match_glob("**/*.min.js", "lib.min.js"));
+    EXPECT_FALSE(FileScanner::match_glob("**/*.min.js", "vendor/lib.js"));
+    EXPECT_FALSE(FileScanner::match_glob("**/*.min.js", "lib.min.js.bak"));
+}
+
+TEST(MatchGlob, TestsDirAtAnyDepth) {
+    EXPECT_TRUE(FileScanner::match_glob("**/tests/**", "tests/foo.go"));
+    EXPECT_TRUE(FileScanner::match_glob("**/tests/**", "pkg/tests/foo.go"));
+    EXPECT_TRUE(FileScanner::match_glob("**/tests/**", "a/b/tests/c/d.go"));
+    EXPECT_FALSE(FileScanner::match_glob("**/tests/**", "testimony.go"));
+}
+
+TEST(MatchGlob, QuestionMarkBoundedByPathSep) {
+    EXPECT_TRUE(FileScanner::match_glob("a/?", "a/b"));
+    EXPECT_FALSE(FileScanner::match_glob("a/?", "a/bc"));
+    EXPECT_FALSE(FileScanner::match_glob("a/?", "a/"));
+}
+
+TEST(MatchGlob, AllowsTrailingStarToMatchEmpty) {
+    EXPECT_TRUE(FileScanner::match_glob("foo*", "foo"));
+    EXPECT_TRUE(FileScanner::match_glob("foo*", "foobar"));
+    EXPECT_FALSE(FileScanner::match_glob("foo*", "foo/bar"));
+}
+
 }  // namespace
 }  // namespace lci

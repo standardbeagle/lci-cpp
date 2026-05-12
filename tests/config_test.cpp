@@ -290,23 +290,22 @@ TEST(DefaultExcludeMatchGlob, NormalSourceFilesNotExcluded) {
     EXPECT_FALSE(excluded_by_default(cfg.exclude, "include/lci/config.h"));
 }
 
-TEST(DefaultExcludeMatchGlob, TempDirLikePathsBasenameOnly) {
-    // Paths whose basename does NOT match a test_* / _test* pattern
-    // must not be excluded. This locks the behavior for the common
-    // single-component rel-path case after the watcher rel-path fix.
-    //
-    // NOTE: A separate known bug in match_glob() — single `*` is
-    // allowed to slide across '/' — causes overly-greedy matches for
-    // multi-component paths whose substring contains `test_`. See
-    // task "Fix glob: single * must not cross / boundary".
+TEST(DefaultExcludeMatchGlob, TempDirLikePathsNotFalsePositive) {
+    // Multi-component paths whose intermediate directory contains
+    // `test_` as a substring must not be excluded. This was the
+    // original watcher bug: temp dir `lci_watcher_test_42` was getting
+    // filtered out by `**/test_*` because the glob was over-greedy.
     auto cfg = make_default_config();
     EXPECT_FALSE(excluded_by_default(cfg.exclude, "main.go"));
     EXPECT_FALSE(excluded_by_default(cfg.exclude, "src/normal.go"));
-    // basename "atest" doesn't start with "test_" — must NOT match.
-    EXPECT_FALSE(excluded_by_default(cfg.exclude, "atest.go"))
-        << "Basename without 'test_' prefix must not match **/test_*";
+    EXPECT_FALSE(excluded_by_default(cfg.exclude, "atest.go"));
     EXPECT_FALSE(excluded_by_default(cfg.exclude, "my_helper.go"));
-    EXPECT_FALSE(excluded_by_default(cfg.exclude, "research.go"));
+
+    // Strict: regression guards for the cross-component-substring bug.
+    EXPECT_FALSE(excluded_by_default(cfg.exclude, "lci_watcher_test_42/main.go"))
+        << "Temp dir containing 'test_' as substring must not be excluded";
+    EXPECT_FALSE(excluded_by_default(cfg.exclude, "my_research_tool/index.py"));
+    EXPECT_FALSE(excluded_by_default(cfg.exclude, "atest_helper/x.go"));
 }
 
 TEST(DefaultExcludeMatchGlob, BinaryAssetsExcluded) {
