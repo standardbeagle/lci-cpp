@@ -325,3 +325,74 @@ that behind an empty `ignore`-tier diff would silently regress
 to "both exit 0" and lose the value of the parity test. The
 real fix was a small CLI port + a generally useful runner
 feature.
+
+### Decision: cli/search/{enhanced,assembly} — C++-only surface (2026-05-12, Iter 2, EUQHIn60mbzd)
+
+**Chosen: audit-only — document C++-only divergence, file removal subtask, no parity descriptor yet.**
+
+Baseline reality check (per iter-6/iter-9 phantom-failure pattern) overturned the
+task description. The task spec described `lci search --enhanced` and
+`--assembly` as flags whose behavior "isn't covered by parity tests." Actual
+ground truth, captured 2026-05-12 against `corpora/synthetic/multi-lang`:
+
+| Binary | `search --enhanced add` | `search --assembly add` |
+|---|---|---|
+| Go `lci-linux-amd64` (parity reference) | **exit 1**, stderr: `flag provided but not defined: -enhanced` | **exit 1**, stderr: `flag provided but not defined: -assembly` |
+| C++ `build/src/lci` (head) | exit 0, full enhanced output (metrics + breadcrumbs, 3 hits) | exit 0, integrated-mode output (3 direct matches, 0 assembly patterns) |
+
+Go's `cmd/lci/search.go` defines `displayEnhancedResults` (line 616) and the
+assembly path (lines 174–207), but **neither is wired to a CLI flag** — the Go
+`Flags:` block on `searchCommand` does not register `enhanced` or `assembly`.
+The Go function is dead code; the assembly path is triggered internally only
+when `isAssemblySearchCandidate(pattern)` heuristics fire on the standard
+search command.
+
+C++ (`src/cli/main.cpp:127–139`) registers both as CLI11 flags and wires them
+through `run_search` (`src/cli/search.cpp:1526–1700+`) with a complete
+implementation: `annotate_with_symbol_metrics`, `widen_to_enclosing_blocks`,
+`format_breadcrumb_segment`, `format_metrics_line_text` are all real and
+covered by `tests/cli_test.cpp:492+`. The implementation is parity-aspirational
+— it was written against the **internal Go functions**, not against Go's CLI
+surface.
+
+This is therefore a C++-only CLI surface, not a divergence to normalize.
+Three options were considered:
+
+- **A. Remove the C++-only flags to match Go.** Touches `src/cli/main.cpp`
+  (~15 LOC removed), `src/cli/search.cpp` (~250 LOC removed including the
+  enhanced/assembly branches in `run_search`, helper bodies, and the
+  `bool enhanced, bool assembly` parameters), `src/cli/grep_filters.h` /
+  `grep_filters.cpp` (helper API surface, ~50 LOC), `tests/cli_test.cpp`
+  (delete enhanced/assembly format helper unit tests, ~200 LOC).
+  Total ≈ 5 files, ≈ 500 LOC removal plus header signature churn.
+  This is the karpathy-correct outcome — Go is the bar.
+
+- **B. Extend descriptor schema with per-binary `expect_go_exit` /
+  `expect_cpp_exit` so a parity descriptor can lock in the divergence.**
+  Touches descriptor schema, parser, runner, plus two new descriptors.
+  Schema-extension work is itself non-trivial and unmotivated by this single
+  audit — it would invite future divergence-locking elsewhere as a path of
+  least resistance, which the eagle-eye discipline expressly rejects.
+
+- **C. Audit-only.** Document the divergence here; file fix subtask for
+  Option A under the iteration loop; defer parity descriptors until C++
+  removal completes, at which point both binaries will reject identically
+  with exit 1 and the descriptors become a trivial `expect_exit: 1` +
+  stderr-substring match.
+
+Chose C: scope of A exceeds this task's context budget (>5 files, >hundreds
+of LOC removal touching a hot path with its own unit test coverage); B is
+schema overreach for a single case. Fix subtask filed under loop
+`zRvo9CV23xZD` describing the exact removal surface. Once removed, this
+decision stub gets replaced with a "Decision A executed" entry plus the two
+descriptors.
+
+No parity descriptors land in this iteration. The non-action is deliberate:
+writing a `_rationale`-laden ignore-tier descriptor against the current
+state would be a karpathy-rule-6 violation ("no silent fallbacks, no
+'implemented but returns empty' stubs"). The audit stands as the work
+product.
+
+**Result for this iteration**: 0 descriptor change, 1 MODULE_MAP decision,
+1 fix subtask filed. Parity score unchanged. Non-parity unit suite baseline
+preserved.
