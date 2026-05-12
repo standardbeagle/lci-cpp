@@ -1,48 +1,125 @@
 # Known Parity Failures
 
-Baseline last updated 2026-04-30.
+Baseline last updated 2026-05-12.
 
 - Go reference: `lci version 0.4.1`
 - C++ port: `lci 0.1.0`
 
-Run: `ctest --test-dir build/debug -L parity --output-on-failure`
+Run: `ctest --test-dir build -L parity --output-on-failure`
 
-Result: **64 / 64 parity descriptors passing.** There are no active parity
-failures in the current suite.
+Result: **109 / 109 parity descriptors passing.** No active parity failures.
+
+> **Important:** "Passing" does not mean "byte-equivalent output." Most
+> non-trivial descriptors carry an `ignore` tier that masks at least one
+> field, and several carry sort/collapse normalizers. Masks fall in four
+> categories (see _Mask Categories_ below). Every mask should have a
+> `_rationale` field on the descriptor or a linked Dart task.
 
 ## Status by category
 
 | Category | Failing | Total | Status |
 |---|---:|---:|---|
 | `cli.*` | 0 | 28 | Green |
-| `http.*` | 0 | 12 | Green |
+| `http.*` | 0 | 13 | Green |
 | `index.*` | 0 | 3 | Green |
 | `mcp.*` | 0 | 17 | Green |
 | `probes.*` | 0 | 3 | Green |
-| **Total** | **0** | **64** | **Green** |
+| `cli.* / http.* / mcp.*` (integration) | 0 | 45 | Green |
+| **Total parity (`-L parity`)** | **0** | **109** | **Green** |
 
-## No active failing test IDs
+(Counts via `ctest -L parity` cover the side-by-side parity_runner
+descriptors plus the integration goldens that also carry the `parity`
+label.)
 
-All descriptors currently pass.
+## Mask categories
 
-## Intentional divergences still documented
+Every tier mask should fall in one of these four buckets. The
+descriptor's `_rationale` field should make the bucket explicit; if
+missing, the descriptor is in violation of the parity contract.
 
-These are not active failures, but they remain intentional descriptor or
-contract decisions and should stay documented:
+1. **(a) Non-determinism.** Timestamps, pids, request_ids, uptime_ms,
+   elapsed_ms, schema_version. Always ignored. Centralization filed as
+   `LaID7inbumds` (DRY parity descriptor ignore lists).
 
-1. `index.*` compares `debug export` at exit-code level only because Go and C++
-   export fundamentally different payloads.
-2. `cli.search.case-insensitive` is intentionally stabilized as a lighter probe
-   because the Go reference is flaky on the synthetic multi-language corpus.
-3. `http.git-analyze` ignores `report.summary.top_recommendation` because the
-   underlying recommendation copy diverges even when the analyzed refs and
-   summary counts align.
+2. **(b) Intentional C++ enrichment.** C++ emits more useful data than
+   Go in the same field. Documented per-descriptor `_rationale`. Locked
+   by C++-side unit/integration tests. Examples:
+   - `http/tree.tree.root.file_path` — C++ resolves the defining file
+     (locked by `ServerTest.TreeRootFilePathIsRelativeToProjectRoot`).
+   - `http/status.indexing_progress` — C++ emits live progress object
+     (locked by `ServerTest.IndexingProgressFieldTypesAndRanges`).
+   - `cli/symbols/inspect{,-json}.signature` — C++ extracts function
+     signature via tree-sitter (locked by integration golden).
+   - `http/search.results[].context.block_name` — C++ always emits the
+     field with stable shape (locked by
+     `ServerTest.SearchResultContextBlockNameContractEmptyOrSymbolName`).
+
+3. **(c) Workspace-state-dependent.** Counts and arrays that change per
+   the user's WIP/git state at test time. Examples:
+   - `http/git-analyze.report.summary` and `report.{naming_issues,
+     duplicates, metrics_issues}` — vary with the lci-cpp repo's WIP
+     when the test runs. Locked C++-side by `GitReportToJson.*` unit
+     tests in tests/git_test.cpp.
+   - `cli/status.{text,json}` runtime metrics (goroutines, memory,
+     build_duration_ms, file_count) are runtime/host-dependent.
+
+4. **(d) Ranking divergence.** Go and C++ produce the same multiset of
+   results in different orders. Masked via `sort_lines: true` (text) or
+   `sort_arrays` (JSON). Convergence tracked in `A38Q2RR8ZcyL`.
+
+## Intentional divergences (will stay masked)
+
+1. `index.*` compares `debug export` at exit-code level only because
+   Go and C++ export fundamentally different payloads.
+2. `cli.search.case-insensitive` is intentionally stabilized as a
+   lighter probe because the Go reference is flaky on the synthetic
+   multi-language corpus.
+3. `http.git-analyze` ignores `report.summary.top_recommendation`
+   because the recommendation copy diverges even when summary counts
+   align.
+4. `cli.status.{text,json}` runtime metrics. Tracked in `VFIWNmWKXNgn`
+   to replace fake-Go-shaped zeros with accurate C++ counters once the
+   runtime-metric implementation lands.
+
+## Open follow-ups (filed as Dart tasks on Personal/lci)
+
+| Task ID | Title |
+|---|---|
+| `8vj4E26sMucH` | Parity audit: enumerate and triage every tier mask |
+| `VFIWNmWKXNgn` | cli/status: emit accurate C++ runtime metrics |
+| `AegvABjs4MF0` | Real regex engine for lci search |
+| `A38Q2RR8ZcyL` | Ranking parity: converge result ordering with Go |
+| `MWm23vqgX9O6` | Wire up ignored CLI flags |
+| `sL0AJDf2hjIh` | Audit handlers_explore / _index / _analysis MCP |
+| `3PMRNxdzbr96` | Add CI benchmark gates vs Go |
+| `xDvnzlsiPKtO` | Enable pocketbase real-project tests |
+| `ClivrpWd5RIf` | Add TypeScript real-project corpora |
+| `x6LLkThO0UAA` | Diagnose flaky parity failures under -j |
+| `h76USlFW6JLd` | Cleanup orphan lci server processes |
+| `LaID7inbumds` | DRY parity descriptor ignore lists |
+| `BNXsh3tUpMSW` | Socket path namespacing dual-candidate sunset |
+| `Qg74ZYD95WP6` | Multi-word search semantics |
+| `qkbC8BBuW14H` | Rename misleading config.search.enable_fuzzy |
+| `236EnLNu6xMy` | MCP tools/call unknown-tool: spec vs parity |
+| `2OayJlW5e5FJ` | cli/debug/info: align C++ debug output schema |
+| `Fs19gT5u1aVu` | (Done) Default-exclude contract test |
+| `c8DhcMRqeN7v` | (Done) Fix glob: single * must not cross / |
+| `rWZYDAQgQsTt` | (Done) Path-matching audit |
+| `p1Iqm9Y7Olcw` | (Done) git-analyze serialization bug fixes |
+
+## CI gating gap
+
+The parity suite is in CI but **this document is not**. A follow-up
+should diff `_rationale` coverage and rationale↔task linkage against
+actual descriptor files and fail when they disagree, so the doc stays
+accurate. Tracked as part of `JHXocNGammb8`.
 
 ## Next strengthening work
 
-1. Replace weakened parity probes with stronger happy-path coverage where the
-   product surface is ready.
-2. Promote stable parity surfaces into C++-owned goldens where that gives
-   clearer ownership than side-by-side Go comparison.
-3. Keep `MODULE_MAP.md` aligned with the current parity decisions so this file
-   can remain a short status page instead of a historical backlog dump.
+1. Promote stable parity surfaces into C++-owned goldens where that
+   gives clearer ownership than side-by-side Go comparison.
+2. Replace weakened parity probes with stronger happy-path coverage
+   where the product surface is ready.
+3. Keep `MODULE_MAP.md` aligned with the current parity decisions so
+   this file can remain a short status page instead of a historical
+   backlog dump.
