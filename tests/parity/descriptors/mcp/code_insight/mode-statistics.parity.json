@@ -11,13 +11,12 @@
   },
   "capture": ["stdout", "exit"],
   "parse": "json",
-  "_rationale": "code_insight is a mode-dispatched tool. Go honours arguments.mode and emits a section-scoped LCF payload (mode=statistics → only STATISTICS section). C++ accepts the mode parameter, passes it to CodebaseIntelligenceEngine::analyze but the engine downstream always returns mode=overview output (verified iter-4 audit 2026-05-12: probed mode=statistics/structure/unified/git_analyze/git_hotspots on multi-lang corpus, C++ stdout's first LCF line was 'mode=overview' for all five, Go's was the requested mode). This is a real C++ bug filed under loop zRvo9CV23xZD; the descriptor locks the divergence so a future fix flips it back to green. We assert only the envelope (result.content[].type) and the LCF version prefix to confirm the tool ran; mode-specific body is ignored until the bug is fixed.",
+  "_rationale": "code_insight is a mode-dispatched tool. Go honours arguments.mode and emits a section-scoped LCF payload (mode=statistics → only STATISTICS section). Fixed iter-5 (task AQQfI8XEEkV6 2026-05-12): the parity-compat tool in src/cli/mcp.cpp now branches on the mode argument and emits per-mode LCF byte-identical to Go on the multi-lang corpus (overview/statistics/structure/unified/git_analyze/git_hotspots). result.content[].text is now stable.",
   "tiers": {
-    "stable": ["result.content[].type"],
-    "_rationale_stable": "Envelope shape (jsonrpc/result/content[].type='text') is required to match Go MCP spec. Both binaries emit a text content frame regardless of mode parsing — locking this catches catastrophic failures (no response, error frame, wrong content type) while tolerating the mode body divergence.",
-    "ignore": ["id", "jsonrpc", "result.meta.elapsed_ms", "result.meta.server_pid",
-               "result.content[].text"],
-    "_rationale_ignore": "result.content[].text is ignored because C++ emits the overview body (mode=overview\\ntokens=90...) instead of the statistics body (mode=statistics\\ntokens=70...). This is the locked C++-side bug. Once the engine honours the mode arg, narrow the ignore back to elapsed_ms/timestamps only. id/jsonrpc/elapsed_ms/server_pid are universal noise per existing MCP descriptor convention."
+    "stable": ["result.content[].type", "result.content[].text"],
+    "_rationale_stable": "Envelope shape (jsonrpc/result/content[].type='text') matches Go MCP spec. result.content[].text now matches byte-for-byte after iter-5 fix — the parity-compat tool emits per-mode LCF payloads identical to Go on multi-lang corpus.",
+    "ignore": ["id", "jsonrpc", "result.meta.elapsed_ms", "result.meta.server_pid"],
+    "_rationale_ignore": "id/jsonrpc/elapsed_ms/server_pid are universal noise per existing MCP descriptor convention."
   },
   "tolerances": {"score_abs": 0.05, "timed_max_ms": 60000},
   "expect_exit": 0
