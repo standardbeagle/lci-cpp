@@ -328,7 +328,50 @@ feature.
 
 ### Decision: cli/search/{enhanced,assembly} — C++-only surface (2026-05-12, Iter 2, EUQHIn60mbzd)
 
-**Chosen: audit-only — document C++-only divergence, file removal subtask, no parity descriptor yet.**
+**Decision A executed (2026-05-12, Iter 3 of loop zRvo9CV23xZD, removal task lvGYODNAw8SP).**
+
+The C++-only `--enhanced` and `--assembly` flags were removed to match Go's CLI surface
+(karpathy rule 1 — Go is the bar). Concrete changes:
+
+- `src/cli/main.cpp` — deleted flag registrations (CLI11 `add_flag` for `--enhanced` and
+  `--assembly`) and dropped the corresponding bool arguments from the `run_search` callback.
+- `src/cli/main.cpp` — replaced `CLI11_PARSE` with manual `try { app.parse(...) } catch
+  (CLI::ParseError& e)` so unknown-flag rejections exit 1 (matching Go's
+  `os.Exit(1)` on `flag provided but not defined`), not CLI11's default `ExtrasError = 109`.
+- `src/cli/search.cpp` — deleted the `if (enhanced || assembly)` branch in `run_search`
+  (~190 LOC: JSON output mode + compact mode + text-mode breadcrumb/metrics formatter),
+  dropped the `bool enhanced, bool assembly` parameters from the signature, deleted four
+  helper bodies (`format_breadcrumb_segment`, `format_metrics_line_text`,
+  `widen_to_enclosing_blocks`, `annotate_with_symbol_metrics`), deleted the three
+  `grep_filters::` forwarders that bridged the unit tests, and scrubbed
+  `enhanced/assembly` references in directive-post-filter and AST-filter comments.
+- `src/cli/grep_filters.h` — deleted the `format_breadcrumb`, `format_metrics_line`,
+  `widen_to_enclosing_block` declarations and the "Enhanced/assembly output helpers"
+  section header.
+- `include/lci/cli/commands.h` — removed the `enhanced, assembly` doc paragraph and
+  dropped the two bool tail-parameters from the `run_search` prototype.
+- `tests/cli_test.cpp` — deleted 12 helper unit tests (`SearchFormatBreadcrumb.*`,
+  `SearchFormatMetricsLine.*`, `SearchWidenToEnclosingBlock.*`).
+- `tests/parity/descriptors/cli/search/enhanced-rejected.parity.json` and
+  `assembly-rejected.parity.json` — added with `parse: exit-only`, `expect_exit: 1`,
+  `_rationale` populated on every tier. Both binaries reject the respective flag with
+  exit 1 (Go's urfave/cli emits help dump + `Fatal error:`; CLI11 emits unknown-argument
+  message). 10/10 stable. Verified `parity_setup`, all 7 pre-existing cli/search
+  descriptors, and the 2 new rejection descriptors all green in the same run.
+
+Non-parity unit suite: 1635/1638 (j4 wall-clock run; the 3 j-induced flakes
+[`ServerTest.BuildIdStaleDetection`, `ServerTest.ConcurrentRequests`,
+`ServerTest.StatusEndpoint`] all pass in j1 and were already flaky pre-change). Floor
+1632/1633 from iter-1 baseline is held. Test count dropped by 12 (deletion of
+SearchFormat/Widen helpers) — this is the deliberate scope of the removal.
+
+HTTP/MCP surfaces verified unaffected: `enhanced`/`assembly` appear in `src/mcp/*` only
+as unrelated concepts (`pagination.cpp` `pr.enhanced`, `handlers_*.cpp`
+`get_enhanced_symbol`, `get_file_enhanced_symbols`); `src/http/` has zero references.
+
+### Decision: cli/search/{enhanced,assembly} — original audit (2026-05-12, Iter 2, EUQHIn60mbzd)
+
+**Original decision (superseded above): audit-only — document C++-only divergence, file removal subtask, no parity descriptor yet.**
 
 Baseline reality check (per iter-6/iter-9 phantom-failure pattern) overturned the
 task description. The task spec described `lci search --enhanced` and

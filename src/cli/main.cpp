@@ -124,20 +124,6 @@ int main(int argc, char* argv[]) {
                            "Filter results by enclosing context: "
                            "function | class | top-level");
 
-    // -- Enhanced output modes (parity with lci Go cmd/lci/search.go) --------
-    // Mutually exclusive presentation flags layered on top of the existing
-    // --json / --compact-search / --max-lines flow.
-    //   --enhanced : metrics + breadcrumbs per match (Go displayEnhancedResults)
-    //   --assembly : surrounding function/class context per match (Go
-    //                displayStandardResultsWithAssembly standard path)
-    bool search_enhanced = false;
-    search_cmd->add_flag("--enhanced", search_enhanced,
-                         "Show complexity metrics and breadcrumbs per match");
-
-    bool search_assembly = false;
-    search_cmd->add_flag("--assembly", search_assembly,
-                         "Show surrounding function/class context per match");
-
     search_cmd->callback([&]() {
         std::exit(run_search(
             gflags, search_pattern, search_max_lines, search_case_insensitive,
@@ -146,8 +132,7 @@ int main(int argc, char* argv[]) {
             search_patterns, search_count,
             search_files_only, search_word_boundary, search_max_count,
             search_ids, search_no_ids, search_comments_only, search_code_only,
-            search_strings_only, search_rank_by, search_context_filter,
-            search_enhanced, search_assembly));
+            search_strings_only, search_rank_by, search_context_filter));
     });
 
     // -- Grep subcommand ------------------------------------------------------
@@ -655,7 +640,18 @@ int main(int argc, char* argv[]) {
         }
     });
 
-    CLI11_PARSE(app, argc, argv);
+    // Manual parse + exit-code remap. CLI11's default `ExtrasError` exit
+    // is 109; Go's urfave/cli exits 1 on `flag provided but not defined`
+    // (see `lci search --enhanced add` against the Go reference binary).
+    // Match Go by collapsing every CLI parse failure to exit 1 — keeps
+    // shell pipelines that branch on non-zero behaving identically across
+    // the two binaries, and matches `if err != nil { os.Exit(1) }` shape.
+    try {
+        app.parse(argc, argv);
+    } catch (const CLI::ParseError& e) {
+        int rc = app.exit(e);
+        return rc == 0 ? 0 : 1;
+    }
 
     return 0;
 }

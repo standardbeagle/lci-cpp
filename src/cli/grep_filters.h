@@ -12,11 +12,10 @@
 //     convention (`_test.`, `.test.`, `.spec.`, `test_*`, trailing `Test`/
 //     `Tests` suffix, or a `tests/` / `test/` directory component).
 //
-//   - `apply_exclude_tests`, `apply_exclude_comments`, `widen_context_blocks`,
-//     and `count_per_file_rows` / `files_with_matches_rows` — JSON
-//     transforms over the server's `results` array. Pure functions modulo
-//     filesystem reads (the comment/context filters open files referenced
-//     by `path` to inspect line text).
+//   - `apply_exclude_tests`, `apply_exclude_comments`, `widen_context_blocks`
+//     — JSON transforms over the server's `results` array. Pure functions
+//     modulo filesystem reads (the comment/context filters open files
+//     referenced by `path` to inspect line text).
 
 #pragma once
 
@@ -60,38 +59,6 @@ nlohmann::json apply_exclude_comments(nlohmann::json results);
 /// `[line - context_lines, line + context_lines]` read fresh from disk.
 /// Pass-through when `context_lines <= 0`.
 nlohmann::json widen_context_blocks(nlohmann::json results, int context_lines);
-
-// -- Enhanced/assembly output helpers ---------------------------------------
-//
-// These back the `--enhanced` and `--assembly` flags on `lci search`. The
-// helpers are pure formatting routines: they take input strings/numbers and
-// return the exact display fragment Go's `displayEnhancedResults` and
-// `displayStandardResultsWithAssembly` produce, so unit tests can pin the
-// output without going through the CLI/server pipeline.
-
-/// Formats a one-segment breadcrumb for enhanced/assembly output. Returns
-/// `<type> <name>` when both are non-empty, the non-empty one alone when only
-/// one is set, and an empty string when both are empty. Matches Go's
-/// `(in <type> <name>)` rendering used in `displayStandardResultsWithAssembly`
-/// and `displayEnhancedResults`.
-std::string format_breadcrumb(std::string_view block_type,
-                              std::string_view block_name);
-
-/// Formats the per-match metrics line for `--enhanced`. Mirrors Go's
-/// `displayEnhancedResults` metrics formatter (search.go:692-708): includes
-/// only fields that are positive, joined with ` | `. Returns an empty string
-/// when no metric is positive (callers should branch and skip the line).
-///
-/// Order matches Go output: complexity, lines, refs.
-std::string format_metrics_line(int complexity, int lines_of_code,
-                                int reference_count);
-
-/// Replaces each result's `context` block with one that spans the enclosing
-/// symbol's `[start_line, end_line]` when the row has both `enclosing_start`
-/// and `enclosing_end` populated by the caller (e.g. pulled from a
-/// `browse_file` lookup). Rows missing those fields are passed through
-/// unchanged. Reads from disk; safe to call repeatedly.
-nlohmann::json widen_to_enclosing_block(nlohmann::json results);
 
 }  // namespace grep_filters
 }  // namespace cli

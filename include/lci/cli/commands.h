@@ -45,18 +45,6 @@ bool is_mcp_mode();
 ///
 /// `extra_patterns` corresponds to the `--patterns` flag (grep -e): each
 /// entry is OR'd with the positional `pattern` to form a single result set.
-///
-/// Output mode flags (mutually exclusive — first listed wins):
-///   - `enhanced`: per-match block with breadcrumb (`block_type block_name`),
-///     complexity/lines metrics for the enclosing symbol, and a
-///     match-line-marked context window. Matches Go's
-///     `displayEnhancedResults` in cmd/lci/search.go:616.
-///   - `assembly`: per-match block with the surrounding function/class
-///     context (widened to the enclosing block when the engine resolved one,
-///     otherwise the server-default window). Matches Go's
-///     `displayStandardResultsWithAssembly` standard-mode path
-///     (cmd/lci/search.go:353); the C++ build has no AssemblySearchEngine,
-///     so the optional "Possible String Assembly" section is omitted.
 int run_search(const GlobalFlags& flags, const std::string& pattern,
                int max_lines, bool case_insensitive, bool json_output,
                bool light, bool compact_search, bool use_regex,
@@ -69,8 +57,7 @@ int run_search(const GlobalFlags& flags, const std::string& pattern,
                int max_count_per_file, bool include_ids, bool no_ids,
                bool comments_only, bool code_only,
                bool strings_only, const std::string& rank_by,
-               const std::string& context_filter,
-               bool enhanced, bool assembly);
+               const std::string& context_filter);
 
 /// grep subcommand. Returns 0 on success, non-zero on error.
 ///

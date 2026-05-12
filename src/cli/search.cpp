@@ -445,142 +445,6 @@ nlohmann::json widen_context_blocks(nlohmann::json results, int context_lines) {
     return results;
 }
 
-/// Formats a breadcrumb segment for enhanced/assembly output. Returns
-/// `<type> <name>` for the typical case where the engine resolved both
-/// fields, falling back to whichever single field is populated. Empty when
-/// nothing is known. Mirrors Go's `(in %s %s)` formatter.
-std::string format_breadcrumb_segment(std::string_view block_type,
-                                      std::string_view block_name) {
-    if (block_type.empty() && block_name.empty()) return {};
-    if (block_type.empty()) return std::string(block_name);
-    if (block_name.empty()) return std::string(block_type);
-    std::string out;
-    out.reserve(block_type.size() + 1 + block_name.size());
-    out.append(block_type);
-    out.push_back(' ');
-    out.append(block_name);
-    return out;
-}
-
-/// Formats the metrics line shown by `--enhanced`. Joins the non-zero
-/// fields with ` | ` in the order Go uses (complexity, lines, refs) and
-/// returns an empty string when no field is positive.
-std::string format_metrics_line_text(int complexity, int lines_of_code,
-                                     int reference_count) {
-    std::string out;
-    auto append = [&](const std::string& part) {
-        if (!out.empty()) out.append(" | ");
-        out.append(part);
-    };
-    if (complexity > 0) {
-        append("complexity: " + std::to_string(complexity));
-    }
-    if (lines_of_code > 0) {
-        append("lines: " + std::to_string(lines_of_code));
-    }
-    if (reference_count > 0) {
-        append("refs: " + std::to_string(reference_count));
-    }
-    return out;
-}
-
-/// Reads the enclosing symbol bounds (start/end line) from the result row's
-/// `enclosing_start`/`enclosing_end` fields (populated upstream when symbol
-/// metadata is available) and replaces the `context` block with the full
-/// `[enclosing_start, enclosing_end]` range read from disk. Rows missing
-/// either field are passed through. The matched line's number is preserved
-/// in `matched_lines`; `start_line`/`end_line` reflect the actual lines
-/// read (may be shorter than the requested range when the file ends early).
-nlohmann::json widen_to_enclosing_blocks(nlohmann::json results) {
-    for (auto& r : results) {
-        std::string path = r.value("path", "");
-        int line_no = r.value("line", 0);
-        int from = r.value("enclosing_start", 0);
-        int to = r.value("enclosing_end", 0);
-        if (path.empty() || line_no <= 0 || from <= 0 || to < from) continue;
-
-        auto lines = read_lines_range(path, from, to);
-        if (lines.empty()) continue;
-
-        nlohmann::json ctx;
-        ctx["block_type"] = r.value("context",
-                                    nlohmann::json::object()).value(
-            "block_type", "lines");
-        ctx["block_name"] = r.value("context",
-                                    nlohmann::json::object()).value(
-            "block_name", "");
-        ctx["start_line"] = from;
-        ctx["end_line"] = from + static_cast<int>(lines.size()) - 1;
-        ctx["is_complete"] = true;
-        nlohmann::json arr = nlohmann::json::array();
-        for (auto& l : lines) arr.push_back(std::move(l));
-        ctx["lines"] = std::move(arr);
-        nlohmann::json matched = nlohmann::json::array();
-        matched.push_back(line_no);
-        ctx["matched_lines"] = matched;
-        ctx["match_count"] = 1;
-        r["context"] = std::move(ctx);
-    }
-    return results;
-}
-
-/// Looks up the enclosing symbol's complexity, lines_of_code, end_line, and
-/// reference counts via `browse_file` and annotates every result row whose
-/// (file, block_name) hits a match in the file's symbol list. Cached per file
-/// so multiple results in the same file share one HTTP round-trip.
-///
-/// The annotations are added under stable keys directly on the result row:
-///   - `enclosing_complexity`  : int, omitted when zero
-///   - `enclosing_lines`       : int (lines_of_code), omitted when zero
-///   - `enclosing_refs`        : int (incoming_refs), omitted when zero
-///   - `enclosing_start`       : int (symbol declaration line)
-///   - `enclosing_end`         : int (symbol end line, when known)
-///
-/// On lookup failure the row is left unchanged (graceful degradation; we
-/// don't fail the whole search just because metrics aren't available).
-nlohmann::json annotate_with_symbol_metrics(Client& client,
-                                            nlohmann::json results) {
-    // Cache: file path -> JSON browse-file response (or null on failure so
-    // we don't retry on every row).
-    std::map<std::string, nlohmann::json> file_cache;
-    for (auto& r : results) {
-        std::string path = r.value("path", "");
-        if (path.empty()) continue;
-        auto context = r.value("context", nlohmann::json::object());
-        std::string block_name = context.value("block_name", "");
-        if (block_name.empty()) continue;
-
-        auto it = file_cache.find(path);
-        if (it == file_cache.end()) {
-            BrowseFileRequest req;
-            req.file = path;
-            req.max = 1000;
-            std::string err;
-            auto resp = client.browse_file(req, err);
-            file_cache[path] = resp.value_or(nlohmann::json());
-            it = file_cache.find(path);
-        }
-        if (it->second.is_null()) continue;
-
-        auto symbols = it->second.value("symbols", nlohmann::json::array());
-        for (const auto& s : symbols) {
-            if (s.value("name", "") != block_name) continue;
-            int sline = s.value("line", 0);
-            int eline = s.value("end_line", 0);
-            int cx = s.value("complexity", 0);
-            int loc = s.value("lines_of_code", 0);
-            int incoming = s.value("incoming_refs", 0);
-            if (cx > 0) r["enclosing_complexity"] = cx;
-            if (loc > 0) r["enclosing_lines"] = loc;
-            if (incoming > 0) r["enclosing_refs"] = incoming;
-            if (sline > 0) r["enclosing_start"] = sline;
-            if (eline > 0) r["enclosing_end"] = eline;
-            break;
-        }
-    }
-    return results;
-}
-
 // -- AST-aware content filters (back `--comments-only`, `--code-only`,
 //    `--strings-only`) ----------------------------------------------------
 //
@@ -1026,21 +890,6 @@ nlohmann::json widen_context_blocks(nlohmann::json results, int context_lines) {
     return ::lci::cli::widen_context_blocks(std::move(results), context_lines);
 }
 
-std::string format_breadcrumb(std::string_view block_type,
-                              std::string_view block_name) {
-    return ::lci::cli::format_breadcrumb_segment(block_type, block_name);
-}
-
-std::string format_metrics_line(int complexity, int lines_of_code,
-                                int reference_count) {
-    return ::lci::cli::format_metrics_line_text(complexity, lines_of_code,
-                                                reference_count);
-}
-
-nlohmann::json widen_to_enclosing_block(nlohmann::json results) {
-    return ::lci::cli::widen_to_enclosing_blocks(std::move(results));
-}
-
 }  // namespace grep_filters
 
 // -- AST-aware filter forwarders ---------------------------------------------
@@ -1173,8 +1022,7 @@ int run_search(const GlobalFlags& flags, const std::string& pattern,
                int max_count_per_file, bool /*include_ids*/,
                bool /*no_ids*/, bool comments_only, bool code_only,
                bool strings_only, const std::string& rank_by,
-               const std::string& context_filter,
-               bool enhanced, bool assembly) {
+               const std::string& context_filter) {
     // -- AST-aware filter mutual exclusion ----------------------------------
     //
     // `--comments-only`, `--code-only`, and `--strings-only` are mutually
@@ -1309,9 +1157,9 @@ int run_search(const GlobalFlags& flags, const std::string& pattern,
     // -- Advanced query directive post-filter --------------------------------
     //
     // Apply file/kind/symbol/exclusion filters extracted from the original
-    // pattern. This runs first — before grep-style and enhanced-mode
-    // pipelines — so every downstream branch (count, files-only,
-    // invert-match, enhanced/assembly) sees the directive-narrowed set.
+    // pattern. This runs first — before grep-style pipelines — so every
+    // downstream branch (count, files-only, invert-match) sees the
+    // directive-narrowed set.
     // Pass-through (no allocations beyond the move) when no directives were
     // present, so existing queries pay no overhead.
     if (!parsed_query.empty_directives()) {
@@ -1371,10 +1219,9 @@ int run_search(const GlobalFlags& flags, const std::string& pattern,
     // Runs AFTER directive/rank/context filters so the classifier only
     // inspects rows that already passed the upstream narrowing — keeps the
     // per-row cost (one disk read fallback per result) bounded by the
-    // already-trimmed set. Runs BEFORE grep-style filters and the
-    // enhanced/assembly branch so every downstream path (count,
-    // files-only, invert-match, enhanced/assembly, JSON, text) sees the
-    // AST-narrowed set without per-branch plumbing.
+    // already-trimmed set. Runs BEFORE grep-style filters so every
+    // downstream path (count, files-only, invert-match, JSON, text) sees
+    // the AST-narrowed set without per-branch plumbing.
     //
     // The filter is a heuristic — see ast_filters.h for the limitation
     // list (most importantly: it operates on a single line of source at
@@ -1506,191 +1353,6 @@ int run_search(const GlobalFlags& flags, const std::string& pattern,
             std::string text = r.value("match", "");
             std::printf("%s:%d:%s\n", path.c_str(), line, text.c_str());
         }
-        return 0;
-    }
-
-    // -- Enhanced / assembly output modes -----------------------------------
-    //
-    // Both modes layer on top of the standard pipeline: they reuse the same
-    // upstream filtering and only diverge at the formatting step. They are
-    // mutually exclusive (a stricter form of Go's `displayEnhancedResults` vs
-    // `displayStandardResultsWithAssembly`); when both flags are set,
-    // `--enhanced` wins because its output is a strict superset of assembly's
-    // (it includes the surrounding-block context plus metrics and breadcrumbs).
-    //
-    // For both modes we annotate each row with the enclosing symbol's
-    // metrics via `browse_file` (cached per file). For `--assembly` we also
-    // widen the context block to span the enclosing symbol's full
-    // `[line, end_line]` range when the lookup succeeded — that's the
-    // "surrounding function/class context" the task spec requires.
-    if (enhanced || assembly) {
-        nlohmann::json results_arr =
-            j.value("results", nlohmann::json::array());
-
-        if (max_count_per_file > 0) {
-            results_arr = apply_max_count_per_file(std::move(results_arr),
-                                                   max_count_per_file);
-        }
-
-        // Annotate every row with `enclosing_*` fields when symbol metrics
-        // are resolvable. Failure to resolve is silent — rows just render
-        // without metrics, exactly like Go's enhanced path skips the metrics
-        // line when `RelationalData.Symbol.Metrics` is nil.
-        results_arr =
-            annotate_with_symbol_metrics(*client, std::move(results_arr));
-
-        if (assembly) {
-            // Widen each row's context block to the enclosing symbol's
-            // bounds. Rows without resolved bounds keep their server-default
-            // single-line window (graceful degradation matches Go's
-            // assembly-disabled path which just renders standard results).
-            results_arr = widen_to_enclosing_blocks(std::move(results_arr));
-        }
-
-        if (json_output) {
-            // Wrapping shape mirrors `--json` standard mode for editor
-            // consumers; the `mode` field switches so callers can identify
-            // the schema. `enhanced` mode adds top-level `assembly_triggered:
-            // false` to advertise that the C++ build does not run an
-            // AssemblySearchEngine (parity-friendly stub for Go consumers).
-            std::error_code rel_ec;
-            auto cwd = std::filesystem::current_path(rel_ec);
-            nlohmann::json wrapped = nlohmann::json::array();
-            for (auto& r : results_arr) {
-                std::string path = r.value("path", "");
-                if (!rel_ec && !path.empty()) {
-                    std::error_code ec;
-                    auto rel = std::filesystem::relative(path, cwd, ec);
-                    if (!ec) r["path"] = rel.string();
-                }
-                wrapped.push_back(nlohmann::json{{"result", r}});
-            }
-            nlohmann::json output;
-            output["query"] = pattern;
-            output["time_ms"] = elapsed_ms;
-            output["count"] = wrapped.size();
-            output["results"] = wrapped;
-            output["mode"] = enhanced ? "enhanced" : "integrated";
-            if (assembly && !enhanced) {
-                // Match Go's `displayStandardResultsWithAssembly` JSON shape:
-                // explicit advertise that no assembly fragments are
-                // available so consumers can disambiguate from a "we just
-                // failed to build them" case.
-                output["assembly_triggered"] = false;
-                output["assembly_count"] = 0;
-                output["assembly_matches"] = nlohmann::json::array();
-                output["search_mode"] = "integrated";
-            }
-            std::cout << output.dump(2) << "\n";
-            return 0;
-        }
-
-        if (compact_search) {
-            // Compact mode is identical to standard compact: one line per
-            // match. The flags don't affect compact output (Go behaves the
-            // same: `displayStandardResultsWithAssembly` short-circuits to
-            // the compact branch before printing breadcrumbs/metrics).
-            std::printf("Found %zu matches in %.1fms (compact mode)\n\n",
-                        results_arr.size(), elapsed_ms);
-            for (auto& r : results_arr) {
-                std::string path =
-                    to_relative_display_path(r.value("path", ""));
-                int line = r.value("line", 0);
-                auto context = r.value("context", nlohmann::json::object());
-                int start_line = context.value("start_line", 0);
-                auto lines = context.value("lines", nlohmann::json::array());
-                for (size_t i = 0; i < lines.size(); ++i) {
-                    int line_num = start_line + static_cast<int>(i);
-                    if (line_num == line) {
-                        std::string text = lines[i].get<std::string>();
-                        if (!text.empty() && text.back() == '\n') text.pop_back();
-                        std::printf("%s:%d: %s\n", path.c_str(), line_num,
-                                    text.c_str());
-                        break;
-                    }
-                }
-            }
-            return 0;
-        }
-
-        const char* header_mode = enhanced ? "enhanced" : "integrated";
-        if (enhanced) {
-            std::printf("Found %zu enhanced results in %.1fms\n\n",
-                        results_arr.size(), elapsed_ms);
-        } else {
-            std::printf("Found %zu results in %.1fms (integrated mode)\n",
-                        results_arr.size(), elapsed_ms);
-            std::printf("  Direct matches: %zu\n", results_arr.size());
-            std::printf("  Assembly patterns: 0\n\n");
-            std::puts("=== Direct Matches ===");
-        }
-        (void)header_mode;
-
-        for (auto& r : results_arr) {
-            std::string path = to_relative_display_path(r.value("path", ""));
-            int line = r.value("line", 0);
-            auto context = r.value("context", nlohmann::json::object());
-            std::string block_type = context.value("block_type", "");
-            std::string block_name = context.value("block_name", "");
-            int start_line = context.value("start_line", 0);
-            auto lines = context.value("lines", nlohmann::json::array());
-
-            // Header: `path:line` plus optional breadcrumb segment. We gate
-            // on `block_name` being populated to mirror Go's
-            // displayEnhancedResults at search.go:632 (`if r.Context.BlockName
-            // != ""`) — `block_type=lines` with no name is the engine's "no
-            // enclosing scope resolved" sentinel, and Go suppresses the
-            // breadcrumb in that case rather than printing `(in lines)`.
-            std::printf("%s:%d", path.c_str(), line);
-            if (!block_name.empty()) {
-                std::string crumb =
-                    format_breadcrumb_segment(block_type, block_name);
-                std::printf(" (in %s)", crumb.c_str());
-            }
-
-            if (enhanced) {
-                int incoming = r.value("enclosing_refs", 0);
-                int outgoing = 0;  // not surfaced by browse-file today
-                if (incoming > 0 || outgoing > 0) {
-                    std::printf(" [refs: %d incoming, %d outgoing]", incoming,
-                                outgoing);
-                }
-            }
-            std::printf("\n");
-
-            // Context lines: enhanced uses Go's `> NNNN | text` format with a
-            // marker on the matched line; assembly mode reuses the standard
-            // formatter (six-char-padded line number + ` | ` + text).
-            for (size_t i = 0; i < lines.size(); ++i) {
-                int line_num = start_line + static_cast<int>(i);
-                std::string text = lines[i].get<std::string>();
-                if (!text.empty() && text.back() == '\n') text.pop_back();
-                if (enhanced) {
-                    if (line_num == line) {
-                        std::printf("  > %4d | %s\n", line_num, text.c_str());
-                    } else {
-                        std::printf("    %4d | %s\n", line_num, text.c_str());
-                    }
-                } else {
-                    std::printf("%6d | %s\n", line_num, text.c_str());
-                }
-            }
-
-            if (enhanced) {
-                int cx = r.value("enclosing_complexity", 0);
-                int loc = r.value("enclosing_lines", 0);
-                int incoming = r.value("enclosing_refs", 0);
-                std::string metrics =
-                    format_metrics_line_text(cx, loc, incoming);
-                if (!metrics.empty()) {
-                    std::printf("  metrics: %s\n", metrics.c_str());
-                }
-            }
-
-            std::printf("\n");
-        }
-
-        (void)max_lines;
         return 0;
     }
 
