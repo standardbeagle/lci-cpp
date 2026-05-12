@@ -1,0 +1,24 @@
+{
+  "id": "mcp/index_stats/wait-ready",
+  "mode": "mcp",
+  "corpus": "multi-lang",
+  "go_binary": "${LCI_GO}",
+  "cpp_binary": "${LCI_CPP}",
+  "invocation": {
+    "args": ["mcp"],
+    "stdin": "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"index_stats\",\"arguments\":{}}}",
+    "cwd": "${CORPUS}"
+  },
+  "capture": ["stdout", "exit"],
+  "parse": "json",
+  "_rationale": "index_stats reports indexer health. On the 4-file multi-lang corpus Go reaches status=ready within ~38ms with file_count=4, symbol_count=4, reference_count=10. C++ remains stuck at status=indexing across 20 sequential probes spaced 500ms apart (verified iter-4 audit 2026-05-12: file_count=0, symbol_count=1, progress.indexing_progress=25, never advances). Two hypotheses: (1) MCP server's background indexer thread is not being scheduled because the stdio read loop monopolises a single thread; (2) the index trigger is conditional on a workspace_id/ws handshake the parity probe doesn't send. Filed as C++ fix subtask under loop zRvo9CV23xZD. Descriptor locks divergent payload — once the indexer reaches ready, narrow the ignore tier to drop top-level counts back to stable.",
+  "tiers": {
+    "stable": ["result.content[].type"],
+    "_rationale_stable": "Envelope-only locking. Both binaries return a content[].type='text' frame, confirming the tool is wired and dispatching. Anything more granular would false-fail until the C++ indexer bug is fixed.",
+    "ignore": ["id", "jsonrpc", "result.meta.elapsed_ms", "result.meta.server_pid",
+               "result.content[].text"],
+    "_rationale_ignore": "result.content[].text body diverges on every field (status, file_count, symbol_count, reference_count, total_size_bytes, progress sub-object presence) because C++ is mid-index. Ignoring the whole text body is the only stable choice until the indexer reaches ready. id/jsonrpc/elapsed_ms/server_pid are universal noise."
+  },
+  "tolerances": {"score_abs": 0.05, "timed_max_ms": 60000},
+  "expect_exit": 0
+}

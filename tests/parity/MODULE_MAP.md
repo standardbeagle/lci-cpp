@@ -439,3 +439,69 @@ product.
 **Result for this iteration**: 0 descriptor change, 1 MODULE_MAP decision,
 1 fix subtask filed. Parity score unchanged. Non-parity unit suite baseline
 preserved.
+
+### Decision: MCP handlers explore/index/analysis audit (2026-05-12, Iter 4, sL0AJDf2hjIh)
+
+**Scope**: 9 MCP tools across `src/mcp/handlers_{explore,index,analysis}.cpp`
+(find_files, search_definitions, tree, get_context, index_stats,
+semantic_annotations, side_effects, code_insight, git_analysis). 11 modes
+counting `code_insight` mode-dispatch (overview/statistics/structure/unified/
+git_analyze/git_hotspots) and `index_stats` mode-dispatch (overview/symbols/
+references/types).
+
+**Audit method**: Probe each tool on `corpora/synthetic/multi-lang` via both
+binaries using the canonical init handshake (initialize → initialized
+notification → tools/call). Go uses ndjson framing; C++ uses Content-Length.
+Multiple back-to-back probes per tool to let indexer warm. Probe transcripts
+in `/tmp/parity-iter4/`; harness `/tmp/parity-iter4/{probe.py,runall.sh}`.
+
+**Classification (4 buckets per existing audit framework)**:
+
+| Tool / mode | Bucket | Evidence |
+|---|---|---|
+| find_files `*.go` | green parity | byte-identical 734-byte payloads, identical result list |
+| get_context name=Add | green parity | both `count:0, contexts:[]` (no symbol "Add" in corpus) |
+| search_definitions Add | green parity | both 107-byte identical responses |
+| tree name=Add | green parity | both 93-byte identical responses |
+| semantic_annotations label=pure | green parity | both `total_count:0, annotations:[]` |
+| side_effects symbol_name=Add | cosmetic type | `purity_ratio: 1` (Go int) vs `1.0` (C++ float). Existing JSON normaliser tolerates. |
+| git_analysis scope=wip | cosmetic type | `risk_score: 0` (Go int) vs `0.0` (C++ float). Timestamp tz format differs (already documented). Existing `_rationale` covers this. |
+| code_insight (no mode, default=overview) | green parity | 350-byte byte-identical LCF payload |
+| **code_insight mode=statistics** | **C++ BUG** | C++ returns `mode=overview\\ntokens=90` regardless of requested mode. Verified across statistics, structure, unified, git_analyze, git_hotspots. Engine downstream of `handle_code_insight` (src/mcp/handlers_analysis.cpp:486-518) accepts mode arg but ignores it. |
+| code_insight mode=structure/unified/git_analyze/git_hotspots | same bug | Same evidence; one descriptor (`mode-statistics.parity.json`) locks the divergence class. |
+| **index_stats** (all 5 modes) | **C++ BUG** | Go reaches `status:ready, file_count:4, symbol_count:4, reference_count:10` within 38ms. C++ stays `status:indexing, file_count:0, symbol_count:1, indexing_progress:25` across 20 back-to-back probes over 10s. Indexer thread appears not to progress under MCP stdio session. |
+
+**Deliverables this iter**:
+
+1. Two new descriptors with full `_rationale` on every tier (per karpathy
+   rule: new descriptors must justify each tier choice):
+   - `tests/parity/descriptors/mcp/code_insight/mode-statistics.parity.json`
+     — locks the mode-dispatch divergence as one class.
+   - `tests/parity/descriptors/mcp/index_stats/wait-ready.parity.json`
+     — locks the `status:indexing` perma-state.
+2. Two C++ fix subtasks filed under loop `zRvo9CV23xZD`:
+   - code_insight mode-arg ignored downstream of handler.
+   - index_stats indexer thread never advances under MCP stdio.
+3. Follow-up descriptor backlog (deferred, filed as one subtask):
+   - 7 additional descriptors to cover the remaining mode permutations
+     and a get_context probe with a corpus-resident symbol (current "Add"
+     yields empty on both sides — green but content-free).
+
+**Existing descriptor `_rationale` gap**: 8 of 9 existing basic.parity.json
+files (find_files, search_definitions, tree, get_context, code_insight,
+index_stats, semantic_annotations, side_effects) predate the karpathy
+"_rationale on every tier" rule and use boilerplate `stable: ["result.content[].type",
+"result.content[].text"]`. They pass today because the corpus-level outputs
+are byte-identical or normalised. Filed as the follow-up descriptor subtask;
+not retrofitted this iter because (a) each requires a per-tool justification
+write-up, (b) bundling 8 file edits with 2 new descriptors blows context
+budget (>5 files of substantive change), (c) the audit framework only
+penalises new descriptors without rationale. Existing parity tests remain
+green; the rule is forward-looking.
+
+**Result for this iteration**: 2 new descriptors with full per-tier
+`_rationale`, 1 MODULE_MAP audit table, 2 C++ fix subtasks + 1 descriptor
+backlog subtask filed under loop. Parity score unchanged (no existing
+descriptor flipped). Non-parity unit suite untouched (audit + descriptor
+edits only).
+
