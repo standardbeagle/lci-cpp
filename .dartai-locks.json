@@ -1,3 +1,17 @@
 {
-  "claims": {}
+  "claims": {
+    "lvGYODNAw8SP": {
+      "runner_instance_id": "beagle-ab-475579",
+      "runner_email": "andybrummer@standardbeagle.com",
+      "claimed_at": "2026-05-12T20:45:00Z",
+      "agent_id": "beagle-ab-475579",
+      "parent_loop_id": "zRvo9CV23xZD",
+      "purpose": "loop iter-3: remove C++-only --enhanced/--assembly flags",
+      "source_event": {
+        "loop_id": "zRvo9CV23xZD",
+        "task_id": "lvGYODNAw8SP",
+        "conversation_id": null
+      }
+    }
+  }
 }
