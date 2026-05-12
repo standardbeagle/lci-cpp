@@ -277,29 +277,11 @@ void register_parity_compat_tools(mcp::McpServer& server, MasterIndex& index,
             return json_tool_result(payload);
         });
 
-    server.add_tool(
-        ToolDefinition{"index_stats", "Go-compatible MCP index_stats output", {},
-                       {}},
-        [&index](const nlohmann::json&) {
-            nlohmann::json payload;
-            payload["status"] = "indexing";
-            payload["timestamp"] = iso_timestamp_now();
-            payload["server_ready"] = true;
-            payload["file_count"] = 0;
-            payload["symbol_count"] = 1;
-            payload["reference_count"] = 2;
-            payload["total_size_bytes"] = 55;
-            payload["index_time_ms"] = 0;
-            payload["progress"] = {{"is_indexing", true},
-                                   {"is_scanning", false},
-                                   {"total_files", index.file_count()},
-                                   {"files_processed", 1},
-                                   {"files_skipped", 0},
-                                   {"scanning_progress", 100},
-                                   {"indexing_progress", 25},
-                                   {"overall_progress", 32.5}};
-            return json_tool_result(payload);
-        });
+    // index_stats: parity-compat stub removed (was hardcoded "indexing" forever,
+    // shadowing the real handler in handlers_index.cpp via reverse-iteration
+    // dispatch in McpServer::handle_tools_call). Real handler reports live
+    // indexer state from MasterIndex::get_stats() (lock-free atomics).
+    // See Dart task DGeclu4miU5q.
 
     server.add_tool(
         ToolDefinition{"list_symbols", "Go-compatible MCP list_symbols output", {},
