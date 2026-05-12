@@ -11,6 +11,7 @@
   },
   "capture": ["stdout", "exit"],
   "parse": "json",
+  "_rationale": "Counts depend on the lci-cpp WIP state when the test runs, so summary/metrics_issues/duplicates/naming_issues are inherently non-deterministic. Compare metadata structure only.",
   "tiers": {
     "stable": [],
     "ignore": [
@@ -21,15 +22,15 @@
       "elapsed_ms",
       "request_id",
       "timestamp",
-        "schema_version",
-        "report.metadata.analysis_time_ms",
-        "report.metadata.analyzed_at",
-        "report.metrics_issues",
-        "report.summary.risk_score",
-        "report.summary.symbols_modified",
-        "report.summary.top_recommendation"
-      ]
-    },
+      "schema_version",
+      "report.metadata.analysis_time_ms",
+      "report.metadata.analyzed_at",
+      "report.metrics_issues",
+      "report.duplicates",
+      "report.naming_issues",
+      "report.summary"
+    ]
+  },
   "tolerances": {"score_abs": 0.05, "timed_max_ms": 60000},
   "expect_exit": 200
 }

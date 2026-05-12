@@ -4,6 +4,8 @@
 #include <string_view>
 #include <vector>
 
+#include <nlohmann/json_fwd.hpp>
+
 #include <lci/git/provider.h>
 #include <lci/git/types.h>
 #include <lci/indexing/master_index.h>
@@ -29,6 +31,14 @@ std::string extract_symbol_content(std::string_view content,
 
 /// Checks if a file has a supported source extension for analysis.
 bool is_analysis_supported_file(std::string_view path);
+
+/// Serializes an AnalysisReport to the canonical JSON shape used by the
+/// HTTP /git-analyze endpoint and the MCP git_analysis tool. All
+/// `file_path` values are normalized to relative-to-project-root so the
+/// caller doesn't see a mix of absolute paths (from the index) and
+/// relative paths (from the git changed-files iterator).
+nlohmann::json report_to_json(const AnalysisReport& report,
+                              const std::string& project_root);
 
 // ============================================================================
 // Analyzer

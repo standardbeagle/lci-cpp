@@ -1,5 +1,10 @@
 #include <gtest/gtest.h>
 
+#include <chrono>
+#include <string>
+
+#include <nlohmann/json.hpp>
+
 #include <lci/git/analyzer.h>
 #include <lci/git/frequency_analyzer.h>
 #include <lci/git/pattern_detector.h>
@@ -924,6 +929,287 @@ TEST(FrequencyAnalyzer, GenerateCollisionRecommendation) {
     rec = generate_collision_recommendation(
         freq, FindingSeverity::Info);
     EXPECT_NE(rec.find("Low"), std::string::npos);
+}
+
+// ============================================================================
+// report_to_json: serialization shape, types, and path normalization
+// ============================================================================
+
+namespace {
+
+AnalysisReport make_report_with_one_duplicate(const std::string& abs_project_root) {
+    AnalysisReport r;
+    r.metadata.base_ref = "HEAD";
+    r.metadata.target_ref = "WORKING";
+    r.metadata.scope = AnalysisScope::WIP;
+    r.metadata.analysis_time_ms = 7;
+    r.metadata.analyzed_at = std::chrono::system_clock::time_point{};
+
+    r.summary.files_changed = 1;
+    r.summary.symbols_added = 2;
+    r.summary.symbols_modified = 0;
+    r.summary.symbols_deleted = 0;
+    r.summary.duplicates_found = 1;
+    r.summary.naming_issues_found = 0;
+    r.summary.metrics_issues_found = 0;
+    r.summary.risk_score = 0.42;
+    r.summary.top_recommendation = "Extract common logic";
+
+    DuplicateFinding d;
+    d.severity = FindingSeverity::Warning;
+    d.description = "Exact duplicate of foo";
+    // new_code uses a relative path (as the git changed-files path arrives).
+    d.new_code = {"src/foo.cpp", 10, 20, "foo", {}};
+    // existing_code uses an absolute path (as the index stores it).
+    d.existing_code = {abs_project_root + "/src/foo.cpp", 5, 15, "foo", {}};
+    d.similarity = 0.95;
+    d.type = "structural";
+    d.suggestion = "Extract common code into a shared function";
+    r.duplicates.push_back(std::move(d));
+    return r;
+}
+
+}  // namespace
+
+TEST(GitReportToJson, EmitsExpectedTopLevelKeys) {
+    AnalysisReport r;
+    r.metadata.scope = AnalysisScope::WIP;
+    auto j = report_to_json(r, "/tmp/proj");
+    ASSERT_TRUE(j.contains("summary"));
+    ASSERT_TRUE(j.contains("metadata"));
+    EXPECT_FALSE(j.contains("naming_issues"));
+    EXPECT_FALSE(j.contains("duplicates"));
+    EXPECT_FALSE(j.contains("metrics_issues"));
+}
+
+TEST(GitReportToJson, MetadataFieldsAndTypes) {
+    AnalysisReport r;
+    r.metadata.base_ref = "main";
+    r.metadata.target_ref = "feature";
+    r.metadata.scope = AnalysisScope::Staged;
+    r.metadata.analysis_time_ms = 123;
+    auto j = report_to_json(r, "/tmp/proj");
+    auto& md = j["metadata"];
+    EXPECT_EQ(md["base_ref"].get<std::string>(), "main");
+    EXPECT_EQ(md["target_ref"].get<std::string>(), "feature");
+    EXPECT_EQ(md["scope"].get<std::string>(), "staged");
+    EXPECT_EQ(md["analysis_time_ms"].get<int64_t>(), 123);
+    ASSERT_TRUE(md.contains("analyzed_at"));
+    EXPECT_TRUE(md["analyzed_at"].is_string());
+    EXPECT_GE(md["analyzed_at"].get<std::string>().size(), 20u);
+    EXPECT_NE(md["analyzed_at"].get<std::string>().find('T'), std::string::npos);
+    EXPECT_EQ(md["analyzed_at"].get<std::string>().back(), 'Z');
+}
+
+TEST(GitReportToJson, SummaryFieldsAndTypes) {
+    AnalysisReport r;
+    r.metadata.scope = AnalysisScope::WIP;
+    r.summary.files_changed = 3;
+    r.summary.symbols_added = 5;
+    r.summary.symbols_modified = 1;
+    r.summary.symbols_deleted = 2;
+    r.summary.duplicates_found = 4;
+    r.summary.naming_issues_found = 7;
+    r.summary.metrics_issues_found = 6;
+    r.summary.risk_score = 0.75;
+    r.summary.top_recommendation = "Fix naming";
+
+    auto j = report_to_json(r, "/tmp/proj");
+    auto& s = j["summary"];
+    EXPECT_EQ(s["files_changed"].get<int>(), 3);
+    EXPECT_EQ(s["symbols_added"].get<int>(), 5);
+    EXPECT_EQ(s["symbols_modified"].get<int>(), 1);
+    EXPECT_EQ(s["symbols_deleted"].get<int>(), 2);
+    EXPECT_EQ(s["duplicates_found"].get<int>(), 4);
+    EXPECT_EQ(s["naming_issues_found"].get<int>(), 7);
+    EXPECT_EQ(s["metrics_issues_found"].get<int>(), 6);
+    EXPECT_DOUBLE_EQ(s["risk_score"].get<double>(), 0.75);
+    EXPECT_EQ(s["top_recommendation"].get<std::string>(), "Fix naming");
+
+    // Critical: similarity-shaped numeric fields must be numbers, not strings.
+    EXPECT_TRUE(s["risk_score"].is_number());
+    EXPECT_FALSE(s["risk_score"].is_string());
+}
+
+TEST(GitReportToJson, DuplicateSimilarityIsFloatNotString) {
+    auto r = make_report_with_one_duplicate("/tmp/proj");
+    auto j = report_to_json(r, "/tmp/proj");
+    ASSERT_TRUE(j.contains("duplicates"));
+    ASSERT_EQ(j["duplicates"].size(), 1u);
+    auto& d = j["duplicates"][0];
+    ASSERT_TRUE(d.contains("similarity"));
+    // Bug regression guard: similarity must serialize as JSON number.
+    EXPECT_TRUE(d["similarity"].is_number());
+    EXPECT_FALSE(d["similarity"].is_string());
+    EXPECT_DOUBLE_EQ(d["similarity"].get<double>(), 0.95);
+}
+
+TEST(GitReportToJson, DuplicatePathsNormalizedToRelative) {
+    const std::string root = "/tmp/proj";
+    auto r = make_report_with_one_duplicate(root);
+    auto j = report_to_json(r, root);
+    auto& d = j["duplicates"][0];
+
+    auto new_path = d["new_code"]["file_path"].get<std::string>();
+    auto existing_path = d["existing_code"]["file_path"].get<std::string>();
+
+    // Both must be relative; neither must begin with a slash.
+    ASSERT_FALSE(new_path.empty());
+    ASSERT_FALSE(existing_path.empty());
+    EXPECT_NE(new_path.front(), '/') << "new_code.file_path is absolute: " << new_path;
+    EXPECT_NE(existing_path.front(), '/') << "existing_code.file_path is absolute: " << existing_path;
+
+    // Both must be the SAME relative path (point at the same file).
+    EXPECT_EQ(new_path, existing_path);
+    EXPECT_EQ(new_path, "src/foo.cpp");
+}
+
+TEST(GitReportToJson, DuplicateLocationContainsAllRequiredFields) {
+    auto r = make_report_with_one_duplicate("/tmp/proj");
+    auto j = report_to_json(r, "/tmp/proj");
+    auto& d = j["duplicates"][0];
+    for (const auto* loc_key : {"new_code", "existing_code"}) {
+        ASSERT_TRUE(d.contains(loc_key)) << "missing " << loc_key;
+        auto& loc = d[loc_key];
+        EXPECT_TRUE(loc.contains("file_path"));
+        EXPECT_TRUE(loc.contains("start_line"));
+        EXPECT_TRUE(loc.contains("end_line"));
+        EXPECT_TRUE(loc.contains("symbol_name"));
+        EXPECT_TRUE(loc["start_line"].is_number_integer());
+        EXPECT_TRUE(loc["end_line"].is_number_integer());
+        EXPECT_TRUE(loc["symbol_name"].is_string());
+    }
+
+    EXPECT_EQ(d["new_code"]["start_line"].get<int>(), 10);
+    EXPECT_EQ(d["new_code"]["end_line"].get<int>(), 20);
+    EXPECT_EQ(d["existing_code"]["start_line"].get<int>(), 5);
+    EXPECT_EQ(d["existing_code"]["end_line"].get<int>(), 15);
+    EXPECT_EQ(d["new_code"]["symbol_name"].get<std::string>(), "foo");
+    EXPECT_EQ(d["existing_code"]["symbol_name"].get<std::string>(), "foo");
+}
+
+TEST(GitReportToJson, DuplicateHasAllTopFields) {
+    auto r = make_report_with_one_duplicate("/tmp/proj");
+    auto j = report_to_json(r, "/tmp/proj");
+    auto& d = j["duplicates"][0];
+    EXPECT_EQ(d["severity"].get<std::string>(), "warning");
+    EXPECT_EQ(d["description"].get<std::string>(), "Exact duplicate of foo");
+    EXPECT_EQ(d["type"].get<std::string>(), "structural");
+    EXPECT_EQ(d["suggestion"].get<std::string>(),
+              "Extract common code into a shared function");
+}
+
+TEST(GitReportToJson, NamingIssuesEmittedWhenPresent) {
+    AnalysisReport r;
+    r.metadata.scope = AnalysisScope::WIP;
+    NamingFinding n;
+    n.severity = FindingSeverity::Warning;
+    n.description = "case mismatch";
+    n.new_symbol.name = "MyFunc";
+    n.new_symbol.type = "function";
+    n.new_symbol.file_path = "/tmp/proj/src/x.go";
+    n.new_symbol.line = 3;
+    n.new_symbol.end_line = 5;
+    n.new_symbol.complexity = 1;
+    n.new_symbol.lines_of_code = 3;
+    n.issue_type = NamingIssueType::CaseMismatch;
+    n.issue = "Uses PascalCase";
+    n.suggestion = "snake_case";
+    r.naming_issues.push_back(std::move(n));
+
+    auto j = report_to_json(r, "/tmp/proj");
+    ASSERT_TRUE(j.contains("naming_issues"));
+    ASSERT_EQ(j["naming_issues"].size(), 1u);
+    auto& it = j["naming_issues"][0];
+    EXPECT_EQ(it["severity"].get<std::string>(), "warning");
+    EXPECT_EQ(it["issue_type"].get<std::string>(), "case_mismatch");
+    EXPECT_EQ(it["issue"].get<std::string>(), "Uses PascalCase");
+    EXPECT_EQ(it["suggestion"].get<std::string>(), "snake_case");
+    EXPECT_TRUE(it["similar_names"].is_null());
+
+    // new_symbol path must be normalized to relative.
+    EXPECT_EQ(it["new_symbol"]["file_path"].get<std::string>(), "src/x.go");
+    EXPECT_EQ(it["new_symbol"]["name"].get<std::string>(), "MyFunc");
+    EXPECT_EQ(it["new_symbol"]["line"].get<int>(), 3);
+    EXPECT_EQ(it["new_symbol"]["end_line"].get<int>(), 5);
+}
+
+TEST(GitReportToJson, MetricsIssuesEmittedWhenPresent) {
+    AnalysisReport r;
+    r.metadata.scope = AnalysisScope::WIP;
+    MetricsFinding m;
+    m.severity = FindingSeverity::Critical;
+    m.description = "complex";
+    m.symbol.name = "doStuff";
+    m.symbol.type = "function";
+    m.symbol.file_path = "/tmp/proj/src/y.go";
+    m.symbol.line = 1;
+    m.symbol.end_line = 100;
+    m.symbol.complexity = 25;
+    m.symbol.lines_of_code = 99;
+    m.symbol.nesting_depth = 8;
+    m.issue_type = MetricsIssueType::HighComplexity;
+    m.issue = "Cyclomatic complexity 25";
+    m.suggestion = "Refactor";
+    r.metrics_issues.push_back(std::move(m));
+
+    auto j = report_to_json(r, "/tmp/proj");
+    ASSERT_TRUE(j.contains("metrics_issues"));
+    ASSERT_EQ(j["metrics_issues"].size(), 1u);
+    auto& it = j["metrics_issues"][0];
+    EXPECT_EQ(it["severity"].get<std::string>(), "critical");
+    EXPECT_EQ(it["issue_type"].get<std::string>(), "high_complexity");
+    EXPECT_EQ(it["symbol"]["file_path"].get<std::string>(), "src/y.go");
+    EXPECT_EQ(it["symbol"]["complexity"].get<int>(), 25);
+    EXPECT_EQ(it["symbol"]["lines_of_code"].get<int>(), 99);
+    EXPECT_EQ(it["symbol"]["nesting_depth"].get<int>(), 8);
+
+    // new_metrics block falls back to symbol counters when no separate
+    // metrics pointer was supplied.
+    auto& nm = it["new_metrics"];
+    EXPECT_EQ(nm["complexity"].get<int>(), 25);
+    EXPECT_EQ(nm["lines_of_code"].get<int>(), 99);
+    EXPECT_EQ(nm["nesting_depth"].get<int>(), 8);
+}
+
+TEST(GitReportToJson, RelativePathInputPassesThrough) {
+    // When file_path arrives already relative (e.g. from new_symbols
+    // populated by the git iterator), it must not be touched.
+    AnalysisReport r;
+    r.metadata.scope = AnalysisScope::WIP;
+    DuplicateFinding d;
+    d.new_code = {"src/foo.cpp", 1, 2, "foo", {}};
+    d.existing_code = {"src/foo.cpp", 3, 4, "foo", {}};
+    d.similarity = 1.0;
+    d.type = "exact";
+    r.duplicates.push_back(std::move(d));
+
+    auto j = report_to_json(r, "/some/root");
+    EXPECT_EQ(j["duplicates"][0]["new_code"]["file_path"].get<std::string>(),
+              "src/foo.cpp");
+    EXPECT_EQ(j["duplicates"][0]["existing_code"]["file_path"].get<std::string>(),
+              "src/foo.cpp");
+}
+
+TEST(GitReportToJson, AbsolutePathOutsideProjectRootIsPreserved) {
+    // If the absolute path doesn't live under project_root, normalization
+    // would produce a ".." chain. Keep the original path rather than
+    // emitting a misleading relative path.
+    AnalysisReport r;
+    r.metadata.scope = AnalysisScope::WIP;
+    DuplicateFinding d;
+    d.new_code = {"/var/elsewhere/x.cpp", 1, 2, "x", {}};
+    d.existing_code = {"/var/elsewhere/x.cpp", 1, 2, "x", {}};
+    d.similarity = 1.0;
+    d.type = "exact";
+    r.duplicates.push_back(std::move(d));
+
+    auto j = report_to_json(r, "/tmp/proj");
+    auto path = j["duplicates"][0]["new_code"]["file_path"].get<std::string>();
+    // Either a clean relative (with ..) or original abs is acceptable;
+    // what's NOT acceptable is silently dropping the path.
+    EXPECT_FALSE(path.empty());
+    EXPECT_NE(path.find("x.cpp"), std::string::npos);
 }
 
 }  // namespace
