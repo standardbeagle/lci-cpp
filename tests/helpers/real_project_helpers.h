@@ -188,6 +188,14 @@ struct RealProjectContext {
     bool valid() const { return indexer != nullptr; }
 
     /// Searches for a pattern across the indexed project.
+    ///
+    /// Forces case-insensitive matching so real-project tests are
+    /// resilient to corpus capitalization variations (e.g. lowercase
+    /// "servehttp" finding "ServeHTTP"). config.search.enable_fuzzy
+    /// describes a different feature (fuzzy substring scoring) that is
+    /// not currently wired into the C++ search engine; keeping it
+    /// uncoupled from case-insensitivity avoids the misleading conflation
+    /// previously here.
     std::vector<SearchResult> search(const std::string& pattern,
                                      int max_results = 100,
                                      int max_context_lines = 5) const {
@@ -198,7 +206,7 @@ struct RealProjectContext {
         opts.max_results = max_results;
         opts.max_context_lines = max_context_lines;
         opts.merge_file_results = true;
-        opts.case_insensitive = config.search.enable_fuzzy;
+        opts.case_insensitive = true;
         return indexer->search_with_options(pattern, opts);
     }
 

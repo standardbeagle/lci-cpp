@@ -72,6 +72,11 @@ struct SearchRankingConfig {
 struct SearchConfig {
     int default_context_lines = 0;
     int max_results = 100;
+    // NOTE: parsed and stored for parity with Go's config schema
+    // (internal/config/config.go field EnableFuzzy), but NOT currently
+    // consumed by the C++ search engine. Setting it has no behavioral
+    // effect today. Tracked under Dart task qkbC8BBuW14H — either wire
+    // through to a real fuzzy-scoring path or remove from both schemas.
     bool enable_fuzzy = true;
     int max_context_lines = 100;
     bool merge_file_results = true;

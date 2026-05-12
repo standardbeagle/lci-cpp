@@ -40,6 +40,8 @@ TEST(DefaultConfigTest, HasExpectedDefaults) {
     EXPECT_EQ(cfg.performance.startup_delay_ms, 1500);
 
     EXPECT_EQ(cfg.search.max_results, 100);
+    // enable_fuzzy: default true for Go schema parity; not yet wired
+    // into the C++ search engine (tracked Dart task qkbC8BBuW14H).
     EXPECT_TRUE(cfg.search.enable_fuzzy);
     EXPECT_EQ(cfg.search.max_context_lines, 100);
     EXPECT_TRUE(cfg.search.merge_file_results);
