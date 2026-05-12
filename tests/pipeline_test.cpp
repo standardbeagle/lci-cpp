@@ -183,6 +183,59 @@ TEST(GitignoreParserTest, DoubleStarPattern) {
     EXPECT_TRUE(p.should_ignore("src/deep/nested/app.test.js", false));
 }
 
+TEST(GitignoreParserTest, SingleStarDoesNotCrossSlash) {
+    // Regression guard: single `*` must not slide across `/`.
+    GitignoreParser p;
+    p.add_pattern("test_*");
+    // Basename starting with test_ — matches at any depth via suffix walk.
+    EXPECT_TRUE(p.should_ignore("test_helper.go", false));
+    EXPECT_TRUE(p.should_ignore("test_other_file", false));
+    EXPECT_TRUE(p.should_ignore("dir/test_a.go", false));
+    // Basename NOT starting with test_ — must not match (no substring slide).
+    EXPECT_FALSE(p.should_ignore("atest.go", false));
+    EXPECT_FALSE(p.should_ignore("dir/atest_a.go", false));
+    EXPECT_FALSE(p.should_ignore("normal_file.go", false));
+}
+
+TEST(GitignoreParserTest, StarOnlyMatchesNonSlashWithinComponent) {
+    GitignoreParser p;
+    p.add_pattern("*.log");
+    EXPECT_TRUE(p.should_ignore("app.log", false));
+    EXPECT_TRUE(p.should_ignore("subdir/app.log", false));  // suffix-walk
+    EXPECT_FALSE(p.should_ignore("appLog", false));
+    EXPECT_FALSE(p.should_ignore("logfile", false));
+}
+
+TEST(GitignoreParserTest, DoubleStarMatchesAcrossComponents) {
+    GitignoreParser p;
+    p.add_pattern("**/build/**");
+    EXPECT_TRUE(p.should_ignore("build/output.o", false));
+    EXPECT_TRUE(p.should_ignore("src/build/output.o", false));
+    EXPECT_TRUE(p.should_ignore("a/b/c/build/d/e.o", false));
+    EXPECT_FALSE(p.should_ignore("notbuild/output.o", false));
+}
+
+TEST(GitignoreParserTest, QuestionMarkSingleChar) {
+    GitignoreParser p;
+    p.add_pattern("?.tmp");
+    EXPECT_TRUE(p.should_ignore("a.tmp", false));
+    EXPECT_TRUE(p.should_ignore("x.tmp", false));
+    EXPECT_FALSE(p.should_ignore("ab.tmp", false));
+    EXPECT_FALSE(p.should_ignore(".tmp", false));
+}
+
+TEST(GitignoreParserTest, RelativePathContract) {
+    // Document the path contract via assertions: gitignore patterns
+    // are matched against project-rel paths, never absolute.
+    GitignoreParser p;
+    p.add_pattern("logs/");
+    // Relative path: match.
+    EXPECT_TRUE(p.should_ignore("logs/x.log", false));
+    EXPECT_TRUE(p.should_ignore("nested/logs/x.log", false));
+    // Absolute-like input is not the contract: passing such a path
+    // is a caller bug. We don't enforce — just document.
+}
+
 TEST(GitignoreParserTest, SkipsCommentsAndEmptyLines) {
     GitignoreParser p;
     p.add_pattern("# this is a comment");

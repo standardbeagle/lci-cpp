@@ -158,48 +158,61 @@ bool GitignoreParser::fast_match(const GitignorePattern& pat,
     return path == pat.pattern;
 }
 
+namespace {
+
+// Recursive matcher with proper `/` boundary handling. Mirrors the
+// implementation in src/indexing/pipeline_scanner.cpp.
+//   `?` matches any single non-`/` char
+//   `*` matches zero or more non-`/` chars
+//   `**` matches zero or more chars across boundaries
+bool gitignore_match_at(std::string_view pattern, size_t px,
+                        std::string_view text, size_t tx) {
+    while (px < pattern.size()) {
+        char c = pattern[px];
+        if (c == '*') {
+            bool double_star =
+                (px + 1 < pattern.size() && pattern[px + 1] == '*');
+            if (double_star) {
+                size_t next_px = px + 2;
+                bool slash_anchored = false;
+                if (next_px < pattern.size() && pattern[next_px] == '/') {
+                    ++next_px;
+                    slash_anchored = true;
+                }
+                for (size_t end = tx; end <= text.size(); ++end) {
+                    if (slash_anchored && end != 0 &&
+                        !(end <= text.size() && text[end - 1] == '/')) {
+                        continue;
+                    }
+                    if (gitignore_match_at(pattern, next_px, text, end))
+                        return true;
+                }
+                return false;
+            }
+            size_t next_px = px + 1;
+            for (size_t end = tx;; ++end) {
+                if (gitignore_match_at(pattern, next_px, text, end))
+                    return true;
+                if (end >= text.size() || text[end] == '/') break;
+            }
+            return false;
+        }
+        if (c == '?') {
+            if (tx >= text.size() || text[tx] == '/') return false;
+            ++px; ++tx;
+            continue;
+        }
+        if (tx >= text.size() || c != text[tx]) return false;
+        ++px; ++tx;
+    }
+    return tx == text.size();
+}
+
+}  // namespace
+
 bool GitignoreParser::match_glob(std::string_view pattern,
                                  std::string_view text) const {
-    size_t px = 0, tx = 0;
-    size_t star_px = std::string_view::npos;
-    size_t star_tx = 0;
-
-    while (tx < text.size()) {
-        if (px < pattern.size() && pattern[px] == '*') {
-            if (px + 1 < pattern.size() && pattern[px + 1] == '*') {
-                // ** matches everything including /
-                px += 2;
-                if (px < pattern.size() && pattern[px] == '/') ++px;
-                star_px = px;
-                star_tx = tx;
-                continue;
-            }
-            // Single * matches everything except /
-            star_px = px + 1;
-            star_tx = tx;
-            ++px;
-            continue;
-        }
-
-        if (px < pattern.size() && pattern[px] == '?') {
-            if (text[tx] != '/') { ++px; ++tx; continue; }
-        } else if (px < pattern.size() && pattern[px] == text[tx]) {
-            ++px; ++tx; continue;
-        }
-
-        // Backtrack to last wildcard
-        if (star_px != std::string_view::npos) {
-            px = star_px;
-            ++star_tx;
-            tx = star_tx;
-            continue;
-        }
-        return false;
-    }
-
-    // Consume trailing wildcards
-    while (px < pattern.size() && pattern[px] == '*') ++px;
-    return px == pattern.size();
+    return gitignore_match_at(pattern, 0, text, 0);
 }
 
 std::vector<std::string> GitignoreParser::get_exclusion_patterns() const {

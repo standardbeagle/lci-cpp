@@ -34,7 +34,9 @@
       "report.summary.naming_issues_found",
       "report.summary.duplicates_found",
       "report.summary.symbols_added",
-      "report.summary.symbols_deleted"
+      "report.summary.symbols_deleted",
+      "report.naming_issues",
+      "report.duplicates"
     ]
   },
   "tolerances": {"score_abs": 0.05, "timed_max_ms": 60000},

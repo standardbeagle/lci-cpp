@@ -25,7 +25,19 @@ class FileScanner {
     /// Scans the project root and returns all indexable file tasks.
     std::vector<FileTask> scan();
 
-    /// Simple glob match supporting * and ** patterns.
+    /// Simple glob match supporting `*`, `**`, and `?` patterns.
+    ///
+    /// **Path contract:** `path` must be **relative-to-project-root**.
+    /// Pattern semantics:
+    ///   - `?`  matches any single non-`/` character
+    ///   - `*`  matches zero or more non-`/` characters (component-local)
+    ///   - `**` matches zero or more characters across `/` boundaries
+    ///   - all other characters are literals
+    ///
+    /// Passing an absolute path produces over-matching for patterns
+    /// anchored with `**/` because the leading prefix (e.g. `/tmp/...`)
+    /// is treated as a prefix component. All callers in this codebase
+    /// pass relative paths; new callers must do the same.
     static bool match_glob(std::string_view pattern, std::string_view path);
 
   private:

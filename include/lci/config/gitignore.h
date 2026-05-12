@@ -40,6 +40,12 @@ class GitignoreParser {
     void add_pattern(std::string_view line);
 
     /// Returns true if the path should be ignored.
+    ///
+    /// **Path contract:** `path` must be **relative-to-project-root**.
+    /// Internal `/` boundary semantics match gitignore standard:
+    ///   - `*`  matches non-`/` only
+    ///   - `**` matches across `/`
+    ///   - directory patterns (trailing `/`) match the dir and contents
     bool should_ignore(std::string_view path, bool is_dir) const;
 
     /// Returns gitignore patterns as LCI exclusion glob patterns.

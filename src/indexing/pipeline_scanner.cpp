@@ -206,9 +206,10 @@ namespace {
 
 // Recursive glob matcher with proper `/` boundary handling.
 //   `?` matches any single non-`/` char
-//   `*` matches zero or more non-`/` chars
-//   `**` (or `**/`) matches any number of path components, including
-//        crossing `/` boundaries (matches "zero or more components")
+//   `*` matches zero or more non-`/` chars (component-local)
+//   `**` matches zero or more chars across boundaries (any subtree)
+//   `**/` is an anchored form: the suffix that follows must start at a
+//        path-component boundary (start-of-string or just after a `/`).
 //   anything else is a literal.
 bool match_glob_at(std::string_view pattern, size_t px,
                    std::string_view path, size_t tx) {
@@ -219,11 +220,18 @@ bool match_glob_at(std::string_view pattern, size_t px,
                 (px + 1 < pattern.size() && pattern[px + 1] == '*');
             if (double_star) {
                 size_t next_px = px + 2;
+                bool slash_anchored = false;
                 if (next_px < pattern.size() && pattern[next_px] == '/') {
                     ++next_px;
+                    slash_anchored = true;
                 }
-                // ** matches zero or more characters across any boundary.
+                // `**/X` requires the tail X to start at a component
+                // boundary. Plain `**X` allows any position.
                 for (size_t end = tx; end <= path.size(); ++end) {
+                    if (slash_anchored && end != 0 &&
+                        !(end <= path.size() && path[end - 1] == '/')) {
+                        continue;
+                    }
                     if (match_glob_at(pattern, next_px, path, end)) return true;
                 }
                 return false;
