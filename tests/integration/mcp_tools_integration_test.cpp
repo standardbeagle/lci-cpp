@@ -255,6 +255,43 @@ TEST_F(McpToolsIntegrationTest, GitAnalysisToolReturnsErrorOrData) {
     EXPECT_TRUE(json.is_object());
 }
 
+TEST_F(McpToolsIntegrationTest, GitAnalysisIsCurrentlyAStubAndAdvertisesItHonestly) {
+    // The MCP handle_git_analysis() in src/mcp/handlers_index.cpp is a
+    // stub that returns status="not_available". This test locks the
+    // honest-not-implemented shape so the stub doesn't quietly start
+    // returning bad data. When the analyzer is wired in
+    // (see Dart task sL0AJDf2hjIh), flip this expectation to the full
+    // report shape and add per-field assertions.
+    auto result = handle_git_analysis({{"scope", "wip"}});
+    auto json = nlohmann::json::parse(result.text);
+    ASSERT_TRUE(json.is_object());
+
+    ASSERT_TRUE(json.contains("status"));
+    EXPECT_EQ(json["status"].get<std::string>(), "not_available");
+
+    ASSERT_TRUE(json.contains("message"));
+    EXPECT_TRUE(json["message"].is_string());
+    EXPECT_FALSE(json["message"].get<std::string>().empty());
+    EXPECT_NE(json["message"].get<std::string>().find("future"),
+              std::string::npos)
+        << "Stub message should reference 'future' to set user expectations";
+
+    // Stub MUST NOT include data-fields that would mislead the caller.
+    EXPECT_FALSE(json.contains("summary"));
+    EXPECT_FALSE(json.contains("duplicates"));
+    EXPECT_FALSE(json.contains("naming_issues"));
+    EXPECT_FALSE(json.contains("metrics_issues"));
+}
+
+TEST_F(McpToolsIntegrationTest, GitAnalysisHandlesUnknownScope) {
+    auto result = handle_git_analysis({{"scope", "nonsense_value"}});
+    auto json = nlohmann::json::parse(result.text);
+    // Either reports an error object or quietly normalizes; both are
+    // acceptable, but the response must remain a JSON object so the
+    // MCP transport never sees malformed payload.
+    EXPECT_TRUE(json.is_object());
+}
+
 // -- Full MCP stdio round-trip ------------------------------------------------
 
 TEST_F(McpToolsIntegrationTest, StdioRoundTripWithRealIndex) {

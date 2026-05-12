@@ -11,6 +11,7 @@
   },
   "capture": ["stdout", "exit"],
   "parse": "json",
+  "_rationale": "Go MCP git_analysis returns a metadata-only payload (`{metadata: {base_ref, scope, target_ref}}`). C++ MCP git_analysis is a stub returning `{status: \"not_available\", message: ...}` because the MCP wiring to the analyzer hasn't been done yet (filed as sL0AJDf2hjIh). Both sides emit minimal payloads, both honest but with different shapes. Parity asserts envelope shape (jsonrpc, content[].type) only. C++ stub shape is locked by McpToolsIntegrationTest.GitAnalysisIsCurrentlyAStubAndAdvertisesItHonestly. When the C++ MCP handler is wired to the analyzer, flip this rationale to document intentional C++ enrichment.",
   "tiers": {
     "stable": ["result.content[].type"],
     "ignore": ["id", "jsonrpc", "result.meta.elapsed_ms", "result.meta.server_pid",
