@@ -1,3 +1,17 @@
 {
-  "claims": {}
+  "claims": {
+    "fMcCXzUHLJrw": {
+      "runner_instance_id": "beagle-ab-475579",
+      "runner_email": "andybrummer@standardbeagle.com",
+      "claimed_at": "2026-05-12T20:18:30Z",
+      "agent_id": "beagle-ab-475579",
+      "parent_loop_id": "zRvo9CV23xZD",
+      "purpose": "loop iter-1: watcher gitignore audit rel-vs-abs",
+      "source_event": {
+        "loop_id": "zRvo9CV23xZD",
+        "task_id": "fMcCXzUHLJrw",
+        "conversation_id": null
+      }
+    }
+  }
 }
