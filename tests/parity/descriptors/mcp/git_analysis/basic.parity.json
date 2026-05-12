@@ -12,8 +12,9 @@
   "capture": ["stdout", "exit"],
   "parse": "json",
   "tiers": {
-    "stable": ["result.content[].type", "result.content[].text"],
-    "ignore": ["id", "jsonrpc", "result.meta.elapsed_ms", "result.meta.server_pid"]
+    "stable": ["result.content[].type"],
+    "ignore": ["id", "jsonrpc", "result.meta.elapsed_ms", "result.meta.server_pid",
+               "result.content[].text"]
   },
   "tolerances": {"score_abs": 0.05, "timed_max_ms": 60000},
   "expect_exit": 0

@@ -115,6 +115,7 @@ spec_diff::TextCanonicalizeOptions TextOptionsFor(const Descriptor& descriptor,
     options.strip_lines = descriptor.text_normalize.strip_lines;
     options.replace = descriptor.text_normalize.replace;
     options.sort_lines = descriptor.text_normalize.sort_lines;
+    options.collapse_blank_lines = descriptor.text_normalize.collapse_blank_lines;
     if (descriptor.text_normalize.rewrite_corpus_path) {
         options.corpus_prefix = corpus_path;
     }

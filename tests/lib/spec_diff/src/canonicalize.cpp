@@ -261,6 +261,19 @@ std::string canonicalize_text(std::string_view in,
         pos = nl + 1;
     }
 
+    if (opts.collapse_blank_lines) {
+        std::vector<Line> collapsed;
+        collapsed.reserve(lines.size());
+        bool prev_blank = false;
+        for (auto& l : lines) {
+            bool is_blank = l.text.empty();
+            if (is_blank && prev_blank) continue;
+            collapsed.push_back(std::move(l));
+            prev_blank = is_blank;
+        }
+        lines = std::move(collapsed);
+    }
+
     if (opts.sort_lines) {
         std::sort(lines.begin(), lines.end(),
                   [](const Line& a, const Line& b) { return a.text < b.text; });

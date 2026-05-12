@@ -38,6 +38,7 @@ struct DescriptorTextNormalize {
     std::vector<std::string>                            strip_lines;
     std::vector<std::pair<std::string, std::string>>    replace;
     bool                                                sort_lines = false;
+    bool                                                collapse_blank_lines = false;
 };
 
 struct Descriptor {

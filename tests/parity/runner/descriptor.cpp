@@ -46,6 +46,7 @@ void load_text_normalize(const nlohmann::json& j, DescriptorTextNormalize& tn) {
     if (j.contains("strip_emoji_prefix"))  tn.strip_emoji_prefix  = j.at("strip_emoji_prefix").get<bool>();
     if (j.contains("strip_lines"))         tn.strip_lines         = str_array(j.at("strip_lines"));
     if (j.contains("sort_lines"))          tn.sort_lines          = j.at("sort_lines").get<bool>();
+    if (j.contains("collapse_blank_lines")) tn.collapse_blank_lines = j.at("collapse_blank_lines").get<bool>();
     if (j.contains("replace")) {
         const auto& arr = j.at("replace");
         if (!arr.is_array()) {

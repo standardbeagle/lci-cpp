@@ -128,6 +128,7 @@ TextCanonicalizeOptions text_opts_for(const Descriptor& d,
     o.strip_lines        = d.text_normalize.strip_lines;
     o.replace            = d.text_normalize.replace;
     o.sort_lines         = d.text_normalize.sort_lines;
+    o.collapse_blank_lines = d.text_normalize.collapse_blank_lines;
     if (d.text_normalize.rewrite_corpus_path) {
         o.corpus_prefix = corpus_path;
     }

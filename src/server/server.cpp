@@ -1296,6 +1296,56 @@ void IndexServer::handle_git_analyze(const httplib::Request& req,
         }
     }
 
+    auto naming_to_json = [&](const git::NamingFinding& finding) {
+        nlohmann::json out;
+        out["severity"] = std::string(git::to_string(finding.severity));
+        out["description"] = finding.description;
+        out["new_symbol"] = symbol_to_json(finding.new_symbol);
+        out["issue_type"] = std::string(git::to_string(finding.issue_type));
+        out["issue"] = finding.issue;
+        out["suggestion"] = finding.suggestion;
+        if (finding.similar_names.empty()) {
+            out["similar_names"] = nullptr;
+        } else {
+            out["similar_names"] = nlohmann::json::array();
+            for (const auto& sym : finding.similar_names) {
+                out["similar_names"].push_back(symbol_to_json(sym));
+            }
+        }
+        return out;
+    };
+
+    if (!report.naming_issues.empty()) {
+        report_j["naming_issues"] = nlohmann::json::array();
+        for (const auto& finding : report.naming_issues) {
+            report_j["naming_issues"].push_back(naming_to_json(finding));
+        }
+    }
+
+    auto duplicate_loc_to_json = [](const git::CodeLocation& loc) {
+        nlohmann::json out;
+        out["file_path"] = loc.file_path;
+        out["start_line"] = loc.start_line;
+        out["end_line"] = loc.end_line;
+        out["symbol_name"] = loc.symbol_name;
+        return out;
+    };
+
+    if (!report.duplicates.empty()) {
+        report_j["duplicates"] = nlohmann::json::array();
+        for (const auto& finding : report.duplicates) {
+            nlohmann::json out;
+            out["severity"] = std::string(git::to_string(finding.severity));
+            out["description"] = finding.description;
+            out["new_code"] = duplicate_loc_to_json(finding.new_code);
+            out["existing_code"] = duplicate_loc_to_json(finding.existing_code);
+            out["similarity"] = finding.similarity;
+            out["type"] = finding.type;
+            out["suggestion"] = finding.suggestion;
+            report_j["duplicates"].push_back(out);
+        }
+    }
+
     auto analyzed_at = std::chrono::system_clock::to_time_t(report.metadata.analyzed_at);
     std::tm analyzed_tm{};
 #ifdef _WIN32

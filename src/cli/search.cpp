@@ -43,6 +43,7 @@
 #include <iostream>
 #include <map>
 #include <optional>
+#include <regex>
 #include <set>
 #include <string>
 #include <string_view>
@@ -1073,9 +1074,96 @@ nlohmann::json apply_code_only(nlohmann::json results) {
 
 }  // namespace ast_filters
 
+namespace {
+
+// Extract the longest literal substring from an ECMAScript regex pattern.
+// Used as a trigram seed so the engine narrows files before the local
+// regex filter runs. Walks the pattern, skipping escape sequences and
+// metacharacters, and tracks the longest contiguous literal run.
+std::string longest_literal_run(const std::string& re) {
+    std::string best;
+    std::string cur;
+    auto take = [&]() {
+        if (cur.size() > best.size()) best = cur;
+        cur.clear();
+    };
+    for (size_t i = 0; i < re.size(); ++i) {
+        char c = re[i];
+        if (c == '\\' && i + 1 < re.size()) {
+            // Escaped char is a literal; consume both.
+            char esc = re[i + 1];
+            // Skip char-class shorthands (\d, \w, \s, \b, etc.) — those
+            // are not literals.
+            if (std::isalpha(static_cast<unsigned char>(esc))) {
+                take();
+            } else {
+                cur.push_back(esc);
+            }
+            ++i;
+            continue;
+        }
+        switch (c) {
+            case '.': case '*': case '+': case '?':
+            case '[': case ']': case '(': case ')':
+            case '{': case '}': case '|':
+            case '^': case '$':
+                take();
+                // Skip whole char class for [...].
+                if (c == '[') {
+                    while (i + 1 < re.size() && re[i + 1] != ']') ++i;
+                }
+                break;
+            default:
+                cur.push_back(c);
+                break;
+        }
+    }
+    take();
+    return best;
+}
+
+// Filter result rows by re-matching their content line against the
+// user-supplied regex. Drops rows whose context block has no line
+// matching the regex; rows that do match get their `line`, `column`,
+// and `match` updated to point at the first matching line in the block.
+nlohmann::json regex_filter_results(nlohmann::json results,
+                                    const std::regex& re) {
+    nlohmann::json out = nlohmann::json::array();
+    for (auto& row : results) {
+        auto& ctx = row["context"];
+        if (!ctx.is_object() || !ctx.contains("lines") ||
+            !ctx["lines"].is_array()) {
+            continue;
+        }
+        int start_line = ctx.value("start_line", 1);
+        bool kept = false;
+        int idx = 0;
+        for (auto& line_json : ctx["lines"]) {
+            std::string line = line_json.is_string()
+                                   ? line_json.get<std::string>()
+                                   : "";
+            // Strip trailing newline so $ anchors work as expected.
+            if (!line.empty() && line.back() == '\n') line.pop_back();
+            std::smatch m;
+            if (std::regex_search(line, m, re)) {
+                row["line"] = start_line + idx;
+                row["column"] = static_cast<int>(m.position()) + 1;
+                row["match"] = m.str();
+                kept = true;
+                break;
+            }
+            ++idx;
+        }
+        if (kept) out.push_back(std::move(row));
+    }
+    return out;
+}
+
+}  // namespace
+
 int run_search(const GlobalFlags& flags, const std::string& pattern,
                int max_lines, bool case_insensitive, bool json_output,
-               bool light, bool compact_search, bool /*use_regex*/,
+               bool light, bool compact_search, bool use_regex,
                const std::string& /*exclude_pattern*/,
                const std::string& /*include_pattern*/,
                bool invert_match,
@@ -1148,6 +1236,29 @@ int run_search(const GlobalFlags& flags, const std::string& pattern,
     std::string effective_pattern =
         parsed_query.empty_directives() ? pattern : parsed_query.content_query;
 
+    // Regex mode: extract the longest literal substring as a trigram seed
+    // for server-side candidate narrowing, then locally filter rows with
+    // std::regex. Requires a >=3-char literal so the trigram engine can
+    // index it; pure-meta patterns return an error.
+    std::optional<std::regex> regex_filter;
+    if (use_regex) {
+        auto seed = longest_literal_run(effective_pattern);
+        if (seed.size() < 3) {
+            std::cerr << "Error: --regex pattern must contain a literal "
+                         "substring of at least 3 characters\n";
+            return 1;
+        }
+        try {
+            auto flags_re = std::regex::ECMAScript;
+            if (case_insensitive) flags_re |= std::regex::icase;
+            regex_filter.emplace(effective_pattern, flags_re);
+        } catch (const std::regex_error& e) {
+            std::cerr << "Error: invalid regex: " << e.what() << "\n";
+            return 1;
+        }
+        effective_pattern = seed;
+    }
+
     // Multi-pattern fan-out: same algorithm as `lci grep` so OR semantics
     // are identical between the two commands. See `search_union_patterns`.
     std::vector<std::string> all_patterns;
@@ -1189,6 +1300,11 @@ int run_search(const GlobalFlags& flags, const std::string& pattern,
     }
 
     auto& j = *result;
+
+    if (regex_filter) {
+        auto raw = j.value("results", nlohmann::json::array());
+        j["results"] = regex_filter_results(std::move(raw), *regex_filter);
+    }
 
     // -- Advanced query directive post-filter --------------------------------
     //

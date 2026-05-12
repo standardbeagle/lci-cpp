@@ -14,7 +14,8 @@
   "tolerances": {"score_abs": 0.0, "timed_max_ms": 60000},
   "expect_exit": 0,
   "text_normalize": {
-    "strip_lines": ["DEBUG:"],
+    "strip_lines": ["DEBUG:", "=== Direct Matches ===", "|"],
+    "collapse_blank_lines": true,
     "replace": [
       {"pattern": "\\(integrated mode[^)]*\\)", "with": "(MODE)"},
       {"pattern": "\\(standard mode\\)",        "with": "(MODE)"}

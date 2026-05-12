@@ -68,6 +68,11 @@ struct TextCanonicalizeOptions {
     // Sort lines in output. Use when producers emit semantically
     // equivalent multiset content in nondeterministic order.
     bool sort_lines = false;
+
+    // Collapse runs of blank lines into a single blank line. Useful
+    // after strip_lines drops content but leaves trailing whitespace
+    // gaps that diverge across producers.
+    bool collapse_blank_lines = false;
 };
 
 // Canonicalize a JSON value:
