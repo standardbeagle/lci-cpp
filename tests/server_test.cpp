@@ -308,6 +308,121 @@ TEST_F(ServerTest, SearchEndpoint) {
     EXPECT_FALSE(j["results"].empty());
 }
 
+// Rich asserts on the search result row shape: every documented field
+// must be present, typed, and (where applicable) populated.
+
+TEST_F(ServerTest, SearchResultRowHasRequiredFields) {
+    auto j = post("/search", {{"pattern", "Add"}});
+    ASSERT_TRUE(j.contains("results"));
+    ASSERT_FALSE(j["results"].empty());
+    auto& row = j["results"][0];
+
+    // Core location fields.
+    EXPECT_TRUE(row.contains("path"));
+    EXPECT_TRUE(row["path"].is_string());
+    EXPECT_FALSE(row["path"].get<std::string>().empty());
+
+    EXPECT_TRUE(row.contains("line"));
+    EXPECT_TRUE(row["line"].is_number_integer());
+    EXPECT_GT(row["line"].get<int>(), 0);
+
+    EXPECT_TRUE(row.contains("column"));
+    EXPECT_TRUE(row["column"].is_number_integer());
+    EXPECT_GE(row["column"].get<int>(), 0);
+
+    EXPECT_TRUE(row.contains("match"));
+    EXPECT_TRUE(row["match"].is_string());
+
+    // Score is numeric (parity tests canonicalize floats but raw shape
+    // must be a number).
+    EXPECT_TRUE(row.contains("score"));
+    EXPECT_TRUE(row["score"].is_number());
+    EXPECT_GT(row["score"].get<double>(), 0.0);
+}
+
+TEST_F(ServerTest, SearchResultContextBlockShape) {
+    auto j = post("/search", {{"pattern", "Add"}});
+    ASSERT_FALSE(j["results"].empty());
+    auto& ctx = j["results"][0]["context"];
+    ASSERT_TRUE(ctx.is_object());
+
+    // Always-present keys (handler emits stable shape).
+    EXPECT_TRUE(ctx.contains("block_type"));
+    EXPECT_TRUE(ctx.contains("block_name"));
+    EXPECT_TRUE(ctx.contains("start_line"));
+    EXPECT_TRUE(ctx.contains("end_line"));
+    EXPECT_TRUE(ctx.contains("is_complete"));
+    EXPECT_TRUE(ctx.contains("lines"));
+
+    // Types.
+    EXPECT_TRUE(ctx["block_type"].is_string());
+    EXPECT_TRUE(ctx["block_name"].is_string());
+    EXPECT_TRUE(ctx["start_line"].is_number_integer());
+    EXPECT_TRUE(ctx["end_line"].is_number_integer());
+    EXPECT_TRUE(ctx["is_complete"].is_boolean());
+    EXPECT_TRUE(ctx["lines"].is_array());
+
+    // block_type defaults to "lines" when no semantic block was resolved.
+    auto bt = ctx["block_type"].get<std::string>();
+    EXPECT_TRUE(bt == "lines" || bt == "function" || bt == "class" ||
+                bt == "method" || bt == "struct")
+        << "unexpected block_type: " << bt;
+
+    // Line range sanity.
+    EXPECT_LE(ctx["start_line"].get<int>(), ctx["end_line"].get<int>());
+    EXPECT_GT(ctx["start_line"].get<int>(), 0);
+
+    // Context lines: at least one, all strings.
+    ASSERT_FALSE(ctx["lines"].empty());
+    for (const auto& line : ctx["lines"]) {
+        EXPECT_TRUE(line.is_string());
+    }
+}
+
+TEST_F(ServerTest, SearchResultContextBlockNameContractEmptyOrSymbolName) {
+    // block_name is always a string. When the search engine resolved
+    // an enclosing function/class, it should be the symbol name. When
+    // not, it's the empty string. Stable presence is the contract.
+    auto j = post("/search", {{"pattern", "Add"}});
+    ASSERT_FALSE(j["results"].empty());
+    for (const auto& row : j["results"]) {
+        auto& ctx = row["context"];
+        ASSERT_TRUE(ctx.contains("block_name"));
+        ASSERT_TRUE(ctx["block_name"].is_string());
+        std::string bn = ctx["block_name"].get<std::string>();
+        // Either empty (no resolved block) or matches a known symbol.
+        // For the synthetic main.go corpus the only symbols are Add,
+        // Calculator, Reset, main.
+        if (!bn.empty()) {
+            EXPECT_TRUE(bn == "Add" || bn == "main" || bn == "Reset" ||
+                        bn == "Calculator")
+                << "unexpected block_name: " << bn;
+        }
+    }
+}
+
+TEST_F(ServerTest, SearchResultFileIdIsStableInteger) {
+    // file_id is intentionally divergent from Go's assignment order;
+    // parity tests mask it. Within a single C++ run, it must be a
+    // stable positive integer per file.
+    auto j = post("/search", {{"pattern", "Add"}});
+    ASSERT_FALSE(j["results"].empty());
+    int prior_id = -1;
+    std::string prior_path;
+    for (const auto& row : j["results"]) {
+        ASSERT_TRUE(row.contains("file_id"));
+        ASSERT_TRUE(row["file_id"].is_number_integer());
+        int fid = row["file_id"].get<int>();
+        EXPECT_GT(fid, 0);
+        if (prior_id != -1 && row["path"].get<std::string>() == prior_path) {
+            EXPECT_EQ(fid, prior_id)
+                << "Same path must map to same file_id within one run";
+        }
+        prior_id = fid;
+        prior_path = row["path"].get<std::string>();
+    }
+}
+
 TEST_F(ServerTest, SearchEmptyPattern) {
     auto j = post("/search", {{"pattern", ""}});
     EXPECT_TRUE(j.contains("error"));
