@@ -2,6 +2,7 @@
 #include "runner/descriptor.h"  // pulls spec_diff into lci::parity
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
+#include <algorithm>
 
 using lci::parity::canonicalize_json;
 using lci::parity::canonicalize_text;
@@ -195,4 +196,119 @@ TEST(CanonicalizeText, CombinesAllNormalizers) {
               "${CORPUS}/d.rs:1\n"
               "\n"
               "${CORPUS}/b.py:1\n");
+}
+
+// ---------- sort_lines ----------
+
+TEST(CanonicalizeTextSortLines, EmptyInputProducesEmptyOutput) {
+    TextCanonicalizeOptions opts;
+    opts.sort_lines = true;
+    EXPECT_EQ(canonicalize_text("", opts), "");
+}
+
+TEST(CanonicalizeTextSortLines, SortsLinesAlphabetically) {
+    TextCanonicalizeOptions opts;
+    opts.sort_lines = true;
+    auto out = canonicalize_text("c\nb\na\n", opts);
+    EXPECT_EQ(out, "a\nb\nc\n");
+    EXPECT_EQ(std::count(out.begin(), out.end(), '\n'), 3);
+    EXPECT_LT(out.find("a\n"), out.find("b\n"));
+    EXPECT_LT(out.find("b\n"), out.find("c\n"));
+}
+
+TEST(CanonicalizeTextSortLines, PreservesLastLineNoNewline) {
+    TextCanonicalizeOptions opts;
+    opts.sort_lines = true;
+    // Last input line "a" has no trailing newline. After sort it ends up
+    // first; the line that originally had a newline ("b") ends up last,
+    // and the trailing newline travels with it.
+    auto out = canonicalize_text("b\na", opts);
+    EXPECT_EQ(out, "ab\n");
+}
+
+TEST(CanonicalizeTextSortLines, SortRunsAfterStrip) {
+    TextCanonicalizeOptions opts;
+    opts.sort_lines = true;
+    opts.strip_lines = {"SKIP"};
+    auto out = canonicalize_text("c\nSKIP\na\nb\n", opts);
+    EXPECT_EQ(out, "a\nb\nc\n");
+    EXPECT_EQ(out.find("SKIP"), std::string::npos);
+}
+
+TEST(CanonicalizeTextSortLines, SortRunsAfterReplace) {
+    TextCanonicalizeOptions opts;
+    opts.sort_lines = true;
+    opts.replace.push_back({R"(zebra)", "aardvark"});
+    auto out = canonicalize_text("zebra\nbear\n", opts);
+    // Replace runs per-line before sort. "zebra" -> "aardvark"; sort puts it first.
+    EXPECT_EQ(out, "aardvark\nbear\n");
+}
+
+TEST(CanonicalizeTextSortLines, BlankLinesSortFirst) {
+    TextCanonicalizeOptions opts;
+    opts.sort_lines = true;
+    auto out = canonicalize_text("c\n\nb\na\n\n", opts);
+    // Two blanks + three letters; blanks sort first.
+    EXPECT_EQ(out.substr(0, 2), "\n\n");
+    EXPECT_EQ(std::count(out.begin(), out.end(), '\n'), 5);
+}
+
+// ---------- collapse_blank_lines ----------
+
+TEST(CanonicalizeTextCollapse, DisabledByDefault) {
+    TextCanonicalizeOptions opts;
+    auto out = canonicalize_text("a\n\n\n\nb\n", opts);
+    EXPECT_EQ(out, "a\n\n\n\nb\n");
+    EXPECT_EQ(std::count(out.begin(), out.end(), '\n'), 5);
+}
+
+TEST(CanonicalizeTextCollapse, CollapsesTwoBlanksToOne) {
+    TextCanonicalizeOptions opts;
+    opts.collapse_blank_lines = true;
+    auto out = canonicalize_text("a\n\n\nb\n", opts);
+    EXPECT_EQ(out, "a\n\nb\n");
+    EXPECT_EQ(std::count(out.begin(), out.end(), '\n'), 3);
+}
+
+TEST(CanonicalizeTextCollapse, CollapsesLongRunsToOne) {
+    TextCanonicalizeOptions opts;
+    opts.collapse_blank_lines = true;
+    auto out = canonicalize_text("x\n\n\n\n\n\n\ny\n", opts);
+    EXPECT_EQ(out, "x\n\ny\n");
+}
+
+TEST(CanonicalizeTextCollapse, CollapsesLeadingBlanks) {
+    TextCanonicalizeOptions opts;
+    opts.collapse_blank_lines = true;
+    auto out = canonicalize_text("\n\n\nfirst\n", opts);
+    EXPECT_EQ(out, "\nfirst\n");
+}
+
+TEST(CanonicalizeTextCollapse, CollapsesTrailingBlanks) {
+    TextCanonicalizeOptions opts;
+    opts.collapse_blank_lines = true;
+    auto out = canonicalize_text("last\n\n\n\n", opts);
+    EXPECT_EQ(out, "last\n\n");
+}
+
+TEST(CanonicalizeTextCollapse, WhitespaceOnlyLinesCollapse) {
+    TextCanonicalizeOptions opts;
+    opts.collapse_blank_lines = true;
+    auto out = canonicalize_text("a\n   \n\nb\n", opts);
+    EXPECT_EQ(out, "a\n\nb\n");
+}
+
+TEST(CanonicalizeTextCollapse, CombinedWithSortLines) {
+    TextCanonicalizeOptions opts;
+    opts.sort_lines = true;
+    opts.collapse_blank_lines = true;
+    auto out = canonicalize_text("c\n\n\n\nb\n\n\na\n", opts);
+    // Collapse first: "c\n\nb\n\na\n" -> 5 lines including 2 blanks.
+    // Sort: 2 empty strings first, then a, b, c.
+    EXPECT_EQ(std::count(out.begin(), out.end(), '\n'), 5);
+    EXPECT_EQ(out.substr(0, 2), "\n\n");
+    // a, b, c each present once.
+    EXPECT_EQ(out.find("a\n"), 2u);
+    EXPECT_EQ(out.find("b\n"), 4u);
+    EXPECT_EQ(out.find("c\n"), 6u);
 }
