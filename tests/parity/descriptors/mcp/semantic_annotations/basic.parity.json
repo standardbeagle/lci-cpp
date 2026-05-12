@@ -11,9 +11,12 @@
   },
   "capture": ["stdout", "exit"],
   "parse": "json",
+  "_rationale": "semantic_annotations label='pure' on multi-lang corpus: corpus's add() functions are not annotated with @pure (the annotation system requires explicit markers in comments/decorators), so both Go and C++ return {total_count:0, annotations:[]}. Byte-identical 123-byte payloads. Probe: /tmp/parity-iter4/semantic_annotations___label___pure.{go,cpp}.json. Retrofitted with _rationale per iter-7 karpathy rule. Content-free but green — to lock real annotation parity, a future iter should add a corpus with @pure markers (or use the propagation engine's inferred-purity output, which IS populated on this corpus per side_effects/basic).",
   "tiers": {
     "stable": ["result.content[].type", "result.content[].text"],
-    "ignore": ["id", "jsonrpc", "result.meta.elapsed_ms", "result.meta.server_pid"]
+    "_rationale_stable": "Envelope matches MCP spec. result.content[].text byte-for-byte identical empty-annotations payload. Locks the dispatch path and the empty-result serialization shape. When a populated-annotation corpus lands the descriptor can stay stable-text without modification.",
+    "ignore": ["id", "jsonrpc", "result.meta.elapsed_ms", "result.meta.server_pid"],
+    "_rationale_ignore": "Universal MCP descriptor noise."
   },
   "tolerances": {"score_abs": 0.05, "timed_max_ms": 60000},
   "expect_exit": 0

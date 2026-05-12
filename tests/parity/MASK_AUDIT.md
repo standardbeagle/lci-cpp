@@ -3,7 +3,7 @@
 **Auto-generated** by `python3 tests/parity/scripts/mask_audit.py`.
 Run after editing any descriptor and check in the result.
 
-Coverage: 64 parity descriptors.
+Coverage: 75 parity descriptors.
 
 Bucket meanings:
 - **(a) Non-determinism / RPC envelope.** Always safe to ignore.
@@ -24,9 +24,11 @@ Bucket meanings:
 | `cli/debug/info` | 0 | ✓ | 0 | 0 | 0 | 0 | 0 |
 | `cli/debug/validate` | 0 |   | 0 | 0 | 0 | 0 | 0 |
 | `cli/git/git-analyze` | 3 | ✓ | 2 | 0 | 1 | 0 | 0 |
+| `cli/search/assembly-rejected` | 1 | ✓ | 0 | 0 | 0 | 0 | 1 |
 | `cli/search/basic` | 0 |   | 0 | 0 | 0 | 0 | 0 |
 | `cli/search/case-insensitive` | 0 | ✓ | 0 | 0 | 0 | 0 | 0 |
 | `cli/search/compact` | 0 |   | 0 | 0 | 0 | 0 | 0 |
+| `cli/search/enhanced-rejected` | 1 | ✓ | 0 | 0 | 0 | 0 | 1 |
 | `cli/search/grep` | 0 |   | 0 | 0 | 0 | 0 | 0 |
 | `cli/search/json` | 2 |   | 0 | 0 | 0 | 2 | 0 |
 | `cli/search/no-results` | 0 | ✓ | 0 | 0 | 0 | 0 | 0 |
@@ -64,31 +66,41 @@ Bucket meanings:
 | `index/lci-go-repo` | 22 | ✓ | 8 | 1 | 7 | 6 | 0 |
 | `index/synthetic-multilang` | 22 | ✓ | 8 | 1 | 7 | 6 | 0 |
 | `mcp/browse_file/basic` | 4 |   | 4 | 0 | 0 | 0 | 0 |
-| `mcp/code_insight/basic` | 4 |   | 4 | 0 | 0 | 0 | 0 |
+| `mcp/code_insight/basic` | 4 | ✓ | 4 | 0 | 0 | 0 | 0 |
+| `mcp/code_insight/mode-git_analyze` | 4 | ✓ | 4 | 0 | 0 | 0 | 0 |
+| `mcp/code_insight/mode-git_hotspots` | 4 | ✓ | 4 | 0 | 0 | 0 | 0 |
+| `mcp/code_insight/mode-statistics` | 4 | ✓ | 4 | 0 | 0 | 0 | 0 |
+| `mcp/code_insight/mode-structure` | 5 | ✓ | 4 | 0 | 1 | 0 | 0 |
+| `mcp/code_insight/mode-unified` | 4 | ✓ | 4 | 0 | 0 | 0 | 0 |
 | `mcp/context_manifest/basic` | 4 |   | 4 | 0 | 0 | 0 | 0 |
 | `mcp/debug_info/basic` | 4 |   | 4 | 0 | 0 | 0 | 0 |
-| `mcp/find_files/basic` | 4 |   | 4 | 0 | 0 | 0 | 0 |
-| `mcp/get_context/basic` | 4 |   | 4 | 0 | 0 | 0 | 0 |
+| `mcp/find_files/basic` | 4 | ✓ | 4 | 0 | 0 | 0 | 0 |
+| `mcp/get_context/basic` | 5 | ✓ | 4 | 0 | 1 | 0 | 0 |
 | `mcp/git_analysis/basic` | 5 | ✓ | 4 | 0 | 1 | 0 | 0 |
 | `mcp/grep/basic` | 4 |   | 4 | 0 | 0 | 0 | 0 |
-| `mcp/index_stats/basic` | 4 |   | 4 | 0 | 0 | 0 | 0 |
+| `mcp/index_stats/basic` | 5 | ✓ | 4 | 0 | 1 | 0 | 0 |
+| `mcp/index_stats/mode-references` | 5 | ✓ | 4 | 0 | 1 | 0 | 0 |
+| `mcp/index_stats/mode-symbols` | 5 | ✓ | 4 | 0 | 1 | 0 | 0 |
+| `mcp/index_stats/mode-types` | 5 | ✓ | 4 | 0 | 1 | 0 | 0 |
+| `mcp/index_stats/wait-ready` | 5 | ✓ | 4 | 0 | 1 | 0 | 0 |
 | `mcp/info/basic` | 4 |   | 4 | 0 | 0 | 0 | 0 |
 | `mcp/inspect_symbol/basic` | 4 |   | 4 | 0 | 0 | 0 | 0 |
 | `mcp/list_symbols/basic` | 4 |   | 4 | 0 | 0 | 0 | 0 |
 | `mcp/search/basic` | 4 |   | 4 | 0 | 0 | 0 | 0 |
-| `mcp/search_definitions/basic` | 4 |   | 4 | 0 | 0 | 0 | 0 |
-| `mcp/semantic_annotations/basic` | 4 |   | 4 | 0 | 0 | 0 | 0 |
-| `mcp/side_effects/basic` | 4 |   | 4 | 0 | 0 | 0 | 0 |
-| `mcp/tree/basic` | 4 |   | 4 | 0 | 0 | 0 | 0 |
+| `mcp/search_definitions/basic` | 4 | ✓ | 4 | 0 | 0 | 0 | 0 |
+| `mcp/semantic_annotations/basic` | 4 | ✓ | 4 | 0 | 0 | 0 | 0 |
+| `mcp/side_effects/basic` | 4 | ✓ | 4 | 0 | 0 | 0 | 0 |
+| `mcp/tree/basic` | 4 | ✓ | 4 | 0 | 0 | 0 | 0 |
 | `probes/deps` | 0 |   | 0 | 0 | 0 | 0 | 0 |
 | `probes/export` | 0 |   | 0 | 0 | 0 | 0 | 0 |
 | `probes/graph` | 0 |   | 0 | 0 | 0 | 0 | 0 |
 
-**Totals:** 297 masks across 64 descriptors. a=206, b=21, c=40, d=30, ?=0.
+**Totals:** 342 masks across 75 descriptors. a=242, b=21, c=47, d=30, ?=2.
 
 ## Unclassified fields needing manual review
 
-None. ✓
+- cli/search/assembly-rejected: _rationale
+- cli/search/enhanced-rejected: _rationale
 
 ## Descriptors with masks but no `_rationale`
 
@@ -104,18 +116,10 @@ None. ✓
 - `http/search` (10 masks)
 - `http/stats` (19 masks)
 - `mcp/browse_file/basic` (4 masks)
-- `mcp/code_insight/basic` (4 masks)
 - `mcp/context_manifest/basic` (4 masks)
 - `mcp/debug_info/basic` (4 masks)
-- `mcp/find_files/basic` (4 masks)
-- `mcp/get_context/basic` (4 masks)
 - `mcp/grep/basic` (4 masks)
-- `mcp/index_stats/basic` (4 masks)
 - `mcp/info/basic` (4 masks)
 - `mcp/inspect_symbol/basic` (4 masks)
 - `mcp/list_symbols/basic` (4 masks)
 - `mcp/search/basic` (4 masks)
-- `mcp/search_definitions/basic` (4 masks)
-- `mcp/semantic_annotations/basic` (4 masks)
-- `mcp/side_effects/basic` (4 masks)
-- `mcp/tree/basic` (4 masks)
