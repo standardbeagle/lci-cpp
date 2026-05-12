@@ -96,7 +96,20 @@ PatternType GitignoreParser::analyze_pattern(
 
 bool GitignoreParser::should_ignore(std::string_view path,
                                     bool is_dir) const {
-    // Normalize to forward slashes
+    // Fast path: on POSIX, paths from std::filesystem::relative + generic_string()
+    // never contain backslashes, so we can match against the caller's buffer
+    // without allocating. Only fall back to a normalized copy if a backslash
+    // is actually present (Windows callers passing native separators).
+    if (path.find('\\') == std::string_view::npos) {
+        bool ignored = false;
+        for (const auto& pat : patterns_) {
+            if (matches_pattern(pat, path, is_dir)) {
+                ignored = !pat.negate;
+            }
+        }
+        return ignored;
+    }
+
     std::string normalized(path);
     for (char& c : normalized) {
         if (c == '\\') c = '/';
