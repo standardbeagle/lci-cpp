@@ -640,6 +640,64 @@ TEST_F(ServerTest, BrowseFileWithStats) {
     EXPECT_TRUE(j["stats"].contains("function_count"));
 }
 
+TEST_F(ServerTest, BrowseFileStatsBlockFullShape) {
+    auto j = post("/browse-file",
+                  {{"file", "main.go"}, {"show_stats", true}});
+    ASSERT_TRUE(j.contains("stats")) << j.dump();
+    auto& stats = j["stats"];
+
+    // Required counter fields.
+    for (const auto* k : {"symbol_count", "function_count"}) {
+        ASSERT_TRUE(stats.contains(k)) << "missing stats key: " << k;
+        EXPECT_TRUE(stats[k].is_number_integer()) << k;
+        EXPECT_GE(stats[k].get<int>(), 0) << k;
+    }
+
+    // main.go has: main, Add, Calculator (struct), Reset -> ~4 symbols.
+    // function_count should be at least 2 (main, Add); Reset is a method.
+    EXPECT_GE(stats["symbol_count"].get<int>(), 3);
+    EXPECT_GE(stats["function_count"].get<int>(), 2);
+}
+
+TEST_F(ServerTest, BrowseFileWithoutStatsFlagOmitsStatsBlock) {
+    // Contract: show_stats=false (default) → no stats block.
+    auto j = post("/browse-file", {{"file", "main.go"}});
+    EXPECT_FALSE(j.contains("stats"))
+        << "stats block must be opt-in via show_stats=true";
+}
+
+TEST_F(ServerTest, BrowseFileSymbolsArrayShape) {
+    auto j = post("/browse-file", {{"file", "main.go"}});
+    ASSERT_TRUE(j.contains("symbols"));
+    ASSERT_TRUE(j["symbols"].is_array());
+    EXPECT_FALSE(j["symbols"].empty());
+
+    bool saw_add = false;
+    bool saw_calc = false;
+    for (const auto& sym : j["symbols"]) {
+        EXPECT_TRUE(sym.contains("name"));
+        EXPECT_TRUE(sym.contains("type"));
+        EXPECT_TRUE(sym.contains("line"));
+        EXPECT_GT(sym["line"].get<int>(), 0);
+
+        auto name = sym["name"].get<std::string>();
+        if (name == "Add") saw_add = true;
+        if (name == "Calculator") saw_calc = true;
+    }
+    EXPECT_TRUE(saw_add);
+    EXPECT_TRUE(saw_calc);
+}
+
+TEST_F(ServerTest, BrowseFileLanguageAndPath) {
+    auto j = post("/browse-file", {{"file", "main.go"}});
+    auto& fi = j["file"];
+    EXPECT_EQ(fi["language"].get<std::string>(), "go");
+    ASSERT_TRUE(fi.contains("path"));
+    EXPECT_NE(fi["path"].get<std::string>().find("main.go"), std::string::npos);
+    ASSERT_TRUE(fi.contains("file_id"));
+    EXPECT_GT(fi["file_id"].get<int>(), 0);
+}
+
 TEST_F(ServerTest, BrowseFileNotFound) {
     auto j = post("/browse-file", {{"file", "nonexistent.go"}});
     EXPECT_TRUE(j.contains("error"));
