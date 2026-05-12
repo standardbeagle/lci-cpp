@@ -302,6 +302,55 @@ TEST_F(ServerTest, StatusEndpointReportsIndexingProgress) {
     EXPECT_EQ(ip["elapsed_ms"].get<int64_t>(), 0);
 }
 
+TEST_F(ServerTest, IndexingProgressFieldTypesAndRanges) {
+    auto j = post("/status");
+    auto ip = j["indexing_progress"];
+
+    // Strict types: phase is string, others numeric.
+    EXPECT_TRUE(ip["phase"].is_string());
+    EXPECT_TRUE(ip["files_scanned"].is_number_integer());
+    EXPECT_TRUE(ip["files_total"].is_number_integer());
+    EXPECT_TRUE(ip["percent_complete"].is_number());
+    EXPECT_TRUE(ip["elapsed_ms"].is_number());
+
+    // Non-negative invariants.
+    EXPECT_GE(ip["files_scanned"].get<int>(), 0);
+    EXPECT_GE(ip["files_total"].get<int>(), 0);
+    EXPECT_GE(ip["percent_complete"].get<double>(), 0.0);
+    EXPECT_LE(ip["percent_complete"].get<double>(), 100.0);
+    EXPECT_GE(ip["elapsed_ms"].get<int64_t>(), 0);
+}
+
+TEST_F(ServerTest, IndexingProgressPhaseIsKnownEnumValue) {
+    auto j = post("/status");
+    auto phase = j["indexing_progress"]["phase"].get<std::string>();
+    // Locked enum values from phase_to_string in src/server/server.cpp.
+    EXPECT_TRUE(phase == "idle" || phase == "scanning" ||
+                phase == "indexing" || phase == "merging")
+        << "unknown phase value: " << phase;
+}
+
+TEST_F(ServerTest, IndexingProgressInvariantScannedLeqTotal) {
+    auto j = post("/status");
+    auto ip = j["indexing_progress"];
+    // When both are populated, scanned must never exceed total.
+    int scanned = ip["files_scanned"].get<int>();
+    int total = ip["files_total"].get<int>();
+    if (total > 0) {
+        EXPECT_LE(scanned, total)
+            << "files_scanned must not exceed files_total";
+    }
+}
+
+TEST_F(ServerTest, StatusReadyFlagAndProgressConsistency) {
+    auto j = post("/status");
+    EXPECT_TRUE(j["ready"].get<bool>());
+    EXPECT_FALSE(j["indexing_active"].get<bool>());
+    EXPECT_EQ(j["indexing_progress"]["phase"].get<std::string>(), "idle");
+    // The legacy `progress` field is 1.0 when ready, 0.0 otherwise.
+    EXPECT_DOUBLE_EQ(j["progress"].get<double>(), 1.0);
+}
+
 TEST_F(ServerTest, SearchEndpoint) {
     auto j = post("/search", {{"pattern", "Add"}});
     ASSERT_TRUE(j.contains("results"));

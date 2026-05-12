@@ -10,6 +10,7 @@
   },
   "capture": ["stdout", "exit"],
   "parse": "json",
+  "_rationale": "C++ /status emits an `indexing_progress` block (phase/files_scanned/files_total/percent_complete/elapsed_ms) describing live indexing state. Go's /status does not include this object. Locked C++-side by ServerTest.IndexingProgressFieldTypesAndRanges, IndexingProgressPhaseIsKnownEnumValue, IndexingProgressInvariantScannedLeqTotal. Intentional enrichment.",
   "tiers": {
     "stable": ["ready", "file_count", "indexing_active"],
     "ignore": [
