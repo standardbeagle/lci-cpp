@@ -31,6 +31,7 @@ add_executable(parity_unit_tests
     unit_tests/field_tier_test.cpp
     unit_tests/diff_test.cpp
     unit_tests/descriptor_test.cpp
+    unit_tests/socket_path_test.cpp
 )
 target_link_libraries(parity_unit_tests PRIVATE
     spec_diff

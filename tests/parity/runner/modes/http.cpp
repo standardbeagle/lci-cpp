@@ -35,9 +35,14 @@ uint32_t hash_corpus(const std::string& abs_corpus) {
     return hash;
 }
 
-// The C++ binary (post-namespacing commit) uses lci-<uid>-<hash>.sock.
-// The Go binary (older) uses lci-server-<hash>.sock. Return both candidates;
-// the caller polls whichever one appears.
+// SUNSET-WHEN-GO-UPGRADES (Dart task BNXsh3tUpMSW):
+//   The C++ binary (post-namespacing commit) uses lci-<uid>-<hash>.sock.
+//   The older Go reference binary uses lci-server-<hash>.sock. We poll
+//   both candidates so HTTP parity works across the version mismatch.
+//   When the Go reference is updated to the new uid-namespaced format,
+//   drop the second candidate, restore a single compute_socket_path()
+//   helper, and delete this comment. Behaviour locked by
+//   tests/parity/unit_tests/socket_path_test.cpp.
 std::vector<std::string> candidate_socket_paths(const std::string& abs_corpus) {
     uint32_t hash = hash_corpus(abs_corpus);
     const auto uid = static_cast<uint32_t>(::getuid());
@@ -209,6 +214,11 @@ CapturedOutput run_http(const std::string& binary_path,
     kill_server(srv, sock_path);
 
     return cap;
+}
+
+std::vector<std::string> candidate_socket_paths_for_test(
+    const std::string& abs_corpus) {
+    return candidate_socket_paths(abs_corpus);
 }
 
 } // namespace lci::parity
