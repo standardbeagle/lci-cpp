@@ -91,3 +91,18 @@ else()
         endif()
     endforeach()
 endif()
+
+# ---- Mask audit script as a CTest entry ----
+# Runs scripts/mask_audit.py, regenerates MASK_AUDIT.md, and fails if any
+# descriptor mask still falls into the (?) Unclassified bucket. Cheap;
+# always part of the parity label.
+find_package(Python3 COMPONENTS Interpreter)
+if(Python3_Interpreter_FOUND)
+    add_test(NAME parity.mask_audit
+             COMMAND ${Python3_EXECUTABLE}
+                     ${CMAKE_CURRENT_SOURCE_DIR}/scripts/mask_audit.py
+             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+    set_tests_properties(parity.mask_audit PROPERTIES
+        LABELS "parity"
+        TIMEOUT 30)
+endif()
