@@ -11,6 +11,7 @@
   },
   "capture": ["stdout", "exit"],
   "parse": "json",
+  "_rationale": "C++ populates tree.root.file_path with the defining file's path (relative to project root). Go emits empty string for this field. Intentional C++ enrichment locked by ServerTest.TreeRootFilePathIsRelativeToProjectRoot. Ignored in parity tier so the rest of the tree shape compares cleanly.",
   "tiers": {
     "stable": [],
     "ignore": ["pid", "start_time", "version", "uptime_ms", "elapsed_ms", "request_id", "timestamp", "schema_version", "tree.root.file_path"]

@@ -651,6 +651,96 @@ TEST_F(ServerTest, TreeEndpoint) {
     EXPECT_TRUE(j.contains("tree") || j.contains("error"));
 }
 
+// Rich asserts on the tree endpoint shape and file_path policy.
+
+TEST_F(ServerTest, TreeRootNodeFullShape) {
+    auto j = post("/tree", {{"function_name", "Add"}});
+    ASSERT_TRUE(j.contains("tree")) << j.dump();
+    auto& tree = j["tree"];
+    EXPECT_EQ(tree["root_function"].get<std::string>(), "Add");
+
+    ASSERT_TRUE(tree.contains("root"));
+    auto& root = tree["root"];
+    // Required keys on every node.
+    for (const auto* key : {"name", "line", "depth", "file_path",
+                             "node_type", "dependency_count",
+                             "dependent_count", "edit_risk_score",
+                             "impact_radius", "annotations",
+                             "safety_notes", "stability_tags",
+                             "children"}) {
+        EXPECT_TRUE(root.contains(key)) << "missing key: " << key;
+    }
+
+    EXPECT_EQ(root["name"].get<std::string>(), "Add");
+    EXPECT_EQ(root["depth"].get<int>(), 0);
+    EXPECT_GT(root["line"].get<int>(), 0);
+    EXPECT_TRUE(root["children"].is_array());
+}
+
+TEST_F(ServerTest, TreeRootFilePathIsRelativeToProjectRoot) {
+    auto j = post("/tree", {{"function_name", "Add"}});
+    ASSERT_TRUE(j.contains("tree")) << j.dump();
+    auto& root = j["tree"]["root"];
+
+    ASSERT_TRUE(root.contains("file_path"));
+    ASSERT_TRUE(root["file_path"].is_string());
+    std::string fp = root["file_path"].get<std::string>();
+    EXPECT_FALSE(fp.empty())
+        << "C++ tree.root.file_path is intentionally populated (richer "
+           "than Go which emits empty). See docs/parity/http-tree.md.";
+    EXPECT_NE(fp.front(), '/') << "Path must be relative: " << fp;
+    EXPECT_NE(fp.find("main.go"), std::string::npos)
+        << "Add is defined in main.go: " << fp;
+}
+
+TEST_F(ServerTest, TreeOptionsBlockShape) {
+    auto j = post("/tree", {{"function_name", "Add"}, {"max_depth", 5}});
+    ASSERT_TRUE(j.contains("tree"));
+    auto& tree = j["tree"];
+    ASSERT_TRUE(tree.contains("options"));
+    auto& opts = tree["options"];
+    EXPECT_TRUE(opts["agent_mode"].is_boolean());
+    EXPECT_FALSE(opts["agent_mode"].get<bool>());
+    EXPECT_FALSE(opts["compact"].get<bool>());
+    EXPECT_FALSE(opts["show_lines"].get<bool>());
+    EXPECT_EQ(opts["max_depth"].get<int>(), 5);
+    EXPECT_EQ(opts["exclude_pattern"].get<std::string>(), "");
+
+    EXPECT_GE(tree["total_nodes"].get<int>(), 0);
+}
+
+TEST_F(ServerTest, TreeFunctionNotFoundReturnsError) {
+    auto j = post("/tree", {{"function_name", "DoesNotExist123"}});
+    EXPECT_TRUE(j.contains("error"));
+    EXPECT_NE(j["error"].get<std::string>().find("not found"),
+              std::string::npos);
+}
+
+TEST_F(ServerTest, TreeMissingFunctionNameReturns400) {
+    auto cli = make_client();
+    auto res = cli.Post("/tree", "{}", "application/json");
+    ASSERT_TRUE(res);
+    EXPECT_EQ(res->status, 400);
+    auto j = nlohmann::json::parse(res->body);
+    EXPECT_TRUE(j.contains("error"));
+    EXPECT_NE(j["error"].get<std::string>().find("function_name"),
+              std::string::npos);
+}
+
+TEST_F(ServerTest, TreeChildNodesHavePositiveDepth) {
+    auto j = post("/tree", {{"function_name", "Add"}, {"max_depth", 10}});
+    ASSERT_TRUE(j.contains("tree"));
+    auto& root = j["tree"]["root"];
+    EXPECT_EQ(root["depth"].get<int>(), 0);
+    // Every child of root must have depth==1, grandchildren depth==2, etc.
+    for (const auto& child : root["children"]) {
+        EXPECT_EQ(child["depth"].get<int>(), 1);
+        for (const auto& gc : child["children"]) {
+            EXPECT_EQ(gc["depth"].get<int>(), 2);
+        }
+    }
+}
+
 TEST_F(ServerTest, GitAnalyzeNotImplemented) {
     auto j = post("/git-analyze", {{"scope", "staged"}});
     EXPECT_TRUE(j.contains("error"));

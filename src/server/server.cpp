@@ -1134,6 +1134,19 @@ void IndexServer::handle_tree(const httplib::Request& req,
         return n;
     };
 
+    // Normalize file_path to relative-to-project-root so tree paths
+    // match what /search and /git-analyze emit.
+    auto rel_tree_path = [&](const std::string& p) -> std::string {
+        if (p.empty()) return p;
+        std::filesystem::path abs_path(p);
+        if (!abs_path.is_absolute()) return p;
+        std::error_code ec;
+        auto rel = std::filesystem::relative(abs_path,
+                                             config_.project.root, ec);
+        if (ec || rel.empty()) return p;
+        return rel.generic_string();
+    };
+
     std::function<nlohmann::json(const FunctionTreeNode&, int)> serialize_node;
     serialize_node = [&](const FunctionTreeNode& node, int depth) -> nlohmann::json {
         nlohmann::json nj;
@@ -1145,7 +1158,9 @@ void IndexServer::handle_tree(const httplib::Request& req,
         // via /browse-file. Empty string for unresolved nodes (root with
         // no symbol bound, recursion guards, etc.).
         nj["file_path"] =
-            node.file_id != 0 ? indexer_->get_file_path(node.file_id) : "";
+            node.file_id != 0
+                ? rel_tree_path(indexer_->get_file_path(node.file_id))
+                : "";
         nj["node_type"] = 0;
         nj["dependency_count"] = static_cast<int>(node.children.size());
         nj["dependent_count"] = 0;
