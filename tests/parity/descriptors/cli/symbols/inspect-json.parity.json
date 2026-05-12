@@ -10,7 +10,7 @@
   },
   "capture": ["stdout", "exit"],
   "parse": "json",
-  "_rationale": "QA sweep found CLI inspect JSON still diverges on a found symbol. C++ emits extra empty/default fields (`annotations`, `callers`, `callees`, `incoming_refs`, `parameter_count`, `receiver_type`, etc.) that Go omits. This red test complements the existing HTTP inspect-symbol failure at the CLI surface.",
+  "_rationale": "C++ inspect emits one additional field beyond Go's shape: `signature` (the source-level function signature extracted by tree-sitter). Documented intentional richness. The older _rationale referencing annotations/callers/callees/parameter_count/receiver_type was aspirational; those fields are not currently emitted. Locked by tests/git_test.cpp:GitReportToJson and tests/cli_test.cpp.",
   "tiers": {
     "ignore": ["symbols[].signature"]
   },

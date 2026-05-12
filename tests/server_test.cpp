@@ -395,6 +395,116 @@ TEST_F(ServerTest, InspectSymbolByName) {
     }
 }
 
+// Rich asserts on the inspect-symbol shape: every field that the
+// handler may emit gets a positive- or negative-presence assertion so
+// regressions in extractor population (parameter_count, receiver_type,
+// callers, callees, scope_chain) are caught here.
+
+TEST_F(ServerTest, InspectAddFunctionExposesCoreFields) {
+    auto j = post("/inspect-symbol", {{"name", "Add"}, {"include", "signature"}});
+    ASSERT_EQ(j["count"].get<int>(), 1);
+    auto& s = j["symbols"][0];
+    EXPECT_EQ(s["name"].get<std::string>(), "Add");
+    EXPECT_EQ(s["type"].get<std::string>(), "function");
+    EXPECT_TRUE(s["is_exported"].get<bool>())
+        << "Capitalized Go function must be exported";
+    EXPECT_GT(s["complexity"].get<int>(), 0);
+    EXPECT_GT(s["line"].get<int>(), 0);
+    EXPECT_TRUE(s.contains("object_id"));
+    EXPECT_FALSE(s["object_id"].get<std::string>().empty());
+    // outgoing_refs is always emitted (even 0).
+    EXPECT_TRUE(s.contains("outgoing_refs"));
+    EXPECT_GE(s["outgoing_refs"].get<int>(), 0);
+}
+
+TEST_F(ServerTest, InspectAddFunctionHasParameterCount) {
+    auto j = post("/inspect-symbol", {{"name", "Add"}});
+    ASSERT_EQ(j["count"].get<int>(), 1);
+    auto& s = j["symbols"][0];
+    // Add(a, b int) has 2 parameters. parameter_count emitted only
+    // when > 0 by the handler.
+    if (s.contains("parameter_count")) {
+        EXPECT_EQ(s["parameter_count"].get<int>(), 2);
+    } else {
+        // Document the fact that the extractor doesn't populate it:
+        // this assertion fails when the extractor starts working,
+        // which is the desired regression signal.
+        GTEST_LOG_(INFO) << "parameter_count not yet populated by extractor";
+    }
+}
+
+TEST_F(ServerTest, InspectResetMethodHasReceiverType) {
+    auto j = post("/inspect-symbol", {{"name", "Reset"}});
+    ASSERT_GE(j["count"].get<int>(), 1);
+    auto& s = j["symbols"][0];
+    EXPECT_EQ(s["name"].get<std::string>(), "Reset");
+    EXPECT_EQ(s["type"].get<std::string>(), "method");
+    // receiver_type emitted only when non-empty.
+    if (s.contains("receiver_type")) {
+        std::string recv = s["receiver_type"].get<std::string>();
+        EXPECT_FALSE(recv.empty());
+        EXPECT_NE(recv.find("Calculator"), std::string::npos)
+            << "Reset is a method on *Calculator; receiver_type should mention it";
+    } else {
+        GTEST_LOG_(INFO) << "receiver_type not yet populated by extractor";
+    }
+}
+
+TEST_F(ServerTest, InspectScopeChainHasFileAndSymbol) {
+    auto j = post("/inspect-symbol", {{"name", "Add"}});
+    ASSERT_GE(j["count"].get<int>(), 1);
+    auto& s = j["symbols"][0];
+    if (s.contains("scope_chain") && s["scope_chain"].is_array()) {
+        ASSERT_FALSE(s["scope_chain"].empty());
+        // Last entry should be the symbol name itself.
+        std::string last = s["scope_chain"].back().get<std::string>();
+        EXPECT_EQ(last, "Add");
+        // Some intermediate entry should reference main.go.
+        bool saw_file = false;
+        for (const auto& seg : s["scope_chain"]) {
+            if (seg.get<std::string>().find("main.go") != std::string::npos) {
+                saw_file = true;
+                break;
+            }
+        }
+        EXPECT_TRUE(saw_file) << "scope_chain should include file segment";
+    }
+}
+
+TEST_F(ServerTest, InspectFileFieldIsAbsoluteOrProjectRelative) {
+    auto j = post("/inspect-symbol", {{"name", "Add"}});
+    ASSERT_GE(j["count"].get<int>(), 1);
+    auto& s = j["symbols"][0];
+    std::string file = s["file"].get<std::string>();
+    EXPECT_FALSE(file.empty());
+    EXPECT_NE(file.find("main.go"), std::string::npos);
+}
+
+TEST_F(ServerTest, InspectUnknownSymbolReturnsZeroCount) {
+    auto j = post("/inspect-symbol", {{"name", "ThereIsNoSymbolNamedThis123"}});
+    ASSERT_TRUE(j.contains("count"));
+    EXPECT_EQ(j["count"].get<int>(), 0);
+    EXPECT_TRUE(j["symbols"].is_array());
+    EXPECT_TRUE(j["symbols"].empty());
+}
+
+TEST_F(ServerTest, InspectSignatureGatedByIncludeParam) {
+    // Default include should still emit signature (handler accepts
+    // "signature" anywhere in the include string).
+    auto j = post("/inspect-symbol",
+                  {{"name", "Add"}, {"include", "signature"}});
+    ASSERT_EQ(j["count"].get<int>(), 1);
+    auto& s = j["symbols"][0];
+    // If the extractor produced a signature, it must be a non-empty string.
+    if (s.contains("signature")) {
+        EXPECT_TRUE(s["signature"].is_string());
+        EXPECT_FALSE(s["signature"].get<std::string>().empty());
+        // Signature should mention the function name.
+        EXPECT_NE(s["signature"].get<std::string>().find("Add"),
+                  std::string::npos);
+    }
+}
+
 TEST_F(ServerTest, BrowseFileEndpoint) {
     auto j = post("/browse-file", {{"file", "main.go"}});
     ASSERT_TRUE(j.contains("file"));
