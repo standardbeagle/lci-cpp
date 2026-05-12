@@ -79,6 +79,7 @@ else()
                  WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
         set_tests_properties(parity.${TID} PROPERTIES
             LABELS "parity"
+            FIXTURES_REQUIRED parity_fixture
             ENVIRONMENT "LCI_GO=${LCI_GO_PATH};LCI_CPP=$<TARGET_FILE:lci>;PARITY_CORPORA=${CMAKE_CURRENT_SOURCE_DIR}/corpora;PARITY_FAILURES=${CMAKE_BINARY_DIR}/parity-failures"
             TIMEOUT 120)
         if(D MATCHES ".*/descriptors/index/.*")
@@ -91,6 +92,23 @@ else()
         endif()
     endforeach()
 endif()
+
+# ---- Orphan-process cleanup fixtures ----
+# CTest fixtures run setup before the suite and verify after, ensuring
+# leaked lci server children from prior crashed runs don't pollute the
+# next run (parity_runner_inotify_leak memory note). Tests in the parity
+# label depend on parity_setup; parity_verify runs after them all.
+add_test(NAME parity_setup
+         COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/scripts/orphan_cleanup.sh setup)
+set_tests_properties(parity_setup PROPERTIES
+    FIXTURES_SETUP parity_fixture
+    LABELS "parity")
+
+add_test(NAME parity_verify
+         COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/scripts/orphan_cleanup.sh verify)
+set_tests_properties(parity_verify PROPERTIES
+    FIXTURES_CLEANUP parity_fixture
+    LABELS "parity")
 
 # ---- Mask audit script as a CTest entry ----
 # Runs scripts/mask_audit.py, regenerates MASK_AUDIT.md, and fails if any
