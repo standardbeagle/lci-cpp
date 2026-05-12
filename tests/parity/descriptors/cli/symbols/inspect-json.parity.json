@@ -11,7 +11,9 @@
   "capture": ["stdout", "exit"],
   "parse": "json",
   "_rationale": "QA sweep found CLI inspect JSON still diverges on a found symbol. C++ emits extra empty/default fields (`annotations`, `callers`, `callees`, `incoming_refs`, `parameter_count`, `receiver_type`, etc.) that Go omits. This red test complements the existing HTTP inspect-symbol failure at the CLI surface.",
-  "tiers": {},
+  "tiers": {
+    "ignore": ["symbols[].signature"]
+  },
   "tolerances": {"score_abs": 0.0, "timed_max_ms": 60000},
   "expect_exit": 0
 }

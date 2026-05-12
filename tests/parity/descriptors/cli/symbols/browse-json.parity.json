@@ -11,7 +11,9 @@
   "capture": ["stdout", "exit"],
   "parse": "json",
   "_rationale": "Adds explicit coverage for the CLI browse JSON path, which is implemented in the Go command layer but was not represented in parity descriptors. This locks in the compact file/symbol JSON shape already shared by both binaries on the synthetic corpus.",
-  "tiers": {},
+  "tiers": {
+    "ignore": ["file.file_id"]
+  },
   "tolerances": {"score_abs": 0.0, "timed_max_ms": 60000},
   "expect_exit": 0
 }

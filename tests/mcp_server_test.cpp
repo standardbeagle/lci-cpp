@@ -226,7 +226,8 @@ TEST_F(McpStdioTest, ToolCallUnknownTool) {
 
     ASSERT_EQ(responses.size(), 2u);
     auto& call_resp = responses[1];
-    EXPECT_TRUE(call_resp["result"]["isError"].get<bool>());
+    EXPECT_TRUE(call_resp.contains("error"));
+    EXPECT_EQ(call_resp["error"]["code"].get<int>(), -32602);
 }
 
 TEST_F(McpStdioTest, ExceptionRecovery) {

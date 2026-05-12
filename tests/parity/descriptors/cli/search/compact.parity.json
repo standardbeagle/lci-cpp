@@ -14,6 +14,7 @@
   "tolerances": {"score_abs": 0.0, "timed_max_ms": 60000},
   "expect_exit": 0,
   "text_normalize": {
-    "strip_lines": ["DEBUG:"]
+    "strip_lines": ["DEBUG:"],
+    "sort_lines": true
   }
 }

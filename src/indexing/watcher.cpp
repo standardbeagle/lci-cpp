@@ -267,22 +267,21 @@ bool FileWatcher::add_watches(const std::string& root) {
 bool FileWatcher::should_ignore_dir(const std::string& path) const {
     std::string basename = fs::path(path).filename().string();
 
+    std::error_code rel_ec;
+    auto rel = fs::relative(path, config_.project.root, rel_ec);
+    std::string rel_str = rel_ec ? basename : rel.generic_string();
+
     for (const auto& pattern : config_.exclude) {
         std::string dir_pattern = pattern;
         if (dir_pattern.ends_with("/**")) {
             dir_pattern = dir_pattern.substr(0, dir_pattern.size() - 3);
         }
         if (FileScanner::match_glob(dir_pattern, basename)) return true;
-        if (FileScanner::match_glob(pattern, path)) return true;
+        if (FileScanner::match_glob(pattern, rel_str)) return true;
     }
 
     if (config_.index.respect_gitignore) {
-        std::error_code ec;
-        auto rel = fs::relative(path, config_.project.root, ec);
-        if (!ec) {
-            std::string rel_str = rel.generic_string();
-            if (gitignore_.should_ignore(rel_str, true)) return true;
-        }
+        if (gitignore_.should_ignore(rel_str, true)) return true;
     }
 
     return false;
@@ -291,25 +290,20 @@ bool FileWatcher::should_ignore_dir(const std::string& path) const {
 bool FileWatcher::should_process_path(const std::string& path) const {
     std::string basename = fs::path(path).filename().string();
 
+    std::error_code rel_ec;
+    auto rel = fs::relative(path, config_.project.root, rel_ec);
+    std::string rel_str = rel_ec ? basename : rel.generic_string();
+
     for (const auto& pattern : config_.exclude) {
         if (FileScanner::match_glob(pattern, basename)) return false;
-        if (FileScanner::match_glob(pattern, path)) return false;
+        if (FileScanner::match_glob(pattern, rel_str)) return false;
     }
 
     if (config_.index.respect_gitignore) {
-        std::error_code ec;
-        auto rel = fs::relative(path, config_.project.root, ec);
-        if (!ec) {
-            std::string rel_str = rel.generic_string();
-            if (gitignore_.should_ignore(rel_str, false)) return false;
-        }
+        if (gitignore_.should_ignore(rel_str, false)) return false;
     }
 
     if (!config_.include.empty()) {
-        std::error_code ec;
-        auto rel = fs::relative(path, config_.project.root, ec);
-        std::string rel_str = ec ? basename : rel.generic_string();
-
         for (const auto& pattern : config_.include) {
             if (FileScanner::match_glob(pattern, rel_str)) return true;
             if (FileScanner::match_glob(pattern, basename)) return true;

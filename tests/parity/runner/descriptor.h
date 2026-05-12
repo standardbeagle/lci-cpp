@@ -37,6 +37,7 @@ struct DescriptorTextNormalize {
     bool                                                strip_emoji_prefix = false;
     std::vector<std::string>                            strip_lines;
     std::vector<std::pair<std::string, std::string>>    replace;
+    bool                                                sort_lines = false;
 };
 
 struct Descriptor {

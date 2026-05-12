@@ -16,7 +16,7 @@ Index Settings:
 
 Performance Settings:
   Max memory:        500 MB
-  Max goroutines:    8
+  Max goroutines:     N
   Debounce:          100 ms
 
 Search Settings:

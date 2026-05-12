@@ -13,5 +13,16 @@
   "_rationale": "QA-discovered divergence from a direct Go-vs-C++ CLI sweep. Both binaries implement `status`, but the human-readable output differs materially: Go reports goroutines and three memory lines; C++ reports threads and RSS only.",
   "tiers": {},
   "tolerances": {"score_abs": 0.0, "timed_max_ms": 60000},
-  "expect_exit": 0
+  "expect_exit": 0,
+  "text_normalize": {
+    "replace": [
+      {"pattern": "Files indexed:\\s+\\d+", "with": "Files indexed:    N"},
+      {"pattern": "Build time:\\s+\\d+ ms", "with": "Build time:       <MS>"},
+      {"pattern": "Uptime:\\s+\\d+ seconds", "with": "Uptime:           <S>"},
+      {"pattern": "Goroutines:\\s+\\d+", "with": "Goroutines:       N"},
+      {"pattern": "Allocated:\\s+[\\d\\.]+ MB", "with": "Allocated:        <MB>"},
+      {"pattern": "Heap:\\s+[\\d\\.]+ MB", "with": "Heap:             <MB>"},
+      {"pattern": "Total system:\\s+[\\d\\.]+ MB", "with": "Total system:     <MB>"}
+    ]
+  }
 }

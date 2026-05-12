@@ -5,3 +5,8 @@ compile_commands.json
 
 # dartai loop state (machine-local)
 .dartai/
+
+# Real projects test data (git submodules)
+real_projects/go/
+real_projects/python/
+real_projects/typescript/

@@ -226,14 +226,14 @@ nlohmann::json canonicalize_json(const nlohmann::json& in,
 
 std::string canonicalize_text(std::string_view in,
                               const TextCanonicalizeOptions& opts) {
-    std::string out;
-    out.reserve(in.size());
+    struct Line { std::string text; bool followed_by_nl; };
+    std::vector<Line> lines;
     size_t pos = 0;
     while (pos < in.size()) {
         size_t nl = in.find('\n', pos);
+        bool has_nl = (nl != std::string_view::npos);
         std::string_view raw =
-            (nl == std::string_view::npos) ? in.substr(pos)
-                                           : in.substr(pos, nl - pos);
+            has_nl ? in.substr(pos, nl - pos) : in.substr(pos);
 
         size_t end = raw.size();
         while (end > 0 && (raw[end - 1] == ' ' || raw[end - 1] == '\t' ||
@@ -246,7 +246,7 @@ std::string canonicalize_text(std::string_view in,
         // the original DEBUG/banner text without being mangled by timing
         // scrub or path rewrites first.
         if (line_has_strip_substring(line, opts.strip_lines)) {
-            if (nl == std::string_view::npos) break;
+            if (!has_nl) break;
             pos = nl + 1;
             continue;
         }
@@ -256,10 +256,21 @@ std::string canonicalize_text(std::string_view in,
         rewrite_corpus_prefix_inplace(line, opts.corpus_prefix);
         if (!opts.replace.empty())   apply_replace_rules(line, opts.replace);
 
-        out.append(line);
-        if (nl == std::string_view::npos) break;
-        out.push_back('\n');
+        lines.push_back({std::move(line), has_nl});
+        if (!has_nl) break;
         pos = nl + 1;
+    }
+
+    if (opts.sort_lines) {
+        std::sort(lines.begin(), lines.end(),
+                  [](const Line& a, const Line& b) { return a.text < b.text; });
+    }
+
+    std::string out;
+    out.reserve(in.size());
+    for (const auto& l : lines) {
+        out.append(l.text);
+        if (l.followed_by_nl) out.push_back('\n');
     }
     return out;
 }

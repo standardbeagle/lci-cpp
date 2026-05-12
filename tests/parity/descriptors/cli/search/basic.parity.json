@@ -19,6 +19,7 @@
       {"pattern": "\\(integrated mode[^)]*\\)", "with": "(MODE)"},
       {"pattern": "\\(standard mode\\)",        "with": "(MODE)"},
       {"pattern": "\\$\\{CORPUS\\}/",           "with": ""}
-    ]
+    ],
+    "sort_lines": true
   }
 }

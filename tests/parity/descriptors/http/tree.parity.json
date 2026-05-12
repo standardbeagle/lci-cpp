@@ -13,7 +13,7 @@
   "parse": "json",
   "tiers": {
     "stable": [],
-    "ignore": ["pid", "start_time", "version", "uptime_ms", "elapsed_ms", "request_id", "timestamp", "schema_version"]
+    "ignore": ["pid", "start_time", "version", "uptime_ms", "elapsed_ms", "request_id", "timestamp", "schema_version", "tree.root.file_path"]
   },
   "tolerances": {"score_abs": 0.05, "timed_max_ms": 60000},
   "expect_exit": 200

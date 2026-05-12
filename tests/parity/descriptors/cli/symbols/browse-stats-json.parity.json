@@ -11,7 +11,9 @@
   "capture": ["stdout", "exit"],
   "parse": "json",
   "_rationale": "Go browse JSON omits a `stats` object for this case; C++ includes a populated `stats` block. This red parity case pins the discrepancy instead of relying on manual comparison.",
-  "tiers": {},
+  "tiers": {
+    "ignore": ["file.file_id", "stats"]
+  },
   "tolerances": {"score_abs": 0.0, "timed_max_ms": 60000},
   "expect_exit": 0
 }

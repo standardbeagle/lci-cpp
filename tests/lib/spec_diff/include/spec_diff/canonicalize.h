@@ -64,6 +64,10 @@ struct TextCanonicalizeOptions {
     // Per-spec regex replacements applied to each line in order.
     // Each pair is {ECMAScript regex pattern, replacement template}.
     std::vector<std::pair<std::string, std::string>> replace;
+
+    // Sort lines in output. Use when producers emit semantically
+    // equivalent multiset content in nondeterministic order.
+    bool sort_lines = false;
 };
 
 // Canonicalize a JSON value:

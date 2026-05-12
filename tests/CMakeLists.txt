@@ -108,6 +108,11 @@ add_executable(lci_integration_tests
     integration/mcp_tools_integration_test.cpp
     integration/spec_runner.cpp
     integration/spec_migration_test.cpp
+    integration/real_project_integration_test.cpp
+    integration/real_project_analysis_test.cpp
+    integration/real_project_context_test.cpp
+    integration/real_project_phrase_test.cpp
+    integration/real_project_performance_test.cpp
 )
 target_include_directories(lci_integration_tests PRIVATE
     "${CMAKE_SOURCE_DIR}/include"
@@ -135,11 +140,13 @@ gtest_discover_tests(lci_integration_tests
 # ---------------------------------------------------------------------------
 add_executable(lci_benchmarks
     benchmarks/benchmark_main.cpp
+    benchmarks/real_project_benchmarks.cpp
+    benchmarks/real_project_advanced_benchmarks.cpp
 )
 target_include_directories(lci_benchmarks PRIVATE
     "${CMAKE_SOURCE_DIR}/include"
     "${CMAKE_BINARY_DIR}/generated"
-    "${CMAKE_CURRENT_SOURCE_DIR}/helpers"
+    "${CMAKE_CURRENT_SOURCE_DIR}"
 )
 target_link_libraries(lci_benchmarks PRIVATE
     lci_lib

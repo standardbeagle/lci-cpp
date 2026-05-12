@@ -14,6 +14,7 @@
 #include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
+#include <vector>
 
 namespace fs = std::filesystem;
 
@@ -26,15 +27,28 @@ namespace {
 // 32-bit polynomial hash (h = h*31 + c) of the absolute project root.
 // The Go binary follows the same format so both servers bind the same
 // socket when given the same --root.
-std::string compute_socket_path(const std::string& abs_corpus) {
+uint32_t hash_corpus(const std::string& abs_corpus) {
     uint32_t hash = 0;
     for (unsigned char c : abs_corpus) {
         hash = hash * 31u + static_cast<uint32_t>(c);
     }
+    return hash;
+}
+
+// The C++ binary (post-namespacing commit) uses lci-<uid>-<hash>.sock.
+// The Go binary (older) uses lci-server-<hash>.sock. Return both candidates;
+// the caller polls whichever one appears.
+std::vector<std::string> candidate_socket_paths(const std::string& abs_corpus) {
+    uint32_t hash = hash_corpus(abs_corpus);
     const auto uid = static_cast<uint32_t>(::getuid());
-    char buf[64];
-    std::snprintf(buf, sizeof(buf), "lci-%u-%08x.sock", uid, hash);
-    return (fs::temp_directory_path() / buf).string();
+    char buf_new[64];
+    std::snprintf(buf_new, sizeof(buf_new), "lci-%u-%08x.sock", uid, hash);
+    char buf_old[64];
+    std::snprintf(buf_old, sizeof(buf_old), "lci-server-%08x.sock", hash);
+    return {
+        (fs::temp_directory_path() / buf_new).string(),
+        (fs::temp_directory_path() / buf_old).string(),
+    };
 }
 
 pid_t spawn_server(const std::string& binary_path,
@@ -61,11 +75,17 @@ pid_t spawn_server(const std::string& binary_path,
     return pid;
 }
 
-bool wait_for_socket(const std::string& sock_path,
+bool wait_for_socket(const std::vector<std::string>& candidates,
+                     std::string& found_path,
                      std::chrono::milliseconds budget) {
     auto end = std::chrono::steady_clock::now() + budget;
     while (std::chrono::steady_clock::now() < end) {
-        if (fs::exists(sock_path)) return true;
+        for (const auto& p : candidates) {
+            if (fs::exists(p)) {
+                found_path = p;
+                return true;
+            }
+        }
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
     return false;
@@ -120,10 +140,12 @@ CapturedOutput run_http(const std::string& binary_path,
     std::string abs_corpus = fs::absolute(corpus_path, ec).string();
     if (ec) abs_corpus = corpus_path;
 
-    std::string sock_path = compute_socket_path(abs_corpus);
+    auto candidates = candidate_socket_paths(abs_corpus);
 
-    // Remove any stale socket from a previous crashed run.
-    fs::remove(sock_path, ec);
+    // Remove any stale sockets from a previous crashed run.
+    for (const auto& p : candidates) {
+        fs::remove(p, ec);
+    }
 
     pid_t srv = spawn_server(binary_path, abs_corpus);
     if (srv < 0) {
@@ -131,8 +153,9 @@ CapturedOutput run_http(const std::string& binary_path,
         return cap;
     }
 
-    if (!wait_for_socket(sock_path, std::chrono::seconds(15))) {
-        kill_server(srv, sock_path);
+    std::string sock_path;
+    if (!wait_for_socket(candidates, sock_path, std::chrono::seconds(15))) {
+        kill_server(srv, candidates.front());
         cap.timed_out = true;
         cap.stderr_data = "run_http: server did not create socket within 15 s";
         return cap;
