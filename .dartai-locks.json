@@ -1,15 +1,15 @@
 {
   "claims": {
-    "iEA8zrihA7b3": {
+    "vJrTKPxyk7RF": {
       "runner_instance_id": "beagle-ab-475579",
       "runner_email": "andybrummer@standardbeagle.com",
-      "claimed_at": "2026-05-12T21:55:00Z",
+      "claimed_at": "2026-05-13T00:00:00Z",
       "agent_id": "beagle-ab-475579",
       "parent_loop_id": "zRvo9CV23xZD",
-      "purpose": "loop iter-7: MCP descriptor backlog + sweep parity-compat stubs",
+      "purpose": "loop iter-8: fix C++ MCP index_stats payload shape vs Go",
       "source_event": {
         "loop_id": "zRvo9CV23xZD",
-        "task_id": "iEA8zrihA7b3",
+        "task_id": "vJrTKPxyk7RF",
         "conversation_id": null
       }
     }
