@@ -1,3 +1,17 @@
 {
-  "claims": {}
+  "claims": {
+    "6lwWAw28lQfj": {
+      "runner_instance_id": "beagle-ab-475579",
+      "runner_email": "andybrummer@standardbeagle.com",
+      "claimed_at": "2026-05-13T23:00:00Z",
+      "agent_id": "beagle-ab-475579",
+      "parent_loop_id": "zRvo9CV23xZD",
+      "purpose": "loop iter-10: regex search post-filter honor invert_match/max_count/word_boundary",
+      "source_event": {
+        "loop_id": "zRvo9CV23xZD",
+        "task_id": "6lwWAw28lQfj",
+        "conversation_id": null
+      }
+    }
+  }
 }
