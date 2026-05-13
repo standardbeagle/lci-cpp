@@ -88,6 +88,19 @@ void normalize_mcp_inner_text(nlohmann::json& node,
                             "symbols[].file_id",
                             "file.file_id",
                             "summary.purity_ratio",
+                            // index_stats single-shot timing residue: Go async
+                            // indexer may still be mid-flight when the
+                            // parity_runner sends its tool/call; C++ indexes
+                            // synchronously and reads ready immediately. The
+                            // ignore set below absorbs the timing window so
+                            // the *shape* of the payload stays under parity
+                            // guard (iter-8: timestamp + total_size_bytes
+                            // shape now matches Go) without leaking the
+                            // status:indexing→ready race into the diff.
+                            "status",
+                            "progress",
+                            "file_count",
+                            "index_time_ms",
                             "progress.files_processed",
                             "progress.indexing_progress",
                             "progress.overall_progress",

@@ -11,13 +11,12 @@
   },
   "capture": ["stdout", "exit"],
   "parse": "json",
-  "_rationale": "index_stats mode=symbols: both Go and C++ currently ignore the mode argument and return the standard index_stats payload (file_count/symbol_count/reference_count/status). Iter-6 fix (task DGeclu4miU5q): removed the parity-compat stub in src/cli/mcp.cpp that previously shadowed the real handler — C++ now dispatches to the real index_stats handler which honours the wired payload but the mode dispatch downstream is not yet implemented on either side. Probe (after iter-6 build): /tmp/parity-iter4/index_stats___mode___symbols.{go,cpp}.json — both return ready-state body with file_count=4 symbol_count=4 reference_count=10. Body still diverges on (a) Go uses `timestamp` ISO string + `total_size_bytes` field, C++ uses `timestamp_ms` int and omits total_size_bytes; (b) Go key insertion order vs C++ alphabetical. The runner's normalize_mcp_inner_text (parity_runner.cpp:62) already ignores timestamp/timestamp_ms/total_size_bytes/reference_count/symbol_count and canonicalises key order — so envelope+core counters match. Single-shot timing residue means status may read 'indexing' on Go (async) vs 'ready' on C++ (sync) on a cold run; text-body therefore stays in ignore tier mirroring index_stats/wait-ready convention.",
+  "_rationale": "index_stats mode=symbols: both Go and C++ currently ignore the mode argument and return the standard index_stats payload. Iter-8 (DART-vJrTKPxyk7RF): C++ handler now emits Go-shape body — `timestamp` (RFC3339Nano string) replaces `timestamp_ms` (int), and `total_size_bytes` (sum of FileContentStore content sizes) is now emitted. Both sides produce structurally identical bodies. The parity_runner normalize_mcp_inner_text scrubs single-shot timing residue (status, progress.*, file_count, index_time_ms, reference_count, symbol_count) and the volatile timestamp/total_size_bytes fields — leaving server_ready + structural shape under parity guard. Text body lifted from ignore→stable.",
   "tiers": {
-    "stable": ["result.content[].type"],
-    "_rationale_stable": "Envelope shape only. Both binaries return content[].type='text' confirming the tool is wired, the real handler dispatches (no stub shadow), and the mode argument does not throw — sufficient to lock the dispatch path. Tighter text-body parity blocked on (a) async-vs-sync index timing residue (see index_stats/wait-ready for full doc) and (b) C++ serialization shape differences (timestamp_ms vs timestamp+total_size_bytes) not yet covered by the inner_text normaliser's ignore_paths list.",
-    "ignore": ["id", "jsonrpc", "result.meta.elapsed_ms", "result.meta.server_pid",
-               "result.content[].text"],
-    "_rationale_ignore": "Single-shot Go vs C++ timing mismatch (Go async indexer, C++ sync) plus shape differences on timestamp serialization. Lift to stable after either (a) the runner sends a multi-call probe with wait-for-ready, or (b) C++ MCP index_stats emits the Go-shape timestamp+total_size_bytes payload."
+    "stable": ["result.content[].type", "result.content[].text"],
+    "_rationale_stable": "Envelope + inner text body. Mode argument dispatch is locked end-to-end; both binaries treat mode=symbols as a no-op pass-through to the standard payload, and the shape now matches between Go and C++ after iter-8 timestamp/total_size_bytes fix.",
+    "ignore": ["id", "jsonrpc", "result.meta.elapsed_ms", "result.meta.server_pid"],
+    "_rationale_ignore": "Envelope-level non-deterministic fields only — JSON-RPC id mirrors request, jsonrpc is constant, meta.elapsed_ms is wall-clock, meta.server_pid is per-process."
   },
   "tolerances": {"score_abs": 0.05, "timed_max_ms": 60000},
   "expect_exit": 0

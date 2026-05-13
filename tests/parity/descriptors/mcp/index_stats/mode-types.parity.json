@@ -11,13 +11,12 @@
   },
   "capture": ["stdout", "exit"],
   "parse": "json",
-  "_rationale": "index_stats mode=types: same dispatch-only contract as mode-symbols/mode-references. Both binaries currently ignore the mode argument and return standard payload. Locks the types-mode entry point. Probe: /tmp/parity-iter4/index_stats___mode___types.{go,cpp}.json — both return ready-state body. Same single-shot Go/C++ timing residue and serialization-shape divergences as the other index_stats mode descriptors. See mode-symbols rationale for full divergence catalogue.",
+  "_rationale": "index_stats mode=types: same dispatch contract as mode-symbols/mode-references. Iter-8 (DART-vJrTKPxyk7RF): C++ handler emits Go-shape body (`timestamp` ISO string + `total_size_bytes`). Normalizer scrubs single-shot timing residue. Text body lifted from ignore→stable.",
   "tiers": {
-    "stable": ["result.content[].type"],
-    "_rationale_stable": "Envelope only. Locks dispatch + no-throw + content[].type='text' frame; tighter text-body parity blocked on the same async-vs-sync timing + serialization-shape divergences documented on mode-symbols.",
-    "ignore": ["id", "jsonrpc", "result.meta.elapsed_ms", "result.meta.server_pid",
-               "result.content[].text"],
-    "_rationale_ignore": "Same as mode-symbols: single-shot timing mismatch + Go/C++ payload-shape diff on timestamp serialization."
+    "stable": ["result.content[].type", "result.content[].text"],
+    "_rationale_stable": "Envelope + inner text body. Mode argument dispatch locked end-to-end; shape parity achieved iter-8.",
+    "ignore": ["id", "jsonrpc", "result.meta.elapsed_ms", "result.meta.server_pid"],
+    "_rationale_ignore": "Envelope-level non-deterministic fields only."
   },
   "tolerances": {"score_abs": 0.05, "timed_max_ms": 60000},
   "expect_exit": 0
