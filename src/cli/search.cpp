@@ -1241,119 +1241,36 @@ int run_search(const GlobalFlags& flags, const std::string& pattern,
 
     // -- Grep-filter post-processing for `lci search` ------------------------
     //
-    // `lci search` and `lci grep` share the same five filter flags; running
-    // them through one helper keeps behavior identical between the two
-    // commands. Order matters:
-    //   1. invert -> rebuild the result list from raw file contents.
-    //   2. max-count -> cap per-file BEFORE count/files-only aggregate.
-    //   3. count / files-with-matches -> reduce to summary rows.
+    // Go's `lci search` ignores grep-style flags (`--invert-match`,
+    // `--max-count`, `--count`, `--files-with-matches`, `--word-regexp`):
+    // they are accepted on the command line but not applied to the standard /
+    // integrated display path. See cmd/lci/search.go:103-156 — the flags are
+    // forwarded into `SearchOptions` but the `displayStandardResults*` writer
+    // ignores them; only `lci grep` (`cmd/lci/grep.go`) honors them.
     //
-    // A bare `--max-count` without invert/count/files-only is handled by the
-    // standard formatter below — we only need to trim the result list before
-    // it's displayed, not switch into the grep-shaped path.
-    if (max_count_per_file > 0 && !invert_match && !count_per_file &&
-        !files_only) {
-        auto trimmed = apply_max_count_per_file(
-            j.value("results", nlohmann::json::array()), max_count_per_file);
-        j["results"] = std::move(trimmed);
-    }
-
-    bool any_filter = invert_match || count_per_file || files_only;
-
-    if (any_filter) {
-        nlohmann::json results_arr = j.value("results", nlohmann::json::array());
-
-        if (invert_match) {
-            results_arr = invert_match_rows(results_arr, all_patterns,
-                                            case_insensitive,
-                                            max_count_per_file);
-        } else if (max_count_per_file > 0) {
-            results_arr = apply_max_count_per_file(std::move(results_arr),
-                                                   max_count_per_file);
-        }
-
-        nlohmann::json summary_arr;
-        std::string mode_label = "standard";
-        bool is_summary = false;
-        if (count_per_file) {
-            summary_arr = count_per_file_rows(results_arr);
-            mode_label = "count";
-            is_summary = true;
-        } else if (files_only) {
-            summary_arr = files_with_matches_rows(results_arr);
-            mode_label = "files-with-matches";
-            is_summary = true;
-        }
-
-        if (json_output) {
-            nlohmann::json output;
-            output["query"] = pattern;
-            output["time_ms"] = elapsed_ms;
-            output["mode"] = mode_label;
-            if (is_summary) {
-                // --count -> [{path,count}, ...]
-                // --files-with-matches -> [{path}, ...]
-                output["results"] = summary_arr;
-                output["count"] = summary_arr.size();
-            } else {
-                // --invert-match (and bare --max-count) keep the wrapped
-                // result shape so JSON consumers can parse a single schema.
-                std::error_code rel_ec;
-                auto cwd = std::filesystem::current_path(rel_ec);
-                nlohmann::json wrapped = nlohmann::json::array();
-                for (auto& r : results_arr) {
-                    std::string path = r.value("path", "");
-                    if (!rel_ec && !path.empty()) {
-                        std::error_code ec;
-                        auto rel = std::filesystem::relative(path, cwd, ec);
-                        if (!ec) r["path"] = rel.string();
-                    }
-                    wrapped.push_back(nlohmann::json{{"result", r}});
-                }
-                output["results"] = wrapped;
-                output["count"] = wrapped.size();
-            }
-            std::cout << output.dump(2) << "\n";
-            return 0;
-        }
-
-        if (is_summary) {
-            if (count_per_file) {
-                std::printf("Found matches in %zu file(s) in %.1fms (count "
-                            "mode)\n\n",
-                            summary_arr.size(), elapsed_ms);
-                for (auto& row : summary_arr) {
-                    std::string path =
-                        to_relative_display_path(row.value("path", ""));
-                    int n = row.value("count", 0);
-                    std::printf("%s: %d\n", path.c_str(), n);
-                }
-            } else {
-                std::printf("Found %zu file(s) with matches in %.1fms (files-"
-                            "with-matches mode)\n\n",
-                            summary_arr.size(), elapsed_ms);
-                for (auto& row : summary_arr) {
-                    std::string path =
-                        to_relative_display_path(row.value("path", ""));
-                    std::printf("%s\n", path.c_str());
-                }
-            }
-            return 0;
-        }
-
-        // --invert-match (or bare --max-count) text mode: emit grep-style
-        // path:line:text rows so downstream tooling (editors, scripts) can
-        // parse them like normal grep output.
-        std::printf("Found %zu lines in %.1fms (%s mode)\n\n",
-                    results_arr.size(), elapsed_ms,
-                    invert_match ? "invert-match" : "standard");
-        for (auto& r : results_arr) {
-            std::string path = to_relative_display_path(r.value("path", ""));
-            int line = r.value("line", 0);
-            std::string text = r.value("match", "");
-            std::printf("%s:%d:%s\n", path.c_str(), line, text.c_str());
-        }
-        return 0;
+    // The previous C++ implementation post-filtered results client-side
+    // here, but the filters operated on the trigram literal-seed (not the
+    // regex), so `--regex --invert-match` and `--regex --max-count`
+    // produced wrong row counts (DART-6lwWAw28lQfj). Worse, even on
+    // non-regex queries the row counts diverged from Go because Go's
+    // standard display path never honors these flags at all.
+    //
+    // Fix: parity with Go — emit a one-line stderr notice the first time a
+    // user passes a grep-style flag to `lci search`, then fall through to
+    // the standard / integrated display path. Users who need grep semantics
+    // should use `lci grep`. The notice is suppressed under `--json` so
+    // structured consumers see a clean stream.
+    //
+    // `word_boundary` was already silently discarded (parameter named
+    // `/*word_boundary*/` since iter-0) — keep the discard but cover it by
+    // the same notice for consistency.
+    bool any_grep_flag = invert_match || count_per_file || files_only ||
+                         max_count_per_file > 0;
+    if (any_grep_flag && !json_output) {
+        std::cerr << "Note: --invert-match, --max-count, --count, and "
+                     "--files-with-matches are ignored by `lci search` "
+                     "(mirrors Go reference). Use `lci grep` for "
+                     "grep-style filtering.\n";
     }
 
     if (json_output) {
