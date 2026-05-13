@@ -1,3 +1,17 @@
 {
-  "claims": {}
+  "claims": {
+    "oY5qTzyaCdml": {
+      "runner_instance_id": "beagle-ab-475579",
+      "runner_email": "andybrummer@standardbeagle.com",
+      "claimed_at": "2026-05-13T22:35:00Z",
+      "agent_id": "beagle-ab-475579",
+      "parent_loop_id": "zRvo9CV23xZD",
+      "purpose": "loop iter-9: fix C++ MCP get_context by object_id returns empty",
+      "source_event": {
+        "loop_id": "zRvo9CV23xZD",
+        "task_id": "oY5qTzyaCdml",
+        "conversation_id": null
+      }
+    }
+  }
 }
