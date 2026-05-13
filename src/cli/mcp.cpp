@@ -249,15 +249,11 @@ void register_parity_compat_tools(mcp::McpServer& server, MasterIndex& index,
             return json_tool_result(payload);
         });
 
-    server.add_tool(
-        ToolDefinition{"get_context", "Go-compatible MCP get_context output", {},
-                       {}},
-        [](const nlohmann::json&) {
-            nlohmann::json payload;
-            payload["contexts"] = nlohmann::json::array();
-            payload["count"] = 0;
-            return json_tool_result(payload);
-        });
+    // get_context: parity-compat stub removed (was hardcoded empty contexts,
+    // shadowing the real handler in handlers_core.cpp via reverse-iteration
+    // dispatch in McpServer::handle_tools_call). Real handler now supports
+    // {id: <object_id>} lookup returning Go-shape payload with symbol_name,
+    // definition, context, purity. See Dart task oY5qTzyaCdml.
 
     server.add_tool(
         ToolDefinition{"debug_info", "Go-compatible MCP debug_info output", {},

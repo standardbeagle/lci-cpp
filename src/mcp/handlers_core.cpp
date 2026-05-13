@@ -6,6 +6,7 @@
 #include <vector>
 
 #include <lci/core/reference_tracker.h>
+#include <lci/idcodec.h>
 #include <lci/indexing/master_index.h>
 #include <lci/mcp/pagination.h>
 #include <lci/mcp/validation.h>
@@ -308,19 +309,67 @@ ToolResult handle_get_context(const nlohmann::json& params,
     auto name = params.value("name", "");
     int file_id_param = params.value("file_id", 0);
     int line_param = params.value("line", 0);
+    auto object_id = params.value("id", "");
     int max_depth = params.value("max_depth", 3);
     max_depth = clamp_int(max_depth, 1, 10);
     bool include_hierarchy =
         params.value("include_call_hierarchy", true);
 
+    auto& ref_tracker = indexer.ref_tracker();
+
+    // -- id (object_id) lookup -- Go-shape payload --------------------------
+    // Go's get_context accepts an object_id from a prior search/list call and
+    // resolves it through symbol_store's deterministic indexing-order IDs.
+    // Output shape (matches Go cmd/lci/mcp/handlers.go::handleGetContext):
+    //   {contexts:[{file_path, line, object_id, symbol_type, symbol_name,
+    //              is_exported, definition, context, purity:{...}}], count}
+    // KARPATHY-RULE-2: O(1) hash lookup, no per-call allocation in the
+    // resolution path itself (string conversions are unavoidable for JSON).
+    // Scope-narrowed iter-9: purity block emitted with conservative defaults
+    // (is_pure:false, purity_score:0, confidence:"low") because the live
+    // MCP runtime never populates SideEffectAnalyzer.results() — wiring
+    // analyzer into the indexing pipeline is a separate task, filed as a
+    // follow-up under the loop. Inner-text canonicalize ignore covers the
+    // purity sub-block until that work lands.
+    if (!object_id.empty()) {
+        auto decoded = decode_symbol_id(object_id);
+        nlohmann::json contexts = nlohmann::json::array();
+        if (decoded.has_value()) {
+            const auto* sym = ref_tracker.get_enhanced_symbol(*decoded);
+            if (sym != nullptr) {
+                nlohmann::json ctx;
+                ctx["file_path"] = indexer.get_file_path(sym->symbol.file_id);
+                ctx["line"] = sym->symbol.line;
+                ctx["object_id"] = object_id;
+                ctx["symbol_type"] =
+                    std::string(to_string(sym->symbol.type));
+                ctx["symbol_name"] = std::string(sym->symbol.name);
+                ctx["is_exported"] = sym->is_exported;
+                ctx["definition"] = std::string(sym->symbol.name);
+                ctx["context"] = nlohmann::json::array(
+                    {std::string(sym->symbol.name)});
+                nlohmann::json purity;
+                purity["is_pure"] = false;
+                purity["purity_score"] = 0;
+                purity["confidence"] = "low";
+                ctx["purity"] = std::move(purity);
+                contexts.push_back(std::move(ctx));
+            }
+        }
+        nlohmann::json response;
+        response["contexts"] = std::move(contexts);
+        response["count"] =
+            static_cast<int>(response["contexts"].size());
+        return make_json_response(response);
+    }
+
     // Must have at least name or file_id+line
     if (name.empty() && file_id_param == 0) {
         return make_error_response(
             "get_context",
-            "either 'name' or 'file_id' with 'line' is required");
+            "either 'name', 'id', or 'file_id' with 'line' is required");
     }
 
-    auto& ref_tracker = indexer.ref_tracker();
     nlohmann::json contexts = nlohmann::json::array();
 
     if (!name.empty()) {

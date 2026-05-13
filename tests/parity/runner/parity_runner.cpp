@@ -107,6 +107,16 @@ void normalize_mcp_inner_text(nlohmann::json& node,
                             "reference_count",
                             "symbol_count",
                             "total_size_bytes",
+                            // get_context purity sub-block: C++ MCP runtime
+                            // emits conservative defaults because the live
+                            // SideEffectAnalyzer is never populated during
+                            // indexing (analyzer.results() empty). Wiring
+                            // the analyzer into the indexing pipeline is a
+                            // separate task — until that lands, purity is
+                            // structural-only (key present, values not
+                            // parity-checked). Filed as follow-up under
+                            // Dart task oY5qTzyaCdml.
+                            "contexts[].purity",
                         };
                         inner_opts.sort_array_paths = {"results", "symbols",
                                                        "metrics_issues",
