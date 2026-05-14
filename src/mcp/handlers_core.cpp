@@ -306,14 +306,7 @@ ToolResult handle_search(const nlohmann::json& params,
 
 ToolResult handle_get_context(const nlohmann::json& params,
                               MasterIndex& indexer) {
-    auto name = params.value("name", "");
-    int file_id_param = params.value("file_id", 0);
-    int line_param = params.value("line", 0);
     auto object_id = params.value("id", "");
-    int max_depth = params.value("max_depth", 3);
-    max_depth = clamp_int(max_depth, 1, 10);
-    bool include_hierarchy =
-        params.value("include_call_hierarchy", true);
 
     auto& ref_tracker = indexer.ref_tracker();
 
@@ -363,127 +356,22 @@ ToolResult handle_get_context(const nlohmann::json& params,
         return make_json_response(response);
     }
 
-    // Must have at least name or file_id+line
-    if (name.empty() && file_id_param == 0) {
-        return make_error_response(
-            "get_context",
-            "either 'name', 'id', or 'file_id' with 'line' is required");
-    }
-
-    nlohmann::json contexts = nlohmann::json::array();
-
-    if (!name.empty()) {
-        // Lookup by symbol name
-        auto symbols = ref_tracker.find_symbols_by_name(name);
-        if (symbols.empty()) {
-            return make_error_response(
-                "get_context",
-                "no symbol found with name '" + name + "'");
-        }
-
-        for (const auto* sym : symbols) {
-            nlohmann::json ctx;
-            ctx["symbol_name"] = std::string(sym->symbol.name);
-            ctx["symbol_type"] = std::string(to_string(sym->symbol.type));
-            ctx["file_id"] = static_cast<int>(sym->symbol.file_id);
-            ctx["line"] = sym->symbol.line;
-
-            auto file_path = indexer.get_file_path(sym->symbol.file_id);
-            ctx["file_path"] = file_path;
-            ctx["is_exported"] = sym->is_exported;
-
-            if (!sym->signature.empty()) {
-                ctx["signature"] = std::string(sym->signature);
-            }
-
-            if (include_hierarchy) {
-                // Callers
-                auto caller_names =
-                    ref_tracker.get_caller_names(sym->id);
-                ctx["callers"] = caller_names;
-
-                // Callees
-                auto callee_names =
-                    ref_tracker.get_callee_names(sym->id);
-                ctx["callees"] = callee_names;
-
-                // Function tree
-                if (max_depth > 0) {
-                    auto tree = ref_tracker.build_function_tree(
-                        sym->id, max_depth);
-                    nlohmann::json tree_json;
-                    tree_json["name"] = tree.name;
-                    tree_json["child_count"] =
-                        static_cast<int>(tree.children.size());
-                    nlohmann::json children = nlohmann::json::array();
-                    for (const auto& child : tree.children) {
-                        nlohmann::json c;
-                        c["name"] = child.name;
-                        c["child_count"] =
-                            static_cast<int>(child.children.size());
-                        children.push_back(std::move(c));
-                    }
-                    tree_json["children"] = std::move(children);
-                    ctx["call_tree"] = std::move(tree_json);
-                }
-            }
-
-            // References
-            auto incoming = ref_tracker.get_symbol_references(
-                sym->id, "incoming");
-            auto outgoing = ref_tracker.get_symbol_references(
-                sym->id, "outgoing");
-            ctx["incoming_ref_count"] = static_cast<int>(incoming.size());
-            ctx["outgoing_ref_count"] = static_cast<int>(outgoing.size());
-
-            contexts.push_back(std::move(ctx));
-        }
-    } else {
-        // Lookup by file_id + line
-        auto fid = static_cast<FileID>(file_id_param);
-        const auto* sym =
-            ref_tracker.get_symbol_at_line(fid, line_param);
-        if (!sym) {
-            return make_error_response(
-                "get_context",
-                "no symbol found at file_id=" +
-                    std::to_string(file_id_param) +
-                    " line=" + std::to_string(line_param));
-        }
-
-        nlohmann::json ctx;
-        ctx["symbol_name"] = std::string(sym->symbol.name);
-        ctx["symbol_type"] = std::string(to_string(sym->symbol.type));
-        ctx["file_id"] = static_cast<int>(sym->symbol.file_id);
-        ctx["line"] = sym->symbol.line;
-        ctx["file_path"] = indexer.get_file_path(sym->symbol.file_id);
-        ctx["is_exported"] = sym->is_exported;
-
-        if (!sym->signature.empty()) {
-            ctx["signature"] = std::string(sym->signature);
-        }
-
-        if (include_hierarchy) {
-            ctx["callers"] =
-                ref_tracker.get_caller_names(sym->id);
-            ctx["callees"] =
-                ref_tracker.get_callee_names(sym->id);
-        }
-
-        auto incoming = ref_tracker.get_symbol_references(
-            sym->id, "incoming");
-        auto outgoing = ref_tracker.get_symbol_references(
-            sym->id, "outgoing");
-        ctx["incoming_ref_count"] = static_cast<int>(incoming.size());
-        ctx["outgoing_ref_count"] = static_cast<int>(outgoing.size());
-
-        contexts.push_back(std::move(ctx));
-    }
-
+    // No-mode get_context is id-only — aligned with Go iter-19.
+    // Go's handleGetContext (internal/mcp/handlers.go) builds its objectIDs
+    // list solely from args.ID; args.Name and file_id+line are never resolved
+    // in the default (no-mode) path. C++ previously had latent name= and
+    // file_id+line resolution branches here (predating iter-9, initial commit
+    // 9ce02a7) that diverged from Go whenever the indexer resolved symbols
+    // under the MCP stdio session. Removed to match Go's id-only contract:
+    // an absent/unresolvable id yields {contexts:[],count:0}, same as Go.
+    // KARPATHY parity win + perf win — this is the read path and removing the
+    // branches strictly reduces work (no find_symbols_by_name / call-tree
+    // traversal on the no-mode path). find_symbols_by_name / get_symbol_at_line
+    // remain in use by other handlers (handlers_explore, handlers_analysis,
+    // server.cpp, context_manifest_expander) — shared infra untouched.
     nlohmann::json response;
-    response["contexts"] = std::move(contexts);
-    response["count"] = static_cast<int>(response["contexts"].size());
-
+    response["contexts"] = nlohmann::json::array();
+    response["count"] = 0;
     return make_json_response(response);
 }
 
