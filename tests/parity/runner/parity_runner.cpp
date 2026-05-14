@@ -2,6 +2,7 @@
 #include "spec_diff/canonicalize.h"
 #include "spec_diff/diff.h"
 #include "runner/descriptor.h"
+#include "runner/ignore_baseline.h"
 #include "runner/modes/cli.h"
 #include "runner/modes/index.h"
 #include "runner/modes/http.h"
@@ -223,6 +224,7 @@ int run_cli_descriptor(const Descriptor& d) {
     nlohmann::json go_canon, cpp_canon;
     DiffOptions opts;
     opts.tiers        = d.tiers;
+    opts.tiers.ignore = merged_ignore(d.tiers.ignore);
     opts.score_abs    = d.tolerances.score_abs;
     opts.timed_max_ms = d.tolerances.timed_max_ms;
     opts.id_pattern   = d.id_pattern;
@@ -242,7 +244,7 @@ int run_cli_descriptor(const Descriptor& d) {
             auto go_j  = nlohmann::json::parse(go_raw);
             auto cpp_j = nlohmann::json::parse(cpp_raw);
             CanonicalizeOptions co;
-            co.ignore_paths  = d.tiers.ignore;
+            co.ignore_paths  = merged_ignore(d.tiers.ignore);
             co.sort_array_paths = d.tiers.sort_arrays;
             co.corpus_prefix = corpus_path;
             co.preserve_number_paths = d.tiers.ranked;
@@ -306,6 +308,7 @@ int run_mcp_descriptor(const Descriptor& d) {
 
     DiffOptions opts;
     opts.tiers        = d.tiers;
+    opts.tiers.ignore = merged_ignore(d.tiers.ignore);
     opts.score_abs    = d.tolerances.score_abs;
     opts.timed_max_ms = d.tolerances.timed_max_ms;
     opts.id_pattern   = d.id_pattern;
@@ -318,7 +321,7 @@ int run_mcp_descriptor(const Descriptor& d) {
         normalize_mcp_inner_text(gj, corpus_path);
         normalize_mcp_inner_text(cj, corpus_path);
         CanonicalizeOptions co;
-        co.ignore_paths  = d.tiers.ignore;
+        co.ignore_paths  = merged_ignore(d.tiers.ignore);
         co.sort_array_paths = d.tiers.sort_arrays;
         co.corpus_prefix = corpus_path;
         co.preserve_number_paths = d.tiers.ranked;
@@ -385,6 +388,7 @@ int run_index_descriptor(const Descriptor& d) {
     nlohmann::json go_canon, cpp_canon;
     DiffOptions opts;
     opts.tiers        = d.tiers;
+    opts.tiers.ignore = merged_ignore(d.tiers.ignore);
     opts.score_abs    = d.tolerances.score_abs;
     opts.timed_max_ms = d.tolerances.timed_max_ms;
     opts.id_pattern   = d.id_pattern;
@@ -394,7 +398,7 @@ int run_index_descriptor(const Descriptor& d) {
         auto go_j  = nlohmann::json::parse(go_out.stdout_data);
         auto cpp_j = nlohmann::json::parse(cpp_out.stdout_data);
         CanonicalizeOptions co;
-        co.ignore_paths  = d.tiers.ignore;
+        co.ignore_paths  = merged_ignore(d.tiers.ignore);
         co.sort_array_paths = d.tiers.sort_arrays;
         co.corpus_prefix = corpus_path;
         co.preserve_number_paths = d.tiers.ranked;
@@ -466,6 +470,7 @@ int run_http_descriptor(const Descriptor& d) {
 
     DiffOptions opts;
     opts.tiers        = d.tiers;
+    opts.tiers.ignore = merged_ignore(d.tiers.ignore);
     opts.score_abs    = d.tolerances.score_abs;
     opts.timed_max_ms = d.tolerances.timed_max_ms;
     opts.id_pattern   = d.id_pattern;
@@ -477,7 +482,7 @@ int run_http_descriptor(const Descriptor& d) {
             auto go_j  = nlohmann::json::parse(go_out.stdout_data);
             auto cpp_j = nlohmann::json::parse(cpp_out.stdout_data);
             CanonicalizeOptions co;
-            co.ignore_paths  = d.tiers.ignore;
+            co.ignore_paths  = merged_ignore(d.tiers.ignore);
             co.sort_array_paths = d.tiers.sort_arrays;
             co.corpus_prefix = corpus_path;
             co.preserve_number_paths = d.tiers.ranked;

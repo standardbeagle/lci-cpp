@@ -32,6 +32,7 @@ add_executable(parity_unit_tests
     unit_tests/diff_test.cpp
     unit_tests/descriptor_test.cpp
     unit_tests/socket_path_test.cpp
+    unit_tests/ignore_baseline_test.cpp
 )
 target_link_libraries(parity_unit_tests PRIVATE
     spec_diff
@@ -40,7 +41,9 @@ target_link_libraries(parity_unit_tests PRIVATE
 )
 include(GoogleTest)
 gtest_discover_tests(parity_unit_tests
-    PROPERTIES LABELS "parity"
+    PROPERTIES
+        LABELS "parity"
+        ENVIRONMENT "PARITY_DESCRIPTORS_DIR=${CMAKE_CURRENT_SOURCE_DIR}/descriptors"
 )
 
 # ---- Locate Go reference binary (for side-by-side parity runner) ----

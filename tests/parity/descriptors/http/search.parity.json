@@ -5,11 +5,16 @@
   "go_binary": "${LCI_GO}",
   "cpp_binary": "${LCI_CPP}",
   "invocation": {
-    "args": ["/search"],
+    "args": [
+      "/search"
+    ],
     "stdin": "{\"pattern\":\"add\"}",
     "cwd": "${CORPUS}"
   },
-  "capture": ["stdout", "exit"],
+  "capture": [
+    "stdout",
+    "exit"
+  ],
   "parse": "json",
   "_comment_results_file_id": "results[].file_id is C++/Go scanner-ordering divergence: both binaries assign FileIDs sequentially during indexing but Go's filesystem-readdir order differs from C++'s scanner (priority desc, path asc). Path / line / column / match / score all match across runs; only the synthetic file_id integer is non-portable. Mask it so this descriptor verifies content rather than ID assignment. Within a single C++ run the file_id is stable (locked by ServerTest.SearchResultFileIdIsStableInteger).",
   "_comment_block_name": "results[].context.block_name is always-present in C++ (empty string when no enclosing block resolved, symbol name when match is inside a function/class). Go does not always emit. C++ shape is locked by ServerTest.SearchResultContextBlockNameContractEmptyOrSymbolName; intentional richness.",
@@ -17,13 +22,17 @@
   "tiers": {
     "stable": [],
     "ignore": [
-      "pid", "start_time", "version", "uptime_ms", "elapsed_ms",
-      "request_id", "timestamp", "schema_version",
       "results[].file_id",
       "results[].context.block_name"
     ],
-    "sort_arrays": ["results"]
+    "sort_arrays": [
+      "results"
+    ],
+    "_rationale_ignore": "BASE_IGNORE_NON_DETERMINISM applies implicitly (pid/timestamp/elapsed_ms/version/jsonrpc envelope etc.); this list captures the descriptor-specific drift beyond the universal baseline."
   },
-  "tolerances": {"score_abs": 0.05, "timed_max_ms": 60000},
+  "tolerances": {
+    "score_abs": 0.05,
+    "timed_max_ms": 60000
+  },
   "expect_exit": 200
 }

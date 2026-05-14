@@ -28,7 +28,8 @@
       "metadata.analysis_time_ms",
       "metadata.analyzed_at",
       "summary.risk_score"
-    ]
+    ],
+    "_rationale_ignore": "Runtime metadata only: analysis_time_ms is wall-clock, analyzed_at is timestamp, summary.risk_score has low-signal float formatting drift between ports. BASE_IGNORE_NON_DETERMINISM applies implicitly."
   },
   "tolerances": {"score_abs": 0.0, "timed_max_ms": 60000},
   "expect_exit": 0,

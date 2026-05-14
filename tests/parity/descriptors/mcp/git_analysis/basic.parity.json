@@ -5,18 +5,30 @@
   "go_binary": "${LCI_GO}",
   "cpp_binary": "${LCI_CPP}",
   "invocation": {
-    "args": ["mcp"],
+    "args": [
+      "mcp"
+    ],
     "stdin": "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"git_analysis\",\"arguments\":{\"scope\":\"wip\"}}}",
     "cwd": "${CORPUS}"
   },
-  "capture": ["stdout", "exit"],
+  "capture": [
+    "stdout",
+    "exit"
+  ],
   "parse": "json",
   "_rationale": "Go MCP git_analysis returns a metadata-only payload (`{metadata: {base_ref, scope, target_ref}}`). C++ MCP git_analysis is a stub returning `{status: \"not_available\", message: ...}` because the MCP wiring to the analyzer hasn't been done yet (filed as sL0AJDf2hjIh). Both sides emit minimal payloads, both honest but with different shapes. Parity asserts envelope shape (jsonrpc, content[].type) only. C++ stub shape is locked by McpToolsIntegrationTest.GitAnalysisIsCurrentlyAStubAndAdvertisesItHonestly. When the C++ MCP handler is wired to the analyzer, flip this rationale to document intentional C++ enrichment.",
   "tiers": {
-    "stable": ["result.content[].type"],
-    "ignore": ["id", "jsonrpc", "result.meta.elapsed_ms", "result.meta.server_pid",
-               "result.content[].text"]
+    "stable": [
+      "result.content[].type"
+    ],
+    "ignore": [
+      "result.content[].text"
+    ],
+    "_rationale_ignore": "BASE_IGNORE_NON_DETERMINISM applies implicitly (pid/timestamp/elapsed_ms/version/jsonrpc envelope etc.); this list captures the descriptor-specific drift beyond the universal baseline."
   },
-  "tolerances": {"score_abs": 0.05, "timed_max_ms": 60000},
+  "tolerances": {
+    "score_abs": 0.05,
+    "timed_max_ms": 60000
+  },
   "expect_exit": 0
 }

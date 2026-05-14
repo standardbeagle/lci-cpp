@@ -5,19 +5,30 @@
   "go_binary": "${LCI_GO}",
   "cpp_binary": "${LCI_CPP}",
   "invocation": {
-    "args": ["mcp"],
+    "args": [
+      "mcp"
+    ],
     "stdin": "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"code_insight\",\"arguments\":{\"mode\":\"git_hotspots\"}}}",
     "cwd": "${CORPUS}"
   },
-  "capture": ["stdout", "exit"],
+  "capture": [
+    "stdout",
+    "exit"
+  ],
   "parse": "json",
   "_rationale": "code_insight mode=git_hotspots is the second git-flavoured branch (separate dispatch from git_analyze even though both fall back to empty-statistics on a no-git corpus). After iter-5 fix, C++ emits a byte-identical 303-byte LCF payload to Go: mode=git_hotspots header + STATISTICS section with zero values. Probe: /tmp/parity-iter4/code_insight___mode___git_hotspots.{go,cpp}.json both 303 bytes after rebuild. Locks the git_hotspots dispatch branch separately from git_analyze so a one-off regression on either side is locally pin-pointed.",
   "tiers": {
-    "stable": ["result.content[].type", "result.content[].text"],
+    "stable": [
+      "result.content[].type",
+      "result.content[].text"
+    ],
     "_rationale_stable": "Envelope matches MCP spec. result.content[].text byte-for-byte identical on multi-lang corpus's empty-git-history fallback path. Like mode-git_analyze, this descriptor locks dispatch + empty fallback; a populated-git corpus descriptor would lock real hotspot content in a future iter.",
-    "ignore": ["id", "jsonrpc", "result.meta.elapsed_ms", "result.meta.server_pid"],
+    "ignore": [],
     "_rationale_ignore": "Universal MCP descriptor noise."
   },
-  "tolerances": {"score_abs": 0.05, "timed_max_ms": 60000},
+  "tolerances": {
+    "score_abs": 0.05,
+    "timed_max_ms": 60000
+  },
   "expect_exit": 0
 }

@@ -24,6 +24,7 @@
       "results[].result.file_id",
       "results[].result.context"
     ],
+    "_rationale_ignore": "See top-level _rationale_file_id (scanner-ordering divergence) and _rationale_context (producer-specific extract_context windowing). BASE_IGNORE_NON_DETERMINISM applies implicitly.",
     "sort_arrays": ["results"]
   },
   "tolerances": {"score_abs": 0.05, "timed_max_ms": 60000},

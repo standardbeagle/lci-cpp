@@ -5,22 +5,29 @@
   "go_binary": "${LCI_GO}",
   "cpp_binary": "${LCI_CPP}",
   "invocation": {
-    "args": ["/browse-file"],
+    "args": [
+      "/browse-file"
+    ],
     "stdin": "{\"file\":\"a.go\"}",
     "cwd": "${CORPUS}"
   },
-  "capture": ["stdout", "exit"],
+  "capture": [
+    "stdout",
+    "exit"
+  ],
   "parse": "json",
   "_comment_ignore": "object_id and file.file_id are sequential synthetic IDs assigned during indexing; Go's filesystem-readdir order differs from C++'s scanner ordering so the integers diverge run-to-run. The semantic content (path, line, name, type, exported, refs) all match — mask the IDs and verify everything else.",
   "tiers": {
     "stable": [],
     "ignore": [
-      "pid", "start_time", "version", "uptime_ms", "elapsed_ms",
-      "request_id", "timestamp", "schema_version",
       "file.file_id",
       "symbols[].object_id"
-    ]
+    ],
+    "_rationale_ignore": "BASE_IGNORE_NON_DETERMINISM applies implicitly (pid/timestamp/elapsed_ms/version/jsonrpc envelope etc.); this list captures the descriptor-specific drift beyond the universal baseline."
   },
-  "tolerances": {"score_abs": 0.05, "timed_max_ms": 60000},
+  "tolerances": {
+    "score_abs": 0.05,
+    "timed_max_ms": 60000
+  },
   "expect_exit": 200
 }

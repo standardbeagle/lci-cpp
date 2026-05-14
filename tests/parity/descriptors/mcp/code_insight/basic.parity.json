@@ -5,19 +5,30 @@
   "go_binary": "${LCI_GO}",
   "cpp_binary": "${LCI_CPP}",
   "invocation": {
-    "args": ["mcp"],
+    "args": [
+      "mcp"
+    ],
     "stdin": "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"code_insight\",\"arguments\":{}}}",
     "cwd": "${CORPUS}"
   },
-  "capture": ["stdout", "exit"],
+  "capture": [
+    "stdout",
+    "exit"
+  ],
   "parse": "json",
   "_rationale": "code_insight with no arguments defaults to mode=overview on both Go and C++. Emits a 350-byte LCF payload with REPOSITORY MAP + HEALTH sections. Byte-identical on multi-lang. Retrofitted with full _rationale per iter-7 karpathy rule. The mode-statistics/structure/unified/git_analyze/git_hotspots descriptors lock the per-mode dispatch path; this descriptor specifically locks the default (no-mode-given) behaviour so a regression that changes the default would surface here even if every explicit mode still works.",
   "tiers": {
-    "stable": ["result.content[].type", "result.content[].text"],
+    "stable": [
+      "result.content[].type",
+      "result.content[].text"
+    ],
     "_rationale_stable": "Envelope matches MCP spec. result.content[].text byte-for-byte identical 350-byte overview LCF payload on multi-lang. Probe: /tmp/parity-iter4/code_insight___.{go,cpp}.json.",
-    "ignore": ["id", "jsonrpc", "result.meta.elapsed_ms", "result.meta.server_pid"],
+    "ignore": [],
     "_rationale_ignore": "Universal MCP descriptor noise."
   },
-  "tolerances": {"score_abs": 0.05, "timed_max_ms": 60000},
+  "tolerances": {
+    "score_abs": 0.05,
+    "timed_max_ms": 60000
+  },
   "expect_exit": 0
 }

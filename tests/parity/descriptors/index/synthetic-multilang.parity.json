@@ -4,21 +4,46 @@
   "corpus": "multi-lang",
   "go_binary": "${LCI_GO}",
   "cpp_binary": "${LCI_CPP}",
-  "invocation": {"args": [], "cwd": "${CORPUS}"},
-  "capture": ["stdout","exit"],
+  "invocation": {
+    "args": [],
+    "cwd": "${CORPUS}"
+  },
+  "capture": [
+    "stdout",
+    "exit"
+  ],
   "parse": "json",
   "_rationale": "debug export schemas are intentionally disjoint between Go and C++ ports: Go's `lci debug export` re-indexes Go-files-only with SymbolLinkerEngine and emits {summary, files[], extractors[], resolvers[], dependencies}; C++'s `lci debug export` queries the running server and emits {file_count, symbol_count, root, ready, build_duration_ms, ...}. No common fields exist. Decision C (parity 5/9 / aKbWRRmO5BDp): suppress the entire payload in the ignore tier to declare known divergence at exit-code level only. See MODULE_MAP.md > Known Divergences.",
   "tiers": {
     "stable": [],
     "ignore": [
-      "index_version", "build_time", "host", "schema_version",
-      "build_duration_ms", "memory_rss_mb", "uptime_seconds",
-      "avg_search_time_ms", "ready", "root", "search_count",
-      "index_size_bytes", "summary", "extractors", "resolvers",
-      "dependencies", "files", "file_count", "symbol_count",
-      "trigram_count", "symbols", "refs"
-    ]
+      "index_version",
+      "build_time",
+      "host",
+      "build_duration_ms",
+      "memory_rss_mb",
+      "uptime_seconds",
+      "avg_search_time_ms",
+      "ready",
+      "root",
+      "search_count",
+      "index_size_bytes",
+      "summary",
+      "extractors",
+      "resolvers",
+      "dependencies",
+      "files",
+      "file_count",
+      "symbol_count",
+      "trigram_count",
+      "symbols",
+      "refs"
+    ],
+    "_rationale_ignore": "BASE_IGNORE_NON_DETERMINISM applies implicitly (pid/timestamp/elapsed_ms/version/jsonrpc envelope etc.); this list captures the descriptor-specific drift beyond the universal baseline."
   },
-  "tolerances": {"score_abs": 0.0, "timed_max_ms": 60000},
+  "tolerances": {
+    "score_abs": 0.0,
+    "timed_max_ms": 60000
+  },
   "expect_exit": 0
 }

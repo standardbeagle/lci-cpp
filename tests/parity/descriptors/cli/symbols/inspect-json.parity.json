@@ -12,7 +12,8 @@
   "parse": "json",
   "_rationale": "C++ inspect emits one additional field beyond Go's shape: `signature` (the source-level function signature extracted by tree-sitter). Documented intentional richness. The older _rationale referencing annotations/callers/callees/parameter_count/receiver_type was aspirational; those fields are not currently emitted. Locked by tests/git_test.cpp:GitReportToJson and tests/cli_test.cpp.",
   "tiers": {
-    "ignore": ["symbols[].signature"]
+    "ignore": ["symbols[].signature"],
+    "_rationale_ignore": "C++ inspect emits `signature` (tree-sitter extracted source-level function signature); Go does not. Intentional divergence — see top-level _rationale. BASE_IGNORE_NON_DETERMINISM applies implicitly."
   },
   "tolerances": {"score_abs": 0.0, "timed_max_ms": 60000},
   "expect_exit": 0

@@ -5,19 +5,30 @@
   "go_binary": "${LCI_GO}",
   "cpp_binary": "${LCI_CPP}",
   "invocation": {
-    "args": ["mcp"],
+    "args": [
+      "mcp"
+    ],
     "stdin": "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"search_definitions\",\"arguments\":{\"query\":\"Add\"}}}",
     "cwd": "${CORPUS}"
   },
-  "capture": ["stdout", "exit"],
+  "capture": [
+    "stdout",
+    "exit"
+  ],
   "parse": "json",
   "_rationale": "search_definitions is NOT registered in either Go or C++ MCP server (verified via tools/list — neither side advertises it). Both binaries return identical JSON-RPC error envelope: {error: {code: -32602, message: \"unknown tool \\\"search_definitions\\\"\"}}. The descriptor's stable tier paths (result.content[].type/text) are absent on both sides, which the spec_diff engine treats as 'equally-missing → match'. That's load-bearing: this descriptor locks the assertion that the tool stays unimplemented on BOTH sides — if one side ever registers it without the other, the result.content[] paths appear asymmetrically and parity fails. To be replaced with a proper request shape if/when the tool lands (likely as a sub-mode of `search` or `list_symbols`).",
   "tiers": {
-    "stable": ["result.content[].type", "result.content[].text"],
+    "stable": [
+      "result.content[].type",
+      "result.content[].text"
+    ],
     "_rationale_stable": "Locks the 'tool missing on both' invariant: absent paths on both sides match. If one binary adds the tool, result.content[] materialises and parity diff surfaces the divergence. The error.code=-32602 is universal noise (not asserted) because the message string includes the tool name which is already in the assertion via the stable-path-absence check.",
-    "ignore": ["id", "jsonrpc", "result.meta.elapsed_ms", "result.meta.server_pid"],
+    "ignore": [],
     "_rationale_ignore": "Universal MCP descriptor noise."
   },
-  "tolerances": {"score_abs": 0.05, "timed_max_ms": 60000},
+  "tolerances": {
+    "score_abs": 0.05,
+    "timed_max_ms": 60000
+  },
   "expect_exit": 0
 }

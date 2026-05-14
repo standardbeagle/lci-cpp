@@ -5,19 +5,30 @@
   "go_binary": "${LCI_GO}",
   "cpp_binary": "${LCI_CPP}",
   "invocation": {
-    "args": ["mcp"],
+    "args": [
+      "mcp"
+    ],
     "stdin": "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"code_insight\",\"arguments\":{\"mode\":\"git_analyze\"}}}",
     "cwd": "${CORPUS}"
   },
-  "capture": ["stdout", "exit"],
+  "capture": [
+    "stdout",
+    "exit"
+  ],
   "parse": "json",
   "_rationale": "code_insight mode=git_analyze is the git-flavoured branch. Multi-lang corpus has no git history so both binaries emit the empty-statistics fallback (complexity/coupling/cohesion/quality all 0.00). After iter-5 fix, C++ emits a byte-identical 302-byte LCF payload to Go: same mode=git_analyze header, same STATISTICS section with zero values. Probe: /tmp/parity-iter4/code_insight___mode___git_analyze.{go,cpp}.json both 302 bytes after rebuild. Locks the git-mode dispatch branch even though the corpus exercises the empty-history path; sufficient to detect any regression that re-routes git_analyze back to overview.",
   "tiers": {
-    "stable": ["result.content[].type", "result.content[].text"],
+    "stable": [
+      "result.content[].type",
+      "result.content[].text"
+    ],
     "_rationale_stable": "Envelope matches MCP spec. result.content[].text is byte-for-byte identical on multi-lang corpus's empty-git-history fallback. A future descriptor on a git-populated corpus would lock real git_analyze content; this one specifically locks the dispatch + empty-fallback path.",
-    "ignore": ["id", "jsonrpc", "result.meta.elapsed_ms", "result.meta.server_pid"],
+    "ignore": [],
     "_rationale_ignore": "Universal MCP descriptor noise."
   },
-  "tolerances": {"score_abs": 0.05, "timed_max_ms": 60000},
+  "tolerances": {
+    "score_abs": 0.05,
+    "timed_max_ms": 60000
+  },
   "expect_exit": 0
 }

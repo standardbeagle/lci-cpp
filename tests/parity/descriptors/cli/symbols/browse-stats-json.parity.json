@@ -12,7 +12,8 @@
   "parse": "json",
   "_rationale": "Both binaries currently drop the CLI `--stats` flag and emit no `stats` block (Go because its CLI never wired it; C++ deliberately sets show_stats=false in src/cli/commands.cpp:1239 to match Go). The HTTP /browse-file endpoint DOES emit stats when given show_stats=true — locked by ServerTest.BrowseFileWithStats. file_id is scanner-order divergent (see http/search rationale).",
   "tiers": {
-    "ignore": ["file.file_id"]
+    "ignore": ["file.file_id"],
+    "_rationale_ignore": "file.file_id is the internal numeric file handle; scanner-order divergent between ports (see http/search rationale). BASE_IGNORE_NON_DETERMINISM applies implicitly."
   },
   "tolerances": {"score_abs": 0.0, "timed_max_ms": 60000},
   "expect_exit": 0

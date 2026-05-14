@@ -5,19 +5,30 @@
   "go_binary": "${LCI_GO}",
   "cpp_binary": "${LCI_CPP}",
   "invocation": {
-    "args": ["mcp"],
+    "args": [
+      "mcp"
+    ],
     "stdin": "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"side_effects\",\"arguments\":{\"symbol_name\":\"Add\"}}}",
     "cwd": "${CORPUS}"
   },
-  "capture": ["stdout", "exit"],
+  "capture": [
+    "stdout",
+    "exit"
+  ],
   "parse": "json",
   "_rationale": "side_effects symbol_name='Add' on multi-lang corpus: the side-effect propagation engine classifies all 4 corpus add()/Add() functions as pure (no I/O, no global writes, no calls to impure primitives). Both binaries return summary-mode payload with total_count=4, pure_functions=4, impure_functions=0. Go emits purity_ratio:1 (int), C++ emits purity_ratio:1.0 (float). The runner's normalize_mcp_inner_text (parity_runner.cpp:90) explicitly ignores `summary.purity_ratio` so the int/float divergence is absorbed; key order normalised by canonicalize_json. Probe: /tmp/parity-iter4/side_effects___symbol_name___Add.{go,cpp}.json — 241 vs 243 bytes (the 2-byte diff is exactly the '.0' suffix). Retrofitted with _rationale per iter-7 karpathy rule.",
   "tiers": {
-    "stable": ["result.content[].type", "result.content[].text"],
+    "stable": [
+      "result.content[].type",
+      "result.content[].text"
+    ],
     "_rationale_stable": "Envelope matches MCP spec. result.content[].text matches after the inner_text normaliser strips `summary.purity_ratio` (Go int vs C++ float, the only divergence). Core fields total_count, pure_functions, impure_functions, mode='summary', results=null all parity-match. The int/float divergence is a JSON serialization cosmetic — both sides agree the ratio is 1, just spelt differently. A future iter could tighten by also asserting purity_ratio in stable if the C++ JSON serializer drops trailing .0 for whole numbers, but cleaner to fix at serializer level than to add a per-descriptor float normaliser.",
-    "ignore": ["id", "jsonrpc", "result.meta.elapsed_ms", "result.meta.server_pid"],
+    "ignore": [],
     "_rationale_ignore": "Universal MCP descriptor noise. `summary.purity_ratio` is NOT listed here because the runner-global inner_text normaliser already ignores it (parity_runner.cpp:90); duplicating it in the descriptor would be redundant."
   },
-  "tolerances": {"score_abs": 0.05, "timed_max_ms": 60000},
+  "tolerances": {
+    "score_abs": 0.05,
+    "timed_max_ms": 60000
+  },
   "expect_exit": 0
 }
