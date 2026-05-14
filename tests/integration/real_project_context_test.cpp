@@ -10,6 +10,7 @@
 
 #include <chrono>
 #include <filesystem>
+#include <fstream>
 #include <string>
 
 #include "helpers/real_project_helpers.h"
@@ -276,6 +277,92 @@ TEST_F(RealProjectContextManifestTest, HydrateManifest) {
 
     EXPECT_TRUE(hydrate_result.contains("refs"));
     EXPECT_TRUE(hydrate_result.contains("stats"));
+}
+
+// Round-trip via file with the compact `f`/`s` ref-key contract that the
+// MCP wire honours (verified iter-13 by parity descriptor
+// tests/parity/descriptors/mcp/context_manifest/save-compact-keys.parity.json
+// and probe against the Go binary — both binaries reject verbose
+// `{file, symbol}` and accept `{f, s}`).
+TEST_F(RealProjectContextManifestTest, SaveAndLoadCompactKeysFileRoundTrip) {
+    SKIP_IF_NO_REAL_PROJECT("go", "chi");
+    auto path = *testing::find_real_project("go", "chi");
+
+    auto ctx = testing::setup_real_project(path, "chi");
+    ASSERT_TRUE(ctx.valid());
+
+    auto search_results = ctx.search("ServeHTTP", 1);
+    ASSERT_FALSE(search_results.empty());
+    auto file_path = search_results[0].path;
+
+    auto tmp_dir = fs::temp_directory_path() /
+                   ("lci_iter13_manifest_" +
+                    std::to_string(::getpid()));
+    fs::create_directories(tmp_dir);
+    auto manifest_rel = ".lci-manifest-iter13.json";
+    auto manifest_abs = tmp_dir / manifest_rel;
+
+    // Save via compact `f`/`s` keys to a file under the project root.
+    // Use absolute path so resolve_manifest_path doesn't relocate.
+    nlohmann::json save_params;
+    save_params["operation"] = "save";
+    save_params["task"] = "iter13-roundtrip";
+    nlohmann::json refs = nlohmann::json::array();
+    nlohmann::json ref;
+    ref["f"] = file_path;
+    ref["s"] = "ServeHTTP";
+    ref["role"] = "primary";
+    refs.push_back(ref);
+    save_params["refs"] = refs;
+    save_params["to_file"] = manifest_abs.string();
+
+    auto save_result = ctx.context_manifest(save_params);
+    ASSERT_FALSE(save_result.contains("error"))
+        << "save error: " << save_result.value("error", "unknown");
+    ASSERT_TRUE(fs::exists(manifest_abs))
+        << "manifest file not written at " << manifest_abs;
+
+    // Load it back — should resolve the same refs without losing `f` or `s`.
+    nlohmann::json load_params;
+    load_params["operation"] = "load";
+    load_params["from_file"] = manifest_abs.string();
+    auto load_result = ctx.context_manifest(load_params);
+
+    ASSERT_FALSE(load_result.contains("error"))
+        << "load error: " << load_result.value("error", "unknown");
+    EXPECT_EQ(load_result["task"].get<std::string>(), "iter13-roundtrip");
+    ASSERT_TRUE(load_result.contains("refs"));
+    ASSERT_GE(load_result["refs"].size(), 1u);
+    EXPECT_EQ(load_result["refs"][0]["symbol"].get<std::string>(),
+              "ServeHTTP");
+
+    // Negative case: a manifest written with verbose `{file, symbol}` ref
+    // keys must be rejected when loaded — surfacing the contract per
+    // karpathy rule 6 (no silent fallback to a forgiving alias).
+    auto bad_manifest_abs = tmp_dir / ".lci-manifest-iter13-verbose.json";
+    nlohmann::json bad;
+    bad["t"] = "verbose";
+    nlohmann::json bad_refs = nlohmann::json::array();
+    nlohmann::json bad_ref;
+    bad_ref["file"] = file_path;    // wrong key — should not be honoured
+    bad_ref["symbol"] = "ServeHTTP"; // wrong key — should not be honoured
+    bad_refs.push_back(bad_ref);
+    bad["refs"] = bad_refs;
+    {
+        std::ofstream out(bad_manifest_abs);
+        out << bad.dump(2);
+    }
+
+    nlohmann::json bad_load;
+    bad_load["operation"] = "load";
+    bad_load["from_file"] = bad_manifest_abs.string();
+    auto bad_load_result = ctx.context_manifest(bad_load);
+    EXPECT_TRUE(bad_load_result.contains("error"))
+        << "verbose `{file, symbol}` ref keys must be rejected — the "
+           "contract is compact `{f, s}`. Silent acceptance would let "
+           "agents write the wrong shape and lose data on round-trip.";
+
+    fs::remove_all(tmp_dir);
 }
 
 }  // namespace

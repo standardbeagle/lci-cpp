@@ -1,17 +1,3 @@
 {
-  "claims": {
-    "zdP14GNGfeo3": {
-      "runner_instance_id": "beagle-ab-475579",
-      "runner_email": "andybrummer@standardbeagle.com",
-      "claimed_at": "2026-05-14T03:00:00Z",
-      "agent_id": "beagle-ab-475579",
-      "parent_loop_id": "zRvo9CV23xZD",
-      "purpose": "loop iter-13: verify context manifest compact f/s key serialization",
-      "source_event": {
-        "loop_id": "zRvo9CV23xZD",
-        "task_id": "zdP14GNGfeo3",
-        "conversation_id": null
-      }
-    }
-  }
+  "claims": {}
 }
