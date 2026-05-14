@@ -1,0 +1,31 @@
+{
+  "id": "cli/search/word-regexp",
+  "mode": "cli",
+  "corpus": "multi-lang",
+  "go_binary": "${LCI_GO}",
+  "cpp_binary": "${LCI_CPP}",
+  "_rationale": {
+    "purpose": "Parity proof for DART-MWm23vqgX9O6: `lci search --word-regexp` must mirror Go. Go's findAllMatchesWithOptions (engine.go:314) rewrites a non-regex word-boundary search into \\b<quoted>\\b regex; C++ post-filters the literal-match engine's rows checking byte boundaries on the matched line. Equivalent semantics, no std::regex in the hot path (Karpathy rule: byte-level only).",
+    "implementation": "src/cli/search.cpp apply_word_boundary() — reads the matched line via read_match_line, checks left/right of [column, column+match.size()) for non-word bytes (\\w = [A-Za-z0-9_]).",
+    "tier": "stable: stdout must match Go byte-for-byte after standard text_normalize (DEBUG strip, mode-label collapse, timing scrub)."
+  },
+  "invocation": {
+    "args": ["search", "add", "--word-regexp"],
+    "cwd": "${CORPUS}"
+  },
+  "capture": ["stdout", "exit"],
+  "parse": "text",
+  "tiers": {},
+  "tolerances": {"score_abs": 0.0, "timed_max_ms": 60000},
+  "expect_exit": 0,
+  "text_normalize": {
+    "strip_lines": ["DEBUG:", "=== Direct Matches ===", "|"],
+    "collapse_blank_lines": true,
+    "replace": [
+      {"pattern": "\\(integrated mode[^)]*\\)", "with": "(MODE)"},
+      {"pattern": "\\(standard mode\\)",        "with": "(MODE)"},
+      {"pattern": "\\$\\{CORPUS\\}/",           "with": ""}
+    ],
+    "sort_lines": true
+  }
+}

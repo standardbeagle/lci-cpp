@@ -1,0 +1,31 @@
+{
+  "id": "cli/search/include-path",
+  "mode": "cli",
+  "corpus": "multi-lang",
+  "go_binary": "${LCI_GO}",
+  "cpp_binary": "${LCI_CPP}",
+  "_rationale": {
+    "purpose": "Rejection parity proof for DART-MWm23vqgX9O6: `lci search --include PATTERN` is silently ignored by Go (server.go:506 forwards only ExcludePattern to the engine; IncludePattern is dropped at the server boundary even though cmd/lci/search.go threads it through SearchOptions). C++ mirrors that silent drop: emits a one-line stderr notice (suppressed under --json) and produces the same result set as a search without --include.",
+    "iter10_pattern": "Same pattern as iter-10 (DART-6lwWAw28lQfj) for grep-style flags: when Go forwards a flag into SearchOptions but the server/display path drops it, C++ must match by also not applying client-side post-filtering. This descriptor proves stdout equivalence so we never reintroduce a divergent client-side include filter.",
+    "tier": "stable: stdout must match Go byte-for-byte (the --include is a silent no-op on both binaries; result set is identical to a search without the flag)."
+  },
+  "invocation": {
+    "args": ["search", "add", "--include", "_test"],
+    "cwd": "${CORPUS}"
+  },
+  "capture": ["stdout", "exit"],
+  "parse": "text",
+  "tiers": {},
+  "tolerances": {"score_abs": 0.0, "timed_max_ms": 60000},
+  "expect_exit": 0,
+  "text_normalize": {
+    "strip_lines": ["DEBUG:", "=== Direct Matches ===", "|", "Note: --include"],
+    "collapse_blank_lines": true,
+    "replace": [
+      {"pattern": "\\(integrated mode[^)]*\\)", "with": "(MODE)"},
+      {"pattern": "\\(standard mode\\)",        "with": "(MODE)"},
+      {"pattern": "\\$\\{CORPUS\\}/",           "with": ""}
+    ],
+    "sort_lines": true
+  }
+}

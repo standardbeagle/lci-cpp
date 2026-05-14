@@ -1,0 +1,31 @@
+{
+  "id": "cli/search/exclude-path",
+  "mode": "cli",
+  "corpus": "multi-lang",
+  "go_binary": "${LCI_GO}",
+  "cpp_binary": "${LCI_CPP}",
+  "_rationale": {
+    "purpose": "Parity proof for DART-MWm23vqgX9O6: `lci search --exclude PATTERN` (regex path filter) must mirror Go. Go's cmd/lci/search.go forwards excludePattern into SearchOptions; the display path regexp.MatchString-filters result paths. C++ post-filters the indexer's result rows with a pre-compiled std::regex (operating on N≤500 paths, not a hot path — Karpathy rule preserved: regex pre-compiled once, applied to bounded post-engine set).",
+    "implementation": "src/cli/search.cpp apply_path_filters() — pre-compiles exclude/include regex once, drops rows whose path matches exclude. Invalid regex syntax warns to stderr and skips the filter (matches Go's regexp.Compile error path).",
+    "tier": "stable: stdout matches Go after text_normalize."
+  },
+  "invocation": {
+    "args": ["search", "add", "--exclude", "_test"],
+    "cwd": "${CORPUS}"
+  },
+  "capture": ["stdout", "exit"],
+  "parse": "text",
+  "tiers": {},
+  "tolerances": {"score_abs": 0.0, "timed_max_ms": 60000},
+  "expect_exit": 0,
+  "text_normalize": {
+    "strip_lines": ["DEBUG:", "=== Direct Matches ===", "|"],
+    "collapse_blank_lines": true,
+    "replace": [
+      {"pattern": "\\(integrated mode[^)]*\\)", "with": "(MODE)"},
+      {"pattern": "\\(standard mode\\)",        "with": "(MODE)"},
+      {"pattern": "\\$\\{CORPUS\\}/",           "with": ""}
+    ],
+    "sort_lines": true
+  }
+}

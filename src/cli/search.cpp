@@ -200,6 +200,153 @@ nlohmann::json invert_match_rows(const nlohmann::json& results,
     return inverted;
 }
 
+// Forward decl: defined later in this same anon namespace. Needed because
+// apply_word_boundary lands above it in source order.
+std::string read_match_line(const nlohmann::json& result,
+                            const std::string& path, int line_no);
+
+/// Returns true if byte `c` is a word character (alphanumeric or underscore).
+/// Mirrors Go's `\b` semantics in `regexp` package — \w = [A-Za-z0-9_].
+bool is_word_byte(unsigned char c) {
+    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+           (c >= '0' && c <= '9') || c == '_';
+}
+
+/// Returns true if the match at `[col_start, col_end)` (0-based half-open
+/// byte offsets) is surrounded by word boundaries — the byte before the match
+/// is non-word (or out of range), and the byte at `col_end` is non-word (or
+/// out of range). Byte-level, no regex.
+bool match_at_word_boundary(std::string_view line, size_t col_start,
+                            size_t col_end) {
+    if (col_end > line.size() || col_start >= col_end) return false;
+    bool left_ok = (col_start == 0) ||
+                   !is_word_byte(static_cast<unsigned char>(line[col_start - 1]));
+    bool right_ok = (col_end == line.size()) ||
+                    !is_word_byte(static_cast<unsigned char>(line[col_end]));
+    return left_ok && right_ok;
+}
+
+/// Filters `results` to keep only rows whose match on the matched line is
+/// bounded by word boundaries on both sides. Uses 1-based `column` from the
+/// result row (server emits 1-based column for matches). Pattern length is
+/// taken from the row's `match` field when present, falling back to looking
+/// for `pattern` on the matched line.
+///
+/// Mirrors Go semantics: `findAllMatchesWithOptions` converts a non-regex
+/// word-boundary search into a `\b<quoted>\b` regex. We post-filter rows
+/// returned by the literal-match engine instead — same effect, no regex.
+nlohmann::json apply_word_boundary(nlohmann::json results,
+                                   const std::string& pattern,
+                                   bool case_insensitive) {
+    nlohmann::json out = nlohmann::json::array();
+    for (auto& r : results) {
+        std::string path = r.value("path", "");
+        int line_no = r.value("line", 0);
+        int column = r.value("column", 0);
+        if (path.empty() || line_no <= 0) {
+            // Missing position → can't classify; drop to mirror grep -w
+            // strictness (Go's regex `\bfoo\b` would simply not match).
+            continue;
+        }
+        std::string text = read_match_line(r, path, line_no);
+        std::string match_str = r.value("match", pattern);
+        if (match_str.empty()) match_str = pattern;
+
+        // The server's literal-match engine emits a 0-based byte offset in
+        // `column` for match positions on the matched line. (Note: the AST
+        // filters in this file treat column as 1-based — that path runs on
+        // a DIFFERENT engine output where `column` is post-normalized to
+        // 1-based by the formatter. Here we read raw indexer rows pre-
+        // formatter, so we use the 0-based byte offset directly.)
+        // `column < 0` is treated as "unknown" — fall back to substring scan.
+        if (column < 0) {
+            // Server didn't record column. Fall back to scanning for the
+            // first occurrence on the line.
+            size_t pos = std::string::npos;
+            if (case_insensitive) {
+                std::string lower_line = ascii_lower(text);
+                std::string lower_pat = ascii_lower(match_str);
+                pos = lower_line.find(lower_pat);
+            } else {
+                pos = text.find(match_str);
+            }
+            if (pos == std::string::npos) continue;
+            if (!match_at_word_boundary(text, pos, pos + match_str.size())) {
+                continue;
+            }
+        } else {
+            size_t start = static_cast<size_t>(column);
+            size_t end = start + match_str.size();
+            if (!match_at_word_boundary(text, start, end)) continue;
+        }
+        out.push_back(std::move(r));
+    }
+    return out;
+}
+
+/// Filters `results` to keep only rows whose `path` matches `include_re`
+/// (when non-empty) and does NOT match `exclude_re` (when non-empty).
+/// Mirrors Go's `displayStandardResults` which calls regexp.MatchString on
+/// each result path. Pre-compiled regexes — no per-row compile.
+///
+/// On invalid regex syntax, emits a warning to stderr and treats the
+/// corresponding filter as inactive (matches Go's `regexp.Compile` error
+/// path which logs and continues with no filter applied).
+nlohmann::json apply_path_filters(nlohmann::json results,
+                                  const std::string& exclude_pattern,
+                                  const std::string& include_pattern) {
+    if (exclude_pattern.empty() && include_pattern.empty()) return results;
+
+    std::optional<std::regex> exclude_re;
+    std::optional<std::regex> include_re;
+    try {
+        if (!exclude_pattern.empty()) {
+            exclude_re.emplace(exclude_pattern, std::regex::ECMAScript);
+        }
+    } catch (const std::regex_error& e) {
+        std::cerr << "Warning: invalid --exclude regex '" << exclude_pattern
+                  << "': " << e.what() << " (filter ignored)\n";
+    }
+    try {
+        if (!include_pattern.empty()) {
+            include_re.emplace(include_pattern, std::regex::ECMAScript);
+        }
+    } catch (const std::regex_error& e) {
+        std::cerr << "Warning: invalid --include regex '" << include_pattern
+                  << "': " << e.what() << " (filter ignored)\n";
+    }
+
+    if (!exclude_re && !include_re) return results;
+
+    nlohmann::json out = nlohmann::json::array();
+    for (auto& r : results) {
+        std::string path = r.value("path", "");
+        // Include: row must match. Empty path always fails an include filter.
+        if (include_re) {
+            if (path.empty() || !std::regex_search(path, *include_re)) continue;
+        }
+        // Exclude: row must NOT match. Empty path passes (nothing to exclude).
+        if (exclude_re && !path.empty() &&
+            std::regex_search(path, *exclude_re)) {
+            continue;
+        }
+        out.push_back(std::move(r));
+    }
+    return out;
+}
+
+/// Strips the `object_id` field from each result row. Used when the user
+/// passes `--no-ids` (default is include). Mirrors Go's
+/// `searchtypes.PopulateDenseObjectIDs` toggle in cmd/lci/search.go:65 —
+/// when `IncludeObjectIDs` is false, object_id stays unset (empty) and the
+/// `omitempty` JSON tag drops it from the wire.
+nlohmann::json strip_object_ids(nlohmann::json results) {
+    for (auto& r : results) {
+        if (r.contains("object_id")) r.erase("object_id");
+    }
+    return results;
+}
+
 /// Caps each file's match list at `max_count_per_file`. Pass-through when 0.
 nlohmann::json apply_max_count_per_file(nlohmann::json results,
                                         int max_count_per_file) {
@@ -1013,14 +1160,14 @@ nlohmann::json regex_filter_results(nlohmann::json results,
 int run_search(const GlobalFlags& flags, const std::string& pattern,
                int max_lines, bool case_insensitive, bool json_output,
                bool light, bool compact_search, bool use_regex,
-               const std::string& /*exclude_pattern*/,
-               const std::string& /*include_pattern*/,
+               const std::string& exclude_pattern,
+               const std::string& include_pattern,
                bool invert_match,
                const std::vector<std::string>& extra_patterns,
                bool count_per_file,
-               bool files_only, bool /*word_boundary*/,
-               int max_count_per_file, bool /*include_ids*/,
-               bool /*no_ids*/, bool comments_only, bool code_only,
+               bool files_only, bool word_boundary,
+               int max_count_per_file, bool include_ids,
+               bool no_ids, bool comments_only, bool code_only,
                bool strings_only, const std::string& rank_by,
                const std::string& context_filter) {
     // -- AST-aware filter mutual exclusion ----------------------------------
@@ -1239,6 +1386,65 @@ int run_search(const GlobalFlags& flags, const std::string& pattern,
         }
     }
 
+    // -- File path exclude filter (Go honors on `lci search`) ---------------
+    //
+    // Go's `lci search` forwards --exclude to the server engine which calls
+    // filterExcludedFiles (engine.go:2381) — regex/glob path filter applied
+    // server-side. C++ post-filters here client-side (compiled once before
+    // the loop, Karpathy rule — operates on bounded N ≤ 500 row set).
+    //
+    // `--include` is NOT honored on `lci search`: Go's server.go:506 forwards
+    // only `ExcludePattern: req.Exclude` to the engine, dropping include on
+    // the server boundary. Mirror that silently — see iter-10 (DART-6lwWAw28lQfj)
+    // pattern: when Go ignores a CLI flag, C++ ignores it too with no client
+    // post-filter. Emits a one-line stderr notice (suppressed under --json)
+    // for surface parity with the iter-10 grep-style flag notice.
+    if (!include_pattern.empty() && !json_output) {
+        std::cerr << "Note: --include is ignored by `lci search` "
+                     "(mirrors Go reference — server forwards only "
+                     "--exclude to the engine). Use `lci grep --include` "
+                     "for path filtering on the grep command.\n";
+    }
+    if (!exclude_pattern.empty()) {
+        auto raw = j.value("results", nlohmann::json::array());
+        j["results"] = apply_path_filters(std::move(raw), exclude_pattern,
+                                          /*include_pattern=*/"");
+    }
+
+    // -- Word boundary filter (grep -w, Go honors on `lci search`) ----------
+    //
+    // Go's `findAllMatchesWithOptions` rewrites a non-regex word-boundary
+    // search into `\b<quoted>\b` regex (engine.go:314). We post-filter rows
+    // already returned by the literal-match engine, checking byte boundaries
+    // on the matched line. Byte-level, no std::regex. See Karpathy rule:
+    // word_boundary checks must be byte-level not regex.
+    if (word_boundary) {
+        auto raw = j.value("results", nlohmann::json::array());
+        // Use the first non-empty pattern as the boundary check target.
+        // When `--patterns` are present, each row's own `match` field is the
+        // authoritative match text; apply_word_boundary falls back to that
+        // per-row, so we only need a default for the column-missing path.
+        std::string boundary_pat =
+            all_patterns.empty() ? pattern : all_patterns.front();
+        j["results"] = apply_word_boundary(std::move(raw), boundary_pat,
+                                           case_insensitive);
+    }
+
+    // -- Object ID toggle (--ids / --no-ids, Go honors on `lci search`) ------
+    //
+    // Go default: include object_id. `--no-ids` forces exclusion; `--ids`
+    // forces inclusion. Server emits `object_id` unconditionally, so we only
+    // need to act on `--no-ids` (strip the field). The `--ids` flag is the
+    // default and acts as an explicit affirmation — no-op here.
+    // `include_ids` retains its value for the future case where the default
+    // is flipped (Go's `c.IsSet("ids")` path); today both produce identical
+    // output when no-ids is false.
+    (void)include_ids;
+    if (no_ids) {
+        auto raw = j.value("results", nlohmann::json::array());
+        j["results"] = strip_object_ids(std::move(raw));
+    }
+
     // -- Grep-filter post-processing for `lci search` ------------------------
     //
     // Go's `lci search` ignores grep-style flags (`--invert-match`,
@@ -1398,8 +1604,8 @@ int run_search(const GlobalFlags& flags, const std::string& pattern,
 
 int run_grep(const GlobalFlags& flags, const std::string& pattern,
              int max_results, int context_lines, bool case_insensitive,
-             bool json_output, const std::string& /*exclude_pattern*/,
-             const std::string& /*include_pattern*/, bool exclude_tests,
+             bool json_output, const std::string& exclude_pattern,
+             const std::string& include_pattern, bool exclude_tests,
              bool exclude_comments, bool /*use_regex*/,
              bool invert_match,
              const std::vector<std::string>& extra_patterns,
@@ -1474,6 +1680,24 @@ int run_grep(const GlobalFlags& flags, const std::string& pattern,
     // 3) max-count caps per-file BEFORE count/files-only aggregation so the
     //    summary respects the cap (parity with grep's `-m N -c`).
     nlohmann::json results_arr = j.value("results", nlohmann::json::array());
+
+    // -- File path exclude filter (Go honors --exclude on `lci grep`) -------
+    // Go's grepCommand forwards --exclude into SearchOptions and the server
+    // engine applies filterExcludedFiles. `--include` is silently dropped on
+    // the server boundary (server.go:506 forwards only ExcludePattern). We
+    // mirror Go: post-filter on exclude, ignore include (with stderr notice).
+    // Runs before exclude_tests/exclude_comments so every downstream mode
+    // sees the path-narrowed set.
+    if (!include_pattern.empty() && !json_output) {
+        std::cerr << "Note: --include is ignored by `lci grep` "
+                     "(mirrors Go reference — server forwards only "
+                     "--exclude to the engine).\n";
+    }
+    if (!exclude_pattern.empty()) {
+        results_arr = apply_path_filters(std::move(results_arr),
+                                         exclude_pattern,
+                                         /*include_pattern=*/"");
+    }
 
     if (exclude_tests) {
         results_arr = apply_exclude_tests(std::move(results_arr));
