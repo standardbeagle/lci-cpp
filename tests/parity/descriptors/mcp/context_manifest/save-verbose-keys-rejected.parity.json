@@ -21,7 +21,7 @@
     "ignore": [
       "result.content[].text"
     ],
-    "_rationale_ignore": "Error-message text differs in wording between binaries (Go references field path `refs[0].f`; C++ references zero-indexed ref slot and validation predicate). Both error messages are user-facing and useful for the agent that triggered the rejection; they are not part of the wire contract. The parity claim is the isError envelope flag, not the diagnostic string. If either binary later accepts the verbose form (isError=false) the stable tier catches it immediately. Karpathy rule 6: do not normalize error wording into a fake match — accept that diagnostics may legitimately diverge while the contract (rejection) holds."
+    "_rationale_ignore": "Error-message text differs in wording between binaries (Go references field path `refs[0].f`; C++ references zero-indexed ref slot and validation predicate). Both error messages are user-facing and useful for the agent that triggered the rejection; they are not part of the wire contract. The parity claim is the isError envelope flag, not the diagnostic string. If either binary later accepts the verbose form (isError=false) the stable tier catches it immediately. Karpathy rule 6: do not normalize error wording into a fake match — accept that diagnostics may legitimately diverge while the contract (rejection) holds. Iter-14 (DART-2PPeRKfyrceR) re-evaluated this tier when the body-shape parity landed: text remains ignore because the error string is intrinsically per-binary wording (not a body-shape field). Promoting it would force a brittle string equality across two unrelated diagnostic strings."
   },
   "tolerances": {
     "score_abs": 0.05,

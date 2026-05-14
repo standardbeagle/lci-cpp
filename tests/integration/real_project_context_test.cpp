@@ -322,6 +322,38 @@ TEST_F(RealProjectContextManifestTest, SaveAndLoadCompactKeysFileRoundTrip) {
     ASSERT_TRUE(fs::exists(manifest_abs))
         << "manifest file not written at " << manifest_abs;
 
+    // Iter-14 (DART-2PPeRKfyrceR): manifest body on disk must use the Go-shape
+    // compact top-level keys (t/c/v/p/r/s) per
+    // internal/types/context_manifest_types.go json tags. Verbose keys
+    // (task/version/project_root/refs) would silently drop cross-binary —
+    // karpathy rule 6 (no silent fallback).
+    {
+        std::ifstream in(manifest_abs);
+        std::string body((std::istreambuf_iterator<char>(in)),
+                         std::istreambuf_iterator<char>());
+        auto disk = nlohmann::json::parse(body);
+        EXPECT_TRUE(disk.contains("t")) << "missing Go-shape top-level 't' (task)";
+        EXPECT_TRUE(disk.contains("c")) << "missing Go-shape top-level 'c' (created)";
+        EXPECT_TRUE(disk.contains("v")) << "missing Go-shape top-level 'v' (version)";
+        EXPECT_TRUE(disk.contains("r")) << "missing Go-shape top-level 'r' (refs)";
+        EXPECT_TRUE(disk.contains("s")) << "missing Go-shape top-level 's' (stats)";
+        EXPECT_TRUE(disk.contains("p"))
+            << "missing Go-shape top-level 'p' (project_root) — must survive "
+               "the save handler's manifest build";
+        EXPECT_FALSE(disk.contains("task"))
+            << "verbose top-level 'task' must not be emitted";
+        EXPECT_FALSE(disk.contains("refs"))
+            << "verbose top-level 'refs' must not be emitted";
+        EXPECT_FALSE(disk.contains("project_root"))
+            << "verbose top-level 'project_root' must not be emitted";
+        ASSERT_TRUE(disk["r"].is_array());
+        ASSERT_GE(disk["r"].size(), 1u);
+        EXPECT_EQ(disk["r"][0]["f"].get<std::string>(), file_path);
+        EXPECT_EQ(disk["r"][0]["s"].get<std::string>(), "ServeHTTP");
+        // Stats block carries rc per Go ManifestStats `rc` tag.
+        EXPECT_TRUE(disk["s"].contains("rc"));
+    }
+
     // Load it back — should resolve the same refs without losing `f` or `s`.
     nlohmann::json load_params;
     load_params["operation"] = "load";

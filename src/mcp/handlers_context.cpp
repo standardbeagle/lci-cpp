@@ -1,7 +1,11 @@
 #include <lci/mcp/handlers_context.h>
 
+#include <chrono>
+#include <cstdio>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <limits>
 #include <string>
 #include <vector>
@@ -14,52 +18,166 @@
 namespace lci {
 namespace mcp {
 
+namespace {
+
+/// Formats a system_clock time_point as RFC3339Nano with local timezone offset
+/// (matches Go's time.Time JSON marshal: "2026-05-13T17:12:53.528955893-05:00").
+///
+/// Duplicated from src/mcp/handlers_index.cpp (iter-8 helper) to keep this
+/// task within the 5-file scope cap. Follow-up: extract to a shared header
+/// under include/lci/mcp/ once the cap relaxes (tracked as loop-fix in the
+/// completion comment of DART-2PPeRKfyrceR).
+std::string format_rfc3339_nano_local(
+    std::chrono::system_clock::time_point tp) {
+    using namespace std::chrono;
+    auto secs = time_point_cast<seconds>(tp);
+    auto ns = duration_cast<nanoseconds>(tp - secs).count();
+    std::time_t t = system_clock::to_time_t(secs);
+    std::tm tm{};
+    localtime_r(&t, &tm);
+
+    std::tm utm{};
+    gmtime_r(&t, &utm);
+    std::time_t lt = std::mktime(&tm);
+    std::time_t ut = std::mktime(&utm);
+    long offset = static_cast<long>(lt - ut);
+    char sign = offset < 0 ? '-' : '+';
+    long abs_off = offset < 0 ? -offset : offset;
+    int oh = static_cast<int>(abs_off / 3600);
+    int om = static_cast<int>((abs_off % 3600) / 60);
+
+    char buf[48];
+    int n = std::snprintf(buf, sizeof(buf),
+                          "%04d-%02d-%02dT%02d:%02d:%02d.%09ld%c%02d:%02d",
+                          tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+                          tm.tm_hour, tm.tm_min, tm.tm_sec,
+                          static_cast<long>(ns), sign, oh, om);
+    if (n <= 0) return std::string{};
+    return std::string(buf, static_cast<size_t>(n));
+}
+
+/// Emits a one-line stderr warning the first time a verbose-shape key is
+/// accepted on the load path. Karpathy rule 6 (no silent fallback): the
+/// Go-shape compact keys are the contract; verbose keys are a transitional
+/// accommodation that must surface.
+void warn_verbose_key_once(const char* key, const char* compact) {
+    std::cerr << "lci: warning: context_manifest accepted verbose key '"
+              << key << "' (compact form is '" << compact
+              << "' per Go reference internal/types/context_manifest_types.go"
+                 " — DART-2PPeRKfyrceR)\n";
+}
+
+/// Reads a string field from a JSON object honouring a compact key (Go
+/// reference) with an optional verbose-key fallback. Returns true if any
+/// form was found and assigns to `out`. Emits a stderr warning on verbose
+/// hits.
+bool read_string_keyed(const nlohmann::json& j, const char* compact,
+                       const char* verbose, std::string& out) {
+    if (j.contains(compact) && j[compact].is_string()) {
+        out = j[compact].get<std::string>();
+        return true;
+    }
+    if (verbose && j.contains(verbose) && j[verbose].is_string()) {
+        warn_verbose_key_once(verbose, compact);
+        out = j[verbose].get<std::string>();
+        return true;
+    }
+    return false;
+}
+
+}  // namespace
+
 // -- JSON serialization -------------------------------------------------------
 
+// Emits the Go-shape compact manifest body (matches internal/types/
+// context_manifest_types.go json tags):
+//   top-level: t (task), c (created RFC3339Nano), v (version), p (project_root),
+//              r (refs), s (stats)
+//   ref:       f, s, l:{s,e}, role, n (note), x
+//   stats:     rc, tl, fc, rb
+// Parity-locked iter-14 (DART-2PPeRKfyrceR) by
+// tests/parity/descriptors/mcp/context_manifest/save-to_string-body-shape.parity.json.
 nlohmann::json manifest_to_json(const ContextManifest& m) {
     nlohmann::json j;
-    if (!m.task.empty()) j["task"] = m.task;
-    if (!m.version.empty()) j["version"] = m.version;
-    if (!m.project_root.empty()) j["project_root"] = m.project_root;
+    if (!m.task.empty()) j["t"] = m.task;
+    // Created timestamp — Go's MarshalJSON does not stamp `c` (it is a passed-
+    // through field), but emitting it on save is harmless because Go's
+    // ContextManifest.Created uses `omitempty` on unmarshal. Stamp it so
+    // round-trips through C++ preserve a creation time when none was set.
+    j["c"] = format_rfc3339_nano_local(std::chrono::system_clock::now());
+    // Go sets v="1.0" in MarshalJSON; mirror that default if caller did not
+    // supply one explicitly.
+    j["v"] = m.version.empty() ? std::string{"1.0"} : m.version;
+    if (!m.project_root.empty()) j["p"] = m.project_root;
 
-    auto& refs = j["refs"];
+    auto& refs = j["r"];
     refs = nlohmann::json::array();
     for (const auto& r : m.refs) {
         nlohmann::json rj;
         rj["f"] = r.file;
         if (!r.symbol.empty()) rj["s"] = r.symbol;
         if (r.has_line_range) {
-            rj["l"] = {{"start", r.line_range.start},
-                       {"end", r.line_range.end}};
+            rj["l"] = {{"s", r.line_range.start},
+                       {"e", r.line_range.end}};
         }
         if (!r.role.empty()) rj["role"] = r.role;
-        if (!r.note.empty()) rj["note"] = r.note;
+        if (!r.note.empty()) rj["n"] = r.note;
         if (!r.expansions.empty()) rj["x"] = r.expansions;
         refs.push_back(std::move(rj));
     }
 
+    // Stats block — Go MarshalJSON calls ComputeStats(); mirror.
+    auto stats = compute_manifest_stats(m);
+    nlohmann::json sj;
+    sj["rc"] = stats.ref_count;
+    if (stats.total_lines > 0) sj["tl"] = stats.total_lines;
+    if (stats.file_count > 0) sj["fc"] = stats.file_count;
+    // Role breakdown — Go emits when non-empty.
+    nlohmann::json rb = nlohmann::json::object();
+    for (const auto& r : m.refs) {
+        if (r.role.empty()) continue;
+        if (rb.contains(r.role)) {
+            rb[r.role] = rb[r.role].get<int>() + 1;
+        } else {
+            rb[r.role] = 1;
+        }
+    }
+    if (!rb.empty()) sj["rb"] = std::move(rb);
+    j["s"] = std::move(sj);
+
     return j;
 }
 
+// Accepts Go-shape compact keys as primary. Verbose keys (task/version/
+// project_root/refs/note/start/end) are accepted as a transitional fallback
+// with a one-line stderr warning per occurrence — karpathy rule 6, no silent
+// fallback. The compact contract is enforced by the parity descriptors
+// save-compact-keys.parity.json and save-verbose-keys-rejected.parity.json
+// (the latter targets the *ref* keys f/s, which never fall back).
 std::string manifest_from_json(const nlohmann::json& j,
                                ContextManifest& out) {
     out = {};
-    if (j.contains("task") && j["task"].is_string()) {
-        out.task = j["task"].get<std::string>();
-    }
-    if (j.contains("version") && j["version"].is_string()) {
-        out.version = j["version"].get<std::string>();
-    }
-    if (j.contains("project_root") && j["project_root"].is_string()) {
-        out.project_root = j["project_root"].get<std::string>();
+
+    read_string_keyed(j, "t", "task", out.task);
+    read_string_keyed(j, "v", "version", out.version);
+    read_string_keyed(j, "p", "project_root", out.project_root);
+
+    // Refs array: Go uses `r`; accept verbose `refs` as load-only fallback.
+    const nlohmann::json* refs_ptr = nullptr;
+    if (j.contains("r") && j["r"].is_array()) {
+        refs_ptr = &j["r"];
+    } else if (j.contains("refs") && j["refs"].is_array()) {
+        warn_verbose_key_once("refs", "r");
+        refs_ptr = &j["refs"];
+    } else {
+        return "missing or invalid 'r' (refs) array";
     }
 
-    if (!j.contains("refs") || !j["refs"].is_array()) {
-        return "missing or invalid 'refs' array";
-    }
-
-    for (const auto& rj : j["refs"]) {
+    for (const auto& rj : *refs_ptr) {
         ContextRef r;
+        // f/s are compact-only by contract; no verbose alias here — the
+        // negative parity descriptor save-verbose-keys-rejected.parity.json
+        // locks rejection of {file, symbol} on the ref level.
         if (rj.contains("f") && rj["f"].is_string()) {
             r.file = rj["f"].get<std::string>();
         }
@@ -67,16 +185,24 @@ std::string manifest_from_json(const nlohmann::json& j,
             r.symbol = rj["s"].get<std::string>();
         }
         if (rj.contains("l") && rj["l"].is_object()) {
-            r.line_range.start = rj["l"].value("start", 0);
-            r.line_range.end = rj["l"].value("end", 0);
+            const auto& lj = rj["l"];
+            // Go LineRange json tags are {s, e}. Verbose {start, end}
+            // accepted as load-only fallback with one-time stderr warning.
+            if (lj.contains("s") && lj.contains("e")) {
+                r.line_range.start = lj.value("s", 0);
+                r.line_range.end = lj.value("e", 0);
+            } else if (lj.contains("start") || lj.contains("end")) {
+                warn_verbose_key_once("l.start/l.end", "l.s/l.e");
+                r.line_range.start = lj.value("start", 0);
+                r.line_range.end = lj.value("end", 0);
+            }
             r.has_line_range = true;
         }
         if (rj.contains("role") && rj["role"].is_string()) {
             r.role = rj["role"].get<std::string>();
         }
-        if (rj.contains("note") && rj["note"].is_string()) {
-            r.note = rj["note"].get<std::string>();
-        }
+        // note: Go uses `n`; accept verbose `note` as load-only fallback.
+        read_string_keyed(rj, "n", "note", r.note);
         if (rj.contains("x") && rj["x"].is_array()) {
             for (const auto& x : rj["x"]) {
                 if (x.is_string()) {
@@ -282,36 +408,35 @@ ToolResult handle_context_save(const nlohmann::json& params,
             "must provide either 'to_file' or set 'to_string' to true");
     }
 
-    // Build manifest
+    // Build manifest. The save tool's input schema is {task, refs:[{f,s,l,
+    // role,n,x}], ...} on the params object — the `refs` argument array is
+    // the canonical input shape, distinct from a stored manifest body (which
+    // uses the Go-shape `r` key and is parsed by manifest_from_json on load).
+    // Parse the refs argument directly; ref keys are Go-shape compact
+    // f/s/l{s,e}/n with verbose start/end/note tolerated for input ergonomics.
     ContextManifest manifest;
     manifest.task = params.value("task", "");
     manifest.project_root = project_root;
-
-    auto err = manifest_from_json(params, manifest);
-    // manifest_from_json may partially fill; re-validate
-    if (manifest.refs.empty()) {
-        // Try direct parse of refs array
-        manifest.refs.clear();
-        for (const auto& rj : params["refs"]) {
-            ContextRef r;
-            r.file = rj.value("f", "");
-            r.symbol = rj.value("s", "");
-            if (rj.contains("l") && rj["l"].is_object()) {
-                r.line_range.start = rj["l"].value("start", 0);
-                r.line_range.end = rj["l"].value("end", 0);
-                r.has_line_range = true;
-            }
-            r.role = rj.value("role", "");
-            r.note = rj.value("note", "");
-            if (rj.contains("x") && rj["x"].is_array()) {
-                for (const auto& x : rj["x"]) {
-                    if (x.is_string()) {
-                        r.expansions.push_back(x.get<std::string>());
-                    }
+    for (const auto& rj : params["refs"]) {
+        ContextRef r;
+        r.file = rj.value("f", "");
+        r.symbol = rj.value("s", "");
+        if (rj.contains("l") && rj["l"].is_object()) {
+            const auto& lj = rj["l"];
+            r.line_range.start = lj.value("s", lj.value("start", 0));
+            r.line_range.end = lj.value("e", lj.value("end", 0));
+            r.has_line_range = true;
+        }
+        r.role = rj.value("role", "");
+        r.note = rj.value("n", rj.value("note", ""));
+        if (rj.contains("x") && rj["x"].is_array()) {
+            for (const auto& x : rj["x"]) {
+                if (x.is_string()) {
+                    r.expansions.push_back(x.get<std::string>());
                 }
             }
-            manifest.refs.push_back(std::move(r));
         }
+        manifest.refs.push_back(std::move(r));
     }
 
     auto val_err = validate_manifest(manifest);

@@ -1,0 +1,31 @@
+{
+  "id": "mcp/context_manifest/save-to_string-body-shape",
+  "mode": "mcp",
+  "corpus": "multi-lang",
+  "go_binary": "${LCI_GO}",
+  "cpp_binary": "${LCI_CPP}",
+  "invocation": {
+    "args": ["mcp"],
+    "stdin": "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"context\",\"arguments\":{\"operation\":\"save\",\"task\":\"parity-body-shape\",\"to_string\":true,\"refs\":[{\"f\":\"a.go\",\"s\":\"Add\",\"role\":\"primary\",\"l\":{\"s\":3,\"e\":5}}]}}}",
+    "cwd": "${CORPUS}"
+  },
+  "capture": ["stdout", "exit"],
+  "parse": "json",
+  "_rationale": "Iter-14 (DART-2PPeRKfyrceR) follow-up to iter-13 (DART-zdP14GNGfeo3). Iter-13 locked the *ref-input* compact key contract (f/s on the wire); this descriptor locks the *manifest body* shape returned by `to_string:true`. Go emits the compact top-level keys per internal/types/context_manifest_types.go json tags: `t` (task), `c` (created RFC3339Nano), `v` (version), `p` (project_root), `r` (refs), `s` (stats); ref note is `n`; LineRange is `{s, e}`; stats sub-keys are rc/tl/fc/rb. The C++ binary was emitting verbose top-level keys (task/version/project_root/refs) and verbose LineRange ({start, end}) prior to this iteration — fixed in src/mcp/handlers_context.cpp manifest_to_json. The structural body assertion is provided by the C++ unit test tests/integration/real_project_context_test.cpp::SaveAndLoadCompactKeysFileRoundTrip (on-disk Go-shape key check). This descriptor adds wire-level coverage: locks the envelope (isError absent on Go-shape input + LineRange {s,e}) and the input contract that both binaries accept Go-shape LineRange — the iter-13 descriptors only exercised the ref-key contract, not the LineRange shape on the input side. Karpathy rule 6 (no silent fallback): a binary that silently dropped the unfamiliar `l.s`/`l.e` keys would surface as isError=false but stats.tl=0 — which we don't probe directly here (text body is ignore-tier for timestamp masking reasons, see _rationale_ignore) but DO bridge via the unit test.",
+  "tiers": {
+    "stable": [
+      "result.content[].type",
+      "result.isError"
+    ],
+    "_rationale_stable": "Envelope frame: content[].type='text' and isError absent (or false) on both binaries means both accepted the Go-shape LineRange `{s, e}` on the input wire. This is the parity guard for the iter-14 input-side LineRange contract.",
+    "ignore": [
+      "result.content[].text"
+    ],
+    "_rationale_ignore": "The manifest body is now Go-shape on both sides (iter-14 fix in manifest_to_json), but content[].text cannot be promoted to stable on the wire-byte diff because the body contains intrinsically per-call fields: (a) `c` RFC3339Nano wall-clock timestamp; (b) `p` absolute project_root path that resolves differently per binary working directory. The parity runner's spec_diff treats content[].text as an opaque string leaf (tests/lib/spec_diff/src/diff.cpp:62) — full string equality, no sub-path masking. Structural body assertion is bridged by C++ unit test SaveAndLoadCompactKeysFileRoundTrip which parses the on-disk manifest and verifies Go-shape keys are present and verbose keys are absent. Future enhancement: parser-aware content[].text diff with masking of inner `c` and `p` paths would let this descriptor promote text to stable — tracked as iter-14 follow-up loop-fix."
+  },
+  "tolerances": {
+    "score_abs": 0.05,
+    "timed_max_ms": 60000
+  },
+  "expect_exit": 0
+}
