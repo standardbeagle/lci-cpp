@@ -163,8 +163,12 @@ set_tests_properties(lci_benchmarks PROPERTIES LABELS "benchmark")
 # Fuzz targets (Clang libFuzzer only)
 # ---------------------------------------------------------------------------
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND LCI_ENABLE_FUZZING)
-    set(FUZZ_LINK_FLAGS "-fsanitize=fuzzer,address,undefined")
-    set(FUZZ_COMPILE_FLAGS "-fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer")
+    # Must be CMake lists (not space-joined strings): target_compile_options
+    # passes a quoted string as a single compiler token, which makes clang
+    # parse "-fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer" as
+    # one -fsanitize= value and reject it.
+    set(FUZZ_LINK_FLAGS -fsanitize=fuzzer,address,undefined)
+    set(FUZZ_COMPILE_FLAGS -fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer)
 
     add_executable(fuzz_regex_classifier fuzz/fuzz_regex_classifier.cpp)
     target_include_directories(fuzz_regex_classifier PRIVATE

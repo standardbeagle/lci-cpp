@@ -12,8 +12,13 @@
 #include <lci/symbol.h>
 #include <lci/types.h>
 
+// tree-sitter declares these inside `extern "C"`; the forward declarations
+// must match that language linkage or gcc-13/clang-18 reject the later
+// <tree_sitter/api.h> include as a conflicting declaration.
+extern "C" {
 struct TSNode;
 struct TSTree;
+}
 
 namespace lci::parser {
 

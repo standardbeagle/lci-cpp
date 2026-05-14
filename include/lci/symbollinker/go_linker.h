@@ -9,7 +9,11 @@
 
 #include <lci/symbollinker/extractor.h>
 
+// tree-sitter declares TSNode inside `extern "C"`; the forward declaration
+// must match that language linkage (gcc-13/clang-18 reject a mismatch).
+extern "C" {
 struct TSNode;
+}
 
 namespace lci::symbollinker {
 
