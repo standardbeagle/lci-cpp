@@ -1,0 +1,12 @@
+// Spec-local corpus config for the cli/config/show integration test.
+//
+// max_goroutines is pinned so `config show` emits a deterministic value
+// instead of host-dependent std::thread::hardware_concurrency(). This lets
+// the golden be byte-exact without a regex normalization mask.
+//
+// This corpus is dedicated to the config/show spec — it deliberately does
+// not share the multi-lang synthetic corpus, so pinning config here has no
+// blast radius on the ~15 other specs that consume multi-lang.
+performance {
+    max_goroutines 8
+}

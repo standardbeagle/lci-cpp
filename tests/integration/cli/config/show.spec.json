@@ -2,7 +2,7 @@
   "id": "cli/config/show",
   "golden": "goldens/cli/config/show.txt",
   "mode": "cli",
-  "corpus": "multi-lang",
+  "corpus": "integration/cli/config/corpus",
   "go_binary": "${LCI_GO}",
   "cpp_binary": "${LCI_CPP}",
   "invocation": {
@@ -22,13 +22,5 @@
     "score_abs": 0.0,
     "timed_max_ms": 60000
   },
-  "expect_exit": 0,
-  "text_normalize": {
-    "replace": [
-      {
-        "pattern": "Max goroutines:\\s+\\d+",
-        "with": "Max goroutines:     N"
-      }
-    ]
-  }
+  "expect_exit": 0
 }
