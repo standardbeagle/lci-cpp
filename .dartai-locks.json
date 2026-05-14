@@ -1,3 +1,17 @@
 {
-  "claims": {}
+  "claims": {
+    "6AJu8CwVPgtH": {
+      "runner_instance_id": "beagle-ab-475579",
+      "runner_email": "andybrummer@standardbeagle.com",
+      "claimed_at": "2026-05-14T04:30:00Z",
+      "agent_id": "beagle-ab-475579",
+      "parent_loop_id": "zRvo9CV23xZD",
+      "purpose": "loop iter-16: cli/config/show real thread count, remove Max goroutines mask",
+      "source_event": {
+        "loop_id": "zRvo9CV23xZD",
+        "task_id": "6AJu8CwVPgtH",
+        "conversation_id": null
+      }
+    }
+  }
 }
