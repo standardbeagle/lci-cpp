@@ -501,6 +501,42 @@ exclude "**/real_projects/**"
 }
 
 // ---------------------------------------------------------------------------
+// Malformed KDL: graceful error, no crash / no hang
+// ---------------------------------------------------------------------------
+TEST_F(KdlConfigTest, RejectsKdlV2TrueToken) {
+    write_kdl("index {\n  respect_gitignore #true\n}\n");
+    auto result = load_config(temp_dir_.string());
+    EXPECT_FALSE(result.ok());
+    EXPECT_NE(result.error.find('#'), std::string::npos) << result.error;
+}
+
+TEST_F(KdlConfigTest, RejectsKdlV2FalseToken) {
+    write_kdl("index {\n  respect_gitignore #false\n}\n");
+    auto result = load_config(temp_dir_.string());
+    EXPECT_FALSE(result.ok());
+    EXPECT_NE(result.error.find('#'), std::string::npos) << result.error;
+}
+
+TEST_F(KdlConfigTest, RejectsBareHashToken) {
+    write_kdl("index {\n  respect_gitignore #\n}\n");
+    auto result = load_config(temp_dir_.string());
+    EXPECT_FALSE(result.ok());
+}
+
+TEST_F(KdlConfigTest, RejectsUnknownHashKeyword) {
+    write_kdl("index {\n  respect_gitignore #unknown\n}\n");
+    auto result = load_config(temp_dir_.string());
+    EXPECT_FALSE(result.ok());
+}
+
+TEST_F(KdlConfigTest, MalformedErrorReportsLineNumber) {
+    write_kdl("project {\n  name \"ok\"\n}\nindex {\n  respect_gitignore #true\n}\n");
+    auto result = load_config(temp_dir_.string());
+    ASSERT_FALSE(result.ok());
+    EXPECT_NE(result.error.find("line 5"), std::string::npos) << result.error;
+}
+
+// ---------------------------------------------------------------------------
 // Validation
 // ---------------------------------------------------------------------------
 TEST(ValidateConfigTest, AcceptsValidDefaults) {
