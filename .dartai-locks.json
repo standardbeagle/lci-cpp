@@ -1,3 +1,17 @@
 {
-  "claims": {}
+  "claims": {
+    "2PPeRKfyrceR": {
+      "runner_instance_id": "beagle-ab-475579",
+      "runner_email": "andybrummer@standardbeagle.com",
+      "claimed_at": "2026-05-14T03:15:00Z",
+      "agent_id": "beagle-ab-475579",
+      "parent_loop_id": "zRvo9CV23xZD",
+      "purpose": "loop iter-14: context_manifest body shape parity Go t/c/v/p/r/s vs C++",
+      "source_event": {
+        "loop_id": "zRvo9CV23xZD",
+        "task_id": "2PPeRKfyrceR",
+        "conversation_id": null
+      }
+    }
+  }
 }
