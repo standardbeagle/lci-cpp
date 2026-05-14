@@ -1,3 +1,17 @@
 {
-  "claims": {}
+  "claims": {
+    "dk4QZUHJYC7J": {
+      "runner_instance_id": "beagle-ab-475579",
+      "runner_email": "andybrummer@standardbeagle.com",
+      "claimed_at": "2026-05-14T05:30:00Z",
+      "agent_id": "beagle-ab-475579",
+      "parent_loop_id": "zRvo9CV23xZD",
+      "purpose": "loop iter-18: fix stale mcp_get_context_basic golden",
+      "source_event": {
+        "loop_id": "zRvo9CV23xZD",
+        "task_id": "dk4QZUHJYC7J",
+        "conversation_id": null
+      }
+    }
+  }
 }
