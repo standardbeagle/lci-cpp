@@ -1,3 +1,17 @@
 {
-  "claims": {}
+  "claims": {
+    "MWm23vqgX9O6": {
+      "runner_instance_id": "beagle-ab-475579",
+      "runner_email": "andybrummer@standardbeagle.com",
+      "claimed_at": "2026-05-13T23:30:00Z",
+      "agent_id": "beagle-ab-475579",
+      "parent_loop_id": "zRvo9CV23xZD",
+      "purpose": "loop iter-11: wire ignored CLI flags word_boundary/exclude/include/ids in run_search/run_grep",
+      "source_event": {
+        "loop_id": "zRvo9CV23xZD",
+        "task_id": "MWm23vqgX9O6",
+        "conversation_id": null
+      }
+    }
+  }
 }
