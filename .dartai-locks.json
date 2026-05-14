@@ -1,17 +1,3 @@
 {
-  "claims": {
-    "20D4f9UiUdP6": {
-      "runner_instance_id": "beagle-ab-475579",
-      "runner_email": "andybrummer@standardbeagle.com",
-      "claimed_at": "2026-05-14T04:00:00Z",
-      "agent_id": "beagle-ab-475579",
-      "parent_loop_id": "zRvo9CV23xZD",
-      "purpose": "loop iter-15: cli/search/regex integration golden lock C++ output drop fake banner",
-      "source_event": {
-        "loop_id": "zRvo9CV23xZD",
-        "task_id": "20D4f9UiUdP6",
-        "conversation_id": null
-      }
-    }
-  }
+  "claims": {}
 }
