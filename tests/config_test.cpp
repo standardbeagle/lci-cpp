@@ -501,6 +501,63 @@ exclude "**/real_projects/**"
 }
 
 // ---------------------------------------------------------------------------
+// .lci.kdl file-load default contract: when a config file IS loaded, Go's
+// parseKDL (internal/config/kdl_config.go) builds its base Config from a
+// struct literal that OMITS several index/performance fields, so they take
+// Go's zero value — NOT the richer no-file defaults from config.go's Load().
+// A .lci.kdl with no `index` block must therefore yield respect_gitignore
+// false, watch_mode false, watch_debounce_ms 0 (Go zero values), even though
+// make_default_config() (the no-file path) has them true/true/300.
+// Repro: Go `config show` prints "Respect .gitignore: false" for a .lci.kdl
+// that only has a `performance` block; C++ printed true before this fix.
+// ---------------------------------------------------------------------------
+TEST_F(KdlConfigTest, FileWithoutIndexBlockUsesGoZeroValueIndexDefaults) {
+    // A .lci.kdl with only a performance block — no `index` block at all.
+    write_kdl("performance {\n  max_goroutines 8\n}\n");
+    auto result = load_config(temp_dir_.string());
+    ASSERT_TRUE(result.ok()) << result.error;
+
+    // Go's parseKDL literal omits these, so they are Go zero values.
+    EXPECT_FALSE(result.config.index.respect_gitignore)
+        << "Go emits respect_gitignore false when a .lci.kdl is loaded "
+           "without an index block";
+    EXPECT_FALSE(result.config.index.watch_mode)
+        << "Go's parseKDL literal omits watch_mode -> zero value false";
+    EXPECT_EQ(result.config.index.watch_debounce_ms, 0)
+        << "Go's parseKDL literal omits watch_debounce_ms -> zero value 0";
+
+    // Fields present in Go's parseKDL literal keep their literal values.
+    EXPECT_EQ(result.config.index.max_file_size, 10 * 1024 * 1024);
+    EXPECT_EQ(result.config.index.max_total_size_mb, 500);
+    EXPECT_EQ(result.config.index.max_file_count, 10000);
+    EXPECT_FALSE(result.config.index.follow_symlinks);
+    EXPECT_TRUE(result.config.index.smart_size_control);
+    EXPECT_EQ(result.config.index.priority_mode, "recent");
+
+    // performance: max_goroutines came from the file (8).
+    EXPECT_EQ(result.config.performance.max_goroutines, 8);
+}
+
+TEST_F(KdlConfigTest, FileWithExplicitIndexBlockStillHonorsFileValues) {
+    // An index block that explicitly sets respect_gitignore true must win.
+    write_kdl("index {\n  respect_gitignore true\n  watch_mode true\n}\n");
+    auto result = load_config(temp_dir_.string());
+    ASSERT_TRUE(result.ok()) << result.error;
+    EXPECT_TRUE(result.config.index.respect_gitignore);
+    EXPECT_TRUE(result.config.index.watch_mode);
+}
+
+TEST(LoadConfigTest, MissingFilePathKeepsRicherNoFileDefaults) {
+    // The no-.lci.kdl path must be UNCHANGED: Go's config.go Load() sets
+    // respect_gitignore true / watch_mode true / watch_debounce_ms 300.
+    auto result = load_config("/nonexistent/path/that/does/not/exist");
+    ASSERT_TRUE(result.ok());
+    EXPECT_TRUE(result.config.index.respect_gitignore);
+    EXPECT_TRUE(result.config.index.watch_mode);
+    EXPECT_EQ(result.config.index.watch_debounce_ms, 300);
+}
+
+// ---------------------------------------------------------------------------
 // Malformed KDL: graceful error, no crash / no hang
 // ---------------------------------------------------------------------------
 TEST_F(KdlConfigTest, RejectsKdlV2TrueToken) {

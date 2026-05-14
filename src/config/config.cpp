@@ -417,6 +417,35 @@ void apply_search(Config& cfg, const KdlNode& node) {
     }
 }
 
+// Base config used when a .lci.kdl file IS loaded. This intentionally
+// diverges from make_default_config() (the no-file path) to match Go's
+// parseKDL in internal/config/kdl_config.go: that function builds its base
+// Config from a struct literal that OMITS several index/performance fields,
+// so they take Go's zero value rather than the richer no-file defaults from
+// config.go's Load(). Fields NOT set here are left at the C++ struct
+// defaults declared in config.h — those defaults match Go's parseKDL literal
+// for every field the literal does set (max_file_size, max_total_size_mb,
+// max_file_count, follow_symlinks, smart_size_control, priority_mode,
+// max_memory_mb, debounce_ms). Only the omitted fields below differ and must
+// be reset to Go's zero value.
+Config make_kdl_base_config() {
+    Config cfg = make_default_config();
+
+    // index: Go's parseKDL literal omits these three -> Go zero values.
+    cfg.index.respect_gitignore = false;
+    cfg.index.watch_mode = false;
+    cfg.index.watch_debounce_ms = 0;
+
+    // performance: Go's parseKDL literal sets MaxGoroutines:4 explicitly and
+    // omits ParallelFileWorkers / IndexingTimeoutSec / StartupDelayMs.
+    cfg.performance.max_goroutines = 4;
+    cfg.performance.parallel_file_workers = 0;
+    cfg.performance.indexing_timeout_sec = 0;
+    cfg.performance.startup_delay_ms = 0;
+
+    return cfg;
+}
+
 // Parses KDL content into a Config. On a malformed document, leaves `cfg`
 // untouched and writes a descriptive message into `error`.
 Config parse_kdl_content(const std::string& content, std::string& error) {
@@ -427,7 +456,7 @@ Config parse_kdl_content(const std::string& content, std::string& error) {
         return make_default_config();
     }
 
-    Config cfg = make_default_config();
+    Config cfg = make_kdl_base_config();
     cfg.include.clear();
     cfg.exclude.clear();
 
