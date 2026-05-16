@@ -156,7 +156,7 @@ SearchContext ContextExtractor::extract_function_context(
     FileID file_id,
     const std::vector<BlockBoundary>& blocks,
     int match_line,
-    int max_context_lines) const {
+    int /*max_context_lines*/) const {
 
     auto content = store_.get_content(file_id);
     if (content.empty()) {

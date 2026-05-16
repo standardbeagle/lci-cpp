@@ -63,8 +63,8 @@ struct PaginationResult {
 
     int suggested_page_size{0};
     bool auto_truncated{false};
-    std::optional<int> next_page;
-    std::optional<int> prev_page;
+    std::optional<int> next_page{};
+    std::optional<int> prev_page{};
 
     /// Serialises the pagination result to JSON.
     nlohmann::json to_json() const;

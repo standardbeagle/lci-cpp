@@ -24,6 +24,7 @@ target_link_libraries(lci_parity_runner_lib PUBLIC
     httplib::httplib
 )
 target_compile_features(lci_parity_runner_lib PUBLIC cxx_std_20)
+target_compile_options(lci_parity_runner_lib PRIVATE ${LCI_WARNING_FLAGS})
 
 # ---- Unit tests for the diff engine ----
 add_executable(parity_unit_tests
@@ -40,6 +41,7 @@ target_link_libraries(parity_unit_tests PRIVATE
     GTest::gtest_main
 )
 include(GoogleTest)
+target_compile_options(parity_unit_tests PRIVATE ${LCI_WARNING_FLAGS})
 gtest_discover_tests(parity_unit_tests
     PROPERTIES
         LABELS "parity"
@@ -67,6 +69,7 @@ else()
         lci_parity_runner_lib
         CLI11::CLI11
     )
+    target_compile_options(parity_runner PRIVATE ${LCI_WARNING_FLAGS})
     add_dependencies(parity_runner lci)
 
     # ---- Per-descriptor parity tests ----

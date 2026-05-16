@@ -146,7 +146,7 @@ CapturedOutput run_mcp(const std::string& binary_path,
             std::string cwd = substitute(d.invocation.cwd, corpus_path);
             if (chdir(cwd.c_str()) != 0) _exit(127);
         } else if (!corpus_path.empty()) {
-            chdir(corpus_path.c_str());
+            if (chdir(corpus_path.c_str()) != 0) _exit(127);
         }
 
         std::vector<std::string> sub_args;

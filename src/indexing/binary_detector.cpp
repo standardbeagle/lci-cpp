@@ -109,8 +109,8 @@ bool BinaryDetector::is_binary_by_magic_number(std::string_view content) const {
     // Magic number signatures
     if (len >= 2 && data[0] == 0x1F && data[1] == 0x8B) return true;  // gzip
     if (len >= 4 && data[0] == 0x50 && data[1] == 0x4B &&
-        (data[2] == 0x03 && data[3] == 0x04 ||
-         data[2] == 0x05 && data[3] == 0x06)) return true;  // ZIP
+        ((data[2] == 0x03 && data[3] == 0x04) ||
+         (data[2] == 0x05 && data[3] == 0x06))) return true;  // ZIP
     if (len >= 4 && data[0] == 0x89 && data[1] == 0x50 &&
         data[2] == 0x4E && data[3] == 0x47) return true;  // PNG
     if (len >= 3 && data[0] == 0xFF && data[1] == 0xD8 &&

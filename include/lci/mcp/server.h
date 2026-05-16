@@ -29,7 +29,7 @@ struct ToolProperty {
     // the default `{"type": items_type}` emission. Used to express complex
     // nested object schemas (e.g., context.refs items with sub-properties)
     // for Go parity without adding a recursive ToolProperty graph.
-    nlohmann::json items_schema_override;
+    nlohmann::json items_schema_override{};
 };
 
 /// Describes an MCP tool with its parameter schema.

@@ -144,3 +144,7 @@ target_link_libraries(lci PRIVATE
     absl::strings
     absl::flat_hash_map
 )
+
+# Project warning flags (target-scoped, do not leak into FetchContent libs).
+target_compile_options(lci_lib PRIVATE ${LCI_WARNING_FLAGS})
+target_compile_options(lci PRIVATE ${LCI_WARNING_FLAGS})

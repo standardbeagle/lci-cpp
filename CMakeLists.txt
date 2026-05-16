@@ -19,30 +19,53 @@ endif()
 
 set(LCI_GO_PATH "" CACHE FILEPATH "Path to Go reference lci binary for parity tests")
 
-# Compiler detection and flags
+# Compiler detection and warning flag list.
+#
+# Flags live in LCI_WARNING_FLAGS and are applied PER-TARGET in src/ and tests/,
+# NOT at directory scope. Directory-scope add_compile_options propagates into
+# FetchContent vendored libraries (tree-sitter, re2, abseil, nlohmann_json_schema_validator,
+# etc.) which have their own warning hygiene policies — combining -Werror with
+# their existing warnings tanks the build for reasons orthogonal to our code.
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS "13.0")
         message(FATAL_ERROR "GCC 13+ required, found ${CMAKE_CXX_COMPILER_VERSION}")
     endif()
-    add_compile_options(-Wall -Wextra -Wpedantic -Wshadow -Wconversion)
+    # -Wno-unused-{parameter,function} on purpose: stubs / deferred-handler
+    # surfaces are tracked in Dart with explicit follow-up tasks (Karpathy rule
+    # 6 — surface signal, don't silence). Compile-time noise on those interferes
+    # with -Werror gating on the warnings that DO catch real bugs.
+    set(LCI_WARNING_FLAGS -Wall -Wextra -Wpedantic -Wshadow -Wconversion
+                          -Wno-unused-parameter -Wno-unused-function)
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
     # Apple Clang uses its own version numbering (e.g. 15.x ships with C++20 support)
-    add_compile_options(-Wall -Wextra -Wpedantic -Wshadow -Wconversion)
+    # -Wno-unused-{parameter,function} on purpose: stubs / deferred-handler
+    # surfaces are tracked in Dart with explicit follow-up tasks (Karpathy rule
+    # 6 — surface signal, don't silence). Compile-time noise on those interferes
+    # with -Werror gating on the warnings that DO catch real bugs.
+    set(LCI_WARNING_FLAGS -Wall -Wextra -Wpedantic -Wshadow -Wconversion
+                          -Wno-unused-parameter -Wno-unused-function)
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS "17.0")
         message(FATAL_ERROR "Clang 17+ required, found ${CMAKE_CXX_COMPILER_VERSION}")
     endif()
-    add_compile_options(-Wall -Wextra -Wpedantic -Wshadow -Wconversion)
+    # -Wno-unused-{parameter,function} on purpose: stubs / deferred-handler
+    # surfaces are tracked in Dart with explicit follow-up tasks (Karpathy rule
+    # 6 — surface signal, don't silence). Compile-time noise on those interferes
+    # with -Werror gating on the warnings that DO catch real bugs.
+    set(LCI_WARNING_FLAGS -Wall -Wextra -Wpedantic -Wshadow -Wconversion
+                          -Wno-unused-parameter -Wno-unused-function)
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
-    add_compile_options(/W4 /permissive-)
+    # /wd4100 = unused parameter, /wd4505 = unused static function (match the
+    # -Wno-unused-{parameter,function} rationale on GCC/Clang).
+    set(LCI_WARNING_FLAGS /W4 /permissive- /wd4100 /wd4505)
 endif()
 
 option(LCI_WARNINGS_AS_ERRORS "Treat warnings as errors (for CI)" OFF)
 if(LCI_WARNINGS_AS_ERRORS)
     if(MSVC)
-        add_compile_options(/WX)
+        list(APPEND LCI_WARNING_FLAGS /WX)
     else()
-        add_compile_options(-Werror)
+        list(APPEND LCI_WARNING_FLAGS -Werror)
     endif()
 endif()
 
@@ -78,6 +101,7 @@ include(FetchContent)
 find_package(nlohmann_json CONFIG QUIET)
 if(NOT nlohmann_json_FOUND)
     FetchContent_Declare(nlohmann_json
+    SYSTEM
         GIT_REPOSITORY https://github.com/nlohmann/json.git
         GIT_TAG v3.11.3
         GIT_SHALLOW TRUE
@@ -88,6 +112,7 @@ endif()
 find_package(CLI11 CONFIG QUIET)
 if(NOT CLI11_FOUND)
     FetchContent_Declare(cli11
+    SYSTEM
         GIT_REPOSITORY https://github.com/CLIUtils/CLI11.git
         GIT_TAG v2.4.2
         GIT_SHALLOW TRUE
@@ -98,6 +123,7 @@ endif()
 find_package(httplib CONFIG QUIET)
 if(NOT httplib_FOUND)
     FetchContent_Declare(httplib
+    SYSTEM
         GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
         GIT_TAG v0.18.3
         GIT_SHALLOW TRUE
@@ -108,6 +134,7 @@ endif()
 find_package(xxHash CONFIG QUIET)
 if(NOT xxHash_FOUND)
     FetchContent_Declare(xxhash
+    SYSTEM
         GIT_REPOSITORY https://github.com/Cyan4973/xxHash.git
         GIT_TAG v0.8.2
         GIT_SHALLOW TRUE
@@ -121,6 +148,7 @@ if(NOT absl_FOUND)
     set(ABSL_PROPAGATE_CXX_STD ON)
     set(ABSL_BUILD_TESTING OFF)
     FetchContent_Declare(abseil-cpp
+    SYSTEM
         GIT_REPOSITORY https://github.com/abseil/abseil-cpp.git
         GIT_TAG 20240722.0
         GIT_SHALLOW TRUE
@@ -135,6 +163,7 @@ if(NOT efsw_FOUND)
     set(VERBOSE OFF CACHE BOOL "" FORCE)
     set(BUILD_TEST_APP OFF CACHE BOOL "" FORCE)
     FetchContent_Declare(efsw
+    SYSTEM
         GIT_REPOSITORY https://github.com/SpartanJ/efsw.git
         GIT_TAG 1.4.1
         GIT_SHALLOW TRUE
@@ -149,6 +178,7 @@ endif()
 find_package(rapidfuzz CONFIG QUIET)
 if(NOT rapidfuzz_FOUND)
     FetchContent_Declare(rapidfuzz
+    SYSTEM
         GIT_REPOSITORY https://github.com/rapidfuzz/rapidfuzz-cpp.git
         GIT_TAG v3.0.5
         GIT_SHALLOW TRUE
@@ -180,6 +210,7 @@ elseif(EXISTS /usr/include/libstemmer.h)
     set(LCI_LIBSTEMMER_TARGET libstemmer_system)
 else()
     FetchContent_Declare(libstemmer_c
+    SYSTEM
         URL https://snowballstem.org/dist/libstemmer_c-2.2.0.tar.gz
         URL_HASH SHA256=b941d9fe9cf36b4e2f8d3873cd4d8b8775bd94867a1df8d8c001bb8b688377c3
     )
@@ -239,6 +270,7 @@ if(NOT nlohmann_json_schema_validator_FOUND)
     set(JSON_VALIDATOR_BUILD_TESTS OFF CACHE BOOL "" FORCE)
     set(JSON_VALIDATOR_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
     FetchContent_Declare(nlohmann_json_schema_validator
+    SYSTEM
         GIT_REPOSITORY https://github.com/pboettch/json-schema-validator.git
         GIT_TAG 2.3.0
         GIT_SHALLOW TRUE
@@ -246,30 +278,31 @@ if(NOT nlohmann_json_schema_validator_FOUND)
     FetchContent_MakeAvailable(nlohmann_json_schema_validator)
 endif()
 
-# tree-sitter is a C library
-find_package(PkgConfig QUIET)
-if(PkgConfig_FOUND)
-    pkg_check_modules(TREE_SITTER QUIET tree-sitter)
-endif()
-if(NOT TREE_SITTER_FOUND)
-    FetchContent_Declare(tree-sitter
-        GIT_REPOSITORY https://github.com/tree-sitter/tree-sitter.git
-        GIT_TAG v0.24.6
-        GIT_SHALLOW TRUE
+# tree-sitter is a C library.
+#
+# Always build from FetchContent at a pinned tag (v0.24.6). System / vcpkg
+# tree-sitter is unreliable across distros: the pinned CI vcpkg baseline
+# (01f602195) ships a stripped-down api.h that forward-declares TSNode as
+# an opaque type, which breaks every TU using TSNode by value. Pinning to
+# the upstream tag keeps Go-parity and Karpathy-rule hot paths deterministic.
+FetchContent_Declare(tree-sitter
+    SYSTEM
+    GIT_REPOSITORY https://github.com/tree-sitter/tree-sitter.git
+    GIT_TAG v0.24.6
+    GIT_SHALLOW TRUE
+)
+FetchContent_GetProperties(tree-sitter)
+if(NOT tree-sitter_POPULATED)
+    FetchContent_Populate(tree-sitter)
+    add_library(tree-sitter STATIC
+        "${tree-sitter_SOURCE_DIR}/lib/src/lib.c"
     )
-    FetchContent_GetProperties(tree-sitter)
-    if(NOT tree-sitter_POPULATED)
-        FetchContent_Populate(tree-sitter)
-        add_library(tree-sitter STATIC
-            "${tree-sitter_SOURCE_DIR}/lib/src/lib.c"
-        )
-        target_include_directories(tree-sitter PUBLIC
-            "${tree-sitter_SOURCE_DIR}/lib/include"
-        )
-        target_include_directories(tree-sitter PRIVATE
-            "${tree-sitter_SOURCE_DIR}/lib/src"
-        )
-    endif()
+    target_include_directories(tree-sitter PUBLIC
+        "${tree-sitter_SOURCE_DIR}/lib/include"
+    )
+    target_include_directories(tree-sitter PRIVATE
+        "${tree-sitter_SOURCE_DIR}/lib/src"
+    )
 endif()
 
 # Tree-sitter language grammars (13 languages)

@@ -203,6 +203,21 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND LCI_ENABLE_FUZZING)
     target_link_options(fuzz_search_input PRIVATE ${FUZZ_LINK_FLAGS})
 endif()
 
+# Project warning flags applied per-test-target (matches src/CMakeLists.txt
+# rationale: keep -Werror out of FetchContent vendored libs).
+foreach(_t IN ITEMS lci_tests lci_helpers_tests lci_integration_tests lci_benchmarks)
+    if(TARGET ${_t})
+        target_compile_options(${_t} PRIVATE ${LCI_WARNING_FLAGS})
+    endif()
+endforeach()
+if(LCI_FUZZ)
+    foreach(_t IN ITEMS fuzz_regex_classifier fuzz_trigram_extract fuzz_search_input)
+        if(TARGET ${_t})
+            target_compile_options(${_t} PRIVATE ${LCI_WARNING_FLAGS})
+        endif()
+    endforeach()
+endif()
+
 # ---------------------------------------------------------------------------
 # Copy fixture files to build directory for runtime access
 # ---------------------------------------------------------------------------

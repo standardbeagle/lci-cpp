@@ -16,6 +16,7 @@ target_include_directories(spec_diff PUBLIC
 )
 target_link_libraries(spec_diff PUBLIC nlohmann_json::nlohmann_json)
 target_compile_features(spec_diff PUBLIC cxx_std_20)
+target_compile_options(spec_diff PRIVATE ${LCI_WARNING_FLAGS})
 
 # ---- Unit tests for the spec_diff library ----
 # Built only when the gtest target is available (i.e. when tests/CMakeLists.txt
@@ -31,6 +32,7 @@ if(TARGET GTest::gtest_main)
         spec_diff
         GTest::gtest_main
     )
+    target_compile_options(spec_diff_unit_tests PRIVATE ${LCI_WARNING_FLAGS})
     include(GoogleTest)
     gtest_discover_tests(spec_diff_unit_tests
         PROPERTIES LABELS "spec_diff"
