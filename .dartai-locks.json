@@ -1,3 +1,17 @@
 {
-  "claims": {}
+  "claims": {
+    "2P0xeGBuU0CN": {
+      "runner_instance_id": "beagle-ab-580276",
+      "runner_email": "andybrummer@standardbeagle.com",
+      "claimed_at": "2026-05-16T04:50:00Z",
+      "agent_id": "beagle-ab-580276",
+      "parent_loop_id": "AN8m7hohEdlM",
+      "purpose": "loop iter-1: add efsw, replace raw inotify watcher (cross-platform, fixes inotify-instance leak)",
+      "source_event": {
+        "loop_id": "AN8m7hohEdlM",
+        "task_id": "2P0xeGBuU0CN",
+        "conversation_id": null
+      }
+    }
+  }
 }
