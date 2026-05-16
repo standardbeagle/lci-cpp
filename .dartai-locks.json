@@ -1,3 +1,17 @@
 {
-  "claims": {}
+  "claims": {
+    "aZYlOsdUzinT": {
+      "runner_instance_id": "beagle-ab-580276",
+      "runner_email": "andybrummer@standardbeagle.com",
+      "claimed_at": "2026-05-16T07:55:00Z",
+      "agent_id": "beagle-ab-580276",
+      "parent_loop_id": "AN8m7hohEdlM",
+      "purpose": "loop iter-14: FIX-D.2 Option B emit-order in build_input_schema + handle_tools_list",
+      "source_event": {
+        "loop_id": "AN8m7hohEdlM",
+        "task_id": "aZYlOsdUzinT",
+        "conversation_id": null
+      }
+    }
+  }
 }
