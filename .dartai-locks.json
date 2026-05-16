@@ -1,3 +1,17 @@
 {
-  "claims": {}
+  "claims": {
+    "FZJ6Iip4we3U": {
+      "runner_instance_id": "beagle-ab-580276",
+      "runner_email": "andybrummer@standardbeagle.com",
+      "claimed_at": "2026-05-16T06:45:00Z",
+      "agent_id": "beagle-ab-580276",
+      "parent_loop_id": "AN8m7hohEdlM",
+      "purpose": "loop iter-9: FIX-D.1 remove 8 duplicate stub registrations (correctness+parity)",
+      "source_event": {
+        "loop_id": "AN8m7hohEdlM",
+        "task_id": "FZJ6Iip4we3U",
+        "conversation_id": null
+      }
+    }
+  }
 }
