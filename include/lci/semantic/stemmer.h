@@ -8,9 +8,19 @@
 
 namespace lci {
 
-/// Porter2 stemmer for word normalization.
+/// Porter2 (Snowball) stemmer for word normalization.
 /// Enables finding similar words in different forms
 /// (authenticate, authentication, authenticating -> authent).
+///
+/// Backed by libstemmer (Snowball upstream). Three-way byte-equivalence
+/// with Go surgebase/porter2 is established by the 29,417-word voc.txt /
+/// output.txt fixture (the canonical Snowball English fixture, also used
+/// verbatim by surgebase as its acceptance test) — see
+/// tests/data/porter2_fixture/ and PorterFixtureTest in semantic_test.cpp.
+///
+/// Hot-path discipline (Karpathy): the underlying sb_stemmer is created
+/// once per thread (thread_local) and reused across calls; stem() writes
+/// into a thread-local std::string buffer to avoid per-token allocation.
 class Stemmer {
   public:
     Stemmer(bool enabled, std::string_view algorithm,
@@ -42,8 +52,8 @@ class Stemmer {
     std::unordered_set<std::string> exclusions_;
 };
 
-/// Porter2 stemming algorithm implementation.
-/// Produces identical output to the Go surgebase/porter2 library.
+/// Stem a single word via libstemmer Porter2 (English UTF-8). Exposed for
+/// tests and parity tooling — production callers go through lci::Stemmer.
 std::string porter2_stem(std::string_view word);
 
 }  // namespace lci

@@ -6,6 +6,8 @@
 
 #include <gtest/gtest.h>
 
+#include <filesystem>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -185,6 +187,63 @@ TEST(StemmerTest, StemAndGroup) {
     EXPECT_TRUE(groups.count("run"));
     EXPECT_TRUE(groups.count("search"));
     EXPECT_GE(groups["run"].size(), 2u);
+}
+
+// Three-way byte-equivalence: libstemmer (via lci::porter2_stem) ==
+// Go surgebase/porter2 (output.txt is surgebase's own committed acceptance
+// output) == lci::Stemmer (which wraps libstemmer). The fixture is the
+// canonical 29,417-word Snowball English voc.txt/output.txt — see
+// tests/data/porter2_fixture/README.md for the audit trail.
+//
+// Per acceptance #2 of the libstemmer integration task: any single
+// divergence is a test failure.
+TEST(PorterFixtureTest, ThreeWayByteEquivalence) {
+    std::filesystem::path fixture_dir =
+        std::filesystem::path(LCI_TESTS_SOURCE_DIR) / "data" / "porter2_fixture";
+    std::ifstream voc(fixture_dir / "voc.txt");
+    std::ifstream out(fixture_dir / "output.txt");
+    ASSERT_TRUE(voc.is_open()) << "missing " << (fixture_dir / "voc.txt");
+    ASSERT_TRUE(out.is_open()) << "missing " << (fixture_dir / "output.txt");
+
+    std::string in_word, expected;
+    size_t line = 0;
+    size_t mismatches = 0;
+    constexpr size_t kMaxReportedMismatches = 10;
+    while (std::getline(voc, in_word) && std::getline(out, expected)) {
+        ++line;
+        std::string actual = porter2_stem(in_word);
+        if (actual != expected) {
+            if (mismatches < kMaxReportedMismatches) {
+                ADD_FAILURE() << "line " << line
+                              << " input='" << in_word
+                              << "' expected='" << expected
+                              << "' actual='" << actual << "'";
+            }
+            ++mismatches;
+        }
+    }
+    EXPECT_EQ(mismatches, 0u) << mismatches << " divergences in " << line << " words";
+    EXPECT_EQ(line, 29417u) << "fixture should be exactly 29,417 lines";
+}
+
+TEST(PorterFixtureTest, StemmerClassMatchesFreeFunction) {
+    // lci::Stemmer must produce the same output as the free porter2_stem
+    // for words past the min_length threshold and not in the exclusion set.
+    // This guarantees the Stemmer class doesn't introduce drift on top of
+    // the libstemmer wrapper.
+    Stemmer s(true, "porter2", 1, {});
+    std::filesystem::path fixture_dir =
+        std::filesystem::path(LCI_TESTS_SOURCE_DIR) / "data" / "porter2_fixture";
+    std::ifstream voc(fixture_dir / "voc.txt");
+    ASSERT_TRUE(voc.is_open());
+
+    std::string word;
+    size_t mismatches = 0;
+    while (std::getline(voc, word)) {
+        if (word.empty()) continue;
+        if (s.stem(word) != porter2_stem(word)) ++mismatches;
+    }
+    EXPECT_EQ(mismatches, 0u);
 }
 
 // -- FuzzyMatcher tests -------------------------------------------------------

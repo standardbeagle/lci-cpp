@@ -118,6 +118,7 @@ target_link_libraries(lci_lib PUBLIC
     tree-sitter-ruby
     efsw
     rapidfuzz::rapidfuzz
+    ${LCI_LIBSTEMMER_TARGET}
 )
 
 # Platform-specific libraries

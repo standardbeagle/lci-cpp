@@ -11,6 +11,7 @@
         "abseil",
         "efsw",
         "rapidfuzz",
-        "nlohmann-json-schema-validator"
+        "nlohmann-json-schema-validator",
+        "libstemmer"
     ]
 }

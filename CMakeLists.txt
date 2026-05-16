@@ -156,6 +156,65 @@ if(NOT rapidfuzz_FOUND)
     FetchContent_MakeAvailable(rapidfuzz)
 endif()
 
+# libstemmer (Snowball) — canonical Porter2 stemming algorithm.
+# License: BSD-3-Clause. Replaces 449-LOC hand-port of Porter2 in
+# src/semantic/stemmer.cpp. libstemmer == Go surgebase/porter2 fixture
+# (29,417-word voc.txt/output.txt, used by both Snowball upstream and the
+# surgebase Go test suite — see tests/data/porter2_fixture/).
+#
+# Karpathy: stemmer is on hot index/query path. Wrapper uses thread-local
+# sb_stemmer (one per thread, reused across calls) + thread-local output
+# buffer — zero alloc per token. See src/semantic/stemmer.cpp.
+#
+# Build mode: prefer vcpkg/system libstemmer; fall back to fetching the
+# snowballstem/snowball-website libstemmer_c distribution and building an
+# English-only static lib (avoid 30-language bloat). The distribution ships
+# pre-generated C source so no Snowball compiler dependency is needed.
+find_package(unofficial-libstemmer CONFIG QUIET)
+if(unofficial-libstemmer_FOUND)
+    # vcpkg target name
+    set(LCI_LIBSTEMMER_TARGET unofficial::libstemmer::libstemmer)
+elseif(EXISTS /usr/include/libstemmer.h)
+    add_library(libstemmer_system INTERFACE)
+    target_link_libraries(libstemmer_system INTERFACE stemmer)
+    set(LCI_LIBSTEMMER_TARGET libstemmer_system)
+else()
+    FetchContent_Declare(libstemmer_c
+        URL https://snowballstem.org/dist/libstemmer_c-2.2.0.tar.gz
+        URL_HASH SHA256=b941d9fe9cf36b4e2f8d3873cd4d8b8775bd94867a1df8d8c001bb8b688377c3
+    )
+    FetchContent_MakeAvailable(libstemmer_c)
+    # English-only build: runtime + UTF-8 English stemmer + custom thin
+    # libstemmer_c.c that registers only english. Skips ~30 unused languages.
+    set(LCI_LIBSTEMMER_SRC_DIR "${libstemmer_c_SOURCE_DIR}")
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/libstemmer_english_only.c.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/generated/libstemmer_english_only.c"
+        @ONLY
+    )
+    add_library(libstemmer_lci STATIC
+        "${LCI_LIBSTEMMER_SRC_DIR}/runtime/api.c"
+        "${LCI_LIBSTEMMER_SRC_DIR}/runtime/utilities.c"
+        "${LCI_LIBSTEMMER_SRC_DIR}/src_c/stem_UTF_8_english.c"
+        "${CMAKE_CURRENT_BINARY_DIR}/generated/libstemmer_english_only.c"
+    )
+    target_include_directories(libstemmer_lci PUBLIC
+        "${LCI_LIBSTEMMER_SRC_DIR}/include"
+    )
+    target_include_directories(libstemmer_lci PRIVATE
+        "${LCI_LIBSTEMMER_SRC_DIR}/runtime"
+        "${LCI_LIBSTEMMER_SRC_DIR}"
+    )
+    # libstemmer C source predates strict warnings — silence to keep -Werror builds clean.
+    if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+        target_compile_options(libstemmer_lci PRIVATE
+            -Wno-unused-parameter -Wno-unused-function
+            -Wno-sign-compare -Wno-conversion -Wno-pedantic
+        )
+    endif()
+    set(LCI_LIBSTEMMER_TARGET libstemmer_lci)
+endif()
+
 # nlohmann-json-schema-validator — JSON Schema draft-7/2019-09 validator built
 # on nlohmann::json. License: MIT. Slated to replace hand-rolled MCP request
 # validation (FIX-B). Dep wiring lives here; handler swap is a separate task.

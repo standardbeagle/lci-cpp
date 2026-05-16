@@ -1,0 +1,64 @@
+/* libstemmer_english_only.c — minimal libstemmer dispatcher with only the
+ * English UTF-8 algorithm registered. Generated from the upstream
+ * libstemmer_c distribution layout. License: BSD-3-Clause (matches Snowball).
+ *
+ * Why English-only: LCI indexes source code identifiers, English is the only
+ * language we tokenize. The upstream libstemmer.c bundles ~30 languages
+ * (~500 KB of code, ~150 KB stripped) — strict no-bloat per project rules.
+ *
+ * Public API (sb_stemmer_new/delete/stem/length/list) is identical to the
+ * upstream — callers cannot tell this is a trimmed build.
+ */
+#include <stdlib.h>
+#include <string.h>
+#include "@LCI_LIBSTEMMER_SRC_DIR@/include/libstemmer.h"
+#include "@LCI_LIBSTEMMER_SRC_DIR@/runtime/api.h"
+#include "@LCI_LIBSTEMMER_SRC_DIR@/src_c/stem_UTF_8_english.h"
+
+struct sb_stemmer {
+    struct SN_env * env;
+    int (*stem)(struct SN_env *);
+    void (*close)(struct SN_env *);
+};
+
+static const char * algorithm_names_data[] = { "english", NULL };
+
+extern const char ** sb_stemmer_list(void) {
+    return algorithm_names_data;
+}
+
+extern struct sb_stemmer *
+sb_stemmer_new(const char * algorithm, const char * charenc) {
+    /* English only; reject anything else. Accept charenc NULL or "UTF_8". */
+    if (algorithm == NULL || strcmp(algorithm, "english") != 0) return NULL;
+    if (charenc != NULL && strcmp(charenc, "UTF_8") != 0) return NULL;
+
+    struct sb_stemmer * stemmer = (struct sb_stemmer *) malloc(sizeof(*stemmer));
+    if (!stemmer) return NULL;
+    stemmer->env = english_UTF_8_create_env();
+    if (!stemmer->env) { free(stemmer); return NULL; }
+    stemmer->stem = english_UTF_8_stem;
+    stemmer->close = english_UTF_8_close_env;
+    return stemmer;
+}
+
+void sb_stemmer_delete(struct sb_stemmer * stemmer) {
+    if (!stemmer) return;
+    if (stemmer->close) stemmer->close(stemmer->env);
+    free(stemmer);
+}
+
+const sb_symbol *
+sb_stemmer_stem(struct sb_stemmer * stemmer, const sb_symbol * word, int size) {
+    if (SN_set_current(stemmer->env, size, (const symbol *)word)) {
+        stemmer->env->l = 0;
+        return NULL;
+    }
+    if (stemmer->stem(stemmer->env) < 0) return NULL;
+    stemmer->env->p[stemmer->env->l] = 0;
+    return (const sb_symbol *) stemmer->env->p;
+}
+
+int sb_stemmer_length(struct sb_stemmer * stemmer) {
+    return stemmer->env->l;
+}

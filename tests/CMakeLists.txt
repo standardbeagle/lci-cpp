@@ -71,6 +71,9 @@ target_include_directories(lci_tests PRIVATE
     "${CMAKE_BINARY_DIR}/generated"
     "${CMAKE_CURRENT_SOURCE_DIR}/helpers"
 )
+target_compile_definitions(lci_tests PRIVATE
+    LCI_TESTS_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+)
 target_link_libraries(lci_tests PRIVATE
     lci_lib
     nlohmann_json_schema_validator
