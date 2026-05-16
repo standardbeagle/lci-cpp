@@ -385,13 +385,23 @@ ToolResult handle_git_analysis(const nlohmann::json& /*params*/) {
 void register_index_handlers(McpServer& server, MasterIndex* indexer) {
     server.add_tool(
         {"index_stats",
-         "Index status and health monitoring. Shows file counts, symbol "
-         "counts, indexing progress, and component health.",
+         "📊 Comprehensive index status and health monitoring. Shows "
+         "indexing progress, component health, memory usage, and file "
+         "watcher status. Use this to diagnose 'index not ready' issues "
+         "or understand why searches return empty. Modes: summary, "
+         "detailed, progress, health. See 'info index_stats'.",
          {{"mode", "string",
-           "Query mode: summary (default), detailed, progress, health", ""},
-          {"include_memory", "boolean", "Include memory usage info", ""},
+           "Query mode: 'summary' (default), 'detailed', 'progress', "
+           "'health'",
+           ""},
+          {"include_memory", "boolean",
+           "Include memory usage statistics (default: false for summary)",
+           ""},
+          {"include_watch_mode", "boolean",
+           "Include file watcher status (default: false for summary)", ""},
           {"include_components", "boolean",
-           "Include component health details", ""}},
+           "Include per-component health (default: false for summary)",
+           ""}},
          {}},
         [indexer](const nlohmann::json& p) -> ToolResult {
             if (!indexer) {
@@ -403,17 +413,22 @@ void register_index_handlers(McpServer& server, MasterIndex* indexer) {
 
     server.add_tool(
         {"debug_info",
-         "Diagnostic information about indexed data. Modes: overview, "
-         "symbols, references, types, files.",
+         "🔬 Deep debug information for troubleshooting index issues. "
+         "Shows symbol distribution, type breakdown, reference statistics, "
+         "and file-level details. Use when index_stats shows problems or "
+         "when relationships return empty. Modes: overview, symbols, "
+         "references, types, files. See 'info debug_info'.",
          {{"mode", "string",
-           "Query mode: overview (default), symbols, references, types, "
-           "files",
+           "Debug mode: 'overview' (default), 'symbols', 'references', "
+           "'types', 'files'",
            ""},
-          {"file_id", "integer", "File ID for file-specific info", ""},
-          {"file_path", "string", "File path for file-specific info", ""},
+          {"file_id", "integer", "File ID to debug (for 'files' mode)", ""},
+          {"file_path", "string",
+           "File path to debug (for 'files' mode)", ""},
           {"max_results", "integer",
-           "Max results for lists (default 20)", ""},
-          {"verbose", "boolean", "Include detailed symbol info", ""}},
+           "Maximum results for lists (default: 20)", ""},
+          {"verbose", "boolean",
+           "Include detailed symbol info (for 'files' mode)", ""}},
          {}},
         [indexer](const nlohmann::json& p) -> ToolResult {
             if (!indexer) {
@@ -425,17 +440,32 @@ void register_index_handlers(McpServer& server, MasterIndex* indexer) {
 
     server.add_tool(
         {"git_analysis",
-         "Analyze git changes for code quality issues (duplicates, naming, "
-         "metrics). Currently a stub - git engine not yet ported.",
+         "🔍 Analyze git changes for code quality issues. Compares "
+         "new/modified code against the existing codebase to find "
+         "duplicates, naming inconsistencies, and function complexity "
+         "issues. Scopes: 'staged' (default), 'wip', 'commit', 'range'. "
+         "Focus areas: duplicates, naming, metrics. Use before committing "
+         "to catch issues early. See 'info git_analysis'.",
          {{"scope", "string",
-           "Analysis scope: staged, wip, commit, range", ""},
-          {"base_ref", "string", "Base reference for commit/range", ""},
-          {"target_ref", "string", "Target reference for range", ""},
-          {"focus", "array", "Focus areas: duplicates, naming, metrics",
+           "Analysis scope: 'staged' (default), 'wip' (all uncommitted), "
+           "'commit' (specific commit), 'range' (commit range)",
+           ""},
+          {"base_ref", "string",
+           "Base git reference for commit/range scope (e.g., 'HEAD~1', "
+           "'main')",
+           ""},
+          {"target_ref", "string",
+           "Target git reference for range scope (defaults to HEAD)", ""},
+          {"focus", "array",
+           "Analysis areas to focus on: 'duplicates', 'naming', 'metrics' "
+           "(defaults to all)",
            "string"},
           {"similarity_threshold", "number",
-           "Similarity threshold for duplicates", ""},
-          {"max_findings", "integer", "Maximum findings to return", ""}},
+           "Similarity threshold for duplicate detection (0.0-1.0, "
+           "default: 0.8)",
+           ""},
+          {"max_findings", "integer",
+           "Maximum findings to return per category (default: 20)", ""}},
          {}},
         [](const nlohmann::json& p) -> ToolResult {
             return handle_git_analysis(p);

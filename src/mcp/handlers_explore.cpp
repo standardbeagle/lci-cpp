@@ -779,31 +779,39 @@ ToolResult handle_browse_file(const nlohmann::json& params,
 void register_explore_handlers(McpServer& server, MasterIndex* indexer) {
     server.add_tool(
         {"list_symbols",
-         "List symbols across the codebase with type and language filters. "
-         "Supports pagination with offset/max.",
+         "📋 Enumerate and filter symbols in the index. Like 'ls' for "
+         "code: list all functions, types, methods with filtering by kind, "
+         "file, complexity, params, exported status, and more. Use to "
+         "discover what's in the codebase without searching. See 'info "
+         "list_symbols'.",
          {{"kind", "string",
-           "Required: symbol kinds to list (comma-separated: func, type, "
-           "struct, interface, method, class, enum, var, const, field, "
-           "property, module, namespace, constructor, trait, all)",
+           "REQUIRED: Symbol kinds (comma-separated): func, type, struct, "
+           "interface, method, class, enum, variable, constant, all. "
+           "Aliases: fn, var, const, cls, iface",
            ""},
-          {"file", "string", "Glob pattern for file path filter", ""},
-          {"exported", "boolean", "Filter by export status", ""},
+          {"file", "string",
+           "Glob pattern for file path filter (e.g., "
+           "'internal/mcp/*.go')",
+           ""},
+          {"exported", "boolean",
+           "true=exported only, false=unexported only, omit=all", ""},
           {"name", "string",
            "Substring filter on symbol name (case-insensitive)", ""},
-          {"receiver", "string", "Filter methods by receiver type", ""},
+          {"receiver", "string",
+           "Filter methods by receiver type (e.g., 'Server')", ""},
           {"min_complexity", "integer", "Minimum cyclomatic complexity", ""},
           {"max_complexity", "integer", "Maximum cyclomatic complexity", ""},
           {"min_params", "integer", "Minimum parameter count", ""},
           {"max_params", "integer", "Maximum parameter count", ""},
           {"flags", "string",
-           "Comma-separated: async, variadic, generator, method", ""},
+           "Comma-separated flags: async, variadic, generator, method", ""},
           {"sort", "string",
-           "Sort order: name (default), complexity, refs, line, params", ""},
-          {"max", "integer", "Max results (default 50, max 500)", ""},
+           "Sort by: name (default), complexity, refs, line, params", ""},
+          {"max", "integer", "Max results (default: 50, max: 500)", ""},
           {"offset", "integer", "Pagination offset", ""},
           {"include", "string",
            "Comma-separated extras: signature, doc, refs, callers, callees, "
-           "scope, ids, all",
+           "scope, ids, all. Default: signature,ids",
            ""}},
          {"kind"}},
         [indexer](const nlohmann::json& p) -> ToolResult {
@@ -816,18 +824,23 @@ void register_explore_handlers(McpServer& server, MasterIndex* indexer) {
 
     server.add_tool(
         {"inspect_symbol",
-         "Deep inspection of a symbol: signature, doc, callers, callees, "
-         "type hierarchy, scope chain, references, annotations, and flags.",
-         {{"name", "string", "Symbol name (exact match)", ""},
-          {"id", "string", "Object ID from search/list_symbols", ""},
+         "🔎 Deep inspect a single symbol. Given a name or object ID, "
+         "returns all metadata: signature, doc, complexity, callers, "
+         "callees, type hierarchy, scope chain, flags. See 'info "
+         "inspect_symbol'.",
+         {{"name", "string",
+           "Symbol name (exact match; may return multiple if ambiguous)",
+           ""},
+          {"id", "string", "Object ID from search/list_symbols results", ""},
           {"file", "string", "File path pattern to disambiguate", ""},
-          {"type", "string", "Symbol type to disambiguate", ""},
+          {"type", "string",
+           "Symbol type to disambiguate (e.g., 'function', 'struct')", ""},
           {"include", "string",
            "Sections: signature, doc, callers, callees, type_hierarchy, "
-           "scope, refs, annotations, flags, all",
+           "scope, refs, annotations, flags, all. Default: all",
            ""},
           {"max_depth", "integer",
-           "Max depth for hierarchy traversal (default 3)", ""}},
+           "Max depth for hierarchy traversal (default: 3)", ""}},
          {}},
         [indexer](const nlohmann::json& p) -> ToolResult {
             if (!indexer) {
@@ -839,21 +852,24 @@ void register_explore_handlers(McpServer& server, MasterIndex* indexer) {
 
     server.add_tool(
         {"browse_file",
-         "Browse a file's symbols with filtering and sorting. Shows file "
-         "info, symbol list, optional imports and stats.",
-         {{"file", "string", "File path (exact, suffix, or basename)", ""},
-          {"file_id", "integer", "File ID alternative", ""},
-          {"kind", "string", "Symbol kind filter", ""},
+         "📂 Browse all symbols in a file - the outline view. Shows the "
+         "complete symbol table for a specific file with filtering, "
+         "sorting, optional imports and stats. See 'info browse_file'.",
+         {{"file", "string",
+           "File path (exact, suffix, or glob match)", ""},
+          {"file_id", "integer", "File ID (alternative to path)", ""},
+          {"kind", "string",
+           "Filter by symbol kinds (same as list_symbols)", ""},
           {"exported", "boolean", "Visibility filter", ""},
           {"sort", "string",
-           "Sort: line (default), name, type, complexity, refs", ""},
-          {"max", "integer", "Max symbols (default 100)", ""},
+           "Sort by: line (default), name, type, complexity, refs", ""},
+          {"max", "integer", "Max symbols (default: 100)", ""},
           {"include", "string",
-           "Comma-separated extras: signature, doc, refs, callers, callees, "
-           "scope, ids, all",
-           ""},
+           "Same as list_symbols. Default: signature,ids", ""},
           {"show_imports", "boolean", "Include import list", ""},
-          {"show_stats", "boolean", "Include file-level stats", ""}},
+          {"show_stats", "boolean",
+           "Include file-level statistics (symbol counts, avg complexity)",
+           ""}},
          {}},
         [indexer](const nlohmann::json& p) -> ToolResult {
             if (!indexer) {

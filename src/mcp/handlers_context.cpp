@@ -642,28 +642,126 @@ void register_context_handlers(McpServer& server, MasterIndex* indexer) {
     // Find and replace the stub "context" tool handler
     // The tool definition is already registered in register_tools()
     auto root = server.project_root();
+
+    // Build context tool definition. The `refs` property has a complex
+    // nested-object items schema for Go parity (jsonschema-go emits the full
+    // ref struct schema with f/l/note/role/s/x fields). All other properties
+    // are flat. Per-property key order inside refs.items.properties is
+    // alphabetical (matches Go map iteration).
+    ToolDefinition ctx_def;
+    ctx_def.name = "context";
+    ctx_def.description =
+        "🎯 Capture and hydrate code context manifests for efficient agent "
+        "handoff. Save compact symbol references (2-5KB manifest), load to "
+        "get instant full context with source code + call graphs. "
+        "Eliminates redundant exploration across agent sessions. "
+        "Operations: 'save' to create manifest, 'load' to hydrate. See "
+        "'info context'.";
+
+    ctx_def.properties = {
+        {"operation", "string",
+         "Operation: 'save' to create manifest, 'load' to hydrate context",
+         "", {}},
+        {"refs", "array", "Code references to save (for 'save' operation)",
+         "", {}},  // items_schema_override set below
+        {"task", "string", "Task description/directive (free-form text)", "",
+         {}},
+        {"to_file", "string",
+         "Write manifest to file path (relative to project root)", "", {}},
+        {"to_string", "boolean",
+         "Return manifest as JSON string instead of writing to file", "",
+         {}},
+        {"append", "boolean", "Append to existing manifest (default: false)",
+         "", {}},
+        {"from_file", "string",
+         "Load manifest from file path (for 'load' operation)", "", {}},
+        {"from_string", "string",
+         "Load manifest from inline JSON string", "", {}},
+        {"format", "string",
+         "Output format: 'full' (default), 'signatures', 'outline'", "", {}},
+        {"filter", "array",
+         "Only include these roles (e.g., ['modify', 'contract'])",
+         "string", {}},
+        {"exclude", "array", "Exclude these roles", "string", {}},
+        {"max_tokens", "integer",
+         "Approximate token limit for hydrated context (0 = no limit)", "",
+         {}},
+    };
+
+    // Set the nested-object items schema for `refs`. Property keys inside
+    // items.properties emit alphabetically; per-property keys emit type
+    // then description (matches Go jsonschema-go Property struct order).
+    // Use ordered_json so insertion order is preserved on dump.
+    nlohmann::ordered_json refs_items;
+    refs_items["properties"] = nlohmann::ordered_json::object();
+    {
+        auto& props = refs_items["properties"];
+
+        nlohmann::ordered_json f;
+        f["type"] = "string";
+        f["description"] = "File path (required)";
+        props["f"] = std::move(f);
+
+        nlohmann::ordered_json l;
+        l["properties"] = nlohmann::ordered_json::object();
+        {
+            nlohmann::ordered_json end_p;
+            end_p["type"] = "integer";
+            end_p["description"] = "End line (1-indexed)";
+            l["properties"]["end"] = std::move(end_p);
+
+            nlohmann::ordered_json start_p;
+            start_p["type"] = "integer";
+            start_p["description"] = "Start line (1-indexed)";
+            l["properties"]["start"] = std::move(start_p);
+        }
+        l["type"] = "object";
+        l["description"] = "Line range {start, end} (optional)";
+        props["l"] = std::move(l);
+
+        nlohmann::ordered_json note;
+        note["type"] = "string";
+        note["description"] = "Architect annotation (free-form text)";
+        props["note"] = std::move(note);
+
+        nlohmann::ordered_json role;
+        role["type"] = "string";
+        role["description"] =
+            "Semantic role: 'modify', 'contract', 'pattern', 'boundary'";
+        props["role"] = std::move(role);
+
+        nlohmann::ordered_json s;
+        s["type"] = "string";
+        s["description"] = "Symbol name (optional)";
+        props["s"] = std::move(s);
+
+        nlohmann::ordered_json x;
+        x["type"] = "array";
+        x["description"] =
+            "Expansion directives: 'callers', 'callees:2' (with purity "
+            "info), 'implementations', 'tests', etc.";
+        x["items"] = nlohmann::ordered_json::object();
+        x["items"]["type"] = "string";
+        props["x"] = std::move(x);
+    }
+    refs_items["required"] = nlohmann::ordered_json::array();
+    refs_items["required"].push_back("f");
+    refs_items["type"] = "object";
+    // Find refs property and attach the override. Convert ordered_json to
+    // nlohmann::json for storage; serialization back through ordered_json
+    // in build_input_schema_ordered() preserves the order via dump+parse.
+    for (auto& prop : ctx_def.properties) {
+        if (prop.name == "refs") {
+            prop.items_schema_override =
+                nlohmann::json::parse(refs_items.dump());
+            break;
+        }
+    }
+
+    ctx_def.required = {"operation"};
+
     server.add_tool(
-        {"context",
-         "Capture and hydrate code context manifests for agent handoff. "
-         "Save compact symbol references, load for instant full context.",
-         {{"operation", "string", "Operation: 'save' or 'load'", ""},
-          {"refs", "array",
-           "References to save: [{f:'file', s:'symbol', l:{start,end}}]",
-           ""},
-          {"task", "string", "Task description for the manifest", ""},
-          {"to_file", "string",
-           "File path to save manifest (relative to project root)", ""},
-          {"to_string", "boolean", "Return manifest as string instead", ""},
-          {"append", "boolean", "Append to existing manifest file", ""},
-          {"from_file", "string", "Load manifest from file", ""},
-          {"from_string", "string", "Load manifest from JSON string", ""},
-          {"format", "string",
-           "Output format: 'full', 'signatures', 'outline'", ""},
-          {"filter", "array", "Include only these roles", "string"},
-          {"exclude", "array", "Exclude these roles", "string"},
-          {"max_tokens", "integer",
-           "Approximate token limit for hydrated context", ""}},
-         {"operation"}},
+        std::move(ctx_def),
         [indexer, root](const nlohmann::json& p) -> ToolResult {
             if (!indexer) {
                 return make_error_response("context", "index not available");

@@ -817,8 +817,9 @@ void register_core_handlers(McpServer& server, MasterIndex* indexer,
     // Replace "info" stub with real handler
     server.add_tool(
         {"info",
-         "Get detailed help and examples for any tool. Use 'info' for "
-         "overview or 'info <tool>' for specifics.",
+         "🔍 Get detailed help and examples for any tool - start here! Use "
+         "'info' for overview or 'info <tool>' for specifics. Use 'info "
+         "version' for server version info.",
          {{"tool", "string",
            "Tool name to get information about (e.g., 'search', "
            "'get_context', 'version')",
@@ -830,7 +831,8 @@ void register_core_handlers(McpServer& server, MasterIndex* indexer,
     server.add_tool(
         {"search",
          "Sub-millisecond in-memory semantic code search. Use instead of "
-         "grep, rg, find.",
+         "grep, rg, find. Note: Uses JSON parameters, not CLI flags like "
+         "-n. See 'info search' for parameter details.",
          {{"pattern", "string", "Search pattern", ""},
           {"max", "integer", "Maximum results", ""},
           {"output", "string", "Output format", ""},
@@ -838,12 +840,25 @@ void register_core_handlers(McpServer& server, MasterIndex* indexer,
           {"flags", "string", "Search flags", ""},
           {"include", "string", "Include options", ""},
           {"symbol_types", "string",
-           "Symbol types to filter (comma-separated)", ""},
-          {"patterns", "string", "Multiple patterns (OR logic)", ""},
-          {"max_per_file", "integer", "Max results per file", ""},
-          {"semantic", "boolean", "Enable semantic search", ""},
+           "Symbol types to filter results (comma-separated). Valid types: "
+           "function, class, method, variable, constant, interface, type, "
+           "struct, module, namespace, property, event, delegate, enum, "
+           "record, operator, indexer, object, companion, extension, "
+           "annotation, field, enum_member. Aliases: func->function, "
+           "var->variable, const->constant, cls->class, meth->method, "
+           "iface->interface, def->function (Python), fn->function (Rust), "
+           "trait->interface (Rust). Prefix and fuzzy matching supported "
+           "with warnings.",
+           ""},
+          {"patterns", "string", "Multiple patterns", ""},
+          {"max_per_file", "integer", "Max per file", ""},
+          {"semantic", "boolean", "Enable semantic", ""},
           {"languages", "array",
-           "Filter by programming languages", "string"}},
+           "Filter by programming languages (e.g., [\"go\"], "
+           "[\"typescript\", \"javascript\"], [\"csharp\"]). "
+           "Case-insensitive with aliases (e.g., 'ts' for TypeScript, 'cs' "
+           "for C#).",
+           "string"}},
          {"pattern"}},
         [indexer, search_engine](const nlohmann::json& p) -> ToolResult {
             if (!indexer) {
@@ -856,12 +871,17 @@ void register_core_handlers(McpServer& server, MasterIndex* indexer,
     // Replace "get_context" stub with real handler
     server.add_tool(
         {"get_context",
-         "Get detailed context for specific code objects. Use 'name' for "
-         "symbol lookup or 'file_id'+'line' for location lookup.",
+         "📋 Get detailed context for specific code objects. Use the 'id' "
+         "parameter with object IDs from search results. See 'info "
+         "get_context' for examples.",
          {{"id", "string",
-           "Concise object ID(s) from search results", ""},
-          {"name", "string", "Symbol name for direct lookup", ""},
-          {"file_id", "integer", "File ID to narrow lookup scope", ""},
+           "Concise object ID(s) from search results (e.g., \"VE\" or "
+           "\"VE,tG\" for multiple)",
+           ""},
+          {"name", "string", "Symbol name for direct lookup (alternative "
+                             "to id)",
+           ""},
+          {"file_id", "integer", "File ID to narrow name lookup scope", ""},
           {"line", "integer", "Line number", ""},
           {"column", "integer", "Column number", ""},
           {"mode", "string", "Lookup mode", ""},
@@ -896,16 +916,24 @@ void register_core_handlers(McpServer& server, MasterIndex* indexer,
     // Replace "find_files" stub with real handler
     server.add_tool(
         {"find_files",
-         "Like 'find' or 'fd' - searches file paths on an in-memory "
-         "index. Supports fuzzy matching and glob patterns.",
-         {{"pattern", "string", "File/path pattern to search for", ""},
-          {"max", "integer", "Maximum results (default: 50)", ""},
-          {"filter", "string", "Filter by file type or glob", ""},
-          {"flags", "string", "Search flags: 'ci', 'exact'", ""},
+         "📁 Like 'find' or 'fd' - searches file paths, not content, on an "
+         "in-memory index. Supports fuzzy matching, glob patterns, and "
+         "filters. See 'info find_files'.",
+         {{"pattern", "string",
+           "File/path pattern to search for (supports fuzzy matching)", ""},
+          {"max", "integer", "Maximum results (default: 50, max: 200)", ""},
+          {"filter", "string",
+           "Filter by file type or glob pattern (e.g., 'go', '*.ts', "
+           "'src/**/*.js')",
+           ""},
+          {"flags", "string",
+           "Search flags: 'ci' (case-insensitive), 'exact' (exact match "
+           "only)",
+           ""},
           {"include_hidden", "boolean",
-           "Include hidden files/directories", ""},
+           "Include hidden files/directories (default: false)", ""},
           {"directory", "string",
-           "Directory to search within", ""}},
+           "Directory to search within (relative to project root)", ""}},
          {"pattern"}},
         [indexer](const nlohmann::json& p) -> ToolResult {
             if (!indexer) {

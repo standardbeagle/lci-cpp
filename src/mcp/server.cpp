@@ -703,10 +703,19 @@ nlohmann::ordered_json build_input_schema_ordered(const ToolDefinition& def) {
         // Go per-property struct order: type → description (+ items for arrays).
         p["type"] = prop->type;
         p["description"] = prop->description;
-        if (prop->type == "array" && !prop->items_type.empty()) {
-            nlohmann::ordered_json items;
-            items["type"] = prop->items_type;
-            p["items"] = std::move(items);
+        if (prop->type == "array") {
+            if (!prop->items_schema_override.is_null()) {
+                // Caller-provided full items schema (used for complex
+                // nested-object items, e.g. context.refs). Convert through
+                // dump+parse so ordered_json preserves caller-specified key
+                // order at every nesting level.
+                p["items"] = nlohmann::ordered_json::parse(
+                    prop->items_schema_override.dump());
+            } else if (!prop->items_type.empty()) {
+                nlohmann::ordered_json items;
+                items["type"] = prop->items_type;
+                p["items"] = std::move(items);
+            }
         }
         properties[prop->name] = std::move(p);
     }

@@ -670,8 +670,9 @@ void register_analysis_handlers(McpServer& server,
     // Replace "semantic_annotations" stub
     server.add_tool(
         {"semantic_annotations",
-         "Query symbols by semantic labels or categories. Supports both "
-         "direct annotations and propagated labels.",
+         "🏷️  Query symbols by semantic labels or categories. Supports "
+         "both direct @lci: annotations and propagated labels through "
+         "call graphs. See 'info semantic_annotations'.",
          {{"label", "string", "Semantic label to search for", ""},
           {"category", "string", "Semantic category", ""},
           {"min_strength", "number", "Minimum label strength", ""},
@@ -679,7 +680,8 @@ void register_analysis_handlers(McpServer& server,
            "Include direct annotations", ""},
           {"include_propagated", "boolean",
            "Include propagated labels", ""},
-          {"max_results", "integer", "Maximum results", ""}},
+          {"max_results", "integer",
+           "Maximum results (keep small to avoid token overload)", ""}},
          {}},
         [annotator, propagator](const nlohmann::json& p) -> ToolResult {
             if (!annotator) {
@@ -693,22 +695,28 @@ void register_analysis_handlers(McpServer& server,
     // Replace "side_effects" stub
     server.add_tool(
         {"side_effects",
-         "Query function purity and side effects. Detects writes, I/O, "
-         "and exceptions with transitive analysis.",
+         "🔬 Query function purity and side effects. Detects writes to "
+         "parameters, globals, closures, I/O operations, and exception "
+         "handling. Supports transitive analysis through call graphs. "
+         "See 'info side_effects'.",
          {{"mode", "string",
            "Query mode: symbol, file, pure, impure, category, summary", ""},
           {"symbol_id", "string", "Symbol ID for symbol mode", ""},
           {"symbol_name", "string", "Symbol name for symbol mode", ""},
           {"file_path", "string", "File path for file mode", ""},
           {"file_id", "integer", "File ID for file mode", ""},
-          {"category", "string", "Side effect category", ""},
+          {"category", "string",
+           "Side effect category: param_write, global_write, io, network, "
+           "throw, channel, external_call",
+           ""},
           {"include_reasons", "boolean",
            "Include reasons for impurity", ""},
           {"include_transitive", "boolean",
-           "Include transitive side effects", ""},
+           "Include transitive side effects from callees", ""},
           {"include_confidence", "boolean",
            "Include confidence levels", ""},
-          {"max_results", "integer", "Maximum results", ""}},
+          {"max_results", "integer",
+           "Maximum results (keep small to avoid token overload)", ""}},
          {}},
         [analyzer, indexer](const nlohmann::json& p) -> ToolResult {
             if (!analyzer) {
@@ -722,17 +730,25 @@ void register_analysis_handlers(McpServer& server,
     // Replace "code_insight" stub
     server.add_tool(
         {"code_insight",
-         "Comprehensive codebase intelligence. Provides overview, detailed "
-         "analysis, statistics, and git analysis.",
+         "🎯 Comprehensive codebase intelligence system for AI agents. "
+         "Provides high-level overview (79.8% context reduction), detailed "
+         "analysis (2-4x accuracy improvement), code statistics, and git "
+         "analysis. Modes: overview, detailed, statistics, unified, "
+         "structure, git_analyze, git_hotspots. See 'info code_insight'.",
          {{"mode", "string", "Analysis mode", ""},
           {"tier", "integer", "Analysis tier", ""},
           {"analysis", "string", "Type of analysis", ""},
           {"metrics", "array", "Metrics to include", "string"},
           {"target", "string", "Target to analyze", ""},
           {"focus", "string", "Analysis focus", ""},
-          {"max_results", "integer", "Maximum results", ""},
+          {"max_results", "integer",
+           "Maximum results (keep small to avoid token overload)", ""},
           {"languages", "array",
-           "Filter by programming languages", "string"}},
+           "Filter by programming languages (e.g., [\"go\"], "
+           "[\"typescript\", \"javascript\"], [\"csharp\"]). "
+           "Case-insensitive with aliases (e.g., 'ts' for TypeScript, "
+           "'cs' for C#).",
+           "string"}},
          {}},
         [ci_engine, indexer](const nlohmann::json& p) -> ToolResult {
             if (!ci_engine || !indexer) {
