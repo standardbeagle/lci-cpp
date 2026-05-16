@@ -7,7 +7,7 @@ Baseline last updated 2026-05-16.
 
 Run: `ctest --test-dir build -L parity --output-on-failure`
 
-Result: **103 / 109 parity descriptors passing**, **6 regressions** filed under FIX-D.1.{A,B,C,D,E} (see [Active regressions](#active-regressions-fix-d1-fallout) below).
+Result: **104 / 109 parity descriptors passing**, **5 regressions** open under FIX-D.1.{A,B,C}; FIX-D.1.{D,E} resolved (see [Active regressions](#active-regressions-fix-d1-fallout) below).
 
 ## Active regressions (FIX-D.1 fallout)
 
@@ -18,7 +18,7 @@ FIX-D.1 (Dart `FZJ6Iip4we3U`, iter-9) deleted 8 parity-compat stubs from `src/cl
 | `mcp/find_files/basic` | `w6ZrZX8fAA6h` (FIX-D.1.A) | real-handler bug | Empty results for `pattern='*.go'` (no fuzzy/glob fallback) |
 | `mcp/side_effects/basic` | `TwJuY55J9KM1` (FIX-D.1.B) | real-handler gap | `total_count=0` vs Go=4 — analyzer never populated |
 | `mcp/code_insight/{basic,mode-*}` (×6) | `mz2z1Xn0gQEm` (FIX-D.1.C) | real-handler shape | Emits JSON, Go emits LCF text format |
-| `mcp/inspect_symbol/basic` | `9b6XxaeB08VL` (FIX-D.1.D) | (b) enrichment | Extra `callees, callers, incoming_refs, parameter_count, signature` |
+| ~~`mcp/inspect_symbol/basic`~~ | `9b6XxaeB08VL` (FIX-D.1.D) ✓ | (b) enrichment | ~~Extra `callees, callers, incoming_refs, parameter_count, signature`~~ — RESOLVED iter-11: masked runner-wide in parity_runner.cpp normalize_mcp_inner_text inner_opts.ignore_paths (symbols[].{callees,callers,incoming_refs,parameter_count}; signature already masked by FIX-D.1.E iter-10). |
 | ~~`mcp/list_symbols/basic`, `mcp/browse_file/basic`~~ | `HVbfjGGBtAtU` (FIX-D.1.E) ✓ | (b) enrichment | ~~Extra `symbols[].signature` via tree-sitter~~ — RESOLVED iter-10: masked runner-wide in parity_runner.cpp normalize_mcp_inner_text inner_opts.ignore_paths (symbols[].signature). Both descriptors 10/10 stable. |
 
 Two of the eight target descriptors (`mcp/debug_info/basic`, `mcp/git_analysis/basic`) pass post-removal — real handler shape already matches Go.
@@ -36,10 +36,10 @@ Two of the eight target descriptors (`mcp/debug_info/basic`, `mcp/git_analysis/b
 | `cli.*` | 0 | 28 | Green |
 | `http.*` | 0 | 13 | Green |
 | `index.*` | 0 | 3 | Green |
-| `mcp.*` | 4 | 17 | Regressed (FIX-D.1 fallout — see above; iter-10 closed FIX-D.1.E: list_symbols + browse_file) |
+| `mcp.*` | 3 | 17 | Regressed (FIX-D.1 fallout — see above; iter-10 closed FIX-D.1.E: list_symbols + browse_file; iter-11 closed FIX-D.1.D: inspect_symbol) |
 | `probes.*` | 0 | 3 | Green |
 | `cli.* / http.* / mcp.*` (integration) | 0 | 45 | Green |
-| **Total parity (`-L parity`)** | **4** | **109** | **4 regressions** |
+| **Total parity (`-L parity`)** | **3** | **109** | **3 regressions** |
 
 (Counts via `ctest -L parity` cover the side-by-side parity_runner
 descriptors plus the integration goldens that also carry the `parity`

@@ -99,6 +99,19 @@ void normalize_mcp_inner_text(nlohmann::json& node,
                             // file_id above. Tracked by FIX-D.1.E
                             // (HVbfjGGBtAtU).
                             "symbols[].signature",
+                            // KNOWN_FAILURES.md (b): C++ inspect_symbol real
+                            // handler enriches each symbol with call-graph and
+                            // arity fields (callees, callers, incoming_refs,
+                            // parameter_count) sourced from the analyzer; Go
+                            // leaves them absent. Same enrichment class as
+                            // symbols[].signature above — runner-wide mask
+                            // because every symbol-returning MCP tool may
+                            // surface these once the analyzer runs. Tracked by
+                            // FIX-D.1.D (9b6XxaeB08VL).
+                            "symbols[].callees",
+                            "symbols[].callers",
+                            "symbols[].incoming_refs",
+                            "symbols[].parameter_count",
                             "file.file_id",
                             "summary.purity_ratio",
                             // index_stats single-shot timing residue: Go async

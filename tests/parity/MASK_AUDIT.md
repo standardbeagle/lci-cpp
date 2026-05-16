@@ -73,7 +73,7 @@ Bucket meanings:
 | `index/lci-cpp-repo` | 21 | ✓ | 7 | 1 | 7 | 6 | 0 |
 | `index/lci-go-repo` | 21 | ✓ | 7 | 1 | 7 | 6 | 0 |
 | `index/synthetic-multilang` | 21 | ✓ | 7 | 1 | 7 | 6 | 0 |
-| `mcp/browse_file/basic` | 0 |   | 0 | 0 | 0 | 0 | 0 |
+| `mcp/browse_file/basic` | 0 | ✓ | 0 | 0 | 0 | 0 | 0 |
 | `mcp/code_insight/basic` | 0 | ✓ | 0 | 0 | 0 | 0 | 0 |
 | `mcp/code_insight/mode-git_analyze` | 0 | ✓ | 0 | 0 | 0 | 0 | 0 |
 | `mcp/code_insight/mode-git_hotspots` | 0 | ✓ | 0 | 0 | 0 | 0 | 0 |
@@ -96,7 +96,7 @@ Bucket meanings:
 | `mcp/index_stats/wait-ready` | 1 | ✓ | 0 | 0 | 1 | 0 | 0 |
 | `mcp/info/basic` | 0 |   | 0 | 0 | 0 | 0 | 0 |
 | `mcp/inspect_symbol/basic` | 0 |   | 0 | 0 | 0 | 0 | 0 |
-| `mcp/list_symbols/basic` | 0 |   | 0 | 0 | 0 | 0 | 0 |
+| `mcp/list_symbols/basic` | 0 | ✓ | 0 | 0 | 0 | 0 | 0 |
 | `mcp/search/basic` | 1 | ✓ | 0 | 0 | 1 | 0 | 0 |
 | `mcp/search_definitions/basic` | 0 | ✓ | 0 | 0 | 0 | 0 | 0 |
 | `mcp/semantic_annotations/basic` | 0 | ✓ | 0 | 0 | 0 | 0 | 0 |
