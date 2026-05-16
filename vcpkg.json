@@ -10,6 +10,7 @@
         "xxhash",
         "abseil",
         "efsw",
-        "rapidfuzz"
+        "rapidfuzz",
+        "nlohmann-json-schema-validator"
     ]
 }

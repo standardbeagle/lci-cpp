@@ -64,6 +64,7 @@ add_executable(lci_tests
     cli_test.cpp
     git_test.cpp
     index_performance_test.cpp
+    json_schema_smoketest.cpp
 )
 target_include_directories(lci_tests PRIVATE
     "${CMAKE_SOURCE_DIR}/include"
@@ -72,6 +73,7 @@ target_include_directories(lci_tests PRIVATE
 )
 target_link_libraries(lci_tests PRIVATE
     lci_lib
+    nlohmann_json_schema_validator
     GTest::gtest_main
 )
 

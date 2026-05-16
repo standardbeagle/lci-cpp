@@ -137,6 +137,22 @@ if(NOT rapidfuzz_FOUND)
     FetchContent_MakeAvailable(rapidfuzz)
 endif()
 
+# nlohmann-json-schema-validator — JSON Schema draft-7/2019-09 validator built
+# on nlohmann::json. License: MIT. Slated to replace hand-rolled MCP request
+# validation (FIX-B). Dep wiring lives here; handler swap is a separate task.
+find_package(nlohmann_json_schema_validator CONFIG QUIET)
+if(NOT nlohmann_json_schema_validator_FOUND)
+    set(JSON_VALIDATOR_INSTALL OFF CACHE BOOL "" FORCE)
+    set(JSON_VALIDATOR_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(JSON_VALIDATOR_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(nlohmann_json_schema_validator
+        GIT_REPOSITORY https://github.com/pboettch/json-schema-validator.git
+        GIT_TAG 2.3.0
+        GIT_SHALLOW TRUE
+    )
+    FetchContent_MakeAvailable(nlohmann_json_schema_validator)
+endif()
+
 # tree-sitter is a C library
 find_package(PkgConfig QUIET)
 if(PkgConfig_FOUND)
