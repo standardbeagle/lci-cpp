@@ -1,3 +1,17 @@
 {
-  "claims": {}
+  "claims": {
+    "w6ZrZX8fAA6h": {
+      "runner_instance_id": "beagle-ab-580276",
+      "runner_email": "andybrummer@standardbeagle.com",
+      "claimed_at": "2026-05-16T07:25:00Z",
+      "agent_id": "beagle-ab-580276",
+      "parent_loop_id": "AN8m7hohEdlM",
+      "purpose": "loop iter-12: FIX-D.1.A find_files real handler glob/fuzzy fallback",
+      "source_event": {
+        "loop_id": "AN8m7hohEdlM",
+        "task_id": "w6ZrZX8fAA6h",
+        "conversation_id": null
+      }
+    }
+  }
 }
