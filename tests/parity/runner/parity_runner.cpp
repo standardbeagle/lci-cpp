@@ -87,6 +87,18 @@ void normalize_mcp_inner_text(nlohmann::json& node,
                             "results[].is_exported",
                             "symbols[].object_id",
                             "symbols[].file_id",
+                            // KNOWN_FAILURES.md (b): C++ list_symbols /
+                            // browse_file handlers extract tree-sitter
+                            // function signatures into symbols[].signature;
+                            // Go leaves the field absent. Same enrichment
+                            // class as cli/symbols/inspect.signature
+                            // (locked by integration golden). Runner-wide
+                            // mask because every symbol-returning MCP tool
+                            // shares the same divergence; matches the
+                            // existing pattern for symbols[].object_id /
+                            // file_id above. Tracked by FIX-D.1.E
+                            // (HVbfjGGBtAtU).
+                            "symbols[].signature",
                             "file.file_id",
                             "summary.purity_ratio",
                             // index_stats single-shot timing residue: Go async

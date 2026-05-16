@@ -16,12 +16,15 @@
     "exit"
   ],
   "parse": "json",
+  "_rationale": "browse_file file=a.go on multi-lang corpus. Go and C++ both return file metadata (language=go, path=${CORPUS}/a.go) plus the single Add function symbol with identical complexity/file/line/name/type/is_exported. Single divergence: C++ emits symbols[].signature (\"func Add(a, b int) int\") via tree-sitter; Go MCP handler leaves it absent. Same enrichment class as cli/symbols/inspect.signature — KNOWN_FAILURES.md (b) C++ tree-sitter signature enrichment. Masked runner-wide in parity_runner.cpp normalize_mcp_inner_text inner_opts.ignore_paths (symbols[].signature), not per-descriptor, because list_symbols/basic shares the same divergence 1:1 and any future symbol-returning MCP tool will inherit it. Tracked by FIX-D.1.E (HVbfjGGBtAtU).",
   "tiers": {
     "stable": [
       "result.content[].type",
       "result.content[].text"
     ],
-    "ignore": []
+    "_rationale_stable": "Envelope content type and the stringified inner JSON payload. Inner payload matches after runner-wide normalize_mcp_inner_text masks symbols[].signature (the only divergence — see top-level _rationale).",
+    "ignore": [],
+    "_rationale_ignore": "Universal MCP descriptor noise is masked by the runner-wide normalize_mcp_inner_text hook (parity_runner.cpp). symbols[].signature is NOT listed here because the runner-global inner_text normaliser already ignores it; duplicating it in the descriptor would be redundant — same pattern as mcp/side_effects/basic for summary.purity_ratio."
   },
   "tolerances": {
     "score_abs": 0.05,
