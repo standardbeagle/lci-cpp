@@ -576,3 +576,51 @@ MCP descriptors (incl. pre-existing) green 10/10 on multi-lang corpus.
 filed as follow-up subtasks. No silent fallbacks introduced (karpathy
 rule 6 honoured per descriptor).
 
+### Decision: validator factories for symbol/tree/object_context are dead — accept-unvalidated, green-light FIX-E (2026-05-16, Iter 6, 8Zjd7zI01dhr)
+
+**Scope**: three hand-rolled validators in `src/mcp/validation.cpp` flagged
+by FIX-A as having no production callers:
+
+- `create_symbol_validator()` — line 326
+- `create_tree_validator()` — line 351
+- `validate_object_context_business_logic()` — line 380
+
+**Audit method**: ripgrep across `src/` and `tests/` for each symbol;
+inspect actual handler entry points; cross-check Go reference where
+available.
+
+**Findings**:
+
+| Validator | Production callers | Handler reality | Decision |
+|---|---|---|---|
+| `create_symbol_validator()` | 0 (only `tests/mcp_validation_pagination_test.cpp`) | No MCP tool keyed `symbol` exists. The closest tool is `inspect_symbol`, which has its own inline `name`/`id` validation in `handle_inspect_symbol` (`src/mcp/handlers_explore.cpp:572-578`). The parity-compat shadow stub in `src/cli/mcp.cpp:276-298` performs no validation but matches Go's stub-shaped output by design. | **DEAD — delete in FIX-E** |
+| `create_tree_validator()` | 0 (only test file) | Validator keys `function` (lines 354-357), but the actual `/tree` HTTP handler at `src/server/server.cpp:1092-1200` keys `function_name` and already inline-validates non-empty (`error_response 400`, line 1106). No MCP `tree` tool is registered (`grep add_tool.*tree` empty). The validator was never wired and was keyed on the wrong field — would have been a no-op if dispatched. | **DEAD — delete in FIX-E** |
+| `validate_object_context_business_logic()` | 0 (only test file) | `handle_get_context` at `src/mcp/handlers_core.cpp:481-505` performs equivalent inline validation: requires exactly one of `id`/`name`, error message text matches Go's `validateGetContextParams` per inline comment (line 487). The factory's logic is **redundantly duplicated** — wiring it would be cosmetic refactor, not behavior change. | **DEAD — delete in FIX-E** |
+
+**Parity check (no live Go corpus available this iter)**: cross-reference is the
+inline comment block at `handlers_core.cpp:487` ("Go validateGetContextParams")
+and at line 510 ("Go's id-only no-mode contract"), both authored in iter-18
+(dk4QZUHJYC7J) when the get_context Go reference was paged in. C++ already
+mirrors Go's validation contract inline. inspect_symbol has its own
+required-field check (`name` OR `id`). The `/tree` HTTP handler has its own
+non-empty check. No parity gap exists from the absence of these three
+validator factories — they are pure dead code.
+
+**Risk of deletion**: low. Pure-removal change with one corresponding test
+file (`tests/mcp_validation_pagination_test.cpp` lines 236-314, 4 test cases)
+that needs the same delete pass. No production behavior changes. No descriptor
+flips expected. Floor: full unit + parity suite must hold green after the
+delete pass (FIX-E owns verification).
+
+**Decision**: **accept-unvalidated** for all three tools. Green-light FIX-E
+to delete the three factory functions and their test cases in one pass. No
+wire-now child fix tasks spawned — there is nothing to wire because:
+1. Inline validation already exists for `get_context` and `inspect_symbol`.
+2. `/tree` is HTTP-only (no MCP surface) and already inline-validates.
+3. Wiring `create_object_context_validator` would be cosmetic refactor of a
+   working inline check, not a correctness fix — explicitly out of scope per
+   karpathy rule 7 (no "we'll optimize later" cosmetic restructuring).
+
+**Followup**: FIX-E (separate Dart task in this loop) is now unblocked. No new
+child subtasks created from FIX-C; the audit closes cleanly.
+
