@@ -8,6 +8,7 @@
 #include <vector>
 
 #include <nlohmann/json-schema.hpp>
+#include <rapidfuzz/distance/Levenshtein.hpp>
 
 #include <lci/core/reference_tracker.h>
 #include <lci/idcodec.h>
@@ -697,7 +698,62 @@ ToolResult handle_find_files(const nlohmann::json& params,
                 }
             }
 
-            // 4. Path component match
+            // 4. Fuzzy match on filenameNoExt — parity with Go's
+            //    matchFilePaths step 4 (handlers_files.go:226-232).
+            //    Go invokes phraseMatcher.Match(pattern, filenameNoExt) with a
+            //    levenshtein FuzzyMatcher at threshold 0.7. The Go fuzzer has a
+            //    quirk: edlib.StringsSimilarity returns proper similarity but
+            //    levenshteinSimilarity then computes `1 - that`, so wildly
+            //    different strings score ~1.0 while near-matches score low.
+            //    We reproduce that observable behaviour exactly so the parity
+            //    descriptor (mcp/find_files/basic) keeps yielding the same
+            //    fuzzy hits with score 0.574 on the multi-lang corpus.
+            //
+            //    For single-word queries (no spaces) the PhraseMatcher reduces
+            //    to a known closed-form: queryWords=[pattern], one fuzzy match
+            //    against the (single) target word →
+            //      avgWordScore = sim_norm * 0.85
+            //      + exactPhraseBonus 0.05   (allWordsMatched && inOrder)
+            //      − fuzzyPenalty 0.08       (fuzzyCount/matchedCount = 1)
+            //      = sim_norm * 0.85 − 0.03
+            //    Final find_files score = phraseScore * 0.7 (line 229).
+            //    Multi-word patterns (containing whitespace) are left unscored
+            //    here for now — descriptor coverage is single-word only and a
+            //    full PhraseMatcher port is FIX-D.1.B-scope.
+            if (score == 0.0 && !exact_only &&
+                normalized_pattern.find(' ') == std::string::npos &&
+                !normalized_pattern.empty() &&
+                !norm_filename_no_ext.empty()) {
+                // Go-compat broken levenshtein: 1.0 for total mismatch,
+                // 0.0 for identical (handled by a==b early return below).
+                double sim_norm;
+                if (normalized_pattern == norm_filename_no_ext) {
+                    sim_norm = 1.0;
+                } else {
+                    size_t lev = rapidfuzz::levenshtein_distance(
+                        normalized_pattern, norm_filename_no_ext);
+                    size_t max_len =
+                        std::max(normalized_pattern.size(),
+                                 norm_filename_no_ext.size());
+                    // sim_norm == lev / max_len  (intentional Go bug-port)
+                    sim_norm = static_cast<double>(lev) /
+                               static_cast<double>(max_len);
+                }
+                if (sim_norm >= 0.7) {  // FuzzyMatcher threshold in Go
+                    double phrase_score = sim_norm * 0.85;
+                    // PhraseMatcher exactPhraseBonus (single word always
+                    // counts as in-order, all-words-matched)
+                    phrase_score += 0.05;
+                    // PhraseMatcher fuzzyPenalty (fuzzyCount=1 of 1 match)
+                    phrase_score -= 0.08;
+                    if (phrase_score > 1.0) phrase_score = 1.0;
+                    if (phrase_score < 0.0) phrase_score = 0.0;
+                    score = phrase_score * 0.7;  // fuzzy-scale per Go
+                    match_type = "fuzzy";
+                }
+            }
+
+            // 5. Path component match
             if (score == 0.0) {
                 size_t cpos = 0;
                 while (cpos < match_path.size()) {
