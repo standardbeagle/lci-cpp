@@ -1,3 +1,17 @@
 {
-  "claims": {}
+  "claims": {
+    "OY9cbXu9WMAS": {
+      "runner_instance_id": "beagle-ab-801666",
+      "runner_email": "andybrummer@standardbeagle.com",
+      "claimed_at": "2026-05-16T18:38:17Z",
+      "agent_id": "beagle-ab-801666",
+      "parent_loop_id": "AN8m7hohEdlM",
+      "purpose": "FIX-D.3 MCP tool description sync (resume iter 16)",
+      "source_event": {
+        "loop_id": "AN8m7hohEdlM",
+        "task_id": "OY9cbXu9WMAS",
+        "conversation_id": "d5f1f7ab-9d28-4655-bedb-b6338f6fdaf1"
+      }
+    }
+  }
 }
