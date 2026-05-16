@@ -53,6 +53,25 @@ configure_file(
     @ONLY
 )
 
+# MCP JSON Schema embedding — schemas live as plain .json under share/lci/mcp-schemas/
+# (human-reviewable, single source of truth) and are embedded into generated headers
+# as C++ raw string literals so the binary has no runtime FS lookup. Mirrors Go's
+# go:embed pattern. To add a schema: drop file in share/lci/mcp-schemas/, append to
+# LCI_MCP_SCHEMAS, include the generated header (#include <lci/mcp/schemas/<name>.h>).
+set(LCI_MCP_SCHEMAS search)
+foreach(_schema IN LISTS LCI_MCP_SCHEMAS)
+    set(_src "${CMAKE_CURRENT_SOURCE_DIR}/share/lci/mcp-schemas/${_schema}.json")
+    set(_dst "${CMAKE_CURRENT_BINARY_DIR}/generated/lci/mcp/schemas/${_schema}.h")
+    file(READ "${_src}" _schema_text)
+    # Guard: raw string literal terminator R"LCI(...)LCI" — pick a delimiter no schema uses.
+    string(TOUPPER "${_schema}" _schema_up)
+    file(CONFIGURE
+        OUTPUT "${_dst}"
+        CONTENT "// Auto-generated from share/lci/mcp-schemas/${_schema}.json — DO NOT EDIT.\n// Edit the .json source; CMake regenerates on configure.\n#pragma once\nnamespace lci { namespace mcp { namespace schemas {\nconstexpr const char* k${_schema_up}_SCHEMA = R\"LCISCHEMA(${_schema_text})LCISCHEMA\";\n}}}\n"
+        @ONLY
+    )
+endforeach()
+
 # Dependencies via vcpkg (preferred) or FetchContent (fallback)
 include(FetchContent)
 

@@ -1,0 +1,44 @@
+{
+    "$schema": "https://json-schema.org/draft/2019-09/schema",
+    "$id": "https://lci.dev/mcp-schemas/search.json",
+    "title": "lci.mcp.search",
+    "description": "Parameter schema for the MCP `search` tool. Mirrors the inline rules in create_search_validator() (src/mcp/validation.cpp) and validate_search_business_logic() (same file). The handler still enforces the pattern/patterns mutual-requirement business rule because JSON Schema cannot express 'at least one of these two string fields is non-empty' as cleanly as the existing helper.",
+    "type": "object",
+    "properties": {
+        "pattern": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100000,
+            "description": "Search pattern. Required unless `patterns` is provided."
+        },
+        "patterns": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100000,
+            "description": "Alias for `pattern`. At least one of {pattern, patterns} must be a non-empty string."
+        },
+        "max": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Max results (clamped to [1,100] by the handler)."
+        },
+        "max_per_file": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Max results per file."
+        },
+        "output": {
+            "type": "string",
+            "description": "Output format: 'line', 'ctx', 'ctx:N', 'full', 'files', 'count'."
+        },
+        "filter": {
+            "type": "string",
+            "description": "File filter: comma-separated types/patterns, e.g. 'go,*.py'."
+        },
+        "flags": {
+            "type": "string",
+            "description": "Search flags: 'ci', 'cs', 'rx', 'iv', 'wb', 'nt', 'nc'."
+        }
+    },
+    "additionalProperties": false
+}

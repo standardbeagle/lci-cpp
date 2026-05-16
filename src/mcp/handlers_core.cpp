@@ -7,10 +7,13 @@
 #include <string_view>
 #include <vector>
 
+#include <nlohmann/json-schema.hpp>
+
 #include <lci/core/reference_tracker.h>
 #include <lci/idcodec.h>
 #include <lci/indexing/master_index.h>
 #include <lci/mcp/pagination.h>
+#include <lci/mcp/schemas/search.h>  // generated: kSEARCH_SCHEMA
 #include <lci/mcp/validation.h>
 #include <lci/search/search_engine.h>
 #include <lci/search/search_options.h>
@@ -67,6 +70,84 @@ std::string to_lower(std::string s) {
     std::transform(s.begin(), s.end(), s.begin(),
                    [](unsigned char c) { return std::tolower(c); });
     return s;
+}
+
+// -- json-schema validation glue ---------------------------------------------
+//
+// FIX-B (4RfLnLqNCD7u): handle_search now uses nlohmann-json-schema-validator
+// against an embedded schema (share/lci/mcp-schemas/search.json) instead of
+// the hand-rolled RequestValidator. Wire format is preserved by mapping the
+// validator's per-error callbacks into the existing ValidationError struct
+// and routing through create_(multi_)validation_error_response.
+//
+// karpathy: validator is built ONCE at first call (static const), not
+// per-request. /search is a hot read path — no malloc/parse on each invoke.
+
+/// Collects schema validation errors into the project's ValidationError shape.
+/// Used as nlohmann::json_schema::basic_error_handler subclass.
+class SearchSchemaErrorCollector
+    : public nlohmann::json_schema::basic_error_handler {
+  public:
+    void error(const nlohmann::json::json_pointer& ptr,
+               const nlohmann::json& instance,
+               const std::string& message) override {
+        nlohmann::json_schema::basic_error_handler::error(ptr, instance,
+                                                          message);
+        ValidationError err;
+        err.value = instance;
+        err.message = message;
+        // Pointer like "/max" or "" (root). Derive a human field name.
+        auto p = ptr.to_string();
+        if (p.empty()) {
+            err.field = "(root)";
+        } else if (!p.empty() && p.front() == '/') {
+            err.field = p.substr(1);  // strip leading slash
+        } else {
+            err.field = p;
+        }
+        // Best-effort code mapping from the schema validator's message text.
+        // The library does not expose a structured kind, so we sniff the
+        // message — matches the kRequired/kInvalidFormat/etc taxonomy the
+        // existing wire format uses.
+        auto lower = message;
+        std::transform(lower.begin(), lower.end(), lower.begin(),
+                       [](unsigned char c) { return std::tolower(c); });
+        if (lower.find("required") != std::string::npos) {
+            err.code = ValidationErrorCode::kRequired;
+        } else if (lower.find("unexpected") != std::string::npos ||
+                   lower.find("additional") != std::string::npos ||
+                   lower.find("evaluating") != std::string::npos) {
+            err.code = ValidationErrorCode::kInvalidFormat;
+        } else if (lower.find("minimum") != std::string::npos ||
+                   lower.find("maximum") != std::string::npos ||
+                   lower.find("range") != std::string::npos) {
+            err.code = ValidationErrorCode::kOutOfRange;
+        } else if (lower.find("length") != std::string::npos) {
+            err.code = lower.find("min") != std::string::npos
+                          ? ValidationErrorCode::kTooShort
+                          : ValidationErrorCode::kTooLong;
+        } else {
+            err.code = ValidationErrorCode::kInvalidFormat;
+        }
+        errors_.push_back(std::move(err));
+    }
+
+    std::vector<ValidationError> take() { return std::move(errors_); }
+
+  private:
+    std::vector<ValidationError> errors_;
+};
+
+/// Returns the lazily-initialized json-schema validator for `search` params.
+/// Constructed once per process; subsequent calls are cheap pointer fetches.
+const nlohmann::json_schema::json_validator& search_schema_validator() {
+    static const nlohmann::json_schema::json_validator instance = [] {
+        nlohmann::json_schema::json_validator v;
+        v.set_root_schema(
+            nlohmann::json::parse(lci::mcp::schemas::kSEARCH_SCHEMA));
+        return v;
+    }();
+    return instance;
 }
 
 }  // namespace
@@ -202,15 +283,27 @@ ToolResult handle_info(const nlohmann::json& params) {
 ToolResult handle_search(const nlohmann::json& params,
                          MasterIndex& indexer,
                          SearchEngine* search_engine) {
-    // Validate required parameters
-    auto validator = create_search_validator();
-    auto validation = validator.validate(params);
-    if (!validation.valid) {
+    // Validate parameters against the embedded JSON Schema. Validator is
+    // built once per process (see search_schema_validator()) — karpathy:
+    // no per-request allocation on the hot read path.
+    SearchSchemaErrorCollector collector;
+    search_schema_validator().validate(params, collector);
+    auto schema_errors = collector.take();
+    if (!schema_errors.empty()) {
+        // Preserve wire format: single-error -> create_validation_error_response,
+        // multi-error -> create_multi_validation_error_response. The existing
+        // handler used the multi shape unconditionally; keep that to avoid a
+        // golden churn for callers already parsing validation_errors[].
         auto err_json = create_multi_validation_error_response(
-            "search", validation.errors);
+            "search", schema_errors);
         return {err_json.dump(), true};
     }
 
+    // Business rule: schema can't express "at least one of {pattern, patterns}
+    // is non-empty" as cleanly as the existing helper. Schema marks both
+    // optional; this guard enforces the OR. Kept here (not in schema) so the
+    // error code stays kRequired and the wire-format snapshot for missing
+    // pattern is byte-identical to pre-FIX-B output.
     auto biz_err = validate_search_business_logic(params);
     if (biz_err.has_value()) {
         auto err_json = create_validation_error_response(

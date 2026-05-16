@@ -193,6 +193,80 @@ TEST_F(HandlersFixture, SearchMissingPatternErrors) {
     EXPECT_TRUE(result.is_error);
 }
 
+// FIX-B (4RfLnLqNCD7u): json-schema validator now backs search param checks.
+// Error response shape must remain the existing
+// create_validation_error_response / create_multi_validation_error_response
+// wire format (snapshot-preserved for missing-pattern). These three cases
+// exercise schema-level rules: required, type, and additionalProperties.
+
+// Required field missing -> validation_error with field=pattern.
+TEST_F(HandlersFixture, SearchSchemaRejectsMissingRequiredPattern) {
+    nlohmann::json params = nlohmann::json::object();  // no pattern, no patterns
+    auto result = handle_search(params, *indexer_, search_engine_.get());
+    ASSERT_TRUE(result.is_error);
+    auto json = nlohmann::json::parse(result.text);
+    EXPECT_FALSE(json["success"].get<bool>());
+    // Must point at pattern (either as the single-error 'field' or as one of
+    // the field_names in validation_errors[]).
+    bool mentions_pattern = false;
+    if (json.contains("error") && json["error"].contains("field")) {
+        mentions_pattern |=
+            json["error"]["field"].get<std::string>().find("pattern") !=
+            std::string::npos;
+    }
+    if (json.contains("validation_errors")) {
+        for (const auto& e : json["validation_errors"]) {
+            if (e.contains("field_name") &&
+                e["field_name"].get<std::string>().find("pattern") !=
+                    std::string::npos) {
+                mentions_pattern = true;
+                break;
+            }
+        }
+    }
+    EXPECT_TRUE(mentions_pattern) << result.text;
+}
+
+// Wrong type on `max` -> validation_error with field=max and invalid_format-ish code.
+TEST_F(HandlersFixture, SearchSchemaRejectsWrongTypeMax) {
+    nlohmann::json params;
+    params["pattern"] = "main";
+    params["max"] = "not-a-number";  // schema says number
+    auto result = handle_search(params, *indexer_, search_engine_.get());
+    ASSERT_TRUE(result.is_error);
+    auto json = nlohmann::json::parse(result.text);
+    EXPECT_FALSE(json["success"].get<bool>());
+    bool mentions_max = false;
+    if (json.contains("validation_errors")) {
+        for (const auto& e : json["validation_errors"]) {
+            if (e.contains("field_name") &&
+                e["field_name"].get<std::string>() == "max") {
+                mentions_max = true;
+                break;
+            }
+        }
+    } else if (json.contains("error") && json["error"].contains("field")) {
+        mentions_max = json["error"]["field"].get<std::string>() == "max";
+    }
+    EXPECT_TRUE(mentions_max) << result.text;
+}
+
+// Unknown field rejected by additionalProperties:false.
+TEST_F(HandlersFixture, SearchSchemaRejectsUnknownField) {
+    nlohmann::json params;
+    params["pattern"] = "main";
+    params["frobnicate"] = "wat";  // not in schema
+    auto result = handle_search(params, *indexer_, search_engine_.get());
+    ASSERT_TRUE(result.is_error);
+    auto json = nlohmann::json::parse(result.text);
+    EXPECT_FALSE(json["success"].get<bool>());
+    // The unknown-field error should mention 'frobnicate' somewhere in the
+    // message/field stream — schema validator typically reports the parent
+    // object pointer plus the offending key in the message text.
+    auto body = result.text;
+    EXPECT_NE(body.find("frobnicate"), std::string::npos) << body;
+}
+
 TEST_F(HandlersFixture, SearchClampsMaxResults) {
     nlohmann::json params;
     params["pattern"] = "func";

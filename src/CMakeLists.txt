@@ -97,6 +97,7 @@ target_include_directories(lci_lib PUBLIC
 
 target_link_libraries(lci_lib PUBLIC
     nlohmann_json::nlohmann_json
+    nlohmann_json_schema_validator
     httplib::httplib
     absl::flat_hash_map
     xxHash::xxhash
