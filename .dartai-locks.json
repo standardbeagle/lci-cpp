@@ -1,17 +1,3 @@
 {
-  "claims": {
-    "dVjdFhemWPDA": {
-      "runner_instance_id": "beagle-ab-580276",
-      "runner_email": "andybrummer@standardbeagle.com",
-      "claimed_at": "2026-05-16T05:35:00Z",
-      "agent_id": "beagle-ab-580276",
-      "parent_loop_id": "AN8m7hohEdlM",
-      "purpose": "loop iter-2: add rapidfuzz-cpp, replace hand-rolled fuzzy matcher",
-      "source_event": {
-        "loop_id": "AN8m7hohEdlM",
-        "task_id": "dVjdFhemWPDA",
-        "conversation_id": null
-      }
-    }
-  }
+  "claims": {}
 }

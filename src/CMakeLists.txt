@@ -116,6 +116,7 @@ target_link_libraries(lci_lib PUBLIC
     tree-sitter-zig
     tree-sitter-ruby
     efsw
+    rapidfuzz::rapidfuzz
 )
 
 # Platform-specific libraries

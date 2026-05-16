@@ -123,6 +123,20 @@ if(NOT efsw_FOUND)
     FetchContent_MakeAvailable(efsw)
 endif()
 
+# rapidfuzz-cpp — header-only SIMD-accelerated string similarity.
+# License: MIT. Replaces hand-rolled Jaro-Winkler / Levenshtein / cosine
+# in src/semantic/fuzzy_matcher.cpp. Matches the algorithm scale used by
+# the rapidfuzz/Python ecosystem most users compare against.
+find_package(rapidfuzz CONFIG QUIET)
+if(NOT rapidfuzz_FOUND)
+    FetchContent_Declare(rapidfuzz
+        GIT_REPOSITORY https://github.com/rapidfuzz/rapidfuzz-cpp.git
+        GIT_TAG v3.0.5
+        GIT_SHALLOW TRUE
+    )
+    FetchContent_MakeAvailable(rapidfuzz)
+endif()
+
 # tree-sitter is a C library
 find_package(PkgConfig QUIET)
 if(PkgConfig_FOUND)
