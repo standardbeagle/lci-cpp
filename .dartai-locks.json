@@ -1,3 +1,17 @@
 {
-  "claims": {}
+  "claims": {
+    "9b6XxaeB08VL": {
+      "runner_instance_id": "beagle-ab-580276",
+      "runner_email": "andybrummer@standardbeagle.com",
+      "claimed_at": "2026-05-16T07:15:00Z",
+      "agent_id": "beagle-ab-580276",
+      "parent_loop_id": "AN8m7hohEdlM",
+      "purpose": "loop iter-11: FIX-D.1.D mask inspect_symbol enrichment fields",
+      "source_event": {
+        "loop_id": "AN8m7hohEdlM",
+        "task_id": "9b6XxaeB08VL",
+        "conversation_id": null
+      }
+    }
+  }
 }
