@@ -7,10 +7,19 @@
 #include <sstream>
 #include <string>
 
+#include <nlohmann/json.hpp>
+
 #include <lci/mcp/handlers_core.h>
 
 namespace lci {
 namespace mcp {
+
+namespace {
+// Forward declaration — defined below in file-local anonymous namespace.
+// Builds inputSchema with Go jsonschema-go field order; consumed by
+// handle_request's tools/list branch for wire output.
+nlohmann::ordered_json build_input_schema_ordered(const ToolDefinition& def);
+}  // namespace
 
 // -- McpServer construction ---------------------------------------------------
 
@@ -466,7 +475,51 @@ nlohmann::json McpServer::handle_request(const nlohmann::json& request) {
     if (method == "initialize") {
         response["result"] = handle_initialize(request);
     } else if (method == "tools/list") {
-        response["result"] = handle_tools_list(request);
+        // tools/list wire response requires Go-jsonschema-go field ordering
+        // (Decision: tools/list emit-order parity, MODULE_MAP.md). Standard
+        // nlohmann::json alphabetises on dump, so build the entire envelope
+        // as ordered_json, serialise here, write directly, and return null to
+        // signal the run loop to skip its default write_message path.
+        nlohmann::ordered_json env;
+        env["jsonrpc"] = "2.0";
+        env["id"] = id;
+
+        nlohmann::ordered_json result_obj;
+        nlohmann::ordered_json tools_arr = nlohmann::ordered_json::array();
+
+        // Snapshot pointers and sort alphabetically by tool name (Go emits
+        // tools alphabetical-by-name; C++ registered_tools_ is in handler-file
+        // insertion order). Sort the snapshot only — do NOT mutate
+        // registered_tools_ (registration order is meaningful for
+        // handle_tools_call last-write-wins lookup at server.cpp ~line 540).
+        std::vector<const RegisteredTool*> snapshot;
+        snapshot.reserve(registered_tools_.size());
+        for (const auto& reg : registered_tools_) {
+            snapshot.push_back(&reg);
+        }
+        std::sort(snapshot.begin(), snapshot.end(),
+                  [](const RegisteredTool* a, const RegisteredTool* b) {
+                      return a->definition.name < b->definition.name;
+                  });
+
+        for (const auto* reg : snapshot) {
+            nlohmann::ordered_json tool;
+            // Tool object top-level keys: alphabetical [description,
+            // inputSchema, name] (matches Go map iteration ordered by
+            // jsonschema-go's sorted emit). Insert in sorted order.
+            tool["description"] = reg->definition.description;
+            tool["inputSchema"] = build_input_schema_ordered(reg->definition);
+            tool["name"] = reg->definition.name;
+            tools_arr.push_back(std::move(tool));
+        }
+
+        result_obj["tools"] = std::move(tools_arr);
+        env["result"] = std::move(result_obj);
+
+        auto body = env.dump();
+        std::cout << "Content-Length: " << body.size() << "\r\n\r\n" << body;
+        std::cout.flush();
+        return nullptr;
     } else if (method == "tools/call") {
         auto params = request.value("params", nlohmann::json::object());
         auto tool_name = params.value("name", "");
@@ -505,13 +558,29 @@ nlohmann::json McpServer::handle_initialize(const nlohmann::json& /*request*/) {
 }
 
 nlohmann::json McpServer::handle_tools_list(const nlohmann::json& /*request*/) {
+    // This path is retained for header ABI compatibility and any direct
+    // callers (none in production wire path). The wire response is emitted by
+    // handle_request via build_tools_list_envelope_ordered() — that path
+    // preserves Go's jsonschema-go field ordering on the dumped string.
+    // Returning a regular nlohmann::json here will alphabetise inputSchema
+    // keys on dump, which is fine for non-wire consumers.
     nlohmann::json tools = nlohmann::json::array();
 
+    std::vector<const RegisteredTool*> snapshot;
+    snapshot.reserve(registered_tools_.size());
     for (const auto& reg : registered_tools_) {
+        snapshot.push_back(&reg);
+    }
+    std::sort(snapshot.begin(), snapshot.end(),
+              [](const RegisteredTool* a, const RegisteredTool* b) {
+                  return a->definition.name < b->definition.name;
+              });
+
+    for (const auto* reg : snapshot) {
         nlohmann::json tool;
-        tool["name"] = reg.definition.name;
-        tool["description"] = reg.definition.description;
-        tool["inputSchema"] = build_input_schema(reg.definition);
+        tool["name"] = reg->definition.name;
+        tool["description"] = reg->definition.description;
+        tool["inputSchema"] = build_input_schema(reg->definition);
         tools.push_back(std::move(tool));
     }
 
@@ -603,27 +672,67 @@ void McpServer::handle_notification(const nlohmann::json& request) {
 
 // -- Schema building ----------------------------------------------------------
 
-nlohmann::json McpServer::build_input_schema(const ToolDefinition& def) {
-    nlohmann::json schema;
+namespace {
+
+// File-local: build inputSchema as ordered_json with Go-jsonschema-go field
+// order. Returned ordered_json is consumed by the file-local
+// build_tools_list_result_ordered() — never escapes the tools/list code path
+// nor enters registered_tools_ storage (karpathy rule: keep ordered_json off
+// the hot read path).
+nlohmann::ordered_json build_input_schema_ordered(const ToolDefinition& def) {
+    nlohmann::ordered_json schema;
+    // Go jsonschema-go schema-root struct order: type → properties → required.
     schema["type"] = "object";
 
-    nlohmann::json properties;
+    // properties map keys: alphabetical (matches Go map iteration ordered by
+    // jsonschema-go's sorted property emit). ordered_json preserves insertion
+    // order, so insert in sorted order explicitly.
+    std::vector<const ToolProperty*> sorted_props;
+    sorted_props.reserve(def.properties.size());
     for (const auto& prop : def.properties) {
-        nlohmann::json p;
-        p["type"] = prop.type;
-        p["description"] = prop.description;
-        if (prop.type == "array" && !prop.items_type.empty()) {
-            p["items"]["type"] = prop.items_type;
+        sorted_props.push_back(&prop);
+    }
+    std::sort(sorted_props.begin(), sorted_props.end(),
+              [](const ToolProperty* a, const ToolProperty* b) {
+                  return a->name < b->name;
+              });
+
+    nlohmann::ordered_json properties = nlohmann::ordered_json::object();
+    for (const auto* prop : sorted_props) {
+        nlohmann::ordered_json p;
+        // Go per-property struct order: type → description (+ items for arrays).
+        p["type"] = prop->type;
+        p["description"] = prop->description;
+        if (prop->type == "array" && !prop->items_type.empty()) {
+            nlohmann::ordered_json items;
+            items["type"] = prop->items_type;
+            p["items"] = std::move(items);
         }
-        properties[prop.name] = std::move(p);
+        properties[prop->name] = std::move(p);
     }
     schema["properties"] = std::move(properties);
 
     if (!def.required.empty()) {
-        schema["required"] = def.required;
+        nlohmann::ordered_json req = nlohmann::ordered_json::array();
+        for (const auto& r : def.required) {
+            req.push_back(r);
+        }
+        schema["required"] = std::move(req);
     }
 
     return schema;
+}
+
+}  // namespace
+
+// Retained for header ABI compatibility (declared in include/lci/mcp/server.h
+// as `static nlohmann::json build_input_schema(...)`). The real ordered builder
+// is the file-local build_input_schema_ordered() above; this wrapper exists so
+// no callers/tests that bind to the public symbol break. Returns plain
+// nlohmann::json (alphabetised on dump) — DO NOT use for tools/list wire
+// output; handle_tools_list calls the ordered builder directly.
+nlohmann::json McpServer::build_input_schema(const ToolDefinition& def) {
+    return nlohmann::json::parse(build_input_schema_ordered(def).dump());
 }
 
 // -- Main run loop ------------------------------------------------------------

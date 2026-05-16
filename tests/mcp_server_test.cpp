@@ -172,9 +172,19 @@ TEST_F(McpStdioTest, ToolsList) {
     auto& tools = tools_resp["result"]["tools"];
     EXPECT_EQ(tools.size(), 14u);
 
-    // Verify first tool is "info"
-    EXPECT_EQ(tools[0]["name"], "info");
+    // Tools emit alphabetically-by-name to match Go jsonschema-go ordering
+    // (FIX-D.2 Option B, MODULE_MAP.md "Decision: tools/list emit-order
+    // parity"). First tool alphabetically across the 14 registered names is
+    // "browse_file".
+    EXPECT_EQ(tools[0]["name"], "browse_file");
     EXPECT_TRUE(tools[0].contains("inputSchema"));
+
+    // Verify alphabetical ordering across the whole array.
+    for (size_t i = 1; i < tools.size(); ++i) {
+        EXPECT_LE(tools[i - 1]["name"].get<std::string>(),
+                  tools[i]["name"].get<std::string>())
+            << "tools/list must be alphabetical-by-name at index " << i;
+    }
 
     // Verify "search" tool exists and has required fields
     bool found_search = false;
@@ -344,14 +354,15 @@ TEST_F(McpStdioTest, All14ToolNamesPresent) {
     ASSERT_EQ(responses.size(), 2u);
     auto& tools = responses[1]["result"]["tools"];
 
+    // Alphabetical-by-name (FIX-D.2 Option B emit order; MODULE_MAP.md
+    // "Decision: tools/list emit-order parity"). The 14 tool names sorted
+    // lexicographically against the C++ registration set.
     std::vector<std::string> expected = {
-        "info",          "search",
-        "get_context",   "semantic_annotations",
-        "side_effects",  "code_insight",
-        "find_files",    "context",
-        "index_stats",   "debug_info",
-        "git_analysis",  "list_symbols",
-        "inspect_symbol", "browse_file",
+        "browse_file",     "code_insight",   "context",
+        "debug_info",      "find_files",     "get_context",
+        "git_analysis",    "index_stats",    "info",
+        "inspect_symbol",  "list_symbols",   "search",
+        "semantic_annotations", "side_effects",
     };
 
     ASSERT_EQ(tools.size(), expected.size());

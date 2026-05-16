@@ -703,9 +703,28 @@ to `.parity.json` and the descriptor enters the suite automatically.
 1. Remove 8 duplicate stub registrations in `src/cli/mcp.cpp` (per
    mcp-stubs-shadow-real-handlers memory) — prerequisite for byte-eq AND
    for correctness of `search`/`find_files`/etc. tools/call output.
+   **LANDED**: FIX-D.1, commit 02594be (iter-9).
 2. Land Option B emitter in `src/mcp/server.cpp::build_input_schema` +
    `handle_tools_list` (~15 LOC); flip tools_list parity descriptor from
    xfail → stable; run 10/10 parity_verify gate.
+   **LANDED (emitter only)**: FIX-D.2 (iter-14, aZYlOsdUzinT).
+   Implementation deviates slightly from initial sketch: emit-order is built
+   in `handle_request`'s `tools/list` branch (not `handle_tools_list`)
+   because the envelope needs ordered_json all the way to `dump()`
+   (`nlohmann::json` alphabetises on dump regardless of how `inputSchema`
+   was constructed — reparse-and-store loses order). `handle_tools_list`
+   retained for header ABI; `build_input_schema` thin-wraps a file-local
+   `build_input_schema_ordered` to preserve the public symbol.
+3. **NEW BLOCKER discovered iter-14**: tool DESCRIPTION TEXT divergence.
+   Post-FIX-D.2 parity_verify on `mcp/tools_list/basic` reports ~20+
+   `stable mismatch` failures on `result.tools[].description` and
+   `result.tools[].inputSchema.properties.*.description`. Example: C++
+   `{"exported", ..., "Filter by export status"}` vs Go
+   `"true=exported only, false=unexported only, omit=all"`. Pure content
+   diff, not ordering. **FIX-D.3 (text-content sync)** required across 14
+   tool registrations in `src/mcp/server.cpp` + `src/mcp/handlers_*.cpp`
+   to match Go-side text byte-for-byte. Descriptor remains `.pending`
+   until this lands. Filed as fix subtask under loop AN8m7hohEdlM.
 
 ### Decision: side_effects summary mode — function-count fallback (2026-05-16, Iter 13, TwJuY55J9KM1 / FIX-D.1.B)
 
