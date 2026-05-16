@@ -1,3 +1,17 @@
 {
-  "claims": {}
+  "claims": {
+    "TwJuY55J9KM1": {
+      "runner_instance_id": "beagle-ab-580276",
+      "runner_email": "andybrummer@standardbeagle.com",
+      "claimed_at": "2026-05-16T07:40:00Z",
+      "agent_id": "beagle-ab-580276",
+      "parent_loop_id": "AN8m7hohEdlM",
+      "purpose": "loop iter-13: FIX-D.1.B side_effects total_count fallback (full wiring is sL9fAGaKTXzc et al)",
+      "source_event": {
+        "loop_id": "AN8m7hohEdlM",
+        "task_id": "TwJuY55J9KM1",
+        "conversation_id": null
+      }
+    }
+  }
 }
