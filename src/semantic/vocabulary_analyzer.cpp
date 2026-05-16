@@ -2,8 +2,9 @@
 
 #include <algorithm>
 #include <cctype>
-#include <regex>
 #include <unordered_set>
+
+#include <re2/re2.h>
 
 namespace lci {
 
@@ -49,19 +50,23 @@ bool is_production_code(const FileSymbol& symbol, const ProjectConfig& config) {
     }
 
     // Language-specific patterns.
+    //
+    // Karpathy: static RE2 instances compile ONCE on first call (function-local
+    // static init is thread-safe under C++11+). PartialMatch is then linear-
+    // time and allocation-free over the path StringPiece.
     if (config.language == "go") {
-        static const std::regex go_test("_test\\.go$|test_.*\\.go$|.*_test\\.go$");
-        if (std::regex_search(path, go_test)) return false;
+        static const RE2 go_test(R"(_test\.go$|test_.*\.go$|.*_test\.go$)");
+        if (RE2::PartialMatch(path, go_test)) return false;
     } else if (config.language == "javascript" || config.language == "typescript") {
-        static const std::regex js_test(
-            "\\.(test|spec)\\.(js|ts|jsx|tsx)$|__tests?__/|test/");
-        if (std::regex_search(path, js_test)) return false;
+        static const RE2 js_test(
+            R"(\.(test|spec)\.(js|ts|jsx|tsx)$|__tests?__/|test/)");
+        if (RE2::PartialMatch(path, js_test)) return false;
     } else if (config.language == "python") {
-        static const std::regex py_test("test_.*\\.py$|.*_test\\.py$|tests?/");
-        if (std::regex_search(path, py_test)) return false;
+        static const RE2 py_test(R"(test_.*\.py$|.*_test\.py$|tests?/)");
+        if (RE2::PartialMatch(path, py_test)) return false;
     } else if (config.language == "java") {
-        static const std::regex java_test(".*Test\\.java$|test/");
-        if (std::regex_search(path, java_test)) return false;
+        static const RE2 java_test(R"(.*Test\.java$|test/)");
+        if (RE2::PartialMatch(path, java_test)) return false;
     } else {
         // Generic: check test markers.
         for (const auto& marker : config.test_markers) {

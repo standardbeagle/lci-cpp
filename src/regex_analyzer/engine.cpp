@@ -3,13 +3,45 @@
 #include <algorithm>
 #include <cctype>
 
+#include <re2/re2.h>
+
 namespace lci {
+
+namespace {
+
+// Build RE2 options matching the engine's prior std::regex defaults:
+// case-insensitive optional, log-silent (failures reported via nullptr).
+//
+// Note on multiline anchors: RE2's `set_one_line(false)` only applies in
+// POSIX syntax mode. In default Perl mode (what we use here, matching the
+// previous std::regex::ECMAScript surface), `^`/`$` are opt-in per-line via
+// the `(?m)` inline flag. We attach `(?m)` in compile() so the engine's
+// public behavior matches the prior std::regex::multiline default.
+RE2::Options make_options(bool case_insensitive) {
+    RE2::Options opts(RE2::Quiet);
+    opts.set_case_sensitive(!case_insensitive);
+    opts.set_log_errors(false);
+    return opts;
+}
+
+// Build a small immutable RE2 used for internal classification/extraction
+// (case-sensitive, no multi-line semantics needed for the lci-cpp callers).
+std::unique_ptr<RE2> make_internal_re2(const char* pat) {
+    RE2::Options opts(RE2::Quiet);
+    opts.set_log_errors(false);
+    return std::make_unique<RE2>(pat, opts);
+}
+
+}  // namespace
 
 // -- RegexClassifier ----------------------------------------------------------
 
 RegexClassifier::RegexClassifier() {
     // Pre-compiled patterns indicating complexity.
     // These detect constructs that prevent trigram optimization.
+    //
+    // Karpathy: compiled ONCE at ctor, stored in a vector of unique_ptrs.
+    // Each is_simple() call merely runs RE2::PartialMatch — no recompile.
     const char* patterns[] = {
         R"(\(\?[=!])",           // lookaheads: (?= or (?!
         R"(\(\?<)",              // lookbehind or named group
@@ -21,17 +53,18 @@ RegexClassifier::RegexClassifier() {
         R"(\(\?R\)|\(\?0\))",    // recursive patterns
         R"(\(\?&\w+\))",         // subroutine calls
     };
+    complex_patterns_.reserve(std::size(patterns));
     for (const auto* p : patterns) {
-        complex_patterns_.emplace_back(p);
+        complex_patterns_.emplace_back(make_internal_re2(p));
     }
 }
 
 bool RegexClassifier::is_simple(std::string_view pattern) const {
     if (pattern.empty()) return false;
 
-    std::string pat(pattern);
+    re2::StringPiece sp(pattern.data(), pattern.size());
     for (const auto& re : complex_patterns_) {
-        if (std::regex_search(pat, re)) return false;
+        if (RE2::PartialMatch(sp, *re)) return false;
     }
 
     return is_structurally_simple(pattern);
@@ -139,8 +172,12 @@ bool RegexClassifier::has_long_alternations(std::string_view pattern) const {
 // -- LiteralExtractor ---------------------------------------------------------
 
 LiteralExtractor::LiteralExtractor()
-    : literal_pattern_(R"([a-zA-Z0-9_]{3,})"),
-      alternation_pattern_(R"(\(([a-zA-Z0-9_]+(?:\|[a-zA-Z0-9_]+)*)\))") {}
+    // RE2::FindAndConsume requires a capturing group per output argument.
+    // literal_pattern_ wraps the run in a capture group so the whole-run text
+    // lands in our std::string output. alternation_pattern_ already has one.
+    : literal_pattern_(make_internal_re2(R"(([a-zA-Z0-9_]{3,}))")),
+      alternation_pattern_(
+          make_internal_re2(R"(\(([a-zA-Z0-9_]+(?:\|[a-zA-Z0-9_]+)*)\))")) {}
 
 std::vector<std::string> LiteralExtractor::extract_literals(
     std::string_view pattern) const {
@@ -180,12 +217,13 @@ std::vector<std::string> LiteralExtractor::extract_from_alternations(
     std::string_view pattern) const {
 
     std::vector<std::string> literals;
-    std::string pat(pattern);
-    std::smatch match;
+    re2::StringPiece input(pattern.data(), pattern.size());
+    std::string content;
 
-    auto it = pat.cbegin();
-    while (std::regex_search(it, pat.cend(), match, alternation_pattern_)) {
-        std::string content = match[1].str();
+    // RE2::FindAndConsume advances `input` past each match, giving us iterate-
+    // all-matches semantics without per-iteration std::string copies of the
+    // input (StringPiece is zero-copy over the caller's buffer).
+    while (RE2::FindAndConsume(&input, *alternation_pattern_, &content)) {
         // Split on '|' and collect alternatives >= 3 chars.
         size_t start = 0;
         for (size_t i = 0; i <= content.size(); ++i) {
@@ -196,7 +234,6 @@ std::vector<std::string> LiteralExtractor::extract_from_alternations(
                 start = i + 1;
             }
         }
-        it = match.suffix().first;
     }
 
     return literals;
@@ -206,16 +243,13 @@ std::vector<std::string> LiteralExtractor::extract_general_literals(
     std::string_view pattern) const {
 
     std::vector<std::string> literals;
-    std::string pat(pattern);
-    std::smatch match;
+    re2::StringPiece input(pattern.data(), pattern.size());
+    std::string match;
 
-    auto it = pat.cbegin();
-    while (std::regex_search(it, pat.cend(), match, literal_pattern_)) {
-        std::string lit = match[0].str();
-        if (lit.size() >= 3) {
-            literals.push_back(std::move(lit));
+    while (RE2::FindAndConsume(&input, *literal_pattern_, &match)) {
+        if (match.size() >= 3) {
+            literals.push_back(std::move(match));
         }
-        it = match.suffix().first;
     }
 
     return literals;
@@ -227,7 +261,7 @@ RegexCache::RegexCache(int max_simple_size, int max_complex_size)
     : max_simple_size_(max_simple_size),
       max_complex_size_(max_complex_size) {}
 
-std::pair<SimpleRegexPattern*, std::regex*> RegexCache::get_regex(
+std::pair<SimpleRegexPattern*, RE2*> RegexCache::get_regex(
     std::string_view pattern, bool case_insensitive) {
 
     std::lock_guard<std::mutex> lock(mu_);
@@ -254,7 +288,7 @@ std::pair<SimpleRegexPattern*, std::regex*> RegexCache::get_regex(
         complex_lru_.remove(key);
         complex_lru_.push_front(key);
         ++stats_.complex_hits;
-        return {nullptr, &it->second};
+        return {nullptr, it->second.get()};
     }
 
     ++stats_.simple_misses;
@@ -280,7 +314,7 @@ void RegexCache::cache_simple(SimpleRegexPattern pattern,
 }
 
 void RegexCache::cache_complex(std::string_view pattern,
-                               std::regex compiled,
+                               std::shared_ptr<RE2> compiled,
                                bool case_insensitive) {
     std::lock_guard<std::mutex> lock(mu_);
 
@@ -379,21 +413,22 @@ void HybridRegexEngine::clear_cache() {
     cache_.clear();
 }
 
-std::unique_ptr<std::regex> HybridRegexEngine::compile(
+std::shared_ptr<RE2> HybridRegexEngine::compile(
     std::string_view pattern, bool case_insensitive) const {
 
-    auto flags = std::regex_constants::ECMAScript |
-                 std::regex_constants::multiline;
-    if (case_insensitive) {
-        flags |= std::regex_constants::icase;
-    }
-
-    try {
-        return std::make_unique<std::regex>(
-            std::string(pattern), flags);
-    } catch (const std::regex_error&) {
+    auto opts = make_options(case_insensitive);
+    // Prefix `(?m)` so `^` and `$` behave per-line, matching the prior
+    // std::regex::multiline default. The prefix is benign for patterns that
+    // don't use those anchors.
+    std::string with_multiline;
+    with_multiline.reserve(pattern.size() + 4);
+    with_multiline.append("(?m)");
+    with_multiline.append(pattern);
+    auto re = std::make_shared<RE2>(with_multiline, opts);
+    if (!re->ok()) {
         return nullptr;
     }
+    return re;
 }
 
 }  // namespace lci

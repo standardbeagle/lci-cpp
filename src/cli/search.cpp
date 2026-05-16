@@ -43,7 +43,7 @@
 #include <iostream>
 #include <map>
 #include <optional>
-#include <regex>
+#include <re2/re2.h>
 #include <set>
 #include <string>
 #include <string_view>
@@ -297,23 +297,34 @@ nlohmann::json apply_path_filters(nlohmann::json results,
                                   const std::string& include_pattern) {
     if (exclude_pattern.empty() && include_pattern.empty()) return results;
 
-    std::optional<std::regex> exclude_re;
-    std::optional<std::regex> include_re;
-    try {
-        if (!exclude_pattern.empty()) {
-            exclude_re.emplace(exclude_pattern, std::regex::ECMAScript);
+    // RE2 instances are compiled ONCE here per call and reused across every
+    // result row in the loop below — no recompile per row. RE2 reports compile
+    // errors via ok()/error() rather than exceptions (matches Go's
+    // regexp.Compile error path which logs+continues with no filter applied).
+    RE2::Options opts(RE2::Quiet);
+    opts.set_log_errors(false);
+
+    std::unique_ptr<RE2> exclude_re;
+    std::unique_ptr<RE2> include_re;
+    if (!exclude_pattern.empty()) {
+        auto re = std::make_unique<RE2>(exclude_pattern, opts);
+        if (re->ok()) {
+            exclude_re = std::move(re);
+        } else {
+            std::cerr << "Warning: invalid --exclude regex '"
+                      << exclude_pattern << "': " << re->error()
+                      << " (filter ignored)\n";
         }
-    } catch (const std::regex_error& e) {
-        std::cerr << "Warning: invalid --exclude regex '" << exclude_pattern
-                  << "': " << e.what() << " (filter ignored)\n";
     }
-    try {
-        if (!include_pattern.empty()) {
-            include_re.emplace(include_pattern, std::regex::ECMAScript);
+    if (!include_pattern.empty()) {
+        auto re = std::make_unique<RE2>(include_pattern, opts);
+        if (re->ok()) {
+            include_re = std::move(re);
+        } else {
+            std::cerr << "Warning: invalid --include regex '"
+                      << include_pattern << "': " << re->error()
+                      << " (filter ignored)\n";
         }
-    } catch (const std::regex_error& e) {
-        std::cerr << "Warning: invalid --include regex '" << include_pattern
-                  << "': " << e.what() << " (filter ignored)\n";
     }
 
     if (!exclude_re && !include_re) return results;
@@ -323,11 +334,11 @@ nlohmann::json apply_path_filters(nlohmann::json results,
         std::string path = r.value("path", "");
         // Include: row must match. Empty path always fails an include filter.
         if (include_re) {
-            if (path.empty() || !std::regex_search(path, *include_re)) continue;
+            if (path.empty() || !RE2::PartialMatch(path, *include_re)) continue;
         }
         // Exclude: row must NOT match. Empty path passes (nothing to exclude).
         if (exclude_re && !path.empty() &&
-            std::regex_search(path, *exclude_re)) {
+            RE2::PartialMatch(path, *exclude_re)) {
             continue;
         }
         out.push_back(std::move(r));
@@ -1123,8 +1134,13 @@ std::string longest_literal_run(const std::string& re) {
 // matching the regex; rows that do match get their `line`, `column`,
 // and `match` updated to point at the first matching line in the block.
 nlohmann::json regex_filter_results(nlohmann::json results,
-                                    const std::regex& re) {
+                                    const RE2& re) {
+    // RE2::Match() reports the matched StringPiece into a submatch array;
+    // submatch[0] is the whole-match piece. We compute column by subtracting
+    // its data() pointer from the line's start — zero copy, no smatch.position()
+    // round-trip.
     nlohmann::json out = nlohmann::json::array();
+    re2::StringPiece submatches[1];
     for (auto& row : results) {
         auto& ctx = row["context"];
         if (!ctx.is_object() || !ctx.contains("lines") ||
@@ -1140,11 +1156,14 @@ nlohmann::json regex_filter_results(nlohmann::json results,
                                    : "";
             // Strip trailing newline so $ anchors work as expected.
             if (!line.empty() && line.back() == '\n') line.pop_back();
-            std::smatch m;
-            if (std::regex_search(line, m, re)) {
+            re2::StringPiece input(line.data(), line.size());
+            if (re.Match(input, 0, line.size(), RE2::UNANCHORED,
+                         submatches, 1)) {
+                auto position = submatches[0].data() - line.data();
                 row["line"] = start_line + idx;
-                row["column"] = static_cast<int>(m.position()) + 1;
-                row["match"] = m.str();
+                row["column"] = static_cast<int>(position) + 1;
+                row["match"] = std::string(submatches[0].data(),
+                                           submatches[0].size());
                 kept = true;
                 break;
             }
@@ -1233,9 +1252,13 @@ int run_search(const GlobalFlags& flags, const std::string& pattern,
 
     // Regex mode: extract the longest literal substring as a trigram seed
     // for server-side candidate narrowing, then locally filter rows with
-    // std::regex. Requires a >=3-char literal so the trigram engine can
-    // index it; pure-meta patterns return an error.
-    std::optional<std::regex> regex_filter;
+    // RE2. Requires a >=3-char literal so the trigram engine can index it;
+    // pure-meta patterns return an error.
+    //
+    // Karpathy: RE2 is linear-time vs std::regex backtracking — order-of-
+    // magnitude faster on the hot path. Compiled ONCE here, reused for every
+    // row in regex_filter_results.
+    std::unique_ptr<RE2> regex_filter;
     if (use_regex) {
         auto seed = longest_literal_run(effective_pattern);
         if (seed.size() < 3) {
@@ -1243,14 +1266,19 @@ int run_search(const GlobalFlags& flags, const std::string& pattern,
                          "substring of at least 3 characters\n";
             return 1;
         }
-        try {
-            auto flags_re = std::regex::ECMAScript;
-            if (case_insensitive) flags_re |= std::regex::icase;
-            regex_filter.emplace(effective_pattern, flags_re);
-        } catch (const std::regex_error& e) {
-            std::cerr << "Error: invalid regex: " << e.what() << "\n";
+        RE2::Options regex_opts(RE2::Quiet);
+        regex_opts.set_case_sensitive(!case_insensitive);
+        regex_opts.set_log_errors(false);
+        // Prefix `(?m)` so `^`/`$` match line boundaries — matches the prior
+        // std::regex::multiline behavior. RE2's set_one_line(false) only works
+        // in POSIX syntax mode; default Perl mode needs the inline flag.
+        std::string with_multiline = "(?m)" + effective_pattern;
+        auto re = std::make_unique<RE2>(with_multiline, regex_opts);
+        if (!re->ok()) {
+            std::cerr << "Error: invalid regex: " << re->error() << "\n";
             return 1;
         }
+        regex_filter = std::move(re);
         effective_pattern = seed;
     }
 

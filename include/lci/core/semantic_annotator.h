@@ -1,6 +1,8 @@
 #pragma once
 
-#include <regex>
+#include <memory>
+
+#include <re2/re2.h>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -86,19 +88,23 @@ class SemanticAnnotator {
     int unique_labels() const;
 
   private:
+    // Annotation patterns: compiled ONCE at construction (RE2 instances are
+    // immutable + thread-safe for matching). Held by unique_ptr because RE2
+    // is non-copyable/non-movable. Karpathy: zero compile cost per annotation
+    // line; matching is linear-time vs std::regex backtracking.
     struct Patterns {
-        std::regex labels;
-        std::regex category;
-        std::regex tags;
-        std::regex deps;
-        std::regex provides;
-        std::regex metrics;
-        std::regex attr;
-        std::regex exclude;
-        std::regex loop_weight;
-        std::regex loop_bounded;
-        std::regex call_frequency;
-        std::regex propagation_weight;
+        std::unique_ptr<RE2> labels;
+        std::unique_ptr<RE2> category;
+        std::unique_ptr<RE2> tags;
+        std::unique_ptr<RE2> deps;
+        std::unique_ptr<RE2> provides;
+        std::unique_ptr<RE2> metrics;
+        std::unique_ptr<RE2> attr;
+        std::unique_ptr<RE2> exclude;
+        std::unique_ptr<RE2> loop_weight;
+        std::unique_ptr<RE2> loop_bounded;
+        std::unique_ptr<RE2> call_frequency;
+        std::unique_ptr<RE2> propagation_weight;
     };
 
     static Patterns make_patterns();

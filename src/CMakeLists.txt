@@ -119,6 +119,7 @@ target_link_libraries(lci_lib PUBLIC
     efsw
     rapidfuzz::rapidfuzz
     ${LCI_LIBSTEMMER_TARGET}
+    re2::re2
 )
 
 # Platform-specific libraries

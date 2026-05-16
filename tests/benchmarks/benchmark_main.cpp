@@ -11,8 +11,11 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <string>
 #include <vector>
+
+#include <re2/re2.h>
 
 namespace fs = std::filesystem;
 
@@ -173,7 +176,9 @@ BENCHMARK(BM_LiteralExtraction);
 
 static void BM_RegexCacheLookup(benchmark::State& state) {
     lci::RegexCache cache(100, 50);
-    std::regex compiled("handler_\\d+", std::regex::multiline);
+    RE2::Options opts(RE2::Quiet);
+    opts.set_one_line(false);
+    auto compiled = std::make_shared<RE2>(R"(handler_\d+)", opts);
     cache.cache_complex("handler_\\d+", std::move(compiled), false);
     for (auto _ : state) {
         auto [simple, complex] = cache.get_regex("handler_\\d+", false);
@@ -181,6 +186,62 @@ static void BM_RegexCacheLookup(benchmark::State& state) {
     }
 }
 BENCHMARK(BM_RegexCacheLookup);
+
+// Head-to-head: std::regex vs RE2 on the search.cpp regex_filter_results
+// scenario — match a moderately complex pattern against 100 short code lines.
+// Karpathy: this is the hot loop that runs once per result row, so a single-
+// digit-microsecond improvement compounds across thousands of search hits.
+static const std::vector<std::string>& bench_lines() {
+    static const std::vector<std::string> lines = []() {
+        std::vector<std::string> v;
+        v.reserve(100);
+        for (int i = 0; i < 100; ++i) {
+            v.push_back("    handler_" + std::to_string(i) +
+                        "_process(req, &resp);");
+        }
+        // Force a non-match line every 5th element so both engines walk
+        // beyond a trivial early-match.
+        for (int i = 0; i < 100; i += 5) {
+            v[static_cast<size_t>(i)] =
+                "    // commented out — no handler here";
+        }
+        return v;
+    }();
+    return lines;
+}
+
+#include <regex>  // benchmark-only — measures the OLD path we replaced
+static void BM_StdRegexFilterRows(benchmark::State& state) {
+    const auto& lines = bench_lines();
+    const std::regex re(R"(handler_\d+_process)",
+                        std::regex::ECMAScript | std::regex::multiline);
+    for (auto _ : state) {
+        int hits = 0;
+        std::smatch m;
+        for (const auto& line : lines) {
+            if (std::regex_search(line, m, re)) ++hits;
+        }
+        benchmark::DoNotOptimize(hits);
+    }
+}
+BENCHMARK(BM_StdRegexFilterRows);
+
+static void BM_Re2FilterRows(benchmark::State& state) {
+    const auto& lines = bench_lines();
+    RE2::Options opts(RE2::Quiet);
+    opts.set_log_errors(false);
+    // Match the search.cpp wrapper's (?m) prefix so we benchmark the same
+    // pattern shape the engine actually compiles.
+    const RE2 re(R"((?m)handler_\d+_process)", opts);
+    for (auto _ : state) {
+        int hits = 0;
+        for (const auto& line : lines) {
+            if (RE2::PartialMatch(line, re)) ++hits;
+        }
+        benchmark::DoNotOptimize(hits);
+    }
+}
+BENCHMARK(BM_Re2FilterRows);
 
 // =============================================================================
 // Parser benchmarks

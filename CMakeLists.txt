@@ -215,6 +215,21 @@ else()
     set(LCI_LIBSTEMMER_TARGET libstemmer_lci)
 endif()
 
+# re2 — Google's RE2 regex engine. License: BSD-3-Clause. Replaces std::regex
+# in lci-cpp hot paths (regex_analyzer/engine, search.cpp regex_filter,
+# semantic_annotator, vocabulary_analyzer, git/pattern_detector).
+#
+# Karpathy rule: std::regex is order-of-magnitude slower than RE2 on the search
+# hot path. RE2 guarantees linear-time matching, has stable memory profile,
+# and is reusable across threads when compiled once (immutable after ctor).
+#
+# Build mode: prefer vcpkg/system re2; fall back to FetchContent from the
+# upstream Google repo at a pinned tag.
+find_package(re2 CONFIG QUIET)
+if(NOT re2_FOUND)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/AddRe2.cmake)
+endif()
+
 # nlohmann-json-schema-validator — JSON Schema draft-7/2019-09 validator built
 # on nlohmann::json. License: MIT. Slated to replace hand-rolled MCP request
 # validation (FIX-B). Dep wiring lives here; handler swap is a separate task.

@@ -1,5 +1,9 @@
 #include <gtest/gtest.h>
 
+#include <memory>
+
+#include <re2/re2.h>
+
 #include <lci/regex_analyzer/engine.h>
 #include <lci/search/requirements_analyzer.h>
 #include <lci/search/semantic_filter.h>
@@ -153,7 +157,7 @@ TEST(RegexCache, SimpleCacheHit) {
     SimpleRegexPattern pattern;
     pattern.pattern = "foo";
     pattern.literals = {"foo"};
-    pattern.compiled = std::regex("foo");
+    pattern.compiled = std::make_shared<RE2>("foo");
     cache.cache_simple(std::move(pattern), false);
 
     auto [simple, complex] = cache.get_regex("foo", false);
@@ -164,7 +168,8 @@ TEST(RegexCache, SimpleCacheHit) {
 
 TEST(RegexCache, ComplexCacheHit) {
     RegexCache cache(10, 10);
-    cache.cache_complex("foo.*bar", std::regex("foo.*bar"), false);
+    cache.cache_complex("foo.*bar",
+                        std::make_shared<RE2>("foo.*bar"), false);
 
     auto [simple, complex] = cache.get_regex("foo.*bar", false);
     EXPECT_EQ(simple, nullptr);
@@ -176,7 +181,7 @@ TEST(RegexCache, CaseInsensitiveSeparateEntry) {
 
     SimpleRegexPattern p;
     p.pattern = "foo";
-    p.compiled = std::regex("foo");
+    p.compiled = std::make_shared<RE2>("foo");
     cache.cache_simple(std::move(p), false);
 
     auto [simple_ci, complex_ci] = cache.get_regex("foo", true);
@@ -190,7 +195,7 @@ TEST(RegexCache, EvictsWhenFull) {
     for (int i = 0; i < 5; ++i) {
         SimpleRegexPattern p;
         p.pattern = "pat" + std::to_string(i);
-        p.compiled = std::regex(p.pattern);
+        p.compiled = std::make_shared<RE2>(p.pattern);
         cache.cache_simple(std::move(p), false);
     }
 
@@ -203,9 +208,9 @@ TEST(RegexCache, ClearResetsEverything) {
 
     SimpleRegexPattern p;
     p.pattern = "foo";
-    p.compiled = std::regex("foo");
+    p.compiled = std::make_shared<RE2>("foo");
     cache.cache_simple(std::move(p), false);
-    cache.cache_complex("bar", std::regex("bar"), false);
+    cache.cache_complex("bar", std::make_shared<RE2>("bar"), false);
 
     cache.clear();
 
@@ -225,7 +230,7 @@ TEST(RegexCache, StatsTracking) {
 
     SimpleRegexPattern p;
     p.pattern = "hit";
-    p.compiled = std::regex("hit");
+    p.compiled = std::make_shared<RE2>("hit");
     cache.cache_simple(std::move(p), false);
     cache.get_regex("hit", false);
 
@@ -268,7 +273,7 @@ TEST(HybridRegexEngine, CompilesCaseInsensitive) {
     EXPECT_NE(re, nullptr);
 
     std::string text = "HELLO world";
-    EXPECT_TRUE(std::regex_search(text, *re));
+    EXPECT_TRUE(RE2::PartialMatch(text, *re));
 }
 
 TEST(HybridRegexEngine, CompileFailsOnInvalidPattern) {

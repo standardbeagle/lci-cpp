@@ -3,7 +3,10 @@
 
 #include <algorithm>
 #include <charconv>
+#include <memory>
 #include <sstream>
+
+#include <re2/re2.h>
 
 namespace lci {
 
@@ -11,21 +14,30 @@ namespace lci {
 // SemanticAnnotator
 // ---------------------------------------------------------------------------
 
+namespace {
+// Helper: build a quiet RE2 (no stderr spam if the pattern is ever bad).
+std::unique_ptr<RE2> mk(const char* pat) {
+    RE2::Options opts(RE2::Quiet);
+    opts.set_log_errors(false);
+    return std::make_unique<RE2>(pat, opts);
+}
+}  // namespace
+
 SemanticAnnotator::Patterns SemanticAnnotator::make_patterns() {
-    return Patterns{
-        std::regex(R"(@lci:labels?\[([^\]]+)\])"),
-        std::regex(R"(@lci:category\[([^\]]+)\])"),
-        std::regex(R"(@lci:tags?\[([^\]]+)\])"),
-        std::regex(R"(@lci:deps?\[([^\]]+)\])"),
-        std::regex(R"(@lci:provides?\[([^\]]+)\])"),
-        std::regex(R"(@lci:metrics?\[([^\]]+)\])"),
-        std::regex(R"(@lci:attr(?:ibutes?)?\[([^\]]+)\])"),
-        std::regex(R"(@lci:exclude\[([^\]]+)\])"),
-        std::regex(R"(@lci:loop-weight\[([0-9.]+)\])"),
-        std::regex(R"(@lci:loop-bounded\[([0-9]+)\])"),
-        std::regex(R"(@lci:call-frequency\[([^\]]+)\])"),
-        std::regex(R"(@lci:propagation-weight\[([0-9.]+)\])"),
-    };
+    Patterns p;
+    p.labels             = mk(R"(@lci:labels?\[([^\]]+)\])");
+    p.category           = mk(R"(@lci:category\[([^\]]+)\])");
+    p.tags               = mk(R"(@lci:tags?\[([^\]]+)\])");
+    p.deps               = mk(R"(@lci:deps?\[([^\]]+)\])");
+    p.provides           = mk(R"(@lci:provides?\[([^\]]+)\])");
+    p.metrics            = mk(R"(@lci:metrics?\[([^\]]+)\])");
+    p.attr               = mk(R"(@lci:attr(?:ibutes?)?\[([^\]]+)\])");
+    p.exclude            = mk(R"(@lci:exclude\[([^\]]+)\])");
+    p.loop_weight        = mk(R"(@lci:loop-weight\[([0-9.]+)\])");
+    p.loop_bounded       = mk(R"(@lci:loop-bounded\[([0-9]+)\])");
+    p.call_frequency     = mk(R"(@lci:call-frequency\[([^\]]+)\])");
+    p.propagation_weight = mk(R"(@lci:propagation-weight\[([0-9.]+)\])");
+    return p;
 }
 
 SemanticAnnotator::SemanticAnnotator() : patterns_(make_patterns()) {}
@@ -184,18 +196,21 @@ SemanticAnnotation* SemanticAnnotator::extract_symbol_annotation(
 
 void SemanticAnnotator::parse_annotation_line(std::string_view line,
                                               SemanticAnnotation& ann) {
-    std::string line_str(line);
-    std::smatch match;
+    // RE2 operates directly on StringPiece — no std::string copy of `line`.
+    // Each capture lands in a stack-local std::string (smallest necessary
+    // owning buffer for the captured tag).
+    re2::StringPiece sp(line.data(), line.size());
+    std::string cap;
 
     // Labels
-    if (std::regex_search(line_str, match, patterns_.labels)) {
-        auto labels = parse_comma_separated(match[1].str());
+    if (RE2::PartialMatch(sp, *patterns_.labels, &cap)) {
+        auto labels = parse_comma_separated(cap);
         ann.labels.insert(ann.labels.end(), labels.begin(), labels.end());
     }
 
     // Category
-    if (std::regex_search(line_str, match, patterns_.category)) {
-        ann.category = match[1].str();
+    if (RE2::PartialMatch(sp, *patterns_.category, &cap)) {
+        ann.category = cap;
         // Trim
         while (!ann.category.empty() && ann.category.front() == ' ')
             ann.category.erase(ann.category.begin());
@@ -204,33 +219,33 @@ void SemanticAnnotator::parse_annotation_line(std::string_view line,
     }
 
     // Tags
-    if (std::regex_search(line_str, match, patterns_.tags)) {
-        auto tags = parse_key_value_pairs(match[1].str());
+    if (RE2::PartialMatch(sp, *patterns_.tags, &cap)) {
+        auto tags = parse_key_value_pairs(cap);
         for (auto& [k, v] : tags) ann.tags[k] = v;
     }
 
     // Provides
-    if (std::regex_search(line_str, match, patterns_.provides)) {
-        auto provides = parse_comma_separated(match[1].str());
+    if (RE2::PartialMatch(sp, *patterns_.provides, &cap)) {
+        auto provides = parse_comma_separated(cap);
         ann.provides.insert(ann.provides.end(), provides.begin(),
                             provides.end());
     }
 
     // Metrics
-    if (std::regex_search(line_str, match, patterns_.metrics)) {
-        auto metrics = parse_key_value_pairs(match[1].str());
+    if (RE2::PartialMatch(sp, *patterns_.metrics, &cap)) {
+        auto metrics = parse_key_value_pairs(cap);
         for (auto& [k, v] : metrics) ann.metrics[k] = v;
     }
 
     // Attributes
-    if (std::regex_search(line_str, match, patterns_.attr)) {
-        auto attrs = parse_key_value_pairs(match[1].str());
+    if (RE2::PartialMatch(sp, *patterns_.attr, &cap)) {
+        auto attrs = parse_key_value_pairs(cap);
         for (auto& [k, v] : attrs) ann.attributes[k] = v;
     }
 
     // Excludes
-    if (std::regex_search(line_str, match, patterns_.exclude)) {
-        auto excludes = parse_comma_separated(match[1].str());
+    if (RE2::PartialMatch(sp, *patterns_.exclude, &cap)) {
+        auto excludes = parse_comma_separated(cap);
         ann.excludes.insert(ann.excludes.end(), excludes.begin(),
                             excludes.end());
     }
@@ -241,31 +256,31 @@ void SemanticAnnotator::parse_annotation_line(std::string_view line,
 
 void SemanticAnnotator::parse_memory_hints(std::string_view line,
                                            SemanticAnnotation& ann) {
-    std::string line_str(line);
-    std::smatch match;
+    re2::StringPiece sp(line.data(), line.size());
+    std::string cap;
 
-    if (std::regex_search(line_str, match, patterns_.loop_weight)) {
+    if (RE2::PartialMatch(sp, *patterns_.loop_weight, &cap)) {
         double weight = 0;
-        auto sv = std::string_view(match[1].str());
-        auto [ptr, ec] = std::from_chars(sv.data(), sv.data() + sv.size(), weight);
+        auto [ptr, ec] = std::from_chars(cap.data(), cap.data() + cap.size(),
+                                         weight);
         if (ec == std::errc{}) {
             ann.loop_weight = weight;
             ann.has_memory_hints = true;
         }
     }
 
-    if (std::regex_search(line_str, match, patterns_.loop_bounded)) {
+    if (RE2::PartialMatch(sp, *patterns_.loop_bounded, &cap)) {
         int bounded = 0;
-        auto sv = std::string_view(match[1].str());
-        auto [ptr, ec] = std::from_chars(sv.data(), sv.data() + sv.size(), bounded);
+        auto [ptr, ec] = std::from_chars(cap.data(), cap.data() + cap.size(),
+                                         bounded);
         if (ec == std::errc{}) {
             ann.loop_bounded = bounded;
             ann.has_memory_hints = true;
         }
     }
 
-    if (std::regex_search(line_str, match, patterns_.call_frequency)) {
-        std::string freq = match[1].str();
+    if (RE2::PartialMatch(sp, *patterns_.call_frequency, &cap)) {
+        std::string freq = cap;
         while (!freq.empty() && freq.front() == ' ') freq.erase(freq.begin());
         while (!freq.empty() && freq.back() == ' ') freq.pop_back();
         if (is_valid_call_frequency(freq)) {
@@ -274,10 +289,10 @@ void SemanticAnnotator::parse_memory_hints(std::string_view line,
         }
     }
 
-    if (std::regex_search(line_str, match, patterns_.propagation_weight)) {
+    if (RE2::PartialMatch(sp, *patterns_.propagation_weight, &cap)) {
         double weight = 0;
-        auto sv = std::string_view(match[1].str());
-        auto [ptr, ec] = std::from_chars(sv.data(), sv.data() + sv.size(), weight);
+        auto [ptr, ec] = std::from_chars(cap.data(), cap.data() + cap.size(),
+                                         weight);
         if (ec == std::errc{}) {
             ann.propagation_weight = std::clamp(weight, 0.0, 1.0);
             ann.has_memory_hints = true;

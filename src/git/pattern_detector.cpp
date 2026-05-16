@@ -3,8 +3,10 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
-#include <regex>
+#include <memory>
 #include <string>
+
+#include <re2/re2.h>
 
 namespace lci {
 namespace git {
@@ -27,10 +29,44 @@ std::string to_lower(std::string_view s) {
     return result;
 }
 
-int count_regex_matches(std::string_view content, const std::regex& re) {
-    auto begin = std::cregex_iterator(content.data(), content.data() + content.size(), re);
-    auto end = std::cregex_iterator();
-    return static_cast<int>(std::distance(begin, end));
+// Karpathy: replaced std::regex with RE2. Static RE2 instances are compiled
+// once per process (function-local statics with C++11 thread-safe init);
+// content scanning uses Match() over a StringPiece view of the caller's
+// buffer — zero copy, linear time.
+
+// Multiline anchors: RE2's `one_line` option only takes effect in POSIX
+// syntax mode; in default Perl syntax mode the only way to opt into
+// multiline `^` / `$` semantics is to prefix the pattern with `(?m)`.
+// We do that inline at each pattern literal below.
+
+RE2::Options quiet_opts() {
+    RE2::Options opts(RE2::Quiet);
+    opts.set_log_errors(false);
+    return opts;
+}
+
+int count_regex_matches(std::string_view content, const RE2& re) {
+    // Use RE2::Match() directly so we work with any pattern shape (captures
+    // present or absent) — FindAndConsume's variadic form is brittle when the
+    // pattern has unbound submatches. Advance the input by computing offsets
+    // from the matched StringPiece.
+    re2::StringPiece input(content.data(), content.size());
+    int count = 0;
+    re2::StringPiece whole;
+    while (re.Match(input, 0, input.size(), RE2::UNANCHORED, &whole, 1)) {
+        ++count;
+        auto end_off = static_cast<size_t>(
+            (whole.data() + whole.size()) - input.data());
+        if (end_off == 0) {
+            // Zero-width match — advance one byte to make progress.
+            if (input.empty()) break;
+            input.remove_prefix(1);
+        } else {
+            input.remove_prefix(end_off);
+        }
+        if (input.empty()) break;
+    }
+    return count;
 }
 
 int count_newlines(std::string_view s) {
@@ -39,28 +75,40 @@ int count_newlines(std::string_view s) {
 
 /// Finds the containing function name and line range for a regex pattern match.
 std::pair<std::string, std::string> find_containing_function(
-    std::string_view content, const std::regex& pattern) {
-    auto begin = std::cregex_iterator(content.data(), content.data() + content.size(), pattern);
-    if (begin == std::cregex_iterator()) return {{}, {}};
-
-    auto first_pos = static_cast<size_t>(begin->position());
+    std::string_view content, const RE2& pattern) {
+    re2::StringPiece input(content.data(), content.size());
+    re2::StringPiece first;
+    // Locate the first match; we need its byte offset within content.
+    if (!pattern.Match(input, 0, content.size(), RE2::UNANCHORED, &first, 1)) {
+        return {{}, {}};
+    }
+    auto first_pos = static_cast<size_t>(first.data() - content.data());
     auto prefix = content.substr(0, first_pos);
 
-    static const std::regex func_re(R"(^func\s+(\w+)\s*\()");
+    static const RE2 func_re(R"((?m)^func\s+(\w+)\s*\()", quiet_opts());
     std::string func_name;
     int start_line = 0;
 
-    auto func_begin = std::cregex_iterator(prefix.data(), prefix.data() + prefix.size(), func_re);
-    auto func_end = std::cregex_iterator();
-
-    std::cmatch last_match;
-    for (auto it = func_begin; it != func_end; ++it) {
-        last_match = *it;
+    // Iterate all func definitions in the prefix; keep the last one.
+    re2::StringPiece prefix_sp(prefix.data(), prefix.size());
+    re2::StringPiece last_whole;
+    std::string last_name;
+    re2::StringPiece submatches[2];
+    while (func_re.Match(prefix_sp, 0, prefix_sp.size(), RE2::UNANCHORED,
+                         submatches, 2)) {
+        last_whole = submatches[0];
+        last_name.assign(submatches[1].data(), submatches[1].size());
+        // Advance past this match. RE2::Match doesn't auto-advance.
+        auto advance = (submatches[0].data() + submatches[0].size()) -
+                       prefix_sp.data();
+        if (advance <= 0) break;  // zero-width safety
+        prefix_sp.remove_prefix(static_cast<size_t>(advance));
     }
 
-    if (!last_match.empty() && last_match.size() >= 2) {
-        func_name = last_match[1].str();
-        start_line = count_newlines(prefix.substr(0, static_cast<size_t>(last_match.position()))) + 1;
+    if (!last_name.empty()) {
+        func_name = last_name;
+        auto match_pos = static_cast<size_t>(last_whole.data() - prefix.data());
+        start_line = count_newlines(prefix.substr(0, match_pos)) + 1;
         int end_line = start_line + 100;
         char buf[64];
         std::snprintf(buf, sizeof(buf), "lines %d-%d", start_line, end_line);
@@ -122,32 +170,45 @@ bool PatternDetector::detect_registration_function(
     std::string_view content, std::string_view file_path,
     AntiPattern& out) const {
 
-    static const std::pair<std::string, std::regex> registration_patterns[] = {
-        {R"(\.AddTool\()", std::regex(R"(\.AddTool\()")},
-        {R"(\.Register\()", std::regex(R"(\.Register\()")},
-        {R"(\.RegisterHandler\()", std::regex(R"(\.RegisterHandler\()")},
-        {R"(\.AddRoute\()", std::regex(R"(\.AddRoute\()")},
-        {R"(\.Handle\()", std::regex(R"(\.Handle\()")},
-        {R"(\.HandleFunc\()", std::regex(R"(\.HandleFunc\()")},
-        {R"(\.Post\()", std::regex(R"(\.Post\()")},
-        {R"(\.Get\()", std::regex(R"(\.Get\()")},
-        {R"(\.Put\()", std::regex(R"(\.Put\()")},
-        {R"(\.Delete\()", std::regex(R"(\.Delete\()")},
-        {R"(router\.)", std::regex(R"(router\.)")},
-        {R"(mux\.)", std::regex(R"(mux\.)")},
-        {R"(app\.Use\()", std::regex(R"(app\.Use\()")},
-        {R"(container\.Bind\()", std::regex(R"(container\.Bind\()")},
-        {R"(container\.Register)", std::regex(R"(container\.Register)")},
-    };
+    // RE2 instances built once on first call via Meyers singleton. unique_ptr
+    // because RE2 is non-copyable/non-movable. The vector itself is static
+    // const — no reseating after init.
+    static const auto& registration_patterns = []() -> const std::vector<std::unique_ptr<RE2>>& {
+        static std::vector<std::unique_ptr<RE2>> v;
+        const char* sources[] = {
+            R"(\.AddTool\()",
+            R"(\.Register\()",
+            R"(\.RegisterHandler\()",
+            R"(\.AddRoute\()",
+            R"(\.Handle\()",
+            R"(\.HandleFunc\()",
+            R"(\.Post\()",
+            R"(\.Get\()",
+            R"(\.Put\()",
+            R"(\.Delete\()",
+            R"(router\.)",
+            R"(mux\.)",
+            R"(app\.Use\()",
+            R"(container\.Bind\()",
+            R"(container\.Register)",
+        };
+        v.reserve(std::size(sources));
+        RE2::Options opts(RE2::Quiet);
+        opts.set_log_errors(false);
+        for (const auto* s : sources) {
+            v.emplace_back(std::make_unique<RE2>(s, opts));
+        }
+        return v;
+    }();
 
     int total_matches = 0;
-    const std::regex* best_re = nullptr;
+    const RE2* best_re = nullptr;
 
-    for (const auto& [_, re] : registration_patterns) {
-        int matches = count_regex_matches(content, re);
+    for (const auto& re : registration_patterns) {
+        int matches = count_regex_matches(content, *re);
         if (matches > total_matches) {
             total_matches = matches;
-            best_re = &re;
+            best_re = re.get();
         }
     }
 
@@ -172,12 +233,13 @@ bool PatternDetector::detect_enum_aggregation(
     std::string_view content, std::string_view file_path,
     AntiPattern& out) const {
 
-    static const std::regex const_block_re(R"(const\s*\()");
-    static const std::regex const_single_re(R"(^const\s+\w+)", std::regex::multiline);
-    static const std::regex iota_re(R"(\biota\b)");
-    static const std::regex enum_member_re(R"(^\s*\w+\s*=\s*(iota|\d+|"[^"]*"))", std::regex::multiline);
-    static const std::regex enum_re(R"(enum\s+\w+\s*\{)");
-    static const std::regex export_const_re(R"(export\s+const\s+\w+)");
+    static const RE2 const_block_re(R"(const\s*\()");
+    static const RE2 const_single_re(R"((?m)^const\s+\w+)", quiet_opts());
+    static const RE2 iota_re(R"(\biota\b)");
+    static const RE2 enum_member_re(
+        R"((?m)^\s*\w+\s*=\s*(iota|\d+|"[^"]*"))", quiet_opts());
+    static const RE2 enum_re(R"(enum\s+\w+\s*\{)");
+    static const RE2 export_const_re(R"(export\s+const\s+\w+)");
 
     int const_blocks = count_regex_matches(content, const_block_re);
     int const_singles = count_regex_matches(content, const_single_re);
@@ -211,9 +273,10 @@ bool PatternDetector::detect_god_object(
     int line_count = count_lines(content);
     if (line_count < god_object_lines_threshold) return false;
 
-    static const std::regex func_re(R"(^func\s+)", std::regex::multiline);
-    static const std::regex method_re(R"(^func\s+\([^)]+\)\s+)", std::regex::multiline);
-    static const std::regex class_re(R"(^(class|struct|interface|type)\s+\w+)", std::regex::multiline);
+    static const RE2 func_re(R"((?m)^func\s+)", quiet_opts());
+    static const RE2 method_re(R"((?m)^func\s+\([^)]+\)\s+)", quiet_opts());
+    static const RE2 class_re(
+        R"((?m)^(class|struct|interface|type)\s+\w+)", quiet_opts());
 
     int func_count = count_regex_matches(content, func_re);
     int method_count = count_regex_matches(content, method_re);
@@ -238,29 +301,41 @@ std::vector<AntiPattern> PatternDetector::detect_switch_factories(
 
     std::vector<AntiPattern> patterns;
 
-    static const std::regex switch_re(R"(switch\s+[^{]*\{)", std::regex::multiline);
-    static const std::regex select_re(R"(select\s*\{)", std::regex::multiline);
+    static const RE2 switch_re(R"(switch\s+[^{]*\{)", quiet_opts());
+    static const RE2 select_re(R"(select\s*\{)", quiet_opts());
 
-    auto process_matches = [&](const std::regex& re, const char* label) {
-        auto begin = std::cregex_iterator(content.data(), content.data() + content.size(), re);
-        auto end = std::cregex_iterator();
-        for (auto it = begin; it != end; ++it) {
-            auto match_end = static_cast<size_t>(it->position() + it->length());
+    auto process_matches = [&](const RE2& re, const char* label) {
+        re2::StringPiece input(content.data(), content.size());
+        re2::StringPiece whole;
+        while (re.Match(input, 0, input.size(), RE2::UNANCHORED, &whole, 1)) {
+            auto abs_start =
+                static_cast<size_t>(whole.data() - content.data());
+            auto match_end = abs_start + whole.size();
             int case_count = count_cases_in_switch(content, match_end);
 
             if (case_count >= switch_cases_threshold) {
-                int line_num = count_newlines(content.substr(0, static_cast<size_t>(it->position()))) + 1;
+                int line_num =
+                    count_newlines(content.substr(0, abs_start)) + 1;
 
                 AntiPattern ap;
                 ap.type = AntiPatternType::SwitchFactory;
-                ap.description = std::string("Large ") + label + " statement with " +
+                ap.description = std::string("Large ") + label +
+                                 " statement with " +
                                  std::to_string(case_count) + " cases";
                 ap.location = "line " + std::to_string(line_num);
-                ap.severity = determine_anti_pattern_severity(case_count, switch_cases_threshold);
-                ap.suggestion = "Consider using a map-based dispatch or strategy pattern";
+                ap.severity = determine_anti_pattern_severity(
+                    case_count, switch_cases_threshold);
+                ap.suggestion =
+                    "Consider using a map-based dispatch or strategy pattern";
                 ap.metrics["case_count"] = case_count;
                 patterns.push_back(std::move(ap));
             }
+
+            // Advance input past this match. RE2::Match doesn't auto-advance.
+            auto advance = match_end -
+                           static_cast<size_t>(input.data() - content.data());
+            if (advance == 0) break;  // zero-width safety
+            input.remove_prefix(advance);
         }
     };
 
@@ -282,10 +357,12 @@ bool PatternDetector::detect_barrel_file(
                      str_ends_with(file_path, "exports.js");
     if (!is_barrel) return false;
 
-    static const std::regex export_re(R"(^export\s+)", std::regex::multiline);
-    static const std::regex reexport_re(R"(^export\s+\*?\s*\{?[^}]*\}?\s*from\s+)", std::regex::multiline);
-    static const std::regex import_re(R"(^import\s+)", std::regex::multiline);
-    static const std::regex py_export_re(R"(^from\s+\.\w+\s+import\s+)", std::regex::multiline);
+    static const RE2 export_re(R"((?m)^export\s+)", quiet_opts());
+    static const RE2 reexport_re(
+        R"((?m)^export\s+\*?\s*\{?[^}]*\}?\s*from\s+)", quiet_opts());
+    static const RE2 import_re(R"((?m)^import\s+)", quiet_opts());
+    static const RE2 py_export_re(
+        R"((?m)^from\s+\.\w+\s+import\s+)", quiet_opts());
 
     int exports = count_regex_matches(content, export_re);
     int reexports = count_regex_matches(content, reexport_re);
@@ -329,8 +406,9 @@ bool PatternDetector::detect_config_aggregation(
                      str_contains(lower_path, "options");
     if (!is_config) return false;
 
-    static const std::regex field_re(R"(^\s+\w+\s+\w+.*`json:)", std::regex::multiline);
-    static const std::regex generic_field_re(R"(^\s+\w+\s+\*?\w+[\[\]]*\s*$)", std::regex::multiline);
+    static const RE2 field_re(R"((?m)^\s+\w+\s+\w+.*`json:)", quiet_opts());
+    static const RE2 generic_field_re(
+        R"((?m)^\s+\w+\s+\*?\w+[\[\]]*\s*$)", quiet_opts());
 
     int fields = count_regex_matches(content, field_re);
     if (fields == 0) {

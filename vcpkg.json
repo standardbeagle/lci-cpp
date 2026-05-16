@@ -12,6 +12,7 @@
         "efsw",
         "rapidfuzz",
         "nlohmann-json-schema-validator",
-        "libstemmer"
+        "libstemmer",
+        "re2"
     ]
 }

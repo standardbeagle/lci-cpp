@@ -2,28 +2,41 @@
 
 #include <cstdint>
 #include <list>
+#include <memory>
 #include <mutex>
-#include <regex>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include <absl/container/flat_hash_map.h>
+#include <re2/re2.h>
 
 namespace lci {
 
 // -- Pattern classification ---------------------------------------------------
 
 /// Classifies regex patterns as simple (trigram-optimizable) or complex.
+///
+/// Karpathy: complex-pattern detection runs on every regex compile request.
+/// RE2 instances are constructed once at ctor and reused across calls — no
+/// per-call allocation, no std::regex backtracking engine.
 class RegexClassifier {
   public:
     RegexClassifier();
+
+    // Non-copyable, non-movable because RE2 instances inside complex_patterns_
+    // are not copyable; the classifier is held by value inside HybridRegexEngine
+    // for its lifetime and never re-seated.
+    RegexClassifier(const RegexClassifier&) = delete;
+    RegexClassifier& operator=(const RegexClassifier&) = delete;
 
     /// Returns true if the pattern is simple enough for trigram optimization.
     bool is_simple(std::string_view pattern) const;
 
   private:
-    std::vector<std::regex> complex_patterns_;
+    // unique_ptr because RE2 itself is non-copyable, non-movable. Vector of
+    // unique_ptrs gives us a stable, reusable set of compiled detectors.
+    std::vector<std::unique_ptr<RE2>> complex_patterns_;
 
     bool is_structurally_simple(std::string_view pattern) const;
     bool is_balanced(std::string_view pattern) const;
@@ -38,12 +51,17 @@ class LiteralExtractor {
   public:
     LiteralExtractor();
 
+    LiteralExtractor(const LiteralExtractor&) = delete;
+    LiteralExtractor& operator=(const LiteralExtractor&) = delete;
+
     /// Extracts literal strings suitable for trigram filtering (>= 3 chars).
     std::vector<std::string> extract_literals(std::string_view pattern) const;
 
   private:
-    std::regex literal_pattern_;
-    std::regex alternation_pattern_;
+    // Held by unique_ptr because RE2 is non-copyable/movable. Reused across
+    // every extract_literals call — no per-call compilation.
+    std::unique_ptr<RE2> literal_pattern_;
+    std::unique_ptr<RE2> alternation_pattern_;
 
     bool has_alphanumeric(std::string_view s) const;
     std::vector<std::string> extract_from_alternations(
@@ -66,10 +84,14 @@ enum class ExecutionPath : uint8_t {
 // -- Cached simple pattern ----------------------------------------------------
 
 /// A parsed and cached simple regex pattern with extracted literals.
+///
+/// `compiled` is shared_ptr<RE2> so cache entries can be inspected via the
+/// pointer returned by RegexCache::get_regex without transferring ownership.
+/// RE2 is thread-safe for matching once compiled.
 struct SimpleRegexPattern {
     std::string pattern;
     std::vector<std::string> literals;
-    std::regex compiled;
+    std::shared_ptr<RE2> compiled;
     std::string cache_key;
     int64_t access_count{};
 };
@@ -90,20 +112,25 @@ struct CacheStats {
 // -- Regex cache --------------------------------------------------------------
 
 /// LRU cache for compiled regex patterns (both simple and complex).
+///
+/// Holds shared_ptr<RE2> for complex entries so callers can keep the compiled
+/// regex alive past a cache eviction. RE2's match methods are const-thread-safe.
 class RegexCache {
   public:
     RegexCache(int max_simple_size, int max_complex_size);
 
     /// Looks up a pattern in cache. Returns pointers (nullptr if miss).
-    std::pair<SimpleRegexPattern*, std::regex*> get_regex(
+    /// The returned SimpleRegexPattern* points into the cache; the RE2 ptr is
+    /// the raw underlying compiled regex (caller must not delete).
+    std::pair<SimpleRegexPattern*, RE2*> get_regex(
         std::string_view pattern, bool case_insensitive);
 
     /// Caches a simple regex pattern.
     void cache_simple(SimpleRegexPattern pattern, bool case_insensitive);
 
-    /// Caches a complex compiled regex.
+    /// Caches a complex compiled regex. Takes ownership of the RE2 instance.
     void cache_complex(std::string_view pattern,
-                       std::regex compiled,
+                       std::shared_ptr<RE2> compiled,
                        bool case_insensitive);
 
     /// Returns cache statistics.
@@ -123,7 +150,7 @@ class RegexCache {
 
   private:
     absl::flat_hash_map<std::string, SimpleRegexPattern> simple_cache_;
-    absl::flat_hash_map<std::string, std::regex> complex_cache_;
+    absl::flat_hash_map<std::string, std::shared_ptr<RE2>> complex_cache_;
     std::list<std::string> simple_lru_;
     std::list<std::string> complex_lru_;
 
@@ -161,8 +188,11 @@ class HybridRegexEngine {
 
     /// Compiles a regex pattern with multiline mode and optional
     /// case-insensitive flag. Returns nullptr on failure.
-    std::unique_ptr<std::regex> compile(std::string_view pattern,
-                                         bool case_insensitive) const;
+    ///
+    /// RE2 multiline semantics: `^` and `$` already match line boundaries with
+    /// RE2::Options::set_one_line(false) (the default for multi-line corpora).
+    std::shared_ptr<RE2> compile(std::string_view pattern,
+                                  bool case_insensitive) const;
 
   private:
     RegexClassifier classifier_;
