@@ -1,3 +1,17 @@
 {
-  "claims": {}
+  "claims": {
+    "nvMSktz7YYIZ": {
+      "runner_instance_id": "beagle-ab-801666",
+      "runner_email": "andybrummer@standardbeagle.com",
+      "claimed_at": "2026-05-16T19:43:37Z",
+      "agent_id": "beagle-ab-801666",
+      "parent_loop_id": "AN8m7hohEdlM",
+      "purpose": "re2 replace std::regex in hot paths (iter 18)",
+      "source_event": {
+        "loop_id": "AN8m7hohEdlM",
+        "task_id": "nvMSktz7YYIZ",
+        "conversation_id": "d5f1f7ab-9d28-4655-bedb-b6338f6fdaf1"
+      }
+    }
+  }
 }
