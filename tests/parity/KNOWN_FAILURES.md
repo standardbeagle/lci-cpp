@@ -80,6 +80,32 @@ missing, the descriptor is in violation of the parity contract.
 4. `cli.status.{text,json}` runtime metrics. Tracked in `VFIWNmWKXNgn`
    to replace fake-Go-shaped zeros with accurate C++ counters once the
    runtime-metric implementation lands.
+5. `mcp.get_context.basic` ignores `result.content[].text` for two
+   contexts[] sub-paths: (b) C++ extracts a tree-sitter function
+   signature where Go leaves it empty (enrichment, same class as
+   `cli/symbols/inspect.signature`); and C++ omits `contexts[].purity`
+   because the C++ MCP runtime wires no side-effect propagator into the
+   get_context handler — Go does. The id-only contract (resolution,
+   `errors[]` for unresolvable ids, `mode=` fail-fast, id/name
+   mutual-exclusion) is locked C++-side by `HandlersFixture.GetContext*`.
+   `mode=` context lookup (Go's `handleGetObjectContextWithMode` /
+   `ContextLookupEngine`) is not ported; C++ returns a fail-fast error
+   rather than a silent stub. Wiring purity tracked below; porting the
+   mode engine and `symbol`+`path` auto-search tracked below.
+6. `mcp.search.basic` ignores `result.content[].text` for two
+   `results[]` sub-paths: (b) C++ enrichment — `handle_search` emits
+   `results[].context_lines` (the matched source line); Go's MCP
+   search omits the field; and (d) ranking — Go and C++ compute their
+   own match scores (Go ~855.5/125.5; C++ ~121.5 from a different
+   ranker) and item orders for the same multiset of matches. Tracked
+   under `A38Q2RR8ZcyL`. The substring-on-symbol-names parity-compat
+   stub in `src/cli/mcp.cpp` (hardcoded `score:855.5`, `column:1`, no
+   regex/flags/output/semantic/ranking) was removed; the real
+   `handle_search` now runs the full trigram-backed `SearchEngine` and
+   attributes each match to its enclosing symbol via
+   `ref_tracker.get_symbol_at_line`. Structural body parity (item
+   count, file set, match strings, symbol attribution) is locked
+   C++-side by `HandlersFixture.Search*` unit tests.
 
 ## Open follow-ups (filed as Dart tasks on Personal/lci)
 
@@ -102,6 +128,14 @@ missing, the descriptor is in violation of the parity contract.
 | `qkbC8BBuW14H` | Rename misleading config.search.enable_fuzzy |
 | `236EnLNu6xMy` | MCP tools/call unknown-tool: spec vs parity |
 | `2OayJlW5e5FJ` | cli/debug/info: align C++ debug output schema |
+| _(to file)_ | MCP get_context: wire side-effect propagator so `contexts[].purity` is populated (currently omitted, diverges from Go) |
+| _(to file)_ | MCP get_context: port `mode=` context lookup (`handleGetObjectContextWithMode` / `ContextLookupEngine`) — C++ currently fails fast |
+| _(to file)_ | MCP get_context: port `symbol`+`path` auto-search (Go's `extractAutoSearchParams` / `autoSearchAndReturnContext`) |
+| `nvMSktz7YYIZ` | lci-cpp: add re2 dep, replace `std::regex` in hot paths |
+| `bm09pW3iU1co` | lci-cpp: add libstemmer (Snowball), replace hand-port Porter2 |
+| `bATJrARRwHAy` | lci-cpp: add nlohmann-json-schema-validator, replace hand-rolled MCP validator |
+| `dVjdFhemWPDA` | lci-cpp: add rapidfuzz-cpp, replace hand-rolled fuzzy matcher |
+| `2P0xeGBuU0CN` | lci-cpp: add efsw, replace raw inotify watcher (cross-platform) |
 | `Fs19gT5u1aVu` | (Done) Default-exclude contract test |
 | `c8DhcMRqeN7v` | (Done) Fix glob: single * must not cross / |
 | `rWZYDAQgQsTt` | (Done) Path-matching audit |

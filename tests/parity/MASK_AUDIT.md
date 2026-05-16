@@ -3,7 +3,7 @@
 **Auto-generated** by `python3 tests/parity/scripts/mask_audit.py`.
 Run after editing any descriptor and check in the result.
 
-Coverage: 83 parity descriptors.
+Coverage: 86 parity descriptors.
 
 Bucket meanings:
 - **(a) Non-determinism / RPC envelope.** Always safe to ignore.
@@ -39,7 +39,7 @@ Bucket meanings:
 | `cli/search/regex-files-only` | 0 | ✓ | 0 | 0 | 0 | 0 | 0 |
 | `cli/search/regex-invert` | 0 | ✓ | 0 | 0 | 0 | 0 | 0 |
 | `cli/search/regex-max-count` | 0 | ✓ | 0 | 0 | 0 | 0 | 0 |
-| `cli/search/regex` | 0 |   | 0 | 0 | 0 | 0 | 0 |
+| `cli/search/regex` | 0 | ✓ | 0 | 0 | 0 | 0 | 0 |
 | `cli/search/word-regexp` | 0 | ✓ | 0 | 0 | 0 | 0 | 0 |
 | `cli/status/json` | 7 | ✓ | 2 | 4 | 0 | 1 | 0 |
 | `cli/status/text` | 0 | ✓ | 0 | 0 | 0 | 0 | 0 |
@@ -81,9 +81,12 @@ Bucket meanings:
 | `mcp/code_insight/mode-structure` | 1 | ✓ | 0 | 0 | 1 | 0 | 0 |
 | `mcp/code_insight/mode-unified` | 0 | ✓ | 0 | 0 | 0 | 0 | 0 |
 | `mcp/context_manifest/basic` | 0 |   | 0 | 0 | 0 | 0 | 0 |
+| `mcp/context_manifest/save-compact-keys` | 1 | ✓ | 0 | 0 | 1 | 0 | 0 |
+| `mcp/context_manifest/save-to_string-body-shape` | 1 | ✓ | 0 | 0 | 1 | 0 | 0 |
+| `mcp/context_manifest/save-verbose-keys-rejected` | 1 | ✓ | 0 | 0 | 1 | 0 | 0 |
 | `mcp/debug_info/basic` | 0 |   | 0 | 0 | 0 | 0 | 0 |
 | `mcp/find_files/basic` | 0 | ✓ | 0 | 0 | 0 | 0 | 0 |
-| `mcp/get_context/basic` | 0 | ✓ | 0 | 0 | 0 | 0 | 0 |
+| `mcp/get_context/basic` | 1 | ✓ | 0 | 0 | 1 | 0 | 0 |
 | `mcp/git_analysis/basic` | 1 | ✓ | 0 | 0 | 1 | 0 | 0 |
 | `mcp/grep/basic` | 0 |   | 0 | 0 | 0 | 0 | 0 |
 | `mcp/index_stats/basic` | 0 | ✓ | 0 | 0 | 0 | 0 | 0 |
@@ -94,7 +97,7 @@ Bucket meanings:
 | `mcp/info/basic` | 0 |   | 0 | 0 | 0 | 0 | 0 |
 | `mcp/inspect_symbol/basic` | 0 |   | 0 | 0 | 0 | 0 | 0 |
 | `mcp/list_symbols/basic` | 0 |   | 0 | 0 | 0 | 0 | 0 |
-| `mcp/search/basic` | 0 |   | 0 | 0 | 0 | 0 | 0 |
+| `mcp/search/basic` | 1 | ✓ | 0 | 0 | 1 | 0 | 0 |
 | `mcp/search_definitions/basic` | 0 | ✓ | 0 | 0 | 0 | 0 | 0 |
 | `mcp/semantic_annotations/basic` | 0 | ✓ | 0 | 0 | 0 | 0 | 0 |
 | `mcp/side_effects/basic` | 0 | ✓ | 0 | 0 | 0 | 0 | 0 |
@@ -103,7 +106,7 @@ Bucket meanings:
 | `probes/export` | 0 |   | 0 | 0 | 0 | 0 | 0 |
 | `probes/graph` | 0 |   | 0 | 0 | 0 | 0 | 0 |
 
-**Totals:** 128 masks across 83 descriptors. a=33, b=21, c=42, d=30, ?=2.
+**Totals:** 133 masks across 86 descriptors. a=33, b=21, c=47, d=30, ?=2.
 
 ## Unclassified fields needing manual review
 

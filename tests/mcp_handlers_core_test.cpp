@@ -1,15 +1,19 @@
 #include <gtest/gtest.h>
 
 #include <lci/config.h>
+#include <lci/core/reference_tracker.h>
+#include <lci/idcodec.h>
 #include <lci/indexing/master_index.h>
 #include <lci/mcp/handlers_core.h>
 #include <lci/mcp/server.h>
 #include <lci/search/search_engine.h>
+#include <lci/symbol.h>
 
 #include <nlohmann/json.hpp>
 
 #include <filesystem>
 #include <fstream>
+#include <set>
 #include <string>
 
 namespace lci {
@@ -207,75 +211,224 @@ TEST_F(HandlersFixture, SearchWithFlags) {
     EXPECT_FALSE(result.is_error);
 }
 
+// Go-shape parity: every result item carries result_id, object_id, score,
+// match, file, line, column, symbol_type, symbol_name, is_exported.
+// Items are enriched with their enclosing symbol so MCP callers can hand
+// the object_id straight to get_context.
+TEST_F(HandlersFixture, SearchEmitsGoShapeFields) {
+    nlohmann::json params;
+    params["pattern"] = "main";
+    auto result = handle_search(params, *indexer_, search_engine_.get());
+    ASSERT_FALSE(result.is_error);
+    auto json = nlohmann::json::parse(result.text);
+    ASSERT_TRUE(json["results"].is_array());
+    ASSERT_FALSE(json["results"].empty());
+    const auto& item = json["results"][0];
+    EXPECT_TRUE(item.contains("result_id"));
+    EXPECT_TRUE(item.contains("object_id"));
+    EXPECT_TRUE(item.contains("file"));
+    EXPECT_TRUE(item.contains("line"));
+    EXPECT_TRUE(item.contains("column"));
+    EXPECT_TRUE(item.contains("match"));
+    EXPECT_TRUE(item.contains("score"));
+    EXPECT_TRUE(item.contains("symbol_type"));
+    EXPECT_TRUE(item.contains("symbol_name"));
+    EXPECT_TRUE(item.contains("is_exported"));
+}
+
+// Symbol enrichment must resolve the enclosing symbol so the object_id is
+// non-empty and matches the symbol that owns the matched line.
+TEST_F(HandlersFixture, SearchEnclosingSymbolResolved) {
+    nlohmann::json params;
+    params["pattern"] = "main";
+    auto result = handle_search(params, *indexer_, search_engine_.get());
+    ASSERT_FALSE(result.is_error);
+    auto json = nlohmann::json::parse(result.text);
+    ASSERT_FALSE(json["results"].empty());
+    bool found_enclosed = false;
+    for (const auto& item : json["results"]) {
+        if (!item["object_id"].get<std::string>().empty() &&
+            item["symbol_name"].get<std::string>() == "main") {
+            EXPECT_EQ(item["symbol_type"].get<std::string>(), "function");
+            found_enclosed = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(found_enclosed) << "no match resolved to enclosing 'main'";
+}
+
+// result_id values must be unique across the result set so callers can use
+// them as stable handles.
+TEST_F(HandlersFixture, SearchResultIdsUnique) {
+    nlohmann::json params;
+    params["pattern"] = "main";
+    auto result = handle_search(params, *indexer_, search_engine_.get());
+    ASSERT_FALSE(result.is_error);
+    auto json = nlohmann::json::parse(result.text);
+    std::set<std::string> ids;
+    for (const auto& item : json["results"]) {
+        auto rid = item["result_id"].get<std::string>();
+        EXPECT_TRUE(ids.insert(rid).second)
+            << "duplicate result_id: " << rid;
+    }
+}
+
+// score is numeric (Go emits float). Real trigram-backed search produces
+// non-uniform scores across matches in different files.
+TEST_F(HandlersFixture, SearchScoreIsNumeric) {
+    nlohmann::json params;
+    params["pattern"] = "main";
+    auto result = handle_search(params, *indexer_, search_engine_.get());
+    ASSERT_FALSE(result.is_error);
+    auto json = nlohmann::json::parse(result.text);
+    ASSERT_FALSE(json["results"].empty());
+    EXPECT_TRUE(json["results"][0]["score"].is_number());
+}
+
 // =============================================================================
 // get_context handler tests
 // =============================================================================
 
-TEST_F(HandlersFixture, GetContextRequiresNameOrFileId) {
+// Returns the encoded object ID of the first symbol named `name`, or "" if
+// the corpus did not yield one (parser-dependent — tests guard on empty).
+static std::string first_object_id(MasterIndex& idx, const std::string& name) {
+    auto symbols = idx.ref_tracker().find_symbols_by_name(name);
+    if (symbols.empty()) return "";
+    return encode_symbol_id(symbols.front()->id);
+}
+
+// No id, no name, no mode -> fail-fast error (Go validateGetContextParams).
+TEST_F(HandlersFixture, GetContextNoParamsErrors) {
     nlohmann::json params = nlohmann::json::object();
     auto result = handle_get_context(params, *indexer_);
     EXPECT_TRUE(result.is_error);
     auto json = nlohmann::json::parse(result.text);
-    EXPECT_TRUE(json["error"].get<std::string>().find("name") !=
-                std::string::npos);
+    EXPECT_NE(json["error"].get<std::string>().find("id"),
+              std::string::npos);
 }
 
-TEST_F(HandlersFixture, GetContextByNameNotFound) {
+// id + name together -> conflict error (Go validateGetContextParams).
+TEST_F(HandlersFixture, GetContextIdAndNameConflictErrors) {
     nlohmann::json params;
-    params["name"] = "nonExistentSymbol_xyz_123";
+    params["id"] = "VE";
+    params["name"] = "main";
     auto result = handle_get_context(params, *indexer_);
     EXPECT_TRUE(result.is_error);
     auto json = nlohmann::json::parse(result.text);
-    EXPECT_TRUE(json["error"].get<std::string>().find("no symbol") !=
-                std::string::npos);
+    EXPECT_NE(json["error"].get<std::string>().find("conflict"),
+              std::string::npos);
 }
 
-TEST_F(HandlersFixture, GetContextByFileIdNotFound) {
+// name-only no-mode path resolves nothing and yields an empty result set,
+// matching Go's id-only no-mode contract (golden: {contexts:[],count:0}).
+TEST_F(HandlersFixture, GetContextNameOnlyReturnsEmpty) {
     nlohmann::json params;
-    params["file_id"] = 9999;
-    params["line"] = 1;
+    params["name"] = "main";
+    auto result = handle_get_context(params, *indexer_);
+    EXPECT_FALSE(result.is_error);
+    auto json = nlohmann::json::parse(result.text);
+    EXPECT_EQ(json["count"].get<int>(), 0);
+    EXPECT_TRUE(json["contexts"].empty());
+}
+
+// mode-based context lookup is unsupported in the C++ port -> fail-fast
+// error rather than a silent empty stub.
+TEST_F(HandlersFixture, GetContextModeErrors) {
+    nlohmann::json params;
+    params["id"] = "VE";
+    params["mode"] = "full";
     auto result = handle_get_context(params, *indexer_);
     EXPECT_TRUE(result.is_error);
+    auto json = nlohmann::json::parse(result.text);
+    EXPECT_NE(json["error"].get<std::string>().find("mode"),
+              std::string::npos);
 }
 
-TEST_F(HandlersFixture, GetContextByNameFindsSymbol) {
+// Valid object ID resolves to a full compact context payload.
+TEST_F(HandlersFixture, GetContextByIdFindsSymbol) {
+    auto oid = first_object_id(*indexer_, "main");
+    if (oid.empty()) GTEST_SKIP() << "corpus produced no 'main' symbol";
     nlohmann::json params;
-    params["name"] = "main";
+    params["id"] = oid;
     auto result = handle_get_context(params, *indexer_);
-    // May or may not find depending on parser; verify structure
+    EXPECT_FALSE(result.is_error);
     auto json = nlohmann::json::parse(result.text);
-    if (!result.is_error) {
-        EXPECT_TRUE(json.contains("contexts"));
-        EXPECT_GT(json["count"].get<int>(), 0);
-        auto& ctx = json["contexts"][0];
-        EXPECT_TRUE(ctx.contains("symbol_name"));
-        EXPECT_TRUE(ctx.contains("symbol_type"));
-        EXPECT_TRUE(ctx.contains("file_path"));
+    EXPECT_EQ(json["count"].get<int>(), 1);
+    auto& ctx = json["contexts"][0];
+    EXPECT_TRUE(ctx.contains("file_path"));
+    EXPECT_TRUE(ctx.contains("line"));
+    EXPECT_EQ(ctx["object_id"].get<std::string>(), oid);
+    EXPECT_TRUE(ctx.contains("symbol_type"));
+    EXPECT_TRUE(ctx.contains("symbol_name"));
+    EXPECT_TRUE(ctx.contains("is_exported"));
+    EXPECT_TRUE(ctx.contains("definition"));
+}
+
+// `signature` is emitted when the symbol carries one (Go ObjectContext
+// has `signature,omitempty`).
+TEST_F(HandlersFixture, GetContextByIdEmitsSignatureWhenPresent) {
+    auto symbols = indexer_->ref_tracker().find_symbols_by_name("main");
+    if (symbols.empty()) GTEST_SKIP() << "no 'main' symbol";
+    const auto* sym = symbols.front();
+    nlohmann::json params;
+    params["id"] = encode_symbol_id(sym->id);
+    auto result = handle_get_context(params, *indexer_);
+    ASSERT_FALSE(result.is_error);
+    auto json = nlohmann::json::parse(result.text);
+    auto& ctx = json["contexts"][0];
+    if (!sym->signature.empty()) {
+        ASSERT_TRUE(ctx.contains("signature"));
+        EXPECT_EQ(ctx["signature"].get<std::string>(),
+                  std::string(sym->signature));
+    } else {
+        EXPECT_FALSE(ctx.contains("signature"));
     }
 }
 
-TEST_F(HandlersFixture, GetContextIncludesCallHierarchy) {
+// `purity` is omitted entirely — Go emits it only when a side-effect
+// propagator is wired (getPurityInfo returns nil otherwise, and the field
+// is `omitempty`). The C++ MCP runtime exposes no side-effect analysis to
+// this handler, so the field is absent. Emitting a zeroed stub here would
+// diverge from Go and violate the no-silent-stub rule. Wiring real purity
+// analysis is tracked as a follow-up.
+TEST_F(HandlersFixture, GetContextPurityOmittedWhenUnavailable) {
+    auto oid = first_object_id(*indexer_, "main");
+    if (oid.empty()) GTEST_SKIP() << "corpus produced no 'main' symbol";
     nlohmann::json params;
-    params["name"] = "main";
-    params["include_call_hierarchy"] = true;
-    params["max_depth"] = 2;
+    params["id"] = oid;
     auto result = handle_get_context(params, *indexer_);
+    ASSERT_FALSE(result.is_error);
     auto json = nlohmann::json::parse(result.text);
-    if (!result.is_error && json["count"].get<int>() > 0) {
-        auto& ctx = json["contexts"][0];
-        EXPECT_TRUE(ctx.contains("callers"));
-        EXPECT_TRUE(ctx.contains("callees"));
-    }
+    EXPECT_FALSE(json["contexts"][0].contains("purity"));
 }
 
-TEST_F(HandlersFixture, GetContextClampsMaxDepth) {
+// Unresolvable object ID is reported in `errors[]`, never silently dropped.
+TEST_F(HandlersFixture, GetContextBadIdReportsError) {
     nlohmann::json params;
-    params["name"] = "main";
-    params["max_depth"] = 999;
+    params["id"] = "zzzzzz";  // well-formed base63, no such symbol
     auto result = handle_get_context(params, *indexer_);
-    // Should not crash; max_depth clamped to 10
+    EXPECT_FALSE(result.is_error);
     auto json = nlohmann::json::parse(result.text);
-    EXPECT_TRUE(json.is_object());
+    EXPECT_EQ(json["count"].get<int>(), 0);
+    ASSERT_TRUE(json.contains("errors"));
+    ASSERT_FALSE(json["errors"].empty());
+    EXPECT_EQ(json["errors"][0]["object_id"].get<std::string>(), "zzzzzz");
+    EXPECT_TRUE(json["errors"][0].contains("error"));
+}
+
+// Comma-separated ids resolve independently; good ids land in `contexts`,
+// bad ids in `errors` (Go iterates objectIDs split on ',').
+TEST_F(HandlersFixture, GetContextMultipleIdsMixed) {
+    auto oid = first_object_id(*indexer_, "main");
+    if (oid.empty()) GTEST_SKIP() << "corpus produced no 'main' symbol";
+    nlohmann::json params;
+    params["id"] = oid + ",zzzzzz";
+    auto result = handle_get_context(params, *indexer_);
+    EXPECT_FALSE(result.is_error);
+    auto json = nlohmann::json::parse(result.text);
+    EXPECT_EQ(json["count"].get<int>(), 1);
+    ASSERT_TRUE(json.contains("errors"));
+    EXPECT_EQ(json["errors"].size(), 1u);
 }
 
 // =============================================================================

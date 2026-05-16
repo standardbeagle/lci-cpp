@@ -12,12 +12,12 @@
   },
   "capture": ["stdout", "exit"],
   "parse": "json",
-  "_rationale": "Iter-19: divergence resolved. C++ no-mode get_context is now id-only, matching Go. The latent name= and file_id+line resolution branches in handle_get_context (src/mcp/handlers_core.cpp, predating iter-9 / initial commit 9ce02a7) have been removed — Go's handleGetContext (internal/mcp/handlers.go) builds objectIDs solely from args.ID and never resolves args.Name in the default path. For invocation get_context name=Add on the multi-lang corpus both binaries now return {\"contexts\":[],\"count\":0}. result.content[].text moved back from the ignore tier to stable: the C++/Go divergence on the name= lookup path is closed (iter-18 had moved it to ignore as interim mitigation). Golden {\"contexts\":[],\"count\":0} was always correct and is untouched. find_symbols_by_name / get_symbol_at_line remain shared infra used by other handlers — only the no-mode get_context call sites were removed.",
+  "_rationale": "C++ no-mode get_context is id-only, matching Go's handleGetObjectContext (internal/mcp/handlers.go), which builds its objectIDs list solely from args.ID and never resolves args.Name in the default no-mode path. A name-only call passes validateGetContextParams (id OR name is required, not both) but resolves nothing, so both binaries return {\"contexts\":[],\"count\":0} for get_context name=Add on the multi-lang corpus. The golden {\"contexts\":[],\"count\":0} is unchanged. This descriptor locks the name-only empty-result contract; the id= resolution path, errors[] reporting for unresolvable ids, and mode= fail-fast are covered by tests/parity/descriptors/mcp/get_context/basic.parity.json plus the HandlersFixture.GetContext* unit tests.",
   "tiers": {
     "stable": ["result.content[].type", "result.content[].text"],
-    "_rationale_stable": "Full envelope + body parity. result.content[].text restored to stable iter-19 — C++ no-mode get_context aligned with Go's id-only contract, both binaries emit {\"contexts\":[],\"count\":0} for name=Add.",
+    "_rationale_stable": "Full envelope + body parity. Both binaries emit {\"contexts\":[],\"count\":0} for the name-only no-mode invocation, so result.content[].text is byte-stable.",
     "ignore": ["id", "jsonrpc", "result.meta.elapsed_ms", "result.meta.server_pid"],
-    "_rationale_ignore": "Standard JSON-RPC envelope noise plus timing residue. result.content[].text is now stable — divergence resolved iter-19."
+    "_rationale_ignore": "Standard JSON-RPC envelope noise plus timing residue. result.content[].text is stable for this name-only invocation."
   },
   "tolerances": {"score_abs": 0.05, "timed_max_ms": 60000},
   "expect_exit": 0

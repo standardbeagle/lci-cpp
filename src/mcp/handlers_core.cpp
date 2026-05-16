@@ -1,8 +1,10 @@
 #include <lci/mcp/handlers_core.h>
 
 #include <algorithm>
+#include <cctype>
 #include <map>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <lci/core/reference_tracker.h>
@@ -234,7 +236,11 @@ ToolResult handle_search(const nlohmann::json& params,
     SearchOptions options;
     options.max_results = max_results;
     options.max_context_lines = context_lines;
-    options.case_insensitive = comma_list_contains(flags, "ci");
+    // Go's MCP search defaults to case-insensitive (verified on multi-lang
+    // corpus: pattern "add" matches "Add" in a.go without an explicit flag).
+    // C++ default mirrors that. Callers can still pass flags=cs to force
+    // case-sensitive matching.
+    options.case_insensitive = !comma_list_contains(flags, "cs");
     options.word_boundary = comma_list_contains(flags, "wb");
     options.exclude_tests = comma_list_contains(flags, "nt");
     options.exclude_comments = comma_list_contains(flags, "nc");
@@ -276,15 +282,45 @@ ToolResult handle_search(const nlohmann::json& params,
         return make_json_response(response);
     }
 
-    // Build standard results
+    // Build standard results — Go-shape, every item is symbol-enriched.
+    // Go's handleSearch (cmd/lci/mcp/handlers.go) attributes each text match
+    // to its enclosing symbol so MCP callers can hand the object_id straight
+    // to get_context. We mirror the shape: result_id, object_id, file, line,
+    // column, match, score (float), symbol_type, symbol_name, is_exported.
+    auto& ref_tracker = indexer.ref_tracker();
     nlohmann::json result_array = nlohmann::json::array();
+    int ordinal = 0;
     for (const auto& r : results) {
+        ++ordinal;
         nlohmann::json item;
+        item["result_id"] = "result_" + std::to_string(ordinal) + "_" +
+                            std::to_string(r.line);
         item["file"] = r.path;
         item["line"] = r.line;
         item["column"] = r.column;
         item["match"] = r.match_text;
-        item["score"] = static_cast<int>(r.score);
+        item["score"] = r.score;  // float; Go emits float, not int
+
+        // Enclosing-symbol enrichment. ref_tracker maps (file_id, line) to
+        // the EnhancedSymbol that covers the line, O(1) hash lookup per
+        // call (KARPATHY rule 2 — no allocation in the inner loop).
+        const auto* sym =
+            ref_tracker.get_symbol_at_line(r.file_id, r.line);
+        if (sym != nullptr) {
+            item["object_id"] = encode_symbol_id(sym->id);
+            item["symbol_name"] = std::string(sym->symbol.name);
+            item["symbol_type"] =
+                std::string(to_string(sym->symbol.type));
+            item["is_exported"] = sym->is_exported;
+        } else {
+            // Match falls outside any indexed symbol (package decl, blank
+            // line, comment between symbols). Emit empty enrichment fields
+            // rather than omitting them so the response shape is stable.
+            item["object_id"] = "";
+            item["symbol_name"] = "";
+            item["symbol_type"] = "";
+            item["is_exported"] = false;
+        }
 
         if (!r.context.lines.empty()) {
             item["context_lines"] = r.context.lines;
@@ -304,74 +340,116 @@ ToolResult handle_search(const nlohmann::json& params,
 
 // -- handle_get_context -------------------------------------------------------
 
+// Resolves a single comma-separated object ID into `contexts`, or records a
+// descriptive entry in `errors` — Go's buildObjectContextCompactWithError
+// never silently drops an unresolvable id (internal/mcp/handlers.go).
+void resolve_object_id(std::string_view id, MasterIndex& indexer,
+                       nlohmann::json& contexts, nlohmann::json& errors) {
+    auto decoded = decode_symbol_id(id);
+    if (!decoded.has_value()) {
+        errors.push_back({{"object_id", std::string(id)},
+                          {"error", "invalid object ID: " + std::string(id)}});
+        return;
+    }
+    const auto* sym = indexer.ref_tracker().get_enhanced_symbol(*decoded);
+    if (sym == nullptr) {
+        errors.push_back(
+            {{"object_id", std::string(id)},
+             {"error", "symbol not found: object_id=" + std::string(id) +
+                           " (symbol may have been deleted or index is stale)"}});
+        return;
+    }
+
+    // Go ObjectContext (internal/mcp/server.go): definition falls back to the
+    // symbol name when no signature is available; signature is `omitempty`.
+    std::string definition = sym->signature.empty()
+                                 ? std::string(sym->symbol.name)
+                                 : std::string(sym->signature);
+    nlohmann::json ctx;
+    ctx["file_path"] = indexer.get_file_path(sym->symbol.file_id);
+    ctx["line"] = sym->symbol.line;
+    ctx["object_id"] = std::string(id);
+    ctx["symbol_type"] = std::string(to_string(sym->symbol.type));
+    ctx["symbol_name"] = std::string(sym->symbol.name);
+    ctx["is_exported"] = sym->is_exported;
+    if (!sym->signature.empty()) {
+        ctx["signature"] = std::string(sym->signature);
+    }
+    ctx["definition"] = definition;
+    ctx["context"] = nlohmann::json::array({definition});
+    // `purity` intentionally omitted: Go's getPurityInfo returns nil (and the
+    // field is `omitempty`) whenever no side-effect propagator is wired. The
+    // C++ MCP runtime exposes no side-effect analysis to this handler, so a
+    // zeroed stub would both diverge from Go and violate the no-silent-stub
+    // rule. Real purity wiring is a tracked follow-up.
+    contexts.push_back(std::move(ctx));
+}
+
 ToolResult handle_get_context(const nlohmann::json& params,
                               MasterIndex& indexer) {
     auto object_id = params.value("id", "");
+    auto name = params.value("name", "");
+    auto mode = params.value("mode", "");
 
-    auto& ref_tracker = indexer.ref_tracker();
-
-    // -- id (object_id) lookup -- Go-shape payload --------------------------
-    // Go's get_context accepts an object_id from a prior search/list call and
-    // resolves it through symbol_store's deterministic indexing-order IDs.
-    // Output shape (matches Go cmd/lci/mcp/handlers.go::handleGetContext):
-    //   {contexts:[{file_path, line, object_id, symbol_type, symbol_name,
-    //              is_exported, definition, context, purity:{...}}], count}
-    // KARPATHY-RULE-2: O(1) hash lookup, no per-call allocation in the
-    // resolution path itself (string conversions are unavoidable for JSON).
-    // Scope-narrowed iter-9: purity block emitted with conservative defaults
-    // (is_pure:false, purity_score:0, confidence:"low") because the live
-    // MCP runtime never populates SideEffectAnalyzer.results() — wiring
-    // analyzer into the indexing pipeline is a separate task, filed as a
-    // follow-up under the loop. Inner-text canonicalize ignore covers the
-    // purity sub-block until that work lands.
-    if (!object_id.empty()) {
-        auto decoded = decode_symbol_id(object_id);
-        nlohmann::json contexts = nlohmann::json::array();
-        if (decoded.has_value()) {
-            const auto* sym = ref_tracker.get_enhanced_symbol(*decoded);
-            if (sym != nullptr) {
-                nlohmann::json ctx;
-                ctx["file_path"] = indexer.get_file_path(sym->symbol.file_id);
-                ctx["line"] = sym->symbol.line;
-                ctx["object_id"] = object_id;
-                ctx["symbol_type"] =
-                    std::string(to_string(sym->symbol.type));
-                ctx["symbol_name"] = std::string(sym->symbol.name);
-                ctx["is_exported"] = sym->is_exported;
-                ctx["definition"] = std::string(sym->symbol.name);
-                ctx["context"] = nlohmann::json::array(
-                    {std::string(sym->symbol.name)});
-                nlohmann::json purity;
-                purity["is_pure"] = false;
-                purity["purity_score"] = 0;
-                purity["confidence"] = "low";
-                ctx["purity"] = std::move(purity);
-                contexts.push_back(std::move(ctx));
-            }
-        }
-        nlohmann::json response;
-        response["contexts"] = std::move(contexts);
-        response["count"] =
-            static_cast<int>(response["contexts"].size());
-        return make_json_response(response);
+    // Go validateGetContextParams (internal/mcp/handlers.go): exactly one of
+    // 'id' or 'name' must be supplied. Fail fast — no silent empty result.
+    const bool has_id = !object_id.empty();
+    const bool has_name = !name.empty();
+    if (!has_id && !has_name) {
+        return make_error_response(
+            "get_context",
+            "missing required 'id' parameter. Use the object ID (o=XX) from "
+            "search results, e.g. {\"id\": \"VE\"} or {\"id\": \"VE,tG\"}");
+    }
+    if (has_id && has_name) {
+        return make_error_response(
+            "get_context",
+            "parameter conflict: use either 'id' OR 'name', not both. "
+            "Prefer 'id' with object IDs from search results");
     }
 
-    // No-mode get_context is id-only — aligned with Go iter-19.
-    // Go's handleGetContext (internal/mcp/handlers.go) builds its objectIDs
-    // list solely from args.ID; args.Name and file_id+line are never resolved
-    // in the default (no-mode) path. C++ previously had latent name= and
-    // file_id+line resolution branches here (predating iter-9, initial commit
-    // 9ce02a7) that diverged from Go whenever the indexer resolved symbols
-    // under the MCP stdio session. Removed to match Go's id-only contract:
-    // an absent/unresolvable id yields {contexts:[],count:0}, same as Go.
-    // KARPATHY parity win + perf win — this is the read path and removing the
-    // branches strictly reduces work (no find_symbols_by_name / call-tree
-    // traversal on the no-mode path). find_symbols_by_name / get_symbol_at_line
-    // remain in use by other handlers (handlers_explore, handlers_analysis,
-    // server.cpp, context_manifest_expander) — shared infra untouched.
+    // mode-based context lookup (Go's handleGetObjectContextWithMode, backed
+    // by ContextLookupEngine) is not ported to C++ — there is no C++
+    // equivalent of that engine. Fail fast rather than emit a silent empty
+    // stub. Accepted divergence, documented in tests/parity/KNOWN_FAILURES.md.
+    if (!mode.empty()) {
+        return make_error_response(
+            "get_context",
+            "mode-based context lookup ('mode' parameter) is not supported "
+            "in the C++ port; omit 'mode' and use plain 'id' lookup");
+    }
+
+    // No-mode path: Go builds its objectIDs list solely from args.ID
+    // (comma-separated). args.Name passes validation but is never resolved
+    // here — a name-only call yields an empty result set, matching Go's
+    // id-only no-mode contract (golden: {contexts:[],count:0}).
+    nlohmann::json contexts = nlohmann::json::array();
+    nlohmann::json errors = nlohmann::json::array();
+    std::string_view remaining = object_id;
+    while (!remaining.empty()) {
+        auto comma = remaining.find(',');
+        std::string_view id = comma == std::string_view::npos
+                                  ? remaining
+                                  : remaining.substr(0, comma);
+        remaining = comma == std::string_view::npos
+                        ? std::string_view{}
+                        : remaining.substr(comma + 1);
+        // Trim surrounding whitespace (Go strings.TrimSpace per id).
+        while (!id.empty() && std::isspace(static_cast<unsigned char>(id.front())))
+            id.remove_prefix(1);
+        while (!id.empty() && std::isspace(static_cast<unsigned char>(id.back())))
+            id.remove_suffix(1);
+        if (id.empty()) continue;
+        resolve_object_id(id, indexer, contexts, errors);
+    }
+
     nlohmann::json response;
-    response["contexts"] = nlohmann::json::array();
-    response["count"] = 0;
+    response["count"] = static_cast<int>(contexts.size());
+    response["contexts"] = std::move(contexts);
+    // Go reports per-id lookup failures in a `errors` array — never dropped.
+    if (!errors.empty()) {
+        response["errors"] = std::move(errors);
+    }
     return make_json_response(response);
 }
 

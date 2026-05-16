@@ -177,50 +177,14 @@ nlohmann::json git_metrics_finding_to_json(const git::MetricsFinding& finding) {
 
 void register_parity_compat_tools(mcp::McpServer& server, MasterIndex& index,
                                   const std::string& project_root) {
-    server.add_tool(
-        ToolDefinition{"search", "Go-compatible MCP search output", {}, {}},
-        [&index](const nlohmann::json& params) {
-            auto pattern = to_lower(params.value("pattern", ""));
-            auto rows = collect_symbols(index);
-            std::vector<SymbolRow> matches;
-            for (const auto& row : rows) {
-                if (to_lower(std::string(row.symbol->symbol.name)).find(pattern) !=
-                    std::string::npos) {
-                    matches.push_back(row);
-                }
-            }
-            std::sort(matches.begin(), matches.end(),
-                      [](const SymbolRow& a, const SymbolRow& b) {
-                          return a.file_path < b.file_path;
-                      });
-
-            nlohmann::json results = nlohmann::json::array();
-            int ordinal = 1;
-            for (const auto& row : matches) {
-                nlohmann::json item;
-                item["result_id"] =
-                    "result_" + std::to_string(ordinal++) + "_" +
-                    std::to_string(row.symbol->symbol.line);
-                item["object_id"] = encode_symbol_id(row.symbol->id);
-                item["file"] = row.file_path;
-                item["line"] = row.symbol->symbol.line;
-                item["column"] = row.symbol->symbol.column;
-                item["match"] = row.symbol->symbol.name;
-                item["score"] = 855.5;
-                item["symbol_type"] =
-                    std::string(to_string(row.symbol->symbol.type));
-                item["symbol_name"] = row.symbol->symbol.name;
-                item["is_exported"] = row.symbol->is_exported;
-                results.push_back(std::move(item));
-            }
-
-            nlohmann::json payload;
-            payload["results"] = std::move(results);
-            payload["total_matches"] = static_cast<int>(matches.size());
-            payload["showing"] = static_cast<int>(matches.size());
-            payload["max_results"] = params.value("max", 50);
-            return json_tool_result(payload);
-        });
+    // search: parity-compat stub removed. The substring-on-symbol-names stub
+    // (hardcoded score:855.5, column:1, ignoring regex/flags/output mode/
+    // semantic/ranking) shadowed the real handle_search via reverse-iteration
+    // dispatch in McpServer::handle_tools_call. handle_search now runs the
+    // full trigram-backed SearchEngine and emits the same Go-shape payload
+    // (result_id, object_id, symbol_type, symbol_name, is_exported, score
+    // as float) directly from real matches with enclosing-symbol attribution.
+    // Locked C++-side by HandlersFixture.Search* in tests/mcp_handlers_core_test.cpp.
 
     server.add_tool(
         ToolDefinition{"find_files", "Go-compatible MCP find_files output", {},
