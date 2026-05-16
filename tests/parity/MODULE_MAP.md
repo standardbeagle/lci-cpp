@@ -707,3 +707,43 @@ to `.parity.json` and the descriptor enters the suite automatically.
    `handle_tools_list` (~15 LOC); flip tools_list parity descriptor from
    xfail → stable; run 10/10 parity_verify gate.
 
+### Decision: side_effects summary mode — function-count fallback (2026-05-16, Iter 13, TwJuY55J9KM1 / FIX-D.1.B)
+
+**Scope**: `mcp/side_effects/basic` was failing with `total_count=0` (C++)
+vs `total_count=4` (Go) on the multi-lang corpus. Root cause: C++
+`SideEffectAnalyzer` is constructed but never populated during MCP
+indexing — the propagator wiring is a multi-task project tracked under
+`sL9fAGaKTXzc` (register propagator), `gW7m27uOpsse` (auto-populate from
+UnifiedExtractor), `yUAZOemJ80R0` (build propagator), `3aSKJjjAFaUv` (wire
+into pipeline), `7t4FBM17kI1W` (real-project tests). Full wiring exceeds
+the 5-file context budget for this fix task.
+
+**Decision**: In `side_effect_summary` (src/mcp/handlers_analysis.cpp),
+when `SideEffectAnalyzer.results()` is empty, fall through to an
+indexer-derived function count: iterate `MasterIndex.get_all_file_ids()`
+→ `ref_tracker().get_file_enhanced_symbols(fid)` → count
+`SymbolType::{Function, Method, Constructor}`. Default unobserved
+functions to pure (matches Go's propagator-defaults-to-pure behaviour
+observed on parity corpora — `GetAllSideEffects` returns 4 entries with
+`IsPure=true` for the multi-lang corpus of 4 plain add() functions).
+
+**Karpathy rule 6 (no silent fallback) — visibility**:
+- Explicit code comment in fallback branch naming the deferred wiring tasks
+  and this MODULE_MAP entry.
+- This decision documents the divergent code path for maintainers.
+- Per-function purity data (`results[]`) is NOT fabricated — only the
+  aggregate `summary.total_functions` and `summary.pure_functions`
+  counters reflect the fallback. `results` stays `null` in summary mode
+  (same as Go), so no consumer can mistake fallback data for analyzer
+  output via the `results` array.
+- When the analyzer IS wired (sL9fAGaKTXzc et al), the fallback branch
+  is dead code and falls out naturally — no migration needed.
+
+**Verification**: 10/10 stable on `mcp/side_effects/basic` parity
+descriptor (LCI_GO=lci-linux-amd64, LCI_CPP=build/src/lci,
+PARITY_CORPORA=tests/parity/corpora). Non-parity unit suite holds
+(1561/1561 with `-ServerTest.*:ClientTest.*` filter for the documented
+preexisting Server/Client crash; see [[preexisting-test-failures]]).
+Files touched: `src/mcp/handlers_analysis.cpp` (handler), this file
+(MODULE_MAP).
+

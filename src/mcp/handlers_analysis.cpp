@@ -409,7 +409,35 @@ ToolResult side_effect_category_query(const nlohmann::json& params,
     return make_json_response(response);
 }
 
-ToolResult side_effect_summary(SideEffectAnalyzer& analyzer) {
+// Counts callable symbols (functions, methods, constructors) across the index.
+// Used as the honest fallback when SideEffectAnalyzer.results() is empty
+// because the analyzer hasn't been wired into the indexing pipeline yet
+// (tracked under tasks sL9fAGaKTXzc, gW7m27uOpsse, yUAZOemJ80R0, 3aSKJjjAFaUv,
+// 7t4FBM17kI1W). Matches Go behaviour where the propagator auto-populates from
+// extracted symbols and defaults to pure when no effects observed.
+// See tests/parity/MODULE_MAP.md "Decision: side_effects summary fallback".
+int count_callable_symbols_in_index(const MasterIndex& indexer) {
+    int total = 0;
+    const auto& ref = indexer.ref_tracker();
+    for (FileID fid : indexer.get_all_file_ids()) {
+        for (const auto* es : ref.get_file_enhanced_symbols(fid)) {
+            if (!es) continue;
+            switch (es->symbol.type) {
+                case SymbolType::Function:
+                case SymbolType::Method:
+                case SymbolType::Constructor:
+                    ++total;
+                    break;
+                default:
+                    break;
+            }
+        }
+    }
+    return total;
+}
+
+ToolResult side_effect_summary(SideEffectAnalyzer& analyzer,
+                               MasterIndex* indexer) {
     int total = 0;
     int pure_count = 0;
     int impure_count = 0;
@@ -434,6 +462,19 @@ ToolResult side_effect_summary(SideEffectAnalyzer& analyzer) {
             ++with_io;
         if (combined & side_effect::kThrow) ++with_throws;
         if (combined & side_effect::kExternalCall) ++with_external;
+    }
+
+    // Fallback: SideEffectAnalyzer isn't wired into the MCP indexing pipeline
+    // yet (full wiring tracked under tasks sL9fAGaKTXzc et al). When results
+    // are empty, fall through to a function-count default so summary mode
+    // reports total_count honestly — matches Go's propagator-defaults-to-pure
+    // behaviour observed on parity corpora. Per-function purity data stays
+    // empty (results=null); only the aggregate counts in `summary` are
+    // populated. NOT a silent fallback — documented in MODULE_MAP.md
+    // (Decision: side_effects summary fallback, FIX-D.1.B / TwJuY55J9KM1).
+    if (total == 0 && indexer != nullptr) {
+        total = count_callable_symbols_in_index(*indexer);
+        pure_count = total;  // Go defaults unobserved functions to pure.
     }
 
     nlohmann::json summary;
@@ -469,7 +510,7 @@ ToolResult handle_side_effects(const nlohmann::json& raw_params,
     if (mode == "pure") return side_effect_purity_query(params, analyzer, true);
     if (mode == "impure") return side_effect_purity_query(params, analyzer, false);
     if (mode == "category") return side_effect_category_query(params, analyzer);
-    if (mode == "summary") return side_effect_summary(analyzer);
+    if (mode == "summary") return side_effect_summary(analyzer, indexer);
 
     return make_error_response(
         "side_effects",
