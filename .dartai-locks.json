@@ -1,3 +1,17 @@
 {
-  "claims": {}
+  "claims": {
+    "8Zjd7zI01dhr": {
+      "runner_instance_id": "beagle-ab-580276",
+      "runner_email": "andybrummer@standardbeagle.com",
+      "claimed_at": "2026-05-16T06:10:00Z",
+      "agent_id": "beagle-ab-580276",
+      "parent_loop_id": "AN8m7hohEdlM",
+      "purpose": "loop iter-6: FIX-C audit symbol/tree/object_context validators (dead vs wire-now)",
+      "source_event": {
+        "loop_id": "AN8m7hohEdlM",
+        "task_id": "8Zjd7zI01dhr",
+        "conversation_id": null
+      }
+    }
+  }
 }
