@@ -1,0 +1,30 @@
+{
+  "id": "mcp/tools_list/basic",
+  "mode": "mcp",
+  "corpus": "multi-lang",
+  "go_binary": "${LCI_GO}",
+  "cpp_binary": "${LCI_CPP}",
+  "invocation": {
+    "args": ["mcp"],
+    "stdin": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\",\"params\":{}}",
+    "cwd": "${CORPUS}"
+  },
+  "capture": ["stdout", "exit"],
+  "parse": "json",
+  "_pending": "DO_NOT_REGISTER_YET — runner has no xfail support (verified tests/parity/runner/*.cpp 2026-05-16). This file is scaffold-only. Register in tests/parity/CMakeLists.txt only after both prereq sub-fix subtasks land (stub dedup + Option B emitter). Until then, parity_runner will fail this descriptor; do not add to the registered list.",
+  "_rationale": "FIX-D byte-equivalence descriptor. Scaffold pending two prerequisites filed as sub-fix subtasks under loop AN8m7hohEdlM: (1) removal of 8 duplicate tool registrations in src/cli/mcp.cpp (per memory mcp-stubs-shadow-real-handlers — find_files, debug_info, list_symbols, inspect_symbol, browse_file, git_analysis, side_effects, code_insight are double-registered, inflating C++ tool count from 14→22 vs Go's 14); (2) Option B custom emit-order in src/mcp/server.cpp::build_input_schema and handle_tools_list to match Go's jsonschema-go field ordering (schema-root: type→properties→required; per-property: type→description; tool list: alphabetical-by-name). Field-by-field audit recorded in MODULE_MAP.md 'Decision: tools/list emit-order parity'. Once both prereqs land, lift xfail and move result.tools[] from ignore to stable.",
+  "tiers": {
+    "stable": [
+      "result.content[].type"
+    ],
+    "_rationale_stable": "Until the Option B emitter + stub dedup land, only the JSON-RPC envelope content type is byte-stable. The real assertion target is result.tools[] — held in ignore until xfail lifts.",
+    "ignore": [
+      "result.tools"
+    ],
+    "_rationale_ignore": "result.tools is the body under test; held in ignore tier during xfail. After dedup + emitter ship: move to stable, drop ignore entry, flip xfail false. Expected post-fix shape per Go: 14 tools alphabetically ordered by name, each with top-level keys [description, inputSchema, name] (alpha), inputSchema with keys [type, properties, required] (insertion via jsonschema-go struct), properties map alphabetical, per-property keys [type, description] (insertion via jsonschema-go Property struct). The centralized JSON-RPC envelope ignore baseline already masks id/jsonrpc/result.meta.* — those don't need per-descriptor entries."
+  },
+  "tolerances": {
+    "timed_max_ms": 60000
+  },
+  "expect_exit": 0
+}

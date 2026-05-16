@@ -624,3 +624,86 @@ wire-now child fix tasks spawned — there is nothing to wire because:
 **Followup**: FIX-E (separate Dart task in this loop) is now unblocked. No new
 child subtasks created from FIX-C; the audit closes cleanly.
 
+### Decision: tools/list emit-order parity — Option B (custom emitter) + dedup-stubs blocker (2026-05-16, Iter 8, chusTmwgGNdC)
+
+**Scope**: FIX-D — align `tools/list` MCP response with Go binary byte-equivalence. Audit-only iteration (~30 add_tool sites across 6 files exceed 5-file commit budget); follow-up sub-fix subtasks filed.
+
+**Audit method**: capture live `tools/list` from both binaries on identical
+corpus (`/tmp/fixd_corpus` with one .go file), parse JSON, diff field-key
+ordering at every nesting level.
+
+**Findings**:
+
+| Aspect | Go (`jsonschema-go` + `encoding/json`) | C++ (`nlohmann::json` default) | Status |
+|---|---|---|---|
+| Tool count | 14 | **22** (8 duplicate stubs) | 🔴 STRUCTURAL — blocks byte-eq |
+| Tool list order | alphabetical by name | insertion order (handler-file order, with dups) | 🔴 Divergent |
+| Top-level tool keys | `[description, inputSchema, name]` (alpha) | `[description, inputSchema, name]` (alpha) | ✅ Match |
+| Schema root keys | `[type, properties, required]` (insertion via struct field order in jsonschema-go) | `[properties, required, type]` (alpha) | 🔴 Divergent |
+| Schema `properties` map | alphabetical (Go map serialisation) | alphabetical (nlohmann default) | ✅ Match |
+| Per-property keys | `[type, description]` (insertion via jsonschema struct) | `[description, type]` (alpha) | 🔴 Divergent |
+
+**Decision: Option B (custom emitter in `build_input_schema` + `handle_tools_list`)**, not Option A (`ordered_json` migration).
+
+Rationale:
+1. **Determinism over registration order.** Tools are registered in
+   handler-file include order (`server.cpp` core → handlers_index →
+   handlers_explore → handlers_analysis → handlers_context → cli/mcp.cpp
+   parity-compat). `ordered_json` would lock that order in — adding a new
+   handler file would silently shift tool order and break parity. Option B
+   emits sorted-by-name regardless of registration, matching Go's map-based
+   alphabetisation.
+2. **Field order is a fixed contract, not data.** The 3 schema-root fields
+   (`type`/`properties`/`required`) and 2 per-property fields
+   (`type`/`description`) are a closed set — encoding the order in 5 lines
+   of emitter code is clearer than carrying ordered_json through every
+   `add_tool` call site and inputSchema literal.
+3. **Perf (karpathy rule 1+2).** `ordered_json` uses linear-scan key lookup
+   (vector-backed) vs `json`'s hashmap. `tools/list` is called once per MCP
+   session so the per-request overhead is negligible, BUT `ordered_json`
+   would propagate to *every* JSON object construction in the MCP path
+   (response building, etc.) — a per-call regression on hot read paths. The
+   gate "no regression on existing parity descriptors" implicitly enforces
+   this, and Option A would risk failing it under benchmark.
+4. **No `add_tool` site change needed.** Option A would require auditing all
+   ~30 `add_tool` callers AND any inline schema literals. Option B touches
+   only `build_input_schema` + `handle_tools_list` in `src/mcp/server.cpp`.
+
+**Hard blocker for the byte-equivalence goal**: 8 duplicate tool
+registrations in `src/cli/mcp.cpp` (per [[mcp-stubs-shadow-real-handlers]])
+inflate C++ tool count from 14→22. Even with perfect field ordering,
+`tools/list` cannot be byte-equal until these are removed. The stubs DO
+shadow real handlers in `tools/call` (per memory) — this is correctness, not
+just parity noise. **FIX-D byte-equivalence is BLOCKED on stub removal.**
+
+**Per-tool ordering work**: NONE required at `add_tool` call sites or
+inline schemas — all flow through the centralized `build_input_schema()`.
+No 30-site audit needed; the inline-literal concern in the task spec is
+moot because all schema construction is centralized through the
+`ToolDefinition`/`ToolProperty` struct path. Verified by grepping
+`inputSchema` across all 6 files: only one occurrence
+(`src/mcp/server.cpp:514` in `handle_tools_list`), no inline literals.
+
+**Proof-of-concept**: not committed this iter (audit-only). Implementation
+is a ~15-line patch to `build_input_schema` (emit `type` → `properties` →
+`required` and `type` → `description` per property using
+`nlohmann::ordered_json` *locally* in that function only, dump to string,
+parse back as regular json — or use a manual std::ostringstream for the
+schema sub-tree). The local scope keeps the hot read path untouched.
+
+**Parity descriptor scaffolded**:
+`tests/parity/descriptors/mcp/tools_list/basic.parity.json.pending`
+(suffix `.pending` to avoid CMake `GLOB_RECURSE *.parity.json`
+auto-registration in `tests/parity/CMakeLists.txt:73` — runner has no
+xfail support, verified 2026-05-16). Body documents the dedup blocker and
+target shape. Once the 8 stubs are removed AND the emitter ships, rename
+to `.parity.json` and the descriptor enters the suite automatically.
+
+**Sub-fix subtasks filed under AN8m7hohEdlM (loop task)**:
+1. Remove 8 duplicate stub registrations in `src/cli/mcp.cpp` (per
+   mcp-stubs-shadow-real-handlers memory) — prerequisite for byte-eq AND
+   for correctness of `search`/`find_files`/etc. tools/call output.
+2. Land Option B emitter in `src/mcp/server.cpp::build_input_schema` +
+   `handle_tools_list` (~15 LOC); flip tools_list parity descriptor from
+   xfail → stable; run 10/10 parity_verify gate.
+
