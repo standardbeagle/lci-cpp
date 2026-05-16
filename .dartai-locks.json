@@ -1,3 +1,17 @@
 {
-  "claims": {}
+  "claims": {
+    "sGNoQG6QcTGB": {
+      "runner_instance_id": "beagle-ab-580276",
+      "runner_email": "andybrummer@standardbeagle.com",
+      "claimed_at": "2026-05-16T06:20:00Z",
+      "agent_id": "beagle-ab-580276",
+      "parent_loop_id": "AN8m7hohEdlM",
+      "purpose": "loop iter-7: FIX-E remove dead RequestValidator + dead validator factories (unblocked by FIX-B+C)",
+      "source_event": {
+        "loop_id": "AN8m7hohEdlM",
+        "task_id": "sGNoQG6QcTGB",
+        "conversation_id": null
+      }
+    }
+  }
 }
