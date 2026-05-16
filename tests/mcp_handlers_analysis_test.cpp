@@ -318,12 +318,19 @@ class CodeInsightTest : public ::testing::Test {
     std::unique_ptr<CodebaseIntelligenceEngine> engine_;
 };
 
+// NOTE post-FIX-D.1.C: handle_code_insight emits LCF text (not JSON) to match
+// Go's wire format. Tests assert LCF header + section presence instead of
+// parsing JSON. The 6 mcp/code_insight/* parity descriptors lock byte-level
+// agreement with Go.
+
 TEST_F(CodeInsightTest, DefaultModeIsOverview) {
     nlohmann::json params;
     auto result = handle_code_insight(params, *engine_, *indexer_);
     EXPECT_FALSE(result.is_error);
-    auto json = nlohmann::json::parse(result.text);
-    EXPECT_EQ(json["analysis_mode"].get<std::string>(), "overview");
+    EXPECT_NE(result.text.find("LCF/1.0"), std::string::npos);
+    EXPECT_NE(result.text.find("mode=overview"), std::string::npos);
+    EXPECT_NE(result.text.find("== REPOSITORY MAP =="), std::string::npos);
+    EXPECT_NE(result.text.find("== HEALTH =="), std::string::npos);
 }
 
 TEST_F(CodeInsightTest, InvalidModeReturnsError) {
@@ -338,9 +345,8 @@ TEST_F(CodeInsightTest, OverviewModeProducesResponse) {
     params["mode"] = "overview";
     auto result = handle_code_insight(params, *engine_, *indexer_);
     EXPECT_FALSE(result.is_error);
-    auto json = nlohmann::json::parse(result.text);
-    EXPECT_TRUE(json.contains("analysis_metadata"));
-    EXPECT_TRUE(json.contains("tier"));
+    EXPECT_NE(result.text.find("mode=overview"), std::string::npos);
+    EXPECT_NE(result.text.find("tier=1"), std::string::npos);
 }
 
 TEST_F(CodeInsightTest, StatisticsModeWorks) {
@@ -348,8 +354,8 @@ TEST_F(CodeInsightTest, StatisticsModeWorks) {
     params["mode"] = "statistics";
     auto result = handle_code_insight(params, *engine_, *indexer_);
     EXPECT_FALSE(result.is_error);
-    auto json = nlohmann::json::parse(result.text);
-    EXPECT_EQ(json["analysis_mode"].get<std::string>(), "statistics");
+    EXPECT_NE(result.text.find("mode=statistics"), std::string::npos);
+    EXPECT_NE(result.text.find("== STATISTICS =="), std::string::npos);
 }
 
 TEST_F(CodeInsightTest, StructureModeWorks) {
@@ -357,6 +363,8 @@ TEST_F(CodeInsightTest, StructureModeWorks) {
     params["mode"] = "structure";
     auto result = handle_code_insight(params, *engine_, *indexer_);
     EXPECT_FALSE(result.is_error);
+    EXPECT_NE(result.text.find("mode=structure"), std::string::npos);
+    EXPECT_NE(result.text.find("== STRUCTURE =="), std::string::npos);
 }
 
 TEST_F(CodeInsightTest, DetailedModeWorks) {
@@ -365,6 +373,9 @@ TEST_F(CodeInsightTest, DetailedModeWorks) {
     params["analysis"] = "modules";
     auto result = handle_code_insight(params, *engine_, *indexer_);
     EXPECT_FALSE(result.is_error);
+    // detailed falls through to the overview LCF payload — matches Go shape
+    // on corpora without dependency-graph / entry-point data wired.
+    EXPECT_NE(result.text.find("LCF/1.0"), std::string::npos);
 }
 
 TEST_F(CodeInsightTest, UnifiedModeWorks) {
@@ -372,6 +383,28 @@ TEST_F(CodeInsightTest, UnifiedModeWorks) {
     params["mode"] = "unified";
     auto result = handle_code_insight(params, *engine_, *indexer_);
     EXPECT_FALSE(result.is_error);
+    EXPECT_NE(result.text.find("mode=unified"), std::string::npos);
+    EXPECT_NE(result.text.find("== REPOSITORY MAP =="), std::string::npos);
+    EXPECT_NE(result.text.find("== HEALTH =="), std::string::npos);
+    EXPECT_NE(result.text.find("== MODULES =="), std::string::npos);
+    EXPECT_NE(result.text.find("== STATISTICS =="), std::string::npos);
+}
+
+TEST_F(CodeInsightTest, GitAnalyzeModeWorks) {
+    nlohmann::json params;
+    params["mode"] = "git_analyze";
+    auto result = handle_code_insight(params, *engine_, *indexer_);
+    EXPECT_FALSE(result.is_error);
+    EXPECT_NE(result.text.find("mode=git_analyze"), std::string::npos);
+    EXPECT_NE(result.text.find("== STATISTICS =="), std::string::npos);
+}
+
+TEST_F(CodeInsightTest, GitHotspotsModeWorks) {
+    nlohmann::json params;
+    params["mode"] = "git_hotspots";
+    auto result = handle_code_insight(params, *engine_, *indexer_);
+    EXPECT_FALSE(result.is_error);
+    EXPECT_NE(result.text.find("mode=git_hotspots"), std::string::npos);
 }
 
 // =============================================================================

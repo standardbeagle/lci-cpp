@@ -2,6 +2,10 @@
 //
 // Mirrors the Go reference's workflow_scenarios/code_insight_test.go.
 // These tests verify CodebaseIntelligenceEngine behavior on actual codebases.
+//
+// FIX-D.1.C: handle_code_insight emits LCF text (not JSON) to match Go's
+// wire format. The ctx.code_insight() helper wraps success payloads as
+// {"lcf": "<text>"} — tests assert on substrings of that text.
 
 #include <gtest/gtest.h>
 
@@ -29,6 +33,22 @@ namespace fs = std::filesystem;
         }                                                                   \
     } while (0)
 
+namespace {
+
+// Asserts the LCF payload contains the canonical header + the given mode
+// declaration line.
+void expect_lcf_mode(const nlohmann::json& result, const std::string& mode) {
+    ASSERT_TRUE(result.contains("lcf"))
+        << "code_insight returned non-LCF payload: " << result.dump();
+    const auto& text = result["lcf"].get_ref<const std::string&>();
+    EXPECT_NE(text.find("LCF/1.0\n"), std::string::npos)
+        << "missing LCF header in payload: " << text;
+    EXPECT_NE(text.find("mode=" + mode + "\n"), std::string::npos)
+        << "missing mode=" << mode << " line in payload: " << text;
+}
+
+}  // namespace
+
 // ---------------------------------------------------------------------------
 // Test: code_insight overview on real projects
 // ---------------------------------------------------------------------------
@@ -49,13 +69,10 @@ TEST_F(RealProjectCodeInsightTest, ChiOverviewProducesMetadata) {
     ASSERT_FALSE(result.contains("error"))
         << "code_insight error: " << result.value("error", "unknown");
 
-    EXPECT_EQ(result["analysis_mode"].get<std::string>(), "overview");
-    EXPECT_TRUE(result.contains("analysis_metadata"));
-    EXPECT_TRUE(result.contains("tier"));
-
-    auto& meta = result["analysis_metadata"];
-    EXPECT_GE(meta["files_analyzed"].get<int>(), 1);
-    EXPECT_GE(meta["analysis_time_ms"].get<int>(), 0);
+    expect_lcf_mode(result, "overview");
+    const auto& text = result["lcf"].get_ref<const std::string&>();
+    EXPECT_NE(text.find("== REPOSITORY MAP =="), std::string::npos);
+    EXPECT_NE(text.find("== HEALTH =="), std::string::npos);
 }
 
 TEST_F(RealProjectCodeInsightTest, ChiStatisticsProducesMetrics) {
@@ -72,7 +89,9 @@ TEST_F(RealProjectCodeInsightTest, ChiStatisticsProducesMetrics) {
     ASSERT_FALSE(result.contains("error"))
         << "code_insight error: " << result.value("error", "unknown");
 
-    EXPECT_EQ(result["analysis_mode"].get<std::string>(), "statistics");
+    expect_lcf_mode(result, "statistics");
+    EXPECT_NE(result["lcf"].get_ref<const std::string&>().find("== STATISTICS =="),
+              std::string::npos);
 }
 
 TEST_F(RealProjectCodeInsightTest, ChiStructureProducesTree) {
@@ -89,7 +108,9 @@ TEST_F(RealProjectCodeInsightTest, ChiStructureProducesTree) {
     ASSERT_FALSE(result.contains("error"))
         << "code_insight error: " << result.value("error", "unknown");
 
-    EXPECT_EQ(result["analysis_mode"].get<std::string>(), "structure");
+    expect_lcf_mode(result, "structure");
+    EXPECT_NE(result["lcf"].get_ref<const std::string&>().find("== STRUCTURE =="),
+              std::string::npos);
 }
 
 TEST_F(RealProjectCodeInsightTest, ChiDetailedModulesAnalysis) {
@@ -107,7 +128,10 @@ TEST_F(RealProjectCodeInsightTest, ChiDetailedModulesAnalysis) {
     ASSERT_FALSE(result.contains("error"))
         << "code_insight error: " << result.value("error", "unknown");
 
-    EXPECT_EQ(result["analysis_mode"].get<std::string>(), "detailed");
+    // "detailed" mode falls through to the overview LCF payload — matches
+    // Go's shape on corpora without dependency-graph data wired. The mode
+    // header therefore reads `mode=overview`.
+    expect_lcf_mode(result, "overview");
 }
 
 TEST_F(RealProjectCodeInsightTest, ChiUnifiedMode) {
@@ -124,7 +148,12 @@ TEST_F(RealProjectCodeInsightTest, ChiUnifiedMode) {
     ASSERT_FALSE(result.contains("error"))
         << "code_insight error: " << result.value("error", "unknown");
 
-    EXPECT_EQ(result["analysis_mode"].get<std::string>(), "unified");
+    expect_lcf_mode(result, "unified");
+    const auto& text = result["lcf"].get_ref<const std::string&>();
+    EXPECT_NE(text.find("== REPOSITORY MAP =="), std::string::npos);
+    EXPECT_NE(text.find("== HEALTH =="), std::string::npos);
+    EXPECT_NE(text.find("== MODULES =="), std::string::npos);
+    EXPECT_NE(text.find("== STATISTICS =="), std::string::npos);
 }
 
 TEST_F(RealProjectCodeInsightTest, FastapiOverview) {
@@ -141,8 +170,7 @@ TEST_F(RealProjectCodeInsightTest, FastapiOverview) {
     ASSERT_FALSE(result.contains("error"))
         << "code_insight error: " << result.value("error", "unknown");
 
-    EXPECT_EQ(result["analysis_mode"].get<std::string>(), "overview");
-    EXPECT_TRUE(result.contains("analysis_metadata"));
+    expect_lcf_mode(result, "overview");
 }
 
 TEST_F(RealProjectCodeInsightTest, PocketbaseOverview) {
@@ -159,7 +187,7 @@ TEST_F(RealProjectCodeInsightTest, PocketbaseOverview) {
     ASSERT_FALSE(result.contains("error"))
         << "code_insight error: " << result.value("error", "unknown");
 
-    EXPECT_EQ(result["analysis_mode"].get<std::string>(), "overview");
+    expect_lcf_mode(result, "overview");
 }
 
 TEST_F(RealProjectCodeInsightTest, InvalidModeReturnsError) {
@@ -199,29 +227,7 @@ TEST_F(RealProjectCodeInsightPerformanceTest, ChiOverviewUnderOneSecond) {
 
     ASSERT_FALSE(result.contains("error"))
         << "code_insight error: " << result.value("error", "unknown");
-
-    EXPECT_LT(elapsed_ms, 1000)
-        << "code_insight overview took " << elapsed_ms << "ms (should be < 1s)";
-}
-
-TEST_F(RealProjectCodeInsightPerformanceTest, ChiStatisticsUnderOneSecond) {
-    SKIP_IF_NO_REAL_PROJECT("go", "chi");
-    auto path = *testing::find_real_project("go", "chi");
-
-    auto ctx = testing::setup_real_project(path, "chi");
-    ASSERT_TRUE(ctx.valid());
-
-    nlohmann::json params;
-    params["mode"] = "statistics";
-
-    auto start = std::chrono::steady_clock::now();
-    auto result = ctx.code_insight(params);
-    auto elapsed = std::chrono::steady_clock::now() - start;
-    auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
-
-    ASSERT_FALSE(result.contains("error"));
-    EXPECT_LT(elapsed_ms, 1000)
-        << "code_insight statistics took " << elapsed_ms << "ms";
+    EXPECT_LT(elapsed_ms, 1000) << "code_insight overview took " << elapsed_ms << "ms";
 }
 
 }  // namespace

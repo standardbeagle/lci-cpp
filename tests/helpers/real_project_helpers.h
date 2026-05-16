@@ -235,13 +235,23 @@ struct RealProjectContext {
     }
 
     /// Calls the code_insight MCP handler.
+    ///
+    /// Returns a wrapper JSON because handle_code_insight now emits LCF text
+    /// (not JSON) to match Go's wire format (FIX-D.1.C):
+    ///   - on error: {"error": "<message>"}
+    ///   - on success: {"lcf": "<full LCF text payload>"}
+    /// Tests should assert via `result["lcf"].get<std::string>().find(...)`.
     nlohmann::json code_insight(nlohmann::json params) const {
         if (!indexer || !ci_engine_) {
             return nlohmann::json{{"error", "Context not initialized"}};
         }
         try {
             auto result = lci::mcp::handle_code_insight(params, *ci_engine_, *indexer);
-            return nlohmann::json::parse(result.text);
+            if (result.is_error) {
+                // Error path still emits JSON via make_error_response.
+                return nlohmann::json::parse(result.text);
+            }
+            return nlohmann::json{{"lcf", result.text}};
         } catch (const std::exception& e) {
             return nlohmann::json{{"error", e.what()}};
         } catch (...) {
