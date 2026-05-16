@@ -1,3 +1,17 @@
 {
-  "claims": {}
+  "claims": {
+    "bm09pW3iU1co": {
+      "runner_instance_id": "beagle-ab-801666",
+      "runner_email": "andybrummer@standardbeagle.com",
+      "claimed_at": "2026-05-16T19:19:40Z",
+      "agent_id": "beagle-ab-801666",
+      "parent_loop_id": "AN8m7hohEdlM",
+      "purpose": "libstemmer replace hand-port Porter2 (iter 17)",
+      "source_event": {
+        "loop_id": "AN8m7hohEdlM",
+        "task_id": "bm09pW3iU1co",
+        "conversation_id": "d5f1f7ab-9d28-4655-bedb-b6338f6fdaf1"
+      }
+    }
+  }
 }
