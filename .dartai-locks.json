@@ -1,17 +1,3 @@
 {
-  "claims": {
-    "bATJrARRwHAy": {
-      "runner_instance_id": "beagle-ab-580276",
-      "runner_email": "andybrummer@standardbeagle.com",
-      "claimed_at": "2026-05-16T05:40:00Z",
-      "agent_id": "beagle-ab-580276",
-      "parent_loop_id": "AN8m7hohEdlM",
-      "purpose": "loop iter-3: add nlohmann-json-schema-validator, replace hand-rolled MCP validator",
-      "source_event": {
-        "loop_id": "AN8m7hohEdlM",
-        "task_id": "bATJrARRwHAy",
-        "conversation_id": null
-      }
-    }
-  }
+  "claims": {}
 }
