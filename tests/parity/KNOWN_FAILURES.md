@@ -135,7 +135,7 @@ missing, the descriptor is in violation of the parity contract.
 | `bm09pW3iU1co` | lci-cpp: add libstemmer (Snowball), replace hand-port Porter2 |
 | `bATJrARRwHAy` | lci-cpp: add nlohmann-json-schema-validator, replace hand-rolled MCP validator |
 | `dVjdFhemWPDA` | lci-cpp: add rapidfuzz-cpp, replace hand-rolled fuzzy matcher |
-| `2P0xeGBuU0CN` | lci-cpp: add efsw, replace raw inotify watcher (cross-platform) |
+| `2P0xeGBuU0CN` | (Done) lci-cpp: add efsw, replace raw inotify watcher (cross-platform) |
 | `Fs19gT5u1aVu` | (Done) Default-exclude contract test |
 | `c8DhcMRqeN7v` | (Done) Fix glob: single * must not cross / |
 | `rWZYDAQgQsTt` | (Done) Path-matching audit |

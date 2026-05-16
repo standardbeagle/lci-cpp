@@ -109,6 +109,20 @@ if(NOT absl_FOUND)
     FetchContent_MakeAvailable(abseil-cpp)
 endif()
 
+# efsw — cross-platform file watcher (Linux inotify / macOS FSEvents / Windows ReadDirectoryChangesW)
+# License: MIT. Replaces hand-rolled per-platform watcher in src/indexing/watcher.cpp.
+find_package(efsw CONFIG QUIET)
+if(NOT efsw_FOUND)
+    set(VERBOSE OFF CACHE BOOL "" FORCE)
+    set(BUILD_TEST_APP OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(efsw
+        GIT_REPOSITORY https://github.com/SpartanJ/efsw.git
+        GIT_TAG 1.4.1
+        GIT_SHALLOW TRUE
+    )
+    FetchContent_MakeAvailable(efsw)
+endif()
+
 # tree-sitter is a C library
 find_package(PkgConfig QUIET)
 if(PkgConfig_FOUND)

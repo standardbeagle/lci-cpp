@@ -115,14 +115,14 @@ target_link_libraries(lci_lib PUBLIC
     tree-sitter-kotlin
     tree-sitter-zig
     tree-sitter-ruby
+    efsw
 )
 
 # Platform-specific libraries
-if(APPLE)
-    target_link_libraries(lci_lib PUBLIC "-framework CoreServices")
-elseif(WIN32)
+if(WIN32)
     target_link_libraries(lci_lib PUBLIC psapi)
 endif()
+# CoreServices framework no longer needed: efsw vendors its own FSEvents bindings.
 
 add_executable(lci
     cli/main.cpp
