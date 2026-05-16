@@ -1,13 +1,27 @@
 # Known Parity Failures
 
-Baseline last updated 2026-05-12.
+Baseline last updated 2026-05-16.
 
 - Go reference: `lci version 0.4.1`
 - C++ port: `lci 0.1.0`
 
 Run: `ctest --test-dir build -L parity --output-on-failure`
 
-Result: **109 / 109 parity descriptors passing.** No active parity failures.
+Result: **103 / 109 parity descriptors passing**, **6 regressions** filed under FIX-D.1.{A,B,C,D,E} (see [Active regressions](#active-regressions-fix-d1-fallout) below).
+
+## Active regressions (FIX-D.1 fallout)
+
+FIX-D.1 (Dart `FZJ6Iip4we3U`, iter-9) deleted 8 parity-compat stubs from `src/cli/mcp.cpp` that were shadowing real handlers via reverse-iteration dispatch. tools/list now correctly emits 14 tools (was 22); real handlers in `handlers_{core,explore,index,analysis,context}.cpp` now own dispatch. Six descriptors regressed because real-handler output diverges from Go shape — each tracked under its own fix subtask:
+
+| Descriptor | Subtask | Class | Issue |
+|---|---|---|---|
+| `mcp/find_files/basic` | `w6ZrZX8fAA6h` (FIX-D.1.A) | real-handler bug | Empty results for `pattern='*.go'` (no fuzzy/glob fallback) |
+| `mcp/side_effects/basic` | `TwJuY55J9KM1` (FIX-D.1.B) | real-handler gap | `total_count=0` vs Go=4 — analyzer never populated |
+| `mcp/code_insight/{basic,mode-*}` (×6) | `mz2z1Xn0gQEm` (FIX-D.1.C) | real-handler shape | Emits JSON, Go emits LCF text format |
+| `mcp/inspect_symbol/basic` | `9b6XxaeB08VL` (FIX-D.1.D) | (b) enrichment | Extra `callees, callers, incoming_refs, parameter_count, signature` |
+| `mcp/list_symbols/basic`, `mcp/browse_file/basic` | `HVbfjGGBtAtU` (FIX-D.1.E) | (b) enrichment | Extra `symbols[].signature` via tree-sitter |
+
+Two of the eight target descriptors (`mcp/debug_info/basic`, `mcp/git_analysis/basic`) pass post-removal — real handler shape already matches Go.
 
 > **Important:** "Passing" does not mean "byte-equivalent output." Most
 > non-trivial descriptors carry an `ignore` tier that masks at least one
@@ -22,10 +36,10 @@ Result: **109 / 109 parity descriptors passing.** No active parity failures.
 | `cli.*` | 0 | 28 | Green |
 | `http.*` | 0 | 13 | Green |
 | `index.*` | 0 | 3 | Green |
-| `mcp.*` | 0 | 17 | Green |
+| `mcp.*` | 6 | 17 | Regressed (FIX-D.1 fallout — see above) |
 | `probes.*` | 0 | 3 | Green |
 | `cli.* / http.* / mcp.*` (integration) | 0 | 45 | Green |
-| **Total parity (`-L parity`)** | **0** | **109** | **Green** |
+| **Total parity (`-L parity`)** | **6** | **109** | **6 regressions** |
 
 (Counts via `ctest -L parity` cover the side-by-side parity_runner
 descriptors plus the integration goldens that also carry the `parity`
