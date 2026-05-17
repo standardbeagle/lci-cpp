@@ -8,7 +8,6 @@
         "cpp-httplib",
         "xxhash",
         "abseil",
-        "efsw",
         "rapidfuzz",
         "libstemmer",
         "re2"
