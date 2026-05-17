@@ -5,6 +5,7 @@
 #include "runner/modes/http.h"
 #include "runner/modes/index.h"
 #include "runner/modes/mcp.h"
+#include "spec_diff/canonicalize.h"
 
 #include <nlohmann/json.hpp>
 
@@ -66,6 +67,103 @@ void WriteFile(const fs::path& path, const std::string& contents) {
         throw std::runtime_error("cannot write file: " + path.string());
     }
     output << contents;
+}
+
+// Mirror of parity_runner.cpp::normalize_mcp_inner_text. MCP tool responses
+// wrap their payload as a stringified JSON inside result.content[].text;
+// spec_diff has no MCP awareness, so symbol-enrichment divergences between
+// the C++ and Go implementations leak into the diff as raw string
+// inequality. We unwrap, canonicalize with the same mask set parity_runner
+// uses runner-wide, and re-serialize so both sides compare on the masked
+// content. Applied to both the live capture and the golden file because
+// the golden was captured from Go (no signature field) and the C++ side
+// emits one — masking absent fields on the Go side is a no-op.
+//
+// Mask list is kept verbatim in sync with parity_runner.cpp lines 74-146
+// (FIX-D.1.E added symbols[].signature; FIX-D.1.D added the call-graph
+// enrichment fields). Test infrastructure only — no production code is
+// affected. Tracked by FIX aqMIb6bLqtnj (carries the parity_runner mask
+// over to the integration runner after the spec_migration_test split).
+void NormalizeMcpInnerText(nlohmann::json& node,
+                           const std::string& corpus_path) {
+    if (node.is_object()) {
+        for (auto it = node.begin(); it != node.end(); ++it) {
+            if (it.key() == "text" && it.value().is_string()) {
+                const auto& raw = it.value().get_ref<const std::string&>();
+                if (!raw.empty() && (raw.front() == '{' || raw.front() == '[')) {
+                    try {
+                        auto inner = nlohmann::json::parse(raw);
+                        spec_diff::CanonicalizeOptions inner_opts;
+                        inner_opts.corpus_prefix = corpus_path;
+                        inner_opts.ignore_paths = {
+                            "timestamp",
+                            "timestamp_ms",
+                            "metadata.analyzed_at",
+                            "metadata.analysis_time_ms",
+                            "analysis_metadata.analysis_time_ms",
+                            "overview",
+                            "summary",
+                            "metrics_issues",
+                            "results[].object_id",
+                            "results[].result_id",
+                            "results[].file_id",
+                            "results[].column",
+                            "results[].is_exported",
+                            "symbols[].object_id",
+                            "symbols[].file_id",
+                            "symbols[].signature",
+                            "symbols[].callees",
+                            "symbols[].callers",
+                            "symbols[].incoming_refs",
+                            "symbols[].parameter_count",
+                            "file.file_id",
+                            "summary.purity_ratio",
+                            "status",
+                            "progress",
+                            "file_count",
+                            "index_time_ms",
+                            "progress.files_processed",
+                            "progress.indexing_progress",
+                            "progress.overall_progress",
+                            "reference_count",
+                            "symbol_count",
+                            "total_size_bytes",
+                            "contexts[].purity",
+                        };
+                        inner_opts.sort_array_paths = {"results", "symbols",
+                                                       "metrics_issues",
+                                                       "duplicates",
+                                                       "naming_issues"};
+                        it.value() =
+                            spec_diff::canonicalize_json(inner, inner_opts).dump();
+                    } catch (...) {
+                    }
+                }
+            } else {
+                NormalizeMcpInnerText(it.value(), corpus_path);
+            }
+        }
+    } else if (node.is_array()) {
+        for (auto& elem : node) {
+            NormalizeMcpInnerText(elem, corpus_path);
+        }
+    }
+}
+
+// Apply MCP inner-text normalization to a raw JSON string in-place.
+// Returns the input unchanged when parsing fails or when the payload does
+// not contain a `text` field. Both the live capture and the golden go
+// through this — Go's golden has no signature field, so the mask is a
+// no-op on that side and a strip on the C++ side.
+std::string NormalizeMcpRaw(const std::string& raw,
+                            const std::string& corpus_path) {
+    try {
+        auto parsed = nlohmann::json::parse(raw);
+        NormalizeMcpInnerText(parsed, corpus_path);
+        return parsed.dump();
+    } catch (...) {
+        return raw;
+    }
 }
 
 std::string ResolveCorpus(const std::string& key) {
@@ -293,8 +391,19 @@ void ExpectSpecMatches(const SpecCase& spec_case) {
 
     spec_diff::DiffResult diff;
     try {
-        diff = spec_diff::assert_matches(actual_raw, spec_descriptor,
-                                         golden_path.string());
+        if (descriptor.mode == Mode::Mcp) {
+            // Unwrap and mask result.content[].text inner JSON on both
+            // sides before tier diff — see NormalizeMcpInnerText doc.
+            const std::string normalized_actual =
+                NormalizeMcpRaw(actual_raw, corpus_path);
+            const std::string normalized_golden =
+                NormalizeMcpRaw(Slurp(golden_path), corpus_path);
+            diff = spec_diff::assert_matches_with_golden(
+                normalized_actual, normalized_golden, spec_descriptor);
+        } else {
+            diff = spec_diff::assert_matches(actual_raw, spec_descriptor,
+                                             golden_path.string());
+        }
     } catch (const std::exception& error) {
         FAIL() << "Failed to compare against golden: " << error.what();
     }
