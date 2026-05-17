@@ -24,11 +24,11 @@ Bucket meanings:
 | `cli/debug/info` | 0 | ✓ | 0 | 0 | 0 | 0 | 0 |
 | `cli/debug/validate` | 0 |   | 0 | 0 | 0 | 0 | 0 |
 | `cli/git/git-analyze` | 3 | ✓ | 2 | 0 | 1 | 0 | 0 |
-| `cli/search/assembly-rejected` | 1 | ✓ | 0 | 0 | 0 | 0 | 1 |
+| `cli/search/assembly-rejected` | 0 | ✓ | 0 | 0 | 0 | 0 | 0 |
 | `cli/search/basic` | 0 |   | 0 | 0 | 0 | 0 | 0 |
 | `cli/search/case-insensitive` | 0 | ✓ | 0 | 0 | 0 | 0 | 0 |
 | `cli/search/compact` | 0 |   | 0 | 0 | 0 | 0 | 0 |
-| `cli/search/enhanced-rejected` | 1 | ✓ | 0 | 0 | 0 | 0 | 1 |
+| `cli/search/enhanced-rejected` | 0 | ✓ | 0 | 0 | 0 | 0 | 0 |
 | `cli/search/exclude-path` | 0 | ✓ | 0 | 0 | 0 | 0 | 0 |
 | `cli/search/grep-exclude-path` | 0 | ✓ | 0 | 0 | 0 | 0 | 0 |
 | `cli/search/grep` | 0 |   | 0 | 0 | 0 | 0 | 0 |
@@ -107,12 +107,11 @@ Bucket meanings:
 | `probes/export` | 0 |   | 0 | 0 | 0 | 0 | 0 |
 | `probes/graph` | 0 |   | 0 | 0 | 0 | 0 | 0 |
 
-**Totals:** 133 masks across 87 descriptors. a=33, b=21, c=47, d=30, ?=2.
+**Totals:** 131 masks across 87 descriptors. a=33, b=21, c=47, d=30, ?=0.
 
 ## Unclassified fields needing manual review
 
-- cli/search/assembly-rejected: _rationale
-- cli/search/enhanced-rejected: _rationale
+None. ✓
 
 ## Descriptors with masks but no `_rationale`
 

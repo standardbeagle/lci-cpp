@@ -63,6 +63,25 @@ def classify(p):
     return "?"
 
 
+def _ignore_paths(tiers_ignore):
+    """Extract the list of masked field paths from a tiers.ignore entry.
+
+    Two descriptor shapes exist:
+      1. tiers.ignore = ["path.a", "path.b"]  (list of paths)
+      2. tiers.ignore = {"_rationale": "..."}  (dict — empty mask set,
+         rationale-only documenting why the tier is empty)
+
+    The dict form contributes no maskable paths; underscore-prefixed keys
+    in either form are metadata, not field paths.
+    """
+    if isinstance(tiers_ignore, list):
+        return [p for p in tiers_ignore if isinstance(p, str)
+                and not p.startswith("_")]
+    if isinstance(tiers_ignore, dict):
+        return [k for k in tiers_ignore.keys() if not k.startswith("_")]
+    return []
+
+
 def collect():
     rows = []
     for f in sorted(DESC_DIR.rglob("*.parity.json")):
@@ -70,9 +89,10 @@ def collect():
             d = json.loads(f.read_text())
         except json.JSONDecodeError:
             continue
+        tiers = d.get("tiers", {}) or {}
         rows.append({
             "id": d.get("id", str(f.relative_to(DESC_DIR))),
-            "ignore": (d.get("tiers", {}) or {}).get("ignore", []) or [],
+            "ignore": _ignore_paths(tiers.get("ignore", [])),
             "rationale": d.get("_rationale", ""),
             "path": str(f.relative_to(ROOT)),
         })
