@@ -1,3 +1,17 @@
 {
-  "claims": {}
+  "claims": {
+    "03rQL2KMn6Qd": {
+      "runner_instance_id": "beagle-ab-801666",
+      "runner_email": "andybrummer@standardbeagle.com",
+      "claimed_at": "2026-05-17T03:29:07Z",
+      "agent_id": "beagle-ab-801666",
+      "parent_loop_id": "AN8m7hohEdlM",
+      "purpose": "iter 21: mcp find_files+list_symbols determinism",
+      "source_event": {
+        "loop_id": "AN8m7hohEdlM",
+        "task_id": "03rQL2KMn6Qd",
+        "conversation_id": "7bbe80a9-66f2-4da2-8bca-ce21030d0454"
+      }
+    }
+  }
 }
