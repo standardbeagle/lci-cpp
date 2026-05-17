@@ -431,8 +431,10 @@ void apply_search(Config& cfg, const KdlNode& node) {
 Config make_kdl_base_config() {
     Config cfg = make_default_config();
 
-    // index: Go's parseKDL literal omits these three -> Go zero values.
-    cfg.index.respect_gitignore = false;
+    // index: Go's parseKDL literal omits these two -> Go zero values.
+    // (respect_gitignore is NOT zero-valued by Go's parseKDL — confirmed
+    // empirically against the Go binary on a KDL that omits the field;
+    // it stays true. Leaving the struct default in place here.)
     cfg.index.watch_mode = false;
     cfg.index.watch_debounce_ms = 0;
 
