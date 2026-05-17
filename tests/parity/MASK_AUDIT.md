@@ -3,7 +3,7 @@
 **Auto-generated** by `python3 tests/parity/scripts/mask_audit.py`.
 Run after editing any descriptor and check in the result.
 
-Coverage: 86 parity descriptors.
+Coverage: 87 parity descriptors.
 
 Bucket meanings:
 - **(a) Non-determinism / RPC envelope.** Always safe to ignore.
@@ -101,12 +101,13 @@ Bucket meanings:
 | `mcp/search_definitions/basic` | 0 | ✓ | 0 | 0 | 0 | 0 | 0 |
 | `mcp/semantic_annotations/basic` | 0 | ✓ | 0 | 0 | 0 | 0 | 0 |
 | `mcp/side_effects/basic` | 0 | ✓ | 0 | 0 | 0 | 0 | 0 |
+| `mcp/tools_list/basic` | 0 | ✓ | 0 | 0 | 0 | 0 | 0 |
 | `mcp/tree/basic` | 0 | ✓ | 0 | 0 | 0 | 0 | 0 |
 | `probes/deps` | 0 |   | 0 | 0 | 0 | 0 | 0 |
 | `probes/export` | 0 |   | 0 | 0 | 0 | 0 | 0 |
 | `probes/graph` | 0 |   | 0 | 0 | 0 | 0 | 0 |
 
-**Totals:** 133 masks across 86 descriptors. a=33, b=21, c=47, d=30, ?=2.
+**Totals:** 133 masks across 87 descriptors. a=33, b=21, c=47, d=30, ?=2.
 
 ## Unclassified fields needing manual review
 

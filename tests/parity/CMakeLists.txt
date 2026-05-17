@@ -80,6 +80,19 @@ else()
         file(RELATIVE_PATH NAME ${CMAKE_CURRENT_SOURCE_DIR}/descriptors ${D})
         string(REPLACE "/" "." TID ${NAME})
         string(REPLACE ".parity.json" "" TID ${TID})
+
+        # Extract the descriptor's corpus name so we can scope the
+        # per-test RESOURCE_LOCK to that corpus only — see README
+        # "Parallel execution" section for the rationale. file(READ) +
+        # regex is enough; every descriptor has a literal "corpus":
+        # "<name>" line near the top.
+        file(READ ${D} DESC_CONTENT)
+        if(DESC_CONTENT MATCHES "\"corpus\"[ \t]*:[ \t]*\"([^\"]+)\"")
+            set(CORPUS_NAME "${CMAKE_MATCH_1}")
+        else()
+            set(CORPUS_NAME "unknown")
+        endif()
+
         add_test(NAME parity.${TID}
                  COMMAND parity_runner ${D}
                  WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
@@ -87,14 +100,19 @@ else()
             LABELS "parity"
             FIXTURES_REQUIRED parity_fixture
             ENVIRONMENT "LCI_GO=${LCI_GO_PATH};LCI_CPP=$<TARGET_FILE:lci>;PARITY_CORPORA=${CMAKE_CURRENT_SOURCE_DIR}/corpora;PARITY_FAILURES=${CMAKE_BINARY_DIR}/parity-failures"
-            TIMEOUT 120)
+            TIMEOUT 120
+            # Per-corpus serialization: every parity descriptor (cli /
+            # mcp / http / index) ends up touching a server keyed on
+            # corpus path — the C++ binary's CLI subcommands auto-spawn
+            # or auto-connect to the per-corpus Unix socket (same hash
+            # as HTTP mode), and `lci debug export` queries the running
+            # server. Two tests against the same corpus therefore race
+            # on socket bind/connect. Lock per corpus so different
+            # corpora still run in parallel.
+            RESOURCE_LOCK "parity-corpus-${CORPUS_NAME}")
         if(D MATCHES ".*/descriptors/index/.*")
             set_tests_properties(parity.${TID} PROPERTIES
                 TIMEOUT 420)
-        endif()
-        if(D MATCHES ".*/descriptors/http/.*")
-            set_tests_properties(parity.${TID} PROPERTIES
-                RESOURCE_LOCK "parity-http-socket")
         endif()
     endforeach()
 endif()

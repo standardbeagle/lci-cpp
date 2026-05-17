@@ -13,6 +13,43 @@ baseline stays green.
     cmake --build build/debug -j$(nproc)
     ctest --test-dir build/debug -L parity --output-on-failure -j$(nproc)
 
+## Parallel execution
+
+Parity tests are safe to run with `ctest -j$(nproc)`. Each descriptor lists a
+`corpus` (e.g. `multi-lang`, `lci-go-repo`); the CMake harness extracts that
+field and tags the test with `RESOURCE_LOCK "parity-corpus-<name>"`. CTest
+then serializes any two tests that share a corpus while still running
+different-corpus tests in parallel.
+
+This is necessary because both Go and C++ servers compute their Unix socket
+path from a hash of the *corpus path*, not from a per-test instance:
+
+```
+socket_path = /tmp/lci-server-<hash-of-corpus>.sock
+```
+
+Two tests running against the same corpus simultaneously would race on
+`bind(2)` / `connect(2)` against that socket — and on the per-corpus server
+process itself (`lci debug export`, MCP/HTTP handlers all hit the same
+server). The per-corpus lock makes parallel and serial runs equivalent in
+outcome.
+
+Distinct corpora currently in use: `empty`, `single-file`, `multi-lang`,
+`lci-go-repo`, `lci-cpp-repo`. Maximum useful parallelism on parity tests is
+therefore bounded by the number of distinct corpora (≈5), regardless of
+`-j$(nproc)`. Mode (`cli` / `mcp` / `http` / `index`) does *not* serialize —
+only corpus does.
+
+If a parity test still flakes under `-j`, suspect either:
+- A descriptor missing the `"corpus"` field (regex falls back to `unknown`,
+  which lumps the test in with every other malformed descriptor).
+- A non-server-mediated resource (a temp file path baked into the runner,
+  a hard-coded port elsewhere). File the case with the offending test ID.
+
+CI runs parity in two configurations: parallel (`-j$(nproc)`) for normal
+PRs, and serial (`-j1`) as a separate matrix entry to detect any future
+locking regressions.
+
 ## Triage failures
 
 When a parity test fails, the runner writes a dump to

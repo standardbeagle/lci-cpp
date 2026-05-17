@@ -159,7 +159,7 @@ jobs:
         if: matrix.preset == 'release'
         run: ./tests/parity/corpora/prep_real.sh
 
-      - name: Run parity tests
+      - name: Run parity tests (parallel)
         if: matrix.preset == 'release'
         continue-on-error: true
         run: |
@@ -171,6 +171,22 @@ jobs:
             exit 0
           fi
           ctest -L parity --output-on-failure --parallel $(nproc) || true
+
+      # Serial parity run — guards against future regressions in the
+      # per-corpus RESOURCE_LOCK scheme. If the parallel run above
+      # passes but this fails, the issue is locking, not divergence.
+      - name: Run parity tests (serial, -j1)
+        if: matrix.preset == 'release' && runner.os == 'Linux' && matrix.compiler == 'gcc'
+        continue-on-error: true
+        run: |
+          set -e
+          cd build/release
+          PARITY_COUNT=$(ctest -L parity --show-only 2>/dev/null | grep -c "Test #" || true)
+          if [ "$PARITY_COUNT" -lt 2 ]; then
+            echo "::warning::Parity tests not registered. Skipping serial parity step."
+            exit 0
+          fi
+          ctest -L parity --output-on-failure --parallel 1 || true
 
       - name: Upload release binary
         if: (matrix.preset == 'release' || matrix.preset == 'macos-universal') && github.event_name == 'push' && github.ref == 'refs/heads/main'
