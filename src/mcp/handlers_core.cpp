@@ -514,9 +514,20 @@ ToolResult handle_get_context(const nlohmann::json& params,
     }
 
     // No-mode path: Go builds its objectIDs list solely from args.ID
-    // (comma-separated). args.Name passes validation but is never resolved
-    // here — a name-only call yields an empty result set, matching Go's
-    // id-only no-mode contract (golden: {contexts:[],count:0}).
+    // (comma-separated). args.Name passes Go's validateGetContextParams
+    // but is never resolved here — Go's id-only no-mode contract yields
+    // an empty result. C++ honored that silently, which is a Karpathy
+    // rule 6 violation (no 'implemented but returns empty' stubs).
+    // Surface the divergence: name-only without mode is unsupported.
+    if (has_name && mode.empty()) {
+        return make_error_response(
+            "get_context",
+            "name-based context lookup requires the 'mode' parameter; "
+            "the C++ port does not implement mode-based context lookup yet. "
+            "Use 'id' with the object ID (o=XX) from search results, "
+            "e.g. {\"id\": \"VE\"}.");
+    }
+
     nlohmann::json contexts = nlohmann::json::array();
     nlohmann::json errors = nlohmann::json::array();
     std::string_view remaining = object_id;
