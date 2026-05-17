@@ -780,10 +780,15 @@ ToolResult handle_find_files(const nlohmann::json& params,
         }
     }
 
-    // Sort by score descending
+    // Sort by score descending, with deterministic tiebreakers.
+    // file_map is absl::flat_hash_map → iteration order is non-deterministic.
+    // Without explicit tiebreak, equal-score matches surface in hash order.
+    // Tiebreak: file_id ascending (matches Go golden ordering), then path.
     std::sort(matches.begin(), matches.end(),
               [](const FileMatch& a, const FileMatch& b) {
-                  return a.score > b.score;
+                  if (a.score != b.score) return a.score > b.score;
+                  if (a.file_id != b.file_id) return a.file_id < b.file_id;
+                  return a.path < b.path;
               });
 
     // Limit results

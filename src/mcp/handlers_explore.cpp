@@ -416,19 +416,30 @@ bool matches_list_filters(const EnhancedSymbol& sym,
 }
 
 /// Sorts symbol list by the given key.
+/// All paths apply (file_path, line) tiebreakers to keep output deterministic
+/// — input file iteration comes from a hash-keyed structure whose order is
+/// not stable across runs (Karpathy rule 4: determinism non-negotiable).
 void sort_symbols(std::vector<SymbolWithFile>& symbols,
                   const std::string& sort_by) {
+    auto tiebreak = [](const SymbolWithFile& a, const SymbolWithFile& b) {
+        if (a.file_path != b.file_path) return a.file_path < b.file_path;
+        return a.sym->symbol.line < b.sym->symbol.line;
+    };
     auto low = to_lower(sort_by);
     if (low == "complexity") {
         std::sort(symbols.begin(), symbols.end(),
-                  [](const SymbolWithFile& a, const SymbolWithFile& b) {
-                      return a.sym->complexity > b.sym->complexity;
+                  [&](const SymbolWithFile& a, const SymbolWithFile& b) {
+                      if (a.sym->complexity != b.sym->complexity)
+                          return a.sym->complexity > b.sym->complexity;
+                      return tiebreak(a, b);
                   });
     } else if (low == "refs") {
         std::sort(symbols.begin(), symbols.end(),
-                  [](const SymbolWithFile& a, const SymbolWithFile& b) {
-                      return a.sym->incoming_refs.size() >
-                             b.sym->incoming_refs.size();
+                  [&](const SymbolWithFile& a, const SymbolWithFile& b) {
+                      auto ar = a.sym->incoming_refs.size();
+                      auto br = b.sym->incoming_refs.size();
+                      if (ar != br) return ar > br;
+                      return tiebreak(a, b);
                   });
     } else if (low == "line") {
         std::sort(symbols.begin(), symbols.end(),
@@ -439,14 +450,19 @@ void sort_symbols(std::vector<SymbolWithFile>& symbols,
                   });
     } else if (low == "params") {
         std::sort(symbols.begin(), symbols.end(),
-                  [](const SymbolWithFile& a, const SymbolWithFile& b) {
-                      return a.sym->parameter_count > b.sym->parameter_count;
+                  [&](const SymbolWithFile& a, const SymbolWithFile& b) {
+                      if (a.sym->parameter_count != b.sym->parameter_count)
+                          return a.sym->parameter_count >
+                                 b.sym->parameter_count;
+                      return tiebreak(a, b);
                   });
     } else {
-        // Default: sort by name
+        // Default: sort by name, then file_path, then line.
         std::sort(symbols.begin(), symbols.end(),
-                  [](const SymbolWithFile& a, const SymbolWithFile& b) {
-                      return a.sym->symbol.name < b.sym->symbol.name;
+                  [&](const SymbolWithFile& a, const SymbolWithFile& b) {
+                      if (a.sym->symbol.name != b.sym->symbol.name)
+                          return a.sym->symbol.name < b.sym->symbol.name;
+                      return tiebreak(a, b);
                   });
     }
 }
