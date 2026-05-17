@@ -517,10 +517,13 @@ TEST_F(KdlConfigTest, FileWithoutIndexBlockUsesGoZeroValueIndexDefaults) {
     auto result = load_config(temp_dir_.string());
     ASSERT_TRUE(result.ok()) << result.error;
 
-    // Go's parseKDL literal omits these, so they are Go zero values.
-    EXPECT_FALSE(result.config.index.respect_gitignore)
-        << "Go emits respect_gitignore false when a .lci.kdl is loaded "
-           "without an index block";
+    // Go's parseKDL leaves respect_gitignore at the struct default (true)
+    // when the KDL omits the field — empirically verified against the Go
+    // binary (see commit ec91211, iter-24). Only watch_mode and
+    // watch_debounce_ms zero-value through the omit path.
+    EXPECT_TRUE(result.config.index.respect_gitignore)
+        << "Go emits respect_gitignore true when a .lci.kdl is loaded "
+           "without an explicit respect_gitignore field";
     EXPECT_FALSE(result.config.index.watch_mode)
         << "Go's parseKDL literal omits watch_mode -> zero value false";
     EXPECT_EQ(result.config.index.watch_debounce_ms, 0)
