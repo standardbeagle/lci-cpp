@@ -1,4 +1,5 @@
 #include "runner/modes/cli.h"
+#include "runner/modes/child_guard.h"
 #include "runner/modes/subst.h"
 
 #include <fcntl.h>
@@ -44,6 +45,9 @@ CapturedOutput run_cli(const std::string& binary_path,
 
     pid_t pid = fork();
     if (pid < 0) {
+        ::close(out_pipe[0]); ::close(out_pipe[1]);
+        ::close(err_pipe[0]); ::close(err_pipe[1]);
+        ::close(in_pipe[0]);  ::close(in_pipe[1]);
         throw std::runtime_error(std::string("fork failed: ") + strerror(errno));
     }
 
@@ -81,6 +85,15 @@ CapturedOutput run_cli(const std::string& binary_path,
     }
 
     // parent
+    // RAII guard: if std::thread construction below throws (e.g. EAGAIN),
+    // or any future addition between fork and waitpid throws, the child
+    // is SIGTERM-then-SIGKILL reaped instead of orphaned. Karpathy rule 4
+    // (determinism — race-free is faster than race-with-retry) + the
+    // task evidence: parity_verify catches 3 orphans / 5 sockets after
+    // the multi-lang corpus suite. Released explicitly once the existing
+    // wait_for / SIGKILL loop has reaped the child.
+    ChildProcessGuard guard(pid);
+
     close(in_pipe[0]);
     close(out_pipe[1]);
     close(err_pipe[1]);
@@ -125,6 +138,9 @@ CapturedOutput run_cli(const std::string& binary_path,
     err_reader.join();
     close(out_pipe[0]);
     close(err_pipe[0]);
+
+    // Child reaped above; release guard so dtor is a no-op.
+    guard.release();
 
     cap.stdout_data = std::move(stdout_buf);
     cap.stderr_data = std::move(stderr_buf);

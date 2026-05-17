@@ -25,8 +25,49 @@ count_orphans() {
     match_proc | wc -l
 }
 
+# Count only sockets currently bound by an lci server whose --root is
+# inside the parity corpora tree. Without this scoping, unrelated lci
+# daemons on the same machine (e.g. an editor-integration server rooted
+# at the user's main project) would have their socket files counted as
+# parity orphans because they share the global /tmp namespace.
+#
+# Implementation: lsof reports each socket file with its owning pid;
+# cross-check those pids against the same `match_proc` filter used for
+# the process count. Falls back to the old broad count if lsof is
+# missing — bare WSL/CI containers always include it.
 count_sockets() {
-    ls /tmp/lci-*-*.sock /tmp/lci-server-*.sock 2>/dev/null | wc -l
+    local socks
+    socks="$(ls /tmp/lci-*-*.sock /tmp/lci-server-*.sock 2>/dev/null)"
+    if [ -z "$socks" ]; then
+        echo 0
+        return
+    fi
+    if ! command -v lsof >/dev/null 2>&1; then
+        # No lsof — fall back to raw count so we still flag *something*.
+        echo "$socks" | wc -l
+        return
+    fi
+    local parity_pids
+    parity_pids="$(match_proc | sort -u | tr '\n' '|' | sed 's/|$//')"
+    if [ -z "$parity_pids" ]; then
+        # No parity-rooted procs alive → no parity sockets either.
+        echo 0
+        return
+    fi
+    local n=0
+    local sock
+    for sock in $socks; do
+        local owners
+        owners="$(lsof -t "$sock" 2>/dev/null | sort -u)"
+        local p
+        for p in $owners; do
+            if echo "$p" | grep -qE "^(${parity_pids})$"; then
+                n=$((n + 1))
+                break
+            fi
+        done
+    done
+    echo "$n"
 }
 
 case "$mode" in
@@ -46,6 +87,8 @@ case "$mode" in
         if [ "$n_proc" -gt 0 ] || [ "$n_sock" -gt 0 ]; then
             echo "$0: orphan check FAILED: $n_proc procs, $n_sock sockets" >&2
             match_proc | xargs -r ps -p >&2 || true
+            # Raw socket inventory for diagnostic context — count_sockets
+            # has already scoped the *count* to parity-owned ones.
             ls /tmp/lci-*-*.sock /tmp/lci-server-*.sock 2>/dev/null >&2 || true
             exit_code=1
         else

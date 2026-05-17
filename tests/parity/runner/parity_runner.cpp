@@ -226,6 +226,16 @@ int run_cli_descriptor(const Descriptor& d) {
     auto go_out  = run_cli(go_bin,  d.invocation, corpus_path);
     auto cpp_out = run_cli(cpp_bin, d.invocation, corpus_path);
 
+    // Both the Go and C++ lci CLI subcommands auto-spawn a detached
+    // (setsid) per-corpus server daemon via ensure_server_running()
+    // — see src/cli/server.cpp. That daemon survives the CLI parent
+    // exit by design, which is correct for normal use but leaks in
+    // the parity suite (parity_verify flags 3+ procs + sockets after
+    // multi-lang corpus runs). Send /shutdown over the socket to both
+    // candidate names; falls back to pgrep+SIGTERM/SIGKILL if /shutdown
+    // doesn't take. Scoped to this corpus only.
+    shutdown_corpus_servers(corpus_path);
+
     if (go_out.timed_out || cpp_out.timed_out) {
         std::cerr << "infra: timeout\n";
         return 2;
@@ -326,6 +336,11 @@ int run_mcp_descriptor(const Descriptor& d) {
     auto go  = run_mcp(go_bin,  d, corpus_path, framing_for_binary(go_bin));
     auto cpp = run_mcp(cpp_bin, d, corpus_path, framing_for_binary(cpp_bin));
 
+    // MCP descriptors that exercise tools backed by the index server
+    // also auto-spawn the per-corpus daemon (same path as CLI mode).
+    // See run_cli_descriptor for full rationale.
+    shutdown_corpus_servers(corpus_path);
+
     if (go.timed_out || cpp.timed_out) {
         std::cerr << "infra: mcp timeout\n";
         return 2;
@@ -389,6 +404,12 @@ int run_index_descriptor(const Descriptor& d) {
 
     auto go_out  = run_index_export(go_bin,  d, corpus_path);
     auto cpp_out = run_index_export(cpp_bin, d, corpus_path);
+
+    // index_export uses `debug export` which is supposed to run
+    // standalone (no server spawn), but pre-existing builds may have
+    // a per-corpus daemon already running from prior CLI tests in the
+    // same suite — clean up defensively. Cheap no-op when no daemon.
+    shutdown_corpus_servers(corpus_path);
 
     if (go_out.timed_out || cpp_out.timed_out) {
         std::cerr << "infra: index export timeout\n";

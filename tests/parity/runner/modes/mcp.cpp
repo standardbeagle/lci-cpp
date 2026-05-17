@@ -1,4 +1,5 @@
 #include "runner/modes/mcp.h"
+#include "runner/modes/child_guard.h"
 #include "runner/modes/subst.h"
 
 #include <fcntl.h>
@@ -128,6 +129,10 @@ CapturedOutput run_mcp(const std::string& binary_path,
 
     pid_t pid = fork();
     if (pid < 0) {
+        // Close parent ends to avoid fd leak on the throw path.
+        ::close(out_pipe[0]); ::close(out_pipe[1]);
+        ::close(in_pipe[0]);  ::close(in_pipe[1]);
+        ::close(err_pipe[0]); ::close(err_pipe[1]);
         throw std::runtime_error("fork failed");
     }
     if (pid == 0) {
@@ -163,6 +168,11 @@ CapturedOutput run_mcp(const std::string& binary_path,
         execvp(prog.c_str(), argv.data());
         _exit(127);
     }
+
+    // RAII: any exception below (std::thread ctor OOM, read_frame errors,
+    // future additions) reaps the child instead of orphaning it. Released
+    // before the explicit waitpid on the happy path. Karpathy rule 4.
+    ChildProcessGuard guard(pid);
 
     close(in_pipe[0]);
     close(out_pipe[1]);
@@ -204,7 +214,24 @@ CapturedOutput run_mcp(const std::string& binary_path,
     close(in_pipe[1]);
     ::kill(pid, SIGTERM);
     int status = 0;
-    waitpid(pid, &status, 0);
+    // Bounded reap: SIGTERM-then-poll-up-to-2 s, SIGKILL on stragglers.
+    // Prior code used blocking waitpid(0) which hung if the MCP child
+    // ignored SIGTERM, contributing to orphan leaks under stress.
+    {
+        auto deadline_kill = std::chrono::steady_clock::now() +
+                             std::chrono::seconds(2);
+        pid_t w = 0;
+        while (std::chrono::steady_clock::now() < deadline_kill) {
+            w = waitpid(pid, &status, WNOHANG);
+            if (w == pid || w == -1) break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+        if (w != pid && w != -1) {
+            ::kill(pid, SIGKILL);
+            waitpid(pid, &status, 0);
+        }
+    }
+    guard.release();  // reaped explicitly
 
     // Signal EOF to err_reader by closing read end after child has exited.
     close(err_pipe[0]);
