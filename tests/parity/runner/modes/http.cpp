@@ -296,6 +296,30 @@ void shutdown_corpus_servers(const std::string& corpus_path) {
             if (!pids.empty()) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(500));
                 for (pid_t pid : pids) ::kill(pid, SIGKILL);
+                // SIGKILL doesn't reap. These daemons were spawned via
+                // setsid so we're not their parent; init reaps them
+                // asynchronously. parity_verify also calls pgrep — it
+                // can still see the dying PIDs for a few ms after SIGKILL
+                // until /proc/<pid> disappears. Poll /proc with a short
+                // ceiling so the next test (and parity_verify) see a
+                // clean process table. Karpathy rule 4 — race-free.
+                auto deadline = std::chrono::steady_clock::now() +
+                                std::chrono::seconds(3);
+                while (std::chrono::steady_clock::now() < deadline) {
+                    bool any_alive = false;
+                    for (pid_t pid : pids) {
+                        std::string proc_path =
+                            "/proc/" + std::to_string(pid);
+                        std::error_code ec;
+                        if (fs::exists(proc_path, ec)) {
+                            any_alive = true;
+                            break;
+                        }
+                    }
+                    if (!any_alive) break;
+                    std::this_thread::sleep_for(
+                        std::chrono::milliseconds(20));
+                }
             }
         }
     }

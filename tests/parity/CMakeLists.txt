@@ -111,8 +111,11 @@ else()
             # corpora still run in parallel.
             RESOURCE_LOCK "parity-corpus-${CORPUS_NAME}")
         if(D MATCHES ".*/descriptors/index/.*")
+            # index_export runs Go then C++ binaries serially, each capped
+            # at 600s by run_index_export. Outer ctest timeout = 2×600
+            # plus 120s slack for build/IO.
             set_tests_properties(parity.${TID} PROPERTIES
-                TIMEOUT 420)
+                TIMEOUT 1320)
         endif()
     endforeach()
 endif()
