@@ -1262,8 +1262,17 @@ int run_search(const GlobalFlags& flags, const std::string& pattern,
     if (use_regex) {
         auto seed = longest_literal_run(effective_pattern);
         if (seed.size() < 3) {
-            std::cerr << "Error: --regex pattern must contain a literal "
-                         "substring of at least 3 characters\n";
+            std::cerr
+                << "Error: --regex pattern must contain a literal "
+                   "substring of at least 3 characters.\n"
+                   "  The trigram index seeds the regex with this literal "
+                   "for a sub-millisecond candidate-set lookup; pure-meta\n"
+                   "  patterns like '\\d+', '^[a-z]+$', or '.{N}' require "
+                   "a full-corpus scan which is not yet implemented.\n"
+                   "  Workaround: prefix or anchor the regex with a "
+                   "literal substring of >=3 chars.\n"
+                   "  Tracked: Dart AegvABjs4MF0 "
+                   "(real regex engine for lci search).\n";
             return 1;
         }
         RE2::Options regex_opts(RE2::Quiet);
