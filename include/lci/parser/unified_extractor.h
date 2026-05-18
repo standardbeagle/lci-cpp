@@ -262,13 +262,10 @@ class UnifiedExtractor {
     PositionKey current_func_key_{};
     bool has_current_func_{};
 
-    // Node type cache (bounded to prevent memory accumulation)
-    static constexpr std::size_t kNodeTypeCacheMaxSize = 10000;
-    struct NodeTypeEntry {
-        uintptr_t id{};
-        std::string type;
-    };
-    std::vector<NodeTypeEntry> node_type_cache_;
+    // Node-type caching deliberately removed (perf record showed the
+    // linear-scan cache was 20.36% of CPU on real-project indexing).
+    // ts_node_type returns into tree-sitter's interned static table —
+    // no caching needed.
 
     // Handled nodes set (for JS context-aware extraction)
     struct HandledEntry {

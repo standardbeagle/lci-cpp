@@ -113,7 +113,6 @@ void UnifiedExtractor::reset() {
     complexity_stack_.clear();
     has_current_func_ = false;
 
-    node_type_cache_.clear();
     handled_nodes_.clear();
 }
 
@@ -182,11 +181,11 @@ UnifiedExtractor::lookup_declaration(int line, int column) const {
 void UnifiedExtractor::visit_node(TSNode node) {
     if (ts_node_is_null(node)) return;
 
-    // Copy to local string because get_node_type returns a string_view into
-    // node_type_cache_ which can be invalidated by vector reallocation during
-    // recursive child visits.
-    std::string node_type_owned(get_node_type(node));
-    std::string_view node_type = node_type_owned;
+    // get_node_type returns a view into tree-sitter's interned static
+    // symbol table — stable for the lifetime of the parser/language.
+    // No copy needed; the previous std::string here was a per-visit
+    // heap alloc accommodating the prior (since-removed) vector cache.
+    std::string_view node_type = get_node_type(node);
 
     // === COMPLEXITY TRACKING ===
     PositionKey func_key{};
@@ -279,24 +278,17 @@ void UnifiedExtractor::visit_node(TSNode node) {
 // ---------------------------------------------------------------------------
 
 std::string_view UnifiedExtractor::get_node_type(TSNode node) {
-    uintptr_t id = reinterpret_cast<uintptr_t>(node.id);
-
-    for (const auto& entry : node_type_cache_) {
-        if (entry.id == id) return entry.type;
-    }
-
+    // ts_node_type returns a pointer into tree-sitter's interned, static
+    // language-symbol table — stable for the lifetime of the parser.
+    // No copy, no cache: just return the view. The prior cache
+    // implementation linear-scanned a vector<NodeTypeEntry> on every
+    // call AND copied each uncached type into a std::string (heap
+    // alloc per uncached node) AND grew unbounded past the "max size"
+    // gate — a single hot-path optimization undid all three.
+    // perf record on BM_RealProjectIndexFastapi pinned get_node_type at
+    // 20.36% of CPU before this fix.
     const char* raw = ts_node_type(node);
-    std::string type_str(raw);
-
-    if (node_type_cache_.size() < kNodeTypeCacheMaxSize) {
-        node_type_cache_.push_back({id, std::move(type_str)});
-        return node_type_cache_.back().type;
-    }
-
-    // Cache full -- return from temporary (caller uses immediately)
-    // Store in a small rotating buffer to keep string alive
-    node_type_cache_.push_back({id, std::move(type_str)});
-    return node_type_cache_.back().type;
+    return raw ? std::string_view(raw) : std::string_view{};
 }
 
 // ---------------------------------------------------------------------------
