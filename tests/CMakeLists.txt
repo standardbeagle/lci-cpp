@@ -110,7 +110,7 @@ gtest_discover_tests(lci_helpers_tests
 )
 
 # ---------------------------------------------------------------------------
-# Integration tests
+# Integration tests (non-real-project)
 # ---------------------------------------------------------------------------
 add_executable(lci_integration_tests
     integration/pipeline_integration_test.cpp
@@ -119,11 +119,6 @@ add_executable(lci_integration_tests
     integration/mcp_tools_integration_test.cpp
     integration/spec_runner.cpp
     integration/spec_migration_test.cpp
-    integration/real_project_integration_test.cpp
-    integration/real_project_analysis_test.cpp
-    integration/real_project_context_test.cpp
-    integration/real_project_phrase_test.cpp
-    integration/real_project_performance_test.cpp
 )
 target_include_directories(lci_integration_tests PRIVATE
     "${CMAKE_SOURCE_DIR}/include"
@@ -144,11 +139,46 @@ gtest_discover_tests(lci_integration_tests
     PROPERTIES
         LABELS "integration"
         ENVIRONMENT "LCI_CPP=$<TARGET_FILE:lci>;PARITY_CORPORA=${CMAKE_CURRENT_SOURCE_DIR}/parity/corpora"
-        # 180s cap. Real-project indexing tests (chi/pocketbase/fastapi)
-        # legitimately need 30-120s each on cold cache; a 60s cap was
-        # killing them mid-index. ServerLifecycle hang class still needs
-        # a real fix; 180s lets the legit slow path finish.
         TIMEOUT 180
+)
+
+# ---------------------------------------------------------------------------
+# Real-project tests (bundled into one binary, run as ONE ctest entry so
+# the in-process setup_real_project cache amortizes indexing across all
+# TEST_F cases on the same corpus). Cuts integration wall by ~5× on the
+# real-project subset (165s separate-process → 17s bundled).
+# ---------------------------------------------------------------------------
+add_executable(lci_real_project_tests
+    integration/real_project_integration_test.cpp
+    integration/real_project_analysis_test.cpp
+    integration/real_project_context_test.cpp
+    integration/real_project_phrase_test.cpp
+    integration/real_project_performance_test.cpp
+    integration/spec_runner.cpp
+)
+target_include_directories(lci_real_project_tests PRIVATE
+    "${CMAKE_SOURCE_DIR}/include"
+    "${CMAKE_BINARY_DIR}/generated"
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+target_compile_definitions(lci_real_project_tests PRIVATE
+    LCI_TESTS_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+)
+target_link_libraries(lci_real_project_tests PRIVATE
+    lci_lib
+    lci_parity_runner_lib
+    spec_diff
+    GTest::gtest_main
+)
+
+add_test(NAME lci_real_project_suite
+         COMMAND lci_real_project_tests)
+set_tests_properties(lci_real_project_suite PROPERTIES
+    LABELS "integration"
+    ENVIRONMENT "LCI_CPP=$<TARGET_FILE:lci>;PARITY_CORPORA=${CMAKE_CURRENT_SOURCE_DIR}/parity/corpora"
+    # 600s for the whole bundled suite; cache makes per-test cost near
+    # zero after the first indexed corpus, so this is generous.
+    TIMEOUT 600
 )
 
 # ---------------------------------------------------------------------------

@@ -11,6 +11,9 @@
 #include <nlohmann/json.hpp>
 
 #include <filesystem>
+#include <map>
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <vector>
@@ -176,15 +179,22 @@ struct RealProjectContext {
     fs::path project_path;
     std::string project_name;
     Config config;
-    std::unique_ptr<MasterIndex> indexer;
-    std::unique_ptr<SearchEngine> search_engine;
-    std::unique_ptr<CodebaseIntelligenceEngine> ci_engine_;
+    // shared_ptr so setup_real_project can cache the (very expensive)
+    // indexer across all TEST_F invocations in the same process. Read-
+    // only workloads share safely; the helper API only exposes search
+    // / get_context / find_files / context_manifest / stats — none
+    // mutate the indexer. Across-process caching needs a different
+    // mechanism (gtest_discover_tests forks per ctest entry); see
+    // Dart rrLFwVaa1omB for the binary-split approach.
+    std::shared_ptr<MasterIndex> indexer;
+    std::shared_ptr<SearchEngine> search_engine;
+    std::shared_ptr<CodebaseIntelligenceEngine> ci_engine_;
 
     RealProjectContext() = default;
 
-    // Non-copyable, movable
-    RealProjectContext(const RealProjectContext&) = delete;
-    RealProjectContext& operator=(const RealProjectContext&) = delete;
+    // Copyable + movable (shared_ptr semantics).
+    RealProjectContext(const RealProjectContext&) = default;
+    RealProjectContext& operator=(const RealProjectContext&) = default;
     RealProjectContext(RealProjectContext&&) = default;
     RealProjectContext& operator=(RealProjectContext&&) = default;
 
@@ -311,27 +321,61 @@ struct RealProjectContext {
 
 /// Sets up a real project for testing by creating a config and indexing it.
 /// Returns an invalid context (indexer == nullptr) if setup fails.
+///
+/// Caches the indexer + search engine + code-insight engine per
+/// (project_path, project_name) in a process-local map so multiple
+/// TEST_F invocations on the same corpus share one index build. Real
+/// corpora cost 5–60s to index from scratch; without caching an N-test
+/// suite paid N× that. The cache is process-local (gtest_discover_tests
+/// forks per ctest entry — across processes the cache resets; see
+/// Dart rrLFwVaa1omB for the binary-bundling fix). RealProjectContext
+/// holds shared_ptr to keep the cached objects alive for borrowers.
 inline RealProjectContext setup_real_project(const fs::path& project_path,
                                              const std::string& project_name) {
+    struct CacheEntry {
+        std::shared_ptr<MasterIndex> indexer;
+        std::shared_ptr<SearchEngine> search_engine;
+        std::shared_ptr<CodebaseIntelligenceEngine> ci_engine;
+        Config config;
+    };
+    static std::mutex cache_mtx;
+    static std::map<std::string, CacheEntry> cache;
+
+    std::string key = project_path.string() + "|" + project_name;
+    std::lock_guard<std::mutex> lock(cache_mtx);
+
+    auto it = cache.find(key);
+    if (it == cache.end()) {
+        CacheEntry e;
+        e.config = make_real_project_config(project_path, project_name);
+        try {
+            e.indexer = std::make_shared<MasterIndex>(e.config);
+            if (!e.indexer->index_directory(project_path.string())) {
+                RealProjectContext ctx;
+                ctx.project_path = project_path;
+                ctx.project_name = project_name;
+                ctx.config = e.config;
+                return ctx;
+            }
+            e.search_engine = std::make_shared<SearchEngine>(*e.indexer);
+            e.ci_engine = std::make_shared<CodebaseIntelligenceEngine>();
+        } catch (...) {
+            RealProjectContext ctx;
+            ctx.project_path = project_path;
+            ctx.project_name = project_name;
+            ctx.config = e.config;
+            return ctx;
+        }
+        it = cache.emplace(key, std::move(e)).first;
+    }
+
     RealProjectContext ctx;
     ctx.project_path = project_path;
     ctx.project_name = project_name;
-    ctx.config = make_real_project_config(project_path, project_name);
-
-    try {
-        ctx.indexer = std::make_unique<MasterIndex>(ctx.config);
-        if (!ctx.indexer->index_directory(project_path.string())) {
-            ctx.indexer.reset();
-            return ctx;
-        }
-        ctx.search_engine = std::make_unique<SearchEngine>(*ctx.indexer);
-        ctx.ci_engine_ = std::make_unique<CodebaseIntelligenceEngine>();
-    } catch (...) {
-        ctx.indexer.reset();
-        ctx.search_engine.reset();
-        ctx.ci_engine_.reset();
-    }
-
+    ctx.config = it->second.config;
+    ctx.indexer = it->second.indexer;
+    ctx.search_engine = it->second.search_engine;
+    ctx.ci_engine_ = it->second.ci_engine;
     return ctx;
 }
 
