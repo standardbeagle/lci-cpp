@@ -565,6 +565,7 @@ ToolResult handle_list_symbols(const nlohmann::json& params,
 
     // Build response
     nlohmann::json symbols_json = nlohmann::json::array();
+    symbols_json.get_ref<nlohmann::json::array_t&>().reserve(all_symbols.size());
     for (const auto& swf : all_symbols) {
         symbols_json.push_back(
             build_explore_symbol(*swf.sym, swf.file_path, includes, tracker));
@@ -636,6 +637,7 @@ ToolResult handle_inspect_symbol(const nlohmann::json& params,
 
     // Build results
     nlohmann::json symbols_json = nlohmann::json::array();
+    symbols_json.get_ref<nlohmann::json::array_t&>().reserve(matched.size());
     for (const auto* sym : matched) {
         auto fp = indexer.get_file_path(sym->symbol.file_id);
         symbols_json.push_back(
@@ -731,6 +733,7 @@ ToolResult handle_browse_file(const nlohmann::json& params,
 
     // Build response
     nlohmann::json symbols_json = nlohmann::json::array();
+    symbols_json.get_ref<nlohmann::json::array_t&>().reserve(filtered.size());
     for (const auto* sym : filtered) {
         symbols_json.push_back(
             build_explore_symbol(*sym, target_path, includes, tracker));

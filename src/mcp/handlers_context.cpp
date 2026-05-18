@@ -112,6 +112,7 @@ nlohmann::json manifest_to_json(const ContextManifest& m) {
 
     auto& refs = j["r"];
     refs = nlohmann::json::array();
+    refs.get_ref<nlohmann::json::array_t&>().reserve(m.refs.size());
     for (const auto& r : m.refs) {
         nlohmann::json rj;
         rj["f"] = r.file;
@@ -254,6 +255,7 @@ nlohmann::json hydrated_context_to_json(const HydratedContext& ctx) {
 
     auto& refs = j["refs"];
     refs = nlohmann::json::array();
+    refs.get_ref<nlohmann::json::array_t&>().reserve(ctx.refs.size());
     for (const auto& r : ctx.refs) {
         nlohmann::json rj;
         rj["file"] = r.file;

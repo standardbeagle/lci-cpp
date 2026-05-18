@@ -175,8 +175,12 @@ std::vector<SearchMatch> SearchEngine::find_matches(
     std::vector<SearchMatch> matches;
     if (pattern.empty() || content.empty()) return matches;
 
-    std::string lower_content;
-    std::string lower_pattern;
+    // Per-query lowercase buffers are thread_local so case-insensitive
+    // searches don't alloc per call (Karpathy rule 2 — no allocation in
+    // inner loops). resize() shrinks when the next call's content is
+    // smaller without freeing capacity.
+    thread_local std::string lower_content;
+    thread_local std::string lower_pattern;
     std::string_view search_content = content;
     std::string_view search_pattern = pattern;
 

@@ -383,6 +383,9 @@ ToolResult handle_search(const nlohmann::json& params,
     // column, match, score (float), symbol_type, symbol_name, is_exported.
     auto& ref_tracker = indexer.ref_tracker();
     nlohmann::json result_array = nlohmann::json::array();
+    // Pre-size to skip geometric realloc on the inner push_back loop.
+    // result_array is array_t (std::vector<json>) under the hood.
+    result_array.get_ref<nlohmann::json::array_t&>().reserve(results.size());
     int ordinal = 0;
     for (const auto& r : results) {
         ++ordinal;
@@ -809,6 +812,7 @@ ToolResult handle_find_files(const nlohmann::json& params,
 
     // Build response
     nlohmann::json result_array = nlohmann::json::array();
+    result_array.get_ref<nlohmann::json::array_t&>().reserve(matches.size());
     for (const auto& m : matches) {
         nlohmann::json item;
         item["path"] = m.path;
