@@ -3,12 +3,18 @@
 #include <chrono>
 #include <ctime>
 #include <cstdio>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
 #include <string>
 
 #include <nlohmann/json.hpp>
+
+#if !defined(_WIN32)
+#  include <sys/resource.h>
+#  include <unistd.h>
+#endif
 
 namespace lci {
 namespace cli {
@@ -48,6 +54,48 @@ std::string format_uptime_seconds(double seconds) {
     return out.str();
 }
 
+// Reads VmRSS / Threads from /proc/self/status. Returns {rss_kb,
+// threads}; either may be 0 if unavailable. Linux + WSL; macOS/Windows
+// covered separately below.
+struct ProcRuntime {
+    long rss_kb{};
+    int threads{};
+};
+
+ProcRuntime read_proc_runtime() {
+    ProcRuntime r;
+#if defined(__linux__)
+    std::ifstream f("/proc/self/status");
+    std::string line;
+    while (std::getline(f, line)) {
+        if (line.rfind("VmRSS:", 0) == 0) {
+            std::istringstream ss(line.substr(6));
+            ss >> r.rss_kb;
+        } else if (line.rfind("Threads:", 0) == 0) {
+            std::istringstream ss(line.substr(8));
+            ss >> r.threads;
+        }
+    }
+#elif !defined(_WIN32)
+    // BSD / macOS fallback: getrusage gives ru_maxrss (kilobytes on
+    // Linux, bytes on macOS — but we only build this branch off-Linux).
+    struct rusage ru{};
+    if (getrusage(RUSAGE_SELF, &ru) == 0) {
+#  if defined(__APPLE__)
+        r.rss_kb = ru.ru_maxrss / 1024;
+#  else
+        r.rss_kb = ru.ru_maxrss;
+#  endif
+    }
+    // Thread count not portable here; leave 0.
+#endif
+    return r;
+}
+
+double rss_mb(const ProcRuntime& r) {
+    return static_cast<double>(r.rss_kb) / 1024.0;
+}
+
 }  // namespace
 
 int run_status(const GlobalFlags& flags, bool json_output, bool verbose) {
@@ -81,6 +129,9 @@ int run_status(const GlobalFlags& flags, bool json_output, bool verbose) {
         return 1;
     }
 
+    auto runtime = read_proc_runtime();
+    double rss = rss_mb(runtime);
+
     if (json_output) {
         nlohmann::json report;
         report["ready"] = status->ready;
@@ -88,10 +139,12 @@ int run_status(const GlobalFlags& flags, bool json_output, bool verbose) {
         report["symbol_count"] = stats->symbol_count;
         report["index_size_bytes"] = stats->index_size_bytes;
         report["build_duration_ms"] = stats->build_duration_ms;
-        report["memory_alloc_mb"] = 0;
-        report["memory_heap_mb"] = 0;
-        report["memory_total_mb"] = 0;
-        report["num_goroutines"] = 0;
+        // C++-native runtime metrics. Go reports goroutines + heap; C++
+        // reports threads + RSS. Different runtimes — fields named to
+        // reflect what's actually measured rather than faking Go's shape
+        // with zeros (the prior behavior).
+        report["num_threads"] = runtime.threads;
+        report["memory_rss_mb"] = rss;
         report["timestamp"] = iso_timestamp_now();
         report["uptime_seconds"] = format_uptime_seconds(stats->uptime_seconds);
         report["search_count"] = stats->search_count;
@@ -125,12 +178,10 @@ int run_status(const GlobalFlags& flags, bool json_output, bool verbose) {
     std::printf("\nServer Runtime:\n");
     std::printf("  Uptime:           %s\n",
                 format_seconds(stats->uptime_seconds).c_str());
-    std::printf("  Goroutines:       0\n");
+    std::printf("  Threads:          %d\n", runtime.threads);
 
     std::printf("\nMemory Usage:\n");
-    std::printf("  Allocated:        0.0 MB\n");
-    std::printf("  Heap:             0.0 MB\n");
-    std::printf("  Total system:     0.0 MB\n");
+    std::printf("  RSS:              %.1f MB\n", rss);
 
     if (stats->search_count > 0 || verbose) {
         std::printf("\nSearch Statistics:\n");

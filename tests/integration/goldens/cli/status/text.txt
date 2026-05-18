@@ -9,9 +9,7 @@ Index Statistics:
   Index size:       0 bytes
 
 Server Runtime:
-  Goroutines:       0
+  Threads:          0
 
 Memory Usage:
-  Allocated:        0.0 MB
-  Heap:             0.0 MB
-  Total system:     0.0 MB
+  RSS:              0.0 MB

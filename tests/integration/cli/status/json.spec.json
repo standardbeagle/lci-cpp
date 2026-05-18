@@ -22,7 +22,9 @@
     "ignore": [
       "timestamp",
       "uptime_seconds",
-      "build_duration_ms"
+      "build_duration_ms",
+      "memory_rss_mb",
+      "num_threads"
     ]
   },
   "tolerances": {

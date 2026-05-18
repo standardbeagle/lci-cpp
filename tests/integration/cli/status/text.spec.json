@@ -24,6 +24,6 @@
   },
   "expect_exit": 0,
   "text_normalize": {
-    "strip_lines": ["Uptime:", "Build time:"]
+    "strip_lines": ["Uptime:", "Build time:", "Threads:", "RSS:"]
   }
 }
