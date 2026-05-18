@@ -215,10 +215,20 @@ void ShardedTrigramStorage::merge_bucket_data_for_worker(
 
         auto& bucket = buckets_[static_cast<size_t>(bid)];
 
+        // Reserve destination hash map capacity for the incoming trigrams
+        // to skip mid-loop rehashing. cheap upper bound: existing size +
+        // incoming distinct count (some will collide but capacity is just
+        // a hint).
+        bucket.trigrams.reserve(bucket.trigrams.size() +
+                                bucket_data.trigrams.size());
+
         for (const auto& [trigram_hash, offsets] : bucket_data.trigrams) {
             auto& entry = bucket.trigrams[trigram_hash];
 
+            // Reserve before append to skip the geometric realloc that
+            // resize() does when capacity < old + needed.
             size_t old_len = entry.locations.size();
+            entry.locations.reserve(old_len + offsets.size());
             entry.locations.resize(old_len + offsets.size());
 
             for (size_t j = 0; j < offsets.size(); ++j) {
