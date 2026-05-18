@@ -138,7 +138,13 @@ TEST_F(RealProjectGetContextTest, FastapiDependsContext) {
     EXPECT_GT(result["contexts"].size(), 0u);
 }
 
-TEST_F(RealProjectGetContextTest, UnknownSymbolReturnsError) {
+// Go's handleGetObjectContext doesn't return an error for an unknown
+// name in the no-mode path — args.Name is never resolved, so the
+// response is the empty {contexts:[],count:0} payload (same shape as
+// any other name-only invocation). Match Go (Karpathy rule 1) rather
+// than the pre-iter-26 fail-fast variant; the C++ ContextLookupEngine
+// gap is tracked in Dart 15Wsg4HQoSW2.
+TEST_F(RealProjectGetContextTest, UnknownSymbolReturnsEmpty) {
     SKIP_IF_NO_REAL_PROJECT("go", "chi");
     auto path = *testing::find_real_project("go", "chi");
 
@@ -149,7 +155,9 @@ TEST_F(RealProjectGetContextTest, UnknownSymbolReturnsError) {
     params["name"] = "ThisSymbolDoesNotExist12345";
     auto result = ctx.get_context(params);
 
-    EXPECT_TRUE(result.contains("error"));
+    EXPECT_FALSE(result.contains("error"));
+    ASSERT_TRUE(result.contains("count"));
+    EXPECT_EQ(result["count"].get<int>(), 0);
 }
 
 // ---------------------------------------------------------------------------

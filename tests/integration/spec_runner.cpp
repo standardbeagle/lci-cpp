@@ -286,18 +286,33 @@ std::optional<fs::path> RewriteOutputArgument(Descriptor& descriptor,
 CapturedOutput RunCppSide(const std::string& cpp_binary,
                           const std::string& corpus_path,
                           const Descriptor& descriptor) {
+    CapturedOutput out;
     switch (descriptor.mode) {
         case Mode::Cli:
-            return run_cli(cpp_binary, descriptor.invocation, corpus_path);
+            out = run_cli(cpp_binary, descriptor.invocation, corpus_path);
+            break;
         case Mode::Http:
-            return run_http(cpp_binary, descriptor, corpus_path);
+            out = run_http(cpp_binary, descriptor, corpus_path);
+            break;
         case Mode::Mcp:
-            return run_mcp(cpp_binary, descriptor, corpus_path,
-                           McpFraming::ContentLength);
+            out = run_mcp(cpp_binary, descriptor, corpus_path,
+                          McpFraming::ContentLength);
+            break;
         case Mode::Index:
-            return run_index_export(cpp_binary, descriptor, corpus_path);
+            out = run_index_export(cpp_binary, descriptor, corpus_path);
+            break;
+        default:
+            throw std::runtime_error("unsupported descriptor mode");
     }
-    throw std::runtime_error("unsupported descriptor mode");
+    // The lci CLI auto-spawns a detached per-corpus server daemon
+    // (setsid) for cli / mcp / index modes; the daemon survives the
+    // parent CLI exit by design. parity_runner does this for the same
+    // reason. Without it, a leftover daemon from a prior integration
+    // test holds /tmp/lci-<hash(corpus)>.sock and the next http-mode
+    // test either fails to bind or gets stale responses (10s
+    // wait_for_ready timeout, then golden-mismatch).
+    lci::parity::shutdown_corpus_servers(corpus_path);
+    return out;
 }
 
 std::string LoadActualRaw(const CapturedOutput& capture,

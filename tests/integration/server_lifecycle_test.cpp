@@ -5,6 +5,8 @@
 #include <lci/search/search_engine.h>
 #include <lci/server/server.h>
 
+#include <unistd.h>
+
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -105,9 +107,15 @@ class ServerLifecycleTest : public ::testing::Test {
         server_ = std::make_unique<IndexServer>(
             config_, *indexer_, search_engine_.get());
 
+        // Include PID + counter so concurrent ctest fork processes
+        // don't collide on /tmp/lci_lifecycle_<N>.sock. The counter
+        // alone reset to 0 in each process; same N reused across
+        // forks bound to the same socket file, causing EADDRINUSE
+        // and intermittent test failures under -j.
         socket_path_ =
             (std::filesystem::temp_directory_path() /
-             ("lci_lifecycle_" + std::to_string(socket_counter_++) + ".sock"))
+             ("lci_lifecycle_" + std::to_string(::getpid()) + "_" +
+              std::to_string(socket_counter_++) + ".sock"))
                 .string();
         server_->set_socket_path(socket_path_);
         server_->set_build_id_override("lifecycle-test-id");

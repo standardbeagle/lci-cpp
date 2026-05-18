@@ -393,18 +393,19 @@ TEST_F(HandlersFixture, GetContextIdAndNameConflictErrors) {
               std::string::npos);
 }
 
-// name-only path (no mode, no id) is unsupported in the C++ port —
-// Go routes name-based lookups through ContextLookupEngine, which is not
-// ported. Surface the divergence via an explicit error rather than the
-// prior silent empty-result stub (Karpathy rule 6, iter-26 commit fd8fec6).
-TEST_F(HandlersFixture, GetContextNameOnlyReturnsError) {
+// name-only no-mode path mirrors Go's id-only contract: name passes
+// validation but is never resolved (Go's handleGetObjectContext only
+// reads args.ID). Both binaries return {contexts:[],count:0}. Karpathy
+// rule 1 — Go is the bar; the C++ ContextLookupEngine gap is tracked
+// in Dart (15Wsg4HQoSW2) as the proper resolution path.
+TEST_F(HandlersFixture, GetContextNameOnlyReturnsEmpty) {
     nlohmann::json params;
     params["name"] = "main";
     auto result = handle_get_context(params, *indexer_);
-    EXPECT_TRUE(result.is_error);
+    EXPECT_FALSE(result.is_error);
     auto json = nlohmann::json::parse(result.text);
-    EXPECT_NE(json["error"].get<std::string>().find("name-based"),
-              std::string::npos);
+    EXPECT_EQ(json["count"].get<int>(), 0);
+    EXPECT_TRUE(json["contexts"].empty());
 }
 
 // mode-based context lookup is unsupported in the C++ port -> fail-fast

@@ -519,18 +519,13 @@ ToolResult handle_get_context(const nlohmann::json& params,
     // No-mode path: Go builds its objectIDs list solely from args.ID
     // (comma-separated). args.Name passes Go's validateGetContextParams
     // but is never resolved here — Go's id-only no-mode contract yields
-    // an empty result. C++ honored that silently, which is a Karpathy
-    // rule 6 violation (no 'implemented but returns empty' stubs).
-    // Surface the divergence: name-only without mode is unsupported.
-    if (has_name && mode.empty()) {
-        return make_error_response(
-            "get_context",
-            "name-based context lookup requires the 'mode' parameter; "
-            "the C++ port does not implement mode-based context lookup yet. "
-            "Use 'id' with the object ID (o=XX) from search results, "
-            "e.g. {\"id\": \"VE\"}.");
-    }
-
+    // {contexts:[],count:0} for name-only invocations. Mirror that
+    // exactly per Karpathy rule 1 (Go is the bar). Iter-26 tried to
+    // surface this as an error (Karpathy rule 6), but Go's actual
+    // behavior IS the silent empty, so the error broke parity. The
+    // proper surface for the C++ ContextLookupEngine gap is the
+    // tracked Dart task (15Wsg4HQoSW2), not a runtime error that
+    // diverges from Go.
     nlohmann::json contexts = nlohmann::json::array();
     nlohmann::json errors = nlohmann::json::array();
     std::string_view remaining = object_id;
