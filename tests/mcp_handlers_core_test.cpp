@@ -408,17 +408,19 @@ TEST_F(HandlersFixture, GetContextNameOnlyReturnsEmpty) {
     EXPECT_TRUE(json["contexts"].empty());
 }
 
-// mode-based context lookup is unsupported in the C++ port -> fail-fast
-// error rather than a silent empty stub.
-TEST_F(HandlersFixture, GetContextModeErrors) {
+// mode parameter combined with id falls through to the id-resolution
+// path (mode-path is only triggered when name is supplied — same
+// gating as Go's handleGetContext branch). Verify the response shape
+// is the standard contexts/errors envelope, not an error.
+TEST_F(HandlersFixture, GetContextModeWithIdFallsThroughToIdPath) {
     nlohmann::json params;
-    params["id"] = "VE";
+    params["id"] = "VE";  // arbitrary; likely unresolved on this corpus
     params["mode"] = "full";
     auto result = handle_get_context(params, *indexer_);
-    EXPECT_TRUE(result.is_error);
+    EXPECT_FALSE(result.is_error);
     auto json = nlohmann::json::parse(result.text);
-    EXPECT_NE(json["error"].get<std::string>().find("mode"),
-              std::string::npos);
+    EXPECT_TRUE(json.contains("contexts"));
+    EXPECT_TRUE(json.contains("count"));
 }
 
 // Valid object ID resolves to a full compact context payload.

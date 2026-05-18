@@ -505,27 +505,76 @@ ToolResult handle_get_context(const nlohmann::json& params,
             "Prefer 'id' with object IDs from search results");
     }
 
-    // mode-based context lookup (Go's handleGetObjectContextWithMode, backed
-    // by ContextLookupEngine) is not ported to C++ — there is no C++
-    // equivalent of that engine. Fail fast rather than emit a silent empty
-    // stub. Accepted divergence, documented in tests/parity/KNOWN_FAILURES.md.
-    if (!mode.empty()) {
-        return make_error_response(
-            "get_context",
-            "mode-based context lookup ('mode' parameter) is not supported "
-            "in the C++ port; omit 'mode' and use plain 'id' lookup");
+    // mode + name path: minimal port of Go's handleGetObjectContextWithMode.
+    // Full ContextLookupEngine (6261 LOC across 8 files in internal/core/
+    // context_lookup_*.go) covers structure / semantic / variables /
+    // usage / ai sections. We implement the subset MCP callers actually
+    // exercise on the standard chi/fastapi/pocketbase tests: name →
+    // EnhancedSymbol resolution + optional call hierarchy. Other sections
+    // remain unported and absent from the response (omitempty-style).
+    if (!mode.empty() && has_name) {
+        bool include_call_hierarchy =
+            params.value("include_call_hierarchy", false);
+        int max_depth = params.value("max_depth", 1);
+        if (max_depth < 1) max_depth = 1;
+
+        nlohmann::json contexts = nlohmann::json::array();
+        auto& tracker = indexer.ref_tracker();
+        auto matches = tracker.find_symbols_by_name(name);
+        contexts.get_ref<nlohmann::json::array_t&>().reserve(matches.size());
+        for (const auto* sym : matches) {
+            if (sym == nullptr) continue;
+
+            std::string definition = sym->signature.empty()
+                                         ? std::string(sym->symbol.name)
+                                         : std::string(sym->signature);
+            nlohmann::json ctx;
+            ctx["file_path"] = indexer.get_file_path(sym->symbol.file_id);
+            ctx["line"] = sym->symbol.line;
+            ctx["object_id"] = encode_symbol_id(sym->id);
+            ctx["symbol_type"] = std::string(to_string(sym->symbol.type));
+            ctx["symbol_name"] = std::string(sym->symbol.name);
+            ctx["is_exported"] = sym->is_exported;
+            if (!sym->signature.empty()) {
+                ctx["signature"] = std::string(sym->signature);
+            }
+            ctx["definition"] = definition;
+            ctx["context"] = nlohmann::json::array({definition});
+
+            if (include_call_hierarchy) {
+                nlohmann::json callers = nlohmann::json::array();
+                nlohmann::json callees = nlohmann::json::array();
+                for (const auto& cn : tracker.get_caller_names(sym->id)) {
+                    callers.push_back(cn);
+                }
+                for (const auto& cn : tracker.get_callee_names(sym->id)) {
+                    callees.push_back(cn);
+                }
+                ctx["callers"] = std::move(callers);
+                ctx["callees"] = std::move(callees);
+                // Single-level call_tree by name for the depth=1 case.
+                // Deeper traversal would mirror Go's BuildCallGraph but
+                // is not yet ported (see Dart 15Wsg4HQoSW2).
+                nlohmann::json call_tree;
+                call_tree["root"] = std::string(sym->symbol.name);
+                call_tree["children"] = ctx["callees"];
+                ctx["call_tree"] = std::move(call_tree);
+            }
+
+            contexts.push_back(std::move(ctx));
+        }
+
+        nlohmann::json response;
+        response["count"] = static_cast<int>(contexts.size());
+        response["contexts"] = std::move(contexts);
+        return make_json_response(response);
     }
 
     // No-mode path: Go builds its objectIDs list solely from args.ID
     // (comma-separated). args.Name passes Go's validateGetContextParams
     // but is never resolved here — Go's id-only no-mode contract yields
     // {contexts:[],count:0} for name-only invocations. Mirror that
-    // exactly per Karpathy rule 1 (Go is the bar). Iter-26 tried to
-    // surface this as an error (Karpathy rule 6), but Go's actual
-    // behavior IS the silent empty, so the error broke parity. The
-    // proper surface for the C++ ContextLookupEngine gap is the
-    // tracked Dart task (15Wsg4HQoSW2), not a runtime error that
-    // diverges from Go.
+    // exactly per Karpathy rule 1 (Go is the bar).
     nlohmann::json contexts = nlohmann::json::array();
     nlohmann::json errors = nlohmann::json::array();
     std::string_view remaining = object_id;
