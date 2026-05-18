@@ -27,30 +27,42 @@ void PostingsIndex::add_token(absl::flat_hash_map<std::string, int>& dst,
                                std::string_view raw, int abs_start) const {
     if (raw.size() < 3) return;
 
-    // Lowercase the token.
-    std::string lower;
-    lower.reserve(raw.size());
-    for (char c : raw) {
-        lower.push_back(static_cast<char>(
-            std::tolower(static_cast<unsigned char>(c))));
+    // Reject non-ASCII without allocating — raw is a view into source.
+    if (!is_all_ascii(raw)) return;
+
+    // Thread-local lowercase buffer reused across tokens. Avoids the
+    // previous per-call std::string alloc that fired ~once per token
+    // and dominated PostingsIndex::add_token in malloc profiles.
+    thread_local std::string lower;
+    lower.assign(raw.size(), '\0');
+    for (size_t i = 0; i < raw.size(); ++i) {
+        lower[i] = static_cast<char>(
+            std::tolower(static_cast<unsigned char>(raw[i])));
     }
 
-    if (!is_all_ascii(lower)) return;
-
-    // Trim leading/trailing non-alnum/underscore.
+    // Trim leading/trailing non-alnum/underscore via string_view (zero
+    // alloc).
     auto is_valid = [](char c) {
         return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_';
     };
-    size_t start = 0;
-    while (start < lower.size() && !is_valid(lower[start])) start++;
-    size_t end = lower.size();
-    while (end > start && !is_valid(lower[end - 1])) end--;
+    std::string_view trimmed(lower);
+    while (!trimmed.empty() && !is_valid(trimmed.front())) {
+        trimmed.remove_prefix(1);
+    }
+    while (!trimmed.empty() && !is_valid(trimmed.back())) {
+        trimmed.remove_suffix(1);
+    }
 
-    if (end - start < 3) return;
+    if (trimmed.size() < 3) return;
 
-    std::string tok = lower.substr(start, end - start);
-    if (!dst.contains(tok)) {
-        dst[tok] = abs_start;
+    // try_emplace does the lookup + insert in one hash op (vs old code's
+    // contains() + operator[] = two ops). Materialise the std::string
+    // key only on insert; reusing the trimmed view via the heterogeneous
+    // lookup overload of flat_hash_map.find lets us skip allocation on
+    // duplicate hits.
+    auto it = dst.find(trimmed);
+    if (it == dst.end()) {
+        dst.emplace(std::string(trimmed), abs_start);
     }
 }
 
