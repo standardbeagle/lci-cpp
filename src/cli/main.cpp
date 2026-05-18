@@ -30,11 +30,16 @@ int main(int argc, char* argv[]) {
 
     // -- Search subcommand ----------------------------------------------------
     auto* search_cmd =
-        app.add_subcommand("search", "Search for pattern in codebase")
+        app.add_subcommand(
+               "search",
+               "Search for pattern in codebase (literal substring match; "
+               "whitespace is part of the pattern, not a word separator)")
             ->alias("s");
 
     std::string search_pattern;
-    search_cmd->add_option("pattern", search_pattern, "Search pattern")
+    search_cmd->add_option("pattern", search_pattern,
+                           "Search pattern (literal substring — "
+                           "'foo bar' matches the exact 6-char string)")
         ->required();
 
     int search_max_lines = 0;
