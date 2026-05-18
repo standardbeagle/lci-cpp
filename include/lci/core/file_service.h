@@ -7,6 +7,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace lci {
 
@@ -31,6 +32,18 @@ class FileService {
     /// Loads a file from disk via memory mapping, enforcing max file size.
     /// Returns the FileID on success, or an error.
     Result<FileID> load_file_from_disk(const std::string& path);
+
+    /// Batches multiple from-disk loads into a single snapshot rewrite.
+    /// Each per-file load_file rewrites the FileContentSnapshot end-to-end
+    /// (RCU copy-on-write); calling that N times is O(N²) in snapshot
+    /// size — the pipeline producer used to pay this for every scanned
+    /// file. batch_load_from_disk mmap-opens each path, enforces the size
+    /// limit, then submits the survivors as one batch. Returns FileIDs in
+    /// input order; 0 for files that failed to open or exceeded the size
+    /// limit (the corresponding error is silently skipped — caller can
+    /// pre-validate paths if surfacing is needed).
+    std::vector<FileID> batch_load_from_disk(
+        const std::vector<std::string>& paths);
 
     /// Returns the raw content for a file, or empty if not found.
     std::string_view get_content(FileID id) const;

@@ -41,15 +41,43 @@ void Pipeline::run() {
     // priority tier). Without this, worker threads race to call
     // load_file_from_disk and the resulting file_id assignment depends
     // on thread scheduling — which then propagates into symbol_id
-    // ordering and HTTP/MCP response ordering. Loading here adds a
-    // small serialization point but keeps per-file parsing in workers.
+    // ordering and HTTP/MCP response ordering.
+    //
+    // Batched loading: per-file load_file rewrites the FileContentSnapshot
+    // end-to-end (RCU copy-on-write). Calling it N times in a row is
+    // O(N²) in snapshot size — perf showed 13% CPU in malloc+free and
+    // 6.5% in FileContentSnapshot shared_ptr ref counting, both rooted
+    // in this per-file rewrite. Group into chunks so each chunk pays
+    // one snapshot rewrite, then push the chunk's tasks to workers.
+    constexpr size_t kLoadBatchSize = 256;
     std::thread producer([&] {
+        std::vector<std::string> batch_paths;
+        std::vector<FileTask> batch_tasks;
+        batch_paths.reserve(kLoadBatchSize);
+        batch_tasks.reserve(kLoadBatchSize);
+
+        auto flush = [&]() {
+            if (batch_paths.empty()) return true;
+            file_service_->batch_load_from_disk(batch_paths);
+            for (auto& t : batch_tasks) {
+                if (stop_flag_.load(std::memory_order_acquire)) return false;
+                progress_.increment_scanned();
+                if (!task_queue.push(std::move(t))) return false;
+            }
+            batch_paths.clear();
+            batch_tasks.clear();
+            return true;
+        };
+
         for (auto& task : tasks) {
             if (stop_flag_.load(std::memory_order_acquire)) break;
-            progress_.increment_scanned();
-            (void)file_service_->load_file_from_disk(task.path);
-            if (!task_queue.push(std::move(task))) break;
+            batch_paths.push_back(task.path);
+            batch_tasks.push_back(std::move(task));
+            if (batch_paths.size() >= kLoadBatchSize) {
+                if (!flush()) break;
+            }
         }
+        flush();
         task_queue.close();
     });
 
