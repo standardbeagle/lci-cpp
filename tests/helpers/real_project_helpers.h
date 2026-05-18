@@ -1,6 +1,7 @@
 #pragma once
 
 #include <lci/analysis/codebase_intelligence.h>
+#include <lci/analysis/side_effect_analyzer.h>
 #include <lci/config.h>
 #include <lci/indexing/master_index.h>
 #include <lci/mcp/handlers_analysis.h>
@@ -300,6 +301,41 @@ struct RealProjectContext {
             return nlohmann::json{{"error", e.what()}};
         } catch (...) {
             return nlohmann::json{{"error", "Unknown error in find_files"}};
+        }
+    }
+
+    /// Calls the side_effects MCP handler. Lazily populates a process-
+    /// local SideEffectAnalyzer with conservative purity classifications
+    /// (callee-name heuristic) on first call, then reuses across modes.
+    nlohmann::json side_effects(nlohmann::json params) const {
+        if (!indexer) {
+            return nlohmann::json{{"error", "Context not initialized"}};
+        }
+        // One analyzer per (indexer pointer) — cached so multi-mode
+        // queries in one test share the populated results.
+        static std::map<const MasterIndex*,
+                        std::shared_ptr<SideEffectAnalyzer>> cache;
+        static std::mutex cache_mu;
+        std::shared_ptr<SideEffectAnalyzer> analyzer;
+        {
+            std::lock_guard<std::mutex> lock(cache_mu);
+            auto it = cache.find(indexer.get());
+            if (it == cache.end()) {
+                analyzer = std::make_shared<SideEffectAnalyzer>("generic");
+                analyzer->populate_from_index(*indexer);
+                cache.emplace(indexer.get(), analyzer);
+            } else {
+                analyzer = it->second;
+            }
+        }
+        try {
+            auto result = lci::mcp::handle_side_effects(params, *analyzer,
+                                                       indexer.get());
+            return nlohmann::json::parse(result.text);
+        } catch (const std::exception& e) {
+            return nlohmann::json{{"error", e.what()}};
+        } catch (...) {
+            return nlohmann::json{{"error", "Unknown error in side_effects"}};
         }
     }
 
