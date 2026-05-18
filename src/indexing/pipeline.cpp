@@ -54,9 +54,16 @@ void Pipeline::run() {
     });
 
     // Stage 2: Process files in parallel (runs in its own thread pool).
+    // Worker count is read from config.performance — parallel_file_workers
+    // first (more specific), falling back to max_goroutines, both honoring
+    // the 0 = auto-detect contract. Wiring this prevents N-test ctest
+    // runs from each defaulting to hw_concurrency() and oversubscribing
+    // the CPU by N×.
     FileProcessor processor(config_, file_service_, trigram_index_);
-    std::thread process_thread([&] {
-        processor.process(task_queue, result_queue);
+    int worker_count = config_.performance.parallel_file_workers;
+    if (worker_count <= 0) worker_count = config_.performance.max_goroutines;
+    std::thread process_thread([&, worker_count] {
+        processor.process(task_queue, result_queue, worker_count);
     });
 
     // Stage 3: Integrate results (runs on this thread). Buffer all

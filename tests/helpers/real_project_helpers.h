@@ -142,6 +142,10 @@ inline Config make_real_project_config(const fs::path& project_path,
 
     cfg.performance.max_memory_mb = 500;
     cfg.performance.debounce_ms = 0;
+    // Leave thread counts at 0 = auto-detect (hw_concurrency). Per-test
+    // serialization is enforced at ctest level via RESOURCE_LOCK on the
+    // real-project label (see tests/CMakeLists.txt) so each test gets
+    // the full thread budget when it runs.
 
     cfg.search.max_results = 1000;
     cfg.search.max_context_lines = 100;
