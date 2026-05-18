@@ -34,6 +34,14 @@ struct ProcessedSymbolMetadata {
 };
 
 /// Result of processing a single file through the pipeline.
+/// Token + first-occurrence-offset pair extracted by the worker pool.
+/// Moved out of FileIntegrator::merge_postings so per-byte tokenization
+/// runs in parallel instead of serial on the integrator thread.
+struct ProcessedToken {
+    std::string token;
+    int offset{};
+};
+
 struct ProcessedFile {
     std::string path;
     FileID file_id{};
@@ -43,6 +51,7 @@ struct ProcessedFile {
     std::vector<ScopeInfo> scopes;
     std::vector<ProcessedSymbolMetadata> symbol_metadata;
     BucketedTrigramResult bucketed_trigrams;
+    std::vector<ProcessedToken> postings_tokens;  // worker-built
     std::vector<int> line_offsets;
     std::string language;
     std::string stage;

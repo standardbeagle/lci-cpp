@@ -1,5 +1,6 @@
 #include <lci/indexing/pipeline_processor.h>
 
+#include <lci/core/reference_tracker.h>
 #include <lci/parser/parser.h>
 #include <lci/parser/parser_pool.h>
 #include <lci/parser/unified_extractor.h>
@@ -211,6 +212,21 @@ ProcessedFile FileProcessor::process_file(int /*worker_id*/,
         result.bucketed_trigrams = std::move(bucketed);
     } else if (trigram_index_ != nullptr) {
         result.bucketed_trigrams = trigram_index_->create_bucketed_result(file_id);
+    }
+
+    // Tokenize for PostingsIndex inline so the per-byte scan + dedup
+    // runs in parallel here instead of serially on the integrator
+    // thread. FileIntegrator::merge_postings consumes the result via
+    // index_file_pretokenized — pure merge, no re-walk of content.
+    {
+        auto pi_tokens = lci::PostingsIndex::tokenize_content(content);
+        result.postings_tokens.reserve(pi_tokens.size());
+        for (auto& pt : pi_tokens) {
+            ProcessedToken t;
+            t.token = std::move(pt.token);
+            t.offset = pt.offset;
+            result.postings_tokens.push_back(std::move(t));
+        }
     }
 
     result.stage = "completed";

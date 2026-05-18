@@ -114,12 +114,37 @@ class ImportResolver {
 // PostingsIndex - token -> (fileID -> firstOffset) index
 // ---------------------------------------------------------------------------
 
+/// Token + first-occurrence-offset extracted from a single file.
+/// Mirrors the inline definition in pipeline_types.h for use outside the
+/// indexing pipeline (e.g. tests).
+struct PostingsToken {
+    std::string token;
+    int offset{};
+};
+
 class PostingsIndex {
   public:
     PostingsIndex() = default;
 
     /// Indexes a file's content, recording first occurrence of each token.
+    /// Tokenizes content inline; suitable for unit tests and single-file
+    /// integration paths.
     void index_file(FileID file_id, std::string_view content);
+
+    /// Indexes pre-tokenized postings produced by the parallel worker
+    /// pool. Caller owns tokenization (see tokenize_content); this path
+    /// just merges the (token, offset) pairs into tokens_/reverse_keys_
+    /// without re-walking content. Single-threaded use only — meant to
+    /// run on the FileIntegrator thread.
+    void index_file_pretokenized(FileID file_id,
+                                 std::vector<PostingsToken> tokens);
+
+    /// Stateless tokenizer used by the pipeline worker pool. Extracts
+    /// (token, first-offset) pairs from content using the same rules as
+    /// index_file's internal scan (ASCII alnum/underscore tokens, ≥3
+    /// chars after trim, lowercased, dedup by first occurrence).
+    static std::vector<PostingsToken> tokenize_content(
+        std::string_view content);
 
     /// Removes all postings for a file.
     void remove_file(FileID file_id);
@@ -147,8 +172,8 @@ class PostingsIndex {
 
     static bool is_token_char(uint8_t b);
     static bool is_all_ascii(std::string_view s);
-    void add_token(absl::flat_hash_map<std::string, int>& dst,
-                   std::string_view raw, int abs_start) const;
+    static void add_token(absl::flat_hash_map<std::string, int>& dst,
+                          std::string_view raw, int abs_start);
 };
 
 // ---------------------------------------------------------------------------

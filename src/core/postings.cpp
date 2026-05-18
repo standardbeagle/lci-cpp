@@ -24,7 +24,7 @@ bool PostingsIndex::is_all_ascii(std::string_view s) {
 }
 
 void PostingsIndex::add_token(absl::flat_hash_map<std::string, int>& dst,
-                               std::string_view raw, int abs_start) const {
+                               std::string_view raw, int abs_start) {
     if (raw.size() < 3) return;
 
     // Reject non-ASCII without allocating — raw is a view into source.
@@ -66,12 +66,18 @@ void PostingsIndex::add_token(absl::flat_hash_map<std::string, int>& dst,
     }
 }
 
-void PostingsIndex::index_file(FileID file_id, std::string_view content) {
-    if (content.empty()) return;
+std::vector<PostingsToken> PostingsIndex::tokenize_content(
+    std::string_view content) {
+    std::vector<PostingsToken> result;
+    if (content.empty()) return result;
 
+    // Local dedup map: thread-local could leak state across files; a
+    // per-call map is the safe default. Reserved heuristically based on
+    // a rough 1-token-per-10-bytes density.
     absl::flat_hash_map<std::string, int> tokens_for_file;
-    int start = -1;
+    tokens_for_file.reserve(content.size() / 10 + 8);
 
+    int start = -1;
     for (int i = 0; i < static_cast<int>(content.size()); ++i) {
         auto b = static_cast<uint8_t>(content[static_cast<size_t>(i)]);
         if (is_token_char(b)) {
@@ -92,22 +98,36 @@ void PostingsIndex::index_file(FileID file_id, std::string_view content) {
                   start);
     }
 
-    if (tokens_for_file.empty()) return;
+    result.reserve(tokens_for_file.size());
+    for (auto& [tok, off] : tokens_for_file) {
+        result.push_back(PostingsToken{std::move(const_cast<std::string&>(tok)),
+                                       off});
+    }
+    return result;
+}
 
-    // Record reverse mapping for efficient removal.
+void PostingsIndex::index_file_pretokenized(FileID file_id,
+                                            std::vector<PostingsToken> tokens) {
+    if (tokens.empty()) return;
+
     std::vector<std::string> keys;
-    keys.reserve(tokens_for_file.size());
-    for (const auto& [tok, _] : tokens_for_file) {
-        keys.push_back(tok);
+    keys.reserve(tokens.size());
+    for (const auto& pt : tokens) {
+        keys.push_back(pt.token);
     }
     reverse_keys_[file_id] = std::move(keys);
 
-    for (const auto& [tok, off] : tokens_for_file) {
-        auto& m = tokens_[tok];
+    for (auto& pt : tokens) {
+        auto& m = tokens_[pt.token];
         if (!m.contains(file_id)) {
-            m[file_id] = off;
+            m[file_id] = pt.offset;
         }
     }
+}
+
+void PostingsIndex::index_file(FileID file_id, std::string_view content) {
+    if (content.empty()) return;
+    index_file_pretokenized(file_id, tokenize_content(content));
 }
 
 void PostingsIndex::remove_file(FileID file_id) {
