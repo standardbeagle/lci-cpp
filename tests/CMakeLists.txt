@@ -82,7 +82,12 @@ target_link_libraries(lci_tests PRIVATE
 
 include(GoogleTest)
 gtest_discover_tests(lci_tests
-    PROPERTIES LABELS "unit"
+    PROPERTIES
+        LABELS "unit"
+        # 60s per-test cap. ServerTest fixtures spawn IndexServer instances
+        # that have hung indefinitely under parallel ctest load (pre-existing
+        # parallel-flake class). Without a cap, one hang blocks the run.
+        TIMEOUT 60
 )
 
 # ---------------------------------------------------------------------------
@@ -139,6 +144,11 @@ gtest_discover_tests(lci_integration_tests
     PROPERTIES
         LABELS "integration"
         ENVIRONMENT "LCI_CPP=$<TARGET_FILE:lci>;PARITY_CORPORA=${CMAKE_CURRENT_SOURCE_DIR}/parity/corpora"
+        # 180s cap. Real-project indexing tests (chi/pocketbase/fastapi)
+        # legitimately need 30-120s each on cold cache; a 60s cap was
+        # killing them mid-index. ServerLifecycle hang class still needs
+        # a real fix; 180s lets the legit slow path finish.
+        TIMEOUT 180
 )
 
 # ---------------------------------------------------------------------------
