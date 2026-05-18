@@ -99,6 +99,23 @@ class SideEffectAnalyzer {
     }
     const SideEffectInfo* get_result(std::string_view file, int line) const;
 
+    /// Walks every function/method symbol in the indexer and populates
+    /// results_ with a conservative purity classification derived from
+    /// callee-name heuristics. Functions whose outgoing refs target only
+    /// internal symbols stay Pure; those that call a known I/O / network /
+    /// database / throw / dynamic-eval symbol get marked accordingly.
+    ///
+    /// This is the C++ counterpart to Go's
+    /// SideEffectAnalyzer.AnalyzeAll(symbolIndex). Replaces the per-file
+    /// AST-walk path until the indexing pipeline pumps record_access /
+    /// record_function_call live (tracked under sibling Dart tasks).
+    void populate_from_index(const class MasterIndex& indexer);
+
+    /// Direct write to results_ — used by populate_from_index above and
+    /// future callers that build SideEffectInfo outside the
+    /// begin_function/end_function lifecycle.
+    void add_result(std::string key, SideEffectInfo info);
+
   private:
     AccessTarget classify_target(std::string_view identifier) const;
     std::string build_target_string(std::string_view identifier,

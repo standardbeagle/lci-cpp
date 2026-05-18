@@ -49,6 +49,34 @@ int run_mcp(const GlobalFlags& flags) {
     SemanticAnnotator annotator;
     GraphPropagator propagator(&runtime_index.ref_tracker());
     SideEffectAnalyzer side_effect_analyzer("generic");
+    // Populate per-function purity from the in-process index. Conservative
+    // heuristic: outgoing-callee names matched against known I/O / network
+    // / database / throw / dynamic-eval prefixes. Replaces the
+    // count_callable_symbols_in_index fallback in handlers_analysis.cpp
+    // with real per-function classifications so summary mode can report
+    // pure_functions / impure_functions split, and symbol / file / pure /
+    // impure / category modes have records to query.
+    side_effect_analyzer.populate_from_index(runtime_index);
+
+    // Seed GraphPropagator with the impure functions so transitive
+    // purity propagates: any caller of an impure function is itself
+    // impure unless its own purity overrides. Decay mode keeps strength
+    // bounded so deep call chains don't blow up.
+    for (const auto& [key, info] : side_effect_analyzer.results()) {
+        if (!info.is_pure) {
+            // Resolve back to SymbolID via ref_tracker.find_symbol_by_name
+            // (file path + line uniquely identifies the symbol since
+            // we keyed on file:line:0 above).
+            for (const auto* es : runtime_index.ref_tracker()
+                                       .find_symbols_by_name(info.function_name)) {
+                if (es && static_cast<int>(es->symbol.line) == info.start_line) {
+                    propagator.seed_label(es->id, "impure", 1.0);
+                }
+            }
+        }
+    }
+    propagator.propagate();
+
     CodebaseIntelligenceEngine ci_engine;
 
     // Start MCP server with the live in-process index instead of the stub-only

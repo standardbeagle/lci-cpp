@@ -1,6 +1,10 @@
 #include <lci/analysis/side_effect_analyzer.h>
 
+#include <lci/core/reference_tracker.h>
+#include <lci/indexing/master_index.h>
+
 #include <algorithm>
+#include <cctype>
 #include <string>
 
 namespace lci {
@@ -256,6 +260,111 @@ const SideEffectInfo* SideEffectAnalyzer::get_result(std::string_view file,
     auto it = results_.find(key);
     return it != results_.end() ? &it->second : nullptr;
 }
+
+// Forward-decl: anonymous-namespace classifier defined later in file.
+namespace {
+uint32_t classify_callee_category(std::string_view callee);
+}
+
+void SideEffectAnalyzer::add_result(std::string key, SideEffectInfo info) {
+    results_[std::move(key)] = std::move(info);
+}
+
+void SideEffectAnalyzer::populate_from_index(const MasterIndex& indexer) {
+    const auto& ref = indexer.ref_tracker();
+    for (FileID fid : indexer.get_all_file_ids()) {
+        std::string file_path = indexer.get_file_path(fid);
+        for (const auto* es : ref.get_file_enhanced_symbols(fid)) {
+            if (!es) continue;
+            bool is_callable = es->symbol.type == SymbolType::Function ||
+                               es->symbol.type == SymbolType::Method ||
+                               es->symbol.type == SymbolType::Constructor;
+            if (!is_callable) continue;
+
+            SideEffectInfo info;
+            info.function_name = std::string(es->symbol.name);
+            info.file_path = file_path;
+            info.start_line = es->symbol.line;
+            info.end_line = es->symbol.end_line;
+
+            uint32_t cats = side_effect::kNone;
+            for (const auto& callee : ref.get_callee_names(es->id)) {
+                cats |= classify_callee_category(callee);
+            }
+            info.categories = cats;
+            info.is_pure = (cats == side_effect::kNone);
+            info.purity_level = info.is_pure ? PurityLevel::Pure
+                                              : PurityLevel::ExternalDependency;
+            info.confidence = PurityConfidence::Medium;
+            info.purity_score = info.is_pure ? 1.0 : 0.0;
+            info.purity_confidence_score = 0.7;
+
+            std::string key = file_path + ":" + std::to_string(info.start_line)
+                              + ":0";
+            results_[std::move(key)] = std::move(info);
+        }
+    }
+}
+
+namespace {
+// Cross-language conservative impure-callee classifier. Names matched
+// case-insensitively against the bare callee identifier (no qualifier
+// prefix). Source: Go's classifyKnownCallee with a few cross-language
+// additions for Python/JS/TS coverage on the real-project corpora.
+uint32_t classify_callee_category(std::string_view callee) {
+    auto lower_starts_with = [&](std::string_view name, std::string_view prefix) {
+        if (name.size() < prefix.size()) return false;
+        for (size_t i = 0; i < prefix.size(); ++i) {
+            char a = static_cast<char>(
+                std::tolower(static_cast<unsigned char>(name[i])));
+            if (a != prefix[i]) return false;
+        }
+        return true;
+    };
+
+    // I/O: print, log, write, read, scan, open, close, fopen, etc.
+    static constexpr std::string_view io_prefixes[] = {
+        "print", "fprint", "puts",  "fputs", "printf", "fprintf",
+        "scanf", "fscanf", "fopen", "fread", "fwrite", "open",
+        "close", "log",    "logger"};
+    for (auto p : io_prefixes) {
+        if (lower_starts_with(callee, p)) return side_effect::kIO;
+    }
+
+    // Network: send, recv, fetch, dial, listen, accept, connect,
+    // http.Get/Post/etc.
+    static constexpr std::string_view net_prefixes[] = {
+        "send", "recv", "fetch", "dial", "listen", "accept",
+        "connect", "request", "httpget", "httppost"};
+    for (auto p : net_prefixes) {
+        if (lower_starts_with(callee, p)) return side_effect::kNetwork;
+    }
+
+    // Database: query, exec, prepare, execute, transaction
+    static constexpr std::string_view db_prefixes[] = {
+        "query", "execute", "prepare", "transaction", "commit",
+        "rollback"};
+    for (auto p : db_prefixes) {
+        if (lower_starts_with(callee, p)) return side_effect::kDatabase;
+    }
+
+    // Throw/panic/raise
+    static constexpr std::string_view throw_prefixes[] = {
+        "panic", "raise", "throw", "abort"};
+    for (auto p : throw_prefixes) {
+        if (lower_starts_with(callee, p)) return side_effect::kThrow;
+    }
+
+    // Dynamic / reflective
+    static constexpr std::string_view dynamic_prefixes[] = {"eval", "exec"};
+    for (auto p : dynamic_prefixes) {
+        if (lower_starts_with(callee, p)) return side_effect::kDynamicCall;
+    }
+
+    return side_effect::kNone;
+}
+}  // namespace
+
 
 // ---------------------------------------------------------------------------
 // Private helpers
