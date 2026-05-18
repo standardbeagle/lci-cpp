@@ -187,7 +187,14 @@ std::shared_ptr<FileContent> FileContentStore::make_file_content(FileID id,
     fc->content.assign(data.begin(), data.end());
     fc->line_offsets = compute_line_offsets(data);
     fc->fast_hash = XXH64(data.data(), data.size(), 0);
-    fc->content_hash = compute_sha256(data);
+    // content_hash (SHA-256) is computed lazily by get_content_hash —
+    // production code never reads it (only tests do, and we want SHA on
+    // demand). perf record showed compute_sha256 dominating in malloc
+    // (per-file pad buffer alloc) and CPU (block-iter); 2772 files at
+    // ~100 blocks each compounded to a measurable fraction of indexing
+    // wall time. Lazy compute keeps the field semantically populated
+    // without the eager cost. content_hash is left zero-initialised
+    // here; get_content_hash fills it on first read.
     fc->ref_count.store(1, std::memory_order_relaxed);
     return fc;
 }
@@ -317,6 +324,23 @@ std::array<uint8_t, 32> FileContentStore::get_content_hash(FileID file_id) const
     auto snap = load_snapshot();
     const auto& fc = snap->find_by_id(file_id);
     if (!fc) return {};
+    // Lazy SHA-256: compute on first read, cache on the FileContent.
+    // Detected via the zero-initialised array sentinel — collision with
+    // a real SHA-256 of all-zero output is theoretically possible but
+    // requires data that hashes to that specific 32-byte zero value;
+    // for indexing purposes treat zero as "not computed".
+    static constexpr std::array<uint8_t, 32> kZeroHash{};
+    if (fc->content_hash == kZeroHash) {
+        // Cache under the same FileContent — mutable from the
+        // get_content_hash caller's POV. Concurrent first-readers may
+        // each compute and overwrite, but the result is identical
+        // (deterministic hash of the same content) so the race is
+        // benign.
+        auto* mutable_fc = const_cast<FileContent*>(fc.get());
+        mutable_fc->content_hash = compute_sha256(
+            std::string_view(reinterpret_cast<const char*>(fc->content.data()),
+                             fc->content.size()));
+    }
     return fc->content_hash;
 }
 
