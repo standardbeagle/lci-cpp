@@ -58,11 +58,15 @@ void Pipeline::run() {
 
         auto flush = [&]() {
             if (batch_paths.empty()) return true;
-            file_service_->batch_load_from_disk(batch_paths);
-            for (auto& t : batch_tasks) {
+            auto ids = file_service_->batch_load_from_disk(batch_paths);
+            for (size_t i = 0; i < batch_tasks.size(); ++i) {
                 if (stop_flag_.load(std::memory_order_acquire)) return false;
                 progress_.increment_scanned();
-                if (!task_queue.push(std::move(t))) return false;
+                // Carry the producer-assigned FileID into the task so
+                // the worker can skip the redundant load_file_from_disk
+                // snapshot copy on the inner loop.
+                if (i < ids.size()) batch_tasks[i].preloaded_id = ids[i];
+                if (!task_queue.push(std::move(batch_tasks[i]))) return false;
             }
             batch_paths.clear();
             batch_tasks.clear();

@@ -142,21 +142,25 @@ ProcessedFile FileProcessor::process_file(int /*worker_id*/,
     result.language = task.language;
     result.stage = "parsing";
 
-    // Load file through FileService
-    auto load_result = file_service_->load_file_from_disk(task.path);
-    if (!load_result.has_value()) {
-        result.has_error = true;
-        result.error = load_result.error();
-        result.stage = "loading";
-        result.duration = std::chrono::steady_clock::now() - start;
-        return result;
-    }
-
-    FileID file_id = load_result.value();
+    // Producer-assigned FileID skips the redundant store_->load_file
+    // snapshot copy. Fallback path covers single-file callers that
+    // bypass the producer pipeline (tests, ad-hoc).
+    FileID file_id = task.preloaded_id;
     if (file_id == 0) {
-        result.stage = "directory_skipped";
-        result.duration = std::chrono::steady_clock::now() - start;
-        return result;
+        auto load_result = file_service_->load_file_from_disk(task.path);
+        if (!load_result.has_value()) {
+            result.has_error = true;
+            result.error = load_result.error();
+            result.stage = "loading";
+            result.duration = std::chrono::steady_clock::now() - start;
+            return result;
+        }
+        file_id = load_result.value();
+        if (file_id == 0) {
+            result.stage = "directory_skipped";
+            result.duration = std::chrono::steady_clock::now() - start;
+            return result;
+        }
     }
 
     auto content = file_service_->get_content(file_id);
