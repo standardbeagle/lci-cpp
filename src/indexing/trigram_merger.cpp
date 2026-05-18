@@ -33,14 +33,12 @@ void TrigramMergerPipeline::start() {
     }
 }
 
-bool TrigramMergerPipeline::submit(const BucketedTrigramResult& result) {
+bool TrigramMergerPipeline::submit(BucketedTrigramResult&& result) {
     if (shutdown_flag_.load(std::memory_order_acquire)) {
         return false;
     }
-    // BoundedQueue::push blocks until space is available or the queue is closed.
-    // Copy the result into a mutable local for push (BoundedQueue takes by move).
-    BucketedTrigramResult copy = result;
-    if (!input_queue_.push(std::move(copy))) {
+    // Move into the input queue. Caller has yielded ownership.
+    if (!input_queue_.push(std::move(result))) {
         failed_files_.fetch_add(1, std::memory_order_relaxed);
         return false;
     }

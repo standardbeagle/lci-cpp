@@ -93,12 +93,17 @@ int FileIntegrator::file_count() const {
     return static_cast<int>(file_map_.size());
 }
 
-void FileIntegrator::merge_trigrams(const ProcessedFile& file) {
+void FileIntegrator::merge_trigrams(ProcessedFile& file) {
     if (trigram_index_ == nullptr) return;
     if (file.bucketed_trigrams.buckets.empty()) return;
 
     if (use_merger_pipeline_ && merger_pipeline_) {
-        merger_pipeline_->submit(file.bucketed_trigrams);
+        // Move the per-file bucketed map into the merger queue instead
+        // of copying it. file.bucketed_trigrams is dead after merge_*
+        // returns (subsequent merges don't read it). perf record showed
+        // submit's const-ref + internal copy ctor accounting for ~1%
+        // of indexing wall on top of the broader heap churn.
+        merger_pipeline_->submit(std::move(file.bucketed_trigrams));
     } else {
         trigram_index_->index_file_with_bucketed_trigrams(
             file.bucketed_trigrams);
@@ -153,7 +158,7 @@ void FileIntegrator::merge_symbols(ProcessedFile& file) {
     }
 }
 
-void FileIntegrator::merge_postings(const ProcessedFile& file) {
+void FileIntegrator::merge_postings(ProcessedFile& file) {
     if (postings_index_ == nullptr) return;
 
     // Workers tokenize during process_file; the integrator just merges
@@ -169,10 +174,13 @@ void FileIntegrator::merge_postings(const ProcessedFile& file) {
         return;
     }
 
+    // Move the worker-built tokens into the postings index, avoiding
+    // a per-token string copy. file.postings_tokens is dead after this
+    // call (no other integrator stage reads it).
     std::vector<PostingsToken> tokens;
     tokens.reserve(file.postings_tokens.size());
-    for (const auto& t : file.postings_tokens) {
-        tokens.push_back(PostingsToken{t.token, t.offset});
+    for (auto& t : file.postings_tokens) {
+        tokens.push_back(PostingsToken{std::move(t.token), t.offset});
     }
     postings_index_->index_file_pretokenized(file.file_id, std::move(tokens));
 }

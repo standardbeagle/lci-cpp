@@ -44,8 +44,11 @@ class TrigramMergerPipeline {
     void start();
 
     /// Submits a bucketed trigram result for merging.
+    /// Takes ownership: the BucketedTrigramResult's hash-of-buckets is
+    /// moved into the input queue, not copied. Pass via std::move from
+    /// a moved-from-okay slot in the caller.
     /// Returns false if the pipeline is shut down or both queues are full.
-    bool submit(const BucketedTrigramResult& result);
+    bool submit(BucketedTrigramResult&& result);
 
     /// Gracefully shuts down all workers and drains remaining work.
     /// Idempotent: safe to call multiple times.

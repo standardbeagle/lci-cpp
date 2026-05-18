@@ -79,8 +79,8 @@ TEST(TrigramMergerPipelineTest, MergesTrigramsLockFree) {
         }
     }
 
-    EXPECT_TRUE(merger.submit(bucketed_a));
-    EXPECT_TRUE(merger.submit(bucketed_b));
+    EXPECT_TRUE(merger.submit(std::move(bucketed_a)));
+    EXPECT_TRUE(merger.submit(std::move(bucketed_b)));
 
     merger.shutdown();
 
@@ -114,7 +114,7 @@ TEST(TrigramMergerPipelineTest, RejectsAfterShutdown) {
     merger.shutdown();
 
     auto bucketed = trigram_idx.create_bucketed_result(FileID{1});
-    EXPECT_FALSE(merger.submit(bucketed));
+    EXPECT_FALSE(merger.submit(BucketedTrigramResult(bucketed)));
 }
 
 TEST(TrigramMergerPipelineTest, GetStatsReportsUsage) {
@@ -157,7 +157,7 @@ TEST(TrigramMergerPipelineTest, MultipleFilesParallel) {
                     bucketed.buckets[bid].trigrams[tri].push_back(
                         static_cast<uint32_t>(i));
                 }
-                merger.submit(bucketed);
+                merger.submit(BucketedTrigramResult(bucketed));
             }
         });
     }

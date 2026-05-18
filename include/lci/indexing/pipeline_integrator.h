@@ -95,9 +95,9 @@ class FileIntegrator {
 
     static const std::string kEmptyString;
 
-    void merge_trigrams(const ProcessedFile& file);
+    void merge_trigrams(ProcessedFile& file);
     void merge_symbols(ProcessedFile& file);
-    void merge_postings(const ProcessedFile& file);
+    void merge_postings(ProcessedFile& file);
     void remove_stale_data(FileID file_id);
 };
 
