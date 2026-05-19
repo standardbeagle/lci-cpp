@@ -189,10 +189,13 @@ CapturedOutput run_http(const std::string& binary_path,
     // Override with a valid Host so both Go and C++ servers accept the request.
     cli.set_default_headers({{"Host", "localhost"}});
 
-    // Wait up to 10 s for the index to be ready. Go guards most endpoints
+    // Wait up to 5 s for the index to be ready. Go guards most endpoints
     // behind index readiness and returns 503 until complete; C++ responds
     // immediately. Poll /status so both binaries are measured post-ready.
-    wait_for_ready(cli, std::chrono::seconds(10));
+    // Multi-lang corpus indexes in <2 s on both binaries; 5 s gives 2.5×
+    // headroom while bounding worst-case wall time when ready never fires
+    // (test proceeds anyway on timeout).
+    wait_for_ready(cli, std::chrono::seconds(5));
 
     // invocation.args[0] is the URL path (e.g. "/status", "/search").
     // invocation.stdin_data is the POST body (empty → GET).
