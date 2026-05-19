@@ -3,7 +3,7 @@
 **Auto-generated** by `python3 tests/parity/scripts/mask_audit.py`.
 Run after editing any descriptor and check in the result.
 
-Coverage: 87 parity descriptors.
+Coverage: 83 parity descriptors.
 
 Bucket meanings:
 - **(a) Non-determinism / RPC envelope.** Always safe to ignore.
@@ -59,8 +59,7 @@ Bucket meanings:
 | `cli/version` | 0 |   | 0 | 0 | 0 | 0 | 0 |
 | `http/browse-file` | 2 |   | 0 | 0 | 0 | 2 | 0 |
 | `http/definition` | 0 |   | 0 | 0 | 0 | 0 | 0 |
-| `http/fileinfo` | 16 |   | 0 | 4 | 12 | 0 | 0 |
-| `http/git-analyze` | 6 | ✓ | 2 | 0 | 4 | 0 | 0 |
+| `http/git-analyze` | 12 | ✓ | 2 | 0 | 10 | 0 | 0 |
 | `http/inspect-symbol` | 0 |   | 0 | 0 | 0 | 0 | 0 |
 | `http/list-symbols` | 1 |   | 0 | 0 | 0 | 1 | 0 |
 | `http/ping` | 2 |   | 2 | 0 | 0 | 0 | 0 |
@@ -70,9 +69,6 @@ Bucket meanings:
 | `http/stats` | 12 |   | 3 | 6 | 1 | 2 | 0 |
 | `http/status` | 3 | ✓ | 1 | 1 | 0 | 1 | 0 |
 | `http/tree` | 1 | ✓ | 0 | 1 | 0 | 0 | 0 |
-| `index/lci-cpp-repo` | 21 | ✓ | 7 | 1 | 7 | 6 | 0 |
-| `index/lci-go-repo` | 21 | ✓ | 7 | 1 | 7 | 6 | 0 |
-| `index/synthetic-multilang` | 21 | ✓ | 7 | 1 | 7 | 6 | 0 |
 | `mcp/browse_file/basic` | 0 | ✓ | 0 | 0 | 0 | 0 | 0 |
 | `mcp/code_insight/basic` | 0 | ✓ | 0 | 0 | 0 | 0 | 0 |
 | `mcp/code_insight/mode-git_analyze` | 0 | ✓ | 0 | 0 | 0 | 0 | 0 |
@@ -107,7 +103,7 @@ Bucket meanings:
 | `probes/export` | 0 |   | 0 | 0 | 0 | 0 | 0 |
 | `probes/graph` | 0 |   | 0 | 0 | 0 | 0 | 0 |
 
-**Totals:** 133 masks across 87 descriptors. a=33, b=23, c=47, d=30, ?=0.
+**Totals:** 60 masks across 83 descriptors. a=12, b=16, c=20, d=12, ?=0.
 
 ## Unclassified fields needing manual review
 
@@ -117,7 +113,6 @@ None. ✓
 
 - `cli/search/json` (2 masks)
 - `http/browse-file` (2 masks)
-- `http/fileinfo` (16 masks)
 - `http/list-symbols` (1 masks)
 - `http/ping` (2 masks)
 - `http/search` (2 masks)

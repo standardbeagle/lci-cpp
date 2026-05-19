@@ -97,8 +97,38 @@ const char* mode_name(Mode m) {
     return "unknown";
 }
 
+// Detect the MCP framing a binary expects. Order of precedence:
+//   1. Explicit CLI override (--go-framing / --cpp-framing).
+//   2. Filename heuristic: "lci-go*" or "lci-linux-amd64" → Ndjson
+//      (matches every released Go reference name).
+//   3. LCI_GO env match → Ndjson (legacy behavior for existing CI).
+//   4. Default: ContentLength (the protocol the C++ port speaks).
+//
+// Heuristic-first avoids the failure mode where capturing C++ output by
+// setting LCI_GO=lci-cpp routes the run through ndjson framing and hangs.
+std::string g_go_framing_override;
+std::string g_cpp_framing_override;
+
+McpFraming parse_framing(const std::string& s, McpFraming dflt) {
+    if (s == "ndjson")         return McpFraming::Ndjson;
+    if (s == "content-length") return McpFraming::ContentLength;
+    return dflt;
+}
+
 McpFraming framing_for_binary(const std::string& bin) {
     auto go = env_or("LCI_GO");
+    // CLI overrides win.
+    if (!g_go_framing_override.empty() && !go.empty() && bin == go) {
+        return parse_framing(g_go_framing_override, McpFraming::Ndjson);
+    }
+    if (!g_cpp_framing_override.empty()) {
+        return parse_framing(g_cpp_framing_override, McpFraming::ContentLength);
+    }
+    // Filename heuristic.
+    auto basename = bin.substr(bin.find_last_of('/') + 1);
+    if (basename.rfind("lci-go", 0) == 0 ||
+        basename == "lci-linux-amd64") return McpFraming::Ndjson;
+    // Legacy LCI_GO env fallback.
     if (!go.empty() && bin == go) return McpFraming::Ndjson;
     return McpFraming::ContentLength;
 }
@@ -685,6 +715,12 @@ int main(int argc, char** argv) {
         "Snapshot mode: load Go reference output from <dir>/<descriptor-id>/ "
         "instead of spawning the Go binary. Falls back to LCI_GO on missing "
         "snapshot. Also reads PARITY_SNAPSHOTS env.");
+    app.add_option("--go-framing", g_go_framing_override,
+        "MCP framing for the Go binary (ndjson|content-length). Overrides "
+        "the filename heuristic. Useful when capturing C++ output via "
+        "LCI_GO=lci-cpp.");
+    app.add_option("--cpp-framing", g_cpp_framing_override,
+        "MCP framing for the C++ binary (ndjson|content-length).");
     CLI11_PARSE(app, argc, argv);
 
     if (g_snapshot_dir.empty()) g_snapshot_dir = env_or("PARITY_SNAPSHOTS");
