@@ -222,6 +222,25 @@ target_link_libraries(lci_benchmarks PRIVATE
 add_test(NAME lci_benchmarks COMMAND lci_benchmarks --benchmark_min_time=0.01s)
 set_tests_properties(lci_benchmarks PROPERTIES LABELS "benchmark")
 
+# Cross-binary perf gate: compares C++ port vs Go reference on real-
+# project corpora. Skips cleanly (exit 0) when LCI_GO_PATH or
+# real_projects/ are unavailable so CI without prep doesn't false-fail.
+if(LCI_GO_PATH)
+    add_test(NAME bench_parity
+        COMMAND ${CMAKE_COMMAND} -E env
+            python3 ${CMAKE_CURRENT_SOURCE_DIR}/benchmarks/bench_parity.py
+                --go ${LCI_GO_PATH}
+                --cpp $<TARGET_FILE:lci>
+                --root ${CMAKE_SOURCE_DIR}
+                --threshold 5.0
+                --trials 2
+    )
+    set_tests_properties(bench_parity PROPERTIES
+        LABELS "benchmark;bench_parity"
+        TIMEOUT 900
+    )
+endif()
+
 # ---------------------------------------------------------------------------
 # Fuzz targets (Clang libFuzzer only)
 # ---------------------------------------------------------------------------

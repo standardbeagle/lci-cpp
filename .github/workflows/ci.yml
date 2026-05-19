@@ -259,6 +259,32 @@ jobs:
           path: benchmark_results.json
           retention-days: 30
 
+      # Cross-binary perf gate. Runs only when the Go reference binary is
+      # present in PATH; CI environments without it skip cleanly. Built
+      # locally per host so the gate isn't gated on a remote artifact.
+      - name: Run bench_parity (C++ vs Go indexing ratio)
+        if: false  # gated until CI provisions the Go reference binary
+        run: |
+          if [ ! -x /usr/local/bin/lci-linux-amd64 ]; then
+            echo "::warning::Go reference binary not present; skipping bench_parity."
+            exit 0
+          fi
+          cmake --build build/release --target lci --parallel
+          python3 tests/benchmarks/bench_parity.py \
+            --go /usr/local/bin/lci-linux-amd64 \
+            --cpp build/release/src/lci \
+            --root . \
+            --threshold 5.0 \
+            --trials 2 | tee bench_parity.txt
+
+      - name: Upload bench_parity report
+        if: false  # enable alongside the run step above once Go binary in CI
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-parity-report
+          path: bench_parity.txt
+          retention-days: 30
+
   fuzz:
     runs-on: ubuntu-24.04
     name: fuzz (10 min)
