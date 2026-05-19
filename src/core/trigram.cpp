@@ -206,8 +206,7 @@ int ShardedTrigramStorage::get_bucket_count() const {
 
 void ShardedTrigramStorage::merge_bucket_data_for_worker(
     const BucketedTrigramResult& result,
-    int bucket_start, int bucket_end,
-    SlabAllocator<FileLocation>* /*allocator*/) {
+    int bucket_start, int bucket_end) {
     int limit = std::min(bucket_end, static_cast<int>(result.buckets.size()));
     for (int bid = bucket_start; bid < limit; ++bid) {
         const auto& bucket_data = result.buckets[static_cast<size_t>(bid)];
@@ -239,10 +238,9 @@ void ShardedTrigramStorage::merge_bucket_data_for_worker(
 }
 
 void ShardedTrigramStorage::merge_bucketed_trigrams(
-    const BucketedTrigramResult& result,
-    SlabAllocator<FileLocation>* allocator) {
+    const BucketedTrigramResult& result) {
     merge_bucket_data_for_worker(
-        result, 0, static_cast<int>(result.buckets.size()), allocator);
+        result, 0, static_cast<int>(result.buckets.size()));
 }
 
 std::vector<FileLocation> ShardedTrigramStorage::search_trigram(
@@ -357,7 +355,7 @@ void TrigramIndex::index_file_with_trigrams(
 void TrigramIndex::index_file_with_bucketed_trigrams(
     const BucketedTrigramResult& result) {
     invalidated_files_.erase(result.file_id);
-    sharded_storage_.merge_bucketed_trigrams(result, &location_allocator_);
+    sharded_storage_.merge_bucketed_trigrams(result);
 }
 
 void TrigramIndex::remove_file(FileID file_id) {

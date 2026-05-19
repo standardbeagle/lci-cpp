@@ -84,8 +84,7 @@ void TrigramMergerPipeline::worker_loop(int /*worker_id*/,
     BucketedTrigramResult result;
     while (input_queue_.pop(result)) {
         storage_.merge_bucket_data_for_worker(
-            result, bucket_start, bucket_end,
-            &trigram_index_.get_allocator());
+            result, bucket_start, bucket_end);
     }
 }
 

@@ -288,7 +288,7 @@ TEST(ShardedTrigramStorageTest, SearchAfterMerge) {
     uint16_t bid = static_cast<uint16_t>(trigram & 255);
     result.buckets[bid].trigrams[trigram] = {0, 5, 10};
 
-    storage.merge_bucketed_trigrams(result, nullptr);
+    storage.merge_bucketed_trigrams(result);
 
     auto locs = storage.search_trigram(trigram);
     ASSERT_EQ(locs.size(), 3u);
@@ -313,8 +313,8 @@ TEST(ShardedTrigramStorageTest, RemoveFile) {
     r2.buckets.resize(256);
     r2.buckets[bid].trigrams[trigram] = {100};
 
-    storage.merge_bucketed_trigrams(r1, nullptr);
-    storage.merge_bucketed_trigrams(r2, nullptr);
+    storage.merge_bucketed_trigrams(r1);
+    storage.merge_bucketed_trigrams(r2);
 
     auto before = storage.search_trigram(trigram);
     EXPECT_EQ(before.size(), 2u);
@@ -335,7 +335,7 @@ TEST(ShardedTrigramStorageTest, Clear) {
     uint32_t trigram = (uint32_t('x') << 16) | (uint32_t('y') << 8) | uint32_t('z');
     uint16_t bid = static_cast<uint16_t>(trigram & 255);
     result.buckets[bid].trigrams[trigram] = {0};
-    storage.merge_bucketed_trigrams(result, nullptr);
+    storage.merge_bucketed_trigrams(result);
 
     storage.clear();
     auto locs = storage.search_trigram(trigram);
@@ -409,7 +409,7 @@ TEST(ShardedTrigramStorageTest, ConcurrentReads) {
     uint32_t trigram = (uint32_t('t') << 16) | (uint32_t('s') << 8) | uint32_t('t');
     uint16_t bid = static_cast<uint16_t>(trigram & 255);
     result.buckets[bid].trigrams[trigram] = {0, 5, 10, 15, 20};
-    storage.merge_bucketed_trigrams(result, nullptr);
+    storage.merge_bucketed_trigrams(result);
 
     // Launch multiple threads reading simultaneously.
     constexpr int kThreads = 4;

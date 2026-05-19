@@ -72,13 +72,10 @@ class ShardedTrigramStorage {
     /// Thread-safe when different threads process non-overlapping ranges.
     void merge_bucket_data_for_worker(
         const BucketedTrigramResult& result,
-        int bucket_start, int bucket_end,
-        SlabAllocator<FileLocation>* allocator);
+        int bucket_start, int bucket_end);
 
     /// Merges all buckets from a pre-bucketed result.
-    void merge_bucketed_trigrams(
-        const BucketedTrigramResult& result,
-        SlabAllocator<FileLocation>* allocator);
+    void merge_bucketed_trigrams(const BucketedTrigramResult& result);
 
     /// Searches for a trigram across the appropriate bucket.
     std::vector<FileLocation> search_trigram(uint32_t trigram_hash) const;
