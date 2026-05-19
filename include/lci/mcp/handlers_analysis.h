@@ -42,9 +42,13 @@ ToolResult handle_side_effects(const nlohmann::json& params,
                                MasterIndex* indexer);
 
 /// Handles "code_insight": dispatches to CodebaseIntelligenceEngine.
+/// When `analyzer` is non-null, unified mode reads per-function purity from
+/// it to populate the HEALTH section's purity total/pure/impure counters.
+/// When null (legacy callers), purity reports total=N pure=0 impure=0.
 ToolResult handle_code_insight(const nlohmann::json& params,
                                CodebaseIntelligenceEngine& engine,
-                               MasterIndex& indexer);
+                               MasterIndex& indexer,
+                               SideEffectAnalyzer* analyzer = nullptr);
 
 }  // namespace mcp
 }  // namespace lci

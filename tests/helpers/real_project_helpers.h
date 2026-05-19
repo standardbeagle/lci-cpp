@@ -7,6 +7,8 @@
 #include <lci/mcp/handlers_analysis.h>
 #include <lci/mcp/handlers_core.h>
 #include <lci/mcp/handlers_context.h>
+#include <lci/mcp/handlers_explore.h>
+#include <lci/mcp/handlers_index.h>
 #include <lci/search/search_engine.h>
 
 #include <nlohmann/json.hpp>
@@ -261,7 +263,27 @@ struct RealProjectContext {
             return nlohmann::json{{"error", "Context not initialized"}};
         }
         try {
-            auto result = lci::mcp::handle_code_insight(params, *ci_engine_, *indexer);
+            // Reuse the per-indexer SideEffectAnalyzer cache so unified-mode
+            // gets purity data without paying the populate_from_index cost
+            // twice. side_effects() seeds the cache; if code_insight runs
+            // first we seed it here on demand.
+            static std::map<const MasterIndex*,
+                            std::shared_ptr<SideEffectAnalyzer>> ci_cache;
+            static std::mutex ci_cache_mu;
+            std::shared_ptr<SideEffectAnalyzer> analyzer;
+            {
+                std::lock_guard<std::mutex> lock(ci_cache_mu);
+                auto it = ci_cache.find(indexer.get());
+                if (it == ci_cache.end()) {
+                    analyzer = std::make_shared<SideEffectAnalyzer>("generic");
+                    analyzer->populate_from_index(*indexer);
+                    ci_cache.emplace(indexer.get(), analyzer);
+                } else {
+                    analyzer = it->second;
+                }
+            }
+            auto result = lci::mcp::handle_code_insight(
+                params, *ci_engine_, *indexer, analyzer.get());
             if (result.is_error) {
                 // Error path still emits JSON via make_error_response.
                 return nlohmann::json::parse(result.text);
@@ -336,6 +358,51 @@ struct RealProjectContext {
             return nlohmann::json{{"error", e.what()}};
         } catch (...) {
             return nlohmann::json{{"error", "Unknown error in side_effects"}};
+        }
+    }
+
+    /// Calls handle_inspect_symbol — symbol lookup by name with callers/
+    /// callees / complexity / signature for each match.
+    nlohmann::json inspect_symbol(nlohmann::json params) const {
+        if (!indexer) return nlohmann::json{{"error", "no indexer"}};
+        try {
+            auto result = lci::mcp::handle_inspect_symbol(params, *indexer);
+            return nlohmann::json::parse(result.text);
+        } catch (const std::exception& e) {
+            return nlohmann::json{{"error", e.what()}};
+        }
+    }
+
+    /// Calls handle_list_symbols — enumerate symbols with filters.
+    nlohmann::json list_symbols(nlohmann::json params) const {
+        if (!indexer) return nlohmann::json{{"error", "no indexer"}};
+        try {
+            auto result = lci::mcp::handle_list_symbols(params, *indexer);
+            return nlohmann::json::parse(result.text);
+        } catch (const std::exception& e) {
+            return nlohmann::json{{"error", e.what()}};
+        }
+    }
+
+    /// Calls handle_browse_file — outline view of a single file.
+    nlohmann::json browse_file(nlohmann::json params) const {
+        if (!indexer) return nlohmann::json{{"error", "no indexer"}};
+        try {
+            auto result = lci::mcp::handle_browse_file(params, *indexer);
+            return nlohmann::json::parse(result.text);
+        } catch (const std::exception& e) {
+            return nlohmann::json{{"error", e.what()}};
+        }
+    }
+
+    /// Calls handle_index_stats — corpus-level counts and language breakdown.
+    nlohmann::json index_stats(nlohmann::json params) const {
+        if (!indexer) return nlohmann::json{{"error", "no indexer"}};
+        try {
+            auto result = lci::mcp::handle_index_stats(params, *indexer);
+            return nlohmann::json::parse(result.text);
+        } catch (const std::exception& e) {
+            return nlohmann::json{{"error", e.what()}};
         }
     }
 

@@ -698,7 +698,8 @@ std::string emit_unified_lcf(const CodebaseIntelligenceResponse& r,
 
 ToolResult handle_code_insight(const nlohmann::json& raw_params,
                                CodebaseIntelligenceEngine& engine,
-                               MasterIndex& indexer) {
+                               MasterIndex& indexer,
+                               SideEffectAnalyzer* analyzer) {
     auto params = raw_params.is_object() ? raw_params : nlohmann::json::object();
     auto mode = params.value("mode", "overview");
 
@@ -734,36 +735,113 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
 
     std::ostringstream out;
     if (mode == "statistics") {
-        out << "LCF/1.0\n"
-            << "mode=statistics\n"
-            << "tier=1\n"
-            << "tokens=70\n"
-            << "---\n"
-            << "== STATISTICS ==\n"
-            << "complexity: avg=1.00 median=1.00\n"
-            << "  distribution: low=" << file_count << "\n"
-            << "coupling: avg=0.00 max=0.00\n"
+        // Wire through engine for real complexity metrics. Hardcoded form
+        // always emitted avg=1.00 + low=<file_count>, which made the test
+        // distribution useless on any non-trivial corpus.
+        CodebaseIntelligenceParams ci_params;
+        ci_params.mode = "statistics";
+        ci_params.include.health_dashboard = true;
+        auto files_data = gather_file_symbol_data(indexer);
+        int symbol_count = 0;
+        for (const auto& f : files_data)
+            symbol_count += static_cast<int>(f.symbols.size());
+        auto result = engine.analyze(ci_params, files_data,
+                                      static_cast<int>(files_data.size()),
+                                      symbol_count);
+        if (!result.ok()) {
+            return make_error_response("code_insight", result.error);
+        }
+        out << "LCF/1.0\nmode=statistics\ntier=1\ntokens=70\n---\n"
+            << "== STATISTICS ==\n";
+        if (result.response.health_dashboard) {
+            const auto& cm = result.response.health_dashboard->complexity;
+            out << "complexity: avg=" << fmt2(cm.average_cc)
+                << " median=" << fmt2(cm.median_cc) << "\n"
+                << "  distribution:";
+            int low = 0, med = 0, high = 0;
+            auto it = cm.distribution.find("low");
+            if (it != cm.distribution.end()) low = it->second;
+            it = cm.distribution.find("medium");
+            if (it != cm.distribution.end()) med = it->second;
+            it = cm.distribution.find("high");
+            if (it != cm.distribution.end()) high = it->second;
+            if (high > 0) out << " high=" << high;
+            if (med  > 0) out << " medium=" << med;
+            if (low  > 0 || (high == 0 && med == 0)) out << " low=" << low;
+            out << "\n";
+        } else {
+            out << "complexity: avg=1.00 median=1.00\n"
+                << "  distribution: low=" << file_count << "\n";
+        }
+        out << "coupling: avg=0.00 max=0.00\n"
             << "cohesion: avg=1.00 min=1.00\n"
             << "quality: maintainability=98.00 debt=0.00 purity=0.00\n"
             << "---";
     } else if (mode == "structure") {
-        // NOTE: descriptor mcp/code_insight/mode-structure ignores text body
-        // — Go emits `types:` line in randomised map-iteration order. C++
-        // emits a deterministic ordering; envelope-only parity holds.
-        out << "LCF/1.0\n"
-            << "mode=structure\n"
-            << "tier=1\n"
-            << "tokens=20\n"
-            << "---\n"
+        // Compute structure inline from the live index. Hardcoded version
+        // always emitted dirs=1, top_dirs `.:N`; on any real corpus the
+        // top-level dir distribution is much richer. Walk file paths,
+        // count per top-level dir + per extension. depth is the deepest
+        // path-component count seen.
+        absl::flat_hash_map<std::string, int> top_dir_files;
+        absl::flat_hash_map<std::string, int> types_count;
+        int code = 0, tests = 0, config = 0, docs = 0;
+        int max_depth = 0;
+        for (auto fid : indexer.get_all_file_ids()) {
+            auto p = indexer.get_file_path(fid);
+            if (p.empty()) continue;
+            std::string rel = p;
+            const auto& root = indexer.config().project.root;
+            if (!root.empty() && rel.rfind(root, 0) == 0) {
+                rel = rel.substr(root.size());
+                while (!rel.empty() && rel.front() == '/') rel.erase(0, 1);
+            }
+            int depth = 0;
+            for (char c : rel) if (c == '/') ++depth;
+            if (depth > max_depth) max_depth = depth;
+            auto slash = rel.find('/');
+            std::string top =
+                slash == std::string::npos ? "." : rel.substr(0, slash);
+            ++top_dir_files[top];
+            auto dot = rel.rfind('.');
+            if (dot != std::string::npos)
+                ++types_count[rel.substr(dot)];
+            if (rel.find("_test.") != std::string::npos ||
+                rel.find("/test") != std::string::npos) ++tests;
+            else if (rel.find(".md") != std::string::npos ||
+                     rel.find("README") != std::string::npos) ++docs;
+            else if (rel.find(".json") != std::string::npos ||
+                     rel.find(".yaml") != std::string::npos ||
+                     rel.find(".yml") != std::string::npos ||
+                     rel.find(".toml") != std::string::npos) ++config;
+            else ++code;
+        }
+        out << "LCF/1.0\nmode=structure\ntier=1\ntokens=20\n---\n"
             << "== STRUCTURE ==\n"
-            << "dirs=1 files=" << file_count
-            << " symbols=" << total_functions << " depth=0\n"
-            << "types: .go=1 .py=1 .rs=1 .cpp=1\n"
-            << "categories: code=" << file_count
-            << " tests=0 config=0 docs=0\n"
-            << "top_dirs:\n"
-            << "  .: " << file_count << " files\n"
-            << "---";
+            << "dirs=" << top_dir_files.size()
+            << " files=" << file_count
+            << " symbols=" << total_functions
+            << " depth=" << max_depth << "\n";
+        std::vector<std::pair<std::string, int>> tv(
+            types_count.begin(), types_count.end());
+        std::sort(tv.begin(), tv.end(),
+                  [](const auto& a, const auto& b) { return a.first < b.first; });
+        out << "types:";
+        for (const auto& [ext, n] : tv) out << " " << ext << "=" << n;
+        out << "\n"
+            << "categories: code=" << code
+            << " tests=" << tests
+            << " config=" << config
+            << " docs=" << docs << "\n"
+            << "top_dirs:\n";
+        std::vector<std::pair<std::string, int>> td(
+            top_dir_files.begin(), top_dir_files.end());
+        std::sort(td.begin(), td.end(),
+                  [](const auto& a, const auto& b) { return a.second > b.second; });
+        size_t shown = std::min(td.size(), size_t{10});
+        for (size_t i = 0; i < shown; ++i)
+            out << "  " << td[i].first << ": " << td[i].second << " files\n";
+        out << "---";
     } else if (mode == "unified") {
         // Wire the real CodebaseIntelligenceEngine through. Hardcoded LCF
         // text was the FIX-D.1.C workaround that made parity tests pass on
@@ -792,6 +870,27 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                                       symbol_count);
         if (!result.ok()) {
             return make_error_response("code_insight", result.error);
+        }
+        // Populate purity_summary from the live SideEffectAnalyzer. The
+        // engine doesn't own one (purity classification is per-MCP-session
+        // state, populated by populate_from_index at server startup) so we
+        // tally here and stuff the result into the response's health
+        // dashboard before LCF emission. emit_unified_lcf reads
+        // purity_summary->{pure_functions, impure_functions}.
+        PuritySummary purity_owned;
+        if (analyzer && result.response.health_dashboard) {
+            int pure_n = 0, impure_n = 0;
+            for (const auto& [key, info] : analyzer->results()) {
+                if (info.is_pure) ++pure_n;
+                else              ++impure_n;
+            }
+            purity_owned.pure_functions = pure_n;
+            purity_owned.impure_functions = impure_n;
+            purity_owned.total_functions = pure_n + impure_n;
+            purity_owned.purity_ratio = purity_owned.total_functions > 0
+                ? static_cast<double>(pure_n) / purity_owned.total_functions
+                : 0.0;
+            result.response.health_dashboard->purity_summary = &purity_owned;
         }
         out << emit_unified_lcf(result.response,
                                 static_cast<int>(files_data.size()),
@@ -927,13 +1026,13 @@ void register_analysis_handlers(McpServer& server,
            "'cs' for C#).",
            "string"}},
          {}},
-        [ci_engine, indexer](const nlohmann::json& p) -> ToolResult {
+        [ci_engine, indexer, analyzer](const nlohmann::json& p) -> ToolResult {
             if (!ci_engine || !indexer) {
                 return make_error_response(
                     "code_insight",
                     "codebase intelligence not available");
             }
-            return handle_code_insight(p, *ci_engine, *indexer);
+            return handle_code_insight(p, *ci_engine, *indexer, analyzer);
         });
 }
 
