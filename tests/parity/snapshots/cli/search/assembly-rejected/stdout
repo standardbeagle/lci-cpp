@@ -1,0 +1,39 @@
+Incorrect Usage: flag provided but not defined: -assembly
+
+NAME:
+   lci search - Search for pattern in codebase
+
+USAGE:
+   lci search command [command options] 
+
+COMMANDS:
+   help, h  Shows a list of commands or help for one command
+
+OPTIONS:
+   --max-lines value, -m value                                              Max context lines (0=use blocks) (default: 0)
+   --case-insensitive, -i                                                   Case-insensitive search (default: false)
+   --json, -j                                                               Output as JSON (default: false)
+   --light                                                                  Use light search without relational data and breadcrumbs (default: false)
+   --exclude value, -e value                                                Exclude files matching regex pattern (e.g., '.*test.*\.go$')
+   --include value, --inc value                                             Include only files matching regex pattern (e.g., '.*\.go$')
+   --comments-only                                                          Search only in comments (default: false)
+   --code-only                                                              Search only in code (excludes comments and strings) (default: false)
+   --strings-only                                                           Search only in string literals (default: false)
+   --template-strings                                                       Include template strings (sql, gql``, etc.) when using --strings-only (default: false)
+   --verbose, -v                                                            Show debug information (default: false)
+   --compare-search                                                         Compare legacy and consolidated search implementations (A/B testing) (default: false)
+   --cpu-profile value                                                      Write CPU profile to file
+   --mem-profile value                                                      Write memory profile to file
+   --invert-match                                                           Inverted match (grep -v): show lines that DON'T match pattern (default: false)
+   --patterns value, --pattern value [ --patterns value, --pattern value ]  Multiple patterns with OR logic (grep -e): --patterns TODO --patterns FIXME
+   --count, -c                                                              Return match count per file (grep -c) (default: false)
+   --files-with-matches, -l                                                 Return only filenames with matches (grep -l) (default: false)
+   --word-regexp, -w                                                        Match whole words only (grep -w) (default: false)
+   --regex, -E                                                              Interpret pattern as extended regex (grep -E). Supports ^, $, *, +, ?, [], (), | (default: false)
+   --max-count value                                                        Max matches per file (grep -m NUM), 0 = unlimited (default: 0)
+   --ids                                                                    Include object IDs in results (default: true) (default: false)
+   --no-ids                                                                 Exclude object IDs from results (default: false)
+   --compact-search, --cs                                                   Show compact output (patterns only, no full context) (default: false)
+   --rank-by value                                                          Rank results by: relevance, proximity, similarity (default: none)
+   --context-filter value                                                   Filter results by context pattern (e.g., 'cache', 'test')
+   --help, -h                                                               show help

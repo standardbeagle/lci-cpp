@@ -1,0 +1,16 @@
+Dependency Graph Analysis
+Root Path: .
+
+Building index...
+Linking symbols and building dependency graph...
+Analyzing dependency complexity...
+
+Dependency Graph Analysis:
+==================================================
+Total Files: 1
+Total Dependency Edges: 0
+Maximum Dependency Depth: 0
+Maximum Dependencies per File: 0
+Maximum Dependents per File: 0
+Average Dependencies per File: 0.00
+Circular Dependencies: 0

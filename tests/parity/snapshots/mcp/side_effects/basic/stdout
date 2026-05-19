@@ -1,0 +1,1 @@
+{"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"{\"results\":null,\"total_count\":4,\"mode\":\"summary\",\"summary\":{\"total_functions\":4,\"pure_functions\":4,\"impure_functions\":0,\"purity_ratio\":1}}"}]}}

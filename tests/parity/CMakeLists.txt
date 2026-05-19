@@ -99,7 +99,7 @@ else()
         set_tests_properties(parity.${TID} PROPERTIES
             LABELS "parity"
             FIXTURES_REQUIRED parity_fixture
-            ENVIRONMENT "LCI_GO=${LCI_GO_PATH};LCI_CPP=$<TARGET_FILE:lci>;PARITY_CORPORA=${CMAKE_CURRENT_SOURCE_DIR}/corpora;PARITY_FAILURES=${CMAKE_BINARY_DIR}/parity-failures"
+            ENVIRONMENT "LCI_GO=${LCI_GO_PATH};LCI_CPP=$<TARGET_FILE:lci>;PARITY_CORPORA=${CMAKE_CURRENT_SOURCE_DIR}/corpora;PARITY_FAILURES=${CMAKE_BINARY_DIR}/parity-failures;PARITY_SNAPSHOTS=${CMAKE_CURRENT_SOURCE_DIR}/snapshots"
             TIMEOUT 120
             # Per-corpus serialization: every parity descriptor (cli /
             # mcp / http / index) ends up touching a server keyed on

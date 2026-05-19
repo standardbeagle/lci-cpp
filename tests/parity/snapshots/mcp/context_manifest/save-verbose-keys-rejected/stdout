@@ -1,0 +1,1 @@
+{"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"{\"error\":\"invalid manifest: validation error on field 'refs[\\u0000].f': file path is required\",\"operation\":\"context\",\"success\":false}"}],"isError":true}}

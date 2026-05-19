@@ -1,0 +1,9 @@
+Exporting Debug Information
+Root Path: .
+Output File: /tmp/lci-parity-debug-export.json
+
+Building index...
+Linking symbols...
+Exporting debug information...
+✓ Debug information exported to /tmp/lci-parity-debug-export.json
+File size: 2355 bytes

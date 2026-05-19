@@ -1,0 +1,13 @@
+Exporting Dependency Graph
+Root Path: .
+Output File: /tmp/lci-parity-debug-graph.dot
+
+Building index...
+Linking symbols and building dependency graph...
+Generating dependency graph...
+✓ Dependency graph exported to /tmp/lci-parity-debug-graph.dot
+File size: 83 bytes
+
+To visualize the graph, use Graphviz:
+  dot -Tpng /tmp/lci-parity-debug-graph.dot -o dependency-graph.png
+  dot -Tsvg /tmp/lci-parity-debug-graph.dot -o dependency-graph.svg

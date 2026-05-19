@@ -1,0 +1,20 @@
+{
+  "symbols": [
+    {
+      "name": "Add",
+      "object_id": "B",
+      "type": "function",
+      "file": "/home/beagle/work/core/lci-cpp/tests/parity/corpora/synthetic/multi-lang/a.go",
+      "line": 3,
+      "is_exported": true,
+      "complexity": 1,
+      "scope_chain": [
+        "multi-lang",
+        "a.go",
+        "Add"
+      ],
+      "outgoing_refs": 2
+    }
+  ],
+  "count": 1
+}

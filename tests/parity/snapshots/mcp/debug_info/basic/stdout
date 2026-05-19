@@ -1,0 +1,1 @@
+{"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"{\"mode\":\"overview\",\"timestamp\":\"2026-05-19T07:20:45.281342837-05:00\",\"overview\":{\"total_files\":0,\"total_symbols\":0,\"total_references\":0,\"unique_languages\":0,\"avg_symbols_per_file\":0,\"avg_refs_per_symbol\":0,\"language_breakdown\":{},\"type_breakdown\":{}}}"}]}}

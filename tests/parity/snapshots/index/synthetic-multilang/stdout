@@ -1,0 +1,113 @@
+{
+  "summary": {
+    "total_files": 1,
+    "total_symbols": 0,
+    "total_imports": 0,
+    "total_references": 0,
+    "indexing_duration": 0,
+    "linking_duration": 0,
+    "languages": {
+      "go": 1
+    },
+    "last_updated": "2026-05-19T07:20:33.47637904-05:00"
+  },
+  "files": [
+    {
+      "file_id": 1,
+      "path": "/home/beagle/work/core/lci-cpp/tests/parity/corpora/synthetic/multi-lang/a.go",
+      "language": "go",
+      "size": 0,
+      "symbols": [],
+      "imports": [],
+      "references": [],
+      "last_modified": "0001-01-01T00:00:00Z",
+      "processing_time": 0
+    }
+  ],
+  "extractors": [
+    {
+      "language": "csharp",
+      "files_processed": 0,
+      "symbols_extracted": 0,
+      "average_processing_time": 0
+    },
+    {
+      "language": "go",
+      "files_processed": 0,
+      "symbols_extracted": 0,
+      "average_processing_time": 0
+    },
+    {
+      "language": "javascript",
+      "files_processed": 0,
+      "symbols_extracted": 0,
+      "average_processing_time": 0
+    },
+    {
+      "language": "php",
+      "files_processed": 0,
+      "symbols_extracted": 0,
+      "average_processing_time": 0
+    },
+    {
+      "language": "python",
+      "files_processed": 0,
+      "symbols_extracted": 0,
+      "average_processing_time": 0
+    },
+    {
+      "language": "typescript",
+      "files_processed": 0,
+      "symbols_extracted": 0,
+      "average_processing_time": 0
+    }
+  ],
+  "resolvers": [
+    {
+      "type": "go",
+      "imports_resolved": 0,
+      "resolution_stats": {},
+      "performance": {
+        "total_time": 0,
+        "average_time": 0
+      }
+    },
+    {
+      "type": "javascript",
+      "imports_resolved": 0,
+      "resolution_stats": {},
+      "performance": {
+        "total_time": 0,
+        "average_time": 0
+      }
+    },
+    {
+      "type": "php",
+      "imports_resolved": 0,
+      "resolution_stats": {},
+      "performance": {
+        "total_time": 0,
+        "average_time": 0
+      }
+    },
+    {
+      "type": "csharp",
+      "imports_resolved": 0,
+      "resolution_stats": {},
+      "performance": {
+        "total_time": 0,
+        "average_time": 0
+      }
+    },
+    {
+      "type": "python",
+      "imports_resolved": 0,
+      "resolution_stats": {},
+      "performance": {
+        "total_time": 0,
+        "average_time": 0
+      }
+    }
+  ],
+  "dependencies": []
+}

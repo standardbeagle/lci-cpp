@@ -23,6 +23,49 @@ using namespace lci::parity;
 
 namespace {
 
+// Capture mode: when set via --capture, the runner executes ONLY the Go
+// (reference) binary for each descriptor and writes its raw stdout + exit
+// code into <capture-dir>/<descriptor-id>/{stdout,exit}. Used to freeze the
+// Go reference output as a snapshot so future runs can diff C++ against the
+// frozen file instead of spawning the Go binary. On capture-mode passes the
+// runner returns 0 unconditionally; capture is invariant to the C++ binary.
+std::string g_capture_dir;
+
+// Snapshot mode: when set via --use-snapshots (or env PARITY_SNAPSHOTS), the
+// runner loads the Go reference output from disk instead of spawning the Go
+// binary. This is the long-running diff source once Go is retired. Falls
+// back to running the Go binary if the snapshot file is missing.
+std::string g_snapshot_dir;
+
+bool write_capture_snapshot(const std::string& descriptor_id,
+                            const std::string& stdout_data,
+                            int exit_code) {
+    if (g_capture_dir.empty()) return false;
+    fs::path dir = fs::path(g_capture_dir) / descriptor_id;
+    std::error_code ec;
+    fs::create_directories(dir, ec);
+    std::ofstream(dir / "stdout") << stdout_data;
+    std::ofstream(dir / "exit")   << exit_code << '\n';
+    return true;
+}
+
+// Returns true if a snapshot for `descriptor_id` exists under g_snapshot_dir
+// and loads stdout + exit into `out`. Caller falls back to spawning the Go
+// binary on false.
+bool load_snapshot(const std::string& descriptor_id, CapturedOutput& out) {
+    if (g_snapshot_dir.empty()) return false;
+    fs::path dir = fs::path(g_snapshot_dir) / descriptor_id;
+    fs::path s   = dir / "stdout";
+    fs::path e   = dir / "exit";
+    if (!fs::is_regular_file(s) || !fs::is_regular_file(e)) return false;
+    std::ifstream sf(s);
+    std::stringstream ss; ss << sf.rdbuf();
+    out.stdout_data = ss.str();
+    std::ifstream ef(e);
+    ef >> out.exit_code;
+    return true;
+}
+
 std::string env_or(const char* name, const std::string& dflt = "") {
     const char* v = std::getenv(name);
     return v ? std::string(v) : dflt;
@@ -218,12 +261,26 @@ int run_cli_descriptor(const Descriptor& d) {
     std::string go_bin  = substitute_binary(d.go_binary);
     std::string cpp_bin = substitute_binary(d.cpp_binary);
 
-    if (go_bin.empty() || cpp_bin.empty()) {
-        std::cerr << "infra: LCI_GO or LCI_CPP not set\n";
+    if (cpp_bin.empty()) {
+        std::cerr << "infra: LCI_CPP not set\n";
         return 2;
     }
 
-    auto go_out  = run_cli(go_bin,  d.invocation, corpus_path);
+    CapturedOutput go_out;
+    if (!load_snapshot(d.id, go_out)) {
+        if (go_bin.empty()) {
+            std::cerr << "infra: LCI_GO not set and no snapshot for "
+                      << d.id << "\n";
+            return 2;
+        }
+        go_out = run_cli(go_bin, d.invocation, corpus_path);
+    }
+    if (!g_capture_dir.empty()) {
+        shutdown_corpus_servers(corpus_path);
+        write_capture_snapshot(d.id, go_out.stdout_data, go_out.exit_code);
+        std::cout << "CAPTURE " << d.id << "\n";
+        return 0;
+    }
     auto cpp_out = run_cli(cpp_bin, d.invocation, corpus_path);
 
     // Both the Go and C++ lci CLI subcommands auto-spawn a detached
@@ -328,12 +385,26 @@ int run_mcp_descriptor(const Descriptor& d) {
     std::string go_bin  = substitute_binary(d.go_binary);
     std::string cpp_bin = substitute_binary(d.cpp_binary);
 
-    if (go_bin.empty() || cpp_bin.empty()) {
-        std::cerr << "infra: LCI_GO or LCI_CPP not set\n";
+    if (cpp_bin.empty()) {
+        std::cerr << "infra: LCI_CPP not set\n";
         return 2;
     }
 
-    auto go  = run_mcp(go_bin,  d, corpus_path, framing_for_binary(go_bin));
+    CapturedOutput go;
+    if (!load_snapshot(d.id, go)) {
+        if (go_bin.empty()) {
+            std::cerr << "infra: LCI_GO not set and no snapshot for "
+                      << d.id << "\n";
+            return 2;
+        }
+        go = run_mcp(go_bin, d, corpus_path, framing_for_binary(go_bin));
+    }
+    if (!g_capture_dir.empty()) {
+        shutdown_corpus_servers(corpus_path);
+        write_capture_snapshot(d.id, go.stdout_data, go.exit_code);
+        std::cout << "CAPTURE " << d.id << "\n";
+        return 0;
+    }
     auto cpp = run_mcp(cpp_bin, d, corpus_path, framing_for_binary(cpp_bin));
 
     // MCP descriptors that exercise tools backed by the index server
@@ -397,12 +468,25 @@ int run_index_descriptor(const Descriptor& d) {
     std::string go_bin  = substitute_binary(d.go_binary);
     std::string cpp_bin = substitute_binary(d.cpp_binary);
 
-    if (go_bin.empty() || cpp_bin.empty()) {
-        std::cerr << "infra: LCI_GO or LCI_CPP not set\n";
+    if (cpp_bin.empty()) {
+        std::cerr << "infra: LCI_CPP not set\n";
         return 2;
     }
 
-    auto go_out  = run_index_export(go_bin,  d, corpus_path);
+    CapturedOutput go_out;
+    if (!load_snapshot(d.id, go_out)) {
+        if (go_bin.empty()) {
+            std::cerr << "infra: LCI_GO not set and no snapshot for "
+                      << d.id << "\n";
+            return 2;
+        }
+        go_out = run_index_export(go_bin, d, corpus_path);
+    }
+    if (!g_capture_dir.empty()) {
+        write_capture_snapshot(d.id, go_out.stdout_data, go_out.exit_code);
+        std::cout << "CAPTURE " << d.id << "\n";
+        return 0;
+    }
     auto cpp_out = run_index_export(cpp_bin, d, corpus_path);
 
     // index_export uses `debug export` which is supposed to run
@@ -480,15 +564,28 @@ int run_http_descriptor(const Descriptor& d) {
     std::string go_bin  = substitute_binary(d.go_binary);
     std::string cpp_bin = substitute_binary(d.cpp_binary);
 
-    if (go_bin.empty() || cpp_bin.empty()) {
-        std::cerr << "infra: LCI_GO or LCI_CPP not set\n";
+    if (cpp_bin.empty()) {
+        std::cerr << "infra: LCI_CPP not set\n";
         return 2;
     }
 
     // Run sequentially: Go then C++. Both servers use the same socket path
     // (derived from corpus_path via an identical hash in both binaries), so
     // they must not run concurrently.
-    auto go_out  = run_http(go_bin,  d, corpus_path);
+    CapturedOutput go_out;
+    if (!load_snapshot(d.id, go_out)) {
+        if (go_bin.empty()) {
+            std::cerr << "infra: LCI_GO not set and no snapshot for "
+                      << d.id << "\n";
+            return 2;
+        }
+        go_out = run_http(go_bin, d, corpus_path);
+    }
+    if (!g_capture_dir.empty()) {
+        write_capture_snapshot(d.id, go_out.stdout_data, go_out.exit_code);
+        std::cout << "CAPTURE " << d.id << "\n";
+        return 0;
+    }
     auto cpp_out = run_http(cpp_bin, d, corpus_path);
 
     if (go_out.timed_out || cpp_out.timed_out) {
@@ -580,7 +677,17 @@ int main(int argc, char** argv) {
     CLI::App app{"lci parity runner"};
     std::string desc_path;
     app.add_option("descriptor", desc_path, "Path to .parity.json")->required();
+    app.add_option("--capture", g_capture_dir,
+        "Capture mode: run Go binary only and write stdout+exit code to "
+        "<dir>/<descriptor-id>/. Skips C++ run and diff. Used to freeze Go "
+        "reference output as a snapshot.");
+    app.add_option("--use-snapshots", g_snapshot_dir,
+        "Snapshot mode: load Go reference output from <dir>/<descriptor-id>/ "
+        "instead of spawning the Go binary. Falls back to LCI_GO on missing "
+        "snapshot. Also reads PARITY_SNAPSHOTS env.");
     CLI11_PARSE(app, argc, argv);
+
+    if (g_snapshot_dir.empty()) g_snapshot_dir = env_or("PARITY_SNAPSHOTS");
 
     std::ifstream f(desc_path);
     if (!f) { std::cerr << "cannot open " << desc_path << "\n"; return 2; }

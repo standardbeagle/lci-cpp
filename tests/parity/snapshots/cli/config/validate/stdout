@@ -1,0 +1,6 @@
+✅ Configuration file is valid
+📍 Config source: .lci.kdl
+📊 Settings: 10000 files max, 500MB memory limit, 500MB index limit
+
+⚠️  Warnings:
+  - No include patterns specified, no files will be indexed

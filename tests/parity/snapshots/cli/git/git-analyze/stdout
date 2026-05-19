@@ -1,0 +1,20 @@
+{
+  "summary": {
+    "files_changed": 0,
+    "symbols_added": 0,
+    "symbols_modified": 0,
+    "symbols_deleted": 0,
+    "duplicates_found": 0,
+    "naming_issues_found": 0,
+    "metrics_issues_found": 0,
+    "risk_score": 0,
+    "top_recommendation": "No changes to analyze"
+  },
+  "metadata": {
+    "base_ref": "HEAD",
+    "target_ref": "WORKING",
+    "scope": "wip",
+    "analyzed_at": "2026-05-19T07:15:05.470990209-05:00",
+    "analysis_time_ms": 4
+  }
+}

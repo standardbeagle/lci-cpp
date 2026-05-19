@@ -1,0 +1,4 @@
+Add (function) /home/beagle/work/core/lci-cpp/tests/parity/corpora/synthetic/multi-lang/a.go:3
+  Complexity: 1
+  Scope: multi-lang > a.go > Add
+  Refs: 0 incoming, 2 outgoing

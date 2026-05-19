@@ -1,0 +1,17 @@
+DEBUG: verbose=false, compact=false, json=false, light=false
+Found 3 results in 0.8ms (standard mode)
+
+=== Direct Matches ===
+b.py:1
+     1 | def add(a: int, b: int) -> int:
+     2 |     return a + b
+
+
+d.rs:1
+     1 | pub fn add(a: i32, b: i32) -> i32 { a + b }
+
+
+c.cpp:1
+     1 | int add(int a, int b) { return a + b; }
+
+
