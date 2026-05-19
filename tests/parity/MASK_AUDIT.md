@@ -41,7 +41,7 @@ Bucket meanings:
 | `cli/search/regex-max-count` | 0 | ✓ | 0 | 0 | 0 | 0 | 0 |
 | `cli/search/regex` | 0 | ✓ | 0 | 0 | 0 | 0 | 0 |
 | `cli/search/word-regexp` | 0 | ✓ | 0 | 0 | 0 | 0 | 0 |
-| `cli/status/json` | 7 | ✓ | 2 | 4 | 0 | 1 | 0 |
+| `cli/status/json` | 9 | ✓ | 2 | 6 | 0 | 1 | 0 |
 | `cli/status/text` | 0 | ✓ | 0 | 0 | 0 | 0 | 0 |
 | `cli/symbols/browse-json` | 1 | ✓ | 0 | 0 | 0 | 1 | 0 |
 | `cli/symbols/browse-stats-json` | 1 | ✓ | 0 | 0 | 0 | 1 | 0 |
@@ -107,7 +107,7 @@ Bucket meanings:
 | `probes/export` | 0 |   | 0 | 0 | 0 | 0 | 0 |
 | `probes/graph` | 0 |   | 0 | 0 | 0 | 0 | 0 |
 
-**Totals:** 131 masks across 87 descriptors. a=33, b=21, c=47, d=30, ?=0.
+**Totals:** 133 masks across 87 descriptors. a=33, b=23, c=47, d=30, ?=0.
 
 ## Unclassified fields needing manual review
 

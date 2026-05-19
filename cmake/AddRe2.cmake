@@ -4,10 +4,13 @@
 # because the FetchContent'd abseil targets aren't in any export set. We only
 # consume re2::re2 in-tree (never `cmake --install`).
 #
-# CMake's function() override mechanism saves the previous definition with a
-# leading underscore. We shadow install() with a no-op while re2's CMakeLists
-# runs, then forward install() back to the underscored original. This keeps
-# the rest of the project's install rules (if any) intact.
+# We shadow install() with a guarded wrapper. While LCI_SUPPRESS_INSTALL is
+# truthy, the wrapper does nothing; otherwise it forwards to the original
+# builtin (reachable as _install after the override). Critically: we override
+# install() exactly ONCE — re-defining a second time replaces _install with
+# the previous (noop) override, which would silently drop the root project's
+# real install(TARGETS lci ...) rule. The guard variable lets us toggle
+# behavior without re-defining.
 include(FetchContent)
 
 set(RE2_BUILD_TESTING OFF CACHE BOOL "" FORCE)
@@ -19,14 +22,12 @@ FetchContent_Declare(re2
 FetchContent_GetProperties(re2)
 if(NOT re2_POPULATED)
     FetchContent_Populate(re2)
-    # Shadow: install() becomes a no-op; the original is reachable as _install
-    # (CMake stashes it automatically when we redefine).
+    set(LCI_SUPPRESS_INSTALL ON)
     function(install)
-        # intentionally empty — discard RE2's install rules
+        if(NOT LCI_SUPPRESS_INSTALL)
+            _install(${ARGV})
+        endif()
     endfunction()
     add_subdirectory(${re2_SOURCE_DIR} ${re2_BINARY_DIR} EXCLUDE_FROM_ALL)
-    # Restore install() by forwarding to the stashed original.
-    function(install)
-        _install(${ARGV})
-    endfunction()
+    set(LCI_SUPPRESS_INSTALL OFF)
 endif()

@@ -53,7 +53,7 @@ if(NOT LCI_GO_PATH)
     set(LCI_GO_PATH "LCI_GO_PATH-NOTFOUND" CACHE FILEPATH
         "Path to Go reference lci binary for parity tests" FORCE)
 endif()
-find_program(LCI_GO_PATH NAMES lci-linux-amd64 lci HINTS
+find_program(LCI_GO_PATH NAMES lci-go-0.4.1 lci-linux-amd64 HINTS
     /home/beagle/work/core/lci
     /usr/local/bin
     ENV PATH)
