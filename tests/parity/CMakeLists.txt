@@ -58,10 +58,24 @@ find_program(LCI_GO_PATH NAMES lci-go-0.4.1 lci-linux-amd64 HINTS
     /usr/local/bin
     ENV PATH)
 
-if(NOT LCI_GO_PATH)
-    message(WARNING "LCI_GO_PATH not set and Go lci binary not found — side-by-side parity tests will be skipped")
+# Parity tests run against either a live Go reference binary (LCI_GO_PATH)
+# or frozen Go output snapshots in tests/parity/snapshots/. Either one is
+# sufficient to register the tests; the runner prefers snapshots and falls
+# back to Go on missing snapshot files.
+set(PARITY_SNAPSHOTS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/snapshots")
+if(EXISTS "${PARITY_SNAPSHOTS_DIR}" AND IS_DIRECTORY "${PARITY_SNAPSHOTS_DIR}")
+    set(PARITY_HAS_SNAPSHOTS ON)
+    message(STATUS "Parity: using frozen snapshots at ${PARITY_SNAPSHOTS_DIR}")
 else()
-    message(STATUS "Parity: using Go binary at ${LCI_GO_PATH}")
+    set(PARITY_HAS_SNAPSHOTS OFF)
+endif()
+
+if(NOT LCI_GO_PATH AND NOT PARITY_HAS_SNAPSHOTS)
+    message(WARNING "Neither LCI_GO_PATH nor frozen snapshots present — parity tests will be skipped")
+else()
+    if(LCI_GO_PATH)
+        message(STATUS "Parity: Go reference binary at ${LCI_GO_PATH} (fallback)")
+    endif()
 
     # ---- Runner executable ----
     add_executable(parity_runner runner/parity_runner.cpp)

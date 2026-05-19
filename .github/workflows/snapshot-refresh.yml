@@ -1,0 +1,140 @@
+name: Snapshot Refresh
+
+# Regenerates tests/parity/snapshots/ against a fresh Go reference binary
+# and opens a PR with the diff. Triggered manually when the Go reference
+# changes upstream, or scheduled monthly as a smoke check that the C++
+# port still tracks any Go bugfixes that affect canonicalized output.
+#
+# Snapshots are committed to the repo (~11M) so the parity suite runs
+# without needing a Go binary in CI. This workflow is the only path
+# that pulls the Go binary back in.
+
+on:
+  workflow_dispatch:
+    inputs:
+      go_version:
+        description: "Go lci version to capture against (matches release tag, e.g. 0.4.1)"
+        required: true
+        default: "0.4.1"
+      go_repo:
+        description: "Go lci repo (owner/name)"
+        required: true
+        default: "standardbeagle/lci"
+  schedule:
+    # Monthly on the 1st at 06:00 UTC. Cheap insurance against silent
+    # Go-side fixes that change canonicalized output.
+    - cron: "0 6 1 * *"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+env:
+  VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+
+jobs:
+  capture:
+    runs-on: ubuntu-24.04
+    name: Capture parity snapshots
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve Go version
+        id: ver
+        run: |
+          V="${{ github.event.inputs.go_version || '0.4.1' }}"
+          R="${{ github.event.inputs.go_repo   || 'standardbeagle/lci' }}"
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "repo=$R"    >> "$GITHUB_OUTPUT"
+
+      - name: Download Go reference binary
+        run: |
+          set -euo pipefail
+          V="${{ steps.ver.outputs.version }}"
+          R="${{ steps.ver.outputs.repo }}"
+          URL="https://github.com/${R}/releases/download/v${V}/lci-linux-amd64"
+          echo "fetching $URL"
+          curl -fL "$URL" -o /tmp/lci-go
+          chmod +x /tmp/lci-go
+          /tmp/lci-go --version
+
+      - name: Export GitHub Actions cache variables
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      - name: Set up vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: "01f602195983451bc83e72f4214af2cbc495aa94"
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-13 g++-13 ninja-build
+
+      - name: Configure
+        env:
+          CC: gcc-13
+          CXX: g++-13
+        run: |
+          cmake --preset release \
+            -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake \
+            -DLCI_GO_PATH=/tmp/lci-go
+
+      - name: Build parity_runner + lci
+        run: cmake --build build/release --target parity_runner lci --parallel
+
+      - name: Prep parity corpora
+        run: ./tests/parity/corpora/prep_real.sh
+
+      - name: Capture snapshots
+        run: |
+          set -euo pipefail
+          rm -rf tests/parity/snapshots
+          export LCI_GO=/tmp/lci-go
+          export LCI_CPP="$PWD/build/release/src/lci"
+          export PARITY_CORPORA="$PWD/tests/parity/corpora"
+          export PARITY_FAILURES="$PWD/build/release/parity-failures"
+          SNAP="$PWD/tests/parity/snapshots"
+          FAIL=0
+          for d in $(find tests/parity/descriptors -name '*.parity.json' | sort); do
+            if ! ./build/release/tests/parity/parity_runner "$d" --capture "$SNAP" >/dev/null 2>&1; then
+              FAIL=$((FAIL+1))
+              echo "::warning::capture failed for $d"
+            fi
+          done
+          CAPTURED=$(find "$SNAP" -name stdout | wc -l)
+          echo "captured=$CAPTURED failures=$FAIL"
+          if [ "$CAPTURED" -lt 80 ]; then
+            echo "::error::only $CAPTURED snapshots captured, expected >=80"
+            exit 1
+          fi
+
+      - name: Verify snapshots replay green
+        run: |
+          set -euo pipefail
+          unset LCI_GO
+          export PARITY_SNAPSHOTS="$PWD/tests/parity/snapshots"
+          cd build/release
+          ctest -L parity --output-on-failure --parallel $(nproc)
+
+      - name: Create pull request on diff
+        uses: peter-evans/create-pull-request@v7
+        with:
+          commit-message: "parity: refresh snapshots against Go ${{ steps.ver.outputs.version }}"
+          title: "Snapshot refresh: Go ${{ steps.ver.outputs.version }}"
+          body: |
+            Automated snapshot refresh from `${{ steps.ver.outputs.repo }}@v${{ steps.ver.outputs.version }}`.
+
+            - `tests/parity/snapshots/` regenerated via `parity_runner --capture`.
+            - Replay verified green via `PARITY_SNAPSHOTS=... ctest -L parity`.
+
+            If the diff is empty, the Go reference is unchanged in any field
+            we don't already ignore; this PR will auto-close.
+          branch: snapshot-refresh/go-${{ steps.ver.outputs.version }}
+          delete-branch: true
+          add-paths: tests/parity/snapshots

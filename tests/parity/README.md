@@ -1,17 +1,79 @@
 # LCI Parity Harness
 
-Side-by-side verification of the C++ `lci` port against the Go reference.
+Verification of the C++ `lci` port against the Go reference output.
 
-**Current baseline: 64 / 64 descriptors passing.** See
-[`KNOWN_FAILURES.md`](KNOWN_FAILURES.md) for the current status and documented
-intentional divergences. Performance work is meaningful again only when this
-baseline stays green.
+**Current baseline: 147 / 147 descriptors passing.** See
+[`KNOWN_FAILURES.md`](KNOWN_FAILURES.md) for documented intentional
+divergences. Performance work is meaningful only when this baseline
+stays green.
+
+## Reference source: snapshots or live Go binary
+
+Each parity test diffs C++ output against a frozen Go reference for the
+same invocation. The reference comes from one of two sources, checked in
+this order:
+
+1. **Frozen snapshots** at [`snapshots/`](snapshots/), keyed by descriptor
+   id (e.g. `snapshots/cli/version/{stdout,exit}`). Captured against a
+   pinned Go release; committed to the repo (~11 MB) so CI runs without
+   a Go binary on the host. This is the default path.
+2. **Live Go binary** at `LCI_GO_PATH` (CMake) or `LCI_GO` (env). Used
+   as a fallback when a descriptor's snapshot is missing — typically
+   only while new descriptors are still being authored.
+
+The runner switches per-descriptor: if `snapshots/<id>/stdout` exists,
+load it; otherwise spawn the Go binary. Both `LCI_GO` env and
+`PARITY_SNAPSHOTS` env override the CMake defaults.
 
 ## Run
 
     cmake --preset debug
     cmake --build build/debug -j$(nproc)
     ctest --test-dir build/debug -L parity --output-on-failure -j$(nproc)
+
+CMake auto-detects snapshots in `tests/parity/snapshots/` and registers
+all 147 tests. To force the live-Go path (e.g. for ad-hoc debugging),
+delete or rename `snapshots/` before configuring, or run a single
+descriptor manually:
+
+    unset PARITY_SNAPSHOTS
+    LCI_GO=/path/to/lci-go LCI_CPP=$PWD/build/debug/src/lci \
+      PARITY_CORPORA=$PWD/tests/parity/corpora \
+      ./build/debug/tests/parity/parity_runner \
+        tests/parity/descriptors/cli/version.parity.json
+
+## Refreshing snapshots
+
+When the Go reference advances (a new tag, a bug fix that changes a
+canonicalized field), regenerate snapshots so future C++ runs diff
+against the new reference. Three options:
+
+**1. GitHub Actions (preferred).** The `Snapshot Refresh` workflow
+([`.github/workflows/snapshot-refresh.yml`](../../.github/workflows/snapshot-refresh.yml))
+runs on `workflow_dispatch` with a Go version input, captures all
+snapshots in CI, replays them green, and opens a PR with the diff.
+Also runs monthly on the 1st as a smoke check.
+
+**2. Local capture against a specific Go binary.**
+
+    rm -rf tests/parity/snapshots
+    LCI_GO=/path/to/lci-go LCI_CPP=$PWD/build/release/src/lci \
+      PARITY_CORPORA=$PWD/tests/parity/corpora \
+    for d in $(find tests/parity/descriptors -name '*.parity.json'); do
+      ./build/release/tests/parity/parity_runner "$d" \
+        --capture tests/parity/snapshots
+    done
+
+**3. Replay-verify before commit.** Once a fresh snapshot set is on
+disk, confirm it actually passes:
+
+    unset LCI_GO
+    PARITY_SNAPSHOTS=$PWD/tests/parity/snapshots \
+      ctest --test-dir build/release -L parity --output-on-failure -j$(nproc)
+
+A snapshot diff is meaningful even when small — every field change is
+an intentional or accidental shift in the Go reference. Review the diff
+in the refresh PR before merging.
 
 ## Parallel execution
 
