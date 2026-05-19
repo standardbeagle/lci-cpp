@@ -16,7 +16,7 @@
     "exit"
   ],
   "parse": "json",
-  "_rationale": "Two-tier verification. Stable: report.metadata fields + common report.summary keys are emitted with the same schema by both binaries on the same WIP. Ignore: per-issue arrays (metrics_issues, duplicates, naming_issues) are Go-only enumeration — Go applies extra complexity heuristics that C++ does not implement, so the arrays and the associated *_found counters / risk_score drift. The stable[] block still anchors the metadata + symbol-count shape so a regression in either binary breaks parity.",
+  "_rationale": "Two-tier verification. Stable: report.metadata fields + common report.summary keys are emitted with the same schema by both binaries on the same WIP. Ignore: per-issue arrays (metrics_issues, duplicates, naming_issues) and the *_found counters / risk_score / files_changed are WIP-state-dependent — both Go and C++ implement the same cyclomatic/long-function/deep-nesting heuristics (C++: src/analysis/metrics_calculator.cpp + src/git/analyzer.cpp; thresholds high_complexity=10, long_function=100, deep_nesting=4), so the lists are populated identically on the same WIP, but the snapshot was captured against a different WIP than current. The stable[] block anchors the metadata + symbol-add/delete shape so a regression in either binary breaks parity.",
   "tiers": {
     "stable": [
       "report.metadata.scope",
