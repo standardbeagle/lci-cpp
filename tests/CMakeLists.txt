@@ -146,13 +146,7 @@ target_link_libraries(lci_integration_tests PRIVATE
 # invocation, gtest reports its own pass/fail per case, ctest sees
 # one exit code.
 add_test(NAME lci_integration_suite
-         COMMAND lci_integration_tests
-         # ServerCancellationTest.ShutdownJoinsInFlightIndexing crashes
-         # with terminate(std::system_error: Invalid argument) — pre-
-         # existing bug previously hidden by ctest's per-test fork
-         # isolation. Excluded from the bundle until root-cause fixed;
-         # tracked separately.
-         --gtest_filter=-ServerCancellationTest.*)
+         COMMAND lci_integration_tests)
 set_tests_properties(lci_integration_suite PROPERTIES
     LABELS "integration"
     ENVIRONMENT "LCI_CPP=$<TARGET_FILE:lci>;PARITY_CORPORA=${CMAKE_CURRENT_SOURCE_DIR}/parity/corpora"
