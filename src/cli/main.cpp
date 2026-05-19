@@ -104,10 +104,11 @@ int main(int argc, char* argv[]) {
     bool search_regex = false;
     search_cmd->add_flag(
         "-E,--regex", search_regex,
-        "Interpret pattern as RE2 regex. Requires a literal substring "
-        "of >=3 chars in the pattern (the trigram index seeds the regex "
-        "with this literal); pure-meta patterns like '\\d+' or '.{N}' "
-        "are rejected.");
+        "Interpret pattern as RE2 regex. Patterns with a >=3-char "
+        "literal substring use the trigram-seeded fast path "
+        "(sub-millisecond candidate-set lookup, RE2 verification on "
+        "rows). Pure-meta patterns like '\\d+' or '^[a-z]+$' fall back "
+        "to a full-corpus RE2 scan (slower but correct).");
 
     int search_max_count = 0;
     search_cmd->add_option("--max-count", search_max_count,

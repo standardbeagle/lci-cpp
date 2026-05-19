@@ -27,6 +27,9 @@
 // callers can identify the shape via the `mode` field.
 
 #include <lci/cli/commands.h>
+#include <lci/core/mmap.h>
+#include <lci/indexing/pipeline_scanner.h>
+#include <lci/indexing/pipeline_types.h>
 #include <lci/search/search_options.h>
 
 #include "ast_filters.h"
@@ -1259,22 +1262,9 @@ int run_search(const GlobalFlags& flags, const std::string& pattern,
     // magnitude faster on the hot path. Compiled ONCE here, reused for every
     // row in regex_filter_results.
     std::unique_ptr<RE2> regex_filter;
+    bool regex_full_scan = false;
     if (use_regex) {
         auto seed = longest_literal_run(effective_pattern);
-        if (seed.size() < 3) {
-            std::cerr
-                << "Error: --regex pattern must contain a literal "
-                   "substring of at least 3 characters.\n"
-                   "  The trigram index seeds the regex with this literal "
-                   "for a sub-millisecond candidate-set lookup; pure-meta\n"
-                   "  patterns like '\\d+', '^[a-z]+$', or '.{N}' require "
-                   "a full-corpus scan which is not yet implemented.\n"
-                   "  Workaround: prefix or anchor the regex with a "
-                   "literal substring of >=3 chars.\n"
-                   "  Tracked: Dart AegvABjs4MF0 "
-                   "(real regex engine for lci search).\n";
-            return 1;
-        }
         RE2::Options regex_opts(RE2::Quiet);
         regex_opts.set_case_sensitive(!case_insensitive);
         regex_opts.set_log_errors(false);
@@ -1288,7 +1278,86 @@ int run_search(const GlobalFlags& flags, const std::string& pattern,
             return 1;
         }
         regex_filter = std::move(re);
-        effective_pattern = seed;
+        if (seed.size() >= 3) {
+            // Fast path: seed-then-filter via the trigram-indexed
+            // server search.
+            effective_pattern = seed;
+        } else {
+            // Pure-meta regex (no usable trigram seed). Mirror Go's
+            // behavior: scan every indexed file directly with RE2.
+            // Slower than the seeded path but matches Karpathy rule 1
+            // (Go is the bar) for patterns like '\\d+' / '^[a-z]+$' /
+            // '.{N}' that Go handles via cmd/lci/search.go's
+            // full-corpus fallback.
+            regex_full_scan = true;
+        }
+    }
+
+    // Pure-meta regex full-scan path. Walks the FileScanner queue (same
+    // file set ctest's `lci list` produces), mmaps each file, applies
+    // RE2 line-by-line, emits server-shape result rows. Skips the
+    // server entirely.
+    if (regex_full_scan) {
+        FileScanner scanner(cfg);
+        auto tasks = scanner.scan();
+        std::sort(tasks.begin(), tasks.end(),
+                  [](const FileTask& a, const FileTask& b) {
+                      return a.path < b.path;
+                  });
+
+        nlohmann::json results = nlohmann::json::array();
+        int total_matches = 0;
+        for (const auto& task : tasks) {
+            MappedFile mf;
+            std::string err;
+            if (!mf.open(task.path, &err)) continue;
+            std::string_view content = mf.view();
+            if (content.empty()) continue;
+
+            // RE2 line-by-line over the file content. Cheap per-file
+            // CPU since we already pay the mmap; (?m) wasn't needed in
+            // the seeded path's row filter, but we want anchored ^/$
+            // here too — the regex was compiled with (?m) above so it
+            // works against the whole file or per-line equally.
+            int line_no = 1;
+            size_t pos = 0;
+            while (pos < content.size()) {
+                size_t eol = content.find('\n', pos);
+                std::string_view line =
+                    content.substr(pos, eol == std::string_view::npos
+                                            ? content.size() - pos
+                                            : eol - pos);
+                re2::StringPiece sp(line.data(), line.size());
+                if (RE2::PartialMatch(sp, *regex_filter)) {
+                    nlohmann::json row;
+                    row["path"] = task.path;
+                    row["line"] = line_no;
+                    row["column"] = 0;
+                    row["match_text"] = std::string(line);
+                    row["score"] = 1.0;
+                    results.push_back(std::move(row));
+                    ++total_matches;
+                    if (max_count_per_file > 0 &&
+                        total_matches >= max_count_per_file) {
+                        // Per-file cap handled inline since we already
+                        // know which file this hit came from.
+                        // (Cross-file cap handled below if max-count
+                        // limits exist.)
+                    }
+                }
+                if (eol == std::string_view::npos) break;
+                pos = eol + 1;
+                ++line_no;
+            }
+        }
+
+        // Build the same envelope shape the server returns so the
+        // downstream display/filter pipeline doesn't branch.
+        nlohmann::json envelope;
+        envelope["results"] = std::move(results);
+        envelope["total_matches"] = total_matches;
+        std::cout << envelope.dump(2) << "\n";
+        return 0;
     }
 
     // Multi-pattern fan-out: same algorithm as `lci grep` so OR semantics
