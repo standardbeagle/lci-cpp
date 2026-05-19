@@ -11,7 +11,8 @@ int main(int argc, char* argv[]) {
     using namespace lci::cli;
 
     CLI::App app{"Lightning fast code indexing for AI assistants"};
-    app.set_version_flag("--version,-V", lci::kVersion);
+    app.set_version_flag("--version,-V",
+                         std::string("lci version ") + lci::kVersion);
 
     // -- Global flags ---------------------------------------------------------
     GlobalFlags gflags;
