@@ -33,10 +33,13 @@ PROJECTS=(
     "typescript:trpc:https://github.com/trpc/trpc.git"
 )
 
-# Minimal projects for initial setup
+# Minimal projects for initial setup. trpc keeps the TS surface
+# bounded (~960 .ts/.tsx files) vs next.js (~10k+) so the real-project
+# suite stays under the existing TIMEOUT budget on cold caches.
 MINIMAL_PROJECTS=(
     "go:chi:https://github.com/go-chi/chi.git"
     "python:fastapi:https://github.com/tiangolo/fastapi.git"
+    "typescript:trpc:https://github.com/trpc/trpc.git"
 )
 
 MODE="minimal"

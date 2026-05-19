@@ -172,6 +172,7 @@ add_executable(lci_real_project_tests
     integration/real_project_phrase_test.cpp
     integration/real_project_performance_test.cpp
     integration/real_project_side_effects_test.cpp
+    integration/real_project_typescript_test.cpp
     integration/spec_runner.cpp
 )
 target_include_directories(lci_real_project_tests PRIVATE
