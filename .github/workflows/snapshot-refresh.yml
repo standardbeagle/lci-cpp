@@ -29,12 +29,9 @@ permissions:
   contents: write
   pull-requests: write
 
-env:
-  VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
-
 jobs:
   capture:
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, lci-linux]
     name: Capture parity snapshots
     steps:
       - uses: actions/checkout@v4

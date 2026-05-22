@@ -3,127 +3,66 @@ name: CI
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - "tests/parity/snapshots/**"
+      - ".gitignore"
   pull_request:
     branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - "tests/parity/snapshots/**"
+      - ".gitignore"
 
-env:
-  VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+# Cancel superseded runs on the same ref. A force-push to a PR kills the
+# in-flight run instead of stacking a second full matrix.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  build:
+  # ---------------------------------------------------------------------------
+  # Linux — self-hosted (wsl-linux). $0 billed. Uses the host's persistent
+  # vcpkg + ccache dirs (survive across runs), so NO GitHub Actions cache is
+  # consumed. Tools (gcc-13, clang-18, ninja, ccache) are pre-installed on the
+  # host; the guard installs only if a reimage drops them.
+  # ---------------------------------------------------------------------------
+  linux:
+    runs-on: [self-hosted, linux, lci-linux]
     strategy:
       fail-fast: false
       matrix:
         include:
-          # Linux GCC - debug, release, sanitizer (ASan+UBSan), TSan
-          - os: ubuntu-24.04
-            compiler: gcc
-            cc: gcc-13
-            cxx: g++-13
-            preset: debug
-          - os: ubuntu-24.04
-            compiler: gcc
-            cc: gcc-13
-            cxx: g++-13
-            preset: release
-          - os: ubuntu-24.04
-            compiler: gcc
-            cc: gcc-13
-            cxx: g++-13
-            preset: sanitizer
-          - os: ubuntu-24.04
-            compiler: gcc
-            cc: gcc-13
-            cxx: g++-13
-            preset: tsan
-
-          # Linux Clang - debug, release, sanitizer (ASan+UBSan), TSan
-          - os: ubuntu-24.04
-            compiler: clang
-            cc: clang-18
-            cxx: clang++-18
-            preset: debug
-          - os: ubuntu-24.04
-            compiler: clang
-            cc: clang-18
-            cxx: clang++-18
-            preset: release
-          - os: ubuntu-24.04
-            compiler: clang
-            cc: clang-18
-            cxx: clang++-18
-            preset: sanitizer
-          - os: ubuntu-24.04
-            compiler: clang
-            cc: clang-18
-            cxx: clang++-18
-            preset: tsan
-
-          # macOS Apple Clang - debug, release, universal binary
-          - os: macos-latest
-            compiler: appleclang
-            cc: cc
-            cxx: c++
-            preset: debug
-          - os: macos-latest
-            compiler: appleclang
-            cc: cc
-            cxx: c++
-            preset: release
-          - os: macos-latest
-            compiler: appleclang
-            cc: cc
-            cxx: c++
-            preset: macos-universal
-
-          # Windows MSVC - debug, release
-          - os: windows-latest
-            compiler: msvc
-            preset: debug
-          - os: windows-latest
-            compiler: msvc
-            preset: release
-
-    runs-on: ${{ matrix.os }}
-    name: ${{ matrix.compiler }} / ${{ matrix.preset }}
-
+          - { cc: gcc-13,   cxx: g++-13,     preset: release }
+          - { cc: clang-18, cxx: clang++-18, preset: release }
+          - { cc: gcc-13,   cxx: g++-13,     preset: debug }
+          # Sanitizers are expensive — main only.
+          - { cc: gcc-13,   cxx: g++-13,     preset: sanitizer, main_only: true }
+          - { cc: gcc-13,   cxx: g++-13,     preset: tsan,      main_only: true }
+    name: linux ${{ matrix.cc }} / ${{ matrix.preset }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Export GitHub Actions cache variables
-        uses: actions/github-script@v7
-        with:
-          script: |
-            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
-            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+      - name: Ensure build tools
+        run: |
+          need=""
+          for t in ninja ccache "${{ matrix.cc }}" "${{ matrix.cxx }}"; do
+            command -v "$t" >/dev/null || need="$need $t"
+          done
+          if [ -n "$need" ]; then
+            sudo apt-get update
+            sudo apt-get install -y ninja-build ccache "${{ matrix.cc }}" "${{ matrix.cxx }}"
+          fi
 
       - name: Set up vcpkg
         uses: lukka/run-vcpkg@v11
         with:
           vcpkgGitCommitId: "01f602195983451bc83e72f4214af2cbc495aa94"
 
-      - name: Set up ccache
-        uses: hendrikmuhs/ccache-action@v1
-        with:
-          key: ${{ matrix.os }}-${{ matrix.compiler }}-${{ matrix.preset }}
-
-      - name: Install Linux compilers
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ninja-build
-          if [ "${{ matrix.compiler }}" = "gcc" ]; then
-            sudo apt-get install -y gcc-13 g++-13
-          elif [ "${{ matrix.compiler }}" = "clang" ]; then
-            sudo apt-get install -y clang-18
-          fi
-
-      - name: Install macOS tools
-        if: runner.os == 'macOS'
-        run: brew install ninja ccache
-
-      - name: Configure (Unix)
-        if: runner.os != 'Windows'
+      - name: Configure
+        if: ${{ !matrix.main_only || github.ref == 'refs/heads/main' }}
         env:
           CC: ${{ matrix.cc }}
           CXX: ${{ matrix.cxx }}
@@ -134,20 +73,12 @@ jobs:
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake
 
-      - name: Configure (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          cmake --preset ${{ matrix.preset }} `
-            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
-
       - name: Build
+        if: ${{ !matrix.main_only || github.ref == 'refs/heads/main' }}
         run: cmake --build build/${{ matrix.preset }} --parallel
 
-      # ctest disabled in CI until pre-existing test failures are triaged
-      # and fixed (ServerTest crash, HandlersFixture parallel flakes,
-      # parity_verify, mask_audit — see MEMORY.md preexisting-test-failures).
-      # Run locally with `ctest --test-dir build/<preset> --output-on-failure`.
-      # Re-enable once all suites green on clean main.
+      # ctest disabled until pre-existing failures triaged (see MEMORY.md
+      # preexisting-test-failures). Run locally: ctest --test-dir build/<preset>.
       - name: Test (disabled — manual until pre-existing failures fixed)
         if: false
         run: ctest --test-dir build/${{ matrix.preset }} --output-on-failure --parallel
@@ -155,10 +86,10 @@ jobs:
       - name: Build parity targets
         if: matrix.preset == 'release'
         run: |
-          if cmake --build build/${{ matrix.preset }} --target parity_runner --parallel 2>/dev/null; then
-            cmake --build build/${{ matrix.preset }} --target parity_unit_tests --parallel
+          if cmake --build build/release --target parity_runner --parallel 2>/dev/null; then
+            cmake --build build/release --target parity_unit_tests --parallel
           else
-            echo "::warning::parity_runner target not registered (LCI_GO_PATH not set). Skipping parity build."
+            echo "::warning::parity_runner not registered (LCI_GO_PATH unset). Skipping."
           fi
 
       - name: Prep parity corpora
@@ -169,43 +100,59 @@ jobs:
         if: matrix.preset == 'release'
         continue-on-error: true
         run: |
-          set -e
           cd build/release
           PARITY_COUNT=$(ctest -L parity --show-only 2>/dev/null | grep -c "Test #" || true)
           if [ "$PARITY_COUNT" -lt 2 ]; then
-            echo "::warning::Parity tests not registered (LCI_GO_PATH not set during configure or Go binary missing). Skipping parity step."
+            echo "::warning::Parity tests not registered. Skipping."
             exit 0
           fi
           ctest -L parity --output-on-failure --parallel $(nproc) || true
 
-      # Serial parity run — guards against future regressions in the
-      # per-corpus RESOURCE_LOCK scheme. If the parallel run above
-      # passes but this fails, the issue is locking, not divergence.
-      - name: Run parity tests (serial, -j1)
-        if: matrix.preset == 'release' && runner.os == 'Linux' && matrix.compiler == 'gcc'
-        continue-on-error: true
-        run: |
-          set -e
-          cd build/release
-          PARITY_COUNT=$(ctest -L parity --show-only 2>/dev/null | grep -c "Test #" || true)
-          if [ "$PARITY_COUNT" -lt 2 ]; then
-            echo "::warning::Parity tests not registered. Skipping serial parity step."
-            exit 0
-          fi
-          ctest -L parity --output-on-failure --parallel 1 || true
+      # Free the build tree after the run so the self-hosted host doesn't
+      # accumulate per-preset build dirs across the matrix. ccache + vcpkg
+      # caches (the slow parts) persist; only object files are dropped.
+      - name: Reclaim build space
+        if: always()
+        run: rm -rf build/${{ matrix.preset }}
 
-      - name: Upload release binary
-        if: (matrix.preset == 'release' || matrix.preset == 'macos-universal') && github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/upload-artifact@v4
+  # ---------------------------------------------------------------------------
+  # Windows — self-hosted (win-host). $0 billed. Requires MSVC (VS Build
+  # Tools), CMake, and Ninja on PATH on the host. Release only.
+  # ---------------------------------------------------------------------------
+  windows:
+    runs-on: [self-hosted, windows, lci-windows]
+    name: windows msvc / release
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up vcpkg
+        uses: lukka/run-vcpkg@v11
         with:
-          name: lci-${{ matrix.os }}-${{ matrix.compiler }}-${{ matrix.preset }}
-          path: build/${{ matrix.preset }}/src/lci*
-          retention-days: 7
+          vcpkgGitCommitId: "01f602195983451bc83e72f4214af2cbc495aa94"
 
-  benchmarks:
-    runs-on: ubuntu-24.04
-    name: benchmarks
+      - name: Configure
+        run: |
+          cmake --preset release `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
 
+      - name: Build
+        run: cmake --build build/release --parallel
+
+      - name: Reclaim build space
+        if: always()
+        run: if (Test-Path build/release) { Remove-Item -Recurse -Force build/release }
+
+  # ---------------------------------------------------------------------------
+  # macOS — GitHub-hosted, the ONLY billed runner (10x). Restricted to pushes
+  # on main + tags so PR iterations never touch it. Keeps GH caches (ephemeral
+  # runner needs them) but uploads NO artifacts.
+  # ---------------------------------------------------------------------------
+  macos:
+    if: github.event_name == 'push'
+    runs-on: macos-latest
+    name: macos appleclang / release
+    env:
+      VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
     steps:
       - uses: actions/checkout@v4
 
@@ -224,12 +171,38 @@ jobs:
       - name: Set up ccache
         uses: hendrikmuhs/ccache-action@v1
         with:
-          key: ubuntu-24.04-gcc-benchmarks
+          key: macos-appleclang-release
+          max-size: 500M
 
       - name: Install tools
+        run: brew install ninja ccache
+
+      - name: Configure
         run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-13 g++-13 ninja-build
+          cmake --preset release \
+            -G Ninja \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake
+
+      - name: Build
+        run: cmake --build build/release --parallel
+
+  # ---------------------------------------------------------------------------
+  # Benchmarks — self-hosted Linux, main only. Numbers go to the job log; no
+  # artifact upload (was retention 30 — pure GH storage).
+  # ---------------------------------------------------------------------------
+  benchmarks:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, linux, lci-linux]
+    name: benchmarks
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: "01f602195983451bc83e72f4214af2cbc495aa94"
 
       - name: Configure
         env:
@@ -248,137 +221,9 @@ jobs:
       - name: Run benchmarks
         run: |
           ./build/release/tests/lci_benchmarks \
-            --benchmark_format=json \
-            --benchmark_out=benchmark_results.json \
-            --benchmark_min_time=0.1s
+            --benchmark_format=console \
+            --benchmark_min_time=0.1s | tee benchmark_results.txt
 
-      - name: Upload benchmark results
-        uses: actions/upload-artifact@v4
-        with:
-          name: benchmark-results
-          path: benchmark_results.json
-          retention-days: 30
-
-      # Cross-binary perf gate. Runs only when the Go reference binary is
-      # present in PATH; CI environments without it skip cleanly. Built
-      # locally per host so the gate isn't gated on a remote artifact.
-      - name: Run bench_parity (C++ vs Go indexing ratio)
-        if: false  # gated until CI provisions the Go reference binary
-        run: |
-          if [ ! -x /usr/local/bin/lci-linux-amd64 ]; then
-            echo "::warning::Go reference binary not present; skipping bench_parity."
-            exit 0
-          fi
-          cmake --build build/release --target lci --parallel
-          python3 tests/benchmarks/bench_parity.py \
-            --go /usr/local/bin/lci-linux-amd64 \
-            --cpp build/release/src/lci \
-            --root . \
-            --threshold 5.0 \
-            --trials 2 | tee bench_parity.txt
-
-      - name: Upload bench_parity report
-        if: false  # enable alongside the run step above once Go binary in CI
-        uses: actions/upload-artifact@v4
-        with:
-          name: bench-parity-report
-          path: bench_parity.txt
-          retention-days: 30
-
-  fuzz:
-    runs-on: ubuntu-24.04
-    name: fuzz (10 min)
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Export GitHub Actions cache variables
-        uses: actions/github-script@v7
-        with:
-          script: |
-            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
-            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
-
-      - name: Set up vcpkg
-        uses: lukka/run-vcpkg@v11
-        with:
-          vcpkgGitCommitId: "01f602195983451bc83e72f4214af2cbc495aa94"
-
-      - name: Install tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y clang-18 ninja-build
-
-      - name: Configure
-        env:
-          CC: clang-18
-          CXX: clang++-18
-        run: |
-          cmake --preset fuzz \
-            -G Ninja \
-            -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake
-
-      - name: Build fuzz targets
-        run: cmake --build build/fuzz --parallel
-
-      # Fuzz runs disabled in CI until pre-existing test failures are fixed.
-      # Run locally: ./build/fuzz/tests/fuzz_<name> corpus/<name> -max_total_time=200
-      - name: Fuzz regex classifier (disabled — manual)
-        if: false
-        run: |
-          mkdir -p corpus/regex
-          ./build/fuzz/tests/fuzz_regex_classifier corpus/regex -max_total_time=200
-
-      - name: Fuzz trigram extract (disabled — manual)
-        if: false
-        run: |
-          mkdir -p corpus/trigram
-          ./build/fuzz/tests/fuzz_trigram_extract corpus/trigram -max_total_time=200
-
-      - name: Fuzz search input (disabled — manual)
-        if: false
-        run: |
-          mkdir -p corpus/search
-          ./build/fuzz/tests/fuzz_search_input corpus/search -max_total_time=200
-
-  clang-tidy:
-    runs-on: ubuntu-24.04
-    name: clang-tidy
-    # Disabled until pre-existing lint findings are triaged and fixed.
-    # Run locally: clang-tidy-18 -p build/ci $(find src include -name '*.cpp' -o -name '*.h')
-    if: false
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Export GitHub Actions cache variables
-        uses: actions/github-script@v7
-        with:
-          script: |
-            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
-            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
-
-      - name: Set up vcpkg
-        uses: lukka/run-vcpkg@v11
-        with:
-          vcpkgGitCommitId: "01f602195983451bc83e72f4214af2cbc495aa94"
-
-      - name: Install tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y clang-18 clang-tidy-18 ninja-build
-
-      - name: Configure
-        env:
-          CC: clang-18
-          CXX: clang++-18
-        run: |
-          cmake --preset ci \
-            -G Ninja \
-            -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake
-
-      - name: Run clang-tidy
-        run: |
-          find src include -name '*.cpp' -o -name '*.h' | \
-            xargs clang-tidy-18 -p build/ci --warnings-as-errors='*'
+      - name: Reclaim build space
+        if: always()
+        run: rm -rf build/release benchmark_results.txt

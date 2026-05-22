@@ -8,33 +8,109 @@ on:
 permissions:
   contents: write
 
-env:
-  VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
-
 jobs:
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-24.04
-            compiler: gcc
-            cc: gcc-13
-            cxx: g++-13
-            artifact: lci-linux-amd64
-          - os: macos-latest
-            compiler: appleclang
-            cc: cc
-            cxx: c++
-            artifact: lci-darwin-universal
-            cmake_extra: "-DLCI_UNIVERSAL_BINARY=ON"
-          - os: windows-latest
-            compiler: msvc
-            artifact: lci-windows-amd64
+  # Linux + Windows build on the self-hosted runners ($0). macOS builds on a
+  # GitHub-hosted runner (only billed leg). Artifact retention trimmed 5 -> 2;
+  # these are consumed by the publish job in the same run.
+  build-linux:
+    runs-on: [self-hosted, linux, lci-linux]
+    name: build / lci-linux-amd64
+    steps:
+      - uses: actions/checkout@v4
 
-    runs-on: ${{ matrix.os }}
-    name: build / ${{ matrix.artifact }}
+      - name: Ensure build tools
+        run: |
+          for t in ninja gcc-13 g++-13; do
+            command -v "$t" >/dev/null || { sudo apt-get update; sudo apt-get install -y ninja-build gcc-13 g++-13; break; }
+          done
 
+      - name: Set up vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: "01f602195983451bc83e72f4214af2cbc495aa94"
+
+      - name: Configure
+        env:
+          CC: gcc-13
+          CXX: g++-13
+        run: |
+          cmake --preset release \
+            -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake
+
+      - name: Build
+        run: cmake --build build/release --parallel
+
+      - name: Test
+        run: ctest --test-dir build/release --output-on-failure --parallel
+
+      - name: Package
+        run: |
+          cd build/release
+          cpack -G TGZ
+          cpack -G DEB
+          cpack -G RPM
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: lci-linux-amd64
+          path: |
+            build/release/lci-*.tar.gz
+            build/release/lci-*.deb
+            build/release/lci-*.rpm
+            build/release/src/lci
+          retention-days: 2
+
+      - name: Reclaim build space
+        if: always()
+        run: rm -rf build/release
+
+  build-windows:
+    runs-on: [self-hosted, windows, lci-windows]
+    name: build / lci-windows-amd64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: "01f602195983451bc83e72f4214af2cbc495aa94"
+
+      - name: Configure
+        run: |
+          cmake --preset release `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+
+      - name: Build
+        run: cmake --build build/release --parallel
+
+      - name: Test
+        run: ctest --test-dir build/release --output-on-failure --parallel
+
+      - name: Package
+        run: |
+          cd build/release
+          cpack -G TGZ
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: lci-windows-amd64
+          path: |
+            build/release/lci-*.tar.gz
+            build/release/src/lci.exe
+          retention-days: 2
+
+      - name: Reclaim build space
+        if: always()
+        run: if (Test-Path build/release) { Remove-Item -Recurse -Force build/release }
+
+  build-macos:
+    runs-on: macos-latest
+    name: build / lci-darwin-universal
+    env:
+      VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
     steps:
       - uses: actions/checkout@v4
 
@@ -50,32 +126,15 @@ jobs:
         with:
           vcpkgGitCommitId: "01f602195983451bc83e72f4214af2cbc495aa94"
 
-      - name: Install Linux tools
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-13 g++-13 ninja-build
-
-      - name: Install macOS tools
-        if: runner.os == 'macOS'
+      - name: Install tools
         run: brew install ninja
 
-      - name: Configure (Unix)
-        if: runner.os != 'Windows'
-        env:
-          CC: ${{ matrix.cc }}
-          CXX: ${{ matrix.cxx }}
+      - name: Configure
         run: |
           cmake --preset release \
             -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake \
-            ${{ matrix.cmake_extra }}
-
-      - name: Configure (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          cmake --preset release `
-            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+            -DLCI_UNIVERSAL_BINARY=ON
 
       - name: Build
         run: cmake --build build/release --parallel
@@ -83,36 +142,24 @@ jobs:
       - name: Test
         run: ctest --test-dir build/release --output-on-failure --parallel
 
-      - name: Package (Unix)
-        if: runner.os != 'Windows'
+      - name: Package
         run: |
           cd build/release
           cpack -G TGZ
 
-      - name: Package (Linux DEB/RPM)
-        if: runner.os == 'Linux'
-        run: |
-          cd build/release
-          cpack -G DEB
-          cpack -G RPM
-
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
+          name: lci-darwin-universal
           path: |
             build/release/lci-*.tar.gz
-            build/release/lci-*.deb
-            build/release/lci-*.rpm
             build/release/src/lci
-            build/release/src/lci.exe
-          retention-days: 5
+          retention-days: 2
 
   release:
-    needs: build
-    runs-on: ubuntu-latest
+    needs: [build-linux, build-windows, build-macos]
+    runs-on: [self-hosted, linux, lci-linux]
     name: publish
-
     steps:
       - uses: actions/checkout@v4
 
@@ -131,3 +178,7 @@ jobs:
             dist/**/*.rpm
             dist/**/lci
             dist/**/lci.exe
+
+      - name: Reclaim space
+        if: always()
+        run: rm -rf dist
