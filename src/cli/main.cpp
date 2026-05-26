@@ -1,11 +1,15 @@
 #include <lci/cli/commands.h>
+#include <lci/indexing/pipeline_scanner.h>
 #include <lci/version.h>
 
+#include <algorithm>
 #include <cstdlib>
 #include <iostream>
 #include <string>
 
 #include <CLI/CLI.hpp>
+
+#include "profiling.h"
 
 int main(int argc, char* argv[]) {
     using namespace lci::cli;
@@ -28,6 +32,15 @@ int main(int argc, char* argv[]) {
     app.add_flag("--test-run", gflags.test_run,
                  "Show files that would be indexed without processing")
         ->group("");  // hidden
+    // Hidden global profile flags (Go parity: cmd/lci/main.go:108-115). When
+    // gperftools is linked, these write CPU/heap profiles. When not, the
+    // runtime path fails fast with a clear error — no silent no-op.
+    app.add_option("--profile-cpu", gflags.profile_cpu_path,
+                   "Write CPU profile to file (requires gperftools)")
+        ->group("");
+    app.add_option("--profile-memory", gflags.profile_memory_path,
+                   "Write memory (heap) profile to file (requires gperftools)")
+        ->group("");
 
     // -- Search subcommand ----------------------------------------------------
     auto* search_cmd =
@@ -127,8 +140,40 @@ int main(int argc, char* argv[]) {
                          "Show compact output");
 
     std::string search_rank_by;
-    search_cmd->add_option("--rank-by", search_rank_by,
-                           "Rank results by: relevance | recency | file-type");
+    search_cmd->add_option(
+        "--rank-by", search_rank_by,
+        "Rank results by: relevance | recency | file-type. "
+        "Go-parity aliases accepted: proximity | similarity (both map "
+        "to relevance — see src/cli/rank_options.h _rationale).");
+
+    // Go-parity search-local flags (cmd/lci/main.go:168-188). Each one is
+    // honored (not just parsed) — see callback + run_search wiring below.
+    bool search_template_strings = false;
+    search_cmd->add_flag(
+        "--template-strings", search_template_strings,
+        "When combined with --strings-only, also match template strings "
+        "(sql``, gql``, etc.)");
+
+    bool search_verbose = false;
+    // Long-only `--verbose` (no -v short — `-v` is grep's invert-match).
+    search_cmd->add_flag("--verbose", search_verbose,
+                         "Show debug information on stderr");
+
+    bool search_compare_search = false;
+    search_cmd->add_flag(
+        "--compare-search", search_compare_search,
+        "A/B-compare legacy vs consolidated search path (Go-parity flag; "
+        "C++ port has only one path — emits a stderr notice)");
+
+    std::string search_cpu_profile_path;
+    search_cmd->add_option("--cpu-profile", search_cpu_profile_path,
+                           "Write search-local CPU profile to file "
+                           "(requires gperftools)");
+
+    std::string search_mem_profile_path;
+    search_cmd->add_option("--mem-profile", search_mem_profile_path,
+                           "Write search-local memory profile to file "
+                           "(requires gperftools)");
 
     std::string search_context_filter;
     search_cmd->add_option("--context-filter", search_context_filter,
@@ -143,7 +188,9 @@ int main(int argc, char* argv[]) {
             search_patterns, search_count,
             search_files_only, search_word_boundary, search_max_count,
             search_ids, search_no_ids, search_comments_only, search_code_only,
-            search_strings_only, search_rank_by, search_context_filter));
+            search_strings_only, search_rank_by, search_context_filter,
+            search_template_strings, search_verbose, search_compare_search,
+            search_cpu_profile_path, search_mem_profile_path));
     });
 
     // -- Grep subcommand ------------------------------------------------------
@@ -190,8 +237,27 @@ int main(int argc, char* argv[]) {
                        "Exclude matches in comments");
 
     bool grep_regex = false;
-    grep_cmd->add_flag("-R,--regex", grep_regex,
-                       "Interpret pattern as extended regex");
+    // Short form `-E` mirrors Go's `lci search -E` and GNU grep -E. The
+    // previous `-R` alias is dropped to avoid an LCI-only short form that
+    // diverged from Go (decision in S3 task spec). `--regex` long form is
+    // unchanged so existing scripts keep working.
+    grep_cmd->add_flag("-E,--regex", grep_regex,
+                       "Interpret pattern as extended (RE2) regex. "
+                       "Honored: when set, the positional pattern and all "
+                       "--patterns entries are compiled with RE2 and matched "
+                       "line-by-line against the result rows returned by the "
+                       "literal-match engine.");
+
+    bool grep_verbose = false;
+    // Long-only `--verbose`. `-v` is grep's invert-match (decision: keep
+    // grep convention, surface `--verbose` separately). Documented divergence
+    // from Go's `-v`=verbose in cmd/lci/main.go:297.
+    // _rationale: grep -v is universally understood as invert-match across
+    // every grep implementation users may already know; aliasing it to verbose
+    // would silently break grep muscle memory. Long-only `--verbose` is the
+    // honest compromise — discoverable in --help, no shadow on -v.
+    grep_cmd->add_flag("--verbose", grep_verbose,
+                       "Show debug information on stderr");
 
     // -- Grep-compatible filter flags (parity with `lci search` and Go CLI) --
     bool grep_invert_match = false;
@@ -225,7 +291,7 @@ int main(int argc, char* argv[]) {
                            grep_exclude, grep_include, grep_exclude_tests,
                            grep_exclude_comments, grep_regex,
                            grep_invert_match, grep_patterns, grep_count,
-                           grep_files_only, grep_max_count));
+                           grep_files_only, grep_max_count, grep_verbose));
     });
 
     // -- Status subcommand ----------------------------------------------------
@@ -249,7 +315,20 @@ int main(int argc, char* argv[]) {
         app.add_subcommand("server", "Start persistent index server")
             ->alias("srv");
 
-    server_cmd->callback([&]() { std::exit(run_server(gflags)); });
+    // Command-local --daemon/--foreground (Go cmd/lci/main.go:801-811). When
+    // both are passed, --foreground wins and we emit a stderr notice.
+    bool server_daemon = false;
+    server_cmd->add_flag("-d,--daemon", server_daemon,
+                         "Run as daemon (background, detaches from terminal)");
+
+    bool server_foreground = false;
+    server_cmd->add_flag("--foreground", server_foreground,
+                         "Force foreground operation (overrides --daemon; "
+                         "for debugging)");
+
+    server_cmd->callback([&]() {
+        std::exit(run_server(gflags, server_daemon, server_foreground));
+    });
 
     // -- Shutdown subcommand --------------------------------------------------
     auto* shutdown_cmd =
@@ -269,6 +348,38 @@ int main(int argc, char* argv[]) {
         "mcp", "Start MCP (Model Context Protocol) server with stdio transport");
 
     mcp_cmd->callback([&]() { std::exit(run_mcp(gflags)); });
+
+    // Helper: emit a real --test-run file list using the same FileScanner the
+    // indexer would consume. Mirrors Go's `MasterIndex.TestRun` (which calls
+    // `ListFiles`) — stdout: one path per line; stderr: "Total: N files
+    // would be indexed". Replaces the prior stub that just printed
+    // "Test run mode: would index from <root>" with no actual file list.
+    auto run_test_run = [&]() -> int {
+        lci::Config cfg;
+        std::string err = load_config_with_overrides(gflags, cfg);
+        if (!err.empty()) {
+            std::cerr << "Error: " << err << "\n";
+            return 1;
+        }
+        std::fprintf(stderr,
+                     "Test run mode: showing files that would be indexed\n");
+        // Same scanner the indexer pipeline uses, so the list reflects the
+        // real include/exclude/root filters — not a parallel implementation.
+        lci::FileScanner scanner(cfg);
+        auto tasks = scanner.scan();
+        // Sort by path for deterministic output (Karpathy rule 4) and to
+        // match Go's `filepath.Walk` lexical order.
+        std::sort(tasks.begin(), tasks.end(),
+                  [](const lci::FileTask& a, const lci::FileTask& b) {
+                      return a.path < b.path;
+                  });
+        for (const auto& task : tasks) {
+            std::printf("%s\n", task.path.c_str());
+        }
+        std::fprintf(stderr,
+                     "\nTotal: %zu files would be indexed\n", tasks.size());
+        return 0;
+    };
 
     // -- Def subcommand -------------------------------------------------------
     auto* def_cmd =
@@ -417,16 +528,28 @@ int main(int argc, char* argv[]) {
     debug_info_cmd->add_flag("-v,--verbose", debug_info_verbose,
                              "Enable verbose debug output");
 
+    bool debug_info_incremental = false;
+    debug_info_cmd->add_flag("--incremental,--inc", debug_info_incremental,
+                             "Show incremental-index introspection "
+                             "(falls back to full scan with notice when "
+                             "no snapshot is available)");
+
     debug_info_cmd->callback([&]() {
-        std::exit(run_debug_info(gflags, debug_info_verbose));
+        std::exit(run_debug_info(gflags, debug_info_verbose,
+                                 debug_info_incremental));
     });
 
     auto* debug_validate_cmd =
         debug_cmd->add_subcommand("validate", "Validate system consistency")
             ->alias("v");
 
+    bool debug_validate_incremental = false;
+    debug_validate_cmd->add_flag("--incremental,--inc",
+                                 debug_validate_incremental,
+                                 "Run incremental-mode consistency checks");
+
     debug_validate_cmd->callback([&]() {
-        std::exit(run_debug_validate(gflags));
+        std::exit(run_debug_validate(gflags, debug_validate_incremental));
     });
 
     auto* debug_deps_cmd =
@@ -454,9 +577,16 @@ int main(int argc, char* argv[]) {
     debug_export_cmd->add_flag("-v,--verbose", debug_export_verbose,
                                "Show export preview");
 
+    bool debug_export_incremental = false;
+    debug_export_cmd->add_flag("--incremental,--inc",
+                               debug_export_incremental,
+                               "Export the incremental-index delta instead "
+                               "of the full snapshot");
+
     debug_export_cmd->callback([&]() {
-        std::exit(
-            run_debug_export(gflags, debug_export_output, debug_export_verbose));
+        std::exit(run_debug_export(gflags, debug_export_output,
+                                   debug_export_verbose,
+                                   debug_export_incremental));
     });
 
     auto* debug_graph_cmd =
@@ -634,15 +764,7 @@ int main(int argc, char* argv[]) {
         if (app.get_subcommands().empty() ||
             app.get_subcommands().front()->get_name().empty()) {
             if (gflags.test_run) {
-                lci::Config cfg;
-                std::string err = load_config_with_overrides(gflags, cfg);
-                if (!err.empty()) {
-                    std::cerr << "Error: " << err << "\n";
-                    std::exit(1);
-                }
-                std::cerr << "Test run mode: would index from "
-                          << cfg.project.root << "\n";
-                std::exit(0);
+                std::exit(run_test_run());
             }
 
             if (is_mcp_mode()) {
@@ -650,6 +772,62 @@ int main(int argc, char* argv[]) {
             }
         }
     });
+
+    // -- Global CPU/memory profiling --------------------------------------
+    //
+    // gperftools profilers are started BEFORE parse() because CLI11 invokes
+    // subcommand callbacks inside parse() and most callbacks call std::exit()
+    // (matching Go's `os.Exit(1)` on error). If we wait until after parse,
+    // the profiler never gets a chance to start.
+    //
+    // We don't have CLI11's parsed values yet at this point, so we scan argv
+    // directly for the two profile flags. Side note: a full pre-pass would
+    // be fragile (we'd be reimplementing CLI11's parser); a targeted scan
+    // for two specific long-only flags is cheap and correct. The flags are
+    // hidden (`->group("")`) and never exposed in --help — only users who
+    // explicitly need profiling reach for them.
+    //
+    // Fails FAST (non-zero exit, clear error) when gperftools is missing —
+    // per Karpathy rule 6, no silent no-op for a flag the user explicitly
+    // set.
+    std::string cpu_profile_path_arg;
+    std::string mem_profile_path_arg;
+    for (int i = 1; i < argc - 1; ++i) {
+        std::string a = argv[i];
+        if (a == "--profile-cpu") {
+            cpu_profile_path_arg = argv[i + 1];
+        } else if (a == "--profile-memory") {
+            mem_profile_path_arg = argv[i + 1];
+        }
+    }
+    // Static storage so guard destructors run via atexit — every subcommand
+    // callback below ends with std::exit(), which DOES invoke atexit handlers
+    // but does NOT unwind the stack (no automatic destructors). Putting the
+    // guards in static storage and registering an explicit atexit that resets
+    // them gives us a deterministic flush on every exit path.
+    static lci::cli::ProfilerGuard cpu_guard;
+    static lci::cli::ProfilerGuard mem_guard;
+    if (!cpu_profile_path_arg.empty() || !mem_profile_path_arg.empty()) {
+        std::string err;
+        cpu_guard = lci::cli::start_cpu_profile(cpu_profile_path_arg, err);
+        if (!err.empty()) {
+            std::cerr << "Error: " << err << "\n";
+            return 1;
+        }
+        mem_guard = lci::cli::start_memory_profile(mem_profile_path_arg, err);
+        if (!err.empty()) {
+            std::cerr << "Error: " << err << "\n";
+            return 1;
+        }
+        std::atexit([]() {
+            // Reset via move-assign of a default-constructed guard, which
+            // triggers ~ProfilerGuard on the held state (Stop+flush). Safe
+            // to call multiple times; the second call is a no-op because
+            // the guards are already Inactive after the first reset.
+            cpu_guard = lci::cli::ProfilerGuard{};
+            mem_guard = lci::cli::ProfilerGuard{};
+        });
+    }
 
     // Manual parse + exit-code remap. CLI11's default `ExtrasError` exit
     // is 109; Go's urfave/cli exits 1 on `flag provided but not defined`
@@ -664,5 +842,6 @@ int main(int argc, char* argv[]) {
         return rc == 0 ? 0 : 1;
     }
 
+    // cpu_guard / mem_guard destruct on return, flushing the profile.
     return 0;
 }

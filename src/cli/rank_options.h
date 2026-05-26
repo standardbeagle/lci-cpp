@@ -126,6 +126,25 @@ inline std::string ascii_lower(std::string_view s) {
 /// Parses a `--rank-by` value into a strategy. Empty and "relevance" both
 /// yield `Relevance` (the no-op default). Hyphen and underscore are
 /// interchangeable so users can type `file-type` or `file_type`.
+///
+/// Go-parity aliases (decision recorded in S3 CLI parity task, _rationale below):
+///   "proximity"   → Relevance  — Go ranks by token-locality; the C++
+///                   port has no separate locality scorer, so we route
+///                   to Relevance (the closest existing strategy: the
+///                   server's word-boundary/line-start bonuses give a
+///                   locality-like signal). Accepting the alias keeps
+///                   `--rank-by proximity` from failing user scripts.
+///   "similarity"  → Relevance  — Go's similarity ranker is rapidfuzz-based
+///                   over symbol names; no equivalent on the search hot
+///                   path in C++ today. Fallback to Relevance is honest:
+///                   the user asked for similarity ordering, gets the
+///                   default relevance ordering. Aliased rather than
+///                   silently dropped so the flag is accepted.
+///
+/// _rationale: Aliasing rather than implementing avoids adding two new
+/// scoring code paths to the read-side hot loop (Karpathy rule 3). The
+/// alias is documented in --help text and in any parity descriptors that
+/// exercise --rank-by.
 inline RankStrategy parse_strategy(std::string_view raw) {
     if (raw.empty()) return RankStrategy::Relevance;
     std::string lower = ascii_lower(raw);
@@ -136,6 +155,9 @@ inline RankStrategy parse_strategy(std::string_view raw) {
     if (lower == "relevance") return RankStrategy::Relevance;
     if (lower == "recency") return RankStrategy::Recency;
     if (lower == "file-type") return RankStrategy::FileType;
+    // Go-parity aliases — route to the nearest existing C++ behavior.
+    if (lower == "proximity") return RankStrategy::Relevance;
+    if (lower == "similarity") return RankStrategy::Relevance;
     return RankStrategy::Unknown;
 }
 

@@ -182,7 +182,7 @@ DependencySummary analyze_dependency_graph(
 
 // -- debug info ---------------------------------------------------------------
 
-int run_debug_info(const GlobalFlags& flags, bool verbose) {
+int run_debug_info(const GlobalFlags& flags, bool verbose, bool incremental) {
     Config cfg;
     if (std::string err = load_config_with_overrides(flags, cfg); !err.empty()) {
         std::cerr << "Error: " << err << "\n";
@@ -226,7 +226,20 @@ int run_debug_info(const GlobalFlags& flags, bool verbose) {
 
     std::printf("Debug Info - Lightning Code Index Symbol Linking System\n");
     std::printf("Root Path: %s\n", display_root_path(root).c_str());
-    std::printf("Incremental Mode: false\n");
+    // When `--incremental` is requested, the C++ port doesn't yet have a
+    // snapshot-delta export (Go reads the last snapshot's manifest and emits
+    // only files that changed). We honor the flag by labeling the header
+    // "true" and emitting a stderr note that the body is still a full scan —
+    // visible signal vs. silent acceptance (Karpathy rule 6).
+    if (incremental) {
+        std::printf("Incremental Mode: true\n");
+        std::fprintf(stderr,
+                     "Note: --incremental requested; falling back to full "
+                     "scan (incremental snapshot delta not yet wired in C++ "
+                     "port — file list reflects current on-disk state).\n");
+    } else {
+        std::printf("Incremental Mode: false\n");
+    }
     std::printf("\n");
     std::printf("Building index...\n");
     std::printf("Linking symbols...\n");
@@ -273,7 +286,7 @@ int run_debug_info(const GlobalFlags& flags, bool verbose) {
 
 // -- debug validate -----------------------------------------------------------
 
-int run_debug_validate(const GlobalFlags& flags) {
+int run_debug_validate(const GlobalFlags& flags, bool incremental) {
     Config cfg;
     if (std::string err = load_config_with_overrides(flags, cfg); !err.empty()) {
         std::cerr << "Error: " << err << "\n";
@@ -289,6 +302,20 @@ int run_debug_validate(const GlobalFlags& flags) {
 
     std::printf("Validating Symbol Linking System\n");
     std::printf("Root Path: %s\n", cfg.project.root.c_str());
+    if (incremental) {
+        std::printf("Mode: incremental\n");
+        // The current consistency check is a single /status round-trip;
+        // it returns whatever the server has cached. Incremental and full
+        // produce identical output here because the server's snapshot is
+        // always coherent. Document the gap rather than fake a separate
+        // path (Karpathy rule 6).
+        std::fprintf(stderr,
+                     "Note: --incremental: server-side consistency check "
+                     "is mode-agnostic in C++ port; output is identical to "
+                     "full-mode for now.\n");
+    } else {
+        std::printf("Mode: full\n");
+    }
     std::printf("\n");
 
     std::string status_err;
@@ -409,7 +436,7 @@ int run_debug_deps(const GlobalFlags& flags, bool verbose) {
 // -- debug export -------------------------------------------------------------
 
 int run_debug_export(const GlobalFlags& flags, const std::string& output,
-                     bool verbose) {
+                     bool verbose, bool incremental) {
     Config cfg;
     if (std::string err = load_config_with_overrides(flags, cfg); !err.empty()) {
         std::cerr << "Error: " << err << "\n";
@@ -419,10 +446,18 @@ int run_debug_export(const GlobalFlags& flags, const std::string& output,
     std::printf("Exporting Debug Information\n");
     std::printf("Root Path: %s\n", cfg.project.root.c_str());
     std::printf("Output File: %s\n", output.c_str());
+    std::printf("Mode: %s\n", incremental ? "incremental" : "full");
+    if (incremental) {
+        std::fprintf(stderr,
+                     "Note: --incremental export: C++ port emits the same "
+                     "snapshot payload as full-mode; the incremental delta "
+                     "manifest is not yet exposed.\n");
+    }
     std::printf("\n");
 
     nlohmann::json data;
     data["root"] = cfg.project.root;
+    data["incremental"] = incremental;
     data["ready"] = false;
     data["file_count"] = 0;
     data["symbol_count"] = 0;

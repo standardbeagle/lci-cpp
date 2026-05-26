@@ -9,6 +9,7 @@
 #include <iostream>
 #include <string>
 #include <thread>
+#include <vector>
 
 #ifndef _WIN32
 #include <unistd.h>
@@ -117,11 +118,80 @@ std::unique_ptr<Client> ensure_server_running(const Config& cfg,
 
 // -- Server start -------------------------------------------------------------
 
-int run_server(const GlobalFlags& flags) {
+int run_server(const GlobalFlags& flags, bool daemon, bool foreground) {
     Config cfg;
     if (std::string err = load_config_with_overrides(flags, cfg); !err.empty()) {
         std::cerr << "Error: " << err << "\n";
         return 1;
+    }
+
+    // -- daemon / foreground resolution -----------------------------------
+    //
+    // Go cmd/lci/main.go:801-811 declares both; `--foreground` defaults true.
+    // We treat `--foreground` as an explicit override: when set, daemon mode
+    // is ignored (with a stderr notice on conflict). When neither is set,
+    // we run in foreground — matches Go's default + matches user expectation
+    // for `lci server` invoked interactively.
+    if (daemon && foreground) {
+        std::fprintf(stderr,
+                     "Note: --foreground overrides --daemon; running in "
+                     "foreground for debug.\n");
+        daemon = false;
+    }
+
+    if (daemon) {
+#ifndef _WIN32
+        // Daemonize: double-fork pattern. Parent exits 0 immediately; child
+        // calls setsid() and re-execs itself with no daemon flag so the
+        // server loop below runs in the detached process. We re-exec rather
+        // than fall through so signal handlers and fd state are clean.
+        std::error_code ec;
+        auto exe_path = std::filesystem::read_symlink("/proc/self/exe", ec);
+        if (ec) {
+            std::cerr << "Error: failed to get executable path: "
+                      << ec.message() << "\n";
+            return 1;
+        }
+        pid_t pid = fork();
+        if (pid < 0) {
+            std::cerr << "Error: fork failed for --daemon\n";
+            return 1;
+        }
+        if (pid > 0) {
+            // Parent: report and exit.
+            std::printf("Index server starting in background (pid: %d)\n",
+                        static_cast<int>(pid));
+            return 0;
+        }
+        // Child: detach.
+        setsid();
+        auto* f1 = freopen("/dev/null", "w", stdout);
+        auto* f2 = freopen("/dev/null", "w", stderr);
+        auto* f3 = freopen("/dev/null", "r", stdin);
+        (void)f1; (void)f2; (void)f3;
+        // Re-exec without --daemon so the next pass runs the server loop
+        // below. `--foreground` is added explicitly to short-circuit any
+        // future config default that might re-enable daemon.
+        std::string exe = exe_path.string();
+        std::vector<std::string> argv;
+        argv.push_back(exe);
+        if (!cfg.project.root.empty() && cfg.project.root != ".") {
+            argv.push_back("--root");
+            argv.push_back(cfg.project.root);
+        }
+        argv.push_back("server");
+        argv.push_back("--foreground");
+        std::vector<char*> raw;
+        raw.reserve(argv.size() + 1);
+        for (auto& a : argv) raw.push_back(a.data());
+        raw.push_back(nullptr);
+        execv(exe.c_str(), raw.data());
+        _exit(1);
+#else
+        std::cerr << "Error: --daemon is not supported on Windows; "
+                     "use --foreground or a service wrapper\n";
+        return 1;
+#endif
     }
 
     IndexServer server(cfg);
