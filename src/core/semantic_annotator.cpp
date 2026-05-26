@@ -1,4 +1,7 @@
 #include <lci/core/semantic_annotator.h>
+#include <lci/core/file_content_store.h>
+#include <lci/core/reference_tracker.h>
+#include <lci/indexing/master_index.h>
 #include <lci/symbol.h>
 
 #include <algorithm>
@@ -69,11 +72,20 @@ void SemanticAnnotator::extract_annotations(
             annotation->file_id = file_id;
             annotation->symbol_id = sym_id;
 
+            // Build the AnnotatedSymbol once and clone into each per-key
+            // index. Move into annotations_ at the end so the file/symbol map
+            // takes ownership of the annotation body.
+            AnnotatedSymbol entry{
+                file_id, sym_id, symbol.name, symbol.line,
+                *annotation, std::string(file_path)};
+
             // Index by labels
             for (const auto& label : annotation->labels) {
-                label_index_[label].push_back(AnnotatedSymbol{
-                    file_id, sym_id, symbol.name, symbol.line,
-                    *annotation, std::string(file_path)});
+                label_index_[label].push_back(entry);
+            }
+            // Index by category (single-valued, optional).
+            if (!annotation->category.empty()) {
+                category_index_[annotation->category].push_back(entry);
             }
 
             annotations_[file_id][sym_id] = std::move(*annotation);
@@ -95,11 +107,58 @@ std::vector<const AnnotatedSymbol*> SemanticAnnotator::get_symbols_by_label(
     std::vector<const AnnotatedSymbol*> result;
     auto it = label_index_.find(std::string(label));
     if (it != label_index_.end()) {
+        result.reserve(it->second.size());
         for (const auto& sym : it->second) {
             result.push_back(&sym);
         }
     }
     return result;
+}
+
+std::vector<const AnnotatedSymbol*> SemanticAnnotator::get_symbols_by_category(
+    std::string_view category) const {
+    std::vector<const AnnotatedSymbol*> result;
+    auto it = category_index_.find(std::string(category));
+    if (it != category_index_.end()) {
+        result.reserve(it->second.size());
+        for (const auto& sym : it->second) {
+            result.push_back(&sym);
+        }
+    }
+    return result;
+}
+
+int SemanticAnnotator::populate_from_index(const MasterIndex& index) {
+    // Walk every indexed file. For each: pull file content + enhanced symbols
+    // from the content store + reference tracker, lower EnhancedSymbol* into
+    // a vector<Symbol> (extract_annotations's expected shape), then call the
+    // existing extraction path. This is the per-MCP-session annotator
+    // population step — without it the tool sees only externally seeded
+    // labels and category queries return empty.
+    int processed = 0;
+    const auto& content_store = index.file_content_store();
+    const auto& ref = index.ref_tracker();
+
+    std::vector<Symbol> file_symbols;  // reused across files (Karpathy: no
+                                       // per-file allocator)
+    for (FileID fid : index.get_all_file_ids()) {
+        auto content = content_store.get_content(fid);
+        if (content.empty()) continue;
+        auto enhanced = ref.get_file_enhanced_symbols(fid);
+        if (enhanced.empty()) continue;
+
+        file_symbols.clear();
+        file_symbols.reserve(enhanced.size());
+        for (const auto* es : enhanced) {
+            if (es) file_symbols.push_back(es->symbol);
+        }
+        if (file_symbols.empty()) continue;
+
+        std::string path = index.get_file_path(fid);
+        extract_annotations(fid, path, content, file_symbols);
+        ++processed;
+    }
+    return processed;
 }
 
 bool SemanticAnnotator::is_excluded(FileID file_id, SymbolID symbol_id,
