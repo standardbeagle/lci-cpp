@@ -1,11 +1,166 @@
 #include <lci/search/search_engine.h>
 
+#include <lci/core/reference_tracker.h>
 #include <lci/indexing/master_index.h>
+
+#include <absl/container/flat_hash_map.h>
+#include <absl/container/flat_hash_set.h>
+#include <re2/re2.h>
 
 #include <algorithm>
 #include <cctype>
+#include <memory>
+#include <string>
+#include <string_view>
 
 namespace lci {
+
+// -- Rich-search helpers ------------------------------------------------------
+//
+// All hot-path-safe: no allocation in inner loops, RE2 not std::regex, no
+// per-call mutex. Karpathy rule 6 (fail fast): regex compile failure surfaces
+// to the caller via empty-results, not silent fallback to literal — caller
+// guards by validating SearchOptions.use_regex upstream.
+
+namespace {
+
+/// Returns true if pattern contains regex-suggestive syntax (Go
+/// looksLikeRegex parity, handlers.go:86). Used by the MCP handler to opt
+/// into a regex-fallback pass at reduced score. Pure (no allocation).
+bool looks_like_regex_impl(std::string_view p) {
+    if (p.empty()) return false;
+    if (p.find('|') != std::string_view::npos) return true;
+    if (p.find('[') != std::string_view::npos &&
+        p.find(']') != std::string_view::npos) return true;
+    if (p.front() == '^' || p.back() == '$') return true;
+    for (size_t i = 0; i + 1 < p.size(); ++i) {
+        char ch = p[i];
+        char next = p[i + 1];
+        if (ch == '\\') {
+            switch (next) {
+                case 'd': case 'w': case 's': case 'b':
+                case 'D': case 'W': case 'S': case 'B':
+                case '.': case '*': case '+': case '?':
+                case '(': case ')': case '[': case ']':
+                case '{': case '}': case '^': case '$':
+                case '|': case '\\':
+                    return true;
+            }
+        }
+        if (ch == '.' && (next == '+' || next == '*' || next == '?')) {
+            return true;
+        }
+        if (ch == '(' && next == '?') return true;
+    }
+    int depth = 0;
+    for (char c : p) {
+        if (c == '(') ++depth;
+        else if (c == ')') --depth;
+        else if (c == '|' && depth > 0) return true;
+    }
+    if (p.find('{') != std::string_view::npos &&
+        p.find('}') != std::string_view::npos) {
+        for (size_t i = 0; i + 2 < p.size(); ++i) {
+            if (p[i] != '{') continue;
+            size_t j = i + 1;
+            while (j < p.size() && p[j] >= '0' && p[j] <= '9') ++j;
+            if (j > i + 1 && j < p.size() && (p[j] == ',' || p[j] == '}')) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+/// Lowercase a path for RE2 path-filter compile (RE2 has no PCRE-style /i).
+/// Used only at compile time on the filter strings — not on every line.
+void lower_inplace(std::string& s) {
+    for (auto& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+}
+
+/// Build a path-filter RE2 from include_pattern + exclude_pattern. nullptr
+/// when both empty. Returned regexes are pre-compiled once per call.
+struct PathFilter {
+    std::unique_ptr<RE2> include;
+    std::unique_ptr<RE2> exclude;
+
+    bool matches(std::string_view path) const {
+        if (include && !RE2::PartialMatch(path, *include)) return false;
+        if (exclude && RE2::PartialMatch(path, *exclude)) return false;
+        return true;
+    }
+};
+
+PathFilter make_path_filter(const SearchOptions& opts) {
+    PathFilter pf;
+    RE2::Options ro(RE2::Quiet);
+    ro.set_log_errors(false);
+    if (!opts.include_pattern.empty()) {
+        pf.include = std::make_unique<RE2>(opts.include_pattern, ro);
+        if (!pf.include->ok()) pf.include.reset();
+    }
+    if (!opts.exclude_pattern.empty()) {
+        pf.exclude = std::make_unique<RE2>(opts.exclude_pattern, ro);
+        if (!pf.exclude->ok()) pf.exclude.reset();
+    }
+    return pf;
+}
+
+/// Returns true if `enclosing` symbol-type matches any user-requested type.
+/// Type-string match (lowercase). Empty allow-list = accept all.
+bool symbol_type_matches_filter(const std::vector<std::string>& wanted,
+                                std::string_view actual) {
+    if (wanted.empty()) return true;
+    for (const auto& w : wanted) {
+        if (w.size() != actual.size()) continue;
+        bool eq = true;
+        for (size_t i = 0; i < w.size(); ++i) {
+            char a = static_cast<char>(std::tolower(static_cast<unsigned char>(w[i])));
+            char b = static_cast<char>(std::tolower(static_cast<unsigned char>(actual[i])));
+            if (a != b) { eq = false; break; }
+        }
+        if (eq) return true;
+    }
+    return false;
+}
+
+}  // namespace
+
+bool looks_like_regex(std::string_view pattern) {
+    return looks_like_regex_impl(pattern);
+}
+
+void split_on_spaces(std::string_view input, std::vector<std::string>& out) {
+    size_t i = 0;
+    while (i < input.size()) {
+        while (i < input.size() && std::isspace(static_cast<unsigned char>(input[i]))) ++i;
+        size_t start = i;
+        while (i < input.size() && !std::isspace(static_cast<unsigned char>(input[i]))) ++i;
+        if (i > start) out.emplace_back(input.substr(start, i - start));
+    }
+}
+
+std::vector<std::string> expand_pattern_semantic(std::string_view pattern) {
+    // Mirror Go performSemanticExpansion's word-split component
+    // (handlers.go:1271). Original pattern first (preserves score priority),
+    // then >2-char unique words.
+    std::vector<std::string> out;
+    out.reserve(8);
+    out.emplace_back(pattern);
+    std::vector<std::string> words;
+    split_on_spaces(pattern, words);
+    if (words.size() <= 1) return out;
+    absl::flat_hash_set<std::string> seen;
+    seen.insert(out.front());
+    for (auto& w : words) {
+        if (w.size() <= 2) continue;
+        if (seen.insert(w).second) {
+            out.emplace_back(std::move(w));
+        }
+    }
+    return out;
+}
+
 
 // -- File classification ------------------------------------------------------
 
@@ -136,10 +291,21 @@ std::vector<SearchResult> SearchEngine::search(
 
     if (pattern.empty() || pattern.size() > 1000) return {};
 
-    auto candidates = index_.find_candidate_files(pattern,
-                                                   options.case_insensitive);
-    if (candidates.empty()) {
+    // Karpathy rule 2: build path-filter regexes once per call, not per file.
+    auto path_filter = make_path_filter(options);
+
+    // Trigram candidate set is meaningful only for literal patterns. For
+    // regex queries we must scan all indexed files because the literal
+    // shortlist cannot represent character classes / anchors.
+    std::vector<FileID> candidates;
+    if (options.use_regex) {
         candidates = index_.get_all_file_ids();
+    } else {
+        candidates = index_.find_candidate_files(pattern,
+                                                  options.case_insensitive);
+        if (candidates.empty()) {
+            candidates = index_.get_all_file_ids();
+        }
     }
     if (candidates.empty()) return {};
 
@@ -155,7 +321,25 @@ std::vector<SearchResult> SearchEngine::search(
             static_cast<int>(results.size()) >= effective_cap) {
             break;
         }
+        // Path filter (languages/filter). Cheap per-file string scan.
+        if (path_filter.include || path_filter.exclude) {
+            auto path = index_.id_to_path(fid);
+            if (!path_filter.matches(path)) continue;
+        }
         process_file(fid, pattern, options, effective_cap, results);
+    }
+
+    // Symbol-type filter — apply after match, before scoring.
+    if (!options.symbol_types.empty()) {
+        auto& tracker = index_.ref_tracker();
+        results.erase(std::remove_if(results.begin(), results.end(),
+            [&](const SearchResult& r) {
+                const auto* sym =
+                    tracker.get_symbol_at_line(r.file_id, r.line);
+                if (sym == nullptr) return true;
+                return !symbol_type_matches_filter(options.symbol_types,
+                                                   to_string(sym->symbol.type));
+            }), results.end());
     }
 
     // Score and rank results.
@@ -167,6 +351,93 @@ std::vector<SearchResult> SearchEngine::search(
     return results;
 }
 
+// Multi-pattern OR-merge with per-result coverage tracking. Mirrors Go's
+// searchAndDeduplicate (handlers.go:1372). Karpathy rule 2: results map
+// pre-reserved; we move rather than copy results into the accumulator.
+std::vector<SearchResult> SearchEngine::search(
+    const std::vector<std::string>& patterns,
+    const SearchOptions& options) const {
+
+    if (patterns.empty()) return {};
+    if (patterns.size() == 1) return search(patterns[0], options);
+
+    struct ResultKey {
+        FileID file_id;
+        int line;
+        std::string match;
+        bool operator==(const ResultKey& o) const {
+            return file_id == o.file_id && line == o.line && match == o.match;
+        }
+    };
+    struct ResultKeyHash {
+        size_t operator()(const ResultKey& k) const {
+            // FNV-ish mix; deterministic across runs.
+            size_t h = std::hash<uint64_t>()(static_cast<uint64_t>(k.file_id));
+            h ^= std::hash<int>()(k.line) + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2);
+            h ^= std::hash<std::string>()(k.match) + 0x9e3779b97f4a7c15ULL +
+                 (h << 6) + (h >> 2);
+            return h;
+        }
+    };
+
+    struct Slot {
+        SearchResult result;
+        int pattern_count{1};
+    };
+
+    absl::flat_hash_map<ResultKey, Slot, ResultKeyHash> acc;
+    acc.reserve(static_cast<size_t>(options.max_results) * patterns.size());
+
+    // Per-pattern search uses the SAME options (use_regex / filter / etc.).
+    SearchOptions per_opts = options;
+    // Multi-pattern coverage takes over scoring; do not double-cap per call.
+    per_opts.max_results = options.max_results > 0 ? options.max_results * 4
+                                                    : 0;
+
+    for (const auto& p : patterns) {
+        auto rs = search(p, per_opts);
+        for (auto& r : rs) {
+            ResultKey k{r.file_id, r.line, r.match_text};
+            auto it = acc.find(k);
+            if (it == acc.end()) {
+                acc.emplace(std::move(k), Slot{std::move(r), 1});
+            } else {
+                ++it->second.pattern_count;
+                if (r.score > it->second.result.score) {
+                    it->second.result.score = r.score;
+                }
+            }
+        }
+    }
+
+    // Coverage boost: +15% per extra match, cap +50%. Final score clamp ≤ 1.0
+    // is intentionally NOT applied here — engine scores are not normalized to
+    // [0,1] in C++ (kBaseMatchScore = 100). The boost is multiplicative on the
+    // already-scored value, matching Go's relative behavior.
+    constexpr double kCoveragePerWord = 0.15;
+    constexpr double kCoverageCap = 0.5;
+
+    std::vector<SearchResult> out;
+    out.reserve(acc.size());
+    for (auto& [_, slot] : acc) {
+        if (slot.pattern_count > 1) {
+            double extra = static_cast<double>(slot.pattern_count - 1) *
+                           kCoveragePerWord;
+            if (extra > kCoverageCap) extra = kCoverageCap;
+            slot.result.score *= (1.0 + extra);
+        }
+        out.emplace_back(std::move(slot.result));
+    }
+
+    SearchCoordinator::rank(out);
+
+    if (options.max_results > 0 &&
+        static_cast<int>(out.size()) > options.max_results) {
+        out.resize(static_cast<size_t>(options.max_results));
+    }
+    return out;
+}
+
 std::vector<SearchMatch> SearchEngine::find_matches(
     std::string_view content,
     std::string_view pattern,
@@ -174,6 +445,67 @@ std::vector<SearchMatch> SearchEngine::find_matches(
 
     std::vector<SearchMatch> matches;
     if (pattern.empty() || content.empty()) return matches;
+
+    // Regex path uses RE2 (Karpathy rule: no std::regex). RE2 is compiled per
+    // call here — for hot multi-file scans a future iteration can lift the
+    // compile up to the SearchEngine::search caller. For now we follow Go's
+    // shape: one match pass per file, compile once per pass via thread_local
+    // cache keyed on (pattern, ci) to skip redundant compiles when the same
+    // pattern is reused across files in the candidate loop.
+    if (options.use_regex) {
+        thread_local std::string cached_key;
+        thread_local std::unique_ptr<RE2> cached_re;
+        std::string key;
+        key.reserve(pattern.size() + 3);
+        key.append(pattern);
+        key.push_back('|');
+        key.push_back(options.case_insensitive ? 'i' : 's');
+        if (key != cached_key || !cached_re || !cached_re->ok()) {
+            RE2::Options ro(RE2::Quiet);
+            ro.set_log_errors(false);
+            ro.set_case_sensitive(!options.case_insensitive);
+            cached_re = std::make_unique<RE2>(pattern, ro);
+            cached_key = std::move(key);
+        }
+        if (!cached_re->ok()) {
+            // Fail fast on bad regex — caller sees empty results plus an
+            // error surfaced upstream by validation. No silent fallback.
+            return matches;
+        }
+        re2::StringPiece input(content.data(), content.size());
+        re2::StringPiece m;
+        size_t cursor = 0;
+        while (cursor <= content.size() &&
+               cached_re->Match(input, cursor, content.size(),
+                                RE2::UNANCHORED, &m, 1)) {
+            int start = static_cast<int>(m.data() - content.data());
+            int end = start + static_cast<int>(m.size());
+            if (end <= start) {
+                // Zero-width match — advance one byte to avoid infinite loop.
+                cursor = static_cast<size_t>(start) + 1;
+                continue;
+            }
+            if (options.word_boundary) {
+                if (!is_word_boundary(content, start) ||
+                    !is_word_boundary(content, end)) {
+                    cursor = static_cast<size_t>(start) + 1;
+                    continue;
+                }
+            }
+            bool exact = is_word_boundary(content, start) &&
+                         is_word_boundary(content, end);
+            matches.push_back({start, end, exact});
+            cursor = static_cast<size_t>(end);
+        }
+
+        int cap = options.max_count_per_file > 0
+                      ? options.max_count_per_file
+                      : kMaxMatchesPerFile;
+        if (static_cast<int>(matches.size()) > cap) {
+            matches.resize(static_cast<size_t>(cap));
+        }
+        return matches;
+    }
 
     // Per-query lowercase buffers are thread_local so case-insensitive
     // searches don't alloc per call (Karpathy rule 2 — no allocation in

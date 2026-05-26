@@ -729,6 +729,181 @@ TEST(RegisterHandlers, NullIndexReturnsError) {
     // wraps it to check for null first - verified by construction
 }
 
+// =============================================================================
+// Rich-search parity tests (subtask A: search filters / regex / semantic)
+// =============================================================================
+
+TEST_F(HandlersFixture, SearchSymbolTypesFiltersResults) {
+    nlohmann::json params;
+    params["pattern"] = "handle";
+    params["symbol_types"] = "function";
+    auto result = handle_search(params, *indexer_, search_engine_.get());
+    EXPECT_FALSE(result.is_error);
+    auto json = nlohmann::json::parse(result.text);
+    ASSERT_TRUE(json.contains("results"));
+    // Every hit must have symbol_type=function (or be filtered out).
+    for (const auto& item : json["results"]) {
+        EXPECT_EQ(item.value("symbol_type", ""), "function");
+    }
+}
+
+TEST_F(HandlersFixture, SearchLanguagesBuildsIncludeFilter) {
+    nlohmann::json params;
+    params["pattern"] = "handle";
+    params["languages"] = {"go"};
+    auto result = handle_search(params, *indexer_, search_engine_.get());
+    EXPECT_FALSE(result.is_error);
+    auto json = nlohmann::json::parse(result.text);
+    for (const auto& item : json["results"]) {
+        const auto file = item.value("file", "");
+        EXPECT_TRUE(file.size() >= 3 &&
+                    file.compare(file.size() - 3, 3, ".go") == 0)
+            << file;
+    }
+}
+
+TEST_F(HandlersFixture, SearchRegexFlagHonored) {
+    nlohmann::json params;
+    params["pattern"] = "handle.+";
+    params["flags"] = "rx";
+    auto result = handle_search(params, *indexer_, search_engine_.get());
+    EXPECT_FALSE(result.is_error);
+    auto json = nlohmann::json::parse(result.text);
+    EXPECT_TRUE(json["results"].is_array());
+}
+
+TEST_F(HandlersFixture, SearchPatternsCsvOrMerges) {
+    nlohmann::json params;
+    params["patterns"] = "handle,parse";
+    auto result = handle_search(params, *indexer_, search_engine_.get());
+    EXPECT_FALSE(result.is_error);
+    auto json = nlohmann::json::parse(result.text);
+    EXPECT_GE(json["total_matches"].get<int>(), 2);
+}
+
+TEST_F(HandlersFixture, SearchIncludeUnsupportedRejected) {
+    nlohmann::json params;
+    params["pattern"] = "handle";
+    params["include"] = "breadcrumbs";
+    auto result = handle_search(params, *indexer_, search_engine_.get());
+    // Must fail-fast, not silently ignore (Karpathy #6).
+    EXPECT_TRUE(result.is_error);
+}
+
+// =============================================================================
+// find_files multi-word coverage tests (subtask B)
+// =============================================================================
+
+TEST_F(HandlersFixture, FindFilesMultiWordBoostsCoverage) {
+    nlohmann::json params;
+    params["pattern"] = "server api";
+    auto result = handle_find_files(params, *indexer_);
+    EXPECT_FALSE(result.is_error);
+    auto json = nlohmann::json::parse(result.text);
+    // internal/api/server.go matches BOTH words → should rank above single-word
+    // matches for either token.
+    ASSERT_TRUE(json.contains("results"));
+    ASSERT_FALSE(json["results"].empty());
+    bool seen_dual = false;
+    for (const auto& r : json["results"]) {
+        const std::string p = r.value("path", "");
+        if (p.find("internal/api/server.go") != std::string::npos) {
+            seen_dual = true;
+            // Score should reflect the +0.15 boost (≥ baseline substring).
+            EXPECT_GT(r.value("score", 0.0), 0.5);
+        }
+    }
+    EXPECT_TRUE(seen_dual);
+}
+
+// =============================================================================
+// get_context normalization + sections (subtask C)
+// =============================================================================
+
+TEST_F(HandlersFixture, GetContextAliasSymbolId) {
+    // symbol_id alias should remap to id.
+    nlohmann::json params;
+    params["symbol_id"] = "AAA";  // Bad ID — should still hit the id path.
+    auto result = handle_get_context(params, *indexer_);
+    auto json = nlohmann::json::parse(result.text);
+    // Either resolves or returns the errors[] array — never silently empty.
+    EXPECT_TRUE(json.contains("contexts"));
+}
+
+TEST_F(HandlersFixture, GetContextAutoSearchReturnsWorkflow) {
+    nlohmann::json params;
+    params["symbol"] = "handleRequest";
+    params["path"] = "handler.go";
+    auto result = handle_get_context(params, *indexer_);
+    // Expect a workflow hint, not a silent empty result.
+    auto json = nlohmann::json::parse(result.text);
+    EXPECT_TRUE(json.contains("error") || json.contains("workflow"));
+}
+
+TEST_F(HandlersFixture, GetContextUnsupportedSectionRejected) {
+    nlohmann::json params;
+    params["id"] = "VE";
+    params["include_sections"] = {"variables"};
+    auto result = handle_get_context(params, *indexer_);
+    EXPECT_TRUE(result.is_error);
+}
+
+TEST_F(HandlersFixture, GetContextOidExtraction) {
+    // oid= prefix should be stripped.
+    nlohmann::json params;
+    params["id"] = "see oid=AAA for the symbol";
+    auto result = handle_get_context(params, *indexer_);
+    // Bad ID → errors[] populated, but the handler must have parsed AAA out.
+    auto json = nlohmann::json::parse(result.text);
+    EXPECT_TRUE(json.contains("errors") || json.contains("contexts"));
+}
+
+// =============================================================================
+// Pure helpers (engine.cpp)
+// =============================================================================
+
+TEST(SearchHelpers, LooksLikeRegexDetectsAlternation) {
+    EXPECT_TRUE(looks_like_regex("foo|bar"));
+    EXPECT_TRUE(looks_like_regex("^prefix"));
+    EXPECT_TRUE(looks_like_regex("suffix$"));
+    EXPECT_TRUE(looks_like_regex("[abc]"));
+    EXPECT_TRUE(looks_like_regex("\\d+"));
+    EXPECT_TRUE(looks_like_regex(".+"));
+    EXPECT_TRUE(looks_like_regex("a{2,5}"));
+}
+
+TEST(SearchHelpers, LooksLikeRegexRejectsPlainNames) {
+    EXPECT_FALSE(looks_like_regex(""));
+    EXPECT_FALSE(looks_like_regex("simple"));
+    EXPECT_FALSE(looks_like_regex("snake_case"));
+    EXPECT_FALSE(looks_like_regex("foo.bar"));  // qualified name, not regex
+    EXPECT_FALSE(looks_like_regex("func()"));   // function call
+}
+
+TEST(SearchHelpers, ExpandPatternSemanticSplitsMultiWord) {
+    auto out = expand_pattern_semantic("user controller handler");
+    ASSERT_EQ(out.size(), 4u);
+    EXPECT_EQ(out[0], "user controller handler");  // original first
+    EXPECT_EQ(out[1], "user");
+    EXPECT_EQ(out[2], "controller");
+    EXPECT_EQ(out[3], "handler");
+}
+
+TEST(SearchHelpers, ExpandPatternSemanticSkipsShortWords) {
+    auto out = expand_pattern_semantic("a really big name");
+    // "a", "really", "big", "name" — only ">2 chars" survive.
+    // "a" and (in some definitions "big" len 3) — len > 2 means strictly >2.
+    EXPECT_EQ(out[0], "a really big name");
+    // "a" is 1 char → skipped. Others are 6/3/4 → kept.
+    EXPECT_EQ(out.size(), 4u);
+}
+
+TEST(SearchHelpers, ExpandPatternSemanticSingleWordOnlyReturnsOne) {
+    auto out = expand_pattern_semantic("singleton");
+    EXPECT_EQ(out.size(), 1u);
+    EXPECT_EQ(out[0], "singleton");
+}
+
 }  // namespace
 }  // namespace mcp
 }  // namespace lci

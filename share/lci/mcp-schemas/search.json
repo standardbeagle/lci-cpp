@@ -38,6 +38,23 @@
         "flags": {
             "type": "string",
             "description": "Search flags: 'ci', 'cs', 'rx', 'iv', 'wb', 'nt', 'nc'."
+        },
+        "symbol_types": {
+            "type": "string",
+            "description": "Comma-separated symbol types (function, class, method, variable, ...). Empty = no filter."
+        },
+        "languages": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Programming languages (e.g. ['go', 'typescript']). Builds an include_pattern over file extensions."
+        },
+        "semantic": {
+            "type": "boolean",
+            "description": "Enable semantic word-split expansion for multi-word patterns (default true)."
+        },
+        "include": {
+            "type": "string",
+            "description": "Comma-separated include add-ons. Allowed: 'object_ids'. Other values fail-fast with a not-implemented error."
         }
     },
     "additionalProperties": false

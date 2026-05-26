@@ -12,6 +12,18 @@ namespace lci {
 
 class MasterIndex;
 
+// -- Rich-search helpers (pure, hot-path-safe) --------------------------------
+
+/// Returns true when pattern contains regex syntax (Go looksLikeRegex parity).
+bool looks_like_regex(std::string_view pattern);
+
+/// Splits whitespace-separated tokens into out. Allocates only string slots.
+void split_on_spaces(std::string_view input, std::vector<std::string>& out);
+
+/// Expands a single pattern into [pattern, words…>2 chars] for multi-word
+/// queries. Single-word patterns return one-element vector.
+std::vector<std::string> expand_pattern_semantic(std::string_view pattern);
+
 // -- Context extractor --------------------------------------------------------
 
 /// Extracts context around search matches with block awareness.
@@ -65,6 +77,13 @@ class SearchEngine {
 
     /// Searches for a pattern across all indexed files.
     std::vector<SearchResult> search(const std::string& pattern,
+                                     const SearchOptions& options) const;
+
+    /// Multi-pattern search (OR-merge + dedup + per-file coverage boost).
+    /// Mirrors Go's searchAndDeduplicate (handlers.go:1372). Each pattern is
+    /// run with the same SearchOptions; results keyed by file+line+match.
+    /// Score boost: +0.15 per additional matching pattern, cap +0.5.
+    std::vector<SearchResult> search(const std::vector<std::string>& patterns,
                                      const SearchOptions& options) const;
 
   private:

@@ -73,6 +73,40 @@ struct SearchOptions {
     bool invert_match{false};
     bool merge_file_results{false};
     int max_count_per_file{0};
+
+    // -- Rich-search parity (Go cmd/lci/mcp.SearchParams) ---------------------
+    // Mirrors Go internal/mcp/handlers.go:1167+ buildSearchOptions output so
+    // C++ MCP `search` handler can carry the same filters down to the engine.
+    // All defaults preserve current behavior.
+
+    /// Treat pattern as RE2 regex (Karpathy rule: no std::regex on hot path).
+    bool use_regex{false};
+
+    /// Enable semantic word-split expansion for multi-word patterns.
+    /// Default true to match Go's SearchParams.Semantic default (handler
+    /// always sets it on for MCP callers; CLI keeps it off via flags).
+    bool semantic{true};
+
+    /// Filter results to enclosing symbol of one of these types
+    /// (function, class, method, …). Empty = no filter.
+    std::vector<std::string> symbol_types;
+
+    /// Multi-pattern OR list (already split from CSV).
+    /// When non-empty, engine runs each pattern, OR-merges results, and
+    /// applies word-coverage scoring (boost per additional matched pattern).
+    std::vector<std::string> pattern_list;
+
+    /// Regex pattern (RE2 syntax) that file paths must match. Built by the
+    /// handler from `languages[]` → file-extension alternation.
+    /// e.g. \.(go|ts|tsx)$
+    std::string include_pattern;
+
+    /// Regex pattern that excludes file paths. Carries the `filter` field.
+    std::string exclude_pattern;
+
+    /// Always populate `object_id` enrichment in handler output. Read by the
+    /// MCP handler, not the engine — engine never strips it.
+    bool include_object_ids{true};
 };
 
 // -- Search result types ------------------------------------------------------

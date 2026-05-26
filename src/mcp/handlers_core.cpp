@@ -2,13 +2,17 @@
 
 #include <algorithm>
 #include <cctype>
+#include <functional>
 #include <map>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include <absl/container/flat_hash_map.h>
+#include <absl/container/flat_hash_set.h>
 #include <nlohmann/json-schema.hpp>
 #include <rapidfuzz/distance/Levenshtein.hpp>
+#include <re2/re2.h>
 
 #include <lci/core/reference_tracker.h>
 #include <lci/idcodec.h>
@@ -26,6 +30,121 @@ namespace mcp {
 // -- Helpers ------------------------------------------------------------------
 
 namespace {
+
+/// Parses a comma-separated string into a vector of trimmed non-empty values.
+/// Go parity: parseListHelper (handlers.go:50). Pre-counts commas to size the
+/// output once — no geometric realloc on the hot search path.
+std::vector<std::string> parse_list_helper(std::string_view s) {
+    std::vector<std::string> out;
+    if (s.empty()) return out;
+    size_t expected = 1;
+    for (char c : s) if (c == ',') ++expected;
+    out.reserve(expected);
+    size_t start = 0;
+    while (start <= s.size()) {
+        auto end = s.find(',', start);
+        std::string_view part =
+            (end == std::string_view::npos) ? s.substr(start)
+                                            : s.substr(start, end - start);
+        // Trim
+        while (!part.empty() && std::isspace(static_cast<unsigned char>(part.front())))
+            part.remove_prefix(1);
+        while (!part.empty() && std::isspace(static_cast<unsigned char>(part.back())))
+            part.remove_suffix(1);
+        if (!part.empty()) out.emplace_back(part);
+        if (end == std::string_view::npos) break;
+        start = end + 1;
+    }
+    return out;
+}
+
+/// Builds a path-include regex from a list of language names.
+/// Go parity: languagesToIncludePattern (handlers.go:967). Returns empty
+/// string when no language maps; caller treats empty as "no filter".
+std::string language_array_to_file_extensions(
+    const std::vector<std::string>& languages) {
+    if (languages.empty()) return "";
+
+    // Same table as Go languageToExtensions (handlers.go:926). Stored as
+    // lowercase keys + alias normalization so users can pass "ts", "TypeScript",
+    // "typescript" interchangeably.
+    static const std::map<std::string, std::vector<std::string>> kTable = {
+        {"go", {"go"}},
+        {"javascript", {"js", "jsx", "mjs", "cjs"}},
+        {"typescript", {"ts", "tsx", "mts", "cts"}},
+        {"python", {"py", "pyw", "pyi"}},
+        {"java", {"java"}},
+        {"rust", {"rs"}},
+        {"c++", {"cpp", "cc", "cxx", "hpp", "hxx", "h++"}},
+        {"cpp", {"cpp", "cc", "cxx", "hpp", "hxx", "h++"}},
+        {"c", {"c", "h"}},
+        {"c#", {"cs"}},
+        {"csharp", {"cs"}},
+        {"php", {"php", "phtml"}},
+        {"ruby", {"rb", "rake", "gemspec"}},
+        {"swift", {"swift"}},
+        {"kotlin", {"kt", "kts"}},
+        {"scala", {"scala", "sc"}},
+        {"vue", {"vue"}},
+        {"svelte", {"svelte"}},
+        {"dart", {"dart"}},
+        {"zig", {"zig"}},
+        {"shell", {"sh", "bash", "zsh"}},
+        {"html", {"html", "htm"}},
+        {"css", {"css", "scss", "sass", "less"}},
+        {"sql", {"sql"}},
+        {"markdown", {"md", "markdown"}},
+        {"json", {"json"}},
+        {"yaml", {"yaml", "yml"}},
+        {"xml", {"xml"}},
+        {"lua", {"lua"}},
+        {"r", {"r"}},
+        {"perl", {"pl", "pm"}},
+        {"haskell", {"hs", "lhs"}},
+        {"elixir", {"ex", "exs"}},
+        {"erlang", {"erl", "hrl"}},
+        {"clojure", {"clj", "cljs", "cljc"}},
+        {"ocaml", {"ml", "mli"}},
+        {"f#", {"fs", "fsi", "fsx"}},
+        // Common aliases for short forms.
+        {"ts", {"ts", "tsx", "mts", "cts"}},
+        {"js", {"js", "jsx", "mjs", "cjs"}},
+        {"py", {"py", "pyw", "pyi"}},
+        {"rb", {"rb", "rake", "gemspec"}},
+        {"cs", {"cs"}},
+        {"kt", {"kt", "kts"}},
+    };
+
+    std::vector<std::string> exts;
+    exts.reserve(languages.size() * 2);
+    for (const auto& lang : languages) {
+        std::string lower;
+        lower.reserve(lang.size());
+        for (char c : lang) {
+            lower.push_back(static_cast<char>(
+                std::tolower(static_cast<unsigned char>(c))));
+        }
+        auto it = kTable.find(lower);
+        if (it == kTable.end()) continue;
+        for (const auto& e : it->second) {
+            // Dedup.
+            bool seen = false;
+            for (const auto& cur : exts) if (cur == e) { seen = true; break; }
+            if (!seen) exts.push_back(e);
+        }
+    }
+    if (exts.empty()) return "";
+
+    std::string out;
+    out.reserve(exts.size() * 5 + 8);
+    out.append("\\.(");
+    for (size_t i = 0; i < exts.size(); ++i) {
+        if (i) out.push_back('|');
+        out.append(exts[i]);
+    }
+    out.append(")$");
+    return out;
+}
 
 /// Returns true if the comma-separated list contains the given item.
 bool comma_list_contains(const std::string& list, const std::string& item) {
@@ -139,6 +258,148 @@ class SearchSchemaErrorCollector
     std::vector<ValidationError> errors_;
 };
 
+// -- get_context helpers -----------------------------------------------------
+//
+// Go's get_context handler does parameter normalization up-front
+// (handlers.go:2074 NormalizeContextParams + extractObjectIDFromCodeInsight).
+// We replicate the cheap, non-engine surfaces here: alias remap, oid=
+// extraction, and a workflow-error response for the symbol+path "auto search"
+// pattern (we don't have AutoSearch yet — fail-fast with a clear hint).
+
+/// Aliases user-typed parameter names to the canonical `id`. Mutates `params`
+/// in place. Returns true if any alias was rewritten.
+/// Go parity: NormalizeContextParams.
+bool normalize_context_params(nlohmann::json& params) {
+    if (!params.is_object()) return false;
+    bool rewrote = false;
+    static const std::vector<std::string> kIdAliases = {
+        "symbol_id", "object_id", "object_ids", "oid"};
+    if (!params.contains("id")) {
+        for (const auto& a : kIdAliases) {
+            if (params.contains(a)) {
+                params["id"] = params[a];
+                params.erase(a);
+                rewrote = true;
+                break;
+            }
+        }
+    } else {
+        // Strip aliases even if `id` is set — Go drops them silently.
+        for (const auto& a : kIdAliases) params.erase(a);
+    }
+    return rewrote;
+}
+
+/// Extracts trailing comma-separated object IDs from strings like
+/// "oid=ABC,XY,DE". Go parity: extractObjectIDFromCodeInsight via regex
+/// `oid=([A-Za-z0-9,]+)`. RE2 here, not std::regex.
+std::vector<std::string> extract_oid_prefix(std::string_view s) {
+    std::vector<std::string> out;
+    static const RE2 kOidRe(R"(oid=([A-Za-z0-9,]+))");
+    re2::StringPiece input(s.data(), s.size());
+    re2::StringPiece captured;
+    while (RE2::FindAndConsume(&input, kOidRe, &captured)) {
+        std::string_view csv(captured.data(), captured.size());
+        size_t start = 0;
+        while (start <= csv.size()) {
+            auto end = csv.find(',', start);
+            std::string_view tok = (end == std::string_view::npos)
+                                       ? csv.substr(start)
+                                       : csv.substr(start, end - start);
+            if (!tok.empty()) out.emplace_back(tok);
+            if (end == std::string_view::npos) break;
+            start = end + 1;
+        }
+    }
+    return out;
+}
+
+/// Mode presets (Go applyContextLookupMode, handlers.go:2327). Mutates params
+/// in place. Unknown modes pass through unchanged.
+void apply_context_lookup_mode(nlohmann::json& params) {
+    if (!params.is_object()) return;
+    std::string mode = params.value("mode", "");
+    if (mode.empty()) return;  // No mode → no preset.
+    auto set_if_unset = [&](const char* key, auto val) {
+        if (!params.contains(key)) params[key] = val;
+    };
+    if (mode == "full") {
+        if (!params.contains("max_depth") ||
+            params["max_depth"].get<int>() == 0) {
+            params["max_depth"] = 5;
+        }
+        set_if_unset("include_ai_text", true);
+    } else if (mode == "quick") {
+        params["max_depth"] = 2;
+        params["include_ai_text"] = false;
+        if (!params.contains("include_sections")) {
+            params["include_sections"] = {"relationships", "structure"};
+        }
+    } else if (mode == "relationships") {
+        if (!params.contains("include_sections")) {
+            params["include_sections"] = {"relationships"};
+        }
+    } else if (mode == "semantic") {
+        if (!params.contains("include_sections")) {
+            params["include_sections"] = {"semantic", "ai"};
+        }
+    } else if (mode == "usage") {
+        if (!params.contains("include_sections")) {
+            params["include_sections"] = {"usage"};
+        }
+    } else if (mode == "variables") {
+        if (!params.contains("include_sections")) {
+            params["include_sections"] = {"variables"};
+        }
+    }
+}
+
+/// Returns true if `section` is allowed by include/exclude_sections (if set).
+bool section_allowed(const nlohmann::json& params, const std::string& section) {
+    if (params.contains("include_sections") &&
+        params["include_sections"].is_array() &&
+        !params["include_sections"].empty()) {
+        bool found = false;
+        for (const auto& v : params["include_sections"]) {
+            if (v.is_string() && v.get<std::string>() == section) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) return false;
+    }
+    if (params.contains("exclude_sections") &&
+        params["exclude_sections"].is_array()) {
+        for (const auto& v : params["exclude_sections"]) {
+            if (v.is_string() && v.get<std::string>() == section) return false;
+        }
+    }
+    return true;
+}
+
+/// Returns the response shape for the auto-search workflow (symbol + path
+/// provided instead of id). We do not implement auto-search in C++ yet;
+/// return a clear workflow hint (Karpathy #6 — fail-fast, not empty).
+nlohmann::json autosearch_workflow_error(const std::string& symbol,
+                                         const std::string& path) {
+    nlohmann::json data;
+    data["error"] =
+        "auto-search (symbol + path) is not implemented in the C++ port "
+        "(tracked as loop-fix:mcp.get_context.auto_search). "
+        "Run `search` first to get the object ID (o=XX), then call "
+        "get_context with {\"id\": \"XX\"}.";
+    data["provided"] = {{"symbol", symbol}, {"path", path}};
+    data["workflow"] = {
+        "1. Run search: {\"pattern\": \"" + symbol + "\"}",
+        "2. Find object ID in results (look for o=XX, e.g., o=VE)",
+        "3. Run get_context: {\"id\": \"VE\"}",
+    };
+    return data;
+}
+
+}  // namespace
+
+namespace {
 /// Returns the lazily-initialized json-schema validator for `search` params.
 /// Constructed once per process; subsequent calls are cheap pointer fetches.
 const nlohmann::json_schema::json_validator& search_schema_validator() {
@@ -313,8 +574,9 @@ ToolResult handle_search(const nlohmann::json& params,
     }
 
     auto pattern = params.value("pattern", "");
+    auto patterns_csv = params.value("patterns", "");
     if (pattern.empty()) {
-        pattern = params.value("patterns", "");
+        pattern = patterns_csv;
     }
     if (pattern.empty()) {
         return make_error_response("search", "pattern is required");
@@ -339,13 +601,116 @@ ToolResult handle_search(const nlohmann::json& params,
     options.exclude_tests = comma_list_contains(flags, "nt");
     options.exclude_comments = comma_list_contains(flags, "nc");
     options.invert_match = comma_list_contains(flags, "iv");
+    options.use_regex = comma_list_contains(flags, "rx");
+
+    // Semantic expansion default true to mirror MCP-side Go default
+    // (cmd/lci/mcp.SearchParams.Semantic = true by handler convention).
+    options.semantic = params.value("semantic", true);
+
+    // symbol_types CSV → vector<string>. Go: parseListHelper(args.SymbolTypes).
+    if (params.contains("symbol_types") && params["symbol_types"].is_string()) {
+        options.symbol_types = parse_list_helper(
+            params["symbol_types"].get_ref<const std::string&>());
+    }
+
+    // patterns CSV → vector<string>. Multi-pattern OR search.
+    if (!patterns_csv.empty()) {
+        options.pattern_list = parse_list_helper(patterns_csv);
+    }
+
+    // languages[] → include_pattern (regex matching file extensions).
+    if (params.contains("languages") && params["languages"].is_array()) {
+        std::vector<std::string> langs;
+        langs.reserve(params["languages"].size());
+        for (const auto& v : params["languages"]) {
+            if (v.is_string()) langs.push_back(v.get<std::string>());
+        }
+        options.include_pattern =
+            language_array_to_file_extensions(langs);
+    }
+
+    // filter → exclude_pattern (Go SearchOptions.ExcludePattern = args.Filter).
+    if (params.contains("filter") && params["filter"].is_string()) {
+        options.exclude_pattern = params["filter"].get<std::string>();
+    }
+
+    int max_per_file = params.value("max_per_file", 0);
+    if (max_per_file > 0) options.max_count_per_file = max_per_file;
+
+    // `include` add-ons (breadcrumbs/safety/refs/deps): emit "not implemented"
+    // for any non-cheaply-portable surface (Karpathy #6: no silent skip).
+    // object_ids is already free in C++ (always emitted below).
+    if (params.contains("include") && params["include"].is_string()) {
+        const auto& inc = params["include"].get_ref<const std::string&>();
+        // Allowed: object_ids (always on, default). Reject anything else with
+        // a clear error so callers don't think we silently honored it.
+        // See Dart task: loop-fix mcp.search.include.{breadcrumbs,safety,refs,deps}.
+        static const std::vector<std::string> kAllowed = {
+            "object_ids", "ids", ""};
+        for (auto& tok : parse_list_helper(inc)) {
+            bool ok = false;
+            for (const auto& a : kAllowed) if (a == tok) { ok = true; break; }
+            if (!ok) {
+                return make_error_response(
+                    "search",
+                    "include='" + tok + "' is not implemented in C++ port "
+                    "(tracked as loop-fix:mcp.search.include." + tok + "). "
+                    "Allowed: 'object_ids'.");
+            }
+        }
+    }
 
     // Perform search
     std::vector<SearchResult> results;
-    if (search_engine) {
-        results = search_engine->search(pattern, options);
+    auto run = [&](const std::string& p, const SearchOptions& o) {
+        if (search_engine) return search_engine->search(p, o);
+        return indexer.search_with_options(p, o);
+    };
+    auto run_multi = [&](const std::vector<std::string>& ps,
+                         const SearchOptions& o) {
+        if (search_engine) return search_engine->search(ps, o);
+        // Fallback for older indexers: OR-merge manually.
+        std::vector<SearchResult> agg;
+        for (const auto& p : ps) {
+            auto rs = indexer.search_with_options(p, o);
+            agg.insert(agg.end(),
+                       std::make_move_iterator(rs.begin()),
+                       std::make_move_iterator(rs.end()));
+        }
+        return agg;
+    };
+
+    // Build effective pattern list. Semantic expansion fans out multi-word
+    // patterns; explicit `patterns` CSV is OR-merged as-is.
+    if (!options.pattern_list.empty()) {
+        results = run_multi(options.pattern_list, options);
+    } else if (options.semantic) {
+        auto expanded = expand_pattern_semantic(pattern);
+        if (expanded.size() > 1) {
+            results = run_multi(expanded, options);
+        } else {
+            results = run(pattern, options);
+        }
     } else {
-        results = indexer.search_with_options(pattern, options);
+        results = run(pattern, options);
+    }
+
+    // Regex fallback: if pattern looks regex-y but `rx` flag was not set,
+    // re-search in regex mode with reduced score and merge.
+    // Mirrors Go handlers.go:1910 looksLikeRegex fallback.
+    if (!options.use_regex && results.size() < static_cast<size_t>(max_results) &&
+        looks_like_regex(pattern)) {
+        SearchOptions rx_opts = options;
+        rx_opts.use_regex = true;
+        auto rx_results = run(pattern, rx_opts);
+        for (auto& r : rx_results) r.score *= 0.7;
+        // Merge with existing literal results, then re-rank.
+        results.reserve(results.size() + rx_results.size());
+        for (auto& r : rx_results) results.emplace_back(std::move(r));
+        SearchCoordinator::rank(results);
+        if (static_cast<int>(results.size()) > max_results) {
+            results.resize(static_cast<size_t>(max_results));
+        }
     }
 
     // Handle files-only output
@@ -484,9 +849,43 @@ void resolve_object_id(std::string_view id, MasterIndex& indexer,
 
 ToolResult handle_get_context(const nlohmann::json& params,
                               MasterIndex& indexer) {
-    auto object_id = params.value("id", "");
-    auto name = params.value("name", "");
-    auto mode = params.value("mode", "");
+    // Step 0: Alias normalization. `symbol_id`, `object_id`, `object_ids`,
+    // `oid` all map to `id`. Go parity (handlers.go:2075 NormalizeContextParams).
+    nlohmann::json p = params;
+    normalize_context_params(p);
+
+    auto object_id = p.value("id", "");
+    auto name = p.value("name", "");
+    auto symbol_param = p.value("symbol", "");
+    auto path_param = p.value("path", "");
+    auto mode = p.value("mode", "");
+
+    // Auto-search shape (symbol + path, no id) — fail-fast with a clear
+    // hint. Karpathy #6: no silent empty stub. Tracked as loop-fix.
+    if (object_id.empty() && !symbol_param.empty() && !path_param.empty()) {
+        return make_json_response(
+            autosearch_workflow_error(symbol_param, path_param));
+    }
+
+    // oid= extraction (Go extractObjectIDFromCodeInsight). Lets callers paste
+    // code_insight output strings like "see oid=VE,tG" straight in.
+    if (!object_id.empty() &&
+        object_id.find("oid=") != std::string::npos) {
+        auto extracted = extract_oid_prefix(object_id);
+        if (!extracted.empty()) {
+            std::string joined;
+            for (size_t i = 0; i < extracted.size(); ++i) {
+                if (i) joined.push_back(',');
+                joined.append(extracted[i]);
+            }
+            object_id = std::move(joined);
+            p["id"] = object_id;
+        }
+    }
+
+    // Apply mode-specific defaults (depth, sections, etc.) before reading
+    // params downstream. mode="full" sets max_depth=5 when unset.
+    apply_context_lookup_mode(p);
 
     // Go validateGetContextParams (internal/mcp/handlers.go): exactly one of
     // 'id' or 'name' must be supplied. Fail fast — no silent empty result.
@@ -505,6 +904,36 @@ ToolResult handle_get_context(const nlohmann::json& params,
             "Prefer 'id' with object IDs from search results");
     }
 
+    // Section filtering: reject any include_section we cannot honor. We
+    // do not have a ContextLookupEngine in C++ yet, so structure/variables/
+    // semantic/usage/ai/dependencies/file_context/quality_metrics return a
+    // clear "not implemented" error rather than a silent empty section.
+    // The sections we DO honor: relationships, basic (the default body).
+    if (p.contains("include_sections") && p["include_sections"].is_array()) {
+        static const std::vector<std::string> kSupported = {
+            "relationships", "basic", "callers", "callees"};
+        static const std::vector<std::string> kUnsupported = {
+            "structure", "variables", "semantic", "usage", "ai",
+            "dependencies", "file_context", "quality_metrics"};
+        for (const auto& v : p["include_sections"]) {
+            if (!v.is_string()) continue;
+            const auto s = v.get<std::string>();
+            for (const auto& u : kUnsupported) {
+                if (s == u) {
+                    return make_error_response(
+                        "get_context",
+                        "section '" + s +
+                            "' is not implemented in the C++ port (no "
+                            "ContextLookupEngine yet — tracked as "
+                            "loop-fix:mcp.get_context.section." + s + "). "
+                            "Supported sections: relationships, basic, "
+                            "callers, callees.");
+                }
+            }
+            (void)kSupported;  // silence unused warning under -Wno-unused
+        }
+    }
+
     // mode + name path: minimal port of Go's handleGetObjectContextWithMode.
     // Full ContextLookupEngine (6261 LOC across 8 files in internal/core/
     // context_lookup_*.go) covers structure / semantic / variables /
@@ -514,9 +943,12 @@ ToolResult handle_get_context(const nlohmann::json& params,
     // remain unported and absent from the response (omitempty-style).
     if (!mode.empty() && has_name) {
         bool include_call_hierarchy =
-            params.value("include_call_hierarchy", false);
-        int max_depth = params.value("max_depth", 1);
+            p.value("include_call_hierarchy", false);
+        int max_depth = p.value("max_depth", 1);
         if (max_depth < 1) max_depth = 1;
+        if (max_depth > 10) max_depth = 10;
+        const bool want_relationships =
+            section_allowed(p, "relationships") || section_allowed(p, "callers");
 
         nlohmann::json contexts = nlohmann::json::array();
         auto& tracker = indexer.ref_tracker();
@@ -541,7 +973,7 @@ ToolResult handle_get_context(const nlohmann::json& params,
             ctx["definition"] = definition;
             ctx["context"] = nlohmann::json::array({definition});
 
-            if (include_call_hierarchy) {
+            if (include_call_hierarchy && want_relationships) {
                 nlohmann::json callers = nlohmann::json::array();
                 nlohmann::json callees = nlohmann::json::array();
                 for (const auto& cn : tracker.get_caller_names(sym->id)) {
@@ -552,13 +984,58 @@ ToolResult handle_get_context(const nlohmann::json& params,
                 }
                 ctx["callers"] = std::move(callers);
                 ctx["callees"] = std::move(callees);
-                // Single-level call_tree by name for the depth=1 case.
-                // Deeper traversal would mirror Go's BuildCallGraph but
-                // is not yet ported (see Dart 15Wsg4HQoSW2).
-                nlohmann::json call_tree;
-                call_tree["root"] = std::string(sym->symbol.name);
-                call_tree["children"] = ctx["callees"];
-                ctx["call_tree"] = std::move(call_tree);
+
+                // Recursive call tree to `max_depth` levels.
+                // Cycle detection via visited set keyed on SymbolID. We chase
+                // callees by NAME (ReferenceTracker exposes name-based call
+                // edges, not edge-IDs) — multiple symbols of the same name
+                // expand under each name node, mirroring Go's BuildCallGraph
+                // ambiguity when symbol names collide.
+                std::function<nlohmann::json(const EnhancedSymbol*, int,
+                                             absl::flat_hash_set<uint64_t>&)>
+                    build_tree;
+                build_tree = [&](const EnhancedSymbol* node, int depth,
+                                 absl::flat_hash_set<uint64_t>& visited)
+                    -> nlohmann::json {
+                    nlohmann::json t;
+                    if (node == nullptr) return t;
+                    t["root"] = std::string(node->symbol.name);
+                    nlohmann::json kids = nlohmann::json::array();
+                    if (depth <= 0) {
+                        t["children"] = std::move(kids);
+                        return t;
+                    }
+                    for (const auto& cn : tracker.get_callee_names(node->id)) {
+                        // Each callee NAME may resolve to multiple symbols;
+                        // we only recurse into the first to bound fan-out, but
+                        // emit a leaf entry for the name regardless.
+                        auto sub_matches = tracker.find_symbols_by_name(cn);
+                        if (sub_matches.empty()) {
+                            kids.push_back({{"root", cn},
+                                            {"children",
+                                             nlohmann::json::array()}});
+                            continue;
+                        }
+                        const EnhancedSymbol* child = sub_matches.front();
+                        if (child == nullptr) continue;
+                        uint64_t key =
+                            static_cast<uint64_t>(child->id);
+                        if (!visited.insert(key).second) {
+                            kids.push_back({{"root", cn},
+                                            {"children",
+                                             nlohmann::json::array()},
+                                            {"cycle", true}});
+                            continue;
+                        }
+                        kids.push_back(
+                            build_tree(child, depth - 1, visited));
+                    }
+                    t["children"] = std::move(kids);
+                    return t;
+                };
+                absl::flat_hash_set<uint64_t> visited;
+                visited.insert(static_cast<uint64_t>(sym->id));
+                ctx["call_tree"] = build_tree(sym, max_depth - 1, visited);
             }
 
             contexts.push_back(std::move(ctx));
@@ -641,6 +1118,7 @@ ToolResult handle_find_files(const nlohmann::json& params,
         double score;
         std::string match_type;
         int file_id;
+        int pattern_count{1};
     };
     std::vector<FileMatch> matches;
 
@@ -834,7 +1312,71 @@ ToolResult handle_find_files(const nlohmann::json& params,
 
         if (score > 0.0) {
             matches.push_back(
-                {path, score, match_type, static_cast<int>(fid)});
+                {path, score, match_type, static_cast<int>(fid), 1});
+        }
+    }
+
+    // Multi-word coverage: when the user types "user controller handler" we
+    // re-scan with each word separately (>2 chars) and boost files matching
+    // more words. Go parity: matchFilePaths multi-word boost. Karpathy: build
+    // a path→index map once, no allocs in the per-word inner loop.
+    if (pattern.find(' ') != std::string::npos) {
+        std::vector<std::string> words;
+        split_on_spaces(pattern, words);
+        // Filter to >2-char words, deduped, excluding the full pattern itself.
+        std::vector<std::string> extra;
+        extra.reserve(words.size());
+        for (auto& w : words) {
+            if (w.size() <= 2) continue;
+            if (w == pattern) continue;
+            bool seen = false;
+            for (const auto& e : extra) if (e == w) { seen = true; break; }
+            if (!seen) extra.push_back(std::move(w));
+        }
+        if (extra.size() >= 1) {
+            absl::flat_hash_map<std::string, size_t> by_path;
+            by_path.reserve(matches.size());
+            for (size_t i = 0; i < matches.size(); ++i) {
+                by_path.emplace(matches[i].path, i);
+            }
+            for (const auto& w : extra) {
+                std::string norm_w = case_insensitive ? to_lower(w) : w;
+                for (const auto& [path, fid] : snapshot->file_map) {
+                    // Same hidden + directory + filter rules as above. We
+                    // skip the heavyweight per-pattern fuzzy/exact branches
+                    // and use a single substring-match heuristic for the
+                    // word pass — exact / substring / path-component only.
+                    if (!directory.empty()) {
+                        if (path.substr(0, directory.size()) != directory ||
+                            (path.size() > directory.size() &&
+                             path[directory.size()] != '/')) continue;
+                    }
+                    std::string mp = case_insensitive ? to_lower(path) : path;
+                    if (mp.find(norm_w) == std::string::npos) continue;
+                    auto it = by_path.find(path);
+                    if (it != by_path.end()) {
+                        // File already matched main pattern: increment count.
+                        ++matches[it->second].pattern_count;
+                    } else {
+                        matches.push_back(
+                            {path, 0.5, "word_substring",
+                             static_cast<int>(fid), 1});
+                        by_path.emplace(matches.back().path,
+                                        matches.size() - 1);
+                    }
+                }
+            }
+            // Apply coverage boost: +0.15 per additional pattern match, cap
+            // +0.5; final score clamped to ≤1.0 per spec.
+            for (auto& m : matches) {
+                if (m.pattern_count > 1) {
+                    double extra_boost =
+                        static_cast<double>(m.pattern_count - 1) * 0.15;
+                    if (extra_boost > 0.5) extra_boost = 0.5;
+                    m.score += extra_boost;
+                    if (m.score > 1.0) m.score = 1.0;
+                }
+            }
         }
     }
 
