@@ -140,6 +140,81 @@ TEST_F(SemanticAnnotationsTest, CategoryAloneIsValid) {
     EXPECT_FALSE(result.is_error);
 }
 
+TEST_F(SemanticAnnotationsTest, CategoryQueryFindsMatches) {
+    // Verify the category branch actually returns annotated symbols
+    // (was previously a comment-only stub).
+    nlohmann::json params;
+    params["category"] = "endpoint";
+    auto result = handle_semantic_annotations(params, *annotator_, nullptr);
+    EXPECT_FALSE(result.is_error);
+    auto json = nlohmann::json::parse(result.text);
+    int total = json["total_count"].get<int>();
+    EXPECT_GE(total, 1);
+    bool found = false;
+    for (const auto& a : json["annotations"]) {
+        if (a.value("symbol_name", "") == "handleRequest") {
+            EXPECT_EQ(a.value("category", ""), "endpoint");
+            found = true;
+        }
+    }
+    EXPECT_TRUE(found);
+}
+
+TEST_F(SemanticAnnotationsTest, GetSymbolsByCategoryDirect) {
+    auto syms = annotator_->get_symbols_by_category("processing");
+    ASSERT_EQ(syms.size(), 1u);
+    EXPECT_EQ(syms[0]->name, "processData");
+    EXPECT_EQ(syms[0]->annotation.category, "processing");
+}
+
+TEST_F(SemanticAnnotationsTest, GetSymbolsByCategoryUnknownReturnsEmpty) {
+    auto syms = annotator_->get_symbols_by_category("does-not-exist");
+    EXPECT_TRUE(syms.empty());
+}
+
+// PopulateFromIndex test: build a real MasterIndex on a tiny temp project
+// with @lci: annotations, run populate, assert annotations land.
+TEST(SemanticAnnotatorIntegration, PopulateFromIndexLoadsAnnotations) {
+    namespace fs = std::filesystem;
+    auto tmp = fs::temp_directory_path() /
+               ("lci_populate_test_" +
+                std::to_string(::testing::UnitTest::GetInstance()->random_seed()));
+    fs::create_directories(tmp);
+
+    // Cleanup at scope end
+    struct Cleanup {
+        fs::path p;
+        ~Cleanup() { std::error_code ec; fs::remove_all(p, ec); }
+    } _{tmp};
+
+    {
+        std::ofstream f(tmp / "main.go");
+        f << "// @lci:labels[handler,api]\n"
+          << "// @lci:category[mcp-api]\n"
+          << "func handleRequest() {}\n"
+          << "\n"
+          << "func main() {}\n";
+    }
+
+    Config cfg;
+    cfg.project.root = tmp.string();
+    MasterIndex idx(cfg);
+    ASSERT_TRUE(idx.index_directory(tmp.string()));
+
+    SemanticAnnotator ann;
+    int processed = ann.populate_from_index(idx);
+    EXPECT_GE(processed, 1);
+
+    auto by_label = ann.get_symbols_by_label("handler");
+    ASSERT_FALSE(by_label.empty());
+    EXPECT_EQ(by_label[0]->name, "handleRequest");
+
+    auto by_cat = ann.get_symbols_by_category("mcp-api");
+    ASSERT_FALSE(by_cat.empty());
+    EXPECT_EQ(by_cat[0]->name, "handleRequest");
+    EXPECT_EQ(by_cat[0]->annotation.category, "mcp-api");
+}
+
 // =============================================================================
 // Side effects handler tests
 // =============================================================================
@@ -368,14 +443,54 @@ TEST_F(CodeInsightTest, StructureModeWorks) {
 }
 
 TEST_F(CodeInsightTest, DetailedModeWorks) {
+    // detailed with default analysis (modules) now actually dispatches to
+    // ModuleAnalyzer (was a silent overview fallback before).
     nlohmann::json params;
     params["mode"] = "detailed";
     params["analysis"] = "modules";
     auto result = handle_code_insight(params, *engine_, *indexer_);
     EXPECT_FALSE(result.is_error);
-    // detailed falls through to the overview LCF payload — matches Go shape
-    // on corpora without dependency-graph / entry-point data wired.
-    EXPECT_NE(result.text.find("LCF/1.0"), std::string::npos);
+    EXPECT_NE(result.text.find("mode=detailed"), std::string::npos);
+    EXPECT_NE(result.text.find("sub=modules"), std::string::npos);
+    EXPECT_NE(result.text.find("== MODULES =="), std::string::npos);
+}
+
+TEST_F(CodeInsightTest, DetailedLayersDispatches) {
+    nlohmann::json params;
+    params["mode"] = "detailed";
+    params["analysis"] = "layers";
+    auto result = handle_code_insight(params, *engine_, *indexer_);
+    EXPECT_FALSE(result.is_error);
+    EXPECT_NE(result.text.find("sub=layers"), std::string::npos);
+    EXPECT_NE(result.text.find("== LAYERS =="), std::string::npos);
+}
+
+TEST_F(CodeInsightTest, DetailedFeaturesDispatches) {
+    nlohmann::json params;
+    params["mode"] = "detailed";
+    params["analysis"] = "features";
+    auto result = handle_code_insight(params, *engine_, *indexer_);
+    EXPECT_FALSE(result.is_error);
+    EXPECT_NE(result.text.find("sub=features"), std::string::npos);
+    EXPECT_NE(result.text.find("== FEATURES =="), std::string::npos);
+}
+
+TEST_F(CodeInsightTest, DetailedTermsDispatches) {
+    nlohmann::json params;
+    params["mode"] = "detailed";
+    params["analysis"] = "terms";
+    auto result = handle_code_insight(params, *engine_, *indexer_);
+    EXPECT_FALSE(result.is_error);
+    EXPECT_NE(result.text.find("sub=terms"), std::string::npos);
+    EXPECT_NE(result.text.find("== TERMS =="), std::string::npos);
+}
+
+TEST_F(CodeInsightTest, DetailedInvalidSubReturnsError) {
+    nlohmann::json params;
+    params["mode"] = "detailed";
+    params["analysis"] = "bogus";
+    auto result = handle_code_insight(params, *engine_, *indexer_);
+    EXPECT_TRUE(result.is_error);
 }
 
 TEST_F(CodeInsightTest, UnifiedModeWorks) {

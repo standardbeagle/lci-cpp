@@ -5,7 +5,11 @@
 #include <string>
 #include <vector>
 
+#include <lci/analysis/ci_vocabulary_analyzer.h>
 #include <lci/analysis/codebase_intelligence.h>
+#include <lci/analysis/feature_analyzer.h>
+#include <lci/analysis/layer_analyzer.h>
+#include <lci/analysis/module_analyzer.h>
 #include <lci/analysis/side_effect_analyzer.h>
 #include <lci/core/graph_propagator.h>
 #include <lci/core/reference_tracker.h>
@@ -13,6 +17,8 @@
 #include <lci/indexing/master_index.h>
 #include <lci/mcp/validation.h>
 #include <lci/symbol.h>
+
+#include <absl/container/flat_hash_set.h>
 
 namespace lci {
 namespace mcp {
@@ -155,7 +161,8 @@ int clamp(int value, int lo, int hi) {
 
 ToolResult handle_semantic_annotations(const nlohmann::json& raw_params,
                                        SemanticAnnotator& annotator,
-                                       GraphPropagator* propagator) {
+                                       GraphPropagator* propagator,
+                                       MasterIndex* indexer) {
     auto params = raw_params.is_object() ? raw_params : nlohmann::json::object();
     auto label = params.value("label", "");
     auto category = params.value("category", "");
@@ -181,55 +188,84 @@ ToolResult handle_semantic_annotations(const nlohmann::json& raw_params,
     nlohmann::json annotations = nlohmann::json::array();
     int count = 0;
 
+    auto serialize_direct = [&](const AnnotatedSymbol* sym) {
+        nlohmann::json item;
+        item["symbol_name"] = sym->name;
+        item["file_id"] = static_cast<int>(sym->file_id);
+        item["symbol_id"] = std::to_string(sym->symbol_id);
+        item["file_path"] = sym->file_path;
+        item["line"] = sym->line;
+        if (!sym->annotation.labels.empty())
+            item["direct_labels"] = sym->annotation.labels;
+        if (!sym->annotation.category.empty())
+            item["category"] = sym->annotation.category;
+        if (!sym->annotation.tags.empty()) {
+            nlohmann::json tags;
+            for (const auto& [k, v] : sym->annotation.tags) {
+                tags[k] = v;
+            }
+            item["tags"] = std::move(tags);
+        }
+        return item;
+    };
+
     // Query by label - direct annotations
     if (!label.empty() && include_direct) {
         auto symbols = annotator.get_symbols_by_label(label);
         for (const auto* sym : symbols) {
             if (count >= max_results) break;
-            nlohmann::json item;
-            item["symbol_name"] = sym->name;
-            item["file_id"] = static_cast<int>(sym->file_id);
-            item["symbol_id"] = std::to_string(sym->symbol_id);
-            item["file_path"] = sym->file_path;
-            item["line"] = sym->line;
-            if (!sym->annotation.labels.empty())
-                item["direct_labels"] = sym->annotation.labels;
-            if (!sym->annotation.category.empty())
-                item["category"] = sym->annotation.category;
-            if (!sym->annotation.tags.empty()) {
-                nlohmann::json tags;
-                for (const auto& [k, v] : sym->annotation.tags) {
-                    tags[k] = v;
-                }
-                item["tags"] = std::move(tags);
-            }
-            annotations.push_back(std::move(item));
+            annotations.push_back(serialize_direct(sym));
             ++count;
         }
     }
 
-    // Query by label - propagated labels
-    if (!label.empty() && include_propagated && propagator) {
-        // GraphPropagator does not expose GetSymbolsWithLabel; iterate
-        // direct results and augment with propagated label info.
-        // (The propagator seeds labels and computes propagated strengths
-        // via propagate(), but we can query per-symbol propagated labels.)
-        // For a full implementation we would need an index of all symbol IDs
-        // to query. For now, augment direct results with propagation data.
+    // Query by label - propagated labels. The propagator is keyed on real
+    // EnhancedSymbol IDs (seeded in mcp.cpp from the live index), not the
+    // annotator's synthetic packed sym_id. For each direct result we resolve
+    // back to the real EnhancedSymbol via ref_tracker(file_id + line) and
+    // query the propagator with that ID. source_name/source_file are filled
+    // by reverse-looking-up the propagated label's source SymbolID. Karpathy
+    // #4: deterministic — get_file_enhanced_symbols returns ordered list,
+    // we match the first symbol on the target line.
+    if (!label.empty() && include_propagated && propagator && indexer) {
+        const auto& ref = indexer->ref_tracker();
         for (auto& item : annotations) {
-            auto sid_str = item.value("symbol_id", "");
-            if (sid_str.empty()) continue;
-            auto sid = static_cast<SymbolID>(std::stoull(sid_str));
-            auto labels = propagator->get_labels(sid);
+            auto file_id = static_cast<FileID>(
+                item.value("file_id", 0));
+            int line = item.value("line", -1);
+            if (line < 0) continue;
+
+            const EnhancedSymbol* real_sym = nullptr;
+            for (const auto* es : ref.get_file_enhanced_symbols(file_id)) {
+                if (es && es->symbol.line == line) {
+                    real_sym = es;
+                    break;
+                }
+            }
+            if (!real_sym) continue;
+
+            auto labels = propagator->get_labels(real_sym->id);
             nlohmann::json prop_labels = nlohmann::json::array();
             for (const auto& pl : labels) {
-                if (pl.label == label && pl.strength >= min_strength) {
-                    nlohmann::json pl_item;
-                    pl_item["label"] = pl.label;
-                    pl_item["strength"] = pl.strength;
-                    pl_item["hops"] = pl.hops;
-                    prop_labels.push_back(std::move(pl_item));
+                if (pl.label != label || pl.strength < min_strength) continue;
+                nlohmann::json pl_item;
+                pl_item["label"] = pl.label;
+                pl_item["strength"] = pl.strength;
+                pl_item["hops"] = pl.hops;
+                // Populate source_name / source_file by reverse symbol
+                // lookup — fixes the comment-only stub at the prior
+                // location. If the source ID isn't found in the index
+                // (orphaned propagation root) we leave the fields out
+                // rather than emit empty strings (matches Go's omitempty).
+                if (pl.source != 0) {
+                    if (const auto* src_es =
+                            ref.get_enhanced_symbol(pl.source)) {
+                        pl_item["source_name"] = src_es->symbol.name;
+                        pl_item["source_file"] =
+                            indexer->get_file_path(src_es->symbol.file_id);
+                    }
                 }
+                prop_labels.push_back(std::move(pl_item));
             }
             if (!prop_labels.empty()) {
                 item["propagated_labels"] = std::move(prop_labels);
@@ -237,18 +273,25 @@ ToolResult handle_semantic_annotations(const nlohmann::json& raw_params,
         }
     }
 
-    // Query by category
+    // Query by category - direct annotations only (Go's surface; propagator
+    // propagates labels, not categories). Use the populated category_index_
+    // on the annotator.
     if (!category.empty() && include_direct) {
-        // SemanticAnnotator does not have get_symbols_by_category; filter
-        // by iterating the label index. We check each annotated symbol's
-        // category field by scanning all labels and filtering.
-        // Since get_symbols_by_label returns per-label, we instead look
-        // at all annotations the annotator holds. The annotator exposes
-        // get_symbols_by_label but not by category, so we gather all
-        // unique labels, query each, and filter by category.
-        //
-        // This is the pragmatic approach given the current API surface.
-        // A future task may add get_symbols_by_category to SemanticAnnotator.
+        auto symbols = annotator.get_symbols_by_category(category);
+        // De-dup against any already-collected (label query may have added
+        // the same symbol). Match Go: check existing items by symbol_id.
+        absl::flat_hash_set<std::string> seen;
+        for (auto& item : annotations) {
+            auto sid = item.value("symbol_id", "");
+            if (!sid.empty()) seen.insert(sid);
+        }
+        for (const auto* sym : symbols) {
+            if (count >= max_results) break;
+            auto sid_str = std::to_string(sym->symbol_id);
+            if (seen.contains(sid_str)) continue;
+            annotations.push_back(serialize_direct(sym));
+            ++count;
+        }
     }
 
     nlohmann::json response;
@@ -909,11 +952,115 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
             << "cohesion: avg=0.00 min=0.00\n"
             << "quality: maintainability=0.00 debt=0.00 purity=0.00\n"
             << "---";
+    } else if (mode == "detailed") {
+        // Detailed sub-mode dispatch via the existing analyzers.
+        // The engine's build_detailed() returns an empty response because
+        // CodebaseIntelligenceResponse has no module/layer/feature fields
+        // (Go uses separate JSON fields the C++ port hasn't yet added to
+        // the response struct). We call the analyzers directly here and
+        // emit results as LCF text — Karpathy #6: don't silently fall
+        // through to overview, surface the real data the analyzers
+        // already compute.
+        std::string detailed_mode = params.value("analysis",
+                                                 params.value("detailed_mode", ""));
+        if (detailed_mode.empty()) detailed_mode = "modules";
+        if (detailed_mode != "modules" && detailed_mode != "layers" &&
+            detailed_mode != "features" && detailed_mode != "terms") {
+            return make_error_response(
+                "code_insight",
+                "invalid detailed analysis '" + detailed_mode +
+                "', must be one of: modules, layers, features, terms");
+        }
+        auto files_data = gather_file_symbol_data(indexer);
+
+        out << "LCF/1.0\nmode=detailed\nsub=" << detailed_mode
+            << "\ntier=2\ntokens=100\n---\n";
+        if (detailed_mode == "modules") {
+            ModuleAnalyzer ma;
+            auto r = ma.analyze(files_data);
+            out << "== MODULES ==\n"
+                << "total=" << r.metrics.total_modules
+                << " cohesion=" << fmt2(r.metrics.average_cohesion)
+                << " coupling=" << fmt2(r.metrics.average_coupling)
+                << " arch_score=" << fmt2(r.metrics.architectural_score)
+                << "\n"
+                << "strategy=" << r.detection_strategy << "\n";
+            size_t shown = std::min(r.modules.size(), size_t{20});
+            for (size_t i = 0; i < shown; ++i) {
+                const auto& m = r.modules[i];
+                out << "  " << m.name << ": type=" << m.type
+                    << " files=" << m.file_count
+                    << " funcs=" << m.function_count
+                    << " cohesion=" << fmt2(m.cohesion_score) << "\n";
+            }
+            if (r.modules.size() > shown)
+                out << "  ... and " << (r.modules.size() - shown) << " more\n";
+        } else if (detailed_mode == "layers") {
+            LayerAnalyzer la;
+            auto r = la.analyze(files_data);
+            out << "== LAYERS ==\n"
+                << "total=" << r.layers.size()
+                << " violations=" << r.violation_count << "\n";
+            for (const auto& l : r.layers) {
+                out << "  " << l.name << ": depth=" << l.depth
+                    << " modules=" << l.modules.size()
+                    << " cohesion=" << fmt2(l.metrics.cohesion_score) << "\n";
+            }
+            for (const auto& p : r.patterns) {
+                out << "  pattern: " << p.name
+                    << " confidence=" << fmt2(p.confidence) << "\n";
+            }
+        } else if (detailed_mode == "features") {
+            FeatureAnalyzer fa;
+            auto r = fa.analyze(files_data);
+            out << "== FEATURES ==\n"
+                << "total=" << r.metrics.total_features
+                << " avg_components=" << fmt2(r.metrics.average_components)
+                << " coupling=" << fmt2(r.metrics.coupling_score)
+                << " modularity=" << fmt2(r.metrics.modularity_score) << "\n";
+            size_t shown = std::min(r.features.size(), size_t{20});
+            for (size_t i = 0; i < shown; ++i) {
+                const auto& f = r.features[i];
+                out << "  " << f.name
+                    << ": module=" << f.primary_module
+                    << " components=" << f.components.size()
+                    << " confidence=" << fmt2(f.confidence) << "\n";
+            }
+            if (r.features.size() > shown)
+                out << "  ... and " << (r.features.size() - shown) << " more\n";
+            for (const auto& d : r.cross_feature_deps) {
+                out << "  dep: " << d.feature_a << "->" << d.feature_b
+                    << " type=" << d.type
+                    << " strength=" << fmt2(d.strength) << "\n";
+            }
+        } else {  // terms
+            CIVocabularyAnalyzer va;
+            auto terms = va.extract_domain_terms_from_files(files_data);
+            out << "== TERMS ==\n"
+                << "total=" << terms.size() << "\n";
+            size_t shown = std::min(terms.size(), size_t{30});
+            for (size_t i = 0; i < shown; ++i) {
+                const auto& t = terms[i];
+                out << "  " << t.domain
+                    << ": count=" << t.count
+                    << " confidence=" << fmt2(t.confidence)
+                    << " terms=" << t.terms.size() << "\n";
+            }
+            if (terms.size() > shown)
+                out << "  ... and " << (terms.size() - shown) << " more\n";
+        }
+        out << "---";
     } else {
-        // overview (default) and "detailed" fall through to the historical
-        // overview payload — keeps default-mode probe stable per acceptance
-        // criterion and matches Go's overview shape on corpora without
-        // dependency-graph / entry-point detection wired.
+        // overview (default) — emit the historical overview payload.
+        // Decision: overview's LCF text is parity-locked byte-stable to
+        // Go on multi-lang corpus (basic.parity.json descriptor). Routing
+        // through the engine here would emit the same shape on populated
+        // corpora but risks per-byte divergence on the empty-history
+        // multi-lang corpus that the descriptor uses. Until a populated
+        // overview parity corpus exists, the static emission stays;
+        // unified mode + detailed sub-modes carry the engine-driven
+        // surface. See MODULE_MAP.md "Decision: code_insight overview
+        // static vs engine".
         out << "LCF/1.0\n"
             << "mode=overview\n"
             << "tier=1\n"
@@ -959,13 +1106,14 @@ void register_analysis_handlers(McpServer& server,
           {"max_results", "integer",
            "Maximum results (keep small to avoid token overload)", ""}},
          {}},
-        [annotator, propagator](const nlohmann::json& p) -> ToolResult {
+        [annotator, propagator, indexer](const nlohmann::json& p) -> ToolResult {
             if (!annotator) {
                 return make_error_response(
                     "semantic_annotations",
                     "semantic annotator not available");
             }
-            return handle_semantic_annotations(p, *annotator, propagator);
+            return handle_semantic_annotations(p, *annotator, propagator,
+                                                indexer);
         });
 
     // Replace "side_effects" stub

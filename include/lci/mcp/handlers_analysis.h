@@ -34,7 +34,8 @@ void register_analysis_handlers(McpServer& server,
 /// Handles "semantic_annotations": queries symbols by @lci: labels/categories.
 ToolResult handle_semantic_annotations(const nlohmann::json& params,
                                        SemanticAnnotator& annotator,
-                                       GraphPropagator* propagator);
+                                       GraphPropagator* propagator,
+                                       MasterIndex* indexer = nullptr);
 
 /// Handles "side_effects": queries function purity with 6 modes.
 ToolResult handle_side_effects(const nlohmann::json& params,

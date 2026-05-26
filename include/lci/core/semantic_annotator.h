@@ -14,6 +14,7 @@
 namespace lci {
 
 struct Symbol;
+class MasterIndex;
 
 /// Structured metadata extracted from @lci: comments.
 struct SemanticAnnotation {
@@ -75,9 +76,24 @@ class SemanticAnnotator {
     const SemanticAnnotation* get_annotation(FileID file_id,
                                              SymbolID symbol_id) const;
 
+    /// Walks every indexed file's content + symbol list and extracts @lci:
+    /// annotations into this annotator. Idempotent: callers should invoke
+    /// once after the MasterIndex completes indexing. Returns the number of
+    /// files processed (i.e., files with at least one symbol). Walking the
+    /// index is a one-shot read-only pass; no locks held across files (the
+    /// content store and reference tracker are both lock-free read snapshots).
+    int populate_from_index(const MasterIndex& index);
+
     /// Returns all symbols with a specific label.
     std::vector<const AnnotatedSymbol*> get_symbols_by_label(
         std::string_view label) const;
+
+    /// Returns all symbols whose annotation category matches `category`.
+    /// Ports Go's SemanticAnnotator.GetSymbolsByCategory. O(1) lookup
+    /// because we maintain a category→symbol index alongside the label
+    /// index. Empty vector when no symbols match.
+    std::vector<const AnnotatedSymbol*> get_symbols_by_category(
+        std::string_view category) const;
 
     /// Checks if a symbol is excluded from a given analysis type.
     bool is_excluded(FileID file_id, SymbolID symbol_id,
@@ -126,6 +142,10 @@ class SemanticAnnotator {
     absl::flat_hash_map<FileID,
         absl::flat_hash_map<SymbolID, SemanticAnnotation>> annotations_;
     absl::flat_hash_map<std::string, std::vector<AnnotatedSymbol>> label_index_;
+    // Category→symbol index parallels label_index_. Built incrementally as
+    // each annotation lands; never read concurrently with writes (populated
+    // once at startup by populate_from_index, then read-only).
+    absl::flat_hash_map<std::string, std::vector<AnnotatedSymbol>> category_index_;
 };
 
 }  // namespace lci

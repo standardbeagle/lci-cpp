@@ -47,6 +47,13 @@ int run_mcp(const GlobalFlags& flags) {
 
     SearchEngine search_engine(runtime_index);
     SemanticAnnotator annotator;
+    // Walk the live index and extract every file's @lci: annotations into
+    // the annotator. Without this, the semantic_annotations tool only sees
+    // labels seeded externally — which on a typical corpus means zero
+    // direct annotations even when files do contain @lci: markers. Has to
+    // run before GraphPropagator seeding so the propagator can pick up
+    // direct labels as propagation roots.
+    annotator.populate_from_index(runtime_index);
     GraphPropagator propagator(&runtime_index.ref_tracker());
     SideEffectAnalyzer side_effect_analyzer("generic");
     // Populate per-function purity from the in-process index. Conservative
@@ -71,6 +78,28 @@ int run_mcp(const GlobalFlags& flags) {
                                        .find_symbols_by_name(info.function_name)) {
                 if (es && static_cast<int>(es->symbol.line) == info.start_line) {
                     propagator.seed_label(es->id, "impure", 1.0);
+                }
+            }
+        }
+    }
+    // Seed propagator with direct @lci: labels from the annotator so the
+    // propagator computes transitive labels across the call graph. Without
+    // this seeding, only impurity labels propagate. Strength 1.0 = explicit
+    // annotation (vs propagated values which decay per hop).
+    {
+        // Get the union of all labels by enumerating known symbol IDs via the
+        // ref_tracker. For each AnnotatedSymbol the annotator has, seed the
+        // propagator with each of its labels at its symbol_id.
+        // Iterate the label index in deterministic order (sort label keys).
+        // Cheap pass — annotations are sparse vs symbols.
+        for (FileID fid : runtime_index.get_all_file_ids()) {
+            for (const auto* es :
+                 runtime_index.ref_tracker().get_file_enhanced_symbols(fid)) {
+                if (!es) continue;
+                const auto* ann = annotator.get_annotation(fid, es->id);
+                if (!ann) continue;
+                for (const auto& lbl : ann->labels) {
+                    propagator.seed_label(es->id, lbl, 1.0);
                 }
             }
         }
