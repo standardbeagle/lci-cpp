@@ -128,10 +128,15 @@ TEST_F(RealProjectCodeInsightTest, ChiDetailedModulesAnalysis) {
     ASSERT_FALSE(result.contains("error"))
         << "code_insight error: " << result.value("error", "unknown");
 
-    // "detailed" mode falls through to the overview LCF payload — matches
-    // Go's shape on corpora without dependency-graph data wired. The mode
-    // header therefore reads `mode=overview`.
-    expect_lcf_mode(result, "overview");
+    // After S2 wiring, `mode=detailed` dispatches to the requested
+    // sub-analyzer (here: ModuleAnalyzer) and emits a per-mode header
+    // `mode=detailed\nsub=modules`. The MODULES LCF section follows.
+    expect_lcf_mode(result, "detailed");
+    const auto& text = result["lcf"].get_ref<const std::string&>();
+    EXPECT_NE(text.find("sub=modules\n"), std::string::npos)
+        << "missing sub=modules line: " << text;
+    EXPECT_NE(text.find("== MODULES =="), std::string::npos)
+        << "missing MODULES section: " << text;
 }
 
 TEST_F(RealProjectCodeInsightTest, ChiUnifiedMode) {

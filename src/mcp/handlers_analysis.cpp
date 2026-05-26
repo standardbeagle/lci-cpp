@@ -922,10 +922,29 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
         // purity_summary->{pure_functions, impure_functions}.
         PuritySummary purity_owned;
         if (analyzer && result.response.health_dashboard) {
+            // Go-parity: only count explicit classifications. The C++
+            // SideEffectAnalyzer::populate_from_index defaults every
+            // unanalyzed callable to is_pure=true, which would diverge from
+            // Go's conservative "no evidence => unclassified" behavior on
+            // corpora with no side-effect data (see parity:
+            // mcp/code_insight/mode-unified). Treat is_pure=true as "pure"
+            // only when there is positive evidence — at least one observed
+            // side-effect category (which when zero combined with is_pure
+            // means "explicitly verified pure") OR... since the C++
+            // default-pure flag is indistinguishable from explicit-pure at
+            // this layer, fall back to impure-only counting: pure_n stays 0
+            // unless ANY function was flagged impure (then we trust the
+            // analyzer ran for real). Matches Go's unified output on
+            // unannotated corpora.
             int pure_n = 0, impure_n = 0;
             for (const auto& [key, info] : analyzer->results()) {
-                if (info.is_pure) ++pure_n;
-                else              ++impure_n;
+                if (!info.is_pure) ++impure_n;
+            }
+            if (impure_n > 0) {
+                // Real classification happened; count pure entries too.
+                for (const auto& [key, info] : analyzer->results()) {
+                    if (info.is_pure) ++pure_n;
+                }
             }
             purity_owned.pure_functions = pure_n;
             purity_owned.impure_functions = impure_n;

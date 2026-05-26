@@ -8,7 +8,7 @@
   "invocation": {
     "args": [
       "grep",
-      "-R",
+      "--regex",
       "Subtract"
     ],
     "cwd": "${CORPUS}"
@@ -24,5 +24,5 @@
     "timed_max_ms": 60000
   },
   "expect_exit": 0,
-  "_rationale": "Pins the `-R/--regex` flag plumbing. Note: the C++ run_grep currently ignores the regex flag (src/cli/search.cpp passes `/*use_regex*/` and falls back to literal substring match), so this spec uses a pattern that resolves the same way under literal and regex semantics. The spec exists primarily to lock the flag's exit code and output shape so a future regex implementation lands a deliberate golden update."
+  "_rationale": "Pins the `--regex` flag plumbing. S3 dropped the legacy `-R` short form (Go uses `-E` in search; grep accepts only the long form across both); use long-only `--regex` here to be portable across both binaries. After S3, C++ honors the flag via RE2; the pattern is chosen to resolve identically under literal and regex semantics so the golden is stable."
 }

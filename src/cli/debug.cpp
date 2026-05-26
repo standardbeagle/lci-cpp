@@ -302,19 +302,15 @@ int run_debug_validate(const GlobalFlags& flags, bool incremental) {
 
     std::printf("Validating Symbol Linking System\n");
     std::printf("Root Path: %s\n", cfg.project.root.c_str());
+    // Go-parity: no Mode line on default invocation. Only print when
+    // --incremental is explicitly set, and document the gap on stderr
+    // (Karpathy rule 6 — no silent skips).
     if (incremental) {
         std::printf("Mode: incremental\n");
-        // The current consistency check is a single /status round-trip;
-        // it returns whatever the server has cached. Incremental and full
-        // produce identical output here because the server's snapshot is
-        // always coherent. Document the gap rather than fake a separate
-        // path (Karpathy rule 6).
         std::fprintf(stderr,
                      "Note: --incremental: server-side consistency check "
                      "is mode-agnostic in C++ port; output is identical to "
                      "full-mode for now.\n");
-    } else {
-        std::printf("Mode: full\n");
     }
     std::printf("\n");
 
@@ -457,7 +453,11 @@ int run_debug_export(const GlobalFlags& flags, const std::string& output,
 
     nlohmann::json data;
     data["root"] = cfg.project.root;
-    data["incremental"] = incremental;
+    // Only emit the incremental field when explicitly requested. Default
+    // invocation must produce {} (matches goldens + Go shape).
+    if (incremental) {
+        data["incremental"] = true;
+    }
     data["ready"] = false;
     data["file_count"] = 0;
     data["symbol_count"] = 0;
