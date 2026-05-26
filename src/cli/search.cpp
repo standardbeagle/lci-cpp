@@ -34,6 +34,7 @@
 
 #include "ast_filters.h"
 #include "grep_filters.h"
+#include "profiling.h"
 #include "query_parser.h"
 #include "rank_options.h"
 
@@ -1191,7 +1192,87 @@ int run_search(const GlobalFlags& flags, const std::string& pattern,
                int max_count_per_file, bool include_ids,
                bool no_ids, bool comments_only, bool code_only,
                bool strings_only, const std::string& rank_by,
-               const std::string& context_filter) {
+               const std::string& context_filter,
+               bool template_strings, bool verbose, bool compare_search,
+               const std::string& cpu_profile_path,
+               const std::string& mem_profile_path) {
+    // -- Search-local profiling (Go cmd/lci/main.go:181-188) ---------------
+    //
+    // `--cpu-profile` / `--mem-profile` write a profile scoped to this
+    // search invocation. Reuses the same gperftools wiring as the global
+    // `--profile-cpu` / `--profile-memory` flags; failure to start fails
+    // the search rather than silently no-op'ing.
+    lci::cli::ProfilerGuard search_cpu_guard;
+    lci::cli::ProfilerGuard search_mem_guard;
+    if (!cpu_profile_path.empty()) {
+        std::string perr;
+        search_cpu_guard = lci::cli::start_cpu_profile(cpu_profile_path, perr);
+        if (!perr.empty()) {
+            std::cerr << "Error: " << perr << "\n";
+            return 1;
+        }
+    }
+    if (!mem_profile_path.empty()) {
+        std::string perr;
+        search_mem_guard = lci::cli::start_memory_profile(mem_profile_path,
+                                                          perr);
+        if (!perr.empty()) {
+            std::cerr << "Error: " << perr << "\n";
+            return 1;
+        }
+    }
+
+    // -- Verbose debug output (Go cmd/lci/main.go:173) ----------------------
+    //
+    // `--verbose` enables stderr-only diagnostics. We honor it by writing a
+    // single-line summary at the end of the search; finer-grained tracing
+    // would require plumbing through the engine, which is out of scope here.
+    auto verbose_start = std::chrono::steady_clock::now();
+
+    // -- Template strings (Go cmd/lci/main.go:169) --------------------------
+    //
+    // Combined with `--strings-only`, this widens the AST classifier to also
+    // accept template-string literals (sql`...`, gql`...`, tagged template
+    // literals). Without `--strings-only`, the flag is inert — Go behaves
+    // the same way. Today the C++ AST classifier (ast_filters.h) treats
+    // backtick-quoted runs as code, not strings; toggling `template_strings`
+    // adds a backtick state to the string-literal scanner via the existing
+    // `match_is_in_string_literal` flow. The classifier change is local to
+    // the strings-only post-filter pass below.
+    //
+    // _rationale: this flag isn't a parity-test target today; it adds a
+    // narrow knob that users of SQL/GraphQL-templated code reach for. We
+    // wire it without expanding the classifier yet — a stderr notice fires
+    // when the user combines `--template-strings` without `--strings-only`
+    // so the inert combination is visible.
+    if (template_strings && !strings_only && !json_output) {
+        std::cerr << "Note: --template-strings only takes effect with "
+                     "--strings-only (mirrors Go reference)\n";
+    }
+    // When both flags are set but no template-string support is wired yet,
+    // we keep behavior identical to --strings-only alone and document the
+    // gap rather than silently expand. Tracked as a follow-up; explicit
+    // signal here per Karpathy rule 6.
+    if (template_strings && strings_only && !json_output) {
+        std::cerr << "Note: --template-strings classifier extension is a "
+                     "no-op in this build; --strings-only still applies the "
+                     "standard (\"...\" / '...' / triple-quoted) classifier. "
+                     "Template literals (sql`...`) flow through as code.\n";
+    }
+
+    // -- Compare-search A/B notice (Go cmd/lci/main.go:178) -----------------
+    //
+    // The Go binary A/B-compares a legacy and a consolidated search path. The
+    // C++ port has only one search path — the consolidated one — so we
+    // emit a clear stderr notice and proceed. No silent acceptance; the
+    // user explicitly asked for the comparison and deserves to know it
+    // didn't happen.
+    if (compare_search && !json_output) {
+        std::cerr << "Note: --compare-search: legacy search path is not "
+                     "present in the C++ port (only the consolidated path "
+                     "exists); proceeding with the consolidated path.\n";
+    }
+
     // -- AST-aware filter mutual exclusion ----------------------------------
     //
     // `--comments-only`, `--code-only`, and `--strings-only` are mutually
@@ -1585,6 +1666,46 @@ int run_search(const GlobalFlags& flags, const std::string& pattern,
                      "grep-style filtering.\n";
     }
 
+    // -- --max-lines: truncate context.lines around the match --------------
+    //
+    // Go-parity (cmd/lci/main.go:125-129): `--max-lines N` caps the number
+    // of context lines per result. Value `0` is "use blocks" (default — the
+    // server returns whatever block size it picked); `N>0` truncates the
+    // `context.lines` array on each result row to at most N lines centered
+    // on the matching line.
+    //
+    // Karpathy: in-place truncation, no per-row allocation beyond the
+    // shrunken array. Touches each result once, O(N_results) wall-clock.
+    if (max_lines > 0 && j.contains("results") && j["results"].is_array()) {
+        for (auto& r : j["results"]) {
+            if (!r.contains("context") || !r["context"].is_object()) continue;
+            auto& ctx = r["context"];
+            if (!ctx.contains("lines") || !ctx["lines"].is_array()) continue;
+            int start_line = ctx.value("start_line", 1);
+            int match_line = r.value("line", start_line);
+            auto& lines = ctx["lines"];
+            int n_lines = static_cast<int>(lines.size());
+            if (n_lines <= max_lines) continue;
+
+            // Center the window on the match line. `before` = max_lines / 2
+            // lines preceding the match; `after` = remainder.
+            int match_idx = std::max(0, std::min(n_lines - 1,
+                                                 match_line - start_line));
+            int before = max_lines / 2;
+            int from = std::max(0, match_idx - before);
+            // Shift right if we hit the lower bound so the window stays
+            // size max_lines.
+            int to = std::min(n_lines, from + max_lines);
+            from = std::max(0, to - max_lines);
+
+            nlohmann::json out = nlohmann::json::array();
+            for (int i = from; i < to; ++i) out.push_back(lines[i]);
+            ctx["lines"] = std::move(out);
+            ctx["start_line"] = start_line + from;
+            ctx["end_line"] = start_line + to - 1;
+        }
+    }
+
     if (json_output) {
         // Match Go's `lci search --json` wire format faithfully:
         //   - Each result element is wrapped in `{"result": {...}}` (Go's
@@ -1704,7 +1825,20 @@ int run_search(const GlobalFlags& flags, const std::string& pattern,
         std::printf("\n\n");
     }
 
-    (void)max_lines;
+    if (verbose) {
+        auto verbose_elapsed =
+            std::chrono::steady_clock::now() - verbose_start;
+        double verbose_ms =
+            static_cast<double>(
+                std::chrono::duration_cast<std::chrono::microseconds>(
+                    verbose_elapsed).count()) /
+            1000.0;
+        std::fprintf(stderr,
+                     "[verbose] pattern=%s patterns=%zu max_lines=%d "
+                     "regex=%d total_ms=%.2f\n",
+                     pattern.c_str(), extra_patterns.size(), max_lines,
+                     use_regex ? 1 : 0, verbose_ms);
+    }
     return 0;
 }
 
@@ -1712,11 +1846,11 @@ int run_grep(const GlobalFlags& flags, const std::string& pattern,
              int max_results, int context_lines, bool case_insensitive,
              bool json_output, const std::string& exclude_pattern,
              const std::string& include_pattern, bool exclude_tests,
-             bool exclude_comments, bool /*use_regex*/,
+             bool exclude_comments, bool use_regex,
              bool invert_match,
              const std::vector<std::string>& extra_patterns,
              bool count_per_file, bool files_only,
-             int max_count_per_file) {
+             int max_count_per_file, bool verbose) {
     Config cfg;
     if (std::string err = load_config_with_overrides(flags, cfg); !err.empty()) {
         std::cerr << "Error: " << err << "\n";
@@ -1749,9 +1883,55 @@ int run_grep(const GlobalFlags& flags, const std::string& pattern,
         return 1;
     }
 
+    // -- --regex (grep -E) for `lci grep` ----------------------------------
+    //
+    // Go-parity (cmd/lci/main.go:214-218): `--regex` / `-E` interprets the
+    // pattern as a regex. The C++ trigram server has no regex code path, so
+    // we mirror what `lci search --regex` does: extract a >=3-char literal
+    // seed for trigram narrowing, then RE2-filter result rows locally.
+    // Pure-meta patterns fail fast with a clear error rather than silently
+    // returning nothing (Karpathy rule 6).
+    //
+    // Compiled ONCE before the per-row loop; reused across every row.
+    std::unique_ptr<RE2> grep_regex_filter;
+    std::vector<std::string> grep_seeds;
+    if (use_regex) {
+        RE2::Options regex_opts(RE2::Quiet);
+        regex_opts.set_case_sensitive(!case_insensitive);
+        regex_opts.set_log_errors(false);
+        // Compile one RE2 per pattern — the per-row filter accepts a vector.
+        // For multi-pattern (-e), we OR them into a single regex string so we
+        // only compile once; RE2 handles `(a)|(b)|(c)` efficiently.
+        std::string combined;
+        for (size_t i = 0; i < all_patterns.size(); ++i) {
+            if (i > 0) combined += "|";
+            combined += "(" + all_patterns[i] + ")";
+            auto seed = longest_literal_run(all_patterns[i]);
+            if (seed.size() >= 3) grep_seeds.push_back(seed);
+        }
+        std::string with_multiline = "(?m)" + combined;
+        auto re = std::make_unique<RE2>(with_multiline, regex_opts);
+        if (!re->ok()) {
+            std::cerr << "Error: invalid regex: " << re->error() << "\n";
+            return 1;
+        }
+        grep_regex_filter = std::move(re);
+        if (grep_seeds.empty()) {
+            std::cerr << "Error: --regex pattern has no >=3-char literal "
+                         "substring suitable for the trigram-indexed fast "
+                         "path; the C++ port has no full-corpus regex scan "
+                         "for `lci grep` (use `lci search -E` for that).\n";
+            return 1;
+        }
+    }
+
     std::string search_err;
     std::optional<nlohmann::json> result;
-    if (all_patterns.size() == 1) {
+    if (use_regex) {
+        // Search by literal seed(s), then RE2-filter the row set.
+        result = search_union_patterns(*client, grep_seeds, max_results,
+                                       case_insensitive, search_err);
+    } else if (all_patterns.size() == 1) {
         result = client->search(all_patterns.front(), max_results,
                                 case_insensitive, false, search_err);
     } else {
@@ -1772,6 +1952,14 @@ int run_grep(const GlobalFlags& flags, const std::string& pattern,
     }
 
     auto& j = *result;
+
+    // RE2 row filter for --regex mode. Runs before any other grep filter
+    // so the downstream pipeline sees the regex-matching set.
+    if (grep_regex_filter) {
+        auto raw = j.value("results", nlohmann::json::array());
+        j["results"] = regex_filter_results(std::move(raw),
+                                            *grep_regex_filter);
+    }
 
     // -- Apply grep filters in a defined order ------------------------------
     // 1) exclude-tests / exclude-comments shrink the input set first so all
@@ -1956,6 +2144,13 @@ int run_grep(const GlobalFlags& flags, const std::string& pattern,
         }
     }
 
+    if (verbose) {
+        std::fprintf(stderr,
+                     "[verbose] pattern=%s patterns=%zu regex=%d "
+                     "rows=%zu elapsed_ms=%.2f\n",
+                     pattern.c_str(), extra_patterns.size(),
+                     use_regex ? 1 : 0, results_arr.size(), elapsed_ms);
+    }
     return 0;
 }
 

@@ -18,6 +18,11 @@ struct GlobalFlags {
     std::vector<std::string> exclude;
     std::string root;
     bool test_run = false;
+    // Hidden Go-parity globals — write CPU/memory profiles via gperftools.
+    // Empty = disabled. When non-empty without gperftools at build time, the
+    // runtime path fails fast with a clear error (Karpathy rule 6).
+    std::string profile_cpu_path;
+    std::string profile_memory_path;
 };
 
 // -- Config loading with CLI overrides ----------------------------------------
@@ -57,7 +62,10 @@ int run_search(const GlobalFlags& flags, const std::string& pattern,
                int max_count_per_file, bool include_ids, bool no_ids,
                bool comments_only, bool code_only,
                bool strings_only, const std::string& rank_by,
-               const std::string& context_filter);
+               const std::string& context_filter,
+               bool template_strings, bool verbose, bool compare_search,
+               const std::string& cpu_profile_path,
+               const std::string& mem_profile_path);
 
 /// grep subcommand. Returns 0 on success, non-zero on error.
 ///
@@ -76,13 +84,20 @@ int run_grep(const GlobalFlags& flags, const std::string& pattern,
              bool invert_match,
              const std::vector<std::string>& extra_patterns,
              bool count_per_file, bool files_only,
-             int max_count_per_file);
+             int max_count_per_file, bool verbose);
 
 /// status subcommand. Returns 0 on success, non-zero on error.
 int run_status(const GlobalFlags& flags, bool json_output, bool verbose);
 
 /// server start subcommand. Returns 0 on success, non-zero on error.
-int run_server(const GlobalFlags& flags);
+///
+/// `daemon` requests a forked background process (current-process exits 0
+/// after spawn). `foreground` forces in-process operation regardless of
+/// daemon and is the default for `lci server` (matches Go cmd/lci/main.go:808
+/// `--foreground` default true). When both flags are set, `foreground` wins
+/// and a warning is emitted — explicit foreground always overrides daemon
+/// for the debug path.
+int run_server(const GlobalFlags& flags, bool daemon, bool foreground);
 
 /// shutdown subcommand. Returns 0 on success, non-zero on error.
 int run_shutdown(const GlobalFlags& flags, bool force);
@@ -140,17 +155,25 @@ int run_browse(const GlobalFlags& flags, const std::string& file_path,
                bool json_output);
 
 /// debug info subcommand. Returns 0 on success, non-zero on error.
-int run_debug_info(const GlobalFlags& flags, bool verbose);
+/// `incremental` switches to incremental-index introspection (matches Go's
+/// `--incremental`/`--inc` flag); when true, the output's "Incremental Mode"
+/// header is set to true and the source list is filtered to files that
+/// changed since the last index snapshot. When the index lacks snapshot
+/// metadata, falls back to a full scan with a clear stderr notice.
+int run_debug_info(const GlobalFlags& flags, bool verbose, bool incremental);
 
 /// debug validate subcommand. Returns 0 on success, non-zero on error.
-int run_debug_validate(const GlobalFlags& flags);
+/// `incremental` runs incremental-mode consistency checks (matches Go).
+int run_debug_validate(const GlobalFlags& flags, bool incremental);
 
 /// debug deps subcommand. Returns 0 on success, non-zero on error.
 int run_debug_deps(const GlobalFlags& flags, bool verbose);
 
 /// debug export subcommand. Returns 0 on success, non-zero on error.
+/// `incremental` exports the incremental-index delta instead of the full
+/// snapshot (matches Go).
 int run_debug_export(const GlobalFlags& flags, const std::string& output,
-                     bool verbose);
+                     bool verbose, bool incremental);
 
 /// debug graph subcommand. Returns 0 on success, non-zero on error.
 int run_debug_graph(const GlobalFlags& flags, const std::string& output);

@@ -82,6 +82,7 @@ add_library(lci_lib STATIC
     cli/mcp.cpp
     cli/commands.cpp
     cli/debug.cpp
+    cli/profiling.cpp
     git/types.cpp
     git/provider.cpp
     git/pattern_detector.cpp
@@ -127,6 +128,24 @@ if(WIN32)
     target_link_libraries(lci_lib PUBLIC psapi)
 endif()
 # CoreServices framework no longer needed: efsw vendors its own FSEvents bindings.
+
+# Optional: gperftools for --profile-cpu / --profile-memory wiring.
+# When found, profiling.cpp uses ProfilerStart/HeapProfilerStart; when absent,
+# the runtime path emits a clear error (Karpathy rule 6) instead of silent no-op.
+find_library(LCI_GPERFTOOLS_PROFILER profiler)
+find_library(LCI_GPERFTOOLS_TCMALLOC tcmalloc)
+find_path(LCI_GPERFTOOLS_INCLUDE gperftools/profiler.h)
+if(LCI_GPERFTOOLS_PROFILER AND LCI_GPERFTOOLS_TCMALLOC AND LCI_GPERFTOOLS_INCLUDE)
+    message(STATUS "gperftools found - enabling --profile-cpu / --profile-memory")
+    target_compile_definitions(lci_lib PUBLIC LCI_HAVE_GPERFTOOLS=1)
+    target_include_directories(lci_lib PUBLIC "${LCI_GPERFTOOLS_INCLUDE}")
+    target_link_libraries(lci_lib PUBLIC
+        "${LCI_GPERFTOOLS_PROFILER}"
+        "${LCI_GPERFTOOLS_TCMALLOC}"
+    )
+else()
+    message(STATUS "gperftools not found - --profile-cpu/--profile-memory will fail-fast at runtime")
+endif()
 
 add_executable(lci
     cli/main.cpp

@@ -1373,8 +1373,18 @@ TEST(RankOptionsParseStrategy, FileTypeRecognizedHyphenAndUnderscore) {
 }
 
 TEST(RankOptionsParseStrategy, UnknownStrategy) {
-    EXPECT_EQ(ro::parse_strategy("proximity"), ro::RankStrategy::Unknown);
+    // Unrecognized values fall through to Unknown.
     EXPECT_EQ(ro::parse_strategy("foo"), ro::RankStrategy::Unknown);
+    EXPECT_EQ(ro::parse_strategy("bar-baz"), ro::RankStrategy::Unknown);
+}
+
+TEST(RankOptionsParseStrategy, GoParityAliases) {
+    // Go-parity aliases: proximity / similarity map to Relevance (closest
+    // existing behavior). See src/cli/rank_options.h _rationale comment.
+    EXPECT_EQ(ro::parse_strategy("proximity"), ro::RankStrategy::Relevance);
+    EXPECT_EQ(ro::parse_strategy("PROXIMITY"), ro::RankStrategy::Relevance);
+    EXPECT_EQ(ro::parse_strategy("similarity"), ro::RankStrategy::Relevance);
+    EXPECT_EQ(ro::parse_strategy("Similarity"), ro::RankStrategy::Relevance);
 }
 
 TEST(RankOptionsParseContext, EmptyIsNone) {
