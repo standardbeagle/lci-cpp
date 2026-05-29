@@ -132,10 +132,23 @@ endif()
 # Optional: gperftools for --profile-cpu / --profile-memory wiring.
 # When found, profiling.cpp uses ProfilerStart/HeapProfilerStart; when absent,
 # the runtime path emits a clear error (Karpathy rule 6) instead of silent no-op.
+#
+# tcmalloc replaces the global allocator and is incompatible with the
+# sanitizer allocators (ASan/TSan/MSan); linking both aborts at startup
+# ("Attempt to free invalid pointer"). Skip gperftools entirely under any
+# -fsanitize build so sanitizer presets (e.g. tsan) link and run.
+string(FIND "${CMAKE_CXX_FLAGS}" "-fsanitize" LCI_SANITIZER_POS)
+if(LCI_SANITIZER_POS GREATER -1)
+    set(LCI_SANITIZER_BUILD ON)
+else()
+    set(LCI_SANITIZER_BUILD OFF)
+endif()
 find_library(LCI_GPERFTOOLS_PROFILER profiler)
 find_library(LCI_GPERFTOOLS_TCMALLOC tcmalloc)
 find_path(LCI_GPERFTOOLS_INCLUDE gperftools/profiler.h)
-if(LCI_GPERFTOOLS_PROFILER AND LCI_GPERFTOOLS_TCMALLOC AND LCI_GPERFTOOLS_INCLUDE)
+if(LCI_SANITIZER_BUILD)
+    message(STATUS "sanitizer build - gperftools/tcmalloc disabled (allocator conflict)")
+elseif(LCI_GPERFTOOLS_PROFILER AND LCI_GPERFTOOLS_TCMALLOC AND LCI_GPERFTOOLS_INCLUDE)
     message(STATUS "gperftools found - enabling --profile-cpu / --profile-memory")
     target_compile_definitions(lci_lib PUBLIC LCI_HAVE_GPERFTOOLS=1)
     target_include_directories(lci_lib PUBLIC "${LCI_GPERFTOOLS_INCLUDE}")
