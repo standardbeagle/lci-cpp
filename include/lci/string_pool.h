@@ -8,6 +8,7 @@
 #include <vector>
 
 #include <absl/container/flat_hash_map.h>
+#include <absl/container/node_hash_map.h>
 
 namespace lci {
 
@@ -49,7 +50,14 @@ class StringPool {
 
   private:
     mutable std::shared_mutex mu_;
-    absl::flat_hash_map<uint32_t, std::string> strings_;
+    // node_hash_map (not flat_hash_map): get_string/get_range_string return a
+    // string_view into the stored std::string, and that view outlives the
+    // shared_lock. A flat_hash_map relocates its values on rehash, so a
+    // concurrent intern() insert would dangle a previously-returned view
+    // (tsan: StringPoolTest.ConcurrentIntern). node_hash_map keeps each
+    // value in a stable node — only the slot array moves on rehash, never
+    // the std::string itself — so escaped views stay valid across inserts.
+    absl::node_hash_map<uint32_t, std::string> strings_;
     absl::flat_hash_map<std::string, uint32_t> lookup_;
     uint32_t next_id_{0};
 };

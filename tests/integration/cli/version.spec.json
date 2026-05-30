@@ -15,11 +15,19 @@
     "stdout",
     "exit"
   ],
-  "parse": "exit-only",
+  "parse": "text",
   "tiers": {},
   "tolerances": {
     "score_abs": 0.0,
     "timed_max_ms": 60000
   },
-  "expect_exit": 0
+  "expect_exit": 0,
+  "text_normalize": {
+    "replace": [
+      {
+        "pattern": "[0-9]+\\.[0-9]+\\.[0-9]+",
+        "with": "VERSION"
+      }
+    ]
+  }
 }

@@ -280,6 +280,13 @@ TEST(MasterIndexSearchIntegrationTest, GetFilePath) {
 
 TEST(MasterIndexSearchIntegrationTest, ConcurrentSearchDuringIndexing) {
     TempDir dir;
+    // stable.go is never modified; its unique token must remain findable
+    // through every concurrent write — the core RCU invariant: a reader
+    // always observes a consistent snapshot, so committed data published
+    // before a write can never transiently disappear or tear.
+    dir.write_file("stable.go",
+        "package main\n"
+        "func alwaysHereStableToken() { return }\n");
     dir.write_file("concurrent.go",
         "package main\n"
         "func concurrent() { return }\n");
@@ -288,24 +295,39 @@ TEST(MasterIndexSearchIntegrationTest, ConcurrentSearchDuringIndexing) {
     cfg.project.root = dir.path().string();
     MasterIndex mi(cfg);
     ASSERT_TRUE(mi.index_directory(dir.path().string()));
+    // Precondition: the stable token is findable before any concurrency.
+    ASSERT_FALSE(mi.search("alwaysHereStableToken", 0).empty());
 
     constexpr int kSearcherCount = 4;
     constexpr int kSearchesPerThread = 100;
     std::atomic<bool> stop{false};
+    // RCU consistency violations: a search for the never-modified token
+    // that comes back empty, or any result with a torn/invalid path.
+    std::atomic<int> stable_token_missing{0};
+    std::atomic<int> malformed_result{0};
     std::vector<std::thread> searchers;
 
     for (int i = 0; i < kSearcherCount; ++i) {
         searchers.emplace_back([&] {
             for (int j = 0; j < kSearchesPerThread && !stop.load(); ++j) {
-                auto results = mi.search("concurrent", 0);
-                (void)results;
+                auto results = mi.search("alwaysHereStableToken", 0);
+                if (results.empty()) {
+                    stable_token_missing.fetch_add(1, std::memory_order_relaxed);
+                }
+                for (const auto& r : results) {
+                    // A torn snapshot would surface an empty/garbage path.
+                    if (r.path.empty()) {
+                        malformed_result.fetch_add(1,
+                                                   std::memory_order_relaxed);
+                    }
+                }
                 auto ids = mi.get_all_file_ids();
                 (void)ids;
             }
         });
     }
 
-    // Concurrent writer updates a file while searches happen.
+    // Concurrent writer churns a *different* file while searches happen.
     std::thread writer([&] {
         for (int i = 0; i < 20; ++i) {
             std::string content = "package main\nvar v" +
@@ -319,29 +341,55 @@ TEST(MasterIndexSearchIntegrationTest, ConcurrentSearchDuringIndexing) {
 
     writer.join();
     for (auto& t : searchers) t.join();
+
+    EXPECT_EQ(stable_token_missing.load(), 0)
+        << "RCU read observed a snapshot missing committed stable data "
+           "during a concurrent write to an unrelated file";
+    EXPECT_EQ(malformed_result.load(), 0)
+        << "search returned a result with a torn/empty path under "
+           "concurrent indexing";
+    // The stable token is still findable after all writes settle.
+    EXPECT_FALSE(mi.search("alwaysHereStableToken", 0).empty());
 }
 
 TEST(MasterIndexSearchIntegrationTest, ConcurrentSearchReads) {
     TempDir dir;
     dir.write_file("shared.go",
-        "package main\nfunc shared() { return }\n");
+        "package main\nfunc sharedReaderToken() { return }\n");
 
     Config cfg = make_default_config();
     cfg.project.root = dir.path().string();
     MasterIndex mi(cfg);
     ASSERT_TRUE(mi.index_directory(dir.path().string()));
 
+    // Establish the expected stable result once, single-threaded.
+    auto expected = mi.search("sharedReaderToken", 0);
+    ASSERT_FALSE(expected.empty());
+
     constexpr int kReaderCount = 8;
     constexpr int kReadsPerThread = 200;
+    // On a static index, every concurrent reader must observe the exact
+    // same result — lock-free reads must be correct, not merely crash-free.
+    std::atomic<int> empty_reads{0};
+    std::atomic<int> wrong_count{0};
+    std::atomic<int> wrong_path{0};
     std::vector<std::thread> readers;
 
     for (int i = 0; i < kReaderCount; ++i) {
         readers.emplace_back([&] {
             for (int j = 0; j < kReadsPerThread; ++j) {
-                auto r1 = mi.search("shared", 0);
-                (void)r1;
-                auto r2 = mi.find_candidate_files("shared", false);
-                (void)r2;
+                auto r1 = mi.search("sharedReaderToken", 0);
+                if (r1.empty()) {
+                    empty_reads.fetch_add(1, std::memory_order_relaxed);
+                }
+                if (r1.size() != expected.size()) {
+                    wrong_count.fetch_add(1, std::memory_order_relaxed);
+                }
+                for (const auto& r : r1) {
+                    if (r.path.find("shared.go") == std::string::npos) {
+                        wrong_path.fetch_add(1, std::memory_order_relaxed);
+                    }
+                }
                 auto snap = mi.read_snapshot();
                 (void)snap->file_count();
             }
@@ -349,6 +397,14 @@ TEST(MasterIndexSearchIntegrationTest, ConcurrentSearchReads) {
     }
 
     for (auto& t : readers) t.join();
+
+    EXPECT_EQ(empty_reads.load(), 0)
+        << "lock-free read returned empty on a static index";
+    EXPECT_EQ(wrong_count.load(), 0)
+        << "lock-free read returned a different result count than the "
+           "single-threaded baseline";
+    EXPECT_EQ(wrong_path.load(), 0)
+        << "lock-free read returned a result outside shared.go";
 }
 
 // -- Search after single-file indexing ----------------------------------------

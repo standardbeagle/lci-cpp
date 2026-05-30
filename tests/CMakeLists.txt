@@ -151,6 +151,12 @@ set_tests_properties(lci_integration_suite PROPERTIES
     LABELS "integration"
     ENVIRONMENT "LCI_CPP=$<TARGET_FILE:lci>;PARITY_CORPORA=${CMAKE_CURRENT_SOURCE_DIR}/parity/corpora"
     TIMEOUT 600
+    # Spawns lci server children on per-corpus sockets. Without isolation it
+    # races the parity suite's server spawns under -j (socket bind/connect
+    # contention + subprocess pile-up), producing flaky golden-mismatch and
+    # wait_for_ready timeouts. RUN_SERIAL runs it when no other test is
+    # active, removing the cross-suite contention.
+    RUN_SERIAL TRUE
 )
 
 # ---------------------------------------------------------------------------
@@ -193,6 +199,9 @@ set_tests_properties(lci_real_project_suite PROPERTIES
     # 600s for the whole bundled suite; cache makes per-test cost near
     # zero after the first indexed corpus, so this is generous.
     TIMEOUT 600
+    # Same rationale as lci_integration_suite: spawns lci server children;
+    # serialize against other tests to avoid socket/subprocess contention.
+    RUN_SERIAL TRUE
 )
 
 # ---------------------------------------------------------------------------
