@@ -214,19 +214,20 @@ TEST(TrigramIndexTest, CleanupThreshold) {
 }
 
 // ---------------------------------------------------------------------------
-// Search cache
+// Find-candidates behavior
 // ---------------------------------------------------------------------------
-TEST(TrigramIndexTest, SearchCacheHit) {
+TEST(TrigramIndexTest, RepeatedFindCandidatesIsDeterministic) {
     TrigramIndex idx;
     idx.index_file(1, "function test() { return value; }");
 
     auto first = idx.find_candidates("function");
     auto second = idx.find_candidates("function");
 
+    EXPECT_FALSE(first.empty());
     EXPECT_EQ(first, second);
 }
 
-TEST(TrigramIndexTest, CacheInvalidatedOnRemoval) {
+TEST(TrigramIndexTest, ResultsClearedAfterRemoval) {
     TrigramIndex idx;
     idx.index_file(1, "function test() { return value; }");
 
@@ -238,18 +239,6 @@ TEST(TrigramIndexTest, CacheInvalidatedOnRemoval) {
 
     auto after = idx.find_candidates("function");
     EXPECT_TRUE(after.empty());
-}
-
-TEST(TrigramIndexTest, InvalidateCacheCompletely) {
-    TrigramIndex idx;
-    idx.index_file(1, "function test() { return value; }");
-
-    idx.find_candidates("function");
-    idx.invalidate_cache_completely();
-
-    // Should still work (just cache miss, re-searches).
-    auto results = idx.find_candidates("function");
-    EXPECT_FALSE(results.empty());
 }
 
 // ---------------------------------------------------------------------------

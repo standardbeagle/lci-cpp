@@ -1,7 +1,6 @@
 #pragma once
 
 #include <atomic>
-#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -26,12 +25,6 @@ struct FileLocation {
 /// A collection of file locations sharing the same trigram.
 struct TrigramEntry {
     std::vector<FileLocation> locations;
-};
-
-/// Cached search result with expiry timestamp.
-struct SearchCacheEntry {
-    std::vector<FileID> results;
-    std::chrono::steady_clock::time_point timestamp;
 };
 
 /// A single shard (bucket) of the trigram index.
@@ -165,9 +158,6 @@ class TrigramIndex {
     /// Returns the underlying sharded storage.
     ShardedTrigramStorage& sharded_storage();
 
-    /// Invalidates the entire search cache.
-    void invalidate_cache_completely();
-
   private:
     /// Immutable read-side state, swapped atomically (RCU). Readers load
     /// the shared_ptr once and operate on the frozen snapshot with zero
@@ -194,12 +184,6 @@ class TrigramIndex {
 
     int cleanup_threshold_{100};
 
-    mutable absl::flat_hash_map<std::string, SearchCacheEntry> search_cache_;
-    std::chrono::seconds search_cache_ttl_{300};
-
-    std::atomic<int32_t> active_indexing_ops_{0};
-    std::atomic<int32_t> bulk_indexing_{0};
-
     uint16_t bucket_count_{256};
     uint32_t bucket_mask_{255};
 
@@ -215,16 +199,6 @@ class TrigramIndex {
     /// Drops invalidated-file locations from a snapshot's trigram maps and
     /// clears the invalidation set. Operates on the writer's private clone.
     static void cleanup_snapshot(Snapshot& snap);
-
-    /// Retrieves a cached search result if valid.
-    std::vector<FileID> get_from_cache(const std::string& pattern) const;
-
-    /// Stores a search result in the cache.
-    void set_cache(const std::string& pattern,
-                   const std::vector<FileID>& results) const;
-
-    /// Invalidates cache entries that may reference a file.
-    void invalidate_cache_for_file(FileID file_id);
 
     /// Filters candidate results by match count and invalidation status,
     /// reading the caller's loaded snapshot.

@@ -302,7 +302,6 @@ void TrigramIndex::clear() {
         snap.unicode_trigrams.clear();
         snap.invalidated_files.clear();
     });
-    search_cache_.clear();
     sharded_storage_.clear();
     location_allocator_.reset_stats();
 }
@@ -397,8 +396,6 @@ void TrigramIndex::remove_file(FileID file_id) {
             cleanup_snapshot(snap);
         }
     });
-
-    invalidate_cache_for_file(file_id);
 }
 
 std::vector<FileID> TrigramIndex::find_candidates(std::string_view pattern) const {
@@ -416,8 +413,9 @@ std::vector<FileID> TrigramIndex::find_candidates_with_options(
 
     // Lock-free read: load the immutable snapshot once and operate on it.
     // The shared_ptr keeps it alive even if a writer publishes a new one
-    // mid-read. The search_cache_ is intentionally bypassed on the read
-    // path (it mutated shared state under no exclusion); see IT3.
+    // mid-read. (The former per-query result cache was removed: it mutated
+    // shared state on the read path under only a shared lock — a data race —
+    // and benchmarks showed candidate lookup is already faster without it.)
     auto snap = load_snapshot();
 
     auto pattern_bytes = std::string_view(search_pattern);
@@ -492,8 +490,12 @@ void TrigramIndex::force_cleanup() {
     mutate_snapshot([](Snapshot& snap) { cleanup_snapshot(snap); });
 }
 
-void TrigramIndex::set_bulk_indexing(bool enabled) {
-    bulk_indexing_.store(enabled ? 1 : 0, std::memory_order_relaxed);
+void TrigramIndex::set_bulk_indexing(bool /*enabled*/) {
+    // No-op: TrigramIndex needs no bulk-build window. The read-path maps
+    // (ascii/unicode) are written only by the incremental index_file path
+    // and stay empty during a bulk reindex, which fills sharded_storage_
+    // (outside the snapshot). Kept for interface symmetry with the other
+    // indexes (MasterIndex::set_bulk_indexing fans out to all three).
 }
 
 SlabAllocator<FileLocation>& TrigramIndex::get_allocator() {
@@ -502,47 +504,6 @@ SlabAllocator<FileLocation>& TrigramIndex::get_allocator() {
 
 ShardedTrigramStorage& TrigramIndex::sharded_storage() {
     return sharded_storage_;
-}
-
-void TrigramIndex::invalidate_cache_completely() {
-    search_cache_.clear();
-}
-
-std::vector<FileID> TrigramIndex::get_from_cache(const std::string& pattern) const {
-    auto it = search_cache_.find(pattern);
-    if (it == search_cache_.end()) return {};
-
-    auto elapsed = std::chrono::steady_clock::now() - it->second.timestamp;
-    if (elapsed > search_cache_ttl_) {
-        search_cache_.erase(it);
-        return {};
-    }
-
-    return it->second.results;
-}
-
-void TrigramIndex::set_cache(
-    const std::string& pattern,
-    const std::vector<FileID>& results) const {
-    if (search_cache_.size() > 1000) {
-        int to_evict = static_cast<int>(search_cache_.size()) / 10;
-        std::vector<std::string> keys_to_remove;
-        keys_to_remove.reserve(static_cast<size_t>(to_evict));
-        for (const auto& [key, _] : search_cache_) {
-            if (to_evict <= 0) break;
-            keys_to_remove.push_back(key);
-            --to_evict;
-        }
-        for (const auto& key : keys_to_remove) {
-            search_cache_.erase(key);
-        }
-    }
-
-    search_cache_[pattern] = {results, std::chrono::steady_clock::now()};
-}
-
-void TrigramIndex::invalidate_cache_for_file(FileID /*file_id*/) {
-    search_cache_.clear();
 }
 
 void TrigramIndex::cleanup_snapshot(Snapshot& snap) {
