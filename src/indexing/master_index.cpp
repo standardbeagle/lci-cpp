@@ -53,7 +53,7 @@ void MasterIndex::set_bulk_indexing(bool enabled) {
     int32_t v = enabled ? 1 : 0;
     trigram_index_.set_bulk_indexing(enabled);
     ref_tracker_.bulk_indexing.store(v, std::memory_order_release);
-    postings_index_.bulk_indexing.store(v, std::memory_order_release);
+    postings_index_.set_bulk_indexing(enabled);
 }
 
 // -- Directory indexing -------------------------------------------------------

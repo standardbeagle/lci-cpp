@@ -11,6 +11,44 @@ namespace lci {
 // PostingsIndex
 // ---------------------------------------------------------------------------
 
+PostingsIndex::PostingsIndex() {
+    snapshot_.store(std::make_shared<const Snapshot>(),
+                    std::memory_order_release);
+}
+
+std::shared_ptr<const PostingsIndex::Snapshot>
+PostingsIndex::load_snapshot() const {
+    return snapshot_.load(std::memory_order_acquire);
+}
+
+template <class Fn>
+void PostingsIndex::write_snapshot(Fn&& fn) {
+    std::lock_guard<std::mutex> lk(write_mu_);
+    if (staging_) {
+        // Bulk window: mutate the private unpublished snapshot in place;
+        // a single publish happens in set_bulk_indexing(false).
+        fn(*staging_);
+        return;
+    }
+    auto next = std::make_shared<Snapshot>(
+        *snapshot_.load(std::memory_order_acquire));
+    fn(*next);
+    snapshot_.store(std::move(next), std::memory_order_release);
+}
+
+void PostingsIndex::set_bulk_indexing(bool enabled) {
+    std::lock_guard<std::mutex> lk(write_mu_);
+    if (enabled) {
+        if (!staging_) {
+            staging_ = std::make_shared<Snapshot>(
+                *snapshot_.load(std::memory_order_acquire));
+        }
+    } else if (staging_) {
+        snapshot_.store(std::move(staging_), std::memory_order_release);
+        staging_ = nullptr;
+    }
+}
+
 bool PostingsIndex::is_token_char(uint8_t b) {
     return (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z') ||
            (b >= '0' && b <= '9') || b == '_';
@@ -110,19 +148,21 @@ void PostingsIndex::index_file_pretokenized(FileID file_id,
                                             std::vector<PostingsToken> tokens) {
     if (tokens.empty()) return;
 
-    std::vector<std::string> keys;
-    keys.reserve(tokens.size());
-    for (const auto& pt : tokens) {
-        keys.push_back(pt.token);
-    }
-    reverse_keys_[file_id] = std::move(keys);
-
-    for (auto& pt : tokens) {
-        auto& m = tokens_[pt.token];
-        if (!m.contains(file_id)) {
-            m[file_id] = pt.offset;
+    write_snapshot([&](Snapshot& snap) {
+        std::vector<std::string> keys;
+        keys.reserve(tokens.size());
+        for (const auto& pt : tokens) {
+            keys.push_back(pt.token);
         }
-    }
+        snap.reverse_keys[file_id] = std::move(keys);
+
+        for (auto& pt : tokens) {
+            auto& m = snap.tokens[pt.token];
+            if (!m.contains(file_id)) {
+                m[file_id] = pt.offset;
+            }
+        }
+    });
 }
 
 void PostingsIndex::index_file(FileID file_id, std::string_view content) {
@@ -131,19 +171,21 @@ void PostingsIndex::index_file(FileID file_id, std::string_view content) {
 }
 
 void PostingsIndex::remove_file(FileID file_id) {
-    auto rk_it = reverse_keys_.find(file_id);
-    if (rk_it == reverse_keys_.end()) return;
+    write_snapshot([&](Snapshot& snap) {
+        auto rk_it = snap.reverse_keys.find(file_id);
+        if (rk_it == snap.reverse_keys.end()) return;
 
-    for (const auto& tok : rk_it->second) {
-        auto tok_it = tokens_.find(tok);
-        if (tok_it != tokens_.end()) {
-            tok_it->second.erase(file_id);
-            if (tok_it->second.empty()) {
-                tokens_.erase(tok_it);
+        for (const auto& tok : rk_it->second) {
+            auto tok_it = snap.tokens.find(tok);
+            if (tok_it != snap.tokens.end()) {
+                tok_it->second.erase(file_id);
+                if (tok_it->second.empty()) {
+                    snap.tokens.erase(tok_it);
+                }
             }
         }
-    }
-    reverse_keys_.erase(rk_it);
+        snap.reverse_keys.erase(rk_it);
+    });
 }
 
 void PostingsIndex::find(std::string_view token, bool case_insensitive,
@@ -165,8 +207,10 @@ void PostingsIndex::find(std::string_view token, bool case_insensitive,
         tok = std::string(token);
     }
 
-    auto it = tokens_.find(tok);
-    if (it == tokens_.end() || it->second.empty()) return;
+    // Lock-free read over the immutable snapshot.
+    auto snap = load_snapshot();
+    auto it = snap->tokens.find(tok);
+    if (it == snap->tokens.end() || it->second.empty()) return;
 
     files_out.reserve(it->second.size());
     for (const auto& [fid, off] : it->second) {
@@ -176,16 +220,18 @@ void PostingsIndex::find(std::string_view token, bool case_insensitive,
 }
 
 int PostingsIndex::token_count() const {
-    return static_cast<int>(tokens_.size());
+    return static_cast<int>(load_snapshot()->tokens.size());
 }
 
 int PostingsIndex::file_count() const {
-    return static_cast<int>(reverse_keys_.size());
+    return static_cast<int>(load_snapshot()->reverse_keys.size());
 }
 
 void PostingsIndex::clear() {
-    tokens_.clear();
-    reverse_keys_.clear();
+    write_snapshot([](Snapshot& snap) {
+        snap.tokens.clear();
+        snap.reverse_keys.clear();
+    });
 }
 
 }  // namespace lci

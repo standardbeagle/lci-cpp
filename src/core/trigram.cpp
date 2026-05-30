@@ -277,12 +277,31 @@ void ShardedTrigramStorage::clear() {
 
 TrigramIndex::TrigramIndex()
     : location_allocator_(kTrigramTierConfigs),
-      sharded_storage_(256) {}
+      sharded_storage_(256) {
+    snapshot_.store(std::make_shared<const Snapshot>(),
+                    std::memory_order_release);
+}
+
+std::shared_ptr<const TrigramIndex::Snapshot>
+TrigramIndex::load_snapshot() const {
+    return snapshot_.load(std::memory_order_acquire);
+}
+
+template <class Fn>
+void TrigramIndex::mutate_snapshot(Fn&& fn) {
+    std::lock_guard<std::mutex> lk(write_mu_);
+    auto next = std::make_shared<Snapshot>(
+        *snapshot_.load(std::memory_order_acquire));
+    fn(*next);
+    snapshot_.store(std::move(next), std::memory_order_release);
+}
 
 void TrigramIndex::clear() {
-    ascii_trigrams_.clear();
-    unicode_trigrams_.clear();
-    invalidated_files_.clear();
+    mutate_snapshot([](Snapshot& snap) {
+        snap.ascii_trigrams.clear();
+        snap.unicode_trigrams.clear();
+        snap.invalidated_files.clear();
+    });
     search_cache_.clear();
     sharded_storage_.clear();
     location_allocator_.reset_stats();
@@ -313,57 +332,71 @@ BucketedTrigramResult TrigramIndex::create_bucketed_result(FileID file_id) const
 }
 
 void TrigramIndex::index_file(FileID file_id, std::string_view content) {
-    active_indexing_ops_.fetch_add(1, std::memory_order_relaxed);
-
-    invalidated_files_.erase(file_id);
-
     if (is_pure_ascii(content)) {
         auto trigrams = extract_simple_trigrams(content);
-        for (const auto& [offset, trigram_hash] : trigrams) {
-            auto& entry = ascii_trigrams_[trigram_hash];
-            entry.locations.push_back({file_id, static_cast<uint32_t>(offset)});
-        }
+        mutate_snapshot([&](Snapshot& snap) {
+            snap.invalidated_files.erase(file_id);
+            for (const auto& [offset, trigram_hash] : trigrams) {
+                auto& entry = snap.ascii_trigrams[trigram_hash];
+                entry.locations.push_back(
+                    {file_id, static_cast<uint32_t>(offset)});
+            }
+        });
     } else {
         auto trigrams = extract_unicode_trigrams(content);
-        for (const auto& [offset, trigram_str] : trigrams) {
-            auto& entry = unicode_trigrams_[trigram_str];
-            entry.locations.push_back({file_id, static_cast<uint32_t>(offset)});
-        }
+        mutate_snapshot([&](Snapshot& snap) {
+            snap.invalidated_files.erase(file_id);
+            for (const auto& [offset, trigram_str] : trigrams) {
+                auto& entry = snap.unicode_trigrams[trigram_str];
+                entry.locations.push_back(
+                    {file_id, static_cast<uint32_t>(offset)});
+            }
+        });
     }
-
-    active_indexing_ops_.fetch_sub(1, std::memory_order_relaxed);
 }
 
 void TrigramIndex::index_file_with_trigrams(
     FileID file_id,
     const absl::flat_hash_map<uint32_t, std::vector<uint32_t>>& trigrams) {
-    invalidated_files_.erase(file_id);
+    mutate_snapshot([&](Snapshot& snap) {
+        snap.invalidated_files.erase(file_id);
+        for (const auto& [trigram_hash, offsets] : trigrams) {
+            if (offsets.empty()) continue;
 
-    for (const auto& [trigram_hash, offsets] : trigrams) {
-        if (offsets.empty()) continue;
+            auto& entry = snap.ascii_trigrams[trigram_hash];
+            size_t old_len = entry.locations.size();
+            entry.locations.resize(old_len + offsets.size());
 
-        auto& entry = ascii_trigrams_[trigram_hash];
-        size_t old_len = entry.locations.size();
-        entry.locations.resize(old_len + offsets.size());
-
-        for (size_t j = 0; j < offsets.size(); ++j) {
-            entry.locations[old_len + j] = {file_id, offsets[j]};
+            for (size_t j = 0; j < offsets.size(); ++j) {
+                entry.locations[old_len + j] = {file_id, offsets[j]};
+            }
         }
-    }
+    });
 }
 
 void TrigramIndex::index_file_with_bucketed_trigrams(
     const BucketedTrigramResult& result) {
-    invalidated_files_.erase(result.file_id);
+    // sharded_storage_ is outside the snapshot (bulk write-only, no search
+    // reader); only the invalidation set is part of the read snapshot. On
+    // the bulk path the invalidation set is normally empty, so skip the COW
+    // entirely unless this file is actually pending invalidation — avoids a
+    // per-file snapshot clone across a full reindex.
+    if (load_snapshot()->invalidated_files.contains(result.file_id)) {
+        mutate_snapshot([&](Snapshot& snap) {
+            snap.invalidated_files.erase(result.file_id);
+        });
+    }
     sharded_storage_.merge_bucketed_trigrams(result);
 }
 
 void TrigramIndex::remove_file(FileID file_id) {
-    invalidated_files_.insert(file_id);
-
-    if (static_cast<int>(invalidated_files_.size()) >= cleanup_threshold_) {
-        perform_cleanup();
-    }
+    mutate_snapshot([&](Snapshot& snap) {
+        snap.invalidated_files.insert(file_id);
+        if (static_cast<int>(snap.invalidated_files.size()) >=
+            cleanup_threshold_) {
+            cleanup_snapshot(snap);
+        }
+    });
 
     invalidate_cache_for_file(file_id);
 }
@@ -381,10 +414,11 @@ std::vector<FileID> TrigramIndex::find_candidates_with_options(
         search_pattern = to_lower_ascii(pattern);
     }
 
-    if (active_indexing_ops_.load(std::memory_order_relaxed) == 0) {
-        auto cached = get_from_cache(search_pattern);
-        if (!cached.empty()) return cached;
-    }
+    // Lock-free read: load the immutable snapshot once and operate on it.
+    // The shared_ptr keeps it alive even if a writer publishes a new one
+    // mid-read. The search_cache_ is intentionally bypassed on the read
+    // path (it mutated shared state under no exclusion); see IT3.
+    auto snap = load_snapshot();
 
     auto pattern_bytes = std::string_view(search_pattern);
 
@@ -394,8 +428,8 @@ std::vector<FileID> TrigramIndex::find_candidates_with_options(
 
         absl::flat_hash_map<FileID, int> file_trigram_counts;
         for (const auto& [_, trigram_hash] : all_pattern_trigrams) {
-            auto it = ascii_trigrams_.find(trigram_hash);
-            if (it != ascii_trigrams_.end()) {
+            auto it = snap->ascii_trigrams.find(trigram_hash);
+            if (it != snap->ascii_trigrams.end()) {
                 for (const auto& loc : it->second.locations) {
                     file_trigram_counts[loc.file_id]++;
                 }
@@ -403,7 +437,7 @@ std::vector<FileID> TrigramIndex::find_candidates_with_options(
         }
 
         return filter_and_return_candidates(
-            file_trigram_counts, total_trigrams, search_pattern);
+            *snap, file_trigram_counts, total_trigrams);
     }
 
     auto all_pattern_trigrams = extract_unicode_trigrams(pattern_bytes);
@@ -411,8 +445,8 @@ std::vector<FileID> TrigramIndex::find_candidates_with_options(
 
     absl::flat_hash_map<FileID, int> file_trigram_counts;
     for (const auto& [_, trigram_str] : all_pattern_trigrams) {
-        auto it = unicode_trigrams_.find(trigram_str);
-        if (it != unicode_trigrams_.end()) {
+        auto it = snap->unicode_trigrams.find(trigram_str);
+        if (it != snap->unicode_trigrams.end()) {
             for (const auto& loc : it->second.locations) {
                 file_trigram_counts[loc.file_id]++;
             }
@@ -420,23 +454,24 @@ std::vector<FileID> TrigramIndex::find_candidates_with_options(
     }
 
     return filter_and_return_candidates(
-        file_trigram_counts, total_trigrams, search_pattern);
+        *snap, file_trigram_counts, total_trigrams);
 }
 
 int TrigramIndex::file_count() const {
+    auto snap = load_snapshot();
     absl::flat_hash_set<FileID> unique_files;
 
-    for (const auto& [_, entry] : ascii_trigrams_) {
+    for (const auto& [_, entry] : snap->ascii_trigrams) {
         for (const auto& loc : entry.locations) {
-            if (!invalidated_files_.contains(loc.file_id)) {
+            if (!snap->invalidated_files.contains(loc.file_id)) {
                 unique_files.insert(loc.file_id);
             }
         }
     }
 
-    for (const auto& [_, entry] : unicode_trigrams_) {
+    for (const auto& [_, entry] : snap->unicode_trigrams) {
         for (const auto& loc : entry.locations) {
-            if (!invalidated_files_.contains(loc.file_id)) {
+            if (!snap->invalidated_files.contains(loc.file_id)) {
                 unique_files.insert(loc.file_id);
             }
         }
@@ -446,7 +481,7 @@ int TrigramIndex::file_count() const {
 }
 
 int TrigramIndex::get_invalidation_count() const {
-    return static_cast<int>(invalidated_files_.size());
+    return static_cast<int>(load_snapshot()->invalidated_files.size());
 }
 
 void TrigramIndex::set_cleanup_threshold(int threshold) {
@@ -454,7 +489,7 @@ void TrigramIndex::set_cleanup_threshold(int threshold) {
 }
 
 void TrigramIndex::force_cleanup() {
-    perform_cleanup();
+    mutate_snapshot([](Snapshot& snap) { cleanup_snapshot(snap); });
 }
 
 void TrigramIndex::set_bulk_indexing(bool enabled) {
@@ -510,14 +545,14 @@ void TrigramIndex::invalidate_cache_for_file(FileID /*file_id*/) {
     search_cache_.clear();
 }
 
-void TrigramIndex::perform_cleanup() {
-    if (invalidated_files_.empty()) return;
+void TrigramIndex::cleanup_snapshot(Snapshot& snap) {
+    if (snap.invalidated_files.empty()) return;
 
-    auto invalidated = std::move(invalidated_files_);
-    invalidated_files_.clear();
+    auto invalidated = std::move(snap.invalidated_files);
+    snap.invalidated_files.clear();
 
     std::vector<uint32_t> ascii_keys_to_remove;
-    for (auto& [key, entry] : ascii_trigrams_) {
+    for (auto& [key, entry] : snap.ascii_trigrams) {
         auto& locs = entry.locations;
         locs.erase(
             std::remove_if(locs.begin(), locs.end(),
@@ -530,11 +565,11 @@ void TrigramIndex::perform_cleanup() {
         }
     }
     for (auto key : ascii_keys_to_remove) {
-        ascii_trigrams_.erase(key);
+        snap.ascii_trigrams.erase(key);
     }
 
     std::vector<std::string> unicode_keys_to_remove;
-    for (auto& [key, entry] : unicode_trigrams_) {
+    for (auto& [key, entry] : snap.unicode_trigrams) {
         auto& locs = entry.locations;
         locs.erase(
             std::remove_if(locs.begin(), locs.end(),
@@ -547,14 +582,14 @@ void TrigramIndex::perform_cleanup() {
         }
     }
     for (const auto& key : unicode_keys_to_remove) {
-        unicode_trigrams_.erase(key);
+        snap.unicode_trigrams.erase(key);
     }
 }
 
 std::vector<FileID> TrigramIndex::filter_and_return_candidates(
+    const Snapshot& snap,
     const absl::flat_hash_map<FileID, int>& file_trigram_counts,
-    int total_trigrams,
-    const std::string& pattern) const {
+    int total_trigrams) const {
     if (total_trigrams == 0) return {};
 
     int min_required = 1;
@@ -567,14 +602,9 @@ std::vector<FileID> TrigramIndex::filter_and_return_candidates(
     std::vector<FileID> candidates;
     for (const auto& [file_id, match_count] : file_trigram_counts) {
         if (match_count >= min_required
-            && !invalidated_files_.contains(file_id)) {
+            && !snap.invalidated_files.contains(file_id)) {
             candidates.push_back(file_id);
         }
-    }
-
-    if (!candidates.empty()
-        && active_indexing_ops_.load(std::memory_order_relaxed) == 0) {
-        set_cache(pattern, candidates);
     }
 
     return candidates;

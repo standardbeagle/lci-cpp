@@ -3,6 +3,8 @@
 #include <atomic>
 #include <cstdint>
 #include <functional>
+#include <memory>
+#include <mutex>
 #include <span>
 #include <string>
 #include <string_view>
@@ -124,7 +126,7 @@ struct PostingsToken {
 
 class PostingsIndex {
   public:
-    PostingsIndex() = default;
+    PostingsIndex();
 
     /// Indexes a file's content, recording first occurrence of each token.
     /// Tokenizes content inline; suitable for unit tests and single-file
@@ -163,12 +165,37 @@ class PostingsIndex {
 
     void clear();
 
-    /// Set to non-zero during bulk indexing to skip locking.
-    std::atomic<int32_t> bulk_indexing{0};
+    /// Opens (enabled=true) or closes (enabled=false) a bulk-build window.
+    /// During the window, writes accumulate into a private unpublished
+    /// snapshot and a single atomic publish happens on close — avoiding the
+    /// O(files^2) cost of cloning the growing tokens map per file. Outside
+    /// the window writes are clone-mutate-publish (RCU) per call.
+    void set_bulk_indexing(bool enabled);
 
   private:
-    absl::flat_hash_map<std::string, absl::flat_hash_map<FileID, int>> tokens_;
-    absl::flat_hash_map<FileID, std::vector<std::string>> reverse_keys_;
+    /// Immutable read-side state, swapped atomically (RCU). Readers load
+    /// the shared_ptr once and operate on the frozen snapshot with zero
+    /// locks; writers clone-mutate-publish under write_mu_ (or, during a
+    /// bulk window, mutate staging_ in place and publish once). Mirrors
+    /// FileContentStore's snapshot model.
+    struct Snapshot {
+        absl::flat_hash_map<std::string, absl::flat_hash_map<FileID, int>>
+            tokens;
+        absl::flat_hash_map<FileID, std::vector<std::string>> reverse_keys;
+    };
+
+    std::atomic<std::shared_ptr<const Snapshot>> snapshot_;
+    mutable std::mutex write_mu_;
+    /// Non-null only inside a bulk window (guarded by write_mu_).
+    std::shared_ptr<Snapshot> staging_;
+
+    /// Loads the current published read snapshot (lock-free).
+    std::shared_ptr<const Snapshot> load_snapshot() const;
+
+    /// Applies a mutation to the index: in the bulk staging snapshot when a
+    /// bulk window is open, otherwise clone-mutate-publish.
+    template <class Fn>
+    void write_snapshot(Fn&& fn);
 
     static bool is_token_char(uint8_t b);
     static bool is_all_ascii(std::string_view s);

@@ -3,6 +3,8 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <memory>
+#include <mutex>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -167,12 +169,29 @@ class TrigramIndex {
     void invalidate_cache_completely();
 
   private:
-    absl::flat_hash_map<uint32_t, TrigramEntry> ascii_trigrams_;
-    absl::flat_hash_map<std::string, TrigramEntry> unicode_trigrams_;
+    /// Immutable read-side state, swapped atomically (RCU). Readers load
+    /// the shared_ptr once and operate on the frozen snapshot with zero
+    /// locks; writers clone-mutate-publish under write_mu_. Mirrors
+    /// FileContentStore's snapshot model.
+    ///
+    /// sharded_storage_ is intentionally NOT part of the snapshot: it is
+    /// written only by the bulk merge path (index_file_with_bucketed_trigrams
+    /// / the merger pipeline) and never read by the search path
+    /// (search_trigram has no callers), so it carries no read-vs-write race
+    /// and needs no snapshot. ascii_trigrams / unicode_trigrams are written
+    /// only by the incremental index_file path, so cloning them on each
+    /// incremental write is cheap (they stay empty during bulk indexing).
+    struct Snapshot {
+        absl::flat_hash_map<uint32_t, TrigramEntry> ascii_trigrams;
+        absl::flat_hash_map<std::string, TrigramEntry> unicode_trigrams;
+        absl::flat_hash_set<FileID> invalidated_files;
+    };
+
+    std::atomic<std::shared_ptr<const Snapshot>> snapshot_;
+    mutable std::mutex write_mu_;
 
     SlabAllocator<FileLocation> location_allocator_;
 
-    absl::flat_hash_set<FileID> invalidated_files_;
     int cleanup_threshold_{100};
 
     mutable absl::flat_hash_map<std::string, SearchCacheEntry> search_cache_;
@@ -186,6 +205,17 @@ class TrigramIndex {
 
     ShardedTrigramStorage sharded_storage_;
 
+    /// Loads the current published read snapshot (lock-free).
+    std::shared_ptr<const Snapshot> load_snapshot() const;
+
+    /// Clone-mutate-publish the snapshot under write_mu_ (RCU write side).
+    template <class Fn>
+    void mutate_snapshot(Fn&& fn);
+
+    /// Drops invalidated-file locations from a snapshot's trigram maps and
+    /// clears the invalidation set. Operates on the writer's private clone.
+    static void cleanup_snapshot(Snapshot& snap);
+
     /// Retrieves a cached search result if valid.
     std::vector<FileID> get_from_cache(const std::string& pattern) const;
 
@@ -196,14 +226,12 @@ class TrigramIndex {
     /// Invalidates cache entries that may reference a file.
     void invalidate_cache_for_file(FileID file_id);
 
-    /// Performs cleanup of invalidated files from all trigram maps.
-    void perform_cleanup();
-
-    /// Filters candidate results by match count and invalidation status.
+    /// Filters candidate results by match count and invalidation status,
+    /// reading the caller's loaded snapshot.
     std::vector<FileID> filter_and_return_candidates(
+        const Snapshot& snap,
         const absl::flat_hash_map<FileID, int>& file_trigram_counts,
-        int total_trigrams,
-        const std::string& pattern) const;
+        int total_trigrams) const;
 };
 
 // -- Free functions for trigram extraction ------------------------------------
