@@ -10,3 +10,6 @@ compile_commands.json
 real_projects/go/
 real_projects/python/
 real_projects/typescript/
+
+# worktrack loop state (per-clone, may contain private email in lease_holder)
+.worktrack/
