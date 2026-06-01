@@ -186,6 +186,106 @@ TEST_F(HandlersFixture, SearchCountOutput) {
     EXPECT_TRUE(json.contains("unique_files"));
 }
 
+// -- include= add-ons (breadcrumbs / refs / safety / deps) --------------------
+// Go parity: handleSearch accepts these tokens and, for strong matches
+// (normalizedScore >= 0.5), attaches `references` {incoming_count,
+// outgoing_count} and `breadcrumbs` (scope chain). `safety`/`deps` are
+// accepted but never populated in compact results (matches Go server.go
+// CompactSearchResult: only Breadcrumbs + References are filled).
+
+TEST_F(HandlersFixture, SearchIncludeRefsEmitsReferenceCounts) {
+    nlohmann::json params;
+    params["pattern"] = "main";
+    params["include"] = "refs";
+    auto result = handle_search(params, *indexer_, search_engine_.get());
+    ASSERT_FALSE(result.is_error) << result.text;
+    auto json = nlohmann::json::parse(result.text);
+    ASSERT_TRUE(json.contains("results"));
+    bool found_refs = false;
+    for (const auto& item : json["results"]) {
+        if (item.contains("references")) {
+            EXPECT_TRUE(item["references"].contains("incoming_count"));
+            EXPECT_TRUE(item["references"].contains("outgoing_count"));
+            found_refs = true;
+        }
+    }
+    EXPECT_TRUE(found_refs) << "expected at least one symbol-enclosed match to "
+                              "carry references; body: " << result.text;
+}
+
+TEST_F(HandlersFixture, SearchIncludeBreadcrumbsAcceptedAndWellFormed) {
+    nlohmann::json params;
+    params["pattern"] = "main";
+    params["include"] = "breadcrumbs";
+    auto result = handle_search(params, *indexer_, search_engine_.get());
+    ASSERT_FALSE(result.is_error) << result.text;
+    auto json = nlohmann::json::parse(result.text);
+    ASSERT_TRUE(json.contains("results"));
+    for (const auto& item : json["results"]) {
+        if (!item.contains("breadcrumbs")) continue;
+        ASSERT_TRUE(item["breadcrumbs"].is_array());
+        for (const auto& c : item["breadcrumbs"]) {
+            EXPECT_TRUE(c.contains("scope_type"));
+            EXPECT_TRUE(c.contains("name"));
+            EXPECT_TRUE(c.contains("start_line"));
+            EXPECT_TRUE(c.contains("end_line"));
+            EXPECT_TRUE(c.contains("language"));
+            EXPECT_TRUE(c.contains("visibility"));
+        }
+    }
+}
+
+TEST_F(HandlersFixture, SearchIncludeSafetyAndDepsAcceptedNotErrored) {
+    nlohmann::json params;
+    params["pattern"] = "main";
+    params["include"] = "safety,deps";
+    auto result = handle_search(params, *indexer_, search_engine_.get());
+    EXPECT_FALSE(result.is_error) << result.text;
+}
+
+// A match inside a nested scope (method body) must carry a non-empty
+// breadcrumb chain — proves include=breadcrumbs emits real scope data, not
+// just an absent field.
+TEST(SearchIncludeBreadcrumbs, NestedScopeEmitsChain) {
+    auto dir = std::filesystem::temp_directory_path() / "lci_bc_nested";
+    std::filesystem::create_directories(dir);
+    {
+        std::ofstream o(dir / "svc.go");
+        o << "package main\n\n"
+             "type Service struct{}\n\n"
+             "func (s Service) Process() {\n"
+             "\tuniqueMarker := 1\n"
+             "\t_ = uniqueMarker\n"
+             "}\n";
+    }
+    Config config;
+    config.project.root = dir.string();
+    MasterIndex indexer(config);
+    indexer.index_directory(dir.string());
+    SearchEngine engine(indexer);
+
+    nlohmann::json params;
+    params["pattern"] = "uniqueMarker";
+    params["include"] = "breadcrumbs";
+    auto result = handle_search(params, indexer, &engine);
+    ASSERT_FALSE(result.is_error) << result.text;
+    auto json = nlohmann::json::parse(result.text);
+    ASSERT_TRUE(json.contains("results"));
+    bool found_chain = false;
+    for (const auto& item : json["results"]) {
+        if (item.contains("breadcrumbs") && !item["breadcrumbs"].empty()) {
+            found_chain = true;
+            const auto& first = item["breadcrumbs"][0];
+            EXPECT_TRUE(first.contains("scope_type"));
+            EXPECT_TRUE(first.contains("name"));
+        }
+    }
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    EXPECT_TRUE(found_chain)
+        << "nested match should carry a scope chain; body: " << result.text;
+}
+
 TEST_F(HandlersFixture, SearchMissingPatternErrors) {
     nlohmann::json params = nlohmann::json::object();
     // No pattern provided
@@ -784,9 +884,10 @@ TEST_F(HandlersFixture, SearchPatternsCsvOrMerges) {
 TEST_F(HandlersFixture, SearchIncludeUnsupportedRejected) {
     nlohmann::json params;
     params["pattern"] = "handle";
-    params["include"] = "breadcrumbs";
+    params["include"] = "frobnicate";  // not a Go include token
     auto result = handle_search(params, *indexer_, search_engine_.get());
-    // Must fail-fast, not silently ignore (Karpathy #6).
+    // Genuinely-unknown tokens still fail-fast, not silently ignored
+    // (Karpathy #6; stricter than Go's silent shouldInclude=false).
     EXPECT_TRUE(result.is_error);
 }
 

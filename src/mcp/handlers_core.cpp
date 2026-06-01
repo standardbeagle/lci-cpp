@@ -20,6 +20,7 @@
 #include <lci/mcp/pagination.h>
 #include <lci/mcp/schemas/search.h>  // generated: kSEARCH_SCHEMA
 #include <lci/mcp/validation.h>
+#include <lci/scope.h>
 #include <lci/search/search_engine.h>
 #include <lci/search/search_options.h>
 #include <lci/version.h>  // generated: lci::kVersion
@@ -56,6 +57,36 @@ std::vector<std::string> parse_list_helper(std::string_view s) {
         start = end + 1;
     }
     return out;
+}
+
+/// Infers a scope's visibility for the `breadcrumbs` add-on. Go parity:
+/// inferVisibility (handlers.go ~1999): explicit Exported attribute or an
+/// upper-case initial → "public"; top-level (level 0) → "public"; else
+/// "private".
+std::string_view infer_scope_visibility(const ScopeInfo& s) {
+    for (const auto& attr : s.attributes) {
+        if (attr.type == ContextAttributeType::Exported) return "public";
+    }
+    if (!s.name.empty() && s.name.front() >= 'A' && s.name.front() <= 'Z') {
+        return "public";
+    }
+    return s.level == 0 ? "public" : "private";
+}
+
+/// Serializes an EnhancedSymbol's scope chain into the Go ScopeBreadcrumb
+/// shape (server.go:489). One object per enclosing scope.
+nlohmann::json scope_chain_to_breadcrumbs(const EnhancedSymbol& sym) {
+    nlohmann::json crumbs = nlohmann::json::array();
+    crumbs.get_ref<nlohmann::json::array_t&>().reserve(sym.scope_chain.size());
+    for (const auto& s : sym.scope_chain) {
+        crumbs.push_back({{"scope_type", std::string(to_string(s.type))},
+                          {"name", s.name},
+                          {"start_line", s.start_line},
+                          {"end_line", s.end_line},
+                          {"language", s.language},
+                          {"visibility", std::string(infer_scope_visibility(s))}});
+    }
+    return crumbs;
 }
 
 /// Builds a path-include regex from a list of language names.
@@ -637,26 +668,27 @@ ToolResult handle_search(const nlohmann::json& params,
     int max_per_file = params.value("max_per_file", 0);
     if (max_per_file > 0) options.max_count_per_file = max_per_file;
 
-    // `include` add-ons (breadcrumbs/safety/refs/deps): emit "not implemented"
-    // for any non-cheaply-portable surface (Karpathy #6: no silent skip).
-    // object_ids is already free in C++ (always emitted below).
+    // `include` add-ons. Go's handleSearch (handlers.go ~1598-1607) enriches
+    // each strong match (normalizedScore >= 0.5) with optional sections:
+    //   refs        -> references {incoming_count, outgoing_count}
+    //   breadcrumbs -> the enclosing scope chain
+    //   safety/deps -> accepted but never populated in compact results
+    //                  (server.go CompactSearchResult leaves them empty)
+    // object_ids/ids are always emitted. Genuinely-unknown tokens fail-fast
+    // (Karpathy #6; stricter than Go's silent shouldInclude=false).
+    bool include_breadcrumbs = false;
+    bool include_refs = false;
     if (params.contains("include") && params["include"].is_string()) {
         const auto& inc = params["include"].get_ref<const std::string&>();
-        // Allowed: object_ids (always on, default). Reject anything else with
-        // a clear error so callers don't think we silently honored it.
-        // See Dart task: loop-fix mcp.search.include.{breadcrumbs,safety,refs,deps}.
-        static const std::vector<std::string> kAllowed = {
-            "object_ids", "ids", ""};
         for (auto& tok : parse_list_helper(inc)) {
-            bool ok = false;
-            for (const auto& a : kAllowed) if (a == tok) { ok = true; break; }
-            if (!ok) {
-                return make_error_response(
-                    "search",
-                    "include='" + tok + "' is not implemented in C++ port "
-                    "(tracked as loop-fix:mcp.search.include." + tok + "). "
-                    "Allowed: 'object_ids'.");
-            }
+            if (tok.empty() || tok == "object_ids" || tok == "ids") continue;
+            if (tok == "breadcrumbs") { include_breadcrumbs = true; continue; }
+            if (tok == "refs") { include_refs = true; continue; }
+            if (tok == "safety" || tok == "deps") continue;  // accepted, unfilled
+            return make_error_response(
+                "search",
+                "include='" + tok + "' is not a recognized search add-on. "
+                "Allowed: object_ids, breadcrumbs, refs, safety, deps.");
         }
     }
 
@@ -784,6 +816,22 @@ ToolResult handle_search(const nlohmann::json& params,
             item["symbol_type"] =
                 std::string(to_string(sym->symbol.type));
             item["is_exported"] = sym->is_exported;
+
+            // Optional include= add-ons, gated like Go on strong matches:
+            // normalizedScore >= 0.5 (scores >1 are /100-normalized).
+            double normalized = r.score > 1.0 ? r.score / 100.0 : r.score;
+            if (normalized >= 0.5) {
+                if (include_refs) {
+                    item["references"] = {
+                        {"incoming_count",
+                         static_cast<int>(sym->incoming_refs.size())},
+                        {"outgoing_count",
+                         static_cast<int>(sym->outgoing_refs.size())}};
+                }
+                if (include_breadcrumbs && !sym->scope_chain.empty()) {
+                    item["breadcrumbs"] = scope_chain_to_breadcrumbs(*sym);
+                }
+            }
         } else {
             // Match falls outside any indexed symbol (package decl, blank
             // line, comment between symbols). Emit empty enrichment fields
