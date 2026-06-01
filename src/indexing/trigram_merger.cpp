@@ -7,14 +7,10 @@ TrigramMergerPipeline::TrigramMergerPipeline(
     : trigram_index_(trigram_index),
       storage_(static_cast<uint16_t>(trigram_index.get_bucket_count())),
       merger_count_(merger_count <= 0 ? 16 : merger_count),
-      buckets_per_merger_(0),
-      input_queue_(merger_count_ * 32) {
-    int bucket_count = trigram_index_.get_bucket_count();
-    buckets_per_merger_ = bucket_count / merger_count_;
-    if (buckets_per_merger_ == 0) {
-        buckets_per_merger_ = 1;
-    }
-}
+      bucket_count_(trigram_index.get_bucket_count()),
+      input_queue_(merger_count_ * 32),
+      bucket_locks_(std::make_unique<std::mutex[]>(
+          static_cast<size_t>(bucket_count_ > 0 ? bucket_count_ : 1))) {}
 
 TrigramMergerPipeline::~TrigramMergerPipeline() {
     shutdown();
@@ -23,13 +19,7 @@ TrigramMergerPipeline::~TrigramMergerPipeline() {
 void TrigramMergerPipeline::start() {
     workers_.reserve(merger_count_);
     for (int i = 0; i < merger_count_; ++i) {
-        int bucket_start = i * buckets_per_merger_;
-        int bucket_end = bucket_start + buckets_per_merger_;
-        if (bucket_end > trigram_index_.get_bucket_count()) {
-            bucket_end = trigram_index_.get_bucket_count();
-        }
-        workers_.emplace_back(&TrigramMergerPipeline::worker_loop, this,
-                              i, bucket_start, bucket_end);
+        workers_.emplace_back(&TrigramMergerPipeline::worker_loop, this, i);
     }
 }
 
@@ -79,12 +69,20 @@ ShardedTrigramStorage& TrigramMergerPipeline::storage() {
     return storage_;
 }
 
-void TrigramMergerPipeline::worker_loop(int /*worker_id*/,
-                                         int bucket_start, int bucket_end) {
+void TrigramMergerPipeline::worker_loop(int /*worker_id*/) {
     BucketedTrigramResult result;
     while (input_queue_.pop(result)) {
-        storage_.merge_bucket_data_for_worker(
-            result, bucket_start, bucket_end);
+        // Merge every non-empty bucket of this result, each under its own
+        // lock so concurrent workers serialize only on shared buckets.
+        int n = static_cast<int>(result.buckets.size());
+        if (n > bucket_count_) n = bucket_count_;
+        for (int bid = 0; bid < n; ++bid) {
+            if (result.buckets[static_cast<size_t>(bid)].trigrams.empty()) {
+                continue;
+            }
+            std::lock_guard<std::mutex> lk(bucket_locks_[static_cast<size_t>(bid)]);
+            storage_.merge_bucket_data_for_worker(result, bid, bid + 1);
+        }
     }
 }
 
