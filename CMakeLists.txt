@@ -131,6 +131,16 @@ if(NOT httplib_FOUND)
     FetchContent_MakeAvailable(httplib)
 endif()
 
+# Raise the listen backlog from httplib's default of 5. The IndexServer accepts
+# bursts of concurrent local clients (CLI fan-out, tests); a backlog of 5 drops
+# connections under an 8+-connection burst (ECONNREFUSED -> intermittent
+# ServerTest.ConcurrentRequests failures). 128 matches typical SOMAXCONN.
+if(TARGET httplib)
+    target_compile_definitions(httplib INTERFACE CPPHTTPLIB_LISTEN_BACKLOG=128)
+elseif(TARGET httplib::httplib)
+    target_compile_definitions(httplib::httplib INTERFACE CPPHTTPLIB_LISTEN_BACKLOG=128)
+endif()
+
 find_package(xxHash CONFIG QUIET)
 if(NOT xxHash_FOUND)
     FetchContent_Declare(xxhash
@@ -167,6 +177,15 @@ if(NOT efsw_FOUND)
         GIT_REPOSITORY https://github.com/SpartanJ/efsw.git
         GIT_TAG 1.4.1
         GIT_SHALLOW TRUE
+        # Upstream data race (TSan-confirmed): FileWatcherInotify's destructor
+        # spins `while (mIsTakingAction)` to hand off with its inotify worker
+        # thread (which writes the flag in handleAction), but mIsTakingAction is
+        # a plain bool — unsynchronised cross-thread access. efsw already wraps
+        # mInitOK in its own Atomic<bool>; this makes mIsTakingAction match.
+        # sed (not a .patch) so re-running on an already-patched tree is a no-op.
+        # Dedicated script keeps the command tokens space-free (CMake otherwise
+        # splits an inline sed expression on its spaces).
+        PATCH_COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/cmake/patch-efsw.sh
     )
     FetchContent_MakeAvailable(efsw)
 endif()
