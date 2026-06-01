@@ -65,6 +65,11 @@ int run_mcp(const GlobalFlags& flags) {
     // impure / category modes have records to query.
     side_effect_analyzer.populate_from_index(runtime_index);
 
+    // Phase 2: propagate impurity transitively upstream through the call
+    // graph so a function that (indirectly) reaches an impure callee is itself
+    // marked impure (populates transitive_categories; recomputes is_pure).
+    side_effect_analyzer.propagate_transitive(runtime_index);
+
     // Seed GraphPropagator with the impure functions so transitive
     // purity propagates: any caller of an impure function is itself
     // impure unless its own purity overrides. Decay mode keeps strength

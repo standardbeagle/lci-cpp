@@ -111,6 +111,15 @@ class SideEffectAnalyzer {
     /// record_function_call live (tracked under sibling Dart tasks).
     void populate_from_index(const class MasterIndex& indexer);
 
+    /// Phase 2: propagates side effects transitively upstream through the call
+    /// graph. A function that (transitively) calls an impure function becomes
+    /// impure even when its own local analysis showed no effects. Runs a
+    /// fixpoint over caller edges (bounded iterations for cycle safety) and
+    /// recomputes is_pure / purity_score from the combined local+transitive
+    /// categories. Call after populate_from_index. C++ counterpart to Go's
+    /// SideEffectPropagator.Propagate (internal/core/side_effect_propagation.go).
+    void propagate_transitive(const class MasterIndex& indexer);
+
     /// Direct write to results_ — used by populate_from_index above and
     /// future callers that build SideEffectInfo outside the
     /// begin_function/end_function lifecycle.

@@ -2,9 +2,15 @@
 
 #include <lci/analysis/metrics_calculator.h>
 #include <lci/analysis/side_effect_analyzer.h>
+#include <lci/config.h>
 #include <lci/core/graph_propagator.h>
+#include <lci/core/reference_tracker.h>
 #include <lci/core/semantic_annotator.h>
+#include <lci/indexing/master_index.h>
 #include <lci/symbol.h>
+
+#include <filesystem>
+#include <fstream>
 
 namespace lci {
 namespace {
@@ -643,6 +649,64 @@ TEST(SemanticAnnotatorTest, StatsReportCorrectly) {
     sa.extract_annotations(1, "s.go", content, {sym});
     EXPECT_EQ(sa.total_annotations(), 1);
     EXPECT_EQ(sa.unique_labels(), 3);
+}
+
+// ===========================================================================
+// Phase 2: transitive side-effect propagation
+// ===========================================================================
+
+// leaf() does local IO (calls println); mid() calls leaf(); top() calls mid().
+// After propagate_transitive, the IO effect flows upstream so mid() and top()
+// become transitively impure even though their local analysis is clean.
+TEST(TransitivePropagation, ImpurityFlowsUpstreamThroughCallGraph) {
+    auto dir = std::filesystem::temp_directory_path() / "lci_se_transitive";
+    std::filesystem::create_directories(dir);
+    {
+        std::ofstream o(dir / "chain.go");
+        o << "package main\n\n"
+             "func leaf() {\n\tprintln(\"x\")\n}\n\n"
+             "func mid() {\n\tleaf()\n}\n\n"
+             "func top() {\n\tmid()\n}\n";
+    }
+    Config config;
+    config.project.root = dir.string();
+    MasterIndex indexer(config);
+    indexer.index_directory(dir.string());
+
+    SideEffectAnalyzer analyzer("generic");
+    analyzer.populate_from_index(indexer);
+
+    auto result_for = [&](const char* name) -> const SideEffectInfo* {
+        const auto* sym = indexer.ref_tracker().find_symbol_by_name(name);
+        if (!sym) return nullptr;
+        return analyzer.get_result(
+            indexer.get_file_path(sym->symbol.file_id), sym->symbol.line);
+    };
+
+    // Before propagation: only leaf() is impure (local IO); mid/top are pure.
+    const auto* leaf = result_for("leaf");
+    const auto* mid = result_for("mid");
+    const auto* top = result_for("top");
+    ASSERT_NE(leaf, nullptr);
+    ASSERT_NE(mid, nullptr);
+    ASSERT_NE(top, nullptr);
+    EXPECT_TRUE(leaf->categories & side_effect::kIO);
+    EXPECT_TRUE(mid->is_pure);
+    EXPECT_TRUE(top->is_pure);
+
+    analyzer.propagate_transitive(indexer);
+
+    leaf = result_for("leaf");
+    mid = result_for("mid");
+    top = result_for("top");
+    // IO propagated upstream: mid and top are now transitively impure.
+    EXPECT_TRUE(mid->transitive_categories & side_effect::kIO);
+    EXPECT_FALSE(mid->is_pure);
+    EXPECT_TRUE(top->transitive_categories & side_effect::kIO);
+    EXPECT_FALSE(top->is_pure);
+
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
 }
 
 }  // namespace

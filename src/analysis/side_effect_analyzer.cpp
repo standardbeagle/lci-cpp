@@ -328,6 +328,79 @@ void SideEffectAnalyzer::populate_from_index(const MasterIndex& indexer) {
 }
 
 namespace {
+// Filters which categories propagate to callers. Mirrors Go's
+// getCategoriesToPropagate under DefaultSideEffectPropagationConfig (IO,
+// throws, global writes all enabled): everything propagates except the
+// caller-local-only effects (closure/field writes, async, reflection).
+uint32_t categories_to_propagate(uint32_t cat) {
+    uint32_t result = 0;
+    result |= cat & (side_effect::kParamWrite | side_effect::kReceiverWrite);
+    result |= cat & (side_effect::kIO | side_effect::kNetwork |
+                     side_effect::kDatabase | side_effect::kChannel);
+    result |= cat & side_effect::kThrow;
+    result |= cat & side_effect::kGlobalWrite;
+    result |= cat & (side_effect::kUncertain | side_effect::kExternalCall |
+                     side_effect::kDynamicCall);
+    return result;
+}
+}  // namespace
+
+void SideEffectAnalyzer::propagate_transitive(const MasterIndex& indexer) {
+    const auto& ref = indexer.ref_tracker();
+
+    // Map each callable symbol to its (already populated) local SideEffectInfo.
+    absl::flat_hash_map<SymbolID, SideEffectInfo*> by_symbol;
+    by_symbol.reserve(results_.size());
+    for (FileID fid : indexer.get_all_file_ids()) {
+        std::string file_path = indexer.get_file_path(fid);
+        for (const auto* es : ref.get_file_enhanced_symbols(fid)) {
+            if (!es) continue;
+            std::string key =
+                file_path + ":" + std::to_string(es->symbol.line) + ":0";
+            auto it = results_.find(key);
+            if (it != results_.end()) by_symbol[es->id] = &it->second;
+        }
+    }
+
+    // Fixpoint: push each symbol's effects upstream to its callers' transitive
+    // set until nothing changes. Bounded iterations guard against cycles.
+    constexpr int kMaxIterations = 100;
+    bool changed = true;
+    for (int iter = 0; changed && iter < kMaxIterations; ++iter) {
+        changed = false;
+        for (auto& [sid, info] : by_symbol) {
+            uint32_t combined = info->categories | info->transitive_categories;
+            uint32_t to_propagate = categories_to_propagate(combined);
+            if (to_propagate == 0) continue;
+            for (SymbolID caller_id : ref.get_caller_symbols(sid)) {
+                auto cit = by_symbol.find(caller_id);
+                if (cit == by_symbol.end()) continue;
+                SideEffectInfo* caller = cit->second;
+                uint32_t old = caller->transitive_categories;
+                caller->transitive_categories |= to_propagate;
+                if (caller->transitive_categories != old) changed = true;
+            }
+        }
+    }
+
+    // Recompute the combined purity assessment (Go updatePurityAssessment).
+    for (auto& [sid, info] : by_symbol) {
+        (void)sid;
+        uint32_t combined = info->categories | info->transitive_categories;
+        info->is_pure = (combined == side_effect::kNone);
+        if (info->is_pure) {
+            info->purity_level = PurityLevel::Pure;
+            info->purity_score = 1.0;
+        } else {
+            if (info->purity_level == PurityLevel::Pure) {
+                info->purity_level = PurityLevel::ExternalDependency;
+            }
+            info->purity_score = 0.0;
+        }
+    }
+}
+
+namespace {
 // Cross-language conservative impure-callee classifier. Names matched
 // case-insensitively against the bare callee identifier (no qualifier
 // prefix). Source: Go's classifyKnownCallee with a few cross-language
