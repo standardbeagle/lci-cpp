@@ -299,6 +299,12 @@ IndexServer::~IndexServer() {
     if (running_.load(std::memory_order_relaxed)) {
         shutdown(std::chrono::milliseconds{5000});
     }
+    // Catch the case where the server never entered the running state (or
+    // shutdown() returned early) but a /shutdown trigger thread is still
+    // outstanding — join it before members are destroyed.
+    if (shutdown_trigger_.joinable()) {
+        shutdown_trigger_.join();
+    }
 }
 
 // -- Configuration ------------------------------------------------------------
@@ -444,6 +450,12 @@ bool IndexServer::shutdown(std::chrono::milliseconds /*timeout*/) {
 
     if (listen_thread_.joinable()) {
         listen_thread_.join();
+    }
+
+    // Handlers are now quiesced (no new /shutdown can spawn a trigger). Join
+    // the deferred-shutdown thread before tearing down the members it touches.
+    if (shutdown_trigger_.joinable()) {
+        shutdown_trigger_.join();
     }
 
     // Cooperatively cancel any in-flight indexing and join its thread
@@ -867,15 +879,21 @@ void IndexServer::handle_shutdown(const httplib::Request& /*req*/,
     j["message"] = "Server shutting down";
     json_response(res, j);
 
-    // Trigger shutdown after response is sent
-    std::thread([this] {
-        std::this_thread::sleep_for(std::chrono::milliseconds{100});
-        {
-            std::lock_guard lock(shutdown_mu_);
-            shutdown_requested_ = true;
-        }
-        shutdown_cv_.notify_all();
-    }).detach();
+    // Trigger shutdown after the response flushes. Owned (not detached) and
+    // joined in shutdown()/dtor, so it can never outlive this server and touch
+    // freed members. CAS guards a single spawn across concurrent /shutdown
+    // requests (a second request must not overwrite a joinable thread).
+    bool expected = false;
+    if (shutdown_triggered_.compare_exchange_strong(expected, true)) {
+        shutdown_trigger_ = std::thread([this] {
+            std::this_thread::sleep_for(std::chrono::milliseconds{100});
+            {
+                std::lock_guard lock(shutdown_mu_);
+                shutdown_requested_ = true;
+            }
+            shutdown_cv_.notify_all();
+        });
+    }
 }
 
 // -- Endpoint: /reindex -------------------------------------------------------

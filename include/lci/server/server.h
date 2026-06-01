@@ -351,6 +351,16 @@ class IndexServer {
     std::condition_variable shutdown_cv_;
     bool shutdown_requested_{false};
 
+    // The /shutdown endpoint defers the actual shutdown by ~100ms (so the HTTP
+    // response flushes first). That delay runs on this thread, owned by the
+    // server and joined before teardown so it can never outlive the object and
+    // touch freed members (shutdown_mu_/shutdown_requested_/shutdown_cv_).
+    // `shutdown_triggered_` guards single-spawn across concurrent /shutdown
+    // requests. (Previously a detached thread — a use-after-free under fast
+    // teardown, TSan-confirmed: see efsw-server-concurrency-races.)
+    std::atomic<bool> shutdown_triggered_{false};
+    std::thread shutdown_trigger_;
+
     std::thread listen_thread_;
 
     // Background indexing thread. Owns the in-flight indexing run
