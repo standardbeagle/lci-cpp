@@ -11,6 +11,7 @@ namespace lci {
 
 class MasterIndex;
 class SearchEngine;
+class SideEffectAnalyzer;
 
 namespace mcp {
 
@@ -19,8 +20,11 @@ namespace mcp {
 ///
 /// Requires that the server was constructed with a valid MasterIndex and
 /// optionally a SearchEngine. If the index is null, handlers return errors.
+/// `analyzer` (optional) supplies side-effect/purity data to get_context; when
+/// null, purity is omitted (Go nil-propagator parity).
 void register_core_handlers(McpServer& server, MasterIndex* indexer,
-                            SearchEngine* search_engine);
+                            SearchEngine* search_engine,
+                            SideEffectAnalyzer* analyzer = nullptr);
 
 // -- Handler functions (exposed for testing) ----------------------------------
 
@@ -35,9 +39,11 @@ ToolResult handle_search(const nlohmann::json& params,
                          SearchEngine* search_engine);
 
 /// Handles the "get_context" tool: returns call hierarchy and symbol
-/// details for a given symbol name or file+line location.
+/// details for a given symbol name or file+line location. When `analyzer` is
+/// non-null, function/method contexts gain a `purity` block (Go getPurityInfo).
 ToolResult handle_get_context(const nlohmann::json& params,
-                              MasterIndex& indexer);
+                              MasterIndex& indexer,
+                              const SideEffectAnalyzer* analyzer = nullptr);
 
 /// Handles the "find_files" tool: searches file paths in the index
 /// using substring and case-insensitive matching.

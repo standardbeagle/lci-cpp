@@ -111,7 +111,8 @@ int run_mcp(const GlobalFlags& flags) {
     // Start MCP server with the live in-process index instead of the stub-only
     // registry so parity and stdio users hit the real handlers.
     mcp::McpServer mcp_server(cfg, runtime_index, &search_engine);
-    mcp::register_core_handlers(mcp_server, &runtime_index, &search_engine);
+    mcp::register_core_handlers(mcp_server, &runtime_index, &search_engine,
+                                &side_effect_analyzer);
     mcp::register_explore_handlers(mcp_server, &runtime_index);
     mcp::register_index_handlers(mcp_server, &runtime_index);
     mcp::register_analysis_handlers(mcp_server, &runtime_index, &annotator,

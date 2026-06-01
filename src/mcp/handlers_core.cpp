@@ -14,6 +14,7 @@
 #include <rapidfuzz/distance/Levenshtein.hpp>
 #include <re2/re2.h>
 
+#include <lci/analysis/side_effect_analyzer.h>
 #include <lci/core/reference_tracker.h>
 #include <lci/idcodec.h>
 #include <lci/indexing/master_index.h>
@@ -870,11 +871,46 @@ ToolResult handle_search(const nlohmann::json& params,
 
 // -- handle_get_context -------------------------------------------------------
 
+// Builds the Go PurityInfo JSON block (server.go:386) for a function/method
+// from its SideEffectInfo. Effect lists and reasons are omitted when empty
+// (omitempty parity).
+nlohmann::json purity_to_json(const SideEffectInfo& info) {
+    nlohmann::json purity;
+    purity["is_pure"] = info.is_pure;
+    purity["purity_score"] = info.purity_score;
+    purity["confidence"] = std::string(to_string(info.confidence));
+    auto local = categories_to_strings(info.categories);
+    if (!local.empty()) purity["local_effects"] = std::move(local);
+    auto transitive = categories_to_strings(info.transitive_categories);
+    if (!transitive.empty()) purity["transitive_effects"] = std::move(transitive);
+    if (!info.impurity_reasons.empty()) {
+        purity["reasons"] = info.impurity_reasons;
+    }
+    return purity;
+}
+
+// Attaches a `purity` block to a function/method context when an analyzer is
+// wired. Go's getPurityInfo (handlers.go:2433) only runs for Function/Method
+// and returns nil (field omitted) when no propagator/report exists.
+void attach_purity(nlohmann::json& ctx, const EnhancedSymbol& sym,
+                   MasterIndex& indexer, const SideEffectAnalyzer* analyzer) {
+    if (analyzer == nullptr) return;
+    if (sym.symbol.type != SymbolType::Function &&
+        sym.symbol.type != SymbolType::Method) {
+        return;
+    }
+    const SideEffectInfo* info = analyzer->get_result(
+        indexer.get_file_path(sym.symbol.file_id), sym.symbol.line);
+    if (info == nullptr) return;
+    ctx["purity"] = purity_to_json(*info);
+}
+
 // Resolves a single comma-separated object ID into `contexts`, or records a
 // descriptive entry in `errors` — Go's buildObjectContextCompactWithError
 // never silently drops an unresolvable id (internal/mcp/handlers.go).
 void resolve_object_id(std::string_view id, MasterIndex& indexer,
-                       nlohmann::json& contexts, nlohmann::json& errors) {
+                       nlohmann::json& contexts, nlohmann::json& errors,
+                       const SideEffectAnalyzer* analyzer) {
     auto decoded = decode_symbol_id(id);
     if (!decoded.has_value()) {
         errors.push_back({{"object_id", std::string(id)},
@@ -907,16 +943,15 @@ void resolve_object_id(std::string_view id, MasterIndex& indexer,
     }
     ctx["definition"] = definition;
     ctx["context"] = nlohmann::json::array({definition});
-    // `purity` intentionally omitted: Go's getPurityInfo returns nil (and the
-    // field is `omitempty`) whenever no side-effect propagator is wired. The
-    // C++ MCP runtime exposes no side-effect analysis to this handler, so a
-    // zeroed stub would both diverge from Go and violate the no-silent-stub
-    // rule. Real purity wiring is a tracked follow-up.
+    // Go getPurityInfo: function/method symbols carry a purity block when a
+    // side-effect analyzer is wired; otherwise the field is omitted.
+    attach_purity(ctx, *sym, indexer, analyzer);
     contexts.push_back(std::move(ctx));
 }
 
 ToolResult handle_get_context(const nlohmann::json& params,
-                              MasterIndex& indexer) {
+                              MasterIndex& indexer,
+                              const SideEffectAnalyzer* analyzer) {
     // Step 0: Alias normalization. `symbol_id`, `object_id`, `object_ids`,
     // `oid` all map to `id`. Go parity (handlers.go:2075 NormalizeContextParams).
     nlohmann::json p = params;
@@ -1040,6 +1075,7 @@ ToolResult handle_get_context(const nlohmann::json& params,
             }
             ctx["definition"] = definition;
             ctx["context"] = nlohmann::json::array({definition});
+            attach_purity(ctx, *sym, indexer, analyzer);
 
             if (include_call_hierarchy && want_relationships) {
                 nlohmann::json callers = nlohmann::json::array();
@@ -1137,7 +1173,7 @@ ToolResult handle_get_context(const nlohmann::json& params,
         while (!id.empty() && std::isspace(static_cast<unsigned char>(id.back())))
             id.remove_suffix(1);
         if (id.empty()) continue;
-        resolve_object_id(id, indexer, contexts, errors);
+        resolve_object_id(id, indexer, contexts, errors, analyzer);
     }
 
     nlohmann::json response;
@@ -1487,7 +1523,8 @@ ToolResult handle_find_files(const nlohmann::json& params,
 // -- register_core_handlers ---------------------------------------------------
 
 void register_core_handlers(McpServer& server, MasterIndex* indexer,
-                            SearchEngine* search_engine) {
+                            SearchEngine* search_engine,
+                            SideEffectAnalyzer* analyzer) {
     // Replace "info" stub with real handler
     server.add_tool(
         {"info",
@@ -1579,12 +1616,12 @@ void register_core_handlers(McpServer& server, MasterIndex* indexer,
           {"include_sections", "array", "Include sections", "string"},
           {"exclude_sections", "array", "Exclude sections", "string"}},
          {}},
-        [indexer](const nlohmann::json& p) -> ToolResult {
+        [indexer, analyzer](const nlohmann::json& p) -> ToolResult {
             if (!indexer) {
                 return make_error_response("get_context",
                                            "index not available");
             }
-            return handle_get_context(p, *indexer);
+            return handle_get_context(p, *indexer, analyzer);
         });
 
     // Replace "find_files" stub with real handler

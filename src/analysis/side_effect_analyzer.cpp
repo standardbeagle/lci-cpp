@@ -13,6 +13,27 @@ namespace lci {
 // Free functions
 // ---------------------------------------------------------------------------
 
+std::vector<std::string> categories_to_strings(uint32_t cat) {
+    std::vector<std::string> result;
+    if (cat == side_effect::kNone) return result;
+    if (cat & side_effect::kParamWrite) result.emplace_back("param_write");
+    if (cat & side_effect::kReceiverWrite) result.emplace_back("receiver_write");
+    if (cat & side_effect::kGlobalWrite) result.emplace_back("global_write");
+    if (cat & side_effect::kClosureWrite) result.emplace_back("closure_write");
+    if (cat & side_effect::kFieldWrite) result.emplace_back("field_write");
+    if (cat & side_effect::kIO) result.emplace_back("io");
+    if (cat & side_effect::kDatabase) result.emplace_back("database");
+    if (cat & side_effect::kNetwork) result.emplace_back("network");
+    if (cat & side_effect::kThrow) result.emplace_back("throw");
+    if (cat & side_effect::kChannel) result.emplace_back("channel");
+    if (cat & side_effect::kAsync) result.emplace_back("async");
+    if (cat & side_effect::kExternalCall) result.emplace_back("external_call");
+    if (cat & side_effect::kDynamicCall) result.emplace_back("dynamic_call");
+    if (cat & side_effect::kReflection) result.emplace_back("reflection");
+    if (cat & side_effect::kUncertain) result.emplace_back("uncertain");
+    return result;
+}
+
 AccessPatternType classify_access_sequence(std::string_view seq) {
     if (seq.empty()) return AccessPatternType::Pure;
 

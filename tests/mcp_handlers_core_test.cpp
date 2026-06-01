@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <lci/analysis/side_effect_analyzer.h>
 #include <lci/config.h>
 #include <lci/core/reference_tracker.h>
 #include <lci/idcodec.h>
@@ -284,6 +285,73 @@ TEST(SearchIncludeBreadcrumbs, NestedScopeEmitsChain) {
     std::filesystem::remove_all(dir, ec);
     EXPECT_TRUE(found_chain)
         << "nested match should carry a scope chain; body: " << result.text;
+}
+
+// -- get_context purity (Go getPurityInfo parity) -----------------------------
+// When a SideEffectAnalyzer is wired into the MCP runtime (populate_from_index
+// at startup), get_context attaches a `purity` block to function/method
+// symbols: {is_pure, purity_score, confidence, [local_effects],
+// [transitive_effects], [reasons]}. Without a propagator it is omitted
+// (Go returns nil; field is omitempty).
+class GetContextPurityTest : public ::testing::Test {
+  protected:
+    void SetUp() override {
+        dir_ = std::filesystem::temp_directory_path() / "lci_purity_ctx";
+        std::filesystem::create_directories(dir_);
+        std::ofstream(dir_ / "math.go")
+            << "package math\n\nfunc Adder(a int, b int) int {\n"
+               "\treturn a + b\n}\n";
+        Config config;
+        config.project.root = dir_.string();
+        indexer_ = std::make_unique<MasterIndex>(config);
+        indexer_->index_directory(dir_.string());
+    }
+    void TearDown() override {
+        indexer_.reset();
+        std::error_code ec;
+        std::filesystem::remove_all(dir_, ec);
+    }
+    std::string adder_object_id() const {
+        const auto* sym = indexer_->ref_tracker().find_symbol_by_name("Adder");
+        return sym ? encode_symbol_id(sym->id) : "";
+    }
+    std::filesystem::path dir_;
+    std::unique_ptr<MasterIndex> indexer_;
+};
+
+TEST_F(GetContextPurityTest, FunctionCarriesPurityWhenAnalyzerWired) {
+    SideEffectAnalyzer analyzer("generic");
+    analyzer.populate_from_index(*indexer_);
+
+    auto oid = adder_object_id();
+    ASSERT_FALSE(oid.empty());
+    nlohmann::json params;
+    params["id"] = oid;
+    auto result = handle_get_context(params, *indexer_, &analyzer);
+    ASSERT_FALSE(result.is_error) << result.text;
+    auto json = nlohmann::json::parse(result.text);
+    ASSERT_TRUE(json.contains("contexts"));
+    ASSERT_FALSE(json["contexts"].empty());
+    const auto& ctx = json["contexts"][0];
+    ASSERT_TRUE(ctx.contains("purity")) << result.text;
+    const auto& purity = ctx["purity"];
+    EXPECT_TRUE(purity.contains("is_pure"));
+    EXPECT_TRUE(purity.contains("purity_score"));
+    EXPECT_TRUE(purity.contains("confidence"));
+    // Adder has no callees -> pure.
+    EXPECT_TRUE(purity["is_pure"].get<bool>());
+}
+
+TEST_F(GetContextPurityTest, PurityOmittedWithoutAnalyzer) {
+    auto oid = adder_object_id();
+    ASSERT_FALSE(oid.empty());
+    nlohmann::json params;
+    params["id"] = oid;
+    auto result = handle_get_context(params, *indexer_);  // no analyzer
+    ASSERT_FALSE(result.is_error) << result.text;
+    auto json = nlohmann::json::parse(result.text);
+    ASSERT_FALSE(json["contexts"].empty());
+    EXPECT_FALSE(json["contexts"][0].contains("purity"));
 }
 
 TEST_F(HandlersFixture, SearchMissingPatternErrors) {

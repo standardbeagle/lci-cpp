@@ -355,4 +355,10 @@ struct SideEffectInfo {
     std::vector<std::string> impurity_reasons;
 };
 
+/// Converts a side-effect category bitfield into human-readable category
+/// names (e.g. "io", "global_write", "throw"). Empty for kNone. Shared by the
+/// side_effects MCP handler and get_context purity emission (Go parity:
+/// categoriesToStrings).
+std::vector<std::string> categories_to_strings(uint32_t categories);
+
 }  // namespace lci
