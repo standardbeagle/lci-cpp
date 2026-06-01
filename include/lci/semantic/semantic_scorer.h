@@ -4,6 +4,7 @@
 #include <lci/semantic/name_splitter.h>
 #include <lci/semantic/score_types.h>
 #include <lci/semantic/stemmer.h>
+#include <lci/semantic/synonym_table.h>
 
 #include <memory>
 #include <string>
@@ -67,6 +68,20 @@ class AbbreviationMatchDetector final : public MatchDetector {
                         const ScoreLayers& config) const override;
   private:
     const NameSplitter& splitter_;
+};
+
+/// Matches when a query word and a target word belong to the same synonym
+/// group (login<->signin, delete/remove/erase). The query-word x target-word
+/// matrix makes the relation bidirectional for free.
+class SynonymMatchDetector final : public MatchDetector {
+  public:
+    SynonymMatchDetector(const NameSplitter& splitter, const SynonymTable& table);
+    DetectResult detect(std::string_view query, std::string_view target_name,
+                        std::string_view query_lower, std::string_view target_lower,
+                        const ScoreLayers& config) const override;
+  private:
+    const NameSplitter& splitter_;
+    const SynonymTable& table_;
 };
 
 class PhraseMatchDetector final : public MatchDetector {
@@ -152,7 +167,8 @@ std::vector<FileSymbol> filter_production_symbols(
 class SemanticScorer {
   public:
     SemanticScorer(std::shared_ptr<NameSplitter> splitter, Stemmer stemmer,
-                   FuzzyMatcher fuzzer);
+                   FuzzyMatcher fuzzer,
+                   SynonymTable synonyms = SynonymTable::build_default());
 
     /// Updates the scoring configuration.
     void configure(const ScoreLayers& layers);
@@ -181,6 +197,9 @@ class SemanticScorer {
     std::shared_ptr<NameSplitter> splitter_;
     Stemmer stemmer_;
     FuzzyMatcher fuzzer_;
+    // Owned, immutable. Detectors hold a const& into this member; stable for
+    // the scorer's lifetime (the scorer is neither moved nor copied).
+    SynonymTable synonyms_;
 
     // Owned match detectors in priority order.
     std::vector<std::unique_ptr<MatchDetector>> detectors_;

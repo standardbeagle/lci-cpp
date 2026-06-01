@@ -7,10 +7,16 @@
 #include <lci/core/file_content_store.h>
 #include <lci/scope.h>
 #include <lci/search/search_options.h>
+#include <lci/semantic/synonym_table.h>
 
 namespace lci {
 
 class MasterIndex;
+
+/// Process-wide default synonym table (built-in dev-verb set). Backs the
+/// SearchEngine constructor default so call sites that don't wire a Config
+/// (tests, older indexers) still get built-in synonyms.
+const SynonymTable& default_synonym_table();
 
 // -- Rich-search helpers (pure, hot-path-safe) --------------------------------
 
@@ -23,6 +29,23 @@ void split_on_spaces(std::string_view input, std::vector<std::string>& out);
 /// Expands a single pattern into [pattern, words…>2 chars] for multi-word
 /// queries. Single-word patterns return one-element vector.
 std::vector<std::string> expand_pattern_semantic(std::string_view pattern);
+
+/// Maximum number of patterns expand_pattern_semantic may emit once synonyms
+/// are injected. Group sizes are ~3-5, so single-word queries stay well under;
+/// the cap only bites on multi-word queries (design §4). No silent unbounded
+/// growth (Karpathy rule 6).
+inline constexpr std::size_t kMaxSynonymExpansion = 16;
+
+/// Synonym-aware expansion. Starts from the word-split set (original pattern
+/// first, then >2-char split words), then appends synonyms_of() for each
+/// retained word, deduped against what's already present. `synonym_flags` is
+/// resized to match the returned vector: true marks a synonym-injected pattern
+/// so the engine can force case-insensitive matching on it (synonyms are
+/// word-concepts, not literal strings). Total output capped at
+/// kMaxSynonymExpansion.
+std::vector<std::string> expand_pattern_semantic(std::string_view pattern,
+                                                 const SynonymTable& table,
+                                                 std::vector<bool>& synonym_flags);
 
 // -- Context extractor --------------------------------------------------------
 
@@ -73,7 +96,8 @@ class ContextExtractor {
 /// Orchestrates trigram + symbol search with ranking and scoring.
 class SearchEngine {
   public:
-    explicit SearchEngine(MasterIndex& index);
+    explicit SearchEngine(MasterIndex& index,
+                          const SynonymTable& synonyms = default_synonym_table());
 
     /// Searches for a pattern across all indexed files.
     std::vector<SearchResult> search(const std::string& pattern,
@@ -86,8 +110,21 @@ class SearchEngine {
     std::vector<SearchResult> search(const std::vector<std::string>& patterns,
                                      const SearchOptions& options) const;
 
+    /// Multi-pattern search with a per-pattern case-insensitive override.
+    /// `synonym_flags[i] == true` forces case_insensitive for patterns[i] (so
+    /// a synonym-injected `signin` matches code `signIn` even when the base
+    /// query is case-sensitive). Flags shorter than patterns are treated as
+    /// false. Otherwise identical to the two-arg overload.
+    std::vector<SearchResult> search(const std::vector<std::string>& patterns,
+                                     const std::vector<bool>& synonym_flags,
+                                     const SearchOptions& options) const;
+
+    /// The synonym table this engine expands queries against.
+    const SynonymTable& synonyms() const { return synonyms_; }
+
   private:
     MasterIndex& index_;
+    const SynonymTable& synonyms_;
     ContextExtractor context_extractor_;
 
     /// Finds literal matches in file content.

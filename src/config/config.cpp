@@ -417,6 +417,29 @@ void apply_search(Config& cfg, const KdlNode& node) {
     }
 }
 
+// Folds a `synonyms` KDL block into a frozen SynonymTable. Children are
+// `group <words…>`, `clear <word>`, or a leading `clear-all`. Returns the
+// table or an lci::Error on validation failure (fail-fast, Karpathy rule 6).
+Result<SynonymTable> apply_synonyms(const KdlNode& node) {
+    std::vector<SynonymOp> ops;
+    ops.reserve(node.children.size());
+    for (const auto& child : node.children) {
+        if (child.name == "clear-all") {
+            ops.push_back({SynonymOp::Kind::ClearAll, {}});
+        } else if (child.name == "clear") {
+            ops.push_back({SynonymOp::Kind::Clear, collect_strings(child)});
+        } else if (child.name == "group") {
+            ops.push_back({SynonymOp::Kind::Group, collect_strings(child)});
+        } else {
+            return make_config_error(
+                "synonyms", child.name,
+                "unknown synonyms child '" + child.name +
+                    "' (expected group, clear, or clear-all)");
+        }
+    }
+    return SynonymTable::build_from_ops(ops);
+}
+
 // Base config used when a .lci.kdl file IS loaded. This intentionally
 // diverges from make_default_config() (the no-file path) to match Go's
 // parseKDL in internal/config/kdl_config.go: that function builds its base
@@ -470,6 +493,14 @@ Config parse_kdl_content(const std::string& content, std::string& error) {
         else if (node.name == "include") cfg.include = collect_strings(node);
         else if (node.name == "exclude") cfg.exclude = collect_strings(node);
         else if (node.name == "propagation_config_dir") get_string(node, cfg.propagation_config_dir);
+        else if (node.name == "synonyms") {
+            auto result = apply_synonyms(node);
+            if (!result) {
+                error = result.error().to_string();
+                return cfg;
+            }
+            cfg.synonyms = std::move(result.value());
+        }
     }
 
     return cfg;

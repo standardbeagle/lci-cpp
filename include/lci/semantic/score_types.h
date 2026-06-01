@@ -21,6 +21,7 @@ enum class MatchType : uint8_t {
     Fuzzy,
     Stemming,
     Abbreviation,
+    Synonym,
     NameSplit,
     None,
 };
@@ -35,6 +36,7 @@ constexpr std::string_view to_string(MatchType mt) {
         case MatchType::Fuzzy: return "fuzzy";
         case MatchType::Stemming: return "stemming";
         case MatchType::Abbreviation: return "abbreviation";
+        case MatchType::Synonym: return "synonym";
         case MatchType::NameSplit: return "name_split";
         case MatchType::None: return "no_match";
     }
@@ -86,6 +88,9 @@ struct ScoreLayers {
     double stemming_weight{0.55};
     double name_split_weight{0.40};
     double abbreviation_weight{0.25};
+    // Synonym match (login<->signin) is a strong semantic equivalence: ranked
+    // above stemming (0.55) and below fuzzy (0.70). Fixed, not KDL-configurable.
+    double synonym_weight{0.6};
 
     double fuzzy_threshold{0.7};
     int stem_min_length{3};

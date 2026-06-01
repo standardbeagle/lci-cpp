@@ -45,7 +45,7 @@ int run_mcp(const GlobalFlags& flags) {
         std::cerr << "Warning: failed to index project root for MCP runtime\n";
     }
 
-    SearchEngine search_engine(runtime_index);
+    SearchEngine search_engine(runtime_index, cfg.synonyms);
     SemanticAnnotator annotator;
     // Walk the live index and extract every file's @lci: annotations into
     // the annotator. Without this, the semantic_annotations tool only sees

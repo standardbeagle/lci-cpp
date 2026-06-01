@@ -3,6 +3,13 @@ build/
 compile_commands.json
 .worktrees/
 
+# CTest scratch output
+Testing/
+
+# claude agent worktrees + loop locks (machine-local)
+.claude/worktrees/
+.claude/scheduled_tasks.lock
+
 # dartai loop state (machine-local)
 .dartai/
 

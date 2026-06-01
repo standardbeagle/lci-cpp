@@ -904,6 +904,44 @@ TEST(SearchHelpers, ExpandPatternSemanticSingleWordOnlyReturnsOne) {
     EXPECT_EQ(out[0], "singleton");
 }
 
+TEST(SearchHelpers, ExpandPatternSynonymsSingleWordExpands) {
+    auto table = SynonymTable::build_default();
+    std::vector<bool> flags;
+    auto out = expand_pattern_semantic("delete", table, flags);
+    ASSERT_EQ(out.size(), flags.size());
+    EXPECT_EQ(out[0], "delete");   // original first
+    EXPECT_FALSE(flags[0]);
+    EXPECT_GT(out.size(), 1u);     // synonyms appended
+    bool has_remove = false, has_erase = false;
+    for (size_t i = 1; i < out.size(); ++i) {
+        EXPECT_TRUE(flags[i]) << "synonym-injected pattern must be flagged";
+        if (out[i] == "remove") has_remove = true;
+        if (out[i] == "erase") has_erase = true;
+    }
+    EXPECT_TRUE(has_remove);
+    EXPECT_TRUE(has_erase);
+}
+
+TEST(SearchHelpers, ExpandPatternSynonymsRespectsCap) {
+    auto table = SynonymTable::build_default();
+    std::vector<bool> flags;
+    auto out = expand_pattern_semantic(
+        "add delete update get set find", table, flags);
+    EXPECT_LE(out.size(), kMaxSynonymExpansion);
+    EXPECT_EQ(out.size(), flags.size());
+    EXPECT_EQ(out[0], "add delete update get set find");  // original first
+}
+
+TEST(SearchHelpers, ExpandPatternSynonymsNonGroupWordStaysSingle) {
+    auto table = SynonymTable::build_default();
+    std::vector<bool> flags;
+    auto out = expand_pattern_semantic("singleton", table, flags);
+    EXPECT_EQ(out.size(), 1u);
+    EXPECT_EQ(out[0], "singleton");
+    ASSERT_EQ(flags.size(), 1u);
+    EXPECT_FALSE(flags[0]);
+}
+
 }  // namespace
 }  // namespace mcp
 }  // namespace lci

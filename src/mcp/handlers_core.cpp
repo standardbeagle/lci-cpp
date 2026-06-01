@@ -667,12 +667,16 @@ ToolResult handle_search(const nlohmann::json& params,
         return indexer.search_with_options(p, o);
     };
     auto run_multi = [&](const std::vector<std::string>& ps,
+                         const std::vector<bool>& ci_flags,
                          const SearchOptions& o) {
-        if (search_engine) return search_engine->search(ps, o);
-        // Fallback for older indexers: OR-merge manually.
+        if (search_engine) return search_engine->search(ps, ci_flags, o);
+        // Fallback for older indexers: OR-merge manually, honoring the
+        // per-pattern case-insensitive override for synonym-injected patterns.
         std::vector<SearchResult> agg;
-        for (const auto& p : ps) {
-            auto rs = indexer.search_with_options(p, o);
+        for (size_t i = 0; i < ps.size(); ++i) {
+            SearchOptions po = o;
+            if (i < ci_flags.size() && ci_flags[i]) po.case_insensitive = true;
+            auto rs = indexer.search_with_options(ps[i], po);
             agg.insert(agg.end(),
                        std::make_move_iterator(rs.begin()),
                        std::make_move_iterator(rs.end()));
@@ -683,11 +687,17 @@ ToolResult handle_search(const nlohmann::json& params,
     // Build effective pattern list. Semantic expansion fans out multi-word
     // patterns; explicit `patterns` CSV is OR-merged as-is.
     if (!options.pattern_list.empty()) {
-        results = run_multi(options.pattern_list, options);
+        results = run_multi(options.pattern_list, {}, options);
     } else if (options.semantic) {
-        auto expanded = expand_pattern_semantic(pattern);
+        // Synonym-aware expansion: query terms fan out to their equivalence
+        // groups (login<->signin, delete/remove/erase). Synonym-injected
+        // patterns are flagged so they match case-insensitively.
+        const SynonymTable& syn = search_engine ? search_engine->synonyms()
+                                                 : default_synonym_table();
+        std::vector<bool> syn_flags;
+        auto expanded = expand_pattern_semantic(pattern, syn, syn_flags);
         if (expanded.size() > 1) {
-            results = run_multi(expanded, options);
+            results = run_multi(expanded, syn_flags, options);
         } else {
             results = run(pattern, options);
         }

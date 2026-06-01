@@ -472,6 +472,140 @@ TEST_F(SemanticScorerTest, ConfigUpdate) {
     EXPECT_DOUBLE_EQ(scorer->config().min_score, 0.5);
 }
 
+// -- SynonymTable tests -------------------------------------------------------
+
+TEST(SynonymTableTest, BuildDefaultIsNonEmptyAndDisjoint) {
+    auto table = SynonymTable::build_default();
+    EXPECT_FALSE(table.empty());
+    EXPECT_GT(table.group_count(), 0u);
+    // Disjoint: a word in one group is not in any other. Sample a few.
+    EXPECT_TRUE(table.in_same_group("delete", "remove"));
+    EXPECT_TRUE(table.in_same_group("delete", "erase"));
+    EXPECT_FALSE(table.in_same_group("delete", "add"));
+}
+
+TEST(SynonymTableTest, SynonymsOfReturnsGroupMinusSelf) {
+    auto table = SynonymTable::build_default();
+    auto syns = table.synonyms_of("login");
+    // Group is {login, signin, authenticate} -> minus self == 2 members.
+    EXPECT_EQ(syns.size(), 2u);
+    bool has_signin = false, has_login = false;
+    for (const auto& s : syns) {
+        if (s == "signin") has_signin = true;
+        if (s == "login") has_login = true;
+    }
+    EXPECT_TRUE(has_signin);
+    EXPECT_FALSE(has_login);  // self excluded
+}
+
+TEST(SynonymTableTest, InSameGroupSymmetryAndSelfExclusion) {
+    auto table = SynonymTable::build_default();
+    EXPECT_TRUE(table.in_same_group("signin", "login"));
+    EXPECT_TRUE(table.in_same_group("login", "signin"));
+    EXPECT_FALSE(table.in_same_group("login", "login"));  // self
+}
+
+TEST(SynonymTableTest, UnknownWordEmpty) {
+    auto table = SynonymTable::build_default();
+    EXPECT_TRUE(table.synonyms_of("zzzznotaword").empty());
+    EXPECT_FALSE(table.in_same_group("zzzznotaword", "login"));
+}
+
+TEST(SynonymTableTest, BuildFromOpsAddsNewGroup) {
+    std::vector<SynonymOp> ops = {
+        {SynonymOp::Kind::Group, {"foo", "bar", "baz"}}};
+    auto result = SynonymTable::build_from_ops(ops);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_TRUE(result.value().in_same_group("foo", "bar"));
+    EXPECT_TRUE(result.value().in_same_group("bar", "baz"));
+    // Built-in groups still present (no clear-all).
+    EXPECT_TRUE(result.value().in_same_group("delete", "remove"));
+}
+
+TEST(SynonymTableTest, BuildFromOpsOverridesViaSharedWord) {
+    // A group sharing a word with a built-in group replaces that built-in.
+    std::vector<SynonymOp> ops = {
+        {SynonymOp::Kind::Group, {"get", "fetch"}}};  // 'get' is built-in
+    auto result = SynonymTable::build_from_ops(ops);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_TRUE(result.value().in_same_group("get", "fetch"));
+    // 'load'/'read' were in the built-in get-group; override drops them.
+    EXPECT_FALSE(result.value().in_same_group("get", "load"));
+}
+
+TEST(SynonymTableTest, BuildFromOpsClearRemovesGroup) {
+    std::vector<SynonymOp> ops = {
+        {SynonymOp::Kind::Clear, {"update"}}};
+    auto result = SynonymTable::build_from_ops(ops);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_FALSE(result.value().in_same_group("update", "modify"));
+    // Other built-ins untouched.
+    EXPECT_TRUE(result.value().in_same_group("delete", "remove"));
+}
+
+TEST(SynonymTableTest, BuildFromOpsClearAllDropsBuiltins) {
+    std::vector<SynonymOp> ops = {
+        {SynonymOp::Kind::ClearAll, {}},
+        {SynonymOp::Kind::Group, {"foo", "bar"}}};
+    auto result = SynonymTable::build_from_ops(ops);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_FALSE(result.value().in_same_group("delete", "remove"));
+    EXPECT_TRUE(result.value().in_same_group("foo", "bar"));
+}
+
+TEST(SynonymTableTest, BuildFromOpsRejectsOneWordGroup) {
+    std::vector<SynonymOp> ops = {{SynonymOp::Kind::Group, {"lonely"}}};
+    auto result = SynonymTable::build_from_ops(ops);
+    EXPECT_FALSE(result.has_value());
+}
+
+TEST(SynonymTableTest, BuildFromOpsRejectsDuplicateWordAcrossGroups) {
+    std::vector<SynonymOp> ops = {
+        {SynonymOp::Kind::Group, {"foo", "bar"}},
+        {SynonymOp::Kind::Group, {"foo", "qux"}}};  // 'foo' twice
+    auto result = SynonymTable::build_from_ops(ops);
+    EXPECT_FALSE(result.has_value());
+}
+
+TEST(SynonymTableTest, BuildFromOpsRejectsMisplacedClearAll) {
+    std::vector<SynonymOp> ops = {
+        {SynonymOp::Kind::Group, {"foo", "bar"}},
+        {SynonymOp::Kind::ClearAll, {}}};  // not first
+    auto result = SynonymTable::build_from_ops(ops);
+    EXPECT_FALSE(result.has_value());
+}
+
+// -- SynonymMatchDetector (via SemanticScorer) --------------------------------
+
+TEST_F(SemanticScorerTest, SynonymMatchLoginSignIn) {
+    auto score = scorer->score_symbol("login", "signIn");
+    EXPECT_EQ(score.query_match, MatchType::Synonym);
+    EXPECT_NEAR(score.score, 0.6, 1e-9);
+}
+
+TEST_F(SemanticScorerTest, SynonymMatchIsBidirectional) {
+    // Group membership is symmetric: query/target order does not matter.
+    auto a = scorer->score_symbol("erase", "delete");
+    EXPECT_EQ(a.query_match, MatchType::Synonym);
+    EXPECT_NEAR(a.score, 0.6, 1e-9);
+    auto b = scorer->score_symbol("delete", "erase");
+    EXPECT_EQ(b.query_match, MatchType::Synonym);
+    EXPECT_NEAR(b.score, 0.6, 1e-9);
+}
+
+TEST_F(SemanticScorerTest, SynonymMatchSeparatedTargetWord) {
+    // Snake/separated names DO split under lowercased splitting, so an
+    // individual word can match a synonym group.
+    auto score = scorer->score_symbol("erase", "delete_record");
+    EXPECT_EQ(score.query_match, MatchType::Synonym);
+    EXPECT_GT(score.score, 0.0);
+}
+
+TEST_F(SemanticScorerTest, SynonymNoFalseMatchForUnrelatedWords) {
+    auto score = scorer->score_symbol("login", "bananaSplitter");
+    EXPECT_NE(score.query_match, MatchType::Synonym);
+}
+
 // -- VocabularyAnalysis tests -------------------------------------------------
 
 TEST(VocabularyAnalysisTest, FilterProductionSymbols) {

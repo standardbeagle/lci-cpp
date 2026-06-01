@@ -161,6 +161,76 @@ std::vector<std::string> expand_pattern_semantic(std::string_view pattern) {
     return out;
 }
 
+namespace {
+
+std::string to_lower_copy(std::string_view s) {
+    std::string out(s);
+    std::transform(out.begin(), out.end(), out.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return out;
+}
+
+}  // namespace
+
+const SynonymTable& default_synonym_table() {
+    static const SynonymTable table = SynonymTable::build_default();
+    return table;
+}
+
+std::vector<std::string> expand_pattern_semantic(std::string_view pattern,
+                                                 const SynonymTable& table,
+                                                 std::vector<bool>& synonym_flags) {
+    std::vector<std::string> out;
+    synonym_flags.clear();
+    out.reserve(kMaxSynonymExpansion);
+
+    // 1. Base set: original pattern first, then >2-char split words for
+    //    multi-word queries (mirrors the no-synonym overload). Not synonyms.
+    out.emplace_back(pattern);
+    synonym_flags.push_back(false);
+
+    std::vector<std::string> words;
+    split_on_spaces(pattern, words);
+
+    absl::flat_hash_set<std::string> seen;
+    seen.insert(out.front());
+
+    // Words whose synonyms we look up: the bare word for a single-word query,
+    // else each retained >2-char split word.
+    std::vector<std::string> retained;
+    if (words.size() <= 1) {
+        if (!words.empty()) retained.push_back(std::move(words.front()));
+    } else {
+        for (auto& w : words) {
+            if (w.size() <= 2) continue;
+            if (seen.insert(w).second) {
+                out.push_back(w);
+                synonym_flags.push_back(false);
+                retained.push_back(std::move(w));
+            }
+        }
+    }
+
+    if (table.empty()) return out;
+
+    // 2. Append synonyms of each retained word, deduped, bounded by the cap.
+    //    Synonyms are lowercase word-concepts; flagged so the engine matches
+    //    them case-insensitively.
+    for (const auto& w : retained) {
+        if (out.size() >= kMaxSynonymExpansion) break;
+        std::string lw = to_lower_copy(w);
+        for (const auto& syn : table.synonyms_of(lw)) {
+            if (out.size() >= kMaxSynonymExpansion) break;
+            if (seen.insert(syn).second) {
+                out.push_back(syn);
+                synonym_flags.push_back(true);
+            }
+        }
+    }
+    return out;
+}
+
 
 // -- File classification ------------------------------------------------------
 
@@ -282,8 +352,9 @@ bool is_test_file(std::string_view path) {
 
 // -- SearchEngine -------------------------------------------------------------
 
-SearchEngine::SearchEngine(MasterIndex& index)
+SearchEngine::SearchEngine(MasterIndex& index, const SynonymTable& synonyms)
     : index_(index),
+      synonyms_(synonyms),
       context_extractor_(index.file_content_store()) {}
 
 std::vector<SearchResult> SearchEngine::search(
@@ -357,9 +428,24 @@ std::vector<SearchResult> SearchEngine::search(
 std::vector<SearchResult> SearchEngine::search(
     const std::vector<std::string>& patterns,
     const SearchOptions& options) const {
+    static const std::vector<bool> kNoFlags;
+    return search(patterns, kNoFlags, options);
+}
+
+std::vector<SearchResult> SearchEngine::search(
+    const std::vector<std::string>& patterns,
+    const std::vector<bool>& synonym_flags,
+    const SearchOptions& options) const {
 
     if (patterns.empty()) return {};
-    if (patterns.size() == 1) return search(patterns[0], options);
+    if (patterns.size() == 1) {
+        if (!synonym_flags.empty() && synonym_flags[0]) {
+            SearchOptions po = options;
+            po.case_insensitive = true;
+            return search(patterns[0], po);
+        }
+        return search(patterns[0], options);
+    }
 
     struct ResultKey {
         FileID file_id;
@@ -394,8 +480,14 @@ std::vector<SearchResult> SearchEngine::search(
     per_opts.max_results = options.max_results > 0 ? options.max_results * 4
                                                     : 0;
 
-    for (const auto& p : patterns) {
-        auto rs = search(p, per_opts);
+    for (size_t i = 0; i < patterns.size(); ++i) {
+        // Synonym-injected patterns force case-insensitive so an expanded
+        // `signin` matches code `signIn` regardless of the base query's flag.
+        SearchOptions p_opts = per_opts;
+        if (i < synonym_flags.size() && synonym_flags[i]) {
+            p_opts.case_insensitive = true;
+        }
+        auto rs = search(patterns[i], p_opts);
         for (auto& r : rs) {
             ResultKey k{r.file_id, r.line, r.match_text};
             auto it = acc.find(k);

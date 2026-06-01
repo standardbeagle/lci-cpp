@@ -4,6 +4,8 @@
 #include <string>
 #include <vector>
 
+#include <lci/semantic/synonym_table.h>
+
 namespace lci {
 
 // -- Config section structs ---------------------------------------------------
@@ -107,6 +109,10 @@ struct Config {
     std::vector<std::string> include;
     std::vector<std::string> exclude;
     std::string propagation_config_dir;
+    /// Synonym groups for semantic search. Defaults to the built-in curated
+    /// dev-verb set (SynonymTable::build_default); a `.lci.kdl` `synonyms`
+    /// block can add/override/clear groups.
+    SynonymTable synonyms{SynonymTable::build_default()};
 };
 
 // -- Config loading -----------------------------------------------------------

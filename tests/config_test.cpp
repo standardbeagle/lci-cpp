@@ -665,5 +665,96 @@ TEST(ValidateConfigTest, RejectsNegativeContextLines) {
     EXPECT_FALSE(err.empty());
 }
 
+// ---------------------------------------------------------------------------
+// Synonyms block
+// ---------------------------------------------------------------------------
+TEST(DefaultConfigTest, HasBuiltinSynonyms) {
+    auto cfg = make_default_config();
+    EXPECT_FALSE(cfg.synonyms.empty());
+    EXPECT_TRUE(cfg.synonyms.in_same_group("delete", "remove"));
+}
+
+TEST_F(KdlConfigTest, ParsesSynonymGroup) {
+    write_kdl(R"(
+synonyms {
+    group "foo" "bar" "baz"
+}
+)");
+    auto result = load_config(temp_dir_.string());
+    ASSERT_TRUE(result.ok()) << result.error;
+    EXPECT_TRUE(result.config.synonyms.in_same_group("foo", "bar"));
+    // Built-ins retained (no clear-all).
+    EXPECT_TRUE(result.config.synonyms.in_same_group("delete", "remove"));
+}
+
+TEST_F(KdlConfigTest, SynonymGroupOverridesBuiltinViaSharedWord) {
+    write_kdl(R"(
+synonyms {
+    group "get" "fetch"
+}
+)");
+    auto result = load_config(temp_dir_.string());
+    ASSERT_TRUE(result.ok()) << result.error;
+    EXPECT_TRUE(result.config.synonyms.in_same_group("get", "fetch"));
+    EXPECT_FALSE(result.config.synonyms.in_same_group("get", "load"));
+}
+
+TEST_F(KdlConfigTest, SynonymClearRemovesGroup) {
+    write_kdl(R"(
+synonyms {
+    clear "update"
+}
+)");
+    auto result = load_config(temp_dir_.string());
+    ASSERT_TRUE(result.ok()) << result.error;
+    EXPECT_FALSE(result.config.synonyms.in_same_group("update", "modify"));
+    EXPECT_TRUE(result.config.synonyms.in_same_group("delete", "remove"));
+}
+
+TEST_F(KdlConfigTest, SynonymClearAllDropsBuiltins) {
+    write_kdl(R"(
+synonyms {
+    clear-all
+    group "foo" "bar"
+}
+)");
+    auto result = load_config(temp_dir_.string());
+    ASSERT_TRUE(result.ok()) << result.error;
+    EXPECT_FALSE(result.config.synonyms.in_same_group("delete", "remove"));
+    EXPECT_TRUE(result.config.synonyms.in_same_group("foo", "bar"));
+}
+
+TEST_F(KdlConfigTest, SynonymOneWordGroupIsError) {
+    write_kdl(R"(
+synonyms {
+    group "lonely"
+}
+)");
+    auto result = load_config(temp_dir_.string());
+    EXPECT_FALSE(result.ok());
+}
+
+TEST_F(KdlConfigTest, SynonymDuplicateWordAcrossGroupsIsError) {
+    write_kdl(R"(
+synonyms {
+    group "foo" "bar"
+    group "foo" "qux"
+}
+)");
+    auto result = load_config(temp_dir_.string());
+    EXPECT_FALSE(result.ok());
+}
+
+TEST_F(KdlConfigTest, SynonymMisplacedClearAllIsError) {
+    write_kdl(R"(
+synonyms {
+    group "foo" "bar"
+    clear-all
+}
+)");
+    auto result = load_config(temp_dir_.string());
+    EXPECT_FALSE(result.ok());
+}
+
 }  // namespace
 }  // namespace lci

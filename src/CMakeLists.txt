@@ -43,6 +43,7 @@ add_library(lci_lib STATIC
     semantic/stemmer.cpp
     semantic/fuzzy_matcher.cpp
     semantic/semantic_scorer.cpp
+    semantic/synonym_table.cpp
     semantic/vocabulary_analyzer.cpp
     analysis/side_effect_analyzer.cpp
     analysis/metrics_calculator.cpp

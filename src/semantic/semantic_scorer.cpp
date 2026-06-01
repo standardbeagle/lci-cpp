@@ -422,6 +422,56 @@ MatchDetector::DetectResult AbbreviationMatchDetector::detect(
     return {};
 }
 
+// -- SynonymMatchDetector -----------------------------------------------------
+
+SynonymMatchDetector::SynonymMatchDetector(const NameSplitter& splitter,
+                                           const SynonymTable& table)
+    : splitter_(splitter), table_(table) {}
+
+MatchDetector::DetectResult SynonymMatchDetector::detect(
+    std::string_view query, std::string_view target_name,
+    std::string_view query_lower, std::string_view target_lower,
+    const ScoreLayers& config) const {
+
+    if (table_.empty()) return {};
+
+    auto query_words = splitter_.split(query_lower);
+    auto target_words = splitter_.split(target_lower);
+    if (query_words.empty() || target_words.empty()) return {};
+
+    int matched = 0;
+    std::vector<std::string> pairs;
+    for (const auto& qw : query_words) {
+        for (const auto& tw : target_words) {
+            if (table_.in_same_group(qw, tw)) {
+                ++matched;
+                pairs.push_back(qw + " \xE2\x86\x94 " + tw);  // qw <-> tw
+                break;  // best/first match per query word, mirrors NameSplit
+            }
+        }
+    }
+
+    if (matched == 0) return {};
+
+    // Denominator is the query-word count, matching NameSplit/Stemming — the
+    // nearest word-to-word tiers — so synonym scores stay comparable.
+    double ratio = static_cast<double>(matched) /
+                   static_cast<double>(query_words.size());
+    double score = config.synonym_weight * ratio;
+
+    std::string joined;
+    for (size_t i = 0; i < pairs.size(); ++i) {
+        if (i > 0) joined += ", ";
+        joined += pairs[i];
+    }
+
+    return {true, score,
+            "Synonym match: " + joined,
+            {{"query", std::string(query)},
+             {"targetName", std::string(target_name)},
+             {"matches", joined}}};
+}
+
 // -- PhraseMatchDetector ------------------------------------------------------
 
 PhraseMatchDetector::PhraseMatchDetector(const NameSplitter& splitter,
@@ -659,11 +709,13 @@ MatchDetector::DetectResult PhraseMatchDetector::detect(
 // -- SemanticScorer -----------------------------------------------------------
 
 SemanticScorer::SemanticScorer(std::shared_ptr<NameSplitter> splitter,
-                               Stemmer stemmer, FuzzyMatcher fuzzer)
+                               Stemmer stemmer, FuzzyMatcher fuzzer,
+                               SynonymTable synonyms)
     : config_(kDefaultScoreLayers),
       splitter_(std::move(splitter)),
       stemmer_(std::move(stemmer)),
       fuzzer_(std::move(fuzzer)),
+      synonyms_(std::move(synonyms)),
       query_cache_(1000) {
 
     // Build detectors in priority order matching Go.
@@ -677,6 +729,8 @@ SemanticScorer::SemanticScorer(std::shared_ptr<NameSplitter> splitter,
         *splitter_, stemmer_));
     detectors_.push_back(std::make_unique<NameSplitMatchDetector>(*splitter_));
     detectors_.push_back(std::make_unique<AbbreviationMatchDetector>(*splitter_));
+    detectors_.push_back(std::make_unique<SynonymMatchDetector>(
+        *splitter_, synonyms_));
 }
 
 void SemanticScorer::configure(const ScoreLayers& layers) {
@@ -693,6 +747,7 @@ MatchType SemanticScorer::index_to_match_type(int index) {
         MatchType::Stemming,
         MatchType::NameSplit,
         MatchType::Abbreviation,
+        MatchType::Synonym,
     };
     if (index >= 0 && index < static_cast<int>(std::size(types))) {
         return types[index];
@@ -710,6 +765,7 @@ double SemanticScorer::match_type_to_confidence(MatchType mt) {
         case MatchType::Stemming: return 0.70;
         case MatchType::NameSplit: return 0.60;
         case MatchType::Abbreviation: return 0.50;
+        case MatchType::Synonym: return 0.72;
         case MatchType::None: return 0.0;
     }
     return 0.0;
