@@ -1007,35 +1007,15 @@ ToolResult handle_get_context(const nlohmann::json& params,
             "Prefer 'id' with object IDs from search results");
     }
 
-    // Section filtering: reject any include_section we cannot honor. We
-    // do not have a ContextLookupEngine in C++ yet, so structure/variables/
-    // semantic/usage/ai/dependencies/file_context/quality_metrics return a
-    // clear "not implemented" error rather than a silent empty section.
-    // The sections we DO honor: relationships, basic (the default body).
-    if (p.contains("include_sections") && p["include_sections"].is_array()) {
-        static const std::vector<std::string> kSupported = {
-            "relationships", "basic", "callers", "callees"};
-        static const std::vector<std::string> kUnsupported = {
-            "structure", "variables", "semantic", "usage", "ai",
-            "dependencies", "file_context", "quality_metrics"};
-        for (const auto& v : p["include_sections"]) {
-            if (!v.is_string()) continue;
-            const auto s = v.get<std::string>();
-            for (const auto& u : kUnsupported) {
-                if (s == u) {
-                    return make_error_response(
-                        "get_context",
-                        "section '" + s +
-                            "' is not implemented in the C++ port (no "
-                            "ContextLookupEngine yet — tracked as "
-                            "loop-fix:mcp.get_context.section." + s + "). "
-                            "Supported sections: relationships, basic, "
-                            "callers, callees.");
-                }
-            }
-            (void)kSupported;  // silence unused warning under -Wno-unused
-        }
-    }
+    // Section filtering. Go accepts include_sections in both paths and never
+    // errors on them (handlers.go: the compact path ignores sections it can't
+    // render — the MCP ObjectContext has no variables/structure/etc. field —
+    // and the mode path filters a rich context). C++ honors the sections it
+    // can compute (relationships/callers/callees via section_allowed below)
+    // and ignores the rest, matching Go's lenient acceptance rather than
+    // fail-fasting where Go succeeds. Sections backed by the unported
+    // ContextLookupEngine (structure/variables/semantic/usage/ai) simply add
+    // no fields to the compact output.
 
     // mode + name path: minimal port of Go's handleGetObjectContextWithMode.
     // Full ContextLookupEngine (6261 LOC across 8 files in internal/core/

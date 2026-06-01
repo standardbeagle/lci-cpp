@@ -1021,12 +1021,26 @@ TEST_F(HandlersFixture, GetContextAutoSearchReturnsWorkflow) {
     EXPECT_FALSE(json.contains("error"));
 }
 
-TEST_F(HandlersFixture, GetContextUnsupportedSectionRejected) {
-    nlohmann::json params;
-    params["id"] = "VE";
-    params["include_sections"] = {"variables"};
-    auto result = handle_get_context(params, *indexer_);
-    EXPECT_TRUE(result.is_error);
+// Go parity: get_context accepts include_sections in both the compact and
+// mode paths and never errors on them. The compact path simply ignores
+// sections it cannot render (the MCP ObjectContext has no variables/structure/
+// etc. field); it must NOT fail-fast where Go succeeds. A bad id still yields
+// an errors[] entry, but the section token itself is accepted.
+TEST_F(HandlersFixture, GetContextSectionTokensAccepted) {
+    const char* sections[] = {"variables",    "structure",       "semantic",
+                              "usage",         "ai",              "dependencies",
+                              "file_context",  "quality_metrics"};
+    for (const char* s : sections) {
+        nlohmann::json params;
+        params["id"] = "VE";
+        params["include_sections"] = {s};
+        auto result = handle_get_context(params, *indexer_);
+        // Accepted: not a hard error. (Unresolvable id is reported in
+        // errors[], not as is_error.)
+        EXPECT_FALSE(result.is_error) << "section '" << s << "': " << result.text;
+        auto json = nlohmann::json::parse(result.text);
+        EXPECT_TRUE(json.contains("contexts")) << s;
+    }
 }
 
 TEST_F(HandlersFixture, GetContextOidExtraction) {
