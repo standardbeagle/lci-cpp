@@ -931,14 +931,26 @@ TEST_F(HandlersFixture, GetContextAliasSymbolId) {
     EXPECT_TRUE(json.contains("contexts"));
 }
 
+// Go parity: autoSearchAndReturnContext (handlers.go ~2038) returns a
+// positive workflow-hint payload, not an error. Shape:
+// {_auto_search_triggered, symbol, path, message, workflow[], example_search,
+// hint}.
 TEST_F(HandlersFixture, GetContextAutoSearchReturnsWorkflow) {
     nlohmann::json params;
     params["symbol"] = "handleRequest";
     params["path"] = "handler.go";
     auto result = handle_get_context(params, *indexer_);
-    // Expect a workflow hint, not a silent empty result.
+    EXPECT_FALSE(result.is_error) << result.text;
     auto json = nlohmann::json::parse(result.text);
-    EXPECT_TRUE(json.contains("error") || json.contains("workflow"));
+    EXPECT_TRUE(json.value("_auto_search_triggered", false));
+    EXPECT_EQ(json.value("symbol", ""), "handleRequest");
+    EXPECT_EQ(json.value("path", ""), "handler.go");
+    EXPECT_TRUE(json.contains("workflow"));
+    EXPECT_TRUE(json["workflow"].is_array());
+    EXPECT_TRUE(json.contains("example_search"));
+    EXPECT_TRUE(json.contains("hint"));
+    // No misleading "not implemented" error field.
+    EXPECT_FALSE(json.contains("error"));
 }
 
 TEST_F(HandlersFixture, GetContextUnsupportedSectionRejected) {

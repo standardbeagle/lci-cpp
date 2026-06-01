@@ -411,20 +411,30 @@ bool section_allowed(const nlohmann::json& params, const std::string& section) {
 /// Returns the response shape for the auto-search workflow (symbol + path
 /// provided instead of id). We do not implement auto-search in C++ yet;
 /// return a clear workflow hint (Karpathy #6 — fail-fast, not empty).
-nlohmann::json autosearch_workflow_error(const std::string& symbol,
-                                         const std::string& path) {
+// Go parity: autoSearchAndReturnContext (handlers.go ~2038). When a caller
+// passes symbol+path but no id, return a positive workflow-hint payload that
+// guides them through search -> object_id -> get_context. Not an error: the
+// shape matches Go's map exactly so MCP clients can branch on
+// `_auto_search_triggered`.
+nlohmann::json autosearch_workflow_hint(const std::string& symbol,
+                                        const std::string& path) {
     nlohmann::json data;
-    data["error"] =
-        "auto-search (symbol + path) is not implemented in the C++ port "
-        "(tracked as loop-fix:mcp.get_context.auto_search). "
-        "Run `search` first to get the object ID (o=XX), then call "
-        "get_context with {\"id\": \"XX\"}.";
-    data["provided"] = {{"symbol", symbol}, {"path", path}};
+    data["_auto_search_triggered"] = true;
+    data["symbol"] = symbol;
+    data["path"] = path;
+    data["message"] =
+        "Auto-search is now supported! Use the search tool first, then "
+        "get_context with the object_id.";
     data["workflow"] = {
-        "1. Run search: {\"pattern\": \"" + symbol + "\"}",
-        "2. Find object ID in results (look for o=XX, e.g., o=VE)",
-        "3. Run get_context: {\"id\": \"VE\"}",
+        "1. Search: search {\"pattern\": \"" + symbol + "\"}",
+        "2. Find object_id (o=XX) in search results",
+        "3. Get context: get_context {\"id\": \"XX\"}",
     };
+    data["example_search"] =
+        "{\"pattern\": \"" + symbol + "\", \"max\": 5}";
+    data["hint"] =
+        "The search tool will return results with object_id (o=XX) that you "
+        "can use with get_context";
     return data;
 }
 
@@ -922,7 +932,7 @@ ToolResult handle_get_context(const nlohmann::json& params,
     // hint. Karpathy #6: no silent empty stub. Tracked as loop-fix.
     if (object_id.empty() && !symbol_param.empty() && !path_param.empty()) {
         return make_json_response(
-            autosearch_workflow_error(symbol_param, path_param));
+            autosearch_workflow_hint(symbol_param, path_param));
     }
 
     // oid= extraction (Go extractObjectIDFromCodeInsight). Lets callers paste
