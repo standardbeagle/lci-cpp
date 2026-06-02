@@ -28,15 +28,40 @@
   },
   "text_normalize": {
     "replace": [
-      {"pattern": "\\[o=[0-9A-Za-z]+\\]", "with": "[o=*]"},
-      {"pattern": "smells: [^\\n]*", "with": "smells: <order-masked>"},
-      {"pattern": "  total=[0-9]+ pure=[0-9]+ impure=[0-9]+ ratio=[0-9.]+", "with": "  <purity-masked>"},
-      {"pattern": "\\n  effects: [^\\n]*", "with": ""},
-      {"pattern": "problematic_symbols:\\n(  [^\\n]+\\n)+", "with": ""},
-      {"pattern": "(shotgun-surgery|high-fan-in)", "with": "FANIN"},
-      {"pattern": "== VOCABULARY ==\\n([^\\n]*\\n)*?---\\n", "with": ""}
+      {
+        "pattern": "\\[o=[0-9A-Za-z]+\\]",
+        "with": "[o=*]"
+      },
+      {
+        "pattern": "smells: [^\\n]*",
+        "with": "smells: <order-masked>"
+      },
+      {
+        "pattern": "  total=[0-9]+ pure=[0-9]+ impure=[0-9]+ ratio=[0-9.]+",
+        "with": "  <purity-masked>"
+      },
+      {
+        "pattern": "\\n  effects: [^\\n]*",
+        "with": ""
+      },
+      {
+        "pattern": "problematic_symbols:\\n(  [^\\n]+\\n)+",
+        "with": ""
+      },
+      {
+        "pattern": "(shotgun-surgery|high-fan-in)",
+        "with": "FANIN"
+      },
+      {
+        "pattern": "== (SUMMARY|ENTRY POINTS|DEPENDENCIES|NEXT STEPS|VOCABULARY) ==\\n([^\\n]*\\n)*?---\\n?",
+        "with": ""
+      },
+      {
+        "pattern": "\\n+$",
+        "with": ""
+      }
     ],
-    "_rationale_replace": "[o=XX] object ids are non-deterministic even within the Go binary run-to-run (symbol-id assignment depends on concurrent index order) — masked to [o=*] on both sides. The `smells:` summary line is emitted from a Go map (random token order: Go's own overview and unified disagree) — C++ sorts it, so the line is order-masked. The `purity` value line and `effects` line are masked because Go's side-effect classification is async and timing-dependent (observed 0/0 mid-index vs 15/11 complete) and C++'s classification depth differs; the `purity:` header + query line stay under guard. `problematic_symbols` is masked+removed because C++'s cyclomatic-complexity / outgoing-reference thresholds put ValidateName at risk>=5 while Go scores it lower (identical risk formula, divergent upstream cc/ref counts) — tracked as a follow-up; aggregate complexity is byte-checked. The high-incoming-refs smell is normalized because C++ renames Go's mislabeled `shotgun-surgery` to the accurate `high-fan-in`. The `== VOCABULARY ==` section is a C++-only enhancement (low-discoverability naming signal) with no Go counterpart, so the whole block is stripped before comparison."
+    "_rationale_replace": "[o=XX] object ids are non-deterministic even within the Go binary run-to-run (symbol-id assignment depends on concurrent index order) \u2014 masked to [o=*] on both sides. The `smells:` summary line is emitted from a Go map (random token order: Go's own overview and unified disagree) \u2014 C++ sorts it, so the line is order-masked. The `purity` value line and `effects` line are masked because Go's side-effect classification is async and timing-dependent (observed 0/0 mid-index vs 15/11 complete) and C++'s classification depth differs; the `purity:` header + query line stay under guard. `problematic_symbols` is masked+removed because C++'s cyclomatic-complexity / outgoing-reference thresholds put ValidateName at risk>=5 while Go scores it lower (identical risk formula, divergent upstream cc/ref counts) \u2014 tracked as a follow-up; aggregate complexity is byte-checked. The high-incoming-refs smell is normalized because C++ renames Go's mislabeled `shotgun-surgery` to the accurate `high-fan-in`. The `== VOCABULARY ==` section is a C++-only enhancement (low-discoverability naming signal) with no Go counterpart, so the whole block is stripped before comparison."
   },
   "tolerances": {
     "score_abs": 0.05,

@@ -775,6 +775,132 @@ void emit_vocabulary(std::ostringstream& out, const NamingReport& nr) {
     out << "---\n";
 }
 
+// == SUMMARY == — one-look orientation: size + language mix. C++-only
+// session-startup section (no Go counterpart). lang counts by file extension.
+void emit_summary(std::ostringstream& out,
+                  const std::vector<FileSymbolData>& files,
+                  std::string_view project_root, int file_count,
+                  int symbol_count) {
+    absl::flat_hash_map<std::string, int> lang_files;
+    absl::flat_hash_set<std::string> dirs;
+    int max_depth = 0;
+    auto lang_of = [](std::string_view path) -> const char* {
+        auto dot = path.rfind('.');
+        if (dot == std::string_view::npos) return nullptr;
+        auto ext = path.substr(dot);
+        if (ext == ".go") return "go";
+        if (ext == ".py") return "python";
+        if (ext == ".ts" || ext == ".tsx") return "typescript";
+        if (ext == ".js" || ext == ".jsx" || ext == ".mjs") return "javascript";
+        if (ext == ".cpp" || ext == ".cc" || ext == ".cxx" || ext == ".hpp" ||
+            ext == ".hh" || ext == ".h")
+            return "cpp";
+        if (ext == ".c") return "c";
+        if (ext == ".rs") return "rust";
+        if (ext == ".java") return "java";
+        if (ext == ".rb") return "ruby";
+        if (ext == ".php") return "php";
+        if (ext == ".cs") return "csharp";
+        if (ext == ".kt") return "kotlin";
+        if (ext == ".swift") return "swift";
+        return nullptr;
+    };
+    for (const auto& f : files) {
+        std::string rel = f.path;
+        if (!project_root.empty() && rel.rfind(project_root, 0) == 0) {
+            rel = rel.substr(project_root.size());
+            while (!rel.empty() && rel.front() == '/') rel.erase(0, 1);
+        }
+        int depth = 0;
+        for (char c : rel) if (c == '/') ++depth;
+        if (depth > max_depth) max_depth = depth;
+        auto slash = rel.rfind('/');
+        dirs.insert(slash == std::string::npos ? std::string(".")
+                                               : rel.substr(0, slash));
+        if (const char* l = lang_of(f.path)) lang_files[l]++;
+    }
+    out << "== SUMMARY ==\n"
+        << "files=" << file_count << " symbols=" << symbol_count
+        << " dirs=" << dirs.size() << " depth=" << max_depth << "\n";
+    if (!lang_files.empty()) {
+        std::vector<std::pair<std::string, int>> langs(lang_files.begin(),
+                                                       lang_files.end());
+        std::sort(langs.begin(), langs.end(),
+                  [](const auto& a, const auto& b) {
+                      if (a.second != b.second) return a.second > b.second;
+                      return a.first < b.first;
+                  });
+        out << "langs:";
+        for (const auto& [l, n] : langs) out << " " << l << "=" << n;
+        out << "\n";
+    }
+    out << "---\n";
+}
+
+// == ENTRY POINTS == — where execution starts / the public surface. main()
+// first, then top exported API by importance. C++-only session-startup
+// section (Go computes entry points but never emits them).
+void emit_entry_points(std::ostringstream& out, const EntryPointsList* ep,
+                       std::string_view project_root) {
+    if (!ep || ep->main_functions.empty()) return;
+    out << "== ENTRY POINTS ==\n";
+    size_t lim = std::min(ep->main_functions.size(), size_t{12});
+    for (size_t i = 0; i < lim; ++i) {
+        const auto& e = ep->main_functions[i];
+        std::string loc = e.location;
+        if (!project_root.empty() && loc.rfind(project_root, 0) == 0) {
+            loc = loc.substr(project_root.size());
+            while (!loc.empty() && loc.front() == '/') loc.erase(0, 1);
+        }
+        out << "  " << e.type << ": " << e.name << " (" << loc << ")\n";
+    }
+    if (ep->main_functions.size() > lim) {
+        out << "  ... and " << (ep->main_functions.size() - lim)
+            << " more exported\n";
+    }
+    out << "---\n";
+}
+
+// == DEPENDENCIES == — which modules the rest of the codebase leans on
+// (afferent coupling = number of other packages that depend on this one) and
+// how unstable each is. Sourced from CouplingAnalyzer (the engine's dependency
+// graph is still a node-only stub). C++-only session-startup section.
+void emit_dependencies(std::ostringstream& out, const CouplingMetrics& cp) {
+    std::vector<std::pair<std::string, int>> aff(cp.afferent_coupling.begin(),
+                                                 cp.afferent_coupling.end());
+    aff.erase(std::remove_if(aff.begin(), aff.end(),
+                             [](const auto& p) { return p.second <= 0; }),
+              aff.end());
+    if (aff.empty()) return;
+    std::sort(aff.begin(), aff.end(), [](const auto& a, const auto& b) {
+        if (a.second != b.second) return a.second > b.second;
+        return a.first < b.first;
+    });
+    out << "== DEPENDENCIES ==\n";
+    out << "most_depended_on:\n";
+    size_t lim = std::min(aff.size(), size_t{8});
+    for (size_t i = 0; i < lim; ++i) {
+        const auto& [pkg, n] = aff[i];
+        double inst = 0.0;
+        auto it = cp.instability.find(pkg);
+        if (it != cp.instability.end()) inst = it->second;
+        out << "  " << pkg << " depended_on_by=" << n
+            << " instability=" << fmt2(inst) << "\n";
+    }
+    out << "---\n";
+}
+
+// == NEXT STEPS == — tells an agent how to USE this report at session start.
+// C++-only footer.
+void emit_next_steps(std::ostringstream& out) {
+    out << "== NEXT STEPS ==\n"
+        << "1. ENTRY POINTS = where execution starts and the public surface.\n"
+        << "2. high-fan-in + problematic_symbols = load-bearing / risky code.\n"
+        << "3. aliases_in_use = search with THIS codebase's vocabulary.\n"
+        << "4. get_context {\"id\": \"<o=ID>\"} drills into any [o=..] symbol.\n"
+        << "---\n";
+}
+
 // == OBJECT IDs == — workflow hint, appended when any smell/problematic
 // symbol carried an object id. Matches Go's formatWorkflowHint (note the
 // leading "---" producing the doubled separator after HEALTH).
@@ -1020,9 +1146,12 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                       !d.naming.outliers.empty();
         emit_lcf_header(out, "unified", 1,
                         lcf_token_count(n_map, 0, hd != nullptr, 0, true));
+        emit_summary(out, files_data, project_root, file_count, symbol_count);
         emit_repository_map(out, d.modules.modules);
+        emit_entry_points(out, d.result.response.entry_points, project_root);
         if (hd) emit_health(out, *hd, &d.purity);
         emit_modules(out, d.modules);
+        emit_dependencies(out, d.coupling.coupling);
         if (hd) {
             emit_statistics(out, hd->complexity, d.coupling.coupling,
                             d.coupling.cohesion, d.quality,
@@ -1030,6 +1159,7 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
         }
         emit_vocabulary(out, d.naming);
         if (objids) emit_object_ids_hint(out);
+        emit_next_steps(out);
     } else if (mode == "git_analyze" || mode == "git_hotspots") {
         // build_git_analyze is still a stub (no git-provider integration);
         // on a corpus without git history Go emits an all-zero STATISTICS
@@ -1156,10 +1286,13 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                       !d.naming.outliers.empty();
         emit_lcf_header(out, "overview", 1,
                         lcf_token_count(n_map, 0, hd != nullptr, 0, false));
+        emit_summary(out, files_data, project_root, file_count, symbol_count);
         emit_repository_map(out, d.modules.modules);
+        emit_entry_points(out, d.result.response.entry_points, project_root);
         if (hd) emit_health(out, *hd, &d.purity);
         emit_vocabulary(out, d.naming);
         if (objids) emit_object_ids_hint(out);
+        emit_next_steps(out);
     }
     return ToolResult{finalize_lcf(out), false};
 }

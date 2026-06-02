@@ -1285,7 +1285,7 @@ TEST(CIEngine, AnalyzeEnforcesBudget) {
 // CodebaseIntelligenceEngine - entry point API limit
 // ===========================================================================
 
-TEST(CIEngine, EntryPointsApiLimit) {
+TEST(CIEngine, EntryPointsCollectedAndRanked) {
     CodebaseIntelligenceEngine engine;
     CodebaseIntelligenceParams params;
     params.mode = "overview";
@@ -1294,7 +1294,9 @@ TEST(CIEngine, EntryPointsApiLimit) {
     params.include.health_dashboard = false;
     params.include.entry_points = true;
 
-    // Create 20 exported functions - only 10 API entries should appear
+    // 20 exported functions + a main(). The engine now collects ALL entry
+    // points and ranks them (main first, then importance desc); the top-N
+    // display cap lives in the LCF emitter, not the engine.
     std::vector<EnhancedSymbol> syms(20);
     std::vector<const EnhancedSymbol*> ptrs;
     for (int i = 0; i < 20; ++i) {
@@ -1305,19 +1307,23 @@ TEST(CIEngine, EntryPointsApiLimit) {
         syms[i].is_exported = true;
         ptrs.push_back(&syms[i]);
     }
+    EnhancedSymbol main_sym;
+    main_sym.symbol.name = "main";
+    main_sym.symbol.type = SymbolType::Function;
+    main_sym.symbol.line = 1;
+    ptrs.push_back(&main_sym);
 
     FileSymbolData fsd;
     fsd.path = "handlers.go";
     fsd.symbols = ptrs;
 
-    auto result = engine.analyze(params, {fsd}, 1, 20);
+    auto result = engine.analyze(params, {fsd}, 1, 21);
     EXPECT_TRUE(result.ok());
 
-    int api_count = 0;
-    for (const auto& ep : result.response.entry_points->main_functions) {
-        if (ep.type == "api") ++api_count;
-    }
-    EXPECT_LE(api_count, 10);
+    const auto& eps = result.response.entry_points->main_functions;
+    EXPECT_EQ(eps.size(), 21u);  // all collected, not capped at the engine
+    ASSERT_FALSE(eps.empty());
+    EXPECT_EQ(eps.front().type, "main");  // main ranked first
 }
 
 }  // namespace

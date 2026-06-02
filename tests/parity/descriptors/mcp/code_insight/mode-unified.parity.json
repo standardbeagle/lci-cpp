@@ -16,23 +16,36 @@
     "exit"
   ],
   "parse": "json",
-  "_rationale": "code_insight mode=unified produces a LCF payload concatenating REPOSITORY MAP + HEALTH + MODULES + STATISTICS sections — the widest mode. C++ routes every section through the real engine + ModuleAnalyzer/CouplingAnalyzer/HealthAnalyzer (FIX-D.1.C). On the flat multi-lang corpus the REPOSITORY MAP, HEALTH score/complexity, MODULES aggregate, and STATISTICS lines are byte-identical to Go; the single per-module MODULES detail line is masked (see _rationale_replace). Locks the most cross-section-prone mode.",
+  "_rationale": "code_insight mode=unified produces a LCF payload concatenating REPOSITORY MAP + HEALTH + MODULES + STATISTICS sections \u2014 the widest mode. C++ routes every section through the real engine + ModuleAnalyzer/CouplingAnalyzer/HealthAnalyzer (FIX-D.1.C). On the flat multi-lang corpus the REPOSITORY MAP, HEALTH score/complexity, MODULES aggregate, and STATISTICS lines are byte-identical to Go; the single per-module MODULES detail line is masked (see _rationale_replace). Locks the most cross-section-prone mode.",
   "tiers": {
     "stable": [
       "result.content[].type",
       "result.content[].text"
     ],
-    "_rationale_stable": "Envelope matches MCP spec. result.content[].text is byte-for-byte identical on multi-lang after masking the single per-module MODULES detail line — REPOSITORY MAP, HEALTH, MODULES aggregate, and STATISTICS all emit identically on both sides.",
+    "_rationale_stable": "Envelope matches MCP spec. result.content[].text is byte-for-byte identical on multi-lang after masking the single per-module MODULES detail line \u2014 REPOSITORY MAP, HEALTH, MODULES aggregate, and STATISTICS all emit identically on both sides.",
     "ignore": [],
     "_rationale_ignore": "Universal MCP descriptor noise."
   },
   "text_normalize": {
     "replace": [
-      {"pattern": "(== MODULES ==\\ntotal=[0-9]+ cohesion=[0-9.]+ coupling=)[0-9.]+", "with": "$1<masked>"},
-      {"pattern": "\\n  [^\\n:]+: type=[^\\n]+", "with": ""},
-      {"pattern": "== VOCABULARY ==\\n([^\\n]*\\n)*?---\\n", "with": ""}
+      {
+        "pattern": "(== MODULES ==\\ntotal=[0-9]+ cohesion=[0-9.]+ coupling=)[0-9.]+",
+        "with": "$1<masked>"
+      },
+      {
+        "pattern": "\\n  [^\\n:]+: type=[^\\n]+",
+        "with": ""
+      },
+      {
+        "pattern": "== (SUMMARY|ENTRY POINTS|DEPENDENCIES|NEXT STEPS|VOCABULARY) ==\\n([^\\n]*\\n)*?---\\n?",
+        "with": ""
+      },
+      {
+        "pattern": "\\n+$",
+        "with": ""
+      }
     ],
-    "_rationale_replace": "The single per-module MODULES detail line is masked because Go's ModuleAnalysis builder has a self-inconsistent bug at the repository root: it names the root module by the checkout's directory basename (e.g. 'multi-lang') and classifies its TYPE from the absolute path (which, sitting under '.../tests/...', yields 'Test'), while Go's own repository-map builder names the same module '(root)'. The C++ port deliberately does not replicate this — it names and classifies every module by the repo-relative package path consistently ('(root)' / 'General' here). The MODULES aggregate `coupling=` field is also masked: Go emits a hardcoded 0.30 placeholder, C++ computes real per-package coupling (0.00 on this single-module flat corpus). The aggregate cohesion + all other sections stay byte-checked."
+    "_rationale_replace": "The single per-module MODULES detail line is masked because Go's ModuleAnalysis builder has a self-inconsistent bug at the repository root: it names the root module by the checkout's directory basename (e.g. 'multi-lang') and classifies its TYPE from the absolute path (which, sitting under '.../tests/...', yields 'Test'), while Go's own repository-map builder names the same module '(root)'. The C++ port deliberately does not replicate this \u2014 it names and classifies every module by the repo-relative package path consistently ('(root)' / 'General' here). The MODULES aggregate `coupling=` field is also masked: Go emits a hardcoded 0.30 placeholder, C++ computes real per-package coupling (0.00 on this single-module flat corpus). The aggregate cohesion + all other sections stay byte-checked."
   },
   "tolerances": {
     "score_abs": 0.05,

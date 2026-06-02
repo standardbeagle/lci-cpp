@@ -437,7 +437,6 @@ DependencyGraph CodebaseIntelligenceEngine::build_dependency_graph(
 EntryPointsList CodebaseIntelligenceEngine::build_entry_points(
     const std::vector<FileSymbolData>& files) const {
     EntryPointsList result;
-    int api_count = 0;
 
     for (const auto& f : files) {
         for (const auto* sym : f.symbols) {
@@ -445,11 +444,8 @@ EntryPointsList CodebaseIntelligenceEngine::build_entry_points(
 
             bool is_main = (sym->symbol.name == "main" ||
                             sym->symbol.name == "Main");
-            bool is_api = !is_main && sym->is_exported &&
-                          is_function_like(sym->symbol.type);
-
+            bool is_api = !is_main && sym->is_exported;
             if (!is_main && !is_api) continue;
-            if (is_api && api_count >= 10) continue;
 
             EntryPointDef ep;
             ep.name = sym->symbol.name;
@@ -459,10 +455,21 @@ EntryPointsList CodebaseIntelligenceEngine::build_entry_points(
             ep.is_exported = sym->is_exported;
             ep.importance = calculate_importance_score(*sym);
             result.main_functions.push_back(std::move(ep));
-
-            if (is_api) ++api_count;
         }
     }
+
+    // Rank: main() first, then exported API by importance (fan-in etc.)
+    // descending, then name. Consumers cap to a top-N for display. (The old
+    // code kept the first 10 exported symbols in scan order, burying the
+    // actual public surface behind whatever was indexed first.)
+    std::sort(result.main_functions.begin(), result.main_functions.end(),
+              [](const EntryPointDef& a, const EntryPointDef& b) {
+                  bool am = a.type == "main", bm = b.type == "main";
+                  if (am != bm) return am;
+                  if (a.importance != b.importance)
+                      return a.importance > b.importance;
+                  return a.name < b.name;
+              });
     return result;
 }
 

@@ -16,7 +16,7 @@
     "exit"
   ],
   "parse": "json",
-  "_rationale": "Unified on the multi-directory `populated` corpus — the widest mode (REPOSITORY MAP + HEALTH + MODULES + STATISTICS + OBJECT IDs). This is the strongest single regression guard on the engine path: it locks the computed token count (modules*20+health50+stats50+20=200), per-directory repository map, average complexity, the MODULES aggregate (total/cohesion/coupling), and the full STATISTICS block (complexity avg/median, package coupling avg/max, cohesion avg/min, maintainability index) — all of which were previously hardcoded constants.",
+  "_rationale": "Unified on the multi-directory `populated` corpus \u2014 the widest mode (REPOSITORY MAP + HEALTH + MODULES + STATISTICS + OBJECT IDs). This is the strongest single regression guard on the engine path: it locks the computed token count (modules*20+health50+stats50+20=200), per-directory repository map, average complexity, the MODULES aggregate (total/cohesion/coupling), and the full STATISTICS block (complexity avg/median, package coupling avg/max, cohesion avg/min, maintainability index) \u2014 all of which were previously hardcoded constants.",
   "tiers": {
     "stable": [
       "result.content[].type",
@@ -28,19 +28,56 @@
   },
   "text_normalize": {
     "replace": [
-      {"pattern": "\\[o=[0-9A-Za-z]+\\]", "with": "[o=*]"},
-      {"pattern": "smells: [^\\n]*", "with": "smells: <order-masked>"},
-      {"pattern": "  total=[0-9]+ pure=[0-9]+ impure=[0-9]+ ratio=[0-9.]+", "with": "  <purity-masked>"},
-      {"pattern": "\\n  effects: [^\\n]*", "with": ""},
-      {"pattern": "problematic_symbols:\\n(  [^\\n]+\\n)+", "with": ""},
-      {"pattern": "  distribution: [^\\n]*", "with": "  distribution: <order-masked>"},
-      {"pattern": "(quality: maintainability=[0-9.]+ debt=[0-9.]+ purity=)[0-9.]+", "with": "$1<masked>"},
-      {"pattern": "(== MODULES ==\\ntotal=[0-9]+ cohesion=[0-9.]+ coupling=)[0-9.]+", "with": "$1<masked>"},
-      {"pattern": "\\n  [^\\n:]+: type=[^\\n]+", "with": ""},
-      {"pattern": "(shotgun-surgery|high-fan-in)", "with": "FANIN"},
-      {"pattern": "== VOCABULARY ==\\n([^\\n]*\\n)*?---\\n", "with": ""}
+      {
+        "pattern": "\\[o=[0-9A-Za-z]+\\]",
+        "with": "[o=*]"
+      },
+      {
+        "pattern": "smells: [^\\n]*",
+        "with": "smells: <order-masked>"
+      },
+      {
+        "pattern": "  total=[0-9]+ pure=[0-9]+ impure=[0-9]+ ratio=[0-9.]+",
+        "with": "  <purity-masked>"
+      },
+      {
+        "pattern": "\\n  effects: [^\\n]*",
+        "with": ""
+      },
+      {
+        "pattern": "problematic_symbols:\\n(  [^\\n]+\\n)+",
+        "with": ""
+      },
+      {
+        "pattern": "  distribution: [^\\n]*",
+        "with": "  distribution: <order-masked>"
+      },
+      {
+        "pattern": "(quality: maintainability=[0-9.]+ debt=[0-9.]+ purity=)[0-9.]+",
+        "with": "$1<masked>"
+      },
+      {
+        "pattern": "(== MODULES ==\\ntotal=[0-9]+ cohesion=[0-9.]+ coupling=)[0-9.]+",
+        "with": "$1<masked>"
+      },
+      {
+        "pattern": "\\n  [^\\n:]+: type=[^\\n]+",
+        "with": ""
+      },
+      {
+        "pattern": "(shotgun-surgery|high-fan-in)",
+        "with": "FANIN"
+      },
+      {
+        "pattern": "== (SUMMARY|ENTRY POINTS|DEPENDENCIES|NEXT STEPS|VOCABULARY) ==\\n([^\\n]*\\n)*?---\\n?",
+        "with": ""
+      },
+      {
+        "pattern": "\\n+$",
+        "with": ""
+      }
     ],
-    "_rationale_replace": "Same object-id / smells-order / purity / problematic_symbols masks as populated-overview (see that descriptor). Additionally: the complexity `distribution` line is order-masked (Go emits low/medium/high from a map in random order). The STATISTICS `quality` line's trailing purity= field is masked (timing-dependent purity ratio). The MODULES aggregate `coupling=` field is masked because Go emits a hardcoded 0.30 placeholder while C++ now computes real per-package coupling from CouplingAnalyzer (cohesion + the STATISTICS coupling/cohesion stay byte-checked). The per-module MODULES detail lines (`  name: type=...`) are removed (Go emits them in map-iteration order AND counts per-module functions differently — follow-up). The high-incoming-refs smell label is normalized (C++ renames Go's mislabeled `shotgun-surgery` to `high-fan-in`). The `== VOCABULARY ==` block is a C++-only enhancement with no Go counterpart and is stripped before comparison."
+    "_rationale_replace": "Same object-id / smells-order / purity / problematic_symbols masks as populated-overview (see that descriptor). Additionally: the complexity `distribution` line is order-masked (Go emits low/medium/high from a map in random order). The STATISTICS `quality` line's trailing purity= field is masked (timing-dependent purity ratio). The MODULES aggregate `coupling=` field is masked because Go emits a hardcoded 0.30 placeholder while C++ now computes real per-package coupling from CouplingAnalyzer (cohesion + the STATISTICS coupling/cohesion stay byte-checked). The per-module MODULES detail lines (`  name: type=...`) are removed (Go emits them in map-iteration order AND counts per-module functions differently \u2014 follow-up). The high-incoming-refs smell label is normalized (C++ renames Go's mislabeled `shotgun-surgery` to `high-fan-in`). The `== VOCABULARY ==` block is a C++-only enhancement with no Go counterpart and is stripped before comparison."
   },
   "tolerances": {
     "score_abs": 0.05,
