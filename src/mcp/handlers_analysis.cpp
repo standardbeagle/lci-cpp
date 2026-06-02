@@ -7,7 +7,9 @@
 
 #include <lci/analysis/ci_vocabulary_analyzer.h>
 #include <lci/analysis/codebase_intelligence.h>
+#include <lci/analysis/coupling_analyzer.h>
 #include <lci/analysis/feature_analyzer.h>
+#include <lci/analysis/health_analyzer.h>
 #include <lci/analysis/layer_analyzer.h>
 #include <lci/analysis/module_analyzer.h>
 #include <lci/analysis/side_effect_analyzer.h>
@@ -563,61 +565,79 @@ std::vector<FileSymbolData> gather_file_symbol_data(MasterIndex& indexer) {
     return result;
 }
 
-// Render a double with two decimals (matches Go's "%.2f" output).
+// Render a double with two/one decimals (matches Go's "%.2f"/"%.1f" output).
 std::string fmt2(double v) {
     char buf[32];
     std::snprintf(buf, sizeof(buf), "%.2f", v);
     return std::string(buf);
 }
+std::string fmt1(double v) {
+    char buf[32];
+    std::snprintf(buf, sizeof(buf), "%.1f", v);
+    return std::string(buf);
+}
 
-// Emit the unified-mode LCF text from a real engine response.
-// Sections: REPOSITORY MAP, HEALTH, MODULES, STATISTICS, [OBJECT IDs].
-// Output structurally matches Go's emitter; empty corpora produce the same
-// empty/zero text as the prior hardcoded path, so parity holds on the
-// trivial synthetic corpus while real codebases now get populated content.
-std::string emit_unified_lcf(const CodebaseIntelligenceResponse& r,
-                             int file_count, int total_functions) {
-    std::ostringstream out;
-    out << "LCF/1.0\nmode=unified\ntier=1\ntokens=140\n---\n";
+// LCF token estimate for the header. Mirrors Go's estimateLCFTokenCount:
+//   modules*20 + dep_edges*15 + (health?50) + entry*15 + (stats?50) + 20.
+// `n_modules` is the post-truncation count (<=15) the repo map actually
+// emits, matching Go (the formatter runs after budget truncation).
+int lcf_token_count(int n_modules, int n_dep_edges, bool has_health,
+                    int n_entry, bool has_stats) {
+    int est = n_modules * 20 + n_dep_edges * 15 + n_entry * 15 + 20;
+    if (has_health) est += 50;
+    if (has_stats) est += 50;
+    return est;
+}
 
-    // REPOSITORY MAP
+void emit_lcf_header(std::ostringstream& out, std::string_view mode, int tier,
+                     int tokens) {
+    out << "LCF/1.0\nmode=" << mode << "\ntier=" << tier << "\ntokens="
+        << tokens << "\n---\n";
+}
+
+// == REPOSITORY MAP == — one line per module, capped to 15 (Go truncates to
+// 15 during budget enforcement). Emitted only when non-empty (Go: nil skip).
+void emit_repository_map(std::ostringstream& out,
+                         const std::vector<ModuleBoundary>& mods) {
+    if (mods.empty()) return;
     out << "== REPOSITORY MAP ==\n";
-    if (r.repository_map && !r.repository_map->module_boundaries.empty()) {
-        // Note: Go's empty-corpus form is "module=(root) files=N" so keep
-        // that when we have no module boundaries. With boundaries, emit
-        // each top-level module name.
-        for (const auto& mb : r.repository_map->module_boundaries) {
-            out << "module=" << mb.name << " files=" << mb.file_count << "\n";
-        }
-    } else {
-        out << "module=(root) files=" << file_count << "\n";
+    size_t lim = std::min(mods.size(), size_t{15});
+    for (size_t i = 0; i < lim; ++i) {
+        out << "module=" << mods[i].name << " files=" << mods[i].file_count
+            << "\n";
     }
     out << "---\n";
+}
 
-    // HEALTH
-    out << "== HEALTH ==\n";
-    double score = r.health_dashboard ? r.health_dashboard->overall_score : 10.0;
-    double avg_cc = r.health_dashboard
-                        ? r.health_dashboard->complexity.average_cc
-                        : 1.0;
-    out << "score=" << fmt2(score) << "\n"
-        << "complexity=" << fmt2(avg_cc) << "\n";
+// == HEALTH == — score, complexity, smell summary + detail, problematic
+// symbols, purity. Object IDs ([o=XX]) come from analyzer-populated fields.
+void emit_health(std::ostringstream& out, const HealthDashboard& hd,
+                 const PuritySummary* purity) {
+    out << "== HEALTH ==\n"
+        << "score=" << fmt2(hd.overall_score) << "\n"
+        << "complexity=" << fmt2(hd.complexity.average_cc) << "\n";
 
-    if (r.health_dashboard && !r.health_dashboard->detailed_smells.empty()) {
+    if (!hd.smell_counts.empty()) {
+        // Go iterates the smell-count map (non-deterministic order). The C++
+        // port sorts by smell type for stable output.
+        std::vector<std::pair<std::string, int>> sc(hd.smell_counts.begin(),
+                                                     hd.smell_counts.end());
+        std::sort(sc.begin(), sc.end(),
+                  [](const auto& a, const auto& b) { return a.first < b.first; });
         out << "smells:";
-        for (const auto& [type, count] : r.health_dashboard->smell_counts) {
-            out << " " << type << "=" << count;
-        }
+        for (const auto& [type, count] : sc) out << " " << type << "=" << count;
         out << "\n";
+    }
+    if (!hd.detailed_smells.empty()) {
         out << "detailed_smells:\n";
-        for (const auto& s : r.health_dashboard->detailed_smells) {
-            out << "  [" << s.severity << "] " << s.type << ": "
-                << s.symbol << " (" << s.location << ")\n";
+        for (const auto& s : hd.detailed_smells) {
+            out << "  [" << s.severity << "] " << s.type << ": " << s.symbol
+                << " (" << s.location << ") [o=" << s.object_id << "]\n";
         }
     }
-    if (r.health_dashboard && !r.health_dashboard->problematic_symbols.empty()) {
+    if (!hd.problematic_symbols.empty()) {
         out << "problematic_symbols:\n";
-        for (const auto& ps : r.health_dashboard->problematic_symbols) {
+        for (const auto& ps : hd.problematic_symbols) {
             out << "  " << ps.name << " (" << ps.location << ")"
                 << " risk=" << ps.risk_score;
             if (!ps.tags.empty()) {
@@ -628,92 +648,145 @@ std::string emit_unified_lcf(const CodebaseIntelligenceResponse& r,
                 }
                 out << "]";
             }
-            out << "\n";
+            out << " [o=" << ps.object_id << "]\n";
         }
     }
-    // Purity
-    int pure_n = 0, impure_n = 0;
-    int total_n = total_functions;
-    if (r.health_dashboard && r.health_dashboard->purity_summary) {
-        pure_n = r.health_dashboard->purity_summary->pure_functions;
-        impure_n = r.health_dashboard->purity_summary->impure_functions;
-        total_n = pure_n + impure_n > 0 ? pure_n + impure_n : total_functions;
-    }
-    double ratio = total_n > 0 ? static_cast<double>(pure_n) / total_n : 0.0;
-    out << "purity:\n"
-        << "  total=" << total_n << " pure=" << pure_n
-        << " impure=" << impure_n << " ratio=" << fmt2(ratio) << "\n"
-        << "  query: side_effects {\"mode\": \"impure\", "
-           "\"include_reasons\": true}\n";
-    out << "---\n";
-
-    // MODULES
-    out << "== MODULES ==\n";
-    if (r.repository_map && !r.repository_map->module_boundaries.empty()) {
-        const auto& mbs = r.repository_map->module_boundaries;
-        double avg_co = 0.0, avg_cp = 0.0;
-        for (const auto& mb : mbs) {
-            avg_co += mb.cohesion_score;
-            avg_cp += mb.coupling_score;
+    if (purity) {
+        double ratio = purity->total_functions > 0
+            ? static_cast<double>(purity->pure_functions) /
+                  purity->total_functions
+            : 0.0;
+        out << "purity:\n"
+            << "  total=" << purity->total_functions
+            << " pure=" << purity->pure_functions
+            << " impure=" << purity->impure_functions
+            << " ratio=" << fmt2(ratio) << "\n";
+        if (purity->with_io_effects > 0 || purity->with_global_writes > 0 ||
+            purity->with_param_writes > 0) {
+            out << "  effects: io=" << purity->with_io_effects
+                << " global_writes=" << purity->with_global_writes
+                << " param_writes=" << purity->with_param_writes
+                << " throws=" << purity->with_throws << "\n";
         }
-        avg_co /= static_cast<double>(mbs.size());
-        avg_cp /= static_cast<double>(mbs.size());
-        out << "total=" << mbs.size() << " cohesion=" << fmt2(avg_co)
-            << " coupling=" << fmt2(avg_cp) << "\n";
-        size_t shown = std::min(mbs.size(), size_t{10});
-        for (size_t i = 0; i < shown; ++i) {
-            const auto& mb = mbs[i];
-            out << "  " << mb.name << ": type=" << mb.type
-                << " files=" << mb.file_count
-                << " funcs=" << mb.function_count
-                << " cohesion=" << fmt2(mb.cohesion_score) << "\n";
-        }
-        if (mbs.size() > shown) {
-            out << "  ... and " << (mbs.size() - shown) << " more modules\n";
-        }
-    } else {
-        out << "total=1 cohesion=1.00 coupling=0.30\n"
-            << "  multi-lang: type=Test files=" << file_count
-            << " funcs=" << total_functions << " cohesion=1.00\n";
+        out << "  query: side_effects {\"mode\": \"impure\", "
+               "\"include_reasons\": true}\n";
     }
     out << "---\n";
+}
 
-    // STATISTICS
+// == MODULES == — aggregate cohesion/coupling + top-10 modules by file count.
+void emit_modules(std::ostringstream& out, const ModuleAnalysis& ma) {
+    if (ma.modules.empty()) return;
+    out << "== MODULES ==\n"
+        << "total=" << ma.metrics.total_modules
+        << " cohesion=" << fmt2(ma.metrics.average_cohesion)
+        << " coupling=" << fmt2(ma.metrics.average_coupling) << "\n";
+    size_t lim = std::min(ma.modules.size(), size_t{10});
+    for (size_t i = 0; i < lim; ++i) {
+        const auto& m = ma.modules[i];
+        out << "  " << m.name << ": type=" << m.type
+            << " files=" << m.file_count << " funcs=" << m.function_count
+            << " cohesion=" << fmt2(m.cohesion_score) << "\n";
+    }
+    if (ma.modules.size() > 10) {
+        out << "  ... and " << (ma.modules.size() - 10) << " more modules\n";
+    }
+    out << "---\n";
+}
+
+// == STATISTICS == — complexity, coupling, cohesion, quality, plus the top-3
+// high-complexity functions and low-cohesion modules.
+void emit_statistics(std::ostringstream& out, const ComplexityMetrics& cm,
+                     const CouplingMetrics& cp, const CohesionMetrics& ch,
+                     const QualityMetrics& q, double purity_ratio) {
     out << "== STATISTICS ==\n";
-    if (r.health_dashboard) {
-        const auto& cm = r.health_dashboard->complexity;
-        out << "complexity: avg=" << fmt2(cm.average_cc)
-            << " median=" << fmt2(cm.median_cc) << "\n";
+    out << "complexity: avg=" << fmt2(cm.average_cc)
+        << " median=" << fmt2(cm.median_cc) << "\n";
+    if (!cm.distribution.empty()) {
+        // Go iterates the distribution map (non-deterministic). C++ emits a
+        // fixed low/medium/high order.
         out << "  distribution:";
-        int low = 0, med = 0, high = 0;
-        auto it = cm.distribution.find("low");
-        if (it != cm.distribution.end()) low = it->second;
-        it = cm.distribution.find("medium");
-        if (it != cm.distribution.end()) med = it->second;
-        it = cm.distribution.find("high");
-        if (it != cm.distribution.end()) high = it->second;
-        if (high > 0) out << " high=" << high;
-        if (med  > 0) out << " medium=" << med;
-        if (low  > 0 || (high == 0 && med == 0)) out << " low=" << low;
+        for (const char* k : {"low", "medium", "high"}) {
+            auto it = cm.distribution.find(k);
+            if (it != cm.distribution.end())
+                out << " " << k << "=" << it->second;
+        }
         out << "\n";
-    } else {
-        out << "complexity: avg=1.00 median=1.00\n"
-            << "  distribution: low=" << file_count << "\n";
     }
-    out << "coupling: avg=0.00 max=0.00\n"
-        << "cohesion: avg=1.00 min=1.00\n";
-    // Maintainability is not yet computed in C++ port (Go derives it from
-    // complexity + LOC + halstead volume). For now emit the empty-corpus
-    // default; future work: port QualityMetrics + maintainability formula
-    // from Go's analysis pipeline.
-    double maint = 98.0;
-    double debt = r.health_dashboard
-        ? r.health_dashboard->technical_debt.ratio : 0.0;
-    out << "quality: maintainability=" << fmt2(maint)
-        << " debt=" << fmt2(debt) << " purity=" << fmt2(ratio) << "\n";
-    out << "---";
+    out << "coupling: avg=" << fmt2(cp.average_coupling)
+        << " max=" << fmt2(cp.max_coupling) << "\n";
+    out << "cohesion: avg=" << fmt2(ch.average_cohesion)
+        << " min=" << fmt2(ch.min_cohesion) << "\n";
+    out << "quality: maintainability=" << fmt2(q.maintainability_index)
+        << " debt=" << fmt2(q.technical_debt_ratio)
+        << " purity=" << fmt2(purity_ratio) << "\n";
+    if (!cm.high_complexity_funcs.empty()) {
+        out << "  high_complexity:\n";
+        size_t lim = std::min(cm.high_complexity_funcs.size(), size_t{3});
+        for (size_t i = 0; i < lim; ++i) {
+            const auto& fn = cm.high_complexity_funcs[i];
+            out << "    " << fn.name << " (" << fn.location << ") cc="
+                << fmt1(fn.complexity) << "\n";
+        }
+    }
+    if (!ch.low_cohesion_modules.empty()) {
+        size_t lim = std::min(ch.low_cohesion_modules.size(), size_t{3});
+        out << "  low_cohesion: ";
+        for (size_t i = 0; i < lim; ++i) {
+            if (i) out << ", ";
+            out << ch.low_cohesion_modules[i];
+        }
+        out << "\n";
+    }
+    out << "---\n";
+}
 
-    return out.str();
+// == OBJECT IDs == — workflow hint, appended when any smell/problematic
+// symbol carried an object id. Matches Go's formatWorkflowHint (note the
+// leading "---" producing the doubled separator after HEALTH).
+void emit_object_ids_hint(std::ostringstream& out) {
+    out << "---\n== OBJECT IDs ==\n"
+        << "Use [o=XX] identifiers above with get_context for detailed info:\n"
+        << "  get_context {\"id\": \"XX\"}\n"
+        << "Example: If you see [o=ABC], use get_context {\"id\": \"ABC\"}\n"
+        << "---\n";
+}
+
+// Tally a purity summary from the live SideEffectAnalyzer. Go-parity: the
+// C++ SideEffectAnalyzer defaults every unanalyzed callable to pure, so
+// pure-counting only happens once at least one impure function proves the
+// analyzer ran for real (otherwise an unannotated corpus would report
+// everything pure, diverging from Go's conservative 0/0).
+PuritySummary tally_purity(SideEffectAnalyzer* analyzer) {
+    PuritySummary ps;
+    if (!analyzer) return ps;
+    int impure_n = 0;
+    for (const auto& [key, info] : analyzer->results()) {
+        (void)key;
+        if (!info.is_pure) ++impure_n;
+    }
+    int pure_n = 0;
+    if (impure_n > 0) {
+        for (const auto& [key, info] : analyzer->results()) {
+            (void)key;
+            if (info.is_pure) ++pure_n;
+        }
+    }
+    ps.pure_functions = pure_n;
+    ps.impure_functions = impure_n;
+    ps.total_functions = static_cast<int>(analyzer->results().size());
+    ps.purity_ratio = ps.total_functions > 0
+        ? static_cast<double>(pure_n) / ps.total_functions
+        : 0.0;
+    return ps;
+}
+
+// Strip a single trailing newline so the payload ends on "---" with no
+// trailing newline, matching Go's strings.Join(lines, "\n").
+std::string finalize_lcf(std::ostringstream& out) {
+    std::string s = out.str();
+    if (!s.empty() && s.back() == '\n') s.pop_back();
+    return s;
 }
 
 }  // namespace
@@ -734,73 +807,72 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
             "statistics, unified, structure, git_analyze, git_hotspots");
     }
 
-    // Derive corpus-derived counts from the live index. The Go binary emits
-    // LCF text (mode=…\ntier=…\ntokens=…\n---\n== SECTION ==\n…) with values
-    // largely fixed for corpora without git history / real complexity data;
-    // only file_count + total_functions vary. Match that surface so per-mode
-    // parity descriptors (mcp/code_insight/{basic,mode-*}) hold byte-stable.
-    //
-    // The CodebaseIntelligenceEngine path was deliberately removed here in
-    // FIX-D.1.C: its JSON-shaped output diverged from Go's LCF text. Re-wire
-    // engine output through the section emitters below once the engine emits
-    // LCF directly (filed as future work in MODULE_MAP.md).
+    // Corpus data gathered once. file_count drives the structure summary;
+    // files_data/symbol_count/project_root feed the engine-backed modes.
+    const std::string& project_root = indexer.config().project.root;
     int file_count = indexer.file_count();
+    auto files_data = gather_file_symbol_data(indexer);
+    int symbol_count = 0;
     int total_functions = 0;
-    {
-        auto& ref = indexer.ref_tracker();
-        for (auto fid : indexer.get_all_file_ids()) {
-            for (const auto* sym : ref.get_file_enhanced_symbols(fid)) {
-                if (sym && sym->symbol.type == SymbolType::Function) {
-                    ++total_functions;
-                }
+    for (const auto& f : files_data) {
+        symbol_count += static_cast<int>(f.symbols.size());
+        for (const auto* sym : f.symbols) {
+            if (sym && sym->symbol.type == SymbolType::Function) {
+                ++total_functions;
             }
         }
     }
 
+    // Shared analysis for the engine-backed modes (overview/unified/
+    // statistics). The engine's overview pipeline computes the health
+    // dashboard (complexity, smells, problematic symbols); modules, purity,
+    // coupling/cohesion and quality are layered on from the dedicated
+    // analyzers, mirroring Go's Server.buildOverview/Statistics path.
+    struct EngineData {
+        CodebaseIntelligenceEngine::Result result;
+        ModuleAnalysis modules;  // repository map + == MODULES == (same naming)
+        PuritySummary purity;
+        CouplingAnalyzer::CouplingResult coupling;
+        QualityMetrics quality;
+    };
+    auto gather_engine = [&]() -> EngineData {
+        CodebaseIntelligenceParams ci;
+        ci.mode = "overview";
+        ci.include.repository_map = true;
+        ci.include.health_dashboard = true;
+        ci.include.dependency_graph = true;
+        ci.include.entry_points = true;
+        if (params.contains("max_results")) {
+            ci.max_results = params.value("max_results", 50);
+        }
+        EngineData d;
+        d.result = engine.analyze(ci, files_data,
+                                  static_cast<int>(files_data.size()),
+                                  symbol_count);
+        d.modules = ModuleAnalyzer().analyze(files_data, project_root);
+        d.purity = tally_purity(analyzer);
+        d.coupling = CouplingAnalyzer().analyze(files_data, project_root);
+        if (d.result.response.health_dashboard) {
+            d.quality = HealthAnalyzer::calculate_quality_from_complexity(
+                d.result.response.health_dashboard->complexity);
+        }
+        return d;
+    };
+
     std::ostringstream out;
     if (mode == "statistics") {
-        // Wire through engine for real complexity metrics. Hardcoded form
-        // always emitted avg=1.00 + low=<file_count>, which made the test
-        // distribution useless on any non-trivial corpus.
-        CodebaseIntelligenceParams ci_params;
-        ci_params.mode = "statistics";
-        ci_params.include.health_dashboard = true;
-        auto files_data = gather_file_symbol_data(indexer);
-        int symbol_count = 0;
-        for (const auto& f : files_data)
-            symbol_count += static_cast<int>(f.symbols.size());
-        auto result = engine.analyze(ci_params, files_data,
-                                      static_cast<int>(files_data.size()),
-                                      symbol_count);
-        if (!result.ok()) {
-            return make_error_response("code_insight", result.error);
+        EngineData d = gather_engine();
+        if (!d.result.ok()) {
+            return make_error_response("code_insight", d.result.error);
         }
-        out << "LCF/1.0\nmode=statistics\ntier=1\ntokens=70\n---\n"
-            << "== STATISTICS ==\n";
-        if (result.response.health_dashboard) {
-            const auto& cm = result.response.health_dashboard->complexity;
-            out << "complexity: avg=" << fmt2(cm.average_cc)
-                << " median=" << fmt2(cm.median_cc) << "\n"
-                << "  distribution:";
-            int low = 0, med = 0, high = 0;
-            auto it = cm.distribution.find("low");
-            if (it != cm.distribution.end()) low = it->second;
-            it = cm.distribution.find("medium");
-            if (it != cm.distribution.end()) med = it->second;
-            it = cm.distribution.find("high");
-            if (it != cm.distribution.end()) high = it->second;
-            if (high > 0) out << " high=" << high;
-            if (med  > 0) out << " medium=" << med;
-            if (low  > 0 || (high == 0 && med == 0)) out << " low=" << low;
-            out << "\n";
-        } else {
-            out << "complexity: avg=1.00 median=1.00\n"
-                << "  distribution: low=" << file_count << "\n";
+        const auto* hd = d.result.response.health_dashboard;
+        emit_lcf_header(out, "statistics", 1,
+                        lcf_token_count(0, 0, false, 0, true));
+        if (hd) {
+            emit_statistics(out, hd->complexity, d.coupling.coupling,
+                            d.coupling.cohesion, d.quality,
+                            d.purity.purity_ratio);
         }
-        out << "coupling: avg=0.00 max=0.00\n"
-            << "cohesion: avg=1.00 min=1.00\n"
-            << "quality: maintainability=98.00 debt=0.00 purity=0.00\n"
-            << "---";
     } else if (mode == "structure") {
         // Compute structure inline from the live index. Hardcoded version
         // always emitted dirs=1, top_dirs `.:N`; on any real corpus the
@@ -867,91 +939,39 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
             out << "  " << td[i].first << ": " << td[i].second << " files\n";
         out << "---";
     } else if (mode == "unified") {
-        // Wire the real CodebaseIntelligenceEngine through. Hardcoded LCF
-        // text was the FIX-D.1.C workaround that made parity tests pass on
-        // the synthetic corpus by emitting Go's empty-corpus shape, but it
-        // produced the same empty/zero content for every codebase, even
-        // ones with hundreds of complex functions. The engine has been
-        // computing real RepositoryMap + HealthDashboard data all along;
-        // we just weren't reading it. emit_unified_lcf() renders the
-        // engine response into Go's LCF format.
-        CodebaseIntelligenceParams ci_params;
-        ci_params.mode = "unified";
-        ci_params.include.repository_map = true;
-        ci_params.include.dependency_graph = true;
-        ci_params.include.health_dashboard = true;
-        ci_params.include.entry_points = true;
-        if (params.contains("max_results")) {
-            ci_params.max_results = params.value("max_results", 50);
+        EngineData d = gather_engine();
+        if (!d.result.ok()) {
+            return make_error_response("code_insight", d.result.error);
         }
-        auto files_data = gather_file_symbol_data(indexer);
-        int symbol_count = 0;
-        for (const auto& f : files_data) {
-            symbol_count += static_cast<int>(f.symbols.size());
+        const auto* hd = d.result.response.health_dashboard;
+        int n_map = std::min(static_cast<int>(d.modules.modules.size()), 15);
+        bool objids = hd && (!hd->detailed_smells.empty() ||
+                             !hd->problematic_symbols.empty());
+        emit_lcf_header(out, "unified", 1,
+                        lcf_token_count(n_map, 0, hd != nullptr, 0, true));
+        emit_repository_map(out, d.modules.modules);
+        if (hd) emit_health(out, *hd, &d.purity);
+        emit_modules(out, d.modules);
+        if (hd) {
+            emit_statistics(out, hd->complexity, d.coupling.coupling,
+                            d.coupling.cohesion, d.quality,
+                            d.purity.purity_ratio);
         }
-        auto result = engine.analyze(ci_params, files_data,
-                                      static_cast<int>(files_data.size()),
-                                      symbol_count);
-        if (!result.ok()) {
-            return make_error_response("code_insight", result.error);
-        }
-        // Populate purity_summary from the live SideEffectAnalyzer. The
-        // engine doesn't own one (purity classification is per-MCP-session
-        // state, populated by populate_from_index at server startup) so we
-        // tally here and stuff the result into the response's health
-        // dashboard before LCF emission. emit_unified_lcf reads
-        // purity_summary->{pure_functions, impure_functions}.
-        PuritySummary purity_owned;
-        if (analyzer && result.response.health_dashboard) {
-            // Go-parity: only count explicit classifications. The C++
-            // SideEffectAnalyzer::populate_from_index defaults every
-            // unanalyzed callable to is_pure=true, which would diverge from
-            // Go's conservative "no evidence => unclassified" behavior on
-            // corpora with no side-effect data (see parity:
-            // mcp/code_insight/mode-unified). Treat is_pure=true as "pure"
-            // only when there is positive evidence — at least one observed
-            // side-effect category (which when zero combined with is_pure
-            // means "explicitly verified pure") OR... since the C++
-            // default-pure flag is indistinguishable from explicit-pure at
-            // this layer, fall back to impure-only counting: pure_n stays 0
-            // unless ANY function was flagged impure (then we trust the
-            // analyzer ran for real). Matches Go's unified output on
-            // unannotated corpora.
-            int pure_n = 0, impure_n = 0;
-            for (const auto& [key, info] : analyzer->results()) {
-                if (!info.is_pure) ++impure_n;
-            }
-            if (impure_n > 0) {
-                // Real classification happened; count pure entries too.
-                for (const auto& [key, info] : analyzer->results()) {
-                    if (info.is_pure) ++pure_n;
-                }
-            }
-            purity_owned.pure_functions = pure_n;
-            purity_owned.impure_functions = impure_n;
-            purity_owned.total_functions = pure_n + impure_n;
-            purity_owned.purity_ratio = purity_owned.total_functions > 0
-                ? static_cast<double>(pure_n) / purity_owned.total_functions
-                : 0.0;
-            result.response.health_dashboard->purity_summary = &purity_owned;
-        }
-        out << emit_unified_lcf(result.response,
-                                static_cast<int>(files_data.size()),
-                                total_functions);
+        if (objids) emit_object_ids_hint(out);
     } else if (mode == "git_analyze" || mode == "git_hotspots") {
-        // Go emits an empty STATISTICS section for both git modes on
-        // corpora without git history. Match that surface.
-        out << "LCF/1.0\n"
-            << "mode=" << mode << "\n"
-            << "tier=1\n"
-            << "tokens=70\n"
-            << "---\n"
-            << "== STATISTICS ==\n"
-            << "complexity: avg=0.00 median=0.00\n"
-            << "coupling: avg=0.00 max=0.00\n"
-            << "cohesion: avg=0.00 min=0.00\n"
-            << "quality: maintainability=0.00 debt=0.00 purity=0.00\n"
-            << "---";
+        // build_git_analyze is still a stub (no git-provider integration);
+        // on a corpus without git history Go emits an all-zero STATISTICS
+        // section, which an empty metric set reproduces honestly — no fake
+        // data, just "nothing computed yet". Real git wiring is tracked
+        // separately (Dart loop-fix). emit_statistics with empty inputs and
+        // min_cohesion forced to 0 yields Go's exact zero block.
+        ComplexityMetrics zero_cm;
+        CouplingMetrics zero_cp;
+        CohesionMetrics zero_ch;
+        zero_ch.min_cohesion = 0.0;
+        QualityMetrics zero_q;
+        emit_lcf_header(out, mode, 1, lcf_token_count(0, 0, false, 0, true));
+        emit_statistics(out, zero_cm, zero_cp, zero_ch, zero_q, 0.0);
     } else if (mode == "detailed") {
         // Detailed sub-mode dispatch via the existing analyzers.
         // The engine's build_detailed() returns an empty response because
@@ -971,13 +991,12 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                 "invalid detailed analysis '" + detailed_mode +
                 "', must be one of: modules, layers, features, terms");
         }
-        auto files_data = gather_file_symbol_data(indexer);
 
         out << "LCF/1.0\nmode=detailed\nsub=" << detailed_mode
             << "\ntier=2\ntokens=100\n---\n";
         if (detailed_mode == "modules") {
             ModuleAnalyzer ma;
-            auto r = ma.analyze(files_data);
+            auto r = ma.analyze(files_data, project_root);
             out << "== MODULES ==\n"
                 << "total=" << r.metrics.total_modules
                 << " cohesion=" << fmt2(r.metrics.average_cohesion)
@@ -1051,35 +1070,24 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
         }
         out << "---";
     } else {
-        // overview (default) — emit the historical overview payload.
-        // Decision: overview's LCF text is parity-locked byte-stable to
-        // Go on multi-lang corpus (basic.parity.json descriptor). Routing
-        // through the engine here would emit the same shape on populated
-        // corpora but risks per-byte divergence on the empty-history
-        // multi-lang corpus that the descriptor uses. Until a populated
-        // overview parity corpus exists, the static emission stays;
-        // unified mode + detailed sub-modes carry the engine-driven
-        // surface. See MODULE_MAP.md "Decision: code_insight overview
-        // static vs engine".
-        out << "LCF/1.0\n"
-            << "mode=overview\n"
-            << "tier=1\n"
-            << "tokens=90\n"
-            << "---\n"
-            << "== REPOSITORY MAP ==\n"
-            << "module=(root) files=" << file_count << "\n"
-            << "---\n"
-            << "== HEALTH ==\n"
-            << "score=10.00\n"
-            << "complexity=1.00\n"
-            << "purity:\n"
-            << "  total=" << total_functions
-            << " pure=0 impure=0 ratio=0.00\n"
-            << "  query: side_effects {\"mode\": \"impure\", "
-               "\"include_reasons\": true}\n"
-            << "---";
+        // overview (default) — engine-backed: repository map + health, with
+        // the object-IDs workflow hint when smells/problematic symbols are
+        // present. Mirrors Go's overview section set (no MODULES/STATISTICS).
+        EngineData d = gather_engine();
+        if (!d.result.ok()) {
+            return make_error_response("code_insight", d.result.error);
+        }
+        const auto* hd = d.result.response.health_dashboard;
+        int n_map = std::min(static_cast<int>(d.modules.modules.size()), 15);
+        bool objids = hd && (!hd->detailed_smells.empty() ||
+                             !hd->problematic_symbols.empty());
+        emit_lcf_header(out, "overview", 1,
+                        lcf_token_count(n_map, 0, hd != nullptr, 0, false));
+        emit_repository_map(out, d.modules.modules);
+        if (hd) emit_health(out, *hd, &d.purity);
+        if (objids) emit_object_ids_hint(out);
     }
-    return ToolResult{out.str(), false};
+    return ToolResult{finalize_lcf(out), false};
 }
 
 // -- register_analysis_handlers -----------------------------------------------

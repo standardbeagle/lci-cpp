@@ -58,6 +58,11 @@ struct Descriptor {
     int         expect_exit = 0;
     std::string id_pattern;  // for ids tier (optional)
     DescriptorTextNormalize text_normalize;
+    // When true (MCP mode), poll index_stats until status=="ready" before
+    // sending the captured tool call. The Go server indexes asynchronously
+    // and returns "index not initialized" until done; larger corpora race
+    // without this. The C++ server indexes synchronously (immediate ready).
+    bool        wait_for_ready = false;
 };
 
 // Throws std::runtime_error on schema or type errors. The input is the raw

@@ -111,6 +111,7 @@ Descriptor parse_descriptor(const std::string& json_text) {
     }
     d.expect_exit = j.value("expect_exit", 0);
     d.id_pattern  = j.value("id_pattern",  std::string());
+    d.wait_for_ready = j.value("wait_for_ready", false);
 
     if (j.contains("text_normalize")) {
         load_text_normalize(j.at("text_normalize"), d.text_normalize);

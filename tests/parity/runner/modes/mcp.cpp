@@ -2,6 +2,8 @@
 #include "runner/modes/child_guard.h"
 #include "runner/modes/subst.h"
 
+#include <nlohmann/json.hpp>
+
 #include <fcntl.h>
 #include <signal.h>
 #include <sys/wait.h>
@@ -189,6 +191,36 @@ CapturedOutput run_mcp(const std::string& binary_path,
     (void)init_resp; // we don't validate beyond non-empty
 
     write_all(in_pipe[1], encode_frame(kInitializedNotification, framing));
+
+    // Optionally wait for async indexing to finish before the captured call.
+    // The Go server indexes in a background goroutine and tools return an
+    // "index not initialized" error (or partial results) until it completes;
+    // the C++ server indexes synchronously and reports ready immediately.
+    // Poll index_stats until status=="ready" (bounded by the deadline) so
+    // larger corpora don't race. Opt-in per descriptor (wait_for_ready).
+    if (d.wait_for_ready) {
+        const char* kStatsCall =
+            "{\"jsonrpc\":\"2.0\",\"id\":900,\"method\":\"tools/call\","
+            "\"params\":{\"name\":\"index_stats\",\"arguments\":{}}}";
+        while (std::chrono::steady_clock::now() < deadline) {
+            write_all(in_pipe[1], encode_frame(kStatsCall, framing));
+            std::string r = read_frame(out_pipe[0], framing, deadline);
+            bool ready = false;
+            try {
+                auto j = nlohmann::json::parse(r);
+                const auto& content = j["result"]["content"];
+                if (content.is_array() && !content.empty() &&
+                    content[0].contains("text")) {
+                    auto inner = nlohmann::json::parse(
+                        content[0]["text"].get<std::string>());
+                    ready = inner.value("status", "") == "ready";
+                }
+            } catch (...) {
+            }
+            if (ready) break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+    }
 
     // Send the descriptor's stdin payload (the tool-call JSON-RPC).
     if (!d.invocation.stdin_data.empty()) {

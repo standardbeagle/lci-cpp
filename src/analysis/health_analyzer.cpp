@@ -1,5 +1,6 @@
 #include <lci/analysis/health_analyzer.h>
 
+#include <lci/idcodec.h>
 #include <lci/reference.h>
 
 #include <algorithm>
@@ -150,6 +151,7 @@ ComplexityMetrics HealthAnalyzer::calculate_complexity_from_files(
                     !is_test_helper_path(file.path) &&
                     !is_test_helper_function(sym->symbol.name)) {
                     FunctionInfo fi;
+                    fi.object_id = encode_symbol_id(sym->id);
                     fi.name = sym->symbol.name;
                     fi.location = file.path + ":" +
                                   std::to_string(sym->symbol.line);
@@ -393,6 +395,7 @@ std::vector<CodeSmellEntry> HealthAnalyzer::calculate_detailed_code_smells(
                                       : "medium";
                 CodeSmellEntry e;
                 e.type = "long-function";
+                e.object_id = encode_symbol_id(sym->id);
                 e.symbol = sym->symbol.name;
                 e.location = base_path + ":" +
                              std::to_string(sym->symbol.line);
@@ -410,6 +413,7 @@ std::vector<CodeSmellEntry> HealthAnalyzer::calculate_detailed_code_smells(
                         : "medium";
                 CodeSmellEntry e;
                 e.type = "high-complexity";
+                e.object_id = encode_symbol_id(sym->id);
                 e.symbol = sym->symbol.name;
                 e.location = base_path + ":" +
                              std::to_string(sym->symbol.line);
@@ -429,6 +433,7 @@ std::vector<CodeSmellEntry> HealthAnalyzer::calculate_detailed_code_smells(
                             : "medium";
                     CodeSmellEntry e;
                     e.type = "god-class";
+                    e.object_id = encode_symbol_id(sym->id);
                     e.symbol = sym->symbol.name;
                     e.location = base_path + ":" +
                                  std::to_string(sym->symbol.line);
@@ -448,6 +453,7 @@ std::vector<CodeSmellEntry> HealthAnalyzer::calculate_detailed_code_smells(
                         : "medium";
                 CodeSmellEntry e;
                 e.type = "shotgun-surgery";
+                e.object_id = encode_symbol_id(sym->id);
                 e.symbol = sym->symbol.name;
                 e.location = base_path + ":" +
                              std::to_string(sym->symbol.line);
@@ -544,6 +550,7 @@ std::vector<ProblematicSymbol> HealthAnalyzer::identify_problematic_symbols(
             auto [tags, risk] = calculate_symbol_risk_and_tags(*sym);
             if (risk >= ci_thresholds::kRiskScoreCutoff) {
                 ProblematicSymbol ps;
+                ps.object_id = encode_symbol_id(sym->id);
                 ps.name = sym->symbol.name;
                 ps.location = base_path + ":" +
                               std::to_string(sym->symbol.line);

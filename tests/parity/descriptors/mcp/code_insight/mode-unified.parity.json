@@ -16,15 +16,21 @@
     "exit"
   ],
   "parse": "json",
-  "_rationale": "code_insight mode=unified produces a LCF payload concatenating REPOSITORY MAP + HEALTH + MODULES + STATISTICS sections — the widest mode. After iter-5 fix (task AQQfI8XEEkV6), C++ emits a byte-identical 654-byte payload to Go on multi-lang corpus including the four section headers, complexity/coupling/cohesion/quality lines, and the multi-lang module summary. Locks the most cross-section-prone mode: a regression in any of the four section emitters would surface here as a stable-tier mismatch. Probe: /tmp/parity-iter4/code_insight___mode___unified.{go,cpp}.json both 654 bytes after rebuild.",
+  "_rationale": "code_insight mode=unified produces a LCF payload concatenating REPOSITORY MAP + HEALTH + MODULES + STATISTICS sections — the widest mode. C++ routes every section through the real engine + ModuleAnalyzer/CouplingAnalyzer/HealthAnalyzer (FIX-D.1.C). On the flat multi-lang corpus the REPOSITORY MAP, HEALTH score/complexity, MODULES aggregate, and STATISTICS lines are byte-identical to Go; the single per-module MODULES detail line is masked (see _rationale_replace). Locks the most cross-section-prone mode.",
   "tiers": {
     "stable": [
       "result.content[].type",
       "result.content[].text"
     ],
-    "_rationale_stable": "Envelope matches MCP spec. result.content[].text is byte-for-byte identical on multi-lang — the four LCF sections (REPOSITORY MAP, HEALTH, MODULES, STATISTICS) emit identically on both sides. This is the strongest single test of the per-section LCF emitters.",
+    "_rationale_stable": "Envelope matches MCP spec. result.content[].text is byte-for-byte identical on multi-lang after masking the single per-module MODULES detail line — REPOSITORY MAP, HEALTH, MODULES aggregate, and STATISTICS all emit identically on both sides.",
     "ignore": [],
     "_rationale_ignore": "Universal MCP descriptor noise."
+  },
+  "text_normalize": {
+    "replace": [
+      {"pattern": "\\n  [^\\n:]+: type=[^\\n]+", "with": ""}
+    ],
+    "_rationale_replace": "The single per-module MODULES detail line is masked because Go's ModuleAnalysis builder has a self-inconsistent bug at the repository root: it names the root module by the checkout's directory basename (e.g. 'multi-lang') and classifies its TYPE from the absolute path (which, sitting under '.../tests/...', yields 'Test'), while Go's own repository-map builder names the same module '(root)'. The C++ port deliberately does not replicate this — it names and classifies every module by the repo-relative package path consistently ('(root)' / 'General' here). The MODULES aggregate line (total/cohesion/coupling) stays byte-checked."
   },
   "tolerances": {
     "score_abs": 0.05,

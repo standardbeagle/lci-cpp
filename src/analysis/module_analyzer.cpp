@@ -1,5 +1,7 @@
 #include <lci/analysis/module_analyzer.h>
 
+#include <lci/analysis/coupling_analyzer.h>
+
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -83,43 +85,59 @@ std::string ModuleAnalyzer::classify_module_by_path(std::string_view path) {
 // ---------------------------------------------------------------------------
 
 ModuleAnalysis ModuleAnalyzer::analyze(
-    const std::vector<FileSymbolData>& files) const {
+    const std::vector<FileSymbolData>& files,
+    std::string_view project_root) const {
 
-    // Group symbols by directory.
-    absl::flat_hash_map<std::string, std::vector<const EnhancedSymbol*>> dir_groups;
-    absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, bool>> dir_files;
+    // Group symbols by package = directory relative to project_root
+    // ("(root)" for root-level files), via getPackageName. Both the NAME and
+    // the TYPE classification use this stable, repo-relative package path —
+    // NOT the absolute directory. Go's ModuleAnalysis builder instead names
+    // by basename and classifies on the absolute path, which misclassifies
+    // (e.g. any module under a ".../tests/..." checkout path becomes "Test")
+    // and disagrees with Go's own repository-map naming; that asymmetry is a
+    // Go bug the C++ port deliberately does not replicate. Only code files
+    // participate; function_count counts functions/methods.
+    absl::flat_hash_map<std::string, std::vector<const EnhancedSymbol*>> pkg_syms;
+    absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, bool>> pkg_files;
+    absl::flat_hash_map<std::string, int> pkg_func_count;
 
     for (const auto& file : files) {
-        auto dir = std::filesystem::path(file.path).parent_path().string();
-        if (dir.empty() || dir == ".") dir = "root";
-
+        if (!CouplingAnalyzer::is_code_file(file.path)) continue;
+        std::string pkg =
+            CouplingAnalyzer::get_package_name(file.path, project_root);
         for (const auto* sym : file.symbols) {
-            dir_groups[dir].push_back(sym);
-            dir_files[dir][file.path] = true;
+            pkg_syms[pkg].push_back(sym);
+            pkg_files[pkg][file.path] = true;
+            if (sym->symbol.type == SymbolType::Function ||
+                sym->symbol.type == SymbolType::Method) {
+                pkg_func_count[pkg]++;
+            }
         }
     }
 
     // Build module boundaries.
     std::vector<ModuleBoundary> modules;
-    for (auto& [dir, syms] : dir_groups) {
-        std::string mod_name = std::filesystem::path(dir).filename().string();
-        if (mod_name.empty() || mod_name == ".") mod_name = "root";
-
-        double coh = prefix_cohesion(syms);
-        double stab = stability_score(static_cast<int>(syms.size()));
-        int file_count = static_cast<int>(dir_files[dir].size());
-
+    for (auto& [pkg, syms] : pkg_syms) {
         ModuleBoundary mb;
-        mb.name = mod_name;
-        mb.type = classify_module_by_path(dir);
-        mb.path = dir;
-        mb.cohesion_score = coh;
+        mb.name = pkg;
+        mb.type = classify_module_by_path(pkg);
+        mb.path = pkg;
+        mb.cohesion_score = prefix_cohesion(syms);
         mb.coupling_score = 0.3;
-        mb.stability = stab;
-        mb.file_count = file_count;
-        mb.function_count = static_cast<int>(syms.size());
+        mb.stability = stability_score(static_cast<int>(syms.size()));
+        mb.file_count = static_cast<int>(pkg_files[pkg].size());
+        mb.function_count = pkg_func_count[pkg];
         modules.push_back(std::move(mb));
     }
+
+    // Deterministic order: file_count desc, then name asc. Go relies on map
+    // iteration order here (non-deterministic on ties); the C++ port sorts.
+    std::sort(modules.begin(), modules.end(),
+              [](const ModuleBoundary& a, const ModuleBoundary& b) {
+                  if (a.file_count != b.file_count)
+                      return a.file_count > b.file_count;
+                  return a.name < b.name;
+              });
 
     // Calculate aggregate metrics.
     double total_cohesion = 0.0;

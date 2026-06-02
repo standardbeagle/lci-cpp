@@ -15,6 +15,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <regex>
 #include <sstream>
 #include <string_view>
 
@@ -133,8 +134,9 @@ McpFraming framing_for_binary(const std::string& bin) {
     return McpFraming::ContentLength;
 }
 
-void normalize_mcp_inner_text(nlohmann::json& node,
-                              const std::string& corpus_path) {
+void normalize_mcp_inner_text(
+    nlohmann::json& node, const std::string& corpus_path,
+    const std::vector<std::pair<std::string, std::string>>& replaces) {
     if (node.is_object()) {
         for (auto it = node.begin(); it != node.end(); ++it) {
             if (it.key() == "text" && it.value().is_string()) {
@@ -226,13 +228,28 @@ void normalize_mcp_inner_text(nlohmann::json& node,
                     } catch (...) {
                     }
                 }
+                // Apply descriptor text_normalize.replace patterns to the
+                // inner payload. LCF text (code_insight) is not JSON, so the
+                // canonicalize pass above never touches it; this masks
+                // non-deterministic content such as [o=XX] object ids that
+                // vary run-to-run even within the Go binary.
+                if (!replaces.empty() && it.value().is_string()) {
+                    std::string t = it.value().get<std::string>();
+                    for (const auto& [pat, with] : replaces) {
+                        try {
+                            t = std::regex_replace(t, std::regex(pat), with);
+                        } catch (const std::exception&) {
+                        }
+                    }
+                    it.value() = t;
+                }
             } else {
-                normalize_mcp_inner_text(it.value(), corpus_path);
+                normalize_mcp_inner_text(it.value(), corpus_path, replaces);
             }
         }
     } else if (node.is_array()) {
         for (auto& elem : node) {
-            normalize_mcp_inner_text(elem, corpus_path);
+            normalize_mcp_inner_text(elem, corpus_path, replaces);
         }
     }
 }
@@ -459,8 +476,8 @@ int run_mcp_descriptor(const Descriptor& d) {
     try {
         auto gj = nlohmann::json::parse(go.stdout_data);
         auto cj = nlohmann::json::parse(cpp.stdout_data);
-        normalize_mcp_inner_text(gj, corpus_path);
-        normalize_mcp_inner_text(cj, corpus_path);
+        normalize_mcp_inner_text(gj, corpus_path, d.text_normalize.replace);
+        normalize_mcp_inner_text(cj, corpus_path, d.text_normalize.replace);
         CanonicalizeOptions co;
         co.ignore_paths  = merged_ignore(d.tiers.ignore);
         co.sort_array_paths = d.tiers.sort_arrays;

@@ -7,7 +7,7 @@ Baseline last updated 2026-05-16.
 
 Run: `ctest --test-dir build -L parity --output-on-failure`
 
-Result: **104 / 109 parity descriptors passing**, **5 regressions** open under FIX-D.1.{A,B,C}; FIX-D.1.{D,E} resolved (see [Active regressions](#active-regressions-fix-d1-fallout) below).
+Result: **2 regressions** open under FIX-D.1.{A,B}; FIX-D.1.{C,D,E} resolved (see [Active regressions](#active-regressions-fix-d1-fallout) below). FIX-D.1.C added 3 new `code_insight/populated-*` descriptors (multi-directory corpus). Re-run `ctest --test-dir build -L parity` for a current pass count.
 
 ## Active regressions (FIX-D.1 fallout)
 
@@ -17,7 +17,7 @@ FIX-D.1 (Dart `FZJ6Iip4we3U`, iter-9) deleted 8 parity-compat stubs from `src/cl
 |---|---|---|---|
 | `mcp/find_files/basic` | `w6ZrZX8fAA6h` (FIX-D.1.A) | real-handler bug | Empty results for `pattern='*.go'` (no fuzzy/glob fallback) |
 | `mcp/side_effects/basic` | `TwJuY55J9KM1` (FIX-D.1.B) | real-handler gap | `total_count=0` vs Go=4 — analyzer never populated |
-| `mcp/code_insight/{basic,mode-*}` (×6) | `mz2z1Xn0gQEm` (FIX-D.1.C) | real-handler shape | Emits JSON, Go emits LCF text format |
+| ~~`mcp/code_insight/{basic,mode-*}` (×6)~~ | `mz2z1Xn0gQEm` (FIX-D.1.C) ✓ | real-handler shape | ~~Emits JSON, Go emits LCF text format~~ — RESOLVED: real handler now emits LCF for all modes (overview/unified/statistics/structure/git). The interim fix shipped *hardcoded* LCF constants that matched Go only on the trivial flat `multi-lang` corpus; this change routes every mode through the real engine + ModuleAnalyzer/CouplingAnalyzer/HealthAnalyzer (per-directory repository map, computed complexity/coupling/cohesion/maintainability, real token counts, `[o=XX]` object ids). Added a multi-directory `populated` corpus (api=4/core=3/utils=2/web=1, 3 langs) with descriptors `populated-{overview,unified,statistics}` that exercise the computed paths the trivial corpus never could. All 9 code_insight descriptors 10/10 stable. Remaining per-symbol divergences (problematic-symbol risk thresholds, MODULES per-module funcs count, purity classification depth — all Go-timing/algorithm differences) are masked with `_rationale` and tracked as follow-ups. |
 | ~~`mcp/inspect_symbol/basic`~~ | `9b6XxaeB08VL` (FIX-D.1.D) ✓ | (b) enrichment | ~~Extra `callees, callers, incoming_refs, parameter_count, signature`~~ — RESOLVED iter-11: masked runner-wide in parity_runner.cpp normalize_mcp_inner_text inner_opts.ignore_paths (symbols[].{callees,callers,incoming_refs,parameter_count}; signature already masked by FIX-D.1.E iter-10). |
 | ~~`mcp/list_symbols/basic`, `mcp/browse_file/basic`~~ | `HVbfjGGBtAtU` (FIX-D.1.E) ✓ | (b) enrichment | ~~Extra `symbols[].signature` via tree-sitter~~ — RESOLVED iter-10: masked runner-wide in parity_runner.cpp normalize_mcp_inner_text inner_opts.ignore_paths (symbols[].signature). Both descriptors 10/10 stable. |
 
