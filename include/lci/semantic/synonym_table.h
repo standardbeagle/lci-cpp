@@ -53,6 +53,11 @@ class SynonymTable {
     /// already be lowercased.
     bool in_same_group(std::string_view a, std::string_view b) const;
 
+    /// The representative (first-listed) term of `word`'s group — the most
+    /// recognizable spelling of the concept (e.g. primary_of("explode") ==
+    /// "split"). Empty if `word` is in no group. `word` must be lowercased.
+    std::string_view primary_of(std::string_view word) const;
+
     bool empty() const { return groups_.empty(); }
     std::size_t group_count() const { return groups_.size(); }
 

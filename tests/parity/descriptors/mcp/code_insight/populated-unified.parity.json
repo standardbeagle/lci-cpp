@@ -35,9 +35,12 @@
       {"pattern": "problematic_symbols:\\n(  [^\\n]+\\n)+", "with": ""},
       {"pattern": "  distribution: [^\\n]*", "with": "  distribution: <order-masked>"},
       {"pattern": "(quality: maintainability=[0-9.]+ debt=[0-9.]+ purity=)[0-9.]+", "with": "$1<masked>"},
-      {"pattern": "\\n  [^\\n:]+: type=[^\\n]+", "with": ""}
+      {"pattern": "(== MODULES ==\\ntotal=[0-9]+ cohesion=[0-9.]+ coupling=)[0-9.]+", "with": "$1<masked>"},
+      {"pattern": "\\n  [^\\n:]+: type=[^\\n]+", "with": ""},
+      {"pattern": "(shotgun-surgery|high-fan-in)", "with": "FANIN"},
+      {"pattern": "== VOCABULARY ==\\n([^\\n]*\\n)*?---\\n", "with": ""}
     ],
-    "_rationale_replace": "Same object-id / smells-order / purity / problematic_symbols masks as populated-overview (see that descriptor). Additionally: the complexity `distribution` line is order-masked (Go emits low/medium/high from a map in random order). The STATISTICS `quality` line's trailing purity= field is masked (it reflects the timing-dependent purity ratio). The per-module MODULES detail lines (`  name: type=... funcs=... cohesion=...`) are removed because Go emits them in map-iteration order AND counts per-module functions differently (Go core funcs=16 vs C++ funcs=8 — Go's ModuleAnalysis symbol tally diverges); the aggregate `total=N cohesion=X coupling=Y` line stays under guard. The per-module count divergence is tracked as a follow-up."
+    "_rationale_replace": "Same object-id / smells-order / purity / problematic_symbols masks as populated-overview (see that descriptor). Additionally: the complexity `distribution` line is order-masked (Go emits low/medium/high from a map in random order). The STATISTICS `quality` line's trailing purity= field is masked (timing-dependent purity ratio). The MODULES aggregate `coupling=` field is masked because Go emits a hardcoded 0.30 placeholder while C++ now computes real per-package coupling from CouplingAnalyzer (cohesion + the STATISTICS coupling/cohesion stay byte-checked). The per-module MODULES detail lines (`  name: type=...`) are removed (Go emits them in map-iteration order AND counts per-module functions differently — follow-up). The high-incoming-refs smell label is normalized (C++ renames Go's mislabeled `shotgun-surgery` to `high-fan-in`). The `== VOCABULARY ==` block is a C++-only enhancement with no Go counterpart and is stripped before comparison."
   },
   "tolerances": {
     "score_abs": 0.05,

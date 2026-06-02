@@ -4,7 +4,9 @@
 #include <lci/analysis/feature_analyzer.h>
 #include <lci/analysis/layer_analyzer.h>
 #include <lci/analysis/module_analyzer.h>
+#include <lci/analysis/naming_analyzer.h>
 #include <lci/reference.h>
+#include <lci/semantic/synonym_table.h>
 
 namespace lci {
 namespace {
@@ -464,6 +466,90 @@ TEST(ModuleAnalyzer, AnalyzeFileCountAccurate) {
     EXPECT_EQ(result.metrics.total_modules, 1);
     EXPECT_EQ(result.modules[0].file_count, 2);
     EXPECT_EQ(result.modules[0].function_count, 2);
+}
+
+// ===========================================================================
+// NamingAnalyzer - low-discoverability vocabulary signal
+// ===========================================================================
+
+namespace {
+// A symbol with `fan_in` synthetic incoming references.
+EnhancedSymbol make_ref_sym(std::string name, int fan_in, SymbolID id) {
+    EnhancedSymbol es = make_sym(std::move(name), SymbolType::Function, id);
+    es.incoming_refs.resize(static_cast<size_t>(fan_in));
+    return es;
+}
+}  // namespace
+
+TEST(NamingAnalyzer, FlagsUnknownVerbHighFanIn) {
+    auto table = SynonymTable::build_default();
+    auto frob = make_ref_sym("frobnicate", 3, 1);
+    auto f = make_file("api/legacy.go", {&frob});
+
+    NamingAnalyzer na;
+    auto rep = na.analyze({f}, table, "");
+
+    ASSERT_EQ(rep.outliers.size(), 1u);
+    EXPECT_EQ(rep.outliers[0].name, "frobnicate");
+    EXPECT_EQ(rep.outliers[0].reason, "unknown-verb");
+    EXPECT_EQ(rep.outliers[0].fan_in, 3);
+}
+
+TEST(NamingAnalyzer, DoesNotFlagStandardVerb) {
+    auto table = SynonymTable::build_default();
+    // "fetch" is a recognized synonym of get; "getUser" leads with a common
+    // word. Neither should be flagged regardless of fan-in.
+    auto fetch = make_ref_sym("fetchUser", 5, 1);
+    auto getu = make_ref_sym("getRecord", 5, 2);
+    auto f = make_file("api/user.go", {&fetch, &getu});
+
+    NamingAnalyzer na;
+    auto rep = na.analyze({f}, table, "");
+    EXPECT_TRUE(rep.outliers.empty());
+}
+
+TEST(NamingAnalyzer, IgnoresLowFanInOutliers) {
+    auto table = SynonymTable::build_default();
+    auto frob = make_ref_sym("frobnicate", 1, 1);  // fan-in < 2
+    auto f = make_file("api/legacy.go", {&frob});
+
+    NamingAnalyzer na;
+    auto rep = na.analyze({f}, table, "");
+    EXPECT_TRUE(rep.outliers.empty());
+}
+
+TEST(NamingAnalyzer, AliasesSurfaceNonPrimarySpelling) {
+    // explode is a non-primary member of the split group → should appear in
+    // aliases_in_use under the primary "split". A plain "split" symbol must
+    // NOT create an alias entry (nothing to learn).
+    auto table = SynonymTable::build_default();
+    auto explode = make_ref_sym("explode", 0, 1);
+    auto split = make_ref_sym("split", 0, 2);
+    auto f = make_file("api/str.go", {&explode, &split});
+
+    NamingAnalyzer na;
+    auto rep = na.analyze({f}, table, "");
+    ASSERT_EQ(rep.aliases_in_use.size(), 1u);
+    EXPECT_EQ(rep.aliases_in_use[0].canonical, "split");
+    bool has_explode = false;
+    for (const auto& [m, n] : rep.aliases_in_use[0].terms) {
+        if (m == "explode") has_explode = true;
+    }
+    EXPECT_TRUE(has_explode);
+}
+
+TEST(NamingAnalyzer, CommonWordRecognized) {
+    EXPECT_TRUE(NamingAnalyzer::is_common_word("handler"));
+    EXPECT_TRUE(NamingAnalyzer::is_common_word("logf"));
+    EXPECT_FALSE(NamingAnalyzer::is_common_word("frobnicate"));
+}
+
+TEST(SynonymTable, PrimaryOfReturnsGroupRepresentative) {
+    auto table = SynonymTable::build_default();
+    EXPECT_EQ(table.primary_of("explode"), "split");
+    EXPECT_EQ(table.primary_of("implode"), "join");
+    EXPECT_EQ(table.primary_of("fetch"), "get");
+    EXPECT_TRUE(table.primary_of("frobnicate").empty());
 }
 
 }  // namespace

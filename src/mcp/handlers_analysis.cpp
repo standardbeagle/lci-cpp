@@ -12,6 +12,7 @@
 #include <lci/analysis/health_analyzer.h>
 #include <lci/analysis/layer_analyzer.h>
 #include <lci/analysis/module_analyzer.h>
+#include <lci/analysis/naming_analyzer.h>
 #include <lci/analysis/side_effect_analyzer.h>
 #include <lci/core/graph_propagator.h>
 #include <lci/core/reference_tracker.h>
@@ -741,6 +742,39 @@ void emit_statistics(std::ostringstream& out, const ComplexityMetrics& cm,
     out << "---\n";
 }
 
+// == VOCABULARY == — low-discoverability naming signal (C++ enhancement; Go
+// has no equivalent section). `outliers` are important symbols whose names use
+// unknown/obscure vocabulary an agent won't search for; `aliases_in_use` tells
+// which member term each standard concept uses in this codebase.
+void emit_vocabulary(std::ostringstream& out, const NamingReport& nr) {
+    if (nr.outliers.empty() && nr.aliases_in_use.empty()) return;
+    out << "== VOCABULARY ==\n";
+    out << "outliers=" << nr.outliers.size() << "\n";
+    for (const auto& o : nr.outliers) {
+        out << "  " << o.name << " (" << o.location << ") fan-in=" << o.fan_in
+            << " " << o.reason << "=" << o.odd_term;
+        if (!o.suggested.empty()) {
+            out << " -> ";
+            for (size_t i = 0; i < o.suggested.size(); ++i) {
+                if (i) out << ",";
+                out << o.suggested[i];
+            }
+        }
+        out << " [o=" << o.object_id << "]\n";
+    }
+    if (!nr.aliases_in_use.empty()) {
+        out << "aliases_in_use:\n";
+        for (const auto& a : nr.aliases_in_use) {
+            out << "  " << a.canonical << ":";
+            for (const auto& [member, n] : a.terms) {
+                out << " " << member << "(" << n << ")";
+            }
+            out << "\n";
+        }
+    }
+    out << "---\n";
+}
+
 // == OBJECT IDs == — workflow hint, appended when any smell/problematic
 // symbol carried an object id. Matches Go's formatWorkflowHint (note the
 // leading "---" producing the doubled separator after HEALTH).
@@ -778,6 +812,19 @@ PuritySummary tally_purity(SideEffectAnalyzer* analyzer) {
     ps.purity_ratio = ps.total_functions > 0
         ? static_cast<double>(pure_n) / ps.total_functions
         : 0.0;
+    // Effect breakdown (same category bits as side_effect_summary) so the
+    // HEALTH purity block can emit the `effects:` line. Counts a function once
+    // per category if it (transitively) exhibits it.
+    for (const auto& [key, info] : analyzer->results()) {
+        (void)key;
+        uint32_t combined = info.categories | info.transitive_categories;
+        if (combined & side_effect::kParamWrite) ++ps.with_param_writes;
+        if (combined & side_effect::kGlobalWrite) ++ps.with_global_writes;
+        if (combined & (side_effect::kIO | side_effect::kNetwork |
+                        side_effect::kDatabase))
+            ++ps.with_io_effects;
+        if (combined & side_effect::kThrow) ++ps.with_throws;
+    }
     return ps;
 }
 
@@ -834,6 +881,7 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
         PuritySummary purity;
         CouplingAnalyzer::CouplingResult coupling;
         QualityMetrics quality;
+        NamingReport naming;
     };
     auto gather_engine = [&]() -> EngineData {
         CodebaseIntelligenceParams ci;
@@ -852,10 +900,32 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
         d.modules = ModuleAnalyzer().analyze(files_data, project_root);
         d.purity = tally_purity(analyzer);
         d.coupling = CouplingAnalyzer().analyze(files_data, project_root);
+        // Replace ModuleAnalyzer's placeholder per-module coupling (a 0.30
+        // constant inherited from Go) with the real per-package coupling
+        // from CouplingAnalyzer. Both key modules by getPackageName, so the
+        // names line up. Recompute the aggregate average from real values.
+        if (!d.coupling.coupling.module_coupling.empty()) {
+            double sum = 0.0;
+            for (auto& m : d.modules.modules) {
+                auto it = d.coupling.coupling.module_coupling.find(m.name);
+                m.coupling_score =
+                    it != d.coupling.coupling.module_coupling.end()
+                        ? it->second
+                        : 0.0;
+                sum += m.coupling_score;
+            }
+            if (!d.modules.modules.empty()) {
+                d.modules.metrics.average_coupling =
+                    sum / static_cast<double>(d.modules.modules.size());
+            }
+        }
         if (d.result.response.health_dashboard) {
             d.quality = HealthAnalyzer::calculate_quality_from_complexity(
                 d.result.response.health_dashboard->complexity);
         }
+        d.naming = NamingAnalyzer().analyze(files_data,
+                                            indexer.config().synonyms,
+                                            project_root);
         return d;
     };
 
@@ -945,8 +1015,9 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
         }
         const auto* hd = d.result.response.health_dashboard;
         int n_map = std::min(static_cast<int>(d.modules.modules.size()), 15);
-        bool objids = hd && (!hd->detailed_smells.empty() ||
-                             !hd->problematic_symbols.empty());
+        bool objids = (hd && (!hd->detailed_smells.empty() ||
+                              !hd->problematic_symbols.empty())) ||
+                      !d.naming.outliers.empty();
         emit_lcf_header(out, "unified", 1,
                         lcf_token_count(n_map, 0, hd != nullptr, 0, true));
         emit_repository_map(out, d.modules.modules);
@@ -957,6 +1028,7 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                             d.coupling.cohesion, d.quality,
                             d.purity.purity_ratio);
         }
+        emit_vocabulary(out, d.naming);
         if (objids) emit_object_ids_hint(out);
     } else if (mode == "git_analyze" || mode == "git_hotspots") {
         // build_git_analyze is still a stub (no git-provider integration);
@@ -1079,12 +1151,14 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
         }
         const auto* hd = d.result.response.health_dashboard;
         int n_map = std::min(static_cast<int>(d.modules.modules.size()), 15);
-        bool objids = hd && (!hd->detailed_smells.empty() ||
-                             !hd->problematic_symbols.empty());
+        bool objids = (hd && (!hd->detailed_smells.empty() ||
+                              !hd->problematic_symbols.empty())) ||
+                      !d.naming.outliers.empty();
         emit_lcf_header(out, "overview", 1,
                         lcf_token_count(n_map, 0, hd != nullptr, 0, false));
         emit_repository_map(out, d.modules.modules);
         if (hd) emit_health(out, *hd, &d.purity);
+        emit_vocabulary(out, d.naming);
         if (objids) emit_object_ids_hint(out);
     }
     return ToolResult{finalize_lcf(out), false};

@@ -444,7 +444,11 @@ std::vector<CodeSmellEntry> HealthAnalyzer::calculate_detailed_code_smells(
                 }
             }
 
-            // Shotgun surgery
+            // High fan-in: many incoming references. (Go labels this
+            // "shotgun-surgery", but the metric is incoming-ref count — the
+            // opposite of shotgun surgery, which is one-change-many-edits.
+            // The C++ port uses the accurate name; parity descriptors
+            // normalize the two labels.)
             int impact = static_cast<int>(sym->incoming_refs.size());
             if (impact > ci_thresholds::kShotgunSurgery) {
                 std::string sev =
@@ -452,14 +456,14 @@ std::vector<CodeSmellEntry> HealthAnalyzer::calculate_detailed_code_smells(
                         ? "high"
                         : "medium";
                 CodeSmellEntry e;
-                e.type = "shotgun-surgery";
+                e.type = "high-fan-in";
                 e.object_id = encode_symbol_id(sym->id);
                 e.symbol = sym->symbol.name;
                 e.location = base_path + ":" +
                              std::to_string(sym->symbol.line);
                 e.severity = sev;
-                e.description = "changes affect " +
-                                std::to_string(impact) + " locations";
+                e.description = std::to_string(impact) +
+                                " incoming references";
                 smells.push_back(std::move(e));
             }
         }

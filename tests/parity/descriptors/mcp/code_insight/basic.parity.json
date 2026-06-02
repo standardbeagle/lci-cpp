@@ -26,6 +26,12 @@
     "ignore": [],
     "_rationale_ignore": "Universal MCP descriptor noise."
   },
+  "text_normalize": {
+    "replace": [
+      {"pattern": "== VOCABULARY ==\\n([^\\n]*\\n)*?---\\n", "with": ""}
+    ],
+    "_rationale_replace": "Defense mask for the C++-only `== VOCABULARY ==` section (low-discoverability naming signal; Go has no counterpart). On the flat multi-lang corpus C++ emits no such section, so this is a no-op here, but it keeps the descriptor robust if the corpus ever grows a non-standard name or alias."
+  },
   "tolerances": {
     "score_abs": 0.05,
     "timed_max_ms": 60000

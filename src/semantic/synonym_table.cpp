@@ -45,6 +45,23 @@ const std::vector<std::vector<std::string>>& default_groups() {
         {"disconnect", "close"},
         {"enable", "activate"},
         {"disable", "deactivate"},
+        // Cross-language aliases for common operations whose names vary by
+        // ecosystem. These cut wasted searches: e.g. PHP's `explode`/`implode`
+        // are string split/join. Disjoint from the groups above.
+        {"split", "explode", "tokenize", "divide"},
+        {"join", "implode", "concat", "concatenate"},
+        {"map", "transform", "convert", "cast"},
+        {"filter", "select", "reject"},
+        {"reduce", "fold", "aggregate", "accumulate"},
+        {"list", "enumerate", "glob", "scan"},
+        {"copy", "clone", "duplicate", "dup"},
+        {"format", "render", "stringify"},
+        {"compare", "diff", "equals"},
+        {"hash", "digest", "checksum"},
+        {"send", "emit", "publish", "dispatch"},
+        {"receive", "consume", "subscribe"},
+        {"lock", "acquire"},
+        {"unlock", "release"},
     };
     return groups;
 }
@@ -207,6 +224,13 @@ bool SynonymTable::in_same_group(std::string_view a, std::string_view b) const {
     auto ib = word_to_group_.find(b);
     if (ib == word_to_group_.end()) return false;
     return ia->second == ib->second;
+}
+
+std::string_view SynonymTable::primary_of(std::string_view word) const {
+    auto it = word_to_group_.find(word);
+    if (it == word_to_group_.end()) return {};
+    const auto& group = groups_[it->second];
+    return group.empty() ? std::string_view{} : std::string_view(group.front());
 }
 
 }  // namespace lci
