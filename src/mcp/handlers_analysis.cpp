@@ -849,6 +849,75 @@ void emit_git_hotspots(std::ostringstream& out,
     out << "---\n";
 }
 
+// A symbol ranked by how much of the codebase transitively depends on it.
+struct LoadBearingSym {
+    std::string name;
+    std::string location;  // project-root-relative path:line
+    int reach{};           // distinct transitive callers
+};
+
+// Transitive load-bearing centrality over the real call graph. For each
+// function-like symbol, reverse-BFS its callers (and callers' callers, …) and
+// count the distinct set that can reach it. Every call edge is weighted 1.0 —
+// for a call graph an edge either carries dependence or it doesn't, so a fixed
+// PageRank-style per-hop decay constant would be arbitrary. (When per-call-site
+// control-flow is available, loop/branch context — not a constant — is the
+// principled way to weight edges; that data isn't surfaced per-edge yet.)
+// O(V·E) worst case; the principled near-linear version (SCC condensation +
+// reverse-topo DP over the reference graph) is the graph-cluster follow-up.
+std::vector<LoadBearingSym> compute_load_bearing(
+    const MasterIndex& indexer, const std::vector<FileSymbolData>& files,
+    std::string_view project_root, size_t top_n) {
+    const auto& ref = indexer.ref_tracker();
+    std::vector<LoadBearingSym> out;
+    for (const auto& f : files) {
+        for (const auto* sym : f.symbols) {
+            auto t = sym->symbol.type;
+            if (t != SymbolType::Function && t != SymbolType::Method &&
+                t != SymbolType::Constructor)
+                continue;
+
+            absl::flat_hash_set<SymbolID> seen;
+            std::vector<SymbolID> queue = ref.get_caller_symbols(sym->id);
+            for (SymbolID id : queue) seen.insert(id);
+            for (size_t head = 0; head < queue.size(); ++head) {
+                for (SymbolID c : ref.get_caller_symbols(queue[head])) {
+                    if (c == sym->id) continue;  // self / cycle edge
+                    if (seen.insert(c).second) queue.push_back(c);
+                }
+            }
+            int reach = static_cast<int>(seen.size());
+            if (reach <= 0) continue;
+            out.push_back({sym->symbol.name,
+                           git_rel(f.path, project_root) + ":" +
+                               std::to_string(sym->symbol.line),
+                           reach});
+        }
+    }
+    std::sort(out.begin(), out.end(),
+              [](const LoadBearingSym& a, const LoadBearingSym& b) {
+                  if (a.reach != b.reach) return a.reach > b.reach;
+                  if (a.name != b.name) return a.name < b.name;
+                  return a.location < b.location;
+              });
+    if (out.size() > top_n) out.resize(top_n);
+    return out;
+}
+
+// == LOAD BEARING == — symbols the rest of the codebase most depends on, by
+// transitive call-graph reach (C++ enrichment; Go has no equivalent). Pairs
+// with HEALTH's problematic_symbols: high reach + high risk = fix-first.
+void emit_load_bearing(std::ostringstream& out,
+                       const std::vector<LoadBearingSym>& lb) {
+    if (lb.empty()) return;
+    out << "== LOAD BEARING ==\n";
+    for (const auto& s : lb) {
+        out << "  " << s.name << " (" << s.location << ") reach=" << s.reach
+            << "\n";
+    }
+    out << "---\n";
+}
+
 // == VOCABULARY == — low-discoverability naming signal (C++ enhancement; Go
 // has no equivalent section). `outliers` are important symbols whose names use
 // unknown/obscure vocabulary an agent won't search for; `aliases_in_use` tells
@@ -1257,6 +1326,9 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
         emit_repository_map(out, d.modules.modules);
         emit_entry_points(out, d.result.response.entry_points, project_root);
         if (hd) emit_health(out, *hd, &d.purity);
+        emit_load_bearing(out,
+                          compute_load_bearing(indexer, files_data,
+                                               project_root, 5));
         emit_modules(out, d.modules);
         emit_dependencies(out, d.coupling.coupling);
         if (hd) {
@@ -1376,8 +1448,8 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
             out << "== FEATURES ==\n"
                 << "total=" << r.metrics.total_features
                 << " avg_components=" << fmt2(r.metrics.average_components)
-                << " coupling=" << fmt2(r.metrics.coupling_score)
-                << " modularity=" << fmt2(r.metrics.modularity_score) << "\n";
+                << " avg_cohesion=" << fmt2(r.metrics.avg_cohesion)
+                << " avg_complexity=" << fmt2(r.metrics.avg_complexity) << "\n";
             size_t shown = std::min(r.features.size(), size_t{20});
             for (size_t i = 0; i < shown; ++i) {
                 const auto& f = r.features[i];
@@ -1429,6 +1501,9 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
         emit_repository_map(out, d.modules.modules);
         emit_entry_points(out, d.result.response.entry_points, project_root);
         if (hd) emit_health(out, *hd, &d.purity);
+        emit_load_bearing(out,
+                          compute_load_bearing(indexer, files_data,
+                                               project_root, 5));
         emit_vocabulary(out, d.naming);
         if (objids) emit_object_ids_hint(out);
         emit_next_steps(out);

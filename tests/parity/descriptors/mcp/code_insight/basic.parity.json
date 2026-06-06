@@ -16,7 +16,7 @@
     "exit"
   ],
   "parse": "json",
-  "_rationale": "code_insight with no arguments defaults to mode=overview on both Go and C++. Go emits REPOSITORY MAP + HEALTH only. C++ enriches the overview with session-startup sections Go has no counterpart for — SUMMARY, ENTRY POINTS, DEPENDENCIES, NEXT STEPS (and VOCABULARY when the corpus has non-standard naming); added in c735c33 for AI session-startup orientation. Those C++-only sections are stripped by the text_normalize mask below so parity asserts the common REPOSITORY MAP + HEALTH subset is byte-identical on multi-lang. The integration golden (tests/integration/goldens/mcp/code_insight/basic.json) locks the FULL C++ output including the enrichment sections; this descriptor locks the Go-common subset. The mode-statistics/structure/unified/git_analyze/git_hotspots descriptors lock the per-mode dispatch path; this descriptor locks the default (no-mode-given) behaviour so a regression that changes the common subset would surface here even if every explicit mode still works.",
+  "_rationale": "code_insight with no arguments defaults to mode=overview on both Go and C++. Go emits REPOSITORY MAP + HEALTH only. C++ enriches the overview with session-startup sections Go has no counterpart for — SUMMARY, ENTRY POINTS, DEPENDENCIES, NEXT STEPS, LOAD BEARING (and VOCABULARY when the corpus has non-standard naming); added in c735c33 (session-startup) plus the graph-centrality work (LOAD BEARING = transitive call-graph reach) for AI session-startup orientation. Those C++-only sections are stripped by the text_normalize mask below so parity asserts the common REPOSITORY MAP + HEALTH subset is byte-identical on multi-lang. The integration golden (tests/integration/goldens/mcp/code_insight/basic.json) locks the FULL C++ output including the enrichment sections; this descriptor locks the Go-common subset. The mode-statistics/structure/unified/git_analyze/git_hotspots descriptors lock the per-mode dispatch path; this descriptor locks the default (no-mode-given) behaviour so a regression that changes the common subset would surface here even if every explicit mode still works.",
   "tiers": {
     "stable": [
       "result.content[].type",
@@ -29,7 +29,7 @@
   "text_normalize": {
     "replace": [
       {
-        "pattern": "== (SUMMARY|ENTRY POINTS|DEPENDENCIES|NEXT STEPS|VOCABULARY) ==\\n([^\\n]*\\n)*?---\\n?",
+        "pattern": "== (SUMMARY|ENTRY POINTS|DEPENDENCIES|NEXT STEPS|VOCABULARY|LOAD BEARING) ==\\n([^\\n]*\\n)*?---\\n?",
         "with": ""
       },
       {

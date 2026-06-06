@@ -69,7 +69,7 @@
         "with": "FANIN"
       },
       {
-        "pattern": "== (SUMMARY|ENTRY POINTS|DEPENDENCIES|NEXT STEPS|VOCABULARY) ==\\n([^\\n]*\\n)*?---\\n?",
+        "pattern": "== (SUMMARY|ENTRY POINTS|DEPENDENCIES|NEXT STEPS|VOCABULARY|LOAD BEARING) ==\\n([^\\n]*\\n)*?---\\n?",
         "with": ""
       },
       {

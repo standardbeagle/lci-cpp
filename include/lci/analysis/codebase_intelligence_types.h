@@ -482,11 +482,19 @@ struct FeatureDependency {
 };
 
 /// Feature analysis metrics.
+///
+/// NOTE: `avg_cohesion` and `avg_complexity` are honest names for what the
+/// FeatureAnalyzer actually computes — the mean name-prefix cohesion and mean
+/// cyclomatic complexity over the detected feature groups. They were formerly
+/// mislabeled `coupling_score` (it is cohesion, not coupling) and
+/// `modularity_score` (it is complexity, not graph modularity Q). Real coupling
+/// and modularity require a community partition over the reference graph
+/// (Louvain/Leiden) — tracked as graph-cluster work, not yet implemented.
 struct FeatureAnalysisMetrics {
     int total_features{};
     double average_components{};
-    double coupling_score{};
-    double modularity_score{};
+    double avg_cohesion{};
+    double avg_complexity{};
 };
 
 /// Detected feature.

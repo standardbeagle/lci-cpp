@@ -409,7 +409,15 @@ DependencyGraph CodebaseIntelligenceEngine::build_dependency_graph(
                             : sym->symbol.type == SymbolType::Method
                                 ? "method"
                                 : "function";
-                node.centrality = 0.0;
+                // Real degree centrality: direct fan-in, each incoming edge
+                // counted at full weight 1.0 (no PageRank-style damping — for a
+                // call graph, an edge either carries influence or it doesn't;
+                // a fixed per-hop decay constant is meaningless here). Transitive
+                // load-bearing reach is computed separately in the MCP layer
+                // (compute_load_bearing) where the resolved call graph is
+                // available. Was hardcoded 0.0.
+                node.centrality =
+                    static_cast<double>(sym->incoming_refs.size());
                 graph.nodes.push_back(std::move(node));
             }
         }

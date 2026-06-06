@@ -236,9 +236,9 @@ FeatureAnalysis FeatureAnalyzer::analyze(
     result.features = std::move(features);
     result.metrics.total_features = count;
     result.metrics.average_components = avg_components;
-    result.metrics.coupling_score = (count > 0)
+    result.metrics.avg_cohesion = (count > 0)
         ? total_cohesion / static_cast<double>(count) : 0.0;
-    result.metrics.modularity_score = (count > 0)
+    result.metrics.avg_complexity = (count > 0)
         ? total_complexity / static_cast<double>(count) : 0.0;
 
     return result;

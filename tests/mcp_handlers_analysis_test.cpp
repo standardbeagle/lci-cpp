@@ -605,6 +605,45 @@ TEST_F(CodeInsightGitTest, GitHotspotsSurfacesRealChurn) {
     EXPECT_NE(result.text.find("window=1y"), std::string::npos);
 }
 
+// Load-bearing centrality: a leaf called transitively by the whole chain must
+// outrank its callers. Real call graph, weight-1.0 reachability, no mocks.
+TEST(CodeInsightLoadBearing, RanksByTransitiveReach) {
+    auto dir = std::filesystem::temp_directory_path() / "lci_loadbearing_test";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    {
+        std::ofstream f(dir / "chain.go");
+        f << "package main\n\n"
+             "func leaf() int { return 1 }\n"
+             "func mid() int { return leaf() }\n"
+             "func top() int { return mid() }\n"
+             "func main() { _ = top() }\n";
+    }
+
+    Config config;
+    config.project.root = dir.string();
+    MasterIndex indexer(config);
+    indexer.index_directory(dir.string());
+    CodebaseIntelligenceEngine engine;
+
+    nlohmann::json params;  // default overview
+    auto result = handle_code_insight(params, engine, indexer);
+    ASSERT_FALSE(result.is_error) << result.text;
+    ASSERT_NE(result.text.find("== LOAD BEARING =="), std::string::npos)
+        << result.text;
+
+    // `leaf` is reachable from mid, top, main → must rank above `top`
+    // (reachable only from main). First listed = highest reach.
+    auto lb = result.text.find("== LOAD BEARING ==");
+    auto leaf_pos = result.text.find("leaf", lb);
+    auto top_pos = result.text.find("top (", lb);
+    ASSERT_NE(leaf_pos, std::string::npos);
+    EXPECT_TRUE(top_pos == std::string::npos || leaf_pos < top_pos)
+        << "leaf must outrank top in load-bearing order\n" << result.text;
+
+    std::filesystem::remove_all(dir);
+}
+
 // =============================================================================
 // Registration test
 // =============================================================================
