@@ -2,7 +2,7 @@
   "result": {
     "content": [
       {
-        "text": "LCF/1.0\nmode=overview\ntier=1\ntokens=90\n---\n== REPOSITORY MAP ==\nmodule=(root) files=4\n---\n== HEALTH ==\nscore=10.00\ncomplexity=1.00\npurity:\n  total=4 pure=0 impure=0 ratio=0.00\n  query: side_effects {\"mode\": \"impure\", \"include_reasons\": true}\n---",
+        "text": "LCF/1.0\nmode=overview\ntier=1\ntokens=90\n---\n== SUMMARY ==\nfiles=4 symbols=4 dirs=1 depth=0\nlangs: cpp=1 go=1 python=1 rust=1\n---\n== REPOSITORY MAP ==\nmodule=(root) files=4\n---\n== ENTRY POINTS ==\n  api: add (b.py:1)\n  api: Add (a.go:3)\n  api: add (c.cpp:1)\n  api: add (d.rs:1)\n---\n== HEALTH ==\nscore=10.00\ncomplexity=1.00\npurity:\n  total=4 pure=0 impure=0 ratio=0.00\n  query: side_effects {\"mode\": \"impure\", \"include_reasons\": true}\n---\n== NEXT STEPS ==\n1. ENTRY POINTS = where execution starts and the public surface.\n2. high-fan-in + problematic_symbols = load-bearing / risky code.\n3. aliases_in_use = search with THIS codebase's vocabulary.\n4. get_context {\"id\": \"<o=ID>\"} drills into any [o=..] symbol.\n---",
         "type": "text"
       }
     ]

@@ -462,13 +462,18 @@ EntryPointsList CodebaseIntelligenceEngine::build_entry_points(
     // descending, then name. Consumers cap to a top-N for display. (The old
     // code kept the first 10 exported symbols in scan order, burying the
     // actual public surface behind whatever was indexed first.)
+    // `location` (path:line, unique per symbol) is the final tiebreak so the
+    // key is TOTAL — without it, same-name same-importance exports (e.g. a
+    // function `add` defined in several files) sort in unspecified order and
+    // the emitted ENTRY POINTS list flickers run-to-run (karpathy #4).
     std::sort(result.main_functions.begin(), result.main_functions.end(),
               [](const EntryPointDef& a, const EntryPointDef& b) {
                   bool am = a.type == "main", bm = b.type == "main";
                   if (am != bm) return am;
                   if (a.importance != b.importance)
                       return a.importance > b.importance;
-                  return a.name < b.name;
+                  if (a.name != b.name) return a.name < b.name;
+                  return a.location < b.location;
               });
     return result;
 }

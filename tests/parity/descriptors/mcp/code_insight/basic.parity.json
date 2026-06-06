@@ -16,13 +16,13 @@
     "exit"
   ],
   "parse": "json",
-  "_rationale": "code_insight with no arguments defaults to mode=overview on both Go and C++. Emits a 350-byte LCF payload with REPOSITORY MAP + HEALTH sections. Byte-identical on multi-lang. Retrofitted with full _rationale per iter-7 karpathy rule. The mode-statistics/structure/unified/git_analyze/git_hotspots descriptors lock the per-mode dispatch path; this descriptor specifically locks the default (no-mode-given) behaviour so a regression that changes the default would surface here even if every explicit mode still works.",
+  "_rationale": "code_insight with no arguments defaults to mode=overview on both Go and C++. Go emits REPOSITORY MAP + HEALTH only. C++ enriches the overview with session-startup sections Go has no counterpart for — SUMMARY, ENTRY POINTS, DEPENDENCIES, NEXT STEPS (and VOCABULARY when the corpus has non-standard naming); added in c735c33 for AI session-startup orientation. Those C++-only sections are stripped by the text_normalize mask below so parity asserts the common REPOSITORY MAP + HEALTH subset is byte-identical on multi-lang. The integration golden (tests/integration/goldens/mcp/code_insight/basic.json) locks the FULL C++ output including the enrichment sections; this descriptor locks the Go-common subset. The mode-statistics/structure/unified/git_analyze/git_hotspots descriptors lock the per-mode dispatch path; this descriptor locks the default (no-mode-given) behaviour so a regression that changes the common subset would surface here even if every explicit mode still works.",
   "tiers": {
     "stable": [
       "result.content[].type",
       "result.content[].text"
     ],
-    "_rationale_stable": "Envelope matches MCP spec. result.content[].text byte-for-byte identical 350-byte overview LCF payload on multi-lang. Probe: /tmp/parity-iter4/code_insight___.{go,cpp}.json.",
+    "_rationale_stable": "Envelope matches MCP spec. After the C++-only session-startup sections are masked, result.content[].text is byte-for-byte identical to Go's REPOSITORY MAP + HEALTH overview payload on multi-lang.",
     "ignore": [],
     "_rationale_ignore": "Universal MCP descriptor noise."
   },
@@ -37,7 +37,7 @@
         "with": ""
       }
     ],
-    "_rationale_replace": "Defense mask for the C++-only `== VOCABULARY ==` section (low-discoverability naming signal; Go has no counterpart). On the flat multi-lang corpus C++ emits no such section, so this is a no-op here, but it keeps the descriptor robust if the corpus ever grows a non-standard name or alias."
+    "_rationale_replace": "Strips the C++-only session-startup sections (SUMMARY, ENTRY POINTS, DEPENDENCIES, NEXT STEPS, VOCABULARY) so the residual payload is the Go-common REPOSITORY MAP + HEALTH subset. These are intentional C++ enrichments with no Go counterpart (c735c33); Go's overview never emits them. On the flat multi-lang corpus C++ DOES emit SUMMARY/ENTRY POINTS/NEXT STEPS, so this mask is load-bearing here (not a no-op). The full enriched output is locked separately by the integration golden."
   },
   "tolerances": {
     "score_abs": 0.05,
