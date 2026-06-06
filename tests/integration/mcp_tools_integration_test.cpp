@@ -248,48 +248,36 @@ TEST_F(McpToolsIntegrationTest, DebugInfoToolReturnsData) {
 // -- Tool: git_analysis -------------------------------------------------------
 
 TEST_F(McpToolsIntegrationTest, GitAnalysisToolReturnsErrorOrData) {
-    auto result = handle_git_analysis({{"scope", "staged"}});
-    // Git analysis may return an error without a real git repo; verify
-    // it handles the case gracefully with a valid JSON response.
+    auto result = handle_git_analysis({{"scope", "staged"}}, *indexer_);
+    // The scratch index root is not a git repo, so the real handler fails
+    // fast with a structured error — never malformed payload.
     auto json = nlohmann::json::parse(result.text);
     EXPECT_TRUE(json.is_object());
+    EXPECT_TRUE(result.is_error);
 }
 
-TEST_F(McpToolsIntegrationTest, GitAnalysisIsCurrentlyAStubAndAdvertisesItHonestly) {
-    // The MCP handle_git_analysis() in src/mcp/handlers_index.cpp is a
-    // stub that returns status="not_available". This test locks the
-    // honest-not-implemented shape so the stub doesn't quietly start
-    // returning bad data. When the analyzer is wired in
-    // (see Dart task sL0AJDf2hjIh), flip this expectation to the full
-    // report shape and add per-field assertions.
-    auto result = handle_git_analysis({{"scope", "wip"}});
+TEST_F(McpToolsIntegrationTest, GitAnalysisIsWiredToRealAnalyzerNotAStub) {
+    // handle_git_analysis() now drives the real git::Analyzer (Dart task
+    // sL0AJDf2hjIh). On a non-git root it must FAIL FAST — it must NOT fall
+    // back to the old "not_available"/"future" stub payload, which would mask
+    // the missing-repo condition behind a fake-success envelope.
+    auto result = handle_git_analysis({{"scope", "wip"}}, *indexer_);
     auto json = nlohmann::json::parse(result.text);
     ASSERT_TRUE(json.is_object());
 
-    ASSERT_TRUE(json.contains("status"));
-    EXPECT_EQ(json["status"].get<std::string>(), "not_available");
-
-    ASSERT_TRUE(json.contains("message"));
-    EXPECT_TRUE(json["message"].is_string());
-    EXPECT_FALSE(json["message"].get<std::string>().empty());
-    EXPECT_NE(json["message"].get<std::string>().find("future"),
-              std::string::npos)
-        << "Stub message should reference 'future' to set user expectations";
-
-    // Stub MUST NOT include data-fields that would mislead the caller.
-    EXPECT_FALSE(json.contains("summary"));
-    EXPECT_FALSE(json.contains("duplicates"));
-    EXPECT_FALSE(json.contains("naming_issues"));
-    EXPECT_FALSE(json.contains("metrics_issues"));
+    EXPECT_TRUE(result.is_error);
+    // The dead stub keys must be gone.
+    EXPECT_FALSE(json.contains("status"));
+    EXPECT_NE(result.text.find("git"), std::string::npos);
 }
 
 TEST_F(McpToolsIntegrationTest, GitAnalysisHandlesUnknownScope) {
-    auto result = handle_git_analysis({{"scope", "nonsense_value"}});
+    auto result = handle_git_analysis({{"scope", "nonsense_value"}}, *indexer_);
     auto json = nlohmann::json::parse(result.text);
-    // Either reports an error object or quietly normalizes; both are
-    // acceptable, but the response must remain a JSON object so the
-    // MCP transport never sees malformed payload.
+    // Unknown scope is rejected with a structured error; the response must
+    // remain a JSON object so the MCP transport never sees malformed payload.
     EXPECT_TRUE(json.is_object());
+    EXPECT_TRUE(result.is_error);
 }
 
 // -- Full MCP stdio round-trip ------------------------------------------------

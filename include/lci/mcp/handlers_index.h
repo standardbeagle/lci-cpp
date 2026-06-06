@@ -28,8 +28,12 @@ ToolResult handle_index_stats(const nlohmann::json& params,
 ToolResult handle_debug_info(const nlohmann::json& params,
                              MasterIndex& indexer);
 
-/// Handles "git_analysis": stub returning not-yet-available message.
-ToolResult handle_git_analysis(const nlohmann::json& params);
+/// Handles "git_analysis": real git-change analysis against the live index.
+/// Builds a git::Provider from the project root, runs git::Analyzer, and emits
+/// the canonical report shape (summary/metrics_issues/.../metadata). Fails fast
+/// with an error response when the project root is not a git repository.
+ToolResult handle_git_analysis(const nlohmann::json& params,
+                               MasterIndex& indexer);
 
 }  // namespace mcp
 }  // namespace lci

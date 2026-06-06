@@ -9,6 +9,9 @@
 
 #include <lci/core/file_content_store.h>
 #include <lci/core/reference_tracker.h>
+#include <lci/git/analyzer.h>
+#include <lci/git/provider.h>
+#include <lci/git/types.h>
 #include <lci/indexing/master_index.h>
 #include <lci/symbol.h>
 
@@ -371,13 +374,50 @@ ToolResult handle_debug_info(const nlohmann::json& params,
 
 // -- handle_git_analysis ------------------------------------------------------
 
-ToolResult handle_git_analysis(const nlohmann::json& /*params*/) {
-    nlohmann::json response;
-    response["status"] = "not_available";
-    response["message"] =
-        "Git analysis engine has not been ported to C++ yet. "
-        "This feature will be available in a future release.";
-    return make_json_response(response);
+ToolResult handle_git_analysis(const nlohmann::json& params,
+                               MasterIndex& indexer) {
+    // Validate input before doing any work. Scope (default 'staged') matches
+    // the CLI/HTTP surface; mirrors IndexServer::handle_git_analyze.
+    git::AnalysisParams ga = git::AnalysisParams::defaults();
+    auto scope = params.value("scope", std::string("staged"));
+    if (scope == "staged") {
+        ga.scope = git::AnalysisScope::Staged;
+    } else if (scope == "wip") {
+        ga.scope = git::AnalysisScope::WIP;
+    } else if (scope == "commit") {
+        ga.scope = git::AnalysisScope::Commit;
+    } else if (scope == "range") {
+        ga.scope = git::AnalysisScope::Range;
+    } else {
+        return make_error_response("git_analysis", "invalid scope: " + scope);
+    }
+
+    const std::string& root = indexer.config().project.root;
+    git::Provider provider;
+    if (!git::Provider::create(root, provider)) {
+        return make_error_response(
+            "git_analysis",
+            "not a git repository: " + (root.empty() ? "<no root>" : root));
+    }
+
+    ga.base_ref = params.value("base_ref", std::string());
+    ga.target_ref = params.value("target_ref", std::string());
+    ga.similarity_threshold = params.value("similarity_threshold", 0.8);
+    ga.max_findings = params.value("max_findings", 20);
+    if (params.contains("focus") && params["focus"].is_array()) {
+        ga.focus = params["focus"].get<std::vector<std::string>>();
+    }
+
+    git::Analyzer analyzer(provider, indexer);
+    git::AnalysisReport report;
+    if (!analyzer.analyze(ga, report)) {
+        return make_error_response("git_analysis", "git analyze failed");
+    }
+
+    // Emit the canonical report shape directly as the tool payload — same
+    // serializer the HTTP /git-analyze endpoint uses, and the shape Go's MCP
+    // git_analysis tool returns (summary/metrics_issues/.../metadata).
+    return make_json_response(git::report_to_json(report, root));
 }
 
 // -- register_index_handlers --------------------------------------------------
@@ -467,8 +507,8 @@ void register_index_handlers(McpServer& server, MasterIndex* indexer) {
           {"max_findings", "integer",
            "Maximum findings to return per category (default: 20)", ""}},
          {}},
-        [](const nlohmann::json& p) -> ToolResult {
-            return handle_git_analysis(p);
+        [indexer](const nlohmann::json& p) -> ToolResult {
+            return handle_git_analysis(p, *indexer);
         });
 }
 

@@ -465,14 +465,86 @@ TEST_F(ExploreIndexTestFixture, DebugInfoUnknownMode) {
 // git_analysis tests
 // =============================================================================
 
-TEST_F(ExploreIndexTestFixture, GitAnalysisStub) {
+// The fixture's tmp_dir_ is a bare scratch directory, not a git repo. The real
+// handler must fail fast with a clear error — NOT a "not_available" stub.
+TEST_F(ExploreIndexTestFixture, GitAnalysisFailsFastOnNonGitDir) {
     nlohmann::json params;
-    params["scope"] = "staged";
-    auto result = handle_git_analysis(params);
-    EXPECT_FALSE(result.is_error);
+    params["scope"] = "wip";
+    auto result = handle_git_analysis(params, *indexer_);
+    EXPECT_TRUE(result.is_error);
     auto j = nlohmann::json::parse(result.text);
-    EXPECT_EQ(j["status"].get<std::string>(), "not_available");
-    EXPECT_TRUE(j.contains("message"));
+    // make_error_response carries the operation + message; assert it names the
+    // git-repo failure rather than the old hardcoded stub payload.
+    EXPECT_EQ(j.value("status", std::string()), std::string());  // no stub key
+    std::string text = result.text;
+    EXPECT_NE(text.find("git"), std::string::npos);
+}
+
+TEST_F(ExploreIndexTestFixture, GitAnalysisRejectsBadScope) {
+    nlohmann::json params;
+    params["scope"] = "bogus";
+    auto result = handle_git_analysis(params, *indexer_);
+    EXPECT_TRUE(result.is_error);
+}
+
+// Real-repo happy path: git-init a throwaway repo, commit a baseline file, make
+// an uncommitted long function (a WIP change), index it, and run the handler.
+// Asserts the canonical report shape (summary + metadata) and a metrics finding
+// for the over-length function — no mocks, real Provider + Analyzer.
+TEST_F(ExploreIndexTestFixture, GitAnalysisRealRepoReturnsReport) {
+    auto repo = std::filesystem::temp_directory_path() /
+                "lci_git_analysis_real_test";
+    std::filesystem::remove_all(repo);
+    std::filesystem::create_directories(repo);
+
+    auto git = [&](const std::string& args) {
+        std::string cmd = "git -C \"" + repo.string() + "\" " + args +
+                          " >/dev/null 2>&1";
+        return std::system(cmd.c_str()) == 0;
+    };
+    ASSERT_TRUE(git("init"));
+    git("config user.email test@test.com");
+    git("config user.name test");
+
+    // Baseline committed file (a short, tracked function).
+    {
+        std::ofstream f(repo / "base.go");
+        f << "package main\n\nfunc Huge() int { return 1 }\n";
+    }
+    ASSERT_TRUE(git("add ."));
+    ASSERT_TRUE(git("commit -m baseline"));
+
+    // Uncommitted WIP modification of the tracked file: grow Huge() past 100
+    // lines so the metrics analyzer raises a long_function finding. WIP scope
+    // compares the working tree against HEAD, so the change must be to a
+    // tracked file (an untracked new file is not part of the WIP diff).
+    {
+        std::ofstream f(repo / "base.go");
+        f << "package main\n\nfunc Huge() int {\n\tx := 0\n";
+        for (int i = 0; i < 130; ++i) f << "\tx += " << i << "\n";
+        f << "\treturn x\n}\n";
+    }
+
+    Config cfg;
+    cfg.project.root = repo.string();
+    MasterIndex idx(cfg);
+    idx.index_directory(repo.string());
+
+    nlohmann::json params;
+    params["scope"] = "wip";
+    auto result = handle_git_analysis(params, idx);
+    ASSERT_FALSE(result.is_error) << result.text;
+
+    auto j = nlohmann::json::parse(result.text);
+    ASSERT_TRUE(j.contains("summary"));
+    ASSERT_TRUE(j.contains("metadata"));
+    EXPECT_EQ(j["metadata"].value("scope", std::string()), "wip");
+    EXPECT_GE(j["summary"].value("files_changed", 0), 1);
+    // The long function must surface as a metrics issue.
+    ASSERT_TRUE(j.contains("metrics_issues"));
+    EXPECT_FALSE(j["metrics_issues"].empty());
+
+    std::filesystem::remove_all(repo);
 }
 
 // =============================================================================
