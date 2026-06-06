@@ -17,6 +17,10 @@
 #include <lci/core/graph_propagator.h>
 #include <lci/core/reference_tracker.h>
 #include <lci/core/semantic_annotator.h>
+#include <lci/git/analyzer.h>
+#include <lci/git/frequency_analyzer.h>
+#include <lci/git/provider.h>
+#include <lci/git/types.h>
 #include <lci/indexing/master_index.h>
 #include <lci/mcp/validation.h>
 #include <lci/symbol.h>
@@ -742,6 +746,109 @@ void emit_statistics(std::ostringstream& out, const ComplexityMetrics& cm,
     out << "---\n";
 }
 
+// Rewrites an absolute path to project-root-relative for compact, stable
+// output (mirrors git::report_to_json's normalization).
+std::string git_rel(std::string_view path, std::string_view root) {
+    if (!root.empty() && path.rfind(root, 0) == 0) {
+        path.remove_prefix(root.size());
+        while (!path.empty() && path.front() == '/') path.remove_prefix(1);
+    }
+    return std::string(path);
+}
+
+// == GIT CHANGES == — real git change-analysis (duplicates / naming / metrics)
+// for the working set. C++ enrichment: Go computes this in git_analyze mode but
+// its LCF formatter discards the git fields and prints an all-zero STATISTICS
+// block, so this data is unreachable in Go's text output. Sourced from
+// git::Analyzer (the same engine behind the git_analysis tool + HTTP
+// /git-analyze).
+void emit_git_changes(std::ostringstream& out, const git::AnalysisReport& r,
+                      std::string_view root) {
+    const auto& s = r.summary;
+    out << "== GIT CHANGES ==\n";
+    out << "scope=" << to_string(r.metadata.scope)
+        << " files_changed=" << s.files_changed
+        << " added=" << s.symbols_added << " modified=" << s.symbols_modified
+        << " deleted=" << s.symbols_deleted << " risk=" << fmt2(s.risk_score)
+        << "\n";
+    out << "findings: duplicates=" << s.duplicates_found
+        << " naming=" << s.naming_issues_found
+        << " metrics=" << s.metrics_issues_found << "\n";
+    if (!s.top_recommendation.empty())
+        out << "top: " << s.top_recommendation << "\n";
+
+    // Top metrics issues, sorted by (file, line) for deterministic output.
+    if (!r.metrics_issues.empty()) {
+        std::vector<const git::MetricsFinding*> mi;
+        mi.reserve(r.metrics_issues.size());
+        for (const auto& m : r.metrics_issues) mi.push_back(&m);
+        std::sort(mi.begin(), mi.end(), [](const auto* a, const auto* b) {
+            if (a->symbol.file_path != b->symbol.file_path)
+                return a->symbol.file_path < b->symbol.file_path;
+            return a->symbol.line < b->symbol.line;
+        });
+        out << "metrics_issues:\n";
+        size_t lim = std::min(mi.size(), size_t{5});
+        for (size_t i = 0; i < lim; ++i) {
+            const auto& m = *mi[i];
+            out << "  " << m.symbol.name << " ("
+                << git_rel(m.symbol.file_path, root) << ":" << m.symbol.line
+                << ") " << to_string(m.issue_type)
+                << " loc=" << m.symbol.lines_of_code
+                << " cc=" << m.symbol.complexity << "\n";
+        }
+        if (mi.size() > lim)
+            out << "  ... and " << (mi.size() - lim) << " more\n";
+    }
+    out << "---\n";
+}
+
+// == GIT HOTSPOTS == — change-frequency / churn analysis: the files that change
+// most, multi-author collision zones, and module ownership. C++ enrichment:
+// like git_analyze, Go computes this in git_hotspots mode but discards it in the
+// LCF formatter. Sourced from git::FrequencyAnalyzer. NOTE: output reflects a
+// rolling time window over live git history, so values are environment- and
+// time-dependent (not byte-stable across runs) — parity for this mode is
+// envelope-only by design.
+void emit_git_hotspots(std::ostringstream& out,
+                       const git::ChangeFrequencyReport& r,
+                       git::TimeWindow window, std::string_view root) {
+    const auto& s = r.summary;
+    out << "== GIT HOTSPOTS ==\n";
+    out << "window=" << to_string(window)
+        << " files_analyzed=" << s.total_files_analyzed
+        << " commits=" << s.total_commits_analyzed
+        << " hotspots=" << s.hotspots_found
+        << " anti_patterns=" << s.anti_patterns_found << "\n";
+
+    if (!r.hotspots.empty()) {
+        out << "hotspots:\n";
+        size_t lim = std::min(r.hotspots.size(), size_t{8});
+        for (size_t i = 0; i < lim; ++i) {
+            const auto& h = r.hotspots[i];
+            const auto it = h.metrics.find(window);
+            int changes = it != h.metrics.end() ? it->second.change_count : 0;
+            int added = it != h.metrics.end() ? it->second.lines_added : 0;
+            int deleted = it != h.metrics.end() ? it->second.lines_deleted : 0;
+            out << "  " << git_rel(h.file_path, root) << " changes=" << changes
+                << " authors=" << h.contributors.size() << " churn=+" << added
+                << "/-" << deleted << "\n";
+        }
+    }
+    if (!r.collisions.empty()) {
+        out << "collisions:\n";
+        size_t lim = std::min(r.collisions.size(), size_t{5});
+        for (size_t i = 0; i < lim; ++i) {
+            const auto& c = r.collisions[i];
+            out << "  " << git_rel(c.path, root)
+                << " score=" << fmt2(c.collision_score)
+                << " contributors=" << c.contributors.size()
+                << " severity=" << to_string(c.severity) << "\n";
+        }
+    }
+    out << "---\n";
+}
+
 // == VOCABULARY == — low-discoverability naming signal (C++ enhancement; Go
 // has no equivalent section). `outliers` are important symbols whose names use
 // unknown/obscure vocabulary an agent won't search for; `aliases_in_use` tells
@@ -1161,19 +1268,51 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
         if (objids) emit_object_ids_hint(out);
         emit_next_steps(out);
     } else if (mode == "git_analyze" || mode == "git_hotspots") {
-        // build_git_analyze is still a stub (no git-provider integration);
-        // on a corpus without git history Go emits an all-zero STATISTICS
-        // section, which an empty metric set reproduces honestly — no fake
-        // data, just "nothing computed yet". Real git wiring is tracked
-        // separately (Dart loop-fix). emit_statistics with empty inputs and
-        // min_cohesion forced to 0 yields Go's exact zero block.
-        ComplexityMetrics zero_cm;
-        CouplingMetrics zero_cp;
-        CohesionMetrics zero_ch;
-        zero_ch.min_cohesion = 0.0;
-        QualityMetrics zero_q;
-        emit_lcf_header(out, mode, 1, lcf_token_count(0, 0, false, 0, true));
-        emit_statistics(out, zero_cm, zero_cp, zero_ch, zero_q, 0.0);
+        // Real git wiring. Go computes these but its LCF formatter discards the
+        // git fields (emits an all-zero STATISTICS block); C++ surfaces the
+        // real data — intentional enrichment, parity is envelope-only for these
+        // two modes (git_hotspots is additionally time-window-volatile). Fail
+        // fast when the project root is not a git repository — no fake zeros.
+        git::Provider provider;
+        if (!git::Provider::create(project_root, provider)) {
+            return make_error_response(
+                "code_insight",
+                "mode=" + mode + " requires a git repository; '" +
+                    (project_root.empty() ? "<no root>" : project_root) +
+                    "' is not one");
+        }
+
+        if (mode == "git_analyze") {
+            git::AnalysisParams ga = git::AnalysisParams::defaults();
+            auto scope = params.value("scope", std::string("staged"));
+            if (scope == "wip") ga.scope = git::AnalysisScope::WIP;
+            else if (scope == "commit") ga.scope = git::AnalysisScope::Commit;
+            else if (scope == "range") ga.scope = git::AnalysisScope::Range;
+            else ga.scope = git::AnalysisScope::Staged;
+            ga.base_ref = params.value("base_ref", std::string());
+            ga.target_ref = params.value("target_ref", std::string());
+
+            git::Analyzer analyzer(provider, indexer);
+            git::AnalysisReport report;
+            if (!analyzer.analyze(ga, report))
+                return make_error_response("code_insight",
+                                           "git change analysis failed");
+            emit_lcf_header(out, mode, 1, lcf_token_count(0, 0, false, 0, true));
+            emit_git_changes(out, report, project_root);
+        } else {  // git_hotspots
+            git::ChangeFrequencyParams fp = git::ChangeFrequencyParams::defaults();
+            fp.time_window = params.value("time_window", std::string("30d"));
+            fp.file_pattern = params.value("file_pattern", std::string());
+            git::TimeWindow win = git::parse_time_window(fp.time_window);
+
+            git::FrequencyAnalyzer freq(provider);
+            git::ChangeFrequencyReport report;
+            if (!freq.analyze(fp, report))
+                return make_error_response("code_insight",
+                                           "git frequency analysis failed");
+            emit_lcf_header(out, mode, 1, lcf_token_count(0, 0, false, 0, true));
+            emit_git_hotspots(out, report, win, project_root);
+        }
     } else if (mode == "detailed") {
         // Detailed sub-mode dispatch via the existing analyzers.
         // The engine's build_detailed() returns an empty response because

@@ -113,15 +113,6 @@ class CodebaseIntelligenceEngine {
         const CodebaseIntelligenceParams& params,
         const std::vector<FileSymbolData>& files) const;
 
-    /// Builds git change analysis.
-    CodebaseIntelligenceResponse build_git_analyze(
-        const CodebaseIntelligenceParams& params,
-        const std::vector<FileSymbolData>& files) const;
-
-    /// Builds git hotspot analysis.
-    CodebaseIntelligenceResponse build_git_hotspots(
-        const CodebaseIntelligenceParams& params,
-        const std::vector<FileSymbolData>& files) const;
 
   private:
     /// Extracts critical functions sorted by importance.

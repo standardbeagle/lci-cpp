@@ -16,15 +16,16 @@
     "exit"
   ],
   "parse": "json",
-  "_rationale": "code_insight mode=git_analyze is the git-flavoured branch. Multi-lang corpus has no git history so both binaries emit the empty-statistics fallback (complexity/coupling/cohesion/quality all 0.00). After iter-5 fix, C++ emits a byte-identical 302-byte LCF payload to Go: same mode=git_analyze header, same STATISTICS section with zero values. Probe: /tmp/parity-iter4/code_insight___mode___git_analyze.{go,cpp}.json both 302 bytes after rebuild. Locks the git-mode dispatch branch even though the corpus exercises the empty-history path; sufficient to detect any regression that re-routes git_analyze back to overview.",
+  "_rationale": "code_insight mode=git_analyze. INTENTIONAL DIVERGENCE: Go computes the git change report then DISCARDS it — its LCF formatter (formatStatisticsSection) never reads the GitAnalysis field, so Go emits an all-zero STATISTICS block. C++ surfaces the real data in a == GIT CHANGES == section (scope/files_changed/risk + top metrics issues), sourced from git::Analyzer (same engine as the git_analysis tool + HTTP /git-analyze). The two outputs share no common text, so content[].text is envelope-only here. Output also depends on the live working tree (staged changes), so it is not byte-stable across environments. Real-content correctness is locked C++-side by CodeInsightGitTest in tests/mcp_handlers_analysis_test.cpp against a controlled git fixture.",
   "tiers": {
     "stable": [
-      "result.content[].type",
+      "result.content[].type"
+    ],
+    "_rationale_stable": "JSON-RPC envelope + content type only. result.content[].text is intentional C++ enrichment Go discards (see _rationale) and is working-tree-dependent, so it is held in the ignore tier.",
+    "ignore": [
       "result.content[].text"
     ],
-    "_rationale_stable": "Envelope matches MCP spec. result.content[].text is byte-for-byte identical on multi-lang corpus's empty-git-history fallback. A future descriptor on a git-populated corpus would lock real git_analyze content; this one specifically locks the dispatch + empty-fallback path.",
-    "ignore": [],
-    "_rationale_ignore": "Universal MCP descriptor noise."
+    "_rationale_ignore": "result.content[].text: C++ emits real git change analysis (== GIT CHANGES ==) where Go's formatter drops the data and prints zero STATISTICS — no common subset to assert, and the content varies with the live working tree. Universal MCP descriptor noise (id/jsonrpc/meta) handled by the centralized baseline."
   },
   "tolerances": {
     "score_abs": 0.05,

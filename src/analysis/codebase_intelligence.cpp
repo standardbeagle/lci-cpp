@@ -151,11 +151,10 @@ CodebaseIntelligenceEngine::Result CodebaseIntelligenceEngine::analyze(
         response = build_unified(params, files, file_count, symbol_count);
     } else if (params.mode == "structure") {
         response = build_structure(params, files);
-    } else if (params.mode == "git_analyze") {
-        response = build_git_analyze(params, files);
-    } else if (params.mode == "git_hotspots") {
-        response = build_git_hotspots(params, files);
     }
+    // git_analyze / git_hotspots are handled entirely in the MCP layer
+    // (handle_code_insight), which owns the git::Provider; the engine has no
+    // provider so it never built them. is_valid_mode still accepts them.
 
     auto end = std::chrono::steady_clock::now();
     int elapsed_ms = static_cast<int>(
@@ -343,22 +342,6 @@ CodebaseIntelligenceResponse CodebaseIntelligenceEngine::build_structure(
 // ============================================================================
 // Git modes
 // ============================================================================
-
-CodebaseIntelligenceResponse CodebaseIntelligenceEngine::build_git_analyze(
-    const CodebaseIntelligenceParams& params,
-    const std::vector<FileSymbolData>& files) const {
-    CodebaseIntelligenceResponse response;
-    // Git change analysis requires git provider integration (7.4c).
-    return response;
-}
-
-CodebaseIntelligenceResponse CodebaseIntelligenceEngine::build_git_hotspots(
-    const CodebaseIntelligenceParams& params,
-    const std::vector<FileSymbolData>& files) const {
-    CodebaseIntelligenceResponse response;
-    // Git hotspot analysis requires git provider integration (7.4c).
-    return response;
-}
 
 // ============================================================================
 // Private helpers

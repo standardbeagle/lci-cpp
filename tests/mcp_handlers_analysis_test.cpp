@@ -11,6 +11,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -505,21 +506,103 @@ TEST_F(CodeInsightTest, UnifiedModeWorks) {
     EXPECT_NE(result.text.find("== STATISTICS =="), std::string::npos);
 }
 
-TEST_F(CodeInsightTest, GitAnalyzeModeWorks) {
+// The base fixture's temp_dir_ is not a git repo. Both git modes must now
+// FAIL FAST (real git wiring) instead of emitting a fake zero-STATISTICS block.
+TEST_F(CodeInsightTest, GitAnalyzeFailsFastOnNonGitDir) {
     nlohmann::json params;
     params["mode"] = "git_analyze";
     auto result = handle_code_insight(params, *engine_, *indexer_);
-    EXPECT_FALSE(result.is_error);
-    EXPECT_NE(result.text.find("mode=git_analyze"), std::string::npos);
-    EXPECT_NE(result.text.find("== STATISTICS =="), std::string::npos);
+    EXPECT_TRUE(result.is_error);
+    EXPECT_NE(result.text.find("git"), std::string::npos);
 }
 
-TEST_F(CodeInsightTest, GitHotspotsModeWorks) {
+TEST_F(CodeInsightTest, GitHotspotsFailsFastOnNonGitDir) {
     nlohmann::json params;
     params["mode"] = "git_hotspots";
     auto result = handle_code_insight(params, *engine_, *indexer_);
-    EXPECT_FALSE(result.is_error);
+    EXPECT_TRUE(result.is_error);
+    EXPECT_NE(result.text.find("git"), std::string::npos);
+}
+
+// Real-repo fixture: git-init a throwaway repo with several commits so both git
+// modes have history to analyze. Asserts the real LCF sections appear (no mocks,
+// real git::Analyzer + git::FrequencyAnalyzer).
+class CodeInsightGitTest : public ::testing::Test {
+  protected:
+    void SetUp() override {
+        repo_ = std::filesystem::temp_directory_path() / "lci_ci_git_repo";
+        std::filesystem::remove_all(repo_);
+        std::filesystem::create_directories(repo_);
+        ASSERT_TRUE(git("init"));
+        git("config user.email t@t.com");
+        git("config user.name t");
+
+        // Three commits touching churn.go so it becomes a hotspot.
+        for (int rev = 0; rev < 3; ++rev) {
+            std::ofstream f(repo_ / "churn.go");
+            f << "package main\n\nfunc Churn() int { return " << rev << "; }\n";
+            f.close();
+            ASSERT_TRUE(git("add ."));
+            ASSERT_TRUE(git("commit -m rev" + std::to_string(rev)));
+        }
+
+        // A staged long function (>100 lines) so git_analyze (default scope=
+        // staged) surfaces a metrics finding deterministically.
+        {
+            std::ofstream f(repo_ / "huge.go");
+            f << "package main\n\nfunc Huge() int {\n\tx := 0\n";
+            for (int i = 0; i < 130; ++i) f << "\tx += " << i << "\n";
+            f << "\treturn x\n}\n";
+        }
+        ASSERT_TRUE(git("add huge.go"));
+
+        Config config;
+        config.project.root = repo_.string();
+        indexer_ = std::make_unique<MasterIndex>(config);
+        indexer_->index_directory(repo_.string());
+        engine_ = std::make_unique<CodebaseIntelligenceEngine>();
+    }
+
+    void TearDown() override {
+        engine_.reset();
+        indexer_.reset();
+        std::error_code ec;
+        std::filesystem::remove_all(repo_, ec);
+    }
+
+    bool git(const std::string& args) {
+        std::string cmd =
+            "git -C \"" + repo_.string() + "\" " + args + " >/dev/null 2>&1";
+        return std::system(cmd.c_str()) == 0;
+    }
+
+    std::filesystem::path repo_;
+    std::unique_ptr<MasterIndex> indexer_;
+    std::unique_ptr<CodebaseIntelligenceEngine> engine_;
+};
+
+TEST_F(CodeInsightGitTest, GitAnalyzeSurfacesRealChanges) {
+    nlohmann::json params;
+    params["mode"] = "git_analyze";
+    params["scope"] = "staged";
+    auto result = handle_code_insight(params, *engine_, *indexer_);
+    ASSERT_FALSE(result.is_error) << result.text;
+    EXPECT_NE(result.text.find("mode=git_analyze"), std::string::npos);
+    EXPECT_NE(result.text.find("== GIT CHANGES =="), std::string::npos);
+    // The staged long function must surface as a metrics issue.
+    EXPECT_NE(result.text.find("metrics_issues:"), std::string::npos);
+    EXPECT_NE(result.text.find("Huge"), std::string::npos);
+}
+
+TEST_F(CodeInsightGitTest, GitHotspotsSurfacesRealChurn) {
+    nlohmann::json params;
+    params["mode"] = "git_hotspots";
+    params["time_window"] = "1y";  // wide window so the 3 commits are in range
+    auto result = handle_code_insight(params, *engine_, *indexer_);
+    ASSERT_FALSE(result.is_error) << result.text;
     EXPECT_NE(result.text.find("mode=git_hotspots"), std::string::npos);
+    EXPECT_NE(result.text.find("== GIT HOTSPOTS =="), std::string::npos);
+    EXPECT_NE(result.text.find("window=1y"), std::string::npos);
 }
 
 // =============================================================================
