@@ -110,6 +110,8 @@ class ImportResolver {
     std::vector<ImportBinding> extract_js_imports(std::string_view match) const;
     std::vector<ImportBinding> extract_python_imports(std::string_view match) const;
     std::vector<ImportBinding> extract_rust_imports(std::string_view match) const;
+    std::vector<ImportBinding> extract_csharp_imports(std::string_view match) const;
+    std::vector<ImportBinding> extract_cpp_imports(std::string_view match) const;
 };
 
 // ---------------------------------------------------------------------------

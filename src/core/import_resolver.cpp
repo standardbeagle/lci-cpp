@@ -48,6 +48,13 @@ FileImportData ImportResolver::extract_file_imports(
             bindings = extract_python_imports(line);
         } else if (ext_lower == ".rs") {
             bindings = extract_rust_imports(line);
+        } else if (ext_lower == ".cs") {
+            bindings = extract_csharp_imports(line);
+        } else if (ext_lower == ".cpp" || ext_lower == ".cc" ||
+                   ext_lower == ".cxx" || ext_lower == ".c" ||
+                   ext_lower == ".h" || ext_lower == ".hpp" ||
+                   ext_lower == ".hh" || ext_lower == ".hxx") {
+            bindings = extract_cpp_imports(line);
         }
 
         for (auto& b : bindings) {
@@ -388,6 +395,128 @@ std::vector<ImportBinding> ImportResolver::extract_rust_imports(
             b.original_name = std::string(use_stmt);
             bindings.push_back(std::move(b));
         }
+    }
+
+    return bindings;
+}
+
+std::vector<ImportBinding> ImportResolver::extract_csharp_imports(
+    std::string_view line) const {
+    std::vector<ImportBinding> bindings;
+    auto ltrim = [](std::string_view& s) {
+        while (!s.empty() && (s.front() == ' ' || s.front() == '\t'))
+            s.remove_prefix(1);
+    };
+    auto rtrim = [](std::string_view& s) {
+        while (!s.empty() && (s.back() == ' ' || s.back() == '\t' ||
+                              s.back() == '\r' || s.back() == ';'))
+            s.remove_suffix(1);
+    };
+
+    auto t = line;
+    ltrim(t);
+    if (t.starts_with("//")) return bindings;
+    // C# 10 file-scoped `global using`.
+    if (t.starts_with("global ")) { t.remove_prefix(7); ltrim(t); }
+    if (!t.starts_with("using")) return bindings;
+    t.remove_prefix(5);
+    // Require a separator so "usingFoo" / "usings" don't match.
+    if (t.empty() || (t.front() != ' ' && t.front() != '\t')) return bindings;
+    ltrim(t);
+    bool is_static = false;
+    if (t.starts_with("static ")) { is_static = true; t.remove_prefix(7); ltrim(t); }
+    rtrim(t);
+    if (t.empty()) return bindings;
+
+    // Alias: `using Foo = Bar.Baz;`
+    auto eq = t.find('=');
+    if (eq != std::string_view::npos) {
+        auto lhs = t.substr(0, eq);
+        auto rhs = t.substr(eq + 1);
+        rtrim(lhs);
+        ltrim(rhs);
+        ImportBinding b;
+        b.imported_name = std::string(lhs);
+        b.original_name = std::string(rhs);
+        b.source_file = std::string(rhs);
+        bindings.push_back(std::move(b));
+        return bindings;
+    }
+
+    // Namespace / static-type import: the last dotted component is the handle.
+    // A plain namespace `using` makes all of its types visible (wildcard).
+    auto dot = t.rfind('.');
+    std::string_view last = dot == std::string_view::npos ? t : t.substr(dot + 1);
+    ImportBinding b;
+    b.imported_name = std::string(last);
+    b.original_name = std::string(last);
+    b.source_file = std::string(t);
+    b.is_wildcard = !is_static;
+    bindings.push_back(std::move(b));
+    return bindings;
+}
+
+std::vector<ImportBinding> ImportResolver::extract_cpp_imports(
+    std::string_view line) const {
+    std::vector<ImportBinding> bindings;
+    auto t = line;
+    while (!t.empty() && (t.front() == ' ' || t.front() == '\t'))
+        t.remove_prefix(1);
+    if (t.starts_with("//")) return bindings;
+
+    // `#include "foo/bar.h"` — quoted includes are project-local; angle-bracket
+    // `<...>` includes are system/external and deliberately skipped (resolving
+    // them needs the compiler's -I search paths, which the simple heuristic
+    // does not have). Records the header so refs can prefer its symbols.
+    if (t.starts_with("#")) {
+        auto rest = t.substr(1);
+        while (!rest.empty() && (rest.front() == ' ' || rest.front() == '\t'))
+            rest.remove_prefix(1);
+        if (!rest.starts_with("include")) return bindings;
+        rest.remove_prefix(7);
+        while (!rest.empty() && (rest.front() == ' ' || rest.front() == '\t'))
+            rest.remove_prefix(1);
+        if (rest.empty() || rest.front() != '"') return bindings;  // skip <...>
+        auto q2 = rest.find('"', 1);
+        if (q2 == std::string_view::npos) return bindings;
+        auto path = rest.substr(1, q2 - 1);
+        if (path.empty()) return bindings;
+        auto slash = path.rfind('/');
+        std::string_view base =
+            slash == std::string_view::npos ? path : path.substr(slash + 1);
+        auto dot = base.rfind('.');
+        std::string_view stem =
+            dot == std::string_view::npos ? base : base.substr(0, dot);
+        ImportBinding b;
+        b.imported_name = std::string(stem);
+        b.original_name = std::string(stem);
+        b.source_file = std::string(path);
+        b.is_wildcard = true;  // a header brings many symbols
+        bindings.push_back(std::move(b));
+        return bindings;
+    }
+
+    // C++20 named modules: `import foo.bar;` (header-unit `import <...>;` /
+    // `import "...";` are skipped, same rationale as angle includes).
+    if (t.starts_with("import ")) {
+        auto rest = t.substr(7);
+        while (!rest.empty() && (rest.front() == ' ' || rest.front() == '\t'))
+            rest.remove_prefix(1);
+        if (rest.empty() || rest.front() == '<' || rest.front() == '"')
+            return bindings;
+        while (!rest.empty() && (rest.back() == ';' || rest.back() == ' ' ||
+                                 rest.back() == '\r'))
+            rest.remove_suffix(1);
+        if (rest.empty()) return bindings;
+        auto dot = rest.rfind('.');
+        std::string_view last =
+            dot == std::string_view::npos ? rest : rest.substr(dot + 1);
+        ImportBinding b;
+        b.imported_name = std::string(last);
+        b.original_name = std::string(last);
+        b.source_file = std::string(rest);
+        bindings.push_back(std::move(b));
+        return bindings;
     }
 
     return bindings;

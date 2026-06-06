@@ -569,6 +569,67 @@ TEST(ImportResolverTest, ExtractRustImports) {
     EXPECT_EQ(data.bindings[0].imported_name, "HashMap");
 }
 
+TEST(ImportResolverTest, ExtractCSharpImports) {
+    ImportResolver resolver;
+
+    auto data = resolver.extract_file_imports(
+        1, "Service.cs",
+        "using System.Text;\n"
+        "using static System.Math;\n"
+        "global using System.Linq;\n"
+        "using Json = System.Text.Json;\n"
+        "namespace App { }\n");
+
+    // namespace + static + global + alias = 4 bindings; the `namespace`
+    // declaration must NOT be treated as an import.
+    ASSERT_EQ(data.bindings.size(), 4u);
+    bool ns_text = false, alias_json = false;
+    for (const auto& b : data.bindings) {
+        if (b.imported_name == "Text" && b.is_wildcard) ns_text = true;
+        if (b.imported_name == "Json" &&
+            b.original_name == "System.Text.Json")
+            alias_json = true;
+    }
+    EXPECT_TRUE(ns_text);
+    EXPECT_TRUE(alias_json);
+}
+
+TEST(ImportResolverTest, ExtractCppIncludes) {
+    ImportResolver resolver;
+
+    auto data = resolver.extract_file_imports(
+        1, "engine.cpp",
+        "#include \"core/widget.h\"\n"
+        "#include <vector>\n"           // angle = system, skipped
+        "#  include \"util.hpp\"\n");   // spaced form
+
+    // Only the two quoted includes; <vector> skipped.
+    ASSERT_EQ(data.bindings.size(), 2u);
+    bool widget = false, util = false;
+    for (const auto& b : data.bindings) {
+        if (b.imported_name == "widget" &&
+            b.source_file == "core/widget.h" && b.is_wildcard)
+            widget = true;
+        if (b.imported_name == "util" && b.source_file == "util.hpp")
+            util = true;
+    }
+    EXPECT_TRUE(widget);
+    EXPECT_TRUE(util);
+}
+
+TEST(ImportResolverTest, ExtractCpp20ModuleImport) {
+    ImportResolver resolver;
+
+    auto data = resolver.extract_file_imports(
+        1, "mod.cpp",
+        "import foo.bar;\n"
+        "import <vector>;\n");  // header unit, skipped
+
+    ASSERT_EQ(data.bindings.size(), 1u);
+    EXPECT_EQ(data.bindings[0].imported_name, "bar");
+    EXPECT_EQ(data.bindings[0].source_file, "foo.bar");
+}
+
 TEST(ImportResolverTest, ResolvePrefersSameFile) {
     ImportResolver resolver;
 
