@@ -51,6 +51,11 @@ class Provider {
     /// Returns the full commit hash for a reference.
     bool get_commit_hash(std::string_view ref, std::string& out) const;
 
+    /// Runs `git <args...>` in the repo root and captures stdout. Each arg is
+    /// shell-quoted, so format strings / refs containing shell metacharacters
+    /// (`|`, spaces, `$`, …) are passed literally. Returns true on success.
+    bool run_git(const std::vector<std::string>& args, std::string& out) const;
+
   private:
     std::string repo_root_;
 
@@ -67,9 +72,6 @@ class Provider {
     bool parse_numstat(std::string_view output, DiffStats& out) const;
     bool get_parent_commit(std::string_view commit, std::string& out) const;
     bool get_staged_content(std::string_view path, std::string& out) const;
-
-    /// Runs a git command and captures stdout. Returns true on success.
-    bool run_git(const std::vector<std::string>& args, std::string& out) const;
 };
 
 }  // namespace git

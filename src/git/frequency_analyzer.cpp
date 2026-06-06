@@ -435,28 +435,11 @@ bool HistoryProvider::get_commit_history(int64_t since_epoch,
         for (const auto& p : paths) args.push_back(p);
     }
 
+    // Reuse Provider::run_git — it cd's into the repo root and shell-quotes
+    // every arg, so the `--format=%H|%an|%ae|%at|%s` placeholders (the `|` in
+    // particular) reach git literally instead of being parsed as shell pipes.
     std::string output;
-    // Use the underlying Provider's run_git. Since run_git is private,
-    // we build and run the command via provider's public interface.
-    // Provider doesn't expose a generic run_git, so we shell out directly.
-    std::string cmd = "cd \"" + provider_.repo_root() + "\" && git";
-    for (const auto& arg : args) {
-        cmd += ' ';
-        cmd += arg;
-    }
-    cmd += " 2>/dev/null";
-
-    FILE* pipe = popen(cmd.c_str(), "r");
-    if (!pipe) return false;
-
-    output.clear();
-    char buf[4096];
-    while (size_t n = fread(buf, 1, sizeof(buf), pipe)) {
-        output.append(buf, n);
-    }
-    int status = pclose(pipe);
-    // git log returns 0 on success, even with empty results.
-    if (status != 0 && output.empty()) return false;
+    if (!provider_.run_git(args, output) && output.empty()) return false;
 
     return parse_commit_history(output, out);
 }
@@ -474,19 +457,11 @@ bool HistoryProvider::get_repo_history(int64_t since_epoch,
         return get_commit_history(since_epoch, out);
     }
 
-    // Expand glob pattern to matching files.
-    std::string cmd = "cd \"" + provider_.repo_root() +
-                      "\" && git ls-files " + std::string(pattern) +
-                      " 2>/dev/null";
-    FILE* pipe = popen(cmd.c_str(), "r");
-    if (!pipe) return get_commit_history(since_epoch, out);
-
+    // Expand glob pattern to matching files. run_git shell-quotes the pattern
+    // so git (not the shell) does the globbing.
     std::string output;
-    char buf[4096];
-    while (size_t n = fread(buf, 1, sizeof(buf), pipe)) {
-        output.append(buf, n);
-    }
-    pclose(pipe);
+    if (!provider_.run_git({"ls-files", std::string(pattern)}, output))
+        return get_commit_history(since_epoch, out);
 
     std::vector<std::string> files;
     size_t start = 0;
