@@ -71,6 +71,9 @@ dashboard, entry points, complexity/coupling/cohesion statistics, module
 and feature breakdowns, naming vocabulary, and git change/hotspot
 analysis.
 
+Full per-tool reference — parameters, modes, output shapes, errors — is in
+[`docs/TOOLS.md`](docs/TOOLS.md).
+
 ## Architecture
 
 - **Indexer pipeline**: scanner → parser pool (tree-sitter) → trigram
