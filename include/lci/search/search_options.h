@@ -181,4 +181,15 @@ double calculate_match_quality(std::string_view content,
 /// Binary search for line number given sorted line offsets (int version).
 int search_binary_line_offset(const std::vector<int>& offsets, int offset);
 
+/// Binary search for the 1-based line number given the per-file line-start
+/// byte offsets (uint32_t version, as stored by FileContentStore).
+int search_binary_line_offset(const std::vector<uint32_t>& offsets, int offset);
+
+/// Shared literal/regex content matcher backing both SearchEngine::find_matches
+/// and MasterIndex::execute_search. Returns byte-offset matches; thread_local
+/// RE2 cache + lowercase buffers keep it allocation-free across a candidate scan.
+std::vector<SearchMatch> find_content_matches(std::string_view content,
+                                              std::string_view pattern,
+                                              const SearchOptions& options);
+
 }  // namespace lci

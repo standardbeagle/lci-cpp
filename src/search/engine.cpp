@@ -530,10 +530,14 @@ std::vector<SearchResult> SearchEngine::search(
     return out;
 }
 
-std::vector<SearchMatch> SearchEngine::find_matches(
+// Shared literal/regex content matcher. Single source of truth for both the
+// SearchEngine::find_matches read path and MasterIndex::execute_search (which
+// previously hand-rolled an O(content×pattern) duplicate). thread_local RE2
+// cache + lowercase buffers keep it allocation-free across files in a scan.
+std::vector<SearchMatch> find_content_matches(
     std::string_view content,
     std::string_view pattern,
-    const SearchOptions& options) const {
+    const SearchOptions& options) {
 
     std::vector<SearchMatch> matches;
     if (pattern.empty() || content.empty()) return matches;
@@ -654,6 +658,13 @@ std::vector<SearchMatch> SearchEngine::find_matches(
     }
 
     return matches;
+}
+
+std::vector<SearchMatch> SearchEngine::find_matches(
+    std::string_view content,
+    std::string_view pattern,
+    const SearchOptions& options) const {
+    return find_content_matches(content, pattern, options);
 }
 
 double SearchEngine::score_result(const SearchResult& result,

@@ -269,44 +269,31 @@ std::vector<SearchResult> MasterIndex::execute_search(
         auto content_sv = file_content_store_->get_content(fid);
         if (content_sv.empty()) continue;
 
-        std::string_view pat_sv(pattern);
-        size_t pos = 0;
-        while (pos < content_sv.size()) {
-            size_t found;
-            if (options.case_insensitive) {
-                found = std::string::npos;
-                for (size_t i = pos; i + pat_sv.size() <= content_sv.size(); ++i) {
-                    bool match = true;
-                    for (size_t j = 0; j < pat_sv.size(); ++j) {
-                        auto a = static_cast<unsigned char>(content_sv[i + j]);
-                        auto b = static_cast<unsigned char>(pat_sv[j]);
-                        if (std::tolower(a) != std::tolower(b)) {
-                            match = false;
-                            break;
-                        }
-                    }
-                    if (match) {
-                        found = i;
-                        break;
-                    }
-                }
-            } else {
-                found = content_sv.find(pat_sv, pos);
-            }
+        // Single disciplined matcher, shared with SearchEngine::find_matches.
+        // Replaces the former bespoke O(content×pattern) tolower double-loop;
+        // thread_local lowercase buffers keep the case-insensitive path
+        // allocation-free across the candidate scan.
+        auto matches = find_content_matches(content_sv, pattern, options);
+        if (matches.empty()) continue;
 
-            if (found == std::string_view::npos) break;
+        // Resolve line numbers via binary search over the precomputed
+        // line-start offsets instead of rescanning from offset 0 per match
+        // (the former O(matches×filesize) quadratic).
+        const std::vector<uint32_t>* line_offsets =
+            file_content_store_->get_line_offsets(fid);
+
+        for (const auto& m : matches) {
             if (static_cast<int>(results.size()) >= options.max_results) break;
 
-            // Compute line number from offset.
-            int line = 1;
-            int col = 0;
-            for (size_t i = 0; i < found; ++i) {
-                if (content_sv[i] == '\n') {
-                    ++line;
-                    col = 0;
-                } else {
-                    ++col;
-                }
+            int line;
+            int col;
+            if (line_offsets != nullptr && !line_offsets->empty()) {
+                line = search_binary_line_offset(*line_offsets, m.start);
+                col = m.start - static_cast<int>(
+                          (*line_offsets)[static_cast<size_t>(line - 1)]);
+            } else {
+                line = search_line_number(content_sv, m.start);
+                col = m.start - search_line_start(content_sv, m.start);
             }
 
             SearchResult r;
@@ -321,8 +308,6 @@ std::vector<SearchResult> MasterIndex::execute_search(
             r.score = 855.5;
             r.context = extract_context(fid, line, options.max_context_lines);
             results.push_back(std::move(r));
-
-            pos = found + 1;
         }
     }
 

@@ -191,6 +191,26 @@ int search_binary_line_offset(const std::vector<int>& offsets, int offset) {
     return lo + 1;
 }
 
+int search_binary_line_offset(const std::vector<uint32_t>& offsets,
+                              int offset) {
+    if (offsets.empty()) return 1;
+    if (offset < 0) offset = 0;
+
+    int lo = 0;
+    int hi = static_cast<int>(offsets.size()) - 1;
+    auto target = static_cast<uint32_t>(offset);
+
+    while (lo < hi) {
+        int mid = (lo + hi + 1) / 2;
+        if (offsets[static_cast<size_t>(mid)] <= target) {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    return lo + 1;
+}
+
 // -- SearchCoordinator --------------------------------------------------------
 
 std::vector<SearchResult> SearchCoordinator::deduplicate(
