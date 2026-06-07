@@ -45,6 +45,7 @@ add_library(lci_lib STATIC
     semantic/semantic_scorer.cpp
     semantic/synonym_table.cpp
     semantic/vocabulary_analyzer.cpp
+    analysis/call_graph.cpp
     analysis/side_effect_analyzer.cpp
     analysis/metrics_calculator.cpp
     analysis/health_analyzer.cpp

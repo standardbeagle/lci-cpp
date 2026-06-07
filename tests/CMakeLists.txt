@@ -53,6 +53,7 @@ add_executable(lci_tests
     php_integration_linker_test.cpp
     codebase_intelligence_test.cpp
     analysis_test.cpp
+    call_graph_test.cpp
     server_test.cpp
     client_test.cpp
     mcp_server_test.cpp

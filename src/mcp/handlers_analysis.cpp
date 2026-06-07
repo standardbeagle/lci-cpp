@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include <lci/analysis/call_graph.h>
 #include <lci/analysis/ci_vocabulary_analyzer.h>
 #include <lci/analysis/codebase_intelligence.h>
 #include <lci/analysis/coupling_analyzer.h>
@@ -856,43 +857,46 @@ struct LoadBearingSym {
     int reach{};           // distinct transitive callers
 };
 
-// Transitive load-bearing centrality over the real call graph. For each
-// function-like symbol, reverse-BFS its callers (and callers' callers, …) and
-// count the distinct set that can reach it. Every call edge is weighted 1.0 —
-// for a call graph an edge either carries dependence or it doesn't, so a fixed
-// PageRank-style per-hop decay constant would be arbitrary. (When per-call-site
-// control-flow is available, loop/branch context — not a constant — is the
-// principled way to weight edges; that data isn't surfaced per-edge yet.)
-// O(V·E) worst case; the principled near-linear version (SCC condensation +
-// reverse-topo DP over the reference graph) is the graph-cluster follow-up.
+// Transitive load-bearing centrality over the real call graph: how many
+// distinct other symbols can transitively reach each function (its transitive
+// callers). Every call edge is weighted 1.0 — for a call graph an edge either
+// carries dependence or it doesn't, so a fixed PageRank-style per-hop decay
+// constant would be arbitrary. (When per-call-site control flow is surfaced,
+// loop/branch context — not a constant — is the principled way to weight edges.)
+//
+// Backed by analysis::CallGraph: Tarjan SCC + bitset ancestor-closure over the
+// condensation computes exact reach for all nodes in one pass (diamonds counted
+// once, cycles collapsed correctly), replacing the former O(V·E) per-node walk.
 std::vector<LoadBearingSym> compute_load_bearing(
     const MasterIndex& indexer, const std::vector<FileSymbolData>& files,
     std::string_view project_root, size_t top_n) {
     const auto& ref = indexer.ref_tracker();
-    std::vector<LoadBearingSym> out;
+
+    std::vector<SymbolID> nodes;
+    absl::flat_hash_map<SymbolID, std::pair<std::string, std::string>> meta;
     for (const auto& f : files) {
         for (const auto* sym : f.symbols) {
             auto t = sym->symbol.type;
             if (t != SymbolType::Function && t != SymbolType::Method &&
                 t != SymbolType::Constructor)
                 continue;
-
-            absl::flat_hash_set<SymbolID> seen;
-            std::vector<SymbolID> queue = ref.get_caller_symbols(sym->id);
-            for (SymbolID id : queue) seen.insert(id);
-            for (size_t head = 0; head < queue.size(); ++head) {
-                for (SymbolID c : ref.get_caller_symbols(queue[head])) {
-                    if (c == sym->id) continue;  // self / cycle edge
-                    if (seen.insert(c).second) queue.push_back(c);
-                }
-            }
-            int reach = static_cast<int>(seen.size());
-            if (reach <= 0) continue;
-            out.push_back({sym->symbol.name,
-                           git_rel(f.path, project_root) + ":" +
-                               std::to_string(sym->symbol.line),
-                           reach});
+            nodes.push_back(sym->id);
+            meta[sym->id] = {sym->symbol.name,
+                             git_rel(f.path, project_root) + ":" +
+                                 std::to_string(sym->symbol.line)};
         }
+    }
+
+    analysis::CallGraph graph;
+    graph.build(nodes,
+                [&ref](SymbolID id) { return ref.get_callee_symbols(id); });
+    auto reach = graph.incoming_reach();
+
+    std::vector<LoadBearingSym> out;
+    for (int i = 0; i < graph.node_count(); ++i) {
+        if (reach[i] <= 0) continue;
+        const auto& m = meta[graph.id_at(i)];
+        out.push_back({m.first, m.second, reach[i]});
     }
     std::sort(out.begin(), out.end(),
               [](const LoadBearingSym& a, const LoadBearingSym& b) {
