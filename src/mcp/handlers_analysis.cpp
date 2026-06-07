@@ -857,10 +857,14 @@ struct LoadBearingSym {
     int reach{};           // distinct transitive callers
 };
 
-// A graph-detected community (Louvain) with its largest-reach exemplar members.
+// A graph-detected community (Louvain) with its largest-reach exemplar members
+// and, when semantic labels are available, the dominant propagated @lci: label
+// across its members (domain) plus the fraction carrying it (coherence).
 struct ClusterInfo {
     int size{};
     std::vector<std::string> exemplars;
+    std::string domain;     // dominant propagated label, "" if none/weak
+    double coherence{};     // members carrying `domain` / size
 };
 
 // Everything derived from one build of the call graph.
@@ -884,8 +888,8 @@ struct GraphSignals {
 // per-edge yet.)
 GraphSignals compute_graph_signals(const MasterIndex& indexer,
                                    const std::vector<FileSymbolData>& files,
-                                   std::string_view project_root,
-                                   size_t top_n) {
+                                   std::string_view project_root, size_t top_n,
+                                   const GraphPropagator* propagator) {
     const auto& ref = indexer.ref_tracker();
 
     std::vector<SymbolID> nodes;
@@ -963,6 +967,40 @@ GraphSignals compute_graph_signals(const MasterIndex& indexer,
                 ci.exemplars.push_back(name_at(idx));
                 if (ci.exemplars.size() >= 3) break;
             }
+
+            // Label-coherent domain: the dominant propagated @lci: label across
+            // this community's members. Crossing graph structure (who calls
+            // whom) with propagated semantics (what concept reaches here) turns
+            // an anonymous cluster into a named domain. `impure`/`pure` are
+            // purity signals, not domains — excluded.
+            if (propagator) {
+                absl::flat_hash_map<std::string, int> label_members;
+                for (int idx : mem) {
+                    absl::flat_hash_set<std::string> here;
+                    for (const auto& pl :
+                         propagator->get_labels(graph.id_at(idx))) {
+                        if (pl.strength < 0.1) continue;
+                        if (pl.label == "impure" || pl.label == "pure") continue;
+                        if (here.insert(pl.label).second)
+                            ++label_members[pl.label];
+                    }
+                }
+                std::string best;
+                int best_n = 0;
+                for (const auto& [lbl, cnt] : label_members) {
+                    if (cnt > best_n || (cnt == best_n && lbl < best)) {
+                        best_n = cnt;
+                        best = lbl;
+                    }
+                }
+                double coh = ci.size > 0
+                                 ? static_cast<double>(best_n) / ci.size
+                                 : 0.0;
+                if (!best.empty() && coh >= 0.5) {
+                    ci.domain = best;
+                    ci.coherence = coh;
+                }
+            }
             all.push_back(std::move(ci));
         }
         std::sort(all.begin(), all.end(), [](const ClusterInfo& a,
@@ -1018,7 +1056,10 @@ void emit_clusters(std::ostringstream& out, const GraphSignals& sig) {
         << " modularity=" << fmt2(sig.modularity) << "\n";
     for (size_t i = 0; i < sig.clusters.size(); ++i) {
         const auto& c = sig.clusters[i];
-        out << "  c" << i << " size=" << c.size << ": ";
+        out << "  c" << i << " size=" << c.size;
+        if (!c.domain.empty())
+            out << " domain=" << c.domain << " coherence=" << fmt2(c.coherence);
+        out << ": ";
         for (size_t j = 0; j < c.exemplars.size(); ++j) {
             if (j) out << ", ";
             out << c.exemplars[j];
@@ -1255,7 +1296,8 @@ std::string finalize_lcf(std::ostringstream& out) {
 ToolResult handle_code_insight(const nlohmann::json& raw_params,
                                CodebaseIntelligenceEngine& engine,
                                MasterIndex& indexer,
-                               SideEffectAnalyzer* analyzer) {
+                               SideEffectAnalyzer* analyzer,
+                               GraphPropagator* propagator) {
     auto params = raw_params.is_object() ? raw_params : nlohmann::json::object();
     auto mode = params.value("mode", "overview");
 
@@ -1438,7 +1480,7 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
         if (hd) emit_health(out, *hd, &d.purity);
         {
             auto sig = compute_graph_signals(indexer, files_data,
-                                             project_root, 5);
+                                             project_root, 5, propagator);
             emit_load_bearing(out, sig.load_bearing);
             emit_clusters(out, sig);
             emit_cycles(out, sig.cycles);
@@ -1617,7 +1659,7 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
         if (hd) emit_health(out, *hd, &d.purity);
         {
             auto sig = compute_graph_signals(indexer, files_data,
-                                             project_root, 5);
+                                             project_root, 5, propagator);
             emit_load_bearing(out, sig.load_bearing);
             emit_clusters(out, sig);
             emit_cycles(out, sig.cycles);
@@ -1721,13 +1763,15 @@ void register_analysis_handlers(McpServer& server,
            "'cs' for C#).",
            "string"}},
          {}},
-        [ci_engine, indexer, analyzer](const nlohmann::json& p) -> ToolResult {
+        [ci_engine, indexer, analyzer, propagator](
+            const nlohmann::json& p) -> ToolResult {
             if (!ci_engine || !indexer) {
                 return make_error_response(
                     "code_insight",
                     "codebase intelligence not available");
             }
-            return handle_code_insight(p, *ci_engine, *indexer, analyzer);
+            return handle_code_insight(p, *ci_engine, *indexer, analyzer,
+                                       propagator);
         });
 }
 

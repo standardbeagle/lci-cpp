@@ -680,6 +680,51 @@ TEST(CodeInsightGraphSignals, SurfacesClustersAndCycles) {
     std::filesystem::remove_all(dir);
 }
 
+// Flagship: label-coherent communities. A Louvain community whose members all
+// carry the same propagated @lci: label is reported as a named domain. Crosses
+// graph structure (CallGraph) with propagated semantics (GraphPropagator).
+TEST(CodeInsightLabelCoherence, ClustersGetDomainFromPropagatedLabels) {
+    auto dir = std::filesystem::temp_directory_path() / "lci_labelcoh_test";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    {
+        std::ofstream f(dir / "g.go");
+        f << "package main\n\n"
+             "func a1() int { return a2() }\n"
+             "func a2() int { return a1() + b1() }\n"
+             "func b1() int { return b2() }\n"
+             "func b2() int { return b1() }\n"
+             "func main() { _ = a1() }\n";
+    }
+
+    Config config;
+    config.project.root = dir.string();
+    MasterIndex indexer(config);
+    indexer.index_directory(dir.string());
+    CodebaseIntelligenceEngine engine;
+
+    // Seed every function with the domain label "core", then propagate, so each
+    // detected community is fully coherent on it.
+    GraphPropagator propagator(&indexer.ref_tracker());
+    for (const char* name : {"a1", "a2", "b1", "b2"}) {
+        for (const auto* es : indexer.ref_tracker().find_symbols_by_name(name))
+            propagator.seed_label(es->id, "core", 1.0);
+    }
+    propagator.propagate();
+
+    nlohmann::json params;  // overview
+    auto result =
+        handle_code_insight(params, engine, indexer, nullptr, &propagator);
+    ASSERT_FALSE(result.is_error) << result.text;
+    ASSERT_NE(result.text.find("== CLUSTERS =="), std::string::npos)
+        << result.text;
+    EXPECT_NE(result.text.find("domain=core"), std::string::npos)
+        << "communities should be labeled with the propagated domain\n"
+        << result.text;
+
+    std::filesystem::remove_all(dir);
+}
+
 // =============================================================================
 // Registration test
 // =============================================================================

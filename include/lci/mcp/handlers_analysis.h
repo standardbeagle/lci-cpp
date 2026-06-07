@@ -46,10 +46,13 @@ ToolResult handle_side_effects(const nlohmann::json& params,
 /// When `analyzer` is non-null, unified mode reads per-function purity from
 /// it to populate the HEALTH section's purity total/pure/impure counters.
 /// When null (legacy callers), purity reports total=N pure=0 impure=0.
+/// When `propagator` is non-null, the == CLUSTERS == section cross-references
+/// Louvain communities with propagated @lci: labels to name domains.
 ToolResult handle_code_insight(const nlohmann::json& params,
                                CodebaseIntelligenceEngine& engine,
                                MasterIndex& indexer,
-                               SideEffectAnalyzer* analyzer = nullptr);
+                               SideEffectAnalyzer* analyzer = nullptr,
+                               GraphPropagator* propagator = nullptr);
 
 }  // namespace mcp
 }  // namespace lci
