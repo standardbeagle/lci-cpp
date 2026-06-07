@@ -17,8 +17,6 @@ if(LCI_UNIVERSAL_BINARY AND APPLE)
     set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "macOS architectures" FORCE)
 endif()
 
-set(LCI_GO_PATH "" CACHE FILEPATH "Path to Go reference lci binary for parity tests")
-
 # Compiler detection and warning flag list.
 #
 # Flags live in LCI_WARNING_FLAGS and are applied PER-TARGET in src/ and tests/,

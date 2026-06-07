@@ -1,19 +1,20 @@
-# Spec-backed integration migrations
+# Spec-backed integration tests
 
-This directory now carries the C++-only migration path for parity descriptors
-that are already green and stable.
+This directory carries the C++ self-test suite: each spec runs the C++ `lci`
+binary and diffs its captured output against a checked-in golden. (The Go
+reference has been retired — the migration is complete — so these goldens are
+the source of truth, not a Go oracle.)
 
 ## Pattern
 
-1. Reuse an existing `tests/parity/descriptors/.../*.parity.json` spec.
-2. Run only the C++ side from `lci_integration_tests`.
-3. Compare the captured output against a checked-in golden with
-   `spec_diff::assert_matches`.
-4. Keep the original parity descriptor and parity runner untouched so the
-   Go-vs-C++ oracle still works.
+1. Write a spec under `integration/<surface>/<name>.spec.json` describing the
+   invocation (args + stdin) and the tier/ignore rules.
+2. Run the C++ side from `lci_integration_tests`.
+3. Compare the captured output against a checked-in golden under
+   `integration/goldens/...` with `spec_diff::assert_matches`. Regenerate
+   goldens with `LCI_UPDATE_GOLDENS=1`.
 
-The reusable helper is `integration/spec_runner.{h,cpp}` and the current
-migrated examples live in `spec_migration_test.cpp`.
+The reusable helper is `integration/spec_runner.{h,cpp}`.
 
 ## Goldens
 

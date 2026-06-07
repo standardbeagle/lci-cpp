@@ -1,1 +1,0 @@
-{"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"LCF/1.0\nmode=structure\ntier=1\ntokens=20\n---\n== STRUCTURE ==\ndirs=1 files=4 symbols=4 depth=0\ntypes: .go=1 .py=1 .rs=1 .cpp=1\ncategories: code=4 tests=0 config=0 docs=0\ntop_dirs:\n  .: 4 files\n---"}]}}

@@ -1,1 +1,0 @@
-{"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"LCF/1.0\nmode=statistics\ntier=1\ntokens=70\n---\n== STATISTICS ==\ncomplexity: avg=1.00 median=1.00\n  distribution: low=4\ncoupling: avg=0.00 max=0.00\ncohesion: avg=1.00 min=1.00\nquality: maintainability=98.00 debt=0.00 purity=0.00\n---"}]}}

@@ -1,4 +1,0 @@
-/home/beagle/work/core/lci-cpp/tests/parity/corpora/synthetic/multi-lang/a.go:3: function Add [exported] (complexity:1)
-/home/beagle/work/core/lci-cpp/tests/parity/corpora/synthetic/multi-lang/b.py:1: function add [exported] (complexity:1)
-/home/beagle/work/core/lci-cpp/tests/parity/corpora/synthetic/multi-lang/d.rs:1: function add [exported] (complexity:1)
-/home/beagle/work/core/lci-cpp/tests/parity/corpora/synthetic/multi-lang/c.cpp:1: function add [exported] (complexity:1)

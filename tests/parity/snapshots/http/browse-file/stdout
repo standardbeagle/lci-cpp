@@ -1,1 +1,0 @@
-{"file":{"path":"/home/beagle/work/core/lci-cpp/tests/parity/corpora/synthetic/multi-lang/a.go","file_id":4,"language":"go"},"symbols":[{"name":"Add","type":"function","file":"/home/beagle/work/core/lci-cpp/tests/parity/corpora/synthetic/multi-lang/a.go","line":3,"object_id":"B","is_exported":true,"complexity":1,"outgoing_refs":2}],"total":1}

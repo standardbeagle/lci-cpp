@@ -6,14 +6,12 @@ on:
     paths-ignore:
       - "**/*.md"
       - "docs/**"
-      - "tests/parity/snapshots/**"
       - ".gitignore"
   pull_request:
     branches: [main]
     paths-ignore:
       - "**/*.md"
       - "docs/**"
-      - "tests/parity/snapshots/**"
       - ".gitignore"
 
 # Cancel superseded runs on the same ref. A force-push to a PR kills the
@@ -83,30 +81,19 @@ jobs:
         if: false
         run: ctest --test-dir build/${{ matrix.preset }} --output-on-failure --parallel
 
-      - name: Build parity targets
+      - name: Build diff-engine unit tests
         if: matrix.preset == 'release'
-        run: |
-          if cmake --build build/release --target parity_runner --parallel 2>/dev/null; then
-            cmake --build build/release --target parity_unit_tests --parallel
-          else
-            echo "::warning::parity_runner not registered (LCI_GO_PATH unset). Skipping."
-          fi
+        run: cmake --build build/release --target parity_unit_tests --parallel
 
-      - name: Prep parity corpora
+      - name: Prep test corpora
         if: matrix.preset == 'release'
         run: ./tests/parity/corpora/prep_real.sh
 
-      - name: Run parity tests (parallel)
+      - name: Run diff-engine unit tests
         if: matrix.preset == 'release'
-        continue-on-error: true
         run: |
           cd build/release
-          PARITY_COUNT=$(ctest -L parity --show-only 2>/dev/null | grep -c "Test #" || true)
-          if [ "$PARITY_COUNT" -lt 2 ]; then
-            echo "::warning::Parity tests not registered. Skipping."
-            exit 0
-          fi
-          ctest -L parity --output-on-failure --parallel $(nproc) || true
+          ctest -L diff --output-on-failure --parallel $(nproc)
 
       # Free the build tree after the run so the self-hosted host doesn't
       # accumulate per-preset build dirs across the matrix. ccache + vcpkg

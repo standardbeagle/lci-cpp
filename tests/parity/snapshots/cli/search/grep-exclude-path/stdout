@@ -1,7 +1,0 @@
-Found 3 matches in 103.7ms (grep mode)
-
-b.py:1:4:def add(a: int, b: int) -> int:
-d.rs:1:7:pub fn add(a: i32, b: i32) -> i32 { a + b }
-
-c.cpp:1:4:int add(int a, int b) { return a + b; }
-
