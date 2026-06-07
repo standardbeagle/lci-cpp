@@ -40,6 +40,12 @@ Platform detect_platform();
 // Returns nullopt when the platform is unsupported or no asset matches.
 std::optional<Asset> select_asset(const std::vector<Asset>& assets, Platform p);
 
+// Pure security guards: a download URL/asset name from the API response is
+// passed to curl/tar via a shell, so reject anything that is not an https
+// GitHub URL free of shell-breaking characters, or a plain filename.
+bool is_safe_download_url(const std::string& url);
+bool is_safe_asset_name(const std::string& name);
+
 // Pure: find the expected lowercase-hex SHA-256 for `asset_name` in a
 // SHA256SUMS body ("<hash>  <filename>" per line). Empty if absent or the
 // matched token is not a valid 64-char hex digest.

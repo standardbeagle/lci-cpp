@@ -131,6 +131,47 @@ TEST(UpdaterChecksum, ExactFilenameMatchNotSuffix) {
               "5555555555555555555555555555555555555555555555555555555555555555");
 }
 
+using lci::update::is_safe_asset_name;
+using lci::update::is_safe_download_url;
+
+TEST(UpdaterSafeUrl, AcceptsGitHubReleaseAndCdnUrls) {
+    EXPECT_TRUE(is_safe_download_url(
+        "https://github.com/standardbeagle/lci-cpp/releases/download/v0.5.0/"
+        "lci-0.5.0-Linux.tar.gz"));
+    EXPECT_TRUE(is_safe_download_url(
+        "https://objects.githubusercontent.com/abc?token=1&x=2"));
+}
+
+TEST(UpdaterSafeUrl, RejectsNonHttpsAndNonGitHub) {
+    EXPECT_FALSE(is_safe_download_url(
+        "http://github.com/x/y/releases/download/v1/a.tar.gz"));
+    EXPECT_FALSE(is_safe_download_url("https://evil.com/a.tar.gz"));
+    EXPECT_FALSE(is_safe_download_url(
+        "https://github.com.evil.com/a.tar.gz"));
+}
+
+TEST(UpdaterSafeUrl, RejectsShellInjectionPayloads) {
+    EXPECT_FALSE(is_safe_download_url(
+        "https://github.com/$(rm -rf ~)/a.tar.gz"));
+    EXPECT_FALSE(is_safe_download_url(
+        "https://github.com/`id`/a.tar.gz"));
+    EXPECT_FALSE(is_safe_download_url(
+        "https://github.com/a\";rm -rf ~;\".tar.gz"));
+}
+
+TEST(UpdaterSafeName, AcceptsNormalAssetNames) {
+    EXPECT_TRUE(is_safe_asset_name("lci-0.5.0-Linux.tar.gz"));
+    EXPECT_TRUE(is_safe_asset_name("SHA256SUMS"));
+}
+
+TEST(UpdaterSafeName, RejectsPathsAndMetachars) {
+    EXPECT_FALSE(is_safe_asset_name(""));
+    EXPECT_FALSE(is_safe_asset_name(".."));
+    EXPECT_FALSE(is_safe_asset_name("../etc/passwd"));
+    EXPECT_FALSE(is_safe_asset_name("a b.tar.gz"));
+    EXPECT_FALSE(is_safe_asset_name("$(id).tar.gz"));
+}
+
 TEST(UpdaterDetect, DetectPlatformIsConsistent) {
     Platform p = lci::update::detect_platform();
     // On the CI/dev host this must resolve to a real, supported triple.

@@ -82,6 +82,18 @@ bool have_tool(const std::string& name) {
     return run_capture(name + " --version", out);
 }
 
+// URLs and filenames from the API response are passed to curl/tar/sha256sum
+// through a shell (popen/system). They are wrapped in double quotes, so the
+// only characters that remain dangerous in that context are those that survive
+// double-quoting: $ ` " \ and whitespace. We additionally pin the scheme to
+// https and the host to GitHub, so a compromised/MITM'd response cannot
+// redirect the shell to an arbitrary command or host.
+bool is_github_host(const std::string& host) {
+    return host == "github.com" || host == "api.github.com" ||
+           host == "codeload.github.com" || host == "githubusercontent.com" ||
+           ends_with(host, ".githubusercontent.com");
+}
+
 // A tag/version is embedded into a shell URL; restrict it to a safe charset.
 bool safe_version(const std::string& v) {
     if (v.empty()) return false;
@@ -296,6 +308,38 @@ std::optional<Asset> select_asset(const std::vector<Asset>& assets,
     }
 }
 
+bool is_safe_download_url(const std::string& url) {
+    const std::string scheme = "https://";
+    if (url.compare(0, scheme.size(), scheme) != 0) return false;
+    // Reject anything that could break out of the double-quoted shell argument.
+    for (char c : url) {
+        if (c == '$' || c == '`' || c == '"' || c == '\\' || c == ' ' ||
+            c == '\t' || c == '\n' || c == '\r') {
+            return false;
+        }
+    }
+    size_t host_start = scheme.size();
+    size_t host_end = url.find('/', host_start);
+    std::string host = url.substr(
+        host_start, host_end == std::string::npos ? std::string::npos
+                                                  : host_end - host_start);
+    // Drop any port suffix before matching.
+    size_t colon = host.find(':');
+    if (colon != std::string::npos) host = host.substr(0, colon);
+    return is_github_host(host);
+}
+
+bool is_safe_asset_name(const std::string& n) {
+    if (n.empty() || n == "." || n == "..") return false;
+    for (char c : n) {
+        if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '.' ||
+              c == '_' || c == '-')) {
+            return false;
+        }
+    }
+    return true;
+}
+
 std::string expected_hash_for(const std::string& sums_text,
                               const std::string& asset_name) {
     std::istringstream iss(sums_text);
@@ -357,8 +401,9 @@ int run_update(const UpdateConfig& cfg) {
 
     std::string json_text;
     std::string fetch =
-        "curl -fsSL -H \"Accept: application/vnd.github+json\" \"" + api_url +
-        "\"";
+        "curl -fsSL --proto =https -H \"Accept: application/vnd.github+json\" "
+        "\"" +
+        api_url + "\"";
     if (!run_capture(fetch, json_text) || json_text.empty()) {
         std::cerr << "Error: failed to query the GitHub releases API ("
                   << api_url << ").\n";
@@ -416,6 +461,11 @@ int run_update(const UpdateConfig& cfg) {
                   << " has no asset matching this platform.\n";
         return 1;
     }
+    if (!is_safe_asset_name(asset->name) || !is_safe_download_url(asset->url)) {
+        std::cerr << "Error: release asset has an unexpected name or download "
+                     "URL; refusing to proceed (" << asset->name << ").\n";
+        return 1;
+    }
 
     std::error_code ec;
     fs::path work = fs::temp_directory_path(ec) /
@@ -430,8 +480,8 @@ int run_update(const UpdateConfig& cfg) {
 
     fs::path tarball = work / asset->name;
     std::cout << "Downloading " << asset->name << " (" << latest << ")...\n";
-    std::string dl = "curl -fsSL -o \"" + tarball.string() + "\" \"" +
-                     asset->url + "\"";
+    std::string dl = "curl -fsSL --proto =https -o \"" + tarball.string() +
+                     "\" \"" + asset->url + "\"";
     if (run_cmd(dl) != 0) {
         std::cerr << "Error: download failed (" << asset->url << ").\n";
         fs::remove_all(work, ec);
@@ -446,9 +496,16 @@ int run_update(const UpdateConfig& cfg) {
             break;
         }
     }
+    if (!sums_url.empty() && !is_safe_download_url(sums_url)) {
+        std::cerr << "Error: SHA256SUMS has an unexpected download URL; "
+                     "refusing to proceed.\n";
+        fs::remove_all(work, ec);
+        return 1;
+    }
     if (!sums_url.empty()) {
         std::string sums_text;
-        if (!run_capture("curl -fsSL \"" + sums_url + "\"", sums_text)) {
+        if (!run_capture("curl -fsSL --proto =https \"" + sums_url + "\"",
+                         sums_text)) {
             std::cerr << "Error: failed to fetch SHA256SUMS for verification.\n";
             fs::remove_all(work, ec);
             return 1;

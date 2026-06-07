@@ -35,12 +35,12 @@ case "$os" in
         ;;
 esac
 
-# HTTP GET to stdout via curl or wget.
+# HTTP GET to stdout via curl or wget, pinned to https.
 http_get() {
     if command -v curl >/dev/null 2>&1; then
-        curl -fsSL "$1"
+        curl -fsSL --proto '=https' "$1"
     elif command -v wget >/dev/null 2>&1; then
-        wget -qO- "$1"
+        wget --https-only -qO- "$1"
     else
         err "neither curl nor wget found on PATH"
     fi
@@ -57,10 +57,16 @@ json="$(http_get "$api")" || err "failed to query GitHub releases API ($api)"
 url="$(printf '%s\n' "$json" \
     | grep -o '"browser_download_url"[ ]*:[ ]*"[^"]*"' \
     | sed 's/.*"browser_download_url"[ ]*:[ ]*"//; s/"$//' \
-    | grep "$pattern" \
+    | grep -F "$pattern" \
     | head -n1)"
 
 [ -n "$url" ] || err "no release asset matching '$pattern' found at $api"
+
+# Pin downloads to GitHub over https — refuse anything else.
+case "$url" in
+    https://github.com/* | https://*.githubusercontent.com/* | https://codeload.github.com/*) ;;
+    *) err "unexpected download URL (not https GitHub): $url";;
+esac
 
 if [ "${LCI_DRYRUN:-}" = "1" ]; then
     printf '%s\n' "$url"
@@ -88,9 +94,9 @@ asset_name="$(basename "$url")"
 tarball="$tmp/$asset_name"
 printf 'Downloading %s\n' "$url"
 if command -v curl >/dev/null 2>&1; then
-    curl -fsSL -o "$tarball" "$url" || err "download failed"
+    curl -fsSL --proto '=https' -o "$tarball" "$url" || err "download failed"
 else
-    wget -qO "$tarball" "$url" || err "download failed"
+    wget --https-only -qO "$tarball" "$url" || err "download failed"
 fi
 
 # Verify integrity against the release SHA256SUMS when present.
@@ -112,7 +118,8 @@ sha256_of() {
 
 if [ -n "$sums_url" ]; then
     if http_get "$sums_url" > "$tmp/SHA256SUMS" 2>/dev/null; then
-        expected="$(grep "  $asset_name\$" "$tmp/SHA256SUMS" | awk '{print $1}' | head -n1)"
+        # Exact filename field match — avoid regex/suffix false positives.
+        expected="$(awk -v n="$asset_name" '$2==n {print $1; exit}' "$tmp/SHA256SUMS")"
         if [ -z "$expected" ]; then
             err "SHA256SUMS has no entry for $asset_name"
         fi

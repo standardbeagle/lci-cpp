@@ -47,13 +47,39 @@ function assetMatcher() {
   return null;
 }
 
-// HTTPS GET following redirects; resolves to a Buffer.
+const ALLOWED_HOSTS = new Set([
+  'github.com',
+  'api.github.com',
+  'codeload.github.com',
+  'githubusercontent.com',
+]);
+
+function isAllowedUrl(url) {
+  let u;
+  try {
+    u = new URL(url);
+  } catch (e) {
+    return false;
+  }
+  if (u.protocol !== 'https:') return false;
+  return ALLOWED_HOSTS.has(u.hostname) || u.hostname.endsWith('.githubusercontent.com');
+}
+
+// HTTPS GET following redirects (GitHub hosts only); resolves to a Buffer.
 function get(url) {
   return new Promise((resolve, reject) => {
+    if (!isAllowedUrl(url)) {
+      reject(new Error(`refusing non-GitHub URL: ${url}`));
+      return;
+    }
     https
       .get(url, { headers: { 'User-Agent': 'lci-npm-installer', Accept: '*/*' } }, (res) => {
         if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
           res.resume();
+          if (!isAllowedUrl(res.headers.location)) {
+            reject(new Error(`refusing redirect to non-GitHub host: ${res.headers.location}`));
+            return;
+          }
           resolve(get(res.headers.location));
           return;
         }

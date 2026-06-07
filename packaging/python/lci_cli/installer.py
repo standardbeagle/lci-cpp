@@ -13,10 +13,21 @@ import stat
 import sys
 import tarfile
 import tempfile
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
 REPO = "standardbeagle/lci-cpp"
+
+_ALLOWED_HOSTS = {"github.com", "api.github.com", "codeload.github.com", "githubusercontent.com"}
+
+
+def _is_allowed_url(url: str) -> bool:
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme != "https":
+        return False
+    host = parsed.hostname or ""
+    return host in _ALLOWED_HOSTS or host.endswith(".githubusercontent.com")
 
 
 class InstallError(RuntimeError):
@@ -74,10 +85,32 @@ def _asset_matcher():
     raise InstallError(f"unsupported platform: {sys.platform}")
 
 
+class _GitHubOnlyRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if not _is_allowed_url(newurl):
+            raise InstallError(f"refusing redirect to non-GitHub host: {newurl}")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
 def _http_get(url: str) -> bytes:
+    if not _is_allowed_url(url):
+        raise InstallError(f"refusing non-GitHub URL: {url}")
+    opener = urllib.request.build_opener(_GitHubOnlyRedirect)
     req = urllib.request.Request(url, headers={"User-Agent": "lci-pip-installer"})
-    with urllib.request.urlopen(req) as resp:  # follows redirects
+    with opener.open(req) as resp:  # redirects validated by the handler
         return resp.read()
+
+
+def _safe_extract(tf: tarfile.TarFile, dest: str) -> None:
+    """Extract guarding against path traversal / link escapes (CVE-2007-4559)."""
+    dest_real = os.path.realpath(dest)
+    for member in tf.getmembers():
+        target = os.path.realpath(os.path.join(dest, member.name))
+        if target != dest_real and not target.startswith(dest_real + os.sep):
+            raise InstallError(f"unsafe path in archive: {member.name}")
+        if member.issym() or member.islnk():
+            raise InstallError(f"refusing link member in archive: {member.name}")
+    tf.extractall(dest)
 
 
 def _download_binary(dest: Path, version: str) -> None:
@@ -125,7 +158,7 @@ def _download_binary(dest: Path, version: str) -> None:
         tarball.write_bytes(data)
 
         with tarfile.open(tarball, "r:gz") as tf:
-            tf.extractall(tmp)
+            _safe_extract(tf, tmp)
 
         want = _binary_name()
         found = next((p for p in Path(tmp).rglob(want) if p.is_file()), None)

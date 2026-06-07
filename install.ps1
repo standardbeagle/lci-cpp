@@ -13,6 +13,15 @@ $ErrorActionPreference = 'Stop'
 
 $repo = 'standardbeagle/lci-cpp'
 
+function Assert-GitHubUrl([string]$url) {
+    $u = [Uri]$url
+    $ok = $u.Scheme -eq 'https' -and (
+        $u.Host -in @('github.com', 'api.github.com', 'codeload.github.com', 'githubusercontent.com') -or
+        $u.Host.EndsWith('.githubusercontent.com')
+    )
+    if (-not $ok) { throw "refusing non-GitHub URL: $url" }
+}
+
 $arch = $env:PROCESSOR_ARCHITECTURE
 if ($arch -ne 'AMD64') {
     throw "unsupported architecture: $arch (only x86_64/AMD64 has a release artifact; build from source)"
@@ -54,12 +63,14 @@ $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("lci-install-" + [System.Gui
 New-Item -ItemType Directory -Force -Path $tmp | Out-Null
 try {
     $tarball = Join-Path $tmp $asset.name
+    Assert-GitHubUrl $asset.browser_download_url
     Write-Output "Downloading $($asset.browser_download_url)"
     Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $tarball -Headers @{ 'User-Agent' = 'lci-installer' }
 
     # Verify integrity against the release SHA256SUMS when present.
     $sums = $release.assets | Where-Object { $_.name -eq 'SHA256SUMS' } | Select-Object -First 1
     if ($sums) {
+        Assert-GitHubUrl $sums.browser_download_url
         $sumsText = (Invoke-WebRequest -Uri $sums.browser_download_url -Headers @{ 'User-Agent' = 'lci-installer' }).Content
         $line = ($sumsText -split "`n") | Where-Object { $_ -match "\s$([regex]::Escape($asset.name))\s*$" } | Select-Object -First 1
         if (-not $line) { throw "SHA256SUMS has no entry for $($asset.name)" }
