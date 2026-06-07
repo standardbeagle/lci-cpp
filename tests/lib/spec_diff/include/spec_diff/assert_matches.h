@@ -18,10 +18,9 @@
 
 namespace spec_diff {
 
-// A descriptor-shaped bundle of all knobs an integration spec needs to
-// drive canonicalize + diff. Mirrors the parity .parity.json shape but
-// carries only the data spec_diff actually consumes — no binary paths,
-// no invocation, no mode enum.
+// A bundle of all knobs an integration spec needs to drive canonicalize +
+// diff: only the data spec_diff actually consumes — no binary paths, no
+// invocation, no mode enum.
 struct SpecDescriptor {
     enum class Parse { Json, Text };
 

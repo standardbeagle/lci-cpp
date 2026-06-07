@@ -69,21 +69,11 @@ void WriteFile(const fs::path& path, const std::string& contents) {
     output << contents;
 }
 
-// Mirror of parity_runner.cpp::normalize_mcp_inner_text. MCP tool responses
-// wrap their payload as a stringified JSON inside result.content[].text;
-// spec_diff has no MCP awareness, so symbol-enrichment divergences between
-// the C++ and Go implementations leak into the diff as raw string
-// inequality. We unwrap, canonicalize with the same mask set parity_runner
-// uses runner-wide, and re-serialize so both sides compare on the masked
-// content. Applied to both the live capture and the golden file because
-// the golden was captured from Go (no signature field) and the C++ side
-// emits one — masking absent fields on the Go side is a no-op.
-//
-// Mask list is kept verbatim in sync with parity_runner.cpp lines 74-146
-// (FIX-D.1.E added symbols[].signature; FIX-D.1.D added the call-graph
-// enrichment fields). Test infrastructure only — no production code is
-// affected. Tracked by FIX aqMIb6bLqtnj (carries the parity_runner mask
-// over to the integration runner after the spec_migration_test split).
+// MCP tool responses wrap their payload as a stringified JSON inside
+// result.content[].text; spec_diff has no MCP awareness, so non-deterministic
+// or enrichment fields would leak into the diff as raw string inequality. We
+// unwrap, canonicalize with the mask set below, and re-serialize so the live
+// capture and the golden compare on masked content. Test infrastructure only.
 void NormalizeMcpInnerText(nlohmann::json& node,
                            const std::string& corpus_path) {
     if (node.is_object()) {
@@ -306,9 +296,9 @@ CapturedOutput RunCppSide(const std::string& cpp_binary,
     }
     // The lci CLI auto-spawns a detached per-corpus server daemon
     // (setsid) for cli / mcp / index modes; the daemon survives the
-    // parent CLI exit by design. parity_runner does this for the same
-    // reason. Without it, a leftover daemon from a prior integration
-    // test holds /tmp/lci-<hash(corpus)>.sock and the next http-mode
+    // parent CLI exit by design. Without cleanup, a leftover daemon from a
+    // prior integration test holds /tmp/lci-<hash(corpus)>.sock and the
+    // next http-mode
     // test either fails to bind or gets stale responses (10s
     // wait_for_ready timeout, then golden-mismatch).
     lci::parity::shutdown_corpus_servers(corpus_path);

@@ -545,11 +545,8 @@ ToolResult handle_info(const nlohmann::json& params) {
         return make_json_response(data);
     }
 
-    // Default: overview of all tools.
-    // Output shape matches Go's `internal/mcp` info handler verbatim — the
-    // descriptor at tests/parity/descriptors/mcp/info/basic.parity.json
-    // compares the full text of result.content[0].text against Go's canon.
-    // Field-by-field changes here must be mirrored in the Go reference.
+    // Default: overview of all tools. The full text of result.content[0].text
+    // is locked by the mcp/info integration golden.
     nlohmann::json data;
     data["available_tools"] = {
         "search - semantic code search",

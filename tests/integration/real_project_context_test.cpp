@@ -297,11 +297,8 @@ TEST_F(RealProjectContextManifestTest, HydrateManifest) {
     EXPECT_TRUE(hydrate_result.contains("stats"));
 }
 
-// Round-trip via file with the compact `f`/`s` ref-key contract that the
-// MCP wire honours (verified iter-13 by parity descriptor
-// tests/parity/descriptors/mcp/context_manifest/save-compact-keys.parity.json
-// and probe against the Go binary — both binaries reject verbose
-// `{file, symbol}` and accept `{f, s}`).
+// Round-trip via file with the compact `f`/`s` ref-key contract the MCP wire
+// honours: verbose `{file, symbol}` is rejected, `{f, s}` accepted.
 TEST_F(RealProjectContextManifestTest, SaveAndLoadCompactKeysFileRoundTrip) {
     SKIP_IF_NO_REAL_PROJECT("go", "chi");
     auto path = *testing::find_real_project("go", "chi");

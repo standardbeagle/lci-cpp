@@ -824,7 +824,7 @@ TEST_F(HandlersFixture, FindFilesGlobFuzzyStarGo) {
     for (const auto& r : json["results"]) {
         if (r["match_type"].get<std::string>() == "fuzzy") {
             any_fuzzy = true;
-            // Score parity with Go: 0.574 ± 0.05 (parity descriptor tolerance)
+            // Fuzzy-match score lands at 0.574 ± 0.05.
             double score = r["score"].get<double>();
             EXPECT_NEAR(score, 0.574, 0.05);
         }

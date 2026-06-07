@@ -172,10 +172,8 @@ TEST_F(McpStdioTest, ToolsList) {
     auto& tools = tools_resp["result"]["tools"];
     EXPECT_EQ(tools.size(), 14u);
 
-    // Tools emit alphabetically-by-name to match Go jsonschema-go ordering
-    // (FIX-D.2 Option B, MODULE_MAP.md "Decision: tools/list emit-order
-    // parity"). First tool alphabetically across the 14 registered names is
-    // "browse_file".
+    // Tools emit alphabetically by name. First tool alphabetically across the
+    // 14 registered names is "browse_file".
     EXPECT_EQ(tools[0]["name"], "browse_file");
     EXPECT_TRUE(tools[0].contains("inputSchema"));
 
@@ -354,8 +352,7 @@ TEST_F(McpStdioTest, All14ToolNamesPresent) {
     ASSERT_EQ(responses.size(), 2u);
     auto& tools = responses[1]["result"]["tools"];
 
-    // Alphabetical-by-name (FIX-D.2 Option B emit order; MODULE_MAP.md
-    // "Decision: tools/list emit-order parity"). The 14 tool names sorted
+    // Alphabetical-by-name emit order. The 14 tool names sorted
     // lexicographically against the C++ registration set.
     std::vector<std::string> expected = {
         "browse_file",     "code_insight",   "context",

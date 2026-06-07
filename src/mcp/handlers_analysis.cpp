@@ -446,9 +446,9 @@ ToolResult side_effect_category_query(const nlohmann::json& params,
 // Used as the honest fallback when SideEffectAnalyzer.results() is empty
 // because the analyzer hasn't been wired into the indexing pipeline yet
 // (tracked under tasks sL9fAGaKTXzc, gW7m27uOpsse, yUAZOemJ80R0, 3aSKJjjAFaUv,
-// 7t4FBM17kI1W). Matches Go behaviour where the propagator auto-populates from
-// extracted symbols and defaults to pure when no effects observed.
-// See tests/parity/MODULE_MAP.md "Decision: side_effects summary fallback".
+// 7t4FBM17kI1W). Decision: the propagator auto-populates from extracted symbols
+// and defaults to pure when no effects are observed, so summary reports the
+// callable-symbol count rather than zero on an unanalyzed corpus.
 int count_callable_symbols_in_index(const MasterIndex& indexer) {
     int total = 0;
     const auto& ref = indexer.ref_tracker();

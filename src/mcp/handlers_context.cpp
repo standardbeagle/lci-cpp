@@ -95,8 +95,8 @@ bool read_string_keyed(const nlohmann::json& j, const char* compact,
 //              r (refs), s (stats)
 //   ref:       f, s, l:{s,e}, role, n (note), x
 //   stats:     rc, tl, fc, rb
-// Parity-locked iter-14 (DART-2PPeRKfyrceR) by
-// tests/parity/descriptors/mcp/context_manifest/save-to_string-body-shape.parity.json.
+// The compact-key wire shape is locked by the context_manifest integration
+// golden + the manifest round-trip unit tests.
 nlohmann::json manifest_to_json(const ContextManifest& m) {
     nlohmann::json j;
     if (!m.task.empty()) j["t"] = m.task;

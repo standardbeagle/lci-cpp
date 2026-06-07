@@ -394,10 +394,9 @@ class CodeInsightTest : public ::testing::Test {
     std::unique_ptr<CodebaseIntelligenceEngine> engine_;
 };
 
-// NOTE post-FIX-D.1.C: handle_code_insight emits LCF text (not JSON) to match
-// Go's wire format. Tests assert LCF header + section presence instead of
-// parsing JSON. The 6 mcp/code_insight/* parity descriptors lock byte-level
-// agreement with Go.
+// NOTE: handle_code_insight emits LCF text (not JSON). These tests assert LCF
+// header + section presence; the mcp/code_insight integration goldens lock the
+// full byte-level output.
 
 TEST_F(CodeInsightTest, DefaultModeIsOverview) {
     nlohmann::json params;

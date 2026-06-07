@@ -27,9 +27,9 @@ struct SpecCase {
 
 void ExpectSpecMatches(const SpecCase& spec_case);
 
-// Load a SpecCase from an integration .spec.json file. The spec JSON is the
-// same shape as a parity descriptor with three additional optional top-level
-// fields that drive the integration harness (parity descriptors ignore them):
+// Load a SpecCase from an integration .spec.json file. The spec JSON describes
+// the invocation plus three top-level fields that drive the integration
+// harness:
 //
 //   "golden":         path to the golden file (required for integration
 //                     specs); may be absolute, or relative to the spec

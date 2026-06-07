@@ -475,9 +475,9 @@ nlohmann::json McpServer::handle_request(const nlohmann::json& request) {
     if (method == "initialize") {
         response["result"] = handle_initialize(request);
     } else if (method == "tools/list") {
-        // tools/list wire response requires Go-jsonschema-go field ordering
-        // (Decision: tools/list emit-order parity, MODULE_MAP.md). Standard
-        // nlohmann::json alphabetises on dump, so build the entire envelope
+        // tools/list emits tools alphabetically by name with a fixed field
+        // order (locked by mcp_server_test). Standard nlohmann::json
+        // alphabetises on dump, so build the entire envelope
         // as ordered_json, serialise here, write directly, and return null to
         // signal the run loop to skip its default write_message path.
         nlohmann::ordered_json env;
