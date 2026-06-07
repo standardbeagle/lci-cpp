@@ -682,6 +682,39 @@ TEST(CodeInsightGraphSignals, SurfacesClustersAndCycles) {
     std::filesystem::remove_all(dir);
 }
 
+// Layer violation: a Data-layer function calling a Presentation-layer function
+// is an upward call against the architecture and must be flagged.
+TEST(CodeInsightLayers, FlagsUpwardCall) {
+    auto dir = std::filesystem::temp_directory_path() / "lci_layers_test";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    {
+        std::ofstream f(dir / "g.go");
+        // saveRecord -> Data Layer (save*). renderView -> Presentation (render*).
+        // Data calling Presentation = upward violation.
+        f << "package main\n\n"
+             "func renderView() int { return 1 }\n"
+             "func saveRecord() int { return renderView() }\n"
+             "func main() { _ = saveRecord() }\n";
+    }
+
+    Config config;
+    config.project.root = dir.string();
+    MasterIndex indexer(config);
+    indexer.index_directory(dir.string());
+    CodebaseIntelligenceEngine engine;
+
+    nlohmann::json params;
+    auto result = handle_code_insight(params, engine, indexer);
+    ASSERT_FALSE(result.is_error) << result.text;
+    ASSERT_NE(result.text.find("== LAYER VIOLATIONS =="), std::string::npos)
+        << result.text;
+    EXPECT_NE(result.text.find("saveRecord"), std::string::npos);
+    EXPECT_NE(result.text.find("renderView"), std::string::npos);
+
+    std::filesystem::remove_all(dir);
+}
+
 // Flagship: label-coherent communities. A Louvain community whose members all
 // carry the same propagated @lci: label is reported as a named domain. Crosses
 // graph structure (CallGraph) with propagated semantics (GraphPropagator).

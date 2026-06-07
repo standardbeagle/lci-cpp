@@ -29,7 +29,7 @@
   "text_normalize": {
     "replace": [
       {
-        "pattern": "== (SUMMARY|ENTRY POINTS|DEPENDENCIES|NEXT STEPS|VOCABULARY|LOAD BEARING|CYCLES|CLUSTERS) ==\\n([^\\n]*\\n)*?---\\n?",
+        "pattern": "== (SUMMARY|ENTRY POINTS|DEPENDENCIES|NEXT STEPS|VOCABULARY|LOAD BEARING|CYCLES|CLUSTERS|LAYER VIOLATIONS) ==\\n([^\\n]*\\n)*?---\\n?",
         "with": ""
       },
       {

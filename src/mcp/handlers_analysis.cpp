@@ -875,15 +875,34 @@ struct BrokerSym {
     double score{};  // normalized betweenness
 };
 
+// An upward call that violates layered architecture: a deeper layer calling a
+// shallower one (e.g. Data -> Presentation).
+struct LayerViolation {
+    std::string caller, caller_layer;
+    std::string callee, callee_layer;
+};
+
 // Everything derived from one build of the call graph.
 struct GraphSignals {
     std::vector<LoadBearingSym> load_bearing;
     std::vector<BrokerSym> brokers;                // top betweenness, may be empty
     std::vector<std::vector<std::string>> cycles;  // names per cyclic group
     std::vector<ClusterInfo> clusters;             // communities by size desc
+    std::vector<LayerViolation> layer_violations;  // upward calls, may be empty
     double modularity{};
     int community_count{};
 };
+
+// Canonical top-to-bottom depth of the architectural layers LayerAnalyzer
+// classifies into. Calls should flow downward (shallow -> deep). Utility is
+// cross-cutting and unknown layers are unranked — both exempt (return -1).
+int layer_depth(const std::string& layer) {
+    if (layer == "Presentation Layer") return 0;
+    if (layer == "Application Layer") return 1;
+    if (layer == "Domain Layer") return 2;
+    if (layer == "Data Layer") return 3;
+    return -1;
+}
 
 // Single build of analysis::CallGraph over the real call graph, yielding three
 // signals at once (Karpathy: don't rebuild the graph three times):
@@ -903,6 +922,7 @@ GraphSignals compute_graph_signals(const MasterIndex& indexer,
 
     std::vector<SymbolID> nodes;
     absl::flat_hash_map<SymbolID, std::pair<std::string, std::string>> meta;
+    absl::flat_hash_map<SymbolID, std::string> layer;  // id -> architectural layer
     for (const auto& f : files) {
         for (const auto* sym : f.symbols) {
             auto t = sym->symbol.type;
@@ -913,6 +933,7 @@ GraphSignals compute_graph_signals(const MasterIndex& indexer,
             meta[sym->id] = {sym->symbol.name,
                              git_rel(f.path, project_root) + ":" +
                                  std::to_string(sym->symbol.line)};
+            layer[sym->id] = LayerAnalyzer::classify_symbol_to_layer(*sym);
         }
     }
 
@@ -1041,6 +1062,30 @@ GraphSignals compute_graph_signals(const MasterIndex& indexer,
         if (all.size() > 6) all.resize(6);
         sig.clusters = std::move(all);
     }
+
+    // Layer violations: call edges that run UP the architectural stack (a deeper
+    // layer calling a shallower one). Calls should flow downward; an upward edge
+    // (e.g. Data -> Presentation) inverts the dependency and is a violation.
+    // Utility/unknown layers are exempt (depth -1).
+    for (SymbolID u : nodes) {
+        int du = layer_depth(layer[u]);
+        if (du < 0) continue;
+        for (SymbolID v : ref.get_callee_symbols(u)) {
+            auto lv = layer.find(v);
+            if (lv == layer.end()) continue;
+            int dv = layer_depth(lv->second);
+            if (dv < 0 || du <= dv) continue;  // exempt or downward/same = ok
+            sig.layer_violations.push_back(
+                {meta[u].first, layer[u], meta[v].first, lv->second});
+        }
+    }
+    std::sort(sig.layer_violations.begin(), sig.layer_violations.end(),
+              [](const LayerViolation& a, const LayerViolation& b) {
+                  if (a.caller != b.caller) return a.caller < b.caller;
+                  return a.callee < b.callee;
+              });
+    if (sig.layer_violations.size() > 8) sig.layer_violations.resize(8);
+
     return sig;
 }
 
@@ -1081,6 +1126,21 @@ void emit_cycles(std::ostringstream& out,
             out << c[i];
         }
         out << "\n";
+    }
+    out << "---\n";
+}
+
+// == LAYER VIOLATIONS == — calls that run UP the architectural stack (a deeper
+// layer calling a shallower one), inverting the intended dependency direction.
+// C++ enrichment; Go has no equivalent.
+void emit_layer_violations(std::ostringstream& out,
+                           const std::vector<LayerViolation>& v) {
+    if (v.empty()) return;
+    out << "== LAYER VIOLATIONS ==\n";
+    out << "count=" << v.size() << "\n";
+    for (const auto& x : v) {
+        out << "  " << x.caller << " [" << x.caller_layer << "] -> " << x.callee
+            << " [" << x.callee_layer << "]\n";
     }
     out << "---\n";
 }
@@ -1523,6 +1583,7 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
             emit_load_bearing(out, sig);
             emit_clusters(out, sig);
             emit_cycles(out, sig.cycles);
+            emit_layer_violations(out, sig.layer_violations);
         }
         emit_modules(out, d.modules);
         emit_dependencies(out, d.coupling.coupling);
@@ -1702,6 +1763,7 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
             emit_load_bearing(out, sig);
             emit_clusters(out, sig);
             emit_cycles(out, sig.cycles);
+            emit_layer_violations(out, sig.layer_violations);
         }
         emit_vocabulary(out, d.naming);
         if (objids) emit_object_ids_hint(out);
