@@ -47,8 +47,13 @@ error. Linux arm64 fails fast (no arm64 release artifact exists today).
 - `lci update --check` — report current vs latest, no write.
 - `lci update --force` — reinstall even if equal.
 - `lci update --version <tag>` — install a specific tag.
-- HTTPS via cpp-httplib (`set_follow_location(true)` for S3 redirect),
-  JSON via nlohmann (both already linked).
+- HTTPS download + extract delegated to system `curl` and `tar` (the same
+  tools install.sh requires); release JSON parsed natively with nlohmann.
+  Deviation from the original "cpp-httplib" plan: httplib is linked WITHOUT
+  `CPPHTTPLIB_OPENSSL_SUPPORT`, so enabling native TLS would mean a
+  vcpkg+OpenSSL build expansion for one subcommand. Reusing curl/tar keeps
+  the dependency surface identical to the install scripts and adds no
+  build-time dependency.
 - Self-path: `/proc/self/exe` (Linux), `_NSGetExecutablePath` (macOS),
   `GetModuleFileNameW` (Windows).
 - Extract via system `tar` (Linux/macOS/Win10+); fail fast if absent.

@@ -1,0 +1,40 @@
+{
+  "name": "@standardbeagle/lci",
+  "version": "0.5.0",
+  "description": "Lightning Code Index — sub-millisecond semantic code search for AI assistants",
+  "bin": {
+    "lci": "bin/lci.js"
+  },
+  "scripts": {
+    "postinstall": "node ./postinstall.js"
+  },
+  "files": [
+    "bin/",
+    "postinstall.js"
+  ],
+  "keywords": [
+    "code-search",
+    "semantic-search",
+    "mcp",
+    "tree-sitter",
+    "ai"
+  ],
+  "os": [
+    "linux",
+    "darwin",
+    "win32"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ],
+  "engines": {
+    "node": ">=16"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/standardbeagle/lci-cpp.git"
+  },
+  "homepage": "https://github.com/standardbeagle/lci-cpp",
+  "license": "MIT"
+}

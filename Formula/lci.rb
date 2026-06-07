@@ -1,7 +1,7 @@
 class Lci < Formula
   desc "Lightning Code Index - fast semantic code search for AI assistants"
-  homepage "https://github.com/standardbeagle/lci"
-  url "https://github.com/standardbeagle/lci/archive/refs/tags/v0.1.0.tar.gz"
+  homepage "https://github.com/standardbeagle/lci-cpp"
+  url "https://github.com/standardbeagle/lci-cpp/archive/refs/tags/v0.5.0.tar.gz"
   sha256 "PLACEHOLDER_SHA256"
   license "MIT"
 
