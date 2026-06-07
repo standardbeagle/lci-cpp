@@ -12,6 +12,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const https = require('https');
+const crypto = require('crypto');
 const { spawnSync } = require('child_process');
 
 const REPO = 'standardbeagle/lci-cpp';
@@ -91,11 +92,34 @@ async function main() {
 
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'lci-npm-'));
   const tarball = path.join(tmp, asset.name);
+  let data;
   try {
-    fs.writeFileSync(tarball, await get(asset.browser_download_url));
+    data = await get(asset.browser_download_url);
   } catch (e) {
     fail(`download failed: ${e.message}`);
   }
+
+  // Verify integrity against the release SHA256SUMS when present.
+  const sums = (release.assets || []).find((a) => a.name === 'SHA256SUMS');
+  if (sums) {
+    let sumsText;
+    try {
+      sumsText = (await get(sums.browser_download_url)).toString('utf8');
+    } catch (e) {
+      fail(`failed to fetch SHA256SUMS: ${e.message}`);
+    }
+    const line = sumsText.split('\n').find((l) => l.trim().endsWith(asset.name));
+    if (!line) fail(`SHA256SUMS has no entry for ${asset.name}`);
+    const expected = line.trim().split(/\s+/)[0].toLowerCase();
+    const actual = crypto.createHash('sha256').update(data).digest('hex');
+    if (actual !== expected) {
+      fail(`checksum mismatch for ${asset.name} (expected ${expected}, got ${actual})`);
+    }
+  } else {
+    console.warn('lci: release has no SHA256SUMS; skipping integrity check');
+  }
+
+  fs.writeFileSync(tarball, data);
 
   const extract = spawnSync('tar', ['-xzf', tarball, '-C', tmp], { stdio: 'inherit' });
   if (extract.status !== 0) {

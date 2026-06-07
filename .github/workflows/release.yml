@@ -168,6 +168,21 @@ jobs:
         with:
           path: dist
 
+      # The raw `lci` / `lci.exe` binaries from each platform share a name and
+      # collide as release assets; the per-platform tarballs are the canonical
+      # download. Compute SHA256SUMS (basenames only) over the packaged
+      # artifacts so the installers can verify integrity.
+      - name: Generate SHA256SUMS
+        run: |
+          cd dist
+          : > SHA256SUMS
+          find . -type f \( -name '*.tar.gz' -o -name '*.deb' -o -name '*.rpm' \) -print0 \
+            | sort -z \
+            | while IFS= read -r -d '' f; do
+                sha256sum "$f" | sed 's|  .*/|  |'
+              done >> SHA256SUMS
+          cat SHA256SUMS
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -176,8 +191,7 @@ jobs:
             dist/**/*.tar.gz
             dist/**/*.deb
             dist/**/*.rpm
-            dist/**/lci
-            dist/**/lci.exe
+            dist/SHA256SUMS
 
       - name: Reclaim space
         if: always()

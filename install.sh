@@ -84,12 +84,49 @@ mkdir -p "$prefix" || err "cannot create install directory: $prefix"
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/lci-install.XXXXXX")" || err "cannot create temp dir"
 trap 'rm -rf "$tmp"' EXIT INT TERM
 
-tarball="$tmp/lci.tar.gz"
+asset_name="$(basename "$url")"
+tarball="$tmp/$asset_name"
 printf 'Downloading %s\n' "$url"
 if command -v curl >/dev/null 2>&1; then
     curl -fsSL -o "$tarball" "$url" || err "download failed"
 else
     wget -qO "$tarball" "$url" || err "download failed"
+fi
+
+# Verify integrity against the release SHA256SUMS when present.
+sums_url="$(printf '%s\n' "$json" \
+    | grep -o '"browser_download_url"[ ]*:[ ]*"[^"]*"' \
+    | sed 's/.*"browser_download_url"[ ]*:[ ]*"//; s/"$//' \
+    | grep '/SHA256SUMS$' \
+    | head -n1)"
+
+sha256_of() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | awk '{print $1}'
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$1" | awk '{print $1}'
+    else
+        return 1
+    fi
+}
+
+if [ -n "$sums_url" ]; then
+    if http_get "$sums_url" > "$tmp/SHA256SUMS" 2>/dev/null; then
+        expected="$(grep "  $asset_name\$" "$tmp/SHA256SUMS" | awk '{print $1}' | head -n1)"
+        if [ -z "$expected" ]; then
+            err "SHA256SUMS has no entry for $asset_name"
+        fi
+        actual="$(sha256_of "$tarball")" \
+            || err "no sha256 tool (sha256sum/shasum) found to verify the download"
+        if [ "$actual" != "$expected" ]; then
+            err "checksum mismatch for $asset_name (expected $expected, got $actual)"
+        fi
+        printf 'Verified checksum.\n'
+    else
+        printf 'warning: could not fetch SHA256SUMS; skipping integrity check\n' >&2
+    fi
+else
+    printf 'warning: release has no SHA256SUMS; skipping integrity check\n' >&2
 fi
 
 tar -xzf "$tarball" -C "$tmp" || err "failed to extract archive"

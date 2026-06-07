@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <sstream>
 #include <string>
 
 #include <nlohmann/json.hpp>
@@ -91,6 +92,50 @@ bool safe_version(const std::string& v) {
         }
     }
     return true;
+}
+
+bool is_hex64(const std::string& s) {
+    if (s.size() != 64) return false;
+    for (char c : s) {
+        if (!std::isxdigit(static_cast<unsigned char>(c))) return false;
+    }
+    return true;
+}
+
+std::string to_lower(std::string s) {
+    for (char& c : s) c = static_cast<char>(std::tolower((unsigned char)c));
+    return s;
+}
+
+// Compute the SHA-256 of a file by shelling out to the platform tool — the
+// same shell-out strategy used for curl/tar. Returns lowercase hex, or empty
+// on failure (no tool / parse failure).
+std::string sha256_of_file(const fs::path& f) {
+    std::string out;
+#if defined(_WIN32)
+    if (!run_capture("certutil -hashfile \"" + f.string() + "\" SHA256", out)) {
+        return {};
+    }
+    std::istringstream iss(out);
+    std::string line;
+    while (std::getline(iss, line)) {
+        std::string h;
+        for (char c : line) {
+            if (!std::isspace(static_cast<unsigned char>(c))) {
+                h.push_back(static_cast<char>(std::tolower((unsigned char)c)));
+            }
+        }
+        if (is_hex64(h)) return h;
+    }
+    return {};
+#else
+    if (run_capture("sha256sum \"" + f.string() + "\"", out) ||
+        run_capture("shasum -a 256 \"" + f.string() + "\"", out)) {
+        std::string tok = to_lower(out.substr(0, out.find_first_of(" \t\n")));
+        if (is_hex64(tok)) return tok;
+    }
+    return {};
+#endif
 }
 
 fs::path current_executable() {
@@ -251,6 +296,29 @@ std::optional<Asset> select_asset(const std::vector<Asset>& assets,
     }
 }
 
+std::string expected_hash_for(const std::string& sums_text,
+                              const std::string& asset_name) {
+    std::istringstream iss(sums_text);
+    std::string line;
+    while (std::getline(iss, line)) {
+        // Trim trailing CR/whitespace.
+        while (!line.empty() && (line.back() == '\r' || line.back() == ' ' ||
+                                 line.back() == '\t')) {
+            line.pop_back();
+        }
+        // Split "<hash><spaces><filename>" and compare the filename exactly —
+        // a suffix match would let "extra-foo.tar.gz" satisfy "foo.tar.gz".
+        size_t sp = line.find_first_of(" \t");
+        if (sp == std::string::npos) continue;
+        size_t fn = line.find_first_not_of(" \t", sp);
+        if (fn == std::string::npos) continue;
+        if (line.compare(fn, std::string::npos, asset_name) != 0) continue;
+        std::string tok = to_lower(line.substr(0, sp));
+        if (is_hex64(tok)) return tok;
+    }
+    return {};
+}
+
 int run_update(const UpdateConfig& cfg) {
     Platform plat = detect_platform();
     if (plat.os == Os::Unsupported || plat.arch == Arch::Other ||
@@ -368,6 +436,48 @@ int run_update(const UpdateConfig& cfg) {
         std::cerr << "Error: download failed (" << asset->url << ").\n";
         fs::remove_all(work, ec);
         return 1;
+    }
+
+    // Verify integrity against the release SHA256SUMS when present.
+    std::string sums_url;
+    for (const auto& a : assets) {
+        if (a.name == "SHA256SUMS") {
+            sums_url = a.url;
+            break;
+        }
+    }
+    if (!sums_url.empty()) {
+        std::string sums_text;
+        if (!run_capture("curl -fsSL \"" + sums_url + "\"", sums_text)) {
+            std::cerr << "Error: failed to fetch SHA256SUMS for verification.\n";
+            fs::remove_all(work, ec);
+            return 1;
+        }
+        std::string expected = expected_hash_for(sums_text, asset->name);
+        if (expected.empty()) {
+            std::cerr << "Error: SHA256SUMS has no entry for " << asset->name
+                      << ".\n";
+            fs::remove_all(work, ec);
+            return 1;
+        }
+        std::string actual = sha256_of_file(tarball);
+        if (actual.empty()) {
+            std::cerr << "Error: no sha256 tool (sha256sum/shasum/certutil) "
+                         "found to verify the download.\n";
+            fs::remove_all(work, ec);
+            return 1;
+        }
+        if (actual != expected) {
+            std::cerr << "Error: checksum mismatch for " << asset->name
+                      << " (expected " << expected << ", got " << actual
+                      << ").\n";
+            fs::remove_all(work, ec);
+            return 1;
+        }
+        std::cout << "Verified checksum.\n";
+    } else {
+        std::cerr << "warning: release has no SHA256SUMS; skipping integrity "
+                     "check.\n";
     }
 
     std::string extract = "tar -xzf \"" + tarball.string() + "\" -C \"" +

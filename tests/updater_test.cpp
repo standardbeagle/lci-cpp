@@ -86,6 +86,51 @@ TEST(UpdaterAssetSelect, DoesNotPickDebOrRpmForLinux) {
     EXPECT_FALSE(a.has_value());
 }
 
+using lci::update::expected_hash_for;
+
+namespace {
+constexpr const char* kSums =
+    "1111111111111111111111111111111111111111111111111111111111111111  "
+    "lci-0.5.0-Linux.tar.gz\n"
+    "2222222222222222222222222222222222222222222222222222222222222222  "
+    "lci-0.5.0-Darwin.tar.gz\n"
+    "3333333333333333333333333333333333333333333333333333333333333333  "
+    "lci-0.5.0-win64.tar.gz\n";
+}  // namespace
+
+TEST(UpdaterChecksum, FindsHashForAsset) {
+    EXPECT_EQ(expected_hash_for(kSums, "lci-0.5.0-Darwin.tar.gz"),
+              "2222222222222222222222222222222222222222222222222222222222222222");
+}
+
+TEST(UpdaterChecksum, HandlesCrlfLineEndings) {
+    std::string crlf =
+        "4444444444444444444444444444444444444444444444444444444444444444  "
+        "lci-0.5.0-Linux.tar.gz\r\n";
+    EXPECT_EQ(expected_hash_for(crlf, "lci-0.5.0-Linux.tar.gz"),
+              "4444444444444444444444444444444444444444444444444444444444444444");
+}
+
+TEST(UpdaterChecksum, MissingAssetReturnsEmpty) {
+    EXPECT_TRUE(expected_hash_for(kSums, "lci-0.5.0-nope.tar.gz").empty());
+}
+
+TEST(UpdaterChecksum, RejectsNonHexDigest) {
+    std::string bad = "zzzz  lci-0.5.0-Linux.tar.gz\n";  // not 64 hex chars
+    EXPECT_TRUE(expected_hash_for(bad, "lci-0.5.0-Linux.tar.gz").empty());
+}
+
+TEST(UpdaterChecksum, ExactFilenameMatchNotSuffix) {
+    // A line for a longer, similarly-suffixed filename must NOT satisfy a
+    // request for the canonical name.
+    std::string sums =
+        "5555555555555555555555555555555555555555555555555555555555555555  "
+        "extra-lci-0.5.0-Linux.tar.gz\n";
+    EXPECT_TRUE(expected_hash_for(sums, "lci-0.5.0-Linux.tar.gz").empty());
+    EXPECT_EQ(expected_hash_for(sums, "extra-lci-0.5.0-Linux.tar.gz"),
+              "5555555555555555555555555555555555555555555555555555555555555555");
+}
+
 TEST(UpdaterDetect, DetectPlatformIsConsistent) {
     Platform p = lci::update::detect_platform();
     // On the CI/dev host this must resolve to a real, supported triple.

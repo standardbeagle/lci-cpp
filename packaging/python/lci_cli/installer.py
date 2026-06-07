@@ -4,6 +4,7 @@ Uses only the standard library (urllib, json, tarfile) — no third-party deps.
 Fails fast with a clear message on every error path.
 """
 
+import hashlib
 import json
 import os
 import platform
@@ -94,9 +95,34 @@ def _download_binary(dest: Path, version: str) -> None:
     with tempfile.TemporaryDirectory(prefix="lci-pip-") as tmp:
         tarball = Path(tmp) / asset["name"]
         try:
-            tarball.write_bytes(_http_get(asset["browser_download_url"]))
+            data = _http_get(asset["browser_download_url"])
         except Exception as exc:  # noqa: BLE001
             raise InstallError(f"download failed: {exc}") from exc
+
+        # Verify integrity against the release SHA256SUMS when present.
+        sums = next((a for a in release.get("assets", []) if a["name"] == "SHA256SUMS"), None)
+        if sums is not None:
+            try:
+                sums_text = _http_get(sums["browser_download_url"]).decode("utf-8")
+            except Exception as exc:  # noqa: BLE001
+                raise InstallError(f"failed to fetch SHA256SUMS: {exc}") from exc
+            expected = None
+            for line in sums_text.splitlines():
+                if line.strip().endswith(asset["name"]):
+                    expected = line.split()[0].lower()
+                    break
+            if expected is None:
+                raise InstallError(f"SHA256SUMS has no entry for {asset['name']}")
+            actual = hashlib.sha256(data).hexdigest()
+            if actual != expected:
+                raise InstallError(
+                    f"checksum mismatch for {asset['name']} "
+                    f"(expected {expected}, got {actual})"
+                )
+        else:
+            print("lci: release has no SHA256SUMS; skipping integrity check", file=sys.stderr)
+
+        tarball.write_bytes(data)
 
         with tarfile.open(tarball, "r:gz") as tf:
             tf.extractall(tmp)

@@ -100,8 +100,13 @@ rework out of scope.
 - npm/python: integration install into temp dir hitting the real release.
 - `lci update`: unit test asset selection; `--check` integration vs real API.
 
+## Checksum verification
+
+release.yml emits a `SHA256SUMS` asset (basenames, over tarballs/deb/rpm) and
+no longer uploads the colliding raw `lci`/`lci.exe` binaries. All five
+installers verify the downloaded tarball against `SHA256SUMS` and fail fast on
+mismatch; when a release lacks the file (older tags) they warn and proceed.
+
 ## Out of scope
 
 - Auto-publish to npmjs/PyPI in release.yml (chose GitHub-only fetch).
-- SHA256SUMS verification — release doesn't emit checksums today.
-  Flagged as a worthwhile follow-up.

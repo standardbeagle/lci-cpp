@@ -40,6 +40,12 @@ Platform detect_platform();
 // Returns nullopt when the platform is unsupported or no asset matches.
 std::optional<Asset> select_asset(const std::vector<Asset>& assets, Platform p);
 
+// Pure: find the expected lowercase-hex SHA-256 for `asset_name` in a
+// SHA256SUMS body ("<hash>  <filename>" per line). Empty if absent or the
+// matched token is not a valid 64-char hex digest.
+std::string expected_hash_for(const std::string& sums_text,
+                              const std::string& asset_name);
+
 struct UpdateConfig {
     std::string repo = "standardbeagle/lci-cpp";
     std::string current_version;  // e.g. lci::kVersion (no leading 'v')

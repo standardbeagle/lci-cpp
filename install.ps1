@@ -53,9 +53,25 @@ New-Item -ItemType Directory -Force -Path $prefix | Out-Null
 $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("lci-install-" + [System.Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Force -Path $tmp | Out-Null
 try {
-    $tarball = Join-Path $tmp 'lci.tar.gz'
+    $tarball = Join-Path $tmp $asset.name
     Write-Output "Downloading $($asset.browser_download_url)"
     Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $tarball -Headers @{ 'User-Agent' = 'lci-installer' }
+
+    # Verify integrity against the release SHA256SUMS when present.
+    $sums = $release.assets | Where-Object { $_.name -eq 'SHA256SUMS' } | Select-Object -First 1
+    if ($sums) {
+        $sumsText = (Invoke-WebRequest -Uri $sums.browser_download_url -Headers @{ 'User-Agent' = 'lci-installer' }).Content
+        $line = ($sumsText -split "`n") | Where-Object { $_ -match "\s$([regex]::Escape($asset.name))\s*$" } | Select-Object -First 1
+        if (-not $line) { throw "SHA256SUMS has no entry for $($asset.name)" }
+        $expected = ($line -split '\s+')[0].ToLower()
+        $actual = (Get-FileHash -Algorithm SHA256 -Path $tarball).Hash.ToLower()
+        if ($actual -ne $expected) {
+            throw "checksum mismatch for $($asset.name) (expected $expected, got $actual)"
+        }
+        Write-Output 'Verified checksum.'
+    } else {
+        Write-Warning 'release has no SHA256SUMS; skipping integrity check'
+    }
 
     tar -xf $tarball -C $tmp
     if ($LASTEXITCODE -ne 0) { throw 'failed to extract archive' }
