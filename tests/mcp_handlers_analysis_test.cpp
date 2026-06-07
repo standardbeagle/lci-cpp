@@ -676,6 +676,8 @@ TEST(CodeInsightGraphSignals, SurfacesClustersAndCycles) {
     EXPECT_NE(result.text.find("modularity="), std::string::npos);
     EXPECT_NE(result.text.find("== CYCLES =="), std::string::npos)
         << result.text;
+    // The bridge between the two groups is a betweenness broker.
+    EXPECT_NE(result.text.find("brokers:"), std::string::npos) << result.text;
 
     std::filesystem::remove_all(dir);
 }

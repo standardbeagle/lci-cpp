@@ -45,6 +45,14 @@ class CallGraph {
     /// all nodes, O(C^2/64) space in the component count C. Weight 1.0 per edge.
     std::vector<int> incoming_reach() const;
 
+    /// Betweenness centrality per node via Brandes' algorithm on the directed,
+    /// unweighted call graph: the fraction of shortest paths between other node
+    /// pairs that pass through each node. High betweenness marks a broker /
+    /// chokepoint bridging otherwise-separate regions — a distinct signal from
+    /// incoming_reach (which measures how many depend on a node). Normalized to
+    /// [0, 1] by (n-1)(n-2). Deterministic. O(V·(V+E)).
+    std::vector<double> betweenness() const;
+
     /// Louvain community detection. Treats the call graph as undirected (a call
     /// couples caller and callee) and greedily maximizes modularity Q via the
     /// standard two-phase multilevel algorithm. Deterministic: nodes are

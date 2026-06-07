@@ -103,6 +103,32 @@ TEST(CallGraph, LouvainSplitsTwoCliques) {
     EXPECT_GT(q, 0.3);  // clear two-community structure
 }
 
+// Betweenness: in a path a->b->c->d, the interior nodes b,c lie on shortest
+// paths between the ends; a and d (endpoints) carry none.
+TEST(CallGraph, BetweennessOnPath) {
+    auto g = make_graph({1, 2, 3, 4}, {{1, {2}}, {2, {3}}, {3, {4}}});
+    auto bc = g.betweenness();
+    ASSERT_EQ(bc.size(), 4u);
+    EXPECT_DOUBLE_EQ(bc[0], 0.0);  // a: endpoint
+    EXPECT_DOUBLE_EQ(bc[3], 0.0);  // d: endpoint
+    EXPECT_GT(bc[1], 0.0);         // b: interior
+    EXPECT_GT(bc[2], 0.0);         // c: interior
+}
+
+// The bridge node between two clusters has the highest betweenness.
+TEST(CallGraph, BetweennessFindsBroker) {
+    // Star into a bridge: 1,2,3 -> 4 (bridge) -> 5,6,7
+    auto g = make_graph({1, 2, 3, 4, 5, 6, 7},
+                        {{1, {4}}, {2, {4}}, {3, {4}}, {4, {5, 6, 7}}});
+    auto bc = g.betweenness();
+    // idx 3 == node 4 (the bridge) must dominate.
+    int argmax = 0;
+    for (int i = 1; i < 7; ++i)
+        if (bc[i] > bc[argmax]) argmax = i;
+    EXPECT_EQ(argmax, 3);
+    EXPECT_GT(bc[3], 0.0);
+}
+
 // Determinism: same graph, same labels + modularity across runs.
 TEST(CallGraph, LouvainDeterministic) {
     absl::flat_hash_map<SymbolID, std::vector<SymbolID>> e = {

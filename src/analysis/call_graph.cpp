@@ -182,6 +182,67 @@ std::vector<int> CallGraph::incoming_reach() const {
     return reach;
 }
 
+std::vector<double> CallGraph::betweenness() const {
+    const int n = static_cast<int>(ids_.size());
+    std::vector<double> bc(n, 0.0);
+    if (n < 3) return bc;
+
+    // Brandes' algorithm (directed, unweighted). For each source s: BFS to count
+    // shortest-path multiplicities sigma, then accumulate dependencies in
+    // reverse-BFS order.
+    std::vector<int> sigma(n), dist(n);
+    std::vector<double> delta(n);
+    std::vector<std::vector<int>> preds(n);
+    std::vector<int> order;
+    order.reserve(n);
+    std::vector<int> bfs;
+    bfs.reserve(n);
+
+    for (int s = 0; s < n; ++s) {
+        for (int i = 0; i < n; ++i) {
+            sigma[i] = 0;
+            dist[i] = -1;
+            delta[i] = 0.0;
+            preds[i].clear();
+        }
+        sigma[s] = 1;
+        dist[s] = 0;
+        order.clear();
+        bfs.clear();
+        bfs.push_back(s);
+        size_t head = 0;
+        while (head < bfs.size()) {
+            int v = bfs[head++];
+            order.push_back(v);
+            for (int w : adj_[v]) {  // adj_ is sorted -> deterministic
+                if (dist[w] < 0) {
+                    dist[w] = dist[v] + 1;
+                    bfs.push_back(w);
+                }
+                if (dist[w] == dist[v] + 1) {
+                    sigma[w] += sigma[v];
+                    preds[w].push_back(v);
+                }
+            }
+        }
+        // Accumulate in reverse BFS order.
+        for (auto it = order.rbegin(); it != order.rend(); ++it) {
+            int w = *it;
+            for (int v : preds[w]) {
+                delta[v] += (static_cast<double>(sigma[v]) / sigma[w]) *
+                            (1.0 + delta[w]);
+            }
+            if (w != s) bc[w] += delta[w];
+        }
+    }
+
+    // Normalize by the number of ordered pairs (directed graph).
+    double norm = static_cast<double>(n - 1) * static_cast<double>(n - 2);
+    if (norm > 0.0)
+        for (double& v : bc) v /= norm;
+    return bc;
+}
+
 // ---------------------------------------------------------------------------
 // Louvain community detection
 // ---------------------------------------------------------------------------

@@ -867,9 +867,18 @@ struct ClusterInfo {
     double coherence{};     // members carrying `domain` / size
 };
 
+// A broker: a symbol with high betweenness — many shortest paths route through
+// it, so it bridges otherwise-separate regions (a chokepoint).
+struct BrokerSym {
+    std::string name;
+    std::string location;
+    double score{};  // normalized betweenness
+};
+
 // Everything derived from one build of the call graph.
 struct GraphSignals {
     std::vector<LoadBearingSym> load_bearing;
+    std::vector<BrokerSym> brokers;                // top betweenness, may be empty
     std::vector<std::vector<std::string>> cycles;  // names per cyclic group
     std::vector<ClusterInfo> clusters;             // communities by size desc
     double modularity{};
@@ -930,6 +939,27 @@ GraphSignals compute_graph_signals(const MasterIndex& indexer,
                   return a.location < b.location;
               });
     if (sig.load_bearing.size() > top_n) sig.load_bearing.resize(top_n);
+
+    // Brokers (betweenness). Brandes is O(V·(V+E)); skip on very large graphs so
+    // the interactive overview stays fast — brokers are an optional enrichment,
+    // not a correctness path.
+    if (graph.node_count() <= 2000) {
+        auto bc = graph.betweenness();
+        std::vector<BrokerSym> brokers;
+        for (int i = 0; i < graph.node_count(); ++i) {
+            if (bc[i] <= 0.0) continue;
+            const auto& m = meta[graph.id_at(i)];
+            brokers.push_back({m.first, m.second, bc[i]});
+        }
+        std::sort(brokers.begin(), brokers.end(),
+                  [](const BrokerSym& a, const BrokerSym& b) {
+                      if (a.score != b.score) return a.score > b.score;
+                      if (a.name != b.name) return a.name < b.name;
+                      return a.location < b.location;
+                  });
+        if (brokers.size() > top_n) brokers.resize(top_n);
+        sig.brokers = std::move(brokers);
+    }
 
     // Cycles (top few, each capped to 6 names for compactness).
     for (auto& cyc : graph.cycles()) {
@@ -1017,13 +1047,22 @@ GraphSignals compute_graph_signals(const MasterIndex& indexer,
 // == LOAD BEARING == — symbols the rest of the codebase most depends on, by
 // transitive call-graph reach (C++ enrichment; Go has no equivalent). Pairs
 // with HEALTH's problematic_symbols: high reach + high risk = fix-first.
-void emit_load_bearing(std::ostringstream& out,
-                       const std::vector<LoadBearingSym>& lb) {
-    if (lb.empty()) return;
+void emit_load_bearing(std::ostringstream& out, const GraphSignals& sig) {
+    const auto& lb = sig.load_bearing;
+    if (lb.empty() && sig.brokers.empty()) return;
     out << "== LOAD BEARING ==\n";
     for (const auto& s : lb) {
         out << "  " << s.name << " (" << s.location << ") reach=" << s.reach
             << "\n";
+    }
+    // Brokers: high-betweenness chokepoints bridging separate regions. Distinct
+    // from reach — a bridge can have low reach but be on every cross-path.
+    if (!sig.brokers.empty()) {
+        out << "brokers:\n";
+        for (const auto& b : sig.brokers) {
+            out << "  " << b.name << " (" << b.location
+                << ") betweenness=" << fmt2(b.score) << "\n";
+        }
     }
     out << "---\n";
 }
@@ -1481,7 +1520,7 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
         {
             auto sig = compute_graph_signals(indexer, files_data,
                                              project_root, 5, propagator);
-            emit_load_bearing(out, sig.load_bearing);
+            emit_load_bearing(out, sig);
             emit_clusters(out, sig);
             emit_cycles(out, sig.cycles);
         }
@@ -1660,7 +1699,7 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
         {
             auto sig = compute_graph_signals(indexer, files_data,
                                              project_root, 5, propagator);
-            emit_load_bearing(out, sig.load_bearing);
+            emit_load_bearing(out, sig);
             emit_clusters(out, sig);
             emit_cycles(out, sig.cycles);
         }
