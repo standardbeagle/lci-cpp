@@ -79,6 +79,40 @@ TEST(CallGraph, EmptyGraph) {
     EXPECT_EQ(g.node_count(), 0);
     EXPECT_TRUE(g.incoming_reach().empty());
     EXPECT_TRUE(g.cycles().empty());
+    double q = -1;
+    EXPECT_TRUE(g.louvain_communities(q).empty());
+    EXPECT_DOUBLE_EQ(q, 0.0);
+}
+
+// Two triangles (1-2-3 and 4-5-6) joined by a single bridge edge 3->4 must
+// split into two communities with positive modularity.
+TEST(CallGraph, LouvainSplitsTwoCliques) {
+    auto g = make_graph(
+        {1, 2, 3, 4, 5, 6},
+        {{1, {2, 3}}, {2, {3, 1}}, {3, {1, 2, 4}},  // triangle A + bridge
+         {4, {5, 6}}, {5, {6, 4}}, {6, {4, 5}}});    // triangle B
+    double q = 0;
+    auto comm = g.louvain_communities(q);
+    ASSERT_EQ(comm.size(), 6u);
+    // Nodes 1,2,3 (idx 0,1,2) share a community; 4,5,6 (idx 3,4,5) share another.
+    EXPECT_EQ(comm[0], comm[1]);
+    EXPECT_EQ(comm[1], comm[2]);
+    EXPECT_EQ(comm[3], comm[4]);
+    EXPECT_EQ(comm[4], comm[5]);
+    EXPECT_NE(comm[0], comm[3]);
+    EXPECT_GT(q, 0.3);  // clear two-community structure
+}
+
+// Determinism: same graph, same labels + modularity across runs.
+TEST(CallGraph, LouvainDeterministic) {
+    absl::flat_hash_map<SymbolID, std::vector<SymbolID>> e = {
+        {1, {2, 3}}, {2, {3, 1}}, {3, {1, 2, 4}}, {4, {5, 6}},
+        {5, {6, 4}}, {6, {4, 5}}};
+    double q1 = 0, q2 = 0;
+    auto a = make_graph({1, 2, 3, 4, 5, 6}, e).louvain_communities(q1);
+    auto b = make_graph({1, 2, 3, 4, 5, 6}, e).louvain_communities(q2);
+    EXPECT_EQ(a, b);
+    EXPECT_DOUBLE_EQ(q1, q2);
 }
 
 }  // namespace

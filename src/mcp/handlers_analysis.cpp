@@ -857,19 +857,35 @@ struct LoadBearingSym {
     int reach{};           // distinct transitive callers
 };
 
-// Transitive load-bearing centrality over the real call graph: how many
-// distinct other symbols can transitively reach each function (its transitive
-// callers). Every call edge is weighted 1.0 — for a call graph an edge either
-// carries dependence or it doesn't, so a fixed PageRank-style per-hop decay
-// constant would be arbitrary. (When per-call-site control flow is surfaced,
-// loop/branch context — not a constant — is the principled way to weight edges.)
-//
-// Backed by analysis::CallGraph: Tarjan SCC + bitset ancestor-closure over the
-// condensation computes exact reach for all nodes in one pass (diamonds counted
-// once, cycles collapsed correctly), replacing the former O(V·E) per-node walk.
-std::vector<LoadBearingSym> compute_load_bearing(
-    const MasterIndex& indexer, const std::vector<FileSymbolData>& files,
-    std::string_view project_root, size_t top_n) {
+// A graph-detected community (Louvain) with its largest-reach exemplar members.
+struct ClusterInfo {
+    int size{};
+    std::vector<std::string> exemplars;
+};
+
+// Everything derived from one build of the call graph.
+struct GraphSignals {
+    std::vector<LoadBearingSym> load_bearing;
+    std::vector<std::vector<std::string>> cycles;  // names per cyclic group
+    std::vector<ClusterInfo> clusters;             // communities by size desc
+    double modularity{};
+    int community_count{};
+};
+
+// Single build of analysis::CallGraph over the real call graph, yielding three
+// signals at once (Karpathy: don't rebuild the graph three times):
+//   - load-bearing: exact transitive-caller reach (SCC + bitset closure),
+//   - cycles: strongly-connected components = circular dependencies,
+//   - clusters: Louvain communities + modularity Q (real graph clustering that
+//     supersedes directory/name-prefix module heuristics).
+// Every call edge is weighted 1.0 — an edge carries dependence or it doesn't;
+// no fixed per-hop decay constant. (Principled edge weighting would come from
+// per-call-site control flow — loops/branches — not a constant; not surfaced
+// per-edge yet.)
+GraphSignals compute_graph_signals(const MasterIndex& indexer,
+                                   const std::vector<FileSymbolData>& files,
+                                   std::string_view project_root,
+                                   size_t top_n) {
     const auto& ref = indexer.ref_tracker();
 
     std::vector<SymbolID> nodes;
@@ -892,20 +908,72 @@ std::vector<LoadBearingSym> compute_load_bearing(
                 [&ref](SymbolID id) { return ref.get_callee_symbols(id); });
     auto reach = graph.incoming_reach();
 
-    std::vector<LoadBearingSym> out;
+    GraphSignals sig;
+    auto name_at = [&](int idx) -> const std::string& {
+        return meta[graph.id_at(idx)].first;
+    };
+
+    // Load-bearing.
     for (int i = 0; i < graph.node_count(); ++i) {
         if (reach[i] <= 0) continue;
         const auto& m = meta[graph.id_at(i)];
-        out.push_back({m.first, m.second, reach[i]});
+        sig.load_bearing.push_back({m.first, m.second, reach[i]});
     }
-    std::sort(out.begin(), out.end(),
+    std::sort(sig.load_bearing.begin(), sig.load_bearing.end(),
               [](const LoadBearingSym& a, const LoadBearingSym& b) {
                   if (a.reach != b.reach) return a.reach > b.reach;
                   if (a.name != b.name) return a.name < b.name;
                   return a.location < b.location;
               });
-    if (out.size() > top_n) out.resize(top_n);
-    return out;
+    if (sig.load_bearing.size() > top_n) sig.load_bearing.resize(top_n);
+
+    // Cycles (top few, each capped to 6 names for compactness).
+    for (auto& cyc : graph.cycles()) {
+        std::vector<std::string> names;
+        for (int idx : cyc) {
+            names.push_back(name_at(idx));
+            if (names.size() >= 6) break;
+        }
+        std::sort(names.begin(), names.end());
+        sig.cycles.push_back(std::move(names));
+        if (sig.cycles.size() >= 5) break;
+    }
+
+    // Clusters: Louvain communities, ranked by size, with highest-reach
+    // exemplars. Only meaningful when there is real structure (≥2 communities).
+    auto comm = graph.louvain_communities(sig.modularity);
+    if (!comm.empty()) {
+        int k = 0;
+        for (int c : comm) k = std::max(k, c + 1);
+        sig.community_count = k;
+        std::vector<std::vector<int>> members(k);
+        for (int i = 0; i < static_cast<int>(comm.size()); ++i)
+            members[comm[i]].push_back(i);
+        std::vector<ClusterInfo> all;
+        for (int c = 0; c < k; ++c) {
+            if (members[c].size() < 2) continue;  // skip singletons
+            auto& mem = members[c];
+            std::sort(mem.begin(), mem.end(), [&](int a, int b) {
+                if (reach[a] != reach[b]) return reach[a] > reach[b];
+                return name_at(a) < name_at(b);
+            });
+            ClusterInfo ci;
+            ci.size = static_cast<int>(mem.size());
+            for (int idx : mem) {
+                ci.exemplars.push_back(name_at(idx));
+                if (ci.exemplars.size() >= 3) break;
+            }
+            all.push_back(std::move(ci));
+        }
+        std::sort(all.begin(), all.end(), [](const ClusterInfo& a,
+                                             const ClusterInfo& b) {
+            if (a.size != b.size) return a.size > b.size;
+            return a.exemplars < b.exemplars;
+        });
+        if (all.size() > 6) all.resize(6);
+        sig.clusters = std::move(all);
+    }
+    return sig;
 }
 
 // == LOAD BEARING == — symbols the rest of the codebase most depends on, by
@@ -918,6 +986,44 @@ void emit_load_bearing(std::ostringstream& out,
     for (const auto& s : lb) {
         out << "  " << s.name << " (" << s.location << ") reach=" << s.reach
             << "\n";
+    }
+    out << "---\n";
+}
+
+// == CYCLES == — circular call dependencies (strongly-connected components of
+// the call graph). C++ enrichment; Go has no equivalent.
+void emit_cycles(std::ostringstream& out,
+                 const std::vector<std::vector<std::string>>& cycles) {
+    if (cycles.empty()) return;
+    out << "== CYCLES ==\n";
+    out << "count=" << cycles.size() << "\n";
+    for (const auto& c : cycles) {
+        out << "  ";
+        for (size_t i = 0; i < c.size(); ++i) {
+            if (i) out << " <-> ";
+            out << c[i];
+        }
+        out << "\n";
+    }
+    out << "---\n";
+}
+
+// == CLUSTERS == — Louvain communities over the call graph: groups of symbols
+// that call each other more than the rest of the codebase, with the modularity
+// score. Real graph clustering, not directory/name heuristics. C++ enrichment.
+void emit_clusters(std::ostringstream& out, const GraphSignals& sig) {
+    if (sig.clusters.empty()) return;
+    out << "== CLUSTERS ==\n";
+    out << "communities=" << sig.community_count
+        << " modularity=" << fmt2(sig.modularity) << "\n";
+    for (size_t i = 0; i < sig.clusters.size(); ++i) {
+        const auto& c = sig.clusters[i];
+        out << "  c" << i << " size=" << c.size << ": ";
+        for (size_t j = 0; j < c.exemplars.size(); ++j) {
+            if (j) out << ", ";
+            out << c.exemplars[j];
+        }
+        out << "\n";
     }
     out << "---\n";
 }
@@ -1330,9 +1436,13 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
         emit_repository_map(out, d.modules.modules);
         emit_entry_points(out, d.result.response.entry_points, project_root);
         if (hd) emit_health(out, *hd, &d.purity);
-        emit_load_bearing(out,
-                          compute_load_bearing(indexer, files_data,
-                                               project_root, 5));
+        {
+            auto sig = compute_graph_signals(indexer, files_data,
+                                             project_root, 5);
+            emit_load_bearing(out, sig.load_bearing);
+            emit_clusters(out, sig);
+            emit_cycles(out, sig.cycles);
+        }
         emit_modules(out, d.modules);
         emit_dependencies(out, d.coupling.coupling);
         if (hd) {
@@ -1505,9 +1615,13 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
         emit_repository_map(out, d.modules.modules);
         emit_entry_points(out, d.result.response.entry_points, project_root);
         if (hd) emit_health(out, *hd, &d.purity);
-        emit_load_bearing(out,
-                          compute_load_bearing(indexer, files_data,
-                                               project_root, 5));
+        {
+            auto sig = compute_graph_signals(indexer, files_data,
+                                             project_root, 5);
+            emit_load_bearing(out, sig.load_bearing);
+            emit_clusters(out, sig);
+            emit_cycles(out, sig.cycles);
+        }
         emit_vocabulary(out, d.naming);
         if (objids) emit_object_ids_hint(out);
         emit_next_steps(out);

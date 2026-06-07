@@ -644,6 +644,42 @@ TEST(CodeInsightLoadBearing, RanksByTransitiveReach) {
     std::filesystem::remove_all(dir);
 }
 
+// Real graph clustering + cycle detection surfaced in the overview. Two
+// mutually-recursive groups (each a cycle) wired into one file; overview must
+// emit == CLUSTERS == (Louvain) and == CYCLES == (SCC).
+TEST(CodeInsightGraphSignals, SurfacesClustersAndCycles) {
+    auto dir = std::filesystem::temp_directory_path() / "lci_graphsignals_test";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    {
+        std::ofstream f(dir / "g.go");
+        // Group A: a1<->a2 (cycle). Group B: b1<->b2 (cycle). a2 bridges to b1.
+        f << "package main\n\n"
+             "func a1() int { return a2() }\n"
+             "func a2() int { return a1() + b1() }\n"
+             "func b1() int { return b2() }\n"
+             "func b2() int { return b1() }\n"
+             "func main() { _ = a1() }\n";
+    }
+
+    Config config;
+    config.project.root = dir.string();
+    MasterIndex indexer(config);
+    indexer.index_directory(dir.string());
+    CodebaseIntelligenceEngine engine;
+
+    nlohmann::json params;  // overview
+    auto result = handle_code_insight(params, engine, indexer);
+    ASSERT_FALSE(result.is_error) << result.text;
+    EXPECT_NE(result.text.find("== CLUSTERS =="), std::string::npos)
+        << result.text;
+    EXPECT_NE(result.text.find("modularity="), std::string::npos);
+    EXPECT_NE(result.text.find("== CYCLES =="), std::string::npos)
+        << result.text;
+
+    std::filesystem::remove_all(dir);
+}
+
 // =============================================================================
 // Registration test
 // =============================================================================

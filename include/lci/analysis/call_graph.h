@@ -45,6 +45,15 @@ class CallGraph {
     /// all nodes, O(C^2/64) space in the component count C. Weight 1.0 per edge.
     std::vector<int> incoming_reach() const;
 
+    /// Louvain community detection. Treats the call graph as undirected (a call
+    /// couples caller and callee) and greedily maximizes modularity Q via the
+    /// standard two-phase multilevel algorithm. Deterministic: nodes are
+    /// considered in index order and ties break to the lowest community id.
+    /// Returns a dense community id per node and writes the final modularity to
+    /// `modularity_out` (0 for an edgeless graph). This is the real graph
+    /// clustering that replaces directory/name heuristics for module discovery.
+    std::vector<int> louvain_communities(double& modularity_out) const;
+
   private:
     std::vector<SymbolID> ids_;                   // idx -> SymbolID
     absl::flat_hash_map<SymbolID, int> index_;    // SymbolID -> idx
