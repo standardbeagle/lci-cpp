@@ -4,7 +4,7 @@ Sub-millisecond semantic code search over large corpora. ~80% context
 reduction versus Grep. Tree-sitter parsing across 13 languages. An MCP
 server for AI assistants, plus CLI, HTTP, and Unix-socket interfaces.
 
-Version `0.5.0`.
+Version `0.6.0`.
 
 ## Quick start
 
@@ -22,7 +22,7 @@ irm https://raw.githubusercontent.com/standardbeagle/lci-cpp/main/install.ps1 | 
 
 Both detect your OS/arch, download the matching release binary, and install
 it (`/usr/local/bin` or `~/.local/bin` on Unix; `%LOCALAPPDATA%\Programs\lci`
-on Windows). Override with `LCI_PREFIX`; pin a version with `LCI_VERSION=0.5.0`.
+on Windows). Override with `LCI_PREFIX`; pin a version with `LCI_VERSION=0.6.0`.
 
 ### Via npm
 
@@ -57,14 +57,14 @@ users can also run `npm update -g @standardbeagle/lci` or
 
 ```sh
 # Linux: tarball or Debian package
-curl -fLO https://github.com/standardbeagle/lci-cpp/releases/download/v0.5.0/lci-0.5.0-Linux.tar.gz
-tar -xzf lci-0.5.0-Linux.tar.gz
-sudo install lci-0.5.0-Linux/bin/lci /usr/local/bin/
+curl -fLO https://github.com/standardbeagle/lci-cpp/releases/download/v0.6.0/lci-0.6.0-Linux.tar.gz
+tar -xzf lci-0.6.0-Linux.tar.gz
+sudo install lci-0.6.0-Linux/bin/lci /usr/local/bin/
 
 # or
-sudo dpkg -i lci-0.5.0-Linux.deb
+sudo dpkg -i lci-0.6.0-Linux.deb
 
-lci --version   # 0.5.0
+lci --version   # 0.6.0
 lci search "myFunction"
 ```
 
@@ -80,8 +80,8 @@ cmake --build build/release --parallel
 # Install + package
 cd build/release
 sudo cmake --install .
-cpack -G TGZ    # produces lci-0.5.0-Linux.tar.gz
-cpack -G DEB    # produces lci-0.5.0-Linux.deb
+cpack -G TGZ    # produces lci-0.6.0-Linux.tar.gz
+cpack -G DEB    # produces lci-0.6.0-Linux.deb
 ```
 
 The CPack output contains only `bin/lci` (~28 MB stripped). Tree-sitter

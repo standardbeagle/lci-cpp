@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.25)
 
 project(lci
-    VERSION 0.5.0
+    VERSION 0.6.0
     DESCRIPTION "Lightning Code Index - fast semantic code search"
     LANGUAGES C CXX
 )

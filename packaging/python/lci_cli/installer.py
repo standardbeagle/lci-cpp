@@ -41,7 +41,7 @@ def _version() -> str:
         return version("lci-cli")
     except Exception:
         # Fallback for source checkouts without installed metadata.
-        return "0.5.0"
+        return "0.6.0"
 
 
 def _cache_dir() -> Path:

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "lci-cli"
-version = "0.5.0"
+version = "0.6.0"
 description = "Lightning Code Index — sub-millisecond semantic code search for AI assistants"
 readme = "README.md"
 requires-python = ">=3.8"
