@@ -172,6 +172,21 @@ jobs:
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake
 
+      # Surface vcpkg port build failures in the job log — by default the
+      # compiler diagnostics land in buildtrees/*/install-*-out.log, which is
+      # never uploaded, making configure failures undiagnosable.
+      - name: Dump vcpkg logs on failure
+        if: failure()
+        run: |
+          echo "===== vcpkg-manifest-install.log ====="
+          cat build/release/vcpkg-manifest-install.log 2>/dev/null || true
+          for f in "$VCPKG_ROOT"/buildtrees/*/install-*-out.log \
+                   "$VCPKG_ROOT"/buildtrees/*/config-*-out.log; do
+            [ -f "$f" ] || continue
+            echo "===== $f (last 200 lines) ====="
+            tail -n 200 "$f"
+          done
+
       - name: Build
         run: cmake --build build/release --parallel
 
