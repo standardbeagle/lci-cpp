@@ -64,6 +64,7 @@ add_executable(lci_tests
     mcp_handlers_context_test.cpp
     cli_test.cpp
     git_test.cpp
+    updater_test.cpp
     index_performance_test.cpp
     json_schema_smoketest.cpp
 )

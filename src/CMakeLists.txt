@@ -85,7 +85,9 @@ add_library(lci_lib STATIC
     cli/mcp.cpp
     cli/commands.cpp
     cli/debug.cpp
+    cli/update.cpp
     cli/profiling.cpp
+    update/updater.cpp
     git/types.cpp
     git/provider.cpp
     git/pattern_detector.cpp

@@ -349,6 +349,27 @@ int main(int argc, char* argv[]) {
 
     mcp_cmd->callback([&]() { std::exit(run_mcp(gflags)); });
 
+    // -- Update subcommand ----------------------------------------------------
+    auto* update_cmd = app.add_subcommand(
+        "update", "Update lci to the latest release (self-update)");
+
+    bool update_check = false;
+    update_cmd->add_flag("--check", update_check,
+                         "Report current vs latest version without installing");
+
+    bool update_force = false;
+    update_cmd->add_flag("-f,--force", update_force,
+                         "Reinstall even when already up to date");
+
+    std::string update_version;
+    update_cmd->add_option("--version", update_version,
+                           "Install a specific release version (e.g. 0.6.0) "
+                           "instead of the latest");
+
+    update_cmd->callback([&]() {
+        std::exit(run_update(update_check, update_force, update_version));
+    });
+
     // Helper: emit a real --test-run file list using the same FileScanner the
     // indexer would consume. Mirrors Go's `MasterIndex.TestRun` (which calls
     // `ListFiles`) — stdout: one path per line; stderr: "Total: N files

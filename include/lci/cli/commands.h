@@ -178,6 +178,12 @@ int run_debug_export(const GlobalFlags& flags, const std::string& output,
 /// debug graph subcommand. Returns 0 on success, non-zero on error.
 int run_debug_graph(const GlobalFlags& flags, const std::string& output);
 
+/// update subcommand: self-update the lci binary from the latest GitHub
+/// release. `check_only` reports current vs latest without writing; `force`
+/// reinstalls even when already current; `version` (empty = latest) pins a
+/// specific release tag. Returns 0 on success, non-zero on error.
+int run_update(bool check_only, bool force, const std::string& version);
+
 // -- Formatting helpers -------------------------------------------------------
 
 std::string format_bytes(int64_t bytes);

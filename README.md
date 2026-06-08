@@ -8,7 +8,52 @@ Version `0.5.0`.
 
 ## Quick start
 
-### From a release artifact (recommended)
+### One-line install (recommended)
+
+```sh
+# Linux / macOS
+curl -fsSL https://raw.githubusercontent.com/standardbeagle/lci-cpp/main/install.sh | sh
+```
+
+```powershell
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/standardbeagle/lci-cpp/main/install.ps1 | iex
+```
+
+Both detect your OS/arch, download the matching release binary, and install
+it (`/usr/local/bin` or `~/.local/bin` on Unix; `%LOCALAPPDATA%\Programs\lci`
+on Windows). Override with `LCI_PREFIX`; pin a version with `LCI_VERSION=0.5.0`.
+
+### Via npm
+
+```sh
+npm install -g @standardbeagle/lci
+lci --version
+```
+
+### Via uv / pip
+
+```sh
+uv tool install lci-cli      # or: pipx install lci-cli
+lci --version
+```
+
+The npm and uv packages download the prebuilt binary for your platform — no
+compiler required.
+
+### Updating
+
+```sh
+lci update            # self-update to the latest release
+lci update --check    # report current vs latest without installing
+lci update --version 0.6.0   # install a specific release
+```
+
+`lci update` works regardless of how lci was installed. Package-manager
+users can also run `npm update -g @standardbeagle/lci` or
+`uv tool upgrade lci-cli`.
+
+### From a release artifact
 
 ```sh
 # Linux: tarball or Debian package

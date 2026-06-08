@@ -1,0 +1,22 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "lci-cli"
+version = "0.5.0"
+description = "Lightning Code Index — sub-millisecond semantic code search for AI assistants"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+keywords = ["code-search", "semantic-search", "mcp", "tree-sitter", "ai"]
+
+[project.urls]
+Homepage = "https://github.com/standardbeagle/lci-cpp"
+Repository = "https://github.com/standardbeagle/lci-cpp"
+
+[project.scripts]
+lci = "lci_cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["lci_cli"]
