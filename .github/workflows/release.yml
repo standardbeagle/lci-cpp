@@ -26,10 +26,11 @@ jobs:
           command -v ninja  >/dev/null || need="$need ninja-build"
           command -v gcc-13 >/dev/null || need="$need gcc-13"
           command -v g++-13 >/dev/null || need="$need g++-13"
-          command -v zip    >/dev/null || need="$need zip"
-          command -v unzip  >/dev/null || need="$need unzip"
-          command -v curl   >/dev/null || need="$need curl"
-          command -v tar    >/dev/null || need="$need tar"
+          command -v zip      >/dev/null || need="$need zip"
+          command -v unzip    >/dev/null || need="$need unzip"
+          command -v curl     >/dev/null || need="$need curl"
+          command -v tar      >/dev/null || need="$need tar"
+          command -v rpmbuild >/dev/null || need="$need rpm"
           if [ -n "$need" ]; then
             sudo apt-get update
             sudo apt-get install -y $need
