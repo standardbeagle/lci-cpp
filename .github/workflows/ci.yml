@@ -43,15 +43,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # zip/unzip/curl/tar are required by bootstrap-vcpkg.sh.
       - name: Ensure build tools
         run: |
           need=""
-          for t in ninja ccache "${{ matrix.cc }}" "${{ matrix.cxx }}"; do
+          for t in ninja ccache zip unzip curl tar "${{ matrix.cc }}" "${{ matrix.cxx }}"; do
             command -v "$t" >/dev/null || need="$need $t"
           done
           if [ -n "$need" ]; then
             sudo apt-get update
-            sudo apt-get install -y ninja-build ccache "${{ matrix.cc }}" "${{ matrix.cxx }}"
+            sudo apt-get install -y ninja-build ccache zip unzip curl tar "${{ matrix.cc }}" "${{ matrix.cxx }}"
           fi
 
       - name: Set up vcpkg
