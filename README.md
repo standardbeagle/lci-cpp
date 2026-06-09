@@ -8,6 +8,11 @@ Version `0.6.0`.
 
 ## Quick start
 
+> **Platform availability:** prebuilt releases are currently **Linux x86_64**
+> only. macOS and Windows binaries are not yet published (ports in progress);
+> the installers fail fast with a clear message on those platforms. Build from
+> source meanwhile.
+
 ### One-line install (recommended)
 
 ```sh
