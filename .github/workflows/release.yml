@@ -27,7 +27,7 @@ jobs:
       - name: Set up vcpkg
         uses: lukka/run-vcpkg@v11
         with:
-          vcpkgGitCommitId: "01f602195983451bc83e72f4214af2cbc495aa94"
+          vcpkgGitCommitId: "f3e10653cc27d62a37a3763cd84b38bca07c6075"
 
       - name: Configure
         env:
@@ -75,7 +75,7 @@ jobs:
       - name: Set up vcpkg
         uses: lukka/run-vcpkg@v11
         with:
-          vcpkgGitCommitId: "01f602195983451bc83e72f4214af2cbc495aa94"
+          vcpkgGitCommitId: "f3e10653cc27d62a37a3763cd84b38bca07c6075"
 
       - name: Configure
         run: |
@@ -124,7 +124,7 @@ jobs:
       - name: Set up vcpkg
         uses: lukka/run-vcpkg@v11
         with:
-          vcpkgGitCommitId: "01f602195983451bc83e72f4214af2cbc495aa94"
+          vcpkgGitCommitId: "f3e10653cc27d62a37a3763cd84b38bca07c6075"
 
       - name: Install tools
         run: brew install ninja

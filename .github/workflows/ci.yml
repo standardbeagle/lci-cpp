@@ -57,7 +57,7 @@ jobs:
       - name: Set up vcpkg
         uses: lukka/run-vcpkg@v11
         with:
-          vcpkgGitCommitId: "01f602195983451bc83e72f4214af2cbc495aa94"
+          vcpkgGitCommitId: "f3e10653cc27d62a37a3763cd84b38bca07c6075"
 
       - name: Configure
         if: ${{ !matrix.main_only || github.ref == 'refs/heads/main' }}
@@ -70,6 +70,18 @@ jobs:
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake
+
+      - name: Dump vcpkg logs on failure
+        if: failure()
+        run: |
+          echo "===== vcpkg-manifest-install.log ====="
+          cat build/${{ matrix.preset }}/vcpkg-manifest-install.log 2>/dev/null || true
+          for f in "$VCPKG_ROOT"/buildtrees/*/install-*-out.log \
+                   "$VCPKG_ROOT"/buildtrees/*/config-*-out.log; do
+            [ -f "$f" ] || continue
+            echo "===== $f (last 200 lines) ====="
+            tail -n 200 "$f"
+          done
 
       - name: Build
         if: ${{ !matrix.main_only || github.ref == 'refs/heads/main' }}
@@ -115,12 +127,23 @@ jobs:
       - name: Set up vcpkg
         uses: lukka/run-vcpkg@v11
         with:
-          vcpkgGitCommitId: "01f602195983451bc83e72f4214af2cbc495aa94"
+          vcpkgGitCommitId: "f3e10653cc27d62a37a3763cd84b38bca07c6075"
 
       - name: Configure
         run: |
           cmake --preset release `
             -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+
+      - name: Dump vcpkg logs on failure
+        if: failure()
+        run: |
+          $log = "build/release/vcpkg-manifest-install.log"
+          if (Test-Path $log) { Write-Output "===== $log ====="; Get-Content $log }
+          Get-ChildItem -Path "$env:VCPKG_ROOT/buildtrees" -Recurse -Filter "*-out.log" -ErrorAction SilentlyContinue |
+            ForEach-Object {
+              Write-Output "===== $($_.FullName) (last 200 lines) ====="
+              Get-Content $_.FullName -Tail 200
+            }
 
       - name: Build
         run: cmake --build build/release --parallel
@@ -153,7 +176,7 @@ jobs:
       - name: Set up vcpkg
         uses: lukka/run-vcpkg@v11
         with:
-          vcpkgGitCommitId: "01f602195983451bc83e72f4214af2cbc495aa94"
+          vcpkgGitCommitId: "f3e10653cc27d62a37a3763cd84b38bca07c6075"
 
       - name: Set up ccache
         uses: hendrikmuhs/ccache-action@v1
@@ -204,7 +227,7 @@ jobs:
       - name: Set up vcpkg
         uses: lukka/run-vcpkg@v11
         with:
-          vcpkgGitCommitId: "01f602195983451bc83e72f4214af2cbc495aa94"
+          vcpkgGitCommitId: "f3e10653cc27d62a37a3763cd84b38bca07c6075"
 
       - name: Configure
         env:
@@ -216,6 +239,18 @@ jobs:
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake
+
+      - name: Dump vcpkg logs on failure
+        if: failure()
+        run: |
+          echo "===== vcpkg-manifest-install.log ====="
+          cat build/release/vcpkg-manifest-install.log 2>/dev/null || true
+          for f in "$VCPKG_ROOT"/buildtrees/*/install-*-out.log \
+                   "$VCPKG_ROOT"/buildtrees/*/config-*-out.log; do
+            [ -f "$f" ] || continue
+            echo "===== $f (last 200 lines) ====="
+            tail -n 200 "$f"
+          done
 
       - name: Build benchmarks
         run: cmake --build build/release --target lci_benchmarks --parallel
