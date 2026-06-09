@@ -96,6 +96,14 @@ endforeach()
 # Dependencies via vcpkg (preferred) or FetchContent (fallback)
 include(FetchContent)
 
+# Force vendored FetchContent dependencies to build static so the released
+# binary is self-contained (the CPack tarball ships only bin/lci). On a fresh
+# CI configure efsw and json-schema-validator otherwise build as shared
+# libraries, and the packaged binary then fails at runtime with a missing
+# libefsw.so / libnlohmann_json_schema_validator.so.2. Local builds already
+# cache this OFF; pin it explicitly so CI matches.
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build vendored dependencies static" FORCE)
+
 find_package(nlohmann_json CONFIG QUIET)
 if(NOT nlohmann_json_FOUND)
     FetchContent_Declare(nlohmann_json
