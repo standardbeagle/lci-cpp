@@ -180,10 +180,9 @@ if(NOT efsw_FOUND)
         # thread (which writes the flag in handleAction), but mIsTakingAction is
         # a plain bool — unsynchronised cross-thread access. efsw already wraps
         # mInitOK in its own Atomic<bool>; this makes mIsTakingAction match.
-        # sed (not a .patch) so re-running on an already-patched tree is a no-op.
-        # Dedicated script keeps the command tokens space-free (CMake otherwise
-        # splits an inline sed expression on its spaces).
-        PATCH_COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/cmake/patch-efsw.sh
+        # Applied via `cmake -P` (file READ/WRITE, not sed) so it is portable
+        # across GNU/BSD/Windows and idempotent on an already-patched tree.
+        PATCH_COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/patch-efsw.cmake
     )
     FetchContent_MakeAvailable(efsw)
 endif()
