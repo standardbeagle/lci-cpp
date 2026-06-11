@@ -281,6 +281,15 @@ TEST(FileContentStoreTest, ConcurrentReadDuringWrite) {
         });
     }
 
+    // Wait until the readers are actually running before writing, so the
+    // assertion below is deterministic even when thread startup is slow under
+    // load (otherwise the writer can finish all iterations before any reader
+    // is scheduled, leaving read_count at 0). Readers keep reading throughout
+    // the writer loop, preserving the concurrent-read-during-write coverage.
+    while (read_count.load(std::memory_order_relaxed) == 0) {
+        std::this_thread::yield();
+    }
+
     // Writer thread updates the store.
     for (int i = 0; i < kIterations; ++i) {
         std::string content = "updated content iteration " + std::to_string(i);
