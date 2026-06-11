@@ -12,6 +12,7 @@ add_library(lci_lib STATIC
     core/reference_tracker.cpp
     core/import_resolver.cpp
     core/portable.cpp
+    core/subprocess.cpp
     core/postings.cpp
     parser/parser.cpp
     parser/parser_pool.cpp
