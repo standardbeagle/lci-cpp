@@ -70,6 +70,7 @@ HANDLE spawn(const std::vector<std::string>& argv, const std::string& cwd,
     sa.bInheritHandle = TRUE;
     HANDLE null_dev = CreateFileW(L"NUL", GENERIC_READ | GENERIC_WRITE, 0, &sa,
                                   OPEN_EXISTING, 0, nullptr);
+    if (null_dev == INVALID_HANDLE_VALUE) return nullptr;
 
     STARTUPINFOW si{};
     si.cb = sizeof(si);
@@ -159,6 +160,7 @@ bool spawn_detached(const std::vector<std::string>& argv) {
 
 #else  // POSIX
 
+#include <cerrno>
 #include <fcntl.h>
 #include <spawn.h>
 #include <sys/wait.h>
@@ -199,7 +201,12 @@ bool run_capture(const std::vector<std::string>& argv, const std::string& cwd,
                                      0);
     if (!cwd.empty()) {
         // posix_spawn_file_actions_addchdir_np: glibc 2.29+, macOS 10.15+.
-        posix_spawn_file_actions_addchdir_np(&fa, cwd.c_str());
+        if (posix_spawn_file_actions_addchdir_np(&fa, cwd.c_str()) != 0) {
+            posix_spawn_file_actions_destroy(&fa);
+            close(fds[0]);
+            close(fds[1]);
+            return false;
+        }
     }
 
     auto cargv = to_cargv(argv);
@@ -213,14 +220,22 @@ bool run_capture(const std::vector<std::string>& argv, const std::string& cwd,
     }
 
     std::array<char, 4096> buf{};
-    ssize_t n = 0;
-    while ((n = read(fds[0], buf.data(), buf.size())) > 0) {
-        out.append(buf.data(), static_cast<size_t>(n));
+    for (;;) {
+        ssize_t n = read(fds[0], buf.data(), buf.size());
+        if (n > 0) {
+            out.append(buf.data(), static_cast<size_t>(n));
+        } else if (n < 0 && errno == EINTR) {
+            continue;
+        } else {
+            break;  // n == 0 (EOF) or a real error
+        }
     }
     close(fds[0]);
 
     int status = 0;
-    if (waitpid(pid, &status, 0) < 0) return false;
+    while (waitpid(pid, &status, 0) < 0) {
+        if (errno != EINTR) return false;
+    }
     return WIFEXITED(status) && WEXITSTATUS(status) == 0;
 }
 
@@ -233,7 +248,9 @@ int run_status(const std::vector<std::string>& argv) {
         return -1;
     }
     int status = 0;
-    if (waitpid(pid, &status, 0) < 0) return -1;
+    while (waitpid(pid, &status, 0) < 0) {
+        if (errno != EINTR) return -1;
+    }
     if (!WIFEXITED(status)) return -1;
     return WEXITSTATUS(status);
 }

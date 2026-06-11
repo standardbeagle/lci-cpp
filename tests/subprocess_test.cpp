@@ -60,5 +60,13 @@ TEST(SubprocessTest, RunStatusReturnsExitCode) {
     EXPECT_EQ(subprocess::run_status({"lci-no-such-binary-xyzzy"}), -1);
 }
 
+TEST(SubprocessTest, SpawnDetachedReturnsTrue) {
+    EXPECT_TRUE(subprocess::spawn_detached({"cmake", "-E", "true"}));
+}
+
+TEST(SubprocessTest, SpawnDetachedMissingBinaryReturnsFalse) {
+    EXPECT_FALSE(subprocess::spawn_detached({"lci-no-such-binary-xyzzy"}));
+}
+
 }  // namespace
 }  // namespace lci
