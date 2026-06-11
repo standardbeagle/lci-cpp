@@ -1,7 +1,13 @@
 #include <gtest/gtest.h>
 
+#include <lci/analysis/codebase_intelligence.h>
+#include <lci/analysis/side_effect_analyzer.h>
 #include <lci/config.h>
+#include <lci/core/graph_propagator.h>
+#include <lci/core/semantic_annotator.h>
 #include <lci/indexing/master_index.h>
+#include <lci/mcp/handlers_analysis.h>
+#include <lci/mcp/handlers_context.h>
 #include <lci/mcp/handlers_core.h>
 #include <lci/mcp/handlers_explore.h>
 #include <lci/mcp/handlers_index.h>
@@ -88,9 +94,38 @@ class McpToolsIntegrationTest : public ::testing::Test {
         search_engine_ = std::make_unique<SearchEngine>(*indexer_);
     }
 
+    // Register the REAL tool handlers on `server` — mirrors the production
+    // wiring in src/cli/mcp.cpp, NOT the stub-only McpServer::register_tools().
+    // The stdio round-trip tests below must exercise production handler code
+    // paths so a broken real handler is caught here, not masked by a placeholder
+    // that always returns "will be implemented in a subsequent task". The
+    // analyzer deps are fixture members so they outlive server.run().
+    void register_real_handlers(McpServer& server) {
+        annotator_ = std::make_unique<SemanticAnnotator>();
+        annotator_->populate_from_index(*indexer_);
+        propagator_ =
+            std::make_unique<GraphPropagator>(&indexer_->ref_tracker());
+        side_effects_ = std::make_unique<SideEffectAnalyzer>("generic");
+        ci_engine_ = std::make_unique<CodebaseIntelligenceEngine>();
+        propagator_->propagate();
+
+        register_core_handlers(server, indexer_.get(), search_engine_.get(),
+                               side_effects_.get());
+        register_explore_handlers(server, indexer_.get());
+        register_index_handlers(server, indexer_.get());
+        register_analysis_handlers(server, indexer_.get(), annotator_.get(),
+                                   side_effects_.get(), propagator_.get(),
+                                   ci_engine_.get());
+        register_context_handlers(server, indexer_.get());
+    }
+
     TempDir dir_;
     std::unique_ptr<MasterIndex> indexer_;
     std::unique_ptr<SearchEngine> search_engine_;
+    std::unique_ptr<SemanticAnnotator> annotator_;
+    std::unique_ptr<GraphPropagator> propagator_;
+    std::unique_ptr<SideEffectAnalyzer> side_effects_;
+    std::unique_ptr<CodebaseIntelligenceEngine> ci_engine_;
 };
 
 // -- Tool: info ---------------------------------------------------------------
@@ -287,7 +322,7 @@ TEST_F(McpToolsIntegrationTest, StdioRoundTripWithRealIndex) {
     config.project.root = dir_.path().string();
 
     McpServer server(config, *indexer_, search_engine_.get());
-    server.register_tools();
+    register_real_handlers(server);
 
     // Build JSON-RPC messages
     auto frame = [](const nlohmann::json& msg) -> std::string {
@@ -365,14 +400,20 @@ TEST_F(McpToolsIntegrationTest, StdioRoundTripWithRealIndex) {
 
     // Response 3: tools/call search with real index
     EXPECT_EQ(responses[2]["id"], 3);
+    EXPECT_FALSE(responses[2]["result"].value("isError", false));
     auto& content = responses[2]["result"]["content"];
     ASSERT_GE(content.size(), 1u);
     EXPECT_EQ(content[0]["type"], "text");
 
-    auto text = nlohmann::json::parse(content[0]["text"].get<std::string>());
-    // Stub handlers return status and tool name
-    EXPECT_TRUE(text.contains("status") || text.contains("results") ||
-                text.contains("total_matches"));
+    auto search_text = content[0]["text"].get<std::string>();
+    // The REAL search handler — not the stub — must answer. Stub placeholders
+    // emit "will be implemented in a subsequent task"; the real handler returns
+    // a JSON payload with results + total_matches for the indexed "greet".
+    EXPECT_EQ(search_text.find("subsequent task"), std::string::npos)
+        << "search dispatched to the stub handler, not the real one";
+    auto text = nlohmann::json::parse(search_text);
+    EXPECT_TRUE(text.contains("results"));
+    EXPECT_GT(text.value("total_matches", 0), 0);
 }
 
 // -- MCP tool call round-trip for all 14 tools --------------------------------
@@ -382,7 +423,7 @@ TEST_F(McpToolsIntegrationTest, AllToolsCallableViaStdio) {
     config.project.root = dir_.path().string();
 
     McpServer server(config, *indexer_, search_engine_.get());
-    server.register_tools();
+    register_real_handlers(server);
 
     auto frame = [](const nlohmann::json& msg) -> std::string {
         auto body = msg.dump();
@@ -482,6 +523,16 @@ TEST_F(McpToolsIntegrationTest, AllToolsCallableViaStdio) {
             << "Response missing 'result': " << resp.dump(2);
         EXPECT_TRUE(resp["result"].contains("content"))
             << "Result missing 'content': " << resp["result"].dump(2);
+        // Real handlers are wired (register_real_handlers), so no tool may
+        // dispatch to the stub placeholder. Catches a regression to the
+        // stub-only register_tools() path.
+        const auto& c = resp["result"]["content"];
+        if (c.is_array() && !c.empty() && c[0].contains("text")) {
+            EXPECT_EQ(c[0]["text"].get<std::string>().find("subsequent task"),
+                      std::string::npos)
+                << "tool '" << calls[i - 1].name
+                << "' dispatched to the stub handler, not the real one";
+        }
     }
 }
 
