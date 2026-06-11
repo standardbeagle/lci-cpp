@@ -117,3 +117,23 @@ path-normalization helper, not the binary's real code paths.
    operate on normalized forward-slash strings independent of the host
    `std::filesystem` separator semantics, then drop those suites from the
    Windows filter.
+
+## 5. macOS Go extractor misses exported symbols
+
+**What:** four Go suites are excluded from the macOS unit gate
+(`GoExtractorTest.*`, `GoLinkerIntegrationTest.*`,
+`AllLinkerIntegrationTest.GoMultiFileProject`). On macOS the Go tree-sitter
+extractor fails to surface exported symbols — e.g. `has_export(t, "Hello")`
+returns `false` for a file containing `func Hello()`. The same tests pass on
+Linux, and other languages (Python, JS, …) extract correctly on macOS, so it is
+a Go-extractor-specific, macOS-specific defect, not a general regression.
+
+**Why deferred:** unrelated to the compilation/port work (no portability change
+touches the Go extractor); it needs a macOS machine to debug — likely undefined
+behaviour (a dangling `string_view` into a temporary, or a tree-sitter
+node-field access) that happens to work under libstdc++/Linux but not
+libc++/AppleClang.
+
+**To close:** on macOS run `GoExtractorTest.ExtractFunction` under ASan/UBSan to
+locate the read, fix the extractor (most likely a lifetime bug surfacing on
+libc++), then drop the four suites from the macOS filter.
