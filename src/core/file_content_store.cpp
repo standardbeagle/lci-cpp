@@ -54,20 +54,20 @@ std::array<uint8_t, 32> compute_sha256(std::string_view data) {
     std::memcpy(buf.data(), src, len);
     buf[len] = 0x80;
     uint64_t bit_len = uint64_t(len) * 8;
-    for (int i = 0; i < 8; ++i) {
+    for (size_t i = 0; i < 8; ++i) {
         buf[padded_len - 1 - i] = uint8_t(bit_len >> (i * 8));
     }
 
     // Process each 64-byte block.
     for (size_t off = 0; off < padded_len; off += 64) {
         std::array<uint32_t, 64> w{};
-        for (int i = 0; i < 16; ++i) {
-            w[size_t(i)] = read_be32(buf.data() + off + size_t(i) * 4);
+        for (size_t i = 0; i < 16; ++i) {
+            w[i] = read_be32(buf.data() + off + i * 4);
         }
-        for (int i = 16; i < 64; ++i) {
+        for (size_t i = 16; i < 64; ++i) {
             uint32_t s0 = rotr32(w[i - 15], 7) ^ rotr32(w[i - 15], 18) ^ (w[i - 15] >> 3);
             uint32_t s1 = rotr32(w[i - 2], 17) ^ rotr32(w[i - 2], 19) ^ (w[i - 2] >> 10);
-            w[size_t(i)] = w[i - 16] + s0 + w[i - 7] + s1;
+            w[i] = w[i - 16] + s0 + w[i - 7] + s1;
         }
 
         uint32_t a = h0, b = h1, c = h2, d = h3;

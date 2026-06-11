@@ -68,7 +68,7 @@ size_t StringPool::size() const {
 // -- FileStringPool -----------------------------------------------------------
 
 FileStringPool::FileStringPool(StringPool& pool, std::string_view content)
-    : pool_(&pool), file_id_(pool.intern(content)) {
+    : file_id_(pool.intern(content)) {
     uint32_t start = 0;
     for (uint32_t i = 0; i < content.size(); ++i) {
         if (content[i] == '\n') {
