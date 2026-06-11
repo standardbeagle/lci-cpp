@@ -113,6 +113,13 @@ gtest_discover_tests(lci_helpers_tests
     PROPERTIES LABELS "infrastructure"
 )
 
+# The integration + real-project suites and the parity runner spawn child
+# processes via fork/exec (tests/parity/runner/modes/*.cpp, child_guard.h) and
+# have no Windows implementation yet. Gated, not stubbed — a Windows port of
+# the runner is tracked as a follow-up. The enforced Windows green bar (like
+# the Linux release gate) is the unit suite (lci_tests) plus spec_diff tests.
+if(NOT WIN32)
+
 # ---------------------------------------------------------------------------
 # Integration tests (non-real-project)
 # ---------------------------------------------------------------------------
@@ -208,6 +215,8 @@ set_tests_properties(lci_real_project_suite PROPERTIES
     RUN_SERIAL TRUE
 )
 
+endif() # NOT WIN32
+
 # ---------------------------------------------------------------------------
 # Benchmark suite (indexing, search, trigram, parser, semantic)
 # ---------------------------------------------------------------------------
@@ -296,4 +305,6 @@ file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/"
 # integration gtests). Must be added BEFORE tests/parity so the parity
 # build can link the spec_diff target.
 add_subdirectory(lib/spec_diff)
-add_subdirectory(parity)
+if(NOT WIN32)
+    add_subdirectory(parity)
+endif()

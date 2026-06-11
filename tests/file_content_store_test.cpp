@@ -2,8 +2,10 @@
 
 #include <lci/core/file_content_store.h>
 #include <lci/core/mmap.h>
+#include <lci/core/portable.h>
 
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <string>
 #include <thread>
@@ -305,7 +307,11 @@ TEST(MappedFileTest, OpenNonExistent) {
 
 TEST(MappedFileTest, OpenAndReadFile) {
     // Create a temporary file.
-    std::string path = "/tmp/lci_mmap_test_" + std::to_string(getpid()) + ".txt";
+    std::string path =
+        (std::filesystem::temp_directory_path() /
+         ("lci_mmap_test_" + std::to_string(lci::portable::process_id()) +
+          ".txt"))
+            .string();
     {
         std::ofstream out(path);
         out << "hello mmap world";
@@ -324,7 +330,11 @@ TEST(MappedFileTest, OpenAndReadFile) {
 }
 
 TEST(MappedFileTest, EmptyFile) {
-    std::string path = "/tmp/lci_mmap_empty_" + std::to_string(getpid()) + ".txt";
+    std::string path =
+        (std::filesystem::temp_directory_path() /
+         ("lci_mmap_empty_" + std::to_string(lci::portable::process_id()) +
+          ".txt"))
+            .string();
     { std::ofstream out(path); }
 
     MappedFile mf;
@@ -337,7 +347,11 @@ TEST(MappedFileTest, EmptyFile) {
 }
 
 TEST(MappedFileTest, MoveSemantics) {
-    std::string path = "/tmp/lci_mmap_move_" + std::to_string(getpid()) + ".txt";
+    std::string path =
+        (std::filesystem::temp_directory_path() /
+         ("lci_mmap_move_" + std::to_string(lci::portable::process_id()) +
+          ".txt"))
+            .string();
     {
         std::ofstream out(path);
         out << "move test";

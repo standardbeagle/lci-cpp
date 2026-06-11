@@ -1,8 +1,11 @@
 #include "spec_diff/assert_matches.h"
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
+#include <functional>
 #include <string>
 
 using spec_diff::SpecDescriptor;
@@ -13,21 +16,23 @@ using spec_diff::diff;
 
 namespace {
 
-// Tiny RAII helper: write text to a temp file, return its path, unlink
-// on destruction. Avoids pulling in std::filesystem temp_directory plumbing
-// for what's a one-line fixture.
+// Tiny RAII helper: write text to a unique temp file, return its path, remove
+// on destruction. Uses std::filesystem so it is portable (no mkstemp).
 class TempGolden {
 public:
     explicit TempGolden(const std::string& contents) {
-        char tmpl[] = "/tmp/spec_diff_golden_XXXXXX";
-        int fd = mkstemp(tmpl);
-        if (fd < 0) std::abort();
-        path_ = tmpl;
-        ::close(fd);
+        static std::atomic<unsigned> counter{0};
+        unsigned n = counter.fetch_add(1);
+        path_ = (std::filesystem::temp_directory_path() /
+                 ("spec_diff_golden_" +
+                  std::to_string(
+                      std::hash<std::string>{}(contents) ^ (n * 2654435761u)) +
+                  ".tmp"))
+                    .string();
         std::ofstream f(path_, std::ios::binary | std::ios::trunc);
         f << contents;
     }
-    ~TempGolden() { std::remove(path_.c_str()); }
+    ~TempGolden() { std::filesystem::remove(path_); }
     const std::string& path() const { return path_; }
 private:
     std::string path_;
