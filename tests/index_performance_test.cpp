@@ -17,6 +17,7 @@
 #include <gtest/gtest.h>
 
 #include <lci/config.h>
+#include <lci/core/portable.h>
 #include <lci/indexing/master_index.h>
 
 #include <chrono>
@@ -103,7 +104,7 @@ struct LargeTestProject {
                 .count();
         root = fs::temp_directory_path() /
                ("lci_perf_" + std::to_string(stamp) + "_" +
-                std::to_string(static_cast<unsigned>(::getpid())));
+                std::to_string(static_cast<unsigned>(lci::portable::process_id())));
         fs::create_directories(root);
 
         for (int i = 0; i < file_count; ++i) {

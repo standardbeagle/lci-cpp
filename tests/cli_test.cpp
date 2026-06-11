@@ -1612,7 +1612,7 @@ TEST(RankOptionsRecency, SortsByFileMtimeDescending) {
     // test is robust against fast-filesystem timestamp granularity.
     namespace fs = std::filesystem;
     auto tmpdir = fs::temp_directory_path() /
-                  ("lci_rank_test_" + std::to_string(::getpid()));
+                  ("lci_rank_test_" + std::to_string(lci::portable::process_id()));
     fs::create_directories(tmpdir);
 
     auto write_file = [&](const std::string& name, std::string_view body) {
