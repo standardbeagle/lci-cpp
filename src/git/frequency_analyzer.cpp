@@ -8,6 +8,8 @@
 #include <filesystem>
 #include <string>
 
+#include <lci/core/portable.h>
+
 namespace lci {
 namespace git {
 
@@ -419,7 +421,7 @@ bool HistoryProvider::get_commit_history(int64_t since_epoch,
     // Format since as ISO date for git --since.
     time_t t = static_cast<time_t>(since_epoch);
     struct tm tm_buf {};
-    gmtime_r(&t, &tm_buf);
+    portable::gmtime_utc(t, tm_buf);
     char since_str[32];
     std::strftime(since_str, sizeof(since_str), "%Y-%m-%dT%H:%M:%S", &tm_buf);
 

@@ -1,8 +1,6 @@
 #include <lci/mcp/handlers_context.h>
 
 #include <chrono>
-#include <cstdio>
-#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -14,47 +12,12 @@
 
 #include <lci/indexing/master_index.h>
 #include <lci/mcp/context_manifest_expander.h>
+#include <lci/mcp/time_format.h>
 
 namespace lci {
 namespace mcp {
 
 namespace {
-
-/// Formats a system_clock time_point as RFC3339Nano with local timezone offset
-/// (matches Go's time.Time JSON marshal: "2026-05-13T17:12:53.528955893-05:00").
-///
-/// Duplicated from src/mcp/handlers_index.cpp (iter-8 helper) to keep this
-/// task within the 5-file scope cap. Follow-up: extract to a shared header
-/// under include/lci/mcp/ once the cap relaxes (tracked as loop-fix in the
-/// completion comment of DART-2PPeRKfyrceR).
-std::string format_rfc3339_nano_local(
-    std::chrono::system_clock::time_point tp) {
-    using namespace std::chrono;
-    auto secs = time_point_cast<seconds>(tp);
-    auto ns = duration_cast<nanoseconds>(tp - secs).count();
-    std::time_t t = system_clock::to_time_t(secs);
-    std::tm tm{};
-    localtime_r(&t, &tm);
-
-    std::tm utm{};
-    gmtime_r(&t, &utm);
-    std::time_t lt = std::mktime(&tm);
-    std::time_t ut = std::mktime(&utm);
-    long offset = static_cast<long>(lt - ut);
-    char sign = offset < 0 ? '-' : '+';
-    long abs_off = offset < 0 ? -offset : offset;
-    int oh = static_cast<int>(abs_off / 3600);
-    int om = static_cast<int>((abs_off % 3600) / 60);
-
-    char buf[48];
-    int n = std::snprintf(buf, sizeof(buf),
-                          "%04d-%02d-%02dT%02d:%02d:%02d.%09ld%c%02d:%02d",
-                          tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
-                          tm.tm_hour, tm.tm_min, tm.tm_sec,
-                          static_cast<long>(ns), sign, oh, om);
-    if (n <= 0) return std::string{};
-    return std::string(buf, static_cast<size_t>(n));
-}
 
 /// Emits a one-line stderr warning the first time a verbose-shape key is
 /// accepted on the load path. Karpathy rule 6 (no silent fallback): the
