@@ -54,3 +54,28 @@ not wired.
 - add an x86_64 macOS release leg; or
 - at minimum, add an arch guard to `install.sh`'s `Darwin` branch so Intel macs
   fail fast with "build from source" instead of fetching a non-runnable binary.
+
+## 3. efsw FSEvents teardown abort on macOS (FileWatcherTest excluded)
+
+**What:** `FileWatcherTest.*` is excluded from the macOS unit-suite gate
+(`--gtest_filter=-FileWatcherTest.*` in both `ci.yml` and `release.yml`).
+Running it on macOS aborts during watcher teardown:
+
+```
+libc++abi: terminating due to uncaught exception of type std::system_error:
+mutex lock failed: Invalid argument
+Abort trap: 6   (exit code 134)
+```
+
+**Why:** vendored efsw's **FSEvents** backend (macOS) races on teardown — the
+macOS analogue of the inotify race fixed for Linux by `cmake/patch-efsw.cmake`
+(`bool mIsTakingAction` → `Atomic<bool>` in `FileWatcherInotify.hpp`). The
+FSEvents backend (`FileWatcherFSEvents.cpp`) is unpatched. `src/indexing/
+watcher.cpp` teardown is correct (`stop()` joins the efsw worker before the
+object dies); the abort is inside efsw. Watcher logic is exercised by the same
+`FileWatcherTest` suite on the Linux CI legs, so cross-platform coverage holds.
+
+**To close:** port the inotify teardown patch to efsw's FSEvents backend
+(guard the watch-action / run-loop mutex against post-destruction access), add
+a `cmake/patch-efsw-fsevents.cmake` analogous to the inotify one, then drop the
+macOS `-FileWatcherTest.*` filter.
