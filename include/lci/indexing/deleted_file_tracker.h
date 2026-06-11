@@ -6,6 +6,7 @@
 
 #include <absl/container/flat_hash_set.h>
 
+#include <lci/core/atomic_shared_ptr.h>
 #include <lci/types.h>
 
 namespace lci {
@@ -56,7 +57,7 @@ class DeletedFileTracker {
     std::vector<FileID> deleted_file_ids() const;
 
   private:
-    std::atomic<std::shared_ptr<const DeletedFileSet>> snapshot_;
+    AtomicSharedPtr<const DeletedFileSet> snapshot_;
     std::shared_ptr<const DeletedFileSet> load() const;
 };
 

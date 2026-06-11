@@ -12,6 +12,7 @@
 #include <absl/container/flat_hash_set.h>
 
 #include <lci/alloc/slab_allocator.h>
+#include <lci/core/atomic_shared_ptr.h>
 #include <lci/types.h>
 
 namespace lci {
@@ -177,7 +178,7 @@ class TrigramIndex {
         absl::flat_hash_set<FileID> invalidated_files;
     };
 
-    std::atomic<std::shared_ptr<const Snapshot>> snapshot_;
+    AtomicSharedPtr<const Snapshot> snapshot_;
     mutable std::mutex write_mu_;
 
     SlabAllocator<FileLocation> location_allocator_;

@@ -9,6 +9,7 @@
 #include <absl/container/flat_hash_map.h>
 
 #include <lci/config.h>
+#include <lci/core/atomic_shared_ptr.h>
 #include <lci/core/file_content_store.h>
 #include <lci/core/file_service.h>
 #include <lci/core/reference_tracker.h>
@@ -214,7 +215,7 @@ class MasterIndex {
     mutable IndexLockManager lock_manager_;
 
     // File snapshot (atomic swap for lock-free reads)
-    std::atomic<std::shared_ptr<const FileSnapshot>> snapshot_;
+    AtomicSharedPtr<const FileSnapshot> snapshot_;
 
     // Fine-grained locks
     std::mutex snapshot_mu_;  // lightweight lock for snapshot updates

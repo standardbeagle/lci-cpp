@@ -16,6 +16,7 @@
 #include <lci/scope.h>
 #include <lci/symbol.h>
 #include <lci/types.h>
+#include <lci/core/atomic_shared_ptr.h>
 #include <lci/core/symbol_store.h>
 
 namespace lci {
@@ -186,7 +187,7 @@ class PostingsIndex {
         absl::flat_hash_map<FileID, std::vector<std::string>> reverse_keys;
     };
 
-    std::atomic<std::shared_ptr<const Snapshot>> snapshot_;
+    AtomicSharedPtr<const Snapshot> snapshot_;
     mutable std::mutex write_mu_;
     /// Non-null only inside a bulk window (guarded by write_mu_).
     std::shared_ptr<Snapshot> staging_;

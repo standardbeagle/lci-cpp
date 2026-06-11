@@ -11,6 +11,7 @@
 
 #include <absl/container/flat_hash_map.h>
 
+#include <lci/core/atomic_shared_ptr.h>
 #include <lci/string_ref.h>
 #include <lci/types.h>
 
@@ -181,7 +182,7 @@ class FileContentStore {
 
   private:
     /// Current snapshot, atomically swapped on writes.
-    std::atomic<std::shared_ptr<FileContentSnapshot>> snapshot_;
+    AtomicSharedPtr<FileContentSnapshot> snapshot_;
 
     /// Serializes write-side snapshot mutations. Reads are lock-free
     /// against the atomic shared_ptr; the mutex only orders the
