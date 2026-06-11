@@ -220,25 +220,31 @@ endif() # NOT WIN32
 # ---------------------------------------------------------------------------
 # Benchmark suite (indexing, search, trigram, parser, semantic)
 # ---------------------------------------------------------------------------
-add_executable(lci_benchmarks
-    benchmarks/benchmark_main.cpp
-    benchmarks/real_project_benchmarks.cpp
-    benchmarks/real_project_advanced_benchmarks.cpp
-)
-target_include_directories(lci_benchmarks PRIVATE
-    "${CMAKE_SOURCE_DIR}/include"
-    "${CMAKE_BINARY_DIR}/generated"
-    "${CMAKE_CURRENT_SOURCE_DIR}"
-)
-target_link_libraries(lci_benchmarks PRIVATE
-    lci_lib
-    benchmark::benchmark
-    benchmark::benchmark_main
-)
+# Gated off Windows: the benchmarks are only ever run on the Linux self-hosted
+# runner (the `benchmarks` CI job), and the benchmark sources use Linux-only
+# std::regex flag spellings (std::regex::multiline) that MSVC rejects. There is
+# no Windows benchmark runner, so building them under MSVC buys nothing.
+if(NOT WIN32)
+    add_executable(lci_benchmarks
+        benchmarks/benchmark_main.cpp
+        benchmarks/real_project_benchmarks.cpp
+        benchmarks/real_project_advanced_benchmarks.cpp
+    )
+    target_include_directories(lci_benchmarks PRIVATE
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_BINARY_DIR}/generated"
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+    target_link_libraries(lci_benchmarks PRIVATE
+        lci_lib
+        benchmark::benchmark
+        benchmark::benchmark_main
+    )
 
-# CTest labels for benchmarks (run separately from unit tests)
-add_test(NAME lci_benchmarks COMMAND lci_benchmarks --benchmark_min_time=0.01s)
-set_tests_properties(lci_benchmarks PROPERTIES LABELS "benchmark")
+    # CTest labels for benchmarks (run separately from unit tests)
+    add_test(NAME lci_benchmarks COMMAND lci_benchmarks --benchmark_min_time=0.01s)
+    set_tests_properties(lci_benchmarks PROPERTIES LABELS "benchmark")
+endif()
 
 # ---------------------------------------------------------------------------
 # Fuzz targets (Clang libFuzzer only)

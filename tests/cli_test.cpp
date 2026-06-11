@@ -135,12 +135,12 @@ TEST(CliMcpDetectTest, DefaultReturnsFalseInTerminal) {
 TEST(CliMcpDetectTest, EnvVariableOverride) {
     // Save and restore env
     const char* old = std::getenv("LCI_MCP_MODE");
-    setenv("LCI_MCP_MODE", "1", 1);
+    lci::portable::set_env("LCI_MCP_MODE", "1");
     EXPECT_TRUE(is_mcp_mode());
     if (old) {
-        setenv("LCI_MCP_MODE", old, 1);
+        lci::portable::set_env("LCI_MCP_MODE", old);
     } else {
-        unsetenv("LCI_MCP_MODE");
+        lci::portable::unset_env("LCI_MCP_MODE");
     }
 }
 

@@ -93,5 +93,22 @@ bool parse_double(std::string_view text, double& out) {
 #endif
 }
 
+bool set_env(const char* name, const char* value) {
+#if defined(_WIN32)
+    return _putenv_s(name, value) == 0;
+#else
+    return ::setenv(name, value, 1) == 0;
+#endif
+}
+
+bool unset_env(const char* name) {
+#if defined(_WIN32)
+    // An empty value removes the variable from the MSVC CRT environment.
+    return _putenv_s(name, "") == 0;
+#else
+    return ::unsetenv(name) == 0;
+#endif
+}
+
 }  // namespace portable
 }  // namespace lci

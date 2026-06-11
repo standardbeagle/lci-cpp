@@ -38,5 +38,13 @@ std::filesystem::path executable_path();
 /// from_chars: returns true if a value was parsed, even with trailing bytes.
 bool parse_double(std::string_view text, double& out);
 
+/// Sets an environment variable, overwriting any existing value. POSIX setenv
+/// / MSVC _putenv_s. Returns true on success.
+bool set_env(const char* name, const char* value);
+
+/// Removes an environment variable (no-op if absent). POSIX unsetenv / MSVC
+/// _putenv_s with an empty value. Returns true on success.
+bool unset_env(const char* name);
+
 }  // namespace portable
 }  // namespace lci
