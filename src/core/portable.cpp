@@ -12,6 +12,7 @@
 #include <unistd.h>
 #endif
 
+#include <cctype>
 #include <charconv>
 #include <cstdlib>
 #include <cstring>
@@ -33,8 +34,11 @@ std::filesystem::path executable_path() {
 #if defined(_WIN32)
     wchar_t buf[MAX_PATH];
     DWORD n = GetModuleFileNameW(nullptr, buf, MAX_PATH);
-    if (n == 0 || n == MAX_PATH) {
+    if (n == 0) {
         throw std::runtime_error("GetModuleFileNameW failed");
+    }
+    if (n == MAX_PATH) {
+        throw std::runtime_error("executable path exceeds MAX_PATH");
     }
     return std::filesystem::path(buf);
 #elif defined(__APPLE__)
@@ -59,7 +63,14 @@ std::filesystem::path executable_path() {
 }
 
 bool parse_double(std::string_view text, double& out) {
-#if defined(__cpp_lib_to_chars) && __cpp_lib_to_chars >= 201611L
+// libc++ (macOS/AppleClang) defines __cpp_lib_to_chars for the INTEGER
+// from_chars overloads but leaves the floating-point overloads deleted (as of
+// LLVM 18 / Xcode 16.4 — confirmed by CI), so the feature macro cannot be
+// trusted there. Use std::from_chars only on non-libc++ stdlibs (libstdc++,
+// MSVC STL) that actually implement the float overload; everywhere on libc++
+// fall back to strtod.
+#if defined(__cpp_lib_to_chars) && __cpp_lib_to_chars >= 201611L && \
+    !defined(_LIBCPP_VERSION)
     auto [ptr, ec] = std::from_chars(text.data(), text.data() + text.size(),
                                      out);
     return ec == std::errc{};
@@ -68,6 +79,10 @@ bool parse_double(std::string_view text, double& out) {
     // but lci never calls setlocale, so LC_NUMERIC stays "C".
     char buf[64];
     if (text.empty() || text.size() >= sizeof(buf)) return false;
+    // from_chars does not skip leading whitespace; strtod does. Reject a
+    // leading space so both branches agree.
+    unsigned char first = static_cast<unsigned char>(text.front());
+    if (std::isspace(first)) return false;
     std::memcpy(buf, text.data(), text.size());
     buf[text.size()] = '\0';
     char* end = nullptr;

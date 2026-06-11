@@ -21,6 +21,9 @@ TEST(PortableTest, LocaltimeLocalProducesValidTm) {
     std::tm tm{};
     ASSERT_TRUE(portable::localtime_local(std::time(nullptr), tm));
     EXPECT_GE(tm.tm_year, 126);  // >= 2026
+    EXPECT_LT(tm.tm_hour, 24);
+    EXPECT_LT(tm.tm_min, 60);
+    EXPECT_LE(tm.tm_sec, 61);    // allow leap seconds
 }
 
 TEST(PortableTest, ProcessIdIsPositiveAndStable) {
