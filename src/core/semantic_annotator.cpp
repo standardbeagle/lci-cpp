@@ -1,5 +1,6 @@
 #include <lci/core/semantic_annotator.h>
 #include <lci/core/file_content_store.h>
+#include <lci/core/portable.h>
 #include <lci/core/reference_tracker.h>
 #include <lci/indexing/master_index.h>
 #include <lci/symbol.h>
@@ -319,10 +320,10 @@ void SemanticAnnotator::parse_memory_hints(std::string_view line,
     std::string cap;
 
     if (RE2::PartialMatch(sp, *patterns_.loop_weight, &cap)) {
+        // portable::parse_double, not std::from_chars: libc++ (macOS) leaves
+        // the floating-point from_chars overload deleted.
         double weight = 0;
-        auto [ptr, ec] = std::from_chars(cap.data(), cap.data() + cap.size(),
-                                         weight);
-        if (ec == std::errc{}) {
+        if (portable::parse_double(cap, weight)) {
             ann.loop_weight = weight;
             ann.has_memory_hints = true;
         }
@@ -350,9 +351,7 @@ void SemanticAnnotator::parse_memory_hints(std::string_view line,
 
     if (RE2::PartialMatch(sp, *patterns_.propagation_weight, &cap)) {
         double weight = 0;
-        auto [ptr, ec] = std::from_chars(cap.data(), cap.data() + cap.size(),
-                                         weight);
-        if (ec == std::errc{}) {
+        if (portable::parse_double(cap, weight)) {
             ann.propagation_weight = std::clamp(weight, 0.0, 1.0);
             ann.has_memory_hints = true;
         }

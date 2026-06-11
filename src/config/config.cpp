@@ -1,4 +1,5 @@
 #include <lci/config.h>
+#include <lci/core/portable.h>
 
 #include <algorithm>
 #include <cctype>
@@ -142,8 +143,9 @@ class Lexer {
 
         std::string text(src_.substr(start, pos_ - start));
         double val = 0;
-        auto [ptr, ec] = std::from_chars(text.data(), text.data() + text.size(), val);
-        if (ec != std::errc{}) val = 0;
+        // portable::parse_double, not std::from_chars: libc++ (macOS) leaves
+        // the floating-point from_chars overload deleted.
+        if (!portable::parse_double(text, val)) val = 0;
         return {TokenKind::Number, std::move(text), val, false};
     }
 
