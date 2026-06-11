@@ -13,6 +13,9 @@ on:
       - "**/*.md"
       - "docs/**"
       - ".gitignore"
+  # Lets a branch run the (billed) macOS leg on demand for validation without
+  # merging to main — see the macos job's event-name guard below.
+  workflow_dispatch:
 
 # Cancel superseded runs on the same ref. A force-push to a PR kills the
 # in-flight run instead of stacking a second full matrix.
@@ -172,7 +175,7 @@ jobs:
   # runner needs them) but uploads NO artifacts.
   # ---------------------------------------------------------------------------
   macos:
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: macos-latest
     name: macos appleclang / release
     env:
@@ -226,6 +229,9 @@ jobs:
 
       - name: Build
         run: cmake --build build/release --parallel
+
+      - name: Test (unit suite)
+        run: ./build/release/tests/lci_tests
 
   # ---------------------------------------------------------------------------
   # Benchmarks — self-hosted Linux, main only. Numbers go to the job log; no
