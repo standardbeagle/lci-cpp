@@ -410,8 +410,9 @@ bool section_allowed(const nlohmann::json& params, const std::string& section) {
 }
 
 /// Returns the response shape for the auto-search workflow (symbol + path
-/// provided instead of id). We do not implement auto-search in C++ yet;
-/// return a clear workflow hint (Karpathy #6 — fail-fast, not empty).
+/// provided instead of id). By design we return a clear workflow hint rather
+/// than running the search server-side (Karpathy #6 — fail-fast, not empty),
+/// mirroring Go's positive _auto_search_triggered payload.
 // Go parity: autoSearchAndReturnContext (handlers.go ~2038). When a caller
 // passes symbol+path but no id, return a positive workflow-hint payload that
 // guides them through search -> object_id -> get_context. Not an error: the
