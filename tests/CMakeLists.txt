@@ -46,7 +46,6 @@ add_executable(lci_tests
     master_index_search_test.cpp
     watcher_test.cpp
     search_engine_test.cpp
-    regex_analyzer_test.cpp
     semantic_test.cpp
     side_effect_analyzer_test.cpp
     linker_engine_test.cpp

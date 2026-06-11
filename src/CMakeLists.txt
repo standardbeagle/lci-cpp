@@ -34,7 +34,6 @@ add_library(lci_lib STATIC
     indexing/deleted_file_tracker.cpp
     indexing/debounced_rebuilder.cpp
     indexing/watcher.cpp
-    regex_analyzer/engine.cpp
     search/engine.cpp
     search/search_coordinator.cpp
     search/engine_context.cpp
