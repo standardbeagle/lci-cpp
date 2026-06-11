@@ -147,7 +147,20 @@ jobs:
             }
 
       - name: Build
-        run: cmake --build build/release --parallel
+        run: cmake --build build/release --parallel --config Release
+
+      # Enforced Windows green bar = the unit suite (lci_tests) plus the
+      # spec_diff unit tests, mirroring the Linux release gate. The fork/exec
+      # integration + parity suites are gated off Windows in tests/CMakeLists.txt
+      # (no Windows runner port yet), so they are not built or run here.
+      - name: Test (unit suite)
+        run: |
+          & build/release/tests/Release/lci_tests.exe
+          if ($LASTEXITCODE -ne 0) { throw "lci_tests failed ($LASTEXITCODE)" }
+          $spec = Get-ChildItem -Path build/release -Recurse -Filter spec_diff_unit_tests.exe | Select-Object -First 1
+          if (-not $spec) { throw "spec_diff_unit_tests.exe not found" }
+          & $spec.FullName
+          if ($LASTEXITCODE -ne 0) { throw "spec_diff_unit_tests failed ($LASTEXITCODE)" }
 
       - name: Reclaim build space
         if: always()
