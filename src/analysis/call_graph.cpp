@@ -1,6 +1,7 @@
 #include <lci/analysis/call_graph.h>
 
 #include <algorithm>
+#include <bit>
 #include <cstdint>
 
 namespace lci {
@@ -168,7 +169,7 @@ std::vector<int> CallGraph::incoming_reach() const {
         for (int w = 0; w < words; ++w) {
             uint64_t b = as[w];
             while (b) {
-                int bit = __builtin_ctzll(b);
+                int bit = std::countr_zero(b);
                 b &= b - 1;
                 total += comp_size[w * 64 + bit];
             }
