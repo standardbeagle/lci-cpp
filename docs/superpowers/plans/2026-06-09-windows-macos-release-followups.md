@@ -79,3 +79,41 @@ object dies); the abort is inside efsw. Watcher logic is exercised by the same
 (guard the watch-action / run-loop mutex against post-destruction access), add
 a `cmake/patch-efsw-fsevents.cmake` analogous to the inotify one, then drop the
 macOS `-FileWatcherTest.*` filter.
+
+## 4. Windows runtime test port (seven suites excluded from the Windows gate)
+
+**What:** the Windows unit gate (`ci.yml` + `release.yml`) runs the full
+`lci_tests` suite EXCEPT seven suites, via
+`--gtest_filter=-ServerTest.*:ClientTest.*:GitReportToJson.*:CodeInsightGitTest.*:ContextHandlerFixture.*:HandlersFixture.*:ExploreIndexTestFixture.*`.
+~1670 unit tests + `spec_diff_unit_tests` run and must pass on Windows; these
+seven (~75 tests) are deferred. The Windows build itself is fully green, and
+the shipped `lci.exe` is unaffected — the gaps are in test fixtures and one
+path-normalization helper, not the binary's real code paths.
+
+**Two root causes:**
+
+1. **Server/Client fixtures are Unix-domain-socket shaped.** `ServerTest` and
+   `ClientTest` SetUp build a `.sock` file path (`temp_directory_path() /
+   "lci_test_N.sock"`) and `make_client()` calls `httplib::Client::
+   set_address_family(AF_UNIX)`. On Windows the transport is TCP
+   (`localhost:<port>`); `server.cpp` parses the port with
+   `stoi(sock.substr(sock.rfind(':')+1))`, and a Windows file path's
+   drive-letter colon (`C:\…`) makes that `stoi` throw "invalid argument" in
+   `SetUp()`, failing every test in both fixtures. Real `lci` is fine — it gets
+   its address from `get_socket_path*()`, which already returns
+   `localhost:<port>` on Windows.
+
+   **To close:** give the fixtures a platform-appropriate address — on Windows
+   a unique `localhost:<port>` (per-fixture port from a static counter) and a
+   TCP `httplib::Client` (no `AF_UNIX`); on POSIX keep the `.sock` path. Then
+   drop `ServerTest.*` / `ClientTest.*` from the Windows filter.
+
+2. **`report_to_json` path relativisation is POSIX-shaped.** `GitReportToJson`,
+   `CodeInsightGitTest`, the MCP `*HandlerFixture`s, and `ExploreIndexTestFixture`
+   feed `/tmp/...`-rooted fixture paths and expect `report_to_json` to strip the
+   root to a forward-slash relative path (`src/foo.cpp`). Under Windows
+   `std::filesystem`, a `/`-rooted path relativises differently, so the result
+   keeps a leading `/`. **To close:** make the git-report path relativisation
+   operate on normalized forward-slash strings independent of the host
+   `std::filesystem` separator semantics, then drop those suites from the
+   Windows filter.
