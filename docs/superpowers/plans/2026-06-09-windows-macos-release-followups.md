@@ -8,25 +8,29 @@ dropped (karpathy #6). Tag when filed in Dart: `loop-fix`.
 
 **What:** `tests/parity/runner/modes/{cli,mcp,http}.cpp` and
 `tests/parity/runner/modes/child_guard.h` spawn child processes with the POSIX
-`fork` / `dup2` / `execvp` / `waitpid` / `kill` pattern and have no Windows
-implementation. They are gated out in `tests/CMakeLists.txt`:
+`fork` / `dup2` / `execvp` / `waitpid` / `kill` pattern. The integration +
+real-project suites, the parity runner, and the benchmark suite are gated to
+**Linux only** in `tests/CMakeLists.txt` (they run only on the Linux CI legs):
 
 ```cmake
-if(NOT WIN32)
+if(NOT WIN32 AND NOT APPLE)
     add_executable(lci_integration_tests ...)
     add_executable(lci_real_project_tests ...)
 endif()
 # ...
-if(NOT WIN32)
+if(NOT WIN32 AND NOT APPLE)
     add_subdirectory(parity)
 endif()
 ```
 
-**Why deferred:** The enforced Windows green bar is the unit suite (`lci_tests`)
-plus `spec_diff_unit_tests`, matching the Linux release gate. The integration
-runner needs an async child-process abstraction (non-blocking pipe reads,
-timeout, signal-equivalent kill) that the current synchronous
-`lci::subprocess` does not expose.
+**Why deferred:** The enforced Windows/macOS green bar is the unit suite
+(`lci_tests`) plus `spec_diff_unit_tests`, matching the Linux release gate.
+Windows has no fork/exec; on macOS these suites are never executed, and even
+compiling the runner there trips libc++'s stricter transitive includes
+(`tests/parity/runner/modes/index.cpp` uses `close()` without `<unistd.h>`).
+A real macOS/Windows port needs an async child-process abstraction
+(non-blocking pipe reads, timeout, signal-equivalent kill) that the current
+synchronous `lci::subprocess` does not expose.
 
 **To close:** extend `lci::subprocess` with a streaming/async child handle
 (read stdout/stderr without blocking, terminate with timeout) on

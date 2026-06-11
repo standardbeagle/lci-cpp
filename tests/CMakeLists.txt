@@ -115,10 +115,13 @@ gtest_discover_tests(lci_helpers_tests
 
 # The integration + real-project suites and the parity runner spawn child
 # processes via fork/exec (tests/parity/runner/modes/*.cpp, child_guard.h) and
-# have no Windows implementation yet. Gated, not stubbed — a Windows port of
-# the runner is tracked as a follow-up. The enforced Windows green bar (like
-# the Linux release gate) is the unit suite (lci_tests) plus spec_diff tests.
-if(NOT WIN32)
+# only ever run on the Linux CI legs. They are gated to Linux: Windows has no
+# fork/exec port, and on macOS they are never executed (the macOS leg runs only
+# the unit suite) so compiling the un-run, not-yet-ported runner there buys
+# nothing — and it trips libc++'s stricter transitive includes. The enforced
+# Windows/macOS green bar is the unit suite (lci_tests) plus spec_diff tests.
+# A runner port to Windows/macOS is tracked as a deferred follow-up.
+if(NOT WIN32 AND NOT APPLE)
 
 # ---------------------------------------------------------------------------
 # Integration tests (non-real-project)
@@ -215,16 +218,17 @@ set_tests_properties(lci_real_project_suite PROPERTIES
     RUN_SERIAL TRUE
 )
 
-endif() # NOT WIN32
+endif() # NOT WIN32 AND NOT APPLE
 
 # ---------------------------------------------------------------------------
 # Benchmark suite (indexing, search, trigram, parser, semantic)
 # ---------------------------------------------------------------------------
-# Gated off Windows: the benchmarks are only ever run on the Linux self-hosted
-# runner (the `benchmarks` CI job), and the benchmark sources use Linux-only
-# std::regex flag spellings (std::regex::multiline) that MSVC rejects. There is
-# no Windows benchmark runner, so building them under MSVC buys nothing.
-if(NOT WIN32)
+# Gated to Linux: the benchmarks only ever run on the Linux self-hosted runner
+# (the `benchmarks` CI job), and the sources use std::regex flag spellings
+# (std::regex::multiline) that MSVC rejects and that are not worth validating on
+# libc++ either. No Windows/macOS benchmark runner exists, so building them off
+# Linux buys nothing.
+if(NOT WIN32 AND NOT APPLE)
     add_executable(lci_benchmarks
         benchmarks/benchmark_main.cpp
         benchmarks/real_project_benchmarks.cpp
@@ -244,7 +248,7 @@ if(NOT WIN32)
     # CTest labels for benchmarks (run separately from unit tests)
     add_test(NAME lci_benchmarks COMMAND lci_benchmarks --benchmark_min_time=0.01s)
     set_tests_properties(lci_benchmarks PROPERTIES LABELS "benchmark")
-endif()
+endif() # NOT WIN32 AND NOT APPLE
 
 # ---------------------------------------------------------------------------
 # Fuzz targets (Clang libFuzzer only)
@@ -311,6 +315,7 @@ file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/"
 # integration gtests). Must be added BEFORE tests/parity so the parity
 # build can link the spec_diff target.
 add_subdirectory(lib/spec_diff)
-if(NOT WIN32)
+# Parity runner is Linux-only (fork/exec; run only on the Linux CI legs).
+if(NOT WIN32 AND NOT APPLE)
     add_subdirectory(parity)
 endif()
