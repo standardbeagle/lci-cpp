@@ -1,4 +1,6 @@
 #include <lci/cli/commands.h>
+#include <lci/core/portable.h>
+#include <lci/core/subprocess.h>
 #include <lci/server/server.h>
 #include <lci/version.h>
 
@@ -56,48 +58,25 @@ std::unique_ptr<Client> ensure_server_running(const Config& cfg,
     std::fprintf(stderr,
                  "Index server not running, starting in background...\n");
 
-#ifndef _WIN32
-    // Get path to current executable via /proc/self/exe
-    std::error_code ec;
-    auto exe_path = std::filesystem::read_symlink("/proc/self/exe", ec);
-    if (ec) {
-        error = "failed to get executable path: " + ec.message();
+    std::filesystem::path exe;
+    try {
+        exe = portable::executable_path();
+    } catch (const std::runtime_error& e) {
+        error = std::string("failed to get executable path: ") + e.what();
         return nullptr;
     }
 
-    std::string exe = exe_path.string();
-    std::string root_arg;
+    std::vector<std::string> argv{exe.string()};
     if (!cfg.project.root.empty() && cfg.project.root != ".") {
-        root_arg = cfg.project.root;
+        argv.push_back("--root");
+        argv.push_back(cfg.project.root);
     }
+    argv.push_back("server");
 
-    pid_t pid = fork();
-    if (pid < 0) {
-        error = "failed to fork server process";
+    if (!subprocess::spawn_detached(argv)) {
+        error = "failed to spawn background server process";
         return nullptr;
     }
-    if (pid == 0) {
-        // Child: detach and exec server
-        setsid();
-
-        // Redirect stdout/stderr to /dev/null for daemon
-        auto* f1 = freopen("/dev/null", "w", stdout);
-        auto* f2 = freopen("/dev/null", "w", stderr);
-        auto* f3 = freopen("/dev/null", "r", stdin);
-        (void)f1; (void)f2; (void)f3;
-
-        if (!root_arg.empty()) {
-            execl(exe.c_str(), exe.c_str(), "--root", root_arg.c_str(),
-                  "server", nullptr);
-        } else {
-            execl(exe.c_str(), exe.c_str(), "server", nullptr);
-        }
-        _exit(1);
-    }
-#else
-    error = "background server start not implemented on Windows";
-    return nullptr;
-#endif
 
     std::fprintf(stderr, "Waiting for index server to be ready...\n");
 
@@ -140,58 +119,33 @@ int run_server(const GlobalFlags& flags, bool daemon, bool foreground) {
     }
 
     if (daemon) {
-#ifndef _WIN32
-        // Daemonize: double-fork pattern. Parent exits 0 immediately; child
-        // calls setsid() and re-execs itself with no daemon flag so the
-        // server loop below runs in the detached process. We re-exec rather
-        // than fall through so signal handlers and fd state are clean.
-        std::error_code ec;
-        auto exe_path = std::filesystem::read_symlink("/proc/self/exe", ec);
-        if (ec) {
-            std::cerr << "Error: failed to get executable path: "
-                      << ec.message() << "\n";
+        // Daemonize: spawn a fully detached copy of ourselves running the
+        // server loop in the foreground (--foreground short-circuits any
+        // config default that might re-enable daemon mode), then return so
+        // the launching process exits immediately.
+        std::filesystem::path exe;
+        try {
+            exe = portable::executable_path();
+        } catch (const std::runtime_error& e) {
+            std::cerr << "Error: failed to get executable path: " << e.what()
+                      << "\n";
             return 1;
         }
-        pid_t pid = fork();
-        if (pid < 0) {
-            std::cerr << "Error: fork failed for --daemon\n";
-            return 1;
-        }
-        if (pid > 0) {
-            // Parent: report and exit.
-            std::printf("Index server starting in background (pid: %d)\n",
-                        static_cast<int>(pid));
-            return 0;
-        }
-        // Child: detach.
-        setsid();
-        auto* f1 = freopen("/dev/null", "w", stdout);
-        auto* f2 = freopen("/dev/null", "w", stderr);
-        auto* f3 = freopen("/dev/null", "r", stdin);
-        (void)f1; (void)f2; (void)f3;
-        // Re-exec without --daemon so the next pass runs the server loop
-        // below. `--foreground` is added explicitly to short-circuit any
-        // future config default that might re-enable daemon.
-        std::string exe = exe_path.string();
-        std::vector<std::string> argv;
-        argv.push_back(exe);
+
+        std::vector<std::string> argv{exe.string()};
         if (!cfg.project.root.empty() && cfg.project.root != ".") {
             argv.push_back("--root");
             argv.push_back(cfg.project.root);
         }
         argv.push_back("server");
         argv.push_back("--foreground");
-        std::vector<char*> raw;
-        raw.reserve(argv.size() + 1);
-        for (auto& a : argv) raw.push_back(a.data());
-        raw.push_back(nullptr);
-        execv(exe.c_str(), raw.data());
-        _exit(1);
-#else
-        std::cerr << "Error: --daemon is not supported on Windows; "
-                     "use --foreground or a service wrapper\n";
-        return 1;
-#endif
+
+        if (!subprocess::spawn_detached(argv)) {
+            std::cerr << "Error: failed to spawn background server process\n";
+            return 1;
+        }
+        std::printf("Index server starting in background\n");
+        return 0;
     }
 
     IndexServer server(cfg);
