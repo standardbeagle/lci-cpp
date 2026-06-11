@@ -1,8 +1,8 @@
 #include <lci/git/provider.h>
 
-#include <array>
+#include <lci/core/subprocess.h>
+
 #include <charconv>
-#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -39,44 +39,15 @@ void split_fields(std::string_view line, std::vector<std::string_view>& fields) 
 
 }  // namespace
 
-namespace {
-// Wraps a string in single quotes for safe use in a /bin/sh command line,
-// escaping any embedded single quotes. Without this, args like
-// `--format=%H|%an|%at` are parsed by the shell — the `|` becomes a pipe and
-// `%an` is run as a command. popen() always goes through /bin/sh -c.
-std::string shell_quote(std::string_view s) {
-    std::string q;
-    q.reserve(s.size() + 2);
-    q += '\'';
-    for (char c : s) {
-        if (c == '\'') q += "'\\''";  // close, escaped quote, reopen
-        else q += c;
-    }
-    q += '\'';
-    return q;
-}
-}  // namespace
-
-bool Provider::run_git(const std::vector<std::string>& args, std::string& out) const {
-    std::string cmd = "cd ";
-    cmd += shell_quote(repo_root_);
-    cmd += " && git";
-    for (const auto& arg : args) {
-        cmd += ' ';
-        cmd += shell_quote(arg);
-    }
-    cmd += " 2>/dev/null";
-
-    FILE* pipe = popen(cmd.c_str(), "r");
-    if (!pipe) return false;
-
-    out.clear();
-    std::array<char, 4096> buf{};
-    while (size_t n = fread(buf.data(), 1, buf.size(), pipe)) {
-        out.append(buf.data(), n);
-    }
-
-    return pclose(pipe) == 0;
+bool Provider::run_git(const std::vector<std::string>& args,
+                       std::string& out) const {
+    // No shell: args go to git verbatim (subprocess::run_capture), so
+    // `--format=%H|%an|%at` needs no quoting and cannot be injected.
+    std::vector<std::string> argv;
+    argv.reserve(args.size() + 1);
+    argv.emplace_back("git");
+    argv.insert(argv.end(), args.begin(), args.end());
+    return subprocess::run_capture(argv, repo_root_, out);
 }
 
 bool Provider::create(std::string_view repo_root, Provider& out) {
