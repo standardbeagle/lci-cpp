@@ -26,6 +26,7 @@ add_executable(lci_tests
     types_test.cpp
     side_effects_test.cpp
     idcodec_test.cpp
+    portable_test.cpp
     config_test.cpp
     gitignore_test.cpp
     error_string_pool_test.cpp

@@ -10,8 +10,9 @@ add_library(lci_lib STATIC
     core/symbol_store.cpp
     core/trigram_bucketing.cpp
     core/reference_tracker.cpp
-    core/postings.cpp
     core/import_resolver.cpp
+    core/portable.cpp
+    core/postings.cpp
     parser/parser.cpp
     parser/parser_pool.cpp
     parser/parse_methods.cpp
