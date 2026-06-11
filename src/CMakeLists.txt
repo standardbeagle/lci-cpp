@@ -49,7 +49,6 @@ add_library(lci_lib STATIC
     semantic/vocabulary_analyzer.cpp
     analysis/call_graph.cpp
     analysis/side_effect_analyzer.cpp
-    analysis/metrics_calculator.cpp
     analysis/health_analyzer.cpp
     analysis/ci_vocabulary_analyzer.cpp
     analysis/coupling_analyzer.cpp
