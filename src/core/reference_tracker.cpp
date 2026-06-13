@@ -357,6 +357,21 @@ std::vector<Reference> ReferenceTracker::get_file_references(
 const EnhancedSymbol* ReferenceTracker::get_symbol_at_line(
     FileID file_id, int line) const {
     auto snap = load_snapshot();
+
+    // Fast path: SymbolLocationIndex provides a binary-searched, lock-free
+    // (RCU) line lookup — O(log n) vs the O(symbols-in-file) linear scan below.
+    // Returns the most-specific spanning symbol; map its id back to this
+    // tracker's symbol snapshot.
+    if (symbol_location_index_ != nullptr) {
+        SymbolID id = symbol_location_index_->find_symbol_id_at_line(file_id,
+                                                                     line);
+        if (id != 0) {
+            if (const auto* s = snap->symbols.get(id)) return s;
+        }
+    }
+
+    // Fallback: linear scan (location index absent or not populated for this
+    // file, e.g. trackers constructed without one in unit tests).
     auto file_syms = snap->symbols.get_symbols_by_file(file_id);
     for (SymbolID id : file_syms) {
         if (const auto* s = snap->symbols.get(id)) {

@@ -56,6 +56,7 @@ void MasterIndex::set_bulk_indexing(bool enabled) {
     // Opens/closes the ReferenceTracker bulk RCU window (staging snapshot +
     // single publish on close), avoiding O(files^2) per-file snapshot clones.
     ref_tracker_.set_bulk_indexing(enabled);
+    symbol_location_index_.set_bulk_indexing(enabled);
     postings_index_.set_bulk_indexing(enabled);
 }
 
@@ -123,6 +124,15 @@ bool MasterIndex::index_directory(const std::string& root) {
         std::lock_guard<std::mutex> stop_lock(stop_mu_);
         active_pipeline_ = nullptr;
     }
+
+    // Publish the symbol-location index now: the pipeline has fully populated
+    // it, and process_all_references reads it (find_symbol_id_at_position) to
+    // resolve reference sources/targets. Under the bulk window those writes sat
+    // in the staging snapshot, invisible to the lock-free reader; close the
+    // window here so resolution sees the committed data. (No further
+    // index_file_symbols runs in this pass; the redundant close at
+    // set_bulk_indexing(false) below is a no-op.)
+    symbol_location_index_.set_bulk_indexing(false);
 
     // Post-pipeline: resolve cross-file references.
     ref_tracker_.process_all_references();

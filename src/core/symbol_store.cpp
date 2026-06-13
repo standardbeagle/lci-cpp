@@ -229,6 +229,42 @@ void SymbolStore::remove_from_secondary_indices(SymbolID id,
 // SymbolLocationIndex
 // ---------------------------------------------------------------------------
 
+SymbolLocationIndex::SymbolLocationIndex() {
+    snapshot_.store(std::make_shared<const Snapshot>(),
+                    std::memory_order_release);
+}
+
+std::shared_ptr<const SymbolLocationIndex::Snapshot>
+SymbolLocationIndex::load_snapshot() const {
+    return snapshot_.load(std::memory_order_acquire);
+}
+
+template <class Fn>
+void SymbolLocationIndex::write_snapshot(Fn&& fn) {
+    std::lock_guard<std::mutex> lk(write_mu_);
+    if (staging_) {
+        fn(*staging_);
+        return;
+    }
+    auto next = std::make_shared<Snapshot>(
+        *snapshot_.load(std::memory_order_acquire));
+    fn(*next);
+    snapshot_.store(std::move(next), std::memory_order_release);
+}
+
+void SymbolLocationIndex::set_bulk_indexing(bool enabled) {
+    std::lock_guard<std::mutex> lk(write_mu_);
+    if (enabled) {
+        if (!staging_) {
+            staging_ = std::make_shared<Snapshot>(
+                *snapshot_.load(std::memory_order_acquire));
+        }
+    } else if (staging_) {
+        snapshot_.store(std::move(staging_), std::memory_order_release);
+        staging_ = nullptr;
+    }
+}
+
 void SymbolLocationIndex::index_file_symbols(
     FileID file_id,
     std::span<const Symbol> symbols,
@@ -266,14 +302,17 @@ void SymbolLocationIndex::index_file_symbols(
                   return a_size < b_size;
               });
 
-    locations_[file_id] = std::move(file_map);
+    write_snapshot([&](Snapshot& s) {
+        s.locations[file_id] = std::move(file_map);
+    });
 }
 
 const Symbol* SymbolLocationIndex::find_symbol_at_position(
     FileID file_id, int line, int column) const {
 
-    auto it = locations_.find(file_id);
-    if (it == locations_.end()) return nullptr;
+    auto snap = load_snapshot();
+    auto it = snap->locations.find(file_id);
+    if (it == snap->locations.end()) return nullptr;
 
     const auto* match = find_best_match(it->second, line, column);
     if (match != nullptr) return &match->symbol;
@@ -283,17 +322,53 @@ const Symbol* SymbolLocationIndex::find_symbol_at_position(
 SymbolID SymbolLocationIndex::find_symbol_id_at_position(
     FileID file_id, int line, int column) const {
 
-    auto it = locations_.find(file_id);
-    if (it == locations_.end()) return 0;
+    auto snap = load_snapshot();
+    auto it = snap->locations.find(file_id);
+    if (it == snap->locations.end()) return 0;
 
     const auto* match = find_best_match(it->second, line, column);
     if (match != nullptr) return match->symbol_id;
     return 0;
 }
 
+SymbolID SymbolLocationIndex::find_symbol_id_at_line(
+    FileID file_id, int line) const {
+
+    auto snap = load_snapshot();
+    auto it = snap->locations.find(file_id);
+    if (it == snap->locations.end()) return 0;
+
+    const auto& syms = it->second.sorted_symbols;
+
+    // sorted_symbols is ordered by start line, then span (smallest first).
+    // All candidates have start_line <= line; binary-search the upper bound,
+    // then take the first (smallest-span, most-specific) whose end_line >= line.
+    // Column-agnostic: callers only know a line.
+    auto upper = std::upper_bound(
+        syms.begin(), syms.end(), line,
+        [](int target_line, const PositionedSymbol& ps) {
+            return target_line < ps.start.line;
+        });
+
+    const PositionedSymbol* best = nullptr;
+    int best_size = -1;
+    for (auto sit = syms.begin(); sit != upper; ++sit) {
+        if (sit->end.line < line) continue;
+        int sym_size = (sit->end.line - sit->start.line) * 1000 +
+                       (sit->end.column - sit->start.column);
+        if (best == nullptr || sym_size < best_size) {
+            best = &(*sit);
+            best_size = sym_size;
+        }
+    }
+
+    return best != nullptr ? best->symbol_id : 0;
+}
+
 std::vector<Symbol> SymbolLocationIndex::get_file_symbols(FileID file_id) const {
-    auto it = locations_.find(file_id);
-    if (it == locations_.end()) return {};
+    auto snap = load_snapshot();
+    auto it = snap->locations.find(file_id);
+    if (it == snap->locations.end()) return {};
 
     std::vector<Symbol> result;
     result.reserve(it->second.sorted_symbols.size());
@@ -304,20 +379,27 @@ std::vector<Symbol> SymbolLocationIndex::get_file_symbols(FileID file_id) const 
 }
 
 void SymbolLocationIndex::remove_file(FileID file_id) {
-    locations_.erase(file_id);
+    write_snapshot([&](Snapshot& s) { s.locations.erase(file_id); });
 }
 
 void SymbolLocationIndex::clear() {
-    locations_.clear();
+    std::lock_guard<std::mutex> lk(write_mu_);
+    if (staging_) {
+        staging_->locations.clear();
+    } else {
+        snapshot_.store(std::make_shared<const Snapshot>(),
+                        std::memory_order_release);
+    }
 }
 
 int SymbolLocationIndex::file_count() const {
-    return static_cast<int>(locations_.size());
+    return static_cast<int>(load_snapshot()->locations.size());
 }
 
 int SymbolLocationIndex::total_symbols() const {
+    auto snap = load_snapshot();
     int count = 0;
-    for (const auto& [fid, file_map] : locations_) {
+    for (const auto& [fid, file_map] : snap->locations) {
         count += static_cast<int>(file_map.sorted_symbols.size());
     }
     return count;
