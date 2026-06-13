@@ -100,22 +100,21 @@ std::vector<SearchResult> MasterIndex::execute_search(
     const std::vector<FileID>& candidates,
     const SearchOptions& options) const {
 
-    // Read locks are needed ONLY for indexes whose reads hand back references
-    // into shared storage, so the lock must outlive the dereference (lifetime
-    // guards, not lookup-atomicity):
-    //   - Reference: find_symbols_by_name returns raw const EnhancedSymbol*
-    //     that the rest of this function sorts and dereferences.
-    //   - Content:   get_content returns a string_view into a snapshotted
-    //     FileContent that the candidate scan reads below.
-    // Trigram and Postings now serve reads from internal RCU snapshots and
-    // return file IDs BY VALUE (find_candidates_with_options -> vector<FileID>,
-    // find -> fills caller vectors), so a concurrent reindex cannot dangle
-    // them. Their read locks were pure lookup-atomicity and are now redundant
-    // (prereq: TrigramIndex+PostingsIndex RCU snapshots, 01KSRKRW8VZB3AEJ97GGNJDMJW).
+    // Only the Reference index still needs a read lock here: find_symbols_by_name
+    // returns raw const EnhancedSymbol* into ReferenceTracker's in-place-mutated
+    // SymbolStore, which the declaration_only / usage_only paths sort and
+    // dereference. The ReadGuard serializes that against a concurrent reindex
+    // until ReferenceTracker becomes RCU (task 01KSWHQ742 phases 2-3).
+    //
+    // Content no longer needs a lock: every content access below pins the
+    // FileContent shared_ptr (get_file) for its dereference window, so a
+    // concurrent invalidate_file cannot free it (01KSWHQ742 phase 1).
+    //
+    // Trigram and Postings serve reads from internal RCU snapshots and return
+    // file IDs BY VALUE, so they need no lock (prereq 01KSRKRW8VZB3AEJ97GGNJDMJW).
     IndexLockManager::ReadGuard ref_lock(lock_manager_, IndexType::Reference);
-    IndexLockManager::ReadGuard content_lock(lock_manager_, IndexType::Content);
 
-    if (!ref_lock.locked() || !content_lock.locked()) {
+    if (!ref_lock.locked()) {
         return {};
     }
 
@@ -274,7 +273,15 @@ std::vector<SearchResult> MasterIndex::execute_search(
         if (static_cast<int>(results.size()) >= options.max_results) break;
 
         // General text search: scan file content for pattern matches.
-        auto content_sv = file_content_store_->get_content(fid);
+        // Pin the FileContent shared_ptr for the whole scan: get_content /
+        // get_line_offsets each return a view / pointer into a snapshot whose
+        // local shared_ptr dies at the call's return, so a concurrent
+        // invalidate_file swap could free the FileContent mid-scan. Holding the
+        // shared_ptr keeps both the content view and line_offsets alive
+        // lock-free — this is the lifetime role the Content ReadGuard played.
+        auto fc = file_content_store_->get_file(fid);
+        if (!fc) continue;
+        std::string_view content_sv = fc->view();
         if (content_sv.empty()) continue;
 
         // Single disciplined matcher, shared with SearchEngine::find_matches.
@@ -286,9 +293,9 @@ std::vector<SearchResult> MasterIndex::execute_search(
 
         // Resolve line numbers via binary search over the precomputed
         // line-start offsets instead of rescanning from offset 0 per match
-        // (the former O(matches×filesize) quadratic).
-        const std::vector<uint32_t>* line_offsets =
-            file_content_store_->get_line_offsets(fid);
+        // (the former O(matches×filesize) quadratic). Points into the pinned
+        // fc above, valid for the scan.
+        const std::vector<uint32_t>* line_offsets = &fc->line_offsets;
 
         for (const auto& m : matches) {
             if (static_cast<int>(results.size()) >= options.max_results) break;
@@ -327,7 +334,12 @@ SearchContext MasterIndex::extract_context(FileID file_id, int match_line,
     SearchContext ctx;
     if (max_context_lines <= 0) return ctx;
 
-    auto content_sv = file_content_store_->get_content(file_id);
+    // Pin the FileContent for this function: the line views below alias into
+    // it until they are copied into ctx.lines. A bare get_content view could be
+    // freed by a concurrent invalidate_file before that copy.
+    auto fc = file_content_store_->get_file(file_id);
+    if (!fc) return ctx;
+    std::string_view content_sv = fc->view();
     if (content_sv.empty()) return ctx;
 
     // Split content into lines. Mirrors Go's reference behavior: each

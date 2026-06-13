@@ -407,6 +407,97 @@ TEST(MasterIndexSearchIntegrationTest, ConcurrentSearchReads) {
         << "lock-free read returned a result outside shared.go";
 }
 
+// Exercises the def/refs read path (search_definitions / search_references ->
+// ReferenceTracker::find_symbols_by_name -> raw EnhancedSymbol* + content view)
+// under a concurrent reindex of an UNRELATED file. The existing concurrent
+// tests do text search only and never touch ReferenceTracker, so this is the
+// missing coverage for task 01KSWHQ742.
+//
+// Functionally green with the locks present (def always found, no torn paths).
+//
+// TSan caveat: under -fsanitize=thread this currently reports FALSE-POSITIVE
+// races on the SymbolStore maps. IndexLockManager acquires reads via
+// std::shared_timed_mutex::try_lock_shared_for, and TSan does not model the
+// timed shared-lock acquisition, so the reader's lock is invisible to it.
+// Verified: swapping IndexLockManager to untimed lock_shared()/lock() makes
+// this test 0-warning clean, confirming the lock really does serialize today.
+// The real fix (01KSWHQ742 phases 2-3) makes the def/refs path lock-free (RCU
+// snapshot + pin), after which this is the gate that is genuinely TSan-clean
+// with NO lock involved — independent of the timed-mutex instrumentation gap.
+TEST(MasterIndexSearchIntegrationTest, ConcurrentDefRefsDuringIndexing) {
+    TempDir dir;
+    // stable.go is never modified; its definition must remain findable on the
+    // def/refs path through every concurrent write to the other file.
+    dir.write_file("stable.go",
+        "package main\n"
+        "func alwaysHereDefRefToken() { return }\n"
+        "func callsItOnce() { alwaysHereDefRefToken() }\n");
+    dir.write_file("concurrent.go",
+        "package main\n"
+        "func churned() { return }\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+    // Precondition: the stable symbol is findable on the def path before any
+    // concurrency.
+    ASSERT_FALSE(mi.search_definitions("alwaysHereDefRefToken").empty());
+
+    constexpr int kSearcherCount = 4;
+    constexpr int kSearchesPerThread = 100;
+    std::atomic<bool> stop{false};
+    std::atomic<int> stable_def_missing{0};
+    std::atomic<int> malformed_result{0};
+    std::vector<std::thread> searchers;
+
+    for (int i = 0; i < kSearcherCount; ++i) {
+        searchers.emplace_back([&] {
+            for (int j = 0; j < kSearchesPerThread && !stop.load(); ++j) {
+                auto defs = mi.search_definitions("alwaysHereDefRefToken");
+                if (defs.empty()) {
+                    stable_def_missing.fetch_add(1, std::memory_order_relaxed);
+                }
+                for (const auto& r : defs) {
+                    if (r.path.empty()) {
+                        malformed_result.fetch_add(1,
+                                                   std::memory_order_relaxed);
+                    }
+                }
+                // usage_only path: dereferences ref pointers + scans content.
+                auto refs = mi.search_references("alwaysHereDefRefToken");
+                for (const auto& r : refs) {
+                    if (r.path.empty()) {
+                        malformed_result.fetch_add(1,
+                                                   std::memory_order_relaxed);
+                    }
+                }
+            }
+        });
+    }
+
+    std::thread writer([&] {
+        for (int i = 0; i < 20; ++i) {
+            std::string content = "package main\nfunc churned" +
+                                  std::to_string(i) + "() { return }\n";
+            std::string path = (dir.path() / "concurrent.go").string();
+            mi.update_file(path, content);
+        }
+        stop.store(true, std::memory_order_release);
+    });
+
+    writer.join();
+    for (auto& t : searchers) t.join();
+
+    EXPECT_EQ(stable_def_missing.load(), 0)
+        << "def/refs read observed a snapshot missing committed stable symbol "
+           "during a concurrent reindex of an unrelated file";
+    EXPECT_EQ(malformed_result.load(), 0)
+        << "def/refs search returned a result with a torn/empty path under "
+           "concurrent indexing";
+    EXPECT_FALSE(mi.search_definitions("alwaysHereDefRefToken").empty());
+}
+
 // -- Search after single-file indexing ----------------------------------------
 
 TEST(MasterIndexSearchIntegrationTest, SearchAfterSingleFileIndex) {
