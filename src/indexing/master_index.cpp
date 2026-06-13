@@ -50,9 +50,10 @@ std::string MasterIndex::id_to_path(FileID file_id) const {
 // -- Bulk indexing mode toggle ------------------------------------------------
 
 void MasterIndex::set_bulk_indexing(bool enabled) {
-    int32_t v = enabled ? 1 : 0;
     trigram_index_.set_bulk_indexing(enabled);
-    ref_tracker_.bulk_indexing.store(v, std::memory_order_release);
+    // Opens/closes the ReferenceTracker bulk RCU window (staging snapshot +
+    // single publish on close), avoiding O(files^2) per-file snapshot clones.
+    ref_tracker_.set_bulk_indexing(enabled);
     postings_index_.set_bulk_indexing(enabled);
 }
 

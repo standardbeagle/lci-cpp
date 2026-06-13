@@ -22,27 +22,121 @@ bool TypeRelationships::has_relationships() const {
 }
 
 // ---------------------------------------------------------------------------
+// ReferenceTracker::Snapshot - read-side query logic over frozen state
+// ---------------------------------------------------------------------------
+
+std::vector<Reference> ReferenceTracker::Snapshot::get_references_by_id(
+    std::span<const uint64_t> ref_ids) const {
+    std::vector<Reference> result;
+    result.reserve(ref_ids.size());
+    for (uint64_t id : ref_ids) {
+        if (auto it = references.find(id); it != references.end()) {
+            result.push_back(it->second);
+        }
+    }
+    return result;
+}
+
+std::vector<const EnhancedSymbol*>
+ReferenceTracker::Snapshot::find_symbols_by_name(std::string_view name) const {
+    auto ids = symbols.get_symbols_by_name(name);
+    std::vector<const EnhancedSymbol*> result;
+    result.reserve(ids.size());
+    for (SymbolID id : ids) {
+        if (const auto* s = symbols.get(id)) {
+            result.push_back(s);
+        }
+    }
+    return result;
+}
+
+std::vector<Reference> ReferenceTracker::Snapshot::get_symbol_references(
+    SymbolID symbol_id, std::string_view direction) const {
+    std::vector<uint64_t> ref_ids;
+
+    const bool want_incoming =
+        direction == "incoming" || direction == "both" ||
+        (direction != "outgoing");
+    const bool want_outgoing =
+        direction == "outgoing" || direction == "both" ||
+        (direction != "incoming");
+
+    if (want_incoming) {
+        if (auto it = incoming_refs.find(symbol_id);
+            it != incoming_refs.end()) {
+            ref_ids.insert(ref_ids.end(), it->second.begin(),
+                           it->second.end());
+        }
+    }
+    if (want_outgoing) {
+        if (auto it = outgoing_refs.find(symbol_id);
+            it != outgoing_refs.end()) {
+            ref_ids.insert(ref_ids.end(), it->second.begin(),
+                           it->second.end());
+        }
+    }
+
+    return get_references_by_id(ref_ids);
+}
+
+// ---------------------------------------------------------------------------
 // ReferenceTracker
 // ---------------------------------------------------------------------------
 
 ReferenceTracker::ReferenceTracker(SymbolLocationIndex* location_index)
-    : symbols_(256), symbol_location_index_(location_index) {}
+    : symbol_location_index_(location_index) {
+    snapshot_.store(std::make_shared<const Snapshot>(),
+                    std::memory_order_release);
+}
+
+std::shared_ptr<const ReferenceTracker::Snapshot>
+ReferenceTracker::load_snapshot() const {
+    return snapshot_.load(std::memory_order_acquire);
+}
+
+template <class Fn>
+void ReferenceTracker::write_snapshot(Fn&& fn) {
+    std::lock_guard<std::mutex> lk(write_mu_);
+    if (staging_) {
+        // Bulk window: mutate the private unpublished snapshot in place;
+        // a single publish happens in set_bulk_indexing(false).
+        fn(*staging_);
+        return;
+    }
+    auto next = std::make_shared<Snapshot>(
+        *snapshot_.load(std::memory_order_acquire));
+    fn(*next);
+    snapshot_.store(std::move(next), std::memory_order_release);
+}
+
+void ReferenceTracker::set_bulk_indexing(bool enabled) {
+    std::lock_guard<std::mutex> lk(write_mu_);
+    bulk_indexing.store(enabled ? 1 : 0, std::memory_order_release);
+    if (enabled) {
+        if (!staging_) {
+            staging_ = std::make_shared<Snapshot>(
+                *snapshot_.load(std::memory_order_acquire));
+        }
+    } else if (staging_) {
+        snapshot_.store(std::move(staging_), std::memory_order_release);
+        staging_ = nullptr;
+    }
+}
 
 void ReferenceTracker::clear() {
-    symbols_.clear();
-    references_.clear();
-    incoming_refs_.clear();
-    outgoing_refs_.clear();
-    scopes_by_file_.clear();
-    symbol_scopes_.clear();
+    std::lock_guard<std::mutex> lk(write_mu_);
     import_data_.clear();
     reference_cache_.clear();
     scope_chain_cache_.clear();
-    line_to_symbols_by_file_.clear();
     next_symbol_id_ = 1;
     next_ref_id_ = 1;
-    stats_ = {};
     import_resolver_.clear();
+    if (staging_) {
+        *staging_ = Snapshot{};
+    } else {
+        snapshot_.store(std::make_shared<const Snapshot>(),
+                        std::memory_order_release);
+    }
 }
 
 // -- File processing ---------------------------------------------------------
@@ -53,46 +147,55 @@ std::vector<EnhancedSymbol> ReferenceTracker::process_file(
     std::span<const Reference> references,
     std::span<const ScopeInfo> scopes) {
 
-    scopes_by_file_[file_id].assign(scopes.begin(), scopes.end());
-
     std::vector<EnhancedSymbol> enhanced;
     enhanced.reserve(symbols.size());
-    std::vector<SymbolID> symbol_ids;
-    symbol_ids.reserve(symbols.size());
 
-    for (const auto& sym : symbols) {
-        SymbolID id = next_symbol_id_++;
-        auto scope_chain = build_symbol_scope_chain(sym, scopes);
+    write_snapshot([&](Snapshot& s) {
+        s.scopes_by_file[file_id].assign(scopes.begin(), scopes.end());
 
-        Symbol s = sym;
-        s.file_id = file_id;
+        for (const auto& sym : symbols) {
+            SymbolID id = next_symbol_id_++;
+            auto scope_chain = build_symbol_scope_chain(sym, scopes);
 
-        bool is_exported = compute_is_exported(path, s.name);
+            Symbol sm = sym;
+            sm.file_id = file_id;
 
-        EnhancedSymbol es;
-        es.symbol = std::move(s);
-        es.id = id;
-        es.scope_chain = scope_chain;
-        es.is_exported = is_exported;
+            bool is_exported = compute_is_exported(path, sm.name);
 
-        symbols_.set(id, es);
-        symbol_scopes_[id] = std::move(scope_chain);
+            EnhancedSymbol es;
+            es.symbol = std::move(sm);
+            es.id = id;
+            es.scope_chain = scope_chain;
+            es.is_exported = is_exported;
 
-        enhanced.push_back(es);
-        symbol_ids.push_back(id);
-    }
+            s.symbols.set(id, es);
+            s.symbol_scopes[id] = std::move(scope_chain);
 
-    // Store references for later processing.
-    for (const auto& ref : references) {
-        Reference r = ref;
-        r.file_id = file_id;
-        uint64_t global_id = make_global_ref_id(file_id,
-                                                 static_cast<uint32_t>(r.id));
-        r.id = global_id;
-        references_[r.id] = std::move(r);
-    }
+            enhanced.push_back(std::move(es));
+        }
+
+        // Store references for later processing.
+        for (const auto& ref : references) {
+            Reference r = ref;
+            r.file_id = file_id;
+            uint64_t global_id =
+                make_global_ref_id(file_id, static_cast<uint32_t>(r.id));
+            r.id = global_id;
+            s.references[r.id] = std::move(r);
+        }
+    });
 
     return enhanced;
+}
+
+void ReferenceTracker::apply_enrichment(
+    std::span<const EnhancedSymbol> enriched) {
+    if (enriched.empty()) return;
+    write_snapshot([&](Snapshot& s) {
+        for (const auto& es : enriched) {
+            s.symbols.set(es.id, es);
+        }
+    });
 }
 
 void ReferenceTracker::process_file_imports(
@@ -108,86 +211,93 @@ void ReferenceTracker::process_all_references() {
     import_resolver_.build_import_graph(import_data_);
     import_data_.clear();
 
-    incoming_refs_.clear();
-    outgoing_refs_.clear();
+    write_snapshot([&](Snapshot& s) {
+        s.incoming_refs.clear();
+        s.outgoing_refs.clear();
 
-    // Get symbol IDs by file for resolution.
-    absl::flat_hash_map<FileID, std::vector<SymbolID>> symbols_by_file;
-    symbols_.range([&](SymbolID id, const EnhancedSymbol& es) {
-        symbols_by_file[es.symbol.file_id].push_back(id);
-        return true;
-    });
+        // Get symbol IDs by file for resolution.
+        absl::flat_hash_map<FileID, std::vector<SymbolID>> symbols_by_file;
+        s.symbols.range([&](SymbolID id, const EnhancedSymbol& es) {
+            symbols_by_file[es.symbol.file_id].push_back(id);
+            return true;
+        });
 
-    for (auto& [ref_id, ref] : references_) {
-        SymbolID source_id = ref.source_symbol;
-        SymbolID target_id = ref.target_symbol;
+        for (auto& [ref_id, ref] : s.references) {
+            SymbolID source_id = ref.source_symbol;
+            SymbolID target_id = ref.target_symbol;
 
-        if (source_id == 0) {
-            source_id = find_symbol_at_location(ref.file_id, ref.line,
-                                                 ref.column);
-            if (source_id != 0) ref.source_symbol = source_id;
-        }
-        if (target_id == 0) {
-            auto it = symbols_by_file.find(ref.file_id);
-            std::span<const SymbolID> file_syms;
-            if (it != symbols_by_file.end()) {
-                file_syms = it->second;
+            if (source_id == 0) {
+                source_id = find_symbol_at_location(s, ref.file_id, ref.line,
+                                                     ref.column);
+                if (source_id != 0) ref.source_symbol = source_id;
             }
-            target_id = resolve_reference_target(ref, file_syms);
-            if (target_id != 0) ref.target_symbol = target_id;
+            if (target_id == 0) {
+                auto it = symbols_by_file.find(ref.file_id);
+                std::span<const SymbolID> file_syms;
+                if (it != symbols_by_file.end()) {
+                    file_syms = it->second;
+                }
+                target_id = resolve_reference_target(s, ref, file_syms);
+                if (target_id != 0) ref.target_symbol = target_id;
+            }
+
+            if (source_id != 0) {
+                s.outgoing_refs[source_id].push_back(ref_id);
+            }
+            if (target_id != 0) {
+                s.incoming_refs[target_id].push_back(ref_id);
+            }
         }
 
-        if (source_id != 0) {
-            outgoing_refs_[source_id].push_back(ref_id);
-        }
-        if (target_id != 0) {
-            incoming_refs_[target_id].push_back(ref_id);
-        }
-    }
-
-    update_reference_stats();
+        update_reference_stats(s);
+    });
 }
 
 void ReferenceTracker::remove_file(FileID file_id) {
-    auto file_syms = symbols_.get_symbols_by_file(file_id);
-    std::vector<SymbolID> ids(file_syms.begin(), file_syms.end());
+    write_snapshot([&](Snapshot& s) {
+        auto file_syms = s.symbols.get_symbols_by_file(file_id);
+        std::vector<SymbolID> ids(file_syms.begin(), file_syms.end());
 
-    for (SymbolID sym_id : ids) {
-        // Remove outgoing references.
-        if (auto it = outgoing_refs_.find(sym_id); it != outgoing_refs_.end()) {
-            for (uint64_t ref_id : it->second) {
-                auto ref_it = references_.find(ref_id);
-                if (ref_it != references_.end()) {
-                    if (ref_it->second.target_symbol != 0) {
-                        remove_from_incoming_refs(ref_it->second.target_symbol,
-                                                   ref_id);
-                    }
-                    references_.erase(ref_it);
-                }
-            }
-            outgoing_refs_.erase(it);
-        }
-
-        // Remove incoming references.
-        if (auto it = incoming_refs_.find(sym_id); it != incoming_refs_.end()) {
-            for (uint64_t ref_id : it->second) {
-                auto ref_it = references_.find(ref_id);
-                if (ref_it != references_.end()) {
-                    if (ref_it->second.source_symbol != 0) {
-                        remove_from_outgoing_refs(
-                            ref_it->second.source_symbol, ref_id);
+        for (SymbolID sym_id : ids) {
+            // Remove outgoing references.
+            if (auto it = s.outgoing_refs.find(sym_id);
+                it != s.outgoing_refs.end()) {
+                for (uint64_t ref_id : it->second) {
+                    auto ref_it = s.references.find(ref_id);
+                    if (ref_it != s.references.end()) {
+                        if (ref_it->second.target_symbol != 0) {
+                            remove_from_incoming_refs(
+                                s, ref_it->second.target_symbol, ref_id);
+                        }
+                        s.references.erase(ref_it);
                     }
                 }
+                s.outgoing_refs.erase(it);
             }
-            incoming_refs_.erase(it);
+
+            // Remove incoming references.
+            if (auto it = s.incoming_refs.find(sym_id);
+                it != s.incoming_refs.end()) {
+                for (uint64_t ref_id : it->second) {
+                    auto ref_it = s.references.find(ref_id);
+                    if (ref_it != s.references.end()) {
+                        if (ref_it->second.source_symbol != 0) {
+                            remove_from_outgoing_refs(
+                                s, ref_it->second.source_symbol, ref_id);
+                        }
+                    }
+                }
+                s.incoming_refs.erase(it);
+            }
+
+            s.symbols.remove(sym_id);
+            s.symbol_scopes.erase(sym_id);
         }
 
-        symbols_.remove(sym_id);
-        symbol_scopes_.erase(sym_id);
-    }
+        s.scopes_by_file.erase(file_id);
+        s.line_to_symbols_by_file.erase(file_id);
+    });
 
-    scopes_by_file_.erase(file_id);
-    line_to_symbols_by_file_.erase(file_id);
     import_resolver_.remove_file(file_id);
 }
 
@@ -195,66 +305,27 @@ void ReferenceTracker::remove_file(FileID file_id) {
 
 std::vector<Reference> ReferenceTracker::get_symbol_references(
     SymbolID symbol_id, std::string_view direction) const {
-
-    std::vector<uint64_t> ref_ids;
-
-    if (direction == "incoming" || direction == "both") {
-        if (auto it = incoming_refs_.find(symbol_id);
-            it != incoming_refs_.end()) {
-            ref_ids.insert(ref_ids.end(), it->second.begin(),
-                           it->second.end());
-        }
-    }
-    if (direction == "outgoing" || direction == "both") {
-        if (auto it = outgoing_refs_.find(symbol_id);
-            it != outgoing_refs_.end()) {
-            ref_ids.insert(ref_ids.end(), it->second.begin(),
-                           it->second.end());
-        }
-    }
-    if (direction != "incoming" && direction != "outgoing" &&
-        direction != "both") {
-        // Default: both directions.
-        if (auto it = incoming_refs_.find(symbol_id);
-            it != incoming_refs_.end()) {
-            ref_ids.insert(ref_ids.end(), it->second.begin(),
-                           it->second.end());
-        }
-        if (auto it = outgoing_refs_.find(symbol_id);
-            it != outgoing_refs_.end()) {
-            ref_ids.insert(ref_ids.end(), it->second.begin(),
-                           it->second.end());
-        }
-    }
-
-    return get_references_by_id(ref_ids);
+    return load_snapshot()->get_symbol_references(symbol_id, direction);
 }
 
 std::vector<const EnhancedSymbol*> ReferenceTracker::find_symbols_by_name(
     std::string_view name) const {
-    auto ids = symbols_.get_symbols_by_name(name);
-    std::vector<const EnhancedSymbol*> result;
-    result.reserve(ids.size());
-    for (SymbolID id : ids) {
-        if (const auto* s = symbols_.get(id)) {
-            result.push_back(s);
-        }
-    }
-    return result;
+    return load_snapshot()->find_symbols_by_name(name);
 }
 
 const EnhancedSymbol* ReferenceTracker::get_enhanced_symbol(
     SymbolID symbol_id) const {
-    return symbols_.get(symbol_id);
+    return load_snapshot()->symbols.get(symbol_id);
 }
 
 std::vector<const EnhancedSymbol*> ReferenceTracker::get_file_enhanced_symbols(
     FileID file_id) const {
-    auto ids = symbols_.get_symbols_by_file(file_id);
+    auto snap = load_snapshot();
+    auto ids = snap->symbols.get_symbols_by_file(file_id);
     std::vector<const EnhancedSymbol*> result;
     result.reserve(ids.size());
     for (SymbolID id : ids) {
-        if (const auto* s = symbols_.get(id)) {
+        if (const auto* s = snap->symbols.get(id)) {
             result.push_back(s);
         }
     }
@@ -263,30 +334,32 @@ std::vector<const EnhancedSymbol*> ReferenceTracker::get_file_enhanced_symbols(
 
 std::vector<Reference> ReferenceTracker::get_file_references(
     FileID file_id) const {
-    auto file_syms = symbols_.get_symbols_by_file(file_id);
+    auto snap = load_snapshot();
+    auto file_syms = snap->symbols.get_symbols_by_file(file_id);
     std::vector<uint64_t> ref_ids;
 
     for (SymbolID sym_id : file_syms) {
-        if (auto it = outgoing_refs_.find(sym_id);
-            it != outgoing_refs_.end()) {
+        if (auto it = snap->outgoing_refs.find(sym_id);
+            it != snap->outgoing_refs.end()) {
             ref_ids.insert(ref_ids.end(), it->second.begin(),
                            it->second.end());
         }
-        if (auto it = incoming_refs_.find(sym_id);
-            it != incoming_refs_.end()) {
+        if (auto it = snap->incoming_refs.find(sym_id);
+            it != snap->incoming_refs.end()) {
             ref_ids.insert(ref_ids.end(), it->second.begin(),
                            it->second.end());
         }
     }
 
-    return get_references_by_id(ref_ids);
+    return snap->get_references_by_id(ref_ids);
 }
 
 const EnhancedSymbol* ReferenceTracker::get_symbol_at_line(
     FileID file_id, int line) const {
-    auto file_syms = symbols_.get_symbols_by_file(file_id);
+    auto snap = load_snapshot();
+    auto file_syms = snap->symbols.get_symbols_by_file(file_id);
     for (SymbolID id : file_syms) {
-        if (const auto* s = symbols_.get(id)) {
+        if (const auto* s = snap->symbols.get(id)) {
             if (s->symbol.line <= line && line <= s->symbol.end_line) {
                 return s;
             }
@@ -297,16 +370,18 @@ const EnhancedSymbol* ReferenceTracker::get_symbol_at_line(
 
 const EnhancedSymbol* ReferenceTracker::find_symbol_by_name(
     std::string_view name) const {
-    auto ids = symbols_.get_symbols_by_name(name);
+    auto snap = load_snapshot();
+    auto ids = snap->symbols.get_symbols_by_name(name);
     if (ids.empty()) return nullptr;
-    return symbols_.get(ids[0]);
+    return snap->symbols.get(ids[0]);
 }
 
 const EnhancedSymbol* ReferenceTracker::find_symbol_by_file_and_name(
     FileID file_id, std::string_view name) const {
-    auto ids = symbols_.get_symbols_by_name(name);
+    auto snap = load_snapshot();
+    auto ids = snap->symbols.get_symbols_by_name(name);
     for (SymbolID id : ids) {
-        if (const auto* s = symbols_.get(id)) {
+        if (const auto* s = snap->symbols.get(id)) {
             if (s->symbol.file_id == file_id) return s;
         }
     }
@@ -314,9 +389,10 @@ const EnhancedSymbol* ReferenceTracker::find_symbol_by_file_and_name(
 }
 
 std::vector<Reference> ReferenceTracker::get_all_references() const {
+    auto snap = load_snapshot();
     std::vector<Reference> out;
-    out.reserve(references_.size());
-    for (const auto& [id, ref] : references_) {
+    out.reserve(snap->references.size());
+    for (const auto& [id, ref] : snap->references) {
         out.push_back(ref);
     }
     return out;
@@ -360,7 +436,8 @@ TypeRelationships ReferenceTracker::get_type_relationships(
 
 std::vector<std::string> ReferenceTracker::get_callee_names(
     SymbolID symbol_id) const {
-    auto refs = get_symbol_references(symbol_id, "outgoing");
+    auto snap = load_snapshot();
+    auto refs = snap->get_symbol_references(symbol_id, "outgoing");
     absl::flat_hash_map<std::string, bool> seen;
     std::vector<std::string> result;
     for (const auto& ref : refs) {
@@ -376,13 +453,14 @@ std::vector<std::string> ReferenceTracker::get_callee_names(
 
 std::vector<std::string> ReferenceTracker::get_caller_names(
     SymbolID symbol_id) const {
-    auto refs = get_symbol_references(symbol_id, "incoming");
+    auto snap = load_snapshot();
+    auto refs = snap->get_symbol_references(symbol_id, "incoming");
     absl::flat_hash_map<SymbolID, bool> seen;
     std::vector<std::string> result;
     for (const auto& ref : refs) {
         if (ref.type == ReferenceType::Call && ref.source_symbol != 0) {
             if (!seen.contains(ref.source_symbol)) {
-                if (const auto* src = symbols_.get(ref.source_symbol)) {
+                if (const auto* src = snap->symbols.get(ref.source_symbol)) {
                     seen[ref.source_symbol] = true;
                     result.push_back(src->symbol.name);
                 }
@@ -394,7 +472,7 @@ std::vector<std::string> ReferenceTracker::get_caller_names(
 
 std::vector<SymbolID> ReferenceTracker::get_callee_symbols(
     SymbolID symbol_id) const {
-    auto refs = get_symbol_references(symbol_id, "outgoing");
+    auto refs = load_snapshot()->get_symbol_references(symbol_id, "outgoing");
     absl::flat_hash_map<SymbolID, bool> seen;
     std::vector<SymbolID> result;
     for (const auto& ref : refs) {
@@ -410,7 +488,7 @@ std::vector<SymbolID> ReferenceTracker::get_callee_symbols(
 
 std::vector<SymbolID> ReferenceTracker::get_caller_symbols(
     SymbolID symbol_id) const {
-    auto refs = get_symbol_references(symbol_id, "incoming");
+    auto refs = load_snapshot()->get_symbol_references(symbol_id, "incoming");
     absl::flat_hash_map<SymbolID, bool> seen;
     std::vector<SymbolID> result;
     for (const auto& ref : refs) {
@@ -426,19 +504,21 @@ std::vector<SymbolID> ReferenceTracker::get_caller_symbols(
 
 FunctionTreeNode ReferenceTracker::build_function_tree(
     SymbolID symbol_id, int max_depth) const {
+    auto snap = load_snapshot();
     absl::flat_hash_map<SymbolID, bool> visited;
-    return build_tree_node(symbol_id, 0, max_depth, visited);
+    return build_tree_node(*snap, symbol_id, 0, max_depth, visited);
 }
 
 // -- Statistics ---------------------------------------------------------------
 
 ReferenceStats ReferenceTracker::get_reference_stats() const {
-    return stats_;
+    return load_snapshot()->stats;
 }
 
 bool ReferenceTracker::has_relationships() const {
-    return !incoming_refs_.empty() || !outgoing_refs_.empty() ||
-           stats_.total_references > 0;
+    auto snap = load_snapshot();
+    return !snap->incoming_refs.empty() || !snap->outgoing_refs.empty() ||
+           snap->stats.total_references > 0;
 }
 
 // -- Line-to-symbol index ----------------------------------------------------
@@ -447,34 +527,39 @@ void ReferenceTracker::store_line_to_symbols(
     FileID file_id,
     absl::flat_hash_map<int, std::vector<int>> line_to_symbols) {
     if (line_to_symbols.empty()) return;
-    line_to_symbols_by_file_[file_id] = std::move(line_to_symbols);
+    write_snapshot([&](Snapshot& s) {
+        s.line_to_symbols_by_file[file_id] = std::move(line_to_symbols);
+    });
 }
 
 const absl::flat_hash_map<int, std::vector<int>>*
 ReferenceTracker::get_file_line_to_symbols(FileID file_id) const {
-    auto it = line_to_symbols_by_file_.find(file_id);
-    if (it == line_to_symbols_by_file_.end()) return nullptr;
+    auto snap = load_snapshot();
+    auto it = snap->line_to_symbols_by_file.find(file_id);
+    if (it == snap->line_to_symbols_by_file.end()) return nullptr;
     return &it->second;
 }
 
 // -- Internal helpers --------------------------------------------------------
 
-void ReferenceTracker::remove_from_incoming_refs(SymbolID symbol_id,
+void ReferenceTracker::remove_from_incoming_refs(Snapshot& s,
+                                                  SymbolID symbol_id,
                                                   uint64_t ref_id) {
-    auto it = incoming_refs_.find(symbol_id);
-    if (it == incoming_refs_.end()) return;
+    auto it = s.incoming_refs.find(symbol_id);
+    if (it == s.incoming_refs.end()) return;
     auto& refs = it->second;
     std::erase(refs, ref_id);
-    if (refs.empty()) incoming_refs_.erase(it);
+    if (refs.empty()) s.incoming_refs.erase(it);
 }
 
-void ReferenceTracker::remove_from_outgoing_refs(SymbolID symbol_id,
+void ReferenceTracker::remove_from_outgoing_refs(Snapshot& s,
+                                                  SymbolID symbol_id,
                                                   uint64_t ref_id) {
-    auto it = outgoing_refs_.find(symbol_id);
-    if (it == outgoing_refs_.end()) return;
+    auto it = s.outgoing_refs.find(symbol_id);
+    if (it == s.outgoing_refs.end()) return;
     auto& refs = it->second;
     std::erase(refs, ref_id);
-    if (refs.empty()) outgoing_refs_.erase(it);
+    if (refs.empty()) s.outgoing_refs.erase(it);
 }
 
 uint64_t ReferenceTracker::make_global_ref_id(FileID file_id,
@@ -580,7 +665,7 @@ uint64_t ReferenceTracker::create_scope_chain_cache_key(
 }
 
 SymbolID ReferenceTracker::find_symbol_at_location(
-    FileID file_id, int line, int col) const {
+    const Snapshot& s, FileID file_id, int line, int col) const {
 
     if (symbol_location_index_ != nullptr) {
         return symbol_location_index_->find_symbol_id_at_position(
@@ -588,15 +673,17 @@ SymbolID ReferenceTracker::find_symbol_at_location(
     }
 
     // Fallback: linear scan.
-    auto file_syms = symbols_.get_symbols_by_file(file_id);
+    auto file_syms = s.symbols.get_symbols_by_file(file_id);
     for (SymbolID id : file_syms) {
-        if (const auto* s = symbols_.get(id)) {
-            if (s->symbol.line <= line && s->symbol.end_line >= line) {
-                if (s->symbol.line == line) {
-                    if (col >= s->symbol.column && col <= s->symbol.end_column) {
+        if (const auto* sym = s.symbols.get(id)) {
+            if (sym->symbol.line <= line && sym->symbol.end_line >= line) {
+                if (sym->symbol.line == line) {
+                    if (col >= sym->symbol.column &&
+                        col <= sym->symbol.end_column) {
                         return id;
                     }
-                } else if (s->symbol.line < line && s->symbol.end_line > line) {
+                } else if (sym->symbol.line < line &&
+                           sym->symbol.end_line > line) {
                     return id;
                 }
             }
@@ -615,7 +702,7 @@ uint64_t ReferenceTracker::fnv1a_hash_name(std::string_view name) {
 }
 
 SymbolID ReferenceTracker::resolve_reference_target(
-    const Reference& ref,
+    const Snapshot& s, const Reference& ref,
     std::span<const SymbolID> file_symbol_ids) {
 
     const auto& name = ref.referenced_name;
@@ -632,8 +719,8 @@ SymbolID ReferenceTracker::resolve_reference_target(
 
     // Check same-file symbols first (fast path).
     for (SymbolID id : file_symbol_ids) {
-        if (const auto* s = symbols_.get(id)) {
-            if (s->symbol.name == name) {
+        if (const auto* sym = s.symbols.get(id)) {
+            if (sym->symbol.name == name) {
                 reference_cache_[cache_key] = id;
                 return id;
             }
@@ -641,12 +728,12 @@ SymbolID ReferenceTracker::resolve_reference_target(
     }
 
     // Cross-file: use import resolver.
-    auto candidates = symbols_.get_symbols_by_name(name);
+    auto candidates = s.symbols.get_symbols_by_name(name);
     SymbolID resolved = 0;
     if (!candidates.empty()) {
         resolved = import_resolver_.resolve_symbol_reference(
             ref.file_id, name, candidates,
-            [this](SymbolID id) { return symbols_.get(id); });
+            [&s](SymbolID id) { return s.symbols.get(id); });
         if (resolved == 0) resolved = candidates[0];
     }
 
@@ -654,60 +741,51 @@ SymbolID ReferenceTracker::resolve_reference_target(
     return resolved;
 }
 
-std::vector<Reference> ReferenceTracker::get_references_by_id(
-    std::span<const uint64_t> ref_ids) const {
-    std::vector<Reference> result;
-    result.reserve(ref_ids.size());
-    for (uint64_t id : ref_ids) {
-        if (auto it = references_.find(id); it != references_.end()) {
-            result.push_back(it->second);
-        }
-    }
-    return result;
-}
-
-void ReferenceTracker::update_reference_stats() {
-    auto ids = symbols_.get_ids();
+void ReferenceTracker::update_reference_stats(Snapshot& s) {
+    auto ids = s.symbols.get_ids();
     for (SymbolID id : ids) {
-        update_reference_stats_for_symbol(id);
+        update_reference_stats_for_symbol(s, id);
     }
 
     // Update global stats.
     absl::flat_hash_map<FileID, bool> files_seen;
     int sym_refs = 0;
-    for (const auto& [sym_id, refs] : incoming_refs_) {
+    for (const auto& [sym_id, refs] : s.incoming_refs) {
         sym_refs += static_cast<int>(refs.size());
     }
-    for (const auto& [sym_id, refs] : outgoing_refs_) {
+    for (const auto& [sym_id, refs] : s.outgoing_refs) {
         sym_refs += static_cast<int>(refs.size());
     }
-    for (const auto& [id, ref] : references_) {
+    for (const auto& [id, ref] : s.references) {
         files_seen[ref.file_id] = true;
     }
 
-    stats_.total_references = static_cast<int>(references_.size());
-    stats_.total_symbols = symbols_.size();
-    stats_.files_with_refs = static_cast<int>(files_seen.size());
-    stats_.symbol_refs = sym_refs;
+    s.stats.total_references = static_cast<int>(s.references.size());
+    s.stats.total_symbols = s.symbols.size();
+    s.stats.files_with_refs = static_cast<int>(files_seen.size());
+    s.stats.symbol_refs = sym_refs;
 }
 
-void ReferenceTracker::update_reference_stats_for_symbol(SymbolID symbol_id) {
-    auto* sym = symbols_.get_mutable(symbol_id);
+void ReferenceTracker::update_reference_stats_for_symbol(Snapshot& s,
+                                                         SymbolID symbol_id) {
+    auto* sym = s.symbols.get_mutable(symbol_id);
     if (sym == nullptr) return;
 
     std::span<const uint64_t> incoming_ids;
     std::span<const uint64_t> outgoing_ids;
 
-    if (auto it = incoming_refs_.find(symbol_id); it != incoming_refs_.end()) {
+    if (auto it = s.incoming_refs.find(symbol_id);
+        it != s.incoming_refs.end()) {
         incoming_ids = it->second;
     }
-    if (auto it = outgoing_refs_.find(symbol_id); it != outgoing_refs_.end()) {
+    if (auto it = s.outgoing_refs.find(symbol_id);
+        it != s.outgoing_refs.end()) {
         outgoing_ids = it->second;
     }
 
     // Populate incoming/outgoing ref vectors on the symbol.
-    sym->incoming_refs = get_references_by_id(incoming_ids);
-    sym->outgoing_refs = get_references_by_id(outgoing_ids);
+    sym->incoming_refs = s.get_references_by_id(incoming_ids);
+    sym->outgoing_refs = s.get_references_by_id(outgoing_ids);
 
     // Build stats on the total RefCount.
     absl::flat_hash_map<FileID, bool> in_files;
@@ -717,7 +795,7 @@ void ReferenceTracker::update_reference_stats_for_symbol(SymbolID symbol_id) {
     int usage_incoming = 0;
 
     for (uint64_t rid : incoming_ids) {
-        if (auto it = references_.find(rid); it != references_.end()) {
+        if (auto it = s.references.find(rid); it != s.references.end()) {
             const auto& r = it->second;
             in_files[r.file_id] = true;
             if (r.type != ReferenceType::Import) usage_incoming++;
@@ -729,7 +807,7 @@ void ReferenceTracker::update_reference_stats_for_symbol(SymbolID symbol_id) {
         }
     }
     for (uint64_t rid : outgoing_ids) {
-        if (auto it = references_.find(rid); it != references_.end()) {
+        if (auto it = s.references.find(rid); it != s.references.end()) {
             const auto& r = it->second;
             out_files[r.file_id] = true;
             switch (r.strength) {
@@ -773,8 +851,9 @@ void ReferenceTracker::update_reference_stats_for_symbol(SymbolID symbol_id) {
 std::vector<SymbolID> ReferenceTracker::get_symbols_by_ref_type(
     SymbolID symbol_id, bool incoming, ReferenceType ref_type) const {
 
+    auto snap = load_snapshot();
     const absl::flat_hash_map<SymbolID, std::vector<uint64_t>>& ref_map =
-        incoming ? incoming_refs_ : outgoing_refs_;
+        incoming ? snap->incoming_refs : snap->outgoing_refs;
 
     auto it = ref_map.find(symbol_id);
     if (it == ref_map.end()) return {};
@@ -783,8 +862,8 @@ std::vector<SymbolID> ReferenceTracker::get_symbols_by_ref_type(
     std::vector<SymbolID> result;
 
     for (uint64_t ref_id : it->second) {
-        auto ref_it = references_.find(ref_id);
-        if (ref_it == references_.end()) continue;
+        auto ref_it = snap->references.find(ref_id);
+        if (ref_it == snap->references.end()) continue;
         const auto& ref = ref_it->second;
         if (ref.type != ref_type) continue;
 
@@ -798,14 +877,14 @@ std::vector<SymbolID> ReferenceTracker::get_symbols_by_ref_type(
 }
 
 FunctionTreeNode ReferenceTracker::build_tree_node(
-    SymbolID symbol_id, int depth, int max_depth,
+    const Snapshot& s, SymbolID symbol_id, int depth, int max_depth,
     absl::flat_hash_map<SymbolID, bool>& visited) const {
 
     FunctionTreeNode node;
     if (depth > max_depth || visited.contains(symbol_id)) return node;
     visited[symbol_id] = true;
 
-    const auto* sym = symbols_.get(symbol_id);
+    const auto* sym = s.symbols.get(symbol_id);
     if (sym == nullptr) return node;
 
     node.name = sym->symbol.name;
@@ -813,10 +892,10 @@ FunctionTreeNode ReferenceTracker::build_tree_node(
     node.file_id = sym->symbol.file_id;
     node.line = sym->symbol.line;
 
-    auto refs = get_symbol_references(symbol_id, "outgoing");
+    auto refs = s.get_symbol_references(symbol_id, "outgoing");
     for (const auto& ref : refs) {
         if (ref.type == ReferenceType::Call && ref.target_symbol != 0) {
-            auto child = build_tree_node(ref.target_symbol, depth + 1,
+            auto child = build_tree_node(s, ref.target_symbol, depth + 1,
                                           max_depth, visited);
             if (!child.name.empty()) {
                 node.children.push_back(std::move(child));
