@@ -100,26 +100,21 @@ std::vector<SearchResult> MasterIndex::execute_search(
     const std::vector<FileID>& candidates,
     const SearchOptions& options) const {
 
-    // Only the Reference index still needs a read lock here: find_symbols_by_name
-    // returns raw const EnhancedSymbol* into ReferenceTracker's in-place-mutated
-    // SymbolStore, which the declaration_only / usage_only paths sort and
-    // dereference. The ReadGuard serializes that against a concurrent reindex
-    // until ReferenceTracker becomes RCU (task 01KSWHQ742 phases 2-3).
-    //
-    // Content no longer needs a lock: every content access below pins the
-    // FileContent shared_ptr (get_file) for its dereference window, so a
-    // concurrent invalidate_file cannot free it (01KSWHQ742 phase 1).
-    //
-    // Trigram and Postings serve reads from internal RCU snapshots and return
-    // file IDs BY VALUE, so they need no lock (prereq 01KSRKRW8VZB3AEJ97GGNJDMJW).
-    IndexLockManager::ReadGuard ref_lock(lock_manager_, IndexType::Reference);
-
-    if (!ref_lock.locked()) {
-        return {};
-    }
+    // execute_search is fully lock-free. Each index it reads serves a stable,
+    // pinned snapshot for the dereference window:
+    //   - Reference: pin() holds the ReferenceTracker RCU snapshot, so the raw
+    //     const EnhancedSymbol* returned by find_symbols_by_name (sorted and
+    //     dereferenced below) stay valid even as a concurrent reindex publishes
+    //     a new snapshot (01KSWHQ742 phases 2-3).
+    //   - Content: every content access pins the FileContent shared_ptr via
+    //     get_file (01KSWHQ742 phase 1).
+    //   - Trigram/Postings: internal RCU, return file IDs BY VALUE
+    //     (prereq 01KSRKRW8VZB3AEJ97GGNJDMJW).
+    // No IndexLockManager lock is taken here.
+    auto refs_snap = ref_tracker_.pin();
 
     if (options.declaration_only) {
-        auto symbols = ref_tracker_.find_symbols_by_name(pattern);
+        auto symbols = refs_snap->find_symbols_by_name(pattern);
         std::sort(symbols.begin(), symbols.end(),
                   [](const EnhancedSymbol* lhs, const EnhancedSymbol* rhs) {
                       if (lhs->symbol.file_id != rhs->symbol.file_id) {
@@ -171,7 +166,7 @@ std::vector<SearchResult> MasterIndex::execute_search(
     }
 
     if (options.usage_only) {
-        auto symbols = ref_tracker_.find_symbols_by_name(pattern);
+        auto symbols = refs_snap->find_symbols_by_name(pattern);
         std::sort(symbols.begin(), symbols.end(),
                   [](const EnhancedSymbol* lhs, const EnhancedSymbol* rhs) {
                       if (lhs->symbol.file_id != rhs->symbol.file_id) {
@@ -188,7 +183,7 @@ std::vector<SearchResult> MasterIndex::execute_search(
 
         std::vector<SearchResult> results;
         for (const auto* sym : symbols) {
-            auto refs = ref_tracker_.get_symbol_references(sym->id, "incoming");
+            auto refs = refs_snap->get_symbol_references(sym->id, "incoming");
             std::sort(refs.begin(), refs.end(),
                       [](const auto& lhs, const auto& rhs) {
                           if (lhs.file_id != rhs.file_id) {
