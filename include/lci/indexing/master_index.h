@@ -211,7 +211,10 @@ class MasterIndex {
     std::shared_ptr<FileContentStore> file_content_store_;
     std::shared_ptr<FileService> file_service_;
 
-    // Lock management (mutable: locking is internal state for const search ops)
+    // Lock management (mutable: locking is internal state for const search ops).
+    // Guards Symbol, Reference, Location, and Content only. Trigram and Postings
+    // are lock-free RCU (own write_mu_ + atomic snapshot publish), so they take
+    // no guard here on either the read or single-file write path.
     mutable IndexLockManager lock_manager_;
 
     // File snapshot (atomic swap for lock-free reads)

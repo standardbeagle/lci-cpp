@@ -100,14 +100,22 @@ std::vector<SearchResult> MasterIndex::execute_search(
     const std::vector<FileID>& candidates,
     const SearchOptions& options) const {
 
-    // Acquire read locks on the indexes we will query.
-    IndexLockManager::ReadGuard trigram_lock(lock_manager_, IndexType::Trigram);
-    IndexLockManager::ReadGuard postings_lock(lock_manager_, IndexType::Postings);
+    // Read locks are needed ONLY for indexes whose reads hand back references
+    // into shared storage, so the lock must outlive the dereference (lifetime
+    // guards, not lookup-atomicity):
+    //   - Reference: find_symbols_by_name returns raw const EnhancedSymbol*
+    //     that the rest of this function sorts and dereferences.
+    //   - Content:   get_content returns a string_view into a snapshotted
+    //     FileContent that the candidate scan reads below.
+    // Trigram and Postings now serve reads from internal RCU snapshots and
+    // return file IDs BY VALUE (find_candidates_with_options -> vector<FileID>,
+    // find -> fills caller vectors), so a concurrent reindex cannot dangle
+    // them. Their read locks were pure lookup-atomicity and are now redundant
+    // (prereq: TrigramIndex+PostingsIndex RCU snapshots, 01KSRKRW8VZB3AEJ97GGNJDMJW).
     IndexLockManager::ReadGuard ref_lock(lock_manager_, IndexType::Reference);
     IndexLockManager::ReadGuard content_lock(lock_manager_, IndexType::Content);
 
-    if (!trigram_lock.locked() || !postings_lock.locked() ||
-        !ref_lock.locked() || !content_lock.locked()) {
+    if (!ref_lock.locked() || !content_lock.locked()) {
         return {};
     }
 

@@ -281,16 +281,16 @@ bool MasterIndex::index_file(const std::string& path) {
     auto content_sv = file_content_store_->get_content(file_id);
     if (content_sv.empty()) return false;
 
-    // Acquire write locks for all index types.
-    IndexLockManager::WriteGuard trigram_lock(lock_manager_, IndexType::Trigram);
+    // Write locks for the indexes still guarded by IndexLockManager. Trigram
+    // and Postings now serialize their own writers via internal write_mu_ +
+    // RCU publish, so they no longer take a manager WriteGuard here (prereq
+    // 01KSRKRW8VZB3AEJ97GGNJDMJW). Their index_file calls below are self-synchronized.
     IndexLockManager::WriteGuard symbol_lock(lock_manager_, IndexType::Symbol);
     IndexLockManager::WriteGuard ref_lock(lock_manager_, IndexType::Reference);
-    IndexLockManager::WriteGuard postings_lock(lock_manager_, IndexType::Postings);
     IndexLockManager::WriteGuard location_lock(lock_manager_, IndexType::Location);
     IndexLockManager::WriteGuard content_lock(lock_manager_, IndexType::Content);
 
-    if (!trigram_lock.locked() || !symbol_lock.locked() ||
-        !ref_lock.locked() || !postings_lock.locked() ||
+    if (!symbol_lock.locked() || !ref_lock.locked() ||
         !location_lock.locked() || !content_lock.locked()) {
         return false;
     }
@@ -313,16 +313,15 @@ bool MasterIndex::update_file(const std::string& path, std::string_view content)
         return false;
     }
 
-    // Acquire write locks for all index types.
-    IndexLockManager::WriteGuard trigram_lock(lock_manager_, IndexType::Trigram);
+    // Trigram + Postings serialize their own writers (write_mu_ + RCU publish);
+    // only the manager-guarded indexes take WriteGuards here (prereq
+    // 01KSRKRW8VZB3AEJ97GGNJDMJW).
     IndexLockManager::WriteGuard symbol_lock(lock_manager_, IndexType::Symbol);
     IndexLockManager::WriteGuard ref_lock(lock_manager_, IndexType::Reference);
-    IndexLockManager::WriteGuard postings_lock(lock_manager_, IndexType::Postings);
     IndexLockManager::WriteGuard location_lock(lock_manager_, IndexType::Location);
     IndexLockManager::WriteGuard content_lock(lock_manager_, IndexType::Content);
 
-    if (!trigram_lock.locked() || !symbol_lock.locked() ||
-        !ref_lock.locked() || !postings_lock.locked() ||
+    if (!symbol_lock.locked() || !ref_lock.locked() ||
         !location_lock.locked() || !content_lock.locked()) {
         return false;
     }
@@ -350,15 +349,15 @@ bool MasterIndex::update_file(const std::string& path, std::string_view content)
 }
 
 bool MasterIndex::remove_file(const std::string& path) {
-    IndexLockManager::WriteGuard trigram_lock(lock_manager_, IndexType::Trigram);
+    // Trigram + Postings serialize their own writers (write_mu_ + RCU publish);
+    // only the manager-guarded indexes take WriteGuards here (prereq
+    // 01KSRKRW8VZB3AEJ97GGNJDMJW).
     IndexLockManager::WriteGuard symbol_lock(lock_manager_, IndexType::Symbol);
     IndexLockManager::WriteGuard ref_lock(lock_manager_, IndexType::Reference);
-    IndexLockManager::WriteGuard postings_lock(lock_manager_, IndexType::Postings);
     IndexLockManager::WriteGuard location_lock(lock_manager_, IndexType::Location);
     IndexLockManager::WriteGuard content_lock(lock_manager_, IndexType::Content);
 
-    if (!trigram_lock.locked() || !symbol_lock.locked() ||
-        !ref_lock.locked() || !postings_lock.locked() ||
+    if (!symbol_lock.locked() || !ref_lock.locked() ||
         !location_lock.locked() || !content_lock.locked()) {
         return false;
     }
