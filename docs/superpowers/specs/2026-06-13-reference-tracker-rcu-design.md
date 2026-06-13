@@ -139,7 +139,20 @@ entirely (migrating all 53 sites to pin) is a separate follow-up.
 - **Phase 4 (follow-up task, not this one).** Migrate the 11 handler files to pin, retire
   the Reference entry from IndexLockManager.
 
-This task `01KSWHQ742` covers phases 0–3. Phase 4 is filed separately.
+This task `01KSWHQ742` covers phases 0–3 — **DONE 2026-06-13** (commits 03b5a01,
+a3ee844, 043556c; execute_search fully lock-free; all 13 *Concurrent* tsan-clean;
+ctest 1842/1842). Phase 4 is filed separately.
+
+### Phase 4 follow-up (not this task)
+Migrate the other ~11 files / 53 raw-pointer read-call sites
+(`get_enhanced_symbol`/`get_file_enhanced_symbols`/`get_symbol_at_line`/… in
+mcp handlers, engine, server, git, semantic/side-effect analyzers) to pin a
+snapshot for the pointer lifetime, then drop their Reference ReadGuards and
+retire the Reference entry from IndexLockManager. Today those callers are still
+correct because they hold the Reference ReadGuard while a writer needs the
+Reference WriteGuard (mutual exclusion keeps the published snapshot alive for
+the synchronous handler). Reviewer advisory: that lock invariant is undocumented
+at the call sites — document or migrate.
 
 ---
 
