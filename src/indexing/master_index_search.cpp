@@ -113,6 +113,11 @@ std::vector<SearchResult> MasterIndex::execute_search(
     // No IndexLockManager lock is taken here.
     auto refs_snap = ref_tracker_.pin();
 
+    // Pin the file snapshot once for the whole query so id_to_path resolves to
+    // a string_view into reverse_file_map with no per-result atomic load or
+    // string copy (path is copied into SearchResult::path exactly once).
+    auto file_snap = read_snapshot();
+
     if (options.declaration_only) {
         auto symbols = refs_snap->find_symbols_by_name(pattern);
         std::sort(symbols.begin(), symbols.end(),
@@ -153,7 +158,7 @@ std::vector<SearchResult> MasterIndex::execute_search(
 
             SearchResult r;
             r.file_id = sym->symbol.file_id;
-            r.path = id_to_path(sym->symbol.file_id);
+            r.path = std::string(id_to_path(*file_snap, sym->symbol.file_id));
             r.line = sym->symbol.line;
             r.column = column;
             r.match_text = sym->symbol.name;
@@ -202,7 +207,7 @@ std::vector<SearchResult> MasterIndex::execute_search(
 
                 SearchResult r;
                 r.file_id = ref.file_id;
-                r.path = id_to_path(ref.file_id);
+                r.path = std::string(id_to_path(*file_snap, ref.file_id));
                 r.line = ref.line;
                 r.column = ref.column;
                 r.match_text = pattern;
@@ -292,6 +297,10 @@ std::vector<SearchResult> MasterIndex::execute_search(
         // fc above, valid for the scan.
         const std::vector<uint32_t>* line_offsets = &fc->line_offsets;
 
+        // Resolve the path once per file (was once per match — every match in a
+        // file shares the same path).
+        std::string_view path_view = id_to_path(*file_snap, fid);
+
         for (const auto& m : matches) {
             if (static_cast<int>(results.size()) >= options.max_results) break;
 
@@ -308,7 +317,7 @@ std::vector<SearchResult> MasterIndex::execute_search(
 
             SearchResult r;
             r.file_id = fid;
-            r.path = id_to_path(fid);
+            r.path = std::string(path_view);
             r.line = line;
             r.column = col;
             r.match_text = pattern;

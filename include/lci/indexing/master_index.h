@@ -112,7 +112,16 @@ class MasterIndex {
     FileID path_to_id(const std::string& path) const;
 
     /// Returns the path for a FileID, or empty string if not found.
+    /// Loads the snapshot and copies the path out; for hot paths that resolve
+    /// many ids per query, prefer the snapshot-scoped overload below.
     std::string id_to_path(FileID file_id) const;
+
+    /// Snapshot-scoped path lookup: returns a string_view into `snap`'s
+    /// reverse_file_map with no atomic load and no allocation. The caller holds
+    /// `snap` (read_snapshot()) for the view's lifetime — load once per query
+    /// and reuse across all id resolutions instead of paying a snapshot load +
+    /// string copy per result.
+    std::string_view id_to_path(const FileSnapshot& snap, FileID file_id) const;
 
     // -- Statistics ------------------------------------------------------------
 

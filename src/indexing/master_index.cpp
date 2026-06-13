@@ -5,10 +5,6 @@
 
 namespace lci {
 
-// -- Helpers ------------------------------------------------------------------
-
-static const std::string kEmptyString;
-
 // -- Construction / Destruction -----------------------------------------------
 
 MasterIndex::MasterIndex(const Config& config)
@@ -41,10 +37,16 @@ FileID MasterIndex::path_to_id(const std::string& path) const {
     return it != snap->file_map.end() ? it->second : FileID{0};
 }
 
+std::string_view MasterIndex::id_to_path(const FileSnapshot& snap,
+                                         FileID file_id) const {
+    auto it = snap.reverse_file_map.find(file_id);
+    if (it == snap.reverse_file_map.end()) return {};
+    return it->second;
+}
+
 std::string MasterIndex::id_to_path(FileID file_id) const {
     auto snap = load_snapshot();
-    auto it = snap->reverse_file_map.find(file_id);
-    return it != snap->reverse_file_map.end() ? it->second : kEmptyString;
+    return std::string(id_to_path(*snap, file_id));
 }
 
 // -- Bulk indexing mode toggle ------------------------------------------------
