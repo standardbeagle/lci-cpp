@@ -708,10 +708,10 @@ void SearchEngine::process_file(
     auto matches = find_matches(content_sv, pattern, options);
     if (matches.empty()) return;
 
-    // Fetch blocks for context extraction.
-    auto file_symbols = index_.symbol_location_index().get_file_symbols(file_id);
-    // Blocks come from FileInfo but we approximate with the file content store.
-    // For block-aware context we need blocks; build empty for now.
+    // Block-aware context is not yet wired; context_extractor falls back to
+    // line-window extraction with an empty block list. (Previously this fetched
+    // symbol_location_index().get_file_symbols(file_id) — a full per-file Symbol
+    // vector copy on the hot path — and discarded it.)
     std::vector<BlockBoundary> blocks;
 
     // Deduplicate by line within this file.
