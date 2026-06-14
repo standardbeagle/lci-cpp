@@ -5,6 +5,8 @@
 #include <string_view>
 #include <vector>
 
+#include <absl/container/flat_hash_map.h>
+
 #include <lci/parser/parser.h>
 #include <lci/types.h>
 
@@ -95,6 +97,13 @@ class ImportResolver {
 
     /// Returns the language this resolver handles.
     virtual parser::Language language() const = 0;
+
+    /// Injects the engine's path -> FileID registry so resolve_import can map a
+    /// resolved module path to a concrete FileID. LinkerEngine::link_symbols
+    /// calls this on every resolver after all files are indexed. Default no-op
+    /// for resolvers that don't need a registry (e.g. test stubs).
+    virtual void set_file_registry(
+        const absl::flat_hash_map<std::string, FileID>& /*registry*/) {}
 };
 
 }  // namespace lci::symbollinker

@@ -126,7 +126,7 @@ class PhpResolver final : public ImportResolver {
 
     /// Sets the file registry for path-to-FileID mapping.
     void set_file_registry(
-        const absl::flat_hash_map<std::string, FileID>& registry);
+        const absl::flat_hash_map<std::string, FileID>& registry) override;
 
     /// Adds a PSR-4 namespace mapping.
     void add_psr4_mapping(std::string_view ns_prefix,

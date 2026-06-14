@@ -108,7 +108,7 @@ class CSharpResolver final : public ImportResolver {
 
     /// Sets the file registry for path-to-FileID mapping.
     void set_file_registry(
-        const absl::flat_hash_map<std::string, FileID>& registry);
+        const absl::flat_hash_map<std::string, FileID>& registry) override;
 
   private:
     // Resolves a namespace by searching project directory structure.

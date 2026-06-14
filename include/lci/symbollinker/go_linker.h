@@ -107,7 +107,7 @@ class GoResolver final : public ImportResolver {
 
     /// Sets the file registry for path-to-FileID mapping.
     void set_file_registry(
-        const absl::flat_hash_map<std::string, FileID>& registry);
+        const absl::flat_hash_map<std::string, FileID>& registry) override;
 
     /// Sets the module name (normally parsed from go.mod).
     void set_module_name(std::string_view name);
