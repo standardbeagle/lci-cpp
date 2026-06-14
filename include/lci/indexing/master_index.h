@@ -15,7 +15,6 @@
 #include <lci/core/reference_tracker.h>
 #include <lci/core/symbol_store.h>
 #include <lci/core/trigram.h>
-#include <lci/indexing/index_locks.h>
 #include <lci/indexing/pipeline.h>
 #include <lci/indexing/pipeline_progress.h>
 #include <lci/search/search_options.h>
@@ -219,12 +218,6 @@ class MasterIndex {
     PostingsIndex postings_index_;
     std::shared_ptr<FileContentStore> file_content_store_;
     std::shared_ptr<FileService> file_service_;
-
-    // Lock management (mutable: locking is internal state for const search ops).
-    // Guards Symbol, Reference, Location, and Content only. Trigram and Postings
-    // are lock-free RCU (own write_mu_ + atomic snapshot publish), so they take
-    // no guard here on either the read or single-file write path.
-    mutable IndexLockManager lock_manager_;
 
     // File snapshot (atomic swap for lock-free reads)
     AtomicSharedPtr<const FileSnapshot> snapshot_;

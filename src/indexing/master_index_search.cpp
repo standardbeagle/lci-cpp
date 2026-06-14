@@ -110,7 +110,7 @@ std::vector<SearchResult> MasterIndex::execute_search(
     //     get_file (01KSWHQ742 phase 1).
     //   - Trigram/Postings: internal RCU, return file IDs BY VALUE
     //     (prereq 01KSRKRW8VZB3AEJ97GGNJDMJW).
-    // No IndexLockManager lock is taken here.
+    // No lock is taken here (the IndexLockManager has since been retired).
     auto refs_snap = ref_tracker_.pin();
 
     // Pin the file snapshot once for the whole query so id_to_path resolves to

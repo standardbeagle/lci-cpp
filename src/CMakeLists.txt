@@ -28,7 +28,6 @@ add_library(lci_lib STATIC
     indexing/trigram_merger.cpp
     indexing/pipeline_progress.cpp
     indexing/pipeline.cpp
-    indexing/index_locks.cpp
     indexing/master_index.cpp
     indexing/master_index_search.cpp
     indexing/deleted_file_tracker.cpp

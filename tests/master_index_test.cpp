@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 
 #include <lci/config.h>
-#include <lci/indexing/index_locks.h>
 #include <lci/indexing/master_index.h>
 
 #include <filesystem>
@@ -45,58 +44,6 @@ class TempDir {
     std::filesystem::path path_;
     static inline int counter_ = 0;
 };
-
-// -- IndexLockManager tests ---------------------------------------------------
-
-TEST(IndexLockManagerTest, AcquireAndReleaseRead) {
-    IndexLockManager mgr;
-    EXPECT_TRUE(mgr.acquire_read(IndexType::Trigram));
-    mgr.release_read(IndexType::Trigram);
-}
-
-TEST(IndexLockManagerTest, AcquireAndReleaseWrite) {
-    IndexLockManager mgr;
-    EXPECT_TRUE(mgr.acquire_write(IndexType::Symbol));
-    mgr.release_write(IndexType::Symbol);
-}
-
-TEST(IndexLockManagerTest, ReadGuardRAII) {
-    IndexLockManager mgr;
-    {
-        IndexLockManager::ReadGuard guard(mgr, IndexType::Postings);
-        EXPECT_TRUE(guard.locked());
-    }
-    // Lock should be released; another write should succeed.
-    EXPECT_TRUE(mgr.acquire_write(IndexType::Postings));
-    mgr.release_write(IndexType::Postings);
-}
-
-TEST(IndexLockManagerTest, WriteGuardRAII) {
-    IndexLockManager mgr;
-    {
-        IndexLockManager::WriteGuard guard(mgr, IndexType::Reference);
-        EXPECT_TRUE(guard.locked());
-    }
-    EXPECT_TRUE(mgr.acquire_read(IndexType::Reference));
-    mgr.release_read(IndexType::Reference);
-}
-
-TEST(IndexLockManagerTest, ConcurrentReads) {
-    IndexLockManager mgr;
-    EXPECT_TRUE(mgr.acquire_read(IndexType::Content));
-    EXPECT_TRUE(mgr.acquire_read(IndexType::Content));
-    mgr.release_read(IndexType::Content);
-    mgr.release_read(IndexType::Content);
-}
-
-TEST(IndexLockManagerTest, IndexTypeName) {
-    EXPECT_STREQ("Trigram", index_type_name(IndexType::Trigram));
-    EXPECT_STREQ("Symbol", index_type_name(IndexType::Symbol));
-    EXPECT_STREQ("Reference", index_type_name(IndexType::Reference));
-    EXPECT_STREQ("Postings", index_type_name(IndexType::Postings));
-    EXPECT_STREQ("Location", index_type_name(IndexType::Location));
-    EXPECT_STREQ("Content", index_type_name(IndexType::Content));
-}
 
 // -- FileSnapshot tests -------------------------------------------------------
 

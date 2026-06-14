@@ -413,17 +413,11 @@ TEST(MasterIndexSearchIntegrationTest, ConcurrentSearchReads) {
 // tests do text search only and never touch ReferenceTracker, so this is the
 // missing coverage for task 01KSWHQ742.
 //
-// Functionally green with the locks present (def always found, no torn paths).
-//
-// TSan caveat: under -fsanitize=thread this currently reports FALSE-POSITIVE
-// races on the SymbolStore maps. IndexLockManager acquires reads via
-// std::shared_timed_mutex::try_lock_shared_for, and TSan does not model the
-// timed shared-lock acquisition, so the reader's lock is invisible to it.
-// Verified: swapping IndexLockManager to untimed lock_shared()/lock() makes
-// this test 0-warning clean, confirming the lock really does serialize today.
-// The real fix (01KSWHQ742 phases 2-3) makes the def/refs path lock-free (RCU
-// snapshot + pin), after which this is the gate that is genuinely TSan-clean
-// with NO lock involved — independent of the timed-mutex instrumentation gap.
+// The def/refs path is now fully lock-free: ReferenceTracker is RCU and
+// execute_search pins a snapshot (01KSWHQ742), so the raw EnhancedSymbol* and
+// content view stay valid across a concurrent reindex with no lock. This test
+// is the gate proving that — genuinely TSan-clean (the IndexLockManager that
+// once guarded this path has been retired entirely).
 TEST(MasterIndexSearchIntegrationTest, ConcurrentDefRefsDuringIndexing) {
     TempDir dir;
     // stable.go is never modified; its definition must remain findable on the
