@@ -1515,7 +1515,7 @@ ToolResult handle_find_files(const nlohmann::json& params,
 void register_core_handlers(McpServer& server, MasterIndex* indexer,
                             SearchEngine* search_engine,
                             SideEffectAnalyzer* analyzer) {
-    // Replace "info" stub with real handler
+    // Register the "info" tool (definition + real handler)
     server.add_tool(
         {"info",
          "🔍 Get detailed help and examples for any tool - start here! Use "
@@ -1528,7 +1528,7 @@ void register_core_handlers(McpServer& server, MasterIndex* indexer,
          {}},
         [](const nlohmann::json& p) { return handle_info(p); });
 
-    // Replace "search" stub with real handler
+    // Register the "search" tool (definition + real handler)
     server.add_tool(
         {"search",
          "Sub-millisecond in-memory semantic code search. Use instead of "
@@ -1569,7 +1569,7 @@ void register_core_handlers(McpServer& server, MasterIndex* indexer,
             return handle_search(p, *indexer, search_engine);
         });
 
-    // Replace "get_context" stub with real handler
+    // Register the "get_context" tool (definition + real handler)
     server.add_tool(
         {"get_context",
          "📋 Get detailed context for specific code objects. Use the 'id' "
@@ -1614,7 +1614,7 @@ void register_core_handlers(McpServer& server, MasterIndex* indexer,
             return handle_get_context(p, *indexer, analyzer);
         });
 
-    // Replace "find_files" stub with real handler
+    // Register the "find_files" tool (definition + real handler)
     server.add_tool(
         {"find_files",
          "📁 Like 'find' or 'fd' - searches file paths, not content, on an "

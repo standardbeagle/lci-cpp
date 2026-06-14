@@ -604,8 +604,8 @@ ToolResult handle_context(const nlohmann::json& params,
 // -- register_context_handlers ------------------------------------------------
 
 void register_context_handlers(McpServer& server, MasterIndex* indexer) {
-    // Find and replace the stub "context" tool handler
-    // The tool definition is already registered in register_tools()
+    // Registers the "context" tool (definition + real handler) — the sole
+    // registration of this tool now that the stub registrar is gone.
     auto root = server.project_root();
 
     // Build context tool definition. The `refs` property has a complex

@@ -767,13 +767,12 @@ TEST(RegisterAnalysisHandlers, RegistersWithoutCrash) {
     Config config;
     config.project.root = "/tmp";
     McpServer server(config);
-    server.register_tools();
-    size_t before = server.tool_count();
 
     register_analysis_handlers(server, nullptr, nullptr, nullptr, nullptr,
                                nullptr);
-    // Should have added 3 tools (replacing stubs)
-    EXPECT_EQ(server.tool_count(), before + 3);
+    // Registers exactly its 3 tools (semantic_annotations, side_effects,
+    // code_insight) — no stub registrar runs first anymore.
+    EXPECT_EQ(server.tool_count(), 3u);
 }
 
 TEST(RegisterAnalysisHandlers, NullAnnotatorReturnsError) {

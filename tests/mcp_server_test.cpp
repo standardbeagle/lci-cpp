@@ -1,8 +1,14 @@
 #include <gtest/gtest.h>
 
 #include <lci/config.h>
+#include <lci/mcp/handlers_analysis.h>
+#include <lci/mcp/handlers_context.h>
+#include <lci/mcp/handlers_core.h>
+#include <lci/mcp/handlers_explore.h>
+#include <lci/mcp/handlers_index.h>
 #include <lci/mcp/server.h>
 
+#include <set>
 #include <sstream>
 #include <string>
 
@@ -11,6 +17,20 @@ namespace mcp {
 namespace {
 
 // -- Helpers ------------------------------------------------------------------
+
+/// Registers all 14 real tool definitions with null dependencies. The handler
+/// lambdas capture the (null) deps and only fail at call time; registration
+/// just installs the definitions — enough for server-mechanics / tools-list /
+/// dispatch tests that don't drive a real index. Replaces the deleted stub
+/// registrar (register_tools()/stub_handler).
+void register_all_tools_nulldeps(McpServer& server) {
+    register_core_handlers(server, nullptr, nullptr, nullptr);
+    register_explore_handlers(server, nullptr);
+    register_index_handlers(server, nullptr);
+    register_analysis_handlers(server, nullptr, nullptr, nullptr, nullptr,
+                               nullptr);
+    register_context_handlers(server, nullptr);
+}
 
 /// Builds a JSON-RPC request string with Content-Length framing.
 std::string frame_message(const nlohmann::json& msg) {
@@ -62,7 +82,7 @@ class McpServerTest : public ::testing::Test {
         Config config;
         config.project.root = "/tmp/lci-mcp-test";
         server_ = std::make_unique<McpServer>(config);
-        server_->register_tools();
+        register_all_tools_nulldeps(*server_);
     }
 
     std::unique_ptr<McpServer> server_;
@@ -72,9 +92,18 @@ class McpServerTest : public ::testing::Test {
 
 TEST_F(McpServerTest, RegistersAll14Tools) {
     EXPECT_EQ(server_->tool_count(), 14u);
-    EXPECT_EQ(server_->tool_at(0).name, "info");
-    EXPECT_EQ(server_->tool_at(1).name, "search");
-    EXPECT_EQ(server_->tool_at(13).name, "browse_file");
+    // Registration order follows the register_*_handlers bundle order (not a
+    // single registrar), so assert distinct names (no shadow double-registration
+    // under forward-iter dispatch) + presence of the boundary tools, not order.
+    std::set<std::string> names;
+    for (size_t i = 0; i < server_->tool_count(); ++i) {
+        names.insert(server_->tool_at(i).name);
+    }
+    EXPECT_EQ(names.size(), 14u) << "tool names must be unique (no shadows)";
+    EXPECT_TRUE(names.count("info"));
+    EXPECT_TRUE(names.count("search"));
+    EXPECT_TRUE(names.count("browse_file"));
+    EXPECT_TRUE(names.count("get_context"));
 }
 
 TEST_F(McpServerTest, ProjectRootFromConfig) {
@@ -98,7 +127,7 @@ class McpStdioTest : public ::testing::Test {
         Config config;
         config.project.root = "/tmp/lci-mcp-test";
         server_ = std::make_unique<McpServer>(config);
-        server_->register_tools();
+        register_all_tools_nulldeps(*server_);
     }
 
     /// Sends requests via stdin simulation and captures stdout responses.
@@ -200,27 +229,28 @@ TEST_F(McpStdioTest, ToolsList) {
     EXPECT_TRUE(found_search);
 }
 
-TEST_F(McpStdioTest, ToolCallStubResponse) {
+TEST_F(McpStdioTest, ToolCallDispatchesToHandler) {
+    // Dispatch a real, dependency-free tool ("info") end-to-end through the
+    // stdio transport. (The stub_handler that returned a fake "not_implemented"
+    // payload is gone; indexer-backed tools would fault with the null-dep test
+    // wiring, so exercise the metadata handler that needs no index.)
     auto responses = exchange({
         make_request("initialize", 1),
-        make_request(
-            "tools/call", 2,
-            {{"name", "search"},
-             {"arguments", {{"pattern", "test"}}}}),
+        make_request("tools/call", 2,
+                     {{"name", "info"}, {"arguments", nlohmann::json::object()}}),
     });
 
     ASSERT_EQ(responses.size(), 2u);
     auto& call_resp = responses[1];
     EXPECT_EQ(call_resp["id"], 2);
-    EXPECT_TRUE(call_resp.contains("result"));
+    ASSERT_TRUE(call_resp.contains("result"));
 
     auto& content = call_resp["result"]["content"];
     ASSERT_EQ(content.size(), 1u);
     EXPECT_EQ(content[0]["type"], "text");
-
-    auto text = nlohmann::json::parse(content[0]["text"].get<std::string>());
-    EXPECT_EQ(text["status"], "not_implemented");
-    EXPECT_EQ(text["tool"], "search");
+    EXPECT_FALSE(content[0]["text"].get<std::string>().empty());
+    // Real handler -> not the old stub's not_implemented sentinel.
+    EXPECT_EQ(call_resp["result"].value("isError", false), false);
 }
 
 TEST_F(McpStdioTest, ToolCallUnknownTool) {
