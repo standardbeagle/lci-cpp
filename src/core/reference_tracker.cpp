@@ -79,6 +79,69 @@ std::vector<Reference> ReferenceTracker::Snapshot::get_symbol_references(
     return get_references_by_id(ref_ids);
 }
 
+const EnhancedSymbol* ReferenceTracker::Snapshot::get_enhanced_symbol(
+    SymbolID symbol_id) const {
+    return symbols.get(symbol_id);
+}
+
+std::vector<const EnhancedSymbol*>
+ReferenceTracker::Snapshot::get_file_enhanced_symbols(FileID file_id) const {
+    auto ids = symbols.get_symbols_by_file(file_id);
+    std::vector<const EnhancedSymbol*> result;
+    result.reserve(ids.size());
+    for (SymbolID id : ids) {
+        if (const auto* s = symbols.get(id)) {
+            result.push_back(s);
+        }
+    }
+    return result;
+}
+
+const EnhancedSymbol* ReferenceTracker::Snapshot::find_symbol_by_name(
+    std::string_view name) const {
+    auto ids = symbols.get_symbols_by_name(name);
+    if (ids.empty()) return nullptr;
+    return symbols.get(ids[0]);
+}
+
+const EnhancedSymbol* ReferenceTracker::Snapshot::find_symbol_by_file_and_name(
+    FileID file_id, std::string_view name) const {
+    auto ids = symbols.get_symbols_by_name(name);
+    for (SymbolID id : ids) {
+        if (const auto* s = symbols.get(id)) {
+            if (s->symbol.file_id == file_id) return s;
+        }
+    }
+    return nullptr;
+}
+
+const absl::flat_hash_map<int, std::vector<int>>*
+ReferenceTracker::Snapshot::get_file_line_to_symbols(FileID file_id) const {
+    auto it = line_to_symbols_by_file.find(file_id);
+    if (it == line_to_symbols_by_file.end()) return nullptr;
+    return &it->second;
+}
+
+const EnhancedSymbol* ReferenceTracker::Snapshot::get_symbol_at_line(
+    const SymbolLocationIndex& location_index, FileID file_id, int line) const {
+    // Fast path: binary-searched, lock-free line lookup; resolve the id against
+    // this (pinned) snapshot so the returned pointer is stable.
+    SymbolID id = location_index.find_symbol_id_at_line(file_id, line);
+    if (id != 0) {
+        if (const auto* s = symbols.get(id)) return s;
+    }
+    // Fallback: linear scan over this file's symbols.
+    auto file_syms = symbols.get_symbols_by_file(file_id);
+    for (SymbolID sid : file_syms) {
+        if (const auto* s = symbols.get(sid)) {
+            if (s->symbol.line <= line && line <= s->symbol.end_line) {
+                return s;
+            }
+        }
+    }
+    return nullptr;
+}
+
 // ---------------------------------------------------------------------------
 // ReferenceTracker
 // ---------------------------------------------------------------------------
@@ -315,21 +378,12 @@ std::vector<const EnhancedSymbol*> ReferenceTracker::find_symbols_by_name(
 
 const EnhancedSymbol* ReferenceTracker::get_enhanced_symbol(
     SymbolID symbol_id) const {
-    return load_snapshot()->symbols.get(symbol_id);
+    return load_snapshot()->get_enhanced_symbol(symbol_id);
 }
 
 std::vector<const EnhancedSymbol*> ReferenceTracker::get_file_enhanced_symbols(
     FileID file_id) const {
-    auto snap = load_snapshot();
-    auto ids = snap->symbols.get_symbols_by_file(file_id);
-    std::vector<const EnhancedSymbol*> result;
-    result.reserve(ids.size());
-    for (SymbolID id : ids) {
-        if (const auto* s = snap->symbols.get(id)) {
-            result.push_back(s);
-        }
-    }
-    return result;
+    return load_snapshot()->get_file_enhanced_symbols(file_id);
 }
 
 std::vector<Reference> ReferenceTracker::get_file_references(
@@ -357,21 +411,10 @@ std::vector<Reference> ReferenceTracker::get_file_references(
 const EnhancedSymbol* ReferenceTracker::get_symbol_at_line(
     FileID file_id, int line) const {
     auto snap = load_snapshot();
-
-    // Fast path: SymbolLocationIndex provides a binary-searched, lock-free
-    // (RCU) line lookup — O(log n) vs the O(symbols-in-file) linear scan below.
-    // Returns the most-specific spanning symbol; map its id back to this
-    // tracker's symbol snapshot.
     if (symbol_location_index_ != nullptr) {
-        SymbolID id = symbol_location_index_->find_symbol_id_at_line(file_id,
-                                                                     line);
-        if (id != 0) {
-            if (const auto* s = snap->symbols.get(id)) return s;
-        }
+        return snap->get_symbol_at_line(*symbol_location_index_, file_id, line);
     }
-
-    // Fallback: linear scan (location index absent or not populated for this
-    // file, e.g. trackers constructed without one in unit tests).
+    // No location index (e.g. unit-test trackers): linear scan over symbols.
     auto file_syms = snap->symbols.get_symbols_by_file(file_id);
     for (SymbolID id : file_syms) {
         if (const auto* s = snap->symbols.get(id)) {
@@ -385,22 +428,12 @@ const EnhancedSymbol* ReferenceTracker::get_symbol_at_line(
 
 const EnhancedSymbol* ReferenceTracker::find_symbol_by_name(
     std::string_view name) const {
-    auto snap = load_snapshot();
-    auto ids = snap->symbols.get_symbols_by_name(name);
-    if (ids.empty()) return nullptr;
-    return snap->symbols.get(ids[0]);
+    return load_snapshot()->find_symbol_by_name(name);
 }
 
 const EnhancedSymbol* ReferenceTracker::find_symbol_by_file_and_name(
     FileID file_id, std::string_view name) const {
-    auto snap = load_snapshot();
-    auto ids = snap->symbols.get_symbols_by_name(name);
-    for (SymbolID id : ids) {
-        if (const auto* s = snap->symbols.get(id)) {
-            if (s->symbol.file_id == file_id) return s;
-        }
-    }
-    return nullptr;
+    return load_snapshot()->find_symbol_by_file_and_name(file_id, name);
 }
 
 std::vector<Reference> ReferenceTracker::get_all_references() const {
@@ -549,10 +582,7 @@ void ReferenceTracker::store_line_to_symbols(
 
 const absl::flat_hash_map<int, std::vector<int>>*
 ReferenceTracker::get_file_line_to_symbols(FileID file_id) const {
-    auto snap = load_snapshot();
-    auto it = snap->line_to_symbols_by_file.find(file_id);
-    if (it == snap->line_to_symbols_by_file.end()) return nullptr;
-    return &it->second;
+    return load_snapshot()->get_file_line_to_symbols(file_id);
 }
 
 // -- Internal helpers --------------------------------------------------------

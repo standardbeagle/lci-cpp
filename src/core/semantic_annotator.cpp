@@ -139,13 +139,14 @@ int SemanticAnnotator::populate_from_index(const MasterIndex& index) {
     int processed = 0;
     const auto& content_store = index.file_content_store();
     const auto& ref = index.ref_tracker();
+    auto rt_snap = ref.pin();
 
     std::vector<Symbol> file_symbols;  // reused across files (Karpathy: no
                                        // per-file allocator)
     for (FileID fid : index.get_all_file_ids()) {
         auto content = content_store.get_content(fid);
         if (content.empty()) continue;
-        auto enhanced = ref.get_file_enhanced_symbols(fid);
+        auto enhanced = rt_snap->get_file_enhanced_symbols(fid);
         if (enhanced.empty()) continue;
 
         file_symbols.clear();

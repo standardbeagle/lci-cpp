@@ -74,8 +74,11 @@ nlohmann::json get_symbols_by_type(ReferenceTracker& tracker,
                                    MasterIndex& indexer) {
     nlohmann::json result = nlohmann::json::object();
     auto file_ids = indexer.get_all_file_ids();
+    // Pin the snapshot for the whole scan: get_file_enhanced_symbols returns
+    // const EnhancedSymbol* into the snapshot, dereferenced in the inner loop.
+    auto rt_snap = tracker.pin();
     for (auto fid : file_ids) {
-        auto symbols = tracker.get_file_enhanced_symbols(fid);
+        auto symbols = rt_snap->get_file_enhanced_symbols(fid);
         for (const auto* sym : symbols) {
             if (!sym) continue;
             auto type_name = std::string(to_string(sym->symbol.type));
@@ -238,6 +241,9 @@ ToolResult handle_debug_info(const nlohmann::json& params,
     } else if (mode == "references") {
         // Get top referenced symbols
         auto& sym_store = indexer.ref_tracker();
+        // Pin the snapshot for the scan: get_file_enhanced_symbols returns
+        // const EnhancedSymbol* into the snapshot, dereferenced in the loop.
+        auto rt_snap = sym_store.pin();
         auto file_ids = indexer.get_all_file_ids();
 
         struct SymRef {
@@ -250,7 +256,7 @@ ToolResult handle_debug_info(const nlohmann::json& params,
 
         for (auto fid : file_ids) {
             auto fp = indexer.get_file_path(fid);
-            auto symbols = sym_store.get_file_enhanced_symbols(fid);
+            auto symbols = rt_snap->get_file_enhanced_symbols(fid);
             for (const auto* sym : symbols) {
                 if (!sym) continue;
                 int inc = static_cast<int>(sym->incoming_refs.size());
@@ -299,7 +305,10 @@ ToolResult handle_debug_info(const nlohmann::json& params,
         if (target_fid != 0) {
             auto fp = indexer.get_file_path(target_fid);
             if (!fp.empty()) {
-                auto symbols = tracker.get_file_enhanced_symbols(target_fid);
+                // Pin the snapshot: get_file_enhanced_symbols returns const
+                // EnhancedSymbol* into it, dereferenced in the verbose loop.
+                auto rt_snap = tracker.pin();
+                auto symbols = rt_snap->get_file_enhanced_symbols(target_fid);
                 nlohmann::json fi;
                 fi["file_id"] = static_cast<int>(target_fid);
                 fi["file_path"] = fp;

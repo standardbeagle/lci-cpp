@@ -492,6 +492,85 @@ TEST(MasterIndexSearchIntegrationTest, ConcurrentDefRefsDuringIndexing) {
     EXPECT_FALSE(mi.search_definitions("alwaysHereDefRefToken").empty());
 }
 
+// Exercises the MCP-handler read pattern post-RCU: pin the ReferenceTracker
+// snapshot, then dereference the raw const EnhancedSymbol* returned by the
+// pointer accessors (find_symbol_by_name / get_enhanced_symbol /
+// get_file_enhanced_symbols) while a concurrent reindex publishes new
+// snapshots. The pin must keep those pointers valid (no use-after-free, no torn
+// field reads) — this is the gate for task 01KV1QHTS8 (handlers migrated from
+// bare-accessor to pin()->accessor). Without the pin, tsan/ASan would flag a
+// dangling read when a publish frees the snapshot the pointer aliases.
+TEST(MasterIndexSearchIntegrationTest, ConcurrentHandlerReadsDuringIndexing) {
+    TempDir dir;
+    dir.write_file("stable.go",
+        "package main\n"
+        "func handlerStableToken() { return }\n");
+    dir.write_file("churn.go",
+        "package main\n"
+        "func churn() { return }\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    const ReferenceTracker& rt = mi.ref_tracker();
+    ASSERT_NE(rt.find_symbol_by_name("handlerStableToken"), nullptr);
+
+    constexpr int kReaders = 4;
+    constexpr int kReadsPerThread = 200;
+    std::atomic<bool> stop{false};
+    std::atomic<int> missing{0};
+    std::atomic<int> torn{0};
+    std::vector<std::thread> readers;
+
+    for (int i = 0; i < kReaders; ++i) {
+        readers.emplace_back([&] {
+            for (int j = 0; j < kReadsPerThread && !stop.load(); ++j) {
+                // Handler pattern: pin once, dereference pointers under the pin.
+                auto snap = rt.pin();
+                const auto* s = snap->find_symbol_by_name("handlerStableToken");
+                if (s == nullptr) {
+                    missing.fetch_add(1, std::memory_order_relaxed);
+                    continue;
+                }
+                // Deref fields of the pinned pointer (would UAF without the pin).
+                if (s->symbol.name != "handlerStableToken") {
+                    torn.fetch_add(1, std::memory_order_relaxed);
+                }
+                const auto* by_id = snap->get_enhanced_symbol(s->id);
+                if (by_id == nullptr || by_id->symbol.name != s->symbol.name) {
+                    torn.fetch_add(1, std::memory_order_relaxed);
+                }
+                for (const auto* fs :
+                     snap->get_file_enhanced_symbols(s->symbol.file_id)) {
+                    if (fs->symbol.name.empty()) {
+                        torn.fetch_add(1, std::memory_order_relaxed);
+                    }
+                }
+            }
+        });
+    }
+
+    std::thread writer([&] {
+        for (int i = 0; i < 20; ++i) {
+            std::string content = "package main\nfunc churn" +
+                                  std::to_string(i) + "() { return }\n";
+            mi.update_file((dir.path() / "churn.go").string(), content);
+        }
+        stop.store(true, std::memory_order_release);
+    });
+
+    writer.join();
+    for (auto& t : readers) t.join();
+
+    EXPECT_EQ(missing.load(), 0)
+        << "pinned handler read lost the stable symbol during a concurrent "
+           "reindex of an unrelated file";
+    EXPECT_EQ(torn.load(), 0)
+        << "pinned handler read observed a torn/freed EnhancedSymbol";
+}
+
 // -- Search after single-file indexing ----------------------------------------
 
 TEST(MasterIndexSearchIntegrationTest, SearchAfterSingleFileIndex) {

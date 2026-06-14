@@ -409,10 +409,12 @@ std::vector<SearchResult> SearchEngine::search(
     // Symbol-type filter — apply after match, before scoring.
     if (!options.symbol_types.empty()) {
         auto& tracker = index_.ref_tracker();
+        auto rt_snap = tracker.pin();
         results.erase(std::remove_if(results.begin(), results.end(),
             [&](const SearchResult& r) {
                 const auto* sym =
-                    tracker.get_symbol_at_line(r.file_id, r.line);
+                    rt_snap->get_symbol_at_line(
+                        index_.symbol_location_index(), r.file_id, r.line);
                 if (sym == nullptr) return true;
                 return !symbol_type_matches_filter(options.symbol_types,
                                                    to_string(sym->symbol.type));

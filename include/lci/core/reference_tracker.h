@@ -359,6 +359,27 @@ class ReferenceTracker {
             SymbolID symbol_id, std::string_view direction) const;
         std::vector<Reference> get_references_by_id(
             std::span<const uint64_t> ref_ids) const;
+
+        // Snapshot-scoped variants of the pointer-returning ReferenceTracker
+        // accessors. A caller that pins this snapshot and queries it directly
+        // keeps the returned const EnhancedSymbol* / map* valid for as long as
+        // the pin is held — even across a concurrent reindex publish. The
+        // ReferenceTracker methods of the same name delegate to a freshly
+        // loaded snapshot (safe only for transient, synchronous use).
+        const EnhancedSymbol* get_enhanced_symbol(SymbolID symbol_id) const;
+        std::vector<const EnhancedSymbol*> get_file_enhanced_symbols(
+            FileID file_id) const;
+        const EnhancedSymbol* find_symbol_by_name(std::string_view name) const;
+        const EnhancedSymbol* find_symbol_by_file_and_name(
+            FileID file_id, std::string_view name) const;
+        const absl::flat_hash_map<int, std::vector<int>>*
+            get_file_line_to_symbols(FileID file_id) const;
+        // get_symbol_at_line needs the (separately RCU) location index for the
+        // O(log n) line lookup; the resulting symbol id is resolved against
+        // this snapshot's symbols so the returned pointer is pin-stable.
+        const EnhancedSymbol* get_symbol_at_line(
+            const SymbolLocationIndex& location_index, FileID file_id,
+            int line) const;
     };
 
     /// Pins the current published snapshot. The caller holds the returned

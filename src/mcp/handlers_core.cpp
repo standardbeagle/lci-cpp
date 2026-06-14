@@ -798,6 +798,10 @@ ToolResult handle_search(const nlohmann::json& params,
     // to get_context. We mirror the shape: result_id, object_id, file, line,
     // column, match, score (float), symbol_type, symbol_name, is_exported.
     auto& ref_tracker = indexer.ref_tracker();
+    // Pin the RCU snapshot for the whole result loop: get_symbol_at_line hands
+    // back a const EnhancedSymbol* into the snapshot, and the pin keeps that
+    // pointer valid across a concurrent reindex publish for every iteration.
+    auto rt_snap = ref_tracker.pin();
     nlohmann::json result_array = nlohmann::json::array();
     // Pre-size to skip geometric realloc on the inner push_back loop.
     // result_array is array_t (std::vector<json>) under the hood.
@@ -817,8 +821,8 @@ ToolResult handle_search(const nlohmann::json& params,
         // Enclosing-symbol enrichment. ref_tracker maps (file_id, line) to
         // the EnhancedSymbol that covers the line, O(1) hash lookup per
         // call (KARPATHY rule 2 — no allocation in the inner loop).
-        const auto* sym =
-            ref_tracker.get_symbol_at_line(r.file_id, r.line);
+        const auto* sym = rt_snap->get_symbol_at_line(
+            indexer.symbol_location_index(), r.file_id, r.line);
         if (sym != nullptr) {
             item["object_id"] = encode_symbol_id(sym->id);
             item["symbol_name"] = std::string(sym->symbol.name);
@@ -915,7 +919,10 @@ void resolve_object_id(std::string_view id, MasterIndex& indexer,
                           {"error", "invalid object ID: " + std::string(id)}});
         return;
     }
-    const auto* sym = indexer.ref_tracker().get_enhanced_symbol(*decoded);
+    // Pin the snapshot so the EnhancedSymbol* stays valid through the ctx
+    // build below (attach_purity dereferences *sym) across a concurrent reindex.
+    auto rt_snap = indexer.ref_tracker().pin();
+    const auto* sym = rt_snap->get_enhanced_symbol(*decoded);
     if (sym == nullptr) {
         errors.push_back(
             {{"object_id", std::string(id)},
@@ -1033,7 +1040,12 @@ ToolResult handle_get_context(const nlohmann::json& params,
 
         nlohmann::json contexts = nlohmann::json::array();
         auto& tracker = indexer.ref_tracker();
-        auto matches = tracker.find_symbols_by_name(name);
+        // Pin the snapshot for the whole match loop + recursive build_tree:
+        // find_symbols_by_name returns const EnhancedSymbol* into the snapshot,
+        // and those pointers are dereferenced throughout (including the nested
+        // lambda's sub_matches), so the pin must outlive every use.
+        auto rt_snap = tracker.pin();
+        auto matches = rt_snap->find_symbols_by_name(name);
         contexts.get_ref<nlohmann::json::array_t&>().reserve(matches.size());
         for (const auto* sym : matches) {
             if (sym == nullptr) continue;
@@ -1091,7 +1103,7 @@ ToolResult handle_get_context(const nlohmann::json& params,
                         // Each callee NAME may resolve to multiple symbols;
                         // we only recurse into the first to bound fan-out, but
                         // emit a leaf entry for the name regardless.
-                        auto sub_matches = tracker.find_symbols_by_name(cn);
+                        auto sub_matches = rt_snap->find_symbols_by_name(cn);
                         if (sub_matches.empty()) {
                             kids.push_back({{"root", cn},
                                             {"children",

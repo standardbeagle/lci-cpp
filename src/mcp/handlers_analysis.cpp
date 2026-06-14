@@ -128,11 +128,12 @@ nlohmann::json side_effect_to_json(const SideEffectInfo& info,
 std::vector<FileSymbolData> collect_file_symbol_data(MasterIndex& indexer) {
     auto file_ids = indexer.get_all_file_ids();
     auto& ref = indexer.ref_tracker();
+    auto rt_snap = ref.pin();
     std::vector<FileSymbolData> result;
     result.reserve(file_ids.size());
     for (auto fid : file_ids) {
         auto path = indexer.get_file_path(fid);
-        auto syms = ref.get_file_enhanced_symbols(fid);
+        auto syms = rt_snap->get_file_enhanced_symbols(fid);
         result.push_back({std::move(path), std::move(syms)});
     }
     return result;
@@ -218,6 +219,7 @@ ToolResult handle_semantic_annotations(const nlohmann::json& raw_params,
     // we match the first symbol on the target line.
     if (!label.empty() && include_propagated && propagator && indexer) {
         const auto& ref = indexer->ref_tracker();
+        auto rt_snap = ref.pin();
         for (auto& item : annotations) {
             auto file_id = static_cast<FileID>(
                 item.value("file_id", 0));
@@ -225,7 +227,7 @@ ToolResult handle_semantic_annotations(const nlohmann::json& raw_params,
             if (line < 0) continue;
 
             const EnhancedSymbol* real_sym = nullptr;
-            for (const auto* es : ref.get_file_enhanced_symbols(file_id)) {
+            for (const auto* es : rt_snap->get_file_enhanced_symbols(file_id)) {
                 if (es && es->symbol.line == line) {
                     real_sym = es;
                     break;
@@ -248,7 +250,7 @@ ToolResult handle_semantic_annotations(const nlohmann::json& raw_params,
                 // rather than emit empty strings (matches Go's omitempty).
                 if (pl.source != 0) {
                     if (const auto* src_es =
-                            ref.get_enhanced_symbol(pl.source)) {
+                            rt_snap->get_enhanced_symbol(pl.source)) {
                         pl_item["source_name"] = src_es->symbol.name;
                         pl_item["source_file"] =
                             indexer->get_file_path(src_es->symbol.file_id);
@@ -312,7 +314,8 @@ ToolResult side_effect_symbol_query(const nlohmann::json& params,
     // Search by symbol name through the index's reference tracker
     if (!symbol_name.empty() && indexer) {
         auto& ref = indexer->ref_tracker();
-        auto symbols = ref.find_symbols_by_name(symbol_name);
+        auto rt_snap = ref.pin();
+        auto symbols = rt_snap->find_symbols_by_name(symbol_name);
         if (symbols.empty()) {
             return make_error_response(
                 "side_effects", "symbol not found: " + symbol_name);
@@ -452,8 +455,9 @@ ToolResult side_effect_category_query(const nlohmann::json& params,
 int count_callable_symbols_in_index(const MasterIndex& indexer) {
     int total = 0;
     const auto& ref = indexer.ref_tracker();
+    auto rt_snap = ref.pin();
     for (FileID fid : indexer.get_all_file_ids()) {
-        for (const auto* es : ref.get_file_enhanced_symbols(fid)) {
+        for (const auto* es : rt_snap->get_file_enhanced_symbols(fid)) {
             if (!es) continue;
             switch (es->symbol.type) {
                 case SymbolType::Function:
@@ -560,8 +564,9 @@ namespace {
 std::vector<FileSymbolData> gather_file_symbol_data(MasterIndex& indexer) {
     std::vector<FileSymbolData> result;
     auto& ref = indexer.ref_tracker();
+    auto rt_snap = ref.pin();
     for (auto fid : indexer.get_all_file_ids()) {
-        auto syms = ref.get_file_enhanced_symbols(fid);
+        auto syms = rt_snap->get_file_enhanced_symbols(fid);
         if (syms.empty()) continue;
         FileSymbolData fsd;
         fsd.path = indexer.get_file_path(fid);
