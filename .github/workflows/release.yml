@@ -118,14 +118,13 @@ jobs:
       - name: Build
         run: cmake --build build/release --parallel --config Release
 
-      # Excludes the seven Unix-socket / POSIX-path suites not yet ported to
-      # Windows (see ci.yml Windows leg + followups doc #4). The shipped binary
-      # itself is unaffected — real lci uses the TCP transport correctly; the
-      # gap is in the test fixtures.
-      - name: Test (unit suite, minus unported runtime suites)
+      # Full unit suite. The seven Unix-socket / POSIX-path suites once excluded
+      # here (followups #4) are re-enabled: the socket fixtures take a
+      # platform-correct address (tests/helpers/test_socket.h) and report_to_json
+      # path normalization is now separator-independent (git/serialize.cpp).
+      - name: Test (unit suite)
         run: |
-          $excluded = '-ServerTest.*:ClientTest.*:GitReportToJson.*:CodeInsightGitTest.*:ContextHandlerFixture.*:HandlersFixture.*:ExploreIndexTestFixture.*'
-          & build/release/tests/Release/lci_tests.exe "--gtest_filter=$excluded"
+          & build/release/tests/Release/lci_tests.exe
           if ($LASTEXITCODE -ne 0) { throw "lci_tests failed ($LASTEXITCODE)" }
 
       - name: Package
@@ -180,12 +179,12 @@ jobs:
       - name: Build
         run: cmake --build build/release --parallel
 
-      # macOS excludes FileWatcherTest (efsw FSEvents teardown abort) and the Go
-      # extractor/linker suites (macOS-only missing-symbol bug); see the ci.yml
-      # macOS leg + followups #3/#5. Both are covered on the Linux legs and do
-      # not affect the shipped binary's other-language indexing.
+      # macOS excludes only FileWatcherTest (efsw FSEvents teardown abort; see
+      # the ci.yml macOS leg + followups #3). The Go extractor/linker suites
+      # (followups #5) are re-enabled after the unsequenced std::move+is_exported
+      # fix in go_linker.cpp.
       - name: Test (unit suite)
-        run: ./build/release/tests/lci_tests "--gtest_filter=-FileWatcherTest.*:GoExtractorTest.*:GoLinkerIntegrationTest.*:AllLinkerIntegrationTest.GoMultiFileProject"
+        run: ./build/release/tests/lci_tests "--gtest_filter=-FileWatcherTest.*"
 
       - name: Package
         run: |

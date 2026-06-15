@@ -80,43 +80,40 @@ object dies); the abort is inside efsw. Watcher logic is exercised by the same
 a `cmake/patch-efsw-fsevents.cmake` analogous to the inotify one, then drop the
 macOS `-FileWatcherTest.*` filter.
 
-## 4. Windows runtime test port (seven suites excluded from the Windows gate)
+## 4. Windows runtime test port — RESOLVED 2026-06-15
 
-**What:** the Windows unit gate (`ci.yml` + `release.yml`) runs the full
-`lci_tests` suite EXCEPT seven suites, via
-`--gtest_filter=-ServerTest.*:ClientTest.*:GitReportToJson.*:CodeInsightGitTest.*:ContextHandlerFixture.*:HandlersFixture.*:ExploreIndexTestFixture.*`.
-~1670 unit tests + `spec_diff_unit_tests` run and must pass on Windows; these
-seven (~75 tests) are deferred. The Windows build itself is fully green, and
-the shipped `lci.exe` is unaffected — the gaps are in test fixtures and one
-path-normalization helper, not the binary's real code paths.
+**What:** the Windows unit gate (`ci.yml` + `release.yml`) excluded seven suites
+(`ServerTest`, `ClientTest`, `GitReportToJson`, `CodeInsightGitTest`,
+`ContextHandlerFixture`, `HandlersFixture`, `ExploreIndexTestFixture`). Both
+root causes are now fixed and all seven are back in the Windows gate (only the
+fork/exec integration/parity/benchmark suites remain gated off Windows in
+`tests/CMakeLists.txt` — see #1).
 
-**Two root causes:**
+**Root cause 1 — Server/Client fixtures were Unix-domain-socket shaped.**
+`ServerTest`/`ClientTest` SetUp built a `.sock` file path and `make_client()`
+called `set_address_family(AF_UNIX)`. On Windows the transport is TCP
+(`localhost:<port>`); a temp `.sock` path is `C:\...\x.sock`, whose drive-letter
+colon made `server.cpp`'s `stoi(sock.substr(sock.rfind(':')+1))` throw in
+`SetUp()`, failing every test in both fixtures. The shipped binary was fine — it
+gets its address from `get_socket_path*()` (already `localhost:<port>` on
+Windows).
 
-1. **Server/Client fixtures are Unix-domain-socket shaped.** `ServerTest` and
-   `ClientTest` SetUp build a `.sock` file path (`temp_directory_path() /
-   "lci_test_N.sock"`) and `make_client()` calls `httplib::Client::
-   set_address_family(AF_UNIX)`. On Windows the transport is TCP
-   (`localhost:<port>`); `server.cpp` parses the port with
-   `stoi(sock.substr(sock.rfind(':')+1))`, and a Windows file path's
-   drive-letter colon (`C:\…`) makes that `stoi` throw "invalid argument" in
-   `SetUp()`, failing every test in both fixtures. Real `lci` is fine — it gets
-   its address from `get_socket_path*()`, which already returns
-   `localhost:<port>` on Windows.
+**Fix 1:** `tests/helpers/test_socket.h` — `next_test_server_address()` returns a
+`.sock` path on POSIX / a process-unique `localhost:<port>` on Windows, and
+`make_test_http_client()` selects AF_UNIX vs TCP to match `lci::Client`. Both
+fixtures use it; their per-fixture `counter_` members were removed.
 
-   **To close:** give the fixtures a platform-appropriate address — on Windows
-   a unique `localhost:<port>` (per-fixture port from a static counter) and a
-   TCP `httplib::Client` (no `AF_UNIX`); on POSIX keep the `.sock` path. Then
-   drop `ServerTest.*` / `ClientTest.*` from the Windows filter.
+**Root cause 2 — `report_to_json` path relativisation was POSIX-shaped.**
+`normalize_rel` used `std::filesystem::relative`. On Windows a `/`-rooted path
+(no drive letter) is not `is_absolute()`, so the helper returned it un-stripped
+with a leading `/`, failing the `front() != '/'` assertions.
 
-2. **`report_to_json` path relativisation is POSIX-shaped.** `GitReportToJson`,
-   `CodeInsightGitTest`, the MCP `*HandlerFixture`s, and `ExploreIndexTestFixture`
-   feed `/tmp/...`-rooted fixture paths and expect `report_to_json` to strip the
-   root to a forward-slash relative path (`src/foo.cpp`). Under Windows
-   `std::filesystem`, a `/`-rooted path relativises differently, so the result
-   keeps a leading `/`. **To close:** make the git-report path relativisation
-   operate on normalized forward-slash strings independent of the host
-   `std::filesystem` separator semantics, then drop those suites from the
-   Windows filter.
+**Fix 2:** `git/serialize.cpp` `normalize_rel` is now a purely lexical,
+separator-independent string operation (normalize `\`→`/`, detect POSIX-root or
+drive specifier, strip the `project_root` prefix on a segment boundary, preserve
+absolute paths outside the root). No `std::filesystem` — identical result on
+every platform, so the Linux legs now fully cover the Windows behaviour. Verify
+locally with `scripts/parity-gap-tests.sh --win`; Windows CI is the gate.
 
 ## 5. macOS Go extractor misses exported symbols — RESOLVED 2026-06-14
 

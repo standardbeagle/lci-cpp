@@ -1,10 +1,10 @@
 #include <lci/git/analyzer.h>
 
+#include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <ctime>
-#include <filesystem>
 #include <string>
-#include <system_error>
 
 #include <nlohmann/json.hpp>
 
@@ -13,17 +13,44 @@ namespace git {
 
 namespace {
 
-/// Returns `p` rewritten relative to `project_root` when `p` is absolute,
-/// or `p` unchanged when already relative or when relative() fails.
+/// Returns `p` rewritten relative to `project_root` when `p` is absolute and
+/// lives under that root, or `p` (forward-slash normalized) unchanged when it
+/// is already relative or sits outside the root.
+///
+/// Implemented as a purely lexical, separator-independent string operation —
+/// NOT std::filesystem::relative — so the emitted JSON path is deterministic
+/// and identical on every platform. std::filesystem treats a '/'-rooted path
+/// as non-absolute on Windows (it carries no drive letter), which left such
+/// paths un-stripped and produced absolute JSON paths on the Windows leg.
 std::string normalize_rel(const std::string& p,
                           const std::string& project_root) {
     if (p.empty()) return p;
-    std::filesystem::path abs_path(p);
-    if (!abs_path.is_absolute()) return p;
-    std::error_code ec;
-    auto rel = std::filesystem::relative(abs_path, project_root, ec);
-    if (ec || rel.empty()) return p;
-    return rel.generic_string();
+
+    std::string path = p;
+    std::replace(path.begin(), path.end(), '\\', '/');
+
+    // "Rooted" = POSIX '/'-rooted or a Windows drive specifier ("C:..."). A
+    // relative path passes through (with separators normalized to '/').
+    const bool rooted =
+        path.front() == '/' ||
+        (path.size() >= 2 &&
+         std::isalpha(static_cast<unsigned char>(path.front())) &&
+         path[1] == ':');
+    if (!rooted) return path;
+
+    std::string root = project_root;
+    std::replace(root.begin(), root.end(), '\\', '/');
+    while (root.size() > 1 && root.back() == '/') root.pop_back();
+
+    // Strip the root only on a path-segment boundary (so "/tmp/projX" is not
+    // treated as living under "/tmp/proj"). Absolute paths outside the root
+    // are preserved rather than rewritten into a misleading "../.." chain.
+    if (!root.empty() && path.size() > root.size() &&
+        path.compare(0, root.size(), root) == 0 &&
+        path[root.size()] == '/') {
+        return path.substr(root.size() + 1);
+    }
+    return path;
 }
 
 nlohmann::json symbol_to_json(const SymbolInfo& symbol,

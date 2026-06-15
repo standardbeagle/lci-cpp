@@ -40,9 +40,12 @@ done
 # Platform-divergent shims — always fast to verify, both sides implemented.
 SHIMS='PortableTest.*:SubprocessTest.*'
 
-# Currently excluded on the Windows CI leg (TCP-vs-AF_UNIX socket fixtures +
-# POSIX path normalization in report_to_json).
-WIN_GAP='ServerTest.*:ClientTest.*:GitReportToJson.*:CodeInsightGitTest.*:ContextHandlerFixture.*:HandlersFixture.*:ExploreIndexTestFixture.*'
+# Once excluded on the Windows CI leg (TCP-vs-AF_UNIX socket fixtures + POSIX
+# path normalization in report_to_json), now re-enabled: socket fixtures take a
+# platform-correct address (tests/helpers/test_socket.h) and normalize_rel is
+# separator-independent (git/serialize.cpp). Kept here as a local regression
+# guard against re-introducing a platform-divergent path/transport assumption.
+WIN_GAP='ServerTest.*:ClientTest.*:SocketPathTest.*:GitReportToJson.*:CodeInsightGitTest.*:ContextHandlerFixture.*:HandlersFixture.*:ExploreIndexTestFixture.*'
 
 # Currently excluded on the macOS CI leg. FileWatcherTest = efsw FSEvents
 # teardown abort (followups #3, still open). The Go suites were re-enabled

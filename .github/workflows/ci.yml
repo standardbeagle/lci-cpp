@@ -152,23 +152,24 @@ jobs:
       - name: Build
         run: cmake --build build/release --parallel --config Release
 
-      # Windows unit gate: the full lci_tests suite plus spec_diff, EXCEPT seven
-      # suites that exercise behaviour not yet ported to Windows (tracked as a
-      # follow-up — see docs/superpowers/plans/*-followups.md #4):
-      #   * ServerTest / ClientTest — the fixtures are Unix-domain-socket shaped
-      #     (httplib AF_UNIX, a .sock file path); the Windows transport is TCP
-      #     (localhost:<port>), so the fixtures need a TCP rework.
+      # Windows unit gate: the full lci_tests suite plus spec_diff. The seven
+      # suites previously excluded here (followups #4) are re-enabled now that
+      # both root causes are fixed:
+      #   * ServerTest / ClientTest — the fixtures were Unix-domain-socket shaped
+      #     (httplib AF_UNIX, a .sock file path) and the Windows transport is TCP
+      #     (localhost:<port>); a .sock path's drive-letter colon also made the
+      #     server's port parse throw in SetUp. The fixtures now take a
+      #     platform-correct address via tests/helpers/test_socket.h.
       #   * GitReportToJson / CodeInsightGitTest / *HandlerFixture /
-      #     ExploreIndexTestFixture — depend on POSIX-style path normalization
-      #     in report_to_json that does not relativise '/'-rooted fixtures the
-      #     same way under Windows std::filesystem.
-      # Everything else (~1670 tests) runs and must pass — this is the enforced
-      # Windows bar until the runtime port lands. The fork/exec integration +
-      # parity + benchmark suites are gated off Windows in tests/CMakeLists.txt.
-      - name: Test (unit suite, minus unported runtime suites)
+      #     ExploreIndexTestFixture — depended on report_to_json's POSIX-shaped
+      #     path normalization (std::filesystem::relative treats a '/'-rooted
+      #     path as non-absolute on Windows). normalize_rel is now a purely
+      #     lexical, separator-independent string operation (git/serialize.cpp).
+      # The fork/exec integration + parity + benchmark suites remain gated off
+      # Windows in tests/CMakeLists.txt (no fork/exec port yet).
+      - name: Test (unit suite)
         run: |
-          $excluded = '-ServerTest.*:ClientTest.*:GitReportToJson.*:CodeInsightGitTest.*:ContextHandlerFixture.*:HandlersFixture.*:ExploreIndexTestFixture.*'
-          & build/release/tests/Release/lci_tests.exe "--gtest_filter=$excluded"
+          & build/release/tests/Release/lci_tests.exe
           if ($LASTEXITCODE -ne 0) { throw "lci_tests failed ($LASTEXITCODE)" }
           $spec = Get-ChildItem -Path build/release -Recurse -Filter spec_diff_unit_tests.exe | Select-Object -First 1
           if (-not $spec) { throw "spec_diff_unit_tests.exe not found" }
