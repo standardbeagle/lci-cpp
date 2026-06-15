@@ -1446,7 +1446,6 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
         ci.mode = "overview";
         ci.include.repository_map = true;
         ci.include.health_dashboard = true;
-        ci.include.dependency_graph = true;
         ci.include.entry_points = true;
         if (params.contains("max_results")) {
             ci.max_results = params.value("max_results", 50);

@@ -80,12 +80,10 @@ CodebaseIntelligenceParams CodebaseIntelligenceEngine::apply_defaults(
 
     if (params.mode == "overview") {
         bool any_set = params.include.repository_map ||
-                       params.include.dependency_graph ||
                        params.include.health_dashboard ||
                        params.include.entry_points;
         if (!any_set) {
             params.include.repository_map = true;
-            params.include.dependency_graph = true;
             params.include.health_dashboard = true;
             params.include.entry_points = true;
         }
@@ -212,12 +210,6 @@ CodebaseIntelligenceResponse CodebaseIntelligenceEngine::build_overview(
         response.repository_map = map.release();
     }
 
-    if (params.include.dependency_graph) {
-        auto graph = std::make_unique<DependencyGraph>();
-        *graph = build_dependency_graph(files);
-        response.dependency_graph = graph.release();
-    }
-
     if (params.include.health_dashboard) {
         auto health = std::make_unique<HealthDashboard>();
         HealthAnalyzer ha;
@@ -313,7 +305,6 @@ CodebaseIntelligenceResponse CodebaseIntelligenceEngine::build_unified(
     CodebaseIntelligenceParams overview_params = params;
     overview_params.mode = "overview";
     overview_params.include.repository_map = true;
-    overview_params.include.dependency_graph = true;
     overview_params.include.health_dashboard = true;
     overview_params.include.entry_points = true;
 
@@ -391,38 +382,6 @@ CodebaseIntelligenceEngine::extract_critical_functions(
         result.push_back(std::move(fs));
     }
     return result;
-}
-
-DependencyGraph CodebaseIntelligenceEngine::build_dependency_graph(
-    const std::vector<FileSymbolData>& files) const {
-    DependencyGraph graph;
-    graph.analysis_metadata.analyzed_at = std::chrono::system_clock::now();
-
-    for (const auto& f : files) {
-        for (const auto* sym : f.symbols) {
-            if (is_function_like(sym->symbol.type) ||
-                sym->symbol.type == SymbolType::Struct) {
-                DependencyNode node;
-                node.name = sym->symbol.name;
-                node.type = sym->symbol.type == SymbolType::Struct
-                                ? "struct"
-                            : sym->symbol.type == SymbolType::Method
-                                ? "method"
-                                : "function";
-                // Real degree centrality: direct fan-in, each incoming edge
-                // counted at full weight 1.0 (no PageRank-style damping — for a
-                // call graph, an edge either carries influence or it doesn't;
-                // a fixed per-hop decay constant is meaningless here). Transitive
-                // load-bearing reach is computed separately in the MCP layer
-                // (compute_load_bearing) where the resolved call graph is
-                // available. Was hardcoded 0.0.
-                node.centrality =
-                    static_cast<double>(sym->incoming_refs.size());
-                graph.nodes.push_back(std::move(node));
-            }
-        }
-    }
-    return graph;
 }
 
 EntryPointsList CodebaseIntelligenceEngine::build_entry_points(

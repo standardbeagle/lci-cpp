@@ -23,9 +23,6 @@ int TokenBudgetManager::estimate_response_tokens(
     if (response.repository_map != nullptr) {
         total += estimate_repository_map_tokens(*response.repository_map);
     }
-    if (response.dependency_graph != nullptr) {
-        total += estimate_dependency_graph_tokens(*response.dependency_graph);
-    }
     if (response.health_dashboard != nullptr) {
         total += estimate_health_dashboard_tokens(*response.health_dashboard);
     }
@@ -51,17 +48,6 @@ int TokenBudgetManager::estimate_repository_map_tokens(
     return tokens;
 }
 
-int TokenBudgetManager::estimate_dependency_graph_tokens(
-    const DependencyGraph& graph) {
-    int tokens = 50;
-    tokens += static_cast<int>(graph.nodes.size()) * 60;
-    tokens += static_cast<int>(graph.edges.size()) * 40;
-    tokens += static_cast<int>(graph.circular_dependencies.size()) * 100;
-    tokens += static_cast<int>(graph.layer_violations.size()) * 100;
-    tokens += static_cast<int>(graph.coupling_hotspots.size()) * 80;
-    tokens += static_cast<int>(graph.highest_centrality.size()) * 30;
-    return tokens;
-}
 
 int TokenBudgetManager::estimate_health_dashboard_tokens(
     const HealthDashboard& health) {
@@ -133,16 +119,7 @@ void TokenBudgetManager::truncate_to_budget(
         }
     }
 
-    // Strategy 3: Reduce dependency graph nodes
-    if (response.dependency_graph != nullptr &&
-        response.dependency_graph->nodes.size() > 20) {
-        int current = estimate_response_tokens(response);
-        if (current > target_tokens) {
-            response.dependency_graph->nodes.resize(20);
-        }
-    }
-
-    // Strategy 4: Reduce module boundaries
+    // Strategy 3: Reduce module boundaries
     if (response.repository_map != nullptr &&
         response.repository_map->module_boundaries.size() > 15) {
         int current = estimate_response_tokens(response);
@@ -160,10 +137,6 @@ void TokenBudgetManager::truncate_to_budget(
             response.repository_map->module_boundaries.clear();
             response.repository_map->domain_terms.clear();
             response.repository_map->entry_points.clear();
-        }
-
-        if (estimate_response_tokens(response) > target_tokens) {
-            response.dependency_graph = nullptr;
         }
 
         if (response.health_dashboard != nullptr &&

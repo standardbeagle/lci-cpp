@@ -304,62 +304,6 @@ struct RepositoryMap {
     std::string note;
 };
 
-// ============================================================================
-// Dependency Graph Types
-// ============================================================================
-
-/// Node in dependency graph.
-struct DependencyNode {
-    std::string entity_id;
-    std::string name;
-    std::string type;
-    double centrality{};
-};
-
-/// Edge in dependency graph.
-struct DependencyEdge {
-    std::string from_entity_id;
-    std::string to_entity_id;
-    double weight{};
-    std::string type;
-};
-
-/// Circular dependency.
-struct CircularDependency {
-    std::vector<std::string> module_entity_ids;
-    std::string severity;
-    std::string description;
-};
-
-/// Layer violation.
-struct LayerViolation {
-    std::string from_entity_id;
-    std::string to_entity_id;
-    std::string severity;
-    std::string description;
-    std::string example;
-};
-
-/// Coupling hotspot.
-struct CouplingHotspot {
-    std::string module_entity_id;
-    std::string module_name;
-    double coupling_score{};
-    int affected_count{};
-    std::vector<std::string> affected_entity_ids;
-};
-
-/// Dependency graph.
-struct DependencyGraph {
-    std::vector<DependencyNode> nodes;
-    std::vector<DependencyEdge> edges;
-    std::vector<CircularDependency> circular_dependencies;
-    std::vector<LayerViolation> layer_violations;
-    std::vector<CouplingHotspot> coupling_hotspots;
-    std::vector<std::string> highest_centrality;
-    AnalysisMetadata analysis_metadata;
-};
-
 /// Entry points list.
 struct EntryPointsList {
     std::vector<EntryPointDef> main_functions;
@@ -520,7 +464,6 @@ struct FeatureAnalysis {
 /// Unified codebase intelligence response.
 struct CodebaseIntelligenceResponse {
     RepositoryMap* repository_map{};
-    DependencyGraph* dependency_graph{};
     HealthDashboard* health_dashboard{};
     EntryPointsList* entry_points{};
     SemanticVocabulary* semantic_vocabulary{};
