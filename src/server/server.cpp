@@ -94,7 +94,10 @@ std::string get_socket_path() {
     // Per-user offset within the 1000-port project window so two users on
     // the same Windows host don't both bind kWindowsBasePort.
     const int port = kWindowsBasePort + static_cast<int>(uid % 1000);
-    return "localhost:" + std::to_string(port);
+    // 127.0.0.1, not "localhost": the listener binds IPv4 (server.cpp bind
+    // path uses "127.0.0.1"), but "localhost" resolves to ::1 first on
+    // Windows, so a localhost client hits IPv6 and gets connection-refused.
+    return "127.0.0.1:" + std::to_string(port);
 #else
     // Format: /<tmp>/lci-<uid>.sock — fits well under the 108-char
     // sun_path limit even with long TMPDIR settings (uid is at most 10
@@ -123,7 +126,9 @@ std::string get_socket_path_for_root(const std::string& root) {
     // distinct ports without overflowing the 1000-slot window.
     const uint32_t mixed = (uid * 2654435761u) ^ hash;
     const int port = kWindowsBasePort + static_cast<int>(mixed % 1000);
-    return "localhost:" + std::to_string(port);
+    // 127.0.0.1, not "localhost" — see get_socket_path() for the IPv4/::1
+    // rationale.
+    return "127.0.0.1:" + std::to_string(port);
 #else
     // Format: /<tmp>/lci-<uid>-<hash>.sock — e.g. /tmp/lci-1000-deadbeef.sock
     // Maximum length with /tmp prefix is /tmp/lci-4294967295-ffffffff.sock = 33

@@ -1,6 +1,7 @@
 #include <lci/mcp/context_manifest_expander.h>
 
 #include <algorithm>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -42,10 +43,17 @@ ExpansionEngine::ExpansionEngine(MasterIndex& index) : index_(index) {}
 
 std::string ExpansionEngine::resolve_path(const std::string& file,
                                            const std::string& project_root) {
+    // Keys in MasterIndex::path_to_id are forward-slash on every platform
+    // (the scanner stores generic_string()), and lookups are exact string
+    // matches. Build the lookup key the same way: normalize to forward-slash
+    // and use std::filesystem to join, so a native-separator project_root
+    // (e.g. "C:\\proj" on Windows) still yields a '/'-joined key. On POSIX
+    // this is byte-identical to the old "root + '/' + file" concatenation.
     if (file.empty()) return {};
-    if (!file.empty() && file[0] == '/') return file;
-    if (project_root.empty()) return file;
-    return project_root + "/" + file;
+    std::filesystem::path p(file);
+    if (p.is_absolute()) return p.generic_string();
+    if (project_root.empty()) return p.generic_string();
+    return (std::filesystem::path(project_root) / p).generic_string();
 }
 
 std::string ExpansionEngine::get_file_path(FileID file_id) {

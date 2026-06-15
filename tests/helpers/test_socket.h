@@ -31,8 +31,10 @@ inline std::string next_test_server_address() {
     int n = counter.fetch_add(1);
 #ifdef _WIN32
     // Unique high port per call within the process (tests run sequentially in
-    // one process, so wrap-around reuse is harmless).
-    return "localhost:" + std::to_string(49200 + (n % 16000));
+    // one process, so wrap-around reuse is harmless). 127.0.0.1, not
+    // "localhost": the server binds IPv4 and "localhost" resolves to ::1
+    // first on Windows, yielding connection-refused.
+    return "127.0.0.1:" + std::to_string(49200 + (n % 16000));
 #else
     return (std::filesystem::temp_directory_path() /
             ("lci_test_srv_" + std::to_string(n) + ".sock"))

@@ -11,6 +11,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include "test_git.h"
+
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -569,11 +571,7 @@ class CodeInsightGitTest : public ::testing::Test {
         std::filesystem::remove_all(repo_, ec);
     }
 
-    bool git(const std::string& args) {
-        std::string cmd =
-            "git -C \"" + repo_.string() + "\" " + args + " >/dev/null 2>&1";
-        return std::system(cmd.c_str()) == 0;
-    }
+    bool git(const std::string& args) { return test::run_git(repo_, args); }
 
     std::filesystem::path repo_;
     std::unique_ptr<MasterIndex> indexer_;

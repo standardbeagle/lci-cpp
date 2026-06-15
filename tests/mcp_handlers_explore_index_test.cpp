@@ -10,6 +10,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include "test_git.h"
+
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -498,9 +500,7 @@ TEST_F(ExploreIndexTestFixture, GitAnalysisRealRepoReturnsReport) {
     std::filesystem::create_directories(repo);
 
     auto git = [&](const std::string& args) {
-        std::string cmd = "git -C \"" + repo.string() + "\" " + args +
-                          " >/dev/null 2>&1";
-        return std::system(cmd.c_str()) == 0;
+        return test::run_git(repo, args);
     };
     ASSERT_TRUE(git("init"));
     git("config user.email test@test.com");
