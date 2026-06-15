@@ -325,7 +325,7 @@ std::optional<nlohmann::json> Client::post_json(const std::string& path,
                                                 const nlohmann::json& body,
                                                 std::string& error) {
 #ifdef _WIN32
-    // On Windows, socket_path_ is "localhost:<port>" for TCP transport.
+    // On Windows, socket_path_ is "127.0.0.1:<port>" for TCP transport.
     httplib::Client cli("http://" + socket_path_);
 #else
     httplib::Client cli(socket_path_);

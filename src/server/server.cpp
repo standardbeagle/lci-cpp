@@ -39,7 +39,7 @@ namespace lci {
 // -- Socket path helpers ------------------------------------------------------
 
 #ifdef _WIN32
-/// On Windows, returns a localhost TCP address "localhost:<port>".
+/// On Windows, returns a loopback TCP address "127.0.0.1:<port>".
 /// Port is derived deterministically from a hash to avoid collisions.
 static constexpr int kWindowsBasePort = 43519;
 #endif
@@ -385,7 +385,7 @@ bool IndexServer::start() {
     }
 
 #ifdef _WIN32
-    // On Windows, use TCP localhost. Parse "localhost:<port>" from sock.
+    // On Windows, use loopback TCP. Parse "127.0.0.1:<port>" from sock.
     int win_port = 0;
     auto colon_pos = sock.rfind(':');
     if (colon_pos != std::string::npos) {

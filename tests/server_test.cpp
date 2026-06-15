@@ -159,8 +159,9 @@ TEST(SocketPathTest, DefaultPath) {
     auto path = get_socket_path();
     EXPECT_FALSE(path.empty());
 #ifdef _WIN32
-    // Windows: TCP fallback "localhost:<port>".
-    EXPECT_NE(path.find("localhost:"), std::string::npos);
+    // Windows: TCP fallback "127.0.0.1:<port>" (IPv4 literal, not "localhost",
+    // which resolves to ::1 first and misses the IPv4 listener).
+    EXPECT_NE(path.find("127.0.0.1:"), std::string::npos);
 #else
     // POSIX: filename incorporates uid so two users on the same host
     // get distinct default sockets.
@@ -174,7 +175,7 @@ TEST(SocketPathTest, ProjectSpecificPath) {
     auto path2 = get_socket_path_for_root("/project/b");
     EXPECT_NE(path1, path2);
 #ifdef _WIN32
-    EXPECT_NE(path1.find("localhost:"), std::string::npos);
+    EXPECT_NE(path1.find("127.0.0.1:"), std::string::npos);
 #else
     EXPECT_NE(path1.find("lci-"), std::string::npos);
     EXPECT_NE(path1.find(".sock"), std::string::npos);

@@ -3,7 +3,7 @@
 // Cross-platform test server addressing.
 //
 // On POSIX the IndexServer listens on a Unix-domain socket (a ".sock" path).
-// Windows has no AF_UNIX, so production falls back to TCP "localhost:<port>"
+// Windows has no AF_UNIX, so production falls back to TCP "127.0.0.1:<port>"
 // (see get_socket_path() / server.cpp). A test fixture must therefore hand the
 // server — and any raw httplib client — an address of the platform-correct
 // shape. A Windows temp ".sock" path is "C:\...\x.sock", and the server's port
