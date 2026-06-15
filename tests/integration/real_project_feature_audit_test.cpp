@@ -419,5 +419,53 @@ TEST_F(FeatureAudit, ChiCodeInsightUnifiedReportsPurity) {
         << "\nfull text:\n" << text;
 }
 
+// -- code_insight detailed=features (graph clustering) -----------------------
+//
+// Features are Louvain communities of chi's call graph, not name-keyword
+// buckets. On a real corpus the FEATURES section must report a positive
+// feature count and a real cohesion fraction in (0, 1] (internal-edge density
+// per community). chi calls across package boundaries, so cross-feature deps
+// must surface once there is more than one community.
+
+TEST_F(FeatureAudit, ChiCodeInsightFeaturesAreGraphClustered) {
+    SKIP_IF_NO_REAL_PROJECT("go", "chi");
+    auto ctx = chi();
+    ASSERT_TRUE(ctx.valid());
+
+    nlohmann::json params;
+    params["mode"] = "detailed";
+    params["analysis"] = "features";
+    auto result = ctx.code_insight(params);
+    ASSERT_FALSE(result.contains("error"));
+    const auto& text = result["lcf"].get_ref<const std::string&>();
+
+    EXPECT_NE(text.find("== FEATURES =="), std::string::npos);
+
+    auto total_pos = text.find("total=");
+    ASSERT_NE(total_pos, std::string::npos);
+    int total = std::atoi(text.c_str() + total_pos + 6);
+    EXPECT_GT(total, 0) << "graph clustering found no features on chi:\n" << text;
+
+    auto coh_pos = text.find("avg_cohesion=");
+    ASSERT_NE(coh_pos, std::string::npos);
+    double coh = std::strtod(text.c_str() + coh_pos + 13, nullptr);
+    EXPECT_GT(coh, 0.0) << "avg_cohesion must be a real positive fraction:\n"
+                        << text;
+    EXPECT_LE(coh, 1.0);
+
+    // Per-feature confidence (= graph cohesion) must be emitted and positive
+    // for at least one feature.
+    auto conf_pos = text.find("confidence=");
+    ASSERT_NE(conf_pos, std::string::npos);
+    EXPECT_GT(std::strtod(text.c_str() + conf_pos + 11, nullptr), 0.0);
+
+    // Multiple communities on a cross-calling corpus must yield cross-feature
+    // dependency edges.
+    if (total > 1) {
+        EXPECT_NE(text.find("dep:"), std::string::npos)
+            << "expected cross-feature deps with >1 feature on chi:\n" << text;
+    }
+}
+
 }  // namespace
 }  // namespace lci
