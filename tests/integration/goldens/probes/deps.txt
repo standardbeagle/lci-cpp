@@ -7,7 +7,7 @@ Analyzing dependency complexity...
 
 Dependency Graph Analysis:
 ==================================================
-Total Files: 1
+Total Files: 2
 Total Dependency Edges: 0
 Maximum Dependency Depth: 0
 Maximum Dependencies per File: 0
