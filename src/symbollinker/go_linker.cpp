@@ -202,7 +202,13 @@ void GoExtractor::extract_function(TSNode node, std::string_view content,
     if (is_null(name_node)) return;
 
     std::string name = node_text(name_node, content);
-    add_symbol(table, std::move(name), is_exported(name));
+    // Compute export visibility BEFORE the move: passing std::move(name) and
+    // is_exported(name) as arguments to the same call is unsequenced, so an
+    // is_exported() that runs after the move would read a moved-from (empty)
+    // string. GCC happens to evaluate right-to-left (works); libc++/AppleClang
+    // evaluates left-to-right and dropped every exported Go symbol on macOS.
+    bool exported = is_exported(name);
+    add_symbol(table, std::move(name), exported);
 }
 
 void GoExtractor::extract_method(TSNode node, std::string_view content,
@@ -363,8 +369,9 @@ void GoExtractor::extract_var_declaration(TSNode node,
             TSNode child = ts_node_child(spec, i);
             if (std::string_view(ts_node_type(child)) == "identifier") {
                 std::string var_name = node_text(child, content);
-                add_symbol(table, std::move(var_name),
-                           is_exported(var_name));
+                // Sequence the export check before the move (see extract_function).
+                bool exported = is_exported(var_name);
+                add_symbol(table, std::move(var_name), exported);
             }
         }
     }

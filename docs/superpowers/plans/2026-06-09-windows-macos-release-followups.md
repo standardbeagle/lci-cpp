@@ -118,22 +118,43 @@ path-normalization helper, not the binary's real code paths.
    `std::filesystem` separator semantics, then drop those suites from the
    Windows filter.
 
-## 5. macOS Go extractor misses exported symbols
+## 5. macOS Go extractor misses exported symbols — RESOLVED 2026-06-14
 
-**What:** four Go suites are excluded from the macOS unit gate
+**What:** four Go suites were excluded from the macOS unit gate
 (`GoExtractorTest.*`, `GoLinkerIntegrationTest.*`,
-`AllLinkerIntegrationTest.GoMultiFileProject`). On macOS the Go tree-sitter
-extractor fails to surface exported symbols — e.g. `has_export(t, "Hello")`
-returns `false` for a file containing `func Hello()`. The same tests pass on
-Linux, and other languages (Python, JS, …) extract correctly on macOS, so it is
-a Go-extractor-specific, macOS-specific defect, not a general regression.
+`AllLinkerIntegrationTest.GoMultiFileProject`). On macOS the Go linker failed to
+surface exported symbols — e.g. `has_export(t, "Hello")` returned `false` for a
+file containing `func Hello()`. The same tests passed on Linux, and other
+languages extracted correctly on macOS.
 
-**Why deferred:** unrelated to the compilation/port work (no portability change
-touches the Go extractor); it needs a macOS machine to debug — likely undefined
-behaviour (a dangling `string_view` into a temporary, or a tree-sitter
-node-field access) that happens to work under libstdc++/Linux but not
-libc++/AppleClang.
+**Root cause (NOT a libc++ lifetime bug):** `GoExtractor` in
+`src/symbollinker/go_linker.cpp` invoked
 
-**To close:** on macOS run `GoExtractorTest.ExtractFunction` under ASan/UBSan to
-locate the read, fix the extractor (most likely a lifetime bug surfacing on
-libc++), then drop the four suites from the macOS filter.
+```cpp
+add_symbol(table, std::move(name), is_exported(name));   // extract_function
+add_symbol(table, std::move(var_name), is_exported(var_name)); // extract_var_declaration
+```
+
+The `std::move(name)` argument and the `is_exported(name)` argument to the *same*
+call are **unsequenced** — C++ leaves the evaluation order of function arguments
+unspecified. GCC evaluates right-to-left, so `is_exported` read the intact string
+first (Linux passed). Clang/AppleClang evaluates left-to-right, so the string was
+moved out into `add_symbol`'s by-value parameter *before* `is_exported` ran;
+`is_exported` then saw a moved-from (empty) string, `name.empty()` was true, and
+every exported Go symbol was marked non-exported. Driver is the **compiler
+front-end**, not the stdlib — reproduced on Linux with `clang++-18`/`clang++-17`
+(buggy → `exported=0`) vs `g++` (`exported=1`); the fixed pattern yields
+`exported=1` on both.
+
+**Fix:** compute the visibility bool before the move at both buggy sites:
+
+```cpp
+bool exported = is_exported(name);
+add_symbol(table, std::move(name), exported);
+```
+
+(The other `add_symbol` sites in the file move `full_name` while reading a
+*different* unmoved variable, so they were already order-safe.) The four suites
+were dropped from the macOS CI filter; only `FileWatcherTest` (#3) remains
+excluded on macOS. Verified locally via `scripts/parity-gap-tests.sh --mac`;
+macOS CI leg is the production gate.
