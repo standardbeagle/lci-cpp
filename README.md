@@ -99,7 +99,7 @@ grammars are statically linked; runtime dependencies are libc + libstdc++
 | Surface | Use |
 |---------|-----|
 | `lci search PATTERN` | substring + symbol-aware ranked search across the corpus |
-| `lci grep PATTERN` | ultra-fast text search (40% faster than ripgrep, 75% less RAM) |
+| `lci grep PATTERN` | literal text search over the corpus, grep-style output |
 | `lci tree SYMBOL` | function call hierarchy with annotations |
 | `lci def SYMBOL` / `lci refs SYMBOL` | definition + reference lookup |
 | `lci git-analyze` | analyze working-set changes for duplicates, naming, complexity |
