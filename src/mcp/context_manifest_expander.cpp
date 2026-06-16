@@ -1,6 +1,7 @@
 #include <lci/mcp/context_manifest_expander.h>
 
 #include <algorithm>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -42,10 +43,17 @@ ExpansionEngine::ExpansionEngine(MasterIndex& index) : index_(index) {}
 
 std::string ExpansionEngine::resolve_path(const std::string& file,
                                            const std::string& project_root) {
+    // Keys in MasterIndex::path_to_id are forward-slash on every platform
+    // (the scanner stores generic_string()), and lookups are exact string
+    // matches. Build the lookup key the same way: normalize to forward-slash
+    // and use std::filesystem to join, so a native-separator project_root
+    // (e.g. "C:\\proj" on Windows) still yields a '/'-joined key. On POSIX
+    // this is byte-identical to the old "root + '/' + file" concatenation.
     if (file.empty()) return {};
-    if (!file.empty() && file[0] == '/') return file;
-    if (project_root.empty()) return file;
-    return project_root + "/" + file;
+    std::filesystem::path p(file);
+    if (p.is_absolute()) return p.generic_string();
+    if (project_root.empty()) return p.generic_string();
+    return (std::filesystem::path(project_root) / p).generic_string();
 }
 
 std::string ExpansionEngine::get_file_path(FileID file_id) {
@@ -129,7 +137,8 @@ ExpansionEngine::ExtractResult ExpansionEngine::extract_symbol_source(
 
     // Search for the symbol by name in the reference tracker
     auto& tracker = index_.ref_tracker();
-    auto* sym = tracker.find_symbol_by_name(symbol_name);
+    auto rt_snap = tracker.pin();
+    auto* sym = rt_snap->find_symbol_by_name(symbol_name);
     if (!sym) {
         return {{}, {}, {}, "symbol " + symbol_name + " not found"};
     }
@@ -140,7 +149,7 @@ ExpansionEngine::ExtractResult ExpansionEngine::extract_symbol_source(
     if (fid != 0 && sym->symbol.file_id != fid) {
         // Try finding in the specified file
         auto* file_sym =
-            tracker.find_symbol_by_file_and_name(fid, symbol_name);
+            rt_snap->find_symbol_by_file_and_name(fid, symbol_name);
         if (file_sym) {
             sym = file_sym;
             sym_path = file_path;
@@ -284,13 +293,14 @@ std::vector<HydratedRef> hydrate_symbol_ids(
     absl::flat_hash_set<SymbolID>& visited) {
     std::vector<HydratedRef> results;
     int total_tokens = 0;
+    auto rt_snap = tracker.pin();
 
     for (auto id : ids) {
         if (total_tokens >= remaining_tokens) break;
         if (visited.contains(id)) continue;
         visited.insert(id);
 
-        auto* sym = tracker.get_enhanced_symbol(id);
+        auto* sym = rt_snap->get_enhanced_symbol(id);
         if (!sym) continue;
 
         auto file_path = index.get_file_path(sym->symbol.file_id);
@@ -320,7 +330,8 @@ std::vector<HydratedRef> ExpansionEngine::expand_callers(
     if (ref.symbol.empty()) return {};
 
     auto& tracker = index_.ref_tracker();
-    auto* sym = tracker.find_symbol_by_name(ref.symbol);
+    auto rt_snap = tracker.pin();
+    auto* sym = rt_snap->find_symbol_by_name(ref.symbol);
     if (!sym) return {};
 
     auto caller_ids = tracker.get_caller_symbols(sym->id);
@@ -337,7 +348,8 @@ std::vector<HydratedRef> ExpansionEngine::expand_callees(
     if (ref.symbol.empty()) return {};
 
     auto& tracker = index_.ref_tracker();
-    auto* sym = tracker.find_symbol_by_name(ref.symbol);
+    auto rt_snap = tracker.pin();
+    auto* sym = rt_snap->find_symbol_by_name(ref.symbol);
     if (!sym) return {};
 
     auto callee_ids = tracker.get_callee_symbols(sym->id);
@@ -354,7 +366,8 @@ std::vector<HydratedRef> ExpansionEngine::expand_implementations(
     if (ref.symbol.empty()) return {};
 
     auto& tracker = index_.ref_tracker();
-    auto symbols = tracker.find_symbols_by_name(ref.symbol);
+    auto rt_snap = tracker.pin();
+    auto symbols = rt_snap->find_symbols_by_name(ref.symbol);
     if (symbols.empty()) return {};
 
     // Prefer interface symbols
@@ -394,7 +407,8 @@ std::vector<HydratedRef> ExpansionEngine::expand_interface(
     if (ref.symbol.empty()) return {};
 
     auto& tracker = index_.ref_tracker();
-    auto symbols = tracker.find_symbols_by_name(ref.symbol);
+    auto rt_snap = tracker.pin();
+    auto symbols = rt_snap->find_symbols_by_name(ref.symbol);
     if (symbols.empty()) return {};
 
     // Prefer concrete types
@@ -430,11 +444,12 @@ std::vector<HydratedRef> ExpansionEngine::expand_siblings(
     if (ref.symbol.empty()) return {};
 
     auto& tracker = index_.ref_tracker();
-    auto* sym = tracker.find_symbol_by_name(ref.symbol);
+    auto rt_snap = tracker.pin();
+    auto* sym = rt_snap->find_symbol_by_name(ref.symbol);
     if (!sym) return {};
     if (sym->symbol.type != SymbolType::Method) return {};
 
-    auto file_symbols = tracker.get_file_enhanced_symbols(sym->symbol.file_id);
+    auto file_symbols = rt_snap->get_file_enhanced_symbols(sym->symbol.file_id);
     std::vector<SymbolID> sibling_ids;
     for (auto* fs : file_symbols) {
         if (fs->id == sym->id) continue;
@@ -459,10 +474,11 @@ std::vector<HydratedRef> ExpansionEngine::expand_tests(
     if (ref.symbol.empty()) return {};
 
     auto& tracker = index_.ref_tracker();
+    auto rt_snap = tracker.pin();
 
     // Strategy 1: find Test{SymbolName}
     std::string test_name = "Test" + ref.symbol;
-    auto test_symbols = tracker.find_symbols_by_name(test_name);
+    auto test_symbols = rt_snap->find_symbols_by_name(test_name);
 
     std::vector<SymbolID> test_ids;
     for (auto* ts : test_symbols) {
@@ -475,11 +491,11 @@ std::vector<HydratedRef> ExpansionEngine::expand_tests(
     }
 
     // Strategy 2: find callers that are test functions
-    auto* sym = tracker.find_symbol_by_name(ref.symbol);
+    auto* sym = rt_snap->find_symbol_by_name(ref.symbol);
     if (sym) {
         auto caller_ids = tracker.get_caller_symbols(sym->id);
         for (auto cid : caller_ids) {
-            auto* caller = tracker.get_enhanced_symbol(cid);
+            auto* caller = rt_snap->get_enhanced_symbol(cid);
             if (!caller) continue;
             if (caller->symbol.name.substr(0, 4) != "Test") continue;
             auto path = get_file_path(caller->symbol.file_id);

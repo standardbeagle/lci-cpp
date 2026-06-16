@@ -9,7 +9,9 @@
 #include <string_view>
 #include <vector>
 
-#ifndef _WIN32
+#ifdef _WIN32
+#include <process.h>  // _getpid
+#else
 #include <unistd.h>
 #endif
 

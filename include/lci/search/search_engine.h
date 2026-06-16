@@ -12,6 +12,7 @@
 namespace lci {
 
 class MasterIndex;
+struct FileSnapshot;
 
 /// Process-wide default synonym table (built-in dev-verb set). Backs the
 /// SearchEngine constructor default so call sites that don't wire a Config
@@ -138,12 +139,15 @@ class SearchEngine {
                         std::string_view pattern,
                         bool has_symbol) const;
 
-    /// Processes a single file for matches and produces results.
+    /// Processes a single file for matches and produces results. `snap` is the
+    /// query's pinned file snapshot, used to resolve the path once (no per-match
+    /// re-fetch).
     void process_file(FileID file_id,
                       std::string_view pattern,
                       const SearchOptions& options,
                       int effective_cap,
-                      std::vector<SearchResult>& results) const;
+                      std::vector<SearchResult>& results,
+                      const FileSnapshot& snap) const;
 };
 
 // -- Search coordinator -------------------------------------------------------

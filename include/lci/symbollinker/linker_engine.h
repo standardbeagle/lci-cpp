@@ -117,6 +117,11 @@ class LinkerEngine {
     /// Returns false if no extractor can handle the file.
     bool index_file(std::string_view path, std::string_view content);
 
+    /// Returns true if a registered extractor can handle this path (by
+    /// extension). Lets callers skip reading files no linker would index
+    /// without duplicating the per-language extension lists.
+    bool can_index(std::string_view path) const;
+
     /// Performs cross-file symbol linking for all indexed files.
     /// Returns false if any file fails to link.
     bool link_symbols();
@@ -217,5 +222,14 @@ class LinkerEngine {
     absl::flat_hash_map<FileID, std::vector<FileID>> import_graph_;
     absl::flat_hash_map<FileID, UpdateInfo> pending_updates_;
 };
+
+/// Registers every built-in language linker pair (extractor + resolver) on the
+/// engine: Go, Python, JavaScript, TypeScript, C#, and PHP. These are the
+/// languages that have a SymbolLinker import-dependency pair today. Languages
+/// that LCI parses but has no linker pair for — C/C++, Rust, Java, Kotlin, Zig,
+/// Ruby — are intentionally absent; their files are skipped by the
+/// dependency-graph path (production cross-file *symbol* resolution for all
+/// parsed languages goes through ReferenceTracker, not this engine).
+void register_all_linkers(LinkerEngine& engine, const std::string& root);
 
 }  // namespace lci::symbollinker

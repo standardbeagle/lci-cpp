@@ -16,6 +16,7 @@
 #include <lci/scope.h>
 #include <lci/symbol.h>
 #include <lci/types.h>
+#include <lci/core/atomic_shared_ptr.h>
 #include <lci/core/symbol_store.h>
 
 namespace lci {
@@ -186,7 +187,7 @@ class PostingsIndex {
         absl::flat_hash_map<FileID, std::vector<std::string>> reverse_keys;
     };
 
-    std::atomic<std::shared_ptr<const Snapshot>> snapshot_;
+    AtomicSharedPtr<const Snapshot> snapshot_;
     mutable std::mutex write_mu_;
     /// Non-null only inside a bulk window (guarded by write_mu_).
     std::shared_ptr<Snapshot> staging_;
@@ -314,20 +315,89 @@ class ReferenceTracker {
     /// Set to non-zero during bulk indexing to skip locking.
     std::atomic<int32_t> bulk_indexing{0};
 
-    /// Returns a mutable reference to the underlying SymbolStore so
-    /// post-processing stages (e.g. integrator metadata enrichment) can
-    /// update fields not surfaced by `process_file`. Const callers should
-    /// continue to go through the typed accessors above.
-    SymbolStore& symbol_store_mut() { return symbols_; }
+    /// Opens (enabled=true) / closes (enabled=false) a bulk-index window.
+    /// During the window writes accumulate into a private unpublished staging
+    /// snapshot and a single atomic publish happens on close, avoiding the
+    /// O(files^2) cost of cloning the growing snapshot per file. Outside the
+    /// window writes are clone-mutate-publish (RCU) per call. Mirrors
+    /// PostingsIndex / FileContentStore.
+    void set_bulk_indexing(bool enabled);
+
+    /// Applies parser-only metadata enrichment (complexity, signature, doc
+    /// comment) to already-processed symbols. Replaces the old mutable
+    /// symbol_store_mut() accessor: under the RCU model the SymbolStore lives
+    /// inside an immutable snapshot, so enrichment is a single write that
+    /// clone-mutate-publishes (or mutates the bulk staging snapshot). The
+    /// integrator collects the enriched EnhancedSymbols and applies them in
+    /// one call after process_file.
+    void apply_enrichment(std::span<const EnhancedSymbol> enriched);
+
+    // -- RCU snapshot --------------------------------------------------------
+
+    /// Immutable read-side state, swapped atomically (RCU). Readers load the
+    /// shared_ptr once (load_snapshot / pin) and operate on the frozen
+    /// snapshot with no lock; writers clone-mutate-publish under write_mu_, or
+    /// mutate the bulk staging snapshot in place and publish once on close.
+    /// Mirrors FileContentStore / PostingsIndex. The read-side query logic
+    /// that hands back pointers/views into this state lives here so callers
+    /// that need pointer lifetime past the call (execute_search) can pin a
+    /// snapshot and query it directly.
+    struct Snapshot {
+        SymbolStore symbols{256};
+        absl::flat_hash_map<uint64_t, Reference> references;
+        absl::flat_hash_map<SymbolID, std::vector<uint64_t>> incoming_refs;
+        absl::flat_hash_map<SymbolID, std::vector<uint64_t>> outgoing_refs;
+        absl::flat_hash_map<FileID, std::vector<ScopeInfo>> scopes_by_file;
+        absl::flat_hash_map<SymbolID, std::vector<ScopeInfo>> symbol_scopes;
+        absl::flat_hash_map<FileID, absl::flat_hash_map<int, std::vector<int>>>
+            line_to_symbols_by_file;
+        ReferenceStats stats{};
+
+        std::vector<const EnhancedSymbol*> find_symbols_by_name(
+            std::string_view name) const;
+        std::vector<Reference> get_symbol_references(
+            SymbolID symbol_id, std::string_view direction) const;
+        std::vector<Reference> get_references_by_id(
+            std::span<const uint64_t> ref_ids) const;
+
+        // Snapshot-scoped variants of the pointer-returning ReferenceTracker
+        // accessors. A caller that pins this snapshot and queries it directly
+        // keeps the returned const EnhancedSymbol* / map* valid for as long as
+        // the pin is held — even across a concurrent reindex publish. The
+        // ReferenceTracker methods of the same name delegate to a freshly
+        // loaded snapshot (safe only for transient, synchronous use).
+        const EnhancedSymbol* get_enhanced_symbol(SymbolID symbol_id) const;
+        std::vector<const EnhancedSymbol*> get_file_enhanced_symbols(
+            FileID file_id) const;
+        const EnhancedSymbol* find_symbol_by_name(std::string_view name) const;
+        const EnhancedSymbol* find_symbol_by_file_and_name(
+            FileID file_id, std::string_view name) const;
+        const absl::flat_hash_map<int, std::vector<int>>*
+            get_file_line_to_symbols(FileID file_id) const;
+        // get_symbol_at_line needs the (separately RCU) location index for the
+        // O(log n) line lookup; the resulting symbol id is resolved against
+        // this snapshot's symbols so the returned pointer is pin-stable.
+        const EnhancedSymbol* get_symbol_at_line(
+            const SymbolLocationIndex& location_index, FileID file_id,
+            int line) const;
+    };
+
+    /// Pins the current published snapshot. The caller holds the returned
+    /// shared_ptr for as long as it dereferences pointers/views obtained from
+    /// it; this is what lets execute_search read def/refs lock-free (the
+    /// snapshot cannot be freed under it even as a concurrent reindex
+    /// publishes a new one).
+    std::shared_ptr<const Snapshot> pin() const { return load_snapshot(); }
 
   private:
-    SymbolStore symbols_;
-    absl::flat_hash_map<uint64_t, Reference> references_;
-    absl::flat_hash_map<SymbolID, std::vector<uint64_t>> incoming_refs_;
-    absl::flat_hash_map<SymbolID, std::vector<uint64_t>> outgoing_refs_;
+    AtomicSharedPtr<const Snapshot> snapshot_;
+    mutable std::mutex write_mu_;
+    /// Non-null only inside a bulk window (guarded by write_mu_).
+    std::shared_ptr<Snapshot> staging_;
 
-    absl::flat_hash_map<FileID, std::vector<ScopeInfo>> scopes_by_file_;
-    absl::flat_hash_map<SymbolID, std::vector<ScopeInfo>> symbol_scopes_;
+    std::shared_ptr<const Snapshot> load_snapshot() const;
+    template <class Fn>
+    void write_snapshot(Fn&& fn);
 
     ImportResolver import_resolver_;
     std::vector<FileImportData> import_data_;
@@ -337,18 +407,16 @@ class ReferenceTracker {
     absl::flat_hash_map<uint64_t, SymbolID> reference_cache_;
     absl::flat_hash_map<uint64_t, ScopeChainCacheEntry> scope_chain_cache_;
 
-    absl::flat_hash_map<FileID, absl::flat_hash_map<int, std::vector<int>>>
-        line_to_symbols_by_file_;
-
     SymbolID next_symbol_id_{1};
     uint64_t next_ref_id_{1};
 
-    ReferenceStats stats_{};
-
     // -- Internal helpers ----------------------------------------------------
 
-    void remove_from_incoming_refs(SymbolID symbol_id, uint64_t ref_id);
-    void remove_from_outgoing_refs(SymbolID symbol_id, uint64_t ref_id);
+    // Write-path helpers mutate the snapshot being built (passed by ref).
+    void remove_from_incoming_refs(Snapshot& s, SymbolID symbol_id,
+                                   uint64_t ref_id);
+    void remove_from_outgoing_refs(Snapshot& s, SymbolID symbol_id,
+                                   uint64_t ref_id);
 
     static uint64_t make_global_ref_id(FileID file_id, uint32_t local_ref_id);
     static bool compute_is_exported(std::string_view path,
@@ -360,22 +428,20 @@ class ReferenceTracker {
         const Symbol& symbol, std::span<const ScopeInfo> scopes,
         int& scope_count_out) const;
 
-    SymbolID find_symbol_at_location(FileID file_id, int line, int col) const;
+    SymbolID find_symbol_at_location(const Snapshot& s, FileID file_id,
+                                     int line, int col) const;
     SymbolID resolve_reference_target(
-        const Reference& ref,
+        const Snapshot& s, const Reference& ref,
         std::span<const SymbolID> file_symbol_ids);
 
-    std::vector<Reference> get_references_by_id(
-        std::span<const uint64_t> ref_ids) const;
-
-    void update_reference_stats();
-    void update_reference_stats_for_symbol(SymbolID symbol_id);
+    void update_reference_stats(Snapshot& s);
+    void update_reference_stats_for_symbol(Snapshot& s, SymbolID symbol_id);
 
     std::vector<SymbolID> get_symbols_by_ref_type(
         SymbolID symbol_id, bool incoming, ReferenceType ref_type) const;
 
     FunctionTreeNode build_tree_node(
-        SymbolID symbol_id, int depth, int max_depth,
+        const Snapshot& s, SymbolID symbol_id, int depth, int max_depth,
         absl::flat_hash_map<SymbolID, bool>& visited) const;
 
     static uint64_t fnv1a_hash_name(std::string_view name);

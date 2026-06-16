@@ -2,8 +2,10 @@
 
 #include <lci/core/file_content_store.h>
 #include <lci/core/mmap.h>
+#include <lci/core/portable.h>
 
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <string>
 #include <thread>
@@ -279,6 +281,15 @@ TEST(FileContentStoreTest, ConcurrentReadDuringWrite) {
         });
     }
 
+    // Wait until the readers are actually running before writing, so the
+    // assertion below is deterministic even when thread startup is slow under
+    // load (otherwise the writer can finish all iterations before any reader
+    // is scheduled, leaving read_count at 0). Readers keep reading throughout
+    // the writer loop, preserving the concurrent-read-during-write coverage.
+    while (read_count.load(std::memory_order_relaxed) == 0) {
+        std::this_thread::yield();
+    }
+
     // Writer thread updates the store.
     for (int i = 0; i < kIterations; ++i) {
         std::string content = "updated content iteration " + std::to_string(i);
@@ -305,7 +316,11 @@ TEST(MappedFileTest, OpenNonExistent) {
 
 TEST(MappedFileTest, OpenAndReadFile) {
     // Create a temporary file.
-    std::string path = "/tmp/lci_mmap_test_" + std::to_string(getpid()) + ".txt";
+    std::string path =
+        (std::filesystem::temp_directory_path() /
+         ("lci_mmap_test_" + std::to_string(lci::portable::process_id()) +
+          ".txt"))
+            .string();
     {
         std::ofstream out(path);
         out << "hello mmap world";
@@ -324,7 +339,11 @@ TEST(MappedFileTest, OpenAndReadFile) {
 }
 
 TEST(MappedFileTest, EmptyFile) {
-    std::string path = "/tmp/lci_mmap_empty_" + std::to_string(getpid()) + ".txt";
+    std::string path =
+        (std::filesystem::temp_directory_path() /
+         ("lci_mmap_empty_" + std::to_string(lci::portable::process_id()) +
+          ".txt"))
+            .string();
     { std::ofstream out(path); }
 
     MappedFile mf;
@@ -337,7 +356,11 @@ TEST(MappedFileTest, EmptyFile) {
 }
 
 TEST(MappedFileTest, MoveSemantics) {
-    std::string path = "/tmp/lci_mmap_move_" + std::to_string(getpid()) + ".txt";
+    std::string path =
+        (std::filesystem::temp_directory_path() /
+         ("lci_mmap_move_" + std::to_string(lci::portable::process_id()) +
+          ".txt"))
+            .string();
     {
         std::ofstream out(path);
         out << "move test";

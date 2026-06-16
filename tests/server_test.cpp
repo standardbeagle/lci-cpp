@@ -14,6 +14,8 @@
 #include <httplib.h>
 #include <nlohmann/json.hpp>
 
+#include "test_socket.h"
+
 #ifndef _WIN32
 #include <sys/un.h>
 #include <unistd.h>
@@ -93,10 +95,9 @@ func (c *Calculator) Reset() {
         server_ = std::make_unique<IndexServer>(
             config_, *indexer_, search_engine_.get());
 
-        // Use a unique socket path per test
-        socket_path_ = (std::filesystem::temp_directory_path() /
-                        ("lci_test_" + std::to_string(counter_++) + ".sock"))
-                            .string();
+        // Platform-correct unique address per test (AF_UNIX path on POSIX,
+        // localhost:<port> on Windows).
+        socket_path_ = test::next_test_server_address();
         server_->set_socket_path(socket_path_);
         server_->set_build_id_override("test-build-id");
 
@@ -112,11 +113,7 @@ func (c *Calculator) Reset() {
     }
 
     httplib::Client make_client() {
-        httplib::Client cli(socket_path_);
-        cli.set_address_family(AF_UNIX);
-        cli.set_connection_timeout(std::chrono::seconds{5});
-        cli.set_read_timeout(std::chrono::seconds{5});
-        return cli;
+        return test::make_test_http_client(socket_path_);
     }
 
     nlohmann::json post(const std::string& path,
@@ -154,7 +151,6 @@ func (c *Calculator) Reset() {
     std::unique_ptr<SearchEngine> search_engine_;
     std::unique_ptr<IndexServer> server_;
     std::string socket_path_;
-    static inline int counter_ = 0;
 };
 
 // -- Socket path helper tests -------------------------------------------------
@@ -163,8 +159,9 @@ TEST(SocketPathTest, DefaultPath) {
     auto path = get_socket_path();
     EXPECT_FALSE(path.empty());
 #ifdef _WIN32
-    // Windows: TCP fallback "localhost:<port>".
-    EXPECT_NE(path.find("localhost:"), std::string::npos);
+    // Windows: TCP fallback "127.0.0.1:<port>" (IPv4 literal, not "localhost",
+    // which resolves to ::1 first and misses the IPv4 listener).
+    EXPECT_NE(path.find("127.0.0.1:"), std::string::npos);
 #else
     // POSIX: filename incorporates uid so two users on the same host
     // get distinct default sockets.
@@ -178,7 +175,7 @@ TEST(SocketPathTest, ProjectSpecificPath) {
     auto path2 = get_socket_path_for_root("/project/b");
     EXPECT_NE(path1, path2);
 #ifdef _WIN32
-    EXPECT_NE(path1.find("localhost:"), std::string::npos);
+    EXPECT_NE(path1.find("127.0.0.1:"), std::string::npos);
 #else
     EXPECT_NE(path1.find("lci-"), std::string::npos);
     EXPECT_NE(path1.find(".sock"), std::string::npos);

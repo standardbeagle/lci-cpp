@@ -358,9 +358,12 @@ int run_debug_deps(const GlobalFlags& flags, bool verbose) {
 
     std::printf("Building index...\n");
     symbollinker::LinkerEngine engine(root.string());
-    engine.register_extractor(std::make_unique<symbollinker::GoExtractor>());
-    engine.register_resolver(
-        std::make_unique<symbollinker::GoResolver>(root.string()));
+    // Register every built-in linker pair (Go, Python, JS, TS, C#, PHP) so the
+    // dependency graph covers all linkable languages, not just Go. Languages
+    // LCI parses but has no linker pair for (C/C++, Rust, Java, Kotlin, Zig,
+    // Ruby) are skipped here; their cross-file symbol resolution still works via
+    // ReferenceTracker on the main index path.
+    symbollinker::register_all_linkers(engine, root.string());
 
     std::vector<FileID> indexed_files;
     std::error_code iter_ec;
@@ -368,7 +371,9 @@ int run_debug_deps(const GlobalFlags& flags, bool verbose) {
          !iter_ec && it != end; it.increment(iter_ec)) {
         if (iter_ec) break;
         if (!it->is_regular_file()) continue;
-        if (!is_go_source_file(it->path())) continue;
+        // Skip files no registered linker can handle (avoids reading binaries);
+        // can_index reuses each extractor's can_handle — single source of truth.
+        if (!engine.can_index(it->path().string())) continue;
 
         auto rel = std::filesystem::relative(it->path(), root, iter_ec);
         if (iter_ec) break;

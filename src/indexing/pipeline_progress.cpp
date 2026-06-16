@@ -50,11 +50,15 @@ IndexingProgress ProgressTracker::get_progress() const {
     auto elapsed = std::chrono::steady_clock::now() - start_time_;
     auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed);
 
+    // Rate is computed from the full-resolution duration as fractional seconds,
+    // NOT from elapsed_ms: a small corpus on a fast machine indexes in well
+    // under a millisecond, which truncates to 0 ms and would force the rate to
+    // 0 (an instant index is a high rate, not a zero one).
+    double elapsed_sec = std::chrono::duration<double>(elapsed).count();
     double fps = 0.0;
     int64_t eta_seconds = 0;
-    if (processed > 0 && elapsed_ms.count() > 0) {
-        fps = static_cast<double>(processed) /
-              (static_cast<double>(elapsed_ms.count()) / 1000.0);
+    if (processed > 0 && elapsed_sec > 0.0) {
+        fps = static_cast<double>(processed) / elapsed_sec;
         if (fps > 0.0) {
             int64_t remaining = total - processed;
             if (remaining > 0) {

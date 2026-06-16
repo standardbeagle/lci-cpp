@@ -4,7 +4,6 @@
 #include <lci/core/trigram.h>
 #include <lci/indexing/master_index.h>
 #include <lci/parser/parser_pool.h>
-#include <lci/regex_analyzer/engine.h>
 #include <lci/search/search_engine.h>
 #include <lci/semantic/fuzzy_matcher.h>
 
@@ -145,47 +144,8 @@ static void BM_SearchMediumIndex(benchmark::State& state) {
 BENCHMARK(BM_SearchMediumIndex);
 
 // =============================================================================
-// Regex analyzer benchmarks
+// Regex filter benchmarks — std::regex vs RE2 on the live search hot path
 // =============================================================================
-
-static void BM_RegexClassifySimple(benchmark::State& state) {
-    lci::RegexClassifier classifier;
-    for (auto _ : state) {
-        benchmark::DoNotOptimize(classifier.is_simple("handler_\\d+"));
-    }
-}
-BENCHMARK(BM_RegexClassifySimple);
-
-static void BM_RegexClassifyComplex(benchmark::State& state) {
-    lci::RegexClassifier classifier;
-    for (auto _ : state) {
-        benchmark::DoNotOptimize(
-            classifier.is_simple("(?:foo|bar|baz){2,}(?=\\s)"));
-    }
-}
-BENCHMARK(BM_RegexClassifyComplex);
-
-static void BM_LiteralExtraction(benchmark::State& state) {
-    lci::LiteralExtractor extractor;
-    for (auto _ : state) {
-        auto literals = extractor.extract_literals("handler_\\d+_process");
-        benchmark::DoNotOptimize(literals);
-    }
-}
-BENCHMARK(BM_LiteralExtraction);
-
-static void BM_RegexCacheLookup(benchmark::State& state) {
-    lci::RegexCache cache(100, 50);
-    RE2::Options opts(RE2::Quiet);
-    opts.set_one_line(false);
-    auto compiled = std::make_shared<RE2>(R"(handler_\d+)", opts);
-    cache.cache_complex("handler_\\d+", std::move(compiled), false);
-    for (auto _ : state) {
-        auto [simple, complex] = cache.get_regex("handler_\\d+", false);
-        benchmark::DoNotOptimize(complex);
-    }
-}
-BENCHMARK(BM_RegexCacheLookup);
 
 // Head-to-head: std::regex vs RE2 on the search.cpp regex_filter_results
 // scenario — match a moderately complex pattern against 100 short code lines.

@@ -126,7 +126,14 @@ void FileScanner::walk_directory(
             continue;
 
         FileTask task;
-        task.path = entry.path().string();
+        // generic_string(), not string(): file-map keys are matched by exact
+        // string equality (MasterIndex::path_to_id) and joined with literal
+        // '/' elsewhere, so keys must be forward-slash on every platform.
+        // On Windows string() yields backslashes that never match a '/'-built
+        // lookup; on POSIX the two are identical, so this is a no-op there.
+        // Also harmonizes with the incremental watcher, which already stores
+        // generic_string().
+        task.path = entry.path().generic_string();
         task.language = detect_language(task.path);
         task.size = file_size;
         task.priority = get_file_priority(task.path);

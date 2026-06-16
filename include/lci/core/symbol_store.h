@@ -1,6 +1,9 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
+#include <memory>
+#include <mutex>
 #include <span>
 #include <string>
 #include <string_view>
@@ -8,6 +11,7 @@
 
 #include <absl/container/flat_hash_map.h>
 
+#include <lci/core/atomic_shared_ptr.h>
 #include <lci/reference.h>
 #include <lci/symbol.h>
 #include <lci/types.h>
@@ -143,11 +147,14 @@ struct FileSymbolMap {
 /// upper_bound to find candidate symbols, then scan only those whose range
 /// contains the target position. This eliminates linear search.
 ///
-/// Thread safety: Caller is responsible for synchronization during writes.
-/// Reads are safe to call concurrently with other reads.
+/// Thread safety: lock-free reads via an atomically-swapped RCU snapshot
+/// (mirrors FileContentStore / ReferenceTracker). All read queries return by
+/// value (SymbolID / std::vector<Symbol>), so callers need no lock and no pin.
+/// Writers (index_file_symbols / remove_file / clear) clone-mutate-publish
+/// under write_mu_, or mutate the bulk staging snapshot and publish once.
 class SymbolLocationIndex {
   public:
-    SymbolLocationIndex() = default;
+    SymbolLocationIndex();
 
     /// Indexes all symbols in a file for position-based lookup.
     void index_file_symbols(FileID file_id,
@@ -164,6 +171,12 @@ class SymbolLocationIndex {
     SymbolID find_symbol_id_at_position(FileID file_id,
                                         int line, int column) const;
 
+    /// Finds the symbol ID of the most-specific symbol whose line range spans
+    /// `line` (column-agnostic). Returns 0 if none. Binary-searched O(log n);
+    /// the line-only analogue of find_symbol_id_at_position for callers that
+    /// only know a line (e.g. ReferenceTracker::get_symbol_at_line).
+    SymbolID find_symbol_id_at_line(FileID file_id, int line) const;
+
     /// Returns all symbols in a file.
     std::vector<Symbol> get_file_symbols(FileID file_id) const;
 
@@ -179,8 +192,24 @@ class SymbolLocationIndex {
     /// Returns total number of indexed symbols across all files.
     int total_symbols() const;
 
+    /// Opens (true) / closes (false) a bulk-index window: writes accumulate in
+    /// a private staging snapshot and publish once on close, avoiding an
+    /// O(files^2) whole-map clone per index_file_symbols during a full index.
+    void set_bulk_indexing(bool enabled);
+
   private:
-    absl::flat_hash_map<FileID, FileSymbolMap> locations_;
+    /// Immutable read-side state, swapped atomically (RCU).
+    struct Snapshot {
+        absl::flat_hash_map<FileID, FileSymbolMap> locations;
+    };
+
+    AtomicSharedPtr<const Snapshot> snapshot_;
+    mutable std::mutex write_mu_;
+    std::shared_ptr<Snapshot> staging_;
+
+    std::shared_ptr<const Snapshot> load_snapshot() const;
+    template <class Fn>
+    void write_snapshot(Fn&& fn);
 
     /// Finds the best-matching positioned symbol near a line/column.
     const PositionedSymbol* find_best_match(const FileSymbolMap& file_map,

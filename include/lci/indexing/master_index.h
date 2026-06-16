@@ -9,12 +9,12 @@
 #include <absl/container/flat_hash_map.h>
 
 #include <lci/config.h>
+#include <lci/core/atomic_shared_ptr.h>
 #include <lci/core/file_content_store.h>
 #include <lci/core/file_service.h>
 #include <lci/core/reference_tracker.h>
 #include <lci/core/symbol_store.h>
 #include <lci/core/trigram.h>
-#include <lci/indexing/index_locks.h>
 #include <lci/indexing/pipeline.h>
 #include <lci/indexing/pipeline_progress.h>
 #include <lci/search/search_options.h>
@@ -111,7 +111,16 @@ class MasterIndex {
     FileID path_to_id(const std::string& path) const;
 
     /// Returns the path for a FileID, or empty string if not found.
+    /// Loads the snapshot and copies the path out; for hot paths that resolve
+    /// many ids per query, prefer the snapshot-scoped overload below.
     std::string id_to_path(FileID file_id) const;
+
+    /// Snapshot-scoped path lookup: returns a string_view into `snap`'s
+    /// reverse_file_map with no atomic load and no allocation. The caller holds
+    /// `snap` (read_snapshot()) for the view's lifetime — load once per query
+    /// and reuse across all id resolutions instead of paying a snapshot load +
+    /// string copy per result.
+    std::string_view id_to_path(const FileSnapshot& snap, FileID file_id) const;
 
     // -- Statistics ------------------------------------------------------------
 
@@ -210,11 +219,8 @@ class MasterIndex {
     std::shared_ptr<FileContentStore> file_content_store_;
     std::shared_ptr<FileService> file_service_;
 
-    // Lock management (mutable: locking is internal state for const search ops)
-    mutable IndexLockManager lock_manager_;
-
     // File snapshot (atomic swap for lock-free reads)
-    std::atomic<std::shared_ptr<const FileSnapshot>> snapshot_;
+    AtomicSharedPtr<const FileSnapshot> snapshot_;
 
     // Fine-grained locks
     std::mutex snapshot_mu_;  // lightweight lock for snapshot updates

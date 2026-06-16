@@ -11,6 +11,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include "test_git.h"
+
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -569,11 +571,7 @@ class CodeInsightGitTest : public ::testing::Test {
         std::filesystem::remove_all(repo_, ec);
     }
 
-    bool git(const std::string& args) {
-        std::string cmd =
-            "git -C \"" + repo_.string() + "\" " + args + " >/dev/null 2>&1";
-        return std::system(cmd.c_str()) == 0;
-    }
+    bool git(const std::string& args) { return test::run_git(repo_, args); }
 
     std::filesystem::path repo_;
     std::unique_ptr<MasterIndex> indexer_;
@@ -767,13 +765,12 @@ TEST(RegisterAnalysisHandlers, RegistersWithoutCrash) {
     Config config;
     config.project.root = "/tmp";
     McpServer server(config);
-    server.register_tools();
-    size_t before = server.tool_count();
 
     register_analysis_handlers(server, nullptr, nullptr, nullptr, nullptr,
                                nullptr);
-    // Should have added 3 tools (replacing stubs)
-    EXPECT_EQ(server.tool_count(), before + 3);
+    // Registers exactly its 3 tools (semantic_annotations, side_effects,
+    // code_insight) — no stub registrar runs first anymore.
+    EXPECT_EQ(server.tool_count(), 3u);
 }
 
 TEST(RegisterAnalysisHandlers, NullAnnotatorReturnsError) {

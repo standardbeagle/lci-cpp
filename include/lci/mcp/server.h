@@ -84,9 +84,6 @@ class McpServer {
     McpServer(const McpServer&) = delete;
     McpServer& operator=(const McpServer&) = delete;
 
-    /// Registers all 14 LCI tools with stub handlers.
-    void register_tools();
-
     /// Registers a single tool.
     void add_tool(ToolDefinition def, ToolHandler handler);
 

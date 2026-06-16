@@ -12,6 +12,8 @@
 #include <string>
 #include <thread>
 
+#include "test_socket.h"
+
 #ifndef _WIN32
 #include <sys/un.h>
 #endif
@@ -91,10 +93,7 @@ func (c *Calculator) Reset() {
         server_ = std::make_unique<IndexServer>(
             config_, *indexer_, search_engine_.get());
 
-        socket_path_ = (std::filesystem::temp_directory_path() /
-                        ("lci_client_test_sock_" +
-                         std::to_string(counter_++) + ".sock"))
-                            .string();
+        socket_path_ = test::next_test_server_address();
         server_->set_socket_path(socket_path_);
         server_->set_build_id_override("test-build-id");
 
@@ -120,7 +119,6 @@ func (c *Calculator) Reset() {
     std::unique_ptr<IndexServer> server_;
     std::unique_ptr<Client> client_;
     std::string socket_path_;
-    static inline int counter_ = 0;
 };
 
 // -- Connection tests ---------------------------------------------------------

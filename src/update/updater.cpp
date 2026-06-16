@@ -1,9 +1,9 @@
 #include <lci/update/updater.h>
 
-#include <array>
+#include <lci/core/portable.h>
+#include <lci/core/subprocess.h>
+
 #include <cctype>
-#include <cstdio>
-#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -51,50 +51,32 @@ std::string strip_v(const std::string& tag) {
 }
 
 // Run a command, capturing stdout. Returns false if the process could not be
-// started or exited non-zero.
-bool run_capture(const std::string& cmd, std::string& out) {
-    out.clear();
-    std::FILE* pipe = ::popen(cmd.c_str(), "r");
-    if (pipe == nullptr) return false;
-    std::array<char, 4096> buf{};
-    size_t n = 0;
-    while ((n = std::fread(buf.data(), 1, buf.size(), pipe)) > 0) {
-        out.append(buf.data(), n);
-    }
-    int rc = ::pclose(pipe);
-    return rc == 0;
+// started or exited non-zero. stderr is discarded (not captured).
+bool run_capture(const std::vector<std::string>& argv, std::string& out) {
+    return lci::subprocess::run_capture(argv, "", out);
 }
 
 // Run a command for its exit code (stdout/stderr inherit the terminal).
-int run_cmd(const std::string& cmd) {
-    int rc = std::system(cmd.c_str());
-    if (rc == -1) return -1;
-#if defined(_WIN32)
-    return rc;
-#else
-    if (WIFEXITED(rc)) return WEXITSTATUS(rc);
-    return -1;
-#endif
+int run_cmd(const std::vector<std::string>& argv) {
+    return lci::subprocess::run_status(argv);
 }
 
 bool have_tool(const std::string& name) {
     std::string out;
-    return run_capture(name + " --version", out);
+    return run_capture({name, "--version"}, out);
 }
 
 // URLs and filenames from the API response are passed to curl/tar/sha256sum
-// through a shell (popen/system). They are wrapped in double quotes, so the
-// only characters that remain dangerous in that context are those that survive
-// double-quoting: $ ` " \ and whitespace. We additionally pin the scheme to
-// https and the host to GitHub, so a compromised/MITM'd response cannot
-// redirect the shell to an arbitrary command or host.
+// as verbatim argv elements (no shell involved). We additionally pin the scheme
+// to https and the host to GitHub, so a compromised/MITM'd response cannot
+// redirect the process to an arbitrary command or host.
 bool is_github_host(const std::string& host) {
     return host == "github.com" || host == "api.github.com" ||
            host == "codeload.github.com" || host == "githubusercontent.com" ||
            ends_with(host, ".githubusercontent.com");
 }
 
-// A tag/version is embedded into a shell URL; restrict it to a safe charset.
+// A tag/version is embedded into a URL passed as an argv element; restrict it to a safe charset.
 bool safe_version(const std::string& v) {
     if (v.empty()) return false;
     for (char c : v) {
@@ -119,13 +101,12 @@ std::string to_lower(std::string s) {
     return s;
 }
 
-// Compute the SHA-256 of a file by shelling out to the platform tool — the
-// same shell-out strategy used for curl/tar. Returns lowercase hex, or empty
-// on failure (no tool / parse failure).
+// Compute the SHA-256 of a file by spawning the platform tool directly (no
+// shell). Returns lowercase hex, or empty on failure (no tool / parse failure).
 std::string sha256_of_file(const fs::path& f) {
     std::string out;
 #if defined(_WIN32)
-    if (!run_capture("certutil -hashfile \"" + f.string() + "\" SHA256", out)) {
+    if (!run_capture({"certutil", "-hashfile", f.string(), "SHA256"}, out)) {
         return {};
     }
     std::istringstream iss(out);
@@ -141,8 +122,8 @@ std::string sha256_of_file(const fs::path& f) {
     }
     return {};
 #else
-    if (run_capture("sha256sum \"" + f.string() + "\"", out) ||
-        run_capture("shasum -a 256 \"" + f.string() + "\"", out)) {
+    if (run_capture({"sha256sum", f.string()}, out) ||
+        run_capture({"shasum", "-a", "256", f.string()}, out)) {
         std::string tok = to_lower(out.substr(0, out.find_first_of(" \t\n")));
         if (is_hex64(tok)) return tok;
     }
@@ -400,10 +381,10 @@ int run_update(const UpdateConfig& cfg) {
     }
 
     std::string json_text;
-    std::string fetch =
-        "curl -fsSL --proto =https -H \"Accept: application/vnd.github+json\" "
-        "\"" +
-        api_url + "\"";
+    std::vector<std::string> fetch = {
+        "curl", "-fsSL", "--proto", "=https",
+        "-H", "Accept: application/vnd.github+json",
+        api_url};
     if (!run_capture(fetch, json_text) || json_text.empty()) {
         std::cerr << "Error: failed to query the GitHub releases API ("
                   << api_url << ").\n";
@@ -469,7 +450,7 @@ int run_update(const UpdateConfig& cfg) {
 
     std::error_code ec;
     fs::path work = fs::temp_directory_path(ec) /
-                    ("lci-update-" + std::to_string(::getpid()));
+                    ("lci-update-" + std::to_string(portable::process_id()));
     fs::remove_all(work, ec);
     fs::create_directories(work, ec);
     if (ec) {
@@ -480,9 +461,8 @@ int run_update(const UpdateConfig& cfg) {
 
     fs::path tarball = work / asset->name;
     std::cout << "Downloading " << asset->name << " (" << latest << ")...\n";
-    std::string dl = "curl -fsSL --proto =https -o \"" + tarball.string() +
-                     "\" \"" + asset->url + "\"";
-    if (run_cmd(dl) != 0) {
+    if (run_cmd({"curl", "-fsSL", "--proto", "=https", "-o", tarball.string(),
+                 asset->url}) != 0) {
         std::cerr << "Error: download failed (" << asset->url << ").\n";
         fs::remove_all(work, ec);
         return 1;
@@ -504,7 +484,7 @@ int run_update(const UpdateConfig& cfg) {
     }
     if (!sums_url.empty()) {
         std::string sums_text;
-        if (!run_capture("curl -fsSL --proto =https \"" + sums_url + "\"",
+        if (!run_capture({"curl", "-fsSL", "--proto", "=https", sums_url},
                          sums_text)) {
             std::cerr << "Error: failed to fetch SHA256SUMS for verification.\n";
             fs::remove_all(work, ec);
@@ -537,9 +517,7 @@ int run_update(const UpdateConfig& cfg) {
                      "check.\n";
     }
 
-    std::string extract = "tar -xzf \"" + tarball.string() + "\" -C \"" +
-                          work.string() + "\"";
-    if (run_cmd(extract) != 0) {
+    if (run_cmd({"tar", "-xzf", tarball.string(), "-C", work.string()}) != 0) {
         std::cerr << "Error: failed to extract " << asset->name << ".\n";
         fs::remove_all(work, ec);
         return 1;

@@ -309,11 +309,12 @@ nlohmann::json build_inspect_result(const EnhancedSymbol& sym,
     if (includes_has(includes, "type_hierarchy")) {
         auto rels = tracker.get_type_relationships(sym.id);
         if (rels.has_relationships()) {
+            auto rt_snap = tracker.pin();
             nlohmann::json th;
             auto resolve_names = [&](const std::vector<SymbolID>& ids) {
                 nlohmann::json names = nlohmann::json::array();
                 for (auto id : ids) {
-                    auto* s = tracker.get_enhanced_symbol(id);
+                    auto* s = rt_snap->get_enhanced_symbol(id);
                     if (s) names.push_back(s->symbol.name);
                 }
                 return names;
@@ -517,6 +518,7 @@ ToolResult handle_list_symbols(const nlohmann::json& params,
     }
 
     auto& tracker = indexer.ref_tracker();
+    auto rt_snap = tracker.pin();
     auto kinds = parse_symbol_kinds(kind_str);
     auto includes = parse_explore_includes(params.value("include", ""));
 
@@ -540,7 +542,7 @@ ToolResult handle_list_symbols(const nlohmann::json& params,
             continue;
         }
 
-        auto symbols = tracker.get_file_enhanced_symbols(fid);
+        auto symbols = rt_snap->get_file_enhanced_symbols(fid);
         for (const auto* sym : symbols) {
             if (sym && matches_list_filters(*sym, kinds, params)) {
                 all_symbols.push_back({sym, file_path});
@@ -594,6 +596,7 @@ ToolResult handle_inspect_symbol(const nlohmann::json& params,
     }
 
     auto& tracker = indexer.ref_tracker();
+    auto rt_snap = tracker.pin();
     auto includes = parse_inspect_includes(params.value("include", ""));
     int max_depth = clamp_int(params.value("max_depth", 3), 1, 10);
 
@@ -604,7 +607,7 @@ ToolResult handle_inspect_symbol(const nlohmann::json& params,
         for (const auto& token : parse_list(id_str)) {
             auto decoded = decode_symbol_id(token);
             if (decoded.has_value()) {
-                auto* sym = tracker.get_enhanced_symbol(decoded.value());
+                auto* sym = rt_snap->get_enhanced_symbol(decoded.value());
                 if (sym) matched.push_back(sym);
             }
         }
@@ -612,7 +615,7 @@ ToolResult handle_inspect_symbol(const nlohmann::json& params,
 
     // Lookup by name (fallback)
     if (!name.empty() && matched.empty()) {
-        matched = tracker.find_symbols_by_name(name);
+        matched = rt_snap->find_symbols_by_name(name);
     }
 
     // Apply file/type disambiguation
@@ -665,6 +668,7 @@ ToolResult handle_browse_file(const nlohmann::json& params,
     }
 
     auto& tracker = indexer.ref_tracker();
+    auto rt_snap = tracker.pin();
 
     // Find the target file
     FileID target_fid = 0;
@@ -708,7 +712,7 @@ ToolResult handle_browse_file(const nlohmann::json& params,
     auto sort_by = params.value("sort", "line");
 
     // Get symbols for the file
-    auto symbols = tracker.get_file_enhanced_symbols(target_fid);
+    auto symbols = rt_snap->get_file_enhanced_symbols(target_fid);
     std::vector<const EnhancedSymbol*> filtered;
     for (const auto* sym : symbols) {
         if (!sym) continue;

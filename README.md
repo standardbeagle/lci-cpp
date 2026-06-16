@@ -8,10 +8,11 @@ Version `0.6.0`.
 
 ## Quick start
 
-> **Platform availability:** prebuilt releases are currently **Linux x86_64**
-> only. macOS and Windows binaries are not yet published (ports in progress);
-> the installers fail fast with a clear message on those platforms. Build from
-> source meanwhile.
+> **Platform availability:** prebuilt releases ship for **Linux x86_64**
+> (`.tar.gz`, `.deb`, `.rpm`), **Windows x86_64** (`.tar.gz`), and **macOS
+> arm64 / Apple Silicon** (`.tar.gz`). Intel (x86_64) macs are not yet served by
+> a prebuilt binary — build from source on those. The installers fail fast with
+> a clear message on any unsupported platform/arch.
 
 ### One-line install (recommended)
 

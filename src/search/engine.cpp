@@ -387,6 +387,11 @@ std::vector<SearchResult> SearchEngine::search(
 
     std::vector<SearchResult> results;
 
+    // Pin the file snapshot once for the whole query: path resolution below
+    // (filter + per-file path) reads a string_view into it, no per-call atomic
+    // load or string copy.
+    auto file_snap = index_.read_snapshot();
+
     for (FileID fid : candidates) {
         if (effective_cap > 0 &&
             static_cast<int>(results.size()) >= effective_cap) {
@@ -394,19 +399,22 @@ std::vector<SearchResult> SearchEngine::search(
         }
         // Path filter (languages/filter). Cheap per-file string scan.
         if (path_filter.include || path_filter.exclude) {
-            auto path = index_.id_to_path(fid);
-            if (!path_filter.matches(path)) continue;
+            if (!path_filter.matches(index_.id_to_path(*file_snap, fid))) {
+                continue;
+            }
         }
-        process_file(fid, pattern, options, effective_cap, results);
+        process_file(fid, pattern, options, effective_cap, results, *file_snap);
     }
 
     // Symbol-type filter — apply after match, before scoring.
     if (!options.symbol_types.empty()) {
         auto& tracker = index_.ref_tracker();
+        auto rt_snap = tracker.pin();
         results.erase(std::remove_if(results.begin(), results.end(),
             [&](const SearchResult& r) {
                 const auto* sym =
-                    tracker.get_symbol_at_line(r.file_id, r.line);
+                    rt_snap->get_symbol_at_line(
+                        index_.symbol_location_index(), r.file_id, r.line);
                 if (sym == nullptr) return true;
                 return !symbol_type_matches_filter(options.symbol_types,
                                                    to_string(sym->symbol.type));
@@ -686,22 +694,26 @@ void SearchEngine::process_file(
     std::string_view pattern,
     const SearchOptions& options,
     int effective_cap,
-    std::vector<SearchResult>& results) const {
+    std::vector<SearchResult>& results,
+    const FileSnapshot& snap) const {
 
     auto content_sv = index_.file_content_store().get_content(file_id);
     if (content_sv.empty()) return;
 
-    auto path = index_.id_to_path(file_id);
+    // Resolve the path once per file as a string_view into the pinned snapshot;
+    // each match copies it into its own SearchResult::path. Previously this was
+    // re-fetched (atomic load + map lookup + string copy) after every match.
+    std::string_view path = index_.id_to_path(snap, file_id);
 
     if (options.exclude_tests && is_test_file(path)) return;
 
     auto matches = find_matches(content_sv, pattern, options);
     if (matches.empty()) return;
 
-    // Fetch blocks for context extraction.
-    auto file_symbols = index_.symbol_location_index().get_file_symbols(file_id);
-    // Blocks come from FileInfo but we approximate with the file content store.
-    // For block-aware context we need blocks; build empty for now.
+    // Block-aware context is not yet wired; context_extractor falls back to
+    // line-window extraction with an empty block list. (Previously this fetched
+    // symbol_location_index().get_file_symbols(file_id) — a full per-file Symbol
+    // vector copy on the hot path — and discarded it.)
     std::vector<BlockBoundary> blocks;
 
     // Deduplicate by line within this file.
@@ -735,11 +747,8 @@ void SearchEngine::process_file(
         }
 
         results.push_back(SearchResult{
-            file_id, std::move(path), line, col,
+            file_id, std::string(path), line, col,
             std::move(match_text), 0.0, std::move(ctx)});
-
-        // Path is moved, re-fetch for next iteration.
-        path = index_.id_to_path(file_id);
     }
 }
 

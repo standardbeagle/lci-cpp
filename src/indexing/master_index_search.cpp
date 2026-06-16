@@ -100,19 +100,26 @@ std::vector<SearchResult> MasterIndex::execute_search(
     const std::vector<FileID>& candidates,
     const SearchOptions& options) const {
 
-    // Acquire read locks on the indexes we will query.
-    IndexLockManager::ReadGuard trigram_lock(lock_manager_, IndexType::Trigram);
-    IndexLockManager::ReadGuard postings_lock(lock_manager_, IndexType::Postings);
-    IndexLockManager::ReadGuard ref_lock(lock_manager_, IndexType::Reference);
-    IndexLockManager::ReadGuard content_lock(lock_manager_, IndexType::Content);
+    // execute_search is fully lock-free. Each index it reads serves a stable,
+    // pinned snapshot for the dereference window:
+    //   - Reference: pin() holds the ReferenceTracker RCU snapshot, so the raw
+    //     const EnhancedSymbol* returned by find_symbols_by_name (sorted and
+    //     dereferenced below) stay valid even as a concurrent reindex publishes
+    //     a new snapshot (01KSWHQ742 phases 2-3).
+    //   - Content: every content access pins the FileContent shared_ptr via
+    //     get_file (01KSWHQ742 phase 1).
+    //   - Trigram/Postings: internal RCU, return file IDs BY VALUE
+    //     (prereq 01KSRKRW8VZB3AEJ97GGNJDMJW).
+    // No lock is taken here (the IndexLockManager has since been retired).
+    auto refs_snap = ref_tracker_.pin();
 
-    if (!trigram_lock.locked() || !postings_lock.locked() ||
-        !ref_lock.locked() || !content_lock.locked()) {
-        return {};
-    }
+    // Pin the file snapshot once for the whole query so id_to_path resolves to
+    // a string_view into reverse_file_map with no per-result atomic load or
+    // string copy (path is copied into SearchResult::path exactly once).
+    auto file_snap = read_snapshot();
 
     if (options.declaration_only) {
-        auto symbols = ref_tracker_.find_symbols_by_name(pattern);
+        auto symbols = refs_snap->find_symbols_by_name(pattern);
         std::sort(symbols.begin(), symbols.end(),
                   [](const EnhancedSymbol* lhs, const EnhancedSymbol* rhs) {
                       if (lhs->symbol.file_id != rhs->symbol.file_id) {
@@ -151,7 +158,7 @@ std::vector<SearchResult> MasterIndex::execute_search(
 
             SearchResult r;
             r.file_id = sym->symbol.file_id;
-            r.path = id_to_path(sym->symbol.file_id);
+            r.path = std::string(id_to_path(*file_snap, sym->symbol.file_id));
             r.line = sym->symbol.line;
             r.column = column;
             r.match_text = sym->symbol.name;
@@ -164,7 +171,7 @@ std::vector<SearchResult> MasterIndex::execute_search(
     }
 
     if (options.usage_only) {
-        auto symbols = ref_tracker_.find_symbols_by_name(pattern);
+        auto symbols = refs_snap->find_symbols_by_name(pattern);
         std::sort(symbols.begin(), symbols.end(),
                   [](const EnhancedSymbol* lhs, const EnhancedSymbol* rhs) {
                       if (lhs->symbol.file_id != rhs->symbol.file_id) {
@@ -181,7 +188,7 @@ std::vector<SearchResult> MasterIndex::execute_search(
 
         std::vector<SearchResult> results;
         for (const auto* sym : symbols) {
-            auto refs = ref_tracker_.get_symbol_references(sym->id, "incoming");
+            auto refs = refs_snap->get_symbol_references(sym->id, "incoming");
             std::sort(refs.begin(), refs.end(),
                       [](const auto& lhs, const auto& rhs) {
                           if (lhs.file_id != rhs.file_id) {
@@ -200,7 +207,7 @@ std::vector<SearchResult> MasterIndex::execute_search(
 
                 SearchResult r;
                 r.file_id = ref.file_id;
-                r.path = id_to_path(ref.file_id);
+                r.path = std::string(id_to_path(*file_snap, ref.file_id));
                 r.line = ref.line;
                 r.column = ref.column;
                 r.match_text = pattern;
@@ -266,7 +273,15 @@ std::vector<SearchResult> MasterIndex::execute_search(
         if (static_cast<int>(results.size()) >= options.max_results) break;
 
         // General text search: scan file content for pattern matches.
-        auto content_sv = file_content_store_->get_content(fid);
+        // Pin the FileContent shared_ptr for the whole scan: get_content /
+        // get_line_offsets each return a view / pointer into a snapshot whose
+        // local shared_ptr dies at the call's return, so a concurrent
+        // invalidate_file swap could free the FileContent mid-scan. Holding the
+        // shared_ptr keeps both the content view and line_offsets alive
+        // lock-free — this is the lifetime role the Content ReadGuard played.
+        auto fc = file_content_store_->get_file(fid);
+        if (!fc) continue;
+        std::string_view content_sv = fc->view();
         if (content_sv.empty()) continue;
 
         // Single disciplined matcher, shared with SearchEngine::find_matches.
@@ -278,9 +293,13 @@ std::vector<SearchResult> MasterIndex::execute_search(
 
         // Resolve line numbers via binary search over the precomputed
         // line-start offsets instead of rescanning from offset 0 per match
-        // (the former O(matches×filesize) quadratic).
-        const std::vector<uint32_t>* line_offsets =
-            file_content_store_->get_line_offsets(fid);
+        // (the former O(matches×filesize) quadratic). Points into the pinned
+        // fc above, valid for the scan.
+        const std::vector<uint32_t>* line_offsets = &fc->line_offsets;
+
+        // Resolve the path once per file (was once per match — every match in a
+        // file shares the same path).
+        std::string_view path_view = id_to_path(*file_snap, fid);
 
         for (const auto& m : matches) {
             if (static_cast<int>(results.size()) >= options.max_results) break;
@@ -298,7 +317,7 @@ std::vector<SearchResult> MasterIndex::execute_search(
 
             SearchResult r;
             r.file_id = fid;
-            r.path = id_to_path(fid);
+            r.path = std::string(path_view);
             r.line = line;
             r.column = col;
             r.match_text = pattern;
@@ -319,7 +338,12 @@ SearchContext MasterIndex::extract_context(FileID file_id, int match_line,
     SearchContext ctx;
     if (max_context_lines <= 0) return ctx;
 
-    auto content_sv = file_content_store_->get_content(file_id);
+    // Pin the FileContent for this function: the line views below alias into
+    // it until they are copied into ctx.lines. A bare get_content view could be
+    // freed by a concurrent invalidate_file before that copy.
+    auto fc = file_content_store_->get_file(file_id);
+    if (!fc) return ctx;
+    std::string_view content_sv = fc->view();
     if (content_sv.empty()) return ctx;
 
     // Split content into lines. Mirrors Go's reference behavior: each

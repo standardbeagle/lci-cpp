@@ -1,6 +1,5 @@
 #include <gtest/gtest.h>
 
-#include <lci/analysis/metrics_calculator.h>
 #include <lci/analysis/side_effect_analyzer.h>
 #include <lci/config.h>
 #include <lci/core/graph_propagator.h>
@@ -280,82 +279,6 @@ TEST(SideEffectAnalyzerTest, NullContextSafe) {
     sa.record_channel_op(1);
     auto info = sa.end_function();
     EXPECT_TRUE(info.function_name.empty());
-}
-
-// ===========================================================================
-// MetricsCalculator
-// ===========================================================================
-
-TEST(MetricsCalculatorTest, MaintainabilityIndex) {
-    double mi = MetricsCalculator::compute_maintainability_index(100.0, 5, 20);
-    EXPECT_GT(mi, 0.0);
-    EXPECT_LE(mi, 100.0);
-}
-
-TEST(MetricsCalculatorTest, MaintainabilityIndexZeroInput) {
-    EXPECT_DOUBLE_EQ(
-        MetricsCalculator::compute_maintainability_index(0, 0, 0), 0.0);
-}
-
-TEST(MetricsCalculatorTest, RiskScoreHighComplexity) {
-    SymbolMetrics m{};
-    m.quality.cyclomatic_complexity = 25;
-    m.quality.maintainability_index = 5;
-    m.dependencies.incoming_dependencies = 25;
-    m.dependencies.outgoing_dependencies = 25;
-    EXPECT_EQ(MetricsCalculator::compute_risk_score(m), 10);
-}
-
-TEST(MetricsCalculatorTest, RiskScoreLowComplexity) {
-    SymbolMetrics m{};
-    m.quality.cyclomatic_complexity = 2;
-    m.quality.maintainability_index = 90;
-    EXPECT_EQ(MetricsCalculator::compute_risk_score(m), 0);
-}
-
-TEST(MetricsCalculatorTest, TagGeneration) {
-    SymbolMetrics m{};
-    m.quality.cyclomatic_complexity = 20;
-    m.quality.cognitive_complexity = 30;
-    m.quality.nesting_depth = 7;
-    m.dependencies.incoming_dependencies = 15;
-    m.dependencies.outgoing_dependencies = 20;
-    m.dependencies.has_circular_deps = true;
-    m.risk_score = 9;
-    m.quality.maintainability_index = 5;
-
-    auto tags = MetricsCalculator::generate_tags(m);
-    auto has = [&](const std::string& t) {
-        return std::find(tags.begin(), tags.end(), t) != tags.end();
-    };
-
-    EXPECT_TRUE(has("HIGH_COMPLEXITY"));
-    EXPECT_TRUE(has("HIGH_COGNITIVE_LOAD"));
-    EXPECT_TRUE(has("DEEP_NESTING"));
-    EXPECT_TRUE(has("HIGHLY_COUPLED"));
-    EXPECT_TRUE(has("MANY_DEPENDENCIES"));
-    EXPECT_TRUE(has("CIRCULAR_DEPS"));
-    EXPECT_TRUE(has("HIGH_RISK"));
-    EXPECT_TRUE(has("HARD_TO_MAINTAIN"));
-}
-
-TEST(MetricsCalculatorTest, CachingWorks) {
-    MetricsCalculator mc;
-    auto m1 = mc.calculate_symbol_metrics(1, "fn", SymbolType::Function, 1,
-                                          1, 10, 5, 3);
-    auto m2 = mc.calculate_symbol_metrics(1, "fn", SymbolType::Function, 1,
-                                          1, 10, 5, 3);
-    EXPECT_EQ(m1.symbol_id, m2.symbol_id);
-    EXPECT_EQ(mc.cache_size(), 1);
-}
-
-TEST(MetricsCalculatorTest, InvalidateCacheForcesRecalc) {
-    MetricsCalculator mc;
-    mc.calculate_symbol_metrics(1, "fn", SymbolType::Function, 1, 1, 10, 5, 3);
-    mc.invalidate_cache();
-    EXPECT_EQ(mc.cache_size(), 1);
-    mc.calculate_symbol_metrics(1, "fn", SymbolType::Function, 1, 1, 10, 5, 3);
-    EXPECT_EQ(mc.cache_size(), 1);
 }
 
 // ===========================================================================

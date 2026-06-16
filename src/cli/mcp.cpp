@@ -23,11 +23,14 @@ namespace cli {
 
 // FIX-D.1 sweep (Dart FZJ6Iip4we3U): all 8 parity-compat stubs removed —
 // find_files, debug_info, list_symbols, inspect_symbol, browse_file,
-// git_analysis, side_effects, code_insight. The stubs shadowed real handlers
-// via reverse-iteration dispatch in McpServer::handle_tools_call, making real
-// handler implementations dead code and inflating tools/list from Go's 14 to
-// C++'s 22. Real handlers in handlers_{core,explore,index,analysis,context}.cpp
-// now own dispatch. Prior individual removals (iter-5/6/9/14): search,
+// git_analysis, side_effects, code_insight. Those stubs once shadowed real
+// handlers under the old reverse-iteration last-write-wins dispatch, inflating
+// tools/list from Go's 14 to C++'s 22. Real handlers in
+// handlers_{core,explore,index,analysis,context}.cpp now own dispatch; the
+// final stub registrar (McpServer::register_tools/stub_handler) and the
+// reverse-iteration shadow mechanism have since been deleted — dispatch is now
+// plain forward iteration over tools each registered exactly once.
+// Prior individual removals (iter-5/6/9/14): search,
 // get_context, index_stats. The entire register_parity_compat_tools() helper
 // and its private stub-only helpers (collect_symbols, basic_symbol_json,
 // iso_timestamp_now, etc.) were deleted alongside. See MODULE_MAP.md
@@ -74,13 +77,14 @@ int run_mcp(const GlobalFlags& flags) {
     // purity propagates: any caller of an impure function is itself
     // impure unless its own purity overrides. Decay mode keeps strength
     // bounded so deep call chains don't blow up.
+    auto rt_snap = runtime_index.ref_tracker().pin();
     for (const auto& [key, info] : side_effect_analyzer.results()) {
         if (!info.is_pure) {
             // Resolve back to SymbolID via ref_tracker.find_symbol_by_name
             // (file path + line uniquely identifies the symbol since
             // we keyed on file:line:0 above).
-            for (const auto* es : runtime_index.ref_tracker()
-                                       .find_symbols_by_name(info.function_name)) {
+            for (const auto* es :
+                 rt_snap->find_symbols_by_name(info.function_name)) {
                 if (es && static_cast<int>(es->symbol.line) == info.start_line) {
                     propagator.seed_label(es->id, "impure", 1.0);
                 }
@@ -97,9 +101,9 @@ int run_mcp(const GlobalFlags& flags) {
         // propagator with each of its labels at its symbol_id.
         // Iterate the label index in deterministic order (sort label keys).
         // Cheap pass — annotations are sparse vs symbols.
+        auto rt_snap = runtime_index.ref_tracker().pin();
         for (FileID fid : runtime_index.get_all_file_ids()) {
-            for (const auto* es :
-                 runtime_index.ref_tracker().get_file_enhanced_symbols(fid)) {
+            for (const auto* es : rt_snap->get_file_enhanced_symbols(fid)) {
                 if (!es) continue;
                 const auto* ann = annotator.get_annotation(fid, es->id);
                 if (!ann) continue;

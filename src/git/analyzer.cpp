@@ -228,11 +228,12 @@ bool Analyzer::parse_changed_files(const std::vector<ChangedFile>& files,
 
 void Analyzer::get_existing_symbols(std::vector<SymbolInfo>& out) {
     auto file_ids = index_.get_all_file_ids();
+    auto rt_snap = index_.ref_tracker().pin();
     for (auto fid : file_ids) {
         std::string path = index_.get_file_path(fid);
         if (path.empty()) continue;
         auto content = index_.file_content_store().get_content(fid);
-        auto symbols = index_.ref_tracker().get_file_enhanced_symbols(fid);
+        auto symbols = rt_snap->get_file_enhanced_symbols(fid);
         for (const auto* sym : symbols) {
             if (sym == nullptr) continue;
 

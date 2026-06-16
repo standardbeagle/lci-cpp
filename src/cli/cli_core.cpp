@@ -1,15 +1,20 @@
 #include <lci/cli/commands.h>
 
+#include <cctype>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <string>
 #include <string_view>
 
-#ifndef _WIN32
+#ifdef _WIN32
+#include <windows.h>
+#else
 #include <sys/stat.h>
 #include <unistd.h>
 #endif
+
+#include <lci/core/portable.h>
 
 namespace lci {
 namespace cli {
@@ -61,14 +66,32 @@ bool is_mcp_mode() {
         if (val == "1" || val == "true") return true;
     }
 
-#ifndef _WIN32
+    // stdin is not an interactive terminal => almost certainly an MCP client
+    // piping JSON-RPC on stdin.
+#if defined(_WIN32)
+    DWORD type = GetFileType(GetStdHandle(STD_INPUT_HANDLE));
+    if (type == FILE_TYPE_PIPE || type == FILE_TYPE_DISK) return true;
+#else
     struct stat st {};
     if (fstat(STDIN_FILENO, &st) == 0 && !S_ISCHR(st.st_mode)) {
         return true;
     }
+#endif
 
+    // argv[0] basename hints (an "lci-mcp" / "lci-server" launcher name).
     {
-        std::string arg0 = fs::path(program_invocation_name).filename().string();
+        std::string arg0;
+#if defined(__GLIBC__)
+        arg0 = fs::path(program_invocation_name).filename().string();
+#elif defined(__APPLE__)
+        arg0 = getprogname();
+#elif defined(_WIN32)
+        try {
+            arg0 = portable::executable_path().filename().string();
+        } catch (const std::runtime_error&) {
+            // No exe name available; skip this heuristic.
+        }
+#endif
         for (auto& c : arg0) c = static_cast<char>(std::tolower(c));
         if (arg0.find("mcp") != std::string::npos ||
             arg0.find("server") != std::string::npos) {
@@ -76,6 +99,10 @@ bool is_mcp_mode() {
         }
     }
 
+    // Linux-only: inspect the parent process name via procfs for known MCP
+    // clients. No portable equivalent on macOS/Windows; the stdin + argv0
+    // heuristics above cover those platforms.
+#if defined(__linux__)
     {
         pid_t ppid = getppid();
         if (ppid > 1) {

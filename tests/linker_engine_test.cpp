@@ -377,5 +377,54 @@ TEST(LinkerEngineTest, StatsAfterIndexing) {
     EXPECT_EQ(s.resolvers, 1);
 }
 
+// -- register_all_linkers (multi-language debug-path wiring) -------------------
+
+TEST(LinkerEngineTest, RegisterAllLinkersCanIndexAllLanguages) {
+    LinkerEngine engine("/project");
+    register_all_linkers(engine, "/project");
+
+    // Every built-in linker language is indexable...
+    EXPECT_TRUE(engine.can_index("/p/main.go"));
+    EXPECT_TRUE(engine.can_index("/p/app.py"));
+    EXPECT_TRUE(engine.can_index("/p/app.js"));
+    EXPECT_TRUE(engine.can_index("/p/app.jsx"));
+    EXPECT_TRUE(engine.can_index("/p/app.ts"));
+    EXPECT_TRUE(engine.can_index("/p/app.tsx"));
+    EXPECT_TRUE(engine.can_index("/p/Program.cs"));
+    EXPECT_TRUE(engine.can_index("/p/index.php"));
+    // ...languages without a linker pair are not.
+    EXPECT_FALSE(engine.can_index("/p/main.rs"));
+    EXPECT_FALSE(engine.can_index("/p/Main.java"));
+    EXPECT_FALSE(engine.can_index("/p/notes.txt"));
+
+    auto s = engine.stats();
+    EXPECT_EQ(s.extractors, 6);  // go, py, js, ts, cs, php
+    EXPECT_EQ(s.resolvers, 6);
+}
+
+// End-to-end: register_all_linkers + index a 2-file JS project + link, with NO
+// manual set_file_registry call — proves link_symbols injects the engine
+// registry so a real cross-file dependency edge forms (the debug-path fix).
+TEST(LinkerEngineTest, RegisterAllLinkersFormsDependencyEdge) {
+    LinkerEngine engine("/project");
+    register_all_linkers(engine, "/project");
+
+    FileID utils_id = engine.get_or_create_file_id("/project/utils.js");
+    FileID app_id = engine.get_or_create_file_id("/project/app.js");
+
+    ASSERT_TRUE(engine.index_file(
+        "/project/utils.js",
+        "export function formatName(name) { return name.trim(); }\n"));
+    ASSERT_TRUE(engine.index_file(
+        "/project/app.js",
+        "import { formatName } from './utils';\n"
+        "console.log(formatName('x'));\n"));
+    ASSERT_TRUE(engine.link_symbols());
+
+    auto deps = engine.get_file_dependencies(app_id);
+    ASSERT_EQ(deps.size(), 1u);
+    EXPECT_EQ(deps[0], utils_id);
+}
+
 }  // namespace
 }  // namespace lci::symbollinker

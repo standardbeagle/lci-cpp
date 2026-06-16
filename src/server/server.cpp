@@ -39,7 +39,7 @@ namespace lci {
 // -- Socket path helpers ------------------------------------------------------
 
 #ifdef _WIN32
-/// On Windows, returns a localhost TCP address "localhost:<port>".
+/// On Windows, returns a loopback TCP address "127.0.0.1:<port>".
 /// Port is derived deterministically from a hash to avoid collisions.
 static constexpr int kWindowsBasePort = 43519;
 #endif
@@ -94,7 +94,10 @@ std::string get_socket_path() {
     // Per-user offset within the 1000-port project window so two users on
     // the same Windows host don't both bind kWindowsBasePort.
     const int port = kWindowsBasePort + static_cast<int>(uid % 1000);
-    return "localhost:" + std::to_string(port);
+    // 127.0.0.1, not "localhost": the listener binds IPv4 (server.cpp bind
+    // path uses "127.0.0.1"), but "localhost" resolves to ::1 first on
+    // Windows, so a localhost client hits IPv6 and gets connection-refused.
+    return "127.0.0.1:" + std::to_string(port);
 #else
     // Format: /<tmp>/lci-<uid>.sock — fits well under the 108-char
     // sun_path limit even with long TMPDIR settings (uid is at most 10
@@ -123,7 +126,9 @@ std::string get_socket_path_for_root(const std::string& root) {
     // distinct ports without overflowing the 1000-slot window.
     const uint32_t mixed = (uid * 2654435761u) ^ hash;
     const int port = kWindowsBasePort + static_cast<int>(mixed % 1000);
-    return "localhost:" + std::to_string(port);
+    // 127.0.0.1, not "localhost" — see get_socket_path() for the IPv4/::1
+    // rationale.
+    return "127.0.0.1:" + std::to_string(port);
 #else
     // Format: /<tmp>/lci-<uid>-<hash>.sock — e.g. /tmp/lci-1000-deadbeef.sock
     // Maximum length with /tmp prefix is /tmp/lci-4294967295-ffffffff.sock = 33
@@ -380,7 +385,7 @@ bool IndexServer::start() {
     }
 
 #ifdef _WIN32
-    // On Windows, use TCP localhost. Parse "localhost:<port>" from sock.
+    // On Windows, use loopback TCP. Parse "127.0.0.1:<port>" from sock.
     int win_port = 0;
     auto colon_pos = sock.rfind(':');
     if (colon_pos != std::string::npos) {
@@ -818,7 +823,8 @@ void IndexServer::handle_symbol(const httplib::Request& req,
         return;
     }
 
-    const auto* sym = indexer_->ref_tracker().get_enhanced_symbol(symbol_id);
+    auto rt_snap = indexer_->ref_tracker().pin();
+    const auto* sym = rt_snap->get_enhanced_symbol(symbol_id);
     if (sym == nullptr) {
         error_response(res, 404, "symbol not found");
         return;
@@ -861,7 +867,8 @@ void IndexServer::handle_fileinfo(const httplib::Request& req,
         return;
     }
 
-    auto symbols = indexer_->ref_tracker().get_file_enhanced_symbols(file_id);
+    auto rt_snap = indexer_->ref_tracker().pin();
+    auto symbols = rt_snap->get_file_enhanced_symbols(file_id);
 
     nlohmann::json j;
     j["file_info"]["file_id"] = file_id;
@@ -1128,7 +1135,8 @@ void IndexServer::handle_tree(const httplib::Request& req,
     int max_depth = body.value("max_depth", 0);
 
     // Find the symbol by name
-    auto symbols = indexer_->ref_tracker().find_symbols_by_name(function_name);
+    auto rt_snap = indexer_->ref_tracker().pin();
+    auto symbols = rt_snap->find_symbols_by_name(function_name);
     if (symbols.empty()) {
         nlohmann::json j;
         j["error"] = "function not found: " + function_name;
@@ -1330,6 +1338,7 @@ void IndexServer::handle_list_symbols(const httplib::Request& req,
     nlohmann::json entries = nlohmann::json::array();
     int total = 0;
 
+    auto rt_snap = indexer_->ref_tracker().pin();
     for (auto fid : all_file_ids) {
         auto file_path = indexer_->get_file_path(fid);
         if (file_path.empty()) continue;
@@ -1341,7 +1350,7 @@ void IndexServer::handle_list_symbols(const httplib::Request& req,
             if (!matched) continue;
         }
 
-        auto symbols = indexer_->ref_tracker().get_file_enhanced_symbols(fid);
+        auto symbols = rt_snap->get_file_enhanced_symbols(fid);
         for (const auto* sym : symbols) {
             if (!kind_matches(sym->symbol.type, kinds)) continue;
             if (exported_filter.has_value()) {
@@ -1433,13 +1442,18 @@ void IndexServer::handle_inspect_symbol(const httplib::Request& req,
 
     std::vector<const EnhancedSymbol*> matched;
 
+    // Pin the RCU snapshot for the lifetime of every pointer pulled from the
+    // tracker below (matched[] elements and the type-hierarchy lookups all
+    // point into this snapshot; it must outlive the serialization loop).
+    auto rt_snap = indexer_->ref_tracker().pin();
+
     // Try by ID first
     auto id_str = body.value("id", "");
     if (!id_str.empty()) {
         auto decoded = decode_symbol_id(id_str);
         if (decoded.has_value()) {
             const auto* sym =
-                indexer_->ref_tracker().get_enhanced_symbol(decoded.value());
+                rt_snap->get_enhanced_symbol(decoded.value());
             if (sym != nullptr) {
                 matched.push_back(sym);
             }
@@ -1449,7 +1463,7 @@ void IndexServer::handle_inspect_symbol(const httplib::Request& req,
     // Try by name if no ID match
     auto name_str = body.value("name", "");
     if (matched.empty() && !name_str.empty()) {
-        matched = indexer_->ref_tracker().find_symbols_by_name(name_str);
+        matched = rt_snap->find_symbols_by_name(name_str);
     }
 
     // Apply disambiguators (file, type)
@@ -1545,22 +1559,22 @@ void IndexServer::handle_inspect_symbol(const httplib::Request& req,
             th["extended_by"] = nlohmann::json::array();
 
             for (auto id : rels.implements) {
-                if (auto* s = tracker.get_enhanced_symbol(id)) {
+                if (auto* s = rt_snap->get_enhanced_symbol(id)) {
                     th["implements"].push_back(s->symbol.name);
                 }
             }
             for (auto id : rels.implemented_by) {
-                if (auto* s = tracker.get_enhanced_symbol(id)) {
+                if (auto* s = rt_snap->get_enhanced_symbol(id)) {
                     th["implemented_by"].push_back(s->symbol.name);
                 }
             }
             for (auto id : rels.extends) {
-                if (auto* s = tracker.get_enhanced_symbol(id)) {
+                if (auto* s = rt_snap->get_enhanced_symbol(id)) {
                     th["extends"].push_back(s->symbol.name);
                 }
             }
             for (auto id : rels.extended_by) {
-                if (auto* s = tracker.get_enhanced_symbol(id)) {
+                if (auto* s = rt_snap->get_enhanced_symbol(id)) {
                     th["extended_by"].push_back(s->symbol.name);
                 }
             }
@@ -1671,7 +1685,8 @@ void IndexServer::handle_browse_file(const httplib::Request& req,
     int max_results = body.value("max", 100);
     if (max_results <= 0) max_results = 100;
 
-    auto symbols = indexer_->ref_tracker().get_file_enhanced_symbols(target_fid);
+    auto rt_snap = indexer_->ref_tracker().pin();
+    auto symbols = rt_snap->get_file_enhanced_symbols(target_fid);
 
     nlohmann::json entries = nlohmann::json::array();
     int total = 0;

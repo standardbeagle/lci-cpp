@@ -10,8 +10,10 @@ add_library(lci_lib STATIC
     core/symbol_store.cpp
     core/trigram_bucketing.cpp
     core/reference_tracker.cpp
-    core/postings.cpp
     core/import_resolver.cpp
+    core/portable.cpp
+    core/subprocess.cpp
+    core/postings.cpp
     parser/parser.cpp
     parser/parser_pool.cpp
     parser/parse_methods.cpp
@@ -26,13 +28,11 @@ add_library(lci_lib STATIC
     indexing/trigram_merger.cpp
     indexing/pipeline_progress.cpp
     indexing/pipeline.cpp
-    indexing/index_locks.cpp
     indexing/master_index.cpp
     indexing/master_index_search.cpp
     indexing/deleted_file_tracker.cpp
     indexing/debounced_rebuilder.cpp
     indexing/watcher.cpp
-    regex_analyzer/engine.cpp
     search/engine.cpp
     search/search_coordinator.cpp
     search/engine_context.cpp
@@ -47,7 +47,6 @@ add_library(lci_lib STATIC
     semantic/vocabulary_analyzer.cpp
     analysis/call_graph.cpp
     analysis/side_effect_analyzer.cpp
-    analysis/metrics_calculator.cpp
     analysis/health_analyzer.cpp
     analysis/ci_vocabulary_analyzer.cpp
     analysis/coupling_analyzer.cpp

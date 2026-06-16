@@ -5,10 +5,6 @@
 
 namespace lci {
 
-// -- Helpers ------------------------------------------------------------------
-
-static const std::string kEmptyString;
-
 // -- Construction / Destruction -----------------------------------------------
 
 MasterIndex::MasterIndex(const Config& config)
@@ -41,18 +37,26 @@ FileID MasterIndex::path_to_id(const std::string& path) const {
     return it != snap->file_map.end() ? it->second : FileID{0};
 }
 
+std::string_view MasterIndex::id_to_path(const FileSnapshot& snap,
+                                         FileID file_id) const {
+    auto it = snap.reverse_file_map.find(file_id);
+    if (it == snap.reverse_file_map.end()) return {};
+    return it->second;
+}
+
 std::string MasterIndex::id_to_path(FileID file_id) const {
     auto snap = load_snapshot();
-    auto it = snap->reverse_file_map.find(file_id);
-    return it != snap->reverse_file_map.end() ? it->second : kEmptyString;
+    return std::string(id_to_path(*snap, file_id));
 }
 
 // -- Bulk indexing mode toggle ------------------------------------------------
 
 void MasterIndex::set_bulk_indexing(bool enabled) {
-    int32_t v = enabled ? 1 : 0;
     trigram_index_.set_bulk_indexing(enabled);
-    ref_tracker_.bulk_indexing.store(v, std::memory_order_release);
+    // Opens/closes the ReferenceTracker bulk RCU window (staging snapshot +
+    // single publish on close), avoiding O(files^2) per-file snapshot clones.
+    ref_tracker_.set_bulk_indexing(enabled);
+    symbol_location_index_.set_bulk_indexing(enabled);
     postings_index_.set_bulk_indexing(enabled);
 }
 
@@ -120,6 +124,15 @@ bool MasterIndex::index_directory(const std::string& root) {
         std::lock_guard<std::mutex> stop_lock(stop_mu_);
         active_pipeline_ = nullptr;
     }
+
+    // Publish the symbol-location index now: the pipeline has fully populated
+    // it, and process_all_references reads it (find_symbol_id_at_position) to
+    // resolve reference sources/targets. Under the bulk window those writes sat
+    // in the staging snapshot, invisible to the lock-free reader; close the
+    // window here so resolution sees the committed data. (No further
+    // index_file_symbols runs in this pass; the redundant close at
+    // set_bulk_indexing(false) below is a no-op.)
+    symbol_location_index_.set_bulk_indexing(false);
 
     // Post-pipeline: resolve cross-file references.
     ref_tracker_.process_all_references();
@@ -281,24 +294,16 @@ bool MasterIndex::index_file(const std::string& path) {
     auto content_sv = file_content_store_->get_content(file_id);
     if (content_sv.empty()) return false;
 
-    // Acquire write locks for all index types.
-    IndexLockManager::WriteGuard trigram_lock(lock_manager_, IndexType::Trigram);
-    IndexLockManager::WriteGuard symbol_lock(lock_manager_, IndexType::Symbol);
-    IndexLockManager::WriteGuard ref_lock(lock_manager_, IndexType::Reference);
-    IndexLockManager::WriteGuard postings_lock(lock_manager_, IndexType::Postings);
-    IndexLockManager::WriteGuard location_lock(lock_manager_, IndexType::Location);
-    IndexLockManager::WriteGuard content_lock(lock_manager_, IndexType::Content);
-
-    if (!trigram_lock.locked() || !symbol_lock.locked() ||
-        !ref_lock.locked() || !postings_lock.locked() ||
-        !location_lock.locked() || !content_lock.locked()) {
-        return false;
-    }
+    // snapshot_mu_ serializes the whole single-file composite write (per-index
+    // publish + file-snapshot swap) as a unit, so a concurrent reader never
+    // sees a file present in one index but missing from the file map. Reads are
+    // lock-free (RCU snapshots); the old IndexLockManager is retired — its
+    // ReadGuards had no remaining callers after execute_search went lock-free
+    // (01KSWHQ742), and its WriteGuards only duplicated this mutex.
+    std::lock_guard<std::mutex> snap_lock(snapshot_mu_);
 
     trigram_index_.index_file(file_id, content_sv);
     postings_index_.index_file(file_id, content_sv);
-
-    std::lock_guard<std::mutex> snap_lock(snapshot_mu_);
     update_snapshot_for_file(path, file_id, FileID{0}, false);
 
     processed_files_.fetch_add(1, std::memory_order_relaxed);
@@ -313,20 +318,9 @@ bool MasterIndex::update_file(const std::string& path, std::string_view content)
         return false;
     }
 
-    // Acquire write locks for all index types.
-    IndexLockManager::WriteGuard trigram_lock(lock_manager_, IndexType::Trigram);
-    IndexLockManager::WriteGuard symbol_lock(lock_manager_, IndexType::Symbol);
-    IndexLockManager::WriteGuard ref_lock(lock_manager_, IndexType::Reference);
-    IndexLockManager::WriteGuard postings_lock(lock_manager_, IndexType::Postings);
-    IndexLockManager::WriteGuard location_lock(lock_manager_, IndexType::Location);
-    IndexLockManager::WriteGuard content_lock(lock_manager_, IndexType::Content);
-
-    if (!trigram_lock.locked() || !symbol_lock.locked() ||
-        !ref_lock.locked() || !postings_lock.locked() ||
-        !location_lock.locked() || !content_lock.locked()) {
-        return false;
-    }
-
+    // snapshot_mu_ serializes the whole composite write (see index_file).
+    // IndexLockManager retired — RCU reads need no lock; these WriteGuards only
+    // duplicated this mutex.
     std::lock_guard<std::mutex> snap_lock(snapshot_mu_);
 
     auto snap = load_snapshot();
@@ -350,26 +344,16 @@ bool MasterIndex::update_file(const std::string& path, std::string_view content)
 }
 
 bool MasterIndex::remove_file(const std::string& path) {
-    IndexLockManager::WriteGuard trigram_lock(lock_manager_, IndexType::Trigram);
-    IndexLockManager::WriteGuard symbol_lock(lock_manager_, IndexType::Symbol);
-    IndexLockManager::WriteGuard ref_lock(lock_manager_, IndexType::Reference);
-    IndexLockManager::WriteGuard postings_lock(lock_manager_, IndexType::Postings);
-    IndexLockManager::WriteGuard location_lock(lock_manager_, IndexType::Location);
-    IndexLockManager::WriteGuard content_lock(lock_manager_, IndexType::Content);
-
-    if (!trigram_lock.locked() || !symbol_lock.locked() ||
-        !ref_lock.locked() || !postings_lock.locked() ||
-        !location_lock.locked() || !content_lock.locked()) {
-        return false;
-    }
+    // snapshot_mu_ serializes the whole composite write and spans the file_map
+    // lookup so two concurrent removals can't both act on the same id. RCU
+    // reads need no lock; the old IndexLockManager WriteGuards are retired.
+    std::lock_guard<std::mutex> snap_lock(snapshot_mu_);
 
     auto snap = load_snapshot();
     auto it = snap->file_map.find(path);
     if (it == snap->file_map.end()) return true;
 
     FileID file_id = it->second;
-
-    std::lock_guard<std::mutex> snap_lock(snapshot_mu_);
 
     remove_file_from_indexes(file_id, path);
     file_content_store_->invalidate_file(path);

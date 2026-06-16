@@ -19,7 +19,10 @@ int main(int argc, char* argv[]) {
                          std::string("lci version ") + lci::kVersion);
 
     // -- Global flags ---------------------------------------------------------
-    GlobalFlags gflags;
+    // Fully qualified: the Win32 SDK (winbase.h, pulled in transitively by
+    // CLI11 on Windows) declares a global GlobalFlags() function that otherwise
+    // collides with lci::cli::GlobalFlags under the using-directive above.
+    lci::cli::GlobalFlags gflags;
     app.add_option("-c,--config", gflags.config_path, "Config file path")
         ->default_val(".lci.kdl");
     app.add_flag("-d,--daemon", gflags.daemon, "Run as daemon");

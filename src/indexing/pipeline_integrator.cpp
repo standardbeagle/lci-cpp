@@ -130,7 +130,7 @@ void FileIntegrator::merge_symbols(ProcessedFile& file) {
         // defaults; we look them up by (line, column) coordinates and
         // write back via the symbol_store update path.
         if (!enhanced.empty() && !file.symbol_metadata.empty()) {
-            auto& store = ref_tracker_->symbol_store_mut();
+            bool enriched_any = false;
             for (auto& es : enhanced) {
                 for (const auto& meta : file.symbol_metadata) {
                     if (meta.line != es.symbol.line ||
@@ -142,10 +142,13 @@ void FileIntegrator::merge_symbols(ProcessedFile& file) {
                     if (!meta.doc_comment.empty()) {
                         es.doc_comment = meta.doc_comment;
                     }
-                    store.set(es.id, es);
+                    enriched_any = true;
                     break;
                 }
             }
+            // Single RCU write: re-publish the enriched symbols (mutates the
+            // bulk staging snapshot in place during index_directory).
+            if (enriched_any) ref_tracker_->apply_enrichment(enhanced);
         }
 
         if (symbol_location_index_ != nullptr && !enhanced.empty()) {

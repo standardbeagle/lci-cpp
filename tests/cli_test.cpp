@@ -1,7 +1,5 @@
 #include <gtest/gtest.h>
 
-#include <unistd.h>
-
 #include <chrono>
 #include <cstdio>
 #include <cstdint>
@@ -12,6 +10,7 @@
 #include <nlohmann/json.hpp>
 
 #include <lci/cli/commands.h>
+#include <lci/core/portable.h>
 
 #include "../src/cli/ast_filters.h"
 #include "../src/cli/grep_filters.h"
@@ -36,11 +35,12 @@ TEST(CliConfigTest, DefaultFlagsProduceValidConfig) {
 
 TEST(CliConfigTest, RootOverrideApplied) {
     GlobalFlags flags;
-    flags.root = "/tmp";
+    auto tmp = std::filesystem::temp_directory_path();
+    flags.root = tmp.string();
     Config cfg;
     std::string err = load_config_with_overrides(flags, cfg);
     EXPECT_TRUE(err.empty()) << err;
-    EXPECT_EQ(cfg.project.root, "/tmp");
+    EXPECT_EQ(cfg.project.root, std::filesystem::absolute(tmp).string());
 }
 
 TEST(CliConfigTest, IncludeOverrideReplacesConfig) {
@@ -135,19 +135,21 @@ TEST(CliMcpDetectTest, DefaultReturnsFalseInTerminal) {
 TEST(CliMcpDetectTest, EnvVariableOverride) {
     // Save and restore env
     const char* old = std::getenv("LCI_MCP_MODE");
-    setenv("LCI_MCP_MODE", "1", 1);
+    lci::portable::set_env("LCI_MCP_MODE", "1");
     EXPECT_TRUE(is_mcp_mode());
     if (old) {
-        setenv("LCI_MCP_MODE", old, 1);
+        lci::portable::set_env("LCI_MCP_MODE", old);
     } else {
-        unsetenv("LCI_MCP_MODE");
+        lci::portable::unset_env("LCI_MCP_MODE");
     }
 }
 
 // -- config init command tests (no server needed) -----------------------------
 
 TEST(CliConfigInitTest, KdlFormatCreatesFile) {
-    std::string test_file = "/tmp/lci_test_config_init.kdl";
+    std::string test_file =
+        (std::filesystem::temp_directory_path() / "lci_test_config_init.kdl")
+            .string();
     std::remove(test_file.c_str());
 
     GlobalFlags flags;
@@ -164,7 +166,9 @@ TEST(CliConfigInitTest, KdlFormatCreatesFile) {
 }
 
 TEST(CliConfigInitTest, MinimalKdlCreatesFile) {
-    std::string test_file = "/tmp/lci_test_config_init_min.kdl";
+    std::string test_file =
+        (std::filesystem::temp_directory_path() / "lci_test_config_init_min.kdl")
+            .string();
     std::remove(test_file.c_str());
 
     GlobalFlags flags;
@@ -182,7 +186,9 @@ TEST(CliConfigInitTest, MinimalKdlCreatesFile) {
 }
 
 TEST(CliConfigInitTest, JsonFormatCreatesValidJson) {
-    std::string test_file = "/tmp/lci_test_config_init.json";
+    std::string test_file =
+        (std::filesystem::temp_directory_path() / "lci_test_config_init.json")
+            .string();
     std::remove(test_file.c_str());
 
     GlobalFlags flags;
@@ -199,7 +205,9 @@ TEST(CliConfigInitTest, JsonFormatCreatesValidJson) {
 }
 
 TEST(CliConfigInitTest, YamlFormatCreatesFile) {
-    std::string test_file = "/tmp/lci_test_config_init.yaml";
+    std::string test_file =
+        (std::filesystem::temp_directory_path() / "lci_test_config_init.yaml")
+            .string();
     std::remove(test_file.c_str());
 
     GlobalFlags flags;
@@ -215,7 +223,9 @@ TEST(CliConfigInitTest, YamlFormatCreatesFile) {
 }
 
 TEST(CliConfigInitTest, RefusesOverwriteWithoutForce) {
-    std::string test_file = "/tmp/lci_test_config_exists.kdl";
+    std::string test_file =
+        (std::filesystem::temp_directory_path() / "lci_test_config_exists.kdl")
+            .string();
     // Create file first
     {
         std::ofstream ofs(test_file);
@@ -234,7 +244,9 @@ TEST(CliConfigInitTest, RefusesOverwriteWithoutForce) {
 
 TEST(CliConfigInitTest, UnsupportedFormatFails) {
     GlobalFlags flags;
-    int rc = run_config_init(flags, "xml", "/tmp/lci_test.xml", false, false);
+    std::string xml_path =
+        (std::filesystem::temp_directory_path() / "lci_test.xml").string();
+    int rc = run_config_init(flags, "xml", xml_path, false, false);
     EXPECT_EQ(rc, 1);
 }
 
@@ -1600,7 +1612,7 @@ TEST(RankOptionsRecency, SortsByFileMtimeDescending) {
     // test is robust against fast-filesystem timestamp granularity.
     namespace fs = std::filesystem;
     auto tmpdir = fs::temp_directory_path() /
-                  ("lci_rank_test_" + std::to_string(::getpid()));
+                  ("lci_rank_test_" + std::to_string(lci::portable::process_id()));
     fs::create_directories(tmpdir);
 
     auto write_file = [&](const std::string& name, std::string_view body) {
@@ -1644,7 +1656,7 @@ TEST(RankOptionsRecency, MissingFilesSinkToBottom) {
     // Simpler: create a temp file and reference it.
     namespace fs = std::filesystem;
     auto tmpfile = fs::temp_directory_path() /
-                   ("lci_rank_real_" + std::to_string(::getpid()) + ".cpp");
+                   ("lci_rank_real_" + std::to_string(lci::portable::process_id()) + ".cpp");
     std::ofstream(tmpfile.string()) << "real";
 
     results.push_back(scored_result(tmpfile.string(), 1.0));

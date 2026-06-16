@@ -2,12 +2,11 @@
 
 #include <algorithm>
 #include <chrono>
-#include <cstdio>
-#include <ctime>
 #include <string>
 #include <vector>
 
 #include <lci/core/file_content_store.h>
+#include <lci/mcp/time_format.h>
 #include <lci/core/reference_tracker.h>
 #include <lci/git/analyzer.h>
 #include <lci/git/provider.h>
@@ -59,41 +58,6 @@ std::string language_from_path(const std::string& path) {
     return "unknown";
 }
 
-/// Formats a system_clock time_point as RFC3339Nano with local timezone offset
-/// (matches Go's time.Time JSON marshal: "2026-05-13T17:12:53.528955893-05:00").
-/// Zero-alloc on hot path: writes into a fixed 48-byte stack buffer then a
-/// single std::string move out.
-std::string format_rfc3339_nano_local(
-    std::chrono::system_clock::time_point tp) {
-    using namespace std::chrono;
-    auto secs = time_point_cast<seconds>(tp);
-    auto ns = duration_cast<nanoseconds>(tp - secs).count();
-    std::time_t t = system_clock::to_time_t(secs);
-    std::tm tm{};
-    localtime_r(&t, &tm);
-
-    // Compute local zone offset from UTC.
-    std::tm utm{};
-    gmtime_r(&t, &utm);
-    // Difference in seconds: treat both tms as if UTC for difftime.
-    std::time_t lt = std::mktime(&tm);
-    std::time_t ut = std::mktime(&utm);
-    long offset = static_cast<long>(lt - ut);
-    char sign = offset < 0 ? '-' : '+';
-    long abs_off = offset < 0 ? -offset : offset;
-    int oh = static_cast<int>(abs_off / 3600);
-    int om = static_cast<int>((abs_off % 3600) / 60);
-
-    char buf[48];
-    int n = std::snprintf(buf, sizeof(buf),
-                          "%04d-%02d-%02dT%02d:%02d:%02d.%09ld%c%02d:%02d",
-                          tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
-                          tm.tm_hour, tm.tm_min, tm.tm_sec,
-                          static_cast<long>(ns), sign, oh, om);
-    if (n <= 0) return std::string{};
-    return std::string(buf, static_cast<size_t>(n));
-}
-
 /// Computes total bytes across all indexed file contents.
 int64_t compute_total_size_bytes(MasterIndex& indexer) {
     int64_t total = 0;
@@ -110,8 +74,11 @@ nlohmann::json get_symbols_by_type(ReferenceTracker& tracker,
                                    MasterIndex& indexer) {
     nlohmann::json result = nlohmann::json::object();
     auto file_ids = indexer.get_all_file_ids();
+    // Pin the snapshot for the whole scan: get_file_enhanced_symbols returns
+    // const EnhancedSymbol* into the snapshot, dereferenced in the inner loop.
+    auto rt_snap = tracker.pin();
     for (auto fid : file_ids) {
-        auto symbols = tracker.get_file_enhanced_symbols(fid);
+        auto symbols = rt_snap->get_file_enhanced_symbols(fid);
         for (const auto* sym : symbols) {
             if (!sym) continue;
             auto type_name = std::string(to_string(sym->symbol.type));
@@ -274,6 +241,9 @@ ToolResult handle_debug_info(const nlohmann::json& params,
     } else if (mode == "references") {
         // Get top referenced symbols
         auto& sym_store = indexer.ref_tracker();
+        // Pin the snapshot for the scan: get_file_enhanced_symbols returns
+        // const EnhancedSymbol* into the snapshot, dereferenced in the loop.
+        auto rt_snap = sym_store.pin();
         auto file_ids = indexer.get_all_file_ids();
 
         struct SymRef {
@@ -286,7 +256,7 @@ ToolResult handle_debug_info(const nlohmann::json& params,
 
         for (auto fid : file_ids) {
             auto fp = indexer.get_file_path(fid);
-            auto symbols = sym_store.get_file_enhanced_symbols(fid);
+            auto symbols = rt_snap->get_file_enhanced_symbols(fid);
             for (const auto* sym : symbols) {
                 if (!sym) continue;
                 int inc = static_cast<int>(sym->incoming_refs.size());
@@ -335,7 +305,10 @@ ToolResult handle_debug_info(const nlohmann::json& params,
         if (target_fid != 0) {
             auto fp = indexer.get_file_path(target_fid);
             if (!fp.empty()) {
-                auto symbols = tracker.get_file_enhanced_symbols(target_fid);
+                // Pin the snapshot: get_file_enhanced_symbols returns const
+                // EnhancedSymbol* into it, dereferenced in the verbose loop.
+                auto rt_snap = tracker.pin();
+                auto symbols = rt_snap->get_file_enhanced_symbols(target_fid);
                 nlohmann::json fi;
                 fi["file_id"] = static_cast<int>(target_fid);
                 fi["file_path"] = fp;

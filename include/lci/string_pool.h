@@ -83,7 +83,6 @@ class FileStringPool {
                                                 int context_after) const;
 
   private:
-    StringPool* pool_;
     uint32_t file_id_;
     std::vector<StringRange> line_ranges_;
 };

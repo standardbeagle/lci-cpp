@@ -8,6 +8,13 @@
 
 #include <lci/parser/parser.h>
 #include <lci/parser/parser_pool.h>
+#include <lci/symbollinker/csharp_linker.h>
+#include <lci/symbollinker/go_linker.h>
+#include <lci/symbollinker/js_linker.h>
+#include <lci/symbollinker/php_linker.h>
+#include <lci/symbollinker/python_linker.h>
+
+#include <memory>
 
 namespace lci::symbollinker {
 
@@ -98,6 +105,14 @@ bool LinkerEngine::index_file(std::string_view path,
 bool LinkerEngine::link_symbols() {
     symbol_links_.clear();
     import_links_.clear();
+
+    // Every file is indexed by now; hand each resolver the path -> FileID
+    // registry so resolve_import can map a resolved module path to a concrete
+    // FileID (otherwise resolution.file_id stays 0 and no dependency edge
+    // forms — the gap that left the debug dependency graph empty even for Go).
+    for (auto& r : resolvers_) {
+        if (r) r->set_file_registry(file_registry_);
+    }
 
     for (auto& [file_id, table] : symbol_tables_) {
         if (!process_file_links(file_id, table)) {
@@ -527,6 +542,10 @@ SymbolExtractor* LinkerEngine::find_extractor(std::string_view path) const {
     return nullptr;
 }
 
+bool LinkerEngine::can_index(std::string_view path) const {
+    return find_extractor(path) != nullptr;
+}
+
 ImportResolver* LinkerEngine::find_resolver(parser::Language lang) const {
     int idx = static_cast<int>(lang);
     if (idx >= 0 && idx < parser::kLanguageCount && resolvers_[idx]) {
@@ -543,6 +562,26 @@ void LinkerEngine::remove_file_from_vec(std::vector<FileID>& vec,
 bool LinkerEngine::contains_file_id(const std::vector<FileID>& vec,
                                     FileID id) {
     return std::find(vec.begin(), vec.end(), id) != vec.end();
+}
+
+void register_all_linkers(LinkerEngine& engine, const std::string& root) {
+    // Extractors: dispatched by can_handle (extension). JSExtractor(true)
+    // handles .ts/.tsx and reports Language::TypeScript so it pairs with
+    // TSResolver; JSExtractor(false) handles .js/.jsx/.mjs/.cjs -> JSResolver.
+    engine.register_extractor(std::make_unique<GoExtractor>());
+    engine.register_extractor(std::make_unique<PythonExtractor>());
+    engine.register_extractor(std::make_unique<JSExtractor>(/*typescript=*/false));
+    engine.register_extractor(std::make_unique<JSExtractor>(/*typescript=*/true));
+    engine.register_extractor(std::make_unique<CSharpExtractor>());
+    engine.register_extractor(std::make_unique<PhpExtractor>());
+
+    // Resolvers: indexed by Language enum.
+    engine.register_resolver(std::make_unique<GoResolver>(root));
+    engine.register_resolver(std::make_unique<PythonResolver>(root));
+    engine.register_resolver(std::make_unique<JSResolver>(root));
+    engine.register_resolver(std::make_unique<TSResolver>(root));
+    engine.register_resolver(std::make_unique<CSharpResolver>(root));
+    engine.register_resolver(std::make_unique<PhpResolver>(root));
 }
 
 }  // namespace lci::symbollinker

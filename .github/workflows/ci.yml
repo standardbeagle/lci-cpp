@@ -13,6 +13,9 @@ on:
       - "**/*.md"
       - "docs/**"
       - ".gitignore"
+  # Lets a branch run the (billed) macOS leg on demand for validation without
+  # merging to main — see the macos job's event-name guard below.
+  workflow_dispatch:
 
 # Cancel superseded runs on the same ref. A force-push to a PR kills the
 # in-flight run instead of stacking a second full matrix.
@@ -147,7 +150,31 @@ jobs:
             }
 
       - name: Build
-        run: cmake --build build/release --parallel
+        run: cmake --build build/release --parallel --config Release
+
+      # Windows unit gate: the full lci_tests suite plus spec_diff. The seven
+      # suites previously excluded here (followups #4) are re-enabled now that
+      # both root causes are fixed:
+      #   * ServerTest / ClientTest — the fixtures were Unix-domain-socket shaped
+      #     (httplib AF_UNIX, a .sock file path) and the Windows transport is TCP
+      #     (localhost:<port>); a .sock path's drive-letter colon also made the
+      #     server's port parse throw in SetUp. The fixtures now take a
+      #     platform-correct address via tests/helpers/test_socket.h.
+      #   * GitReportToJson / CodeInsightGitTest / *HandlerFixture /
+      #     ExploreIndexTestFixture — depended on report_to_json's POSIX-shaped
+      #     path normalization (std::filesystem::relative treats a '/'-rooted
+      #     path as non-absolute on Windows). normalize_rel is now a purely
+      #     lexical, separator-independent string operation (git/serialize.cpp).
+      # The fork/exec integration + parity + benchmark suites remain gated off
+      # Windows in tests/CMakeLists.txt (no fork/exec port yet).
+      - name: Test (unit suite)
+        run: |
+          & build/release/tests/Release/lci_tests.exe
+          if ($LASTEXITCODE -ne 0) { throw "lci_tests failed ($LASTEXITCODE)" }
+          $spec = Get-ChildItem -Path build/release -Recurse -Filter spec_diff_unit_tests.exe | Select-Object -First 1
+          if (-not $spec) { throw "spec_diff_unit_tests.exe not found" }
+          & $spec.FullName
+          if ($LASTEXITCODE -ne 0) { throw "spec_diff_unit_tests failed ($LASTEXITCODE)" }
 
       - name: Reclaim build space
         if: always()
@@ -159,7 +186,7 @@ jobs:
   # runner needs them) but uploads NO artifacts.
   # ---------------------------------------------------------------------------
   macos:
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: macos-latest
     name: macos appleclang / release
     env:
@@ -213,6 +240,23 @@ jobs:
 
       - name: Build
         run: cmake --build build/release --parallel
+
+      # One macOS-specific exclusion (tracked follow-up; everything else must
+      # pass):
+      #   * FileWatcherTest — vendored efsw's FSEvents backend aborts on watcher
+      #     teardown (libc++abi "mutex lock failed", exit 134), the macOS
+      #     analogue of the inotify race patched for Linux in patch-efsw.cmake.
+      # The Go extractor/linker suites previously excluded here (followups #5)
+      # are re-enabled: the root cause was GoExtractor::add_symbol invoked as
+      # add_symbol(table, std::move(name), is_exported(name)) — the move and the
+      # read of the same string are unsequenced function arguments, and
+      # Clang/AppleClang's left-to-right evaluation moved the string out before
+      # is_exported() read it, so every exported Go symbol was dropped. GCC
+      # evaluates right-to-left, hence Linux passed. Now sequenced in
+      # go_linker.cpp (compute the bool before the move).
+      # Watcher logic is covered on the Linux legs.
+      - name: Test (unit suite)
+        run: ./build/release/tests/lci_tests "--gtest_filter=-FileWatcherTest.*"
 
   # ---------------------------------------------------------------------------
   # Benchmarks — self-hosted Linux, main only. Numbers go to the job log; no
