@@ -677,17 +677,6 @@ TEST(TokenBudgetManager, TruncateReducesHotspots) {
     EXPECT_LE(health.hotspots.size(), 10u);
 }
 
-TEST(TokenBudgetManager, TruncateReducesDependencyNodes) {
-    DependencyGraph graph;
-    graph.nodes.resize(100);
-
-    CodebaseIntelligenceResponse response;
-    response.dependency_graph = &graph;
-
-    TokenBudgetManager::truncate_to_budget(response, 500);
-    EXPECT_LE(graph.nodes.size(), 20u);
-}
-
 TEST(TokenBudgetManager, EmergencyTruncation) {
     RepositoryMap map;
     map.critical_functions.resize(100);
@@ -695,16 +684,11 @@ TEST(TokenBudgetManager, EmergencyTruncation) {
     map.domain_terms.resize(30);
     map.entry_points.resize(20);
 
-    DependencyGraph graph;
-    graph.nodes.resize(200);
-    graph.edges.resize(300);
-
     HealthDashboard health;
     health.hotspots.resize(50);
 
     CodebaseIntelligenceResponse response;
     response.repository_map = &map;
-    response.dependency_graph = &graph;
     response.health_dashboard = &health;
 
     TokenBudgetManager::truncate_to_budget(response, 100);
@@ -714,7 +698,6 @@ TEST(TokenBudgetManager, EmergencyTruncation) {
     EXPECT_TRUE(map.module_boundaries.empty());
     EXPECT_TRUE(map.domain_terms.empty());
     EXPECT_TRUE(map.entry_points.empty());
-    EXPECT_EQ(response.dependency_graph, nullptr);
     EXPECT_LE(health.hotspots.size(), 3u);
 }
 
@@ -856,7 +839,6 @@ TEST(CIEngine, OverviewIncludesAllSections) {
     auto result = engine.analyze(params, {fsd}, 1, 1);
     EXPECT_TRUE(result.ok());
     EXPECT_NE(result.response.repository_map, nullptr);
-    EXPECT_NE(result.response.dependency_graph, nullptr);
     EXPECT_NE(result.response.health_dashboard, nullptr);
     EXPECT_NE(result.response.entry_points, nullptr);
 }
@@ -866,7 +848,6 @@ TEST(CIEngine, OverviewSelectiveInclude) {
     CodebaseIntelligenceParams params;
     params.mode = "overview";
     params.include.repository_map = true;
-    params.include.dependency_graph = false;
     params.include.health_dashboard = false;
     params.include.entry_points = false;
 
@@ -884,7 +865,6 @@ TEST(CIEngine, OverviewSelectiveInclude) {
     auto result = engine.analyze(params, {fsd}, 1, 1);
     EXPECT_TRUE(result.ok());
     EXPECT_NE(result.response.repository_map, nullptr);
-    EXPECT_EQ(result.response.dependency_graph, nullptr);
     EXPECT_EQ(result.response.health_dashboard, nullptr);
     EXPECT_EQ(result.response.entry_points, nullptr);
 }
@@ -894,7 +874,6 @@ TEST(CIEngine, OverviewCriticalFunctions) {
     CodebaseIntelligenceParams params;
     params.mode = "overview";
     params.include.repository_map = true;
-    params.include.dependency_graph = false;
     params.include.health_dashboard = false;
     params.include.entry_points = false;
 
@@ -933,7 +912,6 @@ TEST(CIEngine, OverviewHealthDashboard) {
     CodebaseIntelligenceParams params;
     params.mode = "overview";
     params.include.repository_map = false;
-    params.include.dependency_graph = false;
     params.include.health_dashboard = true;
     params.include.entry_points = false;
 
@@ -964,7 +942,6 @@ TEST(CIEngine, OverviewEntryPoints) {
     CodebaseIntelligenceParams params;
     params.mode = "overview";
     params.include.repository_map = false;
-    params.include.dependency_graph = false;
     params.include.health_dashboard = false;
     params.include.entry_points = true;
 
@@ -1001,40 +978,6 @@ TEST(CIEngine, OverviewEntryPoints) {
     }
     EXPECT_TRUE(found_main);
     EXPECT_TRUE(found_api);
-}
-
-TEST(CIEngine, OverviewDependencyGraphNodes) {
-    CodebaseIntelligenceEngine engine;
-    CodebaseIntelligenceParams params;
-    params.mode = "overview";
-    params.include.repository_map = false;
-    params.include.dependency_graph = true;
-    params.include.health_dashboard = false;
-    params.include.entry_points = false;
-
-    EnhancedSymbol func;
-    func.symbol.name = "Process";
-    func.symbol.type = SymbolType::Function;
-
-    EnhancedSymbol cls;
-    cls.symbol.name = "Worker";
-    cls.symbol.type = SymbolType::Struct;
-
-    EnhancedSymbol var;
-    var.symbol.name = "count";
-    var.symbol.type = SymbolType::Variable;
-
-    FileSymbolData fsd;
-    fsd.path = "worker.go";
-    fsd.symbols = {&func, &cls, &var};
-
-    auto result = engine.analyze(params, {fsd}, 1, 3);
-    EXPECT_TRUE(result.ok());
-
-    auto* graph = result.response.dependency_graph;
-    EXPECT_NE(graph, nullptr);
-    // Functions and structs become nodes, variables do not
-    EXPECT_EQ(graph->nodes.size(), 2u);
 }
 
 // ===========================================================================
@@ -1253,7 +1196,6 @@ TEST(CIEngine, AnalyzeEnforcesBudget) {
     CodebaseIntelligenceParams params;
     params.mode = "overview";
     params.include.repository_map = false;
-    params.include.dependency_graph = false;
     params.include.health_dashboard = true;
     params.include.entry_points = false;
     params.max_results = 10;  // small budget
@@ -1290,7 +1232,6 @@ TEST(CIEngine, EntryPointsCollectedAndRanked) {
     CodebaseIntelligenceParams params;
     params.mode = "overview";
     params.include.repository_map = false;
-    params.include.dependency_graph = false;
     params.include.health_dashboard = false;
     params.include.entry_points = true;
 

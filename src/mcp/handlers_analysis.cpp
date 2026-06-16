@@ -1446,7 +1446,6 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
         ci.mode = "overview";
         ci.include.repository_map = true;
         ci.include.health_dashboard = true;
-        ci.include.dependency_graph = true;
         ci.include.entry_points = true;
         if (params.contains("max_results")) {
             ci.max_results = params.value("max_results", 50);
@@ -1705,7 +1704,10 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
             }
         } else if (detailed_mode == "features") {
             FeatureAnalyzer fa;
-            auto r = fa.analyze(files_data);
+            const auto& ref = indexer.ref_tracker();
+            auto r = fa.analyze(files_data, [&ref](SymbolID id) {
+                return ref.get_callee_symbols(id);
+            });
             out << "== FEATURES ==\n"
                 << "total=" << r.metrics.total_features
                 << " avg_components=" << fmt2(r.metrics.average_components)

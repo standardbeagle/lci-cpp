@@ -25,9 +25,6 @@ class TokenBudgetManager {
     /// Estimates tokens in a repository map.
     static int estimate_repository_map_tokens(const RepositoryMap& map);
 
-    /// Estimates tokens in a dependency graph.
-    static int estimate_dependency_graph_tokens(const DependencyGraph& graph);
-
     /// Estimates tokens in a health dashboard.
     static int estimate_health_dashboard_tokens(const HealthDashboard& health);
 

@@ -19,7 +19,6 @@ namespace lci {
 /// Include flags for overview mode.
 struct IncludeFlags {
     bool repository_map{};
-    bool dependency_graph{};
     bool health_dashboard{};
     bool entry_points{};
 };
@@ -118,10 +117,6 @@ class CodebaseIntelligenceEngine {
     /// Extracts critical functions sorted by importance.
     std::vector<FunctionSignature> extract_critical_functions(
         const std::vector<FileSymbolData>& files, int max_results) const;
-
-    /// Builds dependency graph nodes from symbols.
-    DependencyGraph build_dependency_graph(
-        const std::vector<FileSymbolData>& files) const;
 
     /// Builds entry points list from files.
     EntryPointsList build_entry_points(

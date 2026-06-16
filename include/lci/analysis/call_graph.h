@@ -30,6 +30,12 @@ class CallGraph {
     SymbolID id_at(int idx) const { return ids_[idx]; }
     int component_count() const { return n_comps_; }
 
+    /// Adjacency in node-index space: adjacency()[u] is the sorted, deduplicated
+    /// list of callee indices of node u (edges u -> v). Exposed so callers can
+    /// compute edge-derived metrics (e.g. intra- vs inter-community edges for
+    /// feature cohesion) without rebuilding the graph.
+    const std::vector<std::vector<int>>& adjacency() const { return adj_; }
+
     /// Dense SCC id per node index (0-based). Edge u->v in the condensation
     /// implies component_of[u] > component_of[v] (reverse-topological).
     const std::vector<int>& component_of() const { return comp_; }

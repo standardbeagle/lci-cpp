@@ -1,5 +1,10 @@
 #include <gtest/gtest.h>
 
+#include <functional>
+#include <vector>
+
+#include <absl/container/flat_hash_map.h>
+
 #include <lci/analysis/coupling_analyzer.h>
 #include <lci/analysis/feature_analyzer.h>
 #include <lci/analysis/layer_analyzer.h>
@@ -203,46 +208,99 @@ TEST(FeatureAnalyzer, FeatureTypeConfig) {
 // FeatureAnalyzer - analyze
 // ===========================================================================
 
+// Feature analysis is now Louvain community detection over the symbol
+// reference graph, so the tests supply a real call-edge adjacency (the
+// `callees_of` boundary) rather than relying on name-keyword matching.
+namespace {
+
+// Two densely-connected triangles (auth: 1-2-3, order: 4-5-6) joined by a
+// single cross edge 3->4, plus an isolated symbol 7. Louvain must recover the
+// two triangles as features and leave 7 as an orphan.
+std::function<std::vector<SymbolID>(SymbolID)> two_cluster_callees() {
+    absl::flat_hash_map<SymbolID, std::vector<SymbolID>> g = {
+        {1, {2}}, {2, {3}}, {3, {1, 4}},  // auth triangle + cross edge to order
+        {4, {5}}, {5, {6}}, {6, {4}},      // order triangle
+        {7, {}},                            // orphan
+    };
+    return [g = std::move(g)](SymbolID id) -> std::vector<SymbolID> {
+        auto it = g.find(id);
+        return it != g.end() ? it->second : std::vector<SymbolID>{};
+    };
+}
+
+EnhancedSymbol make_fn(std::string name, SymbolID id, int complexity) {
+    auto s = make_sym(std::move(name), SymbolType::Function, id);
+    s.complexity = complexity;
+    return s;
+}
+
+}  // namespace
+
 TEST(FeatureAnalyzer, AnalyzeEmpty) {
     FeatureAnalyzer fa;
-    auto result = fa.analyze({});
+    auto result = fa.analyze({}, two_cluster_callees());
     EXPECT_EQ(result.metrics.total_features, 0);
 }
 
-TEST(FeatureAnalyzer, AnalyzeGroupsByPattern) {
-    EnhancedSymbol s1 = make_sym("UserService", SymbolType::Function);
-    EnhancedSymbol s2 = make_sym("UserRepository", SymbolType::Class);
-    EnhancedSymbol s3 = make_sym("PaymentHandler", SymbolType::Function);
+TEST(FeatureAnalyzer, LouvainRecoversTwoCommunities) {
+    EnhancedSymbol s1 = make_fn("Login", 1, 5);
+    EnhancedSymbol s2 = make_fn("Register", 2, 5);
+    EnhancedSymbol s3 = make_fn("Validate", 3, 5);
+    EnhancedSymbol s4 = make_fn("Checkout", 4, 7);
+    EnhancedSymbol s5 = make_fn("Pay", 5, 7);
+    EnhancedSymbol s6 = make_fn("Invoice", 6, 7);
+    EnhancedSymbol s7 = make_fn("Unrelated", 7, 1);
 
-    auto f = make_file("src/app.go", {&s1, &s2, &s3});
+    auto fa_file = make_file("src/auth/auth.go", {&s1, &s2, &s3});
+    auto fb_file = make_file("src/order/order.go", {&s4, &s5, &s6});
+    auto fc_file = make_file("src/util/util.go", {&s7});
 
     FeatureAnalyzer fa;
-    auto result = fa.analyze({f});
+    auto r = fa.analyze({fa_file, fb_file, fc_file}, two_cluster_callees());
 
-    EXPECT_GE(result.metrics.total_features, 2);
+    // Two triangles -> two features; the disconnected symbol is an orphan.
+    EXPECT_EQ(r.metrics.total_features, 2);
+    ASSERT_EQ(r.orphan_components.size(), 1u);
+    EXPECT_EQ(r.orphan_components.front().name, "Unrelated");
 
-    // Should find "user" and "payment" features
-    bool found_user = false;
-    bool found_payment = false;
-    for (const auto& feat : result.features) {
-        if (feat.name == "user") found_user = true;
-        if (feat.name == "payment") found_payment = true;
+    // Real graph cohesion: each triangle has internal edges, so cohesion > 0,
+    // and confidence mirrors cohesion.
+    for (const auto& feat : r.features) {
+        EXPECT_GT(feat.confidence, 0.0);
+        EXPECT_EQ(feat.components.size(), 3u);
     }
-    EXPECT_TRUE(found_user);
-    EXPECT_TRUE(found_payment);
+    EXPECT_GT(r.metrics.avg_cohesion, 0.0);
+
+    // avg_complexity is real mean cyclomatic complexity (5 and 7) = 6.
+    EXPECT_DOUBLE_EQ(r.metrics.avg_complexity, 6.0);
+
+    // The single cross edge 3->4 surfaces as one directed cross-feature dep.
+    ASSERT_EQ(r.cross_feature_deps.size(), 1u);
+    EXPECT_EQ(r.cross_feature_deps.front().type, "calls");
+    EXPECT_GT(r.cross_feature_deps.front().strength, 0.0);
 }
 
-TEST(FeatureAnalyzer, AnalyzeMetrics) {
-    EnhancedSymbol s1 = make_sym("AuthLogin", SymbolType::Function);
-    EnhancedSymbol s2 = make_sym("AuthRegister", SymbolType::Function);
+TEST(FeatureAnalyzer, Deterministic) {
+    EnhancedSymbol s1 = make_fn("Login", 1, 5);
+    EnhancedSymbol s2 = make_fn("Register", 2, 5);
+    EnhancedSymbol s3 = make_fn("Validate", 3, 5);
+    EnhancedSymbol s4 = make_fn("Checkout", 4, 7);
+    EnhancedSymbol s5 = make_fn("Pay", 5, 7);
+    EnhancedSymbol s6 = make_fn("Invoice", 6, 7);
 
-    auto f = make_file("src/auth.go", {&s1, &s2});
+    auto fa_file = make_file("src/auth/auth.go", {&s1, &s2, &s3});
+    auto fb_file = make_file("src/order/order.go", {&s4, &s5, &s6});
 
     FeatureAnalyzer fa;
-    auto result = fa.analyze({f});
+    auto r1 = fa.analyze({fa_file, fb_file}, two_cluster_callees());
+    auto r2 = fa.analyze({fa_file, fb_file}, two_cluster_callees());
 
-    EXPECT_GT(result.metrics.total_features, 0);
-    EXPECT_GT(result.metrics.average_components, 0.0);
+    ASSERT_EQ(r1.features.size(), r2.features.size());
+    for (size_t i = 0; i < r1.features.size(); ++i) {
+        EXPECT_EQ(r1.features[i].name, r2.features[i].name);
+        EXPECT_EQ(r1.features[i].components.size(),
+                  r2.features[i].components.size());
+    }
 }
 
 // ===========================================================================

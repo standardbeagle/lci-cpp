@@ -304,62 +304,6 @@ struct RepositoryMap {
     std::string note;
 };
 
-// ============================================================================
-// Dependency Graph Types
-// ============================================================================
-
-/// Node in dependency graph.
-struct DependencyNode {
-    std::string entity_id;
-    std::string name;
-    std::string type;
-    double centrality{};
-};
-
-/// Edge in dependency graph.
-struct DependencyEdge {
-    std::string from_entity_id;
-    std::string to_entity_id;
-    double weight{};
-    std::string type;
-};
-
-/// Circular dependency.
-struct CircularDependency {
-    std::vector<std::string> module_entity_ids;
-    std::string severity;
-    std::string description;
-};
-
-/// Layer violation.
-struct LayerViolation {
-    std::string from_entity_id;
-    std::string to_entity_id;
-    std::string severity;
-    std::string description;
-    std::string example;
-};
-
-/// Coupling hotspot.
-struct CouplingHotspot {
-    std::string module_entity_id;
-    std::string module_name;
-    double coupling_score{};
-    int affected_count{};
-    std::vector<std::string> affected_entity_ids;
-};
-
-/// Dependency graph.
-struct DependencyGraph {
-    std::vector<DependencyNode> nodes;
-    std::vector<DependencyEdge> edges;
-    std::vector<CircularDependency> circular_dependencies;
-    std::vector<LayerViolation> layer_violations;
-    std::vector<CouplingHotspot> coupling_hotspots;
-    std::vector<std::string> highest_centrality;
-    AnalysisMetadata analysis_metadata;
-};
-
 /// Entry points list.
 struct EntryPointsList {
     std::vector<EntryPointDef> main_functions;
@@ -483,13 +427,12 @@ struct FeatureDependency {
 
 /// Feature analysis metrics.
 ///
-/// NOTE: `avg_cohesion` and `avg_complexity` are honest names for what the
-/// FeatureAnalyzer actually computes — the mean name-prefix cohesion and mean
-/// cyclomatic complexity over the detected feature groups. They were formerly
-/// mislabeled `coupling_score` (it is cohesion, not coupling) and
-/// `modularity_score` (it is complexity, not graph modularity Q). Real coupling
-/// and modularity require a community partition over the reference graph
-/// (Louvain/Leiden) — tracked as graph-cluster work, not yet implemented.
+/// Features are Louvain communities of the symbol reference graph, so these are
+/// real graph quantities: `avg_cohesion` is the mean per-feature internal-edge
+/// fraction — internal / (internal + boundary) edges, in [0, 1] — and
+/// `avg_complexity` is the mean per-feature average cyclomatic complexity of its
+/// member symbols. (Earlier revisions computed name-prefix cohesion and a
+/// name-length proxy here; both are gone.)
 struct FeatureAnalysisMetrics {
     int total_features{};
     double average_components{};
@@ -508,7 +451,6 @@ struct Feature {
 /// Feature analysis results.
 struct FeatureAnalysis {
     std::vector<Feature> features;
-    absl::flat_hash_map<std::string, std::string> feature_map;
     std::vector<FeatureDependency> cross_feature_deps;
     std::vector<ComponentInfo> orphan_components;
     FeatureAnalysisMetrics metrics;
@@ -521,7 +463,6 @@ struct FeatureAnalysis {
 /// Unified codebase intelligence response.
 struct CodebaseIntelligenceResponse {
     RepositoryMap* repository_map{};
-    DependencyGraph* dependency_graph{};
     HealthDashboard* health_dashboard{};
     EntryPointsList* entry_points{};
     SemanticVocabulary* semantic_vocabulary{};
