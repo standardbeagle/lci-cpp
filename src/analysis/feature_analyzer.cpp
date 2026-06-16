@@ -150,8 +150,10 @@ FeatureAnalysis FeatureAnalyzer::analyze(
         return meta[graph.id_at(idx)];
     };
 
-    // 3. Group node indices by community id.
+    // 3. Group node indices by community id. Community count <= n, so reserve
+    //    the community-keyed maps to n up front (no rehash in the edge loop).
     absl::flat_hash_map<int, std::vector<int>> members;
+    members.reserve(static_cast<size_t>(n));
     for (int i = 0; i < n; ++i) members[comm[i]].push_back(i);
 
     // 4. Edge accounting: per-community internal/boundary counts (for cohesion)
@@ -161,6 +163,10 @@ FeatureAnalysis FeatureAnalyzer::analyze(
     absl::flat_hash_map<int, long> out_cross_edges;   // edges leaving c
     absl::flat_hash_map<long long, long> pair_edges;  // (ca,cb) -> directed count
     absl::flat_hash_map<int, int> intra_degree;       // node idx -> intra edges
+    internal_edges.reserve(static_cast<size_t>(n));
+    boundary_edges.reserve(static_cast<size_t>(n));
+    out_cross_edges.reserve(static_cast<size_t>(n));
+    intra_degree.reserve(static_cast<size_t>(n));
     for (int u = 0; u < n; ++u) {
         int cu = comm[u];
         for (int v : adj[u]) {
@@ -211,12 +217,18 @@ FeatureAnalysis FeatureAnalyzer::analyze(
         }
 
         // Representative = highest intra-community degree (the cluster hub),
-        // tie-broken by name for determinism — it names the feature.
+        // tie-broken by name then SymbolID for a TOTAL order — it names the
+        // feature, so a partial order would make the feature name (and thus
+        // output) nondeterministic when two members share degree+name
+        // (cf. the entry-points same-name flake). SymbolID is unique.
         std::sort(idxs.begin(), idxs.end(), [&](int a, int b) {
             int da = intra_degree.count(a) ? intra_degree[a] : 0;
             int db = intra_degree.count(b) ? intra_degree[b] : 0;
             if (da != db) return da > db;
-            return meta_at(a).sym->symbol.name < meta_at(b).sym->symbol.name;
+            const auto& na = meta_at(a).sym->symbol.name;
+            const auto& nb = meta_at(b).sym->symbol.name;
+            if (na != nb) return na < nb;
+            return graph.id_at(a) < graph.id_at(b);
         });
         const auto& hub = meta_at(idxs.front());
         std::string base = dir_base(hub.path);
@@ -231,13 +243,15 @@ FeatureAnalysis FeatureAnalyzer::analyze(
         double comp_sum = 0.0;
         std::vector<int> sorted_members = idxs;
         std::sort(sorted_members.begin(), sorted_members.end(), [&](int a, int b) {
-            return meta_at(a).sym->symbol.name < meta_at(b).sym->symbol.name;
+            const auto& na = meta_at(a).sym->symbol.name;
+            const auto& nb = meta_at(b).sym->symbol.name;
+            if (na != nb) return na < nb;
+            return graph.id_at(a) < graph.id_at(b);  // total order
         });
         feat.components.reserve(sorted_members.size());
         for (int idx : sorted_members) {
             auto ci = component_for(idx);
             comp_sum += ci.complexity;
-            result.feature_map[ci.name] = name;
             feat.components.push_back(std::move(ci));
         }
 
@@ -265,6 +279,11 @@ FeatureAnalysis FeatureAnalyzer::analyze(
         auto ita = feature_name.find(ca);
         auto itb = feature_name.find(cb);
         if (ita == feature_name.end() || itb == feature_name.end()) continue;
+        // strength = fraction of ca's outgoing cross-community edges that target
+        // cb. The denominator counts ALL of ca's cross edges (including any to
+        // orphan singletons, which are skipped as dep targets), so a feature's
+        // strengths need not sum to 1 — it is a coupling fraction, not a
+        // normalized distribution.
         long total_out = out_cross_edges.count(ca) ? out_cross_edges[ca] : 0;
         FeatureDependency dep;
         dep.feature_a = ita->second;
@@ -276,21 +295,29 @@ FeatureAnalysis FeatureAnalyzer::analyze(
         result.cross_feature_deps.push_back(std::move(dep));
     }
 
-    // 7. Deterministic ordering of all outputs.
+    // 7. Deterministic ordering of all outputs (total orders — feature names can
+    //    collide across communities, so every comparator has a final tiebreak).
     std::sort(result.features.begin(), result.features.end(),
               [](const Feature& a, const Feature& b) {
                   if (a.components.size() != b.components.size())
                       return a.components.size() > b.components.size();
-                  return a.name < b.name;
+                  if (a.name != b.name) return a.name < b.name;
+                  const std::string& la =
+                      a.components.empty() ? a.name : a.components.front().location;
+                  const std::string& lb =
+                      b.components.empty() ? b.name : b.components.front().location;
+                  return la < lb;
               });
     std::sort(result.cross_feature_deps.begin(), result.cross_feature_deps.end(),
               [](const FeatureDependency& a, const FeatureDependency& b) {
                   if (a.feature_a != b.feature_a) return a.feature_a < b.feature_a;
-                  return a.feature_b < b.feature_b;
+                  if (a.feature_b != b.feature_b) return a.feature_b < b.feature_b;
+                  return a.strength > b.strength;
               });
     std::sort(result.orphan_components.begin(), result.orphan_components.end(),
               [](const ComponentInfo& a, const ComponentInfo& b) {
-                  return a.name < b.name;
+                  if (a.name != b.name) return a.name < b.name;
+                  return a.location < b.location;
               });
 
     int count = static_cast<int>(result.features.size());

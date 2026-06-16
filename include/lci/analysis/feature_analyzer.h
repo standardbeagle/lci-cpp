@@ -16,8 +16,9 @@ namespace lci {
 /// Each community is a feature; cohesion, complexity, confidence, and
 /// cross-feature dependencies are derived from real graph structure (intra- vs
 /// inter-community edges and per-symbol cyclomatic complexity) rather than
-/// name-prefix keyword heuristics. Symbols with no call edges cannot be
-/// graph-clustered and are reported as orphan_components.
+/// name-prefix keyword heuristics. Symbols Louvain leaves in a singleton
+/// community (typically those with no call edges) cannot be graph-clustered
+/// and are reported as orphan_components.
 class FeatureAnalyzer {
   public:
     FeatureAnalyzer() = default;

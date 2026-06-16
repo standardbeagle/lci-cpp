@@ -451,7 +451,6 @@ struct Feature {
 /// Feature analysis results.
 struct FeatureAnalysis {
     std::vector<Feature> features;
-    absl::flat_hash_map<std::string, std::string> feature_map;
     std::vector<FeatureDependency> cross_feature_deps;
     std::vector<ComponentInfo> orphan_components;
     FeatureAnalysisMetrics metrics;
