@@ -82,8 +82,10 @@ endif()
 
 # Prefer a fast linker (mold > lld) when installed — the link of `lci` and the
 # monolithic `lci_tests` (links all deps + ~1700 tests) is a real slice of
-# build time, more so with debug info. No-op if neither is present or on MSVC.
-if(NOT MSVC)
+# build time, more so with debug info. Linux/ELF only: mold targets ELF (no
+# Mach-O), and Apple's default ld64 is fine, so don't override the linker on
+# macOS. No-op if neither is present.
+if(NOT MSVC AND NOT APPLE)
     find_program(MOLD_LINKER mold)
     find_program(LLD_LINKER ld.lld)
     if(MOLD_LINKER)
