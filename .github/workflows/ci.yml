@@ -31,7 +31,15 @@ jobs:
   # host; the guard installs only if a reimage drops them.
   # ---------------------------------------------------------------------------
   linux:
+    # workflow_dispatch is for validating the (billed) macOS leg only; the
+    # self-hosted Linux/Windows legs run on push + PR, so skip them on dispatch
+    # to avoid redundant runs hogging the runners.
+    if: github.event_name != 'workflow_dispatch'
     runs-on: [self-hosted, linux, lci-linux]
+    # Hard ceiling so a hung step (e.g. a wedged vcpkg/dep download) can never
+    # occupy the self-hosted runner indefinitely — GitHub kills the job and
+    # frees the runner. Generous vs the ~30-40 min normal Linux build.
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -77,6 +85,8 @@ jobs:
 
       - name: Dump vcpkg logs on failure
         if: failure()
+        timeout-minutes: 3
+        continue-on-error: true
         run: |
           echo "===== vcpkg-manifest-install.log ====="
           cat build/${{ matrix.preset }}/vcpkg-manifest-install.log 2>/dev/null || true
@@ -123,7 +133,11 @@ jobs:
   # Tools), CMake, and Ninja on PATH on the host. Release only.
   # ---------------------------------------------------------------------------
   windows:
+    if: github.event_name != 'workflow_dispatch'
     runs-on: [self-hosted, windows, lci-windows]
+    # Ceiling vs the ~45 min normal MSVC build; prevents a hung vcpkg/log step
+    # from wedging the Windows runner (as happened: a 2h+ hung log-dump step).
+    timeout-minutes: 75
     name: windows msvc / release
     steps:
       - uses: actions/checkout@v4
@@ -140,6 +154,8 @@ jobs:
 
       - name: Dump vcpkg logs on failure
         if: failure()
+        timeout-minutes: 3
+        continue-on-error: true
         run: |
           $log = "build/release/vcpkg-manifest-install.log"
           if (Test-Path $log) { Write-Output "===== $log ====="; Get-Content $log }
@@ -188,6 +204,8 @@ jobs:
   macos:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: macos-latest
+    # macOS is the only billed leg — cap it so a hang can't run up minutes.
+    timeout-minutes: 70
     name: macos appleclang / release
     env:
       VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
@@ -228,6 +246,8 @@ jobs:
       # never uploaded, making configure failures undiagnosable.
       - name: Dump vcpkg logs on failure
         if: failure()
+        timeout-minutes: 3
+        continue-on-error: true
         run: |
           echo "===== vcpkg-manifest-install.log ====="
           cat build/release/vcpkg-manifest-install.log 2>/dev/null || true
@@ -260,6 +280,7 @@ jobs:
   benchmarks:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: [self-hosted, linux, lci-linux]
+    timeout-minutes: 60
     name: benchmarks
     steps:
       - uses: actions/checkout@v4
@@ -282,6 +303,8 @@ jobs:
 
       - name: Dump vcpkg logs on failure
         if: failure()
+        timeout-minutes: 3
+        continue-on-error: true
         run: |
           echo "===== vcpkg-manifest-install.log ====="
           cat build/release/vcpkg-manifest-install.log 2>/dev/null || true
