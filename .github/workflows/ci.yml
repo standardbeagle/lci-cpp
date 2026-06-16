@@ -241,17 +241,12 @@ jobs:
       - name: Build
         run: cmake --build build/release --parallel
 
-      # patch-efsw.cmake patch 2 fixed the FSEvents teardown abort (exit 134),
-      # so the whole FileWatcherTest suite no longer needs excluding — 8/9 pass
-      # on macOS (start/stop/create/modify/recursive/double-stop).
-      # One narrow exclusion remains:
-      #   * DetectsFileDelete — efsw's FSEvents backend delivers an event on
-      #     unlink but does not classify it as Action::Delete (its handleAddModDel
-      #     gates Delete on flags&ItemRemoved && !exists; the real flag bits need
-      #     observing on-device via efDEBUG). Create/Modify detection works.
-      #     Tracked follow-up; not the teardown crash.
+      # Full unit suite, no exclusions. The FSEvents teardown abort is fixed
+      # (patch-efsw.cmake patch 2) and the macOS delete-detection gap is fixed
+      # in watcher.cpp: on_efsw_event now treats a vanished path as Remove
+      # regardless of the coalesced FSEvents label, so DetectsFileDelete passes.
       - name: Test (unit suite)
-        run: ./build/release/tests/lci_tests "--gtest_filter=-FileWatcherTest.DetectsFileDelete"
+        run: ./build/release/tests/lci_tests
 
   # ---------------------------------------------------------------------------
   # Benchmarks — self-hosted Linux, main only. Numbers go to the job log; no

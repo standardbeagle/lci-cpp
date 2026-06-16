@@ -202,12 +202,27 @@ void FileWatcher::on_efsw_event(const std::string& dir,
 
     if (!should_process_path(full_path)) return;
 
+    // Trust the filesystem over the backend's event label: a path that no
+    // longer exists is a removal. macOS FSEvents coalesces events and can hand
+    // us a Write/Create-labelled event for a file that was ultimately deleted,
+    // so the Remove would never surface otherwise. No-op on Linux/Windows,
+    // whose backends already label deletes (gone file -> Remove stays Remove).
+    if (type != FileEventType::Remove) {
+        std::error_code exist_ec;
+        if (!fs::exists(full_path, exist_ec)) {
+            type = FileEventType::Remove;
+        }
+    }
+
     // Size cap: skip files exceeding max_file_size to match the prior
-    // behaviour (avoids re-indexing huge generated artefacts).
-    auto file_size = fs::file_size(full_path, ec);
-    if (!ec && file_size >
-                   static_cast<uintmax_t>(config_.index.max_file_size)) {
-        return;
+    // behaviour (avoids re-indexing huge generated artefacts). A removed file
+    // has no size (file_size sets ec), so removals are never skipped here.
+    if (type != FileEventType::Remove) {
+        auto file_size = fs::file_size(full_path, ec);
+        if (!ec && file_size >
+                       static_cast<uintmax_t>(config_.index.max_file_size)) {
+            return;
+        }
     }
 
     dispatch_event(full_path, type);
