@@ -179,12 +179,11 @@ jobs:
       - name: Build
         run: cmake --build build/release --parallel
 
-      # macOS excludes only FileWatcherTest (efsw FSEvents teardown abort; see
-      # the ci.yml macOS leg + followups #3). The Go extractor/linker suites
-      # (followups #5) are re-enabled after the unsequenced std::move+is_exported
-      # fix in go_linker.cpp.
+      # Full unit suite, no exclusions — the macOS FileWatcherTest FSEvents
+      # teardown abort is fixed by patch-efsw.cmake (drains+releases the
+      # dispatch queue on watcher teardown).
       - name: Test (unit suite)
-        run: ./build/release/tests/lci_tests "--gtest_filter=-FileWatcherTest.*"
+        run: ./build/release/tests/lci_tests
 
       - name: Package
         run: |

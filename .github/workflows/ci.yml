@@ -241,22 +241,13 @@ jobs:
       - name: Build
         run: cmake --build build/release --parallel
 
-      # One macOS-specific exclusion (tracked follow-up; everything else must
-      # pass):
-      #   * FileWatcherTest — vendored efsw's FSEvents backend aborts on watcher
-      #     teardown (libc++abi "mutex lock failed", exit 134), the macOS
-      #     analogue of the inotify race patched for Linux in patch-efsw.cmake.
-      # The Go extractor/linker suites previously excluded here (followups #5)
-      # are re-enabled: the root cause was GoExtractor::add_symbol invoked as
-      # add_symbol(table, std::move(name), is_exported(name)) — the move and the
-      # read of the same string are unsequenced function arguments, and
-      # Clang/AppleClang's left-to-right evaluation moved the string out before
-      # is_exported() read it, so every exported Go symbol was dropped. GCC
-      # evaluates right-to-left, hence Linux passed. Now sequenced in
-      # go_linker.cpp (compute the bool before the move).
-      # Watcher logic is covered on the Linux legs.
+      # Full unit suite, no exclusions. The previous macOS FileWatcherTest
+      # exclusion is gone: patch-efsw.cmake now drains+releases the FSEvents
+      # dispatch queue on watcher teardown (patch 2), fixing the use-after-free
+      # abort (libc++abi "mutex lock failed", exit 134) that the in-flight
+      # FSEvents callback caused against freed listener state.
       - name: Test (unit suite)
-        run: ./build/release/tests/lci_tests "--gtest_filter=-FileWatcherTest.*"
+        run: ./build/release/tests/lci_tests
 
   # ---------------------------------------------------------------------------
   # Benchmarks — self-hosted Linux, main only. Numbers go to the job log; no
