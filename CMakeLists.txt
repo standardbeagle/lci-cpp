@@ -1,5 +1,18 @@
 cmake_minimum_required(VERSION 3.25)
 
+# Use ccache as the compiler launcher when it is installed — automatic for
+# local dev builds, a no-op where absent. Must be set before project()/
+# enable_language. `NOT DEFINED` respects an explicit -DCMAKE_CXX_COMPILER_LAUNCHER
+# passed by CI, so this only fills the gap for developers.
+if(NOT DEFINED CMAKE_CXX_COMPILER_LAUNCHER)
+    find_program(CCACHE_PROGRAM ccache)
+    if(CCACHE_PROGRAM)
+        set(CMAKE_C_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
+        set(CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
+        message(STATUS "lci: using ccache compiler launcher (${CCACHE_PROGRAM})")
+    endif()
+endif()
+
 project(lci
     VERSION 0.6.0
     DESCRIPTION "Lightning Code Index - fast semantic code search"
@@ -64,6 +77,21 @@ if(LCI_WARNINGS_AS_ERRORS)
         list(APPEND LCI_WARNING_FLAGS /WX)
     else()
         list(APPEND LCI_WARNING_FLAGS -Werror)
+    endif()
+endif()
+
+# Prefer a fast linker (mold > lld) when installed — the link of `lci` and the
+# monolithic `lci_tests` (links all deps + ~1700 tests) is a real slice of
+# build time, more so with debug info. No-op if neither is present or on MSVC.
+if(NOT MSVC)
+    find_program(MOLD_LINKER mold)
+    find_program(LLD_LINKER ld.lld)
+    if(MOLD_LINKER)
+        add_link_options(-fuse-ld=mold)
+        message(STATUS "lci: using mold linker (${MOLD_LINKER})")
+    elseif(LLD_LINKER)
+        add_link_options(-fuse-ld=lld)
+        message(STATUS "lci: using lld linker")
     endif()
 endif()
 

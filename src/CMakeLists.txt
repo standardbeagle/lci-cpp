@@ -184,3 +184,19 @@ target_link_libraries(lci PRIVATE
 # Project warning flags (target-scoped, do not leak into FetchContent libs).
 target_compile_options(lci_lib PRIVATE ${LCI_WARNING_FLAGS})
 target_compile_options(lci PRIVATE ${LCI_WARNING_FLAGS})
+
+# Precompiled headers. The heaviest, most widely-included headers — nlohmann/json
+# (~25k lines, in 26 TUs) and absl flat_hash_map (39 TUs) — are parsed once into
+# the PCH instead of per translation unit. Largest clean-build compile-time win
+# for the library. Both deps are linked PUBLIC above, so their include dirs are
+# already on lci_lib's compile line; the std headers are ubiquitous (<string> in
+# 134 TUs, <vector> in 100).
+target_precompile_headers(lci_lib PRIVATE
+    <string>
+    <string_view>
+    <vector>
+    <memory>
+    <unordered_map>
+    <nlohmann/json.hpp>
+    <absl/container/flat_hash_map.h>
+)
