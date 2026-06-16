@@ -241,22 +241,17 @@ jobs:
       - name: Build
         run: cmake --build build/release --parallel
 
-      # One macOS-specific exclusion (tracked follow-up; everything else must
-      # pass):
-      #   * FileWatcherTest — vendored efsw's FSEvents backend aborts on watcher
-      #     teardown (libc++abi "mutex lock failed", exit 134), the macOS
-      #     analogue of the inotify race patched for Linux in patch-efsw.cmake.
-      # The Go extractor/linker suites previously excluded here (followups #5)
-      # are re-enabled: the root cause was GoExtractor::add_symbol invoked as
-      # add_symbol(table, std::move(name), is_exported(name)) — the move and the
-      # read of the same string are unsequenced function arguments, and
-      # Clang/AppleClang's left-to-right evaluation moved the string out before
-      # is_exported() read it, so every exported Go symbol was dropped. GCC
-      # evaluates right-to-left, hence Linux passed. Now sequenced in
-      # go_linker.cpp (compute the bool before the move).
-      # Watcher logic is covered on the Linux legs.
+      # patch-efsw.cmake patch 2 fixed the FSEvents teardown abort (exit 134),
+      # so the whole FileWatcherTest suite no longer needs excluding — 8/9 pass
+      # on macOS (start/stop/create/modify/recursive/double-stop).
+      # One narrow exclusion remains:
+      #   * DetectsFileDelete — efsw's FSEvents backend delivers an event on
+      #     unlink but does not classify it as Action::Delete (its handleAddModDel
+      #     gates Delete on flags&ItemRemoved && !exists; the real flag bits need
+      #     observing on-device via efDEBUG). Create/Modify detection works.
+      #     Tracked follow-up; not the teardown crash.
       - name: Test (unit suite)
-        run: ./build/release/tests/lci_tests "--gtest_filter=-FileWatcherTest.*"
+        run: ./build/release/tests/lci_tests "--gtest_filter=-FileWatcherTest.DetectsFileDelete"
 
   # ---------------------------------------------------------------------------
   # Benchmarks — self-hosted Linux, main only. Numbers go to the job log; no
