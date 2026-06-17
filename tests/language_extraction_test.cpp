@@ -861,5 +861,115 @@ TEST(LanguageExtractionTest, AllParsersCreate) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Scope-based receiver-type resolution (SCIP base case): each language's
+// reference handler must emit method calls as receiver-type-qualified
+// `Type.method` Call refs when the receiver's type is locally known.
+// ---------------------------------------------------------------------------
+
+// True if a Call reference named exactly `name` was extracted.
+bool has_call_ref(const ExtractionResults& r, std::string_view name) {
+    for (const auto& ref : r.references) {
+        if (ref.type == ReferenceType::Call && ref.referenced_name == name)
+            return true;
+    }
+    return false;
+}
+
+TEST(ScopeTypeResolution, JavaQualifiesReceiverAndThis) {
+    constexpr std::string_view src = R"(class A {
+    void run() { helpA(); }
+    void helpA() {}
+}
+class Main {
+    void go() { A a = new A(); a.run(); }
+})";
+    auto r = extract(Language::Java, ".java", src, "M.java");
+    EXPECT_TRUE(has_call_ref(r, "A.helpA"));  // this-qualified bare call
+    EXPECT_TRUE(has_call_ref(r, "A.run"));    // typed-local receiver
+}
+
+TEST(ScopeTypeResolution, CSharpQualifiesReceiverAndThis) {
+    constexpr std::string_view src = R"(class A {
+    void run() { helpA(); }
+    void helpA() {}
+}
+class Main {
+    void go() { A a = new A(); a.run(); }
+})";
+    auto r = extract(Language::CSharp, ".cs", src, "M.cs");
+    EXPECT_TRUE(has_call_ref(r, "A.helpA"));
+    EXPECT_TRUE(has_call_ref(r, "A.run"));
+}
+
+TEST(ScopeTypeResolution, RustQualifiesSelfAndLet) {
+    constexpr std::string_view src = R"(struct A;
+impl A {
+    fn run(&self) { self.help_a(); }
+    fn help_a(&self) {}
+}
+fn go() { let a = A; a.run(); })";
+    auto r = extract(Language::Rust, ".rs", src, "m.rs");
+    EXPECT_TRUE(has_call_ref(r, "A.help_a"));  // self -> impl type
+    EXPECT_TRUE(has_call_ref(r, "A.run"));     // let a = A
+}
+
+TEST(ScopeTypeResolution, PhpQualifiesThisAndNew) {
+    constexpr std::string_view src = R"(<?php
+class A {
+    function run() { $this->helpA(); }
+    function helpA() {}
+}
+function go() { $a = new A(); $a->run(); })";
+    auto r = extract(Language::PHP, ".php", src, "m.php");
+    EXPECT_TRUE(has_call_ref(r, "A.helpA"));  // $this -> class
+    EXPECT_TRUE(has_call_ref(r, "A.run"));    // $a = new A()
+}
+
+TEST(ScopeTypeResolution, KotlinQualifiesThisAndVal) {
+    constexpr std::string_view src = R"(class A {
+    fun run() { helpA() }
+    fun helpA() {}
+}
+fun go() {
+    val a = A()
+    a.run()
+})";
+    auto r = extract(Language::Kotlin, ".kt", src, "m.kt");
+    EXPECT_TRUE(has_call_ref(r, "A.helpA"));  // this -> class
+    EXPECT_TRUE(has_call_ref(r, "A.run"));    // val a = A()
+}
+
+TEST(ScopeTypeResolution, RubyQualifiesReceiverFromNew) {
+    constexpr std::string_view src = R"(class A
+  def run
+    self.help_a
+  end
+  def help_a
+  end
+end
+def go
+  a = A.new
+  a.run
+end)";
+    auto r = extract(Language::Ruby, ".rb", src, "m.rb");
+    EXPECT_TRUE(has_call_ref(r, "A.run"));     // a = A.new ; a.run
+    EXPECT_TRUE(has_call_ref(r, "A.help_a"));  // self.help_a
+}
+
+TEST(ScopeTypeResolution, ZigQualifiesSelfAndConst) {
+    constexpr std::string_view src = R"(const A = struct {
+    fn run(self: A) void { self.helpA(); }
+    fn helpA(self: A) void {}
+};
+fn go() void {
+    const a = A{};
+    a.run();
+})";
+    auto r = extract(Language::Zig, ".zig", src, "m.zig");
+    EXPECT_TRUE(has_call_ref(r, "A.helpA"));  // self: A param
+    EXPECT_TRUE(has_call_ref(r, "A.run"));    // const a = A{}
+}
+
 }  // namespace
 }  // namespace lci::parser

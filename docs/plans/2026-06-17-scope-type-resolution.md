@@ -53,8 +53,31 @@ same as gopls/SCIP).
 3. Python / Rust (annotations + constructor inference; fastapi + a rust repo).
 4. JS / C++ / Kotlin / PHP / Ruby / Zig.
 
-## Status
-- [ ] Phase 1 Go
-- [ ] Phase 2 Java/C#/TS
-- [ ] Phase 3 Python/Rust
-- [ ] Phase 4 remainder
+## Status — all 13 languages have scope-typed call resolution
+- [x] Go, JS/TS, Python, C/C++ (had call graphs; added receiver-type env + qualified emission + resolver scope match)
+- [x] Java, C#, Rust, PHP, Kotlin, Ruby, Zig (had **no** call references at all — added
+      `process_<lang>_reference` Call extraction *and* the receiver-type env in the same pass)
+
+### Prerequisite gaps fixed along the way
+- C/C++: named `struct/class/union` specifiers (with a body) now open a Class scope so
+  member methods carry an owning-type entry the resolver matches.
+- Rust: `impl_item`/`struct_item` open Class scopes (methods live in `impl`, `self` -> impl type).
+- Zig: `const A = struct {…}` opens a Class scope named after the const.
+- Kotlin: symbol extraction was entirely broken (fieldless grammar → `name` field lookups
+  returned null → zero symbols). Added a fieldless-name fallback (`first_named_child_typed`)
+  in `extract_function`/`extract_class`/`process_scope_node`.
+
+### Known base-case limitations (honest; not fabricated)
+- Ruby: a bare no-receiver, no-paren call (`help_a`) parses as `identifier`, not `call`, so it
+  is not emitted as a call edge. Receiver calls (`a.run`, `self.help_a`) and `T.new`-typed
+  locals resolve. Constructor `new` calls are intentionally not emitted as edges.
+- Kotlin/Zig: `val a = A()` / `const a = A{}` constructor calls are emitted as a bare Call on the
+  type name (shows construction); harmless and resolves to the type symbol.
+- All languages: unknown/dynamic receivers degrade to the bare method name (today's behavior),
+  never a fabricated single edge.
+
+### Verification
+- Controlled corpus per language: `go()` resolves `a.run()`/`b.run()` to the *distinct* `run`
+  method of each class (previously collapsed onto the first same-named symbol).
+- Unit: `ScopeTypeResolution.*` (7 langs, extraction-level qualified-ref assertions) +
+  `ReferenceTrackerTest.ResolvesByReceiverTypeScope` (resolver-level). Full suite 1700/1700.

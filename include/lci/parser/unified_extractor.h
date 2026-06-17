@@ -216,6 +216,13 @@ class UnifiedExtractor {
     void process_go_reference(TSNode node, std::string_view node_type);
     void process_js_reference(TSNode node, std::string_view node_type);
     void process_python_reference(TSNode node, std::string_view node_type);
+    void process_java_reference(TSNode node, std::string_view node_type);
+    void process_csharp_reference(TSNode node, std::string_view node_type);
+    void process_rust_reference(TSNode node, std::string_view node_type);
+    void process_php_reference(TSNode node, std::string_view node_type);
+    void process_kotlin_reference(TSNode node, std::string_view node_type);
+    void process_ruby_reference(TSNode node, std::string_view node_type);
+    void process_zig_reference(TSNode node, std::string_view node_type);
     Reference create_reference(TSNode node, ReferenceType ref_type,
                                RefStrength strength);
 
