@@ -1505,6 +1505,18 @@ std::string go_bare_type(std::string_view t) {
     return std::string(t);
 }
 
+// Bare JS/TS type from an annotation/type node: strips ": ", generics
+// (Foo<Bar> -> Foo), array suffix (Foo[] -> Foo), and qualifier (ns.Foo -> Foo).
+std::string js_bare_type(std::string_view t) {
+    while (!t.empty() && (t.front() == ':' || t.front() == ' '))
+        t.remove_prefix(1);
+    if (auto a = t.find('<'); a != std::string_view::npos) t = t.substr(0, a);
+    if (auto b = t.find('['); b != std::string_view::npos) t = t.substr(0, b);
+    while (!t.empty() && (t.back() == ' ')) t.remove_suffix(1);
+    if (auto d = t.rfind('.'); d != std::string_view::npos) t = t.substr(d + 1);
+    return std::string(t);
+}
+
 // Bare Python type from an annotation: strips quotes (string annotations),
 // subscripts (List[Foo] -> List), and module qualifier (mod.Foo -> Foo).
 std::string py_bare_type(std::string_view t) {
@@ -1708,22 +1720,112 @@ void UnifiedExtractor::process_go_reference(TSNode node,
 void UnifiedExtractor::process_js_reference(TSNode node,
                                             std::string_view node_type) {
     uintptr_t node_id = reinterpret_cast<uintptr_t>(node.id);
+    auto is_handled = [&](TSNode n) {
+        uintptr_t id = reinterpret_cast<uintptr_t>(n.id);
+        for (const auto& h : handled_nodes_) {
+            if (h.id == id) return true;
+        }
+        return false;
+    };
+
+    // Local type env (SCIP base case). this -> enclosing class; TS-annotated
+    // params/vars (`x: T`, `(x: T)`) and `new T()` constructions.
+    if (node_type == "method_definition" ||
+        node_type == "function_declaration" ||
+        node_type == "function_expression" || node_type == "arrow_function" ||
+        node_type == "generator_function_declaration") {
+        local_var_types_.clear();
+        std::string cls = enclosing_class_name();
+        if (!cls.empty()) local_var_types_["this"] = cls;
+        TSNode params = ts_node_child_by_field_name(
+            node, "parameters", static_cast<uint32_t>(10));
+        if (!ts_node_is_null(params)) {
+            uint32_t n = ts_node_named_child_count(params);
+            for (uint32_t i = 0; i < n; ++i) {
+                TSNode p = ts_node_named_child(params, i);
+                TSNode ty = ts_node_child_by_field_name(
+                    p, "type", static_cast<uint32_t>(4));
+                TSNode pat = ts_node_child_by_field_name(
+                    p, "pattern", static_cast<uint32_t>(7));
+                if (!ts_node_is_null(ty) && !ts_node_is_null(pat)) {
+                    const char* pt = ts_node_type(pat);
+                    if (pt && std::string_view(pt) == "identifier") {
+                        std::string tn = js_bare_type(node_text(ty));
+                        if (!tn.empty())
+                            local_var_types_[std::string(node_text(pat))] = tn;
+                    }
+                }
+            }
+        }
+        // fall through (arrow/function bodies still get their refs walked)
+    } else if (node_type == "variable_declarator") {
+        TSNode nm = ts_node_child_by_field_name(node, "name",
+                                                static_cast<uint32_t>(4));
+        if (!ts_node_is_null(nm)) {
+            const char* nt = ts_node_type(nm);
+            if (nt && std::string_view(nt) == "identifier") {
+                std::string ty;
+                TSNode tann = ts_node_child_by_field_name(
+                    node, "type", static_cast<uint32_t>(4));
+                if (!ts_node_is_null(tann)) {
+                    ty = js_bare_type(node_text(tann));
+                } else {
+                    TSNode val = ts_node_child_by_field_name(
+                        node, "value", static_cast<uint32_t>(5));
+                    if (!ts_node_is_null(val)) {
+                        const char* vt = ts_node_type(val);
+                        if (vt && std::string_view(vt) == "new_expression") {
+                            TSNode ctor = ts_node_child_by_field_name(
+                                val, "constructor", static_cast<uint32_t>(11));
+                            if (!ts_node_is_null(ctor))
+                                ty = js_bare_type(node_text(ctor));
+                        }
+                    }
+                }
+                if (!ty.empty())
+                    local_var_types_[std::string(node_text(nm))] = ty;
+            }
+        }
+    }
 
     if (node_type == "call_expression") {
         TSNode func = ts_node_child_by_field_name(
             node, "function",
             static_cast<uint32_t>(std::strlen("function")));
-        if (!ts_node_is_null(func)) {
-            handled_nodes_.push_back(
-                {reinterpret_cast<uintptr_t>(func.id)});
-            references_.push_back(
-                create_reference(func, ReferenceType::Call, RefStrength::Tight));
+        if (ts_node_is_null(func)) return;
+        // Method call obj.M(...): tag the PROPERTY (method name) as the Call so
+        // it resolves to the method symbol (not the un-resolvable "obj.M"); the
+        // member_expression branch then skips it. Qualify "Type.M" when obj's
+        // type is known (this -> class, typed local).
+        const char* ftype = ts_node_type(func);
+        if (ftype && std::string_view(ftype) == "member_expression") {
+            TSNode prop = ts_node_child_by_field_name(
+                func, "property", static_cast<uint32_t>(std::strlen("property")));
+            if (!ts_node_is_null(prop)) {
+                handled_nodes_.push_back({reinterpret_cast<uintptr_t>(prop.id)});
+                Reference cref = create_reference(prop, ReferenceType::Call,
+                                                  RefStrength::Tight);
+                TSNode obj = ts_node_child_by_field_name(
+                    func, "object", static_cast<uint32_t>(6));
+                if (!ts_node_is_null(obj)) {
+                    auto it = local_var_types_.find(
+                        std::string(node_text(obj)));  // "this" or ident
+                    if (it != local_var_types_.end() && !it->second.empty())
+                        cref.referenced_name =
+                            it->second + "." + std::string(node_text(prop));
+                }
+                references_.push_back(std::move(cref));
+                return;
+            }
         }
+        handled_nodes_.push_back({reinterpret_cast<uintptr_t>(func.id)});
+        references_.push_back(
+            create_reference(func, ReferenceType::Call, RefStrength::Tight));
     } else if (node_type == "member_expression") {
         TSNode prop = ts_node_child_by_field_name(
             node, "property",
             static_cast<uint32_t>(std::strlen("property")));
-        if (!ts_node_is_null(prop)) {
+        if (!ts_node_is_null(prop) && !is_handled(prop)) {
             handled_nodes_.push_back(
                 {reinterpret_cast<uintptr_t>(prop.id)});
             references_.push_back(
