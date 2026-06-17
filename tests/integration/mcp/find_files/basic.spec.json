@@ -6,16 +6,33 @@
   "go_binary": "${LCI_GO}",
   "cpp_binary": "${LCI_CPP}",
   "invocation": {
-    "args": ["mcp"],
+    "args": [
+      "mcp"
+    ],
     "stdin": "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"find_files\",\"arguments\":{\"pattern\":\"*.go\"}}}",
     "cwd": "${CORPUS}"
   },
-  "capture": ["stdout", "exit"],
+  "capture": [
+    "stdout",
+    "exit"
+  ],
   "parse": "json",
   "tiers": {
-    "stable": ["result.content[].type", "result.content[].text"],
-    "ignore": ["id", "jsonrpc", "result.meta.elapsed_ms", "result.meta.server_pid"]
+    "stable": [
+      "result.content[].type",
+      "result.content[].text"
+    ],
+    "ignore": [
+      "id",
+      "jsonrpc",
+      "result.meta.elapsed_ms",
+      "result.meta.server_pid"
+    ]
   },
-  "tolerances": {"score_abs": 0.05, "timed_max_ms": 60000},
-  "expect_exit": 0
+  "tolerances": {
+    "score_abs": 0.05,
+    "timed_max_ms": 60000
+  },
+  "expect_exit": 0,
+  "_rationale": "find_files pattern '*.go' returns no results: the fuzzy fallback now uses real normalized Levenshtein SIMILARITY (1 - dist/maxlen, threshold 0.7), and '*.go' is far from the filenames a/b/c/d on the multi-lang corpus. The prior golden flooded all 4 files at 0.574 because the ported Go fuzzer used the DISTANCE ratio and tested >=0.7 (inverted: unrelated names scored high). Go oracle retired; inverted similarity fixed (handlers_core.cpp). For extension globs use the `filter` arg; `pattern` is filename/path fuzzy+substring matching."
 }

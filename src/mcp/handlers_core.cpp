@@ -1360,8 +1360,14 @@ ToolResult handle_find_files(const nlohmann::json& params,
                 normalized_pattern.find(' ') == std::string::npos &&
                 !normalized_pattern.empty() &&
                 !norm_filename_no_ext.empty()) {
-                // Go-compat broken levenshtein: 1.0 for total mismatch,
-                // 0.0 for identical (handled by a==b early return below).
+                // Real normalized Levenshtein SIMILARITY: 1.0 identical, 0.0
+                // wildly different. The original Go fuzzer (and the verbatim
+                // port) used the DISTANCE ratio (lev/max_len) here and then
+                // tested `>= 0.7`, which is inverted — unrelated filenames
+                // (high distance) passed and every file flooded in at ~0.574,
+                // while genuine near-matches were rejected. The Go oracle that
+                // pinned that behavior is retired, so use the correct
+                // similarity: similarity = 1 - distance/max_len.
                 double sim_norm;
                 if (normalized_pattern == norm_filename_no_ext) {
                     sim_norm = 1.0;
@@ -1371,9 +1377,8 @@ ToolResult handle_find_files(const nlohmann::json& params,
                     size_t max_len =
                         std::max(normalized_pattern.size(),
                                  norm_filename_no_ext.size());
-                    // sim_norm == lev / max_len  (intentional Go bug-port)
-                    sim_norm = static_cast<double>(lev) /
-                               static_cast<double>(max_len);
+                    sim_norm = 1.0 - static_cast<double>(lev) /
+                                         static_cast<double>(max_len);
                 }
                 if (sim_norm >= 0.7) {  // FuzzyMatcher threshold in Go
                     double phrase_score = sim_norm * 0.85;

@@ -811,47 +811,39 @@ TEST_F(HandlersFixture, FindFilesClampsMax) {
     EXPECT_LE(json["total_matches"].get<int>(), 200);
 }
 
-TEST_F(HandlersFixture, FindFilesGlobFuzzyStarGo) {
-    // Parity: Go's matchFilePaths invokes phraseMatcher.Match against
-    // filenameNoExt as a fallback when literal substring/exact passes miss.
-    // Pattern "*.go" doesn't substring-match any of main/handler/utils/server,
-    // but go-edlib's normalised levenshtein collapses to similarity 1.0 for
-    // very short targets — so all visible files surface as fuzzy hits with
-    // a deterministic score (0.82 raw, * 0.7 fuzzy scale = 0.574).
+// Fuzzy file matching uses real normalized Levenshtein SIMILARITY (1 - dist/
+// maxlen, threshold 0.7), so a near-miss of a filename fuzzy-matches that file
+// and unrelated files do not. (The old behavior — ported from a Go fuzzer that
+// used the DISTANCE ratio and tested >=0.7 — flooded every file as a fuzzy hit
+// at 0.574 for any pattern, including totally unrelated ones. The Go oracle
+// that pinned that is retired; the inverted similarity is fixed.)
+TEST_F(HandlersFixture, FindFilesFuzzyMatchesNearName) {
     nlohmann::json params;
-    params["pattern"] = "*.go";
+    params["pattern"] = "handlr";  // one deletion from "handler"
     auto result = handle_find_files(params, *indexer_);
     EXPECT_FALSE(result.is_error);
     auto json = nlohmann::json::parse(result.text);
-    int total = json["total_matches"].get<int>();
-    // 4 visible .go files (main.go, handler.go, utils.go, internal/api/server.go)
-    EXPECT_EQ(total, 4);
-    bool any_fuzzy = false;
+    bool found_handler = false;
     for (const auto& r : json["results"]) {
-        if (r["match_type"].get<std::string>() == "fuzzy") {
-            any_fuzzy = true;
-            // Fuzzy-match score lands at 0.574 ± 0.05.
-            double score = r["score"].get<double>();
-            EXPECT_NEAR(score, 0.574, 0.05);
-        }
+        std::string path = r["path"].get<std::string>();
+        if (path.find("handler.go") != std::string::npos) found_handler = true;
+        // Unrelated files (main/utils/server) must NOT fuzzy-match "handlr".
+        EXPECT_EQ(path.find("utils.go"), std::string::npos) << path;
     }
-    EXPECT_TRUE(any_fuzzy);
+    EXPECT_TRUE(found_handler) << "near-miss 'handlr' should fuzzy-match handler.go";
 }
 
-TEST_F(HandlersFixture, FindFilesGlobFuzzyNonMatchingPattern) {
-    // Parity: even a totally unrelated pattern like "zzzzzzz" surfaces
-    // every visible file as a fuzzy hit, because go-edlib's normalised
-    // levenshtein returns ~1.0 when one operand is much shorter than the
-    // other. C++ must reproduce this observable behaviour to keep parity
-    // with the Go binary's fuzzy fallback.
+TEST_F(HandlersFixture, FindFilesUnrelatedPatternNoFuzzyFlood) {
+    // A totally unrelated pattern must NOT surface every file. With correct
+    // similarity, "zzzzzzz" is far from main/handler/utils/server -> no fuzzy.
     nlohmann::json params;
     params["pattern"] = "zzzzzzz";
     auto result = handle_find_files(params, *indexer_);
     EXPECT_FALSE(result.is_error);
     auto json = nlohmann::json::parse(result.text);
-    EXPECT_GE(json["total_matches"].get<int>(), 4);
     for (const auto& r : json["results"]) {
-        EXPECT_EQ(r["match_type"], "fuzzy");
+        EXPECT_NE(r["match_type"], "fuzzy")
+            << "unrelated pattern flooded a fuzzy hit: " << r.dump();
     }
 }
 
