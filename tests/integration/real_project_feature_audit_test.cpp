@@ -255,9 +255,15 @@ TEST_F(FeatureAudit, ChiGetContextByNameWorks) {
     params["name"] = "NewRouter";
     auto result = ctx.get_context(params);
     ASSERT_FALSE(result.contains("error"));
-    // The exact response shape is implementation-defined; ensure it isn't
-    // an empty stub.
-    EXPECT_FALSE(result.empty());
+    // Must actually RESOLVE the symbol — count>0 with a matching context.
+    // (EXPECT_FALSE(result.empty()) passed even on {"contexts":[],"count":0}
+    // since the JSON object is non-empty — it masked get_context-by-name
+    // returning nothing without a mode= preset. Assert the real contract.)
+    ASSERT_TRUE(result.contains("count"));
+    EXPECT_GT(result["count"].get<int>(), 0) << result.dump();
+    ASSERT_TRUE(result.contains("contexts"));
+    ASSERT_FALSE(result["contexts"].empty());
+    EXPECT_EQ(result["contexts"][0]["symbol_name"], "NewRouter");
 }
 
 // -- find_files (python) -----------------------------------------------------

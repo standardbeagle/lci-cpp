@@ -1022,14 +1022,20 @@ ToolResult handle_get_context(const nlohmann::json& params,
     // ContextLookupEngine (structure/variables/semantic/usage/ai) simply add
     // no fields to the compact output.
 
-    // mode + name path: minimal port of Go's handleGetObjectContextWithMode.
+    // name path: minimal port of Go's handleGetObjectContextWithMode.
     // Full ContextLookupEngine (6261 LOC across 8 files in internal/core/
     // context_lookup_*.go) covers structure / semantic / variables /
     // usage / ai sections. We implement the subset MCP callers actually
     // exercise on the standard chi/fastapi/pocketbase tests: name →
     // EnhancedSymbol resolution + optional call hierarchy. Other sections
     // remain unported and absent from the response (omitempty-style).
-    if (!mode.empty() && has_name) {
+    //
+    // Runs for ANY name lookup, not only when `mode` is set: a bare
+    // {"name": X} previously fell through to the id path and returned
+    // {contexts:[],count:0} — get_context-by-name silently empty unless the
+    // caller happened to also pass mode=. mode still tunes depth/sections via
+    // apply_context_lookup_mode above; absence of mode just uses the defaults.
+    if (has_name) {
         bool include_call_hierarchy =
             p.value("include_call_hierarchy", false);
         int max_depth = p.value("max_depth", 1);

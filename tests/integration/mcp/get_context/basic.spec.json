@@ -6,19 +6,35 @@
   "go_binary": "${LCI_GO}",
   "cpp_binary": "${LCI_CPP}",
   "invocation": {
-    "args": ["mcp"],
+    "args": [
+      "mcp"
+    ],
     "stdin": "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"get_context\",\"arguments\":{\"name\":\"Add\"}}}",
     "cwd": "${CORPUS}"
   },
-  "capture": ["stdout", "exit"],
+  "capture": [
+    "stdout",
+    "exit"
+  ],
   "parse": "json",
-  "_rationale": "C++ no-mode get_context is id-only, matching Go's handleGetObjectContext (internal/mcp/handlers.go), which builds its objectIDs list solely from args.ID and never resolves args.Name in the default no-mode path. A name-only call passes validateGetContextParams (id OR name is required, not both) but resolves nothing, so both binaries return {\"contexts\":[],\"count\":0} for get_context name=Add on the multi-lang corpus. The golden {\"contexts\":[],\"count\":0} is unchanged. This descriptor locks the name-only empty-result contract; the id= resolution path, errors[] reporting for unresolvable ids, and mode= fail-fast are covered by tests/parity/descriptors/mcp/get_context/basic.parity.json plus the HandlersFixture.GetContext* unit tests.",
+  "_rationale": "get_context name=Add resolves the symbol on the multi-lang corpus (func Add, a.go:3). The earlier no-mode name path was gated behind a non-empty mode= and returned {contexts:[],count:0}, mirroring Go's id-only handleGetObjectContext. That Go oracle is retired (goldens are the sole oracle now), and a silent empty result for a valid symbol name is the synthetic-passes-while-real-is-empty trap the suite guards against, so the name path now resolves regardless of mode (handlers_core.cpp handle_get_context). Deliberate divergence from the old id-only no-mode contract; file_path normalized to ${CORPUS}.",
   "tiers": {
-    "stable": ["result.content[].type", "result.content[].text"],
-    "_rationale_stable": "Full envelope + body parity. Both binaries emit {\"contexts\":[],\"count\":0} for the name-only no-mode invocation, so result.content[].text is byte-stable.",
-    "ignore": ["id", "jsonrpc", "result.meta.elapsed_ms", "result.meta.server_pid"],
-    "_rationale_ignore": "Standard JSON-RPC envelope noise plus timing residue. result.content[].text is stable for this name-only invocation."
+    "stable": [
+      "result.content[].type",
+      "result.content[].text"
+    ],
+    "_rationale_stable": "Full envelope + body. Name-only get_context now resolves to one context (Add) with stable signature/purity/location; result.content[].text is byte-stable after ${CORPUS} path normalization.",
+    "ignore": [
+      "id",
+      "jsonrpc",
+      "result.meta.elapsed_ms",
+      "result.meta.server_pid"
+    ],
+    "_rationale_ignore": "Standard JSON-RPC envelope noise plus timing residue."
   },
-  "tolerances": {"score_abs": 0.05, "timed_max_ms": 60000},
+  "tolerances": {
+    "score_abs": 0.05,
+    "timed_max_ms": 60000
+  },
   "expect_exit": 0
 }

@@ -566,14 +566,20 @@ TEST_F(HandlersFixture, GetContextIdAndNameConflictErrors) {
 // reads args.ID). Both binaries return {contexts:[],count:0}. Karpathy
 // rule 1 — Go is the bar; the C++ ContextLookupEngine gap is tracked
 // in Dart (15Wsg4HQoSW2) as the proper resolution path.
-TEST_F(HandlersFixture, GetContextNameOnlyReturnsEmpty) {
+// get_context by name resolves the symbol(s) even without a `mode` preset.
+// (Previously the name path was gated behind a non-empty mode, so a bare
+// {"name": X} silently returned {contexts:[],count:0} — the
+// "synthetic-passes-while-real-is-empty" trap. The Go oracle that the old
+// id-only no-mode contract mirrored is retired, so name-only now resolves.)
+TEST_F(HandlersFixture, GetContextNameOnlyResolves) {
     nlohmann::json params;
     params["name"] = "main";
     auto result = handle_get_context(params, *indexer_);
     EXPECT_FALSE(result.is_error);
     auto json = nlohmann::json::parse(result.text);
-    EXPECT_EQ(json["count"].get<int>(), 0);
-    EXPECT_TRUE(json["contexts"].empty());
+    EXPECT_GT(json["count"].get<int>(), 0);
+    ASSERT_FALSE(json["contexts"].empty());
+    EXPECT_EQ(json["contexts"][0]["symbol_name"], "main");
 }
 
 // mode parameter combined with id falls through to the id-resolution
