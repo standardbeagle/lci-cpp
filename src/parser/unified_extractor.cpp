@@ -1493,6 +1493,106 @@ void UnifiedExtractor::process_reference_node(TSNode node,
     }
 }
 
+namespace {
+// Bare Go type name from a decorated type token: "*chi.Mux"/"[]Mux" -> "Mux".
+std::string go_bare_type(std::string_view t) {
+    size_t i = 0;
+    while (i < t.size() &&
+           (t[i] == '*' || t[i] == '&' || t[i] == '[' || t[i] == ']'))
+        ++i;
+    t = t.substr(i);
+    if (auto d = t.rfind('.'); d != std::string_view::npos) t = t.substr(d + 1);
+    return std::string(t);
+}
+}  // namespace
+
+// Seed the per-function local type env from the receiver (methods) and typed
+// parameters. Cleared each function/method so types don't leak across funcs.
+void UnifiedExtractor::seed_go_local_types(TSNode fn, bool is_method) {
+    local_var_types_.clear();
+    auto add_plist = [&](TSNode plist) {
+        if (ts_node_is_null(plist)) return;
+        uint32_t n = ts_node_named_child_count(plist);
+        for (uint32_t i = 0; i < n; ++i) {
+            TSNode pd = ts_node_named_child(plist, i);
+            const char* pt = ts_node_type(pd);
+            if (!pt || std::string_view(pt) != "parameter_declaration") continue;
+            TSNode ty = ts_node_child_by_field_name(pd, "type", 4);
+            if (ts_node_is_null(ty)) continue;
+            std::string tn = go_bare_type(node_text(ty));
+            if (tn.empty()) continue;
+            uint32_t cc = ts_node_named_child_count(pd);
+            for (uint32_t j = 0; j < cc; ++j) {
+                TSNode c = ts_node_named_child(pd, j);
+                const char* ct = ts_node_type(c);
+                if (ct && std::string_view(ct) == "identifier")
+                    local_var_types_[std::string(node_text(c))] = tn;
+            }
+        }
+    };
+    if (is_method)
+        add_plist(ts_node_child_by_field_name(fn, "receiver",
+                                              static_cast<uint32_t>(8)));
+    add_plist(ts_node_child_by_field_name(fn, "parameters",
+                                          static_cast<uint32_t>(10)));
+}
+
+// Record `var x T` and `x := T{}` / `x := &T{}` into the local type env.
+void UnifiedExtractor::record_go_local_var(TSNode decl) {
+    const char* dt = ts_node_type(decl);
+    std::string_view t(dt ? dt : "");
+    if (t == "var_declaration") {
+        uint32_t n = ts_node_named_child_count(decl);
+        for (uint32_t i = 0; i < n; ++i) {
+            TSNode spec = ts_node_named_child(decl, i);
+            TSNode ty = ts_node_child_by_field_name(spec, "type",
+                                                    static_cast<uint32_t>(4));
+            if (ts_node_is_null(ty)) continue;
+            std::string tn = go_bare_type(node_text(ty));
+            if (tn.empty()) continue;
+            uint32_t cc = ts_node_named_child_count(spec);
+            for (uint32_t j = 0; j < cc; ++j) {
+                TSNode c = ts_node_named_child(spec, j);
+                const char* ct = ts_node_type(c);
+                if (ct && std::string_view(ct) == "identifier")
+                    local_var_types_[std::string(node_text(c))] = tn;
+            }
+        }
+    } else if (t == "short_var_declaration") {
+        TSNode left = ts_node_child_by_field_name(decl, "left",
+                                                  static_cast<uint32_t>(4));
+        TSNode right = ts_node_child_by_field_name(decl, "right",
+                                                   static_cast<uint32_t>(5));
+        if (ts_node_is_null(left) || ts_node_is_null(right)) return;
+        if (ts_node_named_child_count(left) != 1 ||
+            ts_node_named_child_count(right) != 1)
+            return;  // base case: single binding
+        TSNode lid = ts_node_named_child(left, 0);
+        TSNode rex = ts_node_named_child(right, 0);
+        const char* lt = ts_node_type(lid);
+        if (!lt || std::string_view(lt) != "identifier") return;
+        const char* rt = ts_node_type(rex);
+        std::string_view r(rt ? rt : "");
+        if (r == "unary_expression") {  // &T{}
+            TSNode op = ts_node_named_child(rex, 0);
+            if (!ts_node_is_null(op)) {
+                rex = op;
+                rt = ts_node_type(rex);
+                r = rt ? rt : "";
+            }
+        }
+        if (r == "composite_literal") {  // T{...}
+            TSNode ty = ts_node_child_by_field_name(rex, "type",
+                                                    static_cast<uint32_t>(4));
+            if (!ts_node_is_null(ty)) {
+                std::string tn = go_bare_type(node_text(ty));
+                if (!tn.empty())
+                    local_var_types_[std::string(node_text(lid))] = tn;
+            }
+        }
+    }
+}
+
 void UnifiedExtractor::process_go_reference(TSNode node,
                                             std::string_view node_type) {
     auto is_handled = [&](TSNode n) {
@@ -1502,6 +1602,22 @@ void UnifiedExtractor::process_go_reference(TSNode node,
         }
         return false;
     };
+
+    // Maintain the local type env (SCIP base case). func_literal (closures)
+    // deliberately does NOT clear — it inherits the enclosing function's types.
+    if (node_type == "function_declaration") {
+        seed_go_local_types(node, false);
+        return;
+    }
+    if (node_type == "method_declaration") {
+        seed_go_local_types(node, true);
+        return;
+    }
+    if (node_type == "short_var_declaration" ||
+        node_type == "var_declaration") {
+        record_go_local_var(node);
+        return;
+    }
 
     if (node_type == "call_expression") {
         TSNode func = ts_node_child_by_field_name(
@@ -1526,8 +1642,28 @@ void UnifiedExtractor::process_go_reference(TSNode node,
             if (!ts_node_is_null(field)) {
                 handled_nodes_.push_back(
                     {reinterpret_cast<uintptr_t>(field.id)});
-                references_.push_back(create_reference(
-                    field, ReferenceType::Call, RefStrength::Tight));
+                Reference cref =
+                    create_reference(field, ReferenceType::Call,
+                                     RefStrength::Tight);
+                // Receiver-type qualification (SCIP base case): if the receiver
+                // is a local identifier whose type we know, emit "Type.M" so the
+                // resolver selects the exact method among same-named candidates.
+                TSNode operand = ts_node_child_by_field_name(
+                    func, "operand", static_cast<uint32_t>(7));
+                if (!ts_node_is_null(operand)) {
+                    const char* ot = ts_node_type(operand);
+                    if (ot && std::string_view(ot) == "identifier") {
+                        auto it = local_var_types_.find(
+                            std::string(node_text(operand)));
+                        if (it != local_var_types_.end() &&
+                            !it->second.empty()) {
+                            cref.referenced_name =
+                                it->second + "." +
+                                std::string(node_text(field));
+                        }
+                    }
+                }
+                references_.push_back(std::move(cref));
                 return;
             }
         }
