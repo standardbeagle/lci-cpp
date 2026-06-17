@@ -65,6 +65,42 @@ bool is_cpp_type_declaration_name_context(TSNode node) {
            parent_type == "namespace_definition";
 }
 
+// Bare Go type name from a decorated type token: "*chi.Mux"/"[]Mux" -> "Mux".
+std::string go_bare_type(std::string_view t) {
+    size_t i = 0;
+    while (i < t.size() &&
+           (t[i] == '*' || t[i] == '&' || t[i] == '[' || t[i] == ']'))
+        ++i;
+    t = t.substr(i);
+    if (auto d = t.rfind('.'); d != std::string_view::npos) t = t.substr(d + 1);
+    return std::string(t);
+}
+
+// Bare JS/TS type from an annotation/type node: strips ": ", generics
+// (Foo<Bar> -> Foo), array suffix (Foo[] -> Foo), and qualifier (ns.Foo -> Foo).
+std::string js_bare_type(std::string_view t) {
+    while (!t.empty() && (t.front() == ':' || t.front() == ' '))
+        t.remove_prefix(1);
+    if (auto a = t.find('<'); a != std::string_view::npos) t = t.substr(0, a);
+    if (auto b = t.find('['); b != std::string_view::npos) t = t.substr(0, b);
+    while (!t.empty() && (t.back() == ' ')) t.remove_suffix(1);
+    if (auto d = t.rfind('.'); d != std::string_view::npos) t = t.substr(d + 1);
+    return std::string(t);
+}
+
+// Bare Python type from an annotation: strips quotes (string annotations),
+// subscripts (List[Foo] -> List), and module qualifier (mod.Foo -> Foo).
+std::string py_bare_type(std::string_view t) {
+    while (!t.empty() && (t.front() == '"' || t.front() == '\'' || t.front() == ' '))
+        t.remove_prefix(1);
+    while (!t.empty() && (t.back() == '"' || t.back() == '\'' || t.back() == ' '))
+        t.remove_suffix(1);
+    if (auto b = t.find('['); b != std::string_view::npos) t = t.substr(0, b);
+    if (auto d = t.rfind('.'); d != std::string_view::npos) t = t.substr(d + 1);
+    while (!t.empty() && t.back() == ' ') t.remove_suffix(1);
+    return std::string(t);
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -430,6 +466,31 @@ bool UnifiedExtractor::process_scope_node(TSNode node,
     } else if (node_type == "type_declaration") {
         scope_type = ScopeType::Class;
         name = std::string(extract_go_type_name(node));
+
+    } else if (node_type == "struct_specifier" ||
+               node_type == "class_specifier" ||
+               node_type == "union_specifier") {
+        // C/C++ aggregate definition. Only a named specifier *with a body*
+        // (field_declaration_list) opens a class scope — forward decls and
+        // `struct A a;` uses carry no body and must not nest the surrounding
+        // scope. Giving member methods a Class scope named after the aggregate
+        // is what lets the resolver match a scope-typed `T.m` ref to the method
+        // whose owning type is `T`. Fields are located by child iteration: the
+        // grammar exposes `name` but the body has no stable field name here.
+        std::string_view aggr_name;
+        bool has_body = false;
+        uint32_t cc = ts_node_child_count(node);
+        for (uint32_t i = 0; i < cc; ++i) {
+            TSNode c = ts_node_child(node, i);
+            std::string_view ct(ts_node_type(c));
+            if (ct == "type_identifier" && aggr_name.empty())
+                aggr_name = node_text(c);
+            else if (ct == "field_declaration_list")
+                has_body = true;
+        }
+        if (!has_body || aggr_name.empty()) return false;
+        scope_type = ScopeType::Class;
+        name = std::string(aggr_name);
 
     } else if (node_type == "function_declaration" ||
                node_type == "function_definition") {
@@ -1473,14 +1534,57 @@ void UnifiedExtractor::process_reference_node(TSNode node,
     } else if (ext_ == ".py") {
         process_python_reference(node, node_type);
     } else if (is_cpp_family_extension(ext_)) {
+        // Local type env (SCIP base case): this -> enclosing class; `T x;` /
+        // `T x = ...` declarations. C++ method calls already resolve by bare
+        // name (pick_cpp_reference_leaf returns the field), so this only adds
+        // the receiver-type qualification that disambiguates same-named methods.
+        if (node_type == "function_definition") {
+            local_var_types_.clear();
+            std::string cls = enclosing_class_name();
+            if (!cls.empty()) local_var_types_["this"] = cls;
+        } else if (node_type == "declaration") {
+            TSNode ty = ts_node_child_by_field_name(node, "type",
+                                                    static_cast<uint32_t>(4));
+            TSNode dcl = ts_node_child_by_field_name(
+                node, "declarator", static_cast<uint32_t>(10));
+            if (!ts_node_is_null(ty) && !ts_node_is_null(dcl)) {
+                std::string tn = go_bare_type(node_text(ty));
+                const char* dt = ts_node_type(dcl);
+                if (dt && std::string_view(dt) == "init_declarator")
+                    dcl = ts_node_child_by_field_name(
+                        dcl, "declarator", static_cast<uint32_t>(10));
+                if (!ts_node_is_null(dcl)) {
+                    const char* it = ts_node_type(dcl);
+                    if (it && std::string_view(it) == "identifier" &&
+                        !tn.empty())
+                        local_var_types_[std::string(node_text(dcl))] = tn;
+                }
+            }
+        }
+
         if (node_type == "call_expression") {
             TSNode func = ts_node_child_by_field_name(
                 node, "function",
                 static_cast<uint32_t>(std::strlen("function")));
             if (!ts_node_is_null(func)) {
-                references_.push_back(create_reference(
+                Reference cref = create_reference(
                     pick_cpp_reference_leaf(func), ReferenceType::Call,
-                    RefStrength::Tight));
+                    RefStrength::Tight);
+                const char* ft = ts_node_type(func);
+                if (ft && std::string_view(ft) == "field_expression") {
+                    TSNode arg = ts_node_child_by_field_name(
+                        func, "argument", static_cast<uint32_t>(8));
+                    TSNode fld = ts_node_child_by_field_name(
+                        func, "field", static_cast<uint32_t>(5));
+                    if (!ts_node_is_null(arg) && !ts_node_is_null(fld)) {
+                        auto lv = local_var_types_.find(
+                            std::string(node_text(arg)));
+                        if (lv != local_var_types_.end() && !lv->second.empty())
+                            cref.referenced_name =
+                                lv->second + "." + std::string(node_text(fld));
+                    }
+                }
+                references_.push_back(std::move(cref));
             }
         } else if ((node_type == "type_identifier" ||
                     node_type == "qualified_identifier" ||
@@ -1492,44 +1596,6 @@ void UnifiedExtractor::process_reference_node(TSNode node,
         }
     }
 }
-
-namespace {
-// Bare Go type name from a decorated type token: "*chi.Mux"/"[]Mux" -> "Mux".
-std::string go_bare_type(std::string_view t) {
-    size_t i = 0;
-    while (i < t.size() &&
-           (t[i] == '*' || t[i] == '&' || t[i] == '[' || t[i] == ']'))
-        ++i;
-    t = t.substr(i);
-    if (auto d = t.rfind('.'); d != std::string_view::npos) t = t.substr(d + 1);
-    return std::string(t);
-}
-
-// Bare JS/TS type from an annotation/type node: strips ": ", generics
-// (Foo<Bar> -> Foo), array suffix (Foo[] -> Foo), and qualifier (ns.Foo -> Foo).
-std::string js_bare_type(std::string_view t) {
-    while (!t.empty() && (t.front() == ':' || t.front() == ' '))
-        t.remove_prefix(1);
-    if (auto a = t.find('<'); a != std::string_view::npos) t = t.substr(0, a);
-    if (auto b = t.find('['); b != std::string_view::npos) t = t.substr(0, b);
-    while (!t.empty() && (t.back() == ' ')) t.remove_suffix(1);
-    if (auto d = t.rfind('.'); d != std::string_view::npos) t = t.substr(d + 1);
-    return std::string(t);
-}
-
-// Bare Python type from an annotation: strips quotes (string annotations),
-// subscripts (List[Foo] -> List), and module qualifier (mod.Foo -> Foo).
-std::string py_bare_type(std::string_view t) {
-    while (!t.empty() && (t.front() == '"' || t.front() == '\'' || t.front() == ' '))
-        t.remove_prefix(1);
-    while (!t.empty() && (t.back() == '"' || t.back() == '\'' || t.back() == ' '))
-        t.remove_suffix(1);
-    if (auto b = t.find('['); b != std::string_view::npos) t = t.substr(0, b);
-    if (auto d = t.rfind('.'); d != std::string_view::npos) t = t.substr(d + 1);
-    while (!t.empty() && t.back() == ' ') t.remove_suffix(1);
-    return std::string(t);
-}
-}  // namespace
 
 std::string UnifiedExtractor::enclosing_class_name() const {
     for (auto it = scope_stack_.rbegin(); it != scope_stack_.rend(); ++it) {
