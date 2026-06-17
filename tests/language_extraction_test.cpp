@@ -876,6 +876,22 @@ bool has_call_ref(const ExtractionResults& r, std::string_view name) {
     return false;
 }
 
+TEST(ScopeTypeResolution, CppQualifiesPointerAndValueReceivers) {
+    constexpr std::string_view src = R"(struct A {
+    void run() { this->helpA(); }
+    void helpA() {}
+};
+void go() {
+    A a;
+    a.run();
+    A* p = new A();
+    p->run();
+})";
+    auto r = extract(Language::Cpp, ".cpp", src, "m.cpp");
+    EXPECT_TRUE(has_call_ref(r, "A.helpA"));  // this->
+    EXPECT_TRUE(has_call_ref(r, "A.run"));    // value `A a` and pointer `A* p`
+}
+
 TEST(ScopeTypeResolution, JavaQualifiesReceiverAndThis) {
     constexpr std::string_view src = R"(class A {
     void run() { helpA(); }

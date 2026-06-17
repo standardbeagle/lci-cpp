@@ -1625,16 +1625,24 @@ void UnifiedExtractor::process_reference_node(TSNode node,
                 node, "declarator", static_cast<uint32_t>(10));
             if (!ts_node_is_null(ty) && !ts_node_is_null(dcl)) {
                 std::string tn = go_bare_type(node_text(ty));
-                const char* dt = ts_node_type(dcl);
-                if (dt && std::string_view(dt) == "init_declarator")
-                    dcl = ts_node_child_by_field_name(
-                        dcl, "declarator", static_cast<uint32_t>(10));
-                if (!ts_node_is_null(dcl)) {
-                    const char* it = ts_node_type(dcl);
-                    if (it && std::string_view(it) == "identifier" &&
-                        !tn.empty())
-                        local_var_types_[std::string(node_text(dcl))] = tn;
+                // Peel wrapping declarators down to the identifier:
+                // `A* a = new A()` is init_declarator > pointer_declarator >
+                // identifier, `A** a` nests pointer_declarator, etc. The `*`/`&`
+                // live on the declarator, not the type, so `tn` stays "A".
+                while (!ts_node_is_null(dcl)) {
+                    std::string_view dt(ts_node_type(dcl));
+                    if (dt == "init_declarator" || dt == "pointer_declarator" ||
+                        dt == "reference_declarator" ||
+                        dt == "array_declarator") {
+                        dcl = ts_node_child_by_field_name(
+                            dcl, "declarator", static_cast<uint32_t>(10));
+                    } else {
+                        break;
+                    }
                 }
+                if (!ts_node_is_null(dcl) && !tn.empty() &&
+                    std::string_view(ts_node_type(dcl)) == "identifier")
+                    local_var_types_[std::string(node_text(dcl))] = tn;
             }
         }
 
