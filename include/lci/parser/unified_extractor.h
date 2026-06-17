@@ -285,6 +285,9 @@ class UnifiedExtractor {
     absl::flat_hash_map<std::string, std::string> local_var_types_;
     void seed_go_local_types(TSNode fn_node, bool is_method);
     void record_go_local_var(TSNode decl_node);
+    // Nearest enclosing class/struct scope name (for self/this typing in
+    // class-based languages); empty if not inside one.
+    std::string enclosing_class_name() const;
 };
 
 /// Thread-local pool of UnifiedExtractor instances.

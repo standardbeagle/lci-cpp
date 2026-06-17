@@ -1504,7 +1504,27 @@ std::string go_bare_type(std::string_view t) {
     if (auto d = t.rfind('.'); d != std::string_view::npos) t = t.substr(d + 1);
     return std::string(t);
 }
+
+// Bare Python type from an annotation: strips quotes (string annotations),
+// subscripts (List[Foo] -> List), and module qualifier (mod.Foo -> Foo).
+std::string py_bare_type(std::string_view t) {
+    while (!t.empty() && (t.front() == '"' || t.front() == '\'' || t.front() == ' '))
+        t.remove_prefix(1);
+    while (!t.empty() && (t.back() == '"' || t.back() == '\'' || t.back() == ' '))
+        t.remove_suffix(1);
+    if (auto b = t.find('['); b != std::string_view::npos) t = t.substr(0, b);
+    if (auto d = t.rfind('.'); d != std::string_view::npos) t = t.substr(d + 1);
+    while (!t.empty() && t.back() == ' ') t.remove_suffix(1);
+    return std::string(t);
+}
 }  // namespace
+
+std::string UnifiedExtractor::enclosing_class_name() const {
+    for (auto it = scope_stack_.rbegin(); it != scope_stack_.rend(); ++it) {
+        if (it->scope_type == ScopeType::Class) return it->name;
+    }
+    return {};
+}
 
 // Seed the per-function local type env from the receiver (methods) and typed
 // parameters. Cleared each function/method so types don't leak across funcs.
@@ -1730,25 +1750,108 @@ void UnifiedExtractor::process_js_reference(TSNode node,
 
 void UnifiedExtractor::process_python_reference(TSNode node,
                                                 std::string_view node_type) {
+    auto is_handled = [&](TSNode n) {
+        uintptr_t id = reinterpret_cast<uintptr_t>(n.id);
+        for (const auto& h : handled_nodes_) {
+            if (h.id == id) return true;
+        }
+        return false;
+    };
+
+    // Local type env (SCIP base case). Python uses only UNAMBIGUOUS type
+    // sources: self/cls -> enclosing class, and annotated params/vars
+    // (`x: T`). `x = Foo()` is intentionally skipped — constructor vs factory
+    // call is syntactically identical in Python, so it would mis-type.
+    if (node_type == "function_definition") {
+        local_var_types_.clear();
+        std::string cls = enclosing_class_name();
+        if (!cls.empty()) {
+            local_var_types_["self"] = cls;
+            local_var_types_["cls"] = cls;
+        }
+        TSNode params = ts_node_child_by_field_name(
+            node, "parameters", static_cast<uint32_t>(10));
+        if (!ts_node_is_null(params)) {
+            uint32_t n = ts_node_named_child_count(params);
+            for (uint32_t i = 0; i < n; ++i) {
+                TSNode p = ts_node_named_child(params, i);
+                const char* pt = ts_node_type(p);
+                if (!pt || std::string_view(pt) != "typed_parameter") continue;
+                TSNode ty = ts_node_child_by_field_name(
+                    p, "type", static_cast<uint32_t>(4));
+                TSNode nm = ts_node_named_child(p, 0);
+                if (!ts_node_is_null(ty) && !ts_node_is_null(nm)) {
+                    std::string tn = py_bare_type(node_text(ty));
+                    if (!tn.empty())
+                        local_var_types_[std::string(node_text(nm))] = tn;
+                }
+            }
+        }
+        return;
+    }
+    if (node_type == "assignment") {
+        TSNode ty = ts_node_child_by_field_name(node, "type",
+                                                static_cast<uint32_t>(4));
+        TSNode lhs = ts_node_child_by_field_name(node, "left",
+                                                 static_cast<uint32_t>(4));
+        if (!ts_node_is_null(ty) && !ts_node_is_null(lhs)) {
+            const char* lt = ts_node_type(lhs);
+            if (lt && std::string_view(lt) == "identifier") {
+                std::string tn = py_bare_type(node_text(ty));
+                if (!tn.empty())
+                    local_var_types_[std::string(node_text(lhs))] = tn;
+            }
+        }
+        return;
+    }
+
     if (node_type == "call") {
         TSNode func = ts_node_child_by_field_name(
             node, "function",
             static_cast<uint32_t>(std::strlen("function")));
-        if (!ts_node_is_null(func)) {
-            references_.push_back(
-                create_reference(func, ReferenceType::Call, RefStrength::Tight));
+        if (ts_node_is_null(func)) return;
+        // Method call obj.M(...): tag the attribute (method name) as the Call
+        // (was a Call on the un-resolvable "obj.M" + a Usage on "M", so methods
+        // had no callers). Qualify "Type.M" when obj's type is known.
+        const char* ftype = ts_node_type(func);
+        if (ftype && std::string_view(ftype) == "attribute") {
+            TSNode attr = ts_node_child_by_field_name(
+                func, "attribute", static_cast<uint32_t>(std::strlen("attribute")));
+            if (!ts_node_is_null(attr)) {
+                handled_nodes_.push_back({reinterpret_cast<uintptr_t>(attr.id)});
+                Reference cref = create_reference(attr, ReferenceType::Call,
+                                                  RefStrength::Tight);
+                TSNode obj = ts_node_child_by_field_name(
+                    func, "object", static_cast<uint32_t>(6));
+                if (!ts_node_is_null(obj)) {
+                    const char* ot = ts_node_type(obj);
+                    if (ot && std::string_view(ot) == "identifier") {
+                        auto it = local_var_types_.find(
+                            std::string(node_text(obj)));
+                        if (it != local_var_types_.end() && !it->second.empty())
+                            cref.referenced_name =
+                                it->second + "." + std::string(node_text(attr));
+                    }
+                }
+                references_.push_back(std::move(cref));
+                return;
+            }
         }
+        references_.push_back(
+            create_reference(func, ReferenceType::Call, RefStrength::Tight));
     } else if (node_type == "attribute") {
         TSNode attr = ts_node_child_by_field_name(
             node, "attribute",
             static_cast<uint32_t>(std::strlen("attribute")));
-        if (!ts_node_is_null(attr)) {
+        if (!ts_node_is_null(attr) && !is_handled(attr)) {
             references_.push_back(
                 create_reference(attr, ReferenceType::Usage, RefStrength::Loose));
         }
     } else if (node_type == "identifier") {
-        references_.push_back(
-            create_reference(node, ReferenceType::Usage, RefStrength::Loose));
+        if (!is_handled(node)) {
+            references_.push_back(
+                create_reference(node, ReferenceType::Usage, RefStrength::Loose));
+        }
     }
 }
 
