@@ -510,7 +510,12 @@ std::vector<std::string> ReferenceTracker::get_caller_names(
             if (!seen.contains(ref.source_symbol)) {
                 if (const auto* src = snap->symbols.get(ref.source_symbol)) {
                     seen[ref.source_symbol] = true;
-                    result.push_back(src->symbol.name);
+                    // Anonymous callers (closures / func literals) have an empty
+                    // symbol name; surface a readable label instead of a blank
+                    // entry so a list of callers is legible.
+                    result.push_back(src->symbol.name.empty()
+                                         ? "<anonymous>"
+                                         : src->symbol.name);
                 }
             }
         }

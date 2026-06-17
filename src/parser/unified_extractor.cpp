@@ -1495,25 +1495,57 @@ void UnifiedExtractor::process_reference_node(TSNode node,
 
 void UnifiedExtractor::process_go_reference(TSNode node,
                                             std::string_view node_type) {
+    auto is_handled = [&](TSNode n) {
+        uintptr_t id = reinterpret_cast<uintptr_t>(n.id);
+        for (const auto& h : handled_nodes_) {
+            if (h.id == id) return true;
+        }
+        return false;
+    };
+
     if (node_type == "call_expression") {
         TSNode func = ts_node_child_by_field_name(
             node, "function",
             static_cast<uint32_t>(std::strlen("function")));
-        if (!ts_node_is_null(func)) {
-            references_.push_back(
-                create_reference(func, ReferenceType::Call, RefStrength::Tight));
+        if (ts_node_is_null(func)) return;
+
+        // For a method / qualified call `x.M(...)` (or `pkg.F(...)`) the call
+        // target is the method name M, not the whole `x.M` selector — and
+        // create_reference names a ref by node text, so a Call ref on the
+        // selector is named "x.M" and never resolves to the symbol M. Tag the
+        // FIELD (M) as the Call so referenced_name == "M" resolves to the
+        // method/function symbol and the call site shows up as a CALLER. Mark
+        // the field handled so the selector_expression / field_identifier
+        // branches below don't also emit a Usage ref for it (double-count, and
+        // — the original bug — the only ref that resolved to M was that Usage,
+        // which get_caller_names filters out, so methods had zero callers).
+        const char* ftype = ts_node_type(func);
+        if (ftype && std::string_view(ftype) == "selector_expression") {
+            TSNode field = ts_node_child_by_field_name(
+                func, "field", static_cast<uint32_t>(std::strlen("field")));
+            if (!ts_node_is_null(field)) {
+                handled_nodes_.push_back(
+                    {reinterpret_cast<uintptr_t>(field.id)});
+                references_.push_back(create_reference(
+                    field, ReferenceType::Call, RefStrength::Tight));
+                return;
+            }
         }
+        references_.push_back(
+            create_reference(func, ReferenceType::Call, RefStrength::Tight));
     } else if (node_type == "selector_expression") {
         TSNode field = ts_node_child_by_field_name(
             node, "field", static_cast<uint32_t>(std::strlen("field")));
-        if (!ts_node_is_null(field)) {
+        if (!ts_node_is_null(field) && !is_handled(field)) {
             references_.push_back(
                 create_reference(field, ReferenceType::Usage, RefStrength::Loose));
         }
     } else if (node_type == "type_identifier" ||
                node_type == "field_identifier") {
-        references_.push_back(
-            create_reference(node, ReferenceType::Usage, RefStrength::Loose));
+        if (!is_handled(node)) {
+            references_.push_back(
+                create_reference(node, ReferenceType::Usage, RefStrength::Loose));
+        }
     }
 }
 
