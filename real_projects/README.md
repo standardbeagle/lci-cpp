@@ -28,8 +28,8 @@ git submodule update --recursive --remote
 Or use the provided setup script:
 
 ```bash
-./scripts/add-real-projects.sh --minimal   # 2 projects (fast)
-./scripts/add-real-projects.sh --full      # All 9 projects
+./scripts/add-real-projects.sh --minimal   # 3 projects (fast: Go/Python/TS)
+./scripts/add-real-projects.sh --full       # All 16 projects (covers 13 languages)
 ```
 
 ## Directory Structure
@@ -48,6 +48,13 @@ real_projects/
 │   ├── next.js/          # Next.js React framework
 │   ├── shadcn-ui/        # UI component library
 │   └── trpc/             # TypeScript RPC framework
+├── java/gson/             # Call-graph corpora for the scope-type-resolution
+├── csharp/serilog/        # languages (each had no call graph before that work).
+├── rust/ripgrep/          # real_project_languages_test.cpp asserts receiver-
+├── php/guzzle/            # type resolution fires on each of these real repos.
+├── kotlin/okhttp/
+├── ruby/sinatra/
+├── zig/zls/
 └── README.md             # This file
 ```
 
