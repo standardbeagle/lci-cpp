@@ -23,13 +23,23 @@ namespace {
 /// that trigram/postings indexing still proceeds.
 void run_unified_extraction(ProcessedFile& result,
                             std::string_view content,
-                            const std::string& path) {
+                            const std::string& path,
+                            int64_t max_parse_bytes) {
     auto ext = std::filesystem::path(path).extension().string();
     if (ext.empty()) return;
 
     parser::Language lang{};
     if (!parser::language_from_extension(ext, lang)) {
         return;  // Unsupported language: trigrams still index for text search.
+    }
+
+    // Oversized source: skip the tree-sitter parse (the expensive stage) but
+    // keep trigram text indexing. Surface the skip rather than silently
+    // dropping symbols for the file.
+    if (max_parse_bytes > 0 &&
+        static_cast<int64_t>(content.size()) > max_parse_bytes) {
+        result.parse_skipped_oversize = true;
+        return;
     }
 
     parser::PooledParser parser_guard(lang);
@@ -182,7 +192,8 @@ ProcessedFile FileProcessor::process_file(int /*worker_id*/,
     // tree-sitter. This populates the symbol-aware data the integrator
     // feeds into ReferenceTracker. Without this step, browse-file,
     // list-symbols, references, and tree endpoints all return empty.
-    run_unified_extraction(result, content, task.path);
+    run_unified_extraction(result, content, task.path,
+                           config_.index.max_parse_file_size);
 
     // Bucket trigrams during processing (zero-lock per-file)
     if (trigram_index_ != nullptr && content.size() >= 3) {

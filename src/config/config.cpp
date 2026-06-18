@@ -353,6 +353,14 @@ void apply_index(Config& cfg, const KdlNode& node) {
                 int v = 0;
                 if (get_int(child, v)) cfg.index.max_file_size = v;
             }
+        } else if (child.name == "max_parse_file_size") {
+            std::string sz;
+            if (get_string(child, sz)) {
+                cfg.index.max_parse_file_size = parse_size_string(sz);
+            } else {
+                int v = 0;
+                if (get_int(child, v)) cfg.index.max_parse_file_size = v;
+            }
         } else if (child.name == "max_total_size_mb") {
             int v = 0;
             if (get_int(child, v)) cfg.index.max_total_size_mb = v;

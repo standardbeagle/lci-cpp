@@ -4,8 +4,17 @@
 #include <gtest/gtest.h>
 #include <tree_sitter/api.h>
 
+#include <algorithm>
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <map>
+#include <sstream>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace lci::parser {
 namespace {
@@ -985,6 +994,130 @@ fn go() void {
     auto r = extract(Language::Zig, ".zig", src, "m.zig");
     EXPECT_TRUE(has_call_ref(r, "A.helpA"));  // self: A param
     EXPECT_TRUE(has_call_ref(r, "A.run"));    // const a = A{}
+}
+
+// ---------------------------------------------------------------------------
+// Stage-timing profiler (manual; set LCI_PROFILE_DIR=<path> to run).
+// Walks the tree, and for each known-language source file times tree-sitter
+// parse vs. UnifiedExtractor extraction vs. a representative trigram pass.
+// Reports the per-stage totals, throughput, and the slowest single files so a
+// pathological input (huge minified/generated source) is named, not hidden.
+// ---------------------------------------------------------------------------
+TEST(IndexProfile, StageBreakdown) {
+    const char* dir = std::getenv("LCI_PROFILE_DIR");
+    if (dir == nullptr) GTEST_SKIP() << "set LCI_PROFILE_DIR to run";
+
+    namespace fs = std::filesystem;
+    using clk = std::chrono::steady_clock;
+    auto ms = [](clk::duration d) {
+        return std::chrono::duration<double, std::milli>(d).count();
+    };
+
+    struct FileStat {
+        std::string path;
+        size_t bytes = 0;
+        double parse_ms = 0, extract_ms = 0, trigram_ms = 0;
+        size_t symbols = 0, refs = 0;
+    };
+    std::vector<FileStat> stats;
+    double tot_read = 0, tot_parse = 0, tot_extract = 0, tot_trigram = 0;
+    size_t tot_bytes = 0, tot_syms = 0, tot_refs = 0;
+
+    std::error_code ec;
+    for (auto it = fs::recursive_directory_iterator(
+             dir, fs::directory_options::skip_permission_denied, ec);
+         it != fs::recursive_directory_iterator(); it.increment(ec)) {
+        if (ec) break;
+        if (!it->is_regular_file(ec) || ec) continue;
+        std::string p = it->path().string();
+        if (p.find("/.git/") != std::string::npos) continue;
+        std::string ext = it->path().extension().string();
+        Language lang{};
+        if (!language_from_extension(ext, lang)) continue;
+
+        auto t0 = clk::now();
+        std::ifstream f(p, std::ios::binary);
+        std::stringstream ss;
+        ss << f.rdbuf();
+        std::string content = ss.str();
+        auto t1 = clk::now();
+        if (content.empty()) continue;
+
+        auto tree = parse(lang, content);
+        auto t2 = clk::now();
+        if (!tree) continue;
+
+        UnifiedExtractor ue;
+        ue.init(content, 1, ext, p);
+        ue.extract(tree.get());
+        auto r = ue.get_results();
+        auto t3 = clk::now();
+
+        // Representative trigram pass: 3-byte sliding window into a set.
+        std::vector<uint32_t> tris;
+        tris.reserve(content.size());
+        const auto* b = reinterpret_cast<const uint8_t*>(content.data());
+        for (size_t i = 0; i + 2 < content.size(); ++i)
+            tris.push_back((uint32_t(b[i]) << 16) | (uint32_t(b[i + 1]) << 8) |
+                           uint32_t(b[i + 2]));
+        std::sort(tris.begin(), tris.end());
+        tris.erase(std::unique(tris.begin(), tris.end()), tris.end());
+        auto t4 = clk::now();
+
+        FileStat fsr;
+        fsr.path = p;
+        fsr.bytes = content.size();
+        fsr.parse_ms = ms(t2 - t1);
+        fsr.extract_ms = ms(t3 - t2);
+        fsr.trigram_ms = ms(t4 - t3);
+        fsr.symbols = r.symbols.size();
+        fsr.refs = r.references.size();
+        tot_read += ms(t1 - t0);
+        tot_parse += fsr.parse_ms;
+        tot_extract += fsr.extract_ms;
+        tot_trigram += fsr.trigram_ms;
+        tot_bytes += content.size();
+        tot_syms += r.symbols.size();
+        tot_refs += r.references.size();
+        stats.push_back(std::move(fsr));
+    }
+
+    std::map<std::string, std::pair<double, int>> by_ext;  // ext -> {parse,n}
+    for (const auto& s : stats) {
+        auto e = fs::path(s.path).extension().string();
+        by_ext[e].first += s.parse_ms + s.extract_ms;
+        by_ext[e].second++;
+    }
+
+    double cpu = tot_parse + tot_extract + tot_trigram;
+    fprintf(stderr, "\n=== LCI stage profile: %s ===\n", dir);
+    fprintf(stderr, "files=%zu  bytes=%.1f MB  symbols=%zu  refs=%zu\n",
+            stats.size(), tot_bytes / 1e6, tot_syms, tot_refs);
+    fprintf(stderr, "read     : %8.1f ms\n", tot_read);
+    fprintf(stderr, "parse(TS): %8.1f ms  (%.1f%% of cpu)\n", tot_parse,
+            100 * tot_parse / cpu);
+    fprintf(stderr, "extract  : %8.1f ms  (%.1f%% of cpu)\n", tot_extract,
+            100 * tot_extract / cpu);
+    fprintf(stderr, "trigram  : %8.1f ms  (%.1f%% of cpu)\n", tot_trigram,
+            100 * tot_trigram / cpu);
+    fprintf(stderr, "throughput: %.1f MB/s parse, %.0f files/s\n",
+            tot_bytes / 1e6 / (tot_parse / 1000),
+            stats.size() / (cpu / 1000));
+
+    std::sort(stats.begin(), stats.end(), [](const auto& a, const auto& b) {
+        return (a.parse_ms + a.extract_ms) > (b.parse_ms + b.extract_ms);
+    });
+    fprintf(stderr, "--- 12 slowest files (parse+extract) ---\n");
+    for (size_t i = 0; i < stats.size() && i < 12; ++i) {
+        const auto& s = stats[i];
+        fprintf(stderr, "  %7.1f ms  %6.0f KB  p=%5.1f x=%5.1f  %s\n",
+                s.parse_ms + s.extract_ms, s.bytes / 1024.0, s.parse_ms,
+                s.extract_ms, s.path.c_str());
+    }
+    fprintf(stderr, "--- by extension (parse+extract ms / file count) ---\n");
+    for (const auto& [e, pr] : by_ext)
+        fprintf(stderr, "  %-6s %8.1f ms / %d files\n", e.c_str(), pr.first,
+                pr.second);
 }
 
 }  // namespace

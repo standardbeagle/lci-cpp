@@ -17,6 +17,11 @@ struct ProjectConfig {
 
 struct IndexConfig {
     int64_t max_file_size = 10 * 1024 * 1024;      // 10 MB
+    // Files larger than this are still trigram-indexed for text search but skip
+    // the tree-sitter parse + symbol extraction: a multi-MB source file is
+    // almost always generated/minified, where the parse cost (parse is ~58% of
+    // index CPU) buys little symbol value. 0 disables the cap.
+    int64_t max_parse_file_size = 2 * 1024 * 1024;  // 2 MB
     int64_t max_total_size_mb = 500;
     int max_file_count = 10000;
     bool follow_symlinks = false;

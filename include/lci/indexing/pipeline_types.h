@@ -63,6 +63,7 @@ struct ProcessedFile {
     std::chrono::nanoseconds duration{};
     Error error{};
     bool has_error{};
+    bool parse_skipped_oversize{};  // trigram-indexed, tree-sitter skipped
 };
 
 /// Pipeline buffer size constants.
