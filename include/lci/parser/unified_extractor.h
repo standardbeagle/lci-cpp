@@ -6,6 +6,8 @@
 #include <string_view>
 #include <vector>
 
+#include <absl/container/flat_hash_map.h>
+
 #include <lci/reference.h>
 #include <lci/scope.h>
 #include <lci/side_effects.h>
@@ -214,6 +216,13 @@ class UnifiedExtractor {
     void process_go_reference(TSNode node, std::string_view node_type);
     void process_js_reference(TSNode node, std::string_view node_type);
     void process_python_reference(TSNode node, std::string_view node_type);
+    void process_java_reference(TSNode node, std::string_view node_type);
+    void process_csharp_reference(TSNode node, std::string_view node_type);
+    void process_rust_reference(TSNode node, std::string_view node_type);
+    void process_php_reference(TSNode node, std::string_view node_type);
+    void process_kotlin_reference(TSNode node, std::string_view node_type);
+    void process_ruby_reference(TSNode node, std::string_view node_type);
+    void process_zig_reference(TSNode node, std::string_view node_type);
     Reference create_reference(TSNode node, ReferenceType ref_type,
                                RefStrength strength);
 
@@ -272,6 +281,20 @@ class UnifiedExtractor {
         uintptr_t id{};
     };
     std::vector<HandledEntry> handled_nodes_;
+
+    // Scope-based type resolution (SCIP base case): per-function map of local
+    // identifier -> type name, built syntactically (receiver, typed params,
+    // simple typed/constructor decls). Lets a method call `recv.M()` be emitted
+    // as a receiver-type-qualified ref `Type.M`, which the resolver matches to
+    // the method whose receiver type is `Type` — instead of a bare name that
+    // collides across same-named methods. Cleared on entering a top-level
+    // function/method; closures inherit the enclosing map. Write-path only.
+    absl::flat_hash_map<std::string, std::string> local_var_types_;
+    void seed_go_local_types(TSNode fn_node, bool is_method);
+    void record_go_local_var(TSNode decl_node);
+    // Nearest enclosing class/struct scope name (for self/this typing in
+    // class-based languages); empty if not inside one.
+    std::string enclosing_class_name() const;
 };
 
 /// Thread-local pool of UnifiedExtractor instances.
