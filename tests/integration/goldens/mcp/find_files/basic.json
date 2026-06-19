@@ -2,7 +2,7 @@
   "result": {
     "content": [
       {
-        "text": "{\"pattern\":\"*.go\",\"results\":[{\"file_id\":1,\"match_type\":\"fuzzy\",\"path\":\"/home/beagle/work/core/lci-cpp/tests/parity/corpora/synthetic/multi-lang/a.go\",\"score\":0.574},{\"file_id\":2,\"match_type\":\"fuzzy\",\"path\":\"/home/beagle/work/core/lci-cpp/tests/parity/corpora/synthetic/multi-lang/b.py\",\"score\":0.574},{\"file_id\":3,\"match_type\":\"fuzzy\",\"path\":\"/home/beagle/work/core/lci-cpp/tests/parity/corpora/synthetic/multi-lang/d.rs\",\"score\":0.574},{\"file_id\":4,\"match_type\":\"fuzzy\",\"path\":\"/home/beagle/work/core/lci-cpp/tests/parity/corpora/synthetic/multi-lang/c.cpp\",\"score\":0.574}],\"total_matches\":4}",
+        "text": "{\"pattern\":\"*.go\",\"results\":[],\"total_matches\":0}",
         "type": "text"
       }
     ]

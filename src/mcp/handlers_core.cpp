@@ -1022,14 +1022,20 @@ ToolResult handle_get_context(const nlohmann::json& params,
     // ContextLookupEngine (structure/variables/semantic/usage/ai) simply add
     // no fields to the compact output.
 
-    // mode + name path: minimal port of Go's handleGetObjectContextWithMode.
+    // name path: minimal port of Go's handleGetObjectContextWithMode.
     // Full ContextLookupEngine (6261 LOC across 8 files in internal/core/
     // context_lookup_*.go) covers structure / semantic / variables /
     // usage / ai sections. We implement the subset MCP callers actually
     // exercise on the standard chi/fastapi/pocketbase tests: name →
     // EnhancedSymbol resolution + optional call hierarchy. Other sections
     // remain unported and absent from the response (omitempty-style).
-    if (!mode.empty() && has_name) {
+    //
+    // Runs for ANY name lookup, not only when `mode` is set: a bare
+    // {"name": X} previously fell through to the id path and returned
+    // {contexts:[],count:0} — get_context-by-name silently empty unless the
+    // caller happened to also pass mode=. mode still tunes depth/sections via
+    // apply_context_lookup_mode above; absence of mode just uses the defaults.
+    if (has_name) {
         bool include_call_hierarchy =
             p.value("include_call_hierarchy", false);
         int max_depth = p.value("max_depth", 1);
@@ -1354,8 +1360,14 @@ ToolResult handle_find_files(const nlohmann::json& params,
                 normalized_pattern.find(' ') == std::string::npos &&
                 !normalized_pattern.empty() &&
                 !norm_filename_no_ext.empty()) {
-                // Go-compat broken levenshtein: 1.0 for total mismatch,
-                // 0.0 for identical (handled by a==b early return below).
+                // Real normalized Levenshtein SIMILARITY: 1.0 identical, 0.0
+                // wildly different. The original Go fuzzer (and the verbatim
+                // port) used the DISTANCE ratio (lev/max_len) here and then
+                // tested `>= 0.7`, which is inverted — unrelated filenames
+                // (high distance) passed and every file flooded in at ~0.574,
+                // while genuine near-matches were rejected. The Go oracle that
+                // pinned that behavior is retired, so use the correct
+                // similarity: similarity = 1 - distance/max_len.
                 double sim_norm;
                 if (normalized_pattern == norm_filename_no_ext) {
                     sim_norm = 1.0;
@@ -1365,9 +1377,8 @@ ToolResult handle_find_files(const nlohmann::json& params,
                     size_t max_len =
                         std::max(normalized_pattern.size(),
                                  norm_filename_no_ext.size());
-                    // sim_norm == lev / max_len  (intentional Go bug-port)
-                    sim_norm = static_cast<double>(lev) /
-                               static_cast<double>(max_len);
+                    sim_norm = 1.0 - static_cast<double>(lev) /
+                                         static_cast<double>(max_len);
                 }
                 if (sim_norm >= 0.7) {  // FuzzyMatcher threshold in Go
                     double phrase_score = sim_norm * 0.85;

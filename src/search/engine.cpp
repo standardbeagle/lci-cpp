@@ -380,9 +380,21 @@ std::vector<SearchResult> SearchEngine::search(
     }
     if (candidates.empty()) return {};
 
+    // Output cap (what the caller asked for) vs collection cap (how many raw
+    // matches we gather before scoring). They must differ: if we stop
+    // collecting at the output cap, the kept set is the first-N matches in
+    // candidate-file order and the later score+rank only reorders those N — so
+    // on doc-heavy repos the docs/ files fill the cap before code files are
+    // reached and code matches are never collected (measured: fastapi
+    // "APIRouter" -> 96/100 markdown, 3/100 code). Over-collect, then rank,
+    // then truncate, so high-value matches (code scores ~2x prose) win the cap.
+    int output_cap = options.max_results;
     int effective_cap = options.max_results;
     if (effective_cap <= 0) {
         effective_cap = (static_cast<int>(candidates.size()) >= 400) ? 25 : 0;
+        output_cap = effective_cap;
+    } else {
+        effective_cap = std::min(effective_cap * 8, 2000);
     }
 
     std::vector<SearchResult> results;
@@ -427,6 +439,12 @@ std::vector<SearchResult> SearchEngine::search(
     }
 
     SearchCoordinator::rank(results);
+
+    // Truncate to the requested cap AFTER ranking, so the returned set is the
+    // top-scored matches across all candidates (not the first-found).
+    if (output_cap > 0 && static_cast<int>(results.size()) > output_cap) {
+        results.resize(static_cast<size_t>(output_cap));
+    }
     return results;
 }
 
