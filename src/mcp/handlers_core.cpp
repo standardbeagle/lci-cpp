@@ -33,6 +33,29 @@ namespace mcp {
 
 namespace {
 
+/// Wildcard glob: '*' matches any run of chars (including '/'), '?' matches one.
+/// Allocation-free two-pointer scan with star-backtracking; no std::regex (this
+/// runs per-file on the find_files read path).
+bool wildcard_match(std::string_view str, std::string_view pat) {
+    size_t s = 0, p = 0, star = std::string_view::npos, s_after_star = 0;
+    while (s < str.size()) {
+        if (p < pat.size() && (pat[p] == '?' || pat[p] == str[s])) {
+            ++s;
+            ++p;
+        } else if (p < pat.size() && pat[p] == '*') {
+            star = p++;
+            s_after_star = s;
+        } else if (star != std::string_view::npos) {
+            p = star + 1;
+            s = ++s_after_star;
+        } else {
+            return false;
+        }
+    }
+    while (p < pat.size() && pat[p] == '*') ++p;
+    return p == pat.size();
+}
+
 /// Parses a comma-separated string into a vector of trimmed non-empty values.
 /// Go parity: parseListHelper (handlers.go:50). Pre-counts commas to size the
 /// output once — no geometric realloc on the hot search path.
@@ -1207,6 +1230,12 @@ ToolResult handle_find_files(const nlohmann::json& params,
         normalized_pattern = to_lower(pattern);
     }
 
+    // A pattern carrying wildcards (e.g. "*.ts", "src/*_test.go") is a glob, not
+    // a name to fuzzy-score — the literal "*.ts" would never match a filename.
+    // Match it directly against basename/path and skip the fuzzy scorer.
+    bool pattern_is_glob =
+        normalized_pattern.find_first_of("*?") != std::string::npos;
+
     // Get all file IDs from the index
     auto snapshot = indexer.read_snapshot();
     if (!snapshot || snapshot->file_count() == 0) {
@@ -1309,8 +1338,18 @@ ToolResult handle_find_files(const nlohmann::json& params,
         double score = 0.0;
         std::string match_type;
 
-        // 1. Exact full path match
-        if (match_path == normalized_pattern) {
+        // 0. Glob pattern: match basename or full path; non-matches are skipped
+        //    outright (not fuzzy-scored).
+        if (pattern_is_glob) {
+            if (wildcard_match(norm_filename, normalized_pattern) ||
+                wildcard_match(match_path, normalized_pattern)) {
+                score = 1.0;
+                match_type = "glob";
+            } else {
+                continue;
+            }
+        } else if (match_path == normalized_pattern) {
+            // 1. Exact full path match
             score = 1.0;
             match_type = "exact";
         } else if (!exact_only) {
