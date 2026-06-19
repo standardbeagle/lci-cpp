@@ -751,20 +751,79 @@ uint64_t ReferenceTracker::fnv1a_hash_name(std::string_view name) {
     return h;
 }
 
+namespace {
+// Bare type name from a possibly-decorated receiver token: "*chi.Mux" -> "Mux".
+std::string_view bare_type_name(std::string_view t) {
+    size_t i = 0;
+    while (i < t.size() && (t[i] == '*' || t[i] == '&')) ++i;
+    t = t.substr(i);
+    if (auto dot = t.rfind('.'); dot != std::string_view::npos)
+        t = t.substr(dot + 1);
+    return t;
+}
+
+// Go method-receiver type from a signature: "func (r *Mux) M(...)" -> "Mux".
+std::string_view go_signature_receiver(std::string_view sig) {
+    constexpr std::string_view kFunc = "func (";
+    if (sig.rfind(kFunc, 0) != 0) return {};
+    auto close = sig.find(')', kFunc.size());
+    if (close == std::string_view::npos) return {};
+    std::string_view recv = sig.substr(kFunc.size(), close - kFunc.size());
+    if (auto sp = recv.rfind(' '); sp != std::string_view::npos)
+        recv = recv.substr(sp + 1);  // drop the receiver var name
+    return bare_type_name(recv);
+}
+
+// Does this symbol's owning/receiver type equal `recv_type`? Matches Go
+// receivers (parsed from the signature) and class-based languages (the
+// enclosing class appears in scope_chain).
+bool symbol_matches_receiver_type(const EnhancedSymbol& sym,
+                                  std::string_view recv_type) {
+    if (go_signature_receiver(sym.signature) == recv_type) return true;
+    for (const auto& sc : sym.scope_chain) {
+        if (bare_type_name(sc.name) == recv_type) return true;
+    }
+    return false;
+}
+}  // namespace
+
 SymbolID ReferenceTracker::resolve_reference_target(
     const Snapshot& s, const Reference& ref,
     std::span<const SymbolID> file_symbol_ids) {
 
-    const auto& name = ref.referenced_name;
-    if (name.empty()) return 0;
+    const auto& full_name = ref.referenced_name;
+    if (full_name.empty()) return 0;
 
-    uint64_t name_hash = fnv1a_hash_name(name);
+    uint64_t name_hash = fnv1a_hash_name(full_name);
     uint64_t cache_key = (static_cast<uint64_t>(ref.file_id) << 32) |
                           (name_hash & 0xFFFFFFFF);
 
     if (auto it = reference_cache_.find(cache_key);
         it != reference_cache_.end()) {
         return it->second;
+    }
+
+    // Scope-typed method ref "Type.M" (emitted by the extractor when the
+    // receiver's type is locally known): resolve to the method named M whose
+    // receiver/owning type is Type — the precise target among same-named
+    // methods. Bare lookup name is M; on no receiver-type match we fall through
+    // to the name-based path on M (so unknown/dynamic receivers degrade to the
+    // existing behavior rather than failing).
+    std::string_view name = full_name;
+    std::string_view recv_type;
+    if (auto dot = full_name.rfind('.'); dot != std::string::npos) {
+        recv_type = std::string_view(full_name).substr(0, dot);
+        name = std::string_view(full_name).substr(dot + 1);
+        if (!recv_type.empty() && !name.empty()) {
+            for (SymbolID id : s.symbols.get_symbols_by_name(name)) {
+                if (const auto* sym = s.symbols.get(id)) {
+                    if (symbol_matches_receiver_type(*sym, recv_type)) {
+                        reference_cache_[cache_key] = id;
+                        return id;
+                    }
+                }
+            }
+        }
     }
 
     // Check same-file symbols first (fast path).

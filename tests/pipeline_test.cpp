@@ -11,6 +11,7 @@
 #include <lci/indexing/pipeline_progress.h>
 #include <lci/indexing/pipeline_scanner.h>
 #include <lci/indexing/pipeline_types.h>
+#include <lci/indexing/master_index.h>
 
 #include <atomic>
 #include <filesystem>
@@ -472,6 +473,37 @@ TEST(FileScannerTest, RespectsMaxFileSize) {
     for (const auto& t : tasks) {
         EXPECT_EQ(t.path.find("large.go"), std::string::npos);
     }
+}
+
+// A source file larger than max_parse_file_size skips the tree-sitter parse
+// (no symbols) but remains trigram-indexed for text search — bounding the
+// worst-case parse cost on generated/minified blobs without losing grep.
+TEST(MaxParseFileSize, OversizeSourceSkipsParseButStaysSearchable) {
+    TempDir dir;
+    dir.write_file("small.go",
+                   "package p\nfunc smallFuncMarker() int { return 1 }\n");
+    std::string big = "package p\nfunc bigFuncMarker() int { return 0 }\n";
+    big.append(std::string(4096, '\n'));
+    big.append("// trigram_token_xyzzy padding\n");
+    while (big.size() < 3u * 1024 * 1024) big.append(big);  // grow past 2 MB
+    dir.write_file("big.go", big);
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    cfg.index.max_parse_file_size = 2 * 1024 * 1024;
+
+    MasterIndex index(cfg);
+    ASSERT_TRUE(index.index_directory(dir.path().string()));
+
+    // small file parsed -> symbol present; big file parse skipped -> absent.
+    EXPECT_NE(index.ref_tracker().find_symbol_by_name("smallFuncMarker"),
+              nullptr);
+    EXPECT_EQ(index.ref_tracker().find_symbol_by_name("bigFuncMarker"),
+              nullptr);
+
+    // The big file is still text-searchable (trigram path ran).
+    auto hits = index.search("trigram_token_xyzzy", 0);
+    EXPECT_FALSE(hits.empty());
 }
 
 TEST(FileScannerTest, DetectsSymlinkCycles) {

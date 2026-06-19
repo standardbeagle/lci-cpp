@@ -305,6 +305,88 @@ TEST(ReferenceTrackerTest, FunctionTree) {
 }
 
 // ---------------------------------------------------------------------------
+// Receiver-type-qualified method resolution (SCIP base case)
+// ---------------------------------------------------------------------------
+
+// Two classes A and B each expose a method named run(). The extractor emits the
+// call sites as receiver-type-qualified refs A.run / B.run (it knows the
+// receiver types from the local var env). The resolver must route each ref to
+// the run() whose owning class scope matches the receiver type, instead of
+// collapsing both onto the first same-named symbol.
+TEST(ReferenceTrackerTest, ResolvesByReceiverTypeScope) {
+    ReferenceTracker rt;
+
+    auto scope = [](ScopeType t, const char* n, int s, int e) {
+        ScopeInfo si;
+        si.type = t;
+        si.name = n;
+        si.start_line = s;
+        si.end_line = e;
+        return si;
+    };
+    std::vector<ScopeInfo> scopes = {
+        scope(ScopeType::Class, "A", 1, 4),
+        scope(ScopeType::Class, "B", 5, 8),
+    };
+
+    std::vector<Symbol> symbols = {
+        make_sym("A", SymbolType::Struct, 1, 1, 4),
+        make_sym("runA", SymbolType::Function, 1, 2, 2),
+        make_sym("B", SymbolType::Struct, 1, 5, 8),
+        make_sym("runB", SymbolType::Function, 1, 6, 6),
+        make_sym("go", SymbolType::Function, 1, 9, 14),
+    };
+    // The two run methods share the visible name "run"; their distinct
+    // identifiers above only let the test address each one.
+    symbols[1].name = "run";
+    symbols[3].name = "run";
+
+    auto call = [](uint64_t id, const char* name, int line) {
+        Reference r;
+        r.id = id;
+        r.type = ReferenceType::Call;
+        r.referenced_name = name;
+        r.line = line;
+        r.column = 5;
+        return r;
+    };
+    std::vector<Reference> refs = {
+        call(1, "A.run", 11),  // a.run() inside go()
+        call(2, "B.run", 13),  // b.run() inside go()
+    };
+
+    rt.process_file(1, "m.cpp", symbols, refs, scopes);
+    rt.process_all_references();
+
+    // Address each run() method by line (the struct symbol shares the same
+    // span, so a plain name lookup is ambiguous).
+    const EnhancedSymbol* run_a = nullptr;
+    const EnhancedSymbol* run_b = nullptr;
+    for (const auto* es : rt.find_symbols_by_name("run")) {
+        if (es->symbol.line == 2) run_a = es;
+        if (es->symbol.line == 6) run_b = es;
+    }
+    ASSERT_NE(run_a, nullptr);
+    ASSERT_NE(run_b, nullptr);
+
+    // Each run() carries its owning class in the scope chain.
+    auto chain_has = [](const EnhancedSymbol& es, const char* n) {
+        for (const auto& sc : es.scope_chain)
+            if (sc.name == n) return true;
+        return false;
+    };
+    EXPECT_TRUE(chain_has(*run_a, "A"));
+    EXPECT_TRUE(chain_has(*run_b, "B"));
+
+    // A.run resolves to the L2 method, B.run to the L6 method — not both to A.
+    auto a_callers = rt.get_caller_names(run_a->id);
+    auto b_callers = rt.get_caller_names(run_b->id);
+    EXPECT_EQ(a_callers.size(), 1u);
+    EXPECT_EQ(b_callers.size(), 1u)
+        << "B.run must resolve to the B method, not collapse onto A.run";
+}
+
+// ---------------------------------------------------------------------------
 // Scope chain caching
 // ---------------------------------------------------------------------------
 

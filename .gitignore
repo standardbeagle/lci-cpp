@@ -13,10 +13,17 @@ Testing/
 # dartai loop state (machine-local)
 .dartai/
 
-# Real projects test data (git submodules)
+# Real projects test data (fetched via scripts/add-real-projects.sh)
 real_projects/go/
 real_projects/python/
 real_projects/typescript/
+real_projects/java/
+real_projects/csharp/
+real_projects/rust/
+real_projects/php/
+real_projects/kotlin/
+real_projects/ruby/
+real_projects/zig/
 
 # worktrack loop state (per-clone, may contain private email in lease_holder)
 .worktrack/

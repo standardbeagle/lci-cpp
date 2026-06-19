@@ -14,7 +14,7 @@ if(NOT DEFINED CMAKE_CXX_COMPILER_LAUNCHER)
 endif()
 
 project(lci
-    VERSION 0.6.0
+    VERSION 0.7.0
     DESCRIPTION "Lightning Code Index - fast semantic code search"
     LANGUAGES C CXX
 )

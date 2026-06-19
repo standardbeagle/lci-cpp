@@ -31,6 +31,16 @@ PROJECTS=(
     "typescript:next.js:https://github.com/vercel/next.js.git"
     "typescript:shadcn-ui:https://github.com/shadcn-ui/ui.git"
     "typescript:trpc:https://github.com/trpc/trpc.git"
+    # Call-graph corpora for the scope-type-resolution languages. Each had no
+    # call graph before that work; real_project_languages_test.cpp asserts
+    # receiver-type resolution fires on these real repos.
+    "java:gson:https://github.com/google/gson.git"
+    "csharp:serilog:https://github.com/serilog/serilog.git"
+    "rust:ripgrep:https://github.com/BurntSushi/ripgrep.git"
+    "php:guzzle:https://github.com/guzzle/guzzle.git"
+    "kotlin:okhttp:https://github.com/square/okhttp.git"
+    "ruby:sinatra:https://github.com/sinatra/sinatra.git"
+    "zig:zls:https://github.com/zigtools/zls.git"
 )
 
 # Minimal projects for initial setup. trpc keeps the TS surface
@@ -90,7 +100,7 @@ fi
 
 # Create real_projects directories
 log "Creating directory structure..."
-mkdir -p real_projects/{go,python,typescript}
+mkdir -p real_projects/{go,python,typescript,java,csharp,rust,php,kotlin,ruby,zig}
 
 ADDED=0
 FAILED=0
