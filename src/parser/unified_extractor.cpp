@@ -161,6 +161,7 @@ void UnifiedExtractor::reset() {
     has_current_func_ = false;
 
     handled_nodes_.clear();
+    local_var_types_.clear();
 }
 
 void UnifiedExtractor::extract(TSTree* tree) {
