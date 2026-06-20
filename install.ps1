@@ -65,13 +65,18 @@ try {
     $tarball = Join-Path $tmp $asset.name
     Assert-GitHubUrl $asset.browser_download_url
     Write-Output "Downloading $($asset.browser_download_url)"
-    Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $tarball -Headers @{ 'User-Agent' = 'lci-installer' }
+    Invoke-WebRequest -UseBasicParsing -Uri $asset.browser_download_url -OutFile $tarball -Headers @{ 'User-Agent' = 'lci-installer' }
 
     # Verify integrity against the release SHA256SUMS when present.
     $sums = $release.assets | Where-Object { $_.name -eq 'SHA256SUMS' } | Select-Object -First 1
     if ($sums) {
         Assert-GitHubUrl $sums.browser_download_url
-        $sumsText = (Invoke-WebRequest -Uri $sums.browser_download_url -Headers @{ 'User-Agent' = 'lci-installer' }).Content
+        # Download to a file and read it back rather than using .Content:
+        # on Windows PowerShell 5.1, (Invoke-WebRequest -UseBasicParsing).Content
+        # is a Byte[], not a string, so -split would operate per-byte.
+        $sumsFile = Join-Path $tmp 'SHA256SUMS'
+        Invoke-WebRequest -UseBasicParsing -Uri $sums.browser_download_url -OutFile $sumsFile -Headers @{ 'User-Agent' = 'lci-installer' }
+        $sumsText = Get-Content -Raw -Path $sumsFile
         $line = ($sumsText -split "`n") | Where-Object { $_ -match "\s$([regex]::Escape($asset.name))\s*$" } | Select-Object -First 1
         if (-not $line) { throw "SHA256SUMS has no entry for $($asset.name)" }
         $expected = ($line -split '\s+')[0].ToLower()
