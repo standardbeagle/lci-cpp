@@ -7,6 +7,9 @@
 #   LCI_VERSION   pin a specific release (e.g. 0.6.0); default: latest
 #   LCI_PREFIX    install directory; default: /usr/local/bin (else ~/.local/bin)
 #   LCI_DRYRUN    set to 1 to print the resolved download URL and exit
+#   LCI_NO_PATH   set to 1 to skip adding the install dir to your shell rc
+#   LCI_NO_SLOP   set to 1 to skip registering the lci MCP server with slop-mcp
+#   LCI_AUTO_UPDATE  set to 1 to schedule a weekly `lci update` (systemd/cron)
 #
 # Contract: see docs/superpowers/specs/2026-06-07-install-update-distribution-design.md
 set -eu
@@ -146,8 +149,71 @@ install -m 0755 "$bin" "$prefix/lci" 2>/dev/null || {
 } || err "failed to install to $prefix"
 
 printf 'Installed lci to %s/lci\n' "$prefix"
-case ":$PATH:" in
-    *":$prefix:"*) ;;
-    *) printf 'Note: %s is not on your PATH. Add it:\n  export PATH="%s:$PATH"\n' "$prefix" "$prefix";;
-esac
 "$prefix/lci" --version || true
+
+# Make lci immediately callable. A piped `curl | sh` runs in a subshell and
+# cannot mutate the parent shell's PATH, so we persist it for future shells via
+# the rc file and print the exact export for the current session. Skip with
+# LCI_NO_PATH=1.
+case ":$PATH:" in
+    *":$prefix:"*)
+        : # already on PATH — callable now
+        ;;
+    *)
+        export_line="export PATH=\"$prefix:\$PATH\""
+        if [ "${LCI_NO_PATH:-}" != "1" ]; then
+            case "${SHELL:-}" in
+                *zsh)  rc="$HOME/.zshrc" ;;
+                *bash) rc="$HOME/.bashrc" ;;
+                *)     rc="$HOME/.profile" ;;
+            esac
+            if [ -f "$rc" ] && grep -Fq "$prefix" "$rc" 2>/dev/null; then
+                :
+            elif printf '\n# Added by lci installer\n%s\n' "$export_line" >> "$rc" 2>/dev/null; then
+                printf 'Added %s to PATH in %s (new shells).\n' "$prefix" "$rc"
+            fi
+        fi
+        printf 'To use lci in THIS shell now, run:\n  %s\n' "$export_line"
+        ;;
+esac
+
+# Register the lci MCP server (`lci mcp`, stdio) with slop-mcp when it is
+# installed, so the binary is immediately usable as an MCP. User scope = all
+# projects. Re-running overwrites the entry (idempotent). Skip with LCI_NO_SLOP=1.
+if [ "${LCI_NO_SLOP:-}" != "1" ] && command -v slop-mcp >/dev/null 2>&1; then
+    if slop-mcp mcp add --user lci "$prefix/lci" mcp >/dev/null 2>&1; then
+        printf 'Registered lci MCP server with slop-mcp (user scope).\n'
+    else
+        printf 'warning: slop-mcp found but registering lci failed; add it manually:\n  slop-mcp mcp add --user lci "%s/lci" mcp\n' "$prefix" >&2
+    fi
+fi
+
+# Manual update commands (always shown).
+printf 'Update later with:\n  lci update            # install latest release\n  lci update --check    # report current vs latest without installing\n'
+
+# Optional weekly auto-update: a scheduled job that runs `lci update`. Opt in
+# with LCI_AUTO_UPDATE=1. Prefer a systemd user timer; fall back to cron.
+if [ "${LCI_AUTO_UPDATE:-}" = "1" ]; then
+    if command -v systemctl >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1; then
+        unit_dir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+        mkdir -p "$unit_dir"
+        printf '[Unit]\nDescription=Update lci to the latest release\n\n[Service]\nType=oneshot\nExecStart=%s/lci update\n' "$prefix" > "$unit_dir/lci-update.service"
+        printf '[Unit]\nDescription=Weekly lci auto-update\n\n[Timer]\nOnCalendar=weekly\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n' > "$unit_dir/lci-update.timer"
+        systemctl --user daemon-reload >/dev/null 2>&1
+        if systemctl --user enable --now lci-update.timer >/dev/null 2>&1; then
+            printf 'Auto-update enabled: systemd user timer (weekly).\n  Disable: systemctl --user disable --now lci-update.timer\n'
+        else
+            printf 'warning: could not enable systemd timer; auto-update not scheduled\n' >&2
+        fi
+    elif command -v crontab >/dev/null 2>&1; then
+        if crontab -l 2>/dev/null | grep -Fq 'lci-auto-update'; then
+            printf 'Auto-update already scheduled (crontab).\n'
+        elif { crontab -l 2>/dev/null; printf '@weekly %s/lci update >/dev/null 2>&1  # lci-auto-update\n' "$prefix"; } | crontab -; then
+            printf 'Auto-update enabled: weekly crontab entry.\n  Disable: crontab -e (remove the lci-auto-update line)\n'
+        else
+            printf 'warning: could not write crontab; auto-update not scheduled\n' >&2
+        fi
+    else
+        printf 'warning: LCI_AUTO_UPDATE=1 but no systemd --user or crontab found; skipped\n' >&2
+    fi
+fi

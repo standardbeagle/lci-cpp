@@ -7,6 +7,8 @@
 #   LCI_VERSION   pin a specific release (e.g. 0.6.0); default: latest
 #   LCI_PREFIX    install directory; default: %LOCALAPPDATA%\Programs\lci
 #   LCI_DRYRUN    set to 1 to print the resolved download URL and exit
+#   LCI_NO_SLOP   set to 1 to skip registering the lci MCP server with slop-mcp
+#   LCI_AUTO_UPDATE  set to 1 to schedule a weekly `lci update` (Task Scheduler)
 #
 # Contract: see docs/superpowers/specs/2026-06-07-install-update-distribution-design.md
 $ErrorActionPreference = 'Stop'
@@ -98,13 +100,47 @@ try {
     Copy-Item -Path $bin.FullName -Destination (Join-Path $prefix 'lci.exe') -Force
     Write-Output "Installed lci to $prefix\lci.exe"
 
-    # Add to the user PATH if missing.
+    # Add to the user PATH (persistent, future shells) if missing, and to the
+    # current session so lci is immediately callable — `irm | iex` runs in the
+    # caller's session, so updating $env:PATH here takes effect now.
     $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
     if (($userPath -split ';') -notcontains $prefix) {
         [Environment]::SetEnvironmentVariable('Path', "$userPath;$prefix", 'User')
-        Write-Output "Added $prefix to your user PATH. Restart your shell to pick it up."
+        Write-Output "Added $prefix to your user PATH."
+    }
+    if (($env:PATH -split ';') -notcontains $prefix) {
+        $env:PATH = "$prefix;$env:PATH"
     }
     & (Join-Path $prefix 'lci.exe') --version
+
+    # Register the lci MCP server (`lci mcp`, stdio) with slop-mcp when it is
+    # installed, so the binary is immediately usable as an MCP. User scope = all
+    # projects. Re-running overwrites the entry. Skip with $env:LCI_NO_SLOP='1'.
+    if ($env:LCI_NO_SLOP -ne '1' -and (Get-Command slop-mcp -ErrorAction SilentlyContinue)) {
+        & slop-mcp mcp add --user lci (Join-Path $prefix 'lci.exe') mcp 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Output 'Registered lci MCP server with slop-mcp (user scope).'
+        } else {
+            Write-Warning "slop-mcp found but registering lci failed; add it manually: slop-mcp mcp add --user lci `"$prefix\lci.exe`" mcp"
+        }
+    }
+
+    Write-Output 'Update later with:'
+    Write-Output '  lci update            # install latest release'
+    Write-Output '  lci update --check    # report current vs latest without installing'
+
+    # Optional weekly auto-update via Task Scheduler. Opt in with
+    # $env:LCI_AUTO_UPDATE='1'. /F overwrites an existing task (idempotent).
+    if ($env:LCI_AUTO_UPDATE -eq '1') {
+        $exe = Join-Path $prefix 'lci.exe'
+        & schtasks /Create /TN 'lci-update' /TR "`"$exe`" update" /SC WEEKLY /F 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Output "Auto-update enabled: weekly scheduled task 'lci-update'."
+            Write-Output '  Disable: schtasks /Delete /TN lci-update /F'
+        } else {
+            Write-Warning 'LCI_AUTO_UPDATE=1 but creating the scheduled task failed.'
+        }
+    }
 } finally {
     Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
 }
