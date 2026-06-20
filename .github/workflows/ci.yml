@@ -147,9 +147,14 @@ jobs:
         with:
           vcpkgGitCommitId: "f3e10653cc27d62a37a3763cd84b38bca07c6075"
 
+      # Static-md triplet: exercise the SAME self-contained linkage the release
+      # leg ships (vcpkg deps linked into lci.exe, dynamic CRT). See release.yml
+      # windows leg for why; keep the two in lockstep so this gate proves the
+      # shipped artifact loads standalone.
       - name: Configure
         run: |
           cmake --preset release `
+            -DVCPKG_TARGET_TRIPLET=x64-windows-static-md `
             -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
 
       - name: Dump vcpkg logs on failure

@@ -112,9 +112,18 @@ jobs:
         with:
           vcpkgGitCommitId: "f3e10653cc27d62a37a3763cd84b38bca07c6075"
 
+      # x64-windows-static-md links the vcpkg deps (abseil, re2, xxhash, ...)
+      # statically INTO lci.exe while keeping the dynamic CRT (/MD) that the
+      # project and its FetchContent deps already use. Without this the default
+      # x64-windows triplet builds those deps as DLLs that the CPack TGZ does
+      # not bundle, so the shipped binary fails to load on any machine without
+      # them (the libprofiler.so.0 failure's Windows analogue). Keep this in
+      # lockstep with the ci.yml windows leg so the unit gate exercises the same
+      # linkage that ships.
       - name: Configure
         run: |
           cmake --preset release `
+            -DVCPKG_TARGET_TRIPLET=x64-windows-static-md `
             -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
 
       - name: Build
