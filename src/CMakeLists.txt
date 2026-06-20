@@ -133,35 +133,47 @@ if(WIN32)
 endif()
 # CoreServices framework no longer needed: efsw vendors its own FSEvents bindings.
 
-# Optional: gperftools for --profile-cpu / --profile-memory wiring.
-# When found, profiling.cpp uses ProfilerStart/HeapProfilerStart; when absent,
-# the runtime path emits a clear error (Karpathy rule 6) instead of silent no-op.
+# Optional: gperftools for --profile-cpu / --profile-memory wiring (DEV ONLY).
+#
+# OFF by default so release binaries stay self-contained. Auto-detecting the
+# system gperftools and linking its SHARED libprofiler/libtcmalloc made the
+# release binary hard-depend on libprofiler.so.0; machines without
+# libgoogle-perftools installed fail at load ("error while loading shared
+# libraries: libprofiler.so.0"). Enable explicitly for local profiling:
+# -DLCI_ENABLE_GPERFTOOLS=ON. When disabled, profiling.cpp fails fast at
+# runtime (Karpathy rule 6) with a clear rebuild hint.
 #
 # tcmalloc replaces the global allocator and is incompatible with the
 # sanitizer allocators (ASan/TSan/MSan); linking both aborts at startup
-# ("Attempt to free invalid pointer"). Skip gperftools entirely under any
-# -fsanitize build so sanitizer presets (e.g. tsan) link and run.
+# ("Attempt to free invalid pointer"). Force-disabled under any -fsanitize
+# build so sanitizer presets (e.g. tsan) link and run even if ON is passed.
+option(LCI_ENABLE_GPERFTOOLS "Link gperftools (shared libprofiler/libtcmalloc) for --profile-cpu/--profile-memory; dev only, breaks self-contained release" OFF)
 string(FIND "${CMAKE_CXX_FLAGS}" "-fsanitize" LCI_SANITIZER_POS)
 if(LCI_SANITIZER_POS GREATER -1)
     set(LCI_SANITIZER_BUILD ON)
 else()
     set(LCI_SANITIZER_BUILD OFF)
 endif()
-find_library(LCI_GPERFTOOLS_PROFILER profiler)
-find_library(LCI_GPERFTOOLS_TCMALLOC tcmalloc)
-find_path(LCI_GPERFTOOLS_INCLUDE gperftools/profiler.h)
-if(LCI_SANITIZER_BUILD)
-    message(STATUS "sanitizer build - gperftools/tcmalloc disabled (allocator conflict)")
-elseif(LCI_GPERFTOOLS_PROFILER AND LCI_GPERFTOOLS_TCMALLOC AND LCI_GPERFTOOLS_INCLUDE)
-    message(STATUS "gperftools found - enabling --profile-cpu / --profile-memory")
-    target_compile_definitions(lci_lib PUBLIC LCI_HAVE_GPERFTOOLS=1)
-    target_include_directories(lci_lib PUBLIC "${LCI_GPERFTOOLS_INCLUDE}")
-    target_link_libraries(lci_lib PUBLIC
-        "${LCI_GPERFTOOLS_PROFILER}"
-        "${LCI_GPERFTOOLS_TCMALLOC}"
-    )
+if(NOT LCI_ENABLE_GPERFTOOLS)
+    message(STATUS "gperftools disabled (LCI_ENABLE_GPERFTOOLS=OFF) - --profile-cpu/--profile-memory fail-fast at runtime")
+elseif(LCI_SANITIZER_BUILD)
+    message(STATUS "sanitizer build - gperftools/tcmalloc force-disabled (allocator conflict)")
 else()
-    message(STATUS "gperftools not found - --profile-cpu/--profile-memory will fail-fast at runtime")
+    find_library(LCI_GPERFTOOLS_PROFILER profiler)
+    find_library(LCI_GPERFTOOLS_TCMALLOC tcmalloc)
+    find_path(LCI_GPERFTOOLS_INCLUDE gperftools/profiler.h)
+    if(LCI_GPERFTOOLS_PROFILER AND LCI_GPERFTOOLS_TCMALLOC AND LCI_GPERFTOOLS_INCLUDE)
+        message(STATUS "gperftools found - enabling --profile-cpu / --profile-memory")
+        target_compile_definitions(lci_lib PUBLIC LCI_HAVE_GPERFTOOLS=1)
+        target_include_directories(lci_lib PUBLIC "${LCI_GPERFTOOLS_INCLUDE}")
+        target_link_libraries(lci_lib PUBLIC
+            "${LCI_GPERFTOOLS_PROFILER}"
+            "${LCI_GPERFTOOLS_TCMALLOC}"
+        )
+    else()
+        message(FATAL_ERROR "LCI_ENABLE_GPERFTOOLS=ON but gperftools not found "
+            "(apt: libgoogle-perftools-dev, brew: gperftools, vcpkg: gperftools)")
+    endif()
 endif()
 
 add_executable(lci
