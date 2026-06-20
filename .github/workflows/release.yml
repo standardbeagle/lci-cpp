@@ -138,10 +138,16 @@ jobs:
           & build/release/tests/Release/lci_tests.exe
           if ($LASTEXITCODE -ne 0) { throw "lci_tests failed ($LASTEXITCODE)" }
 
+      # Use CMake's cpack explicitly. Chocolatey ships its own cpack.exe
+      # (a NuGet packer) that shadows CMake's on the runner PATH; a bare
+      # `cpack` resolves to it and fails with "not found or not a .nuspec
+      # file. 'TGZ'". Resolve cpack next to the cmake on PATH instead.
       - name: Package
         run: |
+          $cpack = Join-Path (Split-Path (Get-Command cmake).Source) "cpack.exe"
           cd build/release
-          cpack -G TGZ -C Release
+          & $cpack -G TGZ -C Release
+          if ($LASTEXITCODE -ne 0) { throw "cpack failed ($LASTEXITCODE)" }
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
