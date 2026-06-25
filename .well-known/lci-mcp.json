@@ -1,0 +1,14 @@
+{
+  "name": "lci",
+  "displayName": "LCI — Lightning Code Index",
+  "description": "Sub-millisecond semantic code search and code-intelligence MCP server (stdio). Index a repo once, then search content, look up symbols, trace call hierarchies, find references, outline files, and analyze git change — with ~80% less context than grep.",
+  "transport": "stdio",
+  "command": "lci",
+  "args": ["mcp"],
+  "homepage": "https://github.com/standardbeagle/lci-cpp",
+  "install": {
+    "linux_macos": "curl -fsSL https://raw.githubusercontent.com/standardbeagle/lci-cpp/main/install.sh | sh",
+    "windows": "irm https://raw.githubusercontent.com/standardbeagle/lci-cpp/main/install.ps1 | iex",
+    "npm": "npm install -g @standardbeagle/lci"
+  }
+}

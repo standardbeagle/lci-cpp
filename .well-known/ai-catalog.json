@@ -1,0 +1,39 @@
+{
+  "specVersion": "1.0",
+  "host": {
+    "displayName": "Standard Beagle",
+    "identifier": "did:web:standardbeagle.com"
+  },
+  "entries": [
+    {
+      "identifier": "urn:air:standardbeagle.com:server:lci",
+      "displayName": "LCI — Lightning Code Index",
+      "type": "application/mcp-server+json",
+      "url": "https://standardbeagle.com/.well-known/lci-mcp.json",
+      "description": "Sub-millisecond semantic code search and code-intelligence MCP server. Indexes a repository with tree-sitter across 13 languages and answers search, symbol lookup, call-hierarchy, references, file outline, and git-change queries with ~80% less context than grep. Runs locally over stdio (`lci mcp`).",
+      "capabilities": [
+        "info",
+        "search",
+        "find_files",
+        "get_context",
+        "context",
+        "list_symbols",
+        "inspect_symbol",
+        "browse_file",
+        "index_stats",
+        "debug_info",
+        "semantic_annotations",
+        "side_effects",
+        "code_insight",
+        "git_analysis"
+      ],
+      "representativeQueries": [
+        "find where the authentication middleware is defined",
+        "show me all callers of the ServeHTTP function",
+        "search the codebase for functions that parse JSON",
+        "what does index_directory call and is it pure",
+        "list every struct type in the parser package"
+      ]
+    }
+  ]
+}
