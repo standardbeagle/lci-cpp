@@ -355,6 +355,12 @@ nlohmann::json build_inspect_result(const EnhancedSymbol& sym,
 bool matches_list_filters(const EnhancedSymbol& sym,
                           const std::vector<SymbolType>& kinds,
                           const nlohmann::json& params) {
+    // Anonymous symbols (empty name) are unaddressable closures/lambdas — they
+    // can't be inspected or referenced by name, so they're noise in the "ls for
+    // code". Under the default name sort they'd also sort first ("" precedes
+    // every name), burying the real symbols. Drop them outright.
+    if (sym.symbol.name.empty()) return false;
+
     if (!kind_matches(sym.symbol.type, kinds)) return false;
 
     // Exported filter
