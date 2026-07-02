@@ -357,19 +357,22 @@ ToolResult side_effect_file_query(const nlohmann::json& params,
     int max_results = clamp(params.value("max_results", 100), 1, 10000);
 
     nlohmann::json results = nlohmann::json::array();
-    int count = 0;
+    int total = 0;
+    int shown = 0;
     for (const auto& [key, info] : analyzer.results()) {
         if (info.file_path != file_path) continue;
-        if (count >= max_results) break;
-        results.push_back(side_effect_to_json(info, include_reasons,
-                                              include_transitive,
-                                              include_confidence));
-        ++count;
+        ++total;
+        if (shown < max_results) {
+            results.push_back(side_effect_to_json(info, include_reasons,
+                                                  include_transitive,
+                                                  include_confidence));
+            ++shown;
+        }
     }
 
     nlohmann::json response;
     response["results"] = std::move(results);
-    response["total_count"] = count;
+    response["total_count"] = total;
     response["mode"] = "file";
     return make_json_response(response);
 }
@@ -427,20 +430,23 @@ ToolResult side_effect_category_query(const nlohmann::json& params,
     int max_results = clamp(params.value("max_results", 100), 1, 10000);
 
     nlohmann::json results = nlohmann::json::array();
-    int count = 0;
+    int total = 0;
+    int shown = 0;
     for (const auto& [key, info] : analyzer.results()) {
         uint32_t combined = info.categories | info.transitive_categories;
         if ((combined & bit) == 0) continue;
-        if (count >= max_results) break;
-        results.push_back(side_effect_to_json(info, include_reasons,
-                                              include_transitive,
-                                              include_confidence));
-        ++count;
+        ++total;
+        if (shown < max_results) {
+            results.push_back(side_effect_to_json(info, include_reasons,
+                                                  include_transitive,
+                                                  include_confidence));
+            ++shown;
+        }
     }
 
     nlohmann::json response;
     response["results"] = std::move(results);
-    response["total_count"] = count;
+    response["total_count"] = total;
     response["mode"] = "category";
     return make_json_response(response);
 }
