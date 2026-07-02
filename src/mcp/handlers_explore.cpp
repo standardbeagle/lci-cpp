@@ -709,7 +709,7 @@ ToolResult handle_browse_file(const nlohmann::json& params,
         err["hint"] =
             "Use find_files to locate the correct path, or provide "
             "file_id from search results";
-        return {err.dump(), true};
+        return {dump_json_lossy(err), true};
     }
 
     auto kinds = parse_symbol_kinds(params.value("kind", ""));

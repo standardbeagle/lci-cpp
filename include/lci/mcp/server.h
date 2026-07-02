@@ -65,6 +65,15 @@ using ToolHandler = std::function<ToolResult(const nlohmann::json& params)>;
 
 // -- Response helpers ---------------------------------------------------------
 
+/// Serializes JSON with U+FFFD replacement for invalid UTF-8 instead of the
+/// nlohmann default, which throws type_error.316 on the first non-UTF-8 byte.
+/// MCP responses reflect caller-supplied strings and source-derived text
+/// (symbol names, code snippets, paths) that may contain non-UTF-8 bytes, so
+/// every serialization that can see such content — tool payloads AND the wire
+/// envelope written in the run loop — must use this to stay total. A strict
+/// dump on the unwrapped wire path aborts the whole server.
+std::string dump_json_lossy(const nlohmann::json& data);
+
 /// Creates a JSON text response from arbitrary data.
 ToolResult make_json_response(const nlohmann::json& data);
 

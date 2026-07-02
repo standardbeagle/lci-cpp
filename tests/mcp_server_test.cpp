@@ -77,6 +77,21 @@ class McpServerTest : public ::testing::Test {
     std::unique_ptr<McpServer> server_;
 };
 
+// -- Response serialization robustness ----------------------------------------
+// Regression for a fuzz_get_context finding: tool responses reflect
+// caller-supplied strings and source-derived text that may contain non-UTF-8
+// bytes. A strict nlohmann dump throws type_error.316 on the first bad byte;
+// the response helpers must serialize losslessly (U+FFFD replacement) instead.
+
+TEST(McpResponse, LossyDumpToleratesInvalidUtf8) {
+    nlohmann::json j;
+    j["value"] = std::string("bad\x8a\xffbyte");  // lone 0x8A/0xFF: invalid UTF-8
+    EXPECT_NO_THROW({ (void)lci::mcp::dump_json_lossy(j); });
+    EXPECT_NO_THROW({ (void)lci::mcp::make_json_response(j); });
+    EXPECT_NO_THROW(
+        { (void)lci::mcp::make_error_response("op", "msg\x8a"); });
+}
+
 // -- Tool registration tests --------------------------------------------------
 
 TEST_F(McpServerTest, RegistersAll14Tools) {
@@ -393,6 +408,51 @@ TEST_F(McpStdioTest, ExceptionRecovery) {
     EXPECT_EQ(text["operation"], "throwing_tool");
     EXPECT_TRUE(text["error"].get<std::string>().find(
                     "deliberate test failure") != std::string::npos);
+}
+
+TEST_F(McpStdioTest, InvalidUtf8ToolOutputDoesNotAbortRunLoop) {
+    // A tool whose result text carries invalid UTF-8 must not abort the run
+    // loop when the wire envelope is serialized (write_message). Pre-fix this
+    // threw type_error.316 on the unwrapped std::cout dump and terminated the
+    // server. Regression for the fuzz_get_context finding at the wire layer.
+    Config config;
+    config.project.root = "/tmp/lci-mcp-test";
+    auto srv = std::make_unique<McpServer>(config);
+    srv->add_tool(
+        {"bad_utf8", "emits invalid utf8", {}, {}},
+        [](const nlohmann::json& /*params*/) -> ToolResult {
+            return {std::string("payload\x8a\xffend"), false};
+        });
+
+    std::string input =
+        frame_message(make_request("initialize", 1)) +
+        frame_message(make_request(
+            "tools/call", 2,
+            {{"name", "bad_utf8"}, {"arguments", nlohmann::json::object()}}));
+
+    auto* old_cin = std::cin.rdbuf();
+    auto* old_cout = std::cout.rdbuf();
+    std::istringstream in_stream(input);
+    std::ostringstream out_stream;
+    std::cin.rdbuf(in_stream.rdbuf());
+    std::cout.rdbuf(out_stream.rdbuf());
+
+    int exit_code = srv->run();
+
+    std::cin.rdbuf(old_cin);
+    std::cout.rdbuf(old_cout);
+
+    EXPECT_EQ(exit_code, 0);
+    // Two well-formed newline-framed responses came back (no crash, no partial
+    // write); the second is the tool call with its (now U+FFFD-sanitized) text.
+    std::istringstream rs(out_stream.str());
+    std::vector<nlohmann::json> responses;
+    while (rs.good() && rs.peek() != EOF) {
+        auto r = parse_response(rs);
+        if (!r.is_null()) responses.push_back(std::move(r));
+    }
+    ASSERT_EQ(responses.size(), 2u);
+    EXPECT_TRUE(responses[1]["result"]["content"][0].contains("text"));
 }
 
 TEST_F(McpStdioTest, PingResponse) {

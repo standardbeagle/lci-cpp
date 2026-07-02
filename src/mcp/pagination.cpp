@@ -14,7 +14,10 @@ PaginationConfig default_pagination_config() {
 // -- TokenEstimator -----------------------------------------------------------
 
 int TokenEstimator::estimate_tokens(const nlohmann::json& value) const {
-    auto s = value.dump();
+    // Lossy UTF-8: this only needs a character count for the token estimate,
+    // and a strict dump would throw on non-UTF-8 content in the payload.
+    auto s = value.dump(-1, ' ', /*ensure_ascii=*/false,
+                        nlohmann::json::error_handler_t::replace);
     int char_count = static_cast<int>(s.size());
     return static_cast<int>(static_cast<double>(char_count) / kCharsPerToken *
                             kJsonOverhead);

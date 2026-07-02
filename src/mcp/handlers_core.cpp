@@ -621,7 +621,7 @@ ToolResult handle_search(const nlohmann::json& params,
         // golden churn for callers already parsing validation_errors[].
         auto err_json = create_multi_validation_error_response(
             "search", schema_errors);
-        return {err_json.dump(), true};
+        return {dump_json_lossy(err_json), true};
     }
 
     // Business rule: schema can't express "at least one of {pattern, patterns}
@@ -633,7 +633,7 @@ ToolResult handle_search(const nlohmann::json& params,
     if (biz_err.has_value()) {
         auto err_json = create_validation_error_response(
             "search", *biz_err);
-        return {err_json.dump(), true};
+        return {dump_json_lossy(err_json), true};
     }
 
     auto pattern = params.value("pattern", "");

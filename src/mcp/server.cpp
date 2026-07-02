@@ -95,8 +95,10 @@ std::optional<nlohmann::json> McpServer::read_message() {
 
 void McpServer::write_message(const nlohmann::json& msg) {
     // dump() escapes any embedded newlines, so the trailing '\n' is the
-    // sole frame delimiter.
-    std::cout << msg.dump() << '\n';
+    // sole frame delimiter. Lossy UTF-8 so a response echoing non-UTF-8 bytes
+    // (query text or source-derived content) can't abort the run loop on the
+    // unwrapped wire write.
+    std::cout << dump_json_lossy(msg) << '\n';
     std::cout.flush();
 }
 
@@ -162,7 +164,7 @@ nlohmann::json McpServer::handle_request(const nlohmann::json& request) {
         result_obj["tools"] = std::move(tools_arr);
         env["result"] = std::move(result_obj);
 
-        std::cout << env.dump() << '\n';
+        std::cout << dump_json_lossy(env) << '\n';
         std::cout.flush();
         return nullptr;
     } else if (method == "tools/call") {
