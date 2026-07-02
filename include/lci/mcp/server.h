@@ -17,6 +17,14 @@ class SearchEngine;
 
 namespace mcp {
 
+// -- Protocol versions --------------------------------------------------------
+
+/// MCP protocol revisions this server supports, oldest first. initialize
+/// echoes the client's requested version when supported, else the newest.
+inline constexpr const char* kSupportedProtocolVersions[] = {
+    "2024-11-05", "2025-03-26", "2025-06-18"};
+inline constexpr const char* kLatestProtocolVersion = "2025-06-18";
+
 // -- JSON-RPC types -----------------------------------------------------------
 
 /// A single tool parameter property in a JSON Schema.
@@ -63,7 +71,7 @@ ToolResult make_error_response(const std::string& operation,
 
 /// MCP server with stdio JSON-RPC transport.
 ///
-/// Reads JSON-RPC messages from stdin (Content-Length header + JSON body),
+/// Reads newline-delimited JSON-RPC messages from stdin (MCP stdio framing),
 /// writes responses to stdout. Implements the MCP protocol for tool
 /// registration and invocation.
 ///

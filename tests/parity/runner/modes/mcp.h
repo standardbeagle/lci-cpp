@@ -6,8 +6,6 @@
 
 namespace lci::parity {
 
-enum class McpFraming { Ndjson, ContentLength };
-
 // Drives one MCP descriptor: spawns the binary with `mcp` subcommand,
 // performs JSON-RPC initialize, sends the descriptor's tool call,
 // captures the response, terminates cleanly. The descriptor's
@@ -16,7 +14,6 @@ enum class McpFraming { Ndjson, ContentLength };
 CapturedOutput run_mcp(const std::string& binary_path,
                        const Descriptor&  d,
                        const std::string& corpus_path,
-                       McpFraming         framing,
                        int                timeout_seconds = 60);
 
 } // namespace lci::parity

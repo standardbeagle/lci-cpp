@@ -58,63 +58,15 @@ std::string read_one_line(int fd, std::chrono::steady_clock::time_point deadline
     return out;
 }
 
-// Encode a JSON-RPC frame in the chosen framing.
-std::string encode_frame(const std::string& body, McpFraming f) {
-    if (f == McpFraming::Ndjson) {
-        return body.back() == '\n' ? body : body + "\n";
-    }
-    // Content-Length
-    return "Content-Length: " + std::to_string(body.size()) + "\r\n\r\n" + body;
+// Encode a JSON-RPC frame: newline-delimited JSON (MCP stdio framing).
+std::string encode_frame(const std::string& body) {
+    return body.back() == '\n' ? body : body + "\n";
 }
 
 // Read one decoded frame from fd. Blocks (up to deadline) until a complete
 // frame is available. Returns empty string on EOF/timeout.
-std::string read_frame(int fd, McpFraming f,
-                       std::chrono::steady_clock::time_point deadline) {
-    if (f == McpFraming::Ndjson) {
-        return read_one_line(fd, deadline);
-    }
-    // Content-Length: read headers until blank line, parse Content-Length, read body.
-    std::string headers;
-    while (std::chrono::steady_clock::now() < deadline) {
-        char c;
-        ssize_t n = ::read(fd, &c, 1);
-        if (n == 1) {
-            headers.push_back(c);
-            if (headers.size() >= 4 &&
-                headers.compare(headers.size() - 4, 4, "\r\n\r\n") == 0) break;
-        } else if (n == 0) {
-            return std::string();
-        } else {
-            if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(5));
-                continue;
-            }
-            return std::string();
-        }
-    }
-    // Parse Content-Length
-    size_t len = 0;
-    auto pos = headers.find("Content-Length:");
-    if (pos == std::string::npos) return std::string();
-    pos += sizeof("Content-Length:") - 1;
-    while (pos < headers.size() && (headers[pos] == ' ' || headers[pos] == '\t')) ++pos;
-    while (pos < headers.size() && std::isdigit(static_cast<unsigned char>(headers[pos]))) {
-        len = len * 10 + (headers[pos++] - '0');
-    }
-    std::string body;
-    body.reserve(len);
-    while (body.size() < len && std::chrono::steady_clock::now() < deadline) {
-        char buf[4096];
-        size_t want = std::min(sizeof(buf), len - body.size());
-        ssize_t n = ::read(fd, buf, want);
-        if (n > 0) body.append(buf, static_cast<size_t>(n));
-        else if (n == 0) break;
-        else if (errno == EAGAIN || errno == EWOULDBLOCK) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(5));
-        } else break;
-    }
-    return body;
+std::string read_frame(int fd, std::chrono::steady_clock::time_point deadline) {
+    return read_one_line(fd, deadline);
 }
 
 } // namespace
@@ -122,7 +74,6 @@ std::string read_frame(int fd, McpFraming f,
 CapturedOutput run_mcp(const std::string& binary_path,
                        const Descriptor&  d,
                        const std::string& corpus_path,
-                       McpFraming         framing,
                        int                timeout_seconds) {
     int out_pipe[2], in_pipe[2], err_pipe[2];
     if (pipe(out_pipe) || pipe(in_pipe) || pipe(err_pipe)) {
@@ -186,11 +137,11 @@ CapturedOutput run_mcp(const std::string& binary_path,
                     std::chrono::seconds(timeout_seconds);
 
     // MCP handshake
-    write_all(in_pipe[1], encode_frame(kInitializeBody, framing));
-    std::string init_resp = read_frame(out_pipe[0], framing, deadline);
+    write_all(in_pipe[1], encode_frame(kInitializeBody));
+    std::string init_resp = read_frame(out_pipe[0], deadline);
     (void)init_resp; // we don't validate beyond non-empty
 
-    write_all(in_pipe[1], encode_frame(kInitializedNotification, framing));
+    write_all(in_pipe[1], encode_frame(kInitializedNotification));
 
     // Optionally wait for async indexing to finish before the captured call.
     // The Go server indexes in a background goroutine and tools return an
@@ -203,8 +154,8 @@ CapturedOutput run_mcp(const std::string& binary_path,
             "{\"jsonrpc\":\"2.0\",\"id\":900,\"method\":\"tools/call\","
             "\"params\":{\"name\":\"index_stats\",\"arguments\":{}}}";
         while (std::chrono::steady_clock::now() < deadline) {
-            write_all(in_pipe[1], encode_frame(kStatsCall, framing));
-            std::string r = read_frame(out_pipe[0], framing, deadline);
+            write_all(in_pipe[1], encode_frame(kStatsCall));
+            std::string r = read_frame(out_pipe[0], deadline);
             bool ready = false;
             try {
                 auto j = nlohmann::json::parse(r);
@@ -224,7 +175,7 @@ CapturedOutput run_mcp(const std::string& binary_path,
 
     // Send the descriptor's stdin payload (the tool-call JSON-RPC).
     if (!d.invocation.stdin_data.empty()) {
-        write_all(in_pipe[1], encode_frame(d.invocation.stdin_data, framing));
+        write_all(in_pipe[1], encode_frame(d.invocation.stdin_data));
     }
 
     // Drain stderr concurrently while reading the tool-call response.
@@ -241,7 +192,7 @@ CapturedOutput run_mcp(const std::string& binary_path,
         }
     });
 
-    std::string call_resp = read_frame(out_pipe[0], framing, deadline);
+    std::string call_resp = read_frame(out_pipe[0], deadline);
 
     close(in_pipe[1]);
     ::kill(pid, SIGTERM);

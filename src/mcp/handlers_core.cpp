@@ -490,7 +490,7 @@ ToolResult handle_info(const nlohmann::json& params) {
         data["name"] = "version";
         data["server_name"] = "lightning-code-index-mcp";
         data["server_version"] = kVersion;
-        data["mcp_version"] = "2025-06-18";
+        data["mcp_version"] = kLatestProtocolVersion;
         data["capabilities"] = {"stdio_transport", "semantic_search",
                                 "regex_search", "symbol_analysis",
                                 "call_hierarchy", "multi_language_support"};

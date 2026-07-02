@@ -32,11 +32,9 @@ void register_all_tools_nulldeps(McpServer& server) {
     register_context_handlers(server, nullptr);
 }
 
-/// Builds a JSON-RPC request string with Content-Length framing.
+/// Builds a JSON-RPC request string with newline-delimited framing (MCP stdio).
 std::string frame_message(const nlohmann::json& msg) {
-    auto body = msg.dump();
-    return "Content-Length: " + std::to_string(body.size()) + "\r\n\r\n" +
-           body;
+    return msg.dump() + "\n";
 }
 
 /// Builds a JSON-RPC request.
@@ -52,26 +50,17 @@ nlohmann::json make_request(const std::string& method, int id,
     return req;
 }
 
-/// Parses a framed response from a string stream, returning the JSON body.
+/// Parses one newline-delimited response from a string stream.
 nlohmann::json parse_response(std::istream& stream) {
     std::string line;
-    int content_length = -1;
-
     while (std::getline(stream, line)) {
         if (!line.empty() && line.back() == '\r') {
             line.pop_back();
         }
-        if (line.empty()) break;
-        if (line.rfind("Content-Length:", 0) == 0) {
-            content_length = std::stoi(line.substr(15));
-        }
+        if (line.empty()) continue;
+        return nlohmann::json::parse(line);
     }
-
-    if (content_length <= 0) return nullptr;
-
-    std::string body(static_cast<size_t>(content_length), '\0');
-    stream.read(body.data(), content_length);
-    return nlohmann::json::parse(body);
+    return nullptr;
 }
 
 // -- Test fixture -------------------------------------------------------------
@@ -186,6 +175,31 @@ TEST_F(McpStdioTest, InitializeHandshake) {
     EXPECT_TRUE(resp.contains("result"));
     EXPECT_EQ(resp["result"]["protocolVersion"], "2024-11-05");
     EXPECT_EQ(resp["result"]["serverInfo"]["name"], "lci");
+}
+
+TEST_F(McpStdioTest, InitializeEchoesSupportedProtocolVersion) {
+    auto responses = exchange({
+        make_request("initialize", 1,
+                     {{"protocolVersion", "2025-06-18"},
+                      {"capabilities", nlohmann::json::object()},
+                      {"clientInfo", {{"name", "test"}, {"version", "1.0"}}}}),
+    });
+
+    ASSERT_EQ(responses.size(), 1u);
+    EXPECT_EQ(responses[0]["result"]["protocolVersion"], "2025-06-18");
+}
+
+TEST_F(McpStdioTest, InitializeFallsBackToLatestOnUnsupportedVersion) {
+    auto responses = exchange({
+        make_request("initialize", 1,
+                     {{"protocolVersion", "1999-01-01"},
+                      {"capabilities", nlohmann::json::object()},
+                      {"clientInfo", {{"name", "test"}, {"version", "1.0"}}}}),
+    });
+
+    ASSERT_EQ(responses.size(), 1u);
+    EXPECT_EQ(responses[0]["result"]["protocolVersion"],
+              kLatestProtocolVersion);
 }
 
 TEST_F(McpStdioTest, ToolsList) {

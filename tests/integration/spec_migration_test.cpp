@@ -135,7 +135,7 @@ INSTANTIATE_TEST_SUITE_P(
 //
 // Replaces the explicit SpecMigrationTest.McpInfoBasic anchor that lived
 // here through migrations 3/8 - 6/8. Each spec drives the C++ MCP server
-// over stdio (Content-Length framing) with a deterministic
+// over stdio (newline-delimited framing) with a deterministic
 // initialize → notifications/initialized → tools/call sequence and pins
 // result.content[].type + result.content[].text against a captured golden.
 //

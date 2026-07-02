@@ -28,7 +28,6 @@ namespace {
 using lci::parity::CapturedOutput;
 using lci::parity::Descriptor;
 using lci::parity::Invocation;
-using lci::parity::McpFraming;
 using lci::parity::Mode;
 using lci::parity::ParseStyle;
 using lci::parity::parse_descriptor;
@@ -285,8 +284,7 @@ CapturedOutput RunCppSide(const std::string& cpp_binary,
             out = run_http(cpp_binary, descriptor, corpus_path);
             break;
         case Mode::Mcp:
-            out = run_mcp(cpp_binary, descriptor, corpus_path,
-                          McpFraming::ContentLength);
+            out = run_mcp(cpp_binary, descriptor, corpus_path);
             break;
         case Mode::Index:
             out = run_index_export(cpp_binary, descriptor, corpus_path);

@@ -326,9 +326,7 @@ TEST_F(McpToolsIntegrationTest, StdioRoundTripWithRealIndex) {
 
     // Build JSON-RPC messages
     auto frame = [](const nlohmann::json& msg) -> std::string {
-        auto body = msg.dump();
-        return "Content-Length: " + std::to_string(body.size()) +
-               "\r\n\r\n" + body;
+        return msg.dump() + "\n";
     };
 
     auto make_req = [](const std::string& method, int id,
@@ -368,17 +366,12 @@ TEST_F(McpToolsIntegrationTest, StdioRoundTripWithRealIndex) {
     // Parse responses
     auto parse_resp = [](std::istream& s) -> nlohmann::json {
         std::string line;
-        int content_length = -1;
         while (std::getline(s, line)) {
             if (!line.empty() && line.back() == '\r') line.pop_back();
-            if (line.empty()) break;
-            if (line.rfind("Content-Length:", 0) == 0)
-                content_length = std::stoi(line.substr(15));
+            if (line.empty()) continue;
+            return nlohmann::json::parse(line);
         }
-        if (content_length <= 0) return nullptr;
-        std::string body(static_cast<size_t>(content_length), '\0');
-        s.read(body.data(), content_length);
-        return nlohmann::json::parse(body);
+        return nullptr;
     };
 
     std::vector<nlohmann::json> responses;
@@ -426,9 +419,7 @@ TEST_F(McpToolsIntegrationTest, AllToolsCallableViaStdio) {
     register_real_handlers(server);
 
     auto frame = [](const nlohmann::json& msg) -> std::string {
-        auto body = msg.dump();
-        return "Content-Length: " + std::to_string(body.size()) +
-               "\r\n\r\n" + body;
+        return msg.dump() + "\n";
     };
 
     auto make_req = [](const std::string& method, int id,
@@ -491,17 +482,12 @@ TEST_F(McpToolsIntegrationTest, AllToolsCallableViaStdio) {
     // Parse all responses
     auto parse_resp = [](std::istream& s) -> nlohmann::json {
         std::string line;
-        int cl = -1;
         while (std::getline(s, line)) {
             if (!line.empty() && line.back() == '\r') line.pop_back();
-            if (line.empty()) break;
-            if (line.rfind("Content-Length:", 0) == 0)
-                cl = std::stoi(line.substr(15));
+            if (line.empty()) continue;
+            return nlohmann::json::parse(line);
         }
-        if (cl <= 0) return nullptr;
-        std::string body(static_cast<size_t>(cl), '\0');
-        s.read(body.data(), cl);
-        return nlohmann::json::parse(body);
+        return nullptr;
     };
 
     std::vector<nlohmann::json> responses;

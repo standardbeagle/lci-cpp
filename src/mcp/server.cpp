@@ -10,6 +10,7 @@
 #include <nlohmann/json.hpp>
 
 #include <lci/mcp/handlers_core.h>
+#include <lci/version.h>
 
 namespace lci {
 namespace mcp {
@@ -69,60 +70,33 @@ std::string McpServer::project_root() const { return project_root_; }
 // -- Stdio JSON-RPC transport -------------------------------------------------
 
 std::optional<nlohmann::json> McpServer::read_message() {
-    // MCP uses Content-Length header framing (like LSP).
-    // Format: "Content-Length: <N>\r\n\r\n<JSON body of N bytes>"
+    // MCP stdio transport: newline-delimited JSON-RPC, one message per line
+    // (spec 2024-11-05 onward). Content-Length header framing is LSP, not
+    // MCP — real clients (Claude Code, MCP Inspector) hang against it.
     std::string line;
-    int content_length = -1;
-
     while (std::getline(std::cin, line)) {
-        // Strip trailing \r if present
         if (!line.empty() && line.back() == '\r') {
             line.pop_back();
         }
-
         if (line.empty()) {
-            // Empty line separates headers from body
-            break;
+            continue;
         }
-
-        // Parse Content-Length header
-        if (line.rfind("Content-Length:", 0) == 0) {
-            auto value = line.substr(15);
-            // Trim leading whitespace
-            auto pos = value.find_first_not_of(' ');
-            if (pos != std::string::npos) {
-                value = value.substr(pos);
-            }
-            try {
-                content_length = std::stoi(value);
-            } catch (...) {
-                return std::nullopt;
-            }
+        try {
+            return nlohmann::json::parse(line);
+        } catch (const nlohmann::json::parse_error& e) {
+            // A malformed frame must not kill the server; JSON-RPC -32700
+            // has no id to answer to, so surface on stderr and keep reading.
+            std::cerr << "lci mcp: dropping unparseable input line: "
+                      << e.what() << '\n';
         }
     }
-
-    if (std::cin.eof() || content_length < 0) {
-        return std::nullopt;
-    }
-
-    // Read exactly content_length bytes
-    std::string body(static_cast<size_t>(content_length), '\0');
-    std::cin.read(body.data(), content_length);
-
-    if (std::cin.gcount() != content_length) {
-        return std::nullopt;
-    }
-
-    try {
-        return nlohmann::json::parse(body);
-    } catch (...) {
-        return std::nullopt;
-    }
+    return std::nullopt;  // EOF
 }
 
 void McpServer::write_message(const nlohmann::json& msg) {
-    auto body = msg.dump();
-    std::cout << "Content-Length: " << body.size() << "\r\n\r\n" << body;
+    // dump() escapes any embedded newlines, so the trailing '\n' is the
+    // sole frame delimiter.
+    std::cout << msg.dump() << '\n';
     std::cout.flush();
 }
 
@@ -188,8 +162,7 @@ nlohmann::json McpServer::handle_request(const nlohmann::json& request) {
         result_obj["tools"] = std::move(tools_arr);
         env["result"] = std::move(result_obj);
 
-        auto body = env.dump();
-        std::cout << "Content-Length: " << body.size() << "\r\n\r\n" << body;
+        std::cout << env.dump() << '\n';
         std::cout.flush();
         return nullptr;
     } else if (method == "tools/call") {
@@ -218,14 +191,26 @@ nlohmann::json McpServer::handle_request(const nlohmann::json& request) {
     return response;
 }
 
-nlohmann::json McpServer::handle_initialize(const nlohmann::json& /*request*/) {
+nlohmann::json McpServer::handle_initialize(const nlohmann::json& request) {
     initialized_ = true;
 
+    // Version negotiation (MCP lifecycle): echo the client's requested
+    // protocol version when we support it, else answer with our newest.
+    auto params = request.value("params", nlohmann::json::object());
+    auto requested = params.value("protocolVersion", "");
+    const char* version = kLatestProtocolVersion;
+    for (const char* v : kSupportedProtocolVersions) {
+        if (requested == v) {
+            version = v;
+            break;
+        }
+    }
+
     nlohmann::json result;
-    result["protocolVersion"] = "2024-11-05";
+    result["protocolVersion"] = version;
     result["capabilities"]["tools"]["listChanged"] = false;
     result["serverInfo"]["name"] = "lci";
-    result["serverInfo"]["version"] = "0.1.0";
+    result["serverInfo"]["version"] = lci::kVersion;
     return result;
 }
 
