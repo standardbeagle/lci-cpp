@@ -1,0 +1,6 @@
+# libFuzzer writes discovered inputs here (40-hex-char names). Commit only
+# hand-authored regression seeds (seed_*, crash_*), never generated corpus.
+*
+!.gitignore
+!seed_*
+!crash_*

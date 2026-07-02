@@ -254,55 +254,82 @@ endif() # NOT WIN32 AND NOT APPLE
 # Fuzz targets (Clang libFuzzer only)
 # ---------------------------------------------------------------------------
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND LCI_ENABLE_FUZZING)
-    # Must be CMake lists (not space-joined strings): target_compile_options
-    # passes a quoted string as a single compiler token, which makes clang
-    # parse "-fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer" as
-    # one -fsanitize= value and reject it.
-    set(FUZZ_LINK_FLAGS -fsanitize=fuzzer,address,undefined)
-    set(FUZZ_COMPILE_FLAGS -fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer)
+    # ASan/UBSan + SanitizerCoverage are applied build-wide by the `fuzz` preset
+    # (CMAKE_CXX_FLAGS=-fsanitize=address,undefined,fuzzer-no-link) so that
+    # lci_lib and every vendored dep (abseil, re2, ...) are instrumented
+    # uniformly. That uniformity is required: mixing ASan-instrumented fuzz TUs
+    # with a non-instrumented abseil trips abseil's container poisoning and
+    # aborts with "CHECK failed: AddrIsInMem" the moment a flat_hash_map is
+    # built (e.g. in Config()). Here the fuzz executables only add the libFuzzer
+    # driver itself at link time; `fuzzer` must be a list element, not part of a
+    # space-joined string, or clang folds it into one bad -fsanitize= value.
+    set(FUZZ_LINK_FLAGS -fsanitize=fuzzer)
 
-    add_executable(fuzz_regex_classifier fuzz/fuzz_regex_classifier.cpp)
-    target_include_directories(fuzz_regex_classifier PRIVATE
-        "${CMAKE_SOURCE_DIR}/include"
-        "${CMAKE_BINARY_DIR}/generated"
-    )
-    target_link_libraries(fuzz_regex_classifier PRIVATE lci_lib)
-    target_compile_options(fuzz_regex_classifier PRIVATE ${FUZZ_COMPILE_FLAGS})
-    target_link_options(fuzz_regex_classifier PRIVATE ${FUZZ_LINK_FLAGS})
+    # One recipe per target: include dirs (public headers + generated config),
+    # link lci_lib, add the fuzzer driver, and the project warning flags. The
+    # fuzz sources under fuzz/ share fuzz_fixture.h via "" include (compiler
+    # searches the including file's dir first), so no extra include path needed.
+    function(lci_add_fuzz_target name)
+        add_executable(${name} fuzz/${name}.cpp)
+        target_include_directories(${name} PRIVATE
+            "${CMAKE_SOURCE_DIR}/include"
+            "${CMAKE_BINARY_DIR}/generated"
+        )
+        target_link_libraries(${name} PRIVATE lci_lib)
+        target_compile_options(${name} PRIVATE ${LCI_WARNING_FLAGS})
+        target_link_options(${name} PRIVATE ${FUZZ_LINK_FLAGS})
+    endfunction()
 
-    add_executable(fuzz_trigram_extract fuzz/fuzz_trigram_extract.cpp)
-    target_include_directories(fuzz_trigram_extract PRIVATE
-        "${CMAKE_SOURCE_DIR}/include"
-        "${CMAKE_BINARY_DIR}/generated"
-    )
-    target_link_libraries(fuzz_trigram_extract PRIVATE lci_lib)
-    target_compile_options(fuzz_trigram_extract PRIVATE ${FUZZ_COMPILE_FLAGS})
-    target_link_options(fuzz_trigram_extract PRIVATE ${FUZZ_LINK_FLAGS})
+    # Narrow pure-logic targets (trigram, search-input) plus the four
+    # complex-surface targets: the tree-sitter extraction engine, the full MCP
+    # stdio/JSON-RPC boundary (all 14 tools + the unknown-param guard), the
+    # find_files matcher, and the get_context id-codec / call-hierarchy path.
+    set(LCI_FUZZ_TARGETS
+        fuzz_trigram_extract
+        fuzz_search_input
+        fuzz_symbol_extract
+        fuzz_mcp_dispatch
+        fuzz_find_files
+        fuzz_get_context)
+    foreach(_ft IN LISTS LCI_FUZZ_TARGETS)
+        lci_add_fuzz_target(${_ft})
+    endforeach()
 
-    add_executable(fuzz_search_input fuzz/fuzz_search_input.cpp)
-    target_include_directories(fuzz_search_input PRIVATE
-        "${CMAKE_SOURCE_DIR}/include"
-        "${CMAKE_BINARY_DIR}/generated"
-    )
-    target_link_libraries(fuzz_search_input PRIVATE lci_lib)
-    target_compile_options(fuzz_search_input PRIVATE ${FUZZ_COMPILE_FLAGS})
-    target_link_options(fuzz_search_input PRIVATE ${FUZZ_LINK_FLAGS})
+    # Register each target as a bounded ctest "smoke" run so the corpus is
+    # actually exercised as a regression gate, not merely built — a non-zero
+    # exit means a crash / ASan / UBSan finding. libFuzzer writes new inputs to
+    # its first positional (corpus) arg, so point it at a throwaway dir under
+    # the build tree and pass any committed seeds as a second, read-only input
+    # dir; the checked-in seeds are never mutated. Short budget keeps CI fast;
+    # deep runs use the same binary with a larger -max_total_time by hand.
+    if(BUILD_TESTING)
+        foreach(_ft IN LISTS LCI_FUZZ_TARGETS)
+            set(_work "${CMAKE_CURRENT_BINARY_DIR}/fuzz_corpus/${_ft}")
+            file(MAKE_DIRECTORY "${_work}")
+            set(_positional "${_work}")
+            set(_seed "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/corpus/${_ft}")
+            if(EXISTS "${_seed}")
+                list(APPEND _positional "${_seed}")
+            endif()
+            add_test(NAME ${_ft}_smoke
+                COMMAND ${_ft} -runs=5000 -max_total_time=25 -timeout=10
+                        -rss_limit_mb=4096 ${_positional})
+            set_tests_properties(${_ft}_smoke PROPERTIES
+                LABELS "fuzz"
+                TIMEOUT 120
+                ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0")
+        endforeach()
+    endif()
 endif()
 
 # Project warning flags applied per-test-target (matches src/CMakeLists.txt
-# rationale: keep -Werror out of FetchContent vendored libs).
+# rationale: keep -Werror out of FetchContent vendored libs). Fuzz targets get
+# the warning flags inside lci_add_fuzz_target above.
 foreach(_t IN ITEMS lci_tests lci_helpers_tests lci_integration_tests lci_benchmarks)
     if(TARGET ${_t})
         target_compile_options(${_t} PRIVATE ${LCI_WARNING_FLAGS})
     endif()
 endforeach()
-if(LCI_FUZZ)
-    foreach(_t IN ITEMS fuzz_regex_classifier fuzz_trigram_extract fuzz_search_input)
-        if(TARGET ${_t})
-            target_compile_options(${_t} PRIVATE ${LCI_WARNING_FLAGS})
-        endif()
-    endforeach()
-endif()
 
 # ---------------------------------------------------------------------------
 # Copy fixture files to build directory for runtime access

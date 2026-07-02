@@ -1,0 +1,5 @@
+package main
+
+type T struct{ x int }
+func (t *T) M() int { return t.x }
+func main() { (&T{}).M() }
