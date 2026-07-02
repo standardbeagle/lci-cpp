@@ -179,7 +179,9 @@ nlohmann::json McpServer::handle_request(const nlohmann::json& request) {
                                  {"message", "unknown tool \"" + tool_name +
                                                  "\""}};
         } else {
-            response["result"] = handle_tools_call(request);
+            auto arguments =
+                params.value("arguments", nlohmann::json::object());
+            response["result"] = handle_tools_call(*it, arguments);
         }
     } else if (method == "ping") {
         response["result"] = nlohmann::json::object();
@@ -246,74 +248,93 @@ nlohmann::json McpServer::handle_tools_list(const nlohmann::json& /*request*/) {
     return result;
 }
 
-nlohmann::json McpServer::handle_tools_call(const nlohmann::json& request) {
-    auto params = request.value("params", nlohmann::json::object());
-    auto tool_name = params.value("name", "");
-    auto arguments = params.value("arguments", nlohmann::json::object());
+nlohmann::json McpServer::handle_tools_call(const RegisteredTool& tool,
+                                            const nlohmann::json& arguments) {
+    // Tool already resolved by handle_request (single lookup; unknown tools are
+    // rejected there with JSON-RPC -32602). This only runs the handler and
+    // wraps its result, catching handler exceptions so a single bad call never
+    // takes down the stdio loop.
 
-    // Find the registered tool. Forward iteration = first-registration wins.
-    // Each tool name is registered exactly once (the real register_*_handlers
-    // bundles own dispatch; the stub registrar that used to double-register and
-    // rely on reverse-iteration last-write-wins is gone), so a duplicate name
-    // now surfaces as the first registration rather than being silently
-    // shadowed by a later one.
-    for (auto it = registered_tools_.begin(); it != registered_tools_.end();
-         ++it) {
-        const auto& reg = *it;
-        if (reg.definition.name == tool_name) {
-            // Exception recovery wrapping
-            try {
-                auto result = reg.handler(arguments);
-
-                nlohmann::json content_item;
-                content_item["type"] = "text";
-                content_item["text"] = result.text;
-
-                nlohmann::json response;
-                response["content"] = nlohmann::json::array({content_item});
-                if (result.is_error) {
-                    response["isError"] = true;
-                }
-                return response;
-            } catch (const std::exception& e) {
-                auto err = make_error_response(
-                    tool_name,
-                    std::string("Internal error: ") + e.what());
-
-                nlohmann::json content_item;
-                content_item["type"] = "text";
-                content_item["text"] = err.text;
-
-                nlohmann::json response;
-                response["content"] = nlohmann::json::array({content_item});
-                response["isError"] = true;
-                return response;
-            } catch (...) {
-                auto err = make_error_response(
-                    tool_name, "Unknown internal error");
-
-                nlohmann::json content_item;
-                content_item["type"] = "text";
-                content_item["text"] = err.text;
-
-                nlohmann::json response;
-                response["content"] = nlohmann::json::array({content_item});
-                response["isError"] = true;
-                return response;
+    // Unknown-parameter guard: reject typo'd / unsupported argument keys so a
+    // mistyped param fails fast with a hint instead of being silently ignored
+    // (karpathy #6). `search` owns richer JSON-Schema validation in its handler
+    // (type/range/length checks + its own error shape), so it is exempt here.
+    if (arguments.is_object() && tool.definition.name != "search") {
+        std::string unknown;
+        for (auto it = arguments.begin(); it != arguments.end(); ++it) {
+            const auto& key = it.key();
+            bool allowed = false;
+            for (const auto& prop : tool.definition.properties) {
+                if (prop.name == key) { allowed = true; break; }
             }
+            if (!allowed) {
+                for (const auto& a : tool.definition.aliases) {
+                    if (a == key) { allowed = true; break; }
+                }
+            }
+            if (!allowed) {
+                if (!unknown.empty()) unknown += ", ";
+                unknown += key;
+            }
+        }
+        if (!unknown.empty()) {
+            std::string allowed_list;
+            for (const auto& prop : tool.definition.properties) {
+                if (!allowed_list.empty()) allowed_list += ", ";
+                allowed_list += prop.name;
+            }
+            auto err = make_error_response(
+                tool.definition.name,
+                "unknown parameter(s): " + unknown +
+                    ". Allowed: " + allowed_list);
+            nlohmann::json content_item;
+            content_item["type"] = "text";
+            content_item["text"] = err.text;
+            nlohmann::json response;
+            response["content"] = nlohmann::json::array({content_item});
+            response["isError"] = true;
+            return response;
         }
     }
 
-    // Tool not found
-    nlohmann::json response;
-    response["isError"] = true;
-    nlohmann::json content_item;
-    content_item["type"] = "text";
-    content_item["text"] =
-        R"({"success":false,"error":"Unknown tool: )" + tool_name +
-        R"(","operation":"tools/call"})";
-    response["content"] = nlohmann::json::array({content_item});
-    return response;
+    try {
+        auto result = tool.handler(arguments);
+
+        nlohmann::json content_item;
+        content_item["type"] = "text";
+        content_item["text"] = result.text;
+
+        nlohmann::json response;
+        response["content"] = nlohmann::json::array({content_item});
+        if (result.is_error) {
+            response["isError"] = true;
+        }
+        return response;
+    } catch (const std::exception& e) {
+        auto err = make_error_response(
+            tool.definition.name, std::string("Internal error: ") + e.what());
+
+        nlohmann::json content_item;
+        content_item["type"] = "text";
+        content_item["text"] = err.text;
+
+        nlohmann::json response;
+        response["content"] = nlohmann::json::array({content_item});
+        response["isError"] = true;
+        return response;
+    } catch (...) {
+        auto err = make_error_response(tool.definition.name,
+                                       "Unknown internal error");
+
+        nlohmann::json content_item;
+        content_item["type"] = "text";
+        content_item["text"] = err.text;
+
+        nlohmann::json response;
+        response["content"] = nlohmann::json::array({content_item});
+        response["isError"] = true;
+        return response;
+    }
 }
 
 void McpServer::handle_notification(const nlohmann::json& request) {

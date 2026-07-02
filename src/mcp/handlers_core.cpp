@@ -1655,7 +1655,9 @@ void register_core_handlers(McpServer& server, MasterIndex* indexer,
            "Exclude test files", ""},
           {"include_sections", "array", "Include sections", "string"},
           {"exclude_sections", "array", "Exclude sections", "string"}},
-         {}},
+         {},
+         // Legacy id aliases normalize_context_params() rewrites to `id`.
+         {"symbol_id", "object_id", "object_ids", "oid"}},
         [indexer, analyzer](const nlohmann::json& p) -> ToolResult {
             if (!indexer) {
                 return make_error_response("get_context",

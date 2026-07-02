@@ -282,6 +282,61 @@ TEST_F(McpStdioTest, ToolCallUnknownTool) {
     EXPECT_EQ(call_resp["error"]["code"].get<int>(), -32602);
 }
 
+TEST_F(McpStdioTest, ToolCallUnknownParameterRejected) {
+    // A typo'd / unsupported argument key must fail fast with a hint rather
+    // than being silently ignored (karpathy #6). "info" takes only "tool".
+    auto responses = exchange({
+        make_request("initialize", 1),
+        make_request("tools/call", 2,
+                     {{"name", "info"},
+                      {"arguments", {{"toolz", "search"}}}}),
+    });
+
+    ASSERT_EQ(responses.size(), 2u);
+    auto& call_resp = responses[1];
+    ASSERT_TRUE(call_resp.contains("result"));
+    EXPECT_TRUE(call_resp["result"]["isError"].get<bool>());
+    auto text = call_resp["result"]["content"][0]["text"].get<std::string>();
+    EXPECT_NE(text.find("toolz"), std::string::npos)
+        << "error must name the offending parameter";
+}
+
+TEST_F(McpStdioTest, ToolCallKnownParameterAccepted) {
+    // The documented parameter passes the guard unharmed.
+    auto responses = exchange({
+        make_request("initialize", 1),
+        make_request("tools/call", 2,
+                     {{"name", "info"}, {"arguments", {{"tool", "search"}}}}),
+    });
+
+    ASSERT_EQ(responses.size(), 2u);
+    auto& call_resp = responses[1];
+    ASSERT_TRUE(call_resp.contains("result"));
+    EXPECT_EQ(call_resp["result"].value("isError", false), false);
+}
+
+TEST_F(McpStdioTest, ToolCallAliasParameterAccepted) {
+    // get_context registers legacy id-aliases (symbol_id/object_id/oid) that
+    // its handler normalizes to `id`. The guard must permit them even though
+    // they are not emitted in the tools/list schema. With null deps the
+    // handler still runs (get_context degrades to "index not available"),
+    // which is enough to prove the guard let the aliased key through.
+    auto responses = exchange({
+        make_request("initialize", 1),
+        make_request("tools/call", 2,
+                     {{"name", "get_context"},
+                      {"arguments", {{"oid", "AB"}}}}),
+    });
+
+    ASSERT_EQ(responses.size(), 2u);
+    auto& call_resp = responses[1];
+    ASSERT_TRUE(call_resp.contains("result"));
+    auto text = call_resp["result"]["content"][0]["text"].get<std::string>();
+    // Guard did NOT fire: no "unknown parameter" complaint about `oid`.
+    EXPECT_EQ(text.find("unknown parameter"), std::string::npos)
+        << "registered alias must bypass the unknown-parameter guard";
+}
+
 TEST_F(McpStdioTest, ExceptionRecovery) {
     // Register a tool that throws
     Config config;

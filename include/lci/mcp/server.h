@@ -46,6 +46,11 @@ struct ToolDefinition {
     std::string description;
     std::vector<ToolProperty> properties;
     std::vector<std::string> required;
+    // Accepted-but-undocumented parameter keys (e.g. legacy aliases a handler
+    // normalizes internally). Not emitted in the tools/list inputSchema, but
+    // permitted by the dispatch-level unknown-parameter guard so aliased calls
+    // don't fail-fast. Leave empty for tools with no aliases.
+    std::vector<std::string> aliases;
 };
 
 /// Result returned from a tool invocation.
@@ -112,6 +117,11 @@ class McpServer {
     std::string project_root() const;
 
   private:
+    struct RegisteredTool {
+        ToolDefinition definition;
+        ToolHandler handler;
+    };
+
     /// Reads a single JSON-RPC message from stdin.
     /// Returns nullopt on EOF.
     std::optional<nlohmann::json> read_message();
@@ -128,8 +138,11 @@ class McpServer {
     /// Handles tools/list request.
     nlohmann::json handle_tools_list(const nlohmann::json& request);
 
-    /// Handles tools/call request with exception recovery.
-    nlohmann::json handle_tools_call(const nlohmann::json& request);
+    /// Executes an already-resolved tool with exception recovery, wrapping the
+    /// handler result in the tools/call content envelope. Tool resolution
+    /// (and the -32602 unknown-tool error) happens once in handle_request.
+    nlohmann::json handle_tools_call(const RegisteredTool& tool,
+                                     const nlohmann::json& arguments);
 
     /// Handles notifications (no response needed).
     void handle_notification(const nlohmann::json& request);
@@ -139,11 +152,6 @@ class McpServer {
 
     /// Builds the JSON Schema for a tool definition.
     static nlohmann::json build_input_schema(const ToolDefinition& def);
-
-    struct RegisteredTool {
-        ToolDefinition definition;
-        ToolHandler handler;
-    };
 
     Config config_;
     std::string project_root_;
