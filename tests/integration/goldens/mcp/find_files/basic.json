@@ -2,7 +2,7 @@
   "result": {
     "content": [
       {
-        "text": "{\"pattern\":\"*.go\",\"results\":[],\"total_matches\":0}",
+        "text": "{\"pattern\":\"*.go\",\"results\":[{\"match_type\":\"glob\",\"path\":\"${CORPUS}/a.go\",\"score\":\"1\"}],\"total_matches\":1}",
         "type": "text"
       }
     ]
