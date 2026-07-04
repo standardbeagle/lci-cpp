@@ -504,7 +504,7 @@ ToolResult handle_info(const nlohmann::json& params) {
             "Sub-millisecond semantic code search with multi-layer matching.";
         data["parameters"] = {
             {"pattern", "REQUIRED: Search pattern (string)"},
-            {"max", "Max results (default: 50, hard cap: 100)"},
+            {"max", "Max results (default: 15, hard cap: 100)"},
             {"output",
              "Output format: 'line', 'ctx', 'ctx:N', 'full', 'files', "
              "'count'"},
@@ -648,7 +648,11 @@ ToolResult handle_search(const nlohmann::json& params,
     // Parse options
     auto output = params.value("output", "line");
     auto flags = params.value("flags", "");
-    int max_results = params.value("max", 50);
+    // Default 15: repo-QA benchmark (benchmarks/repo-qa, tier 0) measured the
+    // old default-50 payload at ~18.6k chars (~4.6k tokens) per call — the
+    // dominant context cost of the LCI MCP variant. Agents that need more
+    // pass max explicitly; hard cap stays 100.
+    int max_results = params.value("max", 15);
     max_results = clamp_int(max_results, 1, 100);
     int context_lines = parse_context_lines(output);
 
@@ -815,11 +819,12 @@ ToolResult handle_search(const nlohmann::json& params,
         return make_json_response(response);
     }
 
-    // Build standard results — Go-shape, every item is symbol-enriched.
-    // Go's handleSearch (cmd/lci/mcp/handlers.go) attributes each text match
-    // to its enclosing symbol so MCP callers can hand the object_id straight
-    // to get_context. We mirror the shape: result_id, object_id, file, line,
-    // column, match, score (float), symbol_type, symbol_name, is_exported.
+    // Build standard results. Each text match is attributed to its enclosing
+    // symbol so MCP callers can hand the object_id straight to get_context:
+    // file, line, column, match, score (float), and — when an enclosing
+    // symbol exists — object_id, symbol_name, symbol_type, is_exported.
+    // Enrichment fields are omitted (not emptied) for symbol-less matches:
+    // agents pay tokens for every byte, and empty strings carry no signal.
     auto& ref_tracker = indexer.ref_tracker();
     // Pin the RCU snapshot for the whole result loop: get_symbol_at_line hands
     // back a const EnhancedSymbol* into the snapshot, and the pin keeps that
@@ -829,12 +834,8 @@ ToolResult handle_search(const nlohmann::json& params,
     // Pre-size to skip geometric realloc on the inner push_back loop.
     // result_array is array_t (std::vector<json>) under the hood.
     result_array.get_ref<nlohmann::json::array_t&>().reserve(results.size());
-    int ordinal = 0;
     for (const auto& r : results) {
-        ++ordinal;
         nlohmann::json item;
-        item["result_id"] = "result_" + std::to_string(ordinal) + "_" +
-                            std::to_string(r.line);
         item["file"] = r.path;
         item["line"] = r.line;
         item["column"] = r.column;
@@ -868,15 +869,9 @@ ToolResult handle_search(const nlohmann::json& params,
                     item["breadcrumbs"] = scope_chain_to_breadcrumbs(*sym);
                 }
             }
-        } else {
-            // Match falls outside any indexed symbol (package decl, blank
-            // line, comment between symbols). Emit empty enrichment fields
-            // rather than omitting them so the response shape is stable.
-            item["object_id"] = "";
-            item["symbol_name"] = "";
-            item["symbol_type"] = "";
-            item["is_exported"] = false;
         }
+        // Match outside any indexed symbol (package decl, blank line,
+        // comment between symbols): enrichment fields stay absent.
 
         if (!r.context.lines.empty()) {
             item["context_lines"] = r.context.lines;
@@ -1585,7 +1580,7 @@ void register_core_handlers(McpServer& server, MasterIndex* indexer,
          "grep, rg, find. Note: Uses JSON parameters, not CLI flags like "
          "-n. See 'info search' for parameter details.",
          {{"pattern", "string", "Search pattern", ""},
-          {"max", "integer", "Maximum results", ""},
+          {"max", "integer", "Maximum results (default: 15, max: 100)", ""},
           {"output", "string", "Output format", ""},
           {"filter", "string", "File filter", ""},
           {"flags", "string", "Search flags", ""},

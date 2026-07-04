@@ -453,11 +453,11 @@ TEST_F(HandlersFixture, SearchWithFlags) {
     EXPECT_FALSE(result.is_error);
 }
 
-// Go-shape parity: every result item carries result_id, object_id, score,
-// match, file, line, column, symbol_type, symbol_name, is_exported.
-// Items are enriched with their enclosing symbol so MCP callers can hand
-// the object_id straight to get_context.
-TEST_F(HandlersFixture, SearchEmitsGoShapeFields) {
+// Compact agent-facing shape: every result item carries the core fields;
+// symbol enrichment (object_id, symbol_name, symbol_type, is_exported) is
+// present only when an enclosing symbol resolved. result_id was dropped —
+// callers hand the object_id straight to get_context.
+TEST_F(HandlersFixture, SearchEmitsCompactShape) {
     nlohmann::json params;
     params["pattern"] = "main";
     auto result = handle_search(params, *indexer_, search_engine_.get());
@@ -465,17 +465,22 @@ TEST_F(HandlersFixture, SearchEmitsGoShapeFields) {
     auto json = nlohmann::json::parse(result.text);
     ASSERT_TRUE(json["results"].is_array());
     ASSERT_FALSE(json["results"].empty());
-    const auto& item = json["results"][0];
-    EXPECT_TRUE(item.contains("result_id"));
-    EXPECT_TRUE(item.contains("object_id"));
-    EXPECT_TRUE(item.contains("file"));
-    EXPECT_TRUE(item.contains("line"));
-    EXPECT_TRUE(item.contains("column"));
-    EXPECT_TRUE(item.contains("match"));
-    EXPECT_TRUE(item.contains("score"));
-    EXPECT_TRUE(item.contains("symbol_type"));
-    EXPECT_TRUE(item.contains("symbol_name"));
-    EXPECT_TRUE(item.contains("is_exported"));
+    for (const auto& item : json["results"]) {
+        EXPECT_TRUE(item.contains("file"));
+        EXPECT_TRUE(item.contains("line"));
+        EXPECT_TRUE(item.contains("column"));
+        EXPECT_TRUE(item.contains("match"));
+        EXPECT_TRUE(item.contains("score"));
+        EXPECT_FALSE(item.contains("result_id"));
+        // Enrichment is all-or-nothing per item, and never empty-valued.
+        const bool enriched = item.contains("object_id");
+        EXPECT_EQ(enriched, item.contains("symbol_name"));
+        EXPECT_EQ(enriched, item.contains("symbol_type"));
+        EXPECT_EQ(enriched, item.contains("is_exported"));
+        if (enriched) {
+            EXPECT_FALSE(item["object_id"].get<std::string>().empty());
+        }
+    }
 }
 
 // Symbol enrichment must resolve the enclosing symbol so the object_id is
@@ -489,7 +494,7 @@ TEST_F(HandlersFixture, SearchEnclosingSymbolResolved) {
     ASSERT_FALSE(json["results"].empty());
     bool found_enclosed = false;
     for (const auto& item : json["results"]) {
-        if (!item["object_id"].get<std::string>().empty() &&
+        if (item.contains("object_id") &&
             item["symbol_name"].get<std::string>() == "main") {
             EXPECT_EQ(item["symbol_type"].get<std::string>(), "function");
             found_enclosed = true;
@@ -499,20 +504,16 @@ TEST_F(HandlersFixture, SearchEnclosingSymbolResolved) {
     EXPECT_TRUE(found_enclosed) << "no match resolved to enclosing 'main'";
 }
 
-// result_id values must be unique across the result set so callers can use
-// them as stable handles.
-TEST_F(HandlersFixture, SearchResultIdsUnique) {
+// Default result budget is 15 (agent context economy — see handle_search);
+// explicit max still wins, hard cap 100 unchanged.
+TEST_F(HandlersFixture, SearchDefaultMaxIsFifteen) {
     nlohmann::json params;
     params["pattern"] = "main";
     auto result = handle_search(params, *indexer_, search_engine_.get());
     ASSERT_FALSE(result.is_error);
     auto json = nlohmann::json::parse(result.text);
-    std::set<std::string> ids;
-    for (const auto& item : json["results"]) {
-        auto rid = item["result_id"].get<std::string>();
-        EXPECT_TRUE(ids.insert(rid).second)
-            << "duplicate result_id: " << rid;
-    }
+    EXPECT_EQ(json["max_results"].get<int>(), 15);
+    EXPECT_LE(json["results"].size(), 15u);
 }
 
 // score is numeric (Go emits float). Real trigram-backed search produces
