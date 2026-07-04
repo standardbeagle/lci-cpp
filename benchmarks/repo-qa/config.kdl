@@ -7,26 +7,34 @@ defaults {
     opencode-bin "opencode"
     lci-bin "/home/beagle/work/core/lci-cpp/build/src/lci"
     corpus-root "/home/beagle/work/core/lci-cpp/real_projects"
-    judge-model "github-copilot/claude-sonnet-5"
+    // sonnet-5 via copilot passed a PONG probe but rejects sustained use
+    // ("model not supported" — plan gating is flaky); sonnet-4.6 is proven
+    // across 300+ judgments.
+    judge-model "github-copilot/claude-sonnet-4.6"
     timeout-seconds 600
     concurrency 3
 }
 
-// size: small <30k LOC, medium 30-100k, large >100k
-// complexity: low = single-purpose library, medium = multi-module framework,
-// high = many subsystems / plugin architecture
+// size: small <30k LOC, medium 30-100k, large >100k.
+// minefield: measured architectural treachery, not LOC — composite of
+// call-graph chokepoint concentration, max cyclomatic complexity, cycles,
+// layer violations, coupling/cohesion, modularity, and impurity, computed
+// by LCI itself (scripts/profile_repos.py -> repo-profiles.json). LCI's
+// purpose is identifying and navigating exactly these minefields, so the
+// benchmark's difficulty axis is the minefield index: low <22, mid 22-30,
+// high >30.
 repos {
-    repo "chi"        path="go/chi"            language="go"         size="small"  complexity="low"    files=74   loc=10369
-    repo "sinatra"    path="ruby/sinatra"      language="ruby"       size="small"  complexity="low"    files=147  loc=23891
-    repo "guzzle"     path="php/guzzle"        language="php"        size="small"  complexity="low"    files=85   loc=20226
-    repo "serilog"    path="csharp/serilog"    language="csharp"     size="small"  complexity="medium" files=216  loc=24754
-    repo "gson"       path="java/gson"         language="java"       size="medium" complexity="medium" files=262  loc=55578
-    repo "ripgrep"    path="rust/ripgrep"      language="rust"       size="medium" complexity="medium" files=101  loc=52361
-    repo "zls"        path="zig/zls"           language="zig"        size="medium" complexity="medium" files=103  loc=58323
-    repo "fastapi"    path="python/fastapi"    language="python"     size="large"  complexity="medium" files=1119 loc=107536
-    repo "trpc"       path="typescript/trpc"   language="typescript" size="large"  complexity="high"   files=964  loc=117884
-    repo "okhttp"     path="kotlin/okhttp"     language="kotlin"     size="large"  complexity="high"   files=596  loc=133346
-    repo "pocketbase" path="go/pocketbase"     language="go"         size="large"  complexity="high"   files=448  loc=148554
+    repo "chi"        path="go/chi"            language="go"         size="small"  minefield=29.9 minefield-tier="mid"  files=74   loc=10369
+    repo "sinatra"    path="ruby/sinatra"      language="ruby"       size="small"  minefield=17.5 minefield-tier="low"  files=147  loc=23891
+    repo "guzzle"     path="php/guzzle"        language="php"        size="small"  minefield=15.6 minefield-tier="low"  files=85   loc=20226
+    repo "serilog"    path="csharp/serilog"    language="csharp"     size="small"  minefield=24.6 minefield-tier="mid"  files=216  loc=24754
+    repo "gson"       path="java/gson"         language="java"       size="medium" minefield=23.0 minefield-tier="mid"  files=262  loc=55578
+    repo "ripgrep"    path="rust/ripgrep"      language="rust"       size="medium" minefield=20.4 minefield-tier="low"  files=101  loc=52361
+    repo "zls"        path="zig/zls"           language="zig"        size="medium" minefield=38.6 minefield-tier="high" files=103  loc=58323
+    repo "fastapi"    path="python/fastapi"    language="python"     size="large"  minefield=23.3 minefield-tier="mid"  files=1119 loc=107536
+    repo "trpc"       path="typescript/trpc"   language="typescript" size="large"  minefield=20.9 minefield-tier="low"  files=964  loc=117884
+    repo "okhttp"     path="kotlin/okhttp"     language="kotlin"     size="large"  minefield=34.3 minefield-tier="high" files=596  loc=133346
+    repo "pocketbase" path="go/pocketbase"     language="go"         size="large"  minefield=36.9 minefield-tier="high" files=448  loc=148554
 }
 
 // Verified working 2026-07-04 (PONG probe). Copilot models bill $0 marginal
@@ -56,5 +64,7 @@ tiers {
     tier "0" repos="chi,sinatra"                       models="haiku45,gpt5mini"                       difficulties="easy,medium,hard" reps=1
     tier "1" repos="chi,sinatra"                       models="haiku45,gpt5mini,gemini25f,qwen3coder"  difficulties="easy,medium,hard" reps=2
     tier "2" repos="chi,sinatra,guzzle,ripgrep"        models="haiku45,gpt5mini,gemini35f,qwen3coder,deepseekv4,kimi27,glm52" difficulties="easy,medium,hard" reps=2
-    tier "3" repos="chi,sinatra,guzzle,ripgrep,fastapi,trpc,pocketbase" models="haiku45,gpt5mini,gemini35f,deepseekv4,glm52,sonnet5,gpt55" difficulties="easy,medium,hard" reps=3
+    // tier 3 targets the high-minefield repos — where LCI's graph navigation
+    // should matter most (zls 38.6, pocketbase 36.9, okhttp 34.3).
+    tier "3" repos="chi,guzzle,zls,okhttp,pocketbase" models="haiku45,gpt5mini,gemini35f,deepseekv4,glm52,sonnet5,gpt55" difficulties="easy,medium,hard" reps=3
 }

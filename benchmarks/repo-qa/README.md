@@ -27,12 +27,21 @@ Question banks live in `questions/<repo>.json`; every gold answer was verified
 against the corpus code, and `must_mention` fact groups are regex alternatives
 (any match credits the group).
 
-## Repo tiers
+## Repo tiers — the minefield axis
 
-Corpora are the `real_projects/` submodules, classified in `config.kdl` by
-size (LOC) and complexity (module structure). Tier ladder grows from
-2 small repos + 2 cheap models (tier 0, harness/LCI tuning) to 7 repos +
-6 models + 3 reps (tier 3).
+Corpora are the `real_projects/` submodules. The difficulty axis is not LOC:
+repos are profiled by **architectural minefield** metrics — call-graph
+chokepoint concentration (top symbol reach share, betweenness brokers), max
+cyclomatic complexity, call cycles, layer violations, module coupling vs
+cohesion, Louvain modularity, and side-effect impurity. LCI computes these
+itself (`scripts/profile_repos.py` → `repo-profiles.json`); the composite
+0-100 `minefield` index and tier live in `config.kdl`. LCI's purpose is
+identifying and navigating exactly these minefields, so the central
+hypothesis is: **LCI's advantage over grep grows with the minefield index**
+(zls 38.6, pocketbase 36.9, okhttp 34.3 at the top; guzzle 15.6 at the
+bottom). The report slices results by minefield tier. Tier ladder grows from
+2 small repos + 2 cheap models (tier 0, harness/LCI tuning) to the
+high-minefield set + frontier models (tier 3).
 
 ## Variants
 

@@ -25,6 +25,7 @@ def fmt(x, nd=2):
 
 
 def collect(run_dir):
+    cfg = bl.Config()
     rows = []
     for _, res in bl.iter_results(run_dir):
         s = res.get("scores", {})
@@ -32,6 +33,7 @@ def collect(run_dir):
         tok = res["tokens"]
         rows.append({
             "repo": res["repo"], "model": res["model"], "variant": res["variant"],
+            "minefield": cfg.repos.get(res["repo"], {}).get("minefield-tier", "?"),
             "question_id": res["question_id"], "difficulty": res["difficulty"],
             "rep": res["rep"], "status": res["status"],
             "wall_seconds": res["wall_seconds"],
@@ -110,6 +112,7 @@ def main():
 
     sections = [
         ("Model x Variant", ["model", "variant"]),
+        ("Minefield tier x Variant", ["minefield", "variant"]),
         ("Model x Variant x Difficulty", ["model", "variant", "difficulty"]),
         ("Repo x Variant", ["repo", "variant"]),
     ]
