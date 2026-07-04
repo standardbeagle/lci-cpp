@@ -1,0 +1,262 @@
+{
+  "repo": "ripgrep",
+  "questions": [
+    {
+      "id": "rg-e1",
+      "difficulty": "easy",
+      "question": "Where is the `is_hidden` function defined in the ignore crate, and how does it decide whether a directory entry is hidden?",
+      "gold_answer": "`is_hidden` is defined in crates/ignore/src/pathutil.rs. It has several cfg-gated variants: on Unix it returns true if the entry's base name (file name) starts with a `.` byte; on Windows it returns true if the base name starts with `.` OR the file attributes have the HIDDEN property set (via winapi_util file::is_hidden and file_attributes()); the fallback (non-unix/non-windows) version also just checks whether the base name starts with `.`.",
+      "must_mention": [
+        [
+          "is_hidden"
+        ],
+        [
+          "pathutil"
+        ],
+        [
+          "base ?name|file name|basename"
+        ],
+        [
+          "starts with|begins with|leading"
+        ],
+        [
+          "HIDDEN|file_attributes|windows"
+        ]
+      ],
+      "expected_files": [
+        "crates/ignore/src/pathutil.rs"
+      ]
+    },
+    {
+      "id": "rg-e2",
+      "difficulty": "easy",
+      "question": "What does `parse_human_readable_size` do and how does it interpret size suffixes?",
+      "gold_answer": "`parse_human_readable_size` is defined in crates/cli/src/human.rs. It parses a string such as `2M` into a `u64` number of bytes: it splits the leading digits from an optional suffix, parses the digits as a u64, then multiplies based on the suffix where `K` = 1<<10, `M` = 1<<20, and `G` = 1<<30 (using checked_mul). It returns a `ParseSizeError` on invalid format, invalid integer, or arithmetic overflow.",
+      "must_mention": [
+        [
+          "parse_human_readable_size"
+        ],
+        [
+          "human\\.rs|cli"
+        ],
+        [
+          "kilobyte|megabyte|gigabyte|suffix|\\bK\\b.*\\bM\\b"
+        ],
+        [
+          "1 ?<< ?10|1 ?<< ?20|1 ?<< ?30|1024|checked_mul"
+        ],
+        [
+          "ParseSizeError|overflow"
+        ]
+      ],
+      "expected_files": [
+        "crates/cli/src/human.rs"
+      ]
+    },
+    {
+      "id": "rg-e3",
+      "difficulty": "easy",
+      "question": "In ripgrep's core `run` function, how are the process exit codes decided?",
+      "gold_answer": "In crates/core/main.rs, `run` returns an `ExitCode`: it returns `ExitCode::from(0)` when there was a match (and either quiet mode is set or no error was recorded), `ExitCode::from(2)` when `messages::errored()` is true, and otherwise `ExitCode::from(1)` (no match). Separately, `main` inspects the error chain and, if it finds a `BrokenPipe` I/O error, returns exit code 0 to exit gracefully; other errors print and return exit code 2.",
+      "must_mention": [
+        [
+          "main\\.rs"
+        ],
+        [
+          "ExitCode"
+        ],
+        [
+          "ExitCode::from\\(0\\)|exit.*\\b0\\b|matched"
+        ],
+        [
+          "ExitCode::from\\(1\\)|no match|exit.*\\b1\\b"
+        ],
+        [
+          "ExitCode::from\\(2\\)|errored|error"
+        ],
+        [
+          "broken ?pipe|BrokenPipe"
+        ]
+      ],
+      "expected_files": [
+        "crates/core/main.rs"
+      ]
+    },
+    {
+      "id": "rg-m1",
+      "difficulty": "medium",
+      "question": "How does the ignore crate resolve precedence among override globs, gitignore-style rules, and type filters when deciding whether to skip a path?",
+      "gold_answer": "In crates/ignore/src/dir.rs, `Ignore::matched` applies checks in precedence order: override patterns are checked first and, if any override matches (whitelist or ignore), that result is returned immediately (highest precedence). Next `matched_ignore` is consulted; an ignore match short-circuits and returns, while a whitelist match is remembered. Then type filters (`types.matched`) are checked with the same ignore-short-circuits / whitelist-remembered behavior, and the remembered whitelist is returned otherwise. Inside `matched_ignore`, the various sources are combined by precedence using `.or(...)`: custom ignore, `.ignore`, `.gitignore`, git exclude, global, then explicit. `matched_dir_entry` additionally treats a hidden file as ignored when the hidden option is on and nothing else matched.",
+      "must_mention": [
+        [
+          "dir\\.rs"
+        ],
+        [
+          "override"
+        ],
+        [
+          "gitignore|matched_ignore|ignore_matcher"
+        ],
+        [
+          "type|types"
+        ],
+        [
+          "whitelist"
+        ],
+        [
+          "custom_ignore|\\.or\\(|git_exclude|precedence"
+        ]
+      ],
+      "expected_files": [
+        "crates/ignore/src/dir.rs"
+      ]
+    },
+    {
+      "id": "rg-m2",
+      "difficulty": "medium",
+      "question": "How does ripgrep's regex crate implement 'smart case' \u2014 i.e., how does the `--smart-case` behavior decide to enable case-insensitive matching?",
+      "gold_answer": "In crates/regex/src/config.rs, `Config::is_case_insensitive` returns true if `case_insensitive` is set, otherwise (when `case_smart` is enabled) it returns true only when `analysis.any_literal()` is true and `analysis.any_uppercase()` is false \u2014 i.e., the pattern has at least one literal and none of the literals are uppercase. The `analysis` is an `AstAnalysis` produced by `AstAnalysis::from_ast` in crates/regex/src/ast.rs, which walks the parsed AST to compute the `any_literal` and `any_uppercase` flags. This result is then passed to the HIR translator's `case_insensitive` setting in `ConfiguredHIR::new`.",
+      "must_mention": [
+        [
+          "case_smart|smart case"
+        ],
+        [
+          "is_case_insensitive"
+        ],
+        [
+          "AstAnalysis"
+        ],
+        [
+          "any_literal"
+        ],
+        [
+          "any_uppercase"
+        ],
+        [
+          "config\\.rs|ast\\.rs"
+        ]
+      ],
+      "expected_files": [
+        "crates/regex/src/config.rs",
+        "crates/regex/src/ast.rs"
+      ]
+    },
+    {
+      "id": "rg-m3",
+      "difficulty": "medium",
+      "question": "How are multiple search patterns combined into a single regex matcher, and what fast path exists for literal patterns?",
+      "gold_answer": "In crates/regex/src/matcher.rs, `RegexMatcherBuilder::build` just calls `build_many(&[pattern])`, and `build_many` delegates to `Config::build_many` (crates/regex/src/config.rs), which constructs a `ConfiguredHIR` representing an alternation of the patterns. In `ConfiguredHIR::new`, if `is_fixed_strings` is true it takes a fast path building an `Hir::alternation` of `Hir::literal` values directly (avoiding full parsing); otherwise it wraps each pattern in `(?:...)`, joins them with `|`, parses the AST, and translates it to an HIR. Back in `build_many`, the HIR is compiled to a regex and an optional `fast_line_regex` (inner literals) is derived to accelerate candidate-line detection.",
+      "must_mention": [
+        [
+          "build_many"
+        ],
+        [
+          "alternation|\\balt|join"
+        ],
+        [
+          "ConfiguredHIR"
+        ],
+        [
+          "is_fixed_strings|fixed string"
+        ],
+        [
+          "Hir::literal|Hir::alternation|literal"
+        ],
+        [
+          "matcher\\.rs|config\\.rs"
+        ]
+      ],
+      "expected_files": [
+        "crates/regex/src/matcher.rs",
+        "crates/regex/src/config.rs"
+      ]
+    },
+    {
+      "id": "rg-h1",
+      "difficulty": "hard",
+      "question": "Trace how ripgrep's parallel directory walker coordinates work across threads and how it detects that all work is finished.",
+      "gold_answer": "In crates/ignore/src/walk.rs, `WalkBuilder::build_parallel` yields a `WalkParallel` whose `run` spawns N threads, each owning a `Worker` with its own `Stack` backed by a crossbeam_deque `Worker`/`Deque` plus `Stealer`s of the other threads' deques (work stealing). New directory entries are pushed as `Message::Work` onto the stack. Termination is coordinated with an `active_workers` `AtomicUsize`: in `get_work`, when a worker finds no work it calls `deactivate_worker` (fetch_sub); if the returned count is 0, every worker's local deque is simultaneously empty, so it broadcasts `Message::Quit` (`send_quit`) which dominoes to wake and stop all threads. Idle workers sleep ~1ms between polls, and a separate `quit_now` `AtomicBool` (set on `WalkState::Quit`) forces an immediate quit by making `get_work` only accept quit messages.",
+      "must_mention": [
+        [
+          "walk\\.rs"
+        ],
+        [
+          "crossbeam|work.?steal|Stealer|Deque"
+        ],
+        [
+          "active_workers|AtomicUsize"
+        ],
+        [
+          "quit_now|WalkState|AtomicBool"
+        ],
+        [
+          "deactivate_worker|activate_worker|== 0|reaches 0"
+        ],
+        [
+          "Quit|send_quit|termination"
+        ]
+      ],
+      "expected_files": [
+        "crates/ignore/src/walk.rs"
+      ]
+    },
+    {
+      "id": "rg-h2",
+      "difficulty": "hard",
+      "question": "How does the searcher crate choose which search strategy to use (memory map, whole-file heap multiline, incremental line buffer, or slice-by-line)?",
+      "gold_answer": "In crates/searcher/src/searcher/mod.rs, `search_file`/`search_path` route to `search_file_maybe_path`: if `MmapChoice::open` returns a memory map it searches it via `search_slice`; otherwise, if `multi_line_with_matcher` is true it reads the whole file onto the heap (`fill_multi_line_buffer_from_file`) and runs the `MultiLine` strategy; otherwise it calls `search_reader`, which wraps the reader in a `LineBufferReader` and runs the incremental `ReadByLine` (roll buffer) strategy. `search_slice` searches a slice directly: if the slice needs transcoding (or has a BOM) it falls back to `search_reader`, else it runs `MultiLine` when multiline is chosen or `SliceByLine` otherwise. `multi_line_with_matcher` can return false even when multiline is configured if the matcher's line terminator matches the searcher's, guaranteeing single-line matches.",
+      "must_mention": [
+        [
+          "search_file_maybe_path|search_slice|search_reader"
+        ],
+        [
+          "mmap|memory ?map|MmapChoice"
+        ],
+        [
+          "multi.?line|MultiLine"
+        ],
+        [
+          "ReadByLine|SliceByLine|roll buffer|LineBuffer"
+        ],
+        [
+          "multi_line_with_matcher"
+        ],
+        [
+          "transcod|heap|fill_multi_line_buffer"
+        ]
+      ],
+      "expected_files": [
+        "crates/searcher/src/searcher/mod.rs"
+      ]
+    },
+    {
+      "id": "rg-h3",
+      "difficulty": "hard",
+      "question": "In the gitignore matcher, how is the winning glob among many candidates chosen, and how does `matched_path_or_any_parents` handle parent directories and directory-only globs?",
+      "gold_answer": "In crates/ignore/src/gitignore.rs, `matched_stripped` builds a `Candidate` and collects all matching glob indices from the `GlobSet`, then iterates them in reverse (`matches.iter().rev()`) so the last/highest-precedence matching glob wins; for the first candidate it returns `Match::Whitelist` when `glob.is_whitelist()` (a `!`-prefixed rule) and `Match::Ignore` otherwise, but it skips globs where `is_only_dir()` is true unless `is_dir` is set. `matched_path_or_any_parents` first tries the path itself, then walks up each parent directory (matching each as a directory, `is_dir = true`) until the root, returning the first non-`None` match. Both paths are first normalized by `strip`, which removes a leading `./` and strips the common gitignore root prefix so matching is relative.",
+      "must_mention": [
+        [
+          "gitignore\\.rs"
+        ],
+        [
+          "matched_stripped|rev\\(\\)|reverse|last.*match|highest preceden"
+        ],
+        [
+          "is_whitelist|whitelist|Whitelist"
+        ],
+        [
+          "is_only_dir|only.?dir|directory"
+        ],
+        [
+          "matched_path_or_any_parents|parent"
+        ],
+        [
+          "strip|leading \\./|root"
+        ]
+      ],
+      "expected_files": [
+        "crates/ignore/src/gitignore.rs"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,300 @@
+{
+  "repo": "guzzle",
+  "questions": [
+    {
+      "id": "guz-e1",
+      "difficulty": "easy",
+      "question": "Where are the HTTP verb convenience methods like get(), post(), put(), and delete() defined, and how are they implemented?",
+      "gold_answer": "They are defined in the ClientTrait trait in src/ClientTrait.php, which the Client class uses (`use ClientTrait;` in src/Client.php). Each synchronous helper such as get(), head(), put(), post(), patch(), and delete() simply delegates to the abstract request() method with the corresponding uppercase HTTP method string, e.g. get() calls `$this->request('GET', $uri, $options)`. There are also async variants (getAsync, postAsync, etc.) that delegate to requestAsync().",
+      "must_mention": [
+        [
+          "ClientTrait"
+        ],
+        [
+          "src/ClientTrait\\.php"
+        ],
+        [
+          "request\\(\\s*'GET'",
+          "'GET'",
+          "'POST'"
+        ],
+        [
+          "getAsync",
+          "requestAsync"
+        ],
+        [
+          "trait",
+          "use ClientTrait"
+        ]
+      ],
+      "expected_files": [
+        "src/ClientTrait.php",
+        "src/Client.php"
+      ]
+    },
+    {
+      "id": "guz-e2",
+      "difficulty": "easy",
+      "question": "What does Proxy::wrapSync do and where is it defined?",
+      "gold_answer": "Proxy::wrapSync is defined in src/Handler/Proxy.php. It returns a composed handler closure that routes synchronous requests to one handler and all other (async) requests to another: it inspects the RequestOptions::SYNCHRONOUS option and, if that option is empty, calls the `$default` handler, otherwise it calls the `$sync` handler. This is how Guzzle uses a CurlMultiHandler for async and a CurlHandler for synchronous requests.",
+      "must_mention": [
+        [
+          "wrapSync"
+        ],
+        [
+          "src/Handler/Proxy\\.php"
+        ],
+        [
+          "SYNCHRONOUS",
+          "RequestOptions::SYNCHRONOUS"
+        ],
+        [
+          "default",
+          "sync"
+        ],
+        [
+          "empty"
+        ]
+      ],
+      "expected_files": [
+        "src/Handler/Proxy.php"
+      ]
+    },
+    {
+      "id": "guz-e3",
+      "difficulty": "easy",
+      "question": "What are the default redirect settings in RedirectMiddleware, including the maximum number of redirects?",
+      "gold_answer": "RedirectMiddleware defines a public static `$defaultSettings` array in src/RedirectMiddleware.php with: 'max' => 5, 'protocols' => ['http', 'https'], 'strict' => false, 'referer' => false, and 'track_redirects' => false. So by default Guzzle follows at most 5 redirects, only over http/https, non-strict (RFC-emulating browser behavior), without adding a Referer header and without tracking redirect history. This array is also referenced as the default for the 'allow_redirects' client option in Client::configureDefaults.",
+      "must_mention": [
+        [
+          "defaultSettings"
+        ],
+        [
+          "'max'\\s*=>\\s*5",
+          "max.{0,6}5",
+          "5 redirects"
+        ],
+        [
+          "'strict'",
+          "strict"
+        ],
+        [
+          "'referer'",
+          "referer"
+        ],
+        [
+          "track_redirects"
+        ],
+        [
+          "src/RedirectMiddleware\\.php"
+        ]
+      ],
+      "expected_files": [
+        "src/RedirectMiddleware.php"
+      ]
+    },
+    {
+      "id": "guz-m1",
+      "difficulty": "medium",
+      "question": "How does HandlerStack compose the registered middleware and the base handler into a single callable, and in what order are middleware applied?",
+      "gold_answer": "In src/HandlerStack.php, resolve() builds the composed handler. Starting from the base `$this->handler`, it iterates over the middleware stack in reverse (`\\array_reverse($this->stack)`) and wraps each middleware around the previous callable: `$prev = $fn[0]($prev)`, so each middleware is a callable that accepts the next handler and returns a new handler. The result is cached in `$this->cached` (invalidated to null on push/unshift/remove/setHandler). __invoke() calls resolve() and then invokes the composed callable. Because the stack is reversed during resolution, middleware pushed last executes closest to the handler, while middleware pushed first (or unshifted to the bottom) wraps the outside.",
+      "must_mention": [
+        [
+          "resolve\\(\\)",
+          "resolve"
+        ],
+        [
+          "array_reverse"
+        ],
+        [
+          "cached"
+        ],
+        [
+          "push",
+          "unshift"
+        ],
+        [
+          "\\$fn\\[0\\]\\(\\$prev\\)",
+          "\\$prev = ",
+          "wraps"
+        ],
+        [
+          "src/HandlerStack\\.php"
+        ]
+      ],
+      "expected_files": [
+        "src/HandlerStack.php"
+      ]
+    },
+    {
+      "id": "guz-m2",
+      "difficulty": "medium",
+      "question": "Which default middleware does HandlerStack::create() attach, in what order, and which Middleware factory methods produce them?",
+      "gold_answer": "HandlerStack::create() in src/HandlerStack.php pushes four middleware onto the stack in this order: Middleware::httpErrors() named 'http_errors', Middleware::redirect() named 'allow_redirects', Middleware::cookies() named 'cookies', and Middleware::prepareBody() named 'prepare_body'. These factory methods live in src/Middleware.php: httpErrors() throws RequestException for 4xx/5xx responses (via RequestException::create), redirect() returns a new RedirectMiddleware, cookies() adds/extracts cookies via a CookieJarInterface, and prepareBody() returns a new PrepareBodyMiddleware. Since resolve() reverses the stack, prepare_body runs closest to the handler and http_errors is outermost.",
+      "must_mention": [
+        [
+          "httpErrors",
+          "http_errors"
+        ],
+        [
+          "redirect",
+          "allow_redirects"
+        ],
+        [
+          "cookies"
+        ],
+        [
+          "prepareBody",
+          "prepare_body"
+        ],
+        [
+          "src/HandlerStack\\.php"
+        ],
+        [
+          "src/Middleware\\.php"
+        ]
+      ],
+      "expected_files": [
+        "src/HandlerStack.php",
+        "src/Middleware.php"
+      ]
+    },
+    {
+      "id": "guz-m3",
+      "difficulty": "medium",
+      "question": "How does Utils::chooseHandler decide which HTTP handler to use, and how does it combine cURL and stream handlers?",
+      "gold_answer": "Utils::chooseHandler in src/Utils.php selects a handler based on the environment. If cURL is supported (CURLOPT_CUSTOMREQUEST defined, CurlVersion::supportsCurlHandler(), and curl_exec/curl_multi_exec available) it builds a cURL handler: when both curl_multi_exec and curl_exec exist it uses Proxy::wrapSync(new CurlMultiHandler(...), new CurlHandler(...)) so sync requests go to CurlHandler and others to CurlMultiHandler; otherwise it uses whichever single cURL handler is available. Then, if allow_url_fopen is enabled, it creates a StreamHandler and, if a cURL handler already exists, wraps them with Proxy::wrapStreaming($handler, $streamHandler) so streaming requests go to the StreamHandler. If neither cURL nor allow_url_fopen is available it throws a RuntimeException. It also handles transport_sharing modes.",
+      "must_mention": [
+        [
+          "chooseHandler"
+        ],
+        [
+          "CurlMultiHandler",
+          "CurlHandler"
+        ],
+        [
+          "StreamHandler"
+        ],
+        [
+          "wrapSync",
+          "wrapStreaming"
+        ],
+        [
+          "allow_url_fopen"
+        ],
+        [
+          "src/Utils\\.php"
+        ]
+      ],
+      "expected_files": [
+        "src/Utils.php",
+        "src/Handler/Proxy.php"
+      ]
+    },
+    {
+      "id": "guz-h1",
+      "difficulty": "hard",
+      "question": "Trace what happens when a caller invokes Client::request('GET', $uri, $options): how does the request flow through to the handler stack and back to a ResponseInterface?",
+      "gold_answer": "In src/Client.php, request() (via ClientTrait) sets RequestOptions::SYNCHRONOUS = true and calls requestAsync(), then calls ->wait() on the returned promise to block for the ResponseInterface. requestAsync() merges defaults via prepareDefaults(), extracts headers/body/version, builds the final URI with buildUri() (merging base_uri, IDN conversion, default http scheme), constructs a Psr7\\Request, and calls transfer(). transfer() calls applyOptions() to translate options (form_params, multipart, json, auth, query, body, conditional _conditional headers, etc.) into request modifications, normalizes the protocol version, retrieves the HandlerStack from `$options['handler']`, and returns P\\Create::promiseFor($handler($request, $options)) inside a try/catch that converts thrown exceptions into rejected promises. Invoking the HandlerStack runs resolve() to build the composed middleware chain (http_errors, allow_redirects, cookies, prepare_body around the base handler) and dispatches the request. send() follows the same path but starts from a pre-built RequestInterface via sendAsync().",
+      "must_mention": [
+        [
+          "requestAsync",
+          "sendAsync"
+        ],
+        [
+          "->wait\\(\\)",
+          "wait\\(\\)",
+          "wait"
+        ],
+        [
+          "prepareDefaults"
+        ],
+        [
+          "transfer",
+          "applyOptions"
+        ],
+        [
+          "\\$options\\['handler'\\]",
+          "HandlerStack",
+          "handler"
+        ],
+        [
+          "promiseFor",
+          "rejectionFor"
+        ]
+      ],
+      "expected_files": [
+        "src/Client.php",
+        "src/ClientTrait.php",
+        "src/HandlerStack.php"
+      ]
+    },
+    {
+      "id": "guz-h2",
+      "difficulty": "hard",
+      "question": "How does RedirectMiddleware detect and follow a redirect, enforce the maximum redirect count, and what headers does it strip on cross-origin redirects?",
+      "gold_answer": "In src/RedirectMiddleware.php, __invoke() short-circuits when allow_redirects is empty or has max=0; otherwise it calls the next handler and chains ->then(checkRedirect). checkRedirect() returns the response unchanged unless the status code begins with '3' and a Location header is present. It then calls guardMax(), which increments `$options['__redirect_count']` and throws TooManyRedirectsException when it exceeds allow_redirects['max']. modifyRequest() computes the next request: for 303 (or <=302 when not strict) it downgrades the method to GET (keeping GET/HEAD/OPTIONS) and empties the body, resolves the Location against the current URI via redirectUri() (which validates the scheme against allowed protocols, throwing BadResponseException otherwise), and rewinds the body. Following is recursive: checkRedirect calls `$this($nextRequest, $options)`. On a cross-origin redirect (Psr7\\UriComparator::isCrossOrigin) it removes the Authorization and Cookie headers (and unsets curl CURLOPT_HTTPAUTH/CURLOPT_USERPWD); the Referer header is added only when configured and not downgrading https->http. If track_redirects is set, withTracking() records URIs/status codes in the X-Guzzle-Redirect-History headers.",
+      "must_mention": [
+        [
+          "checkRedirect"
+        ],
+        [
+          "guardMax",
+          "__redirect_count"
+        ],
+        [
+          "TooManyRedirectsException"
+        ],
+        [
+          "isCrossOrigin",
+          "cross-origin",
+          "cross origin"
+        ],
+        [
+          "Authorization",
+          "Cookie"
+        ],
+        [
+          "303",
+          "302"
+        ]
+      ],
+      "expected_files": [
+        "src/RedirectMiddleware.php"
+      ]
+    },
+    {
+      "id": "guz-h3",
+      "difficulty": "hard",
+      "question": "How does RetryMiddleware decide whether to retry a request, and how is the retry delay (exponential backoff) computed by default?",
+      "gold_answer": "In src/RetryMiddleware.php, __invoke() initializes `$options['retries']` to 0, calls the next handler, and attaches ->then(onFulfilled, onRejected). Both onFulfilled and onRejected invoke the user-supplied `$decider` callable with the current retry count, the request, the response (or null), and the exception reason (or null); if the decider returns false the value/rejection is passed through unchanged (onRejected returns P\\Create::rejectionFor). If the decider returns true, doRetry() is called, which increments retries, computes `$options['delay']` from the delay callable, and recursively re-invokes `$this($request, $options)`. When no delay function is provided, the constructor supplies a default exponential backoff of `(int) 2 ** ($retries - 1) * 1000` milliseconds. The Middleware::retry() factory in src/Middleware.php wraps a handler into a RetryMiddleware.",
+      "must_mention": [
+        [
+          "decider"
+        ],
+        [
+          "onFulfilled",
+          "onRejected"
+        ],
+        [
+          "doRetry"
+        ],
+        [
+          "retries"
+        ],
+        [
+          "2 \\*\\* \\(\\$retries - 1\\)",
+          "2 \\*\\*",
+          "exponential"
+        ],
+        [
+          "delay"
+        ]
+      ],
+      "expected_files": [
+        "src/RetryMiddleware.php",
+        "src/Middleware.php"
+      ]
+    }
+  ]
+}
