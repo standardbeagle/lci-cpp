@@ -1,0 +1,260 @@
+{
+  "repo": "sinatra",
+  "questions": [
+    {
+      "id": "sin-e1",
+      "difficulty": "easy",
+      "question": "Where is the `halt` method defined on Sinatra::Base and what mechanism does it use to abort request processing?",
+      "gold_answer": "`halt` is defined in lib/sinatra/base.rb (around lines 1028-1031) as a public instance method of Sinatra::Base. It collapses a single-element response array to that element, then calls `throw :halt, response`. The corresponding `catch(:halt, ...)` lives in the private `invoke` method, which turns the thrown value into a status/headers/body response.",
+      "must_mention": [
+        [
+          "def\\s+halt"
+        ],
+        [
+          "throw\\s+:halt"
+        ],
+        [
+          "lib/sinatra/base\\.rb"
+        ],
+        [
+          "catch\\(:halt|invoke"
+        ]
+      ],
+      "expected_files": [
+        "lib/sinatra/base.rb"
+      ]
+    },
+    {
+      "id": "sin-e2",
+      "difficulty": "easy",
+      "question": "How does Sinatra::IndifferentHash make symbol and string keys interchangeable, and where is that conversion implemented?",
+      "gold_answer": "Sinatra::IndifferentHash is a Hash subclass in lib/sinatra/indifferent_hash.rb. It overrides the reading/writing interface (`[]`, `[]=`/`store`, `fetch`, `key?`, `delete`, `dig`, `merge!`, etc.) to route keys through the private `convert_key` method, which does `key.is_a?(Symbol) ? key.to_s : key` \u2014 turning every Symbol key into its String form. Values that are Hashes/Arrays are normalized via `convert_value` so nested hashes are also indifferent.",
+      "must_mention": [
+        [
+          "convert_key"
+        ],
+        [
+          "is_a\\?\\(Symbol\\)|Symbol \\? key\\.to_s|to_s"
+        ],
+        [
+          "IndifferentHash"
+        ],
+        [
+          "indifferent_hash\\.rb"
+        ],
+        [
+          "convert_value"
+        ]
+      ],
+      "expected_files": [
+        "lib/sinatra/indifferent_hash.rb"
+      ]
+    },
+    {
+      "id": "sin-e3",
+      "difficulty": "easy",
+      "question": "What does the `redirect` helper do, and how does it decide between HTTP status 302 and 303?",
+      "gold_answer": "`redirect` is defined in the Sinatra::Helpers module in lib/sinatra/base.rb (around lines 310-322). It sets the response status to 303 when the protocol is HTTP/1.1 and the request method is not GET, otherwise it uses 302. It then sets the `Location` header via the `uri` helper (honoring `absolute_redirects?` and `prefixed_redirects?`) and finally calls `halt(*args)` to stop processing.",
+      "must_mention": [
+        [
+          "def\\s+redirect"
+        ],
+        [
+          "303"
+        ],
+        [
+          "302"
+        ],
+        [
+          "HTTP/1\\.1"
+        ],
+        [
+          "Location"
+        ],
+        [
+          "halt"
+        ]
+      ],
+      "expected_files": [
+        "lib/sinatra/base.rb"
+      ]
+    },
+    {
+      "id": "sin-m1",
+      "difficulty": "medium",
+      "question": "How does the before/after filter chain get executed for a request, including filters inherited from superclasses?",
+      "gold_answer": "In lib/sinatra/base.rb, `dispatch!` invokes `filter! :before` (inside the `invoke` block, before `route!`) and `filter! :after` in the `ensure` block (skipped when `env['sinatra.static_file']` is set). The private `filter!(type, base = settings, &block)` first recurses into `base.superclass` (when it responds to `:filters`) so ancestor filters run first, then iterates `base.filters[type]`, running each via `process_route(*args)`. The `:before` filter block also pins the content-type by setting `@pinned_response`.",
+      "must_mention": [
+        [
+          "def\\s+filter!"
+        ],
+        [
+          "filter!\\s+:before"
+        ],
+        [
+          "filter!\\s+:after"
+        ],
+        [
+          "superclass"
+        ],
+        [
+          "process_route"
+        ],
+        [
+          "dispatch!"
+        ]
+      ],
+      "expected_files": [
+        "lib/sinatra/base.rb"
+      ]
+    },
+    {
+      "id": "sin-m2",
+      "difficulty": "medium",
+      "question": "When you define a GET route in Sinatra, how does a HEAD route also get created, and how are per-route conditions kept from leaking between the two?",
+      "gold_answer": "The class-level `get(path, opts = {}, &block)` in lib/sinatra/base.rb (around lines 1531-1537) duplicates the current `@conditions` before defining the route, calls `route('GET', path, opts, &block)`, then restores `@conditions = conditions` and calls `route('HEAD', path, opts, &block)` with the same block. So a single `get` registers both GET and HEAD signatures. Saving/restoring `@conditions` is necessary because `compile!` consumes `@conditions` (resetting it to `[]`) when building each route.",
+      "must_mention": [
+        [
+          "def\\s+get"
+        ],
+        [
+          "route\\('HEAD'|'HEAD'"
+        ],
+        [
+          "@conditions"
+        ],
+        [
+          "route\\('GET'|'GET'"
+        ],
+        [
+          "compile!"
+        ]
+      ],
+      "expected_files": [
+        "lib/sinatra/base.rb"
+      ]
+    },
+    {
+      "id": "sin-m3",
+      "difficulty": "medium",
+      "question": "How does `pass` cause Sinatra to fall through to the next matching route, and what happens when no further route matches?",
+      "gold_answer": "`pass` (Base#pass in lib/sinatra/base.rb) does `throw :pass, block`. Inside `process_route`, the route body runs within a `catch(:pass)` block; conditions also `throw :pass` when a condition returns false. When a route passes, `process_route` returns the passed block, which `route!` captures as `pass_block`. `route!` iterates the routes for the request method, recurses into superclass routes, and if a `pass_block` remains it is run via `route_eval`; if nothing matches it finally calls `route_missing`, which forwards downstream when `@app` is set or raises `Sinatra::NotFound` otherwise.",
+      "must_mention": [
+        [
+          "throw\\s+:pass"
+        ],
+        [
+          "catch\\(:pass\\)"
+        ],
+        [
+          "def\\s+route!|def\\s+process_route"
+        ],
+        [
+          "pass_block"
+        ],
+        [
+          "route_missing"
+        ],
+        [
+          "NotFound|forward"
+        ]
+      ],
+      "expected_files": [
+        "lib/sinatra/base.rb"
+      ]
+    },
+    {
+      "id": "sin-h1",
+      "difficulty": "hard",
+      "question": "Trace a request from Rack into Sinatra::Base#call through to the finished response tuple. What are the key steps and why is `dup` used?",
+      "gold_answer": "Rack calls `Base#call(env)`, which does `dup.call!(env)` so each request runs on a fresh copy of the instance (thread-safety / per-request state). `call!` sets `@env`, `@params` (a new IndifferentHash), `@request` (Sinatra::Request), `@response` (Sinatra::Response), resets `@pinned_response`, optionally clears the template cache, then runs `invoke { dispatch! }` and `invoke { error_block!(response.status) }` (unless an error occurred). `dispatch!` merges request params, then `invoke`s a block that serves static files, runs `:before` filters, and calls `route!`; exceptions are routed to `handle_exception!`, and `:after` filters run in the `ensure`. Finally `call!` sets a default content-type if needed and returns `@response.finish`, which produces the `[status, headers, body]` tuple (dropping body/headers for 204/304/informational responses).",
+      "must_mention": [
+        [
+          "dup\\.call!|def\\s+call\\b"
+        ],
+        [
+          "def\\s+call!"
+        ],
+        [
+          "dispatch!"
+        ],
+        [
+          "invoke"
+        ],
+        [
+          "@response\\.finish|def\\s+finish"
+        ],
+        [
+          "route!"
+        ],
+        [
+          "handle_exception!"
+        ]
+      ],
+      "expected_files": [
+        "lib/sinatra/base.rb"
+      ]
+    },
+    {
+      "id": "sin-h2",
+      "difficulty": "hard",
+      "question": "In `process_route`, how are path parameters populated and how are captures resolved differently for regexp-based patterns versus named Mustermann patterns?",
+      "gold_answer": "`process_route` in lib/sinatra/base.rb normalizes the path (`route`), handles empty and trailing-slash cases (respecting `empty_path_info?`/`strict_paths?`), then calls `pattern.params(route)`; a nil result means no match and it returns. It deletes the `'ignore'` key, force-encodes params, and merges them into `@params`. It then checks `regexp_exists` \u2014 true when the pattern is a `Mustermann::Regular` or a composite whose subpatterns include one. For regexp patterns it takes `pattern.match(route).captures`, URI-unescapes each via `URI_INSTANCE.unescape`, appends them to `values`, and stores them in `@params[:captures]`. For named patterns it instead appends `params.values.flatten`. Conditions are checked inside `catch(:pass)`, and the block is invoked with `[self, values]`. Params are reverted in the `ensure` (unless an error stashed them in `sinatra.error.params`).",
+      "must_mention": [
+        [
+          "def\\s+process_route"
+        ],
+        [
+          "pattern\\.params"
+        ],
+        [
+          "Mustermann::Regular"
+        ],
+        [
+          "captures"
+        ],
+        [
+          "URI_INSTANCE\\.unescape|unescape"
+        ],
+        [
+          ":captures"
+        ],
+        [
+          "params\\.values\\.flatten"
+        ]
+      ],
+      "expected_files": [
+        "lib/sinatra/base.rb"
+      ]
+    },
+    {
+      "id": "sin-h3",
+      "difficulty": "hard",
+      "question": "When an exception is raised during a request, how does Sinatra determine the HTTP status and locate the correct custom error handler, including walking exception superclasses?",
+      "gold_answer": "`handle_exception!` in lib/sinatra/base.rb records the exception in `env['sinatra.error']` and derives an http_status: for a `Sinatra::Error` it uses `http_status` if available, or the exception's `code` when `use_code?` is set; anything not in 400-599 becomes 500. For server errors it optionally `dump_errors!` and re-raises when `show_exceptions?`; for 404 it sets the `X-Cascade: pass` header when `x_cascade?`. It then tries `error_block!(boom.class, boom)` and `error_block!(status, boom)`. `error_block!` looks up `settings.errors[key]`, walking up `base.superclass` when a class has no handler; when the key is an Exception class with no match it recurses on `key.superclass` (while `key.superclass < Exception`), so a handler registered for a parent exception class catches subclasses. The registered blocks are run via `process_route`.",
+      "must_mention": [
+        [
+          "def\\s+handle_exception!"
+        ],
+        [
+          "def\\s+error_block!"
+        ],
+        [
+          "sinatra\\.error"
+        ],
+        [
+          "key\\.superclass|superclass\\s*<\\s*Exception"
+        ],
+        [
+          "http_status|status\\("
+        ],
+        [
+          "settings\\.errors|base\\.errors|errors\\[key\\]"
+        ]
+      ],
+      "expected_files": [
+        "lib/sinatra/base.rb"
+      ]
+    }
+  ]
+}

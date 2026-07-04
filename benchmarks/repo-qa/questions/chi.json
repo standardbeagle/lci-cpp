@@ -1,0 +1,287 @@
+{
+  "repo": "chi",
+  "questions": [
+    {
+      "id": "chi-e1",
+      "difficulty": "easy",
+      "question": "Where is the exported `URLParam` function defined, and how does it retrieve a URL parameter value from a request?",
+      "gold_answer": "`URLParam(r *http.Request, key string) string` is defined in context.go (lines 9-15). It fetches chi's routing Context from the request context via `RouteContext(r.Context())` and, if non-nil, delegates to the context's `(*Context).URLParam(key)` method. That method (context.go, lines 100-107) iterates over `x.URLParams.Keys` from the end backwards and returns the matching `x.URLParams.Values[k]`, or \"\" if no key matches.",
+      "must_mention": [
+        [
+          "func URLParam",
+          "URLParam\\("
+        ],
+        [
+          "context\\.go"
+        ],
+        [
+          "RouteContext\\(",
+          "r\\.Context\\(\\)"
+        ],
+        [
+          "URLParams\\.Keys",
+          "URLParams\\.Values"
+        ],
+        [
+          "backwards|reverse|len\\(.*Keys\\) ?- ?1|k-- |for k :="
+        ]
+      ],
+      "expected_files": [
+        "context.go"
+      ]
+    },
+    {
+      "id": "chi-e2",
+      "difficulty": "easy",
+      "question": "What does the `Recoverer` middleware do, and how does it treat `http.ErrAbortHandler`?",
+      "gold_answer": "`Recoverer` (middleware/recoverer.go, lines 22-49) wraps the next handler in a deferred `recover()`. On a recovered panic it logs the panic and backtrace (via `GetLogEntry(r)`/`logEntry.Panic` or `PrintPrettyStack`) and, unless the request has `Connection: Upgrade`, writes `http.StatusInternalServerError` (500). Crucially, if the recovered value is `http.ErrAbortHandler`, it re-panics (`panic(rvr)`) rather than recovering, so the client response is aborted and it is not logged.",
+      "must_mention": [
+        [
+          "Recoverer"
+        ],
+        [
+          "recoverer\\.go"
+        ],
+        [
+          "recover\\(\\)"
+        ],
+        [
+          "ErrAbortHandler"
+        ],
+        [
+          "StatusInternalServerError|500"
+        ],
+        [
+          "panic\\(rvr\\)|re-?panic"
+        ]
+      ],
+      "expected_files": [
+        "middleware/recoverer.go"
+      ]
+    },
+    {
+      "id": "chi-e3",
+      "difficulty": "easy",
+      "question": "What does the unexported `chain` function in chain.go do, and in what order are middlewares applied relative to the endpoint?",
+      "gold_answer": "`chain(middlewares []func(http.Handler) http.Handler, endpoint http.Handler) http.Handler` in chain.go (lines 36-49) composes a middleware stack around an endpoint handler. If there are no middlewares it returns the endpoint unchanged. Otherwise it wraps the endpoint with the last middleware first, then iterates from `len(middlewares)-2` down to 0 wrapping each successive middleware around the previous result. The net effect is that the first middleware in the slice becomes the outermost wrapper (executes first), and the endpoint is innermost.",
+      "must_mention": [
+        [
+          "func chain",
+          "chain\\("
+        ],
+        [
+          "chain\\.go"
+        ],
+        [
+          "len\\(middlewares\\) ?== ?0",
+          "return endpoint"
+        ],
+        [
+          "middlewares\\[len\\(middlewares\\) ?- ?1\\]",
+          "last"
+        ],
+        [
+          "i-- |i >= 0|len\\(middlewares\\) ?- ?2",
+          "reverse|backwards"
+        ]
+      ],
+      "expected_files": [
+        "chain.go"
+      ]
+    },
+    {
+      "id": "chi-m1",
+      "difficulty": "medium",
+      "question": "How does a Mux build its final `handler` from middlewares registered via `Use()`, and why must `Use()` be called before any routes are added?",
+      "gold_answer": "`Use()` (mux.go, lines 100-105) appends to `mx.middlewares` but panics with \"chi: all middlewares must be defined before routes on a mux\" if `mx.handler != nil`. The handler is built lazily by `updateRouteHandler()` (mux.go, lines 511-513), which sets `mx.handler = chain(mx.middlewares, http.HandlerFunc(mx.routeHTTP))` \u2014 i.e. the `chain` helper from chain.go wraps the middleware stack around `routeHTTP` (the tree router). `updateRouteHandler` is triggered from `handle()` (line 422-424) and `With()` when the first route/inline group is created, freezing the stack; hence any later `Use()` call finds `mx.handler != nil` and panics.",
+      "must_mention": [
+        [
+          "func \\(mx \\*Mux\\) Use",
+          "mx\\.middlewares = append"
+        ],
+        [
+          "mx\\.handler != nil",
+          "all middlewares must be defined before routes"
+        ],
+        [
+          "updateRouteHandler"
+        ],
+        [
+          "chain\\(mx\\.middlewares",
+          "routeHTTP"
+        ],
+        [
+          "mux\\.go"
+        ],
+        [
+          "chain\\.go"
+        ]
+      ],
+      "expected_files": [
+        "mux.go",
+        "chain.go"
+      ]
+    },
+    {
+      "id": "chi-m2",
+      "difficulty": "medium",
+      "question": "How does the `GetHead` middleware make undefined HEAD routes fall back to GET handlers, and which Mux/Context mechanisms does it use?",
+      "gold_answer": "`GetHead` (middleware/get_head.go) only acts when `r.Method == \"HEAD\"`. It reads the routing Context via `chi.RouteContext(r.Context())`, determines the routePath (from `rctx.RoutePath`, else `r.URL.RawPath`/`r.URL.Path`), and creates a temporary context with `chi.NewRouteContext()`. It then calls `rctx.Routes.Match(tctx, \"HEAD\", routePath)` (Mux.Match in mux.go, which delegates to `Find`/`tree.FindRoute`). If no HEAD handler matches, it overrides routing by setting `rctx.RouteMethod = \"GET\"` and `rctx.RoutePath = routePath` before calling `next`; `routeHTTP` (mux.go) subsequently uses `rctx.RouteMethod` to look up the GET handler while the actual request stays HEAD.",
+      "must_mention": [
+        [
+          "GetHead"
+        ],
+        [
+          "get_head\\.go"
+        ],
+        [
+          "RouteContext\\(",
+          "rctx\\.Routes"
+        ],
+        [
+          "\\.Match\\(",
+          "Match\\("
+        ],
+        [
+          "RouteMethod ?= ?\"GET\"",
+          "RouteMethod"
+        ],
+        [
+          "RoutePath"
+        ]
+      ],
+      "expected_files": [
+        "middleware/get_head.go",
+        "mux.go"
+      ]
+    },
+    {
+      "id": "chi-m3",
+      "difficulty": "medium",
+      "question": "When you `Mount` a subrouter at a pattern, how is the URL path shifted so the subrouter routes against the remaining path segment?",
+      "gold_answer": "`Mount` (mux.go, lines 289-340) registers a `mountHandler` on `pattern+\"*\"` (plus stub routes for the bare pattern and trailing slash) with `mALL|mSTUB`. When invoked, `mountHandler` gets the Context, sets `rctx.RoutePath = mx.nextRoutePath(rctx)` to shift past the mount prefix, and clears the trailing `*` wildcard value in `rctx.URLParams`. `nextRoutePath` (mux.go, lines 487-494) looks at the last entry of `rctx.routeParams`; if its key is `\"*\"` it returns `\"/\"+value` (the captured remainder), else `\"/\"`. The subrouter's `routeHTTP` then routes using this shifted `RoutePath`. `Route()` is a shorthand that builds a new router via `NewRouter()` and calls `Mount`.",
+      "must_mention": [
+        [
+          "func \\(mx \\*Mux\\) Mount",
+          "Mount\\("
+        ],
+        [
+          "mountHandler"
+        ],
+        [
+          "nextRoutePath"
+        ],
+        [
+          "RoutePath ?= ?mx\\.nextRoutePath",
+          "rctx\\.RoutePath"
+        ],
+        [
+          "pattern ?\\+ ?\"\\*\"",
+          "\\*"
+        ],
+        [
+          "mux\\.go"
+        ]
+      ],
+      "expected_files": [
+        "mux.go"
+      ]
+    },
+    {
+      "id": "chi-h1",
+      "difficulty": "hard",
+      "question": "Trace how a catch-all wildcard route (e.g. `/page/*`) is stored in the tree and how its parameter value is captured during a lookup. How does chi enforce that `*` is the last segment?",
+      "gold_answer": "During insertion, `patNextSegment` (tree.go, lines 687-753) sees the `*` and returns node type `ntCatchAll` with param key `\"*\"`; if `*` is not the final character it panics (\"wildcard '*' must be the last value in a route...\"), and if a `*` precedes a `{param}` it panics too. `addChild` creates a node of type `ntCatchAll`. During lookup, `findRoute` (tree.go, lines 401-544) reaches the `default` (catch-all) branch, appends the entire remaining `search` string to `rctx.routeParams.Values`, selects `nds[0]`, and sets `xsearch = \"\"` so matching terminates at that leaf. `FindRoute` then copies `routeParams` into `rctx.URLParams` and records the pattern, so `URLParam(r, \"*\")` returns the full remaining path (the only placeholder that matches `/`).",
+      "must_mention": [
+        [
+          "ntCatchAll"
+        ],
+        [
+          "patNextSegment"
+        ],
+        [
+          "wildcard '\\*' must be the last",
+          "must be the last"
+        ],
+        [
+          "routeParams\\.Values = append\\(rctx\\.routeParams\\.Values, search\\)",
+          "append.*search"
+        ],
+        [
+          "findRoute"
+        ],
+        [
+          "tree\\.go"
+        ]
+      ],
+      "expected_files": [
+        "tree.go"
+      ]
+    },
+    {
+      "id": "chi-h2",
+      "difficulty": "hard",
+      "question": "How does chi distinguish a 404 (no route) from a 405 (route exists but method not allowed), and how is the `Allow` response header populated?",
+      "gold_answer": "In `findRoute` (tree.go), when a leaf node is reached but `xn.endpoints[method]` has no handler, chi iterates the node's `endpoints`, skips `mALL`/`mSTUB`, appends each registered method to `rctx.methodsAllowed`, and sets `rctx.methodNotAllowed = true` (tree.go, lines ~463-479 and ~508-524). Back in `Mux.routeHTTP` (mux.go, lines 469-485), if `FindRoute` returns no handler, it checks `rctx.methodNotAllowed`: if true it calls `MethodNotAllowedHandler(rctx.methodsAllowed...)`, otherwise `NotFoundHandler()`. The default `methodNotAllowedHandler` (mux.go, lines 518-526) adds an `Allow` header for each allowed method via `reverseMethodMap`, then writes status 405 with an empty body.",
+      "must_mention": [
+        [
+          "methodNotAllowed"
+        ],
+        [
+          "methodsAllowed"
+        ],
+        [
+          "MethodNotAllowedHandler",
+          "methodNotAllowedHandler"
+        ],
+        [
+          "Allow",
+          "reverseMethodMap"
+        ],
+        [
+          "WriteHeader\\(405\\)",
+          "405"
+        ],
+        [
+          "routeHTTP"
+        ]
+      ],
+      "expected_files": [
+        "tree.go",
+        "mux.go"
+      ]
+    },
+    {
+      "id": "chi-h3",
+      "difficulty": "hard",
+      "question": "How does chi reconstruct the full route pattern (`Context.RoutePattern()`) and accumulate URL params across a stack of mounted subrouters over the lifecycle of one request?",
+      "gold_answer": "Each successful match in `tree.FindRoute` (tree.go, lines 374-397) appends the matched endpoint's `pattern` to `rctx.RoutePatterns` and appends that hop's `routeParams` (Keys/Values) onto the cumulative `rctx.URLParams`. As a request passes through mounted subrouters, `Mount`'s handler shifts `RoutePath` and each subrouter adds another entry, so `RoutePatterns` and `URLParams` become stacks spanning all routers. `Context.RoutePattern()` (context.go, lines 123-134) joins `x.RoutePatterns` into one string, then calls `replaceWildcards` which repeatedly replaces `/*/` with `/` (collapsing the mount-connecting wildcards), and trims a trailing `//` or `/`. `URLParam` reads `URLParams` from the end backwards so the innermost/last-set value for a key wins.",
+      "must_mention": [
+        [
+          "RoutePattern\\(\\)"
+        ],
+        [
+          "RoutePatterns"
+        ],
+        [
+          "replaceWildcards",
+          "/\\*/"
+        ],
+        [
+          "URLParams\\.Keys = append",
+          "URLParams"
+        ],
+        [
+          "FindRoute"
+        ],
+        [
+          "context\\.go"
+        ]
+      ],
+      "expected_files": [
+        "context.go",
+        "tree.go"
+      ]
+    }
+  ]
+}
