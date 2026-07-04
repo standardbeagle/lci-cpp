@@ -95,6 +95,7 @@ def parse_events(lines):
     cost = 0.0
     steps = 0
     tool_output_chars = 0
+    trace = []
     texts = {}       # messageID -> [text]
     order = []       # messageIDs in first-seen order
     error = None
@@ -109,10 +110,29 @@ def parse_events(lines):
         t = e.get("type")
         part = e.get("part", {})
         if t == "tool_use":
-            tools.append(part.get("tool", "?"))
-            out = part.get("state", {}).get("output")
+            tool = part.get("tool", "?")
+            tools.append(tool)
+            state = part.get("state", {})
+            out = state.get("output")
             if isinstance(out, str):
                 tool_output_chars += len(out)
+            entry = {
+                "tool": tool,
+                "status": state.get("status", "?"),
+                "output_chars": len(out) if isinstance(out, str) else 0,
+            }
+            args = state.get("input")
+            if isinstance(args, dict):
+                entry["args"] = {k: (v if isinstance(v, (int, float, bool)) else str(v)[:120])
+                                 for k, v in args.items()}
+            if state.get("status") == "error" or "error" in str(state.get("status", "")):
+                entry["error"] = str(state.get("error") or out or "")[:300]
+            # MCP tools report success at transport level but can carry a
+            # JSON error payload in the output — surface those too.
+            elif isinstance(out, str) and tool.startswith("lci_") and (
+                    '"success": false' in out or '"error"' in out[:200]):
+                entry["tool_error"] = out[:300]
+            trace.append(entry)
         elif t == "step_finish":
             steps += 1
             tok = part.get("tokens")
@@ -139,6 +159,7 @@ def parse_events(lines):
         "steps": steps,
         "tool_calls": tools,
         "tool_output_chars": tool_output_chars,
+        "tool_trace": trace,
         "error": error,
     }
 

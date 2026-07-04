@@ -1,0 +1,130 @@
+{
+  "repo": "chi",
+  "cases": [
+    {
+      "id": "search-basic-symbol",
+      "tool": "search",
+      "args": {"pattern": "Mux"},
+      "expect": {"contains": ["mux.go"], "min_results": 1, "max_latency_ms": 500}
+    },
+    {
+      "id": "search-respects-max",
+      "tool": "search",
+      "args": {"pattern": "middleware", "max": 5},
+      "expect": {"min_results": 1, "max_results_len": 5, "max_latency_ms": 500}
+    },
+    {
+      "id": "search-default-max-15",
+      "tool": "search",
+      "args": {"pattern": "func"},
+      "expect": {"max_results_len": 15, "max_latency_ms": 500}
+    },
+    {
+      "id": "search-unknown-param-rejected",
+      "tool": "search",
+      "args": {"query": "Mux"},
+      "expect": {"is_error": true, "contains": ["validation"]}
+    },
+    {
+      "id": "search-symbol-enrichment",
+      "tool": "search",
+      "args": {"pattern": "ServeHTTP", "flags": "cs"},
+      "expect": {"contains": ["object_id", "symbol_name"], "min_results": 1}
+    },
+    {
+      "id": "search-no-empty-enrichment",
+      "tool": "search",
+      "args": {"pattern": "package chi"},
+      "expect": {"not_contains": ["\"object_id\": \"\"", "\"symbol_name\": \"\""], "min_results": 1}
+    },
+    {
+      "id": "find-files-glob",
+      "tool": "find_files",
+      "args": {"pattern": "*.go"},
+      "expect": {"contains": ["main.go", "match_type"], "min_results": 5, "max_latency_ms": 500}
+    },
+    {
+      "id": "find-files-exact-name",
+      "tool": "find_files",
+      "args": {"pattern": "mux.go"},
+      "expect": {"contains": ["mux.go"], "min_results": 1, "max_latency_ms": 500}
+    },
+    {
+      "id": "find-files-no-match-clean",
+      "tool": "find_files",
+      "args": {"pattern": "*.cobol"},
+      "expect": {"not_contains": ["mux.go"], "max_latency_ms": 500}
+    },
+    {
+      "id": "browse-file-outline",
+      "tool": "browse_file",
+      "args": {"file": "mux.go"},
+      "expect": {"contains": ["ServeHTTP", "Use"], "max_latency_ms": 500}
+    },
+    {
+      "id": "browse-file-missing-clean-error",
+      "tool": "browse_file",
+      "args": {"file": "does_not_exist.go"},
+      "expect": {"is_error": true}
+    },
+    {
+      "id": "list-symbols-functions",
+      "tool": "list_symbols",
+      "args": {"kind": "function", "max": 20},
+      "expect": {"contains": ["function", "signature"], "max_latency_ms": 500, "results_key": "symbols", "min_results": 5, "max_results_len": 20}
+    },
+    {
+      "id": "list-symbols-name-filter",
+      "tool": "list_symbols",
+      "args": {"kind": "function", "name": "NewRouter"},
+      "expect": {"contains": ["NewRouter", "chi.go"], "max_latency_ms": 500}
+    },
+    {
+      "id": "get-context-chained-from-search",
+      "tool": "get_context",
+      "pre": {
+        "tool": "search",
+        "args": {"pattern": "func NewRouter", "flags": "cs"},
+        "extract": {"oid": "results.0.object_id"}
+      },
+      "args": {"id": "$oid"},
+      "expect": {"contains": ["NewRouter"], "max_latency_ms": 800}
+    },
+    {
+      "id": "get-context-by-name",
+      "tool": "get_context",
+      "args": {"name": "NewRouter"},
+      "expect": {"contains": ["NewRouter", "chi.go"], "max_latency_ms": 800}
+    },
+    {
+      "id": "get-context-bogus-id-clean-error",
+      "tool": "get_context",
+      "args": {"id": "zzzzzz"},
+      "expect": {"contains": ["symbol not found"], "not_contains": ["exception", "abort"]}
+    },
+    {
+      "id": "inspect-symbol-by-name",
+      "tool": "inspect_symbol",
+      "args": {"name": "Mux"},
+      "expect": {"contains": ["mux.go"], "max_latency_ms": 800}
+    },
+    {
+      "id": "index-stats-sane",
+      "tool": "index_stats",
+      "args": {},
+      "expect": {"contains": ["file"], "max_latency_ms": 500}
+    },
+    {
+      "id": "info-search-help",
+      "tool": "info",
+      "args": {"tool": "search"},
+      "expect": {"contains": ["pattern", "default: 15"], "max_latency_ms": 300}
+    },
+    {
+      "id": "side-effects-by-name",
+      "tool": "side_effects",
+      "args": {"symbol_name": "NewRouter"},
+      "expect": {"max_latency_ms": 800}
+    }
+  ]
+}

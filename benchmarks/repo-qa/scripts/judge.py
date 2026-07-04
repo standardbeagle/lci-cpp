@@ -101,6 +101,9 @@ def main():
         path, res, q = item
         acc, hits = bl.fact_accuracy(res.get("answer", ""), q["must_mention"])
         scores = {"fact_accuracy": acc, "fact_hits": hits}
+        if q.get("expected_tools"):
+            used = set(res.get("tool_calls", []))
+            scores["tool_match"] = int(any(t in used for t in q["expected_tools"]))
         if not args.skip_llm:
             if res.get("status") == "ok":
                 scores["judge"] = llm_judge(cfg, ws, q["question"], q["gold_answer"], res["answer"])

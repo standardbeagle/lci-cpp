@@ -42,6 +42,7 @@ def collect(run_dir):
             "tool_calls": len(res["tool_calls"]),
             "lci_tool_calls": sum(1 for t in res["tool_calls"] if t.startswith("lci_")),
             "fact_accuracy": s.get("fact_accuracy"),
+            "tool_match": s.get("tool_match"),
             "judge_correctness": j.get("correctness"),
             "judge_completeness": j.get("completeness"),
             "judge_grounding": j.get("grounding"),
@@ -63,6 +64,7 @@ def agg_table(rows, keys):
             **dict(zip(keys, gk)),
             "n": len(g), "ok": len(ok),
             "facts": mean([r["fact_accuracy"] for r in g]),
+            "tool_match": mean([r["tool_match"] for r in g]),
             "judge": mean([r["judge_overall"] for r in g]),
             "grounding": mean([r["judge_grounding"] for r in g]),
             "tok_in": mean([r["tokens_in"] for r in ok]),
@@ -77,11 +79,11 @@ def agg_table(rows, keys):
 
 
 def md_table(agg, keys):
-    hdr = keys + ["n", "ok", "facts", "judge", "grounding", "tok_total", "tok_in", "tok_out", "tok_cache", "cost$", "wall_s", "tools"]
+    hdr = keys + ["n", "ok", "facts", "tool_match", "judge", "grounding", "tok_total", "tok_in", "tok_out", "tok_cache", "cost$", "wall_s", "tools"]
     lines = ["| " + " | ".join(hdr) + " |", "|" + "---|" * len(hdr)]
     for a in agg:
         cells = [str(a[k]) for k in keys] + [
-            str(a["n"]), str(a["ok"]), fmt(a["facts"]), fmt(a["judge"]),
+            str(a["n"]), str(a["ok"]), fmt(a["facts"]), fmt(a["tool_match"]), fmt(a["judge"]),
             fmt(a["grounding"]), fmt(a["tok_total"], 0), fmt(a["tok_in"], 0),
             fmt(a["tok_out"], 0), fmt(a["tok_cache"], 0),
             fmt(a["cost"], 4), fmt(a["wall"], 1), fmt(a["tools"], 1),

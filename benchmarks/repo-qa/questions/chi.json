@@ -282,6 +282,120 @@
         "context.go",
         "tree.go"
       ]
+    },
+    {
+      "id": "chi-t1",
+      "difficulty": "micro",
+      "question": "Call the lci_search tool with pattern 'NewRouter' and, based only on its output, report the file and line where the function NewRouter is defined. Answer in the form file:line.",
+      "gold_answer": "NewRouter is defined at chi.go line 60.",
+      "must_mention": [
+        [
+          "chi\\.go"
+        ],
+        [
+          "\\b60\\b"
+        ]
+      ],
+      "expected_tools": [
+        "lci_search"
+      ],
+      "expected_files": [
+        "chi.go"
+      ]
+    },
+    {
+      "id": "chi-t2",
+      "difficulty": "micro",
+      "question": "Use the lci_get_context tool with name='Mount' and report: which file defines Mount, at what line, and whether it is exported.",
+      "gold_answer": "Mount is defined in mux.go at line 289 and it is exported.",
+      "must_mention": [
+        [
+          "mux\\.go"
+        ],
+        [
+          "289"
+        ],
+        [
+          "exported"
+        ]
+      ],
+      "expected_tools": [
+        "lci_get_context"
+      ],
+      "expected_files": [
+        "mux.go"
+      ]
+    },
+    {
+      "id": "chi-t3",
+      "difficulty": "micro",
+      "question": "Use the lci_browse_file tool on the file 'chain.go' and list the exported types defined in that file.",
+      "gold_answer": "chain.go defines the exported types ChainHandler and Middlewares (plus the exported functions Chain and Handler/HandlerFunc constructors on Middlewares).",
+      "must_mention": [
+        [
+          "ChainHandler"
+        ],
+        [
+          "Middlewares"
+        ]
+      ],
+      "expected_tools": [
+        "lci_browse_file"
+      ],
+      "expected_files": [
+        "chain.go"
+      ]
+    },
+    {
+      "id": "chi-t4",
+      "difficulty": "micro",
+      "question": "Use the lci_find_files tool with pattern '*.md' and report how many markdown files the repository contains and name two of them.",
+      "gold_answer": "There are 6 markdown files, e.g. README.md, CHANGELOG.md, CONTRIBUTING.md, SECURITY.md, routes.md.",
+      "must_mention": [
+        [
+          "\\b6\\b"
+        ],
+        [
+          "README\\.md|CHANGELOG\\.md|CONTRIBUTING\\.md|SECURITY\\.md|routes\\.md"
+        ]
+      ],
+      "expected_tools": [
+        "lci_find_files"
+      ]
+    },
+    {
+      "id": "chi-t5",
+      "difficulty": "micro",
+      "question": "Use the lci_search tool with pattern 'ErrAbortHandler' (case-sensitive) and report every distinct source file that appears in the results.",
+      "gold_answer": "The matches are in middleware/recoverer.go (plus a CHANGELOG.md mention).",
+      "must_mention": [
+        [
+          "recoverer\\.go"
+        ]
+      ],
+      "expected_tools": [
+        "lci_search"
+      ],
+      "expected_files": [
+        "middleware/recoverer.go"
+      ]
+    },
+    {
+      "id": "chi-t6",
+      "difficulty": "micro",
+      "question": "Call the lci_get_context tool with id='zzzzzz' and describe exactly what the tool reports back.",
+      "gold_answer": "The tool returns no contexts (count 0) and an errors array saying the symbol was not found: object_id=zzzzzz (symbol may have been deleted or index is stale).",
+      "must_mention": [
+        [
+          "not found"
+        ],
+        [
+          "zzzzzz"
+        ]
+      ],
+      "expected_tools": [
+        "lci_get_context"
+      ]
     }
   ]
 }
