@@ -59,11 +59,11 @@ def llm_judge(cfg, ws, question, gold, answer, timeout=180):
     prompt = JUDGE_PROMPT.format(question=question, gold=gold, answer=answer or "(empty answer)")
     cmd = [cfg.defaults["opencode-bin"], "run", "-m", cfg.defaults["judge-model"], prompt]
     proc = subprocess.run(cmd, cwd=ws, capture_output=True, text=True, timeout=timeout)
-    m = re.search(r"\{.*\}", proc.stdout, re.DOTALL)
-    if not m:
+    start = proc.stdout.find("{")
+    if start < 0:
         return {"error": f"no JSON in judge output (rc={proc.returncode})"}
     try:
-        j = json.loads(m.group(0))
+        j, _ = json.JSONDecoder().raw_decode(proc.stdout[start:])
     except json.JSONDecodeError as ex:
         return {"error": f"judge JSON parse: {ex}"}
     dims = ("correctness", "completeness", "grounding", "conciseness")

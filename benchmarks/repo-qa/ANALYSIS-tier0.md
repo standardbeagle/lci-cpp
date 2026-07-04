@@ -45,10 +45,30 @@ All ok after 2 timeout retries. Judge: sonnet-4.6. Full numbers: `results/tier0/
 ## Actions
 
 - [x] Slim `handle_search` response: default max 50→15, drop `result_id`,
-  omit empty enrichment fields (this commit). Expected: ~70% payload cut.
+  omit empty enrichment fields (b1b3615). Measured: 74% payload cut
+  (18.6k → 4.9k chars on the same chi query).
 - [ ] Relative (root-relative) `file` paths in search results — needs project
   root plumbed into handlers; saves another ~25% of payload.
-- [ ] Re-run tier0 lci/lci-slim slices against the slimmed binary; compare.
+- [x] Re-run tier0 lci/lci-slim slices against the slimmed binary.
+
+## Post-slim re-run (results/tier0-postslim, same 108-run grid)
+
+| model | variant | facts | judge | tok_total | Δtok vs pre | cost$ | wall_s |
+|---|---|---|---|---|---|---|---|
+| gpt5mini | base | 0.83 | 4.51 | 95k | — | .0086 | 27 |
+| gpt5mini | lci | **0.87** | **4.58** | 169k | +20% (noise) | .0119 | 42 |
+| gpt5mini | lci-slim | 0.84 | 4.49 | 128k | −7% | .0102 | 30 |
+| haiku45 | base | 0.78 | 4.25 | 52k | — | .0154 | 48 |
+| haiku45 | lci | 0.82 | 4.17 | 106k | **−25%** | .0262 | 38 |
+| haiku45 | lci-slim | **0.83** | 4.22 | 111k | +1% | .0259 | 31 |
+
+Post-slim, **every LCI variant now beats its baseline on fact accuracy**
+(gpt5mini lci 0.87 vs 0.83 with perfect grounding 5.0; haiku lci-slim 0.83
+vs 0.78 at 36% less wall time). haiku lci token cost dropped 25% at equal
+accuracy. gpt5mini lci tokens rose — single-rep noise; that model's
+exploration depth varies heavily run-to-run (reps=2+ needed at tier 1).
+Residual 2× token premium vs base is now round-trip count + schema re-reads,
+not payload.
 - [ ] Tier 1-2: add gemini-2.5-flash + qwen3-coder, medium repos (ripgrep,
   guzzle) — test whether LCI's win grows with repo size.
 - [ ] Consider a `compact` default output mode for `get_context`-adjacent
