@@ -1,0 +1,263 @@
+{
+  "repo": "okhttp",
+  "questions": [
+    {
+      "id": "okh-e1",
+      "difficulty": "easy",
+      "question": "In OkHttp's Dispatcher class, what are the default values of the maxRequests and maxRequestsPerHost properties that cap concurrent asynchronous calls?",
+      "gold_answer": "In Dispatcher.kt, `var maxRequests = 64` is the default maximum number of requests to execute concurrently, and `var maxRequestsPerHost = 5` is the default maximum number of concurrent requests per host. Both setters require the value be >= 1 (they throw \"max < 1\" otherwise).",
+      "must_mention": [
+        [
+          "maxRequests"
+        ],
+        [
+          "\\b64\\b",
+          "= *64"
+        ],
+        [
+          "maxRequestsPerHost"
+        ],
+        [
+          "\\b5\\b",
+          "= *5"
+        ],
+        [
+          "Dispatcher"
+        ]
+      ],
+      "expected_files": [
+        "okhttp/src/commonJvmAndroid/kotlin/okhttp3/Dispatcher.kt"
+      ]
+    },
+    {
+      "id": "okh-e2",
+      "difficulty": "easy",
+      "question": "What constant in RetryAndFollowUpInterceptor limits how many redirects and authentication challenges a single call will follow, and what is its value?",
+      "gold_answer": "The companion-object constant `MAX_FOLLOW_UPS = 20` caps follow-ups. In intercept(), when `++followUpCount > MAX_FOLLOW_UPS` the interceptor throws a ProtocolException(\"Too many follow-up requests: ...\"). The KDoc notes Chrome follows 21, Firefox/curl/wget 20, Safari 16.",
+      "must_mention": [
+        [
+          "MAX_FOLLOW_UPS"
+        ],
+        [
+          "\\b20\\b",
+          "= *20"
+        ],
+        [
+          "follow[- ]?ups?"
+        ],
+        [
+          "ProtocolException|Too many follow-up"
+        ],
+        [
+          "RetryAndFollowUpInterceptor"
+        ]
+      ],
+      "expected_files": [
+        "okhttp/src/commonJvmAndroid/kotlin/okhttp3/internal/http/RetryAndFollowUpInterceptor.kt"
+      ]
+    },
+    {
+      "id": "okh-e3",
+      "difficulty": "easy",
+      "question": "Which predefined ConnectionSpec constants are declared in ConnectionSpec's companion object, and which one is used for cleartext http: URLs?",
+      "gold_answer": "ConnectionSpec.kt's companion object declares four @JvmField constants: RESTRICTED_TLS, MODERN_TLS (OkHttp's default), COMPATIBLE_TLS, and CLEARTEXT. CLEARTEXT is built via `Builder(false).build()` and is described as \"Unencrypted, unauthenticated connections for http: URLs.\" The TLS ones set cipher suites and tlsVersions (e.g. TLS_1_3, TLS_1_2).",
+      "must_mention": [
+        [
+          "RESTRICTED_TLS"
+        ],
+        [
+          "MODERN_TLS"
+        ],
+        [
+          "COMPATIBLE_TLS"
+        ],
+        [
+          "CLEARTEXT"
+        ],
+        [
+          "companion|ConnectionSpec"
+        ]
+      ],
+      "expected_files": [
+        "okhttp/src/commonJvmAndroid/kotlin/okhttp3/ConnectionSpec.kt"
+      ]
+    },
+    {
+      "id": "okh-m1",
+      "difficulty": "medium",
+      "question": "Explain OkHttp's transparent gzip mechanism in BridgeInterceptor: when does it add the Accept-Encoding header, and how does it decompress the response? Note how this interceptor is placed in the chain.",
+      "gold_answer": "BridgeInterceptor.intercept() sets `transparentGzip = true` and adds `Accept-Encoding: gzip` only when the user request has neither an Accept-Encoding nor a Range header. On the way back, if transparentGzip is true and the network response's Content-Encoding is gzip and it promisesBody(), it wraps the body source in okio's GzipSource, and strips Content-Encoding and Content-Length from the headers, returning a RealResponseBody with length -1. It also handles Content-Type/Content-Length/Transfer-Encoding request headers, Host, Connection, User-Agent, and loads/receives cookies via chain.cookieJar. BridgeInterceptor is added to the chain in RealCall.getResponseWithInterceptorChain() right after RetryAndFollowUpInterceptor.",
+      "must_mention": [
+        [
+          "Accept-Encoding"
+        ],
+        [
+          "gzip"
+        ],
+        [
+          "transparentGzip"
+        ],
+        [
+          "GzipSource"
+        ],
+        [
+          "Content-Encoding"
+        ],
+        [
+          "BridgeInterceptor"
+        ]
+      ],
+      "expected_files": [
+        "okhttp/src/commonJvmAndroid/kotlin/okhttp3/internal/http/BridgeInterceptor.kt",
+        "okhttp/src/commonJvmAndroid/kotlin/okhttp3/internal/connection/RealCall.kt"
+      ]
+    },
+    {
+      "id": "okh-m2",
+      "difficulty": "medium",
+      "question": "How does ConnectInterceptor obtain a network connection and hand it to the rest of the interceptor chain? Trace initExchange and how the Exchange is injected into the chain.",
+      "gold_answer": "ConnectInterceptor (an object) calls `realChain.call.initExchange(realChain)` to get an Exchange, then `realChain.copy(exchange = exchange)` to produce a new RealInterceptorChain carrying that non-null exchange, and finally `connectedChain.proceed(realChain.request)`. RealCall.initExchange() checks state under a lock, gets a connection from `exchangeFinder.find()`, creates a codec via `connection.newCodec(...)`, wraps them in a new Exchange, stores it as interceptorScopedExchange and exchange, and marks request/response bodies open. RealInterceptorChain.copy() rebuilds the chain with the exchange set; proceed() then enforces network-interceptor invariants once an exchange is present.",
+      "must_mention": [
+        [
+          "ConnectInterceptor"
+        ],
+        [
+          "initExchange"
+        ],
+        [
+          "Exchange"
+        ],
+        [
+          "copy\\(exchange|copy\\("
+        ],
+        [
+          "exchangeFinder|newCodec|find\\(\\)"
+        ],
+        [
+          "proceed"
+        ]
+      ],
+      "expected_files": [
+        "okhttp/src/commonJvmAndroid/kotlin/okhttp3/internal/connection/ConnectInterceptor.kt",
+        "okhttp/src/commonJvmAndroid/kotlin/okhttp3/internal/connection/RealCall.kt",
+        "okhttp/src/commonJvmAndroid/kotlin/okhttp3/internal/http/RealInterceptorChain.kt"
+      ]
+    },
+    {
+      "id": "okh-m3",
+      "difficulty": "medium",
+      "question": "What is OkHttpClient's default list of ConnectionSpecs, and how do a client's connectionSpecs reach the Address used to open a connection?",
+      "gold_answer": "OkHttpClient's companion object defines `DEFAULT_CONNECTION_SPECS = listOf(ConnectionSpec.MODERN_TLS, ConnectionSpec.CLEARTEXT)`, which the Builder assigns to `connectionSpecs` by default. RealInterceptorChain.address(url) constructs an Address passing `connectionSpecs = call.client.connectionSpecs` (along with protocols, dns, proxy, sslSocketFactory, etc.), so the client's configured specs flow into the Address that drives connection negotiation.",
+      "must_mention": [
+        [
+          "DEFAULT_CONNECTION_SPECS"
+        ],
+        [
+          "MODERN_TLS"
+        ],
+        [
+          "CLEARTEXT"
+        ],
+        [
+          "connectionSpecs"
+        ],
+        [
+          "Address|address\\("
+        ]
+      ],
+      "expected_files": [
+        "okhttp/src/commonJvmAndroid/kotlin/okhttp3/OkHttpClient.kt",
+        "okhttp/src/commonJvmAndroid/kotlin/okhttp3/ConnectionSpec.kt",
+        "okhttp/src/commonJvmAndroid/kotlin/okhttp3/internal/http/RealInterceptorChain.kt"
+      ]
+    },
+    {
+      "id": "okh-h1",
+      "difficulty": "hard",
+      "question": "In CallServerInterceptor.intercept, walk through the request-writing/response-reading exchange: how are the 'Expect: 100-continue' and duplex request-body branches handled, and how are 1xx interim responses treated? Explain the parameter-dependent branches that make this treacherous.",
+      "gold_answer": "After writeRequestHeaders, if the request has a body (hasRequestBody) and an 'Expect: 100-continue' header, it flushRequest() then readResponseHeaders(expectContinue = true) and sets invokeStartEvent=false; a non-null responseBuilder here means the server did NOT send 100 (it returned e.g. a 4xx), so it calls exchange.noRequestBody() and, if the connection is not multiplexed (isMultiplexed false), noNewExchangesOnConnection() to prevent HTTP/1 reuse. If responseBuilder is still null, it writes the body: for a duplex body (requestBody.isDuplex()) it flushRequest() and creates a duplex request body the application writes later (and skips finishRequest since `requestBody == null || !isDuplex()` is false); otherwise it writes and closes a buffered body. Response reading: if responseBuilder is null it reads headers (expectContinue=false), then loops while shouldIgnoreAndWaitForRealResponse(code) is true \u2014 that helper returns true for code==100 and for codes 102 until 200, so interim/informational 1xx responses are skipped until the real status arrives. Upgrade (101 HTTP_SWITCHING_PROTOCOLS) is rejected on multiplexed/HTTP-2 connections; a matching upgrade request+response swaps in an UnreadableResponseBody and upgradeToSocket(). Connection:close on request or response triggers noNewExchangesOnConnection(); a 204/205 with non-zero Content-Length throws ProtocolException. Exceptions during send are captured as sendRequestException and, if the read also throws, the send exception is rethrown with the read exception suppressed.",
+      "must_mention": [
+        [
+          "100-continue|Expect"
+        ],
+        [
+          "readResponseHeaders|expectContinue"
+        ],
+        [
+          "duplex|isDuplex"
+        ],
+        [
+          "noNewExchangesOnConnection|isMultiplexed"
+        ],
+        [
+          "shouldIgnoreAndWaitForRealResponse|\\b100\\b|102"
+        ],
+        [
+          "sendRequestException|writeRequestHeaders|finishRequest"
+        ]
+      ],
+      "expected_files": [
+        "okhttp/src/commonJvmAndroid/kotlin/okhttp3/internal/http/CallServerInterceptor.kt"
+      ]
+    },
+    {
+      "id": "okh-h2",
+      "difficulty": "hard",
+      "question": "In RetryAndFollowUpInterceptor, how does followUpRequest branch on the response code to decide the next request, and how do recover()/retry semantics interact with request-body oneshot state and route fallback? Enumerate the code-dependent branches.",
+      "gold_answer": "followUpRequest(userResponse, exchange, chain) switches on responseCode: 407 HTTP_PROXY_AUTH requires an HTTP proxy (else ProtocolException) and delegates to chain.proxyAuthenticator.authenticate(route, response); 401 HTTP_UNAUTHORIZED delegates to chain.authenticator; the redirect codes (HTTP_PERM_REDIRECT, HTTP_TEMP_REDIRECT, HTTP_MULT_CHOICE, HTTP_MOVED_PERM, HTTP_MOVED_TEMP, HTTP_SEE_OTHER) call buildRedirectRequest, which honors chain.followRedirects/followSslRedirects, resolves the Location header, may switch the method to GET (redirectsToGet), drops the body/Transfer-Encoding/Content-Length/Content-Type when not maintaining body, and strips Authorization across hosts; 408 HTTP_CLIENT_TIMEOUT retries the same request unless retryOnConnectionFailure is off, the body isOneShot, a prior 408 already occurred, or Retry-After > 0; 503 HTTP_UNAVAILABLE retries only if Retry-After == 0; 421 HTTP_MISDIRECTED_REQUEST retries on a fresh connection if the body isn't oneshot and the connection was coalesced. The main loop guards with `++followUpCount > MAX_FOLLOW_UPS` (20). On IOException, recover(e, call, chain, request) returns false (fatal) if retryOnConnectionFailure is off, if the body is oneshot (or FileNotFoundException) after send started, if !isRecoverable (ProtocolException, non-timeout InterruptedIOException, SSLHandshakeException caused by CertificateException, SSLPeerUnverifiedException), or if `!call.retryAfterFailure()` (no more routes); otherwise it retries with newRoutePlanner=false to fall back to another route.",
+      "must_mention": [
+        [
+          "followUpRequest"
+        ],
+        [
+          "HTTP_PROXY_AUTH|407|proxyAuthenticator"
+        ],
+        [
+          "HTTP_UNAUTHORIZED|401|authenticator"
+        ],
+        [
+          "buildRedirectRequest|redirect|Location"
+        ],
+        [
+          "HTTP_CLIENT_TIMEOUT|408|HTTP_UNAVAILABLE|503"
+        ],
+        [
+          "recover|retryAfterFailure|isOneShot"
+        ]
+      ],
+      "expected_files": [
+        "okhttp/src/commonJvmAndroid/kotlin/okhttp3/internal/http/RetryAndFollowUpInterceptor.kt"
+      ]
+    },
+    {
+      "id": "okh-h3",
+      "difficulty": "hard",
+      "question": "How is the full interceptor chain assembled and driven in RealCall.getResponseWithInterceptorChain and RealInterceptorChain.proceed, and what invariants does proceed enforce that make chain behavior vary by request parameters and installed interceptors?",
+      "gold_answer": "getResponseWithInterceptorChain() builds a mutable list in fixed order: client.interceptors (application), then RetryAndFollowUpInterceptor, BridgeInterceptor, CacheInterceptor, ConnectInterceptor, then client.networkInterceptors (only appended when !forWebSocket), and finally CallServerInterceptor. It creates a RealInterceptorChain at index 0 with exchange=null and calls chain.proceed(originalRequest), wrapping failures via noMoreExchanges. RealInterceptorChain.proceed(request) asserts index < interceptors.size, increments calls, and \u2014 only when exchange != null (network side) \u2014 checks the route planner's sameHostAndPort(request.url) and that calls == 1 (\"must retain the same host and port\" / \"must call proceed() exactly once\"). It copies the chain with index+1, invokes interceptors[index].intercept(next), rejects a null return with NullPointerException, and after the call (with exchange present) re-checks `index + 1 >= interceptors.size || next.calls == 1` to enforce each network interceptor calls proceed exactly once. Because application interceptors run with exchange=null (no such invariants) while network interceptors run after ConnectInterceptor injects the exchange, and because forWebSocket omits network interceptors, the number of interceptors invoked and the enforced constraints vary by request parameters and installed interceptors.",
+      "must_mention": [
+        [
+          "getResponseWithInterceptorChain"
+        ],
+        [
+          "RetryAndFollowUpInterceptor.*BridgeInterceptor|BridgeInterceptor.*CacheInterceptor|ConnectInterceptor.*CallServerInterceptor"
+        ],
+        [
+          "networkInterceptors|forWebSocket"
+        ],
+        [
+          "RealInterceptorChain|proceed"
+        ],
+        [
+          "calls == 1|exactly once|sameHostAndPort"
+        ],
+        [
+          "exchange (!=|==) null|exchange == null|exchange != null"
+        ]
+      ],
+      "expected_files": [
+        "okhttp/src/commonJvmAndroid/kotlin/okhttp3/internal/connection/RealCall.kt",
+        "okhttp/src/commonJvmAndroid/kotlin/okhttp3/internal/http/RealInterceptorChain.kt"
+      ]
+    }
+  ]
+}

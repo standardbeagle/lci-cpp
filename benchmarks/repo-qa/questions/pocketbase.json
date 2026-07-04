@@ -1,0 +1,259 @@
+{
+  "repo": "pocketbase",
+  "questions": [
+    {
+      "id": "pb-e1",
+      "difficulty": "easy",
+      "question": "What is the package-level variable in pocketbase.go that holds the PocketBase framework version, and what is its default (untracked build) value?",
+      "gold_answer": "In pocketbase.go (line 27) the exported package-level variable `var Version = \"(untracked)\"` holds the framework version string. Its default literal value is \"(untracked)\", which is intended to be overridden at build time; until then any build reports the version as \"(untracked)\".",
+      "must_mention": [
+        [
+          "Version"
+        ],
+        [
+          "\\(untracked\\)|untracked"
+        ],
+        [
+          "var|package[- ]level|string"
+        ],
+        [
+          "pocketbase\\.go"
+        ]
+      ],
+      "expected_files": [
+        "pocketbase.go"
+      ]
+    },
+    {
+      "id": "pb-e2",
+      "difficulty": "easy",
+      "question": "In apis/middlewares_cors.go, what is the id constant assigned to the default CORS middleware, and relative to which other middleware priority is its priority defined?",
+      "gold_answer": "apis/middlewares_cors.go defines `DefaultCorsMiddlewareId = \"pbCors\"` (line 27) and `DefaultCorsMiddlewarePriority = DefaultActivityLoggerMiddlewarePriority - 1` (line 28). The priority is one less than the activity-logger priority so the CORS middleware runs before the activity logger and rate limiter, ensuring OPTIONS preflight requests are not counted.",
+      "must_mention": [
+        [
+          "DefaultCorsMiddlewareId"
+        ],
+        [
+          "pbCors"
+        ],
+        [
+          "DefaultCorsMiddlewarePriority"
+        ],
+        [
+          "DefaultActivityLoggerMiddlewarePriority"
+        ],
+        [
+          "middlewares_cors\\.go"
+        ]
+      ],
+      "expected_files": [
+        "apis/middlewares_cors.go"
+      ]
+    },
+    {
+      "id": "pb-e3",
+      "difficulty": "easy",
+      "question": "Which filter modifiers does splitModifier in core/record_field_resolver.go accept as valid, and what does it return for an input with no ':' separator?",
+      "gold_answer": "splitModifier (core/record_field_resolver.go, line 573) splits the input on ':'. If there are not exactly two parts (i.e. no ':' separator) it returns the original combined string as the name with an empty modifier and nil error. When a modifier is present it validates it against the constant set: `isset`, `each`, `length`, `lower`, and `changed`; any other modifier yields an \"unknown modifier\" error.",
+      "must_mention": [
+        [
+          "splitModifier"
+        ],
+        [
+          "each"
+        ],
+        [
+          "isset"
+        ],
+        [
+          "length"
+        ],
+        [
+          "lower"
+        ],
+        [
+          "changed"
+        ]
+      ],
+      "expected_files": [
+        "core/record_field_resolver.go"
+      ]
+    },
+    {
+      "id": "pb-m1",
+      "difficulty": "medium",
+      "question": "Describe how BaseApp.CanAccessRecord decides whether a record is accessible, including its short-circuit cases and how it applies a non-empty access rule.",
+      "gold_answer": "CanAccessRecord (core/record_query.go, line 599) first returns true when requestInfo.HasSuperuserAuth() is set (superusers access everything). If accessRule is nil it returns false (only superusers). If the rule is the empty string it returns true (public). Otherwise it builds a RecordQuery selecting (1) filtered to the record id, constructs a resolver via NewRecordFieldResolver(app, collection, requestInfo, true), compiles the rule with search.FilterData(*accessRule).BuildExpr(resolver), applies resolver.UpdateQuery(query), then runs the query with the expression and Limit(1), returning exists > 0. sql.ErrNoRows is tolerated.",
+      "must_mention": [
+        [
+          "CanAccessRecord"
+        ],
+        [
+          "HasSuperuserAuth|superuser"
+        ],
+        [
+          "accessRule == nil|only superusers|nil"
+        ],
+        [
+          "BuildExpr"
+        ],
+        [
+          "UpdateQuery"
+        ],
+        [
+          "NewRecordFieldResolver"
+        ]
+      ],
+      "expected_files": [
+        "core/record_query.go",
+        "core/record_field_resolver.go"
+      ]
+    },
+    {
+      "id": "pb-m2",
+      "difficulty": "medium",
+      "question": "How does ToApiError in tools/router/error.go normalize an arbitrary error into an ApiError, and how does the resulting status depend on the wrapped error type?",
+      "gold_answer": "ToApiError (tools/router/error.go, line 134) uses errors.As to check whether err already wraps an *ApiError; if so that instance is returned unchanged. If not, it inspects the error: when errors.Is(err, sql.ErrNoRows) or errors.Is(err, fs.ErrNotExist) it wraps it in NewNotFoundError (HTTP 404 / StatusNotFound); otherwise it assigns a generic NewBadRequestError (HTTP 400 / StatusBadRequest). Each constructor calls NewApiError, which builds the safe Data map via safeErrorsData and sentence-cases the message.",
+      "must_mention": [
+        [
+          "ToApiError"
+        ],
+        [
+          "errors\\.As"
+        ],
+        [
+          "sql\\.ErrNoRows"
+        ],
+        [
+          "fs\\.ErrNotExist"
+        ],
+        [
+          "NewNotFoundError|404|StatusNotFound"
+        ],
+        [
+          "NewBadRequestError|400|StatusBadRequest"
+        ]
+      ],
+      "expected_files": [
+        "tools/router/error.go"
+      ]
+    },
+    {
+      "id": "pb-m3",
+      "difficulty": "medium",
+      "question": "In apis/middlewares_cors.go, how is each configured AllowOrigins entry (other than '*') translated into a matcher, and what happens when the pattern fails to compile?",
+      "gold_answer": "During CORS setup, each AllowOrigins entry that is not \"*\" is converted to a regular expression: the origin is escaped with regexp.QuoteMeta, then the escaped wildcards are un-escaped back into regex tokens via strings.ReplaceAll(pattern, \"\\\\*\", \".*\") and strings.ReplaceAll(pattern, \"\\\\?\", \".\"), and the pattern is anchored as \"^\" + pattern + \"$\". It is compiled with regexp.Compile; if compilation fails the code logs \"invalid AllowOrigins pattern\" and continues (silently ignoring that pattern to preserve prior non-panicking behaviour) rather than crashing. Compiled patterns are collected into allowOriginPatterns.",
+      "must_mention": [
+        [
+          "QuoteMeta"
+        ],
+        [
+          "\\.\\*|ReplaceAll"
+        ],
+        [
+          "\\^.*\\$|anchor|\\^\"|\\$\""
+        ],
+        [
+          "regexp\\.Compile"
+        ],
+        [
+          "AllowOrigins"
+        ],
+        [
+          "invalid AllowOrigins pattern|continue|ignored"
+        ]
+      ],
+      "expected_files": [
+        "apis/middlewares_cors.go"
+      ]
+    },
+    {
+      "id": "pb-h1",
+      "difficulty": "hard",
+      "question": "In core/record_field_resolver_runner.go, explain how processActiveProps and finalizeActivePropsProcessing make filter-field resolution depend on the field-path shape \u2014 covering JSON/geoPoint fields, back-relations, the nesting limit, and terminal modifiers.",
+      "gold_answer": "processActiveProps (line 441) iterates the split field path (r.activeProps). For the last prop it delegates to finalizeActivePropsProcessing; for intermediate props the behaviour forks by field type: a hidden non-superuser field errors as \"non-filterable\"; a field of type FieldTypeJSON or FieldTypeGeoPoint causes all remaining props to be treated as a JSON path (built via inflector.Columnify with numeric parts turned into [index]) and resolved with dbutils.JSONExtract. Before descending into a relation it enforces `if i >= maxNestedRels` (maxNestedRels = 6) returning \"max nested relations reached\". When a prop resolves to no field it is tried as a back-relation matching viaRegex `^(\\w+)_via_(\\w+)$`, loading the back collection/field, validating it is a RelationField whose CollectionId points back, and registering joins (multi vs single). finalizeActivePropsProcessing (line 736) calls splitModifier and branches on terminal modifiers: `:length` (lengthModifier) on a MultiValuer yields dbutils.JSONArrayLength, `:each` (eachModifier) expands into a json-each join. Missing terminal fields either return a NULL identifier (nullifyMisingField) or an \"unknown field\" error. Thus the exact SQL produced varies enormously with the path's field types, back-relation syntax, depth, and modifier.",
+      "must_mention": [
+        [
+          "processActiveProps"
+        ],
+        [
+          "finalizeActivePropsProcessing"
+        ],
+        [
+          "FieldTypeJSON|FieldTypeGeoPoint|json path|JSONExtract"
+        ],
+        [
+          "viaRegex|_via_|back relation"
+        ],
+        [
+          "maxNestedRels|max nested"
+        ],
+        [
+          "lengthModifier|eachModifier|:length|:each|JSONArrayLength"
+        ]
+      ],
+      "expected_files": [
+        "core/record_field_resolver_runner.go",
+        "core/record_field_resolver.go"
+      ]
+    },
+    {
+      "id": "pb-h2",
+      "difficulty": "hard",
+      "question": "Walk through the decision logic of the anonymous CORS handler Func in apis/middlewares_cors.go: how it treats a missing Origin, preflight requests, a custom AllowOriginFunc, and the unsafe wildcard-with-credentials case.",
+      "gold_answer": "The returned hook.Handler's Func (starting ~line 172) reads the request Origin and always adds `Vary: Origin`. A preflight is detected as an OPTIONS request (req.Method == http.MethodOptions). If the Origin header is empty it assumes a non-browser request: it calls e.Next() for a normal request, or returns e.NoContent(StatusNoContent) for a preflight. When an Origin is present, if config.AllowOriginFunc is set it is invoked and, on allowed==true, allowOrigin is set to the origin (errors propagate). Otherwise it iterates config.AllowOrigins: a \"*\" entry combined with config.AllowCredentials AND config.UnsafeWildcardOriginWithAllowCredentials reflects the actual origin (the unsafe path); a plain \"*\" or an exact origin match sets allowOrigin (with \"*\" preserved unless credentials force reflection). The decision therefore hinges on Origin presence, method, the custom func, and the unsafe wildcard/credentials flags.",
+      "must_mention": [
+        [
+          "Origin"
+        ],
+        [
+          "preflight|OPTIONS|MethodOptions"
+        ],
+        [
+          "AllowOriginFunc"
+        ],
+        [
+          "UnsafeWildcardOriginWithAllowCredentials"
+        ],
+        [
+          "Vary"
+        ],
+        [
+          "AllowCredentials"
+        ]
+      ],
+      "expected_files": [
+        "apis/middlewares_cors.go"
+      ]
+    },
+    {
+      "id": "pb-h3",
+      "difficulty": "hard",
+      "question": "How does unmarshalInStructValue in tools/router/unmarshal_request_data.go dispatch per struct field, and how does its behaviour change with the field's shape (TextUnmarshaler, slice, nested struct, slice-of-structs)?",
+      "gold_answer": "unmarshalInStructValue (tools/router/unmarshal_request_data.go, line 122) reflectively walks each field of dstStructValue. It skips fields tagged \"-\" or unexported non-anonymous fields, reads the struct tag via structTagKey to compute the lookup name, and prefixes it with structPrefix when nested. It dereferences pointer fields and detects slices (isSlice) by unwrapping reflect.Slice. Dispatch is shape-dependent: (1) if the (element) type implements encoding.TextUnmarshaler (or its pointer does) it calls UnmarshalText, building a reflect.MakeSlice for slice fields; (2) otherwise for non-struct kinds it loads values via setRegularReflectedValue, again slice-aware; (3) for nested/embedded structs it recurses into unmarshalInStructValue, updating structPrefix from the tag (or the field name); (4) a slice-of-structs is explicitly skipped because the filling rules are ambiguous / not supported. So the same function produces very different unmarshalling depending on each field's kind, tag, pointer-ness, and slice-ness.",
+      "must_mention": [
+        [
+          "unmarshalInStructValue"
+        ],
+        [
+          "structTagKey|Tag\\.Get|tag"
+        ],
+        [
+          "TextUnmarshaler"
+        ],
+        [
+          "reflect\\.Slice|isSlice|MakeSlice"
+        ],
+        [
+          "structPrefix"
+        ],
+        [
+          "slice of structs|not supported|ambiguous"
+        ]
+      ],
+      "expected_files": [
+        "tools/router/unmarshal_request_data.go"
+      ]
+    }
+  ]
+}

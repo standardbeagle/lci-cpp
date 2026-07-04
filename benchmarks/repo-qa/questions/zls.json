@@ -1,0 +1,253 @@
+{
+  "repo": "zls",
+  "questions": [
+    {
+      "id": "zls-e1",
+      "difficulty": "easy",
+      "question": "In src/DocumentStore.zig, what does the `getBuildFile` function do and what does it return?",
+      "gold_answer": "`getBuildFile(self: *DocumentStore, uri: Uri) ?*BuildFile` (around line 756) takes an exclusive lock on the DocumentStore's mutex (lockUncancelable / unlock via defer), then looks the URI up in the `build_files` map and returns the stored `?*BuildFile` (null if the URI is not present). It is a thread-safe read guarded by comptime `supports_build_system`.",
+      "must_mention": [
+        [
+          "getBuildFile"
+        ],
+        [
+          "build_files"
+        ],
+        [
+          "mutex|lock(Uncancelable)?|unlock"
+        ],
+        [
+          "\\?\\*BuildFile|BuildFile"
+        ]
+      ],
+      "expected_files": [
+        "src/DocumentStore.zig"
+      ]
+    },
+    {
+      "id": "zls-e2",
+      "difficulty": "easy",
+      "question": "What is the public entry point in src/features/semantic_tokens.zig that produces semantic tokens, and how does it kick off traversal?",
+      "gold_answer": "`pub fn writeSemanticTokens(arena, analyser, handle, loc, encoding, limited, overlappingTokenSupport)` (around line 1164). It constructs a `Builder` from those parameters, iterates over `tree.rootDecls()` calling `writeNodeTokens(&builder, child)` for each root declaration, and returns `builder.finish()`.",
+      "must_mention": [
+        [
+          "writeSemanticTokens"
+        ],
+        [
+          "rootDecls"
+        ],
+        [
+          "writeNodeTokens"
+        ],
+        [
+          "Builder"
+        ]
+      ],
+      "expected_files": [
+        "src/features/semantic_tokens.zig"
+      ]
+    },
+    {
+      "id": "zls-e3",
+      "difficulty": "easy",
+      "question": "In src/analyser/string_pool.zig, describe `stringToSliceLock` and the `LockedString` it returns.",
+      "gold_answer": "`stringToSliceLock(pool, io, index)` (around line 150) locks the pool's mutex with `lockUncancelable(io)` and returns a `LockedString` whose `.slice` points into the pool's internal storage (via `stringToSliceUnsafe`). The pool stays locked until the caller invokes `LockedString.release`, which calls `pool.mutex.unlock(io)`.",
+      "must_mention": [
+        [
+          "stringToSliceLock"
+        ],
+        [
+          "LockedString"
+        ],
+        [
+          "release"
+        ],
+        [
+          "mutex"
+        ],
+        [
+          "unlock"
+        ]
+      ],
+      "expected_files": [
+        "src/analyser/string_pool.zig"
+      ]
+    },
+    {
+      "id": "zls-m1",
+      "difficulty": "medium",
+      "question": "Which feature files call `DeclWithHandle.resolveType`, and what do they use its result for?",
+      "gold_answer": "`DeclWithHandle.resolveType(self, analyser)` (defined in src/analysis.zig ~5873) is called from multiple feature modules: src/features/hover.zig (e.g. `param_decl_handle.resolveType` / `decl_handle.resolveType` to build hover type info), src/features/inlay_hints.zig (`things.resolveType` / `decl.resolveType` to compute inlay type hints), and src/features/signature_help.zig (`decl.resolveType` for parameter types). Each passes the shared `analyser` and uses the resolved `?Type` to render the type of a declaration.",
+      "must_mention": [
+        [
+          "resolveType"
+        ],
+        [
+          "DeclWithHandle"
+        ],
+        [
+          "hover"
+        ],
+        [
+          "inlay_hints"
+        ],
+        [
+          "signature_help"
+        ],
+        [
+          "analyser"
+        ]
+      ],
+      "expected_files": [
+        "src/analysis.zig",
+        "src/features/hover.zig",
+        "src/features/inlay_hints.zig",
+        "src/features/signature_help.zig"
+      ]
+    },
+    {
+      "id": "zls-m2",
+      "difficulty": "medium",
+      "question": "How is a Handle's DocumentScope computed lazily and cached in src/DocumentStore.zig, and what actually builds it?",
+      "gold_answer": "`Handle.getDocumentScope` (line ~183) forwards to `self.document_scope.get(self)`, where `document_scope` is a `Lazy(DocumentScope, DocumentStoreContext)` field. `Lazy.get` (line ~574) takes `lazy.mutex.lockUncancelable(io)`, and if `lazy.value == null` calls `Context.create(handle, store.allocator)` to build and cache it; otherwise it returns the cached value. Creation ultimately calls `DocumentScope.init(allocator, &handle.tree)` (src/DocumentScope.zig ~488), which walks the AST via `walkContainerDecl`/`walkNode`.",
+      "must_mention": [
+        [
+          "getDocumentScope"
+        ],
+        [
+          "Lazy|document_scope"
+        ],
+        [
+          "DocumentScope\\.init|\\.init\\("
+        ],
+        [
+          "mutex|lock"
+        ],
+        [
+          "walkContainerDecl|walkNode|create"
+        ]
+      ],
+      "expected_files": [
+        "src/DocumentStore.zig",
+        "src/DocumentScope.zig"
+      ]
+    },
+    {
+      "id": "zls-m3",
+      "difficulty": "medium",
+      "question": "Trace the build-file lifecycle in src/DocumentStore.zig: how does `getOrLoadBuildFile` create a build file and how does invalidation happen?",
+      "gold_answer": "`getOrLoadBuildFile` (line ~766) first tries `getBuildFile(uri)`; on a hit it returns it. Otherwise it takes an exclusive `self.mutex.lock(self.io)`, does `build_files.getOrPut`, and on a miss allocates a `*BuildFile` and fills it via `createBuildFile(uri)` (with errdefer swapRemove/destroy on failure). After releasing the lock, for a newly created file it calls `invalidateBuildFile(new_build_file.uri)`. `invalidateBuildFile` (line ~915) bails if zig_exe_path/build_runner_path/global_cache_dir/zig_lib_dir config is null, looks the file up with `getBuildFile`, and spawns `invalidateBuildFileWorker` asynchronously through `self.wait_group.async`.",
+      "must_mention": [
+        [
+          "getOrLoadBuildFile"
+        ],
+        [
+          "getBuildFile"
+        ],
+        [
+          "invalidateBuildFile"
+        ],
+        [
+          "createBuildFile"
+        ],
+        [
+          "wait_group|async|invalidateBuildFileWorker"
+        ],
+        [
+          "mutex|lock"
+        ]
+      ],
+      "expected_files": [
+        "src/DocumentStore.zig"
+      ]
+    },
+    {
+      "id": "zls-h1",
+      "difficulty": "hard",
+      "question": "In src/analysis.zig, `DeclWithHandle.resolveType` (~5873) is a high-risk chokepoint. What varies by the `decl` union tag, what shared post-processing runs afterward, and what deeper analyser calls does it fan out to?",
+      "gold_answer": "`resolveType` switches on `self.decl` (a Declaration union) and resolves differently per tag: `.ast_node` -> `resolveTypeOfNodeInternal` on the node; `.function_parameter` -> `pay.get(tree)`, handling `anytype` (building an `anytype_parameter` Type via `resolveCallsiteReferences`) and metatype params (`type_parameter`) or else `param_type.instanceTypeVal`; `.optional_payload` -> `resolveOptionalUnwrap`; `.error_union_payload`/`.error_union_error` -> `resolveUnwrapErrorUnionType` (payload vs error_set); `.for_loop_payload` -> usize for for_range else `resolveBracketAccessType`; `.assign_destructure` -> handles array/tuple/vector/array_type element extraction; `.label` -> resolves the block; `.switch_payload`/`.switch_inline_tag_payload` -> resolves the switch condition, `resolveUnionTag` for inline tag, peer-type shortcut using the first resolvable enum_literal case; `.error_token` -> null. After the switch (`orelse return null`), if `self.container_type` is a `.container` it applies `resolveGenericType(resolved_ty, info.bound_params)`, and if `self.isCaptureByRef()` it wraps the result in a single-item pointer via `typeOf` + `createPointerType` + `instanceUnchecked`. It fans out heavily into `resolveTypeOfNodeInternal`, `resolveCallsiteReferences`, `resolveOptionalUnwrap`, `resolveUnwrapErrorUnionType`, `resolveBracketAccessType`, `resolveUnionTag`, `resolveGenericType`, and recurses through `decl.resolveType` (switch case peer resolution).",
+      "must_mention": [
+        [
+          "resolveType"
+        ],
+        [
+          "function_parameter"
+        ],
+        [
+          "anytype|anytype_parameter|type_parameter"
+        ],
+        [
+          "switch_payload|resolveUnionTag|assign_destructure"
+        ],
+        [
+          "container_type|bound_params|resolveGenericType"
+        ],
+        [
+          "isCaptureByRef|createPointerType|pointer"
+        ]
+      ],
+      "expected_files": [
+        "src/analysis.zig"
+      ]
+    },
+    {
+      "id": "zls-h2",
+      "difficulty": "hard",
+      "question": "In src/features/semantic_tokens.zig, `writeNodeTokens` (~286) is a giant dispatch function. How is it structured, what makes its behavior vary, where does it recurse, and what analysis dependency makes it heavy?",
+      "gold_answer": "`writeNodeTokens(builder, node)` is a big `switch (tree.nodeTag(node))` that handles nearly every AST node tag with a dedicated arm (root is `unreachable`; container fields, blocks, var decls, container/tagged_union decls, error_set_decl, error_value, fn_proto/fn_decl, switch/while/for/if, calls, slices, array/struct inits, etc.). Behavior varies by node tag and by `builder.loc`: at the top it early-returns when a `loc` is set and `offsets.locIntersect(loc, nodeToLoc)` is false (range-limited requests). It is deeply recursive, calling `writeNodeTokens(builder, child)` on statements, container members, arguments, condition/then/else expressions, call params, slice bounds, etc., and emits tokens through `writeToken`/`writeTokenMod`. It is heavy because several arms call `builder.analyser.resolveTypeOfNode` (var decls, fn_proto to detect generic/type funcs via `isGenericFunc`/`isTypeFunc`), tying token highlighting to the full type-resolution machinery.",
+      "must_mention": [
+        [
+          "writeNodeTokens"
+        ],
+        [
+          "switch|nodeTag"
+        ],
+        [
+          "writeNodeTokens\\(builder|recurs"
+        ],
+        [
+          "resolveTypeOfNode"
+        ],
+        [
+          "writeToken|writeTokenMod"
+        ],
+        [
+          "builder\\.loc|locIntersect"
+        ]
+      ],
+      "expected_files": [
+        "src/features/semantic_tokens.zig"
+      ]
+    },
+    {
+      "id": "zls-h3",
+      "difficulty": "hard",
+      "question": "Describe the DocumentScope construction cycle in src/DocumentScope.zig (init / walkNode / walkNodeEnsureScope / pushDeclaration / nameToken). Where is the mutual recursion, and how does pushDeclaration depend on nameToken?",
+      "gold_answer": "Construction starts at `DocumentScope.init(allocator, tree)` (~488), which sets up a `ScopeContext` and, for `.zig`, calls `walkContainerDecl(.root)` (for `.zon` it startScope + `walkNode`). `walkNode(context, tree, node_idx)` (~568) is a big switch dispatching per node tag to walkers (walkContainerDecl, walkFuncNode, walkBlockNode, walkIfNode, walkWhileNode, walkForNode, walkCatchNode, etc.). Those walkers call `walkNodeEnsureScope(context, tree, node_idx, start_token)` (~540) to create a scope for a sub-expression; for block nodes it reuses the block scope via walkBlockNodeKeepOpen, otherwise it `startScope(.other, ...)` then calls `walkNode` again \u2014 this is the mutual recursion `walkNode <-> walkNodeEnsureScope` (walkNodeEnsureScope is invoked from many walker arms: if/while/for/catch/switch). Declarations are registered via `PushedScope.pushDeclaration(identifier_token, declaration, kind)` (~332): it derives `name` via `offsets.identifierTokenToNameSlice`, skips `_`, dedups through `declaration_lookup_map.getOrPut`, and appends to `doc_scope.declarations`. In Debug mode it asserts `identifier_token == declaration.nameToken(tree)`, so pushDeclaration depends on `Declaration.nameToken` (~173) correctly mapping each declaration variant (ast_node var/fn/field, function_parameter, payload/label/switch_payload) back to its identifier token. The whole graph is entered lazily through `Lazy.get` / `getDocumentScope` in DocumentStore.",
+      "must_mention": [
+        [
+          "walkNodeEnsureScope"
+        ],
+        [
+          "walkNode"
+        ],
+        [
+          "pushDeclaration"
+        ],
+        [
+          "nameToken"
+        ],
+        [
+          "\\binit\\b|DocumentScope\\.init"
+        ],
+        [
+          "recurs|mutual|startScope|walkContainerDecl"
+        ]
+      ],
+      "expected_files": [
+        "src/DocumentScope.zig",
+        "src/DocumentStore.zig"
+      ]
+    }
+  ]
+}
