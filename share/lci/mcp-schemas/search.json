@@ -7,15 +7,13 @@
     "properties": {
         "pattern": {
             "type": "string",
-            "minLength": 1,
             "maxLength": 100000,
-            "description": "Search pattern. Required unless `patterns` is provided."
+            "description": "Search pattern. Required unless `patterns` is provided. No minLength: agent tool-callers routinely send \"\" for optional params they don't use (repo-QA traces: 91% of one model's calls failed on minLength); the handler's business rule enforces that at least one of {pattern, patterns} is non-empty."
         },
         "patterns": {
             "type": "string",
-            "minLength": 1,
             "maxLength": 100000,
-            "description": "Alias for `pattern`. At least one of {pattern, patterns} must be a non-empty string."
+            "description": "Comma-separated multi-pattern OR search. At least one of {pattern, patterns} must be a non-empty string (enforced by the handler, not the schema)."
         },
         "max": {
             "type": "number",
@@ -54,7 +52,7 @@
         },
         "include": {
             "type": "string",
-            "description": "Comma-separated include add-ons. Allowed: 'object_ids'. Other values fail-fast with a not-implemented error."
+            "description": "Comma-separated include add-ons. Allowed: 'object_ids', 'breadcrumbs', 'refs', 'safety', 'deps'. Other values fail-fast listing the allowed set."
         }
     },
     "additionalProperties": false

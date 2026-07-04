@@ -113,6 +113,10 @@ set(LCI_MCP_SCHEMAS search)
 foreach(_schema IN LISTS LCI_MCP_SCHEMAS)
     set(_src "${CMAKE_CURRENT_SOURCE_DIR}/share/lci/mcp-schemas/${_schema}.json")
     set(_dst "${CMAKE_CURRENT_BINARY_DIR}/generated/lci/mcp/schemas/${_schema}.h")
+    # Embedding happens at configure time; without this dependency, editing
+    # the .json silently keeps the stale generated header until the next
+    # manual reconfigure.
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_src}")
     file(READ "${_src}" _schema_text)
     # Guard: raw string literal terminator R"LCI(...)LCI" — pick a delimiter no schema uses.
     string(TOUPPER "${_schema}" _schema_up)

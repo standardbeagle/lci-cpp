@@ -435,6 +435,28 @@ TEST_F(HandlersFixture, SearchSchemaRejectsUnknownField) {
     EXPECT_NE(body.find("frobnicate"), std::string::npos) << body;
 }
 
+// Agent tool-callers routinely send "" for optional params they don't use
+// (repo-QA traces: one model failed 20/22 searches on the old minLength:1).
+// Empty optional strings must validate; the business rule still rejects
+// pattern and patterns both empty.
+TEST_F(HandlersFixture, SearchAcceptsEmptyOptionalStrings) {
+    nlohmann::json params;
+    params["pattern"] = "main";
+    params["patterns"] = "";
+    params["filter"] = "";
+    params["flags"] = "";
+    params["include"] = "";
+    params["symbol_types"] = "";
+    auto result = handle_search(params, *indexer_, search_engine_.get());
+    EXPECT_FALSE(result.is_error) << result.text;
+
+    nlohmann::json both_empty;
+    both_empty["pattern"] = "";
+    both_empty["patterns"] = "";
+    auto err = handle_search(both_empty, *indexer_, search_engine_.get());
+    EXPECT_TRUE(err.is_error);
+}
+
 TEST_F(HandlersFixture, SearchClampsMaxResults) {
     nlohmann::json params;
     params["pattern"] = "func";

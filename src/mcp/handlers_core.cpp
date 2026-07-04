@@ -1581,10 +1581,20 @@ void register_core_handlers(McpServer& server, MasterIndex* indexer,
          "-n. See 'info search' for parameter details.",
          {{"pattern", "string", "Search pattern", ""},
           {"max", "integer", "Maximum results (default: 15, max: 100)", ""},
-          {"output", "string", "Output format", ""},
-          {"filter", "string", "File filter", ""},
-          {"flags", "string", "Search flags", ""},
-          {"include", "string", "Include options", ""},
+          {"output", "string",
+           "Output format: 'line' (default), 'ctx:N' (N context lines), "
+           "'full', 'files', 'count'",
+           ""},
+          {"filter", "string",
+           "Exclude filter: comma-separated types/globs, e.g. 'go,*.py'", ""},
+          {"flags", "string",
+           "Comma-separated: cs (case-sensitive), rx (regex), wb "
+           "(word-boundary), nt (skip tests), nc (skip comments), iv (invert)",
+           ""},
+          {"include", "string",
+           "Result add-ons, comma-separated. ONLY: object_ids, breadcrumbs, "
+           "refs, safety, deps. NOT a file filter (use 'filter').",
+           ""},
           {"symbol_types", "string",
            "Symbol types to filter results (comma-separated). Valid types: "
            "function, class, method, variable, constant, interface, type, "
