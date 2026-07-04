@@ -55,10 +55,13 @@ def judge_workspace(cfg):
     return ws
 
 
-def llm_judge(cfg, ws, question, gold, answer, timeout=180):
+def llm_judge(cfg, ws, question, gold, answer, timeout=240):
     prompt = JUDGE_PROMPT.format(question=question, gold=gold, answer=answer or "(empty answer)")
     cmd = [cfg.defaults["opencode-bin"], "run", "-m", cfg.defaults["judge-model"], prompt]
-    proc = subprocess.run(cmd, cwd=ws, capture_output=True, text=True, timeout=timeout)
+    try:
+        proc = subprocess.run(cmd, cwd=ws, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return {"error": f"judge timeout after {timeout}s"}
     start = proc.stdout.find("{")
     if start < 0:
         return {"error": f"no JSON in judge output (rc={proc.returncode})"}

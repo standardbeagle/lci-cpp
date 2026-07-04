@@ -7,7 +7,7 @@ defaults {
     opencode-bin "opencode"
     lci-bin "/home/beagle/work/core/lci-cpp/build/src/lci"
     corpus-root "/home/beagle/work/core/lci-cpp/real_projects"
-    judge-model "github-copilot/claude-sonnet-4.6"
+    judge-model "github-copilot/claude-sonnet-5"
     timeout-seconds 600
     concurrency 3
 }
@@ -30,20 +30,31 @@ repos {
 }
 
 // Verified working 2026-07-04 (PONG probe). Copilot models bill $0 marginal
-// (subscription); openrouter models bill per token.
+// (subscription); openrouter models bill per token. Latest-generation rows
+// added after a web sweep of July-2026 releases (Sonnet 5, GPT-5.5, GLM-5.2,
+// Kimi K2.7-code, Qwen 3.7 Max, DeepSeek V4 Pro, Gemini 3.5 Flash).
 models {
-    model "haiku45"    id="github-copilot/claude-haiku-4.5"     tier="cheap"
-    model "gpt5mini"   id="openrouter/openai/gpt-5-mini"        tier="cheap"
-    model "gemini25f"  id="openrouter/google/gemini-2.5-flash"  tier="cheap"
-    model "sonnet46"   id="github-copilot/claude-sonnet-4.6"    tier="mid"
-    model "qwen3coder" id="openrouter/qwen/qwen3-coder"         tier="mid"
-    model "gpt41"      id="github-copilot/gpt-4.1"              tier="mid"
+    model "haiku45"    id="github-copilot/claude-haiku-4.5"       tier="cheap"
+    model "gpt5mini"   id="openrouter/openai/gpt-5-mini"          tier="cheap"
+    model "gemini25f"  id="openrouter/google/gemini-2.5-flash"    tier="cheap"
+    model "gemini35f"  id="openrouter/google/gemini-3.5-flash"    tier="cheap"
+    model "sonnet46"   id="github-copilot/claude-sonnet-4.6"      tier="mid"
+    model "qwen3coder" id="openrouter/qwen/qwen3-coder"           tier="mid"
+    model "gpt41"      id="github-copilot/gpt-4.1"                tier="mid"
+    model "deepseekv4" id="openrouter/deepseek/deepseek-v4-pro"   tier="mid"
+    model "kimi27"     id="openrouter/moonshotai/kimi-k2.7-code"  tier="mid"
+    model "glm52"      id="openrouter/z-ai/glm-5.2"               tier="mid"
+    model "qwen37max"  id="openrouter/qwen/qwen3.7-max"           tier="frontier"
+    model "sonnet5"    id="github-copilot/claude-sonnet-5"        tier="frontier"
+    model "gpt55"      id="github-copilot/gpt-5.5"                tier="frontier"
+    model "fable5"     id="github-copilot/claude-fable-5"         tier="frontier"
 }
 
 // Cost ladder: run tier 0 first to tune LCI + harness, then grow.
+// difficulties can also include "micro" (tool-oriented single-call prompts).
 tiers {
     tier "0" repos="chi,sinatra"                       models="haiku45,gpt5mini"                       difficulties="easy,medium,hard" reps=1
     tier "1" repos="chi,sinatra"                       models="haiku45,gpt5mini,gemini25f,qwen3coder"  difficulties="easy,medium,hard" reps=2
-    tier "2" repos="chi,sinatra,guzzle,ripgrep"        models="haiku45,gpt5mini,gemini25f,qwen3coder,sonnet46" difficulties="easy,medium,hard" reps=2
-    tier "3" repos="chi,sinatra,guzzle,ripgrep,fastapi,trpc,pocketbase" models="haiku45,gpt5mini,gemini25f,qwen3coder,sonnet46,gpt41" difficulties="easy,medium,hard" reps=3
+    tier "2" repos="chi,sinatra,guzzle,ripgrep"        models="haiku45,gpt5mini,gemini35f,qwen3coder,deepseekv4,kimi27,glm52" difficulties="easy,medium,hard" reps=2
+    tier "3" repos="chi,sinatra,guzzle,ripgrep,fastapi,trpc,pocketbase" models="haiku45,gpt5mini,gemini35f,deepseekv4,glm52,sonnet5,gpt55" difficulties="easy,medium,hard" reps=3
 }

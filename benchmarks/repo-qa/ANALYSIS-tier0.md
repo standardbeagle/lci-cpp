@@ -62,7 +62,8 @@ All ok after 2 timeout retries. Judge: sonnet-4.6. Full numbers: `results/tier0/
 | haiku45 | lci | 0.82 | 4.17 | 106k | **−25%** | .0262 | 38 |
 | haiku45 | lci-slim | **0.83** | 4.22 | 111k | +1% | .0259 | 31 |
 
-Post-slim, **every LCI variant now beats its baseline on fact accuracy**
+(Caveat: pre/post judged by different-day sonnet-4.6 sessions; facts are the
+stable metric.) Post-slim, **every LCI variant now beats its baseline on fact accuracy**
 (gpt5mini lci 0.87 vs 0.83 with perfect grounding 5.0; haiku lci-slim 0.83
 vs 0.78 at 36% less wall time). haiku lci token cost dropped 25% at equal
 accuracy. gpt5mini lci tokens rose — single-rep noise; that model's
