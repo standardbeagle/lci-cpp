@@ -46,14 +46,24 @@ Fall back to bash/read only when the LCI tools cannot answer.
 """
 
 
+# lci-slim keeps the 5 navigation tools and drops the 9 auxiliary ones
+# (~4.3k -> ~1.8k schema tokens per turn, fewer distracting choices).
+SLIM_DISABLED = [
+    "code_insight", "context", "debug_info", "git_analysis", "index_stats",
+    "info", "inspect_symbol", "semantic_annotations", "side_effects",
+]
+
+
 def workspace_config(variant, lci_bin):
     cfg = {
         "$schema": "https://opencode.ai/config.json",
         "mcp": {"slop-mcp": {"enabled": False}},
         "permission": {"edit": "deny", "webfetch": "deny"},
     }
-    if variant == "lci":
+    if variant in ("lci", "lci-slim"):
         cfg["mcp"]["lci"] = {"type": "local", "command": [lci_bin, "mcp"], "enabled": True}
+    if variant == "lci-slim":
+        cfg["tools"] = {f"lci_{name}": False for name in SLIM_DISABLED}
     return cfg
 
 
@@ -71,7 +81,7 @@ def ensure_workspace(cfg, repo, variant):
     with open(os.path.join(ws, "opencode.json"), "w") as f:
         json.dump(workspace_config(variant, cfg.defaults["lci-bin"]), f, indent=2)
     agents = os.path.join(ws, "AGENTS.md")
-    if variant == "lci":
+    if variant in ("lci", "lci-slim"):
         with open(agents, "w") as f:
             f.write(AGENTS_MD_LCI)
     elif os.path.exists(agents):
@@ -84,6 +94,7 @@ def parse_events(lines):
     tokens = {"input": 0, "output": 0, "reasoning": 0, "cache_read": 0, "cache_write": 0}
     cost = 0.0
     steps = 0
+    tool_output_chars = 0
     texts = {}       # messageID -> [text]
     order = []       # messageIDs in first-seen order
     error = None
@@ -99,6 +110,9 @@ def parse_events(lines):
         part = e.get("part", {})
         if t == "tool_use":
             tools.append(part.get("tool", "?"))
+            out = part.get("state", {}).get("output")
+            if isinstance(out, str):
+                tool_output_chars += len(out)
         elif t == "step_finish":
             steps += 1
             tok = part.get("tokens")
@@ -124,6 +138,7 @@ def parse_events(lines):
         "cost": round(cost, 6),
         "steps": steps,
         "tool_calls": tools,
+        "tool_output_chars": tool_output_chars,
         "error": error,
     }
 

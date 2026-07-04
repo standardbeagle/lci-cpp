@@ -10,6 +10,7 @@ Usage:
 """
 
 import argparse
+import concurrent.futures
 import json
 import os
 import re
@@ -77,6 +78,7 @@ def main():
     ap.add_argument("--dir", required=True)
     ap.add_argument("--skip-llm", action="store_true")
     ap.add_argument("--rejudge", action="store_true")
+    ap.add_argument("--concurrency", type=int, default=4)
     args = ap.parse_args()
 
     cfg = bl.Config()
@@ -84,7 +86,8 @@ def main():
     ws = judge_workspace(cfg)
     banks = {}
 
-    n_done = n_skip = n_err = 0
+    todo = []
+    n_skip = 0
     for path, res in bl.iter_results(run_dir):
         if "scores" in res and not args.rejudge:
             n_skip += 1
@@ -92,7 +95,10 @@ def main():
         repo = res["repo"]
         if repo not in banks:
             banks[repo] = {q["id"]: q for q in bl.load_questions(repo)}
-        q = banks[repo][res["question_id"]]
+        todo.append((path, res, banks[repo][res["question_id"]]))
+
+    def score(item):
+        path, res, q = item
         acc, hits = bl.fact_accuracy(res.get("answer", ""), q["must_mention"])
         scores = {"fact_accuracy": acc, "fact_hits": hits}
         if not args.skip_llm:
@@ -100,17 +106,18 @@ def main():
                 scores["judge"] = llm_judge(cfg, ws, q["question"], q["gold_answer"], res["answer"])
             else:
                 scores["judge"] = {"error": f"run status {res.get('status')}"}
-            if "error" in scores["judge"]:
-                n_err += 1
         res["scores"] = scores
         bl.write_json_atomic(path, res)
-        n_done += 1
         j = scores.get("judge", {})
         print(f"{os.path.basename(path)}: facts={acc:.2f} "
               f"judge={j.get('overall', '-')}"
               + (f" JUDGE_ERR={j['error']}" if "error" in j else ""))
+        return "error" in j
 
-    print(f"judged {n_done}, skipped {n_skip}, judge errors {n_err}")
+    with concurrent.futures.ThreadPoolExecutor(max_workers=args.concurrency) as pool:
+        errs = list(pool.map(score, todo))
+    n_err = sum(errs)
+    print(f"judged {len(todo)}, skipped {n_skip}, judge errors {n_err}")
     sys.exit(1 if n_err else 0)
 
 
