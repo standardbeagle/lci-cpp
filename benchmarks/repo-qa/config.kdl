@@ -58,6 +58,16 @@ models {
     model "mimo"       id="opencode/mimo-v2.5-free"               tier="free"
     model "bigpickle"  id="opencode/big-pickle"                   tier="free"
     model "glm47flash" id="zai/glm-4.7-flash"                     tier="free"
+    // opencode Go plan namespace (opencode-go/*) + zhipuai coding plan +
+    // kimi-for-coding — all probed alive 2026-07-05 evening. These are the
+    // user-preferred accounts.
+    model "godsv4pro"  id="opencode-go/deepseek-v4-pro"           tier="mid"
+    model "goglm52"    id="opencode-go/glm-5.2"                   tier="mid"
+    model "gokimi27"   id="opencode-go/kimi-k2.7-code"            tier="mid"
+    model "gominimax3" id="opencode-go/minimax-m3"                tier="mid"
+    model "goqwen37"   id="opencode-go/qwen3.7-max"               tier="frontier"
+    model "zhipuglm52" id="zhipuai-coding-plan/glm-5.2"           tier="mid"
+    model "kimik2p7"   id="kimi-for-coding/k2p7"                  tier="mid"
     model "haiku45"    id="github-copilot/claude-haiku-4.5"       tier="cheap"
     model "gpt5mini"   id="openrouter/openai/gpt-5-mini"          tier="cheap"
     model "gemini25f"  id="openrouter/google/gemini-2.5-flash"    tier="cheap"
