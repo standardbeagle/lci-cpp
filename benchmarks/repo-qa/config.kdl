@@ -42,6 +42,14 @@ repos {
 // added after a web sweep of July-2026 releases (Sonnet 5, GPT-5.5, GLM-5.2,
 // Kimi K2.7-code, Qwen 3.7 Max, DeepSeek V4 Pro, Gemini 3.5 Flash).
 models {
+    // $0 models: opencode zen free tier (probed PONG 2026-07-04) and zai
+    // (works but 429-throttled — run with concurrency 1).
+    model "dsv4free"   id="opencode/deepseek-v4-flash-free"       tier="free"
+    model "nemotron"   id="opencode/nemotron-3-ultra-free"        tier="free"
+    model "northmini"  id="opencode/north-mini-code-free"         tier="free"
+    model "mimo"       id="opencode/mimo-v2.5-free"               tier="free"
+    model "bigpickle"  id="opencode/big-pickle"                   tier="free"
+    model "glm47flash" id="zai/glm-4.7-flash"                     tier="free"
     model "haiku45"    id="github-copilot/claude-haiku-4.5"       tier="cheap"
     model "gpt5mini"   id="openrouter/openai/gpt-5-mini"          tier="cheap"
     model "gemini25f"  id="openrouter/google/gemini-2.5-flash"    tier="cheap"
