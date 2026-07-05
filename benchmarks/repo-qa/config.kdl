@@ -7,10 +7,18 @@ defaults {
     opencode-bin "opencode"
     lci-bin "/home/beagle/work/core/lci-cpp/build/src/lci"
     corpus-root "/home/beagle/work/core/lci-cpp/real_projects"
-    // sonnet-5 via copilot passed a PONG probe but rejects sustained use
-    // ("model not supported" — plan gating is flaky); sonnet-4.6 is proven
-    // across 300+ judgments.
-    judge-model "github-copilot/claude-sonnet-4.6"
+    // Judge history: copilot sonnet-5 rejects sustained use; sonnet-4.6 was
+    // solid for 700+ judgments then began mass-timing-out alongside all
+    // copilot completions (plan throttle); big-pickle answers tiny probes
+    // fast but blows the 240s budget on real-length grading prompts
+    // (reasoning-model overthink). deepseek-v4-flash-free: 14s on a
+    // realistic prompt, clean JSON, $0 on the opencode Go plan.
+    // deepseek-v4-flash-free judged 100 results then hit its per-model zen
+    // quota; north-mini-code misgrades; nemotron-3-ultra-free is fast (10s)
+    // and sane. Caveat: nemotron is also a tier-3 candidate — treat its
+    // scores on its own runs with self-preference caution (facts metric is
+    // judge-independent).
+    judge-model "opencode/nemotron-3-ultra-free"
     timeout-seconds 600
     concurrency 3
 }
