@@ -254,6 +254,66 @@
       "expected_files": [
         "tools/router/unmarshal_request_data.go"
       ]
+    },
+    {
+      "id": "pb-d1",
+      "difficulty": "discovery",
+      "question": "Filter expressions in this backend go through a resolver whose output SQL varies enormously with the field path's shape (relations, JSON fields, back-relations, modifiers). Find the two functions that implement that resolution and their file.",
+      "gold_answer": "processActiveProps and finalizeActivePropsProcessing in core/record_field_resolver_runner.go \u2014 risk-7 functions forking on FieldTypeJSON/geoPoint, _via_ back-relations, maxNestedRels, and :each/:length modifiers.",
+      "must_mention": [
+        [
+          "processActiveProps|finalizeActivePropsProcessing"
+        ],
+        [
+          "record_field_resolver"
+        ],
+        [
+          "JSON|_via_|modifier"
+        ]
+      ],
+      "expected_files": [
+        "core/record_field_resolver_runner.go"
+      ]
+    },
+    {
+      "id": "pb-d2",
+      "difficulty": "discovery",
+      "question": "Error normalization in this codebase is so load-bearing that a change to it would touch ~800+ symbols. Which function converts arbitrary errors into API errors, and in which file?",
+      "gold_answer": "ToApiError in tools/router/error.go (with the Is helper) \u2014 reach 800+; maps sql.ErrNoRows/fs.ErrNotExist to 404 and everything else to 400 via NewApiError.",
+      "must_mention": [
+        [
+          "ToApiError|error\\.go"
+        ],
+        [
+          "sql\\.ErrNoRows|fs\\.ErrNotExist|404"
+        ],
+        [
+          "router"
+        ]
+      ],
+      "expected_files": [
+        "tools/router/error.go"
+      ]
+    },
+    {
+      "id": "pb-d3",
+      "difficulty": "discovery",
+      "question": "Somewhere in this backend's HTTP layer sits a single anonymous function flagged as one of the riskiest in the codebase: it decides cross-origin access. Which middleware file contains it, and what unsafe configuration combination does it special-case?",
+      "gold_answer": "The CORS handler Func in apis/middlewares_cors.go (~line 172) \u2014 special-cases the wildcard-with-credentials combination via UnsafeWildcardOriginWithAllowCredentials, reflecting the actual Origin when '*' + AllowCredentials are both set.",
+      "must_mention": [
+        [
+          "middlewares_cors\\.go|CORS"
+        ],
+        [
+          "UnsafeWildcardOriginWithAllowCredentials|wildcard.*credentials"
+        ],
+        [
+          "Origin"
+        ]
+      ],
+      "expected_files": [
+        "apis/middlewares_cors.go"
+      ]
     }
   ]
 }

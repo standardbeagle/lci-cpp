@@ -258,6 +258,67 @@
         "okhttp/src/commonJvmAndroid/kotlin/okhttp3/internal/connection/RealCall.kt",
         "okhttp/src/commonJvmAndroid/kotlin/okhttp3/internal/http/RealInterceptorChain.kt"
       ]
+    },
+    {
+      "id": "okh-d1",
+      "difficulty": "discovery",
+      "question": "One interceptor in this HTTP client is the riskiest function in the codebase: it owns the raw exchange between writing the request and reading the response, with special-case branches that depend on request headers and body type. Which interceptor and file? Name two of the parameter-dependent branches.",
+      "gold_answer": "CallServerInterceptor.intercept (okhttp/src/commonJvmAndroid/kotlin/okhttp3/internal/http/CallServerInterceptor.kt) \u2014 branches on 'Expect: 100-continue' (readResponseHeaders(expectContinue=true)), duplex request bodies (isDuplex), 1xx interim-response skipping, and Connection:close handling.",
+      "must_mention": [
+        [
+          "CallServerInterceptor"
+        ],
+        [
+          "100-continue|expectContinue|duplex"
+        ],
+        [
+          "intercept"
+        ]
+      ],
+      "expected_files": [
+        "okhttp/src/commonJvmAndroid/kotlin/okhttp3/internal/http/CallServerInterceptor.kt"
+      ]
+    },
+    {
+      "id": "okh-d2",
+      "difficulty": "discovery",
+      "question": "A change to TLS configuration types in this codebase would ripple through more than a thousand symbols. Which class's builder/cipher-suite machinery is that load-bearing, and in which file?",
+      "gold_answer": "ConnectionSpec (okhttp/src/commonJvmAndroid/kotlin/okhttp3/ConnectionSpec.kt) \u2014 its Builder.build()/cipherSuites machinery reaches 1000+ symbols; every connection negotiates through the specs (MODERN_TLS/CLEARTEXT defaults flow into Address).",
+      "must_mention": [
+        [
+          "ConnectionSpec"
+        ],
+        [
+          "cipherSuites|Builder|build"
+        ],
+        [
+          "ConnectionSpec\\.kt"
+        ]
+      ],
+      "expected_files": [
+        "okhttp/src/commonJvmAndroid/kotlin/okhttp3/ConnectionSpec.kt"
+      ]
+    },
+    {
+      "id": "okh-d3",
+      "difficulty": "discovery",
+      "question": "Where is this client's interceptor pipeline assembled in its fixed order, and which function enforces the call-exactly-once/same-host invariants as the chain advances? Name both functions and their files.",
+      "gold_answer": "RealCall.getResponseWithInterceptorChain (okhttp3/internal/connection/RealCall.kt) assembles the ordered list (retry, bridge, cache, connect, network interceptors, call-server); RealInterceptorChain.proceed (okhttp3/internal/http/RealInterceptorChain.kt) enforces calls==1 and sameHostAndPort once an exchange is present.",
+      "must_mention": [
+        [
+          "getResponseWithInterceptorChain"
+        ],
+        [
+          "RealInterceptorChain|proceed"
+        ],
+        [
+          "RealCall\\.kt"
+        ]
+      ],
+      "expected_files": [
+        "okhttp/src/commonJvmAndroid/kotlin/okhttp3/internal/connection/RealCall.kt",
+        "okhttp/src/commonJvmAndroid/kotlin/okhttp3/internal/http/RealInterceptorChain.kt"
+      ]
     }
   ]
 }

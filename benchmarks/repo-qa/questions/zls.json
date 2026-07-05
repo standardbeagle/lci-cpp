@@ -248,6 +248,69 @@
         "src/DocumentScope.zig",
         "src/DocumentStore.zig"
       ]
+    },
+    {
+      "id": "zls-d1",
+      "difficulty": "discovery",
+      "question": "Type information for hover, inlay hints, and signature help all funnels through one high-risk resolution method in this codebase. Identify that method, the file that defines it, and name two feature files that call it.",
+      "gold_answer": "DeclWithHandle.resolveType in src/analysis.zig (~line 5873) \u2014 a risk-9 chokepoint switching on the Declaration union tag. Callers include src/features/hover.zig, src/features/inlay_hints.zig, and src/features/signature_help.zig.",
+      "must_mention": [
+        [
+          "resolveType"
+        ],
+        [
+          "analysis\\.zig"
+        ],
+        [
+          "hover|inlay_hints|signature_help"
+        ]
+      ],
+      "expected_files": [
+        "src/analysis.zig"
+      ]
+    },
+    {
+      "id": "zls-d2",
+      "difficulty": "discovery",
+      "question": "One tiny pair of locking helpers underpins more of this codebase's call graph than almost anything else \u2014 hundreds of symbols transitively depend on them. Which helpers, in which file?",
+      "gold_answer": "The string pool's mutex helpers \u2014 lockUncancelable/unlock (and stringToSliceLock/LockedString.release) in src/analyser/string_pool.zig \u2014 reach 500+ symbols; nearly all analysis paths pass through pool locking.",
+      "must_mention": [
+        [
+          "string_pool\\.zig|StringPool"
+        ],
+        [
+          "lock|unlock|LockedString"
+        ],
+        [
+          "mutex"
+        ]
+      ],
+      "expected_files": [
+        "src/analyser/string_pool.zig"
+      ]
+    },
+    {
+      "id": "zls-d3",
+      "difficulty": "discovery",
+      "question": "Scope construction in this codebase contains a mutual recursion between two walker functions plus a declaration-registration helper that asserts against a token-mapping function. Find the file and name the functions in that cycle.",
+      "gold_answer": "src/DocumentScope.zig: walkNode <-> walkNodeEnsureScope mutual recursion (with walkContainerDecl and the per-node walkers), pushDeclaration registering declarations, whose debug assert depends on Declaration.nameToken.",
+      "must_mention": [
+        [
+          "DocumentScope\\.zig"
+        ],
+        [
+          "walkNode"
+        ],
+        [
+          "walkNodeEnsureScope|pushDeclaration"
+        ],
+        [
+          "nameToken"
+        ]
+      ],
+      "expected_files": [
+        "src/DocumentScope.zig"
+      ]
     }
   ]
 }
