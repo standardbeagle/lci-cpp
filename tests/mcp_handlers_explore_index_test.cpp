@@ -95,13 +95,15 @@ class ExploreIndexTestFixture : public ::testing::Test {
 // list_symbols tests
 // =============================================================================
 
-TEST_F(ExploreIndexTestFixture, ListSymbolsRequiresKind) {
+// kind defaults to "all" — a bare call lists every symbol instead of
+// bouncing agents off a required-param error (benchmark traces showed
+// agents retrying exactly this shape).
+TEST_F(ExploreIndexTestFixture, ListSymbolsDefaultsToAllKinds) {
     nlohmann::json params = nlohmann::json::object();
     auto result = handle_list_symbols(params, *indexer_);
-    EXPECT_TRUE(result.is_error);
+    ASSERT_FALSE(result.is_error) << result.text;
     auto j = nlohmann::json::parse(result.text);
-    EXPECT_TRUE(j["error"].get<std::string>().find("kind") !=
-                std::string::npos);
+    EXPECT_GT(j["total"].get<int>(), 0);
 }
 
 TEST_F(ExploreIndexTestFixture, ListSymbolsFunctions) {

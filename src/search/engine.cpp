@@ -462,11 +462,20 @@ std::vector<SearchResult> SearchEngine::search(
             break;
         }
         // Path scope (`path` param): root-relative prefix or glob.
-        if (!options.path_scope.empty()) {
+        if (!options.path_scope.empty() || !options.filter_globs.empty()) {
             auto rel = relative_to_root(index_.id_to_path(*file_snap, fid),
                                         proj_root);
-            if (!path_in_scope(rel, options.path_scope, scope_is_glob)) {
+            if (!options.path_scope.empty() &&
+                !path_in_scope(rel, options.path_scope, scope_is_glob)) {
                 continue;
+            }
+            // Include filter (`filter` param): any-glob match survives.
+            if (!options.filter_globs.empty()) {
+                bool any = false;
+                for (const auto& g : options.filter_globs) {
+                    if (FileScanner::match_glob(g, rel)) { any = true; break; }
+                }
+                if (!any) continue;
             }
         }
         // Path filter (languages/filter). Cheap per-file string scan.

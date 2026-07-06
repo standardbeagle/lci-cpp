@@ -113,16 +113,11 @@ nlohmann::json scope_chain_to_breadcrumbs(const EnhancedSymbol& sym) {
     return crumbs;
 }
 
-/// Builds a path-include regex from a list of language names.
-/// Go parity: languagesToIncludePattern (handlers.go:967). Returns empty
-/// string when no language maps; caller treats empty as "no filter".
-std::string language_array_to_file_extensions(
-    const std::vector<std::string>& languages) {
-    if (languages.empty()) return "";
-
-    // Same table as Go languageToExtensions (handlers.go:926). Stored as
-    // lowercase keys + alias normalization so users can pass "ts", "TypeScript",
-    // "typescript" interchangeably.
+/// Language-name → file-extension table, shared by the `languages[]`
+/// include filter and the `filter` token translation. Same table as Go
+/// languageToExtensions (handlers.go:926); lowercase keys + aliases so
+/// callers can pass "ts", "TypeScript", "typescript" interchangeably.
+const std::map<std::string, std::vector<std::string>>& language_ext_table() {
     static const std::map<std::string, std::vector<std::string>> kTable = {
         {"go", {"go"}},
         {"javascript", {"js", "jsx", "mjs", "cjs"}},
@@ -169,6 +164,17 @@ std::string language_array_to_file_extensions(
         {"cs", {"cs"}},
         {"kt", {"kt", "kts"}},
     };
+    return kTable;
+}
+
+/// Builds a path-include regex from a list of language names.
+/// Go parity: languagesToIncludePattern (handlers.go:967). Returns empty
+/// string when no language maps; caller treats empty as "no filter".
+std::string language_array_to_file_extensions(
+    const std::vector<std::string>& languages) {
+    if (languages.empty()) return "";
+
+    const auto& kTable = language_ext_table();
 
     std::vector<std::string> exts;
     exts.reserve(languages.size() * 2);
@@ -199,6 +205,46 @@ std::string language_array_to_file_extensions(
     }
     out.append(")$");
     return out;
+}
+
+/// Translates the search `filter` CSV into include globs matched against
+/// root-relative paths. Tokens: a known language name ("go", "typescript")
+/// expands to its extensions; a bare extension token ("md") becomes
+/// **/*.md; anything carrying wildcards or slashes is used as a glob
+/// (basename globs get a **/ prefix so "*.py" matches at any depth).
+/// The old behavior compiled the raw CSV as ONE RE2 *exclude* regex —
+/// filter:"go" silently excluded every path containing "go", and glob/CSV
+/// values were invalid regexes that dropped the filter entirely.
+std::vector<std::string> filter_tokens_to_globs(const std::string& csv) {
+    std::vector<std::string> globs;
+    if (csv.empty()) return globs;
+    const auto& table = language_ext_table();
+    for (auto& raw : parse_list_helper(csv)) {
+        if (raw.empty()) continue;
+        if (raw.find_first_of("*?") != std::string::npos ||
+            raw.find('/') != std::string::npos) {
+            // Glob: anchor basename globs at any depth.
+            if (raw.find('/') == std::string::npos) {
+                globs.push_back("**/" + raw);
+            } else {
+                globs.push_back(raw);
+            }
+            continue;
+        }
+        std::string lower = raw;
+        std::transform(lower.begin(), lower.end(), lower.begin(),
+                       [](unsigned char c) { return std::tolower(c); });
+        auto it = table.find(lower);
+        if (it != table.end()) {
+            for (const auto& ext : it->second) {
+                globs.push_back("**/*." + ext);
+            }
+        } else {
+            // Unknown token: treat as a literal extension.
+            globs.push_back("**/*." + lower);
+        }
+    }
+    return globs;
 }
 
 /// Returns true if the comma-separated list contains the given item.
@@ -511,7 +557,9 @@ ToolResult handle_info(const nlohmann::json& params) {
             {"path",
              "Root-relative scope: dir prefix ('src/http') or glob "
              "('**/*.kt')"},
-            {"filter", "File filter: 'go,*.py' (types/patterns)"},
+            {"filter",
+             "Include-only filter: languages/extensions/globs CSV, e.g. "
+             "'go', 'md,*.yml', 'src/**/*.py'"},
             {"flags",
              "Search flags: 'ci' (case-insensitive), 'rx' (regex), 'iv' "
              "(invert), 'wb' (word-boundary), 'nt' (no-tests), 'nc' "
@@ -711,9 +759,11 @@ ToolResult handle_search(const nlohmann::json& params,
             language_array_to_file_extensions(langs);
     }
 
-    // filter → exclude_pattern (Go SearchOptions.ExcludePattern = args.Filter).
+    // filter → include globs (languages/extensions/globs CSV), matched
+    // against root-relative paths — same include semantics as find_files.
     if (params.contains("filter") && params["filter"].is_string()) {
-        options.exclude_pattern = params["filter"].get<std::string>();
+        options.filter_globs = filter_tokens_to_globs(
+            params["filter"].get<std::string>());
     }
 
     // path → root-relative directory prefix or glob scope. Benchmark traces
@@ -722,13 +772,31 @@ ToolResult handle_search(const nlohmann::json& params,
     if (params.contains("path") && params["path"].is_string()) {
         options.path_scope = params["path"].get<std::string>();
         // Normalize: strip leading ./ and any trailing slash so both
-        // "src/http/" and "./src/http" scope to src/http/**.
+        // "src/http/" and "./src/http" scope to src/http/**. "." and "./"
+        // mean the whole root — no scoping.
         if (options.path_scope.rfind("./", 0) == 0) {
             options.path_scope.erase(0, 2);
         }
         while (!options.path_scope.empty() &&
                options.path_scope.back() == '/') {
             options.path_scope.pop_back();
+        }
+        if (options.path_scope == ".") options.path_scope.clear();
+        // An absolute path is accepted when it points inside the project
+        // root (agents paste absolute paths back from other tools) and is
+        // relativized; anything else can never match — fail fast.
+        if (!options.path_scope.empty() && options.path_scope.front() == '/') {
+            const std::string& root = indexer.config().project.root;
+            if (options.path_scope == root) options.path_scope.clear();
+            auto rel = relative_to_root(options.path_scope, root);
+            if (!rel.empty() && rel.front() == '/') {
+                return make_error_response(
+                    "search",
+                    "path must be project-root-relative (or an absolute "
+                    "path under the project root " + root + "); got: " +
+                        options.path_scope);
+            }
+            options.path_scope = std::string(rel);
         }
     }
 
@@ -973,9 +1041,9 @@ ToolResult handle_search(const nlohmann::json& params,
         (output.size() > 4 && output.compare(0, 4, "ctx:") == 0);
 
     auto trimmed_line = [](const std::string& s) {
-        auto first = s.find_first_not_of(" \t");
+        auto first = s.find_first_not_of(" \t\r\n");
         if (first == std::string::npos) return std::string();
-        auto last = s.find_last_not_of(" \t");
+        auto last = s.find_last_not_of(" \t\r\n");
         std::string out = s.substr(first, last - first + 1);
         if (out.size() > 200) {
             out.resize(200);
@@ -1869,7 +1937,8 @@ void register_core_handlers(McpServer& server, MasterIndex* indexer,
            "('**/*.kt') applied to file paths",
            ""},
           {"filter", "string",
-           "Exclude filter: comma-separated types/globs, e.g. 'go,*.py'", ""},
+           "Include ONLY matching files: comma-separated languages, "
+           "extensions or globs, e.g. 'go', 'md,*.yml', 'src/**/*.py'", ""},
           {"flags", "string",
            "Comma-separated: cs (case-sensitive), rx (regex), wb "
            "(word-boundary), nt (skip tests), nc (skip comments), iv (invert)",

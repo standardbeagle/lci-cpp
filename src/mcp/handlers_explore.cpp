@@ -8,6 +8,7 @@
 #include <lci/idcodec.h>
 #include <lci/indexing/master_index.h>
 #include <lci/mcp/validation.h>
+#include <lci/search/search_engine.h>  // relative_to_root
 #include <lci/symbol.h>
 
 namespace lci {
@@ -213,16 +214,25 @@ nlohmann::json build_explore_symbol(const EnhancedSymbol& sym,
     nlohmann::json j;
     j["name"] = sym.symbol.name;
     j["type"] = std::string(to_string(sym.symbol.type));
-    j["file"] = file_path;
+    // Empty file_path = caller already names the file once at the response
+    // header (browse_file); repeating it per symbol cost ~230 chars/row on
+    // deep absolute paths.
+    if (!file_path.empty()) j["file"] = file_path;
     j["line"] = sym.symbol.line;
-    j["is_exported"] = sym.is_exported;
+    if (sym.is_exported) j["is_exported"] = true;
 
     if (includes_has(includes, "ids")) {
         j["object_id"] = encode_symbol_id(sym.id);
     }
 
     if (includes_has(includes, "signature") && !sym.signature.empty()) {
-        j["signature"] = sym.signature;
+        // Declaration line only — some extractors store the whole body in
+        // `signature` (Kotlin), which belongs to get_context, not a
+        // per-file listing.
+        auto nl = sym.signature.find('\n');
+        j["signature"] = nl == std::string::npos
+                             ? std::string(sym.signature)
+                             : std::string(sym.signature.substr(0, nl)) + " …";
     }
 
     if (includes_has(includes, "doc") && !sym.doc_comment.empty()) {
@@ -516,12 +526,10 @@ void sort_enhanced_symbols(
 
 ToolResult handle_list_symbols(const nlohmann::json& params,
                                MasterIndex& indexer) {
-    auto kind_str = params.value("kind", "");
-    if (kind_str.empty()) {
-        return make_error_response(
-            "list_symbols",
-            "'kind' parameter is required (e.g., \"func\", \"type\", \"all\")");
-    }
+    // kind defaults to "all" — benchmark traces showed agents calling with
+    // just a file filter and bouncing off a required-param error.
+    auto kind_str = params.value("kind", "all");
+    if (kind_str.empty()) kind_str = "all";
 
     auto& tracker = indexer.ref_tracker();
     auto rt_snap = tracker.pin();
@@ -535,23 +543,27 @@ ToolResult handle_list_symbols(const nlohmann::json& params,
     auto file_filter = params.value("file", "");
     auto sort_by = params.value("sort", "name");
 
-    // Collect matching symbols
+    // Collect matching symbols. Paths are emitted root-relative; the glob
+    // filter accepts both forms (agents paste either).
+    const std::string& proj_root = indexer.config().project.root;
     auto file_ids = indexer.get_all_file_ids();
     std::vector<SymbolWithFile> all_symbols;
 
     for (auto fid : file_ids) {
         auto file_path = indexer.get_file_path(fid);
         if (file_path.empty()) continue;
+        std::string rel(relative_to_root(file_path, proj_root));
 
         if (!file_filter.empty() &&
-            !path_matches_glob(file_path, file_filter)) {
+            !path_matches_glob(file_path, file_filter) &&
+            !path_matches_glob(rel, file_filter)) {
             continue;
         }
 
         auto symbols = rt_snap->get_file_enhanced_symbols(fid);
         for (const auto* sym : symbols) {
             if (sym && matches_list_filters(*sym, kinds, params)) {
-                all_symbols.push_back({sym, file_path});
+                all_symbols.push_back({sym, rel});
             }
         }
     }
@@ -633,7 +645,13 @@ ToolResult handle_inspect_symbol(const nlohmann::json& params,
         for (const auto* sym : matched) {
             if (!file_filter.empty()) {
                 auto fp = indexer.get_file_path(sym->symbol.file_id);
-                if (!path_matches_glob(fp, file_filter)) continue;
+                if (!path_matches_glob(fp, file_filter) &&
+                    !path_matches_glob(
+                        std::string(relative_to_root(
+                            fp, indexer.config().project.root)),
+                        file_filter)) {
+                    continue;
+                }
             }
             if (!type_kinds.empty() &&
                 !kind_matches(sym->symbol.type, type_kinds)) {
@@ -644,13 +662,14 @@ ToolResult handle_inspect_symbol(const nlohmann::json& params,
         matched = std::move(filtered);
     }
 
-    // Build results
+    // Build results (root-relative paths, matching search output)
     nlohmann::json symbols_json = nlohmann::json::array();
     symbols_json.get_ref<nlohmann::json::array_t&>().reserve(matched.size());
     for (const auto* sym : matched) {
         auto fp = indexer.get_file_path(sym->symbol.file_id);
+        std::string rel(relative_to_root(fp, indexer.config().project.root));
         symbols_json.push_back(
-            build_inspect_result(*sym, fp, includes, tracker, max_depth));
+            build_inspect_result(*sym, rel, includes, tracker, max_depth));
     }
 
     nlohmann::json response;
@@ -688,11 +707,16 @@ ToolResult handle_browse_file(const nlohmann::json& params,
     }
 
     if (!found && !file_pattern.empty()) {
+        const std::string& proj_root = indexer.config().project.root;
         auto file_ids = indexer.get_all_file_ids();
         for (auto fid : file_ids) {
             auto fp = indexer.get_file_path(fid);
             if (fp.empty()) continue;
-            if (path_matches_glob(fp, file_pattern)) {
+            // Search results emit root-relative paths — accept both forms.
+            if (path_matches_glob(fp, file_pattern) ||
+                path_matches_glob(
+                    std::string(relative_to_root(fp, proj_root)),
+                    file_pattern)) {
                 target_fid = fid;
                 target_path = fp;
                 found = true;
@@ -741,16 +765,19 @@ ToolResult handle_browse_file(const nlohmann::json& params,
         filtered.resize(static_cast<size_t>(max_results));
     }
 
-    // Build response
+    // Build response. The file is named ONCE in the header (root-relative);
+    // per-symbol rows omit it (empty file_path arg).
+    static const std::string kNoPerRowFile;
     nlohmann::json symbols_json = nlohmann::json::array();
     symbols_json.get_ref<nlohmann::json::array_t&>().reserve(filtered.size());
     for (const auto* sym : filtered) {
         symbols_json.push_back(
-            build_explore_symbol(*sym, target_path, includes, tracker));
+            build_explore_symbol(*sym, kNoPerRowFile, includes, tracker));
     }
 
     nlohmann::json response;
-    response["file"]["path"] = target_path;
+    response["file"]["path"] = std::string(relative_to_root(
+        target_path, indexer.config().project.root));
     response["file"]["file_id"] = static_cast<int>(target_fid);
     response["file"]["language"] = language_from_path(target_path);
     response["symbols"] = std::move(symbols_json);

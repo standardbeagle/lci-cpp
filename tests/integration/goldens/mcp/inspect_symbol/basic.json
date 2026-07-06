@@ -2,7 +2,7 @@
   "result": {
     "content": [
       {
-        "text": "{\"count\":1,\"symbols\":[{\"complexity\":1,\"file\":\"/home/beagle/work/core/lci-cpp/tests/parity/corpora/synthetic/multi-lang/a.go\",\"is_exported\":true,\"line\":3,\"name\":\"Add\",\"object_id\":\"B\",\"outgoing_refs\":2,\"scope_chain\":[\"multi-lang\",\"a.go\",\"Add\"],\"type\":\"function\"}]}",
+        "text": "{\"count\":1,\"symbols\":[{\"callees\":[],\"callers\":[],\"complexity\":1,\"file\":\"a.go\",\"incoming_refs\":0,\"is_exported\":true,\"line\":3,\"name\":\"Add\",\"object_id\":\"B\",\"outgoing_refs\":2,\"parameter_count\":0,\"scope_chain\":[\"multi-lang\",\"a.go\",\"Add\"],\"signature\":\"func Add(a, b int) int\",\"type\":\"function\"}]}",
         "type": "text"
       }
     ]

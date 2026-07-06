@@ -101,8 +101,14 @@ struct SearchOptions {
     /// e.g. \.(go|ts|tsx)$
     std::string include_pattern;
 
-    /// Regex pattern that excludes file paths. Carries the `filter` field.
+    /// Regex pattern that excludes file paths.
     std::string exclude_pattern;
+
+    /// Include-only glob filters built from the MCP `filter` param
+    /// (comma-separated languages/extensions/globs, e.g. "go,*.md,src/**").
+    /// A file survives when ANY glob matches its root-relative path.
+    /// Empty = no filtering.
+    std::vector<std::string> filter_globs;
 
     /// Root-relative path scope (the MCP `path` param). Non-glob values are
     /// directory-prefix matches ("src/http" matches src/http/**); values

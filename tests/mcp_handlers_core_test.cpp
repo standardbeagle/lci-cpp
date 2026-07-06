@@ -44,6 +44,8 @@ class HandlersFixture : public ::testing::Test {
                    "package hidden\n\nfunc secret() {}\n");
         write_file(temp_dir_ / "internal/api/server.go",
                    "package api\n\nfunc StartServer() {}\n");
+        write_file(temp_dir_ / "crlf.go",
+                   "package main\r\nfunc CrlfFunc() {}\r\n");
 
         Config config;
         config.project.root = temp_dir_.string();
@@ -623,6 +625,108 @@ TEST_F(HandlersFixture, SearchPathScopeFiltersResults) {
     }
 }
 
+// filter= is an INCLUDE filter: language token keeps only that language's
+// files. The old behavior compiled it as an exclude regex — filter:"go"
+// removed every path containing "go" (i.e., all Go files) and returned 0.
+TEST_F(HandlersFixture, SearchFilterLanguageTokenIncludes) {
+    nlohmann::json params;
+    params["pattern"] = "func";
+    params["filter"] = "go";
+    auto result = handle_search(params, *indexer_, search_engine_.get());
+    ASSERT_FALSE(result.is_error);
+    auto json = nlohmann::json::parse(result.text);
+    EXPECT_GT(json["total_matches"].get<int>(), 0) << result.text;
+    for (const auto& group : json["results"]) {
+        auto file = group["file"].get<std::string>();
+        EXPECT_TRUE(file.size() > 3 &&
+                    file.compare(file.size() - 3, 3, ".go") == 0)
+            << file;
+    }
+}
+
+// filter= glob tokens: "*.go" matches at any depth; unknown bare tokens are
+// treated as literal extensions.
+TEST_F(HandlersFixture, SearchFilterGlobAndExtensionTokens) {
+    nlohmann::json params;
+    params["pattern"] = "StartServer";
+    params["filter"] = "*.go";
+    auto result = handle_search(params, *indexer_, search_engine_.get());
+    ASSERT_FALSE(result.is_error);
+    auto json = nlohmann::json::parse(result.text);
+    EXPECT_GT(json["total_matches"].get<int>(), 0) << result.text;
+
+    nlohmann::json p2;
+    p2["pattern"] = "func";
+    p2["filter"] = "md";  // no .md files in fixture -> zero, with hint
+    auto r2 = handle_search(p2, *indexer_, search_engine_.get());
+    ASSERT_FALSE(r2.is_error);
+    auto j2 = nlohmann::json::parse(r2.text);
+    EXPECT_EQ(j2["total_matches"].get<int>(), 0);
+}
+
+// path="." (and "./") means the whole root — no scoping.
+TEST_F(HandlersFixture, SearchPathDotMeansWholeRoot) {
+    nlohmann::json params;
+    params["pattern"] = "main";
+    params["path"] = ".";
+    auto result = handle_search(params, *indexer_, search_engine_.get());
+    ASSERT_FALSE(result.is_error);
+    auto json = nlohmann::json::parse(result.text);
+    EXPECT_GT(json["total_matches"].get<int>(), 0);
+}
+
+// Absolute path under the project root is relativized (agents paste paths
+// back from other tool output); outside the root it can never match — error.
+TEST_F(HandlersFixture, SearchPathAbsoluteInsideRootRelativized) {
+    nlohmann::json params;
+    params["pattern"] = "StartServer";
+    params["path"] = (temp_dir_ / "internal").string();
+    auto result = handle_search(params, *indexer_, search_engine_.get());
+    ASSERT_FALSE(result.is_error);
+    auto json = nlohmann::json::parse(result.text);
+    EXPECT_GT(json["total_matches"].get<int>(), 0) << result.text;
+}
+
+TEST_F(HandlersFixture, SearchPathAbsoluteOutsideRootErrors) {
+    nlohmann::json params;
+    params["pattern"] = "main";
+    params["path"] = "/definitely/not/under/root";
+    auto result = handle_search(params, *indexer_, search_engine_.get());
+    EXPECT_TRUE(result.is_error);
+}
+
+// path= accepts a glob matched against the root-relative file path.
+TEST_F(HandlersFixture, SearchPathGlobScopes) {
+    nlohmann::json params;
+    params["pattern"] = "StartServer";
+    params["path"] = "**/api/*.go";
+    auto result = handle_search(params, *indexer_, search_engine_.get());
+    ASSERT_FALSE(result.is_error);
+    auto json = nlohmann::json::parse(result.text);
+    EXPECT_GT(json["total_matches"].get<int>(), 0) << result.text;
+    for (const auto& group : json["results"]) {
+        EXPECT_EQ(group["file"].get<std::string>(), "internal/api/server.go");
+    }
+}
+
+// CRLF files: the "text" tier must not leak a trailing \r into output.
+TEST_F(HandlersFixture, SearchTextStripsCarriageReturn) {
+    nlohmann::json params;
+    params["pattern"] = "CrlfFunc";
+    auto result = handle_search(params, *indexer_, search_engine_.get());
+    ASSERT_FALSE(result.is_error);
+    auto json = nlohmann::json::parse(result.text);
+    ASSERT_GT(json["total_matches"].get<int>(), 0);
+    for (const auto& group : json["results"]) {
+        for (const auto& hit : group["hits"]) {
+            if (hit.contains("text")) {
+                EXPECT_EQ(hit["text"].get<std::string>().find('\r'),
+                          std::string::npos);
+            }
+        }
+    }
+}
+
 // Truncated results must report the true total and a directory histogram —
 // never total==max cap-saturation.
 TEST_F(HandlersFixture, SearchTruncationReportsTrueTotalAndDirs) {
@@ -935,10 +1039,10 @@ TEST_F(HandlersFixture, FindFilesReportsTrueTotalWhenTruncated) {
     auto result = handle_find_files(params, *indexer_);
     EXPECT_FALSE(result.is_error);
     auto json = nlohmann::json::parse(result.text);
-    // Fixture has 4 non-hidden .go files; cap of 2 must not lie about the
+    // Fixture has 5 non-hidden .go files; cap of 2 must not lie about the
     // universe size.
     EXPECT_EQ(json["results"].size(), 2u);
-    EXPECT_EQ(json["total_matches"].get<int>(), 4);
+    EXPECT_EQ(json["total_matches"].get<int>(), 5);
     EXPECT_TRUE(json.value("truncated", false));
     EXPECT_EQ(json["showing"].get<int>(), 2);
 }

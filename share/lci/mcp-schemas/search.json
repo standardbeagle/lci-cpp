@@ -31,7 +31,7 @@
         },
         "filter": {
             "type": "string",
-            "description": "File filter: comma-separated types/patterns, e.g. 'go,*.py'."
+            "description": "Include ONLY matching files. Comma-separated language names, extensions, or globs matched against root-relative paths, e.g. 'go', 'md,*.yml', 'src/**/*.py'."
         },
         "path": {
             "type": "string",
