@@ -8,6 +8,8 @@
 #include <lci/indexing/master_index.h>
 #include <lci/symbol.h>
 
+#include "unique_temp.h"
+
 #include <filesystem>
 #include <fstream>
 
@@ -582,7 +584,7 @@ TEST(SemanticAnnotatorTest, StatsReportCorrectly) {
 // After propagate_transitive, the IO effect flows upstream so mid() and top()
 // become transitively impure even though their local analysis is clean.
 TEST(TransitivePropagation, ImpurityFlowsUpstreamThroughCallGraph) {
-    auto dir = std::filesystem::temp_directory_path() / "lci_se_transitive";
+    auto dir = lci::test::unique_temp_dir("lci_se_transitive_");
     std::filesystem::create_directories(dir);
     {
         std::ofstream o(dir / "chain.go");

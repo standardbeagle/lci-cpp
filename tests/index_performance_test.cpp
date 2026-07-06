@@ -20,6 +20,7 @@
 #include <lci/core/portable.h>
 #include <lci/indexing/master_index.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -265,12 +266,26 @@ TEST(IndexPerformanceRequirements, FileAccessScalesSublinearly) {
     };
 
     constexpr int kIterations = 5000;
-    // Use a wide spread (50 vs 1000) so a real O(n) regression produces a
-    // ~20x ratio; hash-map lookups stay near 1x. Narrower spreads (e.g.
-    // 50 vs 200) hide the regression on hot CPUs because a 200-entry
-    // linear scan still fits in L1 and reads in ~1µs.
-    auto avg_small = bench(50, kIterations);
-    auto avg_large = bench(1000, kIterations);
+    // Under parallel ctest (`-j`) every TEST case is its own process and the
+    // CPU is oversubscribed, so a single timed run can be inflated by the
+    // scheduler descheduling this thread mid-measurement. Take the MIN over a
+    // few repetitions: the fastest run is the least-contended, closest to the
+    // true single-threaded cost. A structural O(n) regression persists across
+    // every repetition (the min still shows ~20x), so best-of-N filters
+    // scheduling noise without hiding the signal.
+    auto best_of = [&](int file_count) {
+        auto best = bench(file_count, kIterations);
+        for (int rep = 1; rep < 3; ++rep) {
+            best = std::min(best, bench(file_count, kIterations));
+        }
+        return best;
+    };
+    // Wide spread (50 vs 1000) so a real O(n) regression produces a ~20x
+    // ratio; hash-map lookups stay near 1x. Narrower spreads (e.g. 50 vs 200)
+    // hide the regression on hot CPUs because a 200-entry linear scan still
+    // fits in L1 and reads in ~1µs.
+    auto avg_small = best_of(50);
+    auto avg_large = best_of(1000);
 
     double ratio = static_cast<double>(avg_large.count()) /
                    static_cast<double>(std::max<int64_t>(avg_small.count(), 1));

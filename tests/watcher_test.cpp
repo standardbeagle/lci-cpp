@@ -5,6 +5,8 @@
 #include <lci/indexing/deleted_file_tracker.h>
 #include <lci/indexing/watcher.h>
 
+#include "unique_temp.h"
+
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -25,10 +27,7 @@ namespace fs = std::filesystem;
 class TempDir {
   public:
     TempDir() {
-        path_ = fs::temp_directory_path() /
-                ("lci_watcher_test_" + std::to_string(
-                    std::hash<std::thread::id>{}(std::this_thread::get_id()) ^
-                    std::hash<int>{}(counter_++)));
+        path_ = test::unique_temp_dir("lci_watcher_test_");
         fs::create_directories(path_);
     }
     ~TempDir() {
@@ -50,7 +49,6 @@ class TempDir {
 
   private:
     fs::path path_;
-    static inline int counter_ = 0;
 };
 
 // =============================================================================

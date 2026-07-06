@@ -3,6 +3,8 @@
 #include <lci/config.h>
 #include <lci/indexing/pipeline_scanner.h>
 
+#include "unique_temp.h"
+
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
@@ -371,7 +373,7 @@ class KdlConfigTest : public ::testing::Test {
     fs::path temp_dir_;
 
     void SetUp() override {
-        temp_dir_ = fs::temp_directory_path() / "lci_config_test";
+        temp_dir_ = lci::test::unique_temp_dir("lci_config_test_");
         fs::create_directories(temp_dir_);
     }
 

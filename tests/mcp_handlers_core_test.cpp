@@ -12,6 +12,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include "unique_temp.h"
+
 #include <filesystem>
 #include <fstream>
 #include <set>
@@ -27,8 +29,7 @@ class HandlersFixture : public ::testing::Test {
   protected:
     void SetUp() override {
         // Create a temp directory with sample files for indexing
-        temp_dir_ = std::filesystem::temp_directory_path() /
-                    "lci_handler_test";
+        temp_dir_ = lci::test::unique_temp_dir("lci_handler_test_");
         std::filesystem::create_directories(temp_dir_);
 
         // Create sample source files
@@ -254,7 +255,7 @@ TEST_F(HandlersFixture, SearchIncludeSafetyAndDepsAcceptedNotErrored) {
 // breadcrumb chain — proves include=breadcrumbs emits real scope data, not
 // just an absent field.
 TEST(SearchIncludeBreadcrumbs, NestedScopeEmitsChain) {
-    auto dir = std::filesystem::temp_directory_path() / "lci_bc_nested";
+    auto dir = lci::test::unique_temp_dir("lci_bc_nested_");
     std::filesystem::create_directories(dir);
     {
         std::ofstream o(dir / "svc.go");
@@ -304,7 +305,7 @@ TEST(SearchIncludeBreadcrumbs, NestedScopeEmitsChain) {
 class GetContextPurityTest : public ::testing::Test {
   protected:
     void SetUp() override {
-        dir_ = std::filesystem::temp_directory_path() / "lci_purity_ctx";
+        dir_ = lci::test::unique_temp_dir("lci_purity_ctx_");
         std::filesystem::create_directories(dir_);
         std::ofstream(dir_ / "math.go")
             << "package math\n\nfunc Adder(a int, b int) int {\n"
@@ -1100,8 +1101,10 @@ TEST_F(HandlersFixture, FindFilesReturnsRootRelativePaths) {
 // Before the fix, every find_files call in the repo-qa benchmark returned
 // {"results":[],"total_matches":0} because the corpora live under .work/.
 TEST(FindFilesHiddenAncestor, ProjectUnderDottedDirIsFullyVisible) {
-    auto base = std::filesystem::temp_directory_path() /
-                ".lci_hidden_ancestor" / "proj";
+    // Dotted ancestor is the point of the test; keep the leading dot but make
+    // the directory process-unique so parallel ctest workers don't collide.
+    auto dotted = lci::test::unique_temp_dir(".lci_hidden_ancestor_");
+    auto base = dotted / "proj";
     std::filesystem::create_directories(base / "src");
     {
         std::ofstream(base / "main.go") << "package main\nfunc main() {}\n";
@@ -1123,8 +1126,7 @@ TEST(FindFilesHiddenAncestor, ProjectUnderDottedDirIsFullyVisible) {
         << "dotted ancestor of project root must not hide corpus files";
 
     std::error_code ec;
-    std::filesystem::remove_all(
-        std::filesystem::temp_directory_path() / ".lci_hidden_ancestor", ec);
+    std::filesystem::remove_all(dotted, ec);
 }
 
 // Fuzzy file matching uses real normalized Levenshtein SIMILARITY (1 - dist/

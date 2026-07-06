@@ -15,6 +15,7 @@
 #include <nlohmann/json.hpp>
 
 #include "test_socket.h"
+#include "unique_temp.h"
 
 #ifndef _WIN32
 #include <sys/un.h>
@@ -29,10 +30,7 @@ namespace {
 class TempDir {
   public:
     TempDir() {
-        path_ = std::filesystem::temp_directory_path() /
-                ("lci_server_test_" + std::to_string(
-                    std::hash<std::thread::id>{}(std::this_thread::get_id()) ^
-                    std::hash<int>{}(counter_++)));
+        path_ = test::unique_temp_dir("lci_server_test_");
         std::filesystem::create_directories(path_);
     }
     ~TempDir() {
@@ -54,7 +52,6 @@ class TempDir {
 
   private:
     std::filesystem::path path_;
-    static inline int counter_ = 0;
 };
 
 // -- Test fixture -------------------------------------------------------------

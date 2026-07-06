@@ -4,6 +4,8 @@
 #include <lci/indexing/master_index.h>
 #include <lci/search/search_engine.h>
 
+#include "unique_temp.h"
+
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -17,10 +19,7 @@ namespace {
 class TempDir {
   public:
     TempDir() {
-        path_ = std::filesystem::temp_directory_path() /
-                ("lci_sengine_test_" + std::to_string(
-                    std::hash<std::thread::id>{}(std::this_thread::get_id()) ^
-                    std::hash<int>{}(counter_++)));
+        path_ = test::unique_temp_dir("lci_sengine_test_");
         std::filesystem::create_directories(path_);
     }
     ~TempDir() {
@@ -42,7 +41,6 @@ class TempDir {
 
   private:
     std::filesystem::path path_;
-    static inline int counter_ = 0;
 };
 
 // -- Pure function tests ------------------------------------------------------

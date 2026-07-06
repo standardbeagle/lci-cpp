@@ -9,6 +9,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include "unique_temp.h"
+
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -218,8 +220,7 @@ TEST(HydratedContextJson, SerializesCorrectly) {
 class ContextHandlerFixture : public ::testing::Test {
   protected:
     void SetUp() override {
-        temp_dir_ =
-            std::filesystem::temp_directory_path() / "lci_context_test";
+        temp_dir_ = lci::test::unique_temp_dir("lci_context_test_");
         std::filesystem::create_directories(temp_dir_);
 
         write_file(temp_dir_ / "main.go",

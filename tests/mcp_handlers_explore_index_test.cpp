@@ -11,6 +11,7 @@
 #include <nlohmann/json.hpp>
 
 #include "test_git.h"
+#include "unique_temp.h"
 
 #include <filesystem>
 #include <fstream>
@@ -28,8 +29,7 @@ class ExploreIndexTestFixture : public ::testing::Test {
   protected:
     void SetUp() override {
         // Create temp directory with test source files
-        tmp_dir_ = std::filesystem::temp_directory_path() /
-                   "lci_explore_index_test";
+        tmp_dir_ = lci::test::unique_temp_dir("lci_explore_index_test_");
         std::filesystem::remove_all(tmp_dir_);
         std::filesystem::create_directories(tmp_dir_);
 
@@ -565,8 +565,7 @@ TEST_F(ExploreIndexTestFixture, GitAnalysisRejectsBadScope) {
 // Asserts the canonical report shape (summary + metadata) and a metrics finding
 // for the over-length function — no mocks, real Provider + Analyzer.
 TEST_F(ExploreIndexTestFixture, GitAnalysisRealRepoReturnsReport) {
-    auto repo = std::filesystem::temp_directory_path() /
-                "lci_git_analysis_real_test";
+    auto repo = lci::test::unique_temp_dir("lci_git_analysis_real_test_");
     std::filesystem::remove_all(repo);
     std::filesystem::create_directories(repo);
 

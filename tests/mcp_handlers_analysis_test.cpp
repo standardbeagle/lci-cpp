@@ -12,6 +12,7 @@
 #include <nlohmann/json.hpp>
 
 #include "test_git.h"
+#include "unique_temp.h"
 
 #include <cstdlib>
 #include <filesystem>
@@ -194,9 +195,7 @@ TEST_F(SemanticAnnotationsTest, GetSymbolsByCategoryUnknownReturnsEmpty) {
 // with @lci: annotations, run populate, assert annotations land.
 TEST(SemanticAnnotatorIntegration, PopulateFromIndexLoadsAnnotations) {
     namespace fs = std::filesystem;
-    auto tmp = fs::temp_directory_path() /
-               ("lci_populate_test_" +
-                std::to_string(::testing::UnitTest::GetInstance()->random_seed()));
+    auto tmp = lci::test::unique_temp_dir("lci_populate_test_");
     fs::create_directories(tmp);
 
     // Cleanup at scope end
@@ -404,8 +403,7 @@ TEST_F(SideEffectsTest, CategoryNoMatchEmitsHint) {
 class CodeInsightTest : public ::testing::Test {
   protected:
     void SetUp() override {
-        temp_dir_ = std::filesystem::temp_directory_path() /
-                    "lci_code_insight_test";
+        temp_dir_ = lci::test::unique_temp_dir("lci_code_insight_test_");
         std::filesystem::create_directories(temp_dir_);
 
         write_file(temp_dir_ / "main.go",
@@ -609,7 +607,7 @@ TEST_F(CodeInsightTest, GitHotspotsFailsFastOnNonGitDir) {
 class CodeInsightGitTest : public ::testing::Test {
   protected:
     void SetUp() override {
-        repo_ = std::filesystem::temp_directory_path() / "lci_ci_git_repo";
+        repo_ = lci::test::unique_temp_dir("lci_ci_git_repo_");
         std::filesystem::remove_all(repo_);
         std::filesystem::create_directories(repo_);
         ASSERT_TRUE(git("init"));
@@ -683,7 +681,7 @@ TEST_F(CodeInsightGitTest, GitHotspotsSurfacesRealChurn) {
 // Load-bearing centrality: a leaf called transitively by the whole chain must
 // outrank its callers. Real call graph, weight-1.0 reachability, no mocks.
 TEST(CodeInsightLoadBearing, RanksByTransitiveReach) {
-    auto dir = std::filesystem::temp_directory_path() / "lci_loadbearing_test";
+    auto dir = lci::test::unique_temp_dir("lci_loadbearing_test_");
     std::filesystem::remove_all(dir);
     std::filesystem::create_directories(dir);
     {
@@ -723,7 +721,7 @@ TEST(CodeInsightLoadBearing, RanksByTransitiveReach) {
 // mutually-recursive groups (each a cycle) wired into one file; overview must
 // emit == CLUSTERS == (Louvain) and == CYCLES == (SCC).
 TEST(CodeInsightGraphSignals, SurfacesClustersAndCycles) {
-    auto dir = std::filesystem::temp_directory_path() / "lci_graphsignals_test";
+    auto dir = lci::test::unique_temp_dir("lci_graphsignals_test_");
     std::filesystem::remove_all(dir);
     std::filesystem::create_directories(dir);
     {
@@ -760,7 +758,7 @@ TEST(CodeInsightGraphSignals, SurfacesClustersAndCycles) {
 // Layer violation: a Data-layer function calling a Presentation-layer function
 // is an upward call against the architecture and must be flagged.
 TEST(CodeInsightLayers, FlagsUpwardCall) {
-    auto dir = std::filesystem::temp_directory_path() / "lci_layers_test";
+    auto dir = lci::test::unique_temp_dir("lci_layers_test_");
     std::filesystem::remove_all(dir);
     std::filesystem::create_directories(dir);
     {
@@ -794,7 +792,7 @@ TEST(CodeInsightLayers, FlagsUpwardCall) {
 // carry the same propagated @lci: label is reported as a named domain. Crosses
 // graph structure (CallGraph) with propagated semantics (GraphPropagator).
 TEST(CodeInsightLabelCoherence, ClustersGetDomainFromPropagatedLabels) {
-    auto dir = std::filesystem::temp_directory_path() / "lci_labelcoh_test";
+    auto dir = lci::test::unique_temp_dir("lci_labelcoh_test_");
     std::filesystem::remove_all(dir);
     std::filesystem::create_directories(dir);
     {
