@@ -865,17 +865,26 @@ ToolResult handle_search(const nlohmann::json& params,
     // (Karpathy #6; stricter than Go's silent shouldInclude=false).
     bool include_breadcrumbs = false;
     bool include_refs = false;
+    bool include_signature = false;
     if (params.contains("include") && params["include"].is_string()) {
         const auto& inc = params["include"].get_ref<const std::string&>();
         for (auto& tok : parse_list_helper(inc)) {
             if (tok.empty() || tok == "object_ids" || tok == "ids") continue;
             if (tok == "breadcrumbs") { include_breadcrumbs = true; continue; }
             if (tok == "refs") { include_refs = true; continue; }
+            // `signature` is list_symbols/browse_file vocabulary; agents
+            // carry it here (tier-1 traces: top param-error class). Honor it
+            // rather than bouncing the call.
+            if (tok == "signature" || tok == "signatures") {
+                include_signature = true;
+                continue;
+            }
             if (tok == "safety" || tok == "deps") continue;  // accepted, unfilled
             return make_error_response(
                 "search",
                 "include='" + tok + "' is not a recognized search add-on. "
-                "Allowed: object_ids, breadcrumbs, refs, safety, deps.");
+                "Allowed: object_ids, breadcrumbs, refs, signature, safety, "
+                "deps.");
         }
     }
 
@@ -975,6 +984,14 @@ ToolResult handle_search(const nlohmann::json& params,
 
     auto attach_truncation = [&](nlohmann::json& response) {
         response["total_matches"] = total_matches;
+        // Empty results always carry a hint — output=files/count callers
+        // previously got a bare zero payload that hid scope mistakes. The
+        // standard output path overwrites this with a richer hint below.
+        if (total_matches == 0) {
+            response["hint"] =
+                "0 matches. Try flags=rx for regex, a shorter pattern, or "
+                "drop path=/filter= scoping.";
+        }
         if (have_stats && stats.hit_collection_cap) {
             response["total_is_lower_bound"] = true;
         }
@@ -1141,6 +1158,17 @@ ToolResult handle_search(const nlohmann::json& params,
                 // search response itself.
                 auto callers = static_cast<int>(sym->incoming_refs.size());
                 if (callers > 0) h["callers"] = callers;
+
+                if (include_signature && !sym->signature.empty()) {
+                    // Declaration line only (browse_file convention) —
+                    // bodies belong to get_context.
+                    std::string_view sig(sym->signature);
+                    auto nl = sig.find('\n');
+                    h["signature"] =
+                        nl == std::string_view::npos
+                            ? std::string(sig)
+                            : std::string(sig.substr(0, nl)) + " …";
+                }
 
                 // Optional include= add-ons, gated like Go on strong
                 // matches: normalizedScore >= 0.5 (scores >1 /100-normalized).
@@ -1622,6 +1650,32 @@ ToolResult handle_find_files(const nlohmann::json& params,
         return abs;
     };
 
+    // Normalize the directory scope the same way search's path= does:
+    // "./x" -> "x", trailing slashes stripped, "." / "/" / the project
+    // root itself mean no scoping, and an absolute path under the root is
+    // relativized. Tier-1 traces: 8/8 empty find_files calls were agents
+    // passing "." or an absolute workspace path and getting a silent 0.
+    if (directory.rfind("./", 0) == 0) directory.erase(0, 2);
+    while (!directory.empty() && directory.back() == '/') {
+        directory.pop_back();
+    }
+    if (directory == ".") directory.clear();
+    if (!directory.empty() && directory.front() == '/') {
+        if (directory == proj_root) {
+            directory.clear();
+        } else {
+            auto rel = relative_to_root(directory, proj_root);
+            if (!rel.empty() && rel.front() == '/') {
+                return make_error_response(
+                    "find_files",
+                    "directory must be project-root-relative (or an "
+                    "absolute path under the project root " + proj_root +
+                        "); got: " + directory);
+            }
+            directory = std::string(rel);
+        }
+    }
+
     for (const auto& [abs_path, fid] : snapshot->file_map) {
         const std::string path = rel_of(abs_path);
         // Directory filter (root-relative)
@@ -1947,6 +2001,34 @@ ToolResult handle_find_files(const nlohmann::json& params,
         response["showing"] = max_results;
     }
     response["pattern"] = pattern;
+
+    // Empty result fails loud (Karpathy #6). A nonexistent directory scope
+    // is the most common cause in agent traces — name it explicitly.
+    if (total_found == 0) {
+        if (!directory.empty()) {
+            bool dir_exists = false;
+            for (const auto& [abs_path, fid] : snapshot->file_map) {
+                auto rel = rel_of(abs_path);
+                if (rel.size() > directory.size() &&
+                    rel.compare(0, directory.size(), directory) == 0 &&
+                    rel[directory.size()] == '/') {
+                    dir_exists = true;
+                    break;
+                }
+            }
+            response["hint"] =
+                dir_exists
+                    ? "0 matches for '" + pattern + "' under '" + directory +
+                          "'. Widen the pattern or drop the directory scope."
+                    : "directory '" + directory + "' contains no indexed "
+                      "files — check the path (root-relative) or drop it.";
+        } else {
+            response["hint"] =
+                "0 files matched '" + pattern + "'. Globs match the "
+                "root-relative path; try a shorter name fragment (fuzzy "
+                "matching) or search for content instead.";
+        }
+    }
 
     return make_json_response(response);
 }

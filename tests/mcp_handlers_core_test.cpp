@@ -1095,6 +1095,88 @@ TEST_F(HandlersFixture, FindFilesReturnsRootRelativePaths) {
     }
 }
 
+// directory="." / "./" / trailing slash / absolute-under-root all mean the
+// obvious thing; tier-1 traces showed 8/8 empty find_files calls were
+// agents passing "." or an absolute path and getting a silent 0.
+TEST_F(HandlersFixture, FindFilesDirectoryDotAndAbsoluteNormalized) {
+    for (const std::string dir :
+         {std::string("."), std::string("./"), std::string(""),
+          temp_dir_.string()}) {
+        nlohmann::json params;
+        params["pattern"] = "*.go";
+        params["max"] = 200;
+        if (!dir.empty()) params["directory"] = dir;
+        auto result = handle_find_files(params, *indexer_);
+        ASSERT_FALSE(result.is_error) << dir;
+        auto json = nlohmann::json::parse(result.text);
+        EXPECT_EQ(json["total_matches"].get<int>(), 5)
+            << "directory='" << dir << "'";
+    }
+    // internal with trailing slash scopes correctly
+    nlohmann::json params;
+    params["pattern"] = "*.go";
+    params["directory"] = "internal/";
+    auto result = handle_find_files(params, *indexer_);
+    auto json = nlohmann::json::parse(result.text);
+    EXPECT_EQ(json["total_matches"].get<int>(), 1);
+}
+
+// Empty find_files results carry an actionable hint; a nonexistent
+// directory scope is named explicitly.
+TEST_F(HandlersFixture, FindFilesEmptyResultCarriesHint) {
+    nlohmann::json params;
+    params["pattern"] = "*.go";
+    params["directory"] = "no_such_dir";
+    auto result = handle_find_files(params, *indexer_);
+    ASSERT_FALSE(result.is_error);
+    auto json = nlohmann::json::parse(result.text);
+    EXPECT_EQ(json["total_matches"].get<int>(), 0);
+    ASSERT_TRUE(json.contains("hint"));
+    EXPECT_NE(json["hint"].get<std::string>().find("no_such_dir"),
+              std::string::npos);
+
+    nlohmann::json p2;
+    p2["pattern"] = "*.nomatch";
+    auto r2 = handle_find_files(p2, *indexer_);
+    auto j2 = nlohmann::json::parse(r2.text);
+    EXPECT_TRUE(j2.contains("hint"));
+}
+
+// include=signature is honored on search (list_symbols vocabulary agents
+// carry across tools) — declaration line attached to symbol-enriched hits.
+TEST_F(HandlersFixture, SearchIncludeSignatureAttachesDeclLine) {
+    nlohmann::json params;
+    params["pattern"] = "handleRequest";
+    params["include"] = "signature";
+    auto result = handle_search(params, *indexer_, search_engine_.get());
+    ASSERT_FALSE(result.is_error) << result.text;
+    auto json = nlohmann::json::parse(result.text);
+    bool any_sig = false;
+    for (const auto& group : json["results"]) {
+        for (const auto& hit : group["hits"]) {
+            if (hit.contains("signature")) {
+                any_sig = true;
+                EXPECT_EQ(hit["signature"].get<std::string>().find('\n'),
+                          std::string::npos);
+            }
+        }
+    }
+    EXPECT_TRUE(any_sig) << result.text;
+}
+
+// output=files / count empty results still carry a hint.
+TEST_F(HandlersFixture, SearchFilesOutputEmptyCarriesHint) {
+    nlohmann::json params;
+    params["pattern"] = "zzz_nothing_matches_this";
+    params["output"] = "files";
+    params["semantic"] = false;
+    auto result = handle_search(params, *indexer_, search_engine_.get());
+    ASSERT_FALSE(result.is_error);
+    auto json = nlohmann::json::parse(result.text);
+    EXPECT_EQ(json["total_matches"].get<int>(), 0);
+    EXPECT_TRUE(json.contains("hint")) << result.text;
+}
+
 // `**/name` must match a file at zero directory depth (glob convention).
 // wildcard_match's literal `/` rejected root-level files: benchmark traces
 // showed LLMs default to `**/mux.go` and silently got zero results.
