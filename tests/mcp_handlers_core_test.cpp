@@ -1095,6 +1095,86 @@ TEST_F(HandlersFixture, FindFilesReturnsRootRelativePaths) {
     }
 }
 
+// `**/name` must match a file at zero directory depth (glob convention).
+// wildcard_match's literal `/` rejected root-level files: benchmark traces
+// showed LLMs default to `**/mux.go` and silently got zero results.
+TEST_F(HandlersFixture, FindFilesDoubleStarMatchesRootLevelFiles) {
+    nlohmann::json params;
+    params["pattern"] = "**/main.go";  // main.go lives at the project root
+    auto result = handle_find_files(params, *indexer_);
+    EXPECT_FALSE(result.is_error);
+    auto json = nlohmann::json::parse(result.text);
+    EXPECT_EQ(json["total_matches"].get<int>(), 1) << result.text;
+
+    nlohmann::json p2;
+    p2["pattern"] = "**/*.go";  // must equal the *.go universe
+    p2["max"] = 200;
+    auto r2 = handle_find_files(p2, *indexer_);
+    auto j2 = nlohmann::json::parse(r2.text);
+    nlohmann::json p3;
+    p3["pattern"] = "*.go";
+    p3["max"] = 200;
+    auto r3 = handle_find_files(p3, *indexer_);
+    auto j3 = nlohmann::json::parse(r3.text);
+    EXPECT_EQ(j2["total_matches"].get<int>(), j3["total_matches"].get<int>());
+}
+
+// find_files accepts path= as an alias for directory= (search uses path=;
+// agents carry the param name across tools).
+TEST_F(HandlersFixture, FindFilesPathAliasScopesDirectory) {
+    nlohmann::json params;
+    params["pattern"] = "*.go";
+    params["path"] = "internal";
+    auto result = handle_find_files(params, *indexer_);
+    EXPECT_FALSE(result.is_error);
+    auto json = nlohmann::json::parse(result.text);
+    EXPECT_EQ(json["total_matches"].get<int>(), 1) << result.text;
+}
+
+// search schema-validation errors must carry the allowed-parameter list —
+// benchmark traces showed a model retrying an unknown param ("paths") 3x
+// with no way to self-correct.
+TEST_F(HandlersFixture, SearchUnknownParamErrorListsAllowedParams) {
+    nlohmann::json params;
+    params["pattern"] = "main";
+    params["paths"] = "internal";  // typo of path
+    auto result = handle_search(params, *indexer_, search_engine_.get());
+    EXPECT_TRUE(result.is_error);
+    auto json = nlohmann::json::parse(result.text);
+    ASSERT_TRUE(json.contains("allowed_params")) << result.text;
+    bool has_path = false;
+    for (const auto& p : json["allowed_params"]) {
+        if (p.get<std::string>() == "path") has_path = true;
+    }
+    EXPECT_TRUE(has_path);
+}
+
+// get_context carries a callers count (incoming references), matching the
+// search per-hit field — chokepoint questions answerable without an extra
+// call-hierarchy request. main() calls handleRequest? No — fixture has no
+// cross-file calls guaranteed, so assert shape: field absent when zero,
+// present and positive when the tracker records incoming refs.
+TEST_F(HandlersFixture, GetContextCallersFieldMatchesIncomingRefs) {
+    auto& tracker = indexer_->ref_tracker();
+    auto snap = tracker.pin();
+    auto matches = snap->find_symbols_by_name("handleRequest");
+    ASSERT_FALSE(matches.empty());
+    const auto* sym = matches.front();
+    nlohmann::json params;
+    params["id"] = encode_symbol_id(sym->id);
+    auto result = handle_get_context(params, *indexer_);
+    ASSERT_FALSE(result.is_error);
+    auto json = nlohmann::json::parse(result.text);
+    ASSERT_EQ(json["count"].get<int>(), 1);
+    const auto& ctx = json["contexts"][0];
+    if (sym->incoming_refs.empty()) {
+        EXPECT_FALSE(ctx.contains("callers"));
+    } else {
+        EXPECT_EQ(ctx["callers"].get<int>(),
+                  static_cast<int>(sym->incoming_refs.size()));
+    }
+}
+
 // Regression: a project whose ROOT lives under a dotted directory
 // (~/.cache/repo, .work/corpus, …) must not have every file classified as
 // hidden. The hidden check applies to root-relative components only.

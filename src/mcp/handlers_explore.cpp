@@ -698,7 +698,10 @@ ToolResult handle_inspect_symbol(const nlohmann::json& params,
 
 ToolResult handle_browse_file(const nlohmann::json& params,
                               MasterIndex& indexer) {
+    // `path` is an accepted alias for `file` — search emits root-relative
+    // paths agents paste across tools, and search itself scopes with path=.
     auto file_pattern = params.value("file", "");
+    if (file_pattern.empty()) file_pattern = params.value("path", "");
     int file_id_param = params.value("file_id", 0);
 
     if (file_pattern.empty() && file_id_param == 0) {
@@ -928,6 +931,7 @@ void register_explore_handlers(McpServer& server, MasterIndex* indexer) {
          "sorting, optional imports and stats. See 'info browse_file'.",
          {{"file", "string",
            "File path (exact, suffix, or glob match)", ""},
+          {"path", "string", "Alias for 'file'", ""},
           {"file_id", "integer", "File ID (alternative to path)", ""},
           {"kind", "string",
            "Filter by symbol kinds (same as list_symbols)", ""},

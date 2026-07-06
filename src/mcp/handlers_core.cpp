@@ -729,6 +729,13 @@ ToolResult handle_search(const nlohmann::json& params,
         // golden churn for callers already parsing validation_errors[].
         auto err_json = create_multi_validation_error_response(
             "search", schema_errors);
+        // Recovery guidance: every other tool's error names its allowed
+        // params; without this, benchmark traces showed a model retrying an
+        // unknown param ("paths") 3x with no way to self-correct.
+        err_json["allowed_params"] = {
+            "pattern", "patterns", "max", "max_per_file", "output", "path",
+            "filter", "flags", "symbol_types", "languages", "semantic",
+            "include"};
         return {dump_json_lossy(err_json), true};
     }
 
@@ -1286,6 +1293,12 @@ void resolve_object_id(std::string_view id, MasterIndex& indexer,
         indexer.config().project.root));
     ctx["line"] = sym->symbol.line;
     ctx["object_id"] = std::string(id);
+    // Incoming-reference count, matching search's per-hit `callers` field —
+    // chokepoint questions answerable without a follow-up call-hierarchy
+    // request.
+    if (!sym->incoming_refs.empty()) {
+        ctx["callers"] = static_cast<int>(sym->incoming_refs.size());
+    }
     ctx["symbol_type"] = std::string(to_string(sym->symbol.type));
     ctx["symbol_name"] = std::string(sym->symbol.name);
     ctx["is_exported"] = sym->is_exported;
@@ -1411,6 +1424,11 @@ ToolResult handle_get_context(const nlohmann::json& params,
                 indexer.config().project.root));
             ctx["line"] = sym->symbol.line;
             ctx["object_id"] = encode_symbol_id(sym->id);
+            // Caller count parity with search hits — see resolve_object_id.
+            if (!sym->incoming_refs.empty()) {
+                ctx["callers"] =
+                    static_cast<int>(sym->incoming_refs.size());
+            }
             ctx["symbol_type"] = std::string(to_string(sym->symbol.type));
             ctx["symbol_name"] = std::string(sym->symbol.name);
             ctx["is_exported"] = sym->is_exported;
@@ -1551,7 +1569,10 @@ ToolResult handle_find_files(const nlohmann::json& params,
 
     auto flags = params.value("flags", "");
     auto filter = params.value("filter", "");
+    // `path` is an alias for `directory` — search uses path=, and agents
+    // carry the name across tools.
     auto directory = params.value("directory", "");
+    if (directory.empty()) directory = params.value("path", "");
     bool include_hidden = params.value("include_hidden", false);
     int max_results = params.value("max", 50);
     max_results = clamp_int(max_results, 1, 200);
@@ -1691,10 +1712,21 @@ ToolResult handle_find_files(const nlohmann::json& params,
         std::string match_type;
 
         // 0. Glob pattern: match basename or full path; non-matches are skipped
-        //    outright (not fuzzy-scored).
+        //    outright (not fuzzy-scored). A leading `**/` also matches at
+        //    zero directory depth (glob convention; wildcard_match's literal
+        //    `/` otherwise rejects root-level files — benchmark traces showed
+        //    LLMs default to `**/name.go` and got silent empties on files at
+        //    the project root).
         if (pattern_is_glob) {
-            if (wildcard_match(norm_filename, normalized_pattern) ||
-                wildcard_match(match_path, normalized_pattern)) {
+            bool glob_hit = wildcard_match(norm_filename, normalized_pattern) ||
+                            wildcard_match(match_path, normalized_pattern);
+            if (!glob_hit && normalized_pattern.rfind("**/", 0) == 0) {
+                std::string_view tail(normalized_pattern);
+                tail.remove_prefix(3);
+                glob_hit = wildcard_match(norm_filename, tail) ||
+                           wildcard_match(match_path, tail);
+            }
+            if (glob_hit) {
                 score = 1.0;
                 match_type = "glob";
             } else {
@@ -2064,7 +2096,9 @@ void register_core_handlers(McpServer& server, MasterIndex* indexer,
           {"include_hidden", "boolean",
            "Include hidden files/directories (default: false)", ""},
           {"directory", "string",
-           "Directory to search within (relative to project root)", ""}},
+           "Directory to search within (relative to project root)", ""},
+          {"path", "string",
+           "Alias for 'directory' (matches search's path param)", ""}},
          {"pattern"}},
         [indexer](const nlohmann::json& p) -> ToolResult {
             if (!indexer) {
