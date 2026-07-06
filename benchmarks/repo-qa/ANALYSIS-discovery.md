@@ -1,5 +1,37 @@
 # Discovery eval — find-the-chokepoint — 2026-07-05/06
 
+> **SUPERSEDED 2026-07-06 — see "Fixed-binary re-run" below.** Everything in
+> the original verdict ran against a crippled LCI (find_files 100% dead
+> under `.work/`, test/ui files unindexed — fixed 3abebc2+0895aae). The
+> grep-parity conclusion does not survive the fix.
+
+## Fixed-binary re-run (results/discovery-fixed, same questions/models)
+
+| model | base | lci (crippled) | lci (fixed) |
+|---|---|---|---|
+| deepseek-v4-flash | 0.94 | 1.00 | **1.00** |
+| deepseek-v4-pro | 0.96 | 0.85 | **1.00** |
+| glm-5.2 (Go) | 0.89 | 0.96 | **1.00** |
+| kimi-k2.7-code | 1.00 | 1.00 | **1.00** |
+| qwen3.7-max | 0.93 | 1.00 | **1.00** |
+| kimi k2p7 | 1.00 | 0.96 | **1.00** |
+| mimo-v2.5 | 1.00 | 0.94 | **1.00** |
+| nemotron-3-ultra | 0.90 | 0.86 | **1.00** |
+| zhipuai glm-5.2 | 0.93 | 1.00 | **1.00** |
+| **mean** | **0.95** | 0.95 | **1.00** |
+
+With a working LCI (find_files functional, full index, grouped
+root-relative search output), **every model scores a perfect 1.00 on
+find-the-chokepoint questions — 77/77 completed runs, all fact groups
+hit** — vs 0.95 baseline. The crippled run's "grep parity" was the tool
+failing, not the concept: models fell back to grep because half their LCI
+calls returned empty. Completion rate is now par (lci 10/87 timeouts vs
+base 9/83 — both heavy-model 600s cases); token cost varies by model
+(nemotron −60% from grouped output, kimi k2p7 up on deeper exploration).
+
+Implication for all earlier tiers: pre-0895aae LCI numbers are a floor.
+Tier 0-3 LCI slices under-measure; re-run before quoting them.
+
 160 completed runs: zls/okhttp/pocketbase × 9 discovery questions ("which
 function is the chokepoint that all X routes through" — symbol NOT named)
 × 10 models (Go fleet: deepseek-v4-pro, glm-5.2, kimi-k2.7-code,
