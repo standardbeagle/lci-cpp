@@ -101,11 +101,14 @@ TEST(DefaultConfigTest, HasExclusionPatterns) {
 // both sides together.
 // ---------------------------------------------------------------------------
 
-TEST(DefaultExcludeContract, MatchesGoBinaryPatternCount) {
+TEST(DefaultExcludeContract, LocksPatternCount) {
     auto cfg = make_default_config();
-    // Go binary reports "Exclude Patterns (124)" on `lci config show`.
-    // Locking the count here catches accidental drops or duplicates.
-    EXPECT_EQ(cfg.exclude.size(), 124u);
+    // Historical note: the Go binary shipped 124 patterns. The C++ default
+    // deliberately diverges: test files/dirs, fixtures, ui/ and public/ are
+    // first-party content and are INDEXED (grep-parity mandate; filtering
+    // tests is a query-time flag, not an index-time hole). Locking the
+    // count here catches accidental drops or duplicates.
+    EXPECT_EQ(cfg.exclude.size(), 82u);
 }
 
 TEST(DefaultExcludeContract, IncludesAllVcsAndDotfileDirs) {
@@ -127,42 +130,33 @@ TEST(DefaultExcludeContract, IncludesAllBuildAndDepDirs) {
     for (const auto* p : {"**/node_modules/**", "**/vendor/**",
                            "**/bower_components/**", "**/jspm_packages/**",
                            "**/dist/**", "**/build/**", "**/out/**",
-                           "**/target/**", "**/bin/**", "**/obj/**",
-                           "**/ui/**", "**/public/**"}) {
+                           "**/target/**", "**/bin/**", "**/obj/**"}) {
         EXPECT_TRUE(has(p)) << "missing build/dep exclude: " << p;
     }
+    // ui/ and public/ are first-party source in web projects and must be
+    // indexed (pocketbase ui/src was invisible to search under the old
+    // blanket excludes). Generated bundles inside them are still dropped
+    // by the *.min.js / *.bundle.js rules.
+    EXPECT_FALSE(has("**/ui/**"));
+    EXPECT_FALSE(has("**/public/**"));
 }
 
-TEST(DefaultExcludeContract, IncludesAllTestFilePatterns) {
+TEST(DefaultExcludeContract, TestPatternsAreNotExcluded) {
+    // Test files and test/fixture directories are first-party code. Grep
+    // finds them; search must too. Filtering tests is a query-time flag
+    // (search flags=nt), never an index-time exclusion — the old excludes
+    // made every *_test.go identifier a false-empty search result.
     auto cfg = make_default_config();
     auto has = [&](const std::string& p) {
         return std::find(cfg.exclude.begin(), cfg.exclude.end(), p) !=
                cfg.exclude.end();
     };
-    // Language-specific test file patterns.
-    for (const auto* p : {"**/*_test.go", "**/*_tests.go",
-                           "**/*_test.py", "**/*_tests.py",
-                           "**/test_*.py", "**/tests_*.py",
-                           "**/*.test.js", "**/*.test.ts",
-                           "**/*.test.tsx", "**/*.test.jsx",
-                           "**/*.spec.js", "**/*.spec.ts",
-                           "**/*.spec.tsx", "**/*.spec.jsx",
-                           "**/*_test.rb", "**/*_spec.rb",
-                           "**/*Test.java", "**/*Tests.java",
-                           "**/*TestCase.java", "**/*Test.cs",
-                           "**/*Tests.cs", "**/*Test.csproj",
-                           "**/*Test.php", "**/*TestCase.php",
-                           "**/*Test.kt", "**/*Tests.kt",
-                           "**/*TestCase.kt", "**/*Test.swift",
-                           "**/*Test.m", "**/*Test.h",
-                           "**/test_*", "**/tests_*"}) {
-        EXPECT_TRUE(has(p)) << "missing test file exclude: " << p;
-    }
-    // Test directory patterns.
-    for (const auto* p : {"**/__tests__/**", "**/test/**", "**/tests/**",
-                           "**/testdata/**", "**/__testdata__/**",
-                           "**/fixtures/**", "**/.test/**"}) {
-        EXPECT_TRUE(has(p)) << "missing test dir exclude: " << p;
+    for (const auto* p : {"**/*_test.go", "**/test_*.py", "**/*.test.ts",
+                           "**/*.spec.js", "**/*_spec.rb", "**/*Test.java",
+                           "**/*Test.kt", "**/*Test.php", "**/test_*",
+                           "**/__tests__/**", "**/test/**", "**/tests/**",
+                           "**/testdata/**", "**/fixtures/**"}) {
+        EXPECT_FALSE(has(p)) << "test pattern must not be excluded: " << p;
     }
 }
 
@@ -266,21 +260,23 @@ TEST(DefaultExcludeMatchGlob, MinifiedAssetsExcluded) {
     EXPECT_TRUE(excluded_by_default(cfg.exclude, "dist/app.bundle.js"));
 }
 
-TEST(DefaultExcludeMatchGlob, TestFilesExcluded) {
+TEST(DefaultExcludeMatchGlob, TestFilesIndexed) {
+    // Grep-parity: first-party test code must be searchable by default.
     auto cfg = make_default_config();
-    EXPECT_TRUE(excluded_by_default(cfg.exclude, "pkg/foo_test.go"));
-    EXPECT_TRUE(excluded_by_default(cfg.exclude, "src/test_helper.py"));
-    EXPECT_TRUE(excluded_by_default(cfg.exclude, "tests/foo_test.rb"));
-    EXPECT_TRUE(excluded_by_default(cfg.exclude, "src/CalculatorTest.java"));
-    EXPECT_TRUE(excluded_by_default(cfg.exclude, "app/components/Button.test.tsx"));
+    EXPECT_FALSE(excluded_by_default(cfg.exclude, "pkg/foo_test.go"));
+    EXPECT_FALSE(excluded_by_default(cfg.exclude, "src/test_helper.py"));
+    EXPECT_FALSE(excluded_by_default(cfg.exclude, "src/CalculatorTest.java"));
+    EXPECT_FALSE(excluded_by_default(cfg.exclude, "app/components/Button.test.tsx"));
 }
 
-TEST(DefaultExcludeMatchGlob, TestDirectoriesExcluded) {
+TEST(DefaultExcludeMatchGlob, TestDirectoriesIndexed) {
     auto cfg = make_default_config();
-    EXPECT_TRUE(excluded_by_default(cfg.exclude, "tests/integration/foo.go"));
-    EXPECT_TRUE(excluded_by_default(cfg.exclude, "src/__tests__/x.js"));
-    EXPECT_TRUE(excluded_by_default(cfg.exclude, "pkg/testdata/sample.json"));
-    EXPECT_TRUE(excluded_by_default(cfg.exclude, "internal/fixtures/data.yml"));
+    EXPECT_FALSE(excluded_by_default(cfg.exclude, "tests/integration/foo.go"));
+    EXPECT_FALSE(excluded_by_default(cfg.exclude, "src/__tests__/x.js"));
+    EXPECT_FALSE(excluded_by_default(cfg.exclude, "pkg/testdata/sample.json"));
+    EXPECT_FALSE(excluded_by_default(cfg.exclude, "internal/fixtures/data.yml"));
+    EXPECT_FALSE(excluded_by_default(cfg.exclude, "ui/src/records/list.js"));
+    EXPECT_FALSE(excluded_by_default(cfg.exclude, "public/app.js"));
 }
 
 TEST(DefaultExcludeMatchGlob, NormalSourceFilesNotExcluded) {
@@ -347,8 +343,6 @@ TEST(DefaultExcludeMatchGlob, LogFilesExcluded) {
 }
 
 TEST(DefaultExcludeMatchGlob, NoDuplicatePatterns) {
-    // Currently `**/tests/**` appears twice in the list. Document the
-    // current state; if dedup happens, update the expected count above.
     auto cfg = make_default_config();
     std::vector<std::string> sorted = cfg.exclude;
     std::sort(sorted.begin(), sorted.end());
@@ -356,12 +350,7 @@ TEST(DefaultExcludeMatchGlob, NoDuplicatePatterns) {
     for (size_t i = 1; i < sorted.size(); ++i) {
         if (sorted[i] == sorted[i - 1]) ++dup_count;
     }
-    // `**/tests/**` is listed twice — once at index 38, once at 50 (per
-    // src/config/config.cpp). Until dedup, expect exactly one duplicate.
-    EXPECT_EQ(dup_count, 1)
-        << "Unexpected number of duplicate patterns. The current source has "
-           "one known duplicate ('**/tests/**'). If dedup happens, update "
-           "MatchesGoBinaryPatternCount above to 123.";
+    EXPECT_EQ(dup_count, 0);
 }
 
 // ---------------------------------------------------------------------------
