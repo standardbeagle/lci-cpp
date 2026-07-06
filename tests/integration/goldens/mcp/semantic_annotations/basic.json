@@ -2,7 +2,7 @@
   "result": {
     "content": [
       {
-        "text": "{\"annotations\":[],\"total_count\":0}",
+        "text": "{\"annotations\":[],\"hint\":\"no @lci: semantic annotations exist in this corpus; add `@lci:label=...` comments above symbols to populate them\",\"total_count\":0}",
         "type": "text"
       }
     ]

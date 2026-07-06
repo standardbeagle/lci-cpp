@@ -126,6 +126,21 @@ TEST_F(SemanticAnnotationsTest, QueryByNonexistentLabelReturnsEmpty) {
     EXPECT_EQ(json["total_count"].get<int>(), 0);
 }
 
+// Fail loud (Karpathy #6): the fixture HAS annotations, so an unknown label
+// gets the "no match, index holds N" hint (not the "no annotations at all"
+// variant) so the caller knows the label was wrong, not the corpus empty.
+TEST_F(SemanticAnnotationsTest, QueryByNonexistentLabelEmitsHint) {
+    nlohmann::json params;
+    params["label"] = "nonexistent_label_xyz";
+    auto result = handle_semantic_annotations(params, *annotator_, nullptr);
+    EXPECT_FALSE(result.is_error);
+    auto json = nlohmann::json::parse(result.text);
+    ASSERT_TRUE(json.contains("hint"));
+    auto hint = json["hint"].get<std::string>();
+    EXPECT_NE(hint.find("matched"), std::string::npos);
+    EXPECT_NE(hint.find("annotated symbol"), std::string::npos);
+}
+
 TEST_F(SemanticAnnotationsTest, MaxResultsClamps) {
     nlohmann::json params;
     params["label"] = "api";
@@ -354,6 +369,34 @@ TEST_F(SideEffectsTest, IncludeConfidenceFlag) {
     }
 }
 
+// Fail loud (Karpathy #6): file mode on a path with no analyzed functions must
+// carry a recovery hint, not a bare {results:[],total_count:0}.
+TEST_F(SideEffectsTest, FileModeUnknownPathEmitsHint) {
+    nlohmann::json params;
+    params["mode"] = "file";
+    params["file_path"] = "does_not_exist.go";
+    auto result = handle_side_effects(params, *analyzer_, nullptr);
+    EXPECT_FALSE(result.is_error);
+    auto json = nlohmann::json::parse(result.text);
+    EXPECT_EQ(json["total_count"].get<int>(), 0);
+    ASSERT_TRUE(json.contains("hint"));
+    EXPECT_NE(json["hint"].get<std::string>().find("does_not_exist.go"),
+              std::string::npos);
+}
+
+// A valid category with zero matches is a real empty — it still gets a hint so
+// the caller knows to fall back to summary rather than assume "no data".
+TEST_F(SideEffectsTest, CategoryNoMatchEmitsHint) {
+    nlohmann::json params;
+    params["mode"] = "category";
+    params["category"] = "network";  // fixture has none
+    auto result = handle_side_effects(params, *analyzer_, nullptr);
+    EXPECT_FALSE(result.is_error);
+    auto json = nlohmann::json::parse(result.text);
+    EXPECT_EQ(json["total_count"].get<int>(), 0);
+    EXPECT_TRUE(json.contains("hint"));
+}
+
 // =============================================================================
 // Code insight handler tests
 // =============================================================================
@@ -408,6 +451,41 @@ TEST_F(CodeInsightTest, DefaultModeIsOverview) {
     EXPECT_NE(result.text.find("mode=overview"), std::string::npos);
     EXPECT_NE(result.text.find("== REPOSITORY MAP =="), std::string::npos);
     EXPECT_NE(result.text.find("== HEALTH =="), std::string::npos);
+}
+
+// side_effects symbol mode against a real index but an empty analyzer: the
+// symbol resolves in the index, yet the analyzer holds no record for it. Must
+// fail loud (Karpathy #6) — a bare empty result reads as "pure" — and the
+// error must name the file root-relative ("main.go", not the temp dir).
+TEST_F(CodeInsightTest, SideEffectsSymbolFoundButNoRecordFailsLoud) {
+    SideEffectAnalyzer empty_analyzer("go");
+    nlohmann::json params;
+    params["mode"] = "symbol";
+    params["symbol_name"] = "main";
+    auto result = handle_side_effects(params, empty_analyzer, indexer_.get());
+    EXPECT_TRUE(result.is_error);
+    auto json = nlohmann::json::parse(result.text);
+    auto err = json["error"].get<std::string>();
+    EXPECT_NE(err.find("main"), std::string::npos);
+    EXPECT_EQ(err.find(temp_dir_.string()), std::string::npos)
+        << "error leaked absolute path: " << err;
+}
+
+// Same real index: symbol mode on a resolvable symbol emits a root-relative
+// file_path (regression guard for the absolute-path leak that was fixed).
+TEST_F(CodeInsightTest, SideEffectsSymbolEmitsRootRelativePath) {
+    SideEffectAnalyzer analyzer("go");
+    // Populate the analyzer from the real index so `main` has a record.
+    analyzer.populate_from_index(*indexer_);
+    nlohmann::json params;
+    params["mode"] = "symbol";
+    params["symbol_name"] = "main";
+    auto result = handle_side_effects(params, analyzer, indexer_.get());
+    ASSERT_FALSE(result.is_error) << result.text;
+    auto json = nlohmann::json::parse(result.text);
+    ASSERT_EQ(json["total_count"].get<int>(), 1);
+    auto fp = json["results"][0]["file_path"].get<std::string>();
+    EXPECT_EQ(fp, "main.go");
 }
 
 TEST_F(CodeInsightTest, InvalidModeReturnsError) {

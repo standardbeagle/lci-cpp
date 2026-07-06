@@ -24,6 +24,7 @@
 #include <lci/git/types.h>
 #include <lci/indexing/master_index.h>
 #include <lci/mcp/validation.h>
+#include <lci/search/search_engine.h>
 #include <lci/symbol.h>
 
 #include <absl/container/flat_hash_set.h>
@@ -77,10 +78,11 @@ uint32_t category_name_to_bit(std::string_view name) {
 nlohmann::json side_effect_to_json(const SideEffectInfo& info,
                                    bool include_reasons,
                                    bool include_transitive,
-                                   bool include_confidence) {
+                                   bool include_confidence,
+                                   std::string_view root) {
     nlohmann::json item;
     item["symbol_name"] = info.function_name;
-    item["file_path"] = info.file_path;
+    item["file_path"] = std::string(relative_to_root(info.file_path, root));
     item["line"] = info.start_line;
     if (info.end_line > 0) item["end_line"] = info.end_line;
     item["is_pure"] = info.is_pure;
@@ -168,6 +170,11 @@ ToolResult handle_semantic_annotations(const nlohmann::json& raw_params,
     bool include_propagated = params.value("include_propagated", true);
     int max_results = clamp(params.value("max_results", 100), 1, 10000);
 
+    // Root for root-relative path emission (empty when no index).
+    std::string_view root =
+        indexer ? std::string_view(indexer->config().project.root)
+                : std::string_view{};
+
     // Default: both direct and propagated when neither is set
     if (!params.contains("include_direct") &&
         !params.contains("include_propagated")) {
@@ -183,7 +190,7 @@ ToolResult handle_semantic_annotations(const nlohmann::json& raw_params,
         item["symbol_name"] = sym->name;
         item["file_id"] = static_cast<int>(sym->file_id);
         item["symbol_id"] = std::to_string(sym->symbol_id);
-        item["file_path"] = sym->file_path;
+        item["file_path"] = std::string(relative_to_root(sym->file_path, root));
         item["line"] = sym->line;
         if (!sym->annotation.labels.empty())
             item["direct_labels"] = sym->annotation.labels;
@@ -252,8 +259,9 @@ ToolResult handle_semantic_annotations(const nlohmann::json& raw_params,
                     if (const auto* src_es =
                             rt_snap->get_enhanced_symbol(pl.source)) {
                         pl_item["source_name"] = src_es->symbol.name;
-                        pl_item["source_file"] =
-                            indexer->get_file_path(src_es->symbol.file_id);
+                        pl_item["source_file"] = std::string(relative_to_root(
+                            indexer->get_file_path(src_es->symbol.file_id),
+                            root));
                     }
                 }
                 prop_labels.push_back(std::move(pl_item));
@@ -288,6 +296,28 @@ ToolResult handle_semantic_annotations(const nlohmann::json& raw_params,
     nlohmann::json response;
     response["annotations"] = std::move(annotations);
     response["total_count"] = count;
+    // Fail loud on empty (Karpathy #6): a bare {annotations:[],total_count:0}
+    // can't tell "wrong label" from "corpus has no @lci: annotations at all".
+    // Derive the distinction from the annotator's own totals.
+    if (count == 0) {
+        std::string what =
+            !label.empty() && !category.empty()
+                ? ("label '" + label + "' / category '" + category + "'")
+                : (!label.empty() ? "label '" + label + "'"
+                                  : "category '" + category + "'");
+        int total_ann = annotator.total_annotations();
+        if (total_ann == 0) {
+            response["hint"] =
+                "no @lci: semantic annotations exist in this corpus; add "
+                "`@lci:label=...` comments above symbols to populate them";
+        } else {
+            response["hint"] =
+                "no symbols matched " + what + "; the index holds " +
+                std::to_string(total_ann) + " annotated symbol(s) across " +
+                std::to_string(annotator.unique_labels()) +
+                " label(s) — check spelling/case";
+        }
+    }
     return make_json_response(response);
 }
 
@@ -297,7 +327,8 @@ namespace {
 
 ToolResult side_effect_symbol_query(const nlohmann::json& params,
                                     SideEffectAnalyzer& analyzer,
-                                    MasterIndex* indexer) {
+                                    MasterIndex* indexer,
+                                    std::string_view root) {
     auto symbol_name = params.value("symbol_name", "");
     auto file_path = params.value("file_path", "");
 
@@ -324,14 +355,21 @@ ToolResult side_effect_symbol_query(const nlohmann::json& params,
         auto path = indexer->get_file_path(sym->symbol.file_id);
         auto* info = analyzer.get_result(path, sym->symbol.line);
         if (!info) {
-            nlohmann::json response;
-            response["results"] = nlohmann::json::array();
-            response["total_count"] = 0;
-            response["mode"] = "symbol";
-            return make_json_response(response);
+            // Fail loud (Karpathy #6): we resolved the symbol but the analyzer
+            // holds no side-effect record for it — a bare empty results array
+            // reads as "pure/no effects" and misleads. Say why.
+            return make_error_response(
+                "side_effects",
+                "symbol '" + symbol_name + "' resolved at " +
+                    std::string(relative_to_root(path, root)) + ":" +
+                    std::to_string(sym->symbol.line) +
+                    " but has no side-effect record (not a function/method, or "
+                    "the analyzer is unpopulated for this corpus — try "
+                    "side_effects {\"mode\":\"summary\"})");
         }
         auto item = side_effect_to_json(*info, include_reasons,
-                                        include_transitive, include_confidence);
+                                        include_transitive, include_confidence,
+                                        root);
         nlohmann::json response;
         response["results"] = nlohmann::json::array({std::move(item)});
         response["total_count"] = 1;
@@ -344,7 +382,8 @@ ToolResult side_effect_symbol_query(const nlohmann::json& params,
 }
 
 ToolResult side_effect_file_query(const nlohmann::json& params,
-                                  SideEffectAnalyzer& analyzer) {
+                                  SideEffectAnalyzer& analyzer,
+                                  std::string_view root) {
     auto file_path = params.value("file_path", "");
     if (file_path.empty()) {
         return make_error_response(
@@ -356,16 +395,22 @@ ToolResult side_effect_file_query(const nlohmann::json& params,
     bool include_confidence = params.value("include_confidence", false);
     int max_results = clamp(params.value("max_results", 100), 1, 10000);
 
+    // Analyzer keys hold absolute file_path. Compare in root-relative space so
+    // both a project-relative arg ("src/x.go") and an absolute one match —
+    // relative_to_root leaves an already-relative arg untouched.
+    std::string want_rel(relative_to_root(file_path, root));
+
     nlohmann::json results = nlohmann::json::array();
     int total = 0;
     int shown = 0;
     for (const auto& [key, info] : analyzer.results()) {
-        if (info.file_path != file_path) continue;
+        if (std::string(relative_to_root(info.file_path, root)) != want_rel)
+            continue;
         ++total;
         if (shown < max_results) {
             results.push_back(side_effect_to_json(info, include_reasons,
                                                   include_transitive,
-                                                  include_confidence));
+                                                  include_confidence, root));
             ++shown;
         }
     }
@@ -374,12 +419,22 @@ ToolResult side_effect_file_query(const nlohmann::json& params,
     response["results"] = std::move(results);
     response["total_count"] = total;
     response["mode"] = "file";
+    if (total == 0) {
+        // Fail loud (Karpathy #6): distinguish "analyzer holds nothing" from
+        // "this file matched nothing" so the caller knows which lever to pull.
+        response["hint"] = analyzer.results().empty()
+            ? "no per-function side-effect data for this corpus; use "
+              "side_effects {\"mode\":\"summary\"}"
+            : "no analyzed functions in '" + want_rel +
+                  "'; check the path (project-root-relative) or list files "
+                  "with debug_info {\"mode\":\"files\"}";
+    }
     return make_json_response(response);
 }
 
 ToolResult side_effect_purity_query(const nlohmann::json& params,
                                     SideEffectAnalyzer& analyzer,
-                                    bool want_pure) {
+                                    bool want_pure, std::string_view root) {
     bool include_reasons = params.value("include_reasons", false);
     bool include_transitive = params.value("include_transitive", false);
     bool include_confidence = params.value("include_confidence", false);
@@ -394,7 +449,7 @@ ToolResult side_effect_purity_query(const nlohmann::json& params,
             if (shown < max_results) {
                 results.push_back(side_effect_to_json(
                     info, include_reasons, include_transitive,
-                    include_confidence));
+                    include_confidence, root));
                 ++shown;
             }
         }
@@ -404,11 +459,20 @@ ToolResult side_effect_purity_query(const nlohmann::json& params,
     response["results"] = std::move(results);
     response["total_count"] = total;
     response["mode"] = want_pure ? "pure" : "impure";
+    if (total == 0) {
+        response["hint"] = analyzer.results().empty()
+            ? "no per-function side-effect data for this corpus; use "
+              "side_effects {\"mode\":\"summary\"}"
+            : std::string("no ") + (want_pure ? "pure" : "impure") +
+                  " functions among the analyzed set; try the opposite mode "
+                  "or side_effects {\"mode\":\"summary\"}";
+    }
     return make_json_response(response);
 }
 
 ToolResult side_effect_category_query(const nlohmann::json& params,
-                                      SideEffectAnalyzer& analyzer) {
+                                      SideEffectAnalyzer& analyzer,
+                                      std::string_view root) {
     auto category = params.value("category", "");
     if (category.empty()) {
         return make_error_response(
@@ -439,7 +503,7 @@ ToolResult side_effect_category_query(const nlohmann::json& params,
         if (shown < max_results) {
             results.push_back(side_effect_to_json(info, include_reasons,
                                                   include_transitive,
-                                                  include_confidence));
+                                                  include_confidence, root));
             ++shown;
         }
     }
@@ -448,6 +512,14 @@ ToolResult side_effect_category_query(const nlohmann::json& params,
     response["results"] = std::move(results);
     response["total_count"] = total;
     response["mode"] = "category";
+    if (total == 0) {
+        response["hint"] = analyzer.results().empty()
+            ? "no per-function side-effect data for this corpus; use "
+              "side_effects {\"mode\":\"summary\"}"
+            : "no functions with '" + category +
+                  "' effects among the analyzed set; try side_effects "
+                  "{\"mode\":\"summary\"} for the aggregate breakdown";
+    }
     return make_json_response(response);
 }
 
@@ -548,11 +620,20 @@ ToolResult handle_side_effects(const nlohmann::json& raw_params,
     auto params = raw_params.is_object() ? raw_params : nlohmann::json::object();
     auto mode = params.value("mode", "summary");
 
-    if (mode == "symbol") return side_effect_symbol_query(params, analyzer, indexer);
-    if (mode == "file") return side_effect_file_query(params, analyzer);
-    if (mode == "pure") return side_effect_purity_query(params, analyzer, true);
-    if (mode == "impure") return side_effect_purity_query(params, analyzer, false);
-    if (mode == "category") return side_effect_category_query(params, analyzer);
+    // Root for root-relative path emission / matching (empty when no index).
+    std::string_view root =
+        indexer ? std::string_view(indexer->config().project.root)
+                : std::string_view{};
+
+    if (mode == "symbol")
+        return side_effect_symbol_query(params, analyzer, indexer, root);
+    if (mode == "file") return side_effect_file_query(params, analyzer, root);
+    if (mode == "pure")
+        return side_effect_purity_query(params, analyzer, true, root);
+    if (mode == "impure")
+        return side_effect_purity_query(params, analyzer, false, root);
+    if (mode == "category")
+        return side_effect_category_query(params, analyzer, root);
     if (mode == "summary") return side_effect_summary(analyzer, indexer);
 
     return make_error_response(

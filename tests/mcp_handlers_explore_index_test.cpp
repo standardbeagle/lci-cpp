@@ -455,6 +455,75 @@ TEST_F(ExploreIndexTestFixture, DebugInfoFiles) {
     EXPECT_TRUE(j.contains("files_by_language"));
 }
 
+// references mode must emit project-root-relative file_path (the absolute
+// stored path was leaking — token bloat + machine-dependent output).
+TEST_F(ExploreIndexTestFixture, DebugInfoReferencesPathsAreRootRelative) {
+    nlohmann::json params;
+    params["mode"] = "references";
+    auto result = handle_debug_info(params, *indexer_);
+    EXPECT_FALSE(result.is_error);
+    auto j = nlohmann::json::parse(result.text);
+    ASSERT_TRUE(j.contains("top_referenced_symbols"));
+    ASSERT_FALSE(j["top_referenced_symbols"].empty());
+    for (const auto& s : j["top_referenced_symbols"]) {
+        auto fp = s["file_path"].get<std::string>();
+        EXPECT_NE(fp.front(), '/') << "absolute path leaked: " << fp;
+        EXPECT_EQ(fp.find(tmp_dir_.string()), std::string::npos);
+    }
+}
+
+// files mode accepts a root-relative file_path and returns file_info with a
+// root-relative file_path (both directions were broken: rel lookup missed,
+// output was absolute).
+TEST_F(ExploreIndexTestFixture, DebugInfoFilesByRelativePath) {
+    nlohmann::json params;
+    params["mode"] = "files";
+    params["file_path"] = "main.go";
+    auto result = handle_debug_info(params, *indexer_);
+    EXPECT_FALSE(result.is_error);
+    auto j = nlohmann::json::parse(result.text);
+    ASSERT_TRUE(j.contains("file_info")) << result.text;
+    EXPECT_EQ(j["file_info"]["file_path"].get<std::string>(), "main.go");
+}
+
+// files mode also accepts the absolute stored path, normalising the output.
+TEST_F(ExploreIndexTestFixture, DebugInfoFilesByAbsolutePath) {
+    nlohmann::json params;
+    params["mode"] = "files";
+    params["file_path"] = (tmp_dir_ / "main.go").string();
+    auto result = handle_debug_info(params, *indexer_);
+    EXPECT_FALSE(result.is_error);
+    auto j = nlohmann::json::parse(result.text);
+    ASSERT_TRUE(j.contains("file_info"));
+    EXPECT_EQ(j["file_info"]["file_path"].get<std::string>(), "main.go");
+}
+
+// Fail loud (Karpathy #6): a named-but-unindexed file yields a hint, not a
+// silently-omitted file_info.
+TEST_F(ExploreIndexTestFixture, DebugInfoFilesUnknownPathEmitsHint) {
+    nlohmann::json params;
+    params["mode"] = "files";
+    params["file_path"] = "does/not/exist.go";
+    auto result = handle_debug_info(params, *indexer_);
+    EXPECT_FALSE(result.is_error);
+    auto j = nlohmann::json::parse(result.text);
+    EXPECT_FALSE(j.contains("file_info"));
+    ASSERT_TRUE(j.contains("hint"));
+    EXPECT_NE(j["hint"].get<std::string>().find("does/not/exist.go"),
+              std::string::npos);
+}
+
+TEST_F(ExploreIndexTestFixture, DebugInfoFilesUnknownIdEmitsHint) {
+    nlohmann::json params;
+    params["mode"] = "files";
+    params["file_id"] = 999999;
+    auto result = handle_debug_info(params, *indexer_);
+    EXPECT_FALSE(result.is_error);
+    auto j = nlohmann::json::parse(result.text);
+    EXPECT_FALSE(j.contains("file_info"));
+    EXPECT_TRUE(j.contains("hint"));
+}
+
 TEST_F(ExploreIndexTestFixture, DebugInfoUnknownMode) {
     nlohmann::json params;
     params["mode"] = "invalid_mode";

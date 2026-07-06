@@ -12,6 +12,7 @@
 #include <lci/git/provider.h>
 #include <lci/git/types.h>
 #include <lci/indexing/master_index.h>
+#include <lci/search/search_engine.h>
 #include <lci/symbol.h>
 
 namespace lci {
@@ -205,6 +206,7 @@ ToolResult handle_debug_info(const nlohmann::json& params,
                       .count();
 
     auto& tracker = indexer.ref_tracker();
+    const std::string& root = indexer.config().project.root;
 
     nlohmann::json response;
     response["mode"] = mode;
@@ -282,7 +284,7 @@ ToolResult handle_debug_info(const nlohmann::json& params,
             nlohmann::json item;
             item["symbol_name"] = sr.name;
             item["symbol_type"] = sr.type;
-            item["file_path"] = sr.path;
+            item["file_path"] = std::string(relative_to_root(sr.path, root));
             item["incoming_refs"] = sr.incoming;
             top.push_back(std::move(item));
         }
@@ -294,24 +296,44 @@ ToolResult handle_debug_info(const nlohmann::json& params,
         int file_id_param = params.value("file_id", 0);
         auto file_path_param = params.value("file_path", "");
         bool verbose = params.value("verbose", false);
+        bool wants_file = file_id_param > 0 || !file_path_param.empty();
 
         FileID target_fid = 0;
         if (file_id_param > 0) {
             target_fid = static_cast<FileID>(file_id_param);
         } else if (!file_path_param.empty()) {
+            // file_map keys on the absolute stored path. Accept both a
+            // root-relative arg (resolved against the project root) and an
+            // absolute one, so callers don't have to guess the stored form.
             target_fid = indexer.path_to_id(file_path_param);
+            if (target_fid == 0 && !root.empty() &&
+                file_path_param.front() != '/') {
+                target_fid = indexer.path_to_id(root + "/" + file_path_param);
+            }
         }
 
-        if (target_fid != 0) {
-            auto fp = indexer.get_file_path(target_fid);
-            if (!fp.empty()) {
+        auto fp = target_fid != 0 ? indexer.get_file_path(target_fid)
+                                   : std::string();
+        if (wants_file && fp.empty()) {
+            // Fail loud (Karpathy #6): the caller named a specific file that
+            // isn't indexed — a bare files_by_language map silently hides the
+            // miss. Surface the offending target with a recovery hint.
+            std::string target = file_id_param > 0
+                ? ("file_id " + std::to_string(file_id_param))
+                : ("file_path '" + file_path_param + "'");
+            response["hint"] =
+                "no indexed file for " + target +
+                " (file paths are project-root-relative; drop the arg to list "
+                "files_by_language, or use find_files to locate it)";
+        } else if (target_fid != 0 && !fp.empty()) {
+            {
                 // Pin the snapshot: get_file_enhanced_symbols returns const
                 // EnhancedSymbol* into it, dereferenced in the verbose loop.
                 auto rt_snap = tracker.pin();
                 auto symbols = rt_snap->get_file_enhanced_symbols(target_fid);
                 nlohmann::json fi;
                 fi["file_id"] = static_cast<int>(target_fid);
-                fi["file_path"] = fp;
+                fi["file_path"] = std::string(relative_to_root(fp, root));
                 fi["language"] = language_from_path(fp);
                 fi["symbol_count"] = static_cast<int>(symbols.size());
 
