@@ -7,6 +7,7 @@
 #include <lci/core/reference_tracker.h>
 #include <lci/idcodec.h>
 #include <lci/indexing/master_index.h>
+#include <lci/mcp/handlers_core.h>  // similar_symbol_suggestions
 #include <lci/mcp/validation.h>
 #include <lci/search/search_engine.h>  // relative_to_root
 #include <lci/symbol.h>
@@ -675,6 +676,20 @@ ToolResult handle_inspect_symbol(const nlohmann::json& params,
     nlohmann::json response;
     response["symbols"] = std::move(symbols_json);
     response["count"] = static_cast<int>(matched.size());
+
+    // Empty lookup fails loud: hint + fuzzy near-miss suggestions (typo'd
+    // names self-correct in one round trip; bare {count:0} teaches nothing).
+    if (matched.empty()) {
+        response["hint"] = name.empty()
+                               ? "no symbol resolved from id '" + id_str + "'"
+                               : "no symbol named '" + name +
+                                     "' in the index. Check similar_symbols "
+                                     "below, or use search to locate it.";
+        if (!name.empty()) {
+            auto sims = similar_symbol_suggestions(*rt_snap, name);
+            if (!sims.empty()) response["similar_symbols"] = std::move(sims);
+        }
+    }
 
     return make_json_response(response);
 }

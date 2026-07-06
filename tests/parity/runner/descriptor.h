@@ -63,6 +63,13 @@ struct Descriptor {
     // and returns "index not initialized" until done; larger corpora race
     // without this. The C++ server indexes synchronously (immediate ready).
     bool        wait_for_ready = false;
+    // Optional (integration harness only): path, relative to the tests source
+    // dir, of a directory the integration runner materializes into a fresh
+    // temp git repo (git init/add/commit → clean working tree) before running
+    // the descriptor, using it as the corpus. Makes git-analyze WIP-scope
+    // goldens deterministic instead of depending on the mutable working tree
+    // of a live corpus symlink. See spec_runner.cpp MaterializeGitFixture.
+    std::string git_fixture;
 };
 
 // Throws std::runtime_error on schema or type errors. The input is the raw

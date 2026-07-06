@@ -7,6 +7,8 @@
 #include "runner/modes/mcp.h"
 #include "spec_diff/canonicalize.h"
 
+#include "helpers/test_git.h"
+
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
@@ -17,6 +19,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <system_error>
 
 #include <unistd.h>
 
@@ -174,6 +177,67 @@ std::string ResolveCorpus(const std::string& key) {
         }
     }
     return (base / key).string();
+}
+
+// Removes a temp directory tree on scope exit. gtest FAIL()/ASSERT_* return
+// from ExpectSpecMatches, so cleanup must be destructor-driven to survive
+// every early exit.
+struct TempDirGuard {
+    fs::path path;
+    ~TempDirGuard() {
+        if (!path.empty()) {
+            std::error_code ec;
+            fs::remove_all(path, ec);
+        }
+    }
+};
+
+// Materializes `<tests source>/<fixture_rel>` into a fresh temp git repo with a
+// clean working tree (git init → add -A → commit) and returns its path.
+//
+// This exists because git-analyze's `--scope wip` reads `git diff HEAD`, i.e.
+// the live uncommitted state of the corpus. Pointing that at `lci-go-repo` (a
+// symlink to a real developer repo whose tracked tree is edited outside the
+// test) made the golden non-deterministic: any uncommitted tracked change in
+// that repo turned `files_changed: 0` into a stable-tier mismatch. A repo the
+// test creates and commits itself is guaranteed clean, so the WIP diff is
+// empty across runs and machines (Karpathy rule 4) while still exercising the
+// real git path end-to-end (rule 5 — no mocking). Identity is pinned via `-c`
+// so the commit does not depend on the host's global git config. Fail-fast on
+// any git step: a broken fixture must surface, never silently degrade.
+fs::path MaterializeGitFixture(const std::string& fixture_rel) {
+    const fs::path source = TestsSourceDir() / fixture_rel;
+    if (!fs::is_directory(source)) {
+        throw std::runtime_error("git_fixture source is not a directory: " +
+                                 source.string());
+    }
+
+    static int counter = 0;
+    const fs::path dest =
+        fs::temp_directory_path() /
+        ("lci-git-fixture-" + std::to_string(::getpid()) + "-" +
+         std::to_string(counter++));
+
+    std::error_code ec;
+    fs::remove_all(dest, ec);
+    fs::create_directories(dest);
+    fs::copy(source, dest,
+             fs::copy_options::recursive | fs::copy_options::overwrite_existing);
+
+    if (!lci::test::run_git(dest, "init -q")) {
+        throw std::runtime_error("git init failed in fixture: " + dest.string());
+    }
+    if (!lci::test::run_git(dest, "add -A")) {
+        throw std::runtime_error("git add failed in fixture: " + dest.string());
+    }
+    if (!lci::test::run_git(
+            dest,
+            "-c user.email=fixture@lci.test -c user.name=lci-fixture "
+            "-c commit.gpgsign=false commit -q -m fixture")) {
+        throw std::runtime_error("git commit failed in fixture: " +
+                                 dest.string());
+    }
+    return dest;
 }
 
 std::string ResolveCppBinary() {
@@ -342,8 +406,14 @@ void ExpectSpecMatches(const SpecCase& spec_case) {
 
     std::string corpus_path;
     std::string cpp_binary;
+    TempDirGuard fixture_guard;
     try {
-        corpus_path = ResolveCorpus(descriptor.corpus);
+        if (!descriptor.git_fixture.empty()) {
+            fixture_guard.path = MaterializeGitFixture(descriptor.git_fixture);
+            corpus_path = fixture_guard.path.string();
+        } else {
+            corpus_path = ResolveCorpus(descriptor.corpus);
+        }
         cpp_binary = ResolveCppBinary();
     } catch (const std::exception& error) {
         FAIL() << "Missing runtime configuration: " << error.what();

@@ -2,7 +2,8 @@
   "id": "cli/git/git-analyze",
   "golden": "goldens/cli/git/git-analyze.json",
   "mode": "cli",
-  "corpus": "lci-go-repo",
+  "corpus": "git-fixture",
+  "git_fixture": "integration/cli/git/fixture",
   "go_binary": "${LCI_GO}",
   "cpp_binary": "${LCI_CPP}",
   "invocation": {
@@ -44,5 +45,5 @@
     "timed_max_ms": 60000
   },
   "expect_exit": 0,
-  "_rationale": "The direct CLI happy path is now parity-ready again. The remaining drift on `git-analyze --json --scope wip` is runtime metadata only: `metadata.analysis_time_ms`, `metadata.analyzed_at`, and the low-signal `summary.risk_score` formatting. The descriptor now compares the stable summary counts/recommendation plus the stable metadata refs/scope on the real `lci-go-repo` corpus."
+  "_rationale": "Corpus is now a `git_fixture` (tests/integration/cli/git/fixture) that the integration runner materializes into a fresh temp git repo (init/add/commit) before each run, instead of the `lci-go-repo` symlink to a live developer repo. `--scope wip` reads `git diff HEAD` — the live repo's tracked working tree is edited outside the test, so any uncommitted change flipped `files_changed` from 0 to N and produced flaky stable-tier mismatches (proven: dirtying one tracked file yields `summary.files_changed: stable mismatch (0 vs 1)` etc.). A freshly-committed fixture guarantees a clean tree, so the WIP diff is deterministically empty across runs and machines while still exercising the real git path. Stable tier compares the summary counts/recommendation plus the metadata refs/scope; ignore tier covers runtime-only drift: `metadata.analysis_time_ms`, `metadata.analyzed_at`, and the low-signal `summary.risk_score`."
 }

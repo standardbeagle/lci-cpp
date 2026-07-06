@@ -746,6 +746,38 @@ TEST_F(HandlersFixture, SearchTruncationReportsTrueTotalAndDirs) {
     EXPECT_FALSE(json["dirs"].empty());
 }
 
+// get_context by-name: empty lookup fails loud with hint + fuzzy
+// suggestions; found lookups emit root-relative file_path.
+TEST_F(HandlersFixture, GetContextUnknownNameCarriesSuggestions) {
+    nlohmann::json params;
+    params["name"] = "handleRequestz";  // typo of handleRequest
+    auto result = handle_get_context(params, *indexer_);
+    ASSERT_FALSE(result.is_error) << result.text;
+    auto json = nlohmann::json::parse(result.text);
+    EXPECT_EQ(json["count"].get<int>(), 0);
+    EXPECT_TRUE(json.contains("hint"));
+    ASSERT_TRUE(json.contains("similar_symbols")) << result.text;
+    bool suggested = false;
+    for (const auto& s : json["similar_symbols"]) {
+        if (s["name"].get<std::string>() == "handleRequest") suggested = true;
+    }
+    EXPECT_TRUE(suggested) << result.text;
+}
+
+TEST_F(HandlersFixture, GetContextEmitsRootRelativePaths) {
+    nlohmann::json params;
+    params["name"] = "handleRequest";
+    auto result = handle_get_context(params, *indexer_);
+    ASSERT_FALSE(result.is_error);
+    auto json = nlohmann::json::parse(result.text);
+    ASSERT_GT(json["count"].get<int>(), 0);
+    for (const auto& ctx : json["contexts"]) {
+        auto fp = ctx["file_path"].get<std::string>();
+        EXPECT_FALSE(fp.empty());
+        EXPECT_NE(fp.front(), '/') << fp;
+    }
+}
+
 // =============================================================================
 // get_context handler tests
 // =============================================================================

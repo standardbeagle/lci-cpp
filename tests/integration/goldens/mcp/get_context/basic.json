@@ -2,7 +2,7 @@
   "result": {
     "content": [
       {
-        "text": "{\"contexts\":[{\"context\":[\"func Add(a, b int) int\"],\"definition\":\"func Add(a, b int) int\",\"file_path\":\"${CORPUS}/a.go\",\"is_exported\":true,\"line\":3,\"object_id\":\"B\",\"purity\":{\"confidence\":\"medium\",\"is_pure\":true,\"purity_score\":1.0},\"signature\":\"func Add(a, b int) int\",\"symbol_name\":\"Add\",\"symbol_type\":\"function\"}],\"count\":1}",
+        "text": "{\"contexts\":[{\"context\":[\"func Add(a, b int) int\"],\"definition\":\"func Add(a, b int) int\",\"file_path\":\"a.go\",\"is_exported\":true,\"line\":3,\"object_id\":\"B\",\"purity\":{\"confidence\":\"medium\",\"is_pure\":true,\"purity_score\":1.0},\"signature\":\"func Add(a, b int) int\",\"symbol_name\":\"Add\",\"symbol_type\":\"function\"}],\"count\":1}",
         "type": "text"
       }
     ]

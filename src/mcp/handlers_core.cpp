@@ -526,6 +526,51 @@ const nlohmann::json_schema::json_validator& search_schema_validator() {
 
 }  // namespace
 
+// -- similar_symbol_suggestions ------------------------------------------------
+
+nlohmann::json similar_symbol_suggestions(
+    const ReferenceTracker::Snapshot& rt_snap, const std::string& query) {
+    nlohmann::json sims = nlohmann::json::array();
+    std::string word = to_lower(query);
+    if (word.size() < 3) return sims;
+
+    // Substring containment scores high; otherwise normalized Levenshtein
+    // similarity — catches both partial names and typos ("handleRequestz"
+    // -> handleRequest). Cold path: runs only after an empty lookup.
+    struct Suggestion {
+        const EnhancedSymbol* sym;
+        double score;
+    };
+    std::vector<Suggestion> nearby;
+    for (const auto& es : rt_snap.symbols.get_all()) {
+        std::string name_l = to_lower(std::string(es.symbol.name));
+        if (name_l.empty()) continue;
+        double score = 0.0;
+        if (name_l.find(word) != std::string::npos) {
+            score = 0.9;
+        } else {
+            size_t lev = rapidfuzz::levenshtein_distance(word, name_l);
+            size_t max_len = std::max(word.size(), name_l.size());
+            score = 1.0 - static_cast<double>(lev) /
+                              static_cast<double>(max_len);
+        }
+        if (score >= 0.7) nearby.push_back({&es, score});
+    }
+    std::sort(nearby.begin(), nearby.end(),
+              [](const Suggestion& a, const Suggestion& b) {
+                  if (a.score != b.score) return a.score > b.score;
+                  if (a.sym->symbol.name.size() != b.sym->symbol.name.size())
+                      return a.sym->symbol.name.size() <
+                             b.sym->symbol.name.size();
+                  return a.sym->symbol.name < b.sym->symbol.name;
+              });
+    for (size_t i = 0; i < nearby.size() && i < 3; ++i) {
+        sims.push_back({{"name", std::string(nearby[i].sym->symbol.name)},
+                        {"id", encode_symbol_id(nearby[i].sym->id)}});
+    }
+    return sims;
+}
+
 // -- handle_info --------------------------------------------------------------
 
 ToolResult handle_info(const nlohmann::json& params) {
@@ -1160,46 +1205,8 @@ ToolResult handle_search(const nlohmann::json& params,
             if (w0.size() > 2) { word = to_lower(w0); break; }
         }
         if (!word.empty()) {
-            // Cold path (only on zero results): fuzzy-scan symbol names.
-            // Substring containment scores high; otherwise normalized
-            // Levenshtein similarity — catches both partial names and typos
-            // ("handleRequestz" -> handleRequest).
-            struct Suggestion {
-                const EnhancedSymbol* sym;
-                double score;
-            };
-            std::vector<Suggestion> nearby;
-            for (const auto& es : rt_snap->symbols.get_all()) {
-                std::string name_l = to_lower(std::string(es.symbol.name));
-                if (name_l.empty()) continue;
-                double score = 0.0;
-                if (name_l.find(word) != std::string::npos) {
-                    score = 0.9;
-                } else {
-                    size_t lev =
-                        rapidfuzz::levenshtein_distance(word, name_l);
-                    size_t max_len = std::max(word.size(), name_l.size());
-                    score = 1.0 - static_cast<double>(lev) /
-                                      static_cast<double>(max_len);
-                }
-                if (score >= 0.7) nearby.push_back({&es, score});
-            }
-            std::sort(nearby.begin(), nearby.end(),
-                      [](const Suggestion& a, const Suggestion& b) {
-                          if (a.score != b.score) return a.score > b.score;
-                          if (a.sym->symbol.name.size() !=
-                              b.sym->symbol.name.size())
-                              return a.sym->symbol.name.size() <
-                                     b.sym->symbol.name.size();
-                          return a.sym->symbol.name < b.sym->symbol.name;
-                      });
-            if (!nearby.empty()) {
-                nlohmann::json sims = nlohmann::json::array();
-                for (size_t i = 0; i < nearby.size() && i < 3; ++i) {
-                    sims.push_back(
-                        {{"name", std::string(nearby[i].sym->symbol.name)},
-                         {"id", encode_symbol_id(nearby[i].sym->id)}});
-                }
+            auto sims = similar_symbol_suggestions(*rt_snap, word);
+            if (!sims.empty()) {
                 response["similar_symbols"] = std::move(sims);
             }
         }
@@ -1274,7 +1281,9 @@ void resolve_object_id(std::string_view id, MasterIndex& indexer,
                                  ? std::string(sym->symbol.name)
                                  : std::string(sym->signature);
     nlohmann::json ctx;
-    ctx["file_path"] = indexer.get_file_path(sym->symbol.file_id);
+    ctx["file_path"] = std::string(relative_to_root(
+        indexer.get_file_path(sym->symbol.file_id),
+        indexer.config().project.root));
     ctx["line"] = sym->symbol.line;
     ctx["object_id"] = std::string(id);
     ctx["symbol_type"] = std::string(to_string(sym->symbol.type));
@@ -1397,7 +1406,9 @@ ToolResult handle_get_context(const nlohmann::json& params,
                                          ? std::string(sym->symbol.name)
                                          : std::string(sym->signature);
             nlohmann::json ctx;
-            ctx["file_path"] = indexer.get_file_path(sym->symbol.file_id);
+            ctx["file_path"] = std::string(relative_to_root(
+                indexer.get_file_path(sym->symbol.file_id),
+                indexer.config().project.root));
             ctx["line"] = sym->symbol.line;
             ctx["object_id"] = encode_symbol_id(sym->id);
             ctx["symbol_type"] = std::string(to_string(sym->symbol.type));
@@ -1481,6 +1492,16 @@ ToolResult handle_get_context(const nlohmann::json& params,
         nlohmann::json response;
         response["count"] = static_cast<int>(contexts.size());
         response["contexts"] = std::move(contexts);
+        // Empty lookup fails loud (Karpathy #6): hint + fuzzy near-miss
+        // suggestions so a typo'd or misremembered name self-corrects in
+        // one round trip instead of a bare {contexts:[],count:0}.
+        if (response["count"].get<int>() == 0) {
+            response["hint"] =
+                "no symbol named '" + name + "' in the index. Check "
+                "similar_symbols below, or use search to locate it.";
+            auto sims = similar_symbol_suggestions(*rt_snap, name);
+            if (!sims.empty()) response["similar_symbols"] = std::move(sims);
+        }
         return make_json_response(response);
     }
 
