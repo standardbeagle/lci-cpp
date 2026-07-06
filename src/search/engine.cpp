@@ -2,6 +2,7 @@
 
 #include <lci/core/reference_tracker.h>
 #include <lci/indexing/master_index.h>
+#include <lci/indexing/pipeline_scanner.h>
 
 #include <absl/container/flat_hash_map.h>
 #include <absl/container/flat_hash_set.h>
@@ -357,13 +358,62 @@ SearchEngine::SearchEngine(MasterIndex& index, const SynonymTable& synonyms)
       synonyms_(synonyms),
       context_extractor_(index.file_content_store()) {}
 
+// Root-relative view of an absolute indexed path. Returns `abs` unchanged
+// when it does not live under `root`.
+std::string_view relative_to_root(std::string_view abs, std::string_view root) {
+    if (!root.empty() && abs.size() > root.size() &&
+        abs.substr(0, root.size()) == root && abs[root.size()] == '/') {
+        return abs.substr(root.size() + 1);
+    }
+    return abs;
+}
+
+namespace {
+
+/// True when the root-relative path falls inside the requested scope.
+/// Non-glob scope = directory prefix; glob scope = FileScanner::match_glob.
+bool path_in_scope(std::string_view rel, const std::string& scope,
+                   bool scope_is_glob) {
+    if (scope_is_glob) return FileScanner::match_glob(scope, rel);
+    if (rel.size() == scope.size()) return rel == scope;
+    return rel.size() > scope.size() &&
+           rel.substr(0, scope.size()) == scope && rel[scope.size()] == '/';
+}
+
+/// Builds SearchStats.dir_counts: top-level-dir histogram over the full
+/// pre-truncation result set. Deterministic order: count desc, then name.
+void fill_dir_counts(const std::vector<SearchResult>& results,
+                     std::string_view root, SearchStats& stats) {
+    absl::flat_hash_map<std::string, int> counts;
+    for (const auto& r : results) {
+        auto rel = relative_to_root(r.path, root);
+        auto slash = rel.find('/');
+        std::string_view dir = slash == std::string_view::npos
+                                   ? std::string_view(".")
+                                   : rel.substr(0, slash);
+        ++counts[std::string(dir)];
+    }
+    stats.dir_counts.assign(counts.begin(), counts.end());
+    std::sort(stats.dir_counts.begin(), stats.dir_counts.end(),
+              [](const auto& a, const auto& b) {
+                  if (a.second != b.second) return a.second > b.second;
+                  return a.first < b.first;
+              });
+}
+
+}  // namespace
+
 std::vector<SearchResult> SearchEngine::search(
-    const std::string& pattern, const SearchOptions& options) const {
+    const std::string& pattern, const SearchOptions& options,
+    SearchStats* stats) const {
 
     if (pattern.empty() || pattern.size() > 1000) return {};
 
     // Karpathy rule 2: build path-filter regexes once per call, not per file.
     auto path_filter = make_path_filter(options);
+    const std::string& proj_root = index_.config().project.root;
+    const bool scope_is_glob =
+        options.path_scope.find_first_of("*?") != std::string::npos;
 
     // Trigram candidate set is meaningful only for literal patterns. For
     // regex queries we must scan all indexed files because the literal
@@ -404,10 +454,20 @@ std::vector<SearchResult> SearchEngine::search(
     // load or string copy.
     auto file_snap = index_.read_snapshot();
 
+    bool hit_collection_cap = false;
     for (FileID fid : candidates) {
         if (effective_cap > 0 &&
             static_cast<int>(results.size()) >= effective_cap) {
+            hit_collection_cap = true;
             break;
+        }
+        // Path scope (`path` param): root-relative prefix or glob.
+        if (!options.path_scope.empty()) {
+            auto rel = relative_to_root(index_.id_to_path(*file_snap, fid),
+                                        proj_root);
+            if (!path_in_scope(rel, options.path_scope, scope_is_glob)) {
+                continue;
+            }
         }
         // Path filter (languages/filter). Cheap per-file string scan.
         if (path_filter.include || path_filter.exclude) {
@@ -440,6 +500,14 @@ std::vector<SearchResult> SearchEngine::search(
 
     SearchCoordinator::rank(results);
 
+    // Record the TRUE universe before truncation — the handler reports this
+    // instead of the old total==max cap-saturation lie.
+    if (stats != nullptr) {
+        stats->total_found = static_cast<int>(results.size());
+        stats->hit_collection_cap = hit_collection_cap;
+        fill_dir_counts(results, proj_root, *stats);
+    }
+
     // Truncate to the requested cap AFTER ranking, so the returned set is the
     // top-scored matches across all candidates (not the first-found).
     if (output_cap > 0 && static_cast<int>(results.size()) > output_cap) {
@@ -453,24 +521,24 @@ std::vector<SearchResult> SearchEngine::search(
 // pre-reserved; we move rather than copy results into the accumulator.
 std::vector<SearchResult> SearchEngine::search(
     const std::vector<std::string>& patterns,
-    const SearchOptions& options) const {
+    const SearchOptions& options, SearchStats* stats) const {
     static const std::vector<bool> kNoFlags;
-    return search(patterns, kNoFlags, options);
+    return search(patterns, kNoFlags, options, stats);
 }
 
 std::vector<SearchResult> SearchEngine::search(
     const std::vector<std::string>& patterns,
     const std::vector<bool>& synonym_flags,
-    const SearchOptions& options) const {
+    const SearchOptions& options, SearchStats* stats) const {
 
     if (patterns.empty()) return {};
     if (patterns.size() == 1) {
         if (!synonym_flags.empty() && synonym_flags[0]) {
             SearchOptions po = options;
             po.case_insensitive = true;
-            return search(patterns[0], po);
+            return search(patterns[0], po, stats);
         }
-        return search(patterns[0], options);
+        return search(patterns[0], options, stats);
     }
 
     struct ResultKey {
@@ -506,6 +574,7 @@ std::vector<SearchResult> SearchEngine::search(
     per_opts.max_results = options.max_results > 0 ? options.max_results * 4
                                                     : 0;
 
+    bool any_sub_hit_cap = false;
     for (size_t i = 0; i < patterns.size(); ++i) {
         // Synonym-injected patterns force case-insensitive so an expanded
         // `signin` matches code `signIn` regardless of the base query's flag.
@@ -513,7 +582,14 @@ std::vector<SearchResult> SearchEngine::search(
         if (i < synonym_flags.size() && synonym_flags[i]) {
             p_opts.case_insensitive = true;
         }
-        auto rs = search(patterns[i], p_opts);
+        SearchStats sub_stats;
+        auto rs = search(patterns[i], p_opts,
+                         stats != nullptr ? &sub_stats : nullptr);
+        if (stats != nullptr &&
+            (sub_stats.hit_collection_cap ||
+             sub_stats.total_found > static_cast<int>(rs.size()))) {
+            any_sub_hit_cap = true;
+        }
         for (auto& r : rs) {
             ResultKey k{r.file_id, r.line, r.match_text};
             auto it = acc.find(k);
@@ -548,6 +624,12 @@ std::vector<SearchResult> SearchEngine::search(
     }
 
     SearchCoordinator::rank(out);
+
+    if (stats != nullptr) {
+        stats->total_found = static_cast<int>(out.size());
+        stats->hit_collection_cap = any_sub_hit_cap;
+        fill_dir_counts(out, index_.config().project.root, *stats);
+    }
 
     if (options.max_results > 0 &&
         static_cast<int>(out.size()) > options.max_results) {

@@ -104,9 +104,34 @@ struct SearchOptions {
     /// Regex pattern that excludes file paths. Carries the `filter` field.
     std::string exclude_pattern;
 
+    /// Root-relative path scope (the MCP `path` param). Non-glob values are
+    /// directory-prefix matches ("src/http" matches src/http/**); values
+    /// containing * or ? are matched with FileScanner::match_glob semantics
+    /// against the root-relative path. Empty = no scoping.
+    std::string path_scope;
+
     /// Always populate `object_id` enrichment in handler output. Read by the
     /// MCP handler, not the engine — engine never strips it.
     bool include_object_ids{true};
+};
+
+/// Aggregate outcome of a search beyond the (possibly truncated) result rows.
+/// Filled by SearchEngine::search when the caller passes a non-null stats
+/// pointer; lets handlers report the TRUE universe size instead of the old
+/// total==max cap-saturation, plus a directory histogram for narrowing.
+struct SearchStats {
+    /// Matches found across all candidates before the output cap. Exact when
+    /// hit_collection_cap is false; a lower bound otherwise.
+    int total_found{0};
+
+    /// True when even the over-collection cap (max_results*8, <=2000) was
+    /// reached — total_found is then "at least this many".
+    bool hit_collection_cap{false};
+
+    /// Root-relative top-level directory -> match count over the full
+    /// pre-truncation set, sorted by count desc then name. "." holds
+    /// root-level files.
+    std::vector<std::pair<std::string, int>> dir_counts;
 };
 
 // -- Search result types ------------------------------------------------------

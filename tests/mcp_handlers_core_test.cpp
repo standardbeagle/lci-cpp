@@ -203,11 +203,13 @@ TEST_F(HandlersFixture, SearchIncludeRefsEmitsReferenceCounts) {
     auto json = nlohmann::json::parse(result.text);
     ASSERT_TRUE(json.contains("results"));
     bool found_refs = false;
-    for (const auto& item : json["results"]) {
-        if (item.contains("references")) {
-            EXPECT_TRUE(item["references"].contains("incoming_count"));
-            EXPECT_TRUE(item["references"].contains("outgoing_count"));
-            found_refs = true;
+    for (const auto& group : json["results"]) {
+        for (const auto& hit : group["hits"]) {
+            if (hit.contains("references")) {
+                EXPECT_TRUE(hit["references"].contains("incoming_count"));
+                EXPECT_TRUE(hit["references"].contains("outgoing_count"));
+                found_refs = true;
+            }
         }
     }
     EXPECT_TRUE(found_refs) << "expected at least one symbol-enclosed match to "
@@ -222,16 +224,18 @@ TEST_F(HandlersFixture, SearchIncludeBreadcrumbsAcceptedAndWellFormed) {
     ASSERT_FALSE(result.is_error) << result.text;
     auto json = nlohmann::json::parse(result.text);
     ASSERT_TRUE(json.contains("results"));
-    for (const auto& item : json["results"]) {
-        if (!item.contains("breadcrumbs")) continue;
-        ASSERT_TRUE(item["breadcrumbs"].is_array());
-        for (const auto& c : item["breadcrumbs"]) {
-            EXPECT_TRUE(c.contains("scope_type"));
-            EXPECT_TRUE(c.contains("name"));
-            EXPECT_TRUE(c.contains("start_line"));
-            EXPECT_TRUE(c.contains("end_line"));
-            EXPECT_TRUE(c.contains("language"));
-            EXPECT_TRUE(c.contains("visibility"));
+    for (const auto& group : json["results"]) {
+        for (const auto& hit : group["hits"]) {
+            if (!hit.contains("breadcrumbs")) continue;
+            ASSERT_TRUE(hit["breadcrumbs"].is_array());
+            for (const auto& c : hit["breadcrumbs"]) {
+                EXPECT_TRUE(c.contains("scope_type"));
+                EXPECT_TRUE(c.contains("name"));
+                EXPECT_TRUE(c.contains("start_line"));
+                EXPECT_TRUE(c.contains("end_line"));
+                EXPECT_TRUE(c.contains("language"));
+                EXPECT_TRUE(c.contains("visibility"));
+            }
         }
     }
 }
@@ -273,12 +277,14 @@ TEST(SearchIncludeBreadcrumbs, NestedScopeEmitsChain) {
     auto json = nlohmann::json::parse(result.text);
     ASSERT_TRUE(json.contains("results"));
     bool found_chain = false;
-    for (const auto& item : json["results"]) {
-        if (item.contains("breadcrumbs") && !item["breadcrumbs"].empty()) {
-            found_chain = true;
-            const auto& first = item["breadcrumbs"][0];
-            EXPECT_TRUE(first.contains("scope_type"));
-            EXPECT_TRUE(first.contains("name"));
+    for (const auto& group : json["results"]) {
+        for (const auto& hit : group["hits"]) {
+            if (hit.contains("breadcrumbs") && !hit["breadcrumbs"].empty()) {
+                found_chain = true;
+                const auto& first = hit["breadcrumbs"][0];
+                EXPECT_TRUE(first.contains("scope_type"));
+                EXPECT_TRUE(first.contains("name"));
+            }
         }
     }
     std::error_code ec;
@@ -457,6 +463,15 @@ TEST_F(HandlersFixture, SearchAcceptsEmptyOptionalStrings) {
     EXPECT_TRUE(err.is_error);
 }
 
+// Counts hit rows across all file groups in the grouped response shape.
+static size_t count_hit_rows(const nlohmann::json& response) {
+    size_t n = 0;
+    for (const auto& group : response["results"]) {
+        n += group["hits"].size();
+    }
+    return n;
+}
+
 TEST_F(HandlersFixture, SearchClampsMaxResults) {
     nlohmann::json params;
     params["pattern"] = "func";
@@ -464,7 +479,8 @@ TEST_F(HandlersFixture, SearchClampsMaxResults) {
     auto result = handle_search(params, *indexer_, search_engine_.get());
     EXPECT_FALSE(result.is_error);
     auto json = nlohmann::json::parse(result.text);
-    EXPECT_LE(json["max_results"].get<int>(), 100);
+    EXPECT_LE(json["showing"].get<int>(), 100);
+    EXPECT_LE(count_hit_rows(json), 100u);
 }
 
 TEST_F(HandlersFixture, SearchWithFlags) {
@@ -475,10 +491,13 @@ TEST_F(HandlersFixture, SearchWithFlags) {
     EXPECT_FALSE(result.is_error);
 }
 
-// Compact agent-facing shape: every result item carries the core fields;
-// symbol enrichment (object_id, symbol_name, symbol_type, is_exported) is
-// present only when an enclosing symbol resolved. result_id was dropped —
-// callers hand the object_id straight to get_context.
+// Compact grouped shape: results[] is one entry per file (root-relative
+// path emitted once) with hits[] rows carrying line numbers. A literal
+// search repeats the identical matched text on every row, so it is emitted
+// once at the top level as "match" and per-hit rows omit it. Symbol
+// enrichment (sym/type/id) appears on the first hit inside each enclosing
+// symbol; column/score were dropped (agents never used them — ordering
+// already encodes rank).
 TEST_F(HandlersFixture, SearchEmitsCompactShape) {
     nlohmann::json params;
     params["pattern"] = "main";
@@ -487,25 +506,33 @@ TEST_F(HandlersFixture, SearchEmitsCompactShape) {
     auto json = nlohmann::json::parse(result.text);
     ASSERT_TRUE(json["results"].is_array());
     ASSERT_FALSE(json["results"].empty());
-    for (const auto& item : json["results"]) {
-        EXPECT_TRUE(item.contains("file"));
-        EXPECT_TRUE(item.contains("line"));
-        EXPECT_TRUE(item.contains("column"));
-        EXPECT_TRUE(item.contains("match"));
-        EXPECT_TRUE(item.contains("score"));
-        EXPECT_FALSE(item.contains("result_id"));
-        // Enrichment is all-or-nothing per item, and never empty-valued.
-        const bool enriched = item.contains("object_id");
-        EXPECT_EQ(enriched, item.contains("symbol_name"));
-        EXPECT_EQ(enriched, item.contains("symbol_type"));
-        EXPECT_EQ(enriched, item.contains("is_exported"));
-        if (enriched) {
-            EXPECT_FALSE(item["object_id"].get<std::string>().empty());
+    EXPECT_EQ(json["match"].get<std::string>(), "main");
+    for (const auto& group : json["results"]) {
+        EXPECT_TRUE(group.contains("file"));
+        auto file = group["file"].get<std::string>();
+        EXPECT_FALSE(file.empty());
+        EXPECT_NE(file.front(), '/') << "paths must be root-relative";
+        ASSERT_TRUE(group["hits"].is_array());
+        ASSERT_FALSE(group["hits"].empty());
+        for (const auto& hit : group["hits"]) {
+            EXPECT_TRUE(hit.contains("line"));
+            EXPECT_FALSE(hit.contains("match")) << "uniform match text must "
+                                                   "not repeat per hit";
+            EXPECT_FALSE(hit.contains("column"));
+            EXPECT_FALSE(hit.contains("score"));
+            EXPECT_FALSE(hit.contains("result_id"));
+            // Enrichment comes as a unit and is never empty-valued.
+            const bool enriched = hit.contains("id");
+            EXPECT_EQ(enriched, hit.contains("sym"));
+            EXPECT_EQ(enriched, hit.contains("type"));
+            if (enriched) {
+                EXPECT_FALSE(hit["id"].get<std::string>().empty());
+            }
         }
     }
 }
 
-// Symbol enrichment must resolve the enclosing symbol so the object_id is
+// Symbol enrichment must resolve the enclosing symbol so the object id is
 // non-empty and matches the symbol that owns the matched line.
 TEST_F(HandlersFixture, SearchEnclosingSymbolResolved) {
     nlohmann::json params;
@@ -515,12 +542,13 @@ TEST_F(HandlersFixture, SearchEnclosingSymbolResolved) {
     auto json = nlohmann::json::parse(result.text);
     ASSERT_FALSE(json["results"].empty());
     bool found_enclosed = false;
-    for (const auto& item : json["results"]) {
-        if (item.contains("object_id") &&
-            item["symbol_name"].get<std::string>() == "main") {
-            EXPECT_EQ(item["symbol_type"].get<std::string>(), "function");
-            found_enclosed = true;
-            break;
+    for (const auto& group : json["results"]) {
+        for (const auto& hit : group["hits"]) {
+            if (hit.contains("id") &&
+                hit["sym"].get<std::string>() == "main") {
+                EXPECT_EQ(hit["type"].get<std::string>(), "function");
+                found_enclosed = true;
+            }
         }
     }
     EXPECT_TRUE(found_enclosed) << "no match resolved to enclosing 'main'";
@@ -534,20 +562,84 @@ TEST_F(HandlersFixture, SearchDefaultMaxIsFifteen) {
     auto result = handle_search(params, *indexer_, search_engine_.get());
     ASSERT_FALSE(result.is_error);
     auto json = nlohmann::json::parse(result.text);
-    EXPECT_EQ(json["max_results"].get<int>(), 15);
-    EXPECT_LE(json["results"].size(), 15u);
+    EXPECT_LE(json["showing"].get<int>(), 15);
+    EXPECT_LE(count_hit_rows(json), 15u);
 }
 
-// score is numeric (Go emits float). Real trigram-backed search produces
-// non-uniform scores across matches in different files.
-TEST_F(HandlersFixture, SearchScoreIsNumeric) {
+// The strongest (top-ranked) hits carry the matched source line so agents
+// can often answer without a follow-up read.
+TEST_F(HandlersFixture, SearchTopHitsCarryText) {
     nlohmann::json params;
-    params["pattern"] = "main";
+    params["pattern"] = "handleRequest";
     auto result = handle_search(params, *indexer_, search_engine_.get());
     ASSERT_FALSE(result.is_error);
     auto json = nlohmann::json::parse(result.text);
     ASSERT_FALSE(json["results"].empty());
-    EXPECT_TRUE(json["results"][0]["score"].is_number());
+    bool any_text = false;
+    for (const auto& group : json["results"]) {
+        for (const auto& hit : group["hits"]) {
+            if (hit.contains("text")) {
+                any_text = true;
+                EXPECT_NE(hit["text"].get<std::string>().find("handleRequest"),
+                          std::string::npos);
+            }
+        }
+    }
+    EXPECT_TRUE(any_text) << "top-ranked hit should carry its source line";
+}
+
+// Zero-result searches fail loud: hint text plus fuzzy near-miss symbol
+// suggestions so a typo'd identifier self-corrects in one round trip.
+TEST_F(HandlersFixture, SearchEmptyResultCarriesHintAndSuggestions) {
+    nlohmann::json params;
+    params["pattern"] = "handleRequestz";  // typo of handleRequest
+    params["semantic"] = false;
+    auto result = handle_search(params, *indexer_, search_engine_.get());
+    ASSERT_FALSE(result.is_error);
+    auto json = nlohmann::json::parse(result.text);
+    EXPECT_EQ(json["total_matches"].get<int>(), 0);
+    EXPECT_TRUE(json.contains("hint"));
+    ASSERT_TRUE(json.contains("similar_symbols")) << result.text;
+    bool suggested = false;
+    for (const auto& s : json["similar_symbols"]) {
+        if (s["name"].get<std::string>() == "handleRequest") suggested = true;
+        EXPECT_FALSE(s["id"].get<std::string>().empty());
+    }
+    EXPECT_TRUE(suggested) << result.text;
+}
+
+// path= scopes results to a root-relative subtree.
+TEST_F(HandlersFixture, SearchPathScopeFiltersResults) {
+    nlohmann::json params;
+    params["pattern"] = "func";
+    params["path"] = "internal";
+    auto result = handle_search(params, *indexer_, search_engine_.get());
+    ASSERT_FALSE(result.is_error);
+    auto json = nlohmann::json::parse(result.text);
+    ASSERT_FALSE(json["results"].empty()) << result.text;
+    for (const auto& group : json["results"]) {
+        EXPECT_EQ(group["file"].get<std::string>().rfind("internal/", 0), 0u)
+            << group["file"];
+    }
+}
+
+// Truncated results must report the true total and a directory histogram —
+// never total==max cap-saturation.
+TEST_F(HandlersFixture, SearchTruncationReportsTrueTotalAndDirs) {
+    nlohmann::json params;
+    params["pattern"] = "func";
+    params["max"] = 2;
+    params["semantic"] = false;
+    auto result = handle_search(params, *indexer_, search_engine_.get());
+    ASSERT_FALSE(result.is_error);
+    auto json = nlohmann::json::parse(result.text);
+    ASSERT_EQ(json["showing"].get<int>(), 2);
+    // Fixture has >2 occurrences of "func" across the corpus.
+    EXPECT_GT(json["total_matches"].get<int>(), 2);
+    EXPECT_TRUE(json.value("truncated", false));
+    ASSERT_TRUE(json.contains("dirs"));
+    ASSERT_TRUE(json["dirs"].is_array());
+    EXPECT_FALSE(json["dirs"].empty());
 }
 
 // =============================================================================
@@ -831,7 +923,72 @@ TEST_F(HandlersFixture, FindFilesClampsMax) {
     auto result = handle_find_files(params, *indexer_);
     EXPECT_FALSE(result.is_error);
     auto json = nlohmann::json::parse(result.text);
-    EXPECT_LE(json["total_matches"].get<int>(), 200);
+    // max is clamped to 200 returned rows; total_matches reports the true
+    // count and may exceed the clamp (truncated:true marks that case).
+    EXPECT_LE(json["results"].size(), 200u);
+}
+
+TEST_F(HandlersFixture, FindFilesReportsTrueTotalWhenTruncated) {
+    nlohmann::json params;
+    params["pattern"] = "*.go";
+    params["max"] = 2;
+    auto result = handle_find_files(params, *indexer_);
+    EXPECT_FALSE(result.is_error);
+    auto json = nlohmann::json::parse(result.text);
+    // Fixture has 4 non-hidden .go files; cap of 2 must not lie about the
+    // universe size.
+    EXPECT_EQ(json["results"].size(), 2u);
+    EXPECT_EQ(json["total_matches"].get<int>(), 4);
+    EXPECT_TRUE(json.value("truncated", false));
+    EXPECT_EQ(json["showing"].get<int>(), 2);
+}
+
+TEST_F(HandlersFixture, FindFilesReturnsRootRelativePaths) {
+    nlohmann::json params;
+    params["pattern"] = "server";
+    auto result = handle_find_files(params, *indexer_);
+    EXPECT_FALSE(result.is_error);
+    auto json = nlohmann::json::parse(result.text);
+    ASSERT_GT(json["total_matches"].get<int>(), 0);
+    for (const auto& r : json["results"]) {
+        auto path = r["path"].get<std::string>();
+        EXPECT_FALSE(path.empty());
+        EXPECT_NE(path.front(), '/') << "expected root-relative path, got "
+                                     << path;
+    }
+}
+
+// Regression: a project whose ROOT lives under a dotted directory
+// (~/.cache/repo, .work/corpus, …) must not have every file classified as
+// hidden. The hidden check applies to root-relative components only.
+// Before the fix, every find_files call in the repo-qa benchmark returned
+// {"results":[],"total_matches":0} because the corpora live under .work/.
+TEST(FindFilesHiddenAncestor, ProjectUnderDottedDirIsFullyVisible) {
+    auto base = std::filesystem::temp_directory_path() /
+                ".lci_hidden_ancestor" / "proj";
+    std::filesystem::create_directories(base / "src");
+    {
+        std::ofstream(base / "main.go") << "package main\nfunc main() {}\n";
+        std::ofstream(base / "src" / "server.go")
+            << "package src\nfunc Serve() {}\n";
+    }
+
+    Config config;
+    config.project.root = base.string();
+    MasterIndex indexer(config);
+    indexer.index_directory(base.string());
+
+    nlohmann::json params;
+    params["pattern"] = "*.go";
+    auto result = handle_find_files(params, indexer);
+    EXPECT_FALSE(result.is_error);
+    auto json = nlohmann::json::parse(result.text);
+    EXPECT_EQ(json["total_matches"].get<int>(), 2)
+        << "dotted ancestor of project root must not hide corpus files";
+
+    std::error_code ec;
+    std::filesystem::remove_all(
+        std::filesystem::temp_directory_path() / ".lci_hidden_ancestor", ec);
 }
 
 // Fuzzy file matching uses real normalized Levenshtein SIMILARITY (1 - dist/
@@ -930,9 +1087,15 @@ TEST_F(HandlersFixture, SearchSymbolTypesFiltersResults) {
     EXPECT_FALSE(result.is_error);
     auto json = nlohmann::json::parse(result.text);
     ASSERT_TRUE(json.contains("results"));
-    // Every hit must have symbol_type=function (or be filtered out).
-    for (const auto& item : json["results"]) {
-        EXPECT_EQ(item.value("symbol_type", ""), "function");
+    // Every enriched hit must have type=function (or be filtered out).
+    // Enrichment dedup means follow-on hits inside the same symbol omit
+    // the type; only assert on rows that carry it.
+    for (const auto& group : json["results"]) {
+        for (const auto& hit : group["hits"]) {
+            if (hit.contains("type")) {
+                EXPECT_EQ(hit["type"].get<std::string>(), "function");
+            }
+        }
     }
 }
 

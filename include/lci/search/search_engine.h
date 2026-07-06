@@ -24,6 +24,11 @@ const SynonymTable& default_synonym_table();
 /// Returns true when pattern contains regex syntax (Go looksLikeRegex parity).
 bool looks_like_regex(std::string_view pattern);
 
+/// Root-relative view of an absolute indexed path; returns `abs` unchanged
+/// when it does not live under `root`. Shared by the engine's path-scope
+/// filter and the MCP handlers' root-relative output.
+std::string_view relative_to_root(std::string_view abs, std::string_view root);
+
 /// Splits whitespace-separated tokens into out. Allocates only string slots.
 void split_on_spaces(std::string_view input, std::vector<std::string>& out);
 
@@ -100,16 +105,21 @@ class SearchEngine {
     explicit SearchEngine(MasterIndex& index,
                           const SynonymTable& synonyms = default_synonym_table());
 
-    /// Searches for a pattern across all indexed files.
+    /// Searches for a pattern across all indexed files. When `stats` is
+    /// non-null it receives the true pre-truncation match count and the
+    /// directory histogram (SearchStats) — the result vector itself is
+    /// still capped at options.max_results.
     std::vector<SearchResult> search(const std::string& pattern,
-                                     const SearchOptions& options) const;
+                                     const SearchOptions& options,
+                                     SearchStats* stats = nullptr) const;
 
     /// Multi-pattern search (OR-merge + dedup + per-file coverage boost).
     /// Mirrors Go's searchAndDeduplicate (handlers.go:1372). Each pattern is
     /// run with the same SearchOptions; results keyed by file+line+match.
     /// Score boost: +0.15 per additional matching pattern, cap +0.5.
     std::vector<SearchResult> search(const std::vector<std::string>& patterns,
-                                     const SearchOptions& options) const;
+                                     const SearchOptions& options,
+                                     SearchStats* stats = nullptr) const;
 
     /// Multi-pattern search with a per-pattern case-insensitive override.
     /// `synonym_flags[i] == true` forces case_insensitive for patterns[i] (so
@@ -118,7 +128,8 @@ class SearchEngine {
     /// false. Otherwise identical to the two-arg overload.
     std::vector<SearchResult> search(const std::vector<std::string>& patterns,
                                      const std::vector<bool>& synonym_flags,
-                                     const SearchOptions& options) const;
+                                     const SearchOptions& options,
+                                     SearchStats* stats = nullptr) const;
 
     /// The synonym table this engine expands queries against.
     const SynonymTable& synonyms() const { return synonyms_; }

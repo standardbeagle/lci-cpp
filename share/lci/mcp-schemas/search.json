@@ -33,6 +33,11 @@
             "type": "string",
             "description": "File filter: comma-separated types/patterns, e.g. 'go,*.py'."
         },
+        "path": {
+            "type": "string",
+            "maxLength": 4096,
+            "description": "Root-relative path scope. A directory prefix ('src/http') limits matches to that subtree; a glob ('**/*.kt') is matched against the root-relative file path."
+        },
         "flags": {
             "type": "string",
             "description": "Search flags: 'ci', 'cs', 'rx', 'iv', 'wb', 'nt', 'nc'."

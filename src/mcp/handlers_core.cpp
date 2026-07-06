@@ -508,14 +508,29 @@ ToolResult handle_info(const nlohmann::json& params) {
             {"output",
              "Output format: 'line', 'ctx', 'ctx:N', 'full', 'files', "
              "'count'"},
+            {"path",
+             "Root-relative scope: dir prefix ('src/http') or glob "
+             "('**/*.kt')"},
             {"filter", "File filter: 'go,*.py' (types/patterns)"},
             {"flags",
              "Search flags: 'ci' (case-insensitive), 'rx' (regex), 'iv' "
              "(invert), 'wb' (word-boundary), 'nt' (no-tests), 'nc' "
              "(no-comments)"},
         };
+        data["response"] = {
+            {"results",
+             "Per-file groups: {file (root-relative), hits:[{line, sym, "
+             "type, id, callers, text}]}. id feeds get_context; callers = "
+             "incoming references."},
+            {"other_files", "Doc/generated files: {path: match_count}"},
+            {"total_matches",
+             "TRUE match count (may exceed rows shown; truncated:true then "
+             "set, with a dirs histogram for narrowing via path=)"},
+            {"similar_symbols", "On 0 matches: fuzzy near-miss symbol names"},
+        };
         data["example"] = {{"basic", R"({"pattern": "user"})"},
                            {"with_flags", R"({"pattern": "user", "flags": "ci,nt"})"},
+                           {"with_path", R"({"pattern": "user", "path": "src/auth"})"},
                            {"with_output", R"({"pattern": "TODO", "output": "ctx:3"})"}};
         return make_json_response(data);
     }
@@ -701,6 +716,22 @@ ToolResult handle_search(const nlohmann::json& params,
         options.exclude_pattern = params["filter"].get<std::string>();
     }
 
+    // path → root-relative directory prefix or glob scope. Benchmark traces
+    // showed agents passing path/file params that used to fail validation —
+    // scoping a search to a subtree is a natural ask; support it directly.
+    if (params.contains("path") && params["path"].is_string()) {
+        options.path_scope = params["path"].get<std::string>();
+        // Normalize: strip leading ./ and any trailing slash so both
+        // "src/http/" and "./src/http" scope to src/http/**.
+        if (options.path_scope.rfind("./", 0) == 0) {
+            options.path_scope.erase(0, 2);
+        }
+        while (!options.path_scope.empty() &&
+               options.path_scope.back() == '/') {
+            options.path_scope.pop_back();
+        }
+    }
+
     int max_per_file = params.value("max_per_file", 0);
     if (max_per_file > 0) options.max_count_per_file = max_per_file;
 
@@ -728,16 +759,20 @@ ToolResult handle_search(const nlohmann::json& params,
         }
     }
 
-    // Perform search
+    // Perform search. `stats` carries the true pre-truncation match count
+    // and directory histogram when the engine path runs; the indexer
+    // fallback leaves it zeroed and the emit code falls back to row counts.
     std::vector<SearchResult> results;
+    SearchStats stats;
+    bool have_stats = search_engine != nullptr;
     auto run = [&](const std::string& p, const SearchOptions& o) {
-        if (search_engine) return search_engine->search(p, o);
+        if (search_engine) return search_engine->search(p, o, &stats);
         return indexer.search_with_options(p, o);
     };
     auto run_multi = [&](const std::vector<std::string>& ps,
                          const std::vector<bool>& ci_flags,
                          const SearchOptions& o) {
-        if (search_engine) return search_engine->search(ps, ci_flags, o);
+        if (search_engine) return search_engine->search(ps, ci_flags, o, &stats);
         // Fallback for older indexers: OR-merge manually, honoring the
         // per-pattern case-insensitive override for synonym-injected patterns.
         std::vector<SearchResult> agg;
@@ -778,6 +813,7 @@ ToolResult handle_search(const nlohmann::json& params,
     // Mirrors Go handlers.go:1910 looksLikeRegex fallback.
     if (!options.use_regex && results.size() < static_cast<size_t>(max_results) &&
         looks_like_regex(pattern)) {
+        SearchStats literal_stats = stats;
         SearchOptions rx_opts = options;
         rx_opts.use_regex = true;
         auto rx_results = run(pattern, rx_opts);
@@ -786,23 +822,72 @@ ToolResult handle_search(const nlohmann::json& params,
         results.reserve(results.size() + rx_results.size());
         for (auto& r : rx_results) results.emplace_back(std::move(r));
         SearchCoordinator::rank(results);
+        // Combined totals: `run` overwrote stats with the regex pass; keep
+        // the larger honest floor and the literal pass's dir histogram when
+        // the regex pass found nothing.
+        stats.hit_collection_cap |= literal_stats.hit_collection_cap;
+        stats.total_found = std::max(
+            {literal_stats.total_found, stats.total_found,
+             static_cast<int>(results.size())});
+        if (stats.dir_counts.empty()) {
+            stats.dir_counts = std::move(literal_stats.dir_counts);
+        }
         if (static_cast<int>(results.size()) > max_results) {
             results.resize(static_cast<size_t>(max_results));
         }
     }
 
+    // True totals: prefer engine stats (pre-truncation universe) over the
+    // truncated row count so total==max cap-saturation never lies to the
+    // caller about the result universe.
+    const int shown = static_cast<int>(results.size());
+    const int total_matches =
+        have_stats ? std::max(stats.total_found, shown) : shown;
+    const bool truncated = total_matches > shown ||
+                           (have_stats && stats.hit_collection_cap);
+
+    // All emitted paths are project-root-relative: the absolute prefix is
+    // identical on every row and costs ~110 chars/result in agent context.
+    const std::string& proj_root = indexer.config().project.root;
+    auto rel = [&proj_root](const std::string& p) {
+        return std::string(relative_to_root(p, proj_root));
+    };
+
+    auto attach_truncation = [&](nlohmann::json& response) {
+        response["total_matches"] = total_matches;
+        if (have_stats && stats.hit_collection_cap) {
+            response["total_is_lower_bound"] = true;
+        }
+        if (truncated) {
+            response["truncated"] = true;
+            // Directory histogram over the FULL match set so the caller can
+            // narrow with path= instead of blindly re-guessing patterns.
+            if (!stats.dir_counts.empty()) {
+                nlohmann::json dirs = nlohmann::json::array();
+                size_t emitted = 0;
+                for (const auto& [dir, count] : stats.dir_counts) {
+                    if (emitted++ == 8) break;
+                    dirs.push_back({dir, count});
+                }
+                response["dirs"] = std::move(dirs);
+            }
+        }
+    };
+
     // Handle files-only output
     if (output == "files") {
         std::vector<std::string> files;
         for (const auto& r : results) {
-            if (files.empty() || files.back() != r.path) {
-                files.push_back(r.path);
+            auto rp = rel(r.path);
+            if (files.empty() || files.back() != rp) {
+                files.push_back(std::move(rp));
             }
         }
         nlohmann::json response;
         response["files"] = files;
-        response["total_matches"] = static_cast<int>(results.size());
+        response["showing"] = shown;
         response["unique_files"] = static_cast<int>(files.size());
+        attach_truncation(response);
         return make_json_response(response);
     }
 
@@ -810,81 +895,247 @@ ToolResult handle_search(const nlohmann::json& params,
     if (output == "count") {
         std::map<std::string, int> file_counts;
         for (const auto& r : results) {
-            file_counts[r.path]++;
+            file_counts[rel(r.path)]++;
         }
         nlohmann::json response;
-        response["total_matches"] = static_cast<int>(results.size());
+        response["showing"] = shown;
         response["unique_files"] = static_cast<int>(file_counts.size());
         response["counts"] = file_counts;
+        attach_truncation(response);
         return make_json_response(response);
     }
 
-    // Build standard results. Each text match is attributed to its enclosing
-    // symbol so MCP callers can hand the object_id straight to get_context:
-    // file, line, column, match, score (float), and — when an enclosing
-    // symbol exists — object_id, symbol_name, symbol_type, is_exported.
-    // Enrichment fields are omitted (not emptied) for symbol-less matches:
-    // agents pay tokens for every byte, and empty strings carry no signal.
+    // Build standard results, grouped by file to eliminate repeated path
+    // strings (the dominant payload cost measured in the repo-QA benchmark).
+    // Detail is tiered by match strength:
+    //   - every hit: line (+ match text only when it differs from the shared
+    //     top-level "match"), enclosing-symbol enrichment on the first hit
+    //     inside that symbol (sym/type/id/callers/exported),
+    //   - the top 3 ranked hits additionally carry the matched source line
+    //     ("text") so the strongest results are answerable without a read,
+    //   - explicit output=ctx:N/full requests keep full ctx arrays on all.
+    // Documentation/Unknown files collapse into "other_files" {path: count}
+    // so prose/profile junk never crowds out code rows — unless the whole
+    // result set is non-code, in which case they stay full rows.
     auto& ref_tracker = indexer.ref_tracker();
     // Pin the RCU snapshot for the whole result loop: get_symbol_at_line hands
     // back a const EnhancedSymbol* into the snapshot, and the pin keeps that
     // pointer valid across a concurrent reindex publish for every iteration.
     auto rt_snap = ref_tracker.pin();
-    nlohmann::json result_array = nlohmann::json::array();
-    // Pre-size to skip geometric realloc on the inner push_back loop.
-    // result_array is array_t (std::vector<json>) under the hood.
-    result_array.get_ref<nlohmann::json::array_t&>().reserve(results.size());
+
+    // Shared match text: literal searches repeat the identical matched
+    // substring on every row — emit it once at the top level.
+    bool uniform_match = !results.empty();
     for (const auto& r : results) {
-        nlohmann::json item;
-        item["file"] = r.path;
-        item["line"] = r.line;
-        item["column"] = r.column;
-        item["match"] = r.match_text;
-        item["score"] = r.score;  // float; Go emits float, not int
+        if (r.match_text != results.front().match_text) {
+            uniform_match = false;
+            break;
+        }
+    }
 
-        // Enclosing-symbol enrichment. ref_tracker maps (file_id, line) to
-        // the EnhancedSymbol that covers the line, O(1) hash lookup per
-        // call (KARPATHY rule 2 — no allocation in the inner loop).
-        const auto* sym = rt_snap->get_symbol_at_line(
-            indexer.symbol_location_index(), r.file_id, r.line);
-        if (sym != nullptr) {
-            item["object_id"] = encode_symbol_id(sym->id);
-            item["symbol_name"] = std::string(sym->symbol.name);
-            item["symbol_type"] =
-                std::string(to_string(sym->symbol.type));
-            item["is_exported"] = sym->is_exported;
+    // Group rows by file, preserving rank order of first appearance.
+    struct Group {
+        const std::string* abs_path;
+        std::vector<const SearchResult*> hits;
+        bool is_code;
+    };
+    std::vector<Group> groups;
+    groups.reserve(results.size());
+    absl::flat_hash_map<std::string_view, size_t> group_of;
+    group_of.reserve(results.size());
+    bool any_code_group = false;
+    for (const auto& r : results) {
+        auto [it, inserted] = group_of.emplace(r.path, groups.size());
+        if (inserted) {
+            auto cat = classify_file(r.path);
+            bool is_code = cat != FileCategory::Documentation &&
+                           cat != FileCategory::Unknown;
+            any_code_group |= is_code;
+            groups.push_back({&r.path, {}, is_code});
+        }
+        groups[it->second].hits.push_back(&r);
+    }
 
-            // Optional include= add-ons, gated like Go on strong matches:
-            // normalizedScore >= 0.5 (scores >1 are /100-normalized).
-            double normalized = r.score > 1.0 ? r.score / 100.0 : r.score;
-            if (normalized >= 0.5) {
-                if (include_refs) {
-                    item["references"] = {
-                        {"incoming_count",
-                         static_cast<int>(sym->incoming_refs.size())},
-                        {"outgoing_count",
-                         static_cast<int>(sym->outgoing_refs.size())}};
-                }
-                if (include_breadcrumbs && !sym->scope_chain.empty()) {
-                    item["breadcrumbs"] = scope_chain_to_breadcrumbs(*sym);
+    // Tier-1 carriers: the top 3 ranked hits that land in full-detail groups.
+    // `results` is already rank-sorted, so the first 3 qualifying rows win.
+    absl::flat_hash_set<const SearchResult*> carriers;
+    for (const auto& r : results) {
+        if (carriers.size() >= 3) break;
+        auto cat = classify_file(r.path);
+        bool is_code = cat != FileCategory::Documentation &&
+                       cat != FileCategory::Unknown;
+        if (is_code || !any_code_group) carriers.insert(&r);
+    }
+
+    // Explicit context request (output=ctx:N/full/ctx) keeps ctx on all rows.
+    const bool explicit_ctx =
+        output == "full" || output == "ctx" ||
+        (output.size() > 4 && output.compare(0, 4, "ctx:") == 0);
+
+    auto trimmed_line = [](const std::string& s) {
+        auto first = s.find_first_not_of(" \t");
+        if (first == std::string::npos) return std::string();
+        auto last = s.find_last_not_of(" \t");
+        std::string out = s.substr(first, last - first + 1);
+        if (out.size() > 200) {
+            out.resize(200);
+        }
+        return out;
+    };
+
+    nlohmann::json file_array = nlohmann::json::array();
+    nlohmann::json other_files = nlohmann::json::object();
+    for (auto& g : groups) {
+        if (!g.is_code && any_code_group) {
+            // Non-code bucket: path -> hit count, no per-line rows.
+            other_files[rel(*g.abs_path)] = static_cast<int>(g.hits.size());
+            continue;
+        }
+        // Within a file, emit hits in line order (reading order); the file
+        // groups themselves are already in rank order.
+        std::sort(g.hits.begin(), g.hits.end(),
+                  [](const SearchResult* a, const SearchResult* b) {
+                      return a->line < b->line;
+                  });
+
+        nlohmann::json hits = nlohmann::json::array();
+        hits.get_ref<nlohmann::json::array_t&>().reserve(g.hits.size());
+        const EnhancedSymbol* prev_sym = nullptr;
+        for (const SearchResult* r : g.hits) {
+            nlohmann::json h;
+            h["line"] = r->line;
+            if (!uniform_match) h["match"] = r->match_text;
+
+            // Enclosing-symbol enrichment, deduped: consecutive hits inside
+            // the same symbol repeat nothing. O(1) hash lookup per row
+            // (KARPATHY rule 2 — no allocation in the inner loop).
+            const auto* sym = rt_snap->get_symbol_at_line(
+                indexer.symbol_location_index(), r->file_id, r->line);
+            if (sym != nullptr && sym != prev_sym) {
+                h["sym"] = std::string(sym->symbol.name);
+                h["type"] = std::string(to_string(sym->symbol.type));
+                h["id"] = encode_symbol_id(sym->id);
+                if (sym->is_exported) h["exported"] = true;
+                // Incoming-reference count bridges straight to get_context:
+                // "which function is the chokepoint" is answerable from the
+                // search response itself.
+                auto callers = static_cast<int>(sym->incoming_refs.size());
+                if (callers > 0) h["callers"] = callers;
+
+                // Optional include= add-ons, gated like Go on strong
+                // matches: normalizedScore >= 0.5 (scores >1 /100-normalized).
+                double normalized =
+                    r->score > 1.0 ? r->score / 100.0 : r->score;
+                if (normalized >= 0.5) {
+                    if (include_refs) {
+                        h["references"] = {
+                            {"incoming_count", callers},
+                            {"outgoing_count",
+                             static_cast<int>(sym->outgoing_refs.size())}};
+                    }
+                    if (include_breadcrumbs && !sym->scope_chain.empty()) {
+                        h["breadcrumbs"] = scope_chain_to_breadcrumbs(*sym);
+                    }
                 }
             }
-        }
-        // Match outside any indexed symbol (package decl, blank line,
-        // comment between symbols): enrichment fields stay absent.
+            if (sym != nullptr) prev_sym = sym;
 
-        if (!r.context.lines.empty()) {
-            item["context_lines"] = r.context.lines;
+            if (explicit_ctx) {
+                if (!r->context.lines.empty()) {
+                    h["ctx"] = r->context.lines;
+                }
+            } else if (carriers.contains(r) && !r->context.lines.empty()) {
+                // Matched source line index within the context window.
+                size_t match_idx = 0;
+                if (r->context.start_line > 0 &&
+                    r->line >= r->context.start_line) {
+                    match_idx = static_cast<size_t>(
+                        r->line - r->context.start_line);
+                }
+                if (match_idx >= r->context.lines.size()) match_idx = 0;
+                auto text = trimmed_line(r->context.lines[match_idx]);
+                if (!text.empty()) h["text"] = std::move(text);
+            }
+
+            hits.push_back(std::move(h));
         }
 
-        result_array.push_back(std::move(item));
+        nlohmann::json group_json;
+        group_json["file"] = rel(*g.abs_path);
+        group_json["hits"] = std::move(hits);
+        file_array.push_back(std::move(group_json));
     }
 
     nlohmann::json response;
-    response["results"] = std::move(result_array);
-    response["total_matches"] = static_cast<int>(results.size());
-    response["showing"] = static_cast<int>(results.size());
-    response["max_results"] = max_results;
+    if (uniform_match) response["match"] = results.front().match_text;
+    response["results"] = std::move(file_array);
+    if (!other_files.empty()) response["other_files"] = std::move(other_files);
+    response["showing"] = shown;
+    attach_truncation(response);
+
+    // Empty result: fail loud with actionable guidance instead of a bare
+    // zero (Karpathy rule 6). Includes near-miss symbol names so a typo'd
+    // or wrongly-cased identifier query self-corrects in one round trip.
+    if (results.empty()) {
+        response["hint"] =
+            "0 matches. The index skips build artifacts, minified bundles "
+            "and vendored deps (dist/, node_modules/, vendor/, *.min.js) — "
+            "use grep for those. Try flags=rx for regex patterns, a shorter "
+            "pattern, path= to scope elsewhere, or find_files for filenames.";
+        // First >2-char word of the pattern drives the suggestion scan.
+        std::string word;
+        for (auto& w0 : [&] {
+                 std::vector<std::string> ws;
+                 split_on_spaces(pattern, ws);
+                 return ws;
+             }()) {
+            if (w0.size() > 2) { word = to_lower(w0); break; }
+        }
+        if (!word.empty()) {
+            // Cold path (only on zero results): fuzzy-scan symbol names.
+            // Substring containment scores high; otherwise normalized
+            // Levenshtein similarity — catches both partial names and typos
+            // ("handleRequestz" -> handleRequest).
+            struct Suggestion {
+                const EnhancedSymbol* sym;
+                double score;
+            };
+            std::vector<Suggestion> nearby;
+            for (const auto& es : rt_snap->symbols.get_all()) {
+                std::string name_l = to_lower(std::string(es.symbol.name));
+                if (name_l.empty()) continue;
+                double score = 0.0;
+                if (name_l.find(word) != std::string::npos) {
+                    score = 0.9;
+                } else {
+                    size_t lev =
+                        rapidfuzz::levenshtein_distance(word, name_l);
+                    size_t max_len = std::max(word.size(), name_l.size());
+                    score = 1.0 - static_cast<double>(lev) /
+                                      static_cast<double>(max_len);
+                }
+                if (score >= 0.7) nearby.push_back({&es, score});
+            }
+            std::sort(nearby.begin(), nearby.end(),
+                      [](const Suggestion& a, const Suggestion& b) {
+                          if (a.score != b.score) return a.score > b.score;
+                          if (a.sym->symbol.name.size() !=
+                              b.sym->symbol.name.size())
+                              return a.sym->symbol.name.size() <
+                                     b.sym->symbol.name.size();
+                          return a.sym->symbol.name < b.sym->symbol.name;
+                      });
+            if (!nearby.empty()) {
+                nlohmann::json sims = nlohmann::json::array();
+                for (size_t i = 0; i < nearby.size() && i < 3; ++i) {
+                    sims.push_back(
+                        {{"name", std::string(nearby[i].sym->symbol.name)},
+                         {"id", encode_symbol_id(nearby[i].sym->id)}});
+                }
+                response["similar_symbols"] = std::move(sims);
+            }
+        }
+    }
 
     return make_json_response(response);
 }
@@ -1246,8 +1497,24 @@ ToolResult handle_find_files(const nlohmann::json& params,
     };
     std::vector<FileMatch> matches;
 
-    for (const auto& [path, fid] : snapshot->file_map) {
-        // Directory filter
+    // All filtering and matching below runs on the PROJECT-ROOT-RELATIVE
+    // path. The absolute path is wrong for two of the filters: a project
+    // living under a dotted ancestor (~/.cache/repo, .work/corpus) would
+    // mark every file "hidden", and directory= / glob patterns are written
+    // by callers against the repo layout, not the machine's filesystem.
+    const std::string& proj_root = indexer.config().project.root;
+    auto rel_of = [&proj_root](const std::string& abs) -> std::string {
+        if (!proj_root.empty() && abs.size() > proj_root.size() &&
+            abs.compare(0, proj_root.size(), proj_root) == 0 &&
+            abs[proj_root.size()] == '/') {
+            return abs.substr(proj_root.size() + 1);
+        }
+        return abs;
+    };
+
+    for (const auto& [abs_path, fid] : snapshot->file_map) {
+        const std::string path = rel_of(abs_path);
+        // Directory filter (root-relative)
         if (!directory.empty()) {
             if (path.substr(0, directory.size()) != directory ||
                 (path.size() > directory.size() &&
@@ -1256,7 +1523,8 @@ ToolResult handle_find_files(const nlohmann::json& params,
             }
         }
 
-        // Hidden file filter
+        // Hidden file filter — root-relative components only, so dotted
+        // ancestors of the project root never hide the whole corpus.
         if (!include_hidden) {
             bool hidden = false;
             size_t pos = 0;
@@ -1480,7 +1748,8 @@ ToolResult handle_find_files(const nlohmann::json& params,
             }
             for (const auto& w : extra) {
                 std::string norm_w = case_insensitive ? to_lower(w) : w;
-                for (const auto& [path, fid] : snapshot->file_map) {
+                for (const auto& [abs_path, fid] : snapshot->file_map) {
+                    const std::string path = rel_of(abs_path);
                     // Same hidden + directory + filter rules as above. We
                     // skip the heavyweight per-pattern fuzzy/exact branches
                     // and use a single substring-match heuristic for the
@@ -1530,8 +1799,10 @@ ToolResult handle_find_files(const nlohmann::json& params,
                   return a.path < b.path;
               });
 
-    // Limit results
-    if (static_cast<int>(matches.size()) > max_results) {
+    // Limit results — record the true match count first so the response
+    // never reports total==max when the cap truncated a larger set.
+    const int total_found = static_cast<int>(matches.size());
+    if (total_found > max_results) {
         matches.resize(static_cast<size_t>(max_results));
     }
 
@@ -1549,7 +1820,11 @@ ToolResult handle_find_files(const nlohmann::json& params,
 
     nlohmann::json response;
     response["results"] = std::move(result_array);
-    response["total_matches"] = static_cast<int>(matches.size());
+    response["total_matches"] = total_found;
+    if (total_found > max_results) {
+        response["truncated"] = true;
+        response["showing"] = max_results;
+    }
     response["pattern"] = pattern;
 
     return make_json_response(response);
@@ -1577,13 +1852,21 @@ void register_core_handlers(McpServer& server, MasterIndex* indexer,
     server.add_tool(
         {"search",
          "Sub-millisecond in-memory semantic code search. Use instead of "
-         "grep, rg, find. Note: Uses JSON parameters, not CLI flags like "
-         "-n. See 'info search' for parameter details.",
+         "grep, rg, find. Results are grouped per file (root-relative "
+         "paths) with per-hit line numbers; symbol hits carry sym/type/id "
+         "(id feeds get_context) and callers (incoming-reference count). "
+         "total_matches is the TRUE match count; truncated:true + dirs "
+         "histogram appear when the cap bit — narrow with path=. Note: "
+         "JSON parameters, not CLI flags. See 'info search' for details.",
          {{"pattern", "string", "Search pattern", ""},
           {"max", "integer", "Maximum results (default: 15, max: 100)", ""},
           {"output", "string",
            "Output format: 'line' (default), 'ctx:N' (N context lines), "
            "'full', 'files', 'count'",
+           ""},
+          {"path", "string",
+           "Root-relative scope: directory prefix ('src/http') or glob "
+           "('**/*.kt') applied to file paths",
            ""},
           {"filter", "string",
            "Exclude filter: comma-separated types/globs, e.g. 'go,*.py'", ""},
