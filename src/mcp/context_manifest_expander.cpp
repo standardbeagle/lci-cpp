@@ -70,17 +70,26 @@ ExpansionEngine::LinesResult ExpansionEngine::extract_source_by_lines(
     }
 
     auto& store = index_.file_content_store();
-    auto content = store.get_content(fid);
+    // Pin ONE FileContent for the whole extraction. Reading content and
+    // line_offsets via separate store calls would anchor them to different
+    // snapshot loads through the single-slot thread-local read_pin: a
+    // concurrent reindex between the two calls would dangle the first view and
+    // mismatch its length against the second's offsets (OOB / UAF).
+    auto fc = store.get_file(fid);
+    if (!fc) {
+        return {{}, "file content not found: " + file_path};
+    }
+    std::string_view content = fc->view();
     if (content.empty()) {
         return {{}, "file content not found: " + file_path};
     }
 
-    auto* offsets = store.get_line_offsets(fid);
-    if (!offsets || offsets->empty()) {
+    const std::vector<uint32_t>& offsets = fc->line_offsets;
+    if (offsets.empty()) {
         return {{}, "empty file: " + file_path};
     }
 
-    int line_count = static_cast<int>(offsets->size());
+    int line_count = static_cast<int>(offsets.size());
 
     if (start_line < 1 || start_line > line_count) {
         return {{}, "start line " + std::to_string(start_line) +
@@ -91,10 +100,10 @@ ExpansionEngine::LinesResult ExpansionEngine::extract_source_by_lines(
     if (end_line > line_count) end_line = line_count;
 
     // offsets are 0-based byte offsets; lines are 1-indexed
-    auto begin_off = (*offsets)[static_cast<size_t>(start_line - 1)];
+    auto begin_off = offsets[static_cast<size_t>(start_line - 1)];
     size_t end_off;
     if (end_line < line_count) {
-        end_off = (*offsets)[static_cast<size_t>(end_line)];
+        end_off = offsets[static_cast<size_t>(end_line)];
     } else {
         end_off = content.size();
     }

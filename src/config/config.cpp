@@ -307,7 +307,11 @@ std::vector<std::string> collect_strings(const KdlNode& n) {
 
 // -- Parse size strings like "10MB" -------------------------------------------
 
-int64_t parse_size_string(const std::string& s) {
+// Parses "10MB" / "512KB" / "1024" into a byte count. Returns false on a
+// malformed value (non-numeric, or trailing junk like "10XB") rather than
+// silently coercing to 0 — a zero max_file_size disables indexing entirely,
+// so a bad config line must surface, not fail-open (karpathy #6, fail-fast).
+bool parse_size_string(const std::string& s, int64_t& out) {
     std::string upper;
     upper.reserve(s.size());
     for (char c : s) upper += static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
@@ -329,9 +333,15 @@ int64_t parse_size_string(const std::string& s) {
     }
 
     int64_t num = 0;
-    auto [ptr, ec] = std::from_chars(num_str.data(), num_str.data() + num_str.size(), num);
-    if (ec != std::errc{}) return 0;
-    return num * multiplier;
+    const char* begin = num_str.data();
+    const char* end = num_str.data() + num_str.size();
+    auto [ptr, ec] = std::from_chars(begin, end, num);
+    // Reject empty, non-numeric, and trailing-garbage inputs: from_chars
+    // succeeds on a numeric prefix, so ptr must reach the end for the whole
+    // value to be valid.
+    if (ec != std::errc{} || ptr != end || num < 0) return false;
+    out = num * multiplier;
+    return true;
 }
 
 // -- Apply KDL nodes to Config ------------------------------------------------
@@ -343,12 +353,15 @@ void apply_project(Config& cfg, const KdlNode& node) {
     }
 }
 
-void apply_index(Config& cfg, const KdlNode& node) {
+bool apply_index(Config& cfg, const KdlNode& node, std::string& error) {
     for (const auto& child : node.children) {
         if (child.name == "max_file_size") {
             std::string sz;
             if (get_string(child, sz)) {
-                cfg.index.max_file_size = parse_size_string(sz);
+                if (!parse_size_string(sz, cfg.index.max_file_size)) {
+                    error = "index.max_file_size: invalid size value \"" + sz + "\"";
+                    return false;
+                }
             } else {
                 int v = 0;
                 if (get_int(child, v)) cfg.index.max_file_size = v;
@@ -356,7 +369,10 @@ void apply_index(Config& cfg, const KdlNode& node) {
         } else if (child.name == "max_parse_file_size") {
             std::string sz;
             if (get_string(child, sz)) {
-                cfg.index.max_parse_file_size = parse_size_string(sz);
+                if (!parse_size_string(sz, cfg.index.max_parse_file_size)) {
+                    error = "index.max_parse_file_size: invalid size value \"" + sz + "\"";
+                    return false;
+                }
             } else {
                 int v = 0;
                 if (get_int(child, v)) cfg.index.max_parse_file_size = v;
@@ -380,6 +396,7 @@ void apply_index(Config& cfg, const KdlNode& node) {
             get_int(child, cfg.index.watch_debounce_ms);
         }
     }
+    return true;
 }
 
 void apply_performance(Config& cfg, const KdlNode& node) {
@@ -497,7 +514,9 @@ Config parse_kdl_content(const std::string& content, std::string& error) {
 
     for (const auto& node : nodes) {
         if (node.name == "project") apply_project(cfg, node);
-        else if (node.name == "index") apply_index(cfg, node);
+        else if (node.name == "index") {
+            if (!apply_index(cfg, node, error)) return cfg;
+        }
         else if (node.name == "performance") apply_performance(cfg, node);
         else if (node.name == "search") apply_search(cfg, node);
         else if (node.name == "include") cfg.include = collect_strings(node);

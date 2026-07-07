@@ -441,7 +441,11 @@ bool HistoryProvider::get_commit_history(int64_t since_epoch,
     // every arg, so the `--format=%H|%an|%ae|%at|%s` placeholders (the `|` in
     // particular) reach git literally instead of being parsed as shell pipes.
     std::string output;
-    if (!provider_.run_git(args, output) && output.empty()) return false;
+    // A non-zero git exit means the history is incomplete (bad ref, broken
+    // pipe, mid-stream failure). Fail rather than parse a truncated stream and
+    // present partial change-frequency data as a complete result — the caller
+    // cannot otherwise distinguish "few commits" from "git errored".
+    if (!provider_.run_git(args, output)) return false;
 
     return parse_commit_history(output, out);
 }

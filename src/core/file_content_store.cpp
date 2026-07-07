@@ -333,6 +333,36 @@ StringRef FileContentStore::get_line(FileID file_id, int line_num) const {
     return {file_id, start, length, h};
 }
 
+std::string_view FileContentStore::get_line_view(FileID file_id, int line_num) const {
+    auto snap = load_snapshot();
+    auto fc = snap->find_by_id(file_id);
+    if (!fc) {
+        read_pin().content.reset();
+        return {};
+    }
+    const auto& offsets = fc->line_offsets;
+    if (line_num < 0 || line_num >= static_cast<int>(offsets.size())) {
+        read_pin().content.reset();
+        return {};
+    }
+
+    uint32_t start = offsets[static_cast<size_t>(line_num)];
+    uint32_t end;
+    std::string_view content = fc->view();
+    if (line_num + 1 < static_cast<int>(offsets.size())) {
+        end = offsets[static_cast<size_t>(line_num + 1)];
+        if (end > start && content[end - 1] == '\n') --end;
+    } else {
+        end = static_cast<uint32_t>(content.size());
+    }
+    if (end > start && content[end - 1] == '\r') --end;
+
+    // Pin the owning FileContent so the returned view stays valid per the
+    // single-slot lifetime contract documented in the header.
+    read_pin().content = std::move(fc);
+    return content.substr(start, end - start);
+}
+
 int FileContentStore::get_line_count(FileID file_id) const {
     auto snap = load_snapshot();
     const auto& fc = snap->find_by_id(file_id);
@@ -417,6 +447,12 @@ FileID FileContentStore::load_file(const std::string& path, std::string_view con
             current_memory_.fetch_add(new_size, std::memory_order_relaxed);
             entry.content = std::move(fc);
         }
+        // Re-indexed file: drop its stale LRU entry before re-appending so
+        // access_order stays duplicate-free. Duplicates would both grow the
+        // vector without bound and double-count the file during eviction.
+        snap->access_order.erase(
+            std::remove(snap->access_order.begin(), snap->access_order.end(), file_id),
+            snap->access_order.end());
     } else {
         file_id = static_cast<FileID>(next_id_.fetch_add(1, std::memory_order_relaxed) + 1);
         auto fc = make_file_content(file_id, content);
@@ -469,6 +505,10 @@ std::vector<FileID> FileContentStore::batch_load_files(
                 total_delta += estimate_memory(*fc);
                 entry.content = std::move(fc);
             }
+            // Re-indexed file: drop its stale LRU entry (see load_file).
+            snap->access_order.erase(
+                std::remove(snap->access_order.begin(), snap->access_order.end(), file_id),
+                snap->access_order.end());
         } else {
             file_id = static_cast<FileID>(next_id_.fetch_add(1, std::memory_order_relaxed) + 1);
             auto fc = make_file_content(file_id, content);

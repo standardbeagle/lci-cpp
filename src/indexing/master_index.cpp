@@ -157,6 +157,17 @@ bool MasterIndex::index_directory(const std::string& root) {
     }
 
     auto progress = pipeline.get_progress();
+    // INVARIANT: a bulk reindex must never run concurrently with the
+    // incremental writers (index_file/update_file/remove_file). Those take
+    // snapshot_mu_, but this bulk publish holds only bulk_mu_, and the bulk
+    // window above clear()s every sub-index and resets next_id_ to 0 — so a
+    // concurrent incremental write would draw file IDs from the reset counter
+    // and be silently clobbered here, diverging IDs across indexes. The server
+    // enforces this by wiring: reindex is serialized by is_indexing_/bulk_mu_
+    // and no watch/incremental path is active alongside it. If watch-mode is
+    // ever wired to write concurrently, this whole bulk clear→publish span must
+    // become mutually exclusive with the snapshot_mu_ writers (not just this
+    // store); a lock here alone would leave the sub-index/ID divergence unfixed.
     snapshot_.store(std::move(new_snapshot), std::memory_order_release);
     processed_files_.store(static_cast<int64_t>(integrated),
                            std::memory_order_release);

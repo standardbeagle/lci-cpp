@@ -1,6 +1,7 @@
 #include <lci/string_pool.h>
 
 #include <algorithm>
+#include <limits>
 
 namespace lci {
 
@@ -49,15 +50,25 @@ std::pair<std::string_view, bool> StringPool::get_range_string(const StringRange
     const auto& s = it->second;
     if (r.start >= s.size()) return {{}, false};
 
-    uint32_t end = r.start + r.length;
-    if (end > s.size()) end = static_cast<uint32_t>(s.size());
+    // Clamp length against the remaining bytes without computing r.start +
+    // r.length, which can wrap uint32 and defeat an `end > size` check (same
+    // class as the get_string overflow fixed in FileContentStore).
+    uint32_t max_len = static_cast<uint32_t>(s.size() - r.start);
+    uint32_t len = r.length > max_len ? max_len : r.length;
 
-    return {std::string_view(s).substr(r.start, end - r.start), true};
+    return {std::string_view(s).substr(r.start, len), true};
 }
 
 StringRange StringPool::create_subrange(const StringRange& parent,
                                          uint32_t start, uint32_t length) {
-    return {parent.pool_id, parent.start + start, length};
+    // Saturate the offset add so an overflow produces an out-of-range start
+    // (yielding an empty slice at read time) rather than wrapping to a small
+    // in-range offset that would return the wrong bytes.
+    uint64_t abs_start = static_cast<uint64_t>(parent.start) + start;
+    uint32_t clamped = abs_start > std::numeric_limits<uint32_t>::max()
+                           ? std::numeric_limits<uint32_t>::max()
+                           : static_cast<uint32_t>(abs_start);
+    return {parent.pool_id, clamped, length};
 }
 
 size_t StringPool::size() const {

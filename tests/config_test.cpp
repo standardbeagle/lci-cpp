@@ -587,6 +587,30 @@ TEST_F(KdlConfigTest, MalformedErrorReportsLineNumber) {
     EXPECT_NE(result.error.find("line 5"), std::string::npos) << result.error;
 }
 
+// A malformed size value must fail loudly, not silently coerce to 0 — a zero
+// max_file_size disables indexing entirely, so the bad line has to surface.
+TEST_F(KdlConfigTest, RejectsMalformedMaxFileSize) {
+    write_kdl("index {\n  max_file_size \"10XB\"\n}\n");
+    auto result = load_config(temp_dir_.string());
+    EXPECT_FALSE(result.ok());
+    EXPECT_NE(result.error.find("max_file_size"), std::string::npos) << result.error;
+}
+
+TEST_F(KdlConfigTest, RejectsNonNumericMaxParseFileSize) {
+    write_kdl("index {\n  max_parse_file_size \"garbage\"\n}\n");
+    auto result = load_config(temp_dir_.string());
+    EXPECT_FALSE(result.ok());
+    EXPECT_NE(result.error.find("max_parse_file_size"), std::string::npos) << result.error;
+}
+
+TEST_F(KdlConfigTest, AcceptsWellFormedSuffixedSizes) {
+    write_kdl("index {\n  max_file_size \"2MB\"\n  max_parse_file_size \"512KB\"\n}\n");
+    auto result = load_config(temp_dir_.string());
+    ASSERT_TRUE(result.ok()) << result.error;
+    EXPECT_EQ(result.config.index.max_file_size, 2 * 1024 * 1024);
+    EXPECT_EQ(result.config.index.max_parse_file_size, 512 * 1024);
+}
+
 // ---------------------------------------------------------------------------
 // Validation
 // ---------------------------------------------------------------------------

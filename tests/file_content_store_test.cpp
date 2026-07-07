@@ -491,5 +491,38 @@ TEST(FileContentStoreTest, MultiEvictionPreservesRemainingEntries) {
     check_consistency(id_d, "d.go");
 }
 
+// Regression: re-indexing a changed file must not leave a duplicate in the LRU
+// access_order. Duplicates grow the vector without bound in long-running watched
+// sessions and cause enforce_memory_limit to subtract a file's size more than
+// once, driving current_memory_ artificially low so the cap is under-enforced.
+TEST(FileContentStoreTest, ReindexThenEvictKeepsMemoryAccountingConsistent) {
+    const int64_t kLimit = 1024;
+    FileContentStore store(kLimit);
+
+    // Repeatedly re-index the same file with changing content. Without dedup
+    // this would push "hot.go" onto access_order once per update.
+    for (int i = 0; i < 20; ++i) {
+        store.load_file("hot.go", std::string(300, static_cast<char>('a' + (i % 26))));
+    }
+    EXPECT_EQ(store.get_file_count(), 1);
+
+    // Now add distinct files to force eviction. If "hot.go" had accumulated
+    // duplicate LRU entries, eviction would double-subtract its size and the
+    // reported usage would diverge from the actual surviving content.
+    const std::string payload(300, 'z');
+    for (int i = 0; i < 6; ++i) {
+        store.load_file("f" + std::to_string(i) + ".go", payload);
+    }
+
+    // Usage must stay non-negative and within the cap (+ per-entry overhead),
+    // and must equal the sum over surviving entries — verified indirectly by
+    // the bound: a double-subtract would make this go negative or absurdly low
+    // while entries still exist.
+    int64_t usage = store.get_memory_usage();
+    EXPECT_GT(usage, 0);
+    EXPECT_LE(usage, kLimit + 700);
+    EXPECT_GE(store.get_file_count(), 1);
+}
+
 }  // namespace
 }  // namespace lci

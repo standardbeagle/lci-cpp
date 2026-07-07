@@ -135,13 +135,29 @@ class FileContentStore {
     std::shared_ptr<FileContent> get_file(FileID id) const;
 
     /// Returns the raw content bytes for a file.
+    ///
+    /// Lifetime contract for get_content / get_line_offsets / get_string /
+    /// get_line_view: the returned view/pointer is kept alive by a SINGLE
+    /// thread-local pin slot. Each of these calls REPLACES that slot, so a
+    /// view obtained here is only valid until the next such call on the same
+    /// thread (or a call for a missing file, which clears the slot). To hold a
+    /// view across another store read — or to read both content and offsets
+    /// for the same file — call get_file() once and read through the returned
+    /// shared_ptr instead of combining these single-slot accessors.
     std::string_view get_content(FileID id) const;
 
-    /// Returns the precomputed line offsets for a file.
+    /// Returns the precomputed line offsets for a file. See get_content for the
+    /// single-slot pin lifetime contract.
     const std::vector<uint32_t>* get_line_offsets(FileID id) const;
 
-    /// Resolves a StringRef to a string_view from the backing content.
+    /// Resolves a StringRef to a string_view from the backing content. See
+    /// get_content for the single-slot pin lifetime contract.
     std::string_view get_string(StringRef ref) const;
+
+    /// Returns the text of a single 0-based line (trailing CR/LF trimmed),
+    /// pinned in the thread-local slot. See get_content for the lifetime
+    /// contract. Empty view if the file or line is missing.
+    std::string_view get_line_view(FileID file_id, int line_num) const;
 
     /// Returns a StringRef for a specific line (0-based).
     StringRef get_line(FileID file_id, int line_num) const;

@@ -513,8 +513,15 @@ int run_update(const UpdateConfig& cfg) {
         }
         std::cout << "Verified checksum.\n";
     } else {
-        std::cerr << "warning: release has no SHA256SUMS; skipping integrity "
-                     "check.\n";
+        // No SHA256SUMS asset: refuse rather than overwrite the running
+        // executable with unverified bytes. A missing checksum manifest is a
+        // release-process defect to fix at the source, not something to paper
+        // over on the client (fail-fast; installing an unverified binary is a
+        // supply-chain risk).
+        std::cerr << "Error: release has no SHA256SUMS asset; refusing to "
+                     "install an unverified binary.\n";
+        fs::remove_all(work, ec);
+        return 1;
     }
 
     if (run_cmd({"tar", "-xzf", tarball.string(), "-C", work.string()}) != 0) {

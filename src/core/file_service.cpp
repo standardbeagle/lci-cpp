@@ -82,31 +82,10 @@ std::string_view FileService::get_content(FileID id) const {
 }
 
 std::string_view FileService::get_line_content(FileID id, int line) const {
-    auto fc = store_->get_file(id);
-    if (!fc) return {};
-
-    const auto& offsets = fc->line_offsets;
-    if (line < 0 || line >= static_cast<int>(offsets.size())) return {};
-
-    auto content = fc->view();
-    uint32_t start = offsets[static_cast<size_t>(line)];
-    uint32_t end;
-
-    if (line + 1 < static_cast<int>(offsets.size())) {
-        end = offsets[static_cast<size_t>(line + 1)];
-        if (end > start && content[end - 1] == '\n') {
-            --end;
-        }
-    } else {
-        end = static_cast<uint32_t>(content.size());
-    }
-
-    // Strip trailing \r for CRLF normalization.
-    if (end > start && content[end - 1] == '\r') {
-        --end;
-    }
-
-    return content.substr(start, end - start);
+    // Delegate to the store so the returned view is pinned in the thread-local
+    // slot; computing it here from a local get_file() shared_ptr would dangle
+    // the view once that local pointer drops at return.
+    return store_->get_line_view(id, line);
 }
 
 int FileService::get_line_count(FileID id) const {

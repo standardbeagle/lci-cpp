@@ -350,13 +350,23 @@ SymbolID SymbolLocationIndex::find_symbol_id_at_line(
             return target_line < ps.start.line;
         });
 
+    // Scan backward from the upper bound with the same early-break as
+    // find_best_match (see there): once the query line is more than one
+    // line-span unit past a candidate's start, no earlier symbol can produce a
+    // smaller span, so we stop rather than scanning the whole prefix (O(n) ->
+    // O(log n + span)). <= keeps first-in-array on exact ties.
     const PositionedSymbol* best = nullptr;
     int best_size = -1;
-    for (auto sit = syms.begin(); sit != upper; ++sit) {
+    for (auto sit = upper; sit != syms.begin();) {
+        --sit;
+        if (best != nullptr) {
+            int best_line_span = best->end.line - best->start.line;
+            if (line - sit->start.line > best_line_span + 1) break;
+        }
         if (sit->end.line < line) continue;
         int sym_size = (sit->end.line - sit->start.line) * 1000 +
                        (sit->end.column - sit->start.column);
-        if (best == nullptr || sym_size < best_size) {
+        if (best == nullptr || sym_size <= best_size) {
             best = &(*sit);
             best_size = sym_size;
         }
@@ -422,15 +432,32 @@ const PositionedSymbol* SymbolLocationIndex::find_best_match(
     const PositionedSymbol* best = nullptr;
     int best_size = -1;
 
-    // Scan backwards from upper bound through all candidates.
-    for (auto it = syms.begin(); it != upper; ++it) {
+    // Scan candidates backward from the upper bound (decreasing start line).
+    // Symbols are sorted by start line, so any symbol not yet visited has a
+    // start line <= the current one. An enclosing symbol (end.line >= line) has
+    // line-span = end.line - start.line >= line - start.line, and since the
+    // sym_size metric weights line-span by 1000 (dwarfing the < 1000 column
+    // delta the encoding already assumes), once (line - it->start.line) exceeds
+    // the best line-span by more than one unit, no earlier symbol can beat the
+    // current best — so we stop instead of scanning the whole prefix. This
+    // turns the old O(n)-per-lookup linear prefix scan into O(log n + span),
+    // preserving the exact best-symbol selection for normal source.
+    for (auto it = upper; it != syms.begin();) {
+        --it;
+        if (best != nullptr) {
+            int best_line_span = best->end.line - best->start.line;
+            if (line - it->start.line > best_line_span + 1) break;
+        }
         if (it->end.line < line) continue;
         if (line == it->start.line && column < it->start.column) continue;
         if (line == it->end.line && column > it->end.column) continue;
 
         int sym_size = (it->end.line - it->start.line) * 1000 +
                        (it->end.column - it->start.column);
-        if (best == nullptr || sym_size < best_size) {
+        // <= (not <) so that on an exact size tie the earliest-in-array symbol
+        // wins, matching the original forward scan's first-wins behavior — the
+        // backward scan visits the earliest index last.
+        if (best == nullptr || sym_size <= best_size) {
             best = &(*it);
             best_size = sym_size;
         }

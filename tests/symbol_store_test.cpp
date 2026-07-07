@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -285,19 +286,24 @@ TEST(SymbolStoreTest, BenchmarkLookup) {
                               i, 0, i + 10, 0));
     }
 
-    auto start = std::chrono::steady_clock::now();
+    // Best-of-K batches: contention (parallel CTest) only adds wall time, so the
+    // fastest batch approximates true unloaded per-lookup cost. Absolute-wall-clock
+    // asserts flake under -j load; the minimum does not.
     volatile const EnhancedSymbol* ptr = nullptr;
-    for (int iter = 0; iter < 100000; ++iter) {
-        auto id = static_cast<SymbolID>((iter % 10000) + 1);
-        ptr = store.get(id);
+    long long best_ns_per_lookup = std::numeric_limits<long long>::max();
+    for (int batch = 0; batch < 50; ++batch) {
+        auto start = std::chrono::steady_clock::now();
+        for (int iter = 0; iter < 20000; ++iter) {
+            auto id = static_cast<SymbolID>((iter % 10000) + 1);
+            ptr = store.get(id);
+        }
+        auto elapsed = std::chrono::steady_clock::now() - start;
+        auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(elapsed).count();
+        best_ns_per_lookup = std::min<long long>(best_ns_per_lookup, ns / 20000);
     }
-    auto elapsed = std::chrono::steady_clock::now() - start;
     (void)ptr;
 
-    auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(elapsed).count();
-    auto ns_per_lookup = ns / 100000;
-
-    EXPECT_LT(ns_per_lookup, 2000) << "O(1) lookup should be under 2us";
+    EXPECT_LT(best_ns_per_lookup, 2000) << "O(1) lookup should be under 2us";
 }
 
 // ---------------------------------------------------------------------------
@@ -521,42 +527,81 @@ TEST(SymbolLocationIndexTest, MultiLineSymbolLookup) {
 }
 
 TEST(SymbolLocationIndexTest, BenchmarkPositionLookup) {
-    SymbolLocationIndex idx;
+    // This test guards the *complexity* of position lookup (binary search over
+    // per-file line ranges, expected ~O(log n)), not an absolute latency SLA.
+    // An absolute wall-clock ceiling flakes when the suite runs under -j load
+    // (a 5us op can't reliably beat fully saturated cores). Instead we measure
+    // best-of-K per-lookup at a small N and a 16x-larger N: CPU contention
+    // scales both measurements equally, so their ratio is load-invariant. A
+    // regression to O(n) would blow the ratio up ~16x; O(log n) keeps it ~1.4x.
+    auto build = [](SymbolLocationIndex& idx, int n) {
+        std::vector<Symbol> symbols;
+        std::vector<EnhancedSymbol> enhanced;
+        symbols.reserve(static_cast<size_t>(n));
+        enhanced.reserve(static_cast<size_t>(n));
+        for (int i = 0; i < n; ++i) {
+            Symbol s;
+            s.name = "func_" + std::to_string(i);
+            s.type = SymbolType::Function;
+            s.file_id = 1;
+            s.line = i * 10 + 1;
+            s.column = 0;
+            s.end_line = i * 10 + 8;
+            s.end_column = 1;
+            symbols.push_back(s);
 
-    std::vector<Symbol> symbols;
-    std::vector<EnhancedSymbol> enhanced;
-    for (int i = 0; i < 500; ++i) {
-        Symbol s;
-        s.name = "func_" + std::to_string(i);
-        s.type = SymbolType::Function;
-        s.file_id = 1;
-        s.line = i * 10 + 1;
-        s.column = 0;
-        s.end_line = i * 10 + 8;
-        s.end_column = 1;
-        symbols.push_back(s);
+            EnhancedSymbol es;
+            es.id = static_cast<SymbolID>(i + 1);
+            es.symbol = s;
+            enhanced.push_back(es);
+        }
+        idx.index_file_symbols(1, symbols, enhanced);
+    };
 
-        EnhancedSymbol es;
-        es.id = static_cast<SymbolID>(i + 1);
-        es.symbol = s;
-        enhanced.push_back(es);
-    }
+    // Best-of-K min per-lookup (ns) for an index of n symbols — see
+    // BenchmarkLookup for why the minimum across short batches is the
+    // contention-robust estimator.
+    auto measure = [](SymbolLocationIndex& idx, int n) -> double {
+        volatile SymbolID result = 0;
+        long long best_ns_x1000 = std::numeric_limits<long long>::max();
+        for (int batch = 0; batch < 50; ++batch) {
+            auto start = std::chrono::steady_clock::now();
+            for (int iter = 0; iter < 20000; ++iter) {
+                int line = (iter % n) * 10 + 3;
+                result = idx.find_symbol_id_at_position(1, line, 4);
+            }
+            auto elapsed = std::chrono::steady_clock::now() - start;
+            auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(elapsed).count();
+            best_ns_x1000 = std::min<long long>(best_ns_x1000, (ns * 1000) / 20000);
+        }
+        (void)result;
+        return static_cast<double>(best_ns_x1000) / 1000.0;
+    };
 
-    idx.index_file_symbols(1, symbols, enhanced);
+    constexpr int kSmall = 256;
+    constexpr int kLarge = 4096;  // 16x
 
-    auto start = std::chrono::steady_clock::now();
-    volatile SymbolID result = 0;
-    for (int iter = 0; iter < 100000; ++iter) {
-        int line = (iter % 500) * 10 + 3;
-        result = idx.find_symbol_id_at_position(1, line, 4);
-    }
-    auto elapsed = std::chrono::steady_clock::now() - start;
-    (void)result;
+    SymbolLocationIndex small_idx;
+    SymbolLocationIndex large_idx;
+    build(small_idx, kSmall);
+    build(large_idx, kLarge);
 
-    auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(elapsed).count();
-    auto ns_per_lookup = ns / 100000;
+    double t_small = measure(small_idx, kSmall);
+    double t_large = measure(large_idx, kLarge);
 
-    EXPECT_LT(ns_per_lookup, 10000) << "Position lookup should be under 10us";
+    // Load-invariant complexity guard: a 16x size increase must not scale the
+    // per-lookup cost anywhere near linearly. O(log n) predicts ~1.5x; a bound
+    // of 6x still catches an O(n)/O(sqrt n) regression while tolerating cache
+    // effects and timer noise. Guard against a zero small-time division.
+    ASSERT_GT(t_small, 0.0);
+    double ratio = t_large / t_small;
+    EXPECT_LT(ratio, 6.0)
+        << "position lookup scaled " << ratio << "x for a 16x symbol increase ("
+        << t_small << "ns -> " << t_large << "ns); expected sub-linear (~O(log n))";
+
+    // Loose absolute backstop: catches total breakage (e.g. a 1000x blowup)
+    // without flaking under -j contention the way a tight ceiling would.
+    EXPECT_LT(t_large, 200000.0) << "position lookup absurdly slow: " << t_large << "ns";
 }
 
 }  // namespace
