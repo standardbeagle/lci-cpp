@@ -83,6 +83,16 @@ scripts/bench.py run --repos zls,okhttp,pocketbase --models zhipuglm52 \
 workspace's `.lci/annotations/` directory before MCP indexing. Plain `lci`
 uses the same source tree without those manifests.
 
+Validate annotation manifests against the live MCP tool:
+
+```bash
+scripts/validate_annotations.py
+```
+
+The validator queries every label and category in `annotations/<repo>/` through
+`semantic_annotations` and checks the returned symbol, path, category, labels,
+and tags.
+
 ## Caveats
 
 - The installed `~/.local/bin/lci` (0.7.0 release) predates the MCP newline
