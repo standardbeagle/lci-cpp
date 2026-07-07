@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -24,6 +25,7 @@ struct FileContent {
     std::vector<uint8_t> content;
     std::vector<uint32_t> line_offsets;
     uint64_t fast_hash{};
+    mutable std::mutex content_hash_mu;
     std::array<uint8_t, 32> content_hash{};
     std::atomic<int32_t> ref_count{1};
 

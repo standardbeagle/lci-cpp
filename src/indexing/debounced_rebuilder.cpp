@@ -39,10 +39,14 @@ void DebouncedRebuilder::set_debounce(std::chrono::milliseconds ms) {
 }
 
 void DebouncedRebuilder::shutdown() {
-    bool was_running = running_.exchange(false);
-    if (!was_running) return;
+    {
+        std::lock_guard lock(mu_);
+        if (!running_) return;
+        running_ = false;
+        has_pending_ = false;
+    }
 
-    cv_.notify_one();
+    cv_.notify_all();
     if (timer_thread_.joinable()) {
         timer_thread_.join();
     }
@@ -50,17 +54,20 @@ void DebouncedRebuilder::shutdown() {
 
 void DebouncedRebuilder::timer_thread_func() {
     std::unique_lock lock(mu_);
-    while (running_.load(std::memory_order_relaxed)) {
+    while (running_) {
         if (!has_pending_) {
             cv_.wait(lock, [this] {
-                return has_pending_ || !running_.load(std::memory_order_relaxed);
+                return has_pending_ || !running_;
             });
-            if (!running_.load(std::memory_order_relaxed)) return;
+            if (!running_) return;
         }
 
         auto now = std::chrono::steady_clock::now();
         if (now < deadline_) {
-            cv_.wait_until(lock, deadline_);
+            cv_.wait_until(lock, deadline_, [this] {
+                return !running_ || !has_pending_ ||
+                       std::chrono::steady_clock::now() >= deadline_;
+            });
             continue;
         }
 
@@ -90,6 +97,7 @@ void DebouncedRebuilder::flush_pending() {
         has_pending_ = false;
         cb = callback_;
     }
+    cv_.notify_all();
     if (cb && !files.empty()) {
         cb(files);
     }

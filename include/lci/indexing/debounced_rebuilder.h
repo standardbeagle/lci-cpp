@@ -1,6 +1,5 @@
 #pragma once
 
-#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <functional>
@@ -64,7 +63,7 @@ class DebouncedRebuilder {
     bool has_pending_{false};
 
     std::thread timer_thread_;
-    std::atomic<bool> running_{true};
+    bool running_{true};
 };
 
 }  // namespace lci

@@ -2,7 +2,7 @@
   "result": {
     "content": [
       {
-        "text": "{\"count\":1,\"symbols\":[{\"callees\":[],\"callers\":[],\"complexity\":1,\"file\":\"a.go\",\"incoming_refs\":0,\"is_exported\":true,\"line\":3,\"name\":\"Add\",\"object_id\":\"B\",\"outgoing_refs\":2,\"parameter_count\":0,\"scope_chain\":[\"multi-lang\",\"a.go\",\"Add\"],\"signature\":\"func Add(a, b int) int\",\"type\":\"function\"}]}",
+        "text": "{\"count\":1,\"symbols\":[{\"callees\":[],\"callers\":[],\"complexity\":1,\"file\":\"a.go\",\"incoming_refs\":0,\"is_exported\":true,\"line\":3,\"name\":\"Add\",\"object_id\":\"B\",\"outgoing_refs\":2,\"parameter_count\":0,\"scope_chain\":[\"multi-lang\",\"a.go\",\"Add\"],\"signature\":\"func Add(a, b int) int\",\"source_excerpt\":{\"end_line\":3,\"lines\":[{\"line\":3,\"text\":\"func Add(a, b int) int { return a + b }\\n\"}],\"start_line\":3,\"truncated\":false},\"source_hint\":\"source_excerpt is extracted from the indexed source. Use it for nearby code, initializer, and short body questions; read the file only if you need lines outside this excerpt.\",\"type\":\"function\"}]}",
         "type": "text"
       }
     ]

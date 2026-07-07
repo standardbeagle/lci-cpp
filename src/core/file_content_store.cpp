@@ -13,6 +13,15 @@ namespace {
 /// Sentinel for "not found" lookups in snapshot.
 const std::shared_ptr<FileContent> kNullContent;
 
+struct ReadPin {
+    std::shared_ptr<FileContent> content;
+};
+
+ReadPin& read_pin() {
+    static thread_local ReadPin pin;
+    return pin;
+}
+
 /// SHA-256 round constants.
 constexpr std::array<uint32_t, 64> kSha256K = {
     0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4,
@@ -261,25 +270,36 @@ std::shared_ptr<FileContent> FileContentStore::get_file(FileID id) const {
 
 std::string_view FileContentStore::get_content(FileID id) const {
     auto snap = load_snapshot();
-    const auto& fc = snap->find_by_id(id);
-    if (!fc) return {};
-    return fc->view();
+    auto fc = snap->find_by_id(id);
+    if (!fc) {
+        read_pin().content.reset();
+        return {};
+    }
+    read_pin().content = std::move(fc);
+    return read_pin().content->view();
 }
 
 const std::vector<uint32_t>* FileContentStore::get_line_offsets(FileID id) const {
     auto snap = load_snapshot();
-    const auto& fc = snap->find_by_id(id);
-    if (!fc) return nullptr;
-    return &fc->line_offsets;
+    auto fc = snap->find_by_id(id);
+    if (!fc) {
+        read_pin().content.reset();
+        return nullptr;
+    }
+    read_pin().content = std::move(fc);
+    return &read_pin().content->line_offsets;
 }
 
 std::string_view FileContentStore::get_string(StringRef ref) const {
     auto snap = load_snapshot();
-    const auto& fc = snap->find_by_id(ref.file_id);
-    if (!fc) return {};
-    auto view = fc->view();
-    uint32_t end = ref.offset + ref.length;
-    if (ref.offset >= view.size() || end > view.size()) return {};
+    auto fc = snap->find_by_id(ref.file_id);
+    if (!fc) {
+        read_pin().content.reset();
+        return {};
+    }
+    read_pin().content = std::move(fc);
+    auto view = read_pin().content->view();
+    if (ref.offset >= view.size() || ref.length > view.size() - ref.offset) return {};
     return view.substr(ref.offset, ref.length);
 }
 
@@ -330,14 +350,11 @@ std::array<uint8_t, 32> FileContentStore::get_content_hash(FileID file_id) const
     // requires data that hashes to that specific 32-byte zero value;
     // for indexing purposes treat zero as "not computed".
     static constexpr std::array<uint8_t, 32> kZeroHash{};
+    std::lock_guard<std::mutex> lock(fc->content_hash_mu);
     if (fc->content_hash == kZeroHash) {
-        // Cache under the same FileContent — mutable from the
-        // get_content_hash caller's POV. Concurrent first-readers may
-        // each compute and overwrite, but the result is identical
-        // (deterministic hash of the same content) so the race is
-        // benign.
-        auto* mutable_fc = const_cast<FileContent*>(fc.get());
-        mutable_fc->content_hash = compute_sha256(
+        // Cache under the same FileContent. The mutex keeps concurrent
+        // first-readers from racing while preserving lazy computation.
+        fc->content_hash = compute_sha256(
             std::string_view(reinterpret_cast<const char*>(fc->content.data()),
                              fc->content.size()));
     }

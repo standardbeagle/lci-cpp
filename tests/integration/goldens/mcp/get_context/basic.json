@@ -2,7 +2,7 @@
   "result": {
     "content": [
       {
-        "text": "{\"contexts\":[{\"context\":[\"func Add(a, b int) int\"],\"definition\":\"func Add(a, b int) int\",\"file_path\":\"a.go\",\"is_exported\":true,\"line\":3,\"object_id\":\"B\",\"purity\":{\"confidence\":\"medium\",\"is_pure\":true,\"purity_score\":1.0},\"signature\":\"func Add(a, b int) int\",\"symbol_name\":\"Add\",\"symbol_type\":\"function\"}],\"count\":1}",
+        "text": "{\"contexts\":[{\"context\":[\"func Add(a, b int) int\"],\"definition\":\"func Add(a, b int) int\",\"file_path\":\"a.go\",\"is_exported\":true,\"line\":3,\"object_id\":\"B\",\"purity\":{\"confidence\":\"medium\",\"is_pure\":true,\"purity_score\":1.0},\"signature\":\"func Add(a, b int) int\",\"source_excerpt\":{\"end_line\":3,\"lines\":[{\"line\":3,\"text\":\"func Add(a, b int) int { return a + b }\\n\"}],\"start_line\":3,\"truncated\":false},\"source_hint\":\"source_excerpt is extracted from the indexed source. Use it for nearby code, initializer, and short body questions; read the file only if you need lines outside this excerpt.\",\"symbol_name\":\"Add\",\"symbol_type\":\"function\"}],\"count\":1}",
         "type": "text"
       }
     ]

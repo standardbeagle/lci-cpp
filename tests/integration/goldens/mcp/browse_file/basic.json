@@ -2,7 +2,7 @@
   "result": {
     "content": [
       {
-        "text": "{\"file\":{\"file_id\":1,\"language\":\"go\",\"path\":\"a.go\"},\"symbols\":[{\"complexity\":1,\"is_exported\":true,\"line\":3,\"name\":\"Add\",\"object_id\":\"B\",\"signature\":\"func Add(a, b int) int\",\"type\":\"function\"}],\"total\":1}",
+        "text": "{\"file\":{\"file_id\":1,\"language\":\"go\",\"path\":\"a.go\"},\"hint\":\"This outline is extracted from source. For symbol names, types, signatures, and line numbers, answer from this response; read the file only if you need code body lines.\",\"symbols\":[{\"complexity\":1,\"is_exported\":true,\"line\":3,\"name\":\"Add\",\"object_id\":\"B\",\"signature\":\"func Add(a, b int) int\",\"type\":\"function\"}],\"total\":1}",
         "type": "text"
       }
     ]

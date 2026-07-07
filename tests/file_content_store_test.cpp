@@ -4,6 +4,7 @@
 #include <lci/core/mmap.h>
 #include <lci/core/portable.h>
 
+#include <atomic>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -138,6 +139,38 @@ TEST(FileContentStoreTest, ContentHashConsistency) {
     EXPECT_NE(store.get_content_hash(id1), zero_hash);
 }
 
+TEST(FileContentStoreTest, ConcurrentContentHashReaders) {
+    FileContentStore store;
+    FileID id = store.load_file("a.go", std::string(16 * 1024, 'x'));
+    auto expected = store.get_content_hash(id);
+
+    constexpr int kThreads = 16;
+    constexpr int kIterations = 128;
+    std::atomic<bool> start{false};
+    std::vector<std::array<uint8_t, 32>> hashes(kThreads);
+    std::vector<std::thread> threads;
+    threads.reserve(kThreads);
+
+    for (int i = 0; i < kThreads; ++i) {
+        threads.emplace_back([&, i] {
+            while (!start.load(std::memory_order_acquire)) {
+            }
+            for (int j = 0; j < kIterations; ++j) {
+                hashes[static_cast<size_t>(i)] = store.get_content_hash(id);
+            }
+        });
+    }
+
+    start.store(true, std::memory_order_release);
+    for (auto& thread : threads) {
+        thread.join();
+    }
+
+    for (const auto& hash : hashes) {
+        EXPECT_EQ(hash, expected);
+    }
+}
+
 TEST(FileContentStoreTest, DuplicateContentNotReloaded) {
     FileContentStore store;
     FileID id1 = store.load_file("test.go", "same content");
@@ -184,6 +217,18 @@ TEST(FileContentStoreTest, InvalidateNonExistent) {
     // Should not crash or error.
     store.invalidate_file("nonexistent.go");
     store.invalidate_file_by_id(999);
+}
+
+TEST(FileContentStoreTest, ReturnedContentViewSurvivesInvalidation) {
+    FileContentStore store;
+    FileID id = store.load_file("test.go", "content");
+
+    std::string_view content = store.get_content(id);
+    ASSERT_EQ(content, "content");
+
+    store.invalidate_file_by_id(id);
+    EXPECT_EQ(content, "content");
+    EXPECT_TRUE(store.get_content(id).empty());
 }
 
 TEST(FileContentStoreTest, Clear) {

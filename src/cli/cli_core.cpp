@@ -6,6 +6,7 @@
 #include <fstream>
 #include <string>
 #include <string_view>
+#include <utility>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -37,7 +38,7 @@ std::string load_config_with_overrides(const GlobalFlags& flags, Config& out) {
         return "failed to load config from " + config_path + ": " +
                result.error;
     }
-    out = result.config;
+    out = std::move(result.config);
 
     if (!flags.include.empty()) {
         out.include = flags.include;

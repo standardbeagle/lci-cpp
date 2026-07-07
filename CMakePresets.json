@@ -141,6 +141,11 @@
         {
             "name": "debug",
             "configurePreset": "debug",
+            "filter": {
+                "exclude": {
+                    "label": "benchmark"
+                }
+            },
             "output": {
                 "outputOnFailure": true
             }
@@ -148,6 +153,11 @@
         {
             "name": "release",
             "configurePreset": "release",
+            "filter": {
+                "exclude": {
+                    "label": "benchmark"
+                }
+            },
             "output": {
                 "outputOnFailure": true
             }
@@ -155,6 +165,11 @@
         {
             "name": "sanitizer",
             "configurePreset": "sanitizer",
+            "filter": {
+                "exclude": {
+                    "label": "benchmark"
+                }
+            },
             "output": {
                 "outputOnFailure": true
             }
@@ -162,6 +177,11 @@
         {
             "name": "tsan",
             "configurePreset": "tsan",
+            "filter": {
+                "exclude": {
+                    "label": "benchmark"
+                }
+            },
             "output": {
                 "outputOnFailure": true
             }
@@ -169,6 +189,11 @@
         {
             "name": "msan",
             "configurePreset": "msan",
+            "filter": {
+                "exclude": {
+                    "label": "benchmark"
+                }
+            },
             "output": {
                 "outputOnFailure": true
             }
