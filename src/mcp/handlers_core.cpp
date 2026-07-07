@@ -1286,6 +1286,41 @@ void attach_purity(nlohmann::json& ctx, const EnhancedSymbol& sym,
     ctx["purity"] = purity_to_json(*info);
 }
 
+void attach_source_excerpt(nlohmann::json& ctx, const EnhancedSymbol& sym,
+                           MasterIndex& indexer) {
+    static constexpr int kMaxExcerptLines = 12;
+
+    const int start_line = std::max(1, sym.symbol.line);
+    int end_line = sym.symbol.end_line > 0 ? sym.symbol.end_line : start_line;
+    if (end_line < start_line) end_line = start_line;
+
+    const int capped_end =
+        std::min(end_line, start_line + kMaxExcerptLines - 1);
+    auto fc = indexer.file_content_store().get_file(sym.symbol.file_id);
+    if (!fc) return;
+
+    nlohmann::json lines = nlohmann::json::array();
+    lines.get_ref<nlohmann::json::array_t&>().reserve(
+        static_cast<size_t>(capped_end - start_line + 1));
+    for (int line = start_line; line <= capped_end; ++line) {
+        auto ref = indexer.file_content_store().get_line(sym.symbol.file_id,
+                                                         line - 1);
+        auto text = indexer.file_content_store().get_string(ref);
+        lines.push_back({{"line", line}, {"text", std::string(text)}});
+    }
+    if (lines.empty()) return;
+
+    ctx["source_excerpt"] =
+        nlohmann::json{{"start_line", start_line},
+                       {"end_line", capped_end},
+                       {"truncated", capped_end < end_line},
+                       {"lines", std::move(lines)}};
+    ctx["source_hint"] =
+        "source_excerpt is extracted from the indexed source. Use it for "
+        "nearby code, initializer, and short body questions; read the file "
+        "only if you need lines outside this excerpt.";
+}
+
 // Resolves a single comma-separated object ID into `contexts`, or records a
 // descriptive entry in `errors` — Go's buildObjectContextCompactWithError
 // never silently drops an unresolvable id (internal/mcp/handlers.go).
@@ -1338,6 +1373,7 @@ void resolve_object_id(std::string_view id, MasterIndex& indexer,
     // Go getPurityInfo: function/method symbols carry a purity block when a
     // side-effect analyzer is wired; otherwise the field is omitted.
     attach_purity(ctx, *sym, indexer, analyzer);
+    attach_source_excerpt(ctx, *sym, indexer);
     contexts.push_back(std::move(ctx));
 }
 
@@ -1466,6 +1502,7 @@ ToolResult handle_get_context(const nlohmann::json& params,
             ctx["definition"] = definition;
             ctx["context"] = nlohmann::json::array({definition});
             attach_purity(ctx, *sym, indexer, analyzer);
+            attach_source_excerpt(ctx, *sym, indexer);
 
             if (include_call_hierarchy && want_relationships) {
                 nlohmann::json callers = nlohmann::json::array();
@@ -2058,6 +2095,8 @@ void register_core_handlers(McpServer& server, MasterIndex* indexer,
          "grep, rg, find. Results are grouped per file (root-relative "
          "paths) with per-hit line numbers; symbol hits carry sym/type/id "
          "(id feeds get_context) and callers (incoming-reference count). "
+         "The returned lines are source evidence: answer from them without "
+         "reading the file unless you need lines outside the result. "
          "total_matches is the TRUE match count; truncated:true + dirs "
          "histogram appear when the cap bit — narrow with path=. Note: "
          "JSON parameters, not CLI flags. See 'info search' for details.",
@@ -2115,8 +2154,11 @@ void register_core_handlers(McpServer& server, MasterIndex* indexer,
     server.add_tool(
         {"get_context",
          "📋 Get detailed context for specific code objects. Use the 'id' "
-         "parameter with object IDs from search results. See 'info "
-         "get_context' for examples.",
+         "parameter with object IDs from search results. The returned "
+         "signature, file path, line numbers, callers/callees, references, "
+         "source_excerpt, and snippets are intended to replace opening the "
+         "source file; read files only when this context is missing the exact "
+         "lines you must quote. See 'info get_context' for examples.",
          {{"id", "string",
            "Concise object ID(s) from search results (e.g., \"VE\" or "
            "\"VE,tG\" for multiple)",
@@ -2163,7 +2205,8 @@ void register_core_handlers(McpServer& server, MasterIndex* indexer,
         {"find_files",
          "📁 Like 'find' or 'fd' - searches file paths, not content, on an "
          "in-memory index. Supports fuzzy matching, glob patterns, and "
-         "filters. See 'info find_files'.",
+         "filters. Use search/browse_file/get_context for source evidence "
+         "before reading matched files. See 'info find_files'.",
          {{"pattern", "string",
            "File/path pattern to search for (supports fuzzy matching)", ""},
           {"max", "integer", "Maximum results (default: 50, max: 200)", ""},

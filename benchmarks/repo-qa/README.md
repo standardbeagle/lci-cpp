@@ -71,6 +71,18 @@ scripts/bench.py run --repos chi --models haiku45 --variants lci \
     --difficulties easy --reps 1 --out results/smoke
 ```
 
+Annotation overlay comparison:
+
+```bash
+scripts/bench.py run --repos zls,okhttp,pocketbase --models zhipuglm52 \
+    --variants lci,lci-ann --difficulties annotation \
+    --out results/annotation-compare
+```
+
+`lci-ann` copies repo-specific manifests from `annotations/<repo>/` into the
+workspace's `.lci/annotations/` directory before MCP indexing. Plain `lci`
+uses the same source tree without those manifests.
+
 ## Caveats
 
 - The installed `~/.local/bin/lci` (0.7.0 release) predates the MCP newline

@@ -1,0 +1,23 @@
+{
+  "annotations": [
+    {
+      "file": "apis/base.go",
+      "symbol": "NewRouter",
+      "labels": ["api-entrypoint", "route-installer"],
+      "category": "api-routing",
+      "tags": {
+        "route_group": "/api",
+        "role": "Installs the backend API route groups"
+      }
+    },
+    {
+      "file": "core/field.go",
+      "symbol": "Field",
+      "labels": ["api-usage", "field-registry"],
+      "category": "field-model",
+      "tags": {
+        "registry": "core.Fields maps field type names to Field factories"
+      }
+    }
+  ]
+}

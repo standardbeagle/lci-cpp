@@ -319,6 +319,185 @@
         "okhttp/src/commonJvmAndroid/kotlin/okhttp3/internal/connection/RealCall.kt",
         "okhttp/src/commonJvmAndroid/kotlin/okhttp3/internal/http/RealInterceptorChain.kt"
       ]
+    },
+    {
+      "id": "okh-d4",
+      "difficulty": "discovery",
+      "question": "Every HTTP request in this client — synchronous or asynchronous, plain or WebSocket — becomes exactly one instance of a single concrete Call implementation, constructed only by the client's newCall(). Name that class and its file, and the two methods that hand a synchronous vs an asynchronous call to the dispatcher.",
+      "gold_answer": "RealCall (okhttp/src/commonJvmAndroid/kotlin/okhttp3/internal/connection/RealCall.kt) is the sole Call implementation; it is constructed only via OkHttpClient.newCall(request) -> RealCall(this, request, forWebSocket = false) (and forWebSocket = true for WebSockets). execute() calls client.dispatcher.executed(this) for a synchronous call; enqueue(responseCallback) calls client.dispatcher.enqueue(AsyncCall(responseCallback)) for an asynchronous one.",
+      "must_mention": [
+        [
+          "RealCall"
+        ],
+        [
+          "RealCall\\.kt"
+        ],
+        [
+          "execute"
+        ],
+        [
+          "enqueue"
+        ],
+        [
+          "dispatcher"
+        ],
+        [
+          "newCall"
+        ],
+        [
+          "AsyncCall"
+        ]
+      ],
+      "expected_files": [
+        "okhttp/src/commonJvmAndroid/kotlin/okhttp3/internal/connection/RealCall.kt"
+      ]
+    },
+    {
+      "id": "okh-d5",
+      "difficulty": "discovery",
+      "question": "Concurrency limits on asynchronous calls in this client are enforced by one private method that promotes calls from a ready queue to a running queue and dispatches them onto the executor. Name the class and that method, and the two configurable limits it honors together with their default values.",
+      "gold_answer": "Dispatcher.promoteAndExecute() (okhttp/src/commonJvmAndroid/kotlin/okhttp3/Dispatcher.kt) moves AsyncCalls from readyAsyncCalls to runningAsyncCalls and runs them on the executorService. It honors maxRequests (default 64) — the promotion loop breaks once runningAsyncCalls.size >= maxRequests — and maxRequestsPerHost (default 5), skipping a call whose callsPerHost >= maxRequestsPerHost.",
+      "must_mention": [
+        [
+          "Dispatcher"
+        ],
+        [
+          "promoteAndExecute"
+        ],
+        [
+          "maxRequests"
+        ],
+        [
+          "maxRequestsPerHost"
+        ],
+        [
+          "\\b64\\b|= *64"
+        ],
+        [
+          "\\b5\\b|= *5"
+        ]
+      ],
+      "expected_files": [
+        "okhttp/src/commonJvmAndroid/kotlin/okhttp3/Dispatcher.kt"
+      ]
+    },
+    {
+      "id": "okh-d6",
+      "difficulty": "discovery",
+      "question": "Socket reuse in this client goes through one pool: every attempt to check out an existing connection instead of opening a new one calls a single method on it. Name the pool class, that acquire method, and its file, and note where idle connections are held and how eviction is scheduled.",
+      "gold_answer": "RealConnectionPool.callAcquirePooledConnection() (okhttp/src/commonJvmAndroid/kotlin/okhttp3/internal/connection/RealConnectionPool.kt) is the single check-out path (called from the route planner). Live connections are held in a ConcurrentLinkedQueue<RealConnection>; a cleanupQueue = taskRunner.newQueue() TaskQueue schedules the cleanupTask that evicts once evictableConnectionCount > maxIdleConnections.",
+      "must_mention": [
+        [
+          "RealConnectionPool"
+        ],
+        [
+          "callAcquirePooledConnection"
+        ],
+        [
+          "RealConnectionPool\\.kt"
+        ],
+        [
+          "ConcurrentLinkedQueue|cleanupQueue|maxIdleConnections|TaskQueue"
+        ]
+      ],
+      "expected_files": [
+        "okhttp/src/commonJvmAndroid/kotlin/okhttp3/internal/connection/RealConnectionPool.kt"
+      ]
+    },
+    {
+      "id": "okh-d7",
+      "difficulty": "discovery",
+      "question": "When many requests share a single HTTP/2 socket, they are multiplexed by one class: it allocates each request its own stream and serializes all outbound frames through a single writer queue. Name that class, its stream-allocation method, and its file.",
+      "gold_answer": "Http2Connection (okhttp/src/commonJvmAndroid/kotlin/okhttp3/internal/http2/Http2Connection.kt) is the multiplexing hub. newStream(...) allocates a new Http2Stream for a request (called from Http2ExchangeCodec). All outbound frames are serialized through writerQueue = taskRunner.newQueue() feeding a single Http2Writer(socket.sink, client); the client flow-control window is OKHTTP_CLIENT_WINDOW_SIZE (16 MiB).",
+      "must_mention": [
+        [
+          "Http2Connection"
+        ],
+        [
+          "newStream"
+        ],
+        [
+          "Http2Connection\\.kt"
+        ],
+        [
+          "writerQueue|Http2Writer|Http2Stream"
+        ]
+      ],
+      "expected_files": [
+        "okhttp/src/commonJvmAndroid/kotlin/okhttp3/internal/http2/Http2Connection.kt"
+      ]
+    },
+    {
+      "id": "okh-d8",
+      "difficulty": "discovery",
+      "question": "Background work across this client — connection-pool cleanup, HTTP/2 ping and writer queues, web-socket timeouts — all obtain their queues from one shared scheduler singleton rather than spawning their own threads. Name that class, the method components call to get a queue, and its file.",
+      "gold_answer": "TaskRunner (okhttp/src/commonJvmAndroid/kotlin/okhttp3/internal/concurrent/TaskRunner.kt) is the shared scheduler; components call taskRunner.newQueue() to obtain a TaskQueue (e.g. RealConnectionPool.cleanupQueue and Http2Connection.writerQueue both come from it). The process-wide default is the TaskRunner.INSTANCE singleton, backed by a RealBackend daemon thread.",
+      "must_mention": [
+        [
+          "TaskRunner"
+        ],
+        [
+          "newQueue"
+        ],
+        [
+          "TaskRunner\\.kt"
+        ],
+        [
+          "TaskQueue|INSTANCE"
+        ]
+      ],
+      "expected_files": [
+        "okhttp/src/commonJvmAndroid/kotlin/okhttp3/internal/concurrent/TaskRunner.kt"
+      ]
+    },
+    {
+      "id": "okh-d9",
+      "difficulty": "discovery",
+      "question": "For any candidate cached response, one decision engine computes whether to serve from the cache, revalidate over the network, or bypass — emitting the network-request / cache-response pair the cache interceptor then acts on. Name that class (with its inner factory/compute entry point) and its file.",
+      "gold_answer": "CacheStrategy, produced by its inner CacheStrategy.Factory(now, request, cacheResponse).compute() (okhttp/src/commonJvmAndroid/kotlin/okhttp3/internal/cache/CacheStrategy.kt). The resulting CacheStrategy carries networkRequest: Request? and cacheResponse: Response? (both null/non-null combinations encode serve-from-cache vs revalidate vs bypass). Its sole production caller is CacheInterceptor.",
+      "must_mention": [
+        [
+          "CacheStrategy"
+        ],
+        [
+          "compute|Factory"
+        ],
+        [
+          "CacheStrategy\\.kt"
+        ],
+        [
+          "networkRequest|cacheResponse|CacheInterceptor"
+        ]
+      ],
+      "expected_files": [
+        "okhttp/src/commonJvmAndroid/kotlin/okhttp3/internal/cache/CacheStrategy.kt"
+      ]
+    },
+    {
+      "id": "okh-a1",
+      "difficulty": "annotation",
+      "question": "Use the lci_semantic_annotations tool with label 'value-flow'. According to the annotation, which OkHttp symbol is the connection-routing value-flow entry point, and what flow does it describe?",
+      "gold_answer": "The value-flow annotation points to OkHttpClient.address in okhttp/src/commonJvmAndroid/kotlin/okhttp3/OkHttpClient.kt. Its tag describes the flow `OkHttpClient.connectionSpecs -> Address.connectionSpecs`, meaning address() builds the Address used to open a connection and passes the client's connectionSpecs into it.",
+      "must_mention": [
+        [
+          "address"
+        ],
+        [
+          "OkHttpClient\\.kt"
+        ],
+        [
+          "connectionSpecs"
+        ],
+        [
+          "Address"
+        ]
+      ],
+      "expected_tools": [
+        "lci_semantic_annotations"
+      ],
+      "expected_files": [
+        "okhttp/src/commonJvmAndroid/kotlin/okhttp3/OkHttpClient.kt"
+      ]
     }
   ]
 }

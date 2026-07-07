@@ -1,0 +1,23 @@
+{
+  "annotations": [
+    {
+      "file": "okhttp/src/commonJvmAndroid/kotlin/okhttp3/OkHttpClient.kt",
+      "symbol": "address",
+      "labels": ["api-usage", "value-flow", "connection-routing"],
+      "category": "connection-routing",
+      "tags": {
+        "flow": "OkHttpClient.connectionSpecs -> Address.connectionSpecs",
+        "purpose": "Builds the Address used to open a connection"
+      }
+    },
+    {
+      "file": "okhttp/src/commonJvmAndroid/kotlin/okhttp3/OkHttpClient.kt",
+      "symbol": "connectionSpecs",
+      "labels": ["api-usage", "connection-policy"],
+      "category": "connection-policy",
+      "tags": {
+        "default": "DEFAULT_CONNECTION_SPECS = MODERN_TLS, CLEARTEXT"
+      }
+    }
+  ]
+}

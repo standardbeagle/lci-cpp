@@ -84,6 +84,20 @@ class SemanticAnnotator {
     /// content store and reference tracker are both lock-free read snapshots).
     int populate_from_index(const MasterIndex& index);
 
+    /// Loads external annotations from a JSON manifest file or a directory of
+    /// manifest files. This supports annotation overlays for vendored or
+    /// benchmark corpora where source files should not be edited. Returns the
+    /// number of manifest entries resolved to indexed symbols.
+    int load_manifest(const MasterIndex& index, const std::string& path,
+                      std::string* error = nullptr);
+
+    /// Loads annotation manifests found at the project root. Checked paths:
+    /// .lci/annotations/*.json, .lci/annotations.json,
+    /// .lci-annotations.json, lci-annotations.json. Missing manifests are a
+    /// no-op.
+    int load_project_manifest(const MasterIndex& index,
+                              std::string* error = nullptr);
+
     /// Returns all symbols with a specific label.
     std::vector<const AnnotatedSymbol*> get_symbols_by_label(
         std::string_view label) const;
@@ -132,6 +146,10 @@ class SemanticAnnotator {
                                SemanticAnnotation& annotation);
     void parse_memory_hints(std::string_view line,
                             SemanticAnnotation& annotation);
+    void add_annotation(FileID file_id, SymbolID symbol_id,
+                        const std::string& symbol_name, int line,
+                        const std::string& file_path,
+                        SemanticAnnotation annotation);
     std::vector<std::string> parse_comma_separated(std::string_view input) const;
     absl::flat_hash_map<std::string, std::string> parse_key_value_pairs(
         std::string_view input) const;

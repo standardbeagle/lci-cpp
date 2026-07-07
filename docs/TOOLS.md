@@ -313,6 +313,35 @@ All responses carry `mode` + `timestamp_ms`.
 Query symbols by `@lci:` labels / categories, including labels propagated
 through the call graph.
 
+Annotations can live inline as `@lci:` comments near symbols, or in external
+JSON manifests when source files should not be edited. MCP loads these project
+root manifests at startup:
+
+- `.lci/annotations/*.json`
+- `.lci/annotations.json`
+- `.lci-annotations.json`
+- `lci-annotations.json`
+
+Each manifest can be a JSON array or an object with an `annotations` array:
+
+```json
+{
+  "annotations": [
+    {
+      "file": "okhttp/src/commonJvmAndroid/kotlin/okhttp3/OkHttpClient.kt",
+      "symbol": "address",
+      "labels": ["api-usage", "value-flow"],
+      "category": "connection-routing",
+      "tags": {
+        "flow": "OkHttpClient.connectionSpecs -> Address.connectionSpecs"
+      }
+    }
+  ]
+}
+```
+
+Entries resolve against indexed symbols by `file` plus `symbol` and/or `line`.
+
 | Param | Type | Default | Description |
 |-------|------|---------|-------------|
 | `label` | string | (empty) | Label to search (one of label/category required). |

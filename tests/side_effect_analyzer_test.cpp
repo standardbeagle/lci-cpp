@@ -377,6 +377,81 @@ TEST(SemanticAnnotatorTest, ExtractsLabels) {
     EXPECT_EQ(ann->category, "endpoint");
 }
 
+TEST(SemanticAnnotatorTest, LoadsProjectManifestFile) {
+    auto dir = lci::test::unique_temp_dir("lci_ann_manifest_");
+    std::filesystem::create_directories(dir / ".lci");
+    {
+        std::ofstream src(dir / "handler.go");
+        src << "package main\n\nfunc processRequest() {}\n";
+    }
+    {
+        std::ofstream manifest(dir / ".lci" / "annotations.json");
+        manifest << R"({
+          "annotations": [
+            {
+              "file": "handler.go",
+              "symbol": "processRequest",
+              "labels": ["api", "hot-path"],
+              "category": "endpoint",
+              "tags": {"owner": "backend"}
+            }
+          ]
+        })";
+    }
+
+    Config config;
+    config.project.root = dir.string();
+    MasterIndex indexer(config);
+    ASSERT_TRUE(indexer.index_directory(dir.string()));
+
+    SemanticAnnotator sa;
+    EXPECT_EQ(sa.load_project_manifest(indexer), 1);
+    auto api = sa.get_symbols_by_label("api");
+    ASSERT_EQ(api.size(), 1u);
+    EXPECT_EQ(api[0]->name, "processRequest");
+    EXPECT_EQ(api[0]->annotation.category, "endpoint");
+    auto owner = api[0]->annotation.tags.find("owner");
+    ASSERT_NE(owner, api[0]->annotation.tags.end());
+    EXPECT_EQ(owner->second, "backend");
+
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+}
+
+TEST(SemanticAnnotatorTest, LoadsProjectManifestDirectory) {
+    auto dir = lci::test::unique_temp_dir("lci_ann_manifest_dir_");
+    std::filesystem::create_directories(dir / ".lci" / "annotations");
+    {
+        std::ofstream src(dir / "router.go");
+        src << "package main\n\nfunc NewRouter() {}\n";
+    }
+    {
+        std::ofstream manifest(dir / ".lci" / "annotations" / "api.json");
+        manifest << R"([
+          {
+            "file": "router.go",
+            "symbol": "NewRouter",
+            "labels": ["api-entrypoint"],
+            "category": "routing"
+          }
+        ])";
+    }
+
+    Config config;
+    config.project.root = dir.string();
+    MasterIndex indexer(config);
+    ASSERT_TRUE(indexer.index_directory(dir.string()));
+
+    SemanticAnnotator sa;
+    EXPECT_EQ(sa.load_project_manifest(indexer), 1);
+    auto routing = sa.get_symbols_by_category("routing");
+    ASSERT_EQ(routing.size(), 1u);
+    EXPECT_EQ(routing[0]->name, "NewRouter");
+
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+}
+
 TEST(SemanticAnnotatorTest, ExtractsTags) {
     SemanticAnnotator sa;
     Symbol sym;

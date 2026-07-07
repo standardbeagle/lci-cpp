@@ -311,6 +311,32 @@
       "expected_files": [
         "src/DocumentScope.zig"
       ]
+    },
+    {
+      "id": "zls-a1",
+      "difficulty": "annotation",
+      "question": "Use the lci_semantic_annotations tool with label 'semantic-token-entry'. Which symbol is annotated as the semantic token analysis entry point, and what role does the annotation give it?",
+      "gold_answer": "The semantic-token-entry annotation points to writeSemanticTokens in src/features/semantic_tokens.zig. The annotation identifies it as the public entry point that builds semantic token output.",
+      "must_mention": [
+        [
+          "writeSemanticTokens"
+        ],
+        [
+          "semantic_tokens\\.zig"
+        ],
+        [
+          "entry point|entry"
+        ],
+        [
+          "semantic token"
+        ]
+      ],
+      "expected_tools": [
+        "lci_semantic_annotations"
+      ],
+      "expected_files": [
+        "src/features/semantic_tokens.zig"
+      ]
     }
   ]
 }

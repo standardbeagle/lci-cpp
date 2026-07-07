@@ -182,6 +182,12 @@ KindSet parse_symbol_kinds(const std::string& kind_str) {
             result.push_back(SymbolType::Function);
         } else if (low == "type") {
             result.push_back(SymbolType::Type);
+            result.push_back(SymbolType::Struct);
+            result.push_back(SymbolType::Interface);
+            result.push_back(SymbolType::Class);
+            result.push_back(SymbolType::Enum);
+            result.push_back(SymbolType::Record);
+            result.push_back(SymbolType::Trait);
         } else if (low == "struct") {
             result.push_back(SymbolType::Struct);
         } else if (low == "interface" || low == "iface") {

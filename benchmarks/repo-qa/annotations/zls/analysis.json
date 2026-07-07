@@ -1,0 +1,22 @@
+{
+  "annotations": [
+    {
+      "file": "src/features/semantic_tokens.zig",
+      "symbol": "writeSemanticTokens",
+      "labels": ["analysis-entry", "semantic-token-entry"],
+      "category": "semantic-token-analysis",
+      "tags": {
+        "role": "Public entry point that builds semantic token output"
+      }
+    },
+    {
+      "file": "src/DocumentStore.zig",
+      "symbol": "getBuildFile",
+      "labels": ["analysis-entry", "build-file-cache"],
+      "category": "build-file-cache",
+      "tags": {
+        "role": "Thread-safe lookup of a BuildFile by URI"
+      }
+    }
+  ]
+}

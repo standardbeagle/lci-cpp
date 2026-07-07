@@ -869,6 +869,28 @@ TEST_F(HandlersFixture, GetContextByIdFindsSymbol) {
     EXPECT_TRUE(ctx.contains("definition"));
 }
 
+TEST_F(HandlersFixture, GetContextByIdIncludesBoundedSourceExcerpt) {
+    auto oid = first_object_id(*indexer_, "main");
+    if (oid.empty()) GTEST_SKIP() << "corpus produced no 'main' symbol";
+    nlohmann::json params;
+    params["id"] = oid;
+    auto result = handle_get_context(params, *indexer_);
+    ASSERT_FALSE(result.is_error);
+    auto json = nlohmann::json::parse(result.text);
+    ASSERT_EQ(json["count"].get<int>(), 1);
+    const auto& ctx = json["contexts"][0];
+    ASSERT_TRUE(ctx.contains("source_excerpt")) << result.text;
+    const auto& excerpt = ctx["source_excerpt"];
+    EXPECT_GE(excerpt["start_line"].get<int>(), 1);
+    EXPECT_LE(excerpt["lines"].size(), 12u);
+    ASSERT_FALSE(excerpt["lines"].empty());
+    EXPECT_TRUE(excerpt["lines"][0].contains("line"));
+    EXPECT_TRUE(excerpt["lines"][0].contains("text"));
+    ASSERT_TRUE(ctx.contains("source_hint"));
+    EXPECT_NE(ctx["source_hint"].get<std::string>().find("read the file only"),
+              std::string::npos);
+}
+
 // `signature` is emitted when the symbol carries one (Go ObjectContext
 // has `signature,omitempty`).
 TEST_F(HandlersFixture, GetContextByIdEmitsSignatureWhenPresent) {

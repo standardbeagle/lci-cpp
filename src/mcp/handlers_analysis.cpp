@@ -1878,8 +1878,9 @@ void register_analysis_handlers(McpServer& server,
     server.add_tool(
         {"semantic_annotations",
          "🏷️  Query symbols by semantic labels or categories. Supports "
-         "both direct @lci: annotations and propagated labels through "
-         "call graphs. See 'info semantic_annotations'.",
+         "direct @lci: annotations, external annotation manifests, and "
+         "propagated labels through call graphs. See 'info "
+         "semantic_annotations'.",
          {{"label", "string", "Semantic label to search for", ""},
           {"category", "string", "Semantic category", ""},
           {"min_strength", "number", "Minimum label strength", ""},

@@ -238,6 +238,12 @@ TEST_F(ExploreIndexTestFixture, InspectSymbolByName) {
         EXPECT_TRUE(first.contains("file"));
         EXPECT_TRUE(first.contains("line"));
         EXPECT_TRUE(first.contains("is_exported"));
+        ASSERT_TRUE(first.contains("source_excerpt"));
+        EXPECT_LE(first["source_excerpt"]["lines"].size(), 12u);
+        ASSERT_TRUE(first.contains("source_hint"));
+        EXPECT_NE(first["source_hint"].get<std::string>().find(
+                      "read the file only"),
+                  std::string::npos);
     }
 }
 
@@ -311,6 +317,23 @@ TEST_F(ExploreIndexTestFixture, BrowseFileWithKindFilter) {
         auto type = sym["type"].get<std::string>();
         EXPECT_TRUE(type == "function" || type == "method");
     }
+}
+
+TEST_F(ExploreIndexTestFixture, BrowseFileKindTypeIncludesStructs) {
+    nlohmann::json params;
+    params["file"] = "main.go";
+    params["kind"] = "type";
+    params["exported"] = true;
+    auto result = handle_browse_file(params, *indexer_);
+    EXPECT_FALSE(result.is_error);
+    auto j = nlohmann::json::parse(result.text);
+    ASSERT_EQ(j["total"].get<int>(), 1);
+    ASSERT_EQ(j["symbols"].size(), 1);
+    EXPECT_EQ(j["symbols"][0]["name"].get<std::string>(), "Server");
+    EXPECT_EQ(j["symbols"][0]["type"].get<std::string>(), "struct");
+    ASSERT_TRUE(j.contains("hint"));
+    EXPECT_NE(j["hint"].get<std::string>().find("answer from this response"),
+              std::string::npos);
 }
 
 TEST_F(ExploreIndexTestFixture, BrowseFileWithStats) {

@@ -330,13 +330,10 @@
       "id": "chi-t3",
       "difficulty": "micro",
       "question": "Use the lci_browse_file tool on the file 'chain.go' and list the exported types defined in that file.",
-      "gold_answer": "chain.go defines the exported types ChainHandler and Middlewares (plus the exported functions Chain and Handler/HandlerFunc constructors on Middlewares).",
+      "gold_answer": "chain.go defines one exported type: ChainHandler, a struct declared around line 24. Middlewares is referenced as a field type but is defined elsewhere, not in chain.go.",
       "must_mention": [
         [
           "ChainHandler"
-        ],
-        [
-          "Middlewares"
         ]
       ],
       "expected_tools": [
@@ -350,13 +347,13 @@
       "id": "chi-t4",
       "difficulty": "micro",
       "question": "Use the lci_find_files tool with pattern '*.md' and report how many markdown files the repository contains and name two of them.",
-      "gold_answer": "There are 6 markdown files, e.g. README.md, CHANGELOG.md, CONTRIBUTING.md, SECURITY.md, routes.md.",
+      "gold_answer": "There are 7 markdown files in the LCI benchmark workspace: AGENTS.md plus the corpus files such as README.md, CHANGELOG.md, CONTRIBUTING.md, SECURITY.md, and routes.md.",
       "must_mention": [
         [
-          "\\b6\\b"
+          "\\b7\\b"
         ],
         [
-          "README\\.md|CHANGELOG\\.md|CONTRIBUTING\\.md|SECURITY\\.md|routes\\.md"
+          "AGENTS\\.md|README\\.md|CHANGELOG\\.md|CONTRIBUTING\\.md|SECURITY\\.md|routes\\.md"
         ]
       ],
       "expected_tools": [

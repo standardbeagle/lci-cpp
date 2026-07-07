@@ -57,6 +57,13 @@ int run_mcp(const GlobalFlags& flags) {
     // run before GraphPropagator seeding so the propagator can pick up
     // direct labels as propagation roots.
     annotator.populate_from_index(runtime_index);
+    {
+        std::string manifest_error;
+        annotator.load_project_manifest(runtime_index, &manifest_error);
+        if (!manifest_error.empty()) {
+            std::cerr << "Warning: " << manifest_error << "\n";
+        }
+    }
     GraphPropagator propagator(&runtime_index.ref_tracker());
     SideEffectAnalyzer side_effect_analyzer("generic");
     // Populate per-function purity from the in-process index. Conservative
@@ -101,9 +108,9 @@ int run_mcp(const GlobalFlags& flags) {
         // propagator with each of its labels at its symbol_id.
         // Iterate the label index in deterministic order (sort label keys).
         // Cheap pass — annotations are sparse vs symbols.
-        auto rt_snap = runtime_index.ref_tracker().pin();
+        auto ann_rt_snap = runtime_index.ref_tracker().pin();
         for (FileID fid : runtime_index.get_all_file_ids()) {
-            for (const auto* es : rt_snap->get_file_enhanced_symbols(fid)) {
+            for (const auto* es : ann_rt_snap->get_file_enhanced_symbols(fid)) {
                 if (!es) continue;
                 const auto* ann = annotator.get_annotation(fid, es->id);
                 if (!ann) continue;

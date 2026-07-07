@@ -3,13 +3,17 @@
 #include <lci/core/portable.h>
 #include <lci/core/reference_tracker.h>
 #include <lci/indexing/master_index.h>
+#include <lci/search/search_engine.h>
 #include <lci/symbol.h>
 
 #include <algorithm>
 #include <charconv>
+#include <filesystem>
+#include <fstream>
 #include <memory>
 #include <sstream>
 
+#include <nlohmann/json.hpp>
 #include <re2/re2.h>
 
 namespace lci {
@@ -24,6 +28,50 @@ std::unique_ptr<RE2> mk(const char* pat) {
     RE2::Options opts(RE2::Quiet);
     opts.set_log_errors(false);
     return std::make_unique<RE2>(pat, opts);
+}
+
+bool path_matches_manifest_target(std::string_view full_path,
+                                  std::string_view rel_path,
+                                  std::string_view target) {
+    if (target.empty()) return true;
+    if (full_path == target || rel_path == target) return true;
+    if (full_path.size() > target.size() &&
+        full_path.substr(full_path.size() - target.size()) == target) {
+        return true;
+    }
+    if (rel_path.size() > target.size() &&
+        rel_path.substr(rel_path.size() - target.size()) == target) {
+        return true;
+    }
+    return false;
+}
+
+std::vector<std::string> json_string_array(const nlohmann::json& j) {
+    std::vector<std::string> out;
+    if (!j.is_array()) return out;
+    out.reserve(j.size());
+    for (const auto& item : j) {
+        if (item.is_string()) out.push_back(item.get<std::string>());
+    }
+    return out;
+}
+
+absl::flat_hash_map<std::string, std::string> json_string_map(
+    const nlohmann::json& j) {
+    absl::flat_hash_map<std::string, std::string> out;
+    if (!j.is_object()) return out;
+    for (auto it = j.begin(); it != j.end(); ++it) {
+        if (it.value().is_string()) {
+            out[it.key()] = it.value().get<std::string>();
+        } else if (it.value().is_number_integer()) {
+            out[it.key()] = std::to_string(it.value().get<int64_t>());
+        } else if (it.value().is_number_float()) {
+            out[it.key()] = std::to_string(it.value().get<double>());
+        } else if (it.value().is_boolean()) {
+            out[it.key()] = it.value().get<bool>() ? "true" : "false";
+        }
+    }
+    return out;
 }
 }  // namespace
 
@@ -94,6 +142,28 @@ void SemanticAnnotator::extract_annotations(
     }
 }
 
+void SemanticAnnotator::add_annotation(FileID file_id, SymbolID symbol_id,
+                                       const std::string& symbol_name,
+                                       int line,
+                                       const std::string& file_path,
+                                       SemanticAnnotation annotation) {
+    annotation.file_id = file_id;
+    annotation.symbol_id = symbol_id;
+    if (annotation.start_line == 0) annotation.start_line = line;
+    if (annotation.end_line == 0) annotation.end_line = line;
+
+    AnnotatedSymbol entry{
+        file_id, symbol_id, symbol_name, line, annotation, file_path};
+
+    for (const auto& label : annotation.labels) {
+        label_index_[label].push_back(entry);
+    }
+    if (!annotation.category.empty()) {
+        category_index_[annotation.category].push_back(entry);
+    }
+    annotations_[file_id][symbol_id] = std::move(annotation);
+}
+
 const SemanticAnnotation* SemanticAnnotator::get_annotation(
     FileID file_id, SymbolID symbol_id) const {
     auto file_it = annotations_.find(file_id);
@@ -161,6 +231,163 @@ int SemanticAnnotator::populate_from_index(const MasterIndex& index) {
         ++processed;
     }
     return processed;
+}
+
+int SemanticAnnotator::load_manifest(const MasterIndex& index,
+                                     const std::string& path,
+                                     std::string* error) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    if (!fs::exists(path, ec)) return 0;
+
+    if (fs::is_directory(path, ec)) {
+        std::vector<fs::path> files;
+        for (const auto& entry : fs::directory_iterator(path, ec)) {
+            if (ec) break;
+            if (!entry.is_regular_file()) continue;
+            if (entry.path().extension() == ".json") files.push_back(entry.path());
+        }
+        std::sort(files.begin(), files.end());
+        int total = 0;
+        for (const auto& file : files) {
+            total += load_manifest(index, file.string(), error);
+        }
+        return total;
+    }
+
+    std::ifstream in(path);
+    if (!in) {
+        if (error) *error = "failed to open annotation manifest: " + path;
+        return 0;
+    }
+
+    nlohmann::json root;
+    try {
+        in >> root;
+    } catch (const std::exception& e) {
+        if (error) *error = "failed to parse annotation manifest " + path +
+                            ": " + e.what();
+        return 0;
+    }
+
+    const nlohmann::json* entries = nullptr;
+    if (root.is_array()) {
+        entries = &root;
+    } else if (root.contains("annotations") && root["annotations"].is_array()) {
+        entries = &root["annotations"];
+    }
+    if (entries == nullptr) {
+        if (error) {
+            *error = "annotation manifest must be an array or contain "
+                     "'annotations': " + path;
+        }
+        return 0;
+    }
+
+    const std::string& project_root = index.config().project.root;
+    auto rt_snap = index.ref_tracker().pin();
+    int resolved = 0;
+
+    for (const auto& item : *entries) {
+        if (!item.is_object()) continue;
+        std::string file = item.value("file", "");
+        if (file.empty()) file = item.value("path", "");
+        std::string symbol = item.value("symbol", "");
+        if (symbol.empty()) symbol = item.value("name", "");
+        int line = item.value("line", 0);
+
+        const EnhancedSymbol* match = nullptr;
+        std::string match_path;
+        for (FileID fid : index.get_all_file_ids()) {
+            std::string full_path = index.get_file_path(fid);
+            std::string rel_path(relative_to_root(full_path, project_root));
+            if (!path_matches_manifest_target(full_path, rel_path, file)) {
+                continue;
+            }
+            for (const auto* es : rt_snap->get_file_enhanced_symbols(fid)) {
+                if (!es) continue;
+                bool symbol_ok = symbol.empty() ||
+                                 es->symbol.name == symbol ||
+                                 (!es->receiver_type.empty() &&
+                                  es->receiver_type + "." + es->symbol.name ==
+                                      symbol);
+                bool line_ok = line <= 0 || es->symbol.line == line ||
+                               (es->symbol.line <= line &&
+                                es->symbol.end_line >= line);
+                if (symbol_ok && line_ok) {
+                    match = es;
+                    match_path = full_path;
+                    break;
+                }
+            }
+            if (match) break;
+        }
+        if (!match) continue;
+
+        SemanticAnnotation ann;
+        ann.labels = json_string_array(item.value("labels", nlohmann::json::array()));
+        if (ann.labels.empty()) {
+            ann.labels = json_string_array(item.value("label", nlohmann::json::array()));
+        }
+        ann.category = item.value("category", "");
+        ann.tags = json_string_map(item.value("tags", nlohmann::json::object()));
+        ann.excludes = json_string_array(item.value("exclude", nlohmann::json::array()));
+        if (ann.excludes.empty()) {
+            ann.excludes = json_string_array(item.value("excludes", nlohmann::json::array()));
+        }
+        ann.provides = json_string_array(item.value("provides", nlohmann::json::array()));
+        ann.metrics = json_string_map(item.value("metrics", nlohmann::json::object()));
+        ann.attributes = json_string_map(item.value("attributes", nlohmann::json::object()));
+        ann.raw_text = item.dump();
+        ann.confidence = item.value("confidence", 1.0);
+        ann.start_line = line > 0 ? line : match->symbol.line;
+        ann.end_line = ann.start_line;
+        if (item.contains("call_frequency") && item["call_frequency"].is_string()) {
+            ann.call_frequency = item["call_frequency"].get<std::string>();
+            ann.has_memory_hints = true;
+        }
+        if (item.contains("loop_bounded") && item["loop_bounded"].is_number_integer()) {
+            ann.loop_bounded = item["loop_bounded"].get<int>();
+            ann.has_memory_hints = true;
+        }
+        if (item.contains("loop_weight") && item["loop_weight"].is_number()) {
+            ann.loop_weight = item["loop_weight"].get<double>();
+            ann.has_memory_hints = true;
+        }
+        if (item.contains("propagation_weight") &&
+            item["propagation_weight"].is_number()) {
+            ann.propagation_weight =
+                std::clamp(item["propagation_weight"].get<double>(), 0.0, 1.0);
+            ann.has_memory_hints = true;
+        }
+
+        bool has_content = !ann.labels.empty() || !ann.category.empty() ||
+                           !ann.tags.empty() || !ann.metrics.empty() ||
+                           !ann.attributes.empty() || !ann.excludes.empty() ||
+                           !ann.provides.empty() || ann.has_memory_hints;
+        if (!has_content) continue;
+
+        add_annotation(match->symbol.file_id, match->id, match->symbol.name,
+                       match->symbol.line, match_path, std::move(ann));
+        ++resolved;
+    }
+    return resolved;
+}
+
+int SemanticAnnotator::load_project_manifest(const MasterIndex& index,
+                                             std::string* error) {
+    namespace fs = std::filesystem;
+    fs::path root(index.config().project.root);
+    int total = 0;
+    total += load_manifest(index, (root / ".lci" / "annotations").string(),
+                           error);
+    total += load_manifest(index, (root / ".lci" / "annotations.json").string(),
+                           error);
+    total += load_manifest(index, (root / ".lci-annotations.json").string(),
+                           error);
+    total += load_manifest(index, (root / "lci-annotations.json").string(),
+                           error);
+    return total;
 }
 
 bool SemanticAnnotator::is_excluded(FileID file_id, SymbolID symbol_id,

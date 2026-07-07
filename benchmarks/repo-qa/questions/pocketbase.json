@@ -314,6 +314,172 @@
       "expected_files": [
         "apis/middlewares_cors.go"
       ]
+    },
+    {
+      "id": "pb-d4",
+      "difficulty": "discovery",
+      "question": "This backend's entire handler, middleware, form, and plugin surface programs against a single large abstraction (roughly 100 methods) rather than a concrete type, and there is exactly one production implementor. Name that interface, its file, and the concrete struct that satisfies it.",
+      "gold_answer": "The core.App interface in core/app.go is the single abstraction the whole backend depends on (its ~100 methods include DB() dbx.Builder, Save, OnRecordCreate, etc.). Its sole production implementor is the BaseApp struct, asserted with `var _ App = (*BaseApp)(nil)` in core/base.go. ~158 non-test references to core.App across the tree (e.g. NewRouter(app core.App), Serve(app core.App, ...)).",
+      "must_mention": [
+        [
+          "\\bApp\\b"
+        ],
+        [
+          "interface"
+        ],
+        [
+          "BaseApp"
+        ],
+        [
+          "core/app\\.go|app\\.go"
+        ]
+      ],
+      "expected_files": [
+        "core/app.go",
+        "core/base.go"
+      ]
+    },
+    {
+      "id": "pb-d5",
+      "difficulty": "discovery",
+      "question": "Every OnXxx lifecycle event in this backend (record create/update, bootstrap, serve, realtime subscribe, ...) ultimately dispatches through one generic method that snapshots its handler slice, builds a reverse-order chain, and invokes it. Name that method, the generic type it hangs off, and its file.",
+      "gold_answer": "Hook[T].Trigger in tools/hook/hook.go (line 153). It copies h.handlers plus any one-off funcs, then iterates from the end building nested nextFunc closures (reverse order) and finally calls event.Next() to run the chain front-to-back. TaggedHook[T].Trigger (tools/hook/tagged.go) is the tag-filtering wrapper. ~97 non-test .Trigger( call sites (OnRecordCreate().Trigger, OnRealtimeSubscribeRequest().Trigger, ...).",
+      "must_mention": [
+        [
+          "Trigger"
+        ],
+        [
+          "Hook"
+        ],
+        [
+          "tools/hook/hook\\.go|hook\\.go"
+        ],
+        [
+          "event\\.Next|Next\\(\\)|nextFunc|reverse"
+        ]
+      ],
+      "expected_files": [
+        "tools/hook/hook.go"
+      ]
+    },
+    {
+      "id": "pb-d6",
+      "difficulty": "discovery",
+      "question": "All of this backend's HTTP API routes are wired in one constructor: it builds the router, opens a single '/api' group, and calls a sequence of bindXxxApi installers (settings, collections, record CRUD, auth, logs, backup, cron, file, batch, realtime, health). Name that function and its file.",
+      "gold_answer": "NewRouter in apis/base.go (line 19) constructs router.Router[*core.RequestEvent], creates `apiGroup := pbRouter.Group(\"/api\")`, and calls the 11 binders bindSettingsApi, bindCollectionApi, bindRecordCrudApi, bindRecordAuthApi, bindLogsApi, bindBackupApi, bindCronApi, bindFileApi, bindBatchApi, bindRealtimeApi, bindHealthApi. It is called once from apis/serve.go.",
+      "must_mention": [
+        [
+          "NewRouter"
+        ],
+        [
+          "apis/base\\.go|base\\.go"
+        ],
+        [
+          "/api|apiGroup"
+        ],
+        [
+          "bind\\w*Api|bind\\W*Api|bindRecordCrudApi|bindCollectionApi|installer|binder"
+        ]
+      ],
+      "expected_files": [
+        "apis/base.go"
+      ]
+    },
+    {
+      "id": "pb-d7",
+      "difficulty": "discovery",
+      "question": "Persistence in this backend flows through one accessor that hands back a builder which silently routes read queries (SELECT) to one connection and writes (Model/insert) to another, to keep SQLite from blocking. Name the accessor method, the wrapper type it returns, and the two underlying builders it dispatches between.",
+      "gold_answer": "BaseApp.DB() (core/base.go, line 490) returns `&dualDBBuilder{concurrentDB, nonconcurrentDB}`. The dualDBBuilder (core/db_builder.go) sends Select(...) to concurrentDB and Model(...) (writes) to nonconcurrentDB; callers can also reach ConcurrentDB()/NonconcurrentDB() directly. ~58 non-test .DB() call sites route through it.",
+      "must_mention": [
+        [
+          "\\bDB\\(\\)|BaseApp\\.DB|\\bDB\\b"
+        ],
+        [
+          "dualDBBuilder"
+        ],
+        [
+          "concurrentDB|ConcurrentDB"
+        ],
+        [
+          "nonconcurrentDB|NonconcurrentDB"
+        ]
+      ],
+      "expected_files": [
+        "core/base.go",
+        "core/db_builder.go"
+      ]
+    },
+    {
+      "id": "pb-d8",
+      "difficulty": "discovery",
+      "question": "A single function boots this backend's HTTP server for every production launch: it runs all pending migrations, constructs the router, binds CORS and static file serving, then starts listening. Name it, its file, and the config struct it accepts.",
+      "gold_answer": "Serve(app core.App, config ServeConfig) in apis/serve.go (line 61). It calls app.RunAllMigrations(), builds the router with NewRouter(app), then pbRouter.Bind(CORS(...)) plus gzip/static wiring before listening. ServeConfig (apis/serve.go, line 28) carries AllowedOrigins, HttpAddr, etc.",
+      "must_mention": [
+        [
+          "Serve"
+        ],
+        [
+          "apis/serve\\.go|serve\\.go"
+        ],
+        [
+          "ServeConfig"
+        ],
+        [
+          "RunAllMigrations|migration"
+        ]
+      ],
+      "expected_files": [
+        "apis/serve.go"
+      ]
+    },
+    {
+      "id": "pb-d9",
+      "difficulty": "discovery",
+      "question": "Every schema field type in this backend (text, number, relation, file, json, geoPoint, ...) implements one interface and is constructed through one global factory map keyed by type name. Name that interface, the registry map, and their file.",
+      "gold_answer": "The Field interface (core/field.go, line 70) is implemented by all ~14 concrete field types (TextField, NumberField, RelationField, FileField, JSONField, GeoPointField, ...). They register into the global `var Fields = map[string]FieldFactoryFunc{}` (core/field.go, line 67), whose values are FieldFactoryFunc constructors keyed by Type() string.",
+      "must_mention": [
+        [
+          "\\bField\\b"
+        ],
+        [
+          "\\bFields\\b|FieldFactoryFunc"
+        ],
+        [
+          "core/field\\.go|field\\.go"
+        ],
+        [
+          "RelationField|TextField|FileField|GeoPointField|JSONField"
+        ]
+      ],
+      "expected_files": [
+        "core/field.go"
+      ]
+    },
+    {
+      "id": "pb-a1",
+      "difficulty": "annotation",
+      "question": "Use the lci_semantic_annotations tool with category 'api-routing'. Which function is annotated as the API route installer, what route group does the annotation name, and where is it defined?",
+      "gold_answer": "The api-routing annotation points to NewRouter in apis/base.go. Its route_group tag is `/api`, and the annotation describes NewRouter as installing the backend API route groups.",
+      "must_mention": [
+        [
+          "NewRouter"
+        ],
+        [
+          "apis/base\\.go|base\\.go"
+        ],
+        [
+          "/api"
+        ],
+        [
+          "route|routing|installer"
+        ]
+      ],
+      "expected_tools": [
+        "lci_semantic_annotations"
+      ],
+      "expected_files": [
+        "apis/base.go"
+      ]
     }
   ]
 }

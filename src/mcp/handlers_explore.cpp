@@ -90,9 +90,15 @@ std::vector<SymbolType> parse_symbol_kinds(const std::string& kind_str) {
         auto low = to_lower(k);
         if (low == "func" || low == "fn" || low == "function")
             kinds.push_back(SymbolType::Function);
-        else if (low == "type")
+        else if (low == "type") {
             kinds.push_back(SymbolType::Type);
-        else if (low == "struct")
+            kinds.push_back(SymbolType::Struct);
+            kinds.push_back(SymbolType::Interface);
+            kinds.push_back(SymbolType::Class);
+            kinds.push_back(SymbolType::Enum);
+            kinds.push_back(SymbolType::Record);
+            kinds.push_back(SymbolType::Trait);
+        } else if (low == "struct")
             kinds.push_back(SymbolType::Struct);
         else if (low == "interface" || low == "iface")
             kinds.push_back(SymbolType::Interface);
@@ -207,6 +213,41 @@ struct SymbolWithFile {
     std::string file_path;
 };
 
+void attach_source_excerpt(nlohmann::json& j, const EnhancedSymbol& sym,
+                           MasterIndex& indexer) {
+    static constexpr int kMaxExcerptLines = 12;
+
+    const int start_line = std::max(1, sym.symbol.line);
+    int end_line = sym.symbol.end_line > 0 ? sym.symbol.end_line : start_line;
+    if (end_line < start_line) end_line = start_line;
+    const int capped_end =
+        std::min(end_line, start_line + kMaxExcerptLines - 1);
+
+    auto fc = indexer.file_content_store().get_file(sym.symbol.file_id);
+    if (!fc) return;
+
+    nlohmann::json lines = nlohmann::json::array();
+    lines.get_ref<nlohmann::json::array_t&>().reserve(
+        static_cast<size_t>(capped_end - start_line + 1));
+    for (int line = start_line; line <= capped_end; ++line) {
+        auto ref = indexer.file_content_store().get_line(sym.symbol.file_id,
+                                                         line - 1);
+        auto text = indexer.file_content_store().get_string(ref);
+        lines.push_back({{"line", line}, {"text", std::string(text)}});
+    }
+    if (lines.empty()) return;
+
+    j["source_excerpt"] =
+        nlohmann::json{{"start_line", start_line},
+                       {"end_line", capped_end},
+                       {"truncated", capped_end < end_line},
+                       {"lines", std::move(lines)}};
+    j["source_hint"] =
+        "source_excerpt is extracted from the indexed source. Use it for "
+        "nearby code, initializer, and short body questions; read the file "
+        "only if you need lines outside this excerpt.";
+}
+
 /// Builds a JSON object for a symbol in explore responses.
 nlohmann::json build_explore_symbol(const EnhancedSymbol& sym,
                                     const std::string& file_path,
@@ -278,8 +319,9 @@ nlohmann::json build_explore_symbol(const EnhancedSymbol& sym,
 nlohmann::json build_inspect_result(const EnhancedSymbol& sym,
                                     const std::string& file_path,
                                     const std::vector<std::string>& includes,
-                                    ReferenceTracker& tracker,
+                                    MasterIndex& indexer,
                                     int max_depth) {
+    auto& tracker = indexer.ref_tracker();
     nlohmann::json j;
     j["name"] = sym.symbol.name;
     j["object_id"] = encode_symbol_id(sym.id);
@@ -358,6 +400,8 @@ nlohmann::json build_inspect_result(const EnhancedSymbol& sym,
     if (includes_has(includes, "annotations") && !sym.annotations.empty()) {
         j["annotations"] = sym.annotations;
     }
+
+    attach_source_excerpt(j, sym, indexer);
 
     return j;
 }
@@ -670,7 +714,7 @@ ToolResult handle_inspect_symbol(const nlohmann::json& params,
         auto fp = indexer.get_file_path(sym->symbol.file_id);
         std::string rel(relative_to_root(fp, indexer.config().project.root));
         symbols_json.push_back(
-            build_inspect_result(*sym, rel, includes, tracker, max_depth));
+            build_inspect_result(*sym, rel, includes, indexer, max_depth));
     }
 
     nlohmann::json response;
@@ -800,6 +844,12 @@ ToolResult handle_browse_file(const nlohmann::json& params,
     response["file"]["language"] = language_from_path(target_path);
     response["symbols"] = std::move(symbols_json);
     response["total"] = total;
+    if (total > 0) {
+        response["hint"] =
+            "This outline is extracted from source. For symbol names, types, "
+            "signatures, and line numbers, answer from this response; read "
+            "the file only if you need code body lines.";
+    }
 
     // Optional stats
     if (params.value("show_stats", false)) {
@@ -856,8 +906,9 @@ void register_explore_handlers(McpServer& server, MasterIndex* indexer) {
          "📋 Enumerate and filter symbols in the index. Like 'ls' for "
          "code: list all functions, types, methods with filtering by kind, "
          "file, complexity, params, exported status, and more. Use to "
-         "discover what's in the codebase without searching. See 'info "
-         "list_symbols'.",
+         "discover what's in the codebase without searching. Returned "
+         "signatures, files, line numbers, ids, and refs are source evidence; "
+         "do not read files just to confirm them. See 'info list_symbols'.",
          {{"kind", "string",
            "REQUIRED: Symbol kinds (comma-separated): func, type, struct, "
            "interface, method, class, enum, variable, constant, all. "
@@ -900,7 +951,9 @@ void register_explore_handlers(McpServer& server, MasterIndex* indexer) {
         {"inspect_symbol",
          "🔎 Deep inspect a single symbol. Given a name or object ID, "
          "returns all metadata: signature, doc, complexity, callers, "
-         "callees, type hierarchy, scope chain, flags. See 'info "
+         "callees, type hierarchy, scope chain, flags, and a bounded "
+         "source_excerpt. Treat this output as the source-backed answer; read "
+         "the file only if you need lines outside source_excerpt. See 'info "
          "inspect_symbol'.",
          {{"name", "string",
            "Symbol name (exact match; may return multiple if ambiguous)",
@@ -928,7 +981,9 @@ void register_explore_handlers(McpServer& server, MasterIndex* indexer) {
         {"browse_file",
          "📂 Browse all symbols in a file - the outline view. Shows the "
          "complete symbol table for a specific file with filtering, "
-         "sorting, optional imports and stats. See 'info browse_file'.",
+         "sorting, optional imports and stats. The outline is source-derived; "
+         "do not open the file merely to verify symbol names, signatures, or "
+         "line numbers already shown. See 'info browse_file'.",
          {{"file", "string",
            "File path (exact, suffix, or glob match)", ""},
           {"path", "string", "Alias for 'file'", ""},

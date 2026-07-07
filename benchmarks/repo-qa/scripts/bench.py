@@ -41,6 +41,7 @@ MCP tools over grep/find/cat for code questions:
 - `lci_list_symbols` / `lci_inspect_symbol` — symbol lookup and details
 - `lci_browse_file` — outline of a file's symbols
 - `lci_find_files` — locate files by name/pattern
+- `lci_semantic_annotations` — query project/domain annotations when present
 
 Fall back to bash/read only when the LCI tools cannot answer.
 """
@@ -60,11 +61,22 @@ def workspace_config(variant, lci_bin):
         "mcp": {"slop-mcp": {"enabled": False}},
         "permission": {"edit": "deny", "webfetch": "deny"},
     }
-    if variant in ("lci", "lci-slim"):
+    if variant in ("lci", "lci-slim", "lci-ann"):
         cfg["mcp"]["lci"] = {"type": "local", "command": [lci_bin, "mcp"], "enabled": True}
     if variant == "lci-slim":
         cfg["tools"] = {f"lci_{name}": False for name in SLIM_DISABLED}
     return cfg
+
+
+def install_annotation_overlay(repo, ws):
+    src = os.path.join(bl.BENCH_ROOT, "annotations", repo)
+    if not os.path.isdir(src):
+        return
+    dst = os.path.join(ws, ".lci", "annotations")
+    if os.path.exists(dst):
+        shutil.rmtree(dst)
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    shutil.copytree(src, dst)
 
 
 def ensure_workspace(cfg, repo, variant):
@@ -81,7 +93,9 @@ def ensure_workspace(cfg, repo, variant):
     with open(os.path.join(ws, "opencode.json"), "w") as f:
         json.dump(workspace_config(variant, cfg.defaults["lci-bin"]), f, indent=2)
     agents = os.path.join(ws, "AGENTS.md")
-    if variant in ("lci", "lci-slim"):
+    if variant == "lci-ann":
+        install_annotation_overlay(repo, ws)
+    if variant in ("lci", "lci-slim", "lci-ann"):
         with open(agents, "w") as f:
             f.write(AGENTS_MD_LCI)
     elif os.path.exists(agents):
@@ -196,6 +210,7 @@ def main():
     r.add_argument("--models")
     r.add_argument("--variants", default="base,lci")
     r.add_argument("--difficulties")
+    r.add_argument("--questions", help="comma-separated question ids to restrict to (smoke slices)")
     r.add_argument("--reps", type=int)
     r.add_argument("--out", required=True, help="results directory (relative to repo-qa/)")
     r.add_argument("--concurrency", type=int)
@@ -210,6 +225,7 @@ def main():
     repos = args.repos.split(",") if args.repos else t["repos"]
     models = args.models.split(",") if args.models else t["models"]
     difficulties = args.difficulties.split(",") if args.difficulties else t["difficulties"]
+    only_qids = set(args.questions.split(",")) if args.questions else None
     reps = args.reps or t["reps"]
     variants = args.variants.split(",")
     if not repos or not models:
@@ -224,7 +240,9 @@ def main():
 
     jobs = []
     for repo in repos:
-        questions = [q for q in bl.load_questions(repo) if q["difficulty"] in difficulties]
+        questions = [q for q in bl.load_questions(repo)
+                     if q["difficulty"] in difficulties
+                     and (only_qids is None or q["id"] in only_qids)]
         for variant in variants:
             ws = ensure_workspace(cfg, repo, variant)
             for model in models:
@@ -235,6 +253,29 @@ def main():
                         if os.path.exists(path):
                             continue
                         jobs.append((repo, variant, ws, model, q, rep, path))
+
+    if not jobs:
+        ap.error(
+            "no runs to execute; check repo/model/difficulty/question filters "
+            "and whether the output directory already contains all results"
+        )
+
+    # Schedule biggest-repo lci cells first, while provider quota is fresh.
+    # Every tier-3 DNF was pocketbase-lci (the largest repo) hitting the go-plan
+    # throttle at the session tail. Ordering the queue by repo size descending,
+    # lci before base, moves that expensive grid to the front so the throttle
+    # (which arrives late) lands on cheap, already-completed cells instead of
+    # the one costly grid. Deterministic: ties break by model order, then
+    # question id, then rep.
+    repo_loc = {r: int(cfg.repos[r].get("loc", 0) or 0) for r in repos}
+    variant_rank = {"lci-ann": 0, "lci": 1, "lci-slim": 2, "base": 3}
+    model_pos = {m: i for i, m in enumerate(models)}
+    jobs.sort(key=lambda j: (
+        -repo_loc[j[0]],               # j[0]=repo   — biggest repo first
+        variant_rank.get(j[1], 9),     # j[1]=variant — lci before base
+        model_pos[j[3]],               # j[3]=model  — stable per-model grouping
+        j[4]["id"], j[5],              # j[4]=question, j[5]=rep
+    ))
 
     print(f"{len(jobs)} runs to execute (concurrency={concurrency})")
 
