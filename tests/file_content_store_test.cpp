@@ -354,8 +354,10 @@ TEST(FileContentStoreTest, ConcurrentReadDuringWrite) {
 // ---------------------------------------------------------------------------
 TEST(MappedFileTest, OpenNonExistent) {
     MappedFile mf;
+    EXPECT_FALSE(mf.is_open());
     std::string error;
     EXPECT_FALSE(mf.open("/nonexistent/path/to/file", &error));
+    EXPECT_FALSE(mf.is_open());
     EXPECT_FALSE(error.empty());
 }
 
@@ -379,6 +381,7 @@ TEST(MappedFileTest, OpenAndReadFile) {
 
     mf.close();
     EXPECT_EQ(mf.size(), 0u);
+    EXPECT_FALSE(mf.is_open());
 
     std::remove(path.c_str());
 }
@@ -393,8 +396,12 @@ TEST(MappedFileTest, EmptyFile) {
 
     MappedFile mf;
     ASSERT_TRUE(mf.open(path));
+    EXPECT_TRUE(mf.is_open());
     EXPECT_EQ(mf.size(), 0u);
     EXPECT_TRUE(mf.view().empty());
+
+    mf.close();
+    EXPECT_FALSE(mf.is_open());
 
     mf.close();
     std::remove(path.c_str());

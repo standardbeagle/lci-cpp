@@ -121,7 +121,7 @@ std::vector<SearchResult> MasterIndex::execute_search(
     if (options.declaration_only) {
         auto symbols = refs_snap->find_symbols_by_name(pattern);
         std::sort(symbols.begin(), symbols.end(),
-                  [](const EnhancedSymbol* lhs, const EnhancedSymbol* rhs) {
+                  [](const auto& lhs, const auto& rhs) {
                       if (lhs->symbol.file_id != rhs->symbol.file_id) {
                           return lhs->symbol.file_id < rhs->symbol.file_id;
                       }
@@ -136,7 +136,7 @@ std::vector<SearchResult> MasterIndex::execute_search(
 
         std::vector<SearchResult> results;
         results.reserve(symbols.size());
-        for (const auto* sym : symbols) {
+        for (const auto& sym : symbols) {
             if (static_cast<int>(results.size()) >= options.max_results) break;
 
             SearchContext ctx =
@@ -173,7 +173,7 @@ std::vector<SearchResult> MasterIndex::execute_search(
     if (options.usage_only) {
         auto symbols = refs_snap->find_symbols_by_name(pattern);
         std::sort(symbols.begin(), symbols.end(),
-                  [](const EnhancedSymbol* lhs, const EnhancedSymbol* rhs) {
+                  [](const auto& lhs, const auto& rhs) {
                       if (lhs->symbol.file_id != rhs->symbol.file_id) {
                           return lhs->symbol.file_id < rhs->symbol.file_id;
                       }
@@ -187,7 +187,7 @@ std::vector<SearchResult> MasterIndex::execute_search(
                   });
 
         std::vector<SearchResult> results;
-        for (const auto* sym : symbols) {
+        for (const auto& sym : symbols) {
             auto refs = refs_snap->get_symbol_references(sym->id, "incoming");
             std::sort(refs.begin(), refs.end(),
                       [](const auto& lhs, const auto& rhs) {

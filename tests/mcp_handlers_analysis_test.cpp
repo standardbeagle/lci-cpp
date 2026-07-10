@@ -814,8 +814,9 @@ TEST(CodeInsightLabelCoherence, ClustersGetDomainFromPropagatedLabels) {
     // Seed every function with the domain label "core", then propagate, so each
     // detected community is fully coherent on it.
     GraphPropagator propagator(&indexer.ref_tracker());
+    auto snapshot = indexer.ref_tracker().pin();
     for (const char* name : {"a1", "a2", "b1", "b2"}) {
-        for (const auto* es : indexer.ref_tracker().find_symbols_by_name(name))
+        for (const auto& es : snapshot->find_symbols_by_name(name))
             propagator.seed_label(es->id, "core", 1.0);
     }
     propagator.propagate();

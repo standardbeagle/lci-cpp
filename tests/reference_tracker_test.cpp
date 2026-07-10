@@ -33,7 +33,7 @@ Symbol make_sym(const std::string& name, SymbolType type, FileID file_id,
 TEST(ReferenceTrackerTest, EmptyTracker) {
     ReferenceTracker rt;
     EXPECT_EQ(rt.get_reference_stats().total_symbols, 0);
-    EXPECT_EQ(rt.get_enhanced_symbol(1), nullptr);
+    EXPECT_EQ(rt.pin()->get_enhanced_symbol(1), nullptr);
     EXPECT_TRUE(rt.get_all_references().empty());
     EXPECT_FALSE(rt.has_relationships());
 }
@@ -110,11 +110,27 @@ TEST(ReferenceTrackerTest, FindSymbolsByName) {
     rt.process_file(1, "a.go", syms1, {}, {});
     rt.process_file(2, "b.go", syms2, {}, {});
 
-    auto found = rt.find_symbols_by_name("Foo");
+    auto snapshot = rt.pin();
+    auto found = snapshot->find_symbols_by_name("Foo");
     EXPECT_EQ(found.size(), 2u);
 
-    auto not_found = rt.find_symbols_by_name("Bar");
+    auto not_found = snapshot->find_symbols_by_name("Bar");
     EXPECT_TRUE(not_found.empty());
+}
+
+TEST(ReferenceTrackerTest, SymbolHandleRetainsTemporaryPinnedSnapshot) {
+    ReferenceTracker rt;
+    std::vector<Symbol> symbols = {
+        make_sym("Stable", SymbolType::Function, 1, 1, 3),
+    };
+    rt.process_file(1, "stable.go", symbols, {}, {});
+
+    auto stable = rt.pin()->find_symbol_by_name("Stable");
+    ASSERT_NE(stable, nullptr);
+    rt.clear();
+
+    EXPECT_EQ(stable->symbol.name, "Stable");
+    EXPECT_EQ(stable->symbol.file_id, 1u);
 }
 
 TEST(ReferenceTrackerTest, FindSymbolByFileAndName) {
@@ -130,15 +146,16 @@ TEST(ReferenceTrackerTest, FindSymbolByFileAndName) {
     rt.process_file(1, "a.go", syms1, {}, {});
     rt.process_file(2, "b.go", syms2, {}, {});
 
-    const auto* in_file1 = rt.find_symbol_by_file_and_name(1, "Foo");
+    auto snapshot = rt.pin();
+    auto in_file1 = snapshot->find_symbol_by_file_and_name(1, "Foo");
     ASSERT_NE(in_file1, nullptr);
     EXPECT_EQ(in_file1->symbol.type, SymbolType::Function);
 
-    const auto* in_file2 = rt.find_symbol_by_file_and_name(2, "Foo");
+    auto in_file2 = snapshot->find_symbol_by_file_and_name(2, "Foo");
     ASSERT_NE(in_file2, nullptr);
     EXPECT_EQ(in_file2->symbol.type, SymbolType::Method);
 
-    EXPECT_EQ(rt.find_symbol_by_file_and_name(3, "Foo"), nullptr);
+    EXPECT_EQ(snapshot->find_symbol_by_file_and_name(3, "Foo"), nullptr);
 }
 
 TEST(ReferenceTrackerTest, GetSymbolAtLine) {
@@ -151,14 +168,15 @@ TEST(ReferenceTrackerTest, GetSymbolAtLine) {
 
     rt.process_file(1, "test.go", symbols, {}, {});
 
-    const auto* at_line_5 = rt.get_symbol_at_line(1, 5);
+    auto snapshot = rt.pin();
+    auto at_line_5 = snapshot->get_symbol_at_line(1, 5);
     ASSERT_NE(at_line_5, nullptr);
     EXPECT_EQ(at_line_5->symbol.name, "Outer");
 
-    const auto* at_line_15 = rt.get_symbol_at_line(1, 15);
+    auto at_line_15 = snapshot->get_symbol_at_line(1, 15);
     ASSERT_NE(at_line_15, nullptr);
 
-    EXPECT_EQ(rt.get_symbol_at_line(1, 100), nullptr);
+    EXPECT_EQ(snapshot->get_symbol_at_line(1, 100), nullptr);
 }
 
 TEST(ReferenceTrackerTest, RemoveFile) {
@@ -169,12 +187,14 @@ TEST(ReferenceTrackerTest, RemoveFile) {
     };
     rt.process_file(1, "a.go", syms, {}, {});
 
-    auto found = rt.find_symbols_by_name("Foo");
+    auto snapshot = rt.pin();
+    auto found = snapshot->find_symbols_by_name("Foo");
     EXPECT_EQ(found.size(), 1u);
 
     rt.remove_file(1);
 
-    found = rt.find_symbols_by_name("Foo");
+    snapshot = rt.pin();
+    found = snapshot->find_symbols_by_name("Foo");
     EXPECT_TRUE(found.empty());
 }
 
@@ -188,7 +208,7 @@ TEST(ReferenceTrackerTest, Clear) {
     rt.clear();
 
     EXPECT_EQ(rt.get_reference_stats().total_symbols, 0);
-    EXPECT_TRUE(rt.find_symbols_by_name("Foo").empty());
+    EXPECT_TRUE(rt.pin()->find_symbols_by_name("Foo").empty());
 }
 
 // ---------------------------------------------------------------------------
@@ -278,7 +298,8 @@ TEST(ReferenceTrackerTest, CallGraphCalleeNames) {
     rt.process_all_references();
 
     // Find "main" symbol and check its callees.
-    const auto* main_sym = rt.find_symbol_by_name("main");
+    auto snapshot = rt.pin();
+    auto main_sym = snapshot->find_symbol_by_name("main");
     if (main_sym != nullptr) {
         auto callees = rt.get_callee_names(main_sym->id);
         // May or may not resolve depending on location matching.
@@ -296,7 +317,8 @@ TEST(ReferenceTrackerTest, FunctionTree) {
 
     rt.process_file(1, "test.go", symbols, {}, {});
 
-    const auto* sym = rt.find_symbol_by_name("root");
+    auto snapshot = rt.pin();
+    auto sym = snapshot->find_symbol_by_name("root");
     ASSERT_NE(sym, nullptr);
 
     auto tree = rt.build_function_tree(sym->id, 3);
@@ -360,9 +382,10 @@ TEST(ReferenceTrackerTest, ResolvesByReceiverTypeScope) {
 
     // Address each run() method by line (the struct symbol shares the same
     // span, so a plain name lookup is ambiguous).
-    const EnhancedSymbol* run_a = nullptr;
-    const EnhancedSymbol* run_b = nullptr;
-    for (const auto* es : rt.find_symbols_by_name("run")) {
+    ReferenceTracker::Snapshot::SymbolHandle run_a;
+    ReferenceTracker::Snapshot::SymbolHandle run_b;
+    auto snapshot = rt.pin();
+    for (const auto& es : snapshot->find_symbols_by_name("run")) {
         if (es->symbol.line == 2) run_a = es;
         if (es->symbol.line == 6) run_b = es;
     }
@@ -468,11 +491,12 @@ TEST(ReferenceTrackerTest, LineToSymbolsIndex) {
 
     rt.store_line_to_symbols(1, std::move(line_map));
 
-    const auto* result = rt.get_file_line_to_symbols(1);
+    auto snapshot = rt.pin();
+    auto result = snapshot->get_file_line_to_symbols(1);
     ASSERT_NE(result, nullptr);
     EXPECT_EQ(result->size(), 2u);
 
-    EXPECT_EQ(rt.get_file_line_to_symbols(99), nullptr);
+    EXPECT_EQ(snapshot->get_file_line_to_symbols(99), nullptr);
 }
 
 // ---------------------------------------------------------------------------

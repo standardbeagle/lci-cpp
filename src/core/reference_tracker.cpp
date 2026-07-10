@@ -37,14 +37,14 @@ std::vector<Reference> ReferenceTracker::Snapshot::get_references_by_id(
     return result;
 }
 
-std::vector<const EnhancedSymbol*>
+std::vector<ReferenceTracker::Snapshot::SymbolHandle>
 ReferenceTracker::Snapshot::find_symbols_by_name(std::string_view name) const {
     auto ids = symbols.get_symbols_by_name(name);
-    std::vector<const EnhancedSymbol*> result;
+    std::vector<SymbolHandle> result;
     result.reserve(ids.size());
     for (SymbolID id : ids) {
         if (const auto* s = symbols.get(id)) {
-            result.push_back(s);
+            result.emplace_back(shared_from_this(), s);
         }
     }
     return result;
@@ -79,63 +79,64 @@ std::vector<Reference> ReferenceTracker::Snapshot::get_symbol_references(
     return get_references_by_id(ref_ids);
 }
 
-const EnhancedSymbol* ReferenceTracker::Snapshot::get_enhanced_symbol(
+ReferenceTracker::Snapshot::SymbolHandle
+ReferenceTracker::Snapshot::get_enhanced_symbol(
     SymbolID symbol_id) const {
-    return symbols.get(symbol_id);
+    const auto* symbol = symbols.get(symbol_id);
+    if (symbol == nullptr) return {};
+    return {shared_from_this(), symbol};
 }
 
-std::vector<const EnhancedSymbol*>
+std::vector<ReferenceTracker::Snapshot::SymbolHandle>
 ReferenceTracker::Snapshot::get_file_enhanced_symbols(FileID file_id) const {
     auto ids = symbols.get_symbols_by_file(file_id);
-    std::vector<const EnhancedSymbol*> result;
+    std::vector<SymbolHandle> result;
     result.reserve(ids.size());
     for (SymbolID id : ids) {
         if (const auto* s = symbols.get(id)) {
-            result.push_back(s);
+            result.emplace_back(shared_from_this(), s);
         }
     }
     return result;
 }
 
-const EnhancedSymbol* ReferenceTracker::Snapshot::find_symbol_by_name(
+ReferenceTracker::Snapshot::SymbolHandle
+ReferenceTracker::Snapshot::find_symbol_by_name(
     std::string_view name) const {
     auto ids = symbols.get_symbols_by_name(name);
     if (ids.empty()) return nullptr;
-    return symbols.get(ids[0]);
+    return get_enhanced_symbol(ids[0]);
 }
 
-const EnhancedSymbol* ReferenceTracker::Snapshot::find_symbol_by_file_and_name(
+ReferenceTracker::Snapshot::SymbolHandle
+ReferenceTracker::Snapshot::find_symbol_by_file_and_name(
     FileID file_id, std::string_view name) const {
     auto ids = symbols.get_symbols_by_name(name);
     for (SymbolID id : ids) {
         if (const auto* s = symbols.get(id)) {
-            if (s->symbol.file_id == file_id) return s;
+            if (s->symbol.file_id == file_id) {
+                return {shared_from_this(), s};
+            }
         }
     }
     return nullptr;
 }
 
-const absl::flat_hash_map<int, std::vector<int>>*
+ReferenceTracker::Snapshot::LineMapHandle
 ReferenceTracker::Snapshot::get_file_line_to_symbols(FileID file_id) const {
     auto it = line_to_symbols_by_file.find(file_id);
     if (it == line_to_symbols_by_file.end()) return nullptr;
-    return &it->second;
+    return {shared_from_this(), &it->second};
 }
 
-const EnhancedSymbol* ReferenceTracker::Snapshot::get_symbol_at_line(
-    const SymbolLocationIndex& location_index, FileID file_id, int line) const {
-    // Fast path: binary-searched, lock-free line lookup; resolve the id against
-    // this (pinned) snapshot so the returned pointer is stable.
-    SymbolID id = location_index.find_symbol_id_at_line(file_id, line);
-    if (id != 0) {
-        if (const auto* s = symbols.get(id)) return s;
-    }
-    // Fallback: linear scan over this file's symbols.
+ReferenceTracker::Snapshot::SymbolHandle
+ReferenceTracker::Snapshot::get_symbol_at_line(
+    FileID file_id, int line) const {
     auto file_syms = symbols.get_symbols_by_file(file_id);
     for (SymbolID sid : file_syms) {
         if (const auto* s = symbols.get(sid)) {
             if (s->symbol.line <= line && line <= s->symbol.end_line) {
-                return s;
+                return {shared_from_this(), s};
             }
         }
     }
@@ -195,7 +196,7 @@ void ReferenceTracker::clear() {
     next_ref_id_ = 1;
     import_resolver_.clear();
     if (staging_) {
-        *staging_ = Snapshot{};
+        staging_ = std::make_shared<Snapshot>();
     } else {
         snapshot_.store(std::make_shared<const Snapshot>(),
                         std::memory_order_release);
@@ -371,21 +372,6 @@ std::vector<Reference> ReferenceTracker::get_symbol_references(
     return load_snapshot()->get_symbol_references(symbol_id, direction);
 }
 
-std::vector<const EnhancedSymbol*> ReferenceTracker::find_symbols_by_name(
-    std::string_view name) const {
-    return load_snapshot()->find_symbols_by_name(name);
-}
-
-const EnhancedSymbol* ReferenceTracker::get_enhanced_symbol(
-    SymbolID symbol_id) const {
-    return load_snapshot()->get_enhanced_symbol(symbol_id);
-}
-
-std::vector<const EnhancedSymbol*> ReferenceTracker::get_file_enhanced_symbols(
-    FileID file_id) const {
-    return load_snapshot()->get_file_enhanced_symbols(file_id);
-}
-
 std::vector<Reference> ReferenceTracker::get_file_references(
     FileID file_id) const {
     auto snap = load_snapshot();
@@ -406,34 +392,6 @@ std::vector<Reference> ReferenceTracker::get_file_references(
     }
 
     return snap->get_references_by_id(ref_ids);
-}
-
-const EnhancedSymbol* ReferenceTracker::get_symbol_at_line(
-    FileID file_id, int line) const {
-    auto snap = load_snapshot();
-    if (symbol_location_index_ != nullptr) {
-        return snap->get_symbol_at_line(*symbol_location_index_, file_id, line);
-    }
-    // No location index (e.g. unit-test trackers): linear scan over symbols.
-    auto file_syms = snap->symbols.get_symbols_by_file(file_id);
-    for (SymbolID id : file_syms) {
-        if (const auto* s = snap->symbols.get(id)) {
-            if (s->symbol.line <= line && line <= s->symbol.end_line) {
-                return s;
-            }
-        }
-    }
-    return nullptr;
-}
-
-const EnhancedSymbol* ReferenceTracker::find_symbol_by_name(
-    std::string_view name) const {
-    return load_snapshot()->find_symbol_by_name(name);
-}
-
-const EnhancedSymbol* ReferenceTracker::find_symbol_by_file_and_name(
-    FileID file_id, std::string_view name) const {
-    return load_snapshot()->find_symbol_by_file_and_name(file_id, name);
 }
 
 std::vector<Reference> ReferenceTracker::get_all_references() const {
@@ -583,11 +541,6 @@ void ReferenceTracker::store_line_to_symbols(
     write_snapshot([&](Snapshot& s) {
         s.line_to_symbols_by_file[file_id] = std::move(line_to_symbols);
     });
-}
-
-const absl::flat_hash_map<int, std::vector<int>>*
-ReferenceTracker::get_file_line_to_symbols(FileID file_id) const {
-    return load_snapshot()->get_file_line_to_symbols(file_id);
 }
 
 // -- Internal helpers --------------------------------------------------------

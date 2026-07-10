@@ -177,7 +177,7 @@ int run_server(const GlobalFlags& flags, bool daemon, bool foreground) {
         std::printf("Server shutdown requested\n");
     }
 
-    if (!server.shutdown(std::chrono::milliseconds(10000))) {
+    if (!server.shutdown()) {
         std::cerr << "Warning: shutdown did not complete cleanly\n";
     }
 

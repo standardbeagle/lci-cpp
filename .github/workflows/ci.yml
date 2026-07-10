@@ -101,11 +101,9 @@ jobs:
         if: ${{ !matrix.main_only || github.ref == 'refs/heads/main' }}
         run: cmake --build build/${{ matrix.preset }} --parallel
 
-      # ctest disabled until pre-existing failures triaged (see MEMORY.md
-      # preexisting-test-failures). Run locally: ctest --test-dir build/<preset>.
-      - name: Test (disabled — manual until pre-existing failures fixed)
-        if: false
-        run: ctest --test-dir build/${{ matrix.preset }} --output-on-failure --parallel
+      - name: Test
+        if: ${{ !matrix.main_only || github.ref == 'refs/heads/main' }}
+        run: ctest --preset ${{ matrix.preset }} --parallel
 
       - name: Build diff-engine unit tests
         if: matrix.preset == 'release'

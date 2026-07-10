@@ -513,7 +513,7 @@ TEST(MasterIndexSearchIntegrationTest, ConcurrentHandlerReadsDuringIndexing) {
     ASSERT_TRUE(mi.index_directory(dir.path().string()));
 
     const ReferenceTracker& rt = mi.ref_tracker();
-    ASSERT_NE(rt.find_symbol_by_name("handlerStableToken"), nullptr);
+    ASSERT_NE(rt.pin()->find_symbol_by_name("handlerStableToken"), nullptr);
 
     constexpr int kReaders = 4;
     constexpr int kReadsPerThread = 200;
@@ -527,7 +527,7 @@ TEST(MasterIndexSearchIntegrationTest, ConcurrentHandlerReadsDuringIndexing) {
             for (int j = 0; j < kReadsPerThread && !stop.load(); ++j) {
                 // Handler pattern: pin once, dereference pointers under the pin.
                 auto snap = rt.pin();
-                const auto* s = snap->find_symbol_by_name("handlerStableToken");
+                auto s = snap->find_symbol_by_name("handlerStableToken");
                 if (s == nullptr) {
                     missing.fetch_add(1, std::memory_order_relaxed);
                     continue;
@@ -536,11 +536,11 @@ TEST(MasterIndexSearchIntegrationTest, ConcurrentHandlerReadsDuringIndexing) {
                 if (s->symbol.name != "handlerStableToken") {
                     torn.fetch_add(1, std::memory_order_relaxed);
                 }
-                const auto* by_id = snap->get_enhanced_symbol(s->id);
+                auto by_id = snap->get_enhanced_symbol(s->id);
                 if (by_id == nullptr || by_id->symbol.name != s->symbol.name) {
                     torn.fetch_add(1, std::memory_order_relaxed);
                 }
-                for (const auto* fs :
+                for (const auto& fs :
                      snap->get_file_enhanced_symbols(s->symbol.file_id)) {
                     if (fs->symbol.name.empty()) {
                         torn.fetch_add(1, std::memory_order_relaxed);

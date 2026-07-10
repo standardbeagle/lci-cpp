@@ -494,9 +494,10 @@ TEST(MaxParseFileSize, OversizeSourceSkipsParseButStaysSearchable) {
     ASSERT_TRUE(index.index_directory(dir.path().string()));
 
     // small file parsed -> symbol present; big file parse skipped -> absent.
-    EXPECT_NE(index.ref_tracker().find_symbol_by_name("smallFuncMarker"),
+    auto snapshot = index.ref_tracker().pin();
+    EXPECT_NE(snapshot->find_symbol_by_name("smallFuncMarker"),
               nullptr);
-    EXPECT_EQ(index.ref_tracker().find_symbol_by_name("bigFuncMarker"),
+    EXPECT_EQ(snapshot->find_symbol_by_name("bigFuncMarker"),
               nullptr);
 
     // The big file is still text-searchable (trigram path ran).

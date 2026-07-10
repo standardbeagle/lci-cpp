@@ -310,7 +310,7 @@ TEST_F(ServerLifecycleTest, Endpoint_Shutdown) {
 
 TEST_F(ServerLifecycleTest, GracefulShutdownWithinTimeout) {
     auto start = std::chrono::steady_clock::now();
-    bool clean = server_->shutdown(std::chrono::milliseconds{5000});
+    bool clean = server_->shutdown();
     auto elapsed = std::chrono::steady_clock::now() - start;
 
     EXPECT_TRUE(clean);
@@ -400,7 +400,7 @@ TEST(ServerCancellationTest, ShutdownJoinsInFlightIndexing) {
     // initial-indexing thread and join it before returning. If the
     // thread were detached, the join would be skipped and shutdown
     // could return while indexing was still mutating the indexer.
-    bool clean = server->shutdown(std::chrono::milliseconds{5000});
+    bool clean = server->shutdown();
     EXPECT_TRUE(clean);
     EXPECT_FALSE(server->is_running());
 

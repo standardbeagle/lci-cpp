@@ -1146,9 +1146,9 @@ ToolResult handle_search(const nlohmann::json& params,
             // Enclosing-symbol enrichment, deduped: consecutive hits inside
             // the same symbol repeat nothing. O(1) hash lookup per row
             // (KARPATHY rule 2 — no allocation in the inner loop).
-            const auto* sym = rt_snap->get_symbol_at_line(
-                indexer.symbol_location_index(), r->file_id, r->line);
-            if (sym != nullptr && sym != prev_sym) {
+            auto sym =
+                rt_snap->get_symbol_at_line(r->file_id, r->line);
+            if (sym != nullptr && sym.get() != prev_sym) {
                 h["sym"] = std::string(sym->symbol.name);
                 h["type"] = std::string(to_string(sym->symbol.type));
                 h["id"] = encode_symbol_id(sym->id);
@@ -1186,7 +1186,7 @@ ToolResult handle_search(const nlohmann::json& params,
                     }
                 }
             }
-            if (sym != nullptr) prev_sym = sym;
+            if (sym != nullptr) prev_sym = sym.get();
 
             if (explicit_ctx) {
                 if (!r->context.lines.empty()) {
@@ -1336,7 +1336,7 @@ void resolve_object_id(std::string_view id, MasterIndex& indexer,
     // Pin the snapshot so the EnhancedSymbol* stays valid through the ctx
     // build below (attach_purity dereferences *sym) across a concurrent reindex.
     auto rt_snap = indexer.ref_tracker().pin();
-    const auto* sym = rt_snap->get_enhanced_symbol(*decoded);
+    auto sym = rt_snap->get_enhanced_symbol(*decoded);
     if (sym == nullptr) {
         errors.push_back(
             {{"object_id", std::string(id)},
@@ -1476,7 +1476,7 @@ ToolResult handle_get_context(const nlohmann::json& params,
         auto rt_snap = tracker.pin();
         auto matches = rt_snap->find_symbols_by_name(name);
         contexts.get_ref<nlohmann::json::array_t&>().reserve(matches.size());
-        for (const auto* sym : matches) {
+        for (const auto& sym : matches) {
             if (sym == nullptr) continue;
 
             std::string definition = sym->signature.empty()
@@ -1547,7 +1547,7 @@ ToolResult handle_get_context(const nlohmann::json& params,
                                              nlohmann::json::array()}});
                             continue;
                         }
-                        const EnhancedSymbol* child = sub_matches.front();
+                        const auto& child = sub_matches.front();
                         if (child == nullptr) continue;
                         uint64_t key =
                             static_cast<uint64_t>(child->id);
@@ -1559,14 +1559,15 @@ ToolResult handle_get_context(const nlohmann::json& params,
                             continue;
                         }
                         kids.push_back(
-                            build_tree(child, depth - 1, visited));
+                            build_tree(child.get(), depth - 1, visited));
                     }
                     t["children"] = std::move(kids);
                     return t;
                 };
                 absl::flat_hash_set<uint64_t> visited;
                 visited.insert(static_cast<uint64_t>(sym->id));
-                ctx["call_tree"] = build_tree(sym, max_depth - 1, visited);
+                ctx["call_tree"] =
+                    build_tree(sym.get(), max_depth - 1, visited);
             }
 
             contexts.push_back(std::move(ctx));

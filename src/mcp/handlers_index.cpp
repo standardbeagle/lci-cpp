@@ -80,7 +80,7 @@ nlohmann::json get_symbols_by_type(ReferenceTracker& tracker,
     auto rt_snap = tracker.pin();
     for (auto fid : file_ids) {
         auto symbols = rt_snap->get_file_enhanced_symbols(fid);
-        for (const auto* sym : symbols) {
+        for (const auto& sym : symbols) {
             if (!sym) continue;
             auto type_name = std::string(to_string(sym->symbol.type));
             if (result.contains(type_name)) {
@@ -259,7 +259,7 @@ ToolResult handle_debug_info(const nlohmann::json& params,
         for (auto fid : file_ids) {
             auto fp = indexer.get_file_path(fid);
             auto symbols = rt_snap->get_file_enhanced_symbols(fid);
-            for (const auto* sym : symbols) {
+            for (const auto& sym : symbols) {
                 if (!sym) continue;
                 int inc = static_cast<int>(sym->incoming_refs.size());
                 if (inc > 0) {
@@ -339,7 +339,7 @@ ToolResult handle_debug_info(const nlohmann::json& params,
 
                 if (verbose) {
                     nlohmann::json sym_list = nlohmann::json::array();
-                    for (const auto* sym : symbols) {
+                    for (const auto& sym : symbols) {
                         if (!sym) continue;
                         nlohmann::json s;
                         s["name"] = sym->symbol.name;

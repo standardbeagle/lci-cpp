@@ -206,7 +206,8 @@ TEST(FileIntegratorTest, IntegratesSymbols) {
     integrator.integrate_file(pf);
 
     // The reference tracker should now know about the symbol.
-    auto found = ref_tracker.find_symbols_by_name("main");
+    auto snapshot = ref_tracker.pin();
+    auto found = snapshot->find_symbols_by_name("main");
     EXPECT_GE(found.size(), 1u);
 }
 
@@ -248,10 +249,11 @@ TEST(FileIntegratorTest, HandlesFileUpdate) {
     EXPECT_EQ(integrator.path_to_id("/src/main.go"), FileID{2});
 
     // Old symbol should be gone, new one present.
-    auto old_syms = ref_tracker.find_symbols_by_name("OldFunc");
+    auto snapshot = ref_tracker.pin();
+    auto old_syms = snapshot->find_symbols_by_name("OldFunc");
     EXPECT_EQ(old_syms.size(), 0u);
 
-    auto new_syms = ref_tracker.find_symbols_by_name("New");
+    auto new_syms = snapshot->find_symbols_by_name("New");
     EXPECT_GE(new_syms.size(), 1u);
 }
 
@@ -274,13 +276,13 @@ TEST(FileIntegratorTest, RemoveFileRemovesAllData) {
     integrator.integrate_file(pf);
 
     EXPECT_EQ(integrator.file_count(), 1);
-    EXPECT_GE(ref_tracker.find_symbols_by_name("Helper").size(), 1u);
+    EXPECT_GE(ref_tracker.pin()->find_symbols_by_name("Helper").size(), 1u);
 
     integrator.remove_file("/src/lib.go");
 
     EXPECT_EQ(integrator.file_count(), 0);
     EXPECT_EQ(integrator.path_to_id("/src/lib.go"), FileID{0});
-    EXPECT_EQ(ref_tracker.find_symbols_by_name("Helper").size(), 0u);
+    EXPECT_EQ(ref_tracker.pin()->find_symbols_by_name("Helper").size(), 0u);
 }
 
 TEST(FileIntegratorTest, IntegrateFromQueue) {

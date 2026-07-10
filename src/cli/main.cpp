@@ -184,16 +184,36 @@ int main(int argc, char* argv[]) {
                            "function | class | top-level");
 
     search_cmd->callback([&]() {
-        std::exit(run_search(
-            gflags, search_pattern, search_max_lines, search_case_insensitive,
-            search_json, search_light, search_compact, search_regex,
-            search_exclude, search_include, search_invert_match,
-            search_patterns, search_count,
-            search_files_only, search_word_boundary, search_max_count,
-            search_ids, search_no_ids, search_comments_only, search_code_only,
-            search_strings_only, search_rank_by, search_context_filter,
-            search_template_strings, search_verbose, search_compare_search,
-            search_cpu_profile_path, search_mem_profile_path));
+        SearchCommandOptions options{
+            .pattern = search_pattern,
+            .max_lines = search_max_lines,
+            .case_insensitive = search_case_insensitive,
+            .json_output = search_json,
+            .light = search_light,
+            .compact = search_compact,
+            .use_regex = search_regex,
+            .exclude_pattern = search_exclude,
+            .include_pattern = search_include,
+            .invert_match = search_invert_match,
+            .extra_patterns = search_patterns,
+            .count_per_file = search_count,
+            .files_only = search_files_only,
+            .word_boundary = search_word_boundary,
+            .max_count_per_file = search_max_count,
+            .include_ids = search_ids,
+            .no_ids = search_no_ids,
+            .comments_only = search_comments_only,
+            .code_only = search_code_only,
+            .strings_only = search_strings_only,
+            .rank_by = search_rank_by,
+            .context_filter = search_context_filter,
+            .template_strings = search_template_strings,
+            .verbose = search_verbose,
+            .compare_search = search_compare_search,
+            .cpu_profile_path = search_cpu_profile_path,
+            .mem_profile_path = search_mem_profile_path,
+        };
+        std::exit(run_search(gflags, options));
     });
 
     // -- Grep subcommand ------------------------------------------------------

@@ -39,7 +39,8 @@ void expect_qualified_callee(const std::string& lang, const std::string& repo,
     EXPECT_GT(ctx.indexer->file_count(), 0);
 
     const auto& rt = ctx.indexer->ref_tracker();
-    auto syms = rt.find_symbols_by_name(sentinel);
+    auto snapshot = rt.pin();
+    auto syms = snapshot->find_symbols_by_name(sentinel);
     ASSERT_FALSE(syms.empty())
         << "sentinel symbol '" << sentinel << "' not extracted in " << repo;
 

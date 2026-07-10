@@ -232,6 +232,74 @@ TEST(SocketPathTest, DifferentProjectsProduceDistinctPaths) {
 }
 #endif
 
+TEST(ServerLifecycleFailureTest, FailedStartCanBeShutdownAndDestroyed) {
+    TempDir tmp;
+    Config config;
+    config.project.root = tmp.path().string();
+    MasterIndex indexer(config);
+
+    IndexServer server(config, indexer, nullptr);
+#ifdef _WIN32
+    server.set_socket_path("invalid-address");
+#else
+    server.set_socket_path(
+        (tmp.path() / "missing-parent" / "server.sock").string());
+#endif
+
+    EXPECT_FALSE(server.start());
+    EXPECT_FALSE(server.is_running());
+    EXPECT_TRUE(server.shutdown());
+    EXPECT_TRUE(server.shutdown());
+}
+
+TEST(ServerLifecycleTest, CanRestartAfterCleanShutdown) {
+    TempDir tmp;
+    Config config;
+    config.project.root = tmp.path().string();
+    MasterIndex indexer(config);
+    SearchEngine engine(indexer);
+    IndexServer server(config, indexer, &engine);
+
+    server.set_socket_path(test::next_test_server_address());
+    ASSERT_TRUE(server.start());
+    ASSERT_TRUE(server.shutdown());
+    ASSERT_TRUE(server.start());
+    EXPECT_TRUE(server.is_running());
+    EXPECT_TRUE(server.shutdown());
+}
+
+TEST(ServerLifecycleTest, ConcurrentStartAndShutdownAreSerialized) {
+    TempDir tmp;
+    Config config;
+    config.project.root = tmp.path().string();
+    MasterIndex indexer(config);
+    SearchEngine engine(indexer);
+    IndexServer server(config, indexer, &engine);
+    server.set_socket_path(test::next_test_server_address());
+
+    std::thread starter([&] { (void)server.start(); });
+    std::thread stopper([&] { (void)server.shutdown(); });
+    starter.join();
+    stopper.join();
+
+    EXPECT_TRUE(server.shutdown());
+    EXPECT_FALSE(server.is_running());
+}
+
+#ifdef _WIN32
+TEST(ServerLifecycleFailureTest, MalformedPortReturnsFalse) {
+    TempDir tmp;
+    Config config;
+    config.project.root = tmp.path().string();
+    MasterIndex indexer(config);
+    IndexServer server(config, indexer, nullptr);
+    server.set_socket_path("127.0.0.1:not-a-port");
+
+    EXPECT_FALSE(server.start());
+    EXPECT_FALSE(server.is_running());
+}
+#endif
+
 // -- Build ID tests -----------------------------------------------------------
 
 TEST(BuildIDTest, ReturnsNonEmpty) {
@@ -892,7 +960,7 @@ TEST_F(ServerTest, ConcurrentRequests) {
 
 TEST_F(ServerTest, GracefulShutdownWithinTimeout) {
     auto start = std::chrono::steady_clock::now();
-    bool clean = server_->shutdown(std::chrono::milliseconds{5000});
+    bool clean = server_->shutdown();
     auto elapsed = std::chrono::steady_clock::now() - start;
 
     EXPECT_TRUE(clean);

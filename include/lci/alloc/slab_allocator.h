@@ -6,8 +6,10 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <mutex>
 #include <new>
 #include <span>
+#include <stdexcept>
 #include <vector>
 
 namespace lci {
@@ -18,33 +20,23 @@ struct AllocatorStats {
     int64_t reuses{};
     int64_t pool_hits{};
     int64_t pool_misses{};
+    /// Cumulative element capacity handed out by get().
     int64_t total_capacity{};
 };
 
 /// Configuration for a single slab tier.
 struct SlabTierConfig {
     int capacity{};
-    double weight{};
 };
 
 /// Default tier configurations for general workloads.
 inline constexpr std::array<SlabTierConfig, 7> kDefaultTierConfigs{{
-    {8, 0.30},
-    {16, 0.30},
-    {32, 0.20},
-    {64, 0.10},
-    {128, 0.05},
-    {256, 0.03},
-    {512, 0.02},
+    {8}, {16}, {32}, {64}, {128}, {256}, {512},
 }};
 
 /// Tier configurations optimized for trigram location arrays.
 inline constexpr std::array<SlabTierConfig, 5> kTrigramTierConfigs{{
-    {8, 0.40},
-    {16, 0.40},
-    {32, 0.15},
-    {64, 0.03},
-    {128, 0.02},
+    {8}, {16}, {32}, {64}, {128},
 }};
 
 /// A single free-list node stored in-place within a freed slab block.
@@ -52,11 +44,11 @@ struct FreeNode {
     FreeNode* next{};
 };
 
-/// A lock-free, tier-based slab allocator for fixed-size blocks.
+/// A thread-safe, tier-based slab allocator for fixed-size blocks.
 ///
 /// Each tier manages blocks of a single capacity (element count * element size).
-/// Freed blocks are returned to a per-thread free list for fast reuse.
-/// Thread-local storage provides the lock-free fast path.
+/// Freed blocks are returned to a shared free list for reuse. Allocation and
+/// return operations are serialized because the arenas and lists are shared.
 ///
 /// Template parameter T is the element type stored in allocated slabs.
 template <typename T>
@@ -65,9 +57,19 @@ class SlabAllocator {
     /// Constructs a slab allocator from the given tier configurations.
     explicit SlabAllocator(std::span<const SlabTierConfig> configs)
         : tier_count_(static_cast<int>(configs.size())) {
-        for (int i = 0; i < tier_count_ && i < kMaxTiers; ++i) {
+        if (configs.empty() ||
+            configs.size() > static_cast<size_t>(kMaxTiers)) {
+            throw std::invalid_argument("slab allocator requires 1 to 8 tiers");
+        }
+        int previous_capacity = 0;
+        for (int i = 0; i < tier_count_; ++i) {
+            if (configs[static_cast<size_t>(i)].capacity <= previous_capacity) {
+                throw std::invalid_argument(
+                    "slab tier capacities must be positive and increasing");
+            }
             tiers_[i].capacity = configs[static_cast<size_t>(i)].capacity;
             tiers_[i].byte_size = block_bytes(tiers_[i].capacity);
+            previous_capacity = tiers_[i].capacity;
         }
     }
 
@@ -94,6 +96,7 @@ class SlabAllocator {
             return {nullptr, 0};
         }
 
+        std::lock_guard lock(storage_mu_);
         for (int i = 0; i < tier_count_; ++i) {
             if (tiers_[i].capacity >= capacity) {
                 return get_from_tier(i);
@@ -118,18 +121,16 @@ class SlabAllocator {
             return;
         }
 
+        std::lock_guard lock(storage_mu_);
         for (int i = 0; i < tier_count_; ++i) {
             if (tiers_[i].capacity == actual_capacity) {
                 put_to_tier(i, ptr);
-                stats_.reuses.fetch_add(1, std::memory_order_relaxed);
-                stats_.pool_hits.fetch_add(1, std::memory_order_relaxed);
                 return;
             }
         }
 
         // No matching tier: was a direct allocation, free it.
         ::operator delete(ptr);
-        stats_.pool_misses.fetch_add(1, std::memory_order_relaxed);
     }
 
     /// Returns a snapshot of current allocation statistics.
@@ -238,6 +239,7 @@ class SlabAllocator {
 
     std::array<Tier, kMaxTiers> tiers_{};
     int tier_count_{};
+    std::mutex storage_mu_;
     AtomicStats stats_{};
     std::vector<Arena> arenas_;
 };

@@ -293,10 +293,9 @@ class IndexServer {
     /// Blocks until the shutdown signal is received.
     void wait();
 
-    /// Gracefully shuts down within the given timeout.
+    /// Gracefully shuts down and joins all owned threads.
     /// Returns true if shutdown completed cleanly.
-    bool shutdown(std::chrono::milliseconds timeout =
-                      std::chrono::milliseconds{5000});
+    bool shutdown();
 
     /// Returns true if the server is currently running.
     bool is_running() const;
@@ -346,6 +345,8 @@ class IndexServer {
     std::atomic<bool> running_{false};
     std::atomic<bool> indexing_active_{false};
     mutable std::shared_mutex mu_;
+    std::mutex lifecycle_mu_;
+    bool handlers_registered_{false};
 
     std::mutex shutdown_mu_;
     std::condition_variable shutdown_cv_;
@@ -377,6 +378,7 @@ class IndexServer {
     // Cancels and joins any background indexing thread. Safe to call
     // multiple times. Called from shutdown().
     void cancel_indexing_thread();
+    bool shutdown_locked();
 
     // Cancels any in-flight indexing run, joins its thread, and
     // installs `new_thread` as the active indexing thread. Atomic with

@@ -677,7 +677,8 @@ TEST(TransitivePropagation, ImpurityFlowsUpstreamThroughCallGraph) {
     analyzer.populate_from_index(indexer);
 
     auto result_for = [&](const char* name) -> const SideEffectInfo* {
-        const auto* sym = indexer.ref_tracker().find_symbol_by_name(name);
+        auto snapshot = indexer.ref_tracker().pin();
+        auto sym = snapshot->find_symbol_by_name(name);
         if (!sym) return nullptr;
         return analyzer.get_result(
             indexer.get_file_path(sym->symbol.file_id), sym->symbol.line);

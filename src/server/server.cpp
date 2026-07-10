@@ -1,6 +1,7 @@
 #include <lci/server/server.h>
 
 #include <algorithm>
+#include <charconv>
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
@@ -307,15 +308,7 @@ IndexServer::IndexServer(const Config& config,
       search_engine_(search_engine) {}
 
 IndexServer::~IndexServer() {
-    if (running_.load(std::memory_order_relaxed)) {
-        shutdown(std::chrono::milliseconds{5000});
-    }
-    // Catch the case where the server never entered the running state (or
-    // shutdown() returned early) but a /shutdown trigger thread is still
-    // outstanding — join it before members are destroyed.
-    if (shutdown_trigger_.joinable()) {
-        shutdown_trigger_.join();
-    }
+    shutdown();
 }
 
 // -- Configuration ------------------------------------------------------------
@@ -342,9 +335,16 @@ bool IndexServer::is_running() const {
 // -- Server lifecycle ---------------------------------------------------------
 
 bool IndexServer::start() {
+    std::lock_guard lifecycle_lock(lifecycle_mu_);
     if (running_.exchange(true, std::memory_order_acq_rel)) {
         return false;  // already running
     }
+
+    {
+        std::lock_guard lock(shutdown_mu_);
+        shutdown_requested_ = false;
+    }
+    shutdown_triggered_.store(false, std::memory_order_release);
 
     auto sock = socket_path();
 
@@ -354,7 +354,10 @@ bool IndexServer::start() {
     std::filesystem::remove(sock, ec);
 #endif
 
-    register_handlers();
+    if (!handlers_registered_) {
+        register_handlers();
+        handlers_registered_ = true;
+    }
     start_time_ = std::chrono::steady_clock::now();
 
     // Start background indexing if we own the index. The thread is
@@ -395,10 +398,15 @@ bool IndexServer::start() {
     int win_port = 0;
     auto colon_pos = sock.rfind(':');
     if (colon_pos != std::string::npos) {
-        win_port = std::stoi(sock.substr(colon_pos + 1));
+        auto port = std::string_view(sock).substr(colon_pos + 1);
+        const char* first = port.data();
+        const char* last = first + port.size();
+        auto [end, ec] = std::from_chars(first, last, win_port);
+        if (ec != std::errc{} || end != last) win_port = 0;
     }
-    if (win_port <= 0) {
+    if (win_port <= 0 || win_port > 65535) {
         running_.store(false, std::memory_order_release);
+        shutdown_locked();
         return false;
     }
 
@@ -410,10 +418,13 @@ bool IndexServer::start() {
         svr_.listen_after_bind();
     });
 
-    // Brief wait for the server to be ready
+    bool ready = false;
     for (int i = 0; i < 50; ++i) {
-        if (svr_.is_running()) break;
-        if (!running_.load(std::memory_order_acquire)) return false;
+        if (svr_.is_running()) {
+            ready = true;
+            break;
+        }
+        if (!running_.load(std::memory_order_acquire)) break;
         std::this_thread::sleep_for(std::chrono::milliseconds{10});
     }
 #else
@@ -435,15 +446,23 @@ bool IndexServer::start() {
         svr_.listen_after_bind();
     });
 
-    // Brief wait for the socket to be ready
+    bool ready = false;
     for (int i = 0; i < 50; ++i) {
-        if (std::filesystem::exists(sock)) break;
-        if (!running_.load(std::memory_order_acquire)) return false;
+        if (svr_.is_running()) {
+            ready = true;
+            break;
+        }
+        if (!running_.load(std::memory_order_acquire)) break;
         std::this_thread::sleep_for(std::chrono::milliseconds{10});
     }
 #endif
 
-    return running_.load(std::memory_order_acquire);
+    if (!ready) {
+        running_.store(false, std::memory_order_release);
+        shutdown_locked();
+        return false;
+    }
+    return true;
 }
 
 void IndexServer::wait() {
@@ -451,11 +470,13 @@ void IndexServer::wait() {
     shutdown_cv_.wait(lock, [this] { return shutdown_requested_; });
 }
 
-bool IndexServer::shutdown(std::chrono::milliseconds /*timeout*/) {
-    bool was_running = running_.exchange(false, std::memory_order_acq_rel);
-    if (!was_running) {
-        return true;
-    }
+bool IndexServer::shutdown() {
+    std::lock_guard lifecycle_lock(lifecycle_mu_);
+    return shutdown_locked();
+}
+
+bool IndexServer::shutdown_locked() {
+    running_.store(false, std::memory_order_release);
 
     svr_.stop();
 
@@ -830,7 +851,7 @@ void IndexServer::handle_symbol(const httplib::Request& req,
     }
 
     auto rt_snap = indexer_->ref_tracker().pin();
-    const auto* sym = rt_snap->get_enhanced_symbol(symbol_id);
+    auto sym = rt_snap->get_enhanced_symbol(symbol_id);
     if (sym == nullptr) {
         error_response(res, 404, "symbol not found");
         return;
@@ -1150,7 +1171,7 @@ void IndexServer::handle_tree(const httplib::Request& req,
         return;
     }
 
-    const auto* sym = symbols[0];
+    const auto& sym = symbols[0];
     auto tree = indexer_->ref_tracker().build_function_tree(
         sym->id, max_depth > 0 ? max_depth : 10);
 
@@ -1357,7 +1378,7 @@ void IndexServer::handle_list_symbols(const httplib::Request& req,
         }
 
         auto symbols = rt_snap->get_file_enhanced_symbols(fid);
-        for (const auto* sym : symbols) {
+        for (const auto& sym : symbols) {
             if (!kind_matches(sym->symbol.type, kinds)) continue;
             if (exported_filter.has_value()) {
                 if (*exported_filter != sym->is_exported) continue;
@@ -1446,7 +1467,7 @@ void IndexServer::handle_inspect_symbol(const httplib::Request& req,
         return;
     }
 
-    std::vector<const EnhancedSymbol*> matched;
+    std::vector<ReferenceTracker::Snapshot::SymbolHandle> matched;
 
     // Pin the RCU snapshot for the lifetime of every pointer pulled from the
     // tracker below (matched[] elements and the type-hierarchy lookups all
@@ -1458,7 +1479,7 @@ void IndexServer::handle_inspect_symbol(const httplib::Request& req,
     if (!id_str.empty()) {
         auto decoded = decode_symbol_id(id_str);
         if (decoded.has_value()) {
-            const auto* sym =
+            auto sym =
                 rt_snap->get_enhanced_symbol(decoded.value());
             if (sym != nullptr) {
                 matched.push_back(sym);
@@ -1478,8 +1499,8 @@ void IndexServer::handle_inspect_symbol(const httplib::Request& req,
     if (!file_filter.empty() || !type_filter.empty()) {
         auto type_kinds = parse_symbol_kinds(type_filter);
 
-        std::vector<const EnhancedSymbol*> filtered;
-        for (const auto* sym : matched) {
+        std::vector<ReferenceTracker::Snapshot::SymbolHandle> filtered;
+        for (const auto& sym : matched) {
             if (!file_filter.empty()) {
                 auto fp = indexer_->get_file_path(sym->symbol.file_id);
                 auto base = std::filesystem::path(fp).filename().string();
@@ -1505,7 +1526,7 @@ void IndexServer::handle_inspect_symbol(const httplib::Request& req,
     auto& tracker = indexer_->ref_tracker();
 
     nlohmann::json symbols = nlohmann::json::array();
-    for (const auto* sym : matched) {
+    for (const auto& sym : matched) {
         auto fp = indexer_->get_file_path(sym->symbol.file_id);
 
         nlohmann::json e;
@@ -1565,22 +1586,22 @@ void IndexServer::handle_inspect_symbol(const httplib::Request& req,
             th["extended_by"] = nlohmann::json::array();
 
             for (auto id : rels.implements) {
-                if (auto* s = rt_snap->get_enhanced_symbol(id)) {
+                if (auto s = rt_snap->get_enhanced_symbol(id)) {
                     th["implements"].push_back(s->symbol.name);
                 }
             }
             for (auto id : rels.implemented_by) {
-                if (auto* s = rt_snap->get_enhanced_symbol(id)) {
+                if (auto s = rt_snap->get_enhanced_symbol(id)) {
                     th["implemented_by"].push_back(s->symbol.name);
                 }
             }
             for (auto id : rels.extends) {
-                if (auto* s = rt_snap->get_enhanced_symbol(id)) {
+                if (auto s = rt_snap->get_enhanced_symbol(id)) {
                     th["extends"].push_back(s->symbol.name);
                 }
             }
             for (auto id : rels.extended_by) {
-                if (auto* s = rt_snap->get_enhanced_symbol(id)) {
+                if (auto s = rt_snap->get_enhanced_symbol(id)) {
                     th["extended_by"].push_back(s->symbol.name);
                 }
             }
@@ -1696,7 +1717,7 @@ void IndexServer::handle_browse_file(const httplib::Request& req,
 
     nlohmann::json entries = nlohmann::json::array();
     int total = 0;
-    for (const auto* sym : symbols) {
+    for (const auto& sym : symbols) {
         if (!kind_matches(sym->symbol.type, kinds)) continue;
         if (exported_filter.has_value() &&
             *exported_filter != sym->is_exported) {
@@ -1765,7 +1786,7 @@ void IndexServer::handle_browse_file(const httplib::Request& req,
         int total_cx = 0;
         int cx_count = 0;
 
-        for (const auto* sym : symbols) {
+        for (const auto& sym : symbols) {
             if (sym->is_exported) ++exported_count;
             if (sym->symbol.type == SymbolType::Function ||
                 sym->symbol.type == SymbolType::Method) {

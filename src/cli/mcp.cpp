@@ -90,7 +90,7 @@ int run_mcp(const GlobalFlags& flags) {
             // Resolve back to SymbolID via ref_tracker.find_symbol_by_name
             // (file path + line uniquely identifies the symbol since
             // we keyed on file:line:0 above).
-            for (const auto* es :
+        for (const auto& es :
                  rt_snap->find_symbols_by_name(info.function_name)) {
                 if (es && static_cast<int>(es->symbol.line) == info.start_line) {
                     propagator.seed_label(es->id, "impure", 1.0);
@@ -110,7 +110,7 @@ int run_mcp(const GlobalFlags& flags) {
         // Cheap pass — annotations are sparse vs symbols.
         auto ann_rt_snap = runtime_index.ref_tracker().pin();
         for (FileID fid : runtime_index.get_all_file_ids()) {
-            for (const auto* es : ann_rt_snap->get_file_enhanced_symbols(fid)) {
+            for (const auto& es : ann_rt_snap->get_file_enhanced_symbols(fid)) {
                 if (!es) continue;
                 const auto* ann = annotator.get_annotation(fid, es->id);
                 if (!ann) continue;
@@ -150,7 +150,7 @@ int run_mcp(const GlobalFlags& flags) {
     int exit_code = mcp_server.run();
 
     if (shared_server_started) {
-        index_server.shutdown(std::chrono::milliseconds(5000));
+        index_server.shutdown();
     }
 
     return exit_code;

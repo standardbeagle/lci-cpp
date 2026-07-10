@@ -321,7 +321,8 @@ class GetContextPurityTest : public ::testing::Test {
         std::filesystem::remove_all(dir_, ec);
     }
     std::string adder_object_id() const {
-        const auto* sym = indexer_->ref_tracker().find_symbol_by_name("Adder");
+        auto snapshot = indexer_->ref_tracker().pin();
+        auto sym = snapshot->find_symbol_by_name("Adder");
         return sym ? encode_symbol_id(sym->id) : "";
     }
     std::filesystem::path dir_;
@@ -786,7 +787,8 @@ TEST_F(HandlersFixture, GetContextEmitsRootRelativePaths) {
 // Returns the encoded object ID of the first symbol named `name`, or "" if
 // the corpus did not yield one (parser-dependent — tests guard on empty).
 static std::string first_object_id(MasterIndex& idx, const std::string& name) {
-    auto symbols = idx.ref_tracker().find_symbols_by_name(name);
+    auto snapshot = idx.ref_tracker().pin();
+    auto symbols = snapshot->find_symbols_by_name(name);
     if (symbols.empty()) return "";
     return encode_symbol_id(symbols.front()->id);
 }
@@ -894,9 +896,10 @@ TEST_F(HandlersFixture, GetContextByIdIncludesBoundedSourceExcerpt) {
 // `signature` is emitted when the symbol carries one (Go ObjectContext
 // has `signature,omitempty`).
 TEST_F(HandlersFixture, GetContextByIdEmitsSignatureWhenPresent) {
-    auto symbols = indexer_->ref_tracker().find_symbols_by_name("main");
+    auto snapshot = indexer_->ref_tracker().pin();
+    auto symbols = snapshot->find_symbols_by_name("main");
     if (symbols.empty()) GTEST_SKIP() << "no 'main' symbol";
-    const auto* sym = symbols.front();
+    const auto& sym = symbols.front();
     nlohmann::json params;
     params["id"] = encode_symbol_id(sym->id);
     auto result = handle_get_context(params, *indexer_);
@@ -1263,7 +1266,7 @@ TEST_F(HandlersFixture, GetContextCallersFieldMatchesIncomingRefs) {
     auto snap = tracker.pin();
     auto matches = snap->find_symbols_by_name("handleRequest");
     ASSERT_FALSE(matches.empty());
-    const auto* sym = matches.front();
+    const auto& sym = matches.front();
     nlohmann::json params;
     params["id"] = encode_symbol_id(sym->id);
     auto result = handle_get_context(params, *indexer_);

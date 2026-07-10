@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -15,6 +16,8 @@ struct EnhancedSymbol;
 struct FileSymbolData {
     std::string path;
     std::vector<const EnhancedSymbol*> symbols;
+    /// Optional ownership token for symbol pointers sourced from an RCU view.
+    std::shared_ptr<const void> owner;
 };
 
 // ============================================================================

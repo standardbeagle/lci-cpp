@@ -234,7 +234,7 @@ void Analyzer::get_existing_symbols(std::vector<SymbolInfo>& out) {
         if (path.empty()) continue;
         auto content = index_.file_content_store().get_content(fid);
         auto symbols = rt_snap->get_file_enhanced_symbols(fid);
-        for (const auto* sym : symbols) {
+        for (const auto& sym : symbols) {
             if (sym == nullptr) continue;
 
             auto type = std::string(to_string(sym->symbol.type));

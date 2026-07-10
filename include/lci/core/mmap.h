@@ -28,7 +28,7 @@ class MappedFile {
     MappedFile& operator=(const MappedFile&) = delete;
 
     MappedFile(MappedFile&& other) noexcept
-        : data_(other.data_), size_(other.size_)
+        : data_(other.data_), size_(other.size_), open_(other.open_)
 #ifdef _WIN32
           ,
           file_handle_(other.file_handle_),
@@ -37,6 +37,7 @@ class MappedFile {
     {
         other.data_ = nullptr;
         other.size_ = 0;
+        other.open_ = false;
 #ifdef _WIN32
         other.file_handle_ = INVALID_HANDLE_VALUE;
         other.mapping_handle_ = nullptr;
@@ -48,6 +49,7 @@ class MappedFile {
             close();
             data_ = other.data_;
             size_ = other.size_;
+            open_ = other.open_;
 #ifdef _WIN32
             file_handle_ = other.file_handle_;
             mapping_handle_ = other.mapping_handle_;
@@ -56,6 +58,7 @@ class MappedFile {
 #endif
             other.data_ = nullptr;
             other.size_ = 0;
+            other.open_ = false;
         }
         return *this;
     }
@@ -84,6 +87,7 @@ class MappedFile {
         if (file_size.QuadPart == 0) {
             size_ = 0;
             data_ = nullptr;
+            open_ = true;
             return true;
         }
 
@@ -124,6 +128,7 @@ class MappedFile {
             size_ = 0;
             data_ = nullptr;
             ::close(fd);
+            open_ = true;
             return true;
         }
 
@@ -139,13 +144,12 @@ class MappedFile {
 
         data_ = static_cast<const uint8_t*>(mapped);
 #endif
+        open_ = true;
         return true;
     }
 
     /// Releases the mapping.
     void close() {
-        if (data_ == nullptr && size_ == 0) return;
-
 #ifdef _WIN32
         if (data_ != nullptr) UnmapViewOfFile(data_);
         if (mapping_handle_ != nullptr) CloseHandle(mapping_handle_);
@@ -159,6 +163,7 @@ class MappedFile {
 #endif
         data_ = nullptr;
         size_ = 0;
+        open_ = false;
     }
 
     /// Returns the mapped data pointer (null if empty or not mapped).
@@ -168,7 +173,7 @@ class MappedFile {
     size_t size() const { return size_; }
 
     /// Returns true if data is currently mapped.
-    bool is_open() const { return data_ != nullptr || size_ == 0; }
+    bool is_open() const { return open_; }
 
     /// Returns the mapped content as a string_view.
     std::string_view view() const {
@@ -179,6 +184,7 @@ class MappedFile {
   private:
     const uint8_t* data_ = nullptr;
     size_t size_ = 0;
+    bool open_ = false;
 
 #ifdef _WIN32
     HANDLE file_handle_ = INVALID_HANDLE_VALUE;

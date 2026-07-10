@@ -149,8 +149,11 @@ Python, Rust, C#, and C/C++.
 
 ```sh
 cmake --build build/release --parallel
-ctest --test-dir build/release --output-on-failure -j$(nproc)
+ctest --preset release --parallel $(nproc)
 ```
+
+The preset excludes the separately gated benchmark target. Run
+`./build/release/tests/lci_benchmarks` explicitly for performance checks.
 
 The suite covers unit tests, integration tests (bundled per-binary for
 in-process cache amortization), real-project tests (chi, fastapi, trpc,

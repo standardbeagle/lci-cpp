@@ -296,7 +296,7 @@ void SideEffectAnalyzer::populate_from_index(const MasterIndex& indexer) {
     auto rt_snap = ref.pin();
     for (FileID fid : indexer.get_all_file_ids()) {
         std::string file_path = indexer.get_file_path(fid);
-        for (const auto* es : rt_snap->get_file_enhanced_symbols(fid)) {
+        for (const auto& es : rt_snap->get_file_enhanced_symbols(fid)) {
             if (!es) continue;
             bool is_callable = es->symbol.type == SymbolType::Function ||
                                es->symbol.type == SymbolType::Method ||
@@ -355,7 +355,7 @@ void SideEffectAnalyzer::propagate_transitive(const MasterIndex& indexer) {
     auto rt_snap = ref.pin();
     for (FileID fid : indexer.get_all_file_ids()) {
         std::string file_path = indexer.get_file_path(fid);
-        for (const auto* es : rt_snap->get_file_enhanced_symbols(fid)) {
+        for (const auto& es : rt_snap->get_file_enhanced_symbols(fid)) {
             if (!es) continue;
             std::string key =
                 file_path + ":" + std::to_string(es->symbol.line) + ":0";

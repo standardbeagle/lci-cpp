@@ -1178,24 +1178,71 @@ nlohmann::json regex_filter_results(nlohmann::json results,
     return out;
 }
 
+bool validate_search_options(const SearchCommandOptions& options) {
+    int content_filters = (options.comments_only ? 1 : 0) +
+                          (options.code_only ? 1 : 0) +
+                          (options.strings_only ? 1 : 0);
+    if (content_filters <= 1) return true;
+
+    std::cerr << "Error: --comments-only, --code-only, and --strings-only "
+                 "are mutually exclusive (specified "
+              << content_filters << ")\n";
+    return false;
+}
+
+void emit_search_compatibility_notices(const SearchCommandOptions& options) {
+    if (options.template_strings && !options.strings_only &&
+        !options.json_output) {
+        std::cerr << "Note: --template-strings only takes effect with "
+                     "--strings-only (mirrors Go reference)\n";
+    }
+    if (options.template_strings && options.strings_only &&
+        !options.json_output) {
+        std::cerr << "Note: --template-strings classifier extension is a "
+                     "no-op in this build; --strings-only still applies the "
+                     "standard classifier. Template literals flow through "
+                     "as code.\n";
+    }
+    if (options.compare_search && !options.json_output) {
+        std::cerr << "Note: --compare-search: legacy search path is not "
+                     "present in the C++ port; proceeding with the "
+                     "consolidated path.\n";
+    }
+}
+
+int render_search_output(const SearchCommandOptions& options,
+                         nlohmann::json& response, double elapsed_ms,
+                         std::chrono::steady_clock::time_point verbose_start);
+
 }  // namespace
 
-int run_search(const GlobalFlags& flags, const std::string& pattern,
-               int max_lines, bool case_insensitive, bool json_output,
-               bool light, bool compact_search, bool use_regex,
-               const std::string& exclude_pattern,
-               const std::string& include_pattern,
-               bool invert_match,
-               const std::vector<std::string>& extra_patterns,
-               bool count_per_file,
-               bool files_only, bool word_boundary,
-               int max_count_per_file, bool include_ids,
-               bool no_ids, bool comments_only, bool code_only,
-               bool strings_only, const std::string& rank_by,
-               const std::string& context_filter,
-               bool template_strings, bool verbose, bool compare_search,
-               const std::string& cpu_profile_path,
-               const std::string& mem_profile_path) {
+int run_search(const GlobalFlags& flags, const SearchCommandOptions& options) {
+    if (!validate_search_options(options)) return 1;
+    emit_search_compatibility_notices(options);
+
+    const auto& pattern = options.pattern;
+    const auto& exclude_pattern = options.exclude_pattern;
+    const auto& include_pattern = options.include_pattern;
+    const auto& extra_patterns = options.extra_patterns;
+    const auto& rank_by = options.rank_by;
+    const auto& context_filter = options.context_filter;
+    const auto& cpu_profile_path = options.cpu_profile_path;
+    const auto& mem_profile_path = options.mem_profile_path;
+    const int max_lines = options.max_lines;
+    const int max_count_per_file = options.max_count_per_file;
+    const bool case_insensitive = options.case_insensitive;
+    const bool json_output = options.json_output;
+    const bool light = options.light;
+    const bool use_regex = options.use_regex;
+    const bool invert_match = options.invert_match;
+    const bool count_per_file = options.count_per_file;
+    const bool files_only = options.files_only;
+    const bool word_boundary = options.word_boundary;
+    const bool include_ids = options.include_ids;
+    const bool no_ids = options.no_ids;
+    const bool comments_only = options.comments_only;
+    const bool code_only = options.code_only;
+    const bool strings_only = options.strings_only;
     // -- Search-local profiling (Go cmd/lci/main.go:181-188) ---------------
     //
     // `--cpu-profile` / `--mem-profile` write a profile scoped to this
@@ -1228,70 +1275,6 @@ int run_search(const GlobalFlags& flags, const std::string& pattern,
     // single-line summary at the end of the search; finer-grained tracing
     // would require plumbing through the engine, which is out of scope here.
     auto verbose_start = std::chrono::steady_clock::now();
-
-    // -- Template strings (Go cmd/lci/main.go:169) --------------------------
-    //
-    // Combined with `--strings-only`, this widens the AST classifier to also
-    // accept template-string literals (sql`...`, gql`...`, tagged template
-    // literals). Without `--strings-only`, the flag is inert — Go behaves
-    // the same way. Today the C++ AST classifier (ast_filters.h) treats
-    // backtick-quoted runs as code, not strings; toggling `template_strings`
-    // adds a backtick state to the string-literal scanner via the existing
-    // `match_is_in_string_literal` flow. The classifier change is local to
-    // the strings-only post-filter pass below.
-    //
-    // _rationale: this flag isn't a parity-test target today; it adds a
-    // narrow knob that users of SQL/GraphQL-templated code reach for. We
-    // wire it without expanding the classifier yet — a stderr notice fires
-    // when the user combines `--template-strings` without `--strings-only`
-    // so the inert combination is visible.
-    if (template_strings && !strings_only && !json_output) {
-        std::cerr << "Note: --template-strings only takes effect with "
-                     "--strings-only (mirrors Go reference)\n";
-    }
-    // When both flags are set but no template-string support is wired yet,
-    // we keep behavior identical to --strings-only alone and document the
-    // gap rather than silently expand. Tracked as a follow-up; explicit
-    // signal here per Karpathy rule 6.
-    if (template_strings && strings_only && !json_output) {
-        std::cerr << "Note: --template-strings classifier extension is a "
-                     "no-op in this build; --strings-only still applies the "
-                     "standard (\"...\" / '...' / triple-quoted) classifier. "
-                     "Template literals (sql`...`) flow through as code.\n";
-    }
-
-    // -- Compare-search A/B notice (Go cmd/lci/main.go:178) -----------------
-    //
-    // The Go binary A/B-compares a legacy and a consolidated search path. The
-    // C++ port has only one search path — the consolidated one — so we
-    // emit a clear stderr notice and proceed. No silent acceptance; the
-    // user explicitly asked for the comparison and deserves to know it
-    // didn't happen.
-    if (compare_search && !json_output) {
-        std::cerr << "Note: --compare-search: legacy search path is not "
-                     "present in the C++ port (only the consolidated path "
-                     "exists); proceeding with the consolidated path.\n";
-    }
-
-    // -- AST-aware filter mutual exclusion ----------------------------------
-    //
-    // `--comments-only`, `--code-only`, and `--strings-only` are mutually
-    // exclusive — they each express a different scope, and combining any
-    // two would always produce an empty result set (or contradictory
-    // semantics). Reject early so the user gets an actionable error
-    // instead of a silently empty result list. This mirrors Go's
-    // mutually-exclusive-option pattern from cmd/lci/main.go.
-    {
-        int set = (comments_only ? 1 : 0) + (code_only ? 1 : 0) +
-                  (strings_only ? 1 : 0);
-        if (set > 1) {
-            std::cerr
-                << "Error: --comments-only, --code-only, and --strings-only "
-                   "are mutually exclusive (specified "
-                << set << ")\n";
-            return 1;
-        }
-    }
 
     Config cfg;
     if (std::string err = load_config_with_overrides(flags, cfg); !err.empty()) {
@@ -1706,70 +1689,58 @@ int run_search(const GlobalFlags& flags, const std::string& pattern,
         }
     }
 
-    if (json_output) {
-        // Match Go's `lci search --json` wire format faithfully:
-        //   - Each result element is wrapped in `{"result": {...}}` (Go's
-        //     `searchtypes.StandardResult` has a `Result GrepResult
-        //     json:"result"` tag — the wrapper is part of the contract).
-        //   - Paths are emitted relative to cwd (Go calls
-        //     `pathutil.ToRelativeStandardResults(results, projectRoot)`).
-        //   - Top-level `mode` is "standard" (Go's standard-results path
-        //     adds `"mode": "standard"`; integrated-mode would override).
-        std::error_code rel_ec;
-        auto cwd = std::filesystem::current_path(rel_ec);
-        auto raw_results = j.value("results", nlohmann::json::array());
+    return render_search_output(options, j, elapsed_ms, verbose_start);
+}
+
+namespace {
+
+int render_search_output(const SearchCommandOptions& options,
+                         nlohmann::json& response, double elapsed_ms,
+                         std::chrono::steady_clock::time_point verbose_start) {
+    if (options.json_output) {
+        std::error_code cwd_error;
+        auto cwd = std::filesystem::current_path(cwd_error);
+        auto raw_results = response.value("results", nlohmann::json::array());
         nlohmann::json wrapped = nlohmann::json::array();
-        for (auto& r : raw_results) {
-            std::string path = r.value("path", "");
-            if (!rel_ec && !path.empty()) {
-                std::error_code ec;
-                auto rel = std::filesystem::relative(path, cwd, ec);
-                if (!ec) {
-                    r["path"] = rel.string();
-                }
+        for (auto& result : raw_results) {
+            std::string path = result.value("path", "");
+            if (!cwd_error && !path.empty()) {
+                std::error_code relative_error;
+                auto relative =
+                    std::filesystem::relative(path, cwd, relative_error);
+                if (!relative_error) result["path"] = relative.string();
             }
-            wrapped.push_back(nlohmann::json{{"result", r}});
+            wrapped.push_back(nlohmann::json{{"result", result}});
         }
-        nlohmann::json output;
-        output["query"] = pattern;
-        output["time_ms"] = elapsed_ms;
-        output["count"] = wrapped.size();
-        output["results"] = wrapped;
-        output["mode"] = "standard";
-        std::cout << output.dump(2) << "\n";
+        nlohmann::json output{
+            {"query", options.pattern},
+            {"time_ms", elapsed_ms},
+            {"count", wrapped.size()},
+            {"results", std::move(wrapped)},
+            {"mode", "standard"},
+        };
+        std::cout << output.dump(2) << '\n';
         return 0;
     }
 
-    auto results = j.value("results", nlohmann::json::array());
-
-    if (compact_search) {
+    auto results = response.value("results", nlohmann::json::array());
+    if (options.compact) {
         std::printf("Found %zu matches in %.1fms (compact mode)\n\n",
                     results.size(), elapsed_ms);
-        // Resolve the current working directory once so we can render
-        // paths relative to it, mirroring Go's compact-mode formatter
-        // (`b.py:1:` rather than `/abs/path/to/b.py:1:`).
-        for (auto& r : results) {
-            std::string path = to_relative_display_path(r.value("path", ""));
-            int line = r.value("line", 0);
-            auto context = r.value("context", nlohmann::json::object());
+        for (auto& result : results) {
+            std::string path =
+                to_relative_display_path(result.value("path", ""));
+            int match_line = result.value("line", 0);
+            auto context = result.value("context", nlohmann::json::object());
             int start_line = context.value("start_line", 0);
             auto lines = context.value("lines", nlohmann::json::array());
-            std::string display_path = path;
-
             for (size_t i = 0; i < lines.size(); ++i) {
-                int line_num = start_line + static_cast<int>(i);
-                if (line_num == line) {
-                    // Lines from context.lines may carry a trailing
-                    // '\n' (the indexer preserves the file's final
-                    // newline on the last line). printf adds its own
-                    // newline below, so strip the trailing one to
-                    // avoid an extra blank line in compact output.
-                    std::string text = lines[i].get<std::string>();
-                    if (!text.empty() && text.back() == '\n') text.pop_back();
-                    std::printf("%s:%d: %s\n", display_path.c_str(), line_num,
-                                text.c_str());
-                    break;
-                }
+                int line = start_line + static_cast<int>(i);
+                if (line != match_line) continue;
+                std::string text = lines[i].get<std::string>();
+                if (!text.empty() && text.back() == '\n') text.pop_back();
+                std::printf("%s:%d: %s\n", path.c_str(), line, text.c_str());
+                break;
             }
         }
         return 0;
@@ -1777,70 +1748,59 @@ int run_search(const GlobalFlags& flags, const std::string& pattern,
 
     std::printf("Found %zu results in %.1fms (standard mode)\n\n",
                 results.size(), elapsed_ms);
-
-    for (auto& r : results) {
-        std::string path = to_relative_display_path(r.value("path", ""));
-        int line = r.value("line", 0);
-        auto context = r.value("context", nlohmann::json::object());
+    for (auto& result : results) {
+        std::string path =
+            to_relative_display_path(result.value("path", ""));
+        int match_line = result.value("line", 0);
+        auto context = result.value("context", nlohmann::json::object());
         std::string block_name = context.value("block_name", "");
         std::string block_type = context.value("block_type", "");
         int start_line = context.value("start_line", 0);
         auto lines = context.value("lines", nlohmann::json::array());
 
-        if (case_insensitive && start_line == line - 1 && line > 1 &&
-            !lines.empty()) {
+        if (options.case_insensitive && start_line == match_line - 1 &&
+            match_line > 1 && !lines.empty()) {
             std::string first = lines[0].get<std::string>();
             if (!first.empty() && first.back() == '\n') first.pop_back();
             if (first.empty()) {
-                auto prior_line =
-                    read_line_from_file(r.value("path", ""), line - 2);
-                if (!prior_line.empty()) {
-                    lines.insert(lines.begin(), prior_line);
-                    start_line = line - 2;
+                auto prior = read_line_from_file(result.value("path", ""),
+                                                 match_line - 2);
+                if (!prior.empty()) {
+                    lines.insert(lines.begin(), prior);
+                    start_line = match_line - 2;
                 }
             }
         }
 
-        std::printf("%s:%d", path.c_str(), line);
+        std::printf("%s:%d", path.c_str(), match_line);
         if (!block_name.empty()) {
             std::printf(" (in %s %s)", block_type.c_str(), block_name.c_str());
         }
         std::printf("\n");
-
         for (size_t i = 0; i < lines.size(); ++i) {
-            int line_num = start_line + static_cast<int>(i);
-            // Match Go's text-mode output exactly: a 6-char right-
-            // padded line number + " | " + content + "\n". No '>'
-            // marker on the match line — Go's formatter prints every
-            // context line uniformly and parity is more valuable than
-            // the marker. Strip any trailing '\n' on the source line
-            // so printf's own newline doesn't double up.
             std::string text = lines[i].get<std::string>();
             if (!text.empty() && text.back() == '\n') text.pop_back();
-            std::printf("%6d | %s\n", line_num, text.c_str());
+            std::printf("%6d | %s\n", start_line + static_cast<int>(i),
+                        text.c_str());
         }
-        // Go's standard-mode formatter prints two blank lines between
-        // result blocks (one closing the context, one before the next
-        // path). Match that spacing exactly.
         std::printf("\n\n");
     }
 
-    if (verbose) {
-        auto verbose_elapsed =
-            std::chrono::steady_clock::now() - verbose_start;
-        double verbose_ms =
-            static_cast<double>(
-                std::chrono::duration_cast<std::chrono::microseconds>(
-                    verbose_elapsed).count()) /
-            1000.0;
+    if (options.verbose) {
+        double total_ms = static_cast<double>(
+            std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::steady_clock::now() - verbose_start)
+                .count()) / 1000.0;
         std::fprintf(stderr,
                      "[verbose] pattern=%s patterns=%zu max_lines=%d "
                      "regex=%d total_ms=%.2f\n",
-                     pattern.c_str(), extra_patterns.size(), max_lines,
-                     use_regex ? 1 : 0, verbose_ms);
+                     options.pattern.c_str(), options.extra_patterns.size(),
+                     options.max_lines, options.use_regex ? 1 : 0, total_ms);
     }
     return 0;
 }
+
+}  // namespace
 
 int run_grep(const GlobalFlags& flags, const std::string& pattern,
              int max_results, int context_lines, bool case_insensitive,

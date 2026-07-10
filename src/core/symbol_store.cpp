@@ -307,16 +307,16 @@ void SymbolLocationIndex::index_file_symbols(
     });
 }
 
-const Symbol* SymbolLocationIndex::find_symbol_at_position(
+std::optional<Symbol> SymbolLocationIndex::find_symbol_at_position(
     FileID file_id, int line, int column) const {
 
     auto snap = load_snapshot();
     auto it = snap->locations.find(file_id);
-    if (it == snap->locations.end()) return nullptr;
+    if (it == snap->locations.end()) return std::nullopt;
 
     const auto* match = find_best_match(it->second, line, column);
-    if (match != nullptr) return &match->symbol;
-    return nullptr;
+    if (match != nullptr) return match->symbol;
+    return std::nullopt;
 }
 
 SymbolID SymbolLocationIndex::find_symbol_id_at_position(

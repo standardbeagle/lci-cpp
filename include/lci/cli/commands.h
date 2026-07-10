@@ -46,26 +46,38 @@ bool is_mcp_mode();
 
 // -- Subcommand entry points --------------------------------------------------
 
-/// search/grep subcommand. Returns 0 on success, non-zero on error.
-///
-/// `extra_patterns` corresponds to the `--patterns` flag (grep -e): each
-/// entry is OR'd with the positional `pattern` to form a single result set.
-int run_search(const GlobalFlags& flags, const std::string& pattern,
-               int max_lines, bool case_insensitive, bool json_output,
-               bool light, bool compact_search, bool use_regex,
-               const std::string& exclude_pattern,
-               const std::string& include_pattern,
-               bool invert_match,
-               const std::vector<std::string>& extra_patterns,
-               bool count_per_file,
-               bool files_only, bool word_boundary,
-               int max_count_per_file, bool include_ids, bool no_ids,
-               bool comments_only, bool code_only,
-               bool strings_only, const std::string& rank_by,
-               const std::string& context_filter,
-               bool template_strings, bool verbose, bool compare_search,
-               const std::string& cpu_profile_path,
-               const std::string& mem_profile_path);
+struct SearchCommandOptions {
+    std::string pattern;
+    int max_lines{};
+    bool case_insensitive{};
+    bool json_output{};
+    bool light{};
+    bool compact{};
+    bool use_regex{};
+    std::string exclude_pattern;
+    std::string include_pattern;
+    bool invert_match{};
+    std::vector<std::string> extra_patterns;
+    bool count_per_file{};
+    bool files_only{};
+    bool word_boundary{};
+    int max_count_per_file{};
+    bool include_ids{};
+    bool no_ids{};
+    bool comments_only{};
+    bool code_only{};
+    bool strings_only{};
+    std::string rank_by;
+    std::string context_filter;
+    bool template_strings{};
+    bool verbose{};
+    bool compare_search{};
+    std::string cpu_profile_path;
+    std::string mem_profile_path;
+};
+
+/// Search subcommand. Returns 0 on success, non-zero on error.
+int run_search(const GlobalFlags& flags, const SearchCommandOptions& options);
 
 /// grep subcommand. Returns 0 on success, non-zero on error.
 ///

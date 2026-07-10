@@ -221,7 +221,7 @@ int SemanticAnnotator::populate_from_index(const MasterIndex& index) {
 
         file_symbols.clear();
         file_symbols.reserve(enhanced.size());
-        for (const auto* es : enhanced) {
+        for (const auto& es : enhanced) {
             if (es) file_symbols.push_back(es->symbol);
         }
         if (file_symbols.empty()) continue;
@@ -296,7 +296,7 @@ int SemanticAnnotator::load_manifest(const MasterIndex& index,
         if (symbol.empty()) symbol = item.value("name", "");
         int line = item.value("line", 0);
 
-        const EnhancedSymbol* match = nullptr;
+        ReferenceTracker::Snapshot::SymbolHandle match;
         std::string match_path;
         for (FileID fid : index.get_all_file_ids()) {
             std::string full_path = index.get_file_path(fid);
@@ -304,7 +304,7 @@ int SemanticAnnotator::load_manifest(const MasterIndex& index,
             if (!path_matches_manifest_target(full_path, rel_path, file)) {
                 continue;
             }
-            for (const auto* es : rt_snap->get_file_enhanced_symbols(fid)) {
+            for (const auto& es : rt_snap->get_file_enhanced_symbols(fid)) {
                 if (!es) continue;
                 bool symbol_ok = symbol.empty() ||
                                  es->symbol.name == symbol ||

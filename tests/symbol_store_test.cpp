@@ -313,7 +313,7 @@ TEST(SymbolLocationIndexTest, EmptyIndex) {
     SymbolLocationIndex idx;
     EXPECT_EQ(idx.file_count(), 0);
     EXPECT_EQ(idx.total_symbols(), 0);
-    EXPECT_EQ(idx.find_symbol_at_position(1, 1, 0), nullptr);
+    EXPECT_FALSE(idx.find_symbol_at_position(1, 1, 0).has_value());
     EXPECT_EQ(idx.find_symbol_id_at_position(1, 1, 0), 0u);
 }
 
@@ -339,8 +339,8 @@ TEST(SymbolLocationIndexTest, IndexAndFindSingleLine) {
 
     idx.index_file_symbols(1, symbols, enhanced);
 
-    const auto* found = idx.find_symbol_at_position(1, 5, 10);
-    ASSERT_NE(found, nullptr);
+    auto found = idx.find_symbol_at_position(1, 5, 10);
+    ASSERT_TRUE(found.has_value());
     EXPECT_EQ(found->name, "foo");
 
     EXPECT_EQ(idx.find_symbol_id_at_position(1, 5, 10), 42u);
@@ -382,8 +382,8 @@ TEST(SymbolLocationIndexTest, FindMostSpecific) {
 
     idx.index_file_symbols(1, symbols, enhanced);
 
-    const auto* found = idx.find_symbol_at_position(1, 15, 8);
-    ASSERT_NE(found, nullptr);
+    auto found = idx.find_symbol_at_position(1, 15, 8);
+    ASSERT_TRUE(found.has_value());
     EXPECT_EQ(found->name, "my_method");
 }
 
@@ -409,8 +409,8 @@ TEST(SymbolLocationIndexTest, PositionOutsideAllSymbols) {
 
     idx.index_file_symbols(1, symbols, enhanced);
 
-    EXPECT_EQ(idx.find_symbol_at_position(1, 5, 0), nullptr);
-    EXPECT_EQ(idx.find_symbol_at_position(1, 25, 0), nullptr);
+    EXPECT_FALSE(idx.find_symbol_at_position(1, 5, 0).has_value());
+    EXPECT_FALSE(idx.find_symbol_at_position(1, 25, 0).has_value());
 }
 
 TEST(SymbolLocationIndexTest, GetFileSymbols) {
@@ -468,7 +468,7 @@ TEST(SymbolLocationIndexTest, RemoveFile) {
 
     idx.remove_file(1);
     EXPECT_EQ(idx.file_count(), 0);
-    EXPECT_EQ(idx.find_symbol_at_position(1, 5, 0), nullptr);
+    EXPECT_FALSE(idx.find_symbol_at_position(1, 5, 0).has_value());
 }
 
 TEST(SymbolLocationIndexTest, Clear) {

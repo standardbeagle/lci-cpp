@@ -367,7 +367,7 @@ nlohmann::json build_inspect_result(const EnhancedSymbol& sym,
             auto resolve_names = [&](const std::vector<SymbolID>& ids) {
                 nlohmann::json names = nlohmann::json::array();
                 for (auto id : ids) {
-                    auto* s = rt_snap->get_enhanced_symbol(id);
+                    auto s = rt_snap->get_enhanced_symbol(id);
                     if (s) names.push_back(s->symbol.name);
                 }
                 return names;
@@ -606,9 +606,9 @@ ToolResult handle_list_symbols(const nlohmann::json& params,
         }
 
         auto symbols = rt_snap->get_file_enhanced_symbols(fid);
-        for (const auto* sym : symbols) {
+        for (const auto& sym : symbols) {
             if (sym && matches_list_filters(*sym, kinds, params)) {
-                all_symbols.push_back({sym, rel});
+                all_symbols.push_back({sym.get(), rel});
             }
         }
     }
@@ -663,14 +663,14 @@ ToolResult handle_inspect_symbol(const nlohmann::json& params,
     auto includes = parse_inspect_includes(params.value("include", ""));
     int max_depth = clamp_int(params.value("max_depth", 3), 1, 10);
 
-    std::vector<const EnhancedSymbol*> matched;
+    std::vector<ReferenceTracker::Snapshot::SymbolHandle> matched;
 
     // Lookup by ID
     if (!id_str.empty()) {
         for (const auto& token : parse_list(id_str)) {
             auto decoded = decode_symbol_id(token);
             if (decoded.has_value()) {
-                auto* sym = rt_snap->get_enhanced_symbol(decoded.value());
+                auto sym = rt_snap->get_enhanced_symbol(decoded.value());
                 if (sym) matched.push_back(sym);
             }
         }
@@ -686,8 +686,8 @@ ToolResult handle_inspect_symbol(const nlohmann::json& params,
     auto type_filter = params.value("type", "");
     if (!file_filter.empty() || !type_filter.empty()) {
         auto type_kinds = parse_symbol_kinds(type_filter);
-        std::vector<const EnhancedSymbol*> filtered;
-        for (const auto* sym : matched) {
+        std::vector<ReferenceTracker::Snapshot::SymbolHandle> filtered;
+        for (const auto& sym : matched) {
             if (!file_filter.empty()) {
                 auto fp = indexer.get_file_path(sym->symbol.file_id);
                 if (!path_matches_glob(fp, file_filter) &&
@@ -710,7 +710,7 @@ ToolResult handle_inspect_symbol(const nlohmann::json& params,
     // Build results (root-relative paths, matching search output)
     nlohmann::json symbols_json = nlohmann::json::array();
     symbols_json.get_ref<nlohmann::json::array_t&>().reserve(matched.size());
-    for (const auto* sym : matched) {
+    for (const auto& sym : matched) {
         auto fp = indexer.get_file_path(sym->symbol.file_id);
         std::string rel(relative_to_root(fp, indexer.config().project.root));
         symbols_json.push_back(
@@ -806,7 +806,7 @@ ToolResult handle_browse_file(const nlohmann::json& params,
     // Get symbols for the file
     auto symbols = rt_snap->get_file_enhanced_symbols(target_fid);
     std::vector<const EnhancedSymbol*> filtered;
-    for (const auto* sym : symbols) {
+    for (const auto& sym : symbols) {
         if (!sym) continue;
         if (!kind_matches(sym->symbol.type, kinds)) continue;
 
@@ -816,7 +816,7 @@ ToolResult handle_browse_file(const nlohmann::json& params,
             if (!want && sym->is_exported) continue;
         }
 
-        filtered.push_back(sym);
+        filtered.push_back(sym.get());
     }
 
     int total = static_cast<int>(filtered.size());
@@ -832,7 +832,7 @@ ToolResult handle_browse_file(const nlohmann::json& params,
     static const std::string kNoPerRowFile;
     nlohmann::json symbols_json = nlohmann::json::array();
     symbols_json.get_ref<nlohmann::json::array_t&>().reserve(filtered.size());
-    for (const auto* sym : filtered) {
+    for (const auto& sym : filtered) {
         symbols_json.push_back(
             build_explore_symbol(*sym, kNoPerRowFile, includes, tracker));
     }
@@ -860,7 +860,7 @@ ToolResult handle_browse_file(const nlohmann::json& params,
         int complexity_count = 0;
         int max_complexity = 0;
 
-        for (const auto* sym : symbols) {
+        for (const auto& sym : symbols) {
             if (!sym) continue;
             if (sym->is_exported) ++exported_count;
             if (sym->symbol.type == SymbolType::Function ||

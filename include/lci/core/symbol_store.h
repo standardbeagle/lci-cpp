@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -148,8 +149,8 @@ struct FileSymbolMap {
 /// contains the target position. This eliminates linear search.
 ///
 /// Thread safety: lock-free reads via an atomically-swapped RCU snapshot
-/// (mirrors FileContentStore / ReferenceTracker). All read queries return by
-/// value (SymbolID / std::vector<Symbol>), so callers need no lock and no pin.
+/// (mirrors FileContentStore / ReferenceTracker). Read queries return by
+/// value, so callers need no lock and no pin.
 /// Writers (index_file_symbols / remove_file / clear) clone-mutate-publish
 /// under write_mu_, or mutate the bulk staging snapshot and publish once.
 class SymbolLocationIndex {
@@ -162,9 +163,9 @@ class SymbolLocationIndex {
                             std::span<const EnhancedSymbol> enhanced_symbols);
 
     /// Finds the most specific symbol at a line/column position.
-    /// Returns nullptr if no symbol contains the position.
-    const Symbol* find_symbol_at_position(FileID file_id,
-                                          int line, int column) const;
+    /// Returns nullopt if no symbol contains the position.
+    std::optional<Symbol> find_symbol_at_position(FileID file_id,
+                                                  int line, int column) const;
 
     /// Finds the symbol ID at a line/column position.
     /// Returns 0 if no symbol contains the position.
@@ -174,7 +175,7 @@ class SymbolLocationIndex {
     /// Finds the symbol ID of the most-specific symbol whose line range spans
     /// `line` (column-agnostic). Returns 0 if none. Binary-searched O(log n);
     /// the line-only analogue of find_symbol_id_at_position for callers that
-    /// only know a line (e.g. ReferenceTracker::get_symbol_at_line).
+    /// only know a line (e.g. ReferenceTracker::Snapshot::get_symbol_at_line).
     SymbolID find_symbol_id_at_line(FileID file_id, int line) const;
 
     /// Returns all symbols in a file.

@@ -493,9 +493,8 @@ std::vector<SearchResult> SearchEngine::search(
         auto rt_snap = tracker.pin();
         results.erase(std::remove_if(results.begin(), results.end(),
             [&](const SearchResult& r) {
-                const auto* sym =
-                    rt_snap->get_symbol_at_line(
-                        index_.symbol_location_index(), r.file_id, r.line);
+                auto sym =
+                    rt_snap->get_symbol_at_line(r.file_id, r.line);
                 if (sym == nullptr) return true;
                 return !symbol_type_matches_filter(options.symbol_types,
                                                    to_string(sym->symbol.type));

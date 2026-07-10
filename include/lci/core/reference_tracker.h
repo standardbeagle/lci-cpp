@@ -255,29 +255,8 @@ class ReferenceTracker {
     std::vector<Reference> get_symbol_references(
         SymbolID symbol_id, std::string_view direction) const;
 
-    /// Finds all symbols with a given name.
-    std::vector<const EnhancedSymbol*> find_symbols_by_name(
-        std::string_view name) const;
-
-    /// Returns an enhanced symbol by ID. Returns nullptr if not found.
-    const EnhancedSymbol* get_enhanced_symbol(SymbolID symbol_id) const;
-
-    /// Returns all enhanced symbols for a file.
-    std::vector<const EnhancedSymbol*> get_file_enhanced_symbols(
-        FileID file_id) const;
-
     /// Returns all references where source or target is in the given file.
     std::vector<Reference> get_file_references(FileID file_id) const;
-
-    /// Finds the symbol containing a given line in a file.
-    const EnhancedSymbol* get_symbol_at_line(FileID file_id, int line) const;
-
-    /// Finds a symbol by name (first match).
-    const EnhancedSymbol* find_symbol_by_name(std::string_view name) const;
-
-    /// Finds a symbol by file ID and name.
-    const EnhancedSymbol* find_symbol_by_file_and_name(
-        FileID file_id, std::string_view name) const;
 
     /// Returns a snapshot of all references.
     std::vector<Reference> get_all_references() const;
@@ -309,9 +288,6 @@ class ReferenceTracker {
     void store_line_to_symbols(
         FileID file_id,
         absl::flat_hash_map<int, std::vector<int>> line_to_symbols);
-    const absl::flat_hash_map<int, std::vector<int>>*
-        get_file_line_to_symbols(FileID file_id) const;
-
     /// Set to non-zero during bulk indexing to skip locking.
     std::atomic<int32_t> bulk_indexing{0};
 
@@ -342,7 +318,15 @@ class ReferenceTracker {
     /// that hands back pointers/views into this state lives here so callers
     /// that need pointer lifetime past the call (execute_search) can pin a
     /// snapshot and query it directly.
-    struct Snapshot {
+    struct Snapshot : std::enable_shared_from_this<Snapshot> {
+        using SymbolHandle = std::shared_ptr<const EnhancedSymbol>;
+        using LineMap = absl::flat_hash_map<int, std::vector<int>>;
+        using LineMapHandle = std::shared_ptr<const LineMap>;
+
+        Snapshot() = default;
+        Snapshot(const Snapshot&) = default;
+        Snapshot& operator=(const Snapshot&) = default;
+
         SymbolStore symbols{256};
         absl::flat_hash_map<uint64_t, Reference> references;
         absl::flat_hash_map<SymbolID, std::vector<uint64_t>> incoming_refs;
@@ -353,40 +337,33 @@ class ReferenceTracker {
             line_to_symbols_by_file;
         ReferenceStats stats{};
 
-        std::vector<const EnhancedSymbol*> find_symbols_by_name(
+        std::vector<SymbolHandle> find_symbols_by_name(
             std::string_view name) const;
         std::vector<Reference> get_symbol_references(
             SymbolID symbol_id, std::string_view direction) const;
         std::vector<Reference> get_references_by_id(
             std::span<const uint64_t> ref_ids) const;
 
-        // Snapshot-scoped variants of the pointer-returning ReferenceTracker
-        // accessors. A caller that pins this snapshot and queries it directly
-        // keeps the returned const EnhancedSymbol* / map* valid for as long as
-        // the pin is held — even across a concurrent reindex publish. The
-        // ReferenceTracker methods of the same name delegate to a freshly
-        // loaded snapshot (safe only for transient, synchronous use).
-        const EnhancedSymbol* get_enhanced_symbol(SymbolID symbol_id) const;
-        std::vector<const EnhancedSymbol*> get_file_enhanced_symbols(
+        // Aliasing handles retain this snapshot while referring directly to
+        // its immutable symbols/maps. Results therefore remain valid even if
+        // the caller queried through a temporary pin.
+        SymbolHandle get_enhanced_symbol(SymbolID symbol_id) const;
+        std::vector<SymbolHandle> get_file_enhanced_symbols(
             FileID file_id) const;
-        const EnhancedSymbol* find_symbol_by_name(std::string_view name) const;
-        const EnhancedSymbol* find_symbol_by_file_and_name(
+        SymbolHandle find_symbol_by_name(std::string_view name) const;
+        SymbolHandle find_symbol_by_file_and_name(
             FileID file_id, std::string_view name) const;
-        const absl::flat_hash_map<int, std::vector<int>>*
-            get_file_line_to_symbols(FileID file_id) const;
-        // get_symbol_at_line needs the (separately RCU) location index for the
-        // O(log n) line lookup; the resulting symbol id is resolved against
-        // this snapshot's symbols so the returned pointer is pin-stable.
-        const EnhancedSymbol* get_symbol_at_line(
-            const SymbolLocationIndex& location_index, FileID file_id,
-            int line) const;
+        LineMapHandle get_file_line_to_symbols(FileID file_id) const;
+        // Line lookup deliberately uses only this snapshot. Combining it with
+        // the separately-published SymbolLocationIndex can mix generations
+        // during a concurrent reindex and resolve a reused ID to the wrong
+        // symbol.
+        SymbolHandle get_symbol_at_line(FileID file_id, int line) const;
     };
 
-    /// Pins the current published snapshot. The caller holds the returned
-    /// shared_ptr for as long as it dereferences pointers/views obtained from
-    /// it; this is what lets execute_search read def/refs lock-free (the
-    /// snapshot cannot be freed under it even as a concurrent reindex
-    /// publishes a new one).
+    /// Pins the current published snapshot. Symbol and line-map queries return
+    /// aliasing handles that retain this snapshot, so their lifetime remains
+    /// safe even after the explicit pin leaves scope.
     std::shared_ptr<const Snapshot> pin() const { return load_snapshot(); }
 
   private:

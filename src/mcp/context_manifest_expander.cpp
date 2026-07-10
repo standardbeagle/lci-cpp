@@ -147,7 +147,7 @@ ExpansionEngine::ExtractResult ExpansionEngine::extract_symbol_source(
     // Search for the symbol by name in the reference tracker
     auto& tracker = index_.ref_tracker();
     auto rt_snap = tracker.pin();
-    auto* sym = rt_snap->find_symbol_by_name(symbol_name);
+    auto sym = rt_snap->find_symbol_by_name(symbol_name);
     if (!sym) {
         return {{}, {}, {}, "symbol " + symbol_name + " not found"};
     }
@@ -157,7 +157,7 @@ ExpansionEngine::ExtractResult ExpansionEngine::extract_symbol_source(
     auto fid = index_.path_to_id(file_path);
     if (fid != 0 && sym->symbol.file_id != fid) {
         // Try finding in the specified file
-        auto* file_sym =
+        auto file_sym =
             rt_snap->find_symbol_by_file_and_name(fid, symbol_name);
         if (file_sym) {
             sym = file_sym;
@@ -309,7 +309,7 @@ std::vector<HydratedRef> hydrate_symbol_ids(
         if (visited.contains(id)) continue;
         visited.insert(id);
 
-        auto* sym = rt_snap->get_enhanced_symbol(id);
+        auto sym = rt_snap->get_enhanced_symbol(id);
         if (!sym) continue;
 
         auto file_path = index.get_file_path(sym->symbol.file_id);
@@ -340,7 +340,7 @@ std::vector<HydratedRef> ExpansionEngine::expand_callers(
 
     auto& tracker = index_.ref_tracker();
     auto rt_snap = tracker.pin();
-    auto* sym = rt_snap->find_symbol_by_name(ref.symbol);
+    auto sym = rt_snap->find_symbol_by_name(ref.symbol);
     if (!sym) return {};
 
     auto caller_ids = tracker.get_caller_symbols(sym->id);
@@ -358,7 +358,7 @@ std::vector<HydratedRef> ExpansionEngine::expand_callees(
 
     auto& tracker = index_.ref_tracker();
     auto rt_snap = tracker.pin();
-    auto* sym = rt_snap->find_symbol_by_name(ref.symbol);
+    auto sym = rt_snap->find_symbol_by_name(ref.symbol);
     if (!sym) return {};
 
     auto callee_ids = tracker.get_callee_symbols(sym->id);
@@ -381,18 +381,18 @@ std::vector<HydratedRef> ExpansionEngine::expand_implementations(
 
     // Prefer interface symbols
     const EnhancedSymbol* target = nullptr;
-    for (auto* s : symbols) {
+    for (const auto& s : symbols) {
         if (s->symbol.type == SymbolType::Interface) {
-            target = s;
+            target = s.get();
             break;
         }
         if (s->symbol.type == SymbolType::Class ||
             s->symbol.type == SymbolType::Struct ||
             s->symbol.type == SymbolType::Type) {
-            if (!target) target = s;
+            if (!target) target = s.get();
         }
     }
-    if (!target) target = symbols[0];
+    if (!target) target = symbols[0].get();
 
     auto impl_ids = tracker.get_implementors(target->id);
     auto derived_ids = tracker.get_derived_types(target->id);
@@ -422,15 +422,15 @@ std::vector<HydratedRef> ExpansionEngine::expand_interface(
 
     // Prefer concrete types
     const EnhancedSymbol* target = nullptr;
-    for (auto* s : symbols) {
+    for (const auto& s : symbols) {
         if (s->symbol.type == SymbolType::Class ||
             s->symbol.type == SymbolType::Struct ||
             s->symbol.type == SymbolType::Type) {
-            target = s;
+            target = s.get();
             break;
         }
     }
-    if (!target) target = symbols[0];
+    if (!target) target = symbols[0].get();
 
     auto iface_ids = tracker.get_implemented_interfaces(target->id);
     auto base_ids = tracker.get_base_types(target->id);
@@ -454,13 +454,13 @@ std::vector<HydratedRef> ExpansionEngine::expand_siblings(
 
     auto& tracker = index_.ref_tracker();
     auto rt_snap = tracker.pin();
-    auto* sym = rt_snap->find_symbol_by_name(ref.symbol);
+    auto sym = rt_snap->find_symbol_by_name(ref.symbol);
     if (!sym) return {};
     if (sym->symbol.type != SymbolType::Method) return {};
 
     auto file_symbols = rt_snap->get_file_enhanced_symbols(sym->symbol.file_id);
     std::vector<SymbolID> sibling_ids;
-    for (auto* fs : file_symbols) {
+    for (const auto& fs : file_symbols) {
         if (fs->id == sym->id) continue;
         if (fs->symbol.type != SymbolType::Method) continue;
         if (!sym->receiver_type.empty() &&
@@ -490,7 +490,7 @@ std::vector<HydratedRef> ExpansionEngine::expand_tests(
     auto test_symbols = rt_snap->find_symbols_by_name(test_name);
 
     std::vector<SymbolID> test_ids;
-    for (auto* ts : test_symbols) {
+    for (const auto& ts : test_symbols) {
         auto path = get_file_path(ts->symbol.file_id);
         if (path.find("_test.") != std::string::npos ||
             path.find("_test/") != std::string::npos ||
@@ -500,11 +500,11 @@ std::vector<HydratedRef> ExpansionEngine::expand_tests(
     }
 
     // Strategy 2: find callers that are test functions
-    auto* sym = rt_snap->find_symbol_by_name(ref.symbol);
+    auto sym = rt_snap->find_symbol_by_name(ref.symbol);
     if (sym) {
         auto caller_ids = tracker.get_caller_symbols(sym->id);
         for (auto cid : caller_ids) {
-            auto* caller = rt_snap->get_enhanced_symbol(cid);
+            auto caller = rt_snap->get_enhanced_symbol(cid);
             if (!caller) continue;
             if (caller->symbol.name.substr(0, 4) != "Test") continue;
             auto path = get_file_path(caller->symbol.file_id);

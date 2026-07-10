@@ -114,14 +114,13 @@ TEST(SlabAllocatorTest, StatsTrackAllocationsAndReuses) {
 
     alloc.put(p1, c1);
     auto stats_after_put = alloc.get_stats();
-    EXPECT_EQ(stats_after_put.reuses, 1);
-    EXPECT_EQ(stats_after_put.pool_hits, 1);
+    EXPECT_EQ(stats_after_put.reuses, 0);
+    EXPECT_EQ(stats_after_put.pool_hits, 0);
 
     auto [p2, c2] = alloc.get(8);
     auto stats2 = alloc.get_stats();
-    // put() counted one reuse, get() from free list counted another.
-    EXPECT_EQ(stats2.reuses, 2);
-    EXPECT_EQ(stats2.pool_hits, 2);
+    EXPECT_EQ(stats2.reuses, 1);
+    EXPECT_EQ(stats2.pool_hits, 1);
 
     alloc.put(p2, c2);
 }
@@ -140,7 +139,7 @@ TEST(SlabAllocatorTest, ResetStatsClearsCounters) {
     EXPECT_EQ(stats.total_capacity, 0);
 }
 
-TEST(SlabAllocatorTest, OversizedPutTracksPoolMiss) {
+TEST(SlabAllocatorTest, OversizedAllocationTracksPoolMiss) {
     SlabAllocator<uint32_t> alloc;
     auto [ptr, cap] = alloc.get(1024);
     alloc.put(ptr, cap);
@@ -153,8 +152,8 @@ TEST(SlabAllocatorTest, OversizedPutTracksPoolMiss) {
 // ---------------------------------------------------------------------------
 TEST(SlabAllocatorTest, CustomTierConfigs) {
     constexpr std::array<SlabTierConfig, 2> configs{{
-        {4, 0.5},
-        {16, 0.5},
+        {4},
+        {16},
     }};
     SlabAllocator<uint32_t> alloc(configs);
 
@@ -165,6 +164,42 @@ TEST(SlabAllocatorTest, CustomTierConfigs) {
     auto [p2, c2] = alloc.get(5);
     EXPECT_EQ(c2, 16);
     alloc.put(p2, c2);
+}
+
+TEST(SlabAllocatorTest, RejectsTooManyTiers) {
+    std::array<SlabTierConfig, 9> configs{};
+    for (size_t i = 0; i < configs.size(); ++i) {
+        configs[i].capacity = static_cast<int>(i + 1);
+    }
+    EXPECT_THROW((SlabAllocator<uint32_t>{configs}), std::invalid_argument);
+}
+
+TEST(SlabAllocatorTest, RejectsInvalidTierOrdering) {
+    constexpr std::array<SlabTierConfig, 2> duplicate{{
+        {8},
+        {8},
+    }};
+    constexpr std::array<SlabTierConfig, 1> non_positive{{
+        {0},
+    }};
+    EXPECT_THROW((SlabAllocator<uint32_t>{duplicate}), std::invalid_argument);
+    EXPECT_THROW((SlabAllocator<uint32_t>{non_positive}), std::invalid_argument);
+}
+
+TEST(SlabAllocatorTest, ConcurrentGetPutIsSafe) {
+    SlabAllocator<uint32_t> alloc;
+    std::vector<std::thread> workers;
+    for (int t = 0; t < 4; ++t) {
+        workers.emplace_back([&] {
+            for (int i = 0; i < 1000; ++i) {
+                auto [ptr, cap] = alloc.get(8);
+                ptr[0] = static_cast<uint32_t>(i);
+                alloc.put(ptr, cap);
+            }
+        });
+    }
+    for (auto& worker : workers) worker.join();
+    EXPECT_GT(alloc.get_stats().pool_hits, 0);
 }
 
 TEST(SlabAllocatorTest, TrigramTierConfigs) {
@@ -237,7 +272,7 @@ TEST(SlabAllocatorBenchmark, GetPutCycleReusesMemory) {
 
     auto stats = alloc.get_stats();
     // After warmup, every get() should hit the free list (pool hit).
-    // Every put() also counts a reuse. So reuses == 2 * kIterations.
+    // Returning a block is not a hit; every subsequent get() is.
     EXPECT_EQ(stats.allocations, 0);
     EXPECT_EQ(stats.pool_misses, 0);
     EXPECT_GT(stats.pool_hits, 0);
