@@ -18,6 +18,7 @@
 #include <lci/indexing/master_index.h>
 #include <lci/search/search_engine.h>
 #include <lci/search/search_options.h>
+#include <lci/server/request_decode.h>
 #include <lci/version.h>
 
 #ifdef _WIN32
@@ -224,13 +225,6 @@ KindSet parse_symbol_kinds(const std::string& kind_str) {
 bool kind_matches(SymbolType st, const KindSet& kinds) {
     if (kinds.empty()) return true;
     return std::find(kinds.begin(), kinds.end(), st) != kinds.end();
-}
-
-int bounded_result_limit(const nlohmann::json& body, const char* field,
-                         int default_value, int maximum) {
-    int value = body.value(field, default_value);
-    if (value <= 0) return default_value;
-    return std::min(value, maximum);
 }
 
 std::string language_from_extension(const std::string& path) {
@@ -749,25 +743,26 @@ void IndexServer::handle_search(const httplib::Request& req,
         return;
     }
 
-    auto pattern = body.value("pattern", "");
-    if (pattern.empty()) {
-        error_response(res, 400, "pattern is required");
+    std::string decode_error;
+    auto request = server_request::decode_search(body, decode_error);
+    if (!request) {
+        error_response(res, 400, decode_error);
         return;
     }
 
     SearchOptions opts;
-    opts.max_results = bounded_result_limit(body, "max_results", 100, 1000);
-    opts.case_insensitive = body.value("case_insensitive", false);
-    opts.declaration_only = body.value("declaration_only", false);
+    opts.max_results = request->max_results;
+    opts.case_insensitive = request->case_insensitive;
+    opts.declaration_only = request->declaration_only;
     // Go's /search ships a `context` block per hit. Request a small
     // surrounding window so extract_context() actually populates lines;
     // without this max_context_lines=0 produces an empty `lines` array.
-    opts.max_context_lines = body.value("max_context_lines", 1);
+    opts.max_context_lines = request->max_context_lines;
 
     std::vector<SearchResult> results;
     {
         std::shared_lock lock(mu_);
-        results = indexer_->search_with_options(pattern, opts);
+        results = indexer_->search_with_options(request->pattern, opts);
     }
 
     int max_res = opts.max_results;
@@ -1024,22 +1019,21 @@ void IndexServer::handle_definition(const httplib::Request& req,
         return;
     }
 
-    auto pattern = body.value("pattern", "");
-    if (pattern.empty()) {
-        error_response(res, 400, "pattern is required");
+    std::string decode_error;
+    auto request = server_request::decode_limited_pattern(body, decode_error);
+    if (!request) {
+        error_response(res, 400, decode_error);
         return;
     }
-
-    int max_results = bounded_result_limit(body, "max_results", 100, 1000);
 
     std::vector<SearchResult> results;
     {
         std::shared_lock lock(mu_);
-        results = indexer_->search_definitions(pattern);
+        results = indexer_->search_definitions(request->pattern);
     }
 
-    if (static_cast<int>(results.size()) > max_results) {
-        results.resize(static_cast<size_t>(max_results));
+    if (static_cast<int>(results.size()) > request->max_results) {
+        results.resize(static_cast<size_t>(request->max_results));
     }
 
     nlohmann::json defs = nlohmann::json::array();
@@ -1075,13 +1069,12 @@ void IndexServer::handle_references(const httplib::Request& req,
         return;
     }
 
-    auto pattern = body.value("pattern", "");
-    if (pattern.empty()) {
-        error_response(res, 400, "pattern is required");
+    std::string decode_error;
+    auto request = server_request::decode_limited_pattern(body, decode_error);
+    if (!request) {
+        error_response(res, 400, decode_error);
         return;
     }
-
-    int max_results = bounded_result_limit(body, "max_results", 100, 1000);
 
     // Go's /references endpoint returns one entry per text occurrence of
     // the pattern (matching the Go reference output: a definition-line
@@ -1090,17 +1083,17 @@ void IndexServer::handle_references(const httplib::Request& req,
     // recorded incoming refs (which only covers cross-language linker
     // hits and would drop the same-file definition lines).
     SearchOptions opts;
-    opts.max_results = max_results;
+    opts.max_results = request->max_results;
     opts.max_context_lines = 5;
 
     std::vector<SearchResult> results;
     {
         std::shared_lock lock(mu_);
-        results = indexer_->search_with_options(pattern, opts);
+        results = indexer_->search_with_options(request->pattern, opts);
     }
 
-    if (static_cast<int>(results.size()) > max_results) {
-        results.resize(static_cast<size_t>(max_results));
+    if (static_cast<int>(results.size()) > request->max_results) {
+        results.resize(static_cast<size_t>(request->max_results));
     }
 
     nlohmann::json refs = nlohmann::json::array();

@@ -4,6 +4,7 @@
 #include <lci/indexing/master_index.h>
 #include <lci/search/search_engine.h>
 #include <lci/server/server.h>
+#include <lci/server/request_decode.h>
 
 #include <chrono>
 #include <filesystem>
@@ -24,6 +25,23 @@
 
 namespace lci {
 namespace {
+
+TEST(ServerRequestDecodeTest, RejectsWrongFieldTypes) {
+    std::string error;
+    EXPECT_FALSE(server_request::decode_search(
+        {{"pattern", "Add"}, {"max_results", "many"}}, error));
+    EXPECT_NE(error.find("integer"), std::string::npos);
+}
+
+TEST(ServerRequestDecodeTest, BoundsNumericOptions) {
+    std::string error;
+    auto request = server_request::decode_search(
+        {{"pattern", "Add"}, {"max_results", -1},
+         {"max_context_lines", 10000}}, error);
+    ASSERT_TRUE(request) << error;
+    EXPECT_EQ(request->max_results, 100);
+    EXPECT_EQ(request->max_context_lines, 100);
+}
 
 // -- Temp directory helper (matches existing test patterns) -------------------
 
