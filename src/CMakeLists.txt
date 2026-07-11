@@ -18,6 +18,7 @@ add_library(lci_lib STATIC
     parser/parser_pool.cpp
     parser/parse_methods.cpp
     parser/unified_extractor.cpp
+    parser/unified_extractor_references.cpp
     parser/unified_extractor_side_effects.cpp
     parser/unified_extractor_types.cpp
     config/gitignore.cpp
