@@ -69,7 +69,6 @@ add_library(lci_lib STATIC
     mcp/server.cpp
     mcp/response.cpp
     mcp/validation.cpp
-    mcp/pagination.cpp
     mcp/formatter_compact.cpp
     mcp/handlers_core.cpp
     mcp/handlers_analysis.cpp

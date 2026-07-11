@@ -18,7 +18,6 @@
 #include <lci/core/reference_tracker.h>
 #include <lci/idcodec.h>
 #include <lci/indexing/master_index.h>
-#include <lci/mcp/pagination.h>
 #include <lci/mcp/schemas/search.h>  // generated: kSEARCH_SCHEMA
 #include <lci/mcp/validation.h>
 #include <lci/scope.h>
