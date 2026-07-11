@@ -1,11 +1,23 @@
 #include <gtest/gtest.h>
 
 #include <lci/core/portable.h>
+#include <lci/core/text.h>
 
 #include <ctime>
 #include <filesystem>
 
 namespace lci {
+
+TEST(TextTest, AsciiLowerIsLocaleIndependent) {
+    EXPECT_EQ(text::ascii_lower("HTTP_Server"), "http_server");
+    EXPECT_EQ(text::ascii_lower("already lower"), "already lower");
+}
+
+TEST(TextTest, AsciiContainsCaseInsensitive) {
+    EXPECT_TRUE(text::ascii_contains_ci("Path/To/Handler.cpp", "HANDLER"));
+    EXPECT_TRUE(text::ascii_contains_ci("anything", ""));
+    EXPECT_FALSE(text::ascii_contains_ci("short", "longer"));
+}
 namespace {
 
 TEST(PortableTest, GmtimeUtcMatchesKnownEpoch) {

@@ -2,6 +2,7 @@
 
 #include <lci/idcodec.h>
 #include <lci/reference.h>
+#include <lci/core/text.h>
 
 #include <algorithm>
 #include <cctype>
@@ -12,13 +13,6 @@
 namespace lci {
 
 namespace {
-
-std::string to_lower(std::string_view s) {
-    std::string result(s);
-    std::transform(result.begin(), result.end(), result.begin(),
-                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    return result;
-}
 
 bool contains(std::string_view haystack, std::string_view needle) {
     return haystack.find(needle) != std::string_view::npos;
@@ -59,7 +53,7 @@ bool HealthAnalyzer::is_excluded_file(std::string_view path) const {
 bool HealthAnalyzer::is_test_helper_function(std::string_view name) {
     if (name.empty()) return false;
 
-    std::string lower = to_lower(name);
+    std::string lower = text::ascii_lower(name);
 
     const std::string_view always_helper[] = {
         "setup", "teardown", "helper", "mock", "fake", "stub"};
@@ -96,7 +90,7 @@ bool HealthAnalyzer::is_test_helper_function(std::string_view name) {
 }
 
 bool HealthAnalyzer::is_test_helper_path(std::string_view path) {
-    std::string lower = to_lower(path);
+    std::string lower = text::ascii_lower(path);
 
     const std::string_view dirs[] = {
         "testhelpers/", "testhelper/", "testing/", "testutil/", "testutils/",
@@ -105,7 +99,7 @@ bool HealthAnalyzer::is_test_helper_path(std::string_view path) {
         if (contains(lower, dir)) return true;
     }
 
-    std::string base = to_lower(std::filesystem::path(std::string(path)).filename().string());
+    std::string base = text::ascii_lower(std::filesystem::path(std::string(path)).filename().string());
     const std::string_view patterns[] = {
         "_test_helper", "test_helper", "_testutil", "testutil_",
         "_mock", "mock_", "_fake", "fake_", "_stub", "stub_"};

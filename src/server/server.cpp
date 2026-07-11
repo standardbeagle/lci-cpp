@@ -10,6 +10,7 @@
 #include <thread>
 
 #include <lci/core/reference_tracker.h>
+#include <lci/core/text.h>
 #include <lci/file_info.h>
 #include <lci/git/analyzer.h>
 #include <lci/git/provider.h>
@@ -225,23 +226,6 @@ bool kind_matches(SymbolType st, const KindSet& kinds) {
     return std::find(kinds.begin(), kinds.end(), st) != kinds.end();
 }
 
-std::string to_lower(std::string_view sv) {
-    std::string r;
-    r.reserve(sv.size());
-    for (char c : sv) {
-        r.push_back(static_cast<char>(
-            std::tolower(static_cast<unsigned char>(c))));
-    }
-    return r;
-}
-
-bool contains_ci(std::string_view haystack, std::string_view needle) {
-    if (needle.empty()) return true;
-    auto h = to_lower(haystack);
-    auto n = to_lower(needle);
-    return h.find(n) != std::string::npos;
-}
-
 int bounded_result_limit(const nlohmann::json& body, const char* field,
                          int default_value, int maximum) {
     int value = body.value(field, default_value);
@@ -251,7 +235,7 @@ int bounded_result_limit(const nlohmann::json& body, const char* field,
 
 std::string language_from_extension(const std::string& path) {
     auto ext = std::filesystem::path(path).extension().string();
-    auto low = to_lower(ext);
+    auto low = text::ascii_lower(ext);
     if (low == ".go") return "go";
     if (low == ".js") return "javascript";
     if (low == ".ts") return "typescript";
@@ -1391,11 +1375,11 @@ void IndexServer::handle_list_symbols(const httplib::Request& req,
                 if (*exported_filter != sym->is_exported) continue;
             }
             if (!name_filter.empty() &&
-                !contains_ci(sym->symbol.name, name_filter)) {
+                !text::ascii_contains_ci(sym->symbol.name, name_filter)) {
                 continue;
             }
             if (!receiver_filter.empty() &&
-                to_lower(sym->receiver_type) != to_lower(receiver_filter)) {
+                text::ascii_lower(sym->receiver_type) != text::ascii_lower(receiver_filter)) {
                 continue;
             }
             if (min_complexity.has_value() &&

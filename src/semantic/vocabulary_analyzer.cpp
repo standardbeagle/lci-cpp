@@ -1,4 +1,5 @@
 #include <lci/semantic/semantic_scorer.h>
+#include <lci/core/text.h>
 
 #include <algorithm>
 #include <cctype>
@@ -21,21 +22,6 @@ const std::vector<std::string>& common_exclude_patterns() {
     return patterns;
 }
 
-std::string str_to_lower(std::string_view s) {
-    std::string result(s);
-    std::transform(result.begin(), result.end(), result.begin(),
-                   [](unsigned char c) {
-                       return static_cast<char>(std::tolower(c));
-                   });
-    return result;
-}
-
-bool contains_ci(std::string_view haystack, std::string_view needle) {
-    std::string h = str_to_lower(haystack);
-    std::string n = str_to_lower(needle);
-    return h.find(n) != std::string::npos;
-}
-
 bool is_production_code(const FileSymbol& symbol, const ProjectConfig& config) {
     const auto& path = symbol.file_path;
 
@@ -46,7 +32,7 @@ bool is_production_code(const FileSymbol& symbol, const ProjectConfig& config) {
 
     // Check common test patterns.
     for (const auto& pattern : common_exclude_patterns()) {
-        if (contains_ci(path, pattern)) return false;
+        if (text::ascii_contains_ci(path, pattern)) return false;
     }
 
     // Language-specific patterns.
@@ -70,7 +56,7 @@ bool is_production_code(const FileSymbol& symbol, const ProjectConfig& config) {
     } else {
         // Generic: check test markers.
         for (const auto& marker : config.test_markers) {
-            if (contains_ci(path, marker)) return false;
+            if (text::ascii_contains_ci(path, marker)) return false;
         }
     }
 

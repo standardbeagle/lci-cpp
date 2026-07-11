@@ -1,4 +1,5 @@
 #include <lci/semantic/synonym_table.h>
+#include <lci/core/text.h>
 
 #include <algorithm>
 #include <cctype>
@@ -6,14 +7,6 @@
 namespace lci {
 
 namespace {
-
-std::string to_lower(std::string_view s) {
-    std::string out(s);
-    std::transform(out.begin(), out.end(), out.begin(), [](unsigned char c) {
-        return static_cast<char>(std::tolower(c));
-    });
-    return out;
-}
 
 std::string_view trim(std::string_view s) {
     while (!s.empty() && std::isspace(static_cast<unsigned char>(s.front())))
@@ -145,7 +138,7 @@ Result<SynonymTable> SynonymTable::build_from_ops(std::span<const SynonymOp> ops
                         "synonyms", "clear",
                         "clear takes exactly one word");
                 }
-                std::string w = to_lower(trim(op.words[0]));
+                std::string w = text::ascii_lower(trim(op.words[0]));
                 if (w.empty()) {
                     return make_config_error("synonyms", "clear",
                                              "clear word must not be empty");
@@ -162,7 +155,7 @@ Result<SynonymTable> SynonymTable::build_from_ops(std::span<const SynonymOp> ops
                 std::vector<std::string> members;
                 members.reserve(op.words.size());
                 for (const auto& raw : op.words) {
-                    std::string w = to_lower(trim(raw));
+                    std::string w = text::ascii_lower(trim(raw));
                     if (w.empty()) {
                         return make_config_error(
                             "synonyms", "group",

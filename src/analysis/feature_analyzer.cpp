@@ -9,17 +9,11 @@
 #include <absl/container/flat_hash_map.h>
 
 #include <lci/analysis/call_graph.h>
+#include <lci/core/text.h>
 
 namespace lci {
 
 namespace {
-
-std::string to_lower(std::string_view s) {
-    std::string result(s);
-    std::transform(result.begin(), result.end(), result.begin(),
-                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    return result;
-}
 
 bool contains(std::string_view haystack, std::string_view needle) {
     return haystack.find(needle) != std::string_view::npos;
@@ -53,7 +47,7 @@ std::string dir_base(const std::string& path) {
 // ---------------------------------------------------------------------------
 
 std::string FeatureAnalyzer::classify_component_type(const EnhancedSymbol& sym) {
-    std::string name = to_lower(sym.symbol.name);
+    std::string name = text::ascii_lower(sym.symbol.name);
 
     if (is_function_like(sym.symbol.type)) {
         if (contains(name, "handler") || contains(name, "controller"))
@@ -83,7 +77,7 @@ std::string FeatureAnalyzer::classify_component_type(const EnhancedSymbol& sym) 
 }
 
 std::string FeatureAnalyzer::classify_feature_type(std::string_view name) {
-    std::string lower = to_lower(name);
+    std::string lower = text::ascii_lower(name);
 
     if (contains_any(lower, {"user", "auth", "login", "register", "account", "profile"}))
         return "User Management";

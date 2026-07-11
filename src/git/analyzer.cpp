@@ -10,6 +10,7 @@
 #include <lci/parser/parser.h>
 #include <lci/parser/parser_pool.h>
 #include <lci/parser/unified_extractor.h>
+#include <lci/core/text.h>
 #include <tree_sitter/api.h>
 
 namespace lci {
@@ -80,14 +81,6 @@ const AbbrevEntry kAbbreviations[] = {
     {"param", {"parameter", "", ""}, 1},
     {"args", {"arguments", "", ""}, 1},
 };
-
-std::string to_lower(std::string_view s) {
-    std::string out(s);
-    for (auto& c : out) {
-        if (c >= 'A' && c <= 'Z') c = static_cast<char>(c + 32);
-    }
-    return out;
-}
 
 int compute_nesting_depth(std::string_view content) {
     int depth = 0;
@@ -548,11 +541,11 @@ bool Analyzer::find_similar_names(const SymbolInfo& sym,
                                   double threshold,
                                   NamingFinding& out) {
     std::vector<SymbolInfo> similar;
-    auto new_lower = to_lower(sym.name);
+    auto new_lower = text::ascii_lower(sym.name);
 
     for (const auto& es : existing) {
         if (es.name == sym.name) continue;
-        auto exist_lower = to_lower(es.name);
+        auto exist_lower = text::ascii_lower(es.name);
         double sim = fuzzy_matcher_.similarity(new_lower, exist_lower);
         if (sim >= threshold) {
             similar.push_back(es);
@@ -584,7 +577,7 @@ bool Analyzer::check_abbreviations(const SymbolInfo& sym,
     if (words.empty()) return false;
 
     for (const auto& word : words) {
-        auto word_lower = to_lower(word);
+        auto word_lower = text::ascii_lower(word);
 
         // Check if word is a known abbreviation.
         for (const auto& entry : kAbbreviations) {
@@ -592,7 +585,7 @@ bool Analyzer::check_abbreviations(const SymbolInfo& sym,
                 for (const auto& es : existing) {
                     auto es_words = name_splitter_.split(es.name);
                     for (const auto& ew : es_words) {
-                        auto ew_lower = to_lower(ew);
+                        auto ew_lower = text::ascii_lower(ew);
                         for (int j = 0; j < entry.count; ++j) {
                             if (ew_lower == entry.expansions[j]) {
                                 out.severity = FindingSeverity::Info;
@@ -616,7 +609,7 @@ bool Analyzer::check_abbreviations(const SymbolInfo& sym,
                     for (const auto& es : existing) {
                         auto es_words = name_splitter_.split(es.name);
                         for (const auto& ew : es_words) {
-                            if (to_lower(ew) == entry.abbrev) {
+                            if (text::ascii_lower(ew) == entry.abbrev) {
                                 out.severity = FindingSeverity::Info;
                                 out.new_symbol = sym;
                                 out.similar_names = {es};

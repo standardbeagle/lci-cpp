@@ -1,6 +1,7 @@
 #include <lci/analysis/module_analyzer.h>
 
 #include <lci/analysis/coupling_analyzer.h>
+#include <lci/core/text.h>
 
 #include <algorithm>
 #include <cctype>
@@ -11,13 +12,6 @@
 namespace lci {
 
 namespace {
-
-std::string to_lower(std::string_view s) {
-    std::string result(s);
-    std::transform(result.begin(), result.end(), result.begin(),
-                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    return result;
-}
 
 bool contains(std::string_view haystack, std::string_view needle) {
     return haystack.find(needle) != std::string_view::npos;
@@ -31,8 +25,8 @@ double prefix_cohesion(const std::vector<const EnhancedSymbol*>& syms) {
     for (const auto* sym : syms) {
         auto pos = sym->symbol.name.find('_');
         std::string prefix = (pos != std::string::npos)
-            ? to_lower(sym->symbol.name.substr(0, pos))
-            : to_lower(sym->symbol.name);
+            ? text::ascii_lower(sym->symbol.name.substr(0, pos))
+            : text::ascii_lower(sym->symbol.name);
         prefix_counts[prefix]++;
     }
 
@@ -55,7 +49,7 @@ double stability_score(int sym_count) {
 // ---------------------------------------------------------------------------
 
 std::string ModuleAnalyzer::classify_module_by_path(std::string_view path) {
-    std::string lower = to_lower(path);
+    std::string lower = text::ascii_lower(path);
 
     if (contains(lower, "api") || contains(lower, "controller") ||
         contains(lower, "handler"))

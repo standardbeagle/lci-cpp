@@ -1,4 +1,5 @@
 #include <lci/git/pattern_detector.h>
+#include <lci/core/text.h>
 
 #include <algorithm>
 #include <cctype>
@@ -20,13 +21,6 @@ bool str_contains(std::string_view haystack, std::string_view needle) {
 bool str_ends_with(std::string_view s, std::string_view suffix) {
     return s.size() >= suffix.size() &&
            s.substr(s.size() - suffix.size()) == suffix;
-}
-
-std::string to_lower(std::string_view s) {
-    std::string result(s);
-    std::transform(result.begin(), result.end(), result.begin(),
-                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    return result;
 }
 
 // Karpathy: replaced std::regex with RE2. Static RE2 instances are compiled
@@ -400,7 +394,7 @@ bool PatternDetector::detect_config_aggregation(
     std::string_view content, std::string_view file_path,
     AntiPattern& out) const {
 
-    auto lower_path = to_lower(file_path);
+    auto lower_path = text::ascii_lower(file_path);
     bool is_config = str_contains(lower_path, "config") ||
                      str_contains(lower_path, "settings") ||
                      str_contains(lower_path, "options");

@@ -1,4 +1,5 @@
 #include <lci/analysis/layer_analyzer.h>
+#include <lci/core/text.h>
 
 #include <algorithm>
 #include <cctype>
@@ -8,13 +9,6 @@
 namespace lci {
 
 namespace {
-
-std::string to_lower(std::string_view s) {
-    std::string result(s);
-    std::transform(result.begin(), result.end(), result.begin(),
-                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    return result;
-}
 
 bool contains(std::string_view haystack, std::string_view needle) {
     return haystack.find(needle) != std::string_view::npos;
@@ -37,8 +31,8 @@ double prefix_cohesion(const std::vector<const EnhancedSymbol*>& syms) {
     for (const auto* sym : syms) {
         auto pos = sym->symbol.name.find('_');
         std::string prefix = (pos != std::string::npos)
-            ? to_lower(sym->symbol.name.substr(0, pos))
-            : to_lower(sym->symbol.name);
+            ? text::ascii_lower(sym->symbol.name.substr(0, pos))
+            : text::ascii_lower(sym->symbol.name);
         prefix_counts[prefix]++;
     }
 
@@ -98,7 +92,7 @@ const LayerKeywords kLayerKeywords[] = {
 // ---------------------------------------------------------------------------
 
 std::string LayerAnalyzer::classify_symbol_to_layer(const EnhancedSymbol& sym) {
-    std::string name = to_lower(sym.symbol.name);
+    std::string name = text::ascii_lower(sym.symbol.name);
 
     // Check symbol type for strong classification.
     if (is_class_like(sym.symbol.type)) {

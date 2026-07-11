@@ -1,6 +1,7 @@
 #include <lci/search/search_engine.h>
 
 #include <lci/core/reference_tracker.h>
+#include <lci/core/text.h>
 #include <lci/indexing/master_index.h>
 #include <lci/indexing/pipeline_scanner.h>
 
@@ -264,22 +265,6 @@ std::string_view file_base(std::string_view path) {
     return path.substr(slash + 1);
 }
 
-bool contains_ci(std::string_view haystack, std::string_view needle) {
-    if (needle.size() > haystack.size()) return false;
-    for (size_t i = 0; i + needle.size() <= haystack.size(); ++i) {
-        bool match = true;
-        for (size_t j = 0; j < needle.size(); ++j) {
-            if (std::tolower(static_cast<unsigned char>(haystack[i + j])) !=
-                std::tolower(static_cast<unsigned char>(needle[j]))) {
-                match = false;
-                break;
-            }
-        }
-        if (match) return true;
-    }
-    return false;
-}
-
 bool is_code_extension(std::string_view ext) {
     static constexpr std::string_view exts[] = {
         ".go", ".rs", ".py", ".js", ".jsx", ".ts", ".tsx",
@@ -322,9 +307,9 @@ bool is_config_extension(std::string_view ext) {
 FileCategory classify_file(std::string_view path) {
     auto base = file_base(path);
 
-    if (contains_ci(base, "_test.") || contains_ci(base, ".test.") ||
-        contains_ci(base, ".spec.") ||
-        (base.size() >= 5 && contains_ci(base.substr(0, 5), "test_"))) {
+    if (text::ascii_contains_ci(base, "_test.") || text::ascii_contains_ci(base, ".test.") ||
+        text::ascii_contains_ci(base, ".spec.") ||
+        (base.size() >= 5 && text::ascii_contains_ci(base.substr(0, 5), "test_"))) {
         return FileCategory::Test;
     }
 

@@ -1,6 +1,7 @@
 #include <lci/analysis/ci_vocabulary_analyzer.h>
 
 #include <lci/reference.h>
+#include <lci/core/text.h>
 
 #include <algorithm>
 #include <cctype>
@@ -10,13 +11,6 @@
 namespace lci {
 
 namespace {
-
-std::string to_lower(std::string_view s) {
-    std::string result(s);
-    std::transform(result.begin(), result.end(), result.begin(),
-                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    return result;
-}
 
 bool contains(std::string_view haystack, std::string_view needle) {
     return haystack.find(needle) != std::string_view::npos;
@@ -71,7 +65,7 @@ CIVocabularyAnalyzer::CIVocabularyAnalyzer() {
 std::pair<std::string, double> CIVocabularyAnalyzer::classify_term_with_strength(
     std::string_view term) const {
 
-    std::string term_lower = to_lower(term);
+    std::string term_lower = text::ascii_lower(term);
     std::string best_domain;
     double best_strength = 0.0;
 

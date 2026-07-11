@@ -1,4 +1,5 @@
 #include <lci/semantic/semantic_scorer.h>
+#include <lci/core/text.h>
 
 #include <algorithm>
 #include <cctype>
@@ -9,15 +10,6 @@
 namespace lci {
 
 namespace {
-
-std::string to_lower(std::string_view s) {
-    std::string result(s);
-    std::transform(result.begin(), result.end(), result.begin(),
-                   [](unsigned char c) {
-                       return static_cast<char>(std::tolower(c));
-                   });
-    return result;
-}
 
 // Common abbreviation table matching Go's phrase_matcher.go.
 const std::unordered_map<std::string, std::vector<std::string>>& abbreviation_table() {
@@ -790,8 +782,8 @@ SemanticScore SemanticScorer::score_symbol(std::string_view query,
     query = trim(query);
     symbol_name = trim(symbol_name);
 
-    std::string query_lower = to_lower(query);
-    std::string symbol_lower = to_lower(symbol_name);
+    std::string query_lower = text::ascii_lower(query);
+    std::string symbol_lower = text::ascii_lower(symbol_name);
 
     // Run all detectors, keep best result.
     SemanticScore best{};

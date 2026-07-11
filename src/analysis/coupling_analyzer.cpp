@@ -1,6 +1,7 @@
 #include <lci/analysis/coupling_analyzer.h>
 
 #include <lci/reference.h>
+#include <lci/core/text.h>
 
 #include <algorithm>
 #include <cctype>
@@ -10,13 +11,6 @@
 namespace lci {
 
 namespace {
-
-std::string to_lower(std::string_view s) {
-    std::string result(s);
-    std::transform(result.begin(), result.end(), result.begin(),
-                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    return result;
-}
 
 bool contains(std::string_view haystack, std::string_view needle) {
     return haystack.find(needle) != std::string_view::npos;
@@ -32,7 +26,7 @@ bool CouplingAnalyzer::is_code_file(std::string_view path) {
     auto dot = path.rfind('.');
     if (dot == std::string_view::npos) return false;
 
-    std::string ext = to_lower(path.substr(dot));
+    std::string ext = text::ascii_lower(path.substr(dot));
 
     static const std::string_view code_exts[] = {
         ".go",  ".js",    ".ts",  ".tsx",   ".jsx",  ".py",
