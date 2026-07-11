@@ -560,9 +560,21 @@ TEST_F(ServerTest, DefinitionEndpoint) {
     }
 }
 
+TEST_F(ServerTest, DefinitionEndpointTreatsNegativeLimitAsDefault) {
+    auto j = post("/definition", {{"pattern", "Add"}, {"max_results", -1}});
+    ASSERT_TRUE(j.contains("definitions")) << j.dump();
+    EXPECT_TRUE(j["definitions"].is_array());
+}
+
 TEST_F(ServerTest, ReferencesEndpoint) {
     auto j = post("/references", {{"pattern", "Add"}});
     ASSERT_TRUE(j.contains("references"));
+}
+
+TEST_F(ServerTest, ReferencesEndpointTreatsNegativeLimitAsDefault) {
+    auto j = post("/references", {{"pattern", "Add"}, {"max_results", -1}});
+    ASSERT_TRUE(j.contains("references")) << j.dump();
+    EXPECT_TRUE(j["references"].is_array());
 }
 
 TEST_F(ServerTest, StatsEndpoint) {

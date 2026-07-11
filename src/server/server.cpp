@@ -242,6 +242,13 @@ bool contains_ci(std::string_view haystack, std::string_view needle) {
     return h.find(n) != std::string::npos;
 }
 
+int bounded_result_limit(const nlohmann::json& body, const char* field,
+                         int default_value, int maximum) {
+    int value = body.value(field, default_value);
+    if (value <= 0) return default_value;
+    return std::min(value, maximum);
+}
+
 std::string language_from_extension(const std::string& path) {
     auto ext = std::filesystem::path(path).extension().string();
     auto low = to_lower(ext);
@@ -765,7 +772,7 @@ void IndexServer::handle_search(const httplib::Request& req,
     }
 
     SearchOptions opts;
-    opts.max_results = body.value("max_results", 100);
+    opts.max_results = bounded_result_limit(body, "max_results", 100, 1000);
     opts.case_insensitive = body.value("case_insensitive", false);
     opts.declaration_only = body.value("declaration_only", false);
     // Go's /search ships a `context` block per hit. Request a small
@@ -779,8 +786,8 @@ void IndexServer::handle_search(const httplib::Request& req,
         results = indexer_->search_with_options(pattern, opts);
     }
 
-    int max_res = body.value("max_results", 0);
-    if (max_res > 0 && static_cast<int>(results.size()) > max_res) {
+    int max_res = opts.max_results;
+    if (static_cast<int>(results.size()) > max_res) {
         results.resize(static_cast<size_t>(max_res));
     }
 
@@ -1039,7 +1046,7 @@ void IndexServer::handle_definition(const httplib::Request& req,
         return;
     }
 
-    int max_results = body.value("max_results", 100);
+    int max_results = bounded_result_limit(body, "max_results", 100, 1000);
 
     std::vector<SearchResult> results;
     {
@@ -1090,7 +1097,7 @@ void IndexServer::handle_references(const httplib::Request& req,
         return;
     }
 
-    int max_results = body.value("max_results", 100);
+    int max_results = bounded_result_limit(body, "max_results", 100, 1000);
 
     // Go's /references endpoint returns one entry per text occurrence of
     // the pattern (matching the Go reference output: a definition-line

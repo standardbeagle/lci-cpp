@@ -38,6 +38,11 @@ class Lexer {
 
     Token next() {
         skip_ws_and_comments();
+        if (!pending_error_.empty()) {
+            std::string error = std::move(pending_error_);
+            pending_error_.clear();
+            return stamp({TokenKind::Error, std::move(error), 0, false});
+        }
         if (pos_ >= src_.size()) return stamp({TokenKind::Eof, {}, 0, false});
 
         char c = src_[pos_];
@@ -58,6 +63,7 @@ class Lexer {
     std::string_view src_;
     size_t pos_;
     int line_{1};
+    std::string pending_error_;
 
     // Stamps the token with the line where it began. Called after the lexer
     // has already advanced past the token, so re-derive the start line by
@@ -88,13 +94,21 @@ class Lexer {
                     continue;
                 }
                 if (src_[pos_ + 1] == '*') {
+                    const int start_line = line_;
                     pos_ += 2;
                     while (pos_ + 1 < src_.size() &&
                            !(src_[pos_] == '*' && src_[pos_ + 1] == '/')) {
                         if (src_[pos_] == '\n') ++line_;
                         ++pos_;
                     }
-                    if (pos_ + 1 < src_.size()) pos_ += 2;
+                    if (pos_ + 1 < src_.size()) {
+                        pos_ += 2;
+                    } else {
+                        pos_ = src_.size();
+                        pending_error_ =
+                            "unterminated block comment starting on line " +
+                            std::to_string(start_line);
+                    }
                     continue;
                 }
             }
@@ -103,6 +117,7 @@ class Lexer {
     }
 
     Token lex_string() {
+        const int start_line = line_;
         ++pos_;  // skip opening quote
         std::string val;
         while (pos_ < src_.size() && src_[pos_] != '"') {
@@ -116,11 +131,18 @@ class Lexer {
                     default: val += src_[pos_]; break;
                 }
             } else {
+                if (src_[pos_] == '\n') ++line_;
                 val += src_[pos_];
             }
             ++pos_;
         }
-        if (pos_ < src_.size()) ++pos_;  // skip closing quote
+        if (pos_ >= src_.size()) {
+            return {TokenKind::Error,
+                    "unterminated string starting on line " +
+                        std::to_string(start_line),
+                    0, false};
+        }
+        ++pos_;  // skip closing quote
         return {TokenKind::String, std::move(val), 0, false};
     }
 
@@ -247,10 +269,16 @@ class Parser {
         }
 
         if (cur_.kind == TokenKind::LBrace) {
+            const int opening_line = cur_.line;
             advance();
             node.children = parse_document();
             if (!error_.empty()) return node;
-            if (cur_.kind == TokenKind::RBrace) advance();
+            if (cur_.kind != TokenKind::RBrace) {
+                error_ = "line " + std::to_string(opening_line) +
+                         ": unclosed block";
+                return node;
+            }
+            advance();
         }
 
         return node;

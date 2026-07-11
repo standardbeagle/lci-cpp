@@ -587,6 +587,31 @@ TEST_F(KdlConfigTest, MalformedErrorReportsLineNumber) {
     EXPECT_NE(result.error.find("line 5"), std::string::npos) << result.error;
 }
 
+TEST_F(KdlConfigTest, RejectsUnterminatedString) {
+    write_kdl("project {\n  name \"unfinished");
+    auto result = load_config(temp_dir_.string());
+    ASSERT_FALSE(result.ok());
+    EXPECT_NE(result.error.find("unterminated string"), std::string::npos)
+        << result.error;
+}
+
+TEST_F(KdlConfigTest, RejectsUnclosedBlock) {
+    write_kdl("project {\n  name \"unfinished\"\n");
+    auto result = load_config(temp_dir_.string());
+    ASSERT_FALSE(result.ok());
+    EXPECT_NE(result.error.find("unclosed block"), std::string::npos)
+        << result.error;
+}
+
+TEST_F(KdlConfigTest, RejectsUnterminatedBlockComment) {
+    write_kdl("project {\n  /* unfinished\n");
+    auto result = load_config(temp_dir_.string());
+    ASSERT_FALSE(result.ok());
+    EXPECT_NE(result.error.find("unterminated block comment"),
+              std::string::npos)
+        << result.error;
+}
+
 // A malformed size value must fail loudly, not silently coerce to 0 — a zero
 // max_file_size disables indexing entirely, so the bad line has to surface.
 TEST_F(KdlConfigTest, RejectsMalformedMaxFileSize) {

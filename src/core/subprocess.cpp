@@ -267,18 +267,34 @@ bool spawn_detached(const std::vector<std::string>& argv) {
     posix_spawn_file_actions_addopen(&fa, STDERR_FILENO, "/dev/null", O_WRONLY,
                                      0);
 
-    posix_spawnattr_t attr;
-    posix_spawnattr_init(&attr);
-#ifdef POSIX_SPAWN_SETSID
-    posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETSID);
-#endif
-
+    // Prepare all allocating state before fork. The launcher may be created
+    // from a multithreaded process and must only call async-signal-safe
+    // operations before posix_spawnp/_exit.
     auto cargv = to_cargv(argv);
-    pid_t pid = -1;
-    int rc = posix_spawnp(&pid, cargv[0], &fa, &attr, cargv.data(), environ);
-    posix_spawnattr_destroy(&attr);
+
+    // Spawn through a short-lived child. The caller reaps that child, while
+    // the actual daemon is reparented when the child exits. Calling
+    // posix_spawnp directly and discarding its PID leaves a zombie owned by
+    // this process when the daemon eventually exits.
+    pid_t launcher = fork();
+    if (launcher < 0) {
+        posix_spawn_file_actions_destroy(&fa);
+        return false;
+    }
+    if (launcher == 0) {
+        if (setsid() < 0) _exit(127);
+        pid_t daemon = -1;
+        int rc = posix_spawnp(&daemon, cargv[0], &fa, nullptr, cargv.data(),
+                              environ);
+        _exit(rc == 0 ? 0 : 127);
+    }
+
     posix_spawn_file_actions_destroy(&fa);
-    return rc == 0;
+    int status = 0;
+    while (waitpid(launcher, &status, 0) < 0) {
+        if (errno != EINTR) return false;
+    }
+    return WIFEXITED(status) && WEXITSTATUS(status) == 0;
 }
 
 }  // namespace subprocess
