@@ -66,6 +66,7 @@ add_library(lci_lib STATIC
     symbollinker/csharp_linker.cpp
     symbollinker/php_linker.cpp
     server/server.cpp
+    server/handlers_search.cpp
     server/client.cpp
     mcp/server.cpp
     mcp/response.cpp
