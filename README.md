@@ -154,6 +154,10 @@ ctest --preset release --parallel $(nproc)
 
 The preset excludes the separately gated benchmark target. Run
 `./build/release/tests/lci_benchmarks` explicitly for performance checks.
+CI gates the synthetic suite against
+`tests/benchmarks/baseline/linux-x64.json` via `scripts/bench_gate.py`
+(fails on >1.5x regression); regenerate the baseline on the benchmark
+runner with `scripts/bench_gate.py --update` when benchmarks change.
 
 The suite covers unit tests, integration tests (bundled per-binary for
 in-process cache amortization), real-project tests (chi, fastapi, trpc,
@@ -179,7 +183,7 @@ and skip cleanly when corpora are absent.
 |---------|-------|
 | C++ binary install | TGZ / DEB / RPM via CPack |
 | MCP server | 14 tools, all engine-backed |
-| Performance | meets/beats every benchmark gate |
+| Performance | synthetic benchmark suite gated in CI (fails on >1.5x regression vs stored baseline); real-project benches run locally |
 
 ## License
 

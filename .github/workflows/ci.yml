@@ -321,12 +321,28 @@ jobs:
       - name: Build benchmarks
         run: cmake --build build/release --target lci_benchmarks --parallel
 
+      # RealProject benches are excluded: their corpora are untracked local
+      # clones (scripts/add-real-projects.sh) that actions/checkout wipes, so
+      # on CI they can only error. The synthetic suite is gated against the
+      # checked-in baseline; regenerate it on this runner with
+      # scripts/bench_gate.py --update when benchmarks change.
       - name: Run benchmarks
         run: |
           ./build/release/tests/lci_benchmarks \
-            --benchmark_format=console \
-            --benchmark_min_time=0.1s | tee benchmark_results.txt
+            --benchmark_filter=-RealProject \
+            --benchmark_repetitions=3 \
+            --benchmark_report_aggregates_only=true \
+            --benchmark_min_time=0.1s \
+            --benchmark_out=benchmark_results.json \
+            --benchmark_out_format=json
+
+      - name: Perf regression gate
+        run: |
+          python3 scripts/bench_gate.py \
+            --baseline tests/benchmarks/baseline/linux-x64.json \
+            --current benchmark_results.json \
+            --threshold 1.5
 
       - name: Reclaim build space
         if: always()
-        run: rm -rf build/release benchmark_results.txt
+        run: rm -rf build/release benchmark_results.json
