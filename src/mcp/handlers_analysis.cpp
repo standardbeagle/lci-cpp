@@ -1583,82 +1583,55 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
 
     std::ostringstream out;
     if (mode == "statistics") {
-        EngineData d = gather_engine();
-        if (!d.result.ok()) {
-            return make_error_response("code_insight", d.result.error);
+        // Data comes from the engine (build_statistics runs the coupling
+        // analyzer + derives quality); the handler only renders LCF. purity
+        // is sourced from the side-effect analyzer, which the engine does not
+        // own, so it is passed in.
+        if (files_data.empty()) {
+            return make_error_response("code_insight",
+                                       "no files provided for analysis");
         }
-        const auto* hd = d.result.response.health_dashboard;
+        CodebaseIntelligenceParams sp;
+        sp.mode = "statistics";
+        double purity_ratio = tally_purity(analyzer).purity_ratio;
+        auto resp = engine.build_statistics(sp, files_data, project_root,
+                                            purity_ratio);
+        const auto& sr = *resp.statistics_report;
         emit_lcf_header(out, "statistics", 1,
                         lcf_token_count(0, 0, false, 0, true));
-        if (hd) {
-            emit_statistics(out, hd->complexity, d.coupling.coupling,
-                            d.coupling.cohesion, d.quality,
-                            d.purity.purity_ratio);
-        }
+        emit_statistics(out, sr.complexity, sr.coupling, sr.cohesion,
+                        sr.quality, sr.purity_ratio);
     } else if (mode == "structure") {
-        // Compute structure inline from the live index. Hardcoded version
-        // always emitted dirs=1, top_dirs `.:N`; on any real corpus the
-        // top-level dir distribution is much richer. Walk file paths,
-        // count per top-level dir + per extension. depth is the deepest
-        // path-component count seen.
-        absl::flat_hash_map<std::string, int> top_dir_files;
-        absl::flat_hash_map<std::string, int> types_count;
-        int code = 0, tests = 0, config = 0, docs = 0;
-        int max_depth = 0;
+        // Structure data (dir/type/category breakdown) is computed by the
+        // engine from the indexed file paths; the handler gathers the raw
+        // paths and renders LCF. Hardcoded output always emitted dirs=1; on a
+        // real corpus the top-level dir distribution is much richer.
+        std::vector<std::string> file_paths;
         for (auto fid : indexer.get_all_file_ids()) {
             auto p = indexer.get_file_path(fid);
-            if (p.empty()) continue;
-            std::string rel = p;
-            const auto& root = indexer.config().project.root;
-            if (!root.empty() && rel.rfind(root, 0) == 0) {
-                rel = rel.substr(root.size());
-                while (!rel.empty() && rel.front() == '/') rel.erase(0, 1);
-            }
-            int depth = 0;
-            for (char c : rel) if (c == '/') ++depth;
-            if (depth > max_depth) max_depth = depth;
-            auto slash = rel.find('/');
-            std::string top =
-                slash == std::string::npos ? "." : rel.substr(0, slash);
-            ++top_dir_files[top];
-            auto dot = rel.rfind('.');
-            if (dot != std::string::npos)
-                ++types_count[rel.substr(dot)];
-            if (rel.find("_test.") != std::string::npos ||
-                rel.find("/test") != std::string::npos) ++tests;
-            else if (rel.find(".md") != std::string::npos ||
-                     rel.find("README") != std::string::npos) ++docs;
-            else if (rel.find(".json") != std::string::npos ||
-                     rel.find(".yaml") != std::string::npos ||
-                     rel.find(".yml") != std::string::npos ||
-                     rel.find(".toml") != std::string::npos) ++config;
-            else ++code;
+            if (!p.empty()) file_paths.emplace_back(p);
         }
+        CodebaseIntelligenceParams sp;
+        sp.mode = "structure";
+        auto resp = engine.build_structure(sp, files_data, file_paths,
+                                           project_root, file_count,
+                                           total_functions);
+        const auto& s = *resp.structure_analysis;
         out << "LCF/1.0\nmode=structure\ntier=1\ntokens=20\n---\n"
             << "== STRUCTURE ==\n"
-            << "dirs=" << top_dir_files.size()
-            << " files=" << file_count
-            << " symbols=" << total_functions
-            << " depth=" << max_depth << "\n";
-        std::vector<std::pair<std::string, int>> tv(
-            types_count.begin(), types_count.end());
-        std::sort(tv.begin(), tv.end(),
-                  [](const auto& a, const auto& b) { return a.first < b.first; });
+            << "dirs=" << s.dir_count << " files=" << s.file_count
+            << " symbols=" << s.symbol_count << " depth=" << s.max_depth
+            << "\n";
         out << "types:";
-        for (const auto& [ext, n] : tv) out << " " << ext << "=" << n;
+        for (const auto& [ext, n] : s.types) out << " " << ext << "=" << n;
         out << "\n"
-            << "categories: code=" << code
-            << " tests=" << tests
-            << " config=" << config
-            << " docs=" << docs << "\n"
+            << "categories: code=" << s.code << " tests=" << s.tests
+            << " config=" << s.config << " docs=" << s.docs << "\n"
             << "top_dirs:\n";
-        std::vector<std::pair<std::string, int>> td(
-            top_dir_files.begin(), top_dir_files.end());
-        std::sort(td.begin(), td.end(),
-                  [](const auto& a, const auto& b) { return a.second > b.second; });
-        size_t shown = std::min(td.size(), size_t{10});
+        size_t shown = std::min(s.top_dirs.size(), size_t{10});
         for (size_t i = 0; i < shown; ++i)
-            out << "  " << td[i].first << ": " << td[i].second << " files\n";
+            out << "  " << s.top_dirs[i].first << ": " << s.top_dirs[i].second
+                << " files\n";
         out << "---";
     } else if (mode == "unified") {
         EngineData d = gather_engine();
@@ -1741,14 +1714,10 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
             emit_git_hotspots(out, report, win, project_root);
         }
     } else if (mode == "detailed") {
-        // Detailed sub-mode dispatch via the existing analyzers.
-        // The engine's build_detailed() returns an empty response because
-        // CodebaseIntelligenceResponse has no module/layer/feature fields
-        // (Go uses separate JSON fields the C++ port hasn't yet added to
-        // the response struct). We call the analyzers directly here and
-        // emit results as LCF text — Karpathy #6: don't silently fall
-        // through to overview, surface the real data the analyzers
-        // already compute.
+        // Detailed sub-mode dispatch. The engine runs the module/layer/
+        // feature/vocabulary analyzers and returns the results in the
+        // response; the handler renders LCF from those fields (Karpathy #6:
+        // don't silently fall through to overview — surface the real data).
         std::string detailed_mode = params.value("analysis",
                                                  params.value("detailed_mode", ""));
         if (detailed_mode.empty()) detailed_mode = "modules";
@@ -1760,11 +1729,18 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                 "', must be one of: modules, layers, features, terms");
         }
 
+        CodebaseIntelligenceParams dp;
+        dp.mode = "detailed";
+        dp.analysis = detailed_mode;
+        const auto& ref = indexer.ref_tracker();
+        auto resp = engine.build_detailed(
+            dp, files_data, project_root,
+            [&ref](SymbolID id) { return ref.get_callee_symbols(id); });
+
         out << "LCF/1.0\nmode=detailed\nsub=" << detailed_mode
             << "\ntier=2\ntokens=100\n---\n";
         if (detailed_mode == "modules") {
-            ModuleAnalyzer ma;
-            auto r = ma.analyze(files_data, project_root);
+            const auto& r = *resp.module_analysis;
             out << "== MODULES ==\n"
                 << "total=" << r.metrics.total_modules
                 << " cohesion=" << fmt2(r.metrics.average_cohesion)
@@ -1783,8 +1759,7 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
             if (r.modules.size() > shown)
                 out << "  ... and " << (r.modules.size() - shown) << " more\n";
         } else if (detailed_mode == "layers") {
-            LayerAnalyzer la;
-            auto r = la.analyze(files_data);
+            const auto& r = *resp.layer_analysis;
             out << "== LAYERS ==\n"
                 << "total=" << r.layers.size()
                 << " violations=" << r.violation_count << "\n";
@@ -1798,11 +1773,7 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                     << " confidence=" << fmt2(p.confidence) << "\n";
             }
         } else if (detailed_mode == "features") {
-            FeatureAnalyzer fa;
-            const auto& ref = indexer.ref_tracker();
-            auto r = fa.analyze(files_data, [&ref](SymbolID id) {
-                return ref.get_callee_symbols(id);
-            });
+            const auto& r = *resp.feature_analysis;
             out << "== FEATURES ==\n"
                 << "total=" << r.metrics.total_features
                 << " avg_components=" << fmt2(r.metrics.average_components)
@@ -1824,8 +1795,7 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                     << " strength=" << fmt2(d.strength) << "\n";
             }
         } else {  // terms
-            CIVocabularyAnalyzer va;
-            auto terms = va.extract_domain_terms_from_files(files_data);
+            const auto& terms = resp.domain_terms;
             out << "== TERMS ==\n"
                 << "total=" << terms.size() << "\n";
             size_t shown = std::min(terms.size(), size_t{30});
