@@ -60,6 +60,15 @@ nlohmann::json apply_exclude_comments(nlohmann::json results);
 /// Pass-through when `context_lines <= 0`.
 nlohmann::json widen_context_blocks(nlohmann::json results, int context_lines);
 
+/// Resolves the trailing `lci grep/search <path>...` positionals to the
+/// ROOT-relative form the index matches against. Each token is interpreted as
+/// absolute or relative to `cwd`, then expressed relative to `root`. Purely
+/// lexical (no disk access). A token that escapes `root` is returned
+/// unchanged so the server-side index-membership check can reject it loudly.
+std::vector<std::string> resolve_scope_paths(
+    const std::vector<std::string>& paths, const std::string& root,
+    const std::string& cwd);
+
 }  // namespace grep_filters
 }  // namespace cli
 }  // namespace lci

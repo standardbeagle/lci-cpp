@@ -1023,6 +1023,49 @@ std::optional<nlohmann::json> search_union_patterns(
     return wrapper;
 }
 
+// Resolve the trailing path positionals (`lci grep pattern <path>...`, ripgrep
+// `rg pattern [path...]` convention) to ROOT-relative form so they line up with
+// the root-relative paths the index stores and matches against server-side.
+//
+// The indexed paths inside execute_search's `rel_in_scope` matcher are
+// root-relative. A raw argv token is either absolute or relative to the user's
+// current working directory, which need not equal the indexed root — so
+// `lci grep pattern /abs/path/to/file` or a cwd-relative arg run from a
+// subdirectory never prefix-matches a root-relative indexed path and silently
+// matches nothing. Resolving here fixes that.
+//
+// Purely lexical (mirrors the std::filesystem::relative idiom used in
+// debug.cpp's snapshot keying, but lexical so it needs no disk access and stays
+// deterministic under tests). A token that cannot be expressed relative to
+// `root` (it escapes the indexed root) is left unchanged; the server-side index
+// membership check then reports it loudly as an unindexed path rather than
+// silently returning empty. Fail-fast for unknown paths is enforced there — a
+// filesystem::exists check here would pass files that exist on disk but were
+// never indexed, which is the exact silent-empty bug this replaces.
+std::vector<std::string> resolve_scope_paths(
+    const std::vector<std::string>& paths, const std::string& root,
+    const std::string& cwd) {
+    std::vector<std::string> out;
+    out.reserve(paths.size());
+    const std::string& effective_root = root.empty() ? cwd : root;
+    std::filesystem::path root_norm =
+        std::filesystem::path(effective_root).lexically_normal();
+    std::filesystem::path cwd_path(cwd);
+    for (const auto& token : paths) {
+        std::filesystem::path p(token);
+        std::filesystem::path abs =
+            (p.is_absolute() ? p : (cwd_path / p)).lexically_normal();
+        std::filesystem::path rel = abs.lexically_relative(root_norm);
+        if (!rel.empty() && rel != std::filesystem::path(".") &&
+            *rel.begin() != "..") {
+            out.push_back(rel.generic_string());
+        } else {
+            out.push_back(token);
+        }
+    }
+    return out;
+}
+
 }  // namespace
 
 // -- Test-visible filter helpers ---------------------------------------------
@@ -1052,6 +1095,12 @@ nlohmann::json apply_exclude_comments(nlohmann::json results) {
 
 nlohmann::json widen_context_blocks(nlohmann::json results, int context_lines) {
     return ::lci::cli::widen_context_blocks(std::move(results), context_lines);
+}
+
+std::vector<std::string> resolve_scope_paths(
+    const std::vector<std::string>& paths, const std::string& root,
+    const std::string& cwd) {
+    return ::lci::cli::resolve_scope_paths(paths, root, cwd);
 }
 
 }  // namespace grep_filters
@@ -1180,23 +1229,6 @@ nlohmann::json regex_filter_results(nlohmann::json results,
     return out;
 }
 
-// Fail-fast validation for the trailing path positionals (ripgrep parity):
-// a path that does not exist on disk is a user error (typo), so error loudly
-// with a nonzero exit rather than silently returning zero matches. Paths are
-// checked relative to the current working directory, mirroring how ripgrep
-// resolves `rg pattern <path>` and how the scope tokens are matched against
-// the (root-relative) indexed paths server-side.
-bool validate_scope_paths(const std::vector<std::string>& paths) {
-    for (const auto& p : paths) {
-        std::error_code ec;
-        if (p.empty() || !std::filesystem::exists(p, ec)) {
-            std::cerr << "Error: path does not exist: " << p << "\n";
-            return false;
-        }
-    }
-    return true;
-}
-
 bool validate_search_options(const SearchCommandOptions& options) {
     int content_filters = (options.comments_only ? 1 : 0) +
                           (options.code_only ? 1 : 0) +
@@ -1237,7 +1269,6 @@ int render_search_output(const SearchCommandOptions& options,
 
 int run_search(const GlobalFlags& flags, const SearchCommandOptions& options) {
     if (!validate_search_options(options)) return 1;
-    if (!validate_scope_paths(options.paths)) return 1;
     emit_search_compatibility_notices(options);
 
     const auto& pattern = options.pattern;
@@ -1301,6 +1332,14 @@ int run_search(const GlobalFlags& flags, const SearchCommandOptions& options) {
         std::cerr << "Error: " << err << "\n";
         return 1;
     }
+
+    // Resolve trailing path positionals to root-relative form (blocker: an
+    // absolute or cwd-relative arg never matches the root-relative indexed
+    // paths otherwise). Unknown/unindexed paths fail loudly server-side.
+    std::error_code scope_cwd_ec;
+    std::vector<std::string> scoped_paths = resolve_scope_paths(
+        options.paths, cfg.project.root,
+        std::filesystem::current_path(scope_cwd_ec).string());
 
     std::string conn_err;
     auto client = ensure_server_running(cfg, conn_err);
@@ -1466,11 +1505,11 @@ int run_search(const GlobalFlags& flags, const SearchCommandOptions& options) {
     std::optional<nlohmann::json> result;
     if (all_patterns.size() == 1) {
         result = client->search(all_patterns.front(), 500, case_insensitive,
-                                false, search_err, options.paths);
+                                false, search_err, scoped_paths);
     } else {
         result = search_union_patterns(*client, all_patterns, 500,
                                        case_insensitive, search_err,
-                                       options.paths);
+                                       scoped_paths);
     }
 
     auto elapsed = std::chrono::steady_clock::now() - start;
@@ -1833,13 +1872,19 @@ int run_grep(const GlobalFlags& flags, const std::string& pattern,
              bool count_per_file, bool files_only,
              int max_count_per_file, bool verbose,
              const std::vector<std::string>& paths) {
-    if (!validate_scope_paths(paths)) return 1;
-
     Config cfg;
     if (std::string err = load_config_with_overrides(flags, cfg); !err.empty()) {
         std::cerr << "Error: " << err << "\n";
         return 1;
     }
+
+    // Resolve trailing path positionals to root-relative form (blocker: an
+    // absolute or cwd-relative arg never matches the root-relative indexed
+    // paths otherwise). Unknown/unindexed paths fail loudly server-side.
+    std::error_code scope_cwd_ec;
+    std::vector<std::string> scoped_paths = resolve_scope_paths(
+        paths, cfg.project.root,
+        std::filesystem::current_path(scope_cwd_ec).string());
 
     std::string conn_err;
     auto client = ensure_server_running(cfg, conn_err);
@@ -1914,13 +1959,16 @@ int run_grep(const GlobalFlags& flags, const std::string& pattern,
     if (use_regex) {
         // Search by literal seed(s), then RE2-filter the row set.
         result = search_union_patterns(*client, grep_seeds, max_results,
-                                       case_insensitive, search_err, paths);
+                                       case_insensitive, search_err,
+                                       scoped_paths);
     } else if (all_patterns.size() == 1) {
         result = client->search(all_patterns.front(), max_results,
-                                case_insensitive, false, search_err, paths);
+                                case_insensitive, false, search_err,
+                                scoped_paths);
     } else {
         result = search_union_patterns(*client, all_patterns, max_results,
-                                       case_insensitive, search_err, paths);
+                                       case_insensitive, search_err,
+                                       scoped_paths);
     }
 
     auto elapsed = std::chrono::steady_clock::now() - start;

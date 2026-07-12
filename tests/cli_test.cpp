@@ -332,6 +332,48 @@ TEST(CliGitAnalyzeTest, RangeScopeRequiresBase) {
 
 namespace gf = ::lci::cli::grep_filters;
 
+// -- Path-scope resolution (blocker 2: root-relative normalization) ----------
+//
+// resolve_scope_paths must convert an absolute or cwd-relative positional into
+// the root-relative form the index matches against. Purely lexical, so these
+// exercise it with synthetic root/cwd values and no disk access.
+
+TEST(GrepScopePaths, AbsolutePathUnderRootBecomesRootRelative) {
+    auto out = gf::resolve_scope_paths({"/home/u/proj/src/a.cpp"},
+                                       "/home/u/proj", "/tmp");
+    ASSERT_EQ(out.size(), 1u);
+    EXPECT_EQ(out.front(), "src/a.cpp");
+}
+
+TEST(GrepScopePaths, CwdRelativeFromSubdirBecomesRootRelative) {
+    // Run from a subdirectory whose cwd != indexed root: a bare relative token
+    // must resolve against the root, not silently match nothing.
+    auto out = gf::resolve_scope_paths({"utils"}, "/home/u/proj",
+                                       "/home/u/proj/pkg");
+    ASSERT_EQ(out.size(), 1u);
+    EXPECT_EQ(out.front(), "pkg/utils");
+}
+
+TEST(GrepScopePaths, RelativeTokenAtRootAndDotSlashNormalize) {
+    // cwd == root: relative token unchanged; leading ./ stripped.
+    EXPECT_EQ(gf::resolve_scope_paths({"src/a.cpp"}, "/home/u/proj",
+                                      "/home/u/proj")
+                  .front(),
+              "src/a.cpp");
+    EXPECT_EQ(gf::resolve_scope_paths({"./src"}, "/home/u/proj", "/home/u/proj")
+                  .front(),
+              "src");
+}
+
+TEST(GrepScopePaths, PathEscapingRootLeftUnchanged) {
+    // A path outside the indexed root cannot be expressed root-relative; leave
+    // it verbatim so the server-side index-membership check rejects it loudly.
+    auto out = gf::resolve_scope_paths({"/etc/passwd"}, "/home/u/proj",
+                                       "/home/u/proj");
+    ASSERT_EQ(out.size(), 1u);
+    EXPECT_EQ(out.front(), "/etc/passwd");
+}
+
 TEST(GrepFiltersComment, LineSlashSlashIsComment) {
     EXPECT_TRUE(gf::line_looks_like_comment("// hello"));
     EXPECT_TRUE(gf::line_looks_like_comment("    // indented"));
