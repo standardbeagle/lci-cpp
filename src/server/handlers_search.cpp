@@ -29,6 +29,32 @@ void IndexServer::handle_search(const httplib::Request& req,
         return;
     }
 
+    // Fail fast on a path scope that matches NO indexed file. The CLI resolves
+    // the positional to root-relative before sending, but a path that exists on
+    // disk yet was never indexed (gitignored, wrong extension, outside the
+    // root) would otherwise slip past to the path-scope filter, empty the
+    // candidate set, and return an empty success (silent empty). Reject it
+    // loudly instead. Reuses the existing `error` field which Client::search
+    // already surfaces to the CLI as a nonzero-exit error.
+    if (!request->paths.empty()) {
+        std::vector<std::string> unmatched;
+        {
+            std::shared_lock lock(mu_);
+            unmatched = indexer_->scopes_without_indexed_match(request->paths);
+        }
+        if (!unmatched.empty()) {
+            std::string joined;
+            for (size_t i = 0; i < unmatched.size(); ++i) {
+                if (i) joined += ", ";
+                joined += unmatched[i];
+            }
+            nlohmann::json j;
+            j["error"] = "path matches no indexed file: " + joined;
+            json_response(res, j);
+            return;
+        }
+    }
+
     SearchOptions opts;
     opts.max_results = request->max_results;
     opts.case_insensitive = request->case_insensitive;

@@ -208,6 +208,17 @@ class MasterIndex {
     /// Returns all non-deleted file IDs.
     std::vector<FileID> get_all_file_ids() const;
 
+    /// Returns the subset of `scopes` (root-relative file or directory-prefix
+    /// tokens, the `lci grep/search <path>...` positional) that match NO
+    /// indexed file. An empty result means every scope matches at least one
+    /// indexed file. Used to fail fast when a user-supplied path exists on
+    /// disk but was never indexed (gitignored, wrong extension, outside the
+    /// configured root) — a bare std::filesystem::exists check on the CLI
+    /// side cannot detect that, so the path-scope filter would otherwise
+    /// empty the candidate set and exit 0 with zero results (silent empty).
+    std::vector<std::string> scopes_without_indexed_match(
+        const std::vector<std::string>& scopes) const;
+
   private:
     Config config_;
 

@@ -114,6 +114,34 @@ std::string MasterIndex::get_file_path(FileID file_id) const {
     return id_to_path(file_id);
 }
 
+std::vector<std::string> MasterIndex::scopes_without_indexed_match(
+    const std::vector<std::string>& scopes) const {
+    std::vector<std::string> unmatched;
+    if (scopes.empty()) return unmatched;
+
+    // Membership is checked against the FULL indexed file set (not the
+    // pattern-narrowed trigram candidates) so this answers "is this path
+    // indexed at all?" independent of whether the current pattern happens to
+    // occur inside it. A scope that matches an indexed file but whose pattern
+    // has zero hits is a legitimate empty result, NOT an unindexed-path error.
+    auto file_snap = read_snapshot();
+    std::string_view root = config().project.root;
+    for (const auto& scope : scopes) {
+        std::string_view norm = normalize_scope(scope);
+        bool found = false;
+        for (const auto& [abs_path, fid] : file_snap->file_map) {
+            (void)fid;
+            std::string_view rel = relative_to_root(abs_path, root);
+            if (rel_in_scope(rel, norm)) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) unmatched.push_back(scope);
+    }
+    return unmatched;
+}
+
 std::vector<FileID> MasterIndex::get_all_file_ids() const {
     auto snap = load_snapshot();
     std::vector<FileID> ids;

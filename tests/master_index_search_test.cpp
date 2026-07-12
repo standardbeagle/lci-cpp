@@ -206,6 +206,41 @@ TEST(MasterIndexSearchIntegrationTest, PathScopesNarrowToFileAndDir) {
     }
 }
 
+TEST(MasterIndexSearchIntegrationTest, ScopesWithoutIndexedMatchFlagsUnindexedPath) {
+    // Fail-fast regression (blocker 1): a path that exists on disk but was
+    // never indexed must be detected via INDEX membership, not a bare
+    // std::filesystem::exists check. Without the membership guard the
+    // path-scope filter would empty the candidate set and exit 0 (silent
+    // empty). scopes_without_indexed_match reports the offending token.
+    TempDir dir;
+    dir.write_file("pkg/a.go", "package pkg\nvar needle = 1\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    // Exists on disk but NOT in the index (created after indexing — stands in
+    // for a gitignored / wrong-extension / outside-root file that a plain
+    // exists() check would wrongly accept).
+    dir.write_file("pkg/ghost.go", "package pkg\nvar needle = 9\n");
+
+    // Indexed file and directory scopes match at least one indexed file.
+    EXPECT_TRUE(mi.scopes_without_indexed_match({"pkg/a.go"}).empty());
+    EXPECT_TRUE(mi.scopes_without_indexed_match({"pkg"}).empty());
+
+    // The on-disk-but-unindexed file matches no indexed file -> flagged.
+    auto unmatched = mi.scopes_without_indexed_match({"pkg/ghost.go"});
+    ASSERT_EQ(unmatched.size(), 1u);
+    EXPECT_EQ(unmatched.front(), "pkg/ghost.go");
+
+    // A wholly unknown directory is flagged; a mixed set reports only the bad
+    // entry so the error can name exactly what did not resolve.
+    auto mixed = mi.scopes_without_indexed_match({"pkg/a.go", "nope/dir"});
+    ASSERT_EQ(mixed.size(), 1u);
+    EXPECT_EQ(mixed.front(), "nope/dir");
+}
+
 TEST(MasterIndexSearchIntegrationTest, IndexAndSearchWithContext) {
     TempDir dir;
     dir.write_file("sample.py",
