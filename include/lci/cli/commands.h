@@ -200,6 +200,22 @@ int run_debug_graph(const GlobalFlags& flags, const std::string& output);
 /// specific release tag. Returns 0 on success, non-zero on error.
 int run_update(bool check_only, bool force, const std::string& version);
 
+// -- def zero-result diagnosis helpers ----------------------------------------
+
+/// Returns true if `line` is an import statement that brings `symbol` into
+/// scope. Recognizes Python (`import x`, `from mod import x`), JS/TS
+/// (`import ... from`, `require(...)`), and Go-style import lines. Used by
+/// run_def to distinguish an external-dependency symbol (imported, not
+/// defined in-repo) from an indexing gap or a typo when a definition lookup
+/// returns nothing.
+bool line_imports_symbol(std::string_view line, std::string_view symbol);
+
+/// Extracts the module a `from <module> import ...` line pulls from, e.g.
+/// "joblib" from "from joblib import effective_n_jobs". Returns "" when the
+/// line is not a `from ... import` statement (plain `import x`, JS, etc.),
+/// in which case callers fall back to printing the import line verbatim.
+std::string import_module_of(std::string_view line);
+
 // -- Formatting helpers -------------------------------------------------------
 
 std::string format_bytes(int64_t bytes);

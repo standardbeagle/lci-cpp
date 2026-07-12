@@ -67,6 +67,44 @@ TEST(CliConfigTest, ExcludeOverrideAppendsToConfig) {
     EXPECT_TRUE(found);
 }
 
+// -- def zero-result diagnosis helpers ----------------------------------------
+
+TEST(CliDefDiagnosisTest, RecognizesPythonFromImport) {
+    EXPECT_TRUE(line_imports_symbol("from joblib import effective_n_jobs",
+                                    "effective_n_jobs"));
+    EXPECT_EQ(import_module_of("from joblib import effective_n_jobs"), "joblib");
+}
+
+TEST(CliDefDiagnosisTest, RecognizesPythonFromImportIndented) {
+    EXPECT_TRUE(line_imports_symbol("    from joblib import Memory", "Memory"));
+    EXPECT_EQ(import_module_of("    from joblib import Memory"), "joblib");
+}
+
+TEST(CliDefDiagnosisTest, RecognizesPlainImport) {
+    EXPECT_TRUE(line_imports_symbol("import numpy", "numpy"));
+    // Plain import has no `from` module; caller prints the line verbatim.
+    EXPECT_EQ(import_module_of("import numpy"), "");
+}
+
+TEST(CliDefDiagnosisTest, RejectsUsageLine) {
+    // A call site mentions the symbol but is not an import — must not be
+    // misclassified as an import site.
+    EXPECT_FALSE(line_imports_symbol("    n = effective_n_jobs(self.n_jobs)",
+                                     "effective_n_jobs"));
+}
+
+TEST(CliDefDiagnosisTest, RejectsImportLineWithoutSymbol) {
+    // The line is an import, but of a different symbol — not this one's site.
+    EXPECT_FALSE(
+        line_imports_symbol("from joblib import Parallel", "effective_n_jobs"));
+}
+
+TEST(CliDefDiagnosisTest, DoesNotMatchImportInsideIdentifier) {
+    // "important" contains "import" as a substring but is not an import stmt.
+    EXPECT_FALSE(
+        line_imports_symbol("important = compute_important(x)", "important"));
+}
+
 // -- format helpers -----------------------------------------------------------
 
 TEST(CliFormatTest, FormatBytesSmall) {

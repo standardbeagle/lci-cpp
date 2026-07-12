@@ -1,16 +1,19 @@
 #include <lci/cli/commands.h>
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <set>
 #include <string>
 #include <string_view>
 
 #include <lci/indexing/pipeline_scanner.h>
+#include <lci/semantic/fuzzy_matcher.h>
 #include <nlohmann/json.hpp>
 
 #include "symbol_filters.h"
@@ -20,6 +23,67 @@ namespace lci {
 namespace cli {
 
 namespace fs = std::filesystem;
+
+// -- def zero-result diagnosis helpers ----------------------------------------
+
+namespace {
+
+// Left-trims ASCII spaces and tabs.
+std::string_view ltrim_view(std::string_view s) {
+    size_t i = 0;
+    while (i < s.size() && (s[i] == ' ' || s[i] == '\t')) ++i;
+    return s.substr(i);
+}
+
+bool is_ident_char(unsigned char c) {
+    return std::isalnum(c) != 0 || c == '_';
+}
+
+// True if `word` appears in `line` bounded by non-identifier characters, so
+// "import" matches `from x import y` but not `important`.
+bool contains_word(std::string_view line, std::string_view word) {
+    if (word.empty()) return false;
+    size_t pos = line.find(word);
+    while (pos != std::string_view::npos) {
+        const bool left_ok =
+            pos == 0 ||
+            !is_ident_char(static_cast<unsigned char>(line[pos - 1]));
+        const size_t after = pos + word.size();
+        const bool right_ok =
+            after >= line.size() ||
+            !is_ident_char(static_cast<unsigned char>(line[after]));
+        if (left_ok && right_ok) return true;
+        pos = line.find(word, pos + 1);
+    }
+    return false;
+}
+
+}  // namespace
+
+bool line_imports_symbol(std::string_view line, std::string_view symbol) {
+    if (symbol.empty()) return false;
+    std::string_view t = ltrim_view(line);
+    const bool is_import =
+        t.starts_with("import ") ||
+        (t.starts_with("from ") && contains_word(t, "import")) ||
+        contains_word(t, "require");
+    if (!is_import) return false;
+    // Only an import *of this symbol* counts as its import site.
+    return contains_word(line, symbol);
+}
+
+std::string import_module_of(std::string_view line) {
+    std::string_view t = ltrim_view(line);
+    if (!t.starts_with("from ")) return "";
+    t.remove_prefix(std::string_view("from ").size());
+    t = ltrim_view(t);
+    size_t end = 0;
+    while (end < t.size() &&
+           (is_ident_char(static_cast<unsigned char>(t[end])) || t[end] == '.')) {
+        ++end;
+    }
+    return std::string(t.substr(0, end));
+}
 
 // -- def command --------------------------------------------------------------
 
@@ -44,13 +108,88 @@ int run_def(const GlobalFlags& flags, const std::string& symbol) {
         return 1;
     }
 
-    for (const auto& r : *results) {
-        if (!r.signature.empty()) {
-            std::printf("%s:%d: %s\n", r.file_path.c_str(), r.line,
-                        r.signature.c_str());
-        } else {
-            std::printf("%s:%d: %s %s\n", r.file_path.c_str(), r.line,
-                        r.type.c_str(), r.name.c_str());
+    if (!results->empty()) {
+        for (const auto& r : *results) {
+            if (!r.signature.empty()) {
+                std::printf("%s:%d: %s\n", r.file_path.c_str(), r.line,
+                            r.signature.c_str());
+            } else {
+                std::printf("%s:%d: %s %s\n", r.file_path.c_str(), r.line,
+                            r.type.c_str(), r.name.c_str());
+            }
+        }
+        return 0;
+    }
+
+    // Zero definitions in the index is ambiguous between an external-dependency
+    // symbol (imported, defined outside the repo), an indexing gap, and a typo.
+    // Emit an explicit diagnosis instead of exiting silently. Exit code stays 0:
+    // "no result" is an informational answer to a valid query, not a hard error
+    // — matching `lci search` on a non-existent pattern (tests/integration/cli/
+    // search/no-results.spec.json expects exit 0). Reserve nonzero for genuine
+    // failures (bad config, server/connection errors) already handled above.
+    std::printf("no definition in index for %s\n", symbol.c_str());
+
+    // (1) Is it imported? Reuse the reference search (text-based) and surface
+    // any hit whose source line is an import statement for this symbol. This
+    // explains "external dependency" without a wire-format change: the import
+    // line (e.g. `from joblib import effective_n_jobs`) names the module.
+    std::string refs_err;
+    if (auto refs = client->get_references(symbol, 100, refs_err)) {
+        std::set<std::string> seen;
+        int shown = 0;
+        constexpr int kMaxImportSites = 10;
+        for (const auto& r : *refs) {
+            if (shown >= kMaxImportSites) break;
+            if (!line_imports_symbol(r.context, symbol)) continue;
+            std::string key = r.file_path + ":" + std::to_string(r.line);
+            if (!seen.insert(key).second) continue;
+            if (std::string mod = import_module_of(r.context); !mod.empty()) {
+                std::printf("  imported from %s at %s:%d\n", mod.c_str(),
+                            r.file_path.c_str(), r.line);
+            } else {
+                // Plain `import x` / JS / require: print the site verbatim.
+                std::string_view line = ltrim_view(r.context);
+                std::printf("  imported at %s:%d: %.*s\n", r.file_path.c_str(),
+                            r.line, static_cast<int>(line.size()), line.data());
+            }
+            ++shown;
+        }
+        if (shown > 0) {
+            return 0;  // Named the import site(s); that is the answer.
+        }
+    }
+
+    // (2) No import site found — offer nearest-name matches so a typo is
+    // recoverable. Pull a bounded candidate pool from the index and rank it
+    // with the existing fuzzy matcher (jaro-winkler; 0.7 is the project's
+    // fuzzy_threshold default, see SemanticScoringConfig).
+    ListSymbolsRequest sym_req;
+    sym_req.max = 500;
+    std::string sym_err;
+    if (auto listed = client->list_symbols(sym_req, sym_err)) {
+        std::vector<std::string> candidates;
+        if (listed->contains("symbols") && (*listed)["symbols"].is_array()) {
+            candidates.reserve((*listed)["symbols"].size());
+            for (const auto& s : (*listed)["symbols"]) {
+                std::string name = s.value("name", "");
+                if (!name.empty()) candidates.push_back(std::move(name));
+            }
+        }
+        FuzzyMatcher matcher(/*enabled=*/true, /*threshold=*/0.7, "jaro-winkler");
+        auto matches = matcher.find_matches(symbol, candidates);
+        if (!matches.empty()) {
+            constexpr size_t kMaxSuggestions = 5;
+            std::printf("did you mean: ");
+            std::set<std::string> shown_names;
+            bool first = true;
+            for (const auto& m : matches) {
+                if (shown_names.size() >= kMaxSuggestions) break;
+                if (!shown_names.insert(m.term).second) continue;
+                std::printf("%s%s", first ? "" : ", ", m.term.c_str());
+                first = false;
+            }
+            std::printf("?\n");
         }
     }
 
