@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -9,6 +10,7 @@
 #include <absl/container/flat_hash_map.h>
 
 #include <lci/analysis/codebase_intelligence_types.h>
+#include <lci/types.h>
 
 namespace lci {
 
@@ -92,14 +94,30 @@ class CodebaseIntelligenceEngine {
         int file_count, int symbol_count) const;
 
     /// Builds detailed analysis (Tier 2) - dispatches by analysis type.
+    ///
+    /// Runs the module/layer/feature/vocabulary analyzers and populates the
+    /// matching response field (module_analysis / layer_analysis /
+    /// feature_analysis / domain_terms). `project_root` relativizes module
+    /// paths; `callees_of` supplies the reference-graph edges for feature
+    /// clustering (typically ref_tracker.get_callee_symbols). Both are
+    /// optional so the plain analyze() dispatch can call this without a live
+    /// index; the features analysis is skipped when `callees_of` is unset.
     CodebaseIntelligenceResponse build_detailed(
         const CodebaseIntelligenceParams& params,
-        const std::vector<FileSymbolData>& files) const;
+        const std::vector<FileSymbolData>& files,
+        std::string_view project_root = {},
+        const std::function<std::vector<SymbolID>(SymbolID)>& callees_of =
+            {}) const;
 
-    /// Builds statistics analysis (Tier 3).
+    /// Builds statistics analysis (Tier 3). Runs the coupling analyzer and
+    /// derives quality from complexity, populating statistics_report.
+    /// `purity_ratio` is supplied by the caller (from the side-effect
+    /// analyzer, which the engine does not own).
     CodebaseIntelligenceResponse build_statistics(
         const CodebaseIntelligenceParams& params,
-        const std::vector<FileSymbolData>& files) const;
+        const std::vector<FileSymbolData>& files,
+        std::string_view project_root = {},
+        double purity_ratio = 0.0) const;
 
     /// Builds unified analysis (all tiers combined).
     CodebaseIntelligenceResponse build_unified(
@@ -107,10 +125,16 @@ class CodebaseIntelligenceEngine {
         const std::vector<FileSymbolData>& files,
         int file_count, int symbol_count) const;
 
-    /// Builds structure analysis (directory tree exploration).
+    /// Builds structure analysis (directory tree exploration). `file_paths`
+    /// is the full set of indexed file paths (relativized against
+    /// `project_root`); `file_count` and `total_functions` populate the
+    /// summary line. Populates structure_analysis.
     CodebaseIntelligenceResponse build_structure(
         const CodebaseIntelligenceParams& params,
-        const std::vector<FileSymbolData>& files) const;
+        const std::vector<FileSymbolData>& files,
+        const std::vector<std::string>& file_paths = {},
+        std::string_view project_root = {}, int file_count = 0,
+        int total_functions = 0) const;
 
 
   private:

@@ -1,7 +1,11 @@
 #include <lci/analysis/codebase_intelligence.h>
 
 #include <lci/analysis/ci_vocabulary_analyzer.h>
+#include <lci/analysis/coupling_analyzer.h>
+#include <lci/analysis/feature_analyzer.h>
 #include <lci/analysis/health_analyzer.h>
+#include <lci/analysis/layer_analyzer.h>
+#include <lci/analysis/module_analyzer.h>
 #include <lci/analysis/token_budget.h>
 #include <lci/reference.h>
 
@@ -251,20 +255,29 @@ CodebaseIntelligenceResponse CodebaseIntelligenceEngine::build_overview(
 
 CodebaseIntelligenceResponse CodebaseIntelligenceEngine::build_detailed(
     const CodebaseIntelligenceParams& params,
-    const std::vector<FileSymbolData>& files) const {
+    const std::vector<FileSymbolData>& files, std::string_view project_root,
+    const std::function<std::vector<SymbolID>(SymbolID)>& callees_of) const {
     CodebaseIntelligenceResponse response;
 
-    std::string analysis_type =
-        params.analysis.value_or("modules");
+    std::string analysis_type = params.analysis.value_or("modules");
 
-    if (analysis_type != "modules" && analysis_type != "layers" &&
-        analysis_type != "features" && analysis_type != "terms") {
-        return response;
+    if (analysis_type == "modules") {
+        response.module_analysis =
+            ModuleAnalyzer().analyze(files, project_root);
+    } else if (analysis_type == "layers") {
+        response.layer_analysis = LayerAnalyzer().analyze(files);
+    } else if (analysis_type == "features") {
+        // Feature clustering needs the reference graph; without a callee
+        // lookup (e.g. the plain analyze() dispatch, which has no live index)
+        // there are no edges to cluster, so leave feature_analysis unset.
+        if (callees_of) {
+            response.feature_analysis =
+                FeatureAnalyzer().analyze(files, callees_of);
+        }
+    } else if (analysis_type == "terms") {
+        response.domain_terms =
+            CIVocabularyAnalyzer().extract_domain_terms_from_files(files);
     }
-
-    // Detailed sub-analyzers (modules, layers, features, terms) will be
-    // implemented in task 7.4c. The engine dispatch is correct; the
-    // response will contain only metadata until those analyzers exist.
     return response;
 }
 
@@ -273,22 +286,35 @@ CodebaseIntelligenceResponse CodebaseIntelligenceEngine::build_detailed(
 // ============================================================================
 
 CodebaseIntelligenceResponse CodebaseIntelligenceEngine::build_statistics(
-    const CodebaseIntelligenceParams& params,
-    const std::vector<FileSymbolData>& files) const {
+    const CodebaseIntelligenceParams& /*params*/,
+    const std::vector<FileSymbolData>& files, std::string_view project_root,
+    double purity_ratio) const {
     CodebaseIntelligenceResponse response;
 
-    // Health-based statistics are available now via the health analyzer.
-    // Full statistics report builder deferred to 7.4c.
-    auto health = std::make_unique<HealthDashboard>();
     HealthAnalyzer ha;
-    health->complexity = ha.calculate_complexity_from_files(files);
-    health->overall_score =
-        HealthAnalyzer::calculate_overall_health_score(
-            health->complexity, static_cast<int>(files.size()));
+    ComplexityMetrics complexity = ha.calculate_complexity_from_files(files);
+
+    // Health dashboard kept for callers that read it via analyze() (mirrors
+    // the previous behavior); the STATISTICS section renders from
+    // statistics_report below.
+    auto health = std::make_unique<HealthDashboard>();
+    health->complexity = complexity;
+    health->overall_score = HealthAnalyzer::calculate_overall_health_score(
+        complexity, static_cast<int>(files.size()));
     health->analysis_metadata.analyzed_at = std::chrono::system_clock::now();
-    health->analysis_metadata.files_analyzed =
-        static_cast<int>(files.size());
+    health->analysis_metadata.files_analyzed = static_cast<int>(files.size());
     response.health_dashboard = health.release();
+
+    auto coupling = CouplingAnalyzer().analyze(files, project_root);
+
+    StatisticsReport report;
+    report.complexity = complexity;
+    report.coupling = coupling.coupling;
+    report.cohesion = coupling.cohesion;
+    report.quality =
+        HealthAnalyzer::calculate_quality_from_complexity(complexity);
+    report.purity_ratio = purity_ratio;
+    response.statistics_report = std::move(report);
 
     return response;
 }
@@ -316,16 +342,64 @@ CodebaseIntelligenceResponse CodebaseIntelligenceEngine::build_unified(
 // ============================================================================
 
 CodebaseIntelligenceResponse CodebaseIntelligenceEngine::build_structure(
-    const CodebaseIntelligenceParams& params,
-    const std::vector<FileSymbolData>& files) const {
+    const CodebaseIntelligenceParams& /*params*/,
+    const std::vector<FileSymbolData>& /*files*/,
+    const std::vector<std::string>& file_paths, std::string_view project_root,
+    int file_count, int total_functions) const {
     CodebaseIntelligenceResponse response;
 
-    // Structure analysis (directory tree, file categories) deferred to 7.4c.
     // Set navigation hints so callers know the mode exists.
     response.navigation_hints["explore_directory"] =
         "Use search with filter to see files in a directory";
     response.navigation_hints["focus_area"] =
         "Use mode='structure' with focus='<term>' to filter results";
+
+    // Walk the indexed file paths: count per top-level dir + per extension,
+    // categorize (code/tests/config/docs), and track deepest path depth.
+    absl::flat_hash_map<std::string, int> top_dir_files;
+    absl::flat_hash_map<std::string, int> types_count;
+    StructureAnalysis s;
+    s.file_count = file_count;
+    s.symbol_count = total_functions;
+    for (const auto& path : file_paths) {
+        if (path.empty()) continue;
+        std::string rel = path;
+        if (!project_root.empty() && rel.rfind(project_root, 0) == 0) {
+            rel = rel.substr(project_root.size());
+            while (!rel.empty() && rel.front() == '/') rel.erase(0, 1);
+        }
+        int depth = 0;
+        for (char c : rel)
+            if (c == '/') ++depth;
+        if (depth > s.max_depth) s.max_depth = depth;
+        auto slash = rel.find('/');
+        std::string top =
+            slash == std::string::npos ? "." : rel.substr(0, slash);
+        ++top_dir_files[top];
+        auto dot = rel.rfind('.');
+        if (dot != std::string::npos) ++types_count[rel.substr(dot)];
+        if (rel.find("_test.") != std::string::npos ||
+            rel.find("/test") != std::string::npos)
+            ++s.tests;
+        else if (rel.find(".md") != std::string::npos ||
+                 rel.find("README") != std::string::npos)
+            ++s.docs;
+        else if (rel.find(".json") != std::string::npos ||
+                 rel.find(".yaml") != std::string::npos ||
+                 rel.find(".yml") != std::string::npos ||
+                 rel.find(".toml") != std::string::npos)
+            ++s.config;
+        else
+            ++s.code;
+    }
+    s.dir_count = static_cast<int>(top_dir_files.size());
+    s.types.assign(types_count.begin(), types_count.end());
+    std::sort(s.types.begin(), s.types.end(),
+              [](const auto& a, const auto& b) { return a.first < b.first; });
+    s.top_dirs.assign(top_dir_files.begin(), top_dir_files.end());
+    std::sort(s.top_dirs.begin(), s.top_dirs.end(),
+              [](const auto& a, const auto& b) { return a.second > b.second; });
+    response.structure_analysis = std::move(s);
 
     return response;
 }

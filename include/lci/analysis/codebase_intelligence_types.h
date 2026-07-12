@@ -2,7 +2,9 @@
 
 #include <chrono>
 #include <memory>
+#include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <absl/container/flat_hash_map.h>
@@ -460,6 +462,39 @@ struct FeatureAnalysis {
 };
 
 // ============================================================================
+// Statistics Report Type (Tier 3)
+// ============================================================================
+
+/// Aggregate statistics for the `statistics` mode: complexity distribution,
+/// package coupling/cohesion, quality, and function purity.
+struct StatisticsReport {
+    ComplexityMetrics complexity;
+    CouplingMetrics coupling;
+    CohesionMetrics cohesion;
+    QualityMetrics quality;
+    double purity_ratio{};
+};
+
+// ============================================================================
+// Structure Analysis Type (directory tree exploration)
+// ============================================================================
+
+/// Directory/file-type breakdown for the `structure` mode. `types` is sorted
+/// by extension ascending; `top_dirs` is sorted by file count descending.
+struct StructureAnalysis {
+    int dir_count{};
+    int file_count{};
+    int symbol_count{};
+    int max_depth{};
+    std::vector<std::pair<std::string, int>> types;
+    int code{};
+    int tests{};
+    int config{};
+    int docs{};
+    std::vector<std::pair<std::string, int>> top_dirs;
+};
+
+// ============================================================================
 // Unified Response Type
 // ============================================================================
 
@@ -469,6 +504,16 @@ struct CodebaseIntelligenceResponse {
     HealthDashboard* health_dashboard{};
     EntryPointsList* entry_points{};
     SemanticVocabulary* semantic_vocabulary{};
+    // Tier 2/3 analysis payloads. Value-owned (optional) so the response frees
+    // them itself — unlike the raw-pointer sub-objects above. Populated by the
+    // engine's detailed/statistics/structure builders; the MCP handler renders
+    // LCF from these rather than recomputing the analysis inline.
+    std::optional<ModuleAnalysis> module_analysis;
+    std::optional<LayerAnalysis> layer_analysis;
+    std::optional<FeatureAnalysis> feature_analysis;
+    std::vector<DomainTerm> domain_terms;
+    std::optional<StatisticsReport> statistics_report;
+    std::optional<StructureAnalysis> structure_analysis;
     std::string analysis_mode;
     int tier{};
     AnalysisMetadata analysis_metadata;
