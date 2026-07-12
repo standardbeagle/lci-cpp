@@ -1,11 +1,15 @@
 #include <lci/cli/commands.h>
 
 #include <algorithm>
+#include <chrono>
+#include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <optional>
 #include <string_view>
 #include <string>
 #include <unordered_map>
@@ -13,6 +17,7 @@
 #include <vector>
 
 #include <nlohmann/json.hpp>
+#include <lci/string_ref.h>
 #include <lci/symbollinker/go_linker.h>
 #include <lci/symbollinker/linker_engine.h>
 
@@ -178,6 +183,89 @@ DependencySummary analyze_dependency_graph(
     return summary;
 }
 
+// -- incremental snapshot -----------------------------------------------------
+//
+// `lci debug --incremental` mirrors Go's IncrementalEngine: it persists a
+// manifest of the discovered Go sources and, on the next incremental run,
+// reports only files that changed relative to that manifest.
+//
+// Manifest location: `<root>/.lci/debug-snapshot.json`. A hidden per-project
+// cache dir keeps the snapshot next to the tree it describes (so it travels
+// with a checkout) without polluting the source listing (`.go` walk ignores
+// it). It is written ONLY on incremental runs — the default `debug info`
+// stays a pure read with no on-disk side effects.
+//
+// Change signal: size + FNV-1a content hash (reusing lci::hash_fnv1a). mtime
+// is deliberately NOT used: it is not preserved across checkouts/copies, so a
+// committed manifest would report every file as modified after a clone. Size
+// is the cheap pre-check; the content hash is the authoritative signal.
+
+struct SnapshotEntry {
+    uint64_t size = 0;
+    uint64_t hash = 0;
+};
+
+std::filesystem::path snapshot_path_for_root(const std::filesystem::path& root) {
+    return root / ".lci" / "debug-snapshot.json";
+}
+
+std::string hash_hex(uint64_t h) {
+    char buf[17];
+    std::snprintf(buf, sizeof(buf), "%016llx",
+                  static_cast<unsigned long long>(h));
+    return std::string(buf, 16);
+}
+
+// Loads a prior manifest keyed by root-relative path. Returns std::nullopt
+// when no snapshot exists yet (first-ever incremental run) or the file is
+// unreadable/malformed — the caller treats that as "no baseline".
+std::optional<std::unordered_map<std::string, SnapshotEntry>> load_snapshot(
+    const std::filesystem::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    if (!in) return std::nullopt;
+    nlohmann::json doc;
+    try {
+        in >> doc;
+    } catch (const std::exception&) {
+        return std::nullopt;
+    }
+    if (!doc.is_object() || !doc.contains("files") ||
+        !doc["files"].is_array()) {
+        return std::nullopt;
+    }
+    std::unordered_map<std::string, SnapshotEntry> entries;
+    for (const auto& f : doc["files"]) {
+        if (!f.contains("path")) continue;
+        SnapshotEntry entry;
+        entry.size = f.value("size", static_cast<uint64_t>(0));
+        entry.hash = std::strtoull(
+            f.value("hash", std::string("0")).c_str(), nullptr, 16);
+        entries.emplace(f["path"].get<std::string>(), entry);
+    }
+    return entries;
+}
+
+// Serializes the current file set to the manifest (sorted by relative path so
+// the on-disk form is stable/diffable). Best-effort: a write failure is
+// non-fatal to the debug command.
+void write_snapshot(
+    const std::filesystem::path& path,
+    const std::vector<std::pair<std::string, SnapshotEntry>>& sorted_entries) {
+    std::error_code ec;
+    std::filesystem::create_directories(path.parent_path(), ec);
+    nlohmann::json doc;
+    doc["version"] = 1;
+    doc["files"] = nlohmann::json::array();
+    for (const auto& [rel, entry] : sorted_entries) {
+        doc["files"].push_back({{"path", rel},
+                                {"size", entry.size},
+                                {"hash", hash_hex(entry.hash)}});
+    }
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    if (!out) return;
+    out << doc.dump(2) << "\n";
+}
+
 }  // namespace
 
 // -- debug info ---------------------------------------------------------------
@@ -224,22 +312,25 @@ int run_debug_info(const GlobalFlags& flags, bool verbose, bool incremental) {
     char updated_at[20];
     std::strftime(updated_at, sizeof(updated_at), "%Y-%m-%d %H:%M:%S", &tm);
 
+    // Fingerprint the current on-disk file set (size + FNV-1a content hash),
+    // keyed by root-relative path. Reused by both the snapshot diff and the
+    // snapshot rewrite below.
+    std::vector<std::pair<std::string, SnapshotEntry>> current_entries;
+    current_entries.reserve(go_files.size());
+    for (const auto& file : go_files) {
+        std::error_code rel_ec;
+        auto rel = std::filesystem::relative(file, root, rel_ec);
+        std::string rel_key = rel_ec ? file.string() : rel.generic_string();
+        std::string content = read_text_file(file);
+        SnapshotEntry entry;
+        entry.size = content.size();
+        entry.hash = hash_fnv1a(content);
+        current_entries.emplace_back(std::move(rel_key), entry);
+    }
+
     std::printf("Debug Info - Lightning Code Index Symbol Linking System\n");
     std::printf("Root Path: %s\n", display_root_path(root).c_str());
-    // When `--incremental` is requested, the C++ port doesn't yet have a
-    // snapshot-delta export (Go reads the last snapshot's manifest and emits
-    // only files that changed). We honor the flag by labeling the header
-    // "true" and emitting a stderr note that the body is still a full scan —
-    // visible signal vs. silent acceptance (Karpathy rule 6).
-    if (incremental) {
-        std::printf("Incremental Mode: true\n");
-        std::fprintf(stderr,
-                     "Note: --incremental requested; falling back to full "
-                     "scan (incremental snapshot delta not yet wired in C++ "
-                     "port — file list reflects current on-disk state).\n");
-    } else {
-        std::printf("Incremental Mode: false\n");
-    }
+    std::printf("Incremental Mode: %s\n", incremental ? "true" : "false");
     std::printf("\n");
     std::printf("Building index...\n");
     std::printf("Linking symbols...\n");
@@ -248,24 +339,84 @@ int run_debug_info(const GlobalFlags& flags, bool verbose, bool incremental) {
     std::printf("================================================================================\n");
     std::printf("=== Symbol Linking System Debug Info ===\n");
     std::printf("\n");
-    std::printf("Summary:\n");
-    std::printf("  Total Files: %zu\n", go_files.size());
-    std::printf("  Total Symbols: 0\n");
-    std::printf("  Total Imports: 0\n");
-    std::printf("  Total References: 0\n");
-    if (go_files.empty()) {
-        std::printf("  Languages: map[]\n");
+
+    if (incremental) {
+        auto snapshot_path = snapshot_path_for_root(root);
+        auto prior = load_snapshot(snapshot_path);
+
+        // (path, status) pairs describing what changed vs. the prior snapshot.
+        std::vector<std::pair<std::string, const char*>> changed;
+        int added = 0, modified = 0, removed = 0, unchanged = 0;
+
+        std::unordered_set<std::string> current_keys;
+        for (const auto& [rel, entry] : current_entries) {
+            current_keys.insert(rel);
+            const char* status = nullptr;
+            if (!prior) {
+                status = "added";  // no baseline — everything is new
+                ++added;
+            } else if (auto it = prior->find(rel); it == prior->end()) {
+                status = "added";
+                ++added;
+            } else if (it->second.size != entry.size ||
+                       it->second.hash != entry.hash) {
+                status = "modified";
+                ++modified;
+            } else {
+                ++unchanged;
+                continue;  // unchanged files are omitted from the delta
+            }
+            changed.emplace_back((root / rel).string(), status);
+        }
+        if (prior) {
+            for (const auto& [rel, _] : *prior) {
+                if (!current_keys.count(rel)) {
+                    ++removed;
+                    changed.emplace_back((root / rel).string(), "removed");
+                }
+            }
+        }
+        std::sort(changed.begin(), changed.end());
+
+        std::printf("Summary:\n");
+        std::printf("  Total Files: %zu\n", go_files.size());
+        std::printf("  Added: %d\n", added);
+        std::printf("  Modified: %d\n", modified);
+        std::printf("  Removed: %d\n", removed);
+        std::printf("  Unchanged: %d\n", unchanged);
+        std::printf("  Last Updated: %s\n", updated_at);
+        std::printf("\n");
+        if (!prior) {
+            std::printf(
+                "No prior snapshot; establishing baseline (all files new).\n");
+        }
+        std::printf("Changed Files (%zu):\n", changed.size());
+        for (const auto& [path, status] : changed) {
+            std::printf("  %s (%s)\n", path.c_str(), status);
+        }
+        std::printf("\n");
+
+        write_snapshot(snapshot_path, current_entries);
     } else {
-        std::printf("  Languages: map[go:%zu]\n", go_files.size());
+        std::printf("Summary:\n");
+        std::printf("  Total Files: %zu\n", go_files.size());
+        std::printf("  Total Symbols: 0\n");
+        std::printf("  Total Imports: 0\n");
+        std::printf("  Total References: 0\n");
+        if (go_files.empty()) {
+            std::printf("  Languages: map[]\n");
+        } else {
+            std::printf("  Languages: map[go:%zu]\n", go_files.size());
+        }
+        std::printf("  Last Updated: %s\n", updated_at);
+        std::printf("\n");
+        std::printf("Files (%zu):\n", go_files.size());
+        for (size_t i = 0; i < go_files.size(); ++i) {
+            std::printf("  %s (ID: %zu, Language: go, Symbols: 0, Imports: 0)\n",
+                        go_files[i].string().c_str(), i + 1);
+        }
+        std::printf("\n");
     }
-    std::printf("  Last Updated: %s\n", updated_at);
-    std::printf("\n");
-    std::printf("Files (%zu):\n", go_files.size());
-    for (size_t i = 0; i < go_files.size(); ++i) {
-        std::printf("  %s (ID: %zu, Language: go, Symbols: 0, Imports: 0)\n",
-                    go_files[i].string().c_str(), i + 1);
-    }
-    std::printf("\n");
     std::printf("Extractors (6):\n");
     std::printf("  csharp: 0 files processed, 0 symbols extracted\n");
     std::printf("  go: 0 files processed, 0 symbols extracted\n");

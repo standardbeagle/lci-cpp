@@ -168,10 +168,14 @@ int run_browse(const GlobalFlags& flags, const std::string& file_path,
 
 /// debug info subcommand. Returns 0 on success, non-zero on error.
 /// `incremental` switches to incremental-index introspection (matches Go's
-/// `--incremental`/`--inc` flag); when true, the output's "Incremental Mode"
-/// header is set to true and the source list is filtered to files that
-/// changed since the last index snapshot. When the index lacks snapshot
-/// metadata, falls back to a full scan with a clear stderr notice.
+/// `--incremental`/`--inc` flag). When true, the output's "Incremental Mode"
+/// header is set to true and the file listing is filtered to files that
+/// changed (added/modified/removed) relative to the persisted snapshot
+/// manifest at `<root>/.lci/debug-snapshot.json`; the manifest is then
+/// refreshed to the current on-disk state. The first-ever incremental run
+/// (no prior manifest) establishes the baseline and reports every file as
+/// new. The default (non-incremental) invocation is a pure read and does not
+/// touch the snapshot.
 int run_debug_info(const GlobalFlags& flags, bool verbose, bool incremental);
 
 /// debug validate subcommand. Returns 0 on success, non-zero on error.
