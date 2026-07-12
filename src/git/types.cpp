@@ -249,7 +249,9 @@ Language get_language_from_path(std::string_view path) {
     if (ext == ".go") return Language::Go;
     if (ext == ".js" || ext == ".jsx" || ext == ".mjs" || ext == ".cjs") return Language::JavaScript;
     if (ext == ".ts" || ext == ".tsx" || ext == ".mts" || ext == ".cts") return Language::TypeScript;
-    if (ext == ".py" || ext == ".pyw" || ext == ".pyi") return Language::Python;
+    if (ext == ".py" || ext == ".pyw" || ext == ".pyi" || ext == ".pyx" ||
+        ext == ".pxd")
+        return Language::Python;
     if (ext == ".rs") return Language::Rust;
     if (ext == ".java") return Language::Java;
     if (ext == ".cs") return Language::CSharp;

@@ -126,7 +126,8 @@ void traverse(TSNode node,
 
 bool PythonExtractor::can_handle(std::string_view path) const {
     return ends_with(path, ".py") || ends_with(path, ".pyw") ||
-           ends_with(path, ".pyi");
+           ends_with(path, ".pyi") || ends_with(path, ".pyx") ||
+           ends_with(path, ".pxd");
 }
 
 SymbolTable PythonExtractor::extract_symbols(FileID file_id,

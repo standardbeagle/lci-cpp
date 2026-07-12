@@ -30,6 +30,7 @@ bool CouplingAnalyzer::is_code_file(std::string_view path) {
 
     static const std::string_view code_exts[] = {
         ".go",  ".js",    ".ts",  ".tsx",   ".jsx",  ".py",
+        ".pyx", ".pxd",
         ".java", ".rs",   ".c",   ".cpp",   ".h",    ".hpp",
         ".cs",  ".rb",    ".php", ".swift", ".kt",   ".scala",
         ".ex",  ".exs",

@@ -235,7 +235,7 @@ std::string language_from_extension(const std::string& path) {
     if (low == ".ts") return "typescript";
     if (low == ".tsx") return "tsx";
     if (low == ".jsx") return "jsx";
-    if (low == ".py") return "python";
+    if (low == ".py" || low == ".pyx" || low == ".pxd") return "python";
     if (low == ".rs") return "rust";
     if (low == ".java") return "java";
     if (low == ".cs") return "csharp";

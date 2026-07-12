@@ -582,7 +582,7 @@ bool ReferenceTracker::compute_is_exported(std::string_view path,
     if (ext == ".go") {
         return std::isupper(static_cast<unsigned char>(symbol_name[0])) != 0;
     }
-    if (ext == ".py") {
+    if (ext == ".py" || ext == ".pyx" || ext == ".pxd") {
         return !symbol_name.starts_with('_');
     }
     if (ext == ".js" || ext == ".jsx" || ext == ".ts" || ext == ".tsx" ||

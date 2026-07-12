@@ -1315,7 +1315,7 @@ void emit_summary(std::ostringstream& out,
         if (dot == std::string_view::npos) return nullptr;
         auto ext = path.substr(dot);
         if (ext == ".go") return "go";
-        if (ext == ".py") return "python";
+        if (ext == ".py" || ext == ".pyx" || ext == ".pxd") return "python";
         if (ext == ".ts" || ext == ".tsx") return "typescript";
         if (ext == ".js" || ext == ".jsx" || ext == ".mjs") return "javascript";
         if (ext == ".cpp" || ext == ".cc" || ext == ".cxx" || ext == ".hpp" ||

@@ -68,7 +68,7 @@ std::string language_from_path(const std::string& path) {
     if (ext == ".ts") return "typescript";
     if (ext == ".jsx") return "jsx";
     if (ext == ".tsx") return "tsx";
-    if (ext == ".py") return "python";
+    if (ext == ".py" || ext == ".pyx" || ext == ".pxd") return "python";
     if (ext == ".rs") return "rust";
     if (ext == ".java") return "java";
     if (ext == ".cs") return "csharp";

@@ -267,7 +267,7 @@ std::string_view file_base(std::string_view path) {
 
 bool is_code_extension(std::string_view ext) {
     static constexpr std::string_view exts[] = {
-        ".go", ".rs", ".py", ".js", ".jsx", ".ts", ".tsx",
+        ".go", ".rs", ".py", ".pyx", ".pxd", ".js", ".jsx", ".ts", ".tsx",
         ".java", ".c", ".cpp", ".cc", ".cxx", ".h", ".hpp",
         ".cs", ".php", ".rb", ".swift", ".kt", ".scala",
         ".lua", ".pl", ".pm", ".r", ".jl", ".ex", ".exs",

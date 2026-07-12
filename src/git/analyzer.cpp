@@ -26,6 +26,7 @@ bool has_supported_extension(std::string_view path) {
 
     static const absl::flat_hash_set<std::string_view> supported = {
         ".go",   ".js",  ".jsx",    ".ts",   ".tsx",  ".py",
+        ".pyx",  ".pxd",
         ".rs",   ".java", ".c",     ".cpp",  ".cc",   ".h",
         ".hpp",  ".cs",  ".php",    ".rb",   ".swift", ".kt",
         ".scala", ".zig", ".vue",   ".svelte",

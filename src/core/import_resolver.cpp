@@ -44,7 +44,8 @@ FileImportData ImportResolver::extract_file_imports(
         } else if (ext_lower == ".js" || ext_lower == ".ts" ||
                    ext_lower == ".tsx") {
             bindings = extract_js_imports(line);
-        } else if (ext_lower == ".py") {
+        } else if (ext_lower == ".py" || ext_lower == ".pyx" ||
+                   ext_lower == ".pxd") {
             bindings = extract_python_imports(line);
         } else if (ext_lower == ".rs") {
             bindings = extract_rust_imports(line);
