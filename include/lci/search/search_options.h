@@ -116,6 +116,14 @@ struct SearchOptions {
     /// against the root-relative path. Empty = no scoping.
     std::string path_scope;
 
+    /// Trailing CLI path arguments (`lci grep pattern <path>...`, ripgrep
+    /// `rg pattern [path...]` convention). Each entry is a root-relative file
+    /// (exact match) or directory prefix ("sklearn/utils" matches
+    /// sklearn/utils/**). A candidate survives when it matches ANY entry.
+    /// Distinct from the single `path_scope` above (the MCP `path` param):
+    /// this list carries the multi-path CLI positional. Empty = no scoping.
+    std::vector<std::string> path_scopes;
+
     /// Always populate `object_id` enrichment in handler output. Read by the
     /// MCP handler, not the engine — engine never strips it.
     bool include_object_ids{true};

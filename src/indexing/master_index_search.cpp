@@ -1,9 +1,65 @@
 #include <lci/indexing/master_index.h>
 
 #include <algorithm>
+#include <string>
 #include <string_view>
+#include <vector>
 
 namespace lci {
+
+namespace {
+
+// -- Path-scope filtering (CLI trailing-path args) ----------------------------
+//
+// Mirrors the non-glob semantics of SearchEngine's file-local `path_in_scope`
+// (src/search/engine.cpp) without lifting that anonymous-namespace helper out
+// of an out-of-file scope: a scope entry matches a root-relative path when the
+// path equals it (exact file) or is nested under it (directory prefix). Kept
+// deliberately duplicated here — the CLI `lci grep/search <path>...` positional
+// only ever passes real files or directory prefixes, never globs, so the glob
+// branch is unneeded.
+
+/// Normalizes a raw scope token: strips a leading "./" and any trailing '/'.
+std::string_view normalize_scope(std::string_view scope) {
+    if (scope.size() >= 2 && scope[0] == '.' && scope[1] == '/') {
+        scope.remove_prefix(2);
+    }
+    while (scope.size() > 1 && scope.back() == '/') {
+        scope.remove_suffix(1);
+    }
+    return scope;
+}
+
+/// True when `rel` (root-relative path) equals `scope` (exact file) or is
+/// nested directly under it (directory prefix).
+bool rel_in_scope(std::string_view rel, std::string_view scope) {
+    if (scope.empty()) return false;
+    if (rel.size() == scope.size()) return rel == scope;
+    return rel.size() > scope.size() &&
+           rel.substr(0, scope.size()) == scope && rel[scope.size()] == '/';
+}
+
+/// True when `rel` matches ANY of the normalized scope entries.
+bool rel_in_any_scope(std::string_view rel,
+                      const std::vector<std::string>& scopes) {
+    for (const auto& s : scopes) {
+        if (rel_in_scope(rel, normalize_scope(s))) return true;
+    }
+    return false;
+}
+
+/// Returns the portion of `abs` relative to `root` (root-relative path), or
+/// `abs` unchanged when it does not sit under `root`.
+std::string_view relative_to_root(std::string_view abs, std::string_view root) {
+    while (root.size() > 1 && root.back() == '/') root.remove_suffix(1);
+    if (root.empty() || abs.size() <= root.size()) return abs;
+    if (abs.substr(0, root.size()) == root && abs[root.size()] == '/') {
+        return abs.substr(root.size() + 1);
+    }
+    return abs;
+}
+
+}  // namespace
 
 // -- Public search methods ----------------------------------------------------
 
@@ -254,6 +310,23 @@ std::vector<SearchResult> MasterIndex::execute_search(
     // This handles short patterns and ensures text search always works.
     if (filtered.empty() && !options.declaration_only && !options.usage_only) {
         filtered = candidates;
+    }
+
+    // Path-scope filter (CLI trailing-path args). Applied INDEX-SIDE, before
+    // scoring/truncation, so a scoped query never loses in-scope hits to the
+    // max_results cap being spent on out-of-scope files. Root-relative match:
+    // exact file or directory prefix, OR across all path_scopes entries.
+    if (!options.path_scopes.empty()) {
+        std::string_view root = config().project.root;
+        filtered.erase(
+            std::remove_if(filtered.begin(), filtered.end(),
+                           [&](FileID fid) {
+                               std::string_view rel = relative_to_root(
+                                   id_to_path(*file_snap, fid), root);
+                               return !rel_in_any_scope(rel,
+                                                        options.path_scopes);
+                           }),
+            filtered.end());
     }
 
     // Trigram and postings indexes return file IDs in hash-table order,

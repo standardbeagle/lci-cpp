@@ -161,6 +161,51 @@ TEST(MasterIndexSearchIntegrationTest, IndexAndSearchText) {
     }
 }
 
+TEST(MasterIndexSearchIntegrationTest, PathScopesNarrowToFileAndDir) {
+    // Same pattern lives in three files across two directories. Path scoping
+    // (the `lci grep pattern <path>...` positional) must narrow index-side.
+    TempDir dir;
+    dir.write_file("pkg/a.go", "package pkg\nvar needle = 1\n");
+    dir.write_file("pkg/sub/b.go", "package sub\nvar needle = 2\n");
+    dir.write_file("other/c.go", "package other\nvar needle = 3\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    auto path_of = [](const std::vector<SearchResult>& rs) {
+        std::vector<std::string> ps;
+        for (const auto& r : rs) ps.push_back(r.path);
+        return ps;
+    };
+    auto has_suffix = [](const std::string& p, const std::string& suf) {
+        return p.size() >= suf.size() &&
+               p.compare(p.size() - suf.size(), suf.size(), suf) == 0;
+    };
+
+    // Baseline: no scope -> all three files hit.
+    auto all_hits = mi.search_with_options("needle", SearchOptions{});
+    ASSERT_EQ(all_hits.size(), 3u);
+
+    // Exact file scope -> only that file.
+    SearchOptions file_opts;
+    file_opts.path_scopes = {"pkg/a.go"};
+    auto file_hits = mi.search_with_options("needle", file_opts);
+    ASSERT_EQ(file_hits.size(), 1u);
+    EXPECT_TRUE(has_suffix(file_hits.front().path, "pkg/a.go"));
+
+    // Directory-prefix scope -> both files under pkg/ (incl. pkg/sub), none
+    // under other/.
+    SearchOptions dir_opts;
+    dir_opts.path_scopes = {"pkg"};
+    auto dir_hits = mi.search_with_options("needle", dir_opts);
+    ASSERT_EQ(dir_hits.size(), 2u);
+    for (const auto& p : path_of(dir_hits)) {
+        EXPECT_EQ(p.find("/other/"), std::string::npos) << p;
+    }
+}
+
 TEST(MasterIndexSearchIntegrationTest, IndexAndSearchWithContext) {
     TempDir dir;
     dir.write_file("sample.py",
