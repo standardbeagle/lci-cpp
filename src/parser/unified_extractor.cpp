@@ -36,6 +36,104 @@ std::string go_bare_type(std::string_view t) {
     return std::string(t);
 }
 
+// Recovers Cython callable definitions that tree-sitter-python cannot parse.
+// `cpdef name(...)` / `cdef [ret] name(...)` degrade to an ERROR node under the
+// Python grammar (the leading keyword is read as a stray identifier), so no
+// function_definition is produced and the normal extractor path never fires.
+// A light per-line scan recovers the function symbol directly. Cython class
+// definitions (`cdef class Foo`) already recover as class_definition nodes and
+// plain `def` bodies parse normally, so only cpdef/cdef *functions* need this.
+bool is_ident_char(char c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+           (c >= '0' && c <= '9') || c == '_';
+}
+
+bool is_type_def_keyword(std::string_view w) {
+    return w == "class" || w == "struct" || w == "union" || w == "enum" ||
+           w == "cppclass" || w == "packed" || w == "fused";
+}
+
+std::vector<Symbol> scan_cython_callables(std::string_view content,
+                                          FileID file_id) {
+    std::vector<Symbol> out;
+    size_t pos = 0;
+    int line_no = 0;
+    while (pos <= content.size()) {
+        ++line_no;
+        size_t eol = content.find('\n', pos);
+        std::string_view line =
+            content.substr(pos, eol == std::string_view::npos
+                                     ? std::string_view::npos
+                                     : eol - pos);
+        pos = (eol == std::string_view::npos) ? content.size() + 1 : eol + 1;
+
+        // Skip indentation, record it for the symbol column.
+        size_t indent = 0;
+        while (indent < line.size() &&
+               (line[indent] == ' ' || line[indent] == '\t'))
+            ++indent;
+        if (indent >= line.size() || line[indent] == '#') continue;
+
+        // Match a leading `cpdef` / `cdef` / `def` keyword on a word boundary.
+        // Plain `def` is included because tree-sitter's error recovery around a
+        // preceding cpdef/cdef often collapses following `def` bodies into the
+        // same ERROR node, so they never reach the grammar's function path.
+        std::string_view rest = line.substr(indent);
+        size_t kw_len = 0;
+        if (rest.rfind("cpdef", 0) == 0)
+            kw_len = 5;
+        else if (rest.rfind("cdef", 0) == 0)
+            kw_len = 4;
+        else if (rest.rfind("def", 0) == 0)
+            kw_len = 3;
+        else
+            continue;
+        if (kw_len < rest.size() && is_ident_char(rest[kw_len])) continue;
+
+        // The first word after the keyword may not introduce a type/aggregate
+        // definition (those recover through the grammar as their own nodes).
+        size_t after = kw_len;
+        while (after < rest.size() &&
+               (rest[after] == ' ' || rest[after] == '\t'))
+            ++after;
+        size_t word_end = after;
+        while (word_end < rest.size() && is_ident_char(rest[word_end]))
+            ++word_end;
+        if (is_type_def_keyword(rest.substr(after, word_end - after))) continue;
+
+        // The function name is the identifier immediately preceding the first
+        // parameter-list `(`.
+        size_t paren = rest.find('(', kw_len);
+        if (paren == std::string_view::npos) continue;
+
+        // An `=` before that paren means this is a typed assignment whose value
+        // is a call, e.g. `cdef int n = _effective_n_threads()`, not a
+        // definition. Reject so call sites are not mistaken for declarations.
+        if (rest.substr(kw_len, paren - kw_len).find('=') !=
+            std::string_view::npos)
+            continue;
+        size_t name_end = paren;
+        while (name_end > kw_len &&
+               (rest[name_end - 1] == ' ' || rest[name_end - 1] == '\t'))
+            --name_end;
+        size_t name_begin = name_end;
+        while (name_begin > kw_len && is_ident_char(rest[name_begin - 1]))
+            --name_begin;
+        if (name_begin >= name_end) continue;
+
+        Symbol sym;
+        sym.name = std::string(rest.substr(name_begin, name_end - name_begin));
+        sym.type = SymbolType::Function;
+        sym.file_id = file_id;
+        sym.line = line_no;
+        sym.column = static_cast<int>(indent + name_begin) + 1;
+        sym.end_line = line_no;
+        sym.end_column = static_cast<int>(indent + name_end) + 1;
+        out.push_back(std::move(sym));
+    }
+    return out;
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -46,7 +144,11 @@ void UnifiedExtractor::init(std::string_view content, FileID file_id,
                             std::string_view ext, std::string_view path) {
     content_ = content;
     file_id_ = file_id;
-    ext_ = ext;
+    // Treat Cython (.pyx/.pxd) as the Python dialect so every downstream
+    // `ext_ == ".py"` branch (imports, references, type relationships,
+    // side effects) fires. The real path is retained in path_ so extract()
+    // can still recognise Cython for cpdef/cdef recovery.
+    ext_ = (ext == ".pyx" || ext == ".pxd") ? std::string_view(".py") : ext;
     path_ = path;
     ref_id_ = 1;
     current_level_ = 0;
@@ -130,6 +232,19 @@ void UnifiedExtractor::extract(TSTree* tree) {
 
     current_level_ = 1;
     visit_node(root);
+
+    // Cython recovery: cpdef/cdef functions produce ERROR nodes the tree walk
+    // cannot turn into symbols. Detect Cython by the real path (ext_ has been
+    // normalised to ".py") and recover them from a light source scan.
+    if (path_.ends_with(".pyx") || path_.ends_with(".pxd")) {
+        for (auto& sym : scan_cython_callables(content_, file_id_)) {
+            bool exists = std::any_of(
+                symbols_.begin(), symbols_.end(), [&](const Symbol& s) {
+                    return s.line == sym.line && s.name == sym.name;
+                });
+            if (!exists) symbols_.push_back(std::move(sym));
+        }
+    }
 }
 
 ExtractionResults UnifiedExtractor::get_results() const {

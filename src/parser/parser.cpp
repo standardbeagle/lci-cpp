@@ -24,7 +24,13 @@ namespace lci::parser {
 
 bool language_from_extension(std::string_view ext, Language& out) {
     if (ext == ".go") { out = Language::Go; return true; }
-    if (ext == ".py") { out = Language::Python; return true; }
+    // Cython sources (.pyx) and declaration files (.pxd) are a Python dialect;
+    // tree-sitter-python parses their bodies best-effort and the unified
+    // extractor recovers cpdef/cdef signatures the grammar cannot.
+    if (ext == ".py" || ext == ".pyx" || ext == ".pxd") {
+        out = Language::Python;
+        return true;
+    }
     if (ext == ".js" || ext == ".jsx") { out = Language::JavaScript; return true; }
     if (ext == ".ts" || ext == ".tsx") { out = Language::TypeScript; return true; }
     if (ext == ".rs") { out = Language::Rust; return true; }
