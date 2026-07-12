@@ -59,6 +59,14 @@ int main(int argc, char* argv[]) {
                            "'foo bar' matches the exact 6-char string)")
         ->required();
 
+    // Optional trailing path args (ripgrep `rg pattern [path...]`). A single
+    // string positional followed by a vector positional: CLI11 gives `pattern`
+    // the first token and `paths` every remaining positional.
+    std::vector<std::string> search_paths;
+    search_cmd->add_option("paths", search_paths,
+                           "Optional files or directory prefixes to scope "
+                           "results to (e.g. src/ or src/foo.cpp)");
+
     int search_max_lines = 0;
     search_cmd->add_option("-m,--max-lines", search_max_lines,
                            "Max context lines (0=use blocks)");
@@ -186,6 +194,7 @@ int main(int argc, char* argv[]) {
     search_cmd->callback([&]() {
         SearchCommandOptions options{
             .pattern = search_pattern,
+            .paths = search_paths,
             .max_lines = search_max_lines,
             .case_insensitive = search_case_insensitive,
             .json_output = search_json,
@@ -224,6 +233,14 @@ int main(int argc, char* argv[]) {
     std::string grep_pattern;
     grep_cmd->add_option("pattern", grep_pattern, "Search pattern")
         ->required();
+
+    // Optional trailing path args (ripgrep `rg pattern [path...]`). String
+    // positional then vector positional — `pattern` takes the first token,
+    // `grep_paths` collects the rest.
+    std::vector<std::string> grep_paths;
+    grep_cmd->add_option("paths", grep_paths,
+                         "Optional files or directory prefixes to scope "
+                         "results to (e.g. sklearn/utils or foo.py)");
 
     int grep_max_results = 500;
     grep_cmd->add_option("-n,--max-results", grep_max_results,
@@ -314,7 +331,8 @@ int main(int argc, char* argv[]) {
                            grep_exclude, grep_include, grep_exclude_tests,
                            grep_exclude_comments, grep_regex,
                            grep_invert_match, grep_patterns, grep_count,
-                           grep_files_only, grep_max_count, grep_verbose));
+                           grep_files_only, grep_max_count, grep_verbose,
+                           grep_paths));
     });
 
     // -- Status subcommand ----------------------------------------------------

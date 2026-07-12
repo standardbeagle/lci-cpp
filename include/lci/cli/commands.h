@@ -48,6 +48,9 @@ bool is_mcp_mode();
 
 struct SearchCommandOptions {
     std::string pattern;
+    // Optional trailing path args (files or directory prefixes) that scope
+    // results, ripgrep `rg pattern [path...]` convention. Empty = whole corpus.
+    std::vector<std::string> paths;
     int max_lines{};
     bool case_insensitive{};
     bool json_output{};
@@ -88,6 +91,8 @@ int run_search(const GlobalFlags& flags, const SearchCommandOptions& options);
 ///   - `count_per_file`   : grep -c, emit "path: N" per file.
 ///   - `files_only`       : grep -l, emit only paths with at least one match.
 ///   - `max_count_per_file`: grep -m, cap matches per file (0 = unlimited).
+///   - `paths`            : trailing file/dir-prefix args scoping results
+///                          (ripgrep `rg pattern [path...]`); empty = corpus.
 int run_grep(const GlobalFlags& flags, const std::string& pattern,
              int max_results, int context_lines, bool case_insensitive,
              bool json_output, const std::string& exclude_pattern,
@@ -96,7 +101,8 @@ int run_grep(const GlobalFlags& flags, const std::string& pattern,
              bool invert_match,
              const std::vector<std::string>& extra_patterns,
              bool count_per_file, bool files_only,
-             int max_count_per_file, bool verbose);
+             int max_count_per_file, bool verbose,
+             const std::vector<std::string>& paths);
 
 /// status subcommand. Returns 0 on success, non-zero on error.
 int run_status(const GlobalFlags& flags, bool json_output, bool verbose);

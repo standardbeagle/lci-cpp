@@ -996,13 +996,15 @@ nlohmann::json apply_code_only(nlohmann::json results) {
 /// pattern's score/context survives.
 std::optional<nlohmann::json> search_union_patterns(
     Client& client, const std::vector<std::string>& patterns, int max_results,
-    bool case_insensitive, std::string& error) {
+    bool case_insensitive, std::string& error,
+    const std::vector<std::string>& paths = {}) {
     nlohmann::json all = nlohmann::json::array();
     std::set<std::pair<std::string, int>> seen;
     for (const auto& p : patterns) {
         if (p.empty()) continue;
         std::string err;
-        auto j = client.search(p, max_results, case_insensitive, false, err);
+        auto j = client.search(p, max_results, case_insensitive, false, err,
+                               paths);
         if (!j) {
             error = err;
             return std::nullopt;
@@ -1178,6 +1180,23 @@ nlohmann::json regex_filter_results(nlohmann::json results,
     return out;
 }
 
+// Fail-fast validation for the trailing path positionals (ripgrep parity):
+// a path that does not exist on disk is a user error (typo), so error loudly
+// with a nonzero exit rather than silently returning zero matches. Paths are
+// checked relative to the current working directory, mirroring how ripgrep
+// resolves `rg pattern <path>` and how the scope tokens are matched against
+// the (root-relative) indexed paths server-side.
+bool validate_scope_paths(const std::vector<std::string>& paths) {
+    for (const auto& p : paths) {
+        std::error_code ec;
+        if (p.empty() || !std::filesystem::exists(p, ec)) {
+            std::cerr << "Error: path does not exist: " << p << "\n";
+            return false;
+        }
+    }
+    return true;
+}
+
 bool validate_search_options(const SearchCommandOptions& options) {
     int content_filters = (options.comments_only ? 1 : 0) +
                           (options.code_only ? 1 : 0) +
@@ -1218,6 +1237,7 @@ int render_search_output(const SearchCommandOptions& options,
 
 int run_search(const GlobalFlags& flags, const SearchCommandOptions& options) {
     if (!validate_search_options(options)) return 1;
+    if (!validate_scope_paths(options.paths)) return 1;
     emit_search_compatibility_notices(options);
 
     const auto& pattern = options.pattern;
@@ -1446,10 +1466,11 @@ int run_search(const GlobalFlags& flags, const SearchCommandOptions& options) {
     std::optional<nlohmann::json> result;
     if (all_patterns.size() == 1) {
         result = client->search(all_patterns.front(), 500, case_insensitive,
-                                false, search_err);
+                                false, search_err, options.paths);
     } else {
         result = search_union_patterns(*client, all_patterns, 500,
-                                       case_insensitive, search_err);
+                                       case_insensitive, search_err,
+                                       options.paths);
     }
 
     auto elapsed = std::chrono::steady_clock::now() - start;
@@ -1810,7 +1831,10 @@ int run_grep(const GlobalFlags& flags, const std::string& pattern,
              bool invert_match,
              const std::vector<std::string>& extra_patterns,
              bool count_per_file, bool files_only,
-             int max_count_per_file, bool verbose) {
+             int max_count_per_file, bool verbose,
+             const std::vector<std::string>& paths) {
+    if (!validate_scope_paths(paths)) return 1;
+
     Config cfg;
     if (std::string err = load_config_with_overrides(flags, cfg); !err.empty()) {
         std::cerr << "Error: " << err << "\n";
@@ -1890,13 +1914,13 @@ int run_grep(const GlobalFlags& flags, const std::string& pattern,
     if (use_regex) {
         // Search by literal seed(s), then RE2-filter the row set.
         result = search_union_patterns(*client, grep_seeds, max_results,
-                                       case_insensitive, search_err);
+                                       case_insensitive, search_err, paths);
     } else if (all_patterns.size() == 1) {
         result = client->search(all_patterns.front(), max_results,
-                                case_insensitive, false, search_err);
+                                case_insensitive, false, search_err, paths);
     } else {
         result = search_union_patterns(*client, all_patterns, max_results,
-                                       case_insensitive, search_err);
+                                       case_insensitive, search_err, paths);
     }
 
     auto elapsed = std::chrono::steady_clock::now() - start;
