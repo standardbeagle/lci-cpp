@@ -22,6 +22,10 @@ struct TSNode;
 struct TSTree;
 }
 
+namespace lci {
+class SideEffectAnalyzer;
+}
+
 namespace lci::parser {
 
 /// Zero-allocation key for line:column lookups.
@@ -96,6 +100,14 @@ class UnifiedExtractor {
 
     /// Returns all extraction results.
     ExtractionResults get_results() const;
+
+    /// Routes per-function side-effect facts (writes, throws, calls, channel
+    /// ops) discovered during the tree walk into `sink`. When null (the
+    /// default), the side-effect lifecycle is skipped entirely so the hot
+    /// indexing path pays nothing. The sink must outlive the extract() call;
+    /// records are keyed by the file path + 1-based start line so they line up
+    /// with SideEffectAnalyzer::populate_from_index and get_result.
+    void set_side_effect_sink(SideEffectAnalyzer* sink) { side_effects_ = sink; }
 
     /// Looks up declaration info (signature, doc comment) by 1-based position.
     /// Returns empty strings if not found.
@@ -238,6 +250,13 @@ class UnifiedExtractor {
 
     // --- Side effect tracking (in unified_extractor_side_effects.cpp) ---
     void process_side_effect_node(TSNode node, std::string_view node_type);
+    // Registers the current function's parameters (and Go/method receiver) with
+    // the side-effect sink so end_function can tell a param write from a global
+    // write. Called once on entry to the outermost tracked function.
+    void register_function_signature(TSNode node, std::string_view node_type);
+    // Records a write to the base identifier of an lvalue node (descends member
+    // / subscript expressions to the leftmost identifier).
+    void record_lvalue_write(TSNode lvalue, int line, int column);
 
     // Input data
     std::string_view content_;
@@ -265,6 +284,14 @@ class UnifiedExtractor {
     bool in_import_context_{};
     bool in_trait_or_impl_body_{};
     bool in_class_body_{};
+
+    // Side-effect sink (optional). When set, the tree walk drives the
+    // SideEffectAnalyzer per-function lifecycle. se_func_depth_ tracks function
+    // nesting so effects in nested functions/closures are conservatively
+    // attributed to the enclosing top-level function (the analyzer holds one
+    // function context at a time).
+    SideEffectAnalyzer* side_effects_{};
+    int se_func_depth_{};
 
     // Complexity tracking (stack for nested functions)
     std::vector<int> complexity_stack_;

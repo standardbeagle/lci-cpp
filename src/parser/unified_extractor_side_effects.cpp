@@ -1,6 +1,8 @@
 #include <lci/parser/parser.h>
 #include <lci/parser/unified_extractor.h>
 
+#include <lci/analysis/side_effect_analyzer.h>
+
 #include <tree_sitter/api.h>
 
 #include <cstring>
@@ -11,184 +13,259 @@ namespace lci::parser {
 // Side effect tracking during traversal.
 //
 // Ports the Go SideEffectTracker from internal/parser/side_effect_tracking.go.
-// Detects language-specific side-effect-producing patterns during the AST walk:
-// - Assignment expressions (writes to parameters, globals, receiver)
-// - Function calls (including I/O, network, database patterns)
-// - Throw/panic/raise statements
-// - Channel operations (Go)
-// - Defer/try-finally patterns
+// Drives the SideEffectAnalyzer per-function lifecycle from real AST facts
+// instead of callee-name guessing:
+// - Assignment / augmented-assignment / inc-dec -> record_access(Write) on the
+//   lvalue base identifier, classified (param / receiver / global / closure) by
+//   the analyzer from the parameters + receiver registered on function entry.
+// - Function calls -> record_function_call (feeds Phase-2 transitive resolution).
+// - Throw / raise / panic -> record_throw.
+// - Go channel send -> record_channel_op; defer -> record_defer.
 //
-// The detection is based on node type matching, consistent with how the
-// Go implementation identifies these patterns per language.
+// Only runs when a sink is attached (mcp side-effect pass); the guard in
+// visit_node keeps the hot indexing path free of this work.
 // ---------------------------------------------------------------------------
+
+namespace {
+
+// Field-name lookup shorthand (tree-sitter wants the byte length).
+TSNode field(TSNode node, const char* name) {
+    return ts_node_child_by_field_name(
+        node, name, static_cast<uint32_t>(std::strlen(name)));
+}
+
+// Identifier-shaped node types across the grammars we register params from.
+bool is_identifier_type(std::string_view t) {
+    return t == "identifier" || t == "simple_identifier" ||
+           t == "field_identifier" || t == "property_identifier" ||
+           t == "shorthand_property_identifier" || t == "variable_name" ||
+           t == "name" || t == "dotted_name";
+}
+
+int line_of(TSNode node) {
+    return static_cast<int>(ts_node_start_point(node).row) + 1;
+}
+int col_of(TSNode node) {
+    return static_cast<int>(ts_node_start_point(node).column) + 1;
+}
+
+}  // namespace
+
+void UnifiedExtractor::record_lvalue_write(TSNode lvalue, int line, int column) {
+    if (!side_effects_) return;
+    TSNode n = lvalue;
+    // Descend member / subscript / selector expressions to the base identifier
+    // that owns the mutation (a.b.c = x mutates `a`; arr[i] = x mutates `arr`).
+    for (int guard = 0; guard < 32 && !ts_node_is_null(n); ++guard) {
+        std::string_view t = get_node_type(n);
+        if (is_identifier_type(t)) {
+            std::string_view id = node_text(n);
+            if (!id.empty())
+                side_effects_->record_access(id, {}, AccessType::Write, line,
+                                             column);
+            return;
+        }
+        if (ts_node_named_child_count(n) == 0) {
+            // Leaf we don't recognise as an identifier (e.g. `this`/`self`);
+            // record its text so the analyzer can classify it as a receiver.
+            std::string_view txt = node_text(n);
+            if (!txt.empty())
+                side_effects_->record_access(txt, {}, AccessType::Write, line,
+                                             column);
+            return;
+        }
+        n = ts_node_named_child(n, 0);
+    }
+}
+
+void UnifiedExtractor::register_function_signature(TSNode node,
+                                                   std::string_view node_type) {
+    if (!side_effects_) return;
+    (void)node_type;
+
+    // Go method receiver: `func (r *T) M()` -> classify writes to `r` as
+    // receiver mutations rather than global writes.
+    TSNode receiver = field(node, "receiver");
+    if (!ts_node_is_null(receiver)) {
+        uint32_t n = ts_node_named_child_count(receiver);
+        for (uint32_t i = 0; i < n; ++i) {
+            TSNode decl = ts_node_named_child(receiver, i);
+            TSNode name = field(decl, "name");
+            if (!ts_node_is_null(name)) {
+                side_effects_->set_receiver(node_text(name), {});
+                break;
+            }
+        }
+    }
+
+    // Parameter list. Field name is "parameters" across Go / JS / TS / Python /
+    // Java / C# / PHP function-and-method grammars.
+    TSNode params = field(node, "parameters");
+    if (ts_node_is_null(params)) return;
+
+    int index = 0;
+    uint32_t n = ts_node_named_child_count(params);
+    for (uint32_t i = 0; i < n; ++i) {
+        TSNode param = ts_node_named_child(params, i);
+        std::string_view t = get_node_type(param);
+        // Skip punctuation-ish nodes that slipped into named children.
+        if (t == "comment") continue;
+
+        std::string_view pname;
+        TSNode name = field(param, "name");
+        if (!ts_node_is_null(name)) {
+            pname = node_text(name);
+        } else if (is_identifier_type(t)) {
+            pname = node_text(param);
+        } else {
+            // Pattern / typed parameter: first identifier-shaped descendant.
+            uint32_t cc = ts_node_named_child_count(param);
+            for (uint32_t j = 0; j < cc; ++j) {
+                TSNode c = ts_node_named_child(param, j);
+                if (is_identifier_type(get_node_type(c))) {
+                    pname = node_text(c);
+                    break;
+                }
+            }
+        }
+        if (!pname.empty()) {
+            side_effects_->add_parameter(pname, index);
+        }
+        ++index;
+    }
+}
 
 void UnifiedExtractor::process_side_effect_node(
     TSNode node, std::string_view node_type) {
-    // Assignment patterns - writes to state
+    // Only record inside a tracked function body.
+    if (!side_effects_ || se_func_depth_ == 0) return;
+
+    int line = line_of(node);
+    int column = col_of(node);
+
+    // Assignment patterns - writes to state.
     if (node_type == "assignment_expression" ||
-        node_type == "assignment_statement" ||
-        node_type == "assignment") {
-        // Generic assignment detected - the specific target classification
-        // (parameter, receiver, global, closure) requires scope analysis
-        // beyond what the extractor tracks. We record it as a potential
-        // side effect for later analysis.
+        node_type == "assignment_statement" || node_type == "assignment") {
+        TSNode left = field(node, "left");
+        if (ts_node_is_null(left)) left = ts_node_named_child(node, 0);
+        if (ts_node_is_null(left)) return;
+        // Go multi-assign: `a, b = f()` -> left is an expression_list.
+        if (get_node_type(left) == "expression_list") {
+            uint32_t n = ts_node_named_child_count(left);
+            for (uint32_t i = 0; i < n; ++i) {
+                record_lvalue_write(ts_node_named_child(left, i), line, column);
+            }
+        } else {
+            record_lvalue_write(left, line, column);
+        }
         return;
     }
 
     if (node_type == "augmented_assignment_expression" ||
         node_type == "augmented_assignment" ||
         node_type == "compound_assignment_expr") {
-        // +=, -=, etc. both read and write
+        TSNode left = field(node, "left");
+        if (ts_node_is_null(left)) left = ts_node_named_child(node, 0);
+        if (!ts_node_is_null(left)) record_lvalue_write(left, line, column);
         return;
     }
 
-    // Go-specific side effects
+    // Go-specific side effects.
     if (ext_ == ".go") {
         if (node_type == "send_statement") {
-            // Channel send: ch <- value
-            return;
-        }
-        if (node_type == "go_statement") {
-            // Goroutine launch - concurrent side effect
+            side_effects_->record_channel_op(line);
             return;
         }
         if (node_type == "defer_statement") {
-            // Deferred execution
+            side_effects_->record_defer();
             return;
         }
         if (node_type == "inc_statement" || node_type == "dec_statement") {
-            // i++, i-- mutation
+            TSNode t = ts_node_named_child(node, 0);
+            if (!ts_node_is_null(t)) record_lvalue_write(t, line, column);
             return;
         }
     }
 
-    // JavaScript/TypeScript-specific
+    // JavaScript/TypeScript-specific.
     if (ext_ == ".js" || ext_ == ".jsx" || ext_ == ".ts" || ext_ == ".tsx") {
         if (node_type == "update_expression") {
-            // i++, i--, ++i, --i
-            return;
-        }
-        if (node_type == "await_expression") {
-            // Async operation
-            return;
-        }
-        if (node_type == "yield_expression") {
-            // Generator yield
+            TSNode arg = field(node, "argument");
+            if (ts_node_is_null(arg)) arg = ts_node_named_child(node, 0);
+            if (!ts_node_is_null(arg)) record_lvalue_write(arg, line, column);
             return;
         }
         if (node_type == "delete_expression") {
-            // delete obj.prop - mutation
+            TSNode arg = ts_node_named_child(node, 0);
+            if (!ts_node_is_null(arg)) record_lvalue_write(arg, line, column);
             return;
         }
+        // await_expression / yield_expression: async markers with no dedicated
+        // recorder in the analyzer. Deferred (kept conservative) - the call
+        // they wrap is still recorded via call_expression below.
     }
 
-    // Python-specific
+    // Python-specific.
     if (ext_ == ".py") {
         if (node_type == "raise_statement") {
-            // Exception throw
-            return;
-        }
-        if (node_type == "yield") {
-            // Generator yield
-            return;
-        }
-        if (node_type == "await") {
-            // Async operation
+            side_effects_->record_throw({}, line, column);
             return;
         }
         if (node_type == "delete_statement") {
-            // del x - mutation
+            uint32_t n = ts_node_named_child_count(node);
+            for (uint32_t i = 0; i < n; ++i) {
+                record_lvalue_write(ts_node_named_child(node, i), line, column);
+            }
             return;
         }
     }
 
-    // Rust-specific
+    // Rust-specific: panic-family macros are precise throw sites.
     if (ext_ == ".rs") {
         if (node_type == "macro_invocation") {
-            // Macros like println!, panic! can have side effects
-            TSNode name_node = ts_node_child_by_field_name(
-                node, "macro", static_cast<uint32_t>(std::strlen("macro")));
+            TSNode name_node = field(node, "macro");
             if (!ts_node_is_null(name_node)) {
                 std::string_view macro_name = node_text(name_node);
-                // Known I/O macros
-                if (macro_name == "println" || macro_name == "print" ||
-                    macro_name == "eprintln" || macro_name == "eprint" ||
-                    macro_name == "write" || macro_name == "writeln") {
-                    return;
-                }
-                // Panic macros
                 if (macro_name == "panic" || macro_name == "unreachable" ||
                     macro_name == "unimplemented" || macro_name == "todo") {
+                    side_effects_->record_throw(macro_name, line, column);
                     return;
                 }
             }
         }
-        if (node_type == "unsafe_block") {
-            // Unsafe code - potential side effects
-            return;
-        }
     }
 
-    // Java/C#-specific
-    if (ext_ == ".java" || ext_ == ".cs") {
-        if (node_type == "throw_statement") {
-            // Exception throw
-            return;
-        }
-    }
-
-    // C/C++-specific
-    if (ext_ == ".c" || ext_ == ".cpp" || ext_ == ".cc" ||
-        ext_ == ".cxx" || ext_ == ".h" || ext_ == ".hpp") {
-        if (node_type == "throw_statement") {
-            // C++ exception
-            return;
-        }
-    }
-
-    // PHP-specific
-    if (ext_ == ".php" || ext_ == ".phtml") {
-        if (node_type == "throw_expression") {
-            return;
-        }
-    }
-
-    // Universal throw/panic patterns
+    // Throw statements (Java / C# / C / C++) and PHP throw expressions plus the
+    // universal fallback (JS `throw`, etc.).
     if (node_type == "throw_statement" || node_type == "throw_expression") {
+        side_effects_->record_throw({}, line, column);
         return;
     }
 
-    // Call expressions - detect known I/O function patterns
-    if (node_type == "call_expression" || node_type == "call") {
-        TSNode func = ts_node_child_by_field_name(
-            node, "function", static_cast<uint32_t>(std::strlen("function")));
-        if (ts_node_is_null(func)) {
-            func = ts_node_child_by_field_name(
-                node, "name", static_cast<uint32_t>(std::strlen("name")));
+    // Call expressions - record the callee for Phase-2 transitive resolution.
+    if (node_type == "call_expression" || node_type == "call" ||
+        node_type == "call_statement") {
+        TSNode func = field(node, "function");
+        if (ts_node_is_null(func)) func = field(node, "name");
+        if (ts_node_is_null(func)) func = ts_node_named_child(node, 0);
+        if (ts_node_is_null(func)) return;
+
+        std::string_view callee = node_text(func);
+        if (callee.empty()) return;
+
+        // Qualified `pkg.Fn` / `recv.method` -> split into qualifier + name so
+        // the resolver can match the method by receiver.
+        auto dot = callee.rfind('.');
+        if (dot != std::string_view::npos && dot + 1 < callee.size()) {
+            side_effects_->record_function_call(callee.substr(dot + 1),
+                                                callee.substr(0, dot),
+                                                /*is_method=*/true, line,
+                                                column);
+        } else {
+            side_effects_->record_function_call(callee, {}, /*is_method=*/false,
+                                                line, column);
         }
-        if (!ts_node_is_null(func)) {
-            std::string_view func_text = node_text(func);
-            // Known I/O function patterns across languages
-            if (func_text == "fmt.Println" || func_text == "fmt.Printf" ||
-                func_text == "fmt.Print" || func_text == "fmt.Fprintf" ||
-                func_text == "console.log" || func_text == "console.error" ||
-                func_text == "console.warn" || func_text == "print" ||
-                func_text == "println") {
-                return;
-            }
-            // Known file I/O patterns
-            if (func_text == "os.Open" || func_text == "os.Create" ||
-                func_text == "os.ReadFile" || func_text == "os.WriteFile" ||
-                func_text == "fs.readFile" || func_text == "fs.writeFile" ||
-                func_text == "open") {
-                return;
-            }
-            // Known network patterns
-            if (func_text == "http.Get" || func_text == "http.Post" ||
-                func_text == "fetch") {
-                return;
-            }
-        }
+        return;
     }
 }
 

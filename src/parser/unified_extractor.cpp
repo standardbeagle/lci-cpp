@@ -1,6 +1,8 @@
 #include <lci/parser/parser.h>
 #include <lci/parser/unified_extractor.h>
 
+#include <lci/analysis/side_effect_analyzer.h>
+
 #include <tree_sitter/api.h>
 
 #include <algorithm>
@@ -52,6 +54,7 @@ void UnifiedExtractor::init(std::string_view content, FileID file_id,
     in_trait_or_impl_body_ = false;
     in_class_body_ = false;
     has_current_func_ = false;
+    se_func_depth_ = 0;
     lines_initialized_ = false;
 }
 
@@ -81,6 +84,9 @@ void UnifiedExtractor::reset() {
 
     complexity_stack_.clear();
     has_current_func_ = false;
+
+    side_effects_ = nullptr;
+    se_func_depth_ = 0;
 
     handled_nodes_.clear();
     local_var_types_.clear();
@@ -166,6 +172,21 @@ void UnifiedExtractor::visit_node(TSNode node) {
         func_key = {static_cast<int>(start.row) + 1,
                      static_cast<int>(start.column) + 1};
         complexity_stack_.push_back(1);  // base complexity = 1
+
+        // Side-effect lifecycle: open a per-function context on entry to the
+        // outermost tracked function. Nested functions/closures fold their
+        // effects into the enclosing context (analyzer holds one context).
+        if (side_effects_) {
+            if (se_func_depth_ == 0) {
+                std::string_view fname = extract_function_name(node, node_type);
+                int start_line = static_cast<int>(start.row) + 1;
+                int end_line = static_cast<int>(ts_node_end_point(node).row) + 1;
+                side_effects_->begin_function(fname, path_, start_line,
+                                              end_line);
+                register_function_signature(node, node_type);
+            }
+            ++se_func_depth_;
+        }
     }
 
     if (!complexity_stack_.empty()) {
@@ -191,6 +212,13 @@ void UnifiedExtractor::visit_node(TSNode node) {
 
     // === TYPE RELATIONSHIP EXTRACTION ===
     process_type_relationships(node, node_type);
+
+    // === SIDE EFFECT EXTRACTION ===
+    // Only when a sink is attached (mcp side-effect pass). Zero cost on the
+    // hot indexing path where side_effects_ is null.
+    if (side_effects_) {
+        process_side_effect_node(node, node_type);
+    }
 
     // Track import context
     bool was_import = in_import_context_;
@@ -240,6 +268,13 @@ void UnifiedExtractor::visit_node(TSNode node) {
         int cx = complexity_stack_.back();
         complexity_stack_.pop_back();
         complexity_.push_back({func_key, cx});
+    }
+
+    // Close the side-effect context when the outermost tracked function exits.
+    if (is_func && side_effects_ && se_func_depth_ > 0) {
+        if (--se_func_depth_ == 0) {
+            side_effects_->end_function();
+        }
     }
 }
 
