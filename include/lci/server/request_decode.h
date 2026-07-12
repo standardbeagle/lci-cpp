@@ -4,6 +4,7 @@
 #include <optional>
 #include <string>
 #include <type_traits>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
@@ -15,6 +16,9 @@ struct Search {
     int max_context_lines{1};
     bool case_insensitive{};
     bool declaration_only{};
+    // Trailing CLI path args (`lci grep pattern <path>...`). Each entry is a
+    // root-relative file or directory prefix; results are scoped index-side.
+    std::vector<std::string> paths;
 };
 
 struct LimitedPattern {
@@ -69,6 +73,21 @@ inline std::optional<Search> decode_search(const nlohmann::json& body,
         !optional_field(body, "declaration_only", request.declaration_only,
                         error)) {
         return std::nullopt;
+    }
+    // Decode the optional `paths` array (multi-path CLI scoping). Absent =
+    // unscoped (empty vector). Must be an array of strings when present.
+    if (auto it = body.find("paths"); it != body.end()) {
+        if (!it->is_array()) {
+            error = "paths must be an array of strings";
+            return std::nullopt;
+        }
+        for (const auto& el : *it) {
+            if (!el.is_string()) {
+                error = "paths must be an array of strings";
+                return std::nullopt;
+            }
+            request.paths.push_back(el.get<std::string>());
+        }
     }
     if (request.max_results <= 0) request.max_results = 100;
     request.max_results = std::min(request.max_results, 1000);

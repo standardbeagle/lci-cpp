@@ -34,12 +34,16 @@ class Client {
     /// Retrieves the current index status.
     std::optional<IndexStatus> get_status(std::string& error);
 
-    /// Performs a search query.
+    /// Performs a search query. `paths` scopes results to those files or
+    /// directory prefixes (ripgrep `rg pattern [path...]` convention); empty
+    /// leaves the search unscoped.
     std::optional<nlohmann::json> search(const std::string& pattern,
                                          int max_results,
                                          bool case_insensitive,
                                          bool declaration_only,
-                                         std::string& error);
+                                         std::string& error,
+                                         const std::vector<std::string>& paths =
+                                             {});
 
     /// Retrieves symbol information by ID.
     std::optional<nlohmann::json> get_symbol(uint64_t symbol_id,

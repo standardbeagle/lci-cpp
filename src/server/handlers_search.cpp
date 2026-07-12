@@ -37,6 +37,9 @@ void IndexServer::handle_search(const httplib::Request& req,
     // surrounding window so extract_context() actually populates lines;
     // without this max_context_lines=0 produces an empty `lines` array.
     opts.max_context_lines = request->max_context_lines;
+    // Trailing CLI path args → index-side path scope (exact file or dir prefix,
+    // OR across entries). Empty leaves search unscoped (unchanged behavior).
+    opts.path_scopes = request->paths;
 
     std::vector<SearchResult> results;
     {

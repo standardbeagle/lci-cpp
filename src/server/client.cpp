@@ -41,16 +41,18 @@ std::optional<IndexStatus> Client::get_status(std::string& error) {
     return status;
 }
 
-std::optional<nlohmann::json> Client::search(const std::string& pattern,
-                                             int max_results,
-                                             bool case_insensitive,
-                                             bool declaration_only,
-                                             std::string& error) {
+std::optional<nlohmann::json> Client::search(
+    const std::string& pattern, int max_results, bool case_insensitive,
+    bool declaration_only, std::string& error,
+    const std::vector<std::string>& paths) {
     nlohmann::json body = {
         {"pattern", pattern},
         {"max_results", max_results},
         {"case_insensitive", case_insensitive},
         {"declaration_only", declaration_only}};
+    // Only attach `paths` when scoping is requested so unscoped queries keep
+    // their exact prior wire shape.
+    if (!paths.empty()) body["paths"] = paths;
     auto j = post_json("/search", body, error);
     if (!j) return std::nullopt;
 
