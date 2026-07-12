@@ -529,12 +529,13 @@ ToolResult side_effect_category_query(const nlohmann::json& params,
 }
 
 // Counts callable symbols (functions, methods, constructors) across the index.
-// Used as the honest fallback when SideEffectAnalyzer.results() is empty
-// because the analyzer hasn't been wired into the indexing pipeline yet
-// (tracked under tasks sL9fAGaKTXzc, gW7m27uOpsse, yUAZOemJ80R0, 3aSKJjjAFaUv,
-// 7t4FBM17kI1W). Decision: the propagator auto-populates from extracted symbols
-// and defaults to pure when no effects are observed, so summary reports the
-// callable-symbol count rather than zero on an unanalyzed corpus.
+// Used as the honest fallback when SideEffectAnalyzer.results() is empty — e.g.
+// a corpus whose languages the AST side-effect pass + callee-name heuristic
+// could not classify (unsupported grammar, all files skipped). The analyzer is
+// now wired into the MCP pipeline (populate_side_effects_from_ast +
+// populate_from_index in cli/mcp.cpp), so this path is reached only when that
+// wiring produced no records; it defaults unobserved functions to pure to match
+// the propagator's behaviour.
 int count_callable_symbols_in_index(const MasterIndex& indexer) {
     int total = 0;
     const auto& ref = indexer.ref_tracker();
@@ -584,9 +585,9 @@ ToolResult side_effect_summary(SideEffectAnalyzer& analyzer,
         if (combined & side_effect::kExternalCall) ++with_external;
     }
 
-    // Fallback: SideEffectAnalyzer isn't wired into the MCP indexing pipeline
-    // yet (full wiring tracked under tasks sL9fAGaKTXzc et al). When results
-    // are empty, fall through to a function-count default so summary mode
+    // Fallback: the AST side-effect pass + callee-name heuristic produced no
+    // per-function records (a corpus whose languages neither path could
+    // classify). Fall through to a function-count default so summary mode
     // reports total_count honestly — matches Go's propagator-defaults-to-pure
     // behaviour observed on parity corpora. Per-function purity data stays
     // empty (results=null); only the aggregate counts in `summary` are
