@@ -462,9 +462,13 @@ int main(int argc, char* argv[]) {
     refs_cmd->add_option("symbol", refs_symbol, "Symbol name")->required();
     bool refs_json = false;
     refs_cmd->add_flag("--json", refs_json, "Output as JSON")->group("");
+    bool refs_all = false;
+    refs_cmd->add_flag("--all", refs_all,
+                       "Include lexical-only matches (strings/comments/"
+                       "docstrings) in a separate section");
 
     refs_cmd->callback([&]() {
-        std::exit(run_refs(gflags, refs_symbol, refs_json));
+        std::exit(run_refs(gflags, refs_symbol, refs_json, refs_all));
     });
 
     // -- Tree subcommand ------------------------------------------------------

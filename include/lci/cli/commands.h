@@ -127,8 +127,44 @@ int run_mcp(const GlobalFlags& flags);
 int run_def(const GlobalFlags& flags, const std::string& symbol);
 
 /// refs subcommand: find symbol references. Returns 0 on success, non-zero on error.
+/// `show_all` prints the lexical-only (string/comment/docstring) matches in a
+/// separate tail section; without it those matches are suppressed behind a
+/// counted summary line so real code references surface first.
 int run_refs(const GlobalFlags& flags, const std::string& symbol,
-             bool json_output);
+             bool json_output, bool show_all);
+
+// -- refs ranking -------------------------------------------------------------
+
+/// Split of `lci refs` results into real code references vs lexical-only noise.
+/// `code` holds matches in code context (imports, calls, decorators, attribute
+/// accesses, plain identifiers); `lexical` holds matches whose column falls
+/// inside a string literal or comment (docstrings, inline comments, string
+/// constants). Each group preserves its original relative order.
+struct PartitionedReferences {
+    std::vector<ReferenceLocation> code;
+    std::vector<ReferenceLocation> lexical;
+};
+
+/// Partitions `refs` into code-context and lexical-only groups using the
+/// per-line/column classifiers `match_is_in_string_literal` /
+/// `match_is_in_comment` (the same predicates `lci search --code-only` uses).
+/// Each `ReferenceLocation::context` is the exact source line at the match and
+/// `column` the 1-based match column. A ref whose line text is empty cannot be
+/// classified and is kept as code-context (never silently hidden). Used to keep
+/// real references above natural-language "deprecated"-style docstring noise for
+/// common-word symbol names.
+PartitionedReferences partition_references(
+    const std::vector<ReferenceLocation>& refs);
+
+/// Given a file's source `lines`, returns a per-line mask (index = line - 1)
+/// flagging each line that BEGINS inside an open Python triple-quoted string
+/// (`"""`/`'''`) — i.e. the interior lines of a multi-line docstring. These are
+/// the natural-language matches (e.g. reStructuredText `.. deprecated::` notes)
+/// that the single-line `ast_filters` classifiers cannot see, because the
+/// opening quote is on an earlier line. Used by `partition_references` to keep
+/// docstring prose from outranking real code references.
+std::vector<bool> python_docstring_line_mask(
+    const std::vector<std::string>& lines);
 
 /// tree subcommand: display call hierarchy. Returns 0 on success, non-zero on error.
 int run_tree(const GlobalFlags& flags, const std::string& function_name,

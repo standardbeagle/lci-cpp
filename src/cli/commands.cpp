@@ -16,6 +16,7 @@
 #include <lci/semantic/fuzzy_matcher.h>
 #include <nlohmann/json.hpp>
 
+#include "ast_filters.h"
 #include "symbol_filters.h"
 #include "tree_formatter.h"
 
@@ -198,8 +199,122 @@ int run_def(const GlobalFlags& flags, const std::string& symbol) {
 
 // -- refs command -------------------------------------------------------------
 
+std::vector<bool> python_docstring_line_mask(
+    const std::vector<std::string>& lines) {
+    // Marks each line that begins INSIDE an open triple-quoted string
+    // (`"""..."""` / `'''...'''`). These are the interior lines of a multi-line
+    // Python docstring — the dominant source of `deprecated`-style natural-
+    // language noise — which the single-line `ast_filters` classifiers cannot
+    // detect because the opening quote lives on an earlier line. Same-line
+    // triple quotes are left to `ast_filters` (which handles them per-column);
+    // this mask only supplies the multi-line carry state ast_filters lacks.
+    std::vector<bool> mask(lines.size(), false);
+    bool in_triple = false;
+    char tq = 0;
+    for (size_t i = 0; i < lines.size(); ++i) {
+        mask[i] = in_triple;  // interior lines carry the open-string state
+        const std::string& ln = lines[i];
+        size_t j = 0;
+        while (j < ln.size()) {
+            const char c = ln[j];
+            if (in_triple) {
+                if (c == tq && j + 2 < ln.size() && ln[j + 1] == tq &&
+                    ln[j + 2] == tq) {
+                    in_triple = false;
+                    j += 3;
+                    continue;
+                }
+                ++j;
+                continue;
+            }
+            if (c == '#') break;  // comment runs to end-of-line
+            if (c == '"' || c == '\'') {
+                if (j + 2 < ln.size() && ln[j + 1] == c && ln[j + 2] == c) {
+                    in_triple = true;
+                    tq = c;
+                    j += 3;
+                    continue;
+                }
+                // Single-line string: skip to its unescaped closer so a quote
+                // or `#` inside it doesn't spuriously toggle triple/comment.
+                const char q = c;
+                ++j;
+                while (j < ln.size()) {
+                    if (ln[j] == '\\') {
+                        j += 2;
+                        continue;
+                    }
+                    if (ln[j] == q) {
+                        ++j;
+                        break;
+                    }
+                    ++j;
+                }
+                continue;
+            }
+            ++j;
+        }
+    }
+    return mask;
+}
+
+namespace {
+
+// Reads `path` and returns the per-line docstring mask (index = line - 1).
+// A file that cannot be read yields an empty mask, so its matches fall back to
+// the single-line classifiers rather than being dropped.
+std::vector<bool> docstring_mask_for_file(const std::string& path) {
+    std::ifstream in(path);
+    if (!in) return {};
+    std::vector<std::string> lines;
+    std::string line;
+    while (std::getline(in, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        lines.push_back(std::move(line));
+    }
+    return python_docstring_line_mask(lines);
+}
+
+}  // namespace
+
+PartitionedReferences partition_references(
+    const std::vector<ReferenceLocation>& refs) {
+    PartitionedReferences out;
+    // A file's docstring mask is computed once and reused across all of its
+    // matches (a common-word symbol hits the same file many times).
+    std::map<std::string, std::vector<bool>> mask_cache;
+    for (const auto& r : refs) {
+        // A match is lexical-only noise when it falls inside a comment, a
+        // single-line string literal, OR an interior line of a multi-line
+        // docstring. `context` is the exact source line and `column` the
+        // 1-based match position (see handle_references). Everything else —
+        // imports, calls, decorators, attribute accesses, plain identifiers —
+        // is a real code reference and ranks first. A match we cannot classify
+        // (empty line text) is kept as code-context, never silently hidden.
+        bool in_docstring = false;
+        if (!r.file_path.empty() && r.line > 0) {
+            auto it = mask_cache.find(r.file_path);
+            if (it == mask_cache.end()) {
+                it = mask_cache
+                         .emplace(r.file_path,
+                                  docstring_mask_for_file(r.file_path))
+                         .first;
+            }
+            const auto idx = static_cast<size_t>(r.line - 1);
+            if (idx < it->second.size()) in_docstring = it->second[idx];
+        }
+        const bool lexical =
+            in_docstring ||
+            (!r.context.empty() &&
+             (ast_filters::match_is_in_string_literal(r.context, r.column) ||
+              ast_filters::match_is_in_comment(r.context, r.column)));
+        (lexical ? out.lexical : out.code).push_back(r);
+    }
+    return out;
+}
+
 int run_refs(const GlobalFlags& flags, const std::string& symbol,
-             bool json_output) {
+             bool json_output, bool show_all) {
     if (json_output) {
         std::cout
             << "Incorrect Usage: flag provided but not defined: -json\n\n"
@@ -234,13 +349,39 @@ int run_refs(const GlobalFlags& flags, const std::string& symbol,
         return 1;
     }
 
-    for (const auto& r : *results) {
+    // Partition so real code references (imports/calls/decorators/attribute
+    // accesses/plain identifiers) print FIRST and lexical-only matches (inside
+    // strings/comments/docstrings) never outrank them. For a common-word symbol
+    // like `deprecated`, the whole-text-search backend returns hundreds of
+    // natural-language occurrences that would otherwise bury the real refs.
+    PartitionedReferences parts = partition_references(*results);
+
+    auto print_ref = [](const ReferenceLocation& r) {
         if (!r.context.empty()) {
             std::printf("%s:%d: %s\n", r.file_path.c_str(), r.line,
                         r.context.c_str());
         } else {
             std::printf("%s:%d: %s\n", r.file_path.c_str(), r.line,
                         r.match_text.c_str());
+        }
+    };
+
+    for (const auto& r : parts.code) {
+        print_ref(r);
+    }
+
+    if (!parts.lexical.empty()) {
+        const char* plural = parts.lexical.size() == 1 ? "" : "es";
+        if (show_all) {
+            std::printf("\n-- %zu lexical-only match%s in strings/comments --\n",
+                        parts.lexical.size(), plural);
+            for (const auto& r : parts.lexical) {
+                print_ref(r);
+            }
+        } else {
+            std::printf("%zu lexical-only match%s in strings/comments "
+                        "(use --all to show)\n",
+                        parts.lexical.size(), plural);
         }
     }
 

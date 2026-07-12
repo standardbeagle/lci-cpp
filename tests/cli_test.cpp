@@ -105,6 +105,115 @@ TEST(CliDefDiagnosisTest, DoesNotMatchImportInsideIdentifier) {
         line_imports_symbol("important = compute_important(x)", "important"));
 }
 
+// -- refs ranking (code-context vs lexical partition) -------------------------
+
+namespace {
+
+ReferenceLocation make_ref(std::string file, int line, int column,
+                           std::string context) {
+    ReferenceLocation r;
+    r.file_path = std::move(file);
+    r.line = line;
+    r.column = column;
+    r.context = std::move(context);
+    return r;
+}
+
+}  // namespace
+
+// The core discrimination: a `@deprecated` decorator usage is a code
+// reference, while the same word inside a docstring is lexical-only noise.
+// Column is 1-based and points at the match ("deprecated").
+TEST(CliRefsPartitionTest, DecoratorIsCodeDocstringIsLexical) {
+    std::vector<ReferenceLocation> refs = {
+        // Docstring hit — appears FIRST in the raw text-search results, which
+        // is exactly the noise-outranks-code failure we are fixing.
+        make_ref("a.py", 3, 8, "    \"\"\"This is deprecated behavior.\"\"\""),
+        // Decorator usage — real code reference.
+        make_ref("b.py", 10, 2, "@deprecated"),
+    };
+
+    PartitionedReferences parts = partition_references(refs);
+
+    ASSERT_EQ(parts.code.size(), 1u);
+    ASSERT_EQ(parts.lexical.size(), 1u);
+    EXPECT_EQ(parts.code[0].file_path, "b.py");
+    EXPECT_EQ(parts.lexical[0].file_path, "a.py");
+}
+
+// The partition must produce a top-to-bottom ordering where every code
+// reference precedes every lexical-only one, regardless of the input order.
+TEST(CliRefsPartitionTest, CodeAlwaysPrecedesLexicalInMergedOrder) {
+    std::vector<ReferenceLocation> refs = {
+        make_ref("doc.py", 1, 5, "# deprecated: use foo instead"),  // comment
+        make_ref("use.py", 2, 1, "deprecated(func)"),               // call
+        make_ref("s.py", 3, 12, "msg = \"deprecated api\""),        // string
+        make_ref("imp.py", 4, 20, "from x import deprecated"),      // import
+    };
+
+    PartitionedReferences parts = partition_references(refs);
+
+    // Merge as run_refs prints: code first, then lexical.
+    std::vector<std::string> order;
+    for (const auto& r : parts.code) order.push_back(r.file_path);
+    for (const auto& r : parts.lexical) order.push_back(r.file_path);
+
+    // Code refs (call + import) precede lexical refs (comment + string), and
+    // each group keeps its original relative order.
+    EXPECT_EQ(order, (std::vector<std::string>{"use.py", "imp.py", "doc.py",
+                                               "s.py"}));
+}
+
+// A ref with no line text cannot be classified; keep it as code-context so a
+// possibly-real reference is never silently hidden.
+TEST(CliRefsPartitionTest, EmptyContextIsKeptAsCode) {
+    std::vector<ReferenceLocation> refs = {make_ref("x.py", 1, 0, "")};
+    PartitionedReferences parts = partition_references(refs);
+    EXPECT_EQ(parts.code.size(), 1u);
+    EXPECT_TRUE(parts.lexical.empty());
+}
+
+// The load-bearing case for real corpora: sklearn docstrings are multi-line
+// triple-quoted strings, so a `deprecated` mention on an INTERIOR line carries
+// no quote of its own and escapes the single-line classifiers. The mask must
+// flag those interior lines while leaving surrounding code (the decorator,
+// the def) unmarked — otherwise docstring prose outranks a `@deprecated` usage.
+TEST(CliRefsPartitionTest, MultiLineDocstringInteriorLinesAreMasked) {
+    std::vector<std::string> lines = {
+        "@deprecated(\"1.9\")",           // 1: decorator — code
+        "def f(x):",                       // 2: code
+        "    \"\"\"Short summary.",        // 3: opens docstring
+        "",                                // 4: interior
+        "    .. deprecated:: 1.9",         // 5: interior prose (the noise)
+        "       use g instead.",           // 6: interior
+        "    \"\"\"",                       // 7: closes docstring
+        "    return deprecated_call(x)",   // 8: code
+    };
+
+    std::vector<bool> mask = python_docstring_line_mask(lines);
+    ASSERT_EQ(mask.size(), lines.size());
+
+    EXPECT_FALSE(mask[0]);  // @deprecated decorator is code, never masked
+    EXPECT_FALSE(mask[1]);  // def line
+    EXPECT_FALSE(mask[2]);  // opener line handled by single-line classifier
+    EXPECT_TRUE(mask[3]);   // interior blank
+    EXPECT_TRUE(mask[4]);   // ".. deprecated:: 1.9" — the docstring noise
+    EXPECT_TRUE(mask[5]);   // interior prose
+    EXPECT_FALSE(mask[7]);  // code after the docstring closes
+}
+
+// Single-line triple-quoted strings must not leave the scanner stuck "inside"
+// a docstring for the rest of the file.
+TEST(CliRefsPartitionTest, SameLineTripleQuoteDoesNotLeak) {
+    std::vector<std::string> lines = {
+        "x = \"\"\"one line deprecated\"\"\"",  // opens and closes
+        "y = deprecated(x)",                     // must be code
+    };
+    std::vector<bool> mask = python_docstring_line_mask(lines);
+    EXPECT_FALSE(mask[0]);
+    EXPECT_FALSE(mask[1]);
+}
+
 // -- format helpers -----------------------------------------------------------
 
 TEST(CliFormatTest, FormatBytesSmall) {
