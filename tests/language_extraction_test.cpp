@@ -156,6 +156,62 @@ TEST(LanguageExtractionTest, Python) {
 }
 
 // ---------------------------------------------------------------------------
+// Cython (.pyx / .pxd) — Python dialect with cpdef/cdef callables
+// ---------------------------------------------------------------------------
+
+constexpr std::string_view kCythonSrc = R"(import numpy as np
+
+cpdef _openmp_effective_n_threads(n_threads=None, only_physical_cores=True):
+    return 1
+
+cdef int _compute(int x):
+    return x + 1
+
+def _plain_helper(value):
+    return value
+
+cdef class Backend:
+    cdef int _size
+
+    cpdef reset(self):
+        cdef int n = _openmp_effective_n_threads()
+        return n
+)";
+
+// Discrimination test: fails if .pyx is not mapped to Python
+// (language_from_extension) or if the extractor stops recovering cpdef/cdef
+// callables that tree-sitter-python degrades to ERROR nodes.
+TEST(LanguageExtractionTest, Cython) {
+    Language lang{};
+    ASSERT_TRUE(language_from_extension(".pyx", lang));
+    EXPECT_EQ(lang, Language::Python);
+    ASSERT_TRUE(language_from_extension(".pxd", lang));
+    EXPECT_EQ(lang, Language::Python);
+
+    auto r = extract(Language::Python, ".pyx", kCythonSrc, "_helpers.pyx");
+
+    // cpdef function is recovered at its true line, exactly once (the call
+    // site inside reset() must not be mistaken for a second definition).
+    const Symbol* cpdef_fn = find_symbol(r, "_openmp_effective_n_threads");
+    ASSERT_NE(cpdef_fn, nullptr);
+    EXPECT_EQ(cpdef_fn->type, SymbolType::Function);
+    EXPECT_EQ(cpdef_fn->line, 3);
+    int cpdef_count = 0;
+    for (const auto& s : r.symbols)
+        if (s.name == "_openmp_effective_n_threads") ++cpdef_count;
+    EXPECT_EQ(cpdef_count, 1);
+
+    // cdef (typed) function and cpdef method are recovered.
+    EXPECT_NE(find_symbol(r, "_compute"), nullptr);
+    EXPECT_NE(find_symbol(r, "reset"), nullptr);
+
+    // Plain def and cdef class parse through the grammar as usual.
+    EXPECT_NE(find_symbol(r, "_plain_helper"), nullptr);
+    ASSERT_NE(find_symbol(r, "Backend"), nullptr);
+    EXPECT_EQ(find_symbol(r, "Backend")->type, SymbolType::Class);
+}
+
+// ---------------------------------------------------------------------------
 // JavaScript
 // ---------------------------------------------------------------------------
 
