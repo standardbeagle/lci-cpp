@@ -1,0 +1,38 @@
+Debug Info - Lightning Code Index Symbol Linking System
+Root Path: .
+Incremental Mode: true
+
+Building index...
+Linking symbols...
+
+Debug Information:
+================================================================================
+=== Symbol Linking System Debug Info ===
+
+Summary:
+  Total Files: 3
+  Added: 1
+  Modified: 1
+  Removed: 1
+  Unchanged: 1
+
+Changed Files (3):
+  ${CORPUS}/b.go (modified)
+  ${CORPUS}/c.go (added)
+  ${CORPUS}/d.go (removed)
+
+Extractors (6):
+  csharp: 0 files processed, 0 symbols extracted
+  go: 0 files processed, 0 symbols extracted
+  javascript: 0 files processed, 0 symbols extracted
+  php: 0 files processed, 0 symbols extracted
+  python: 0 files processed, 0 symbols extracted
+  typescript: 0 files processed, 0 symbols extracted
+
+Resolvers (5):
+  go: 0 imports resolved
+  javascript: 0 imports resolved
+  php: 0 imports resolved
+  csharp: 0 imports resolved
+  python: 0 imports resolved
+

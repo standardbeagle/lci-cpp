@@ -1,0 +1,20 @@
+{
+  "files": [
+    {
+      "hash": "3532df529aa7cfdd",
+      "path": "a.go",
+      "size": 44
+    },
+    {
+      "hash": "0000000000000000",
+      "path": "b.go",
+      "size": 99
+    },
+    {
+      "hash": "deadbeefdeadbeef",
+      "path": "d.go",
+      "size": 10
+    }
+  ],
+  "version": 1
+}
