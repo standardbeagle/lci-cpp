@@ -303,16 +303,33 @@ void SideEffectAnalyzer::populate_from_index(const MasterIndex& indexer) {
                                es->symbol.type == SymbolType::Constructor;
             if (!is_callable) continue;
 
+            uint32_t cats = side_effect::kNone;
+            for (const auto& callee : ref.get_callee_names(es->id)) {
+                cats |= classify_callee_category(callee);
+            }
+
+            std::string key = file_path + ":" +
+                              std::to_string(es->symbol.line) + ":0";
+
+            // If the AST pass already recorded precise local effects for this
+            // function (param / receiver / global writes, throws, channel ops),
+            // keep them and merely OR in the callee-name heuristic categories
+            // (IO / network / database / throw the AST can't see from a bare
+            // call node). Never discard AST precision by overwriting.
+            if (auto it = results_.find(key); it != results_.end()) {
+                it->second.categories |= cats;
+                uint32_t combined =
+                    it->second.categories | it->second.transitive_categories;
+                it->second.is_pure = (combined == side_effect::kNone);
+                continue;
+            }
+
             SideEffectInfo info;
             info.function_name = std::string(es->symbol.name);
             info.file_path = file_path;
             info.start_line = es->symbol.line;
             info.end_line = es->symbol.end_line;
 
-            uint32_t cats = side_effect::kNone;
-            for (const auto& callee : ref.get_callee_names(es->id)) {
-                cats |= classify_callee_category(callee);
-            }
             info.categories = cats;
             info.is_pure = (cats == side_effect::kNone);
             info.purity_level = info.is_pure ? PurityLevel::Pure
@@ -321,8 +338,6 @@ void SideEffectAnalyzer::populate_from_index(const MasterIndex& indexer) {
             info.purity_score = info.is_pure ? 1.0 : 0.0;
             info.purity_confidence_score = 0.7;
 
-            std::string key = file_path + ":" + std::to_string(info.start_line)
-                              + ":0";
             results_[std::move(key)] = std::move(info);
         }
     }

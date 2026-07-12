@@ -99,16 +99,20 @@ class SideEffectAnalyzer {
     }
     const SideEffectInfo* get_result(std::string_view file, int line) const;
 
-    /// Walks every function/method symbol in the indexer and populates
-    /// results_ with a conservative purity classification derived from
-    /// callee-name heuristics. Functions whose outgoing refs target only
-    /// internal symbols stay Pure; those that call a known I/O / network /
-    /// database / throw / dynamic-eval symbol get marked accordingly.
+    /// Walks every function/method symbol in the indexer and augments results_
+    /// with a conservative purity classification derived from callee-name
+    /// heuristics. Functions whose outgoing refs target only internal symbols
+    /// stay Pure; those that call a known I/O / network / database / throw /
+    /// dynamic-eval symbol get marked accordingly.
     ///
-    /// This is the C++ counterpart to Go's
-    /// SideEffectAnalyzer.AnalyzeAll(symbolIndex). Replaces the per-file
-    /// AST-walk path until the indexing pipeline pumps record_access /
-    /// record_function_call live (tracked under sibling Dart tasks).
+    /// Runs AFTER the AST pass (UnifiedExtractor driving begin_function /
+    /// record_access / record_throw via set_side_effect_sink): for a function
+    /// the AST already recorded, it only OR-s in the heuristic categories the
+    /// AST can't see from a bare call node, preserving the AST-derived
+    /// param/receiver/global writes and throws. For functions with no AST
+    /// record it builds the heuristic-only classification as a fallback.
+    ///
+    /// C++ counterpart to Go's SideEffectAnalyzer.AnalyzeAll(symbolIndex).
     void populate_from_index(const class MasterIndex& indexer);
 
     /// Phase 2: propagates side effects transitively upstream through the call
