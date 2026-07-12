@@ -45,7 +45,7 @@ void expect_qualified_callee(const std::string& lang, const std::string& repo,
         << "sentinel symbol '" << sentinel << "' not extracted in " << repo;
 
     bool found = false;
-    for (const auto* s : syms) {
+    for (const auto& s : syms) {
         for (const auto& callee : rt.get_callee_names(s->id)) {
             if (callee == qualified_callee) {
                 found = true;
