@@ -344,7 +344,13 @@ struct SideEffectInfo {
 
     // Transitive effects (from callees) - populated by propagation
     uint32_t transitive_categories{};
-    PurityConfidence transitive_confidence{};
+    // Per-hop-decayed confidence in the transitive assessment. A function that
+    // directly holds an effect keeps full confidence (1.0); each call-graph hop
+    // outward multiplies by ConfidenceDecay (0.95), floored at MinConfidence
+    // (0.3). Continuous, matching Go's SideEffectPropagator.decayConfidence
+    // (hence double, not the coarse PurityConfidence bucket). 0.0 until
+    // propagate_transitive runs.
+    double transitive_confidence{};
 
     // Combined assessment
     bool is_pure{};

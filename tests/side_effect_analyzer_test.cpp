@@ -10,8 +10,10 @@
 
 #include "unique_temp.h"
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <string>
 
 namespace lci {
 namespace {
@@ -705,6 +707,64 @@ TEST(TransitivePropagation, ImpurityFlowsUpstreamThroughCallGraph) {
     EXPECT_FALSE(mid->is_pure);
     EXPECT_TRUE(top->transitive_categories & side_effect::kIO);
     EXPECT_FALSE(top->is_pure);
+
+    // Confidence decays 0.95 per hop from the direct source (Go parity):
+    // leaf holds the effect directly (full confidence), mid is one hop out,
+    // top is two hops out.
+    EXPECT_DOUBLE_EQ(leaf->transitive_confidence, 1.0);
+    EXPECT_DOUBLE_EQ(mid->transitive_confidence, 0.95);
+    EXPECT_DOUBLE_EQ(top->transitive_confidence, 0.95 * 0.95);
+
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+}
+
+// A long call chain f0 <- f1 <- ... <- fN where only f0 does local IO. Each
+// hop outward multiplies confidence by 0.95; past the point where 0.95^hop
+// drops below 0.3 the value clamps to the MinConfidence floor, proving the
+// decay math is bounded exactly as Go's SideEffectPropagator specifies.
+TEST(TransitivePropagation, ConfidenceDecaysToMinConfidenceFloor) {
+    constexpr int kChainLen = 30;  // 0.95^hop < 0.3 well before this depth
+    auto dir = lci::test::unique_temp_dir("lci_se_decay_floor_");
+    std::filesystem::create_directories(dir);
+    {
+        std::ofstream o(dir / "chain.go");
+        o << "package main\n\n";
+        o << "func f0() {\n\tprintln(\"x\")\n}\n\n";
+        for (int i = 1; i < kChainLen; ++i) {
+            o << "func f" << i << "() {\n\tf" << (i - 1) << "()\n}\n\n";
+        }
+    }
+    Config config;
+    config.project.root = dir.string();
+    MasterIndex indexer(config);
+    indexer.index_directory(dir.string());
+
+    SideEffectAnalyzer analyzer("generic");
+    analyzer.populate_from_index(indexer);
+    analyzer.propagate_transitive(indexer);
+
+    auto conf_for = [&](const std::string& name) -> double {
+        auto snapshot = indexer.ref_tracker().pin();
+        auto sym = snapshot->find_symbol_by_name(name);
+        EXPECT_NE(sym, nullptr) << name;
+        const auto* info = analyzer.get_result(
+            indexer.get_file_path(sym->symbol.file_id), sym->symbol.line);
+        EXPECT_NE(info, nullptr) << name;
+        return info ? info->transitive_confidence : -1.0;
+    };
+
+    // Direct source keeps full confidence; each hop decays by 0.95 until the
+    // 0.3 floor takes over.
+    EXPECT_DOUBLE_EQ(conf_for("f0"), 1.0);
+    double expected = 1.0;
+    for (int hop = 1; hop < kChainLen; ++hop) {
+        expected = std::max(0.3, expected * 0.95);
+        EXPECT_DOUBLE_EQ(conf_for("f" + std::to_string(hop)), expected)
+            << "hop " << hop;
+    }
+    // By the end of a 30-deep chain the floor is firmly in effect.
+    EXPECT_DOUBLE_EQ(conf_for("f" + std::to_string(kChainLen - 1)), 0.3);
 
     std::error_code ec;
     std::filesystem::remove_all(dir, ec);

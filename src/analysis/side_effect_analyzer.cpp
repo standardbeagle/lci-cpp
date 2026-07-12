@@ -379,8 +379,26 @@ void SideEffectAnalyzer::propagate_transitive(const MasterIndex& indexer) {
         }
     }
 
+    // Confidence decay along the call graph (Go SideEffectPropagator parity):
+    // a function that directly holds a propagatable effect is a source at full
+    // confidence; each hop outward toward callers multiplies confidence by
+    // kConfidenceDecay, floored at kMinConfidence. Names/values mirror Go's
+    // ConfidenceDecay / MinConfidence exactly for auditability.
+    constexpr double kInitialConfidence = 1.0;
+    constexpr double kConfidenceDecay = 0.95;
+    constexpr double kMinConfidence = 0.3;
+
+    // Seed each direct source with full confidence before the fixpoint.
+    for (auto& [sid, info] : by_symbol) {
+        (void)sid;
+        if (categories_to_propagate(info->categories) != 0)
+            info->transitive_confidence = kInitialConfidence;
+    }
+
     // Fixpoint: push each symbol's effects upstream to its callers' transitive
-    // set until nothing changes. Bounded iterations guard against cycles.
+    // set until nothing changes. Confidence at a caller is the best (highest,
+    // i.e. shortest-hop) decayed value across incoming impure paths. Bounded
+    // iterations guard against cycles.
     constexpr int kMaxIterations = 100;
     bool changed = true;
     for (int iter = 0; changed && iter < kMaxIterations; ++iter) {
@@ -389,6 +407,9 @@ void SideEffectAnalyzer::propagate_transitive(const MasterIndex& indexer) {
             uint32_t combined = info->categories | info->transitive_categories;
             uint32_t to_propagate = categories_to_propagate(combined);
             if (to_propagate == 0) continue;
+            double caller_confidence =
+                std::max(kMinConfidence,
+                         info->transitive_confidence * kConfidenceDecay);
             for (SymbolID caller_id : ref.get_caller_symbols(sid)) {
                 auto cit = by_symbol.find(caller_id);
                 if (cit == by_symbol.end()) continue;
@@ -396,6 +417,10 @@ void SideEffectAnalyzer::propagate_transitive(const MasterIndex& indexer) {
                 uint32_t old = caller->transitive_categories;
                 caller->transitive_categories |= to_propagate;
                 if (caller->transitive_categories != old) changed = true;
+                if (caller_confidence > caller->transitive_confidence) {
+                    caller->transitive_confidence = caller_confidence;
+                    changed = true;
+                }
             }
         }
     }
