@@ -7,9 +7,11 @@
 namespace lci {
 namespace {
 
-/// Converts a UTF-8 string_view to a vector of Unicode code points.
-std::vector<uint32_t> to_code_points(std::string_view s) {
-    std::vector<uint32_t> result;
+/// Converts a UTF-8 string_view to Unicode code points, appended into a
+/// caller-owned buffer. The buffer is cleared first; passing a reused buffer
+/// (e.g. thread-local scratch) avoids a fresh per-call heap allocation.
+void to_code_points_into(std::string_view s, std::vector<uint32_t>& result) {
+    result.clear();
     result.reserve(s.size());
 
     size_t i = 0;
@@ -44,8 +46,6 @@ std::vector<uint32_t> to_code_points(std::string_view s) {
         result.push_back(cp);
         i += static_cast<size_t>(len);
     }
-
-    return result;
 }
 
 /// Returns the byte length of a single code point encoded in UTF-8.
@@ -87,16 +87,17 @@ void append_code_point(std::string& out, uint32_t cp) {
     }
 }
 
-/// Computes byte offsets for each code point in a UTF-8 string.
-std::vector<size_t> compute_byte_offsets(std::string_view s) {
-    std::vector<size_t> offsets;
+/// Computes byte offsets for each code point in a UTF-8 string, appended into
+/// a caller-owned buffer (cleared first) so a reused buffer skips a per-call
+/// heap allocation.
+void compute_byte_offsets_into(std::string_view s, std::vector<size_t>& offsets) {
+    offsets.clear();
     offsets.reserve(s.size());
     size_t i = 0;
     while (i < s.size()) {
         offsets.push_back(i);
         i += static_cast<size_t>(utf8_char_len(static_cast<uint8_t>(s[i])));
     }
-    return offsets;
 }
 
 /// Lowercase ASCII character.
@@ -112,6 +113,57 @@ std::string to_lower_ascii(std::string_view s) {
         result[i] = ascii_lower(s[i]);
     }
     return result;
+}
+
+/// Visits every ASCII trigram in `content`, calling `sink(byte_offset, hash)`.
+/// The single extraction loop shared by the query-path map builder and the
+/// write-path scratch filler — the sink decides where each trigram lands.
+template <class Sink>
+void for_each_simple_trigram(std::string_view content, Sink&& sink) {
+    if (content.size() < 3) return;
+
+    for (size_t i = 0; i + 2 < content.size(); ++i) {
+        auto b0 = static_cast<uint8_t>(content[i]);
+        auto b1 = static_cast<uint8_t>(content[i + 1]);
+        auto b2 = static_cast<uint8_t>(content[i + 2]);
+
+        bool has_alpha = is_alpha_num(b0) || is_alpha_num(b1) || is_alpha_num(b2);
+        if (!has_alpha) continue;
+
+        uint32_t trigram = (uint32_t(b0) << 16) | (uint32_t(b1) << 8) | uint32_t(b2);
+        sink(static_cast<int>(i), trigram);
+    }
+}
+
+/// Visits every Unicode trigram in `content`, calling `sink(byte_offset, str)`
+/// with an rvalue trigram string (SSO-sized, so no per-trigram heap alloc).
+/// `code_points` and `byte_offsets` are caller-owned scratch buffers; passing
+/// reused (thread-local) buffers avoids two fresh per-call heap allocations.
+template <class Sink>
+void for_each_unicode_trigram(std::string_view content,
+                              std::vector<uint32_t>& code_points,
+                              std::vector<size_t>& byte_offsets, Sink&& sink) {
+    if (content.size() < 3) return;
+
+    to_code_points_into(content, code_points);
+    if (code_points.size() < 3) return;
+
+    compute_byte_offsets_into(content, byte_offsets);
+
+    for (size_t i = 0; i + 2 < code_points.size(); ++i) {
+        bool has_alpha = is_alpha_num_unicode(code_points[i])
+                         || is_alpha_num_unicode(code_points[i + 1])
+                         || is_alpha_num_unicode(code_points[i + 2]);
+        if (!has_alpha) continue;
+
+        std::string trigram_str;
+        trigram_str.reserve(12);
+        append_code_point(trigram_str, code_points[i]);
+        append_code_point(trigram_str, code_points[i + 1]);
+        append_code_point(trigram_str, code_points[i + 2]);
+
+        sink(static_cast<int>(byte_offsets[i]), std::move(trigram_str));
+    }
 }
 
 /// Removes locations for a specific file from a vector.
@@ -138,49 +190,22 @@ bool is_pure_ascii(std::string_view content) {
 absl::flat_hash_map<int, uint32_t> extract_simple_trigrams(
     std::string_view content) {
     absl::flat_hash_map<int, uint32_t> trigrams;
-    if (content.size() < 3) return trigrams;
-
-    for (size_t i = 0; i + 2 < content.size(); ++i) {
-        auto b0 = static_cast<uint8_t>(content[i]);
-        auto b1 = static_cast<uint8_t>(content[i + 1]);
-        auto b2 = static_cast<uint8_t>(content[i + 2]);
-
-        bool has_alpha = is_alpha_num(b0) || is_alpha_num(b1) || is_alpha_num(b2);
-        if (!has_alpha) continue;
-
-        uint32_t trigram = (uint32_t(b0) << 16) | (uint32_t(b1) << 8) | uint32_t(b2);
-        trigrams[static_cast<int>(i)] = trigram;
-    }
-
+    for_each_simple_trigram(content, [&](int offset, uint32_t trigram) {
+        trigrams[offset] = trigram;
+    });
     return trigrams;
 }
 
 absl::flat_hash_map<int, std::string> extract_unicode_trigrams(
     std::string_view content) {
     absl::flat_hash_map<int, std::string> trigrams;
-    if (content.size() < 3) return trigrams;
-
-    auto code_points = to_code_points(content);
-    if (code_points.size() < 3) return trigrams;
-
-    auto byte_offsets = compute_byte_offsets(content);
-
-    for (size_t i = 0; i + 2 < code_points.size(); ++i) {
-        bool has_alpha = is_alpha_num_unicode(code_points[i])
-                         || is_alpha_num_unicode(code_points[i + 1])
-                         || is_alpha_num_unicode(code_points[i + 2]);
-        if (!has_alpha) continue;
-
-        std::string trigram_str;
-        trigram_str.reserve(12);
-        append_code_point(trigram_str, code_points[i]);
-        append_code_point(trigram_str, code_points[i + 1]);
-        append_code_point(trigram_str, code_points[i + 2]);
-
-        int byte_offset = static_cast<int>(byte_offsets[i]);
-        trigrams[byte_offset] = std::move(trigram_str);
-    }
-
+    std::vector<uint32_t> code_points;
+    std::vector<size_t> byte_offsets;
+    for_each_unicode_trigram(
+        content, code_points, byte_offsets,
+        [&](int offset, std::string trigram_str) {
+            trigrams[offset] = std::move(trigram_str);
+        });
     return trigrams;
 }
 
@@ -331,21 +356,38 @@ BucketedTrigramResult TrigramIndex::create_bucketed_result(FileID file_id) const
 }
 
 void TrigramIndex::index_file(FileID file_id, std::string_view content) {
+    // Write path: extract into thread-local scratch (reused across files, so
+    // no per-file heap allocation and no throwaway hash map) OUTSIDE the write
+    // lock, then drain the scratch into the snapshot under it. thread_local is
+    // per-thread private state, so concurrent index_file callers never share a
+    // buffer; the snapshot mutation is already serialized by mutate_snapshot.
     if (is_pure_ascii(content)) {
-        auto trigrams = extract_simple_trigrams(content);
+        thread_local std::vector<std::pair<int, uint32_t>> ascii_scratch;
+        ascii_scratch.clear();
+        for_each_simple_trigram(content, [&](int offset, uint32_t trigram) {
+            ascii_scratch.emplace_back(offset, trigram);
+        });
         mutate_snapshot([&](Snapshot& snap) {
             snap.invalidated_files.erase(file_id);
-            for (const auto& [offset, trigram_hash] : trigrams) {
+            for (const auto& [offset, trigram_hash] : ascii_scratch) {
                 auto& entry = snap.ascii_trigrams[trigram_hash];
                 entry.locations.push_back(
                     {file_id, static_cast<uint32_t>(offset)});
             }
         });
     } else {
-        auto trigrams = extract_unicode_trigrams(content);
+        thread_local std::vector<uint32_t> code_points;
+        thread_local std::vector<size_t> byte_offsets;
+        thread_local std::vector<std::pair<int, std::string>> unicode_scratch;
+        unicode_scratch.clear();
+        for_each_unicode_trigram(
+            content, code_points, byte_offsets,
+            [&](int offset, std::string trigram_str) {
+                unicode_scratch.emplace_back(offset, std::move(trigram_str));
+            });
         mutate_snapshot([&](Snapshot& snap) {
             snap.invalidated_files.erase(file_id);
-            for (const auto& [offset, trigram_str] : trigrams) {
+            for (const auto& [offset, trigram_str] : unicode_scratch) {
                 auto& entry = snap.unicode_trigrams[trigram_str];
                 entry.locations.push_back(
                     {file_id, static_cast<uint32_t>(offset)});
