@@ -1,21 +1,21 @@
 {
   "format": 1,
   "host": "beagle-ab",
-  "date": "2026-07-12T11:26:29-05:00",
+  "date": "2026-07-12T19:19:54-05:00",
   "benchmarks": {
-    "BM_FuzzyFindMatches": 29466.4,
-    "BM_FuzzyMatchJaroWinkler": 102.9,
-    "BM_FuzzyMatchLevenshtein": 34.0,
-    "BM_IndexingThroughput/100": 76349531.7,
-    "BM_IndexingThroughput/1000": 2044898253.0,
-    "BM_IndexingThroughput/500": 668439818.0,
-    "BM_ParserPoolAcquireRelease": 27.5,
-    "BM_Re2FilterRows": 11028.2,
-    "BM_SearchMediumIndex": 18958.5,
-    "BM_SearchSmallIndex": 16273.8,
-    "BM_StdRegexFilterRows": 120039.8,
-    "BM_TrigramExtractAscii": 399445.0,
-    "BM_TrigramFindCandidates": 6807902.7,
-    "BM_TrigramIndexFile": 912823.2
+    "BM_FuzzyFindMatches": 30507.9,
+    "BM_FuzzyMatchJaroWinkler": 90.0,
+    "BM_FuzzyMatchLevenshtein": 32.8,
+    "BM_IndexingThroughput/100": 65043323.0,
+    "BM_IndexingThroughput/1000": 1922861859.0,
+    "BM_IndexingThroughput/500": 681603047.0,
+    "BM_ParserPoolAcquireRelease": 26.2,
+    "BM_Re2FilterRows": 10775.9,
+    "BM_SearchMediumIndex": 13169.2,
+    "BM_SearchSmallIndex": 12576.5,
+    "BM_StdRegexFilterRows": 77016.7,
+    "BM_TrigramExtractAscii": 381893.4,
+    "BM_TrigramFindCandidates": 6020981.7,
+    "BM_TrigramIndexFile": 356719.8
   }
 }
