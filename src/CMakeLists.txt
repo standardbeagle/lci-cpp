@@ -59,6 +59,7 @@ add_library(lci_lib STATIC
     analysis/codebase_intelligence.cpp
     core/graph_propagator.cpp
     core/semantic_annotator.cpp
+    core/context_lookup.cpp
     symbollinker/linker_engine.cpp
     symbollinker/go_linker.cpp
     symbollinker/js_linker.cpp

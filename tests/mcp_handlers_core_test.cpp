@@ -47,6 +47,9 @@ class HandlersFixture : public ::testing::Test {
                    "package api\n\nfunc StartServer() {}\n");
         write_file(temp_dir_ / "crlf.go",
                    "package main\r\nfunc CrlfFunc() {}\r\n");
+        write_file(temp_dir_ / "math.go",
+                   "package main\n\n// Add returns the sum of a and b.\nfunc "
+                   "Add(a int, b int) int {\n\treturn a + b\n}\n");
 
         Config config;
         config.project.root = temp_dir_.string();
@@ -1097,10 +1100,10 @@ TEST_F(HandlersFixture, FindFilesReportsTrueTotalWhenTruncated) {
     auto result = handle_find_files(params, *indexer_);
     EXPECT_FALSE(result.is_error);
     auto json = nlohmann::json::parse(result.text);
-    // Fixture has 5 non-hidden .go files; cap of 2 must not lie about the
+    // Fixture has 6 non-hidden .go files; cap of 2 must not lie about the
     // universe size.
     EXPECT_EQ(json["results"].size(), 2u);
-    EXPECT_EQ(json["total_matches"].get<int>(), 5);
+    EXPECT_EQ(json["total_matches"].get<int>(), 6);
     EXPECT_TRUE(json.value("truncated", false));
     EXPECT_EQ(json["showing"].get<int>(), 2);
 }
@@ -1134,7 +1137,7 @@ TEST_F(HandlersFixture, FindFilesDirectoryDotAndAbsoluteNormalized) {
         auto result = handle_find_files(params, *indexer_);
         ASSERT_FALSE(result.is_error) << dir;
         auto json = nlohmann::json::parse(result.text);
-        EXPECT_EQ(json["total_matches"].get<int>(), 5)
+        EXPECT_EQ(json["total_matches"].get<int>(), 6)
             << "directory='" << dir << "'";
     }
     // internal with trailing slash scopes correctly
@@ -1531,24 +1534,67 @@ TEST_F(HandlersFixture, GetContextAutoSearchReturnsWorkflow) {
 }
 
 // Go parity: get_context accepts include_sections in both the compact and
-// mode paths and never errors on them. The compact path simply ignores
-// sections it cannot render (the MCP ObjectContext has no variables/structure/
-// etc. field); it must NOT fail-fast where Go succeeds. A bad id still yields
-// an errors[] entry, but the section token itself is accepted.
+// mode paths and never errors on them. The id (compact) path still simply
+// ignores sections it cannot render — a bad id yields an errors[] entry, but
+// the section token itself is accepted, never fail-fast.
+//
+// CONTRACT CHANGE (CLX S1): a section request against a resolvable *name* no
+// longer silently ignores the section — it now EMITS a rich CodeObjectContext
+// (`context`) built by the ported ContextLookupEngine, with all six section
+// keys present. This test was updated (not deleted) to pin both halves.
 TEST_F(HandlersFixture, GetContextSectionTokensAccepted) {
     const char* sections[] = {"variables",    "structure",       "semantic",
                               "usage",         "ai",              "dependencies",
                               "file_context",  "quality_metrics"};
     for (const char* s : sections) {
+        // id path: section token accepted, never a hard error.
         nlohmann::json params;
         params["id"] = "VE";
         params["include_sections"] = {s};
         auto result = handle_get_context(params, *indexer_);
-        // Accepted: not a hard error. (Unresolvable id is reported in
-        // errors[], not as is_error.)
         EXPECT_FALSE(result.is_error) << "section '" << s << "': " << result.text;
         auto json = nlohmann::json::parse(result.text);
         EXPECT_TRUE(json.contains("contexts")) << s;
+    }
+
+    // name path: a known section now emits the rich context instead of being
+    // silently dropped.
+    nlohmann::json name_params;
+    name_params["name"] = "Add";
+    name_params["include_sections"] = {"structure"};
+    auto name_result = handle_get_context(name_params, *indexer_);
+    EXPECT_FALSE(name_result.is_error) << name_result.text;
+    auto name_json = nlohmann::json::parse(name_result.text);
+    ASSERT_TRUE(name_json.contains("context")) << name_result.text;
+    EXPECT_EQ(name_json["context"]["object_id"]["name"], "Add");
+    for (const char* key :
+         {"direct_relationships", "variable_context", "semantic_context",
+          "structure_context", "usage_analysis", "ai_context"}) {
+        EXPECT_TRUE(name_json["context"].contains(key)) << key;
+    }
+}
+
+// CLX S1 RED->GREEN: a full-mode name lookup returns the ported
+// CodeObjectContext with identity, signature, location, version, and all six
+// section keys present.
+TEST_F(HandlersFixture, GetContextFullModeEmitsCodeObjectContext) {
+    nlohmann::json params;
+    params["name"] = "Add";
+    params["mode"] = "full";
+    auto result = handle_get_context(params, *indexer_);
+    EXPECT_FALSE(result.is_error) << result.text;
+    auto json = nlohmann::json::parse(result.text);
+    ASSERT_TRUE(json.contains("context")) << result.text;
+    const auto& ctx = json["context"];
+    EXPECT_EQ(ctx["object_id"]["name"], "Add");
+    EXPECT_FALSE(ctx["signature"].get<std::string>().empty());
+    EXPECT_GT(ctx["location"]["Line"].get<int>(), 0);
+    ASSERT_TRUE(ctx.contains("context_version"));
+    EXPECT_FALSE(ctx["context_version"].get<std::string>().empty());
+    for (const char* key :
+         {"direct_relationships", "variable_context", "semantic_context",
+          "structure_context", "usage_analysis", "ai_context"}) {
+        EXPECT_TRUE(ctx.contains(key)) << key;
     }
 }
 

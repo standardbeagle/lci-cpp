@@ -15,6 +15,7 @@
 #include <re2/re2.h>
 
 #include <lci/analysis/side_effect_analyzer.h>
+#include <lci/core/context_lookup.h>
 #include <lci/core/reference_tracker.h>
 #include <lci/idcodec.h>
 #include <lci/indexing/master_index.h>
@@ -1575,6 +1576,46 @@ ToolResult handle_get_context(const nlohmann::json& params,
         nlohmann::json response;
         response["count"] = static_cast<int>(contexts.size());
         response["contexts"] = std::move(contexts);
+
+        // Full/section requests get the rich CodeObjectContext from the ported
+        // ContextLookupEngine (S1 skeleton: object_id/signature/location +
+        // diagnostics + all six section keys present-but-empty). A bare
+        // {"name": X} without mode/sections keeps the compact envelope only, so
+        // existing callers are unaffected.
+        const bool rich_request =
+            p.value("mode", "") == "full" ||
+            (p.contains("include_sections") &&
+             p["include_sections"].is_array() &&
+             !p["include_sections"].empty()) ||
+            (p.contains("exclude_sections") &&
+             p["exclude_sections"].is_array() &&
+             !p["exclude_sections"].empty());
+        if (rich_request) {
+            const EnhancedSymbol* target = nullptr;
+            for (const auto& sym : matches) {
+                if (sym != nullptr) {
+                    target = sym.get();
+                    break;
+                }
+            }
+            if (target != nullptr) {
+                ContextLookupEngine engine(indexer);
+                engine.set_max_context_depth(max_depth);
+                engine.set_include_ai_text(p.value("include_ai_text", true));
+                if (p.contains("confidence_threshold")) {
+                    engine.set_confidence_threshold(
+                        p["confidence_threshold"].get<double>());
+                }
+                CodeObjectID oid;
+                oid.file_id = target->symbol.file_id;
+                oid.symbol_id = encode_symbol_id(target->id);
+                oid.name = std::string(target->symbol.name);
+                oid.type = target->symbol.type;
+                bool ok = false;
+                CodeObjectContext obj_ctx = engine.get_context(oid, ok);
+                response["context"] = obj_ctx.to_json();
+            }
+        }
         // Empty lookup fails loud (Karpathy #6): hint + fuzzy near-miss
         // suggestions so a typo'd or misremembered name self-corrects in
         // one round trip instead of a bare {contexts:[],count:0}.

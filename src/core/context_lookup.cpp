@@ -1,0 +1,139 @@
+#include <lci/core/context_lookup.h>
+
+#include <algorithm>
+#include <chrono>
+#include <cstdio>
+#include <ctime>
+#include <string>
+
+#include <absl/container/flat_hash_set.h>
+
+#include <lci/core/portable.h>
+#include <lci/core/reference_tracker.h>
+#include <lci/idcodec.h>
+#include <lci/indexing/master_index.h>
+#include <lci/symbol.h>
+
+namespace lci {
+
+namespace {
+
+// Formats now() as an RFC3339 UTC timestamp. generated_at is time.Now() in Go
+// and never appears in a deterministic golden, so a UTC "Z" form is sufficient
+// (the local-offset form Go emits is not load-bearing for parity).
+std::string now_rfc3339_utc() {
+    auto tp = std::chrono::system_clock::now();
+    auto secs = std::chrono::time_point_cast<std::chrono::seconds>(tp);
+    auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(tp - secs)
+                  .count();
+    std::time_t t = std::chrono::system_clock::to_time_t(secs);
+    std::tm tm{};
+    if (!portable::gmtime_utc(t, tm)) return std::string{};
+    char buf[48];
+    int n = std::snprintf(buf, sizeof(buf),
+                          "%04d-%02d-%02dT%02d:%02d:%02d.%09ldZ",
+                          tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+                          tm.tm_hour, tm.tm_min, tm.tm_sec,
+                          static_cast<long>(ns));
+    if (n <= 0) return std::string{};
+    return std::string(buf, static_cast<size_t>(n));
+}
+
+}  // namespace
+
+bool ContextLookupEngine::fill_basic_info(CodeObjectContext& ctx,
+                                          const EnhancedSymbol& sym) const {
+    // Refresh identity from the authoritative symbol (the caller-supplied
+    // CodeObjectID may carry a stale name/type).
+    ctx.object_id.file_id = sym.symbol.file_id;
+    ctx.object_id.name = std::string(sym.symbol.name);
+    ctx.object_id.type = sym.symbol.type;
+    ctx.object_id.symbol_id = encode_symbol_id(sym.id);
+
+    ctx.signature = sym.signature.empty() ? std::string(sym.symbol.name)
+                                          : std::string(sym.signature);
+    ctx.documentation = std::string(sym.doc_comment);
+    ctx.location.file_id = sym.symbol.file_id;
+    ctx.location.line = sym.symbol.line;
+    ctx.location.column = sym.symbol.column;
+    return true;
+}
+
+CodeObjectContext ContextLookupEngine::get_context(
+    const CodeObjectID& object_id, bool& ok) const {
+    ok = false;
+    CodeObjectContext ctx;
+    ctx.object_id = object_id;
+    ctx.generated_at = now_rfc3339_utc();
+    ctx.context_version = "1.1.0";
+
+    LookupDiagnostics& diag = ctx.diagnostics;
+
+    // RCU: pin the snapshot ONCE. Every fill reads from this frozen snapshot;
+    // re-pinning per section could straddle a concurrent reindex generation.
+    auto snap = indexer_.ref_tracker().pin();
+    diag.symbol_index_ready = snap != nullptr;
+    diag.ref_tracker_ready = snap != nullptr;
+    diag.call_graph_populated = indexer_.ref_tracker().has_relationships();
+    if (!diag.call_graph_populated) {
+        diag.add_error({"CALL_GRAPH_EMPTY",
+                        "call graph index is empty - relationships not indexed",
+                        "relationships", /*fatal=*/false});
+        diag.add_warning(
+            "Call graph is empty - relationship queries will return no data. "
+            "Ensure full indexing is complete.");
+    }
+
+    // Resolve the target symbol ONCE (trap 8: hoist target resolution instead
+    // of rescanning per section). basic_info is FATAL on a miss.
+    auto decoded = decode_symbol_id(object_id.symbol_id);
+    ReferenceTracker::Snapshot::SymbolHandle sym;
+    if (decoded && snap) sym = snap->get_enhanced_symbol(*decoded);
+    if (sym == nullptr) {
+        diag.add_error({"SYMBOL_NOT_FOUND",
+                        "symbol not found in index", "object_id",
+                        /*fatal=*/true});
+        return ctx;  // ok stays false — fatal.
+    }
+
+    fill_basic_info(ctx, *sym);
+
+    // S1 leaves the remaining sections empty-but-present: CodeObjectContext
+    // default-constructs each section and to_json emits its keys with `[]` /
+    // zero values. S3-S8 populate them in place, soft-failing into diagnostics.
+
+    ok = true;
+    return ctx;
+}
+
+void ContextLookupEngine::sort_by_confidence_desc(
+    std::vector<ObjectReference>& refs) {
+    std::stable_sort(refs.begin(), refs.end(),
+                     [](const ObjectReference& a, const ObjectReference& b) {
+                         return a.confidence > b.confidence;
+                     });
+}
+
+std::vector<ObjectReference> ContextLookupEngine::filter_high_confidence(
+    const std::vector<ObjectReference>& refs, double threshold) {
+    std::vector<ObjectReference> out;
+    out.reserve(refs.size());
+    for (const auto& ref : refs) {
+        if (ref.confidence >= threshold) out.push_back(ref);
+    }
+    return out;
+}
+
+void ContextLookupEngine::dedup_references(std::vector<ObjectReference>& refs) {
+    absl::flat_hash_set<std::string> seen;
+    seen.reserve(refs.size());
+    std::vector<ObjectReference> out;
+    out.reserve(refs.size());
+    for (auto& ref : refs) {
+        std::string key = ref.object_id.symbol_id + '\0' + ref.context;
+        if (seen.insert(std::move(key)).second) out.push_back(std::move(ref));
+    }
+    refs = std::move(out);
+}
+
+}  // namespace lci
