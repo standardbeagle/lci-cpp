@@ -1862,16 +1862,26 @@ int render_search_output(const SearchCommandOptions& options,
 
 }  // namespace
 
-int run_grep(const GlobalFlags& flags, const std::string& pattern,
-             int max_results, int context_lines, bool case_insensitive,
-             bool json_output, const std::string& exclude_pattern,
-             const std::string& include_pattern, bool exclude_tests,
-             bool exclude_comments, bool use_regex,
-             bool invert_match,
-             const std::vector<std::string>& extra_patterns,
-             bool count_per_file, bool files_only,
-             int max_count_per_file, bool verbose,
-             const std::vector<std::string>& paths) {
+int run_grep(const GlobalFlags& flags, const GrepCommandOptions& options) {
+    // Local aliases keep the (long) body identical to the flat-parameter era.
+    const std::string& pattern = options.pattern;
+    const std::vector<std::string>& paths = options.paths;
+    const int max_results = options.max_results;
+    const int context_lines = options.context_lines;
+    const bool case_insensitive = options.case_insensitive;
+    const bool json_output = options.json_output;
+    const std::string& exclude_pattern = options.exclude_pattern;
+    const std::string& include_pattern = options.include_pattern;
+    const bool exclude_tests = options.exclude_tests;
+    const bool exclude_comments = options.exclude_comments;
+    const bool use_regex = options.use_regex;
+    const bool invert_match = options.invert_match;
+    const std::vector<std::string>& extra_patterns = options.extra_patterns;
+    const bool count_per_file = options.count_per_file;
+    const bool files_only = options.files_only;
+    const int max_count_per_file = options.max_count_per_file;
+    const bool verbose = options.verbose;
+
     Config cfg;
     if (std::string err = load_config_with_overrides(flags, cfg); !err.empty()) {
         std::cerr << "Error: " << err << "\n";

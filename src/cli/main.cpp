@@ -326,13 +326,25 @@ int main(int argc, char* argv[]) {
                          "Stop after N matches per file (grep -m, 0=unlimited)");
 
     grep_cmd->callback([&]() {
-        std::exit(run_grep(gflags, grep_pattern, grep_max_results,
-                           grep_context, grep_case_insensitive, grep_json,
-                           grep_exclude, grep_include, grep_exclude_tests,
-                           grep_exclude_comments, grep_regex,
-                           grep_invert_match, grep_patterns, grep_count,
-                           grep_files_only, grep_max_count, grep_verbose,
-                           grep_paths));
+        GrepCommandOptions opts;
+        opts.pattern = grep_pattern;
+        opts.paths = grep_paths;
+        opts.max_results = grep_max_results;
+        opts.context_lines = grep_context;
+        opts.case_insensitive = grep_case_insensitive;
+        opts.json_output = grep_json;
+        opts.exclude_pattern = grep_exclude;
+        opts.include_pattern = grep_include;
+        opts.exclude_tests = grep_exclude_tests;
+        opts.exclude_comments = grep_exclude_comments;
+        opts.use_regex = grep_regex;
+        opts.invert_match = grep_invert_match;
+        opts.extra_patterns = grep_patterns;
+        opts.count_per_file = grep_count;
+        opts.files_only = grep_files_only;
+        opts.max_count_per_file = grep_max_count;
+        opts.verbose = grep_verbose;
+        std::exit(run_grep(gflags, opts));
     });
 
     // -- Status subcommand ----------------------------------------------------
