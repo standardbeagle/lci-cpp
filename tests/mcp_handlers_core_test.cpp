@@ -1817,6 +1817,34 @@ TEST_F(HandlersFixture, GetContextFullModeEmitsCodeObjectContext) {
     }
 }
 
+// VERIFY task 01KXE5MM2138EN5P0MKXA1FT2H, edge 1 (RED->GREEN parity fix):
+// An UNRECOGNIZED non-empty mode string (e.g. "bogus") must be treated as
+// "full" and yield the rich context/metadata/performance envelope — NOT fall
+// through to the compact one.
+//
+// Ground truth from the Go reference binary (`lci -r <fixture> mcp`):
+//   get_context {"id":"E","mode":"full"}  -> {success, data:{context, metadata,
+//                                              performance}}   (rich)
+//   get_context {"id":"E","mode":"bogus"} -> IDENTICAL rich envelope
+//   get_context {"id":"E"}                -> {contexts, count} (compact)
+// Go's applyContextLookupMode has `default: args.Mode = "full"`
+// (internal/mcp/handlers.go:2372-2374) and dispatches to the rich mode path
+// whenever Mode != "", so any non-empty mode is rich. The C++ port previously
+// left unknown modes unchanged, so rich_request (gated on mode=="full") went
+// false and the compact envelope shipped — the divergence this test locks.
+TEST_F(HandlersFixture, GetContextUnknownModeTreatedAsFullRichGoParity) {
+    nlohmann::json params;
+    params["name"] = "Add";
+    params["mode"] = "bogus";  // unrecognized, non-empty
+    auto result = handle_get_context(params, *indexer_);
+    ASSERT_FALSE(result.is_error) << result.text;
+    auto json = nlohmann::json::parse(result.text);
+    // Go normalizes unknown mode -> full -> rich envelope with all three keys.
+    EXPECT_TRUE(json.contains("context")) << result.text;
+    EXPECT_TRUE(json.contains("metadata")) << result.text;
+    EXPECT_TRUE(json.contains("performance")) << result.text;
+}
+
 // CHARACTERIZATION (VERIFY task 01KXE5MM2138EN5P0MKXA1FT2H, edge 2):
 // A rich (mode/section) request whose name resolves to NO symbol emits the
 // compact fail-loud envelope — {count:0, contexts:[], hint} — and OMITS the
