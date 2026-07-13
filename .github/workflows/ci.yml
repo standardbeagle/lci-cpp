@@ -321,6 +321,21 @@ jobs:
       - name: Build benchmarks
         run: cmake --build build/release --target lci_benchmarks --parallel
 
+      # Bounded quiet-down BEFORE the run: the runner is a shared dev box and
+      # benchmarks executed under load fake regressions. Wait up to 10 min for
+      # loadavg < 2, then proceed either way. The pre-run load is snapshotted
+      # for the gate — the benchmark run itself inflates the 1-min average, so
+      # a post-run reading would demote the gate to informational every time.
+      - name: Wait for quiet machine
+        run: |
+          for i in $(seq 1 20); do
+            load=$(cut -d' ' -f1 /proc/loadavg)
+            awk -v l="$load" 'BEGIN{exit !(l < 2.0)}' && { echo "load $load OK"; break; }
+            echo "load $load too high, waiting (attempt $i/20)"
+            sleep 30
+          done
+          echo "BENCH_GATE_LOAD=$(cut -d' ' -f1 /proc/loadavg)" >> "$GITHUB_ENV"
+
       # RealProject benches are excluded: their corpora are untracked local
       # clones (scripts/add-real-projects.sh) that actions/checkout wipes, so
       # on CI they can only error. The synthetic suite is gated against the
@@ -335,20 +350,6 @@ jobs:
             --benchmark_min_time=0.1s \
             --benchmark_out=benchmark_results.json \
             --benchmark_out_format=json
-
-      # Bounded quiet-down: the runner is a shared dev box; benchmarks run
-      # under load fake regressions. Wait up to 10 min for loadavg < 2, then
-      # proceed either way — bench_gate itself demotes to informational-only
-      # when still loaded, so a busy box can never fail the gate falsely.
-      - name: Wait for quiet machine
-        run: |
-          for i in $(seq 1 20); do
-            load=$(cut -d' ' -f1 /proc/loadavg)
-            awk -v l="$load" 'BEGIN{exit !(l < 2.0)}' && { echo "load $load OK"; exit 0; }
-            echo "load $load too high, waiting (attempt $i/20)"
-            sleep 30
-          done
-          echo "still loaded after 10min — gate will report informationally"
 
       - name: Perf regression gate
         run: |

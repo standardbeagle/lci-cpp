@@ -107,6 +107,15 @@ def cmd_update(baseline_path: str, current: dict) -> None:
 
 
 def current_load() -> float | None:
+    # The benchmark run itself inflates the 1-min average, so a live reading
+    # taken after it over-triggers the informational demotion. CI captures
+    # load BEFORE running benchmarks and passes it via BENCH_GATE_LOAD.
+    pre = os.environ.get("BENCH_GATE_LOAD")
+    if pre is not None:
+        try:
+            return float(pre)
+        except ValueError:
+            fail(f"BENCH_GATE_LOAD is not a number: {pre!r}", code=2)
     try:
         return os.getloadavg()[0]
     except OSError:
