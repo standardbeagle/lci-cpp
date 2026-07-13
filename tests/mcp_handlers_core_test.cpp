@@ -1817,6 +1817,39 @@ TEST_F(HandlersFixture, GetContextFullModeEmitsCodeObjectContext) {
     }
 }
 
+// CHARACTERIZATION (VERIFY task 01KXE5MM2138EN5P0MKXA1FT2H, edge 2):
+// A rich (mode/section) request whose name resolves to NO symbol emits the
+// compact fail-loud envelope — {count:0, contexts:[], hint} — and OMITS the
+// rich context/metadata/performance keys. It is NOT an MCP error.
+//
+// This is a DELIBERATE, documented divergence from the Go reference, not a
+// defect. Ground truth captured by driving the Go binary
+// (`lci -r <fixture> mcp`, get_context {"id":"zzzz","mode":"full"} and
+// {"name":<missing>,"mode":"full"}): Go returns an ERROR
+//   "context lookup failed: invalid object ID: function::0"
+// because its paramsToObjectID yields FileID=0 and GetContext's
+// CodeObjectID.IsValid() rejects it (internal/core/context_lookup.go:365,434).
+// The C++ port instead fails loud with a hint + fuzzy near-miss suggestions
+// (Karpathy #6, handlers_core.cpp:1688-1697), a workspace-wide UX choice shared
+// with the compact path. Locked here so a future change toward Go's hard error
+// — or an accidental emission of empty rich keys — turns red and is reviewed.
+TEST_F(HandlersFixture, GetContextRichAllNullMatchesEmitsHintNotRichKeys) {
+    nlohmann::json params;
+    params["name"] = "nonexistent_xyz_sym";
+    params["mode"] = "full";
+    auto result = handle_get_context(params, *indexer_);
+    ASSERT_FALSE(result.is_error) << result.text;  // hint, not MCP error
+    auto json = nlohmann::json::parse(result.text);
+    EXPECT_EQ(json.value("count", -1), 0) << result.text;
+    ASSERT_TRUE(json.contains("contexts"));
+    EXPECT_TRUE(json["contexts"].empty());
+    EXPECT_TRUE(json.contains("hint")) << result.text;
+    // Rich keys are omitted when no match resolves (accept-then-empty).
+    EXPECT_FALSE(json.contains("context"));
+    EXPECT_FALSE(json.contains("metadata"));
+    EXPECT_FALSE(json.contains("performance"));
+}
+
 TEST_F(HandlersFixture, GetContextOidExtraction) {
     // oid= prefix should be stripped.
     nlohmann::json params;
