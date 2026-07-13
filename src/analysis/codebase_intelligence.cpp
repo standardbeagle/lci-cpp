@@ -8,6 +8,7 @@
 #include <lci/analysis/module_analyzer.h>
 #include <lci/analysis/token_budget.h>
 #include <lci/reference.h>
+#include <lci/search/search_options.h>  // classify_file / FileCategory
 
 #include <algorithm>
 #include <cctype>
@@ -389,19 +390,18 @@ CodebaseIntelligenceResponse CodebaseIntelligenceEngine::build_structure(
         ++top_dir_files[top];
         auto dot = rel.rfind('.');
         if (dot != std::string::npos) ++types_count[rel.substr(dot)];
-        if (rel.find("_test.") != std::string::npos ||
-            rel.find("/test") != std::string::npos)
-            ++s.tests;
-        else if (rel.find(".md") != std::string::npos ||
-                 rel.find("README") != std::string::npos)
-            ++s.docs;
-        else if (rel.find(".json") != std::string::npos ||
-                 rel.find(".yaml") != std::string::npos ||
-                 rel.find(".yml") != std::string::npos ||
-                 rel.find(".toml") != std::string::npos)
-            ++s.config;
-        else
-            ++s.code;
+        // Categorize through the canonical classify_file rule (1:1 FileCategory
+        // mapping) instead of loose substring matching. This fixes the review
+        // finding where rel.find("/test") wrongly matched "/testing" and
+        // rel.find(".md") matched a mid-path ".md". Unknown (no recognized
+        // extension) falls into the code bucket, preserving the old default.
+        switch (classify_file(rel)) {
+            case FileCategory::Test: ++s.tests; break;
+            case FileCategory::Documentation: ++s.docs; break;
+            case FileCategory::Config: ++s.config; break;
+            case FileCategory::Code:
+            case FileCategory::Unknown: ++s.code; break;
+        }
     }
     s.dir_count = static_cast<int>(top_dir_files.size());
     s.types.assign(types_count.begin(), types_count.end());
