@@ -1613,6 +1613,30 @@ ToolResult handle_get_context(const nlohmann::json& params,
                 oid.type = target->symbol.type;
                 bool ok = false;
                 CodeObjectContext obj_ctx = engine.get_context(oid, ok);
+                // Honor include_sections / exclude_sections (mode presets
+                // funnel through include_sections too): zero the filtered-out
+                // sections. Filtered sections stay present-but-empty in the
+                // JSON — keys are never dropped. Go parity:
+                // Server.filterContextSections.
+                std::vector<std::string> include_sections, exclude_sections;
+                if (p.contains("include_sections") &&
+                    p["include_sections"].is_array()) {
+                    for (const auto& v : p["include_sections"]) {
+                        if (v.is_string()) {
+                            include_sections.push_back(v.get<std::string>());
+                        }
+                    }
+                }
+                if (p.contains("exclude_sections") &&
+                    p["exclude_sections"].is_array()) {
+                    for (const auto& v : p["exclude_sections"]) {
+                        if (v.is_string()) {
+                            exclude_sections.push_back(v.get<std::string>());
+                        }
+                    }
+                }
+                ContextLookupEngine::filter_context_sections(
+                    obj_ctx, include_sections, exclude_sections);
                 response["context"] = obj_ctx.to_json();
             }
         }

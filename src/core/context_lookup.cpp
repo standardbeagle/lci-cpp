@@ -125,10 +125,51 @@ std::vector<ObjectReference> ContextLookupEngine::filter_high_confidence(
 }
 
 void ContextLookupEngine::filter_context_sections(
-    CodeObjectContext& /*ctx*/,
-    const std::vector<std::string>& /*include_sections*/,
-    const std::vector<std::string>& /*exclude_sections*/) {
-    // RED stub — replaced with the real zeroing logic in the GREEN commit.
+    CodeObjectContext& ctx,
+    const std::vector<std::string>& include_sections,
+    const std::vector<std::string>& exclude_sections) {
+    // No section constraints → full context untouched (Go early return).
+    if (include_sections.empty() && exclude_sections.empty()) return;
+
+    // Exclude pass: zero each NAMED section. Unknown tokens match nothing and
+    // fall through (Go's switch has no default).
+    for (const auto& section : exclude_sections) {
+        if (section == "relationships") {
+            ctx.direct_relationships = DirectRelationships{};
+        } else if (section == "variables") {
+            ctx.variable_context = VariableContext{};
+        } else if (section == "semantic") {
+            ctx.semantic_context = SemanticContext{};
+        } else if (section == "structure") {
+            ctx.structure_context = StructureContext{};
+        } else if (section == "usage") {
+            ctx.usage_analysis = UsageAnalysis{};
+        } else if (section == "ai") {
+            ctx.ai_context = AIContext{};
+        }
+    }
+
+    // Include pass: whitelist — zero every section NOT requested. Only runs
+    // when include_sections is non-empty (Go gates on len > 0). An unknown
+    // include token whitelists nothing (bug-for-bug parity): it sits in the
+    // request set but no section is keyed on it, so listing only unknown
+    // tokens zeroes all six.
+    if (!include_sections.empty()) {
+        auto requested = [&](const char* name) {
+            for (const auto& s : include_sections) {
+                if (s == name) return true;
+            }
+            return false;
+        };
+        if (!requested("relationships")) {
+            ctx.direct_relationships = DirectRelationships{};
+        }
+        if (!requested("variables")) ctx.variable_context = VariableContext{};
+        if (!requested("semantic")) ctx.semantic_context = SemanticContext{};
+        if (!requested("structure")) ctx.structure_context = StructureContext{};
+        if (!requested("usage")) ctx.usage_analysis = UsageAnalysis{};
+        if (!requested("ai")) ctx.ai_context = AIContext{};
+    }
 }
 
 void ContextLookupEngine::dedup_references(std::vector<ObjectReference>& refs) {
