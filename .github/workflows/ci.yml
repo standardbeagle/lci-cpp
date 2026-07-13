@@ -336,6 +336,20 @@ jobs:
             --benchmark_out=benchmark_results.json \
             --benchmark_out_format=json
 
+      # Bounded quiet-down: the runner is a shared dev box; benchmarks run
+      # under load fake regressions. Wait up to 10 min for loadavg < 2, then
+      # proceed either way — bench_gate itself demotes to informational-only
+      # when still loaded, so a busy box can never fail the gate falsely.
+      - name: Wait for quiet machine
+        run: |
+          for i in $(seq 1 20); do
+            load=$(cut -d' ' -f1 /proc/loadavg)
+            awk -v l="$load" 'BEGIN{exit !(l < 2.0)}' && { echo "load $load OK"; exit 0; }
+            echo "load $load too high, waiting (attempt $i/20)"
+            sleep 30
+          done
+          echo "still loaded after 10min — gate will report informationally"
+
       - name: Perf regression gate
         run: |
           python3 scripts/bench_gate.py \

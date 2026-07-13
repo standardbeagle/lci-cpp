@@ -21,11 +21,17 @@ Exit codes: 0 ok, 1 regression/mismatch, 2 usage or missing input.
 
 import argparse
 import json
+import os
 import sys
 
 BASELINE_FORMAT = 1
 
 UNIT_TO_NS = {"ns": 1.0, "us": 1e3, "ms": 1e6, "s": 1e9}
+
+# A loaded shared runner slows every benchmark uniformly and fakes
+# regressions (observed: 9 false regressions up to 2.19x at loadavg 10+).
+# Above this 1-min load average the gate refuses to pass judgment.
+DEFAULT_MAX_LOAD = 2.0
 
 
 def fail(msg: str, code: int = 1) -> None:
@@ -100,9 +106,31 @@ def cmd_update(baseline_path: str, current: dict) -> None:
     print(f"bench_gate: baseline written to {baseline_path} ({len(times)} benchmarks)")
 
 
-def cmd_check(baseline: dict, current: dict, threshold: float) -> None:
+def current_load() -> float | None:
+    try:
+        return os.getloadavg()[0]
+    except OSError:
+        return None  # platform without loadavg — gate normally
+
+
+def cmd_check(baseline: dict, current: dict, threshold: float,
+              max_load: float) -> None:
     if baseline.get("format") != BASELINE_FORMAT:
         fail(f"baseline format {baseline.get('format')} != {BASELINE_FORMAT}", code=2)
+
+    load = current_load()
+    gate_active = load is None or load <= max_load
+    if not gate_active:
+        # Loud, unmissable, but NOT a failure: a loaded box cannot
+        # distinguish real regressions from contention. The numbers below
+        # are informational only.
+        print(
+            f"bench_gate: WARNING: 1-min load average {load:.2f} exceeds "
+            f"{max_load:.2f} — machine too busy to gate reliably.\n"
+            "bench_gate: results below are INFORMATIONAL ONLY; the gate "
+            "did not run. Re-run on a quiet machine to enforce.",
+            file=sys.stderr,
+        )
 
     base = baseline["benchmarks"]
     cur = extract_times_ns(current)
@@ -140,10 +168,22 @@ def cmd_check(baseline: dict, current: dict, threshold: float) -> None:
     if improvements:
         print(f"bench_gate: {len(improvements)} benchmark(s) improved beyond threshold")
     if regressions:
+        if not gate_active:
+            print(
+                f"bench_gate: SKIPPED (load {load:.2f} > {max_load:.2f}) — "
+                f"{len(regressions)} apparent regression(s) NOT enforced; "
+                "re-run on a quiet machine",
+                file=sys.stderr,
+            )
+            return
         fail(
             f"{len(regressions)} benchmark(s) regressed beyond {threshold:.2f}x:\n  "
             + "\n  ".join(f"{n}: {r:.2f}x" for n, r in regressions)
         )
+    if not gate_active:
+        print("bench_gate: SKIPPED (machine loaded) — no regression seen, "
+              "but result is informational only")
+        return
     print("bench_gate: OK — no regression beyond threshold")
 
 
@@ -155,6 +195,12 @@ def main() -> None:
                    help="fail when current/baseline exceeds this ratio (default 1.5)")
     p.add_argument("--update", action="store_true",
                    help="rewrite the baseline from the current run instead of checking")
+    p.add_argument("--max-load", type=float,
+                   default=float(os.environ.get("BENCH_GATE_MAX_LOAD",
+                                                DEFAULT_MAX_LOAD)),
+                   help="1-min load average above which the gate reports "
+                        "informationally instead of failing (default 2.0, "
+                        "env BENCH_GATE_MAX_LOAD)")
     args = p.parse_args()
 
     if args.threshold <= 1.0:
@@ -162,10 +208,17 @@ def main() -> None:
 
     current = load_json(args.current, "current run")
     if args.update:
+        load = current_load()
+        if load is not None and load > args.max_load:
+            fail(
+                f"refusing to write baseline at load average {load:.2f} "
+                f"(> {args.max_load:.2f}) — numbers would be contaminated",
+                code=2,
+            )
         cmd_update(args.baseline, current)
     else:
         baseline = load_json(args.baseline, "baseline")
-        cmd_check(baseline, current, args.threshold)
+        cmd_check(baseline, current, args.threshold, args.max_load)
 
 
 if __name__ == "__main__":
