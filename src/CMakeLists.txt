@@ -61,6 +61,7 @@ add_library(lci_lib STATIC
     core/semantic_annotator.cpp
     core/context_lookup.cpp
     core/context_lookup_variables.cpp
+    core/context_lookup_structure.cpp
     symbollinker/linker_engine.cpp
     symbollinker/go_linker.cpp
     symbollinker/js_linker.cpp

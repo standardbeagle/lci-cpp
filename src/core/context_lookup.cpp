@@ -23,6 +23,13 @@ namespace lci {
 void fill_variable_context(CodeObjectContext& ctx,
                            const ReferenceTracker::Snapshot& snap);
 
+// Defined in context_lookup_structure.cpp (CLX S5). Fills
+// ctx.structure_context from the pinned snapshot plus the indexer (needed for
+// file-path resolution).
+void fill_structure_context(CodeObjectContext& ctx,
+                            const ReferenceTracker::Snapshot& snap,
+                            MasterIndex& indexer);
+
 namespace {
 
 // Formats now() as an RFC3339 UTC timestamp. generated_at is time.Now() in Go
@@ -109,10 +116,11 @@ CodeObjectContext ContextLookupEngine::get_context(
     // ... Relationships (S3) lands independently; the variables section does
     // not depend on it, so it fills directly after basic_info here.
     fill_variable_context(ctx, *snap);
+    fill_structure_context(ctx, *snap, indexer_);
 
     // Remaining sections stay empty-but-present: CodeObjectContext default-
     // constructs each and to_json emits its keys with `[]` / zero values.
-    // S3/S5-S8 populate them in place, soft-failing into diagnostics.
+    // S3/S6-S8 populate them in place, soft-failing into diagnostics.
 
     ok = true;
     return ctx;
