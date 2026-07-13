@@ -64,6 +64,7 @@ add_library(lci_lib STATIC
     core/context_lookup_variables.cpp
     core/context_lookup_structure.cpp
     core/context_lookup_semantic.cpp
+    core/context_lookup_usage.cpp
     symbollinker/linker_engine.cpp
     symbollinker/go_linker.cpp
     symbollinker/js_linker.cpp

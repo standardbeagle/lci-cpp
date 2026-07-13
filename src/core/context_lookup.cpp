@@ -46,6 +46,14 @@ void fill_semantic_context(CodeObjectContext& ctx,
                            MasterIndex& indexer, GraphPropagator* propagator,
                            SemanticAnnotator* annotator);
 
+// Defined in context_lookup_usage.cpp (CLX S6). Fills ctx.usage_analysis from
+// the pinned snapshot plus the indexer (needed for dependent-component module
+// resolution); reads ctx.direct_relationships (already filled by S3) rather
+// than re-deriving the caller list.
+void fill_usage_analysis(CodeObjectContext& ctx,
+                         const ReferenceTracker::Snapshot& snap,
+                         MasterIndex& indexer);
+
 namespace {
 
 // Formats now() as an RFC3339 UTC timestamp. generated_at is time.Now() in Go
@@ -137,10 +145,11 @@ CodeObjectContext ContextLookupEngine::get_context(
     fill_semantic_context(ctx, *snap, indexer_, graph_propagator_,
                           semantic_annotator_);
     fill_structure_context(ctx, *snap, indexer_);
+    fill_usage_analysis(ctx, *snap, indexer_);
 
     // Remaining sections stay empty-but-present: CodeObjectContext default-
     // constructs each and to_json emits its keys with `[]` / zero values.
-    // S7-S8 populate them in place, soft-failing into diagnostics.
+    // S8 populates it in place, soft-failing into diagnostics.
 
     ok = true;
     return ctx;
