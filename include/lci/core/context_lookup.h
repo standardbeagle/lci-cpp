@@ -9,6 +9,8 @@ namespace lci {
 
 class MasterIndex;
 struct EnhancedSymbol;
+class GraphPropagator;
+class SemanticAnnotator;
 
 // ContextLookupEngine — C++ port of internal/core/context_lookup.go.
 //
@@ -48,6 +50,24 @@ class ContextLookupEngine {
     }
     double confidence_threshold() const {
         return confidence_threshold_.load(std::memory_order_relaxed);
+    }
+
+    // GraphPropagator/SemanticAnnotator (CLX S6, semantic section) are
+    // OPTIONAL collaborators: a caller that hasn't built one for this index
+    // simply never wires it, and fill_semantic_context degrades to an
+    // empty/default result for the parts that need it rather than crashing
+    // (mirrors Go's `if cle.graphPropagator != nil` / semanticAnnotator==nil
+    // gates). Plain non-owning pointers — lifetime is the caller's.
+    void set_graph_propagator(GraphPropagator* propagator) {
+        graph_propagator_ = propagator;
+    }
+    GraphPropagator* graph_propagator() const { return graph_propagator_; }
+
+    void set_semantic_annotator(SemanticAnnotator* annotator) {
+        semantic_annotator_ = annotator;
+    }
+    SemanticAnnotator* semantic_annotator() const {
+        return semantic_annotator_;
     }
 
     // Builds the full context for `object_id`. Pins the tracker snapshot once
@@ -95,6 +115,8 @@ class ContextLookupEngine {
     std::atomic<int> max_context_depth_{5};
     std::atomic<bool> include_ai_text_{true};
     std::atomic<double> confidence_threshold_{0.3};
+    GraphPropagator* graph_propagator_{nullptr};
+    SemanticAnnotator* semantic_annotator_{nullptr};
 };
 
 }  // namespace lci

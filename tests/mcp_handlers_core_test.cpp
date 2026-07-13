@@ -5,6 +5,7 @@
 #include <lci/core/context_lookup.h>
 #include <lci/core/context_lookup_types.h>
 #include <lci/core/reference_tracker.h>
+#include <lci/core/semantic_annotator.h>
 #include <lci/idcodec.h>
 #include <lci/indexing/master_index.h>
 #include <lci/mcp/handlers_core.h>
@@ -2168,6 +2169,162 @@ TEST_F(StructureContextFixture, ImportsEmptyOnGoCorpusNoStubData) {
         EXPECT_TRUE(imp.import_name.empty());
         EXPECT_EQ(imp.import_style, "default");
     }
+}
+
+// =============================================================================
+// CLX S7 (numbering per port map order basic->relationships->variables->
+// semantic->structure->usage->ai; this file is actually S6: SemanticContext)
+// — fill_semantic_context port parity
+// =============================================================================
+// Fixture: main() calls RequestHandler() calls query(). RequestHandler carries
+// a direct `@lci:labels[critical]` annotation. Exercises:
+//   - entry_point_dependencies: BFS reachability (main -> RequestHandler),
+//     type "main function", confidence 0.8.
+//   - service_dependencies: trap 6b — the matcher always reports
+//     servicePatterns[0]'s operation ("api_call") regardless of which
+//     hardcoded substring fired.
+//   - propagation_labels: direct @lci: annotation via SemanticAnnotator,
+//     strength 1.0, direction "bidirectional" (no GraphPropagator wired —
+//     it is an OPTIONAL collaborator and this fixture pins its absence).
+//   - criticality_analysis: the "critical" label maps to is_critical=true.
+//   - purpose heuristic: RequestHandler (name contains "handler",
+//     case-insensitively) -> "API handler", confidence 0.9.
+class SemanticContextFixture : public ::testing::Test {
+  protected:
+    void SetUp() override {
+        temp_dir_ = lci::test::unique_temp_dir("lci_semctx_test_");
+        std::filesystem::create_directories(temp_dir_);
+        std::ofstream(temp_dir_ / "handler.go") << R"(package sample
+
+// @lci:labels[critical]
+func RequestHandler(id string) string {
+	q := query(id)
+	return q
+}
+
+func query(id string) string {
+	return id
+}
+
+func main() {
+	RequestHandler("x")
+}
+)";
+        Config config;
+        config.project.root = temp_dir_.string();
+        indexer_ = std::make_unique<MasterIndex>(config);
+        indexer_->index_directory(temp_dir_.string());
+
+        annotator_ = std::make_unique<SemanticAnnotator>();
+        annotator_->populate_from_index(*indexer_);
+    }
+
+    void TearDown() override {
+        annotator_.reset();
+        indexer_.reset();
+        std::error_code ec;
+        std::filesystem::remove_all(temp_dir_, ec);
+    }
+
+    CodeObjectID object_id_for(const std::string& name) {
+        auto snap = indexer_->ref_tracker().pin();
+        auto syms = snap->find_symbols_by_name(name);
+        EXPECT_FALSE(syms.empty()) << "no symbol named " << name;
+        CodeObjectID oid;
+        if (syms.empty()) return oid;
+        const auto& s = syms.front();
+        oid.file_id = s->symbol.file_id;
+        oid.symbol_id = encode_symbol_id(s->id);
+        oid.name = std::string(s->symbol.name);
+        oid.type = s->symbol.type;
+        return oid;
+    }
+
+    std::filesystem::path temp_dir_;
+    std::unique_ptr<MasterIndex> indexer_;
+    std::unique_ptr<SemanticAnnotator> annotator_;
+};
+
+TEST_F(SemanticContextFixture, EntryPointDependenciesFindsMainViaBFS) {
+    ContextLookupEngine engine(*indexer_);
+    engine.set_semantic_annotator(annotator_.get());
+    bool ok = false;
+    auto ctx = engine.get_context(object_id_for("RequestHandler"), ok);
+    ASSERT_TRUE(ok);
+
+    const auto& entries = ctx.semantic_context.entry_point_dependencies;
+    ASSERT_FALSE(entries.empty());
+    bool found_main = false;
+    for (const auto& ep : entries) {
+        if (ep.entry_point_id.name != "main") continue;
+        found_main = true;
+        EXPECT_EQ(ep.type, "main function");
+        EXPECT_DOUBLE_EQ(ep.confidence, 0.8);
+    }
+    EXPECT_TRUE(found_main);
+}
+
+// trap 6b: bug-for-bug — the service matcher reports servicePatterns[0]'s
+// operation ("api_call") for every hit, never "database"/"query" even though
+// the callee is literally named "query".
+TEST_F(SemanticContextFixture, ServiceDependenciesReportsFirstPatternOperation) {
+    ContextLookupEngine engine(*indexer_);
+    engine.set_semantic_annotator(annotator_.get());
+    bool ok = false;
+    auto ctx = engine.get_context(object_id_for("RequestHandler"), ok);
+    ASSERT_TRUE(ok);
+
+    const auto& services = ctx.semantic_context.service_dependencies;
+    ASSERT_FALSE(services.empty());
+    bool found_query = false;
+    for (const auto& svc : services) {
+        if (svc.service_name != "query") continue;
+        found_query = true;
+        EXPECT_EQ(svc.operation_type, "api_call");  // trap 6b, not "query"
+        EXPECT_EQ(svc.dependency_type, "direct");
+        EXPECT_DOUBLE_EQ(svc.confidence, 0.6);
+    }
+    EXPECT_TRUE(found_query);
+}
+
+TEST_F(SemanticContextFixture, PropagationLabelsCarryDirectAnnotation) {
+    ContextLookupEngine engine(*indexer_);
+    engine.set_semantic_annotator(annotator_.get());
+    bool ok = false;
+    auto ctx = engine.get_context(object_id_for("RequestHandler"), ok);
+    ASSERT_TRUE(ok);
+
+    const auto& labels = ctx.semantic_context.propagation_labels;
+    ASSERT_FALSE(labels.empty());
+    bool found_critical = false;
+    for (const auto& label : labels) {
+        if (label.label != "critical") continue;
+        found_critical = true;
+        EXPECT_DOUBLE_EQ(label.strength, 1.0);
+        EXPECT_EQ(label.direction, "bidirectional");
+    }
+    EXPECT_TRUE(found_critical);
+}
+
+TEST_F(SemanticContextFixture, CriticalLabelMarksCriticalityAnalysis) {
+    ContextLookupEngine engine(*indexer_);
+    engine.set_semantic_annotator(annotator_.get());
+    bool ok = false;
+    auto ctx = engine.get_context(object_id_for("RequestHandler"), ok);
+    ASSERT_TRUE(ok);
+
+    EXPECT_TRUE(ctx.semantic_context.criticality_analysis.is_critical);
+}
+
+TEST_F(SemanticContextFixture, HandlerNamePurposeHeuristic) {
+    ContextLookupEngine engine(*indexer_);
+    engine.set_semantic_annotator(annotator_.get());
+    bool ok = false;
+    auto ctx = engine.get_context(object_id_for("RequestHandler"), ok);
+    ASSERT_TRUE(ok);
+
+    EXPECT_EQ(ctx.semantic_context.purpose, "API handler");
+    EXPECT_DOUBLE_EQ(ctx.semantic_context.confidence, 0.9);
 }
 
 }  // namespace
