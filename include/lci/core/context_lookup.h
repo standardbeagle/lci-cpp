@@ -70,6 +70,21 @@ class ContextLookupEngine {
     // first (highest-confidence after a sort) occurrence.
     static void dedup_references(std::vector<ObjectReference>& refs);
 
+    // Zeroes CodeObjectContext sections per include/exclude lists — C++ port
+    // of Go's Server.filterContextSections (internal/mcp/handlers.go:2578).
+    // The exclude pass zeroes each NAMED section; the include pass (only when
+    // include_sections is non-empty) whitelists — zeroing every section NOT
+    // named. Both passes ONLY zero (default-construct) a section, never
+    // restore. Filtered sections stay PRESENT in to_json with empty/zero
+    // values — keys are never omitted. The six tokens are exactly
+    // relationships, variables, semantic, structure, usage, ai; unknown tokens
+    // are silently ignored (bug-for-bug parity: an unknown include token
+    // whitelists nothing). No include and no exclude is a no-op.
+    static void filter_context_sections(
+        CodeObjectContext& ctx,
+        const std::vector<std::string>& include_sections,
+        const std::vector<std::string>& exclude_sections);
+
   private:
     // Fills identification/signature/location from the resolved symbol.
     // Returns false only if the symbol is unusable (fatal).

@@ -2,6 +2,8 @@
 
 #include <lci/analysis/side_effect_analyzer.h>
 #include <lci/config.h>
+#include <lci/core/context_lookup.h>
+#include <lci/core/context_lookup_types.h>
 #include <lci/core/reference_tracker.h>
 #include <lci/idcodec.h>
 #include <lci/indexing/master_index.h>
@@ -962,6 +964,172 @@ TEST_F(HandlersFixture, GetContextMultipleIdsMixed) {
     EXPECT_EQ(json["count"].get<int>(), 1);
     ASSERT_TRUE(json.contains("errors"));
     EXPECT_EQ(json["errors"].size(), 1u);
+}
+
+// =============================================================================
+// filterContextSections — six-section zeroing semantics
+// =============================================================================
+// Go parity: Server.filterContextSections (internal/mcp/handlers.go:2578). The
+// exclude pass zeroes each NAMED section; the include pass whitelists (zeroes
+// every section NOT named). Both passes ONLY zero, never restore. Filtered
+// sections stay PRESENT in to_json with empty/zero values — keys are never
+// omitted. Tokens are exactly {relationships, variables, semantic, structure,
+// usage, ai}; unknown tokens are silently ignored.
+//
+// S1's get_context leaves every section empty, so include=usage vs no-filter
+// are observationally identical through the handler. These unit tests plant a
+// sentinel in each section so a zeroed section is genuinely distinguishable
+// from a kept one — the real discrimination the handler-level tests below can
+// only assert as key-presence.
+
+// Builds a CodeObjectContext with a sentinel in every one of the six
+// filterable sections.
+CodeObjectContext make_sentinel_context() {
+    CodeObjectContext ctx;
+    ObjectReference ref;
+    ref.object_id.name = "caller";
+    ref.object_id.file_id = 1;
+    ctx.direct_relationships.caller_functions.push_back(ref);
+    VariableInfo var;
+    var.name = "p";
+    ctx.variable_context.parameters.push_back(var);
+    ctx.semantic_context.purpose = "handler";
+    ctx.structure_context.file_path = "svc.go";
+    ctx.usage_analysis.fan_in = 7;
+    ctx.ai_context.natural_language_summary = "summary";
+    return ctx;
+}
+
+// True when to_json emits all six section keys (present, regardless of value).
+bool all_section_keys_present(const CodeObjectContext& ctx) {
+    auto j = ctx.to_json();
+    return j.contains("direct_relationships") &&
+           j.contains("variable_context") && j.contains("semantic_context") &&
+           j.contains("structure_context") && j.contains("usage_analysis") &&
+           j.contains("ai_context");
+}
+
+TEST(FilterContextSections, IncludeUsageZeroesOtherFivePresent) {
+    auto ctx = make_sentinel_context();
+    ContextLookupEngine::filter_context_sections(ctx, {"usage"}, {});
+    // usage kept...
+    EXPECT_EQ(ctx.usage_analysis.fan_in, 7);
+    // ...the other five zeroed.
+    EXPECT_TRUE(ctx.direct_relationships.caller_functions.empty());
+    EXPECT_TRUE(ctx.variable_context.parameters.empty());
+    EXPECT_TRUE(ctx.semantic_context.purpose.empty());
+    EXPECT_TRUE(ctx.structure_context.file_path.empty());
+    EXPECT_TRUE(ctx.ai_context.natural_language_summary.empty());
+    // Zeroed sections remain PRESENT keys (discrimination: not absence).
+    EXPECT_TRUE(all_section_keys_present(ctx));
+}
+
+TEST(FilterContextSections, ExcludeAiZeroesAiOnly) {
+    auto ctx = make_sentinel_context();
+    ContextLookupEngine::filter_context_sections(ctx, {}, {"ai"});
+    EXPECT_TRUE(ctx.ai_context.natural_language_summary.empty());
+    // Every other section retained.
+    EXPECT_FALSE(ctx.direct_relationships.caller_functions.empty());
+    EXPECT_FALSE(ctx.variable_context.parameters.empty());
+    EXPECT_EQ(ctx.semantic_context.purpose, "handler");
+    EXPECT_EQ(ctx.structure_context.file_path, "svc.go");
+    EXPECT_EQ(ctx.usage_analysis.fan_in, 7);
+    EXPECT_TRUE(all_section_keys_present(ctx));
+}
+
+TEST(FilterContextSections, UnknownTokenSilentlyIgnored) {
+    // Unknown exclude token: nothing is zeroed.
+    auto ctx = make_sentinel_context();
+    ContextLookupEngine::filter_context_sections(ctx, {}, {"bogus"});
+    EXPECT_FALSE(ctx.direct_relationships.caller_functions.empty());
+    EXPECT_EQ(ctx.usage_analysis.fan_in, 7);
+    EXPECT_EQ(ctx.ai_context.natural_language_summary, "summary");
+
+    // Unknown include token alongside a real one: the real token is honored,
+    // the unknown whitelists nothing (Go bug-for-bug: requestedSections holds
+    // it but no section is keyed on it).
+    auto ctx2 = make_sentinel_context();
+    ContextLookupEngine::filter_context_sections(ctx2, {"usage", "bogus"}, {});
+    EXPECT_EQ(ctx2.usage_analysis.fan_in, 7);
+    EXPECT_TRUE(ctx2.semantic_context.purpose.empty());
+    EXPECT_TRUE(ctx2.ai_context.natural_language_summary.empty());
+}
+
+TEST(FilterContextSections, NoSectionsIsNoOp) {
+    auto ctx = make_sentinel_context();
+    ContextLookupEngine::filter_context_sections(ctx, {}, {});
+    EXPECT_FALSE(ctx.direct_relationships.caller_functions.empty());
+    EXPECT_EQ(ctx.usage_analysis.fan_in, 7);
+    EXPECT_EQ(ctx.ai_context.natural_language_summary, "summary");
+}
+
+// -- get_context section filtering + mode presets (end-to-end) ----------------
+// The rich `context` payload (ContextLookupEngine) honors include_sections /
+// exclude_sections and the mode presets that funnel through them. Filtered
+// sections stay PRESENT-but-empty in the JSON; keys are never dropped.
+
+TEST_F(HandlersFixture, GetContextIncludeSectionsKeepsAllSectionKeys) {
+    nlohmann::json params;
+    params["name"] = "main";
+    params["include_sections"] = {"usage"};
+    auto result = handle_get_context(params, *indexer_);
+    ASSERT_FALSE(result.is_error) << result.text;
+    auto json = nlohmann::json::parse(result.text);
+    ASSERT_TRUE(json.contains("context")) << result.text;
+    const auto& c = json["context"];
+    // Discrimination: present-with-empty-value, NOT key absence.
+    for (const char* key :
+         {"direct_relationships", "variable_context", "semantic_context",
+          "structure_context", "usage_analysis", "ai_context"}) {
+        EXPECT_TRUE(c.contains(key)) << key;
+    }
+}
+
+TEST_F(HandlersFixture, GetContextExcludeAiKeepsAiKeyPresent) {
+    nlohmann::json params;
+    params["name"] = "main";
+    params["exclude_sections"] = {"ai"};
+    auto result = handle_get_context(params, *indexer_);
+    ASSERT_FALSE(result.is_error) << result.text;
+    auto json = nlohmann::json::parse(result.text);
+    ASSERT_TRUE(json.contains("context")) << result.text;
+    EXPECT_TRUE(json["context"].contains("ai_context"));
+}
+
+TEST_F(HandlersFixture, GetContextUnknownSectionTokenIgnoredNoError) {
+    nlohmann::json params;
+    params["name"] = "main";
+    params["include_sections"] = {"totally_bogus"};
+    auto result = handle_get_context(params, *indexer_);
+    EXPECT_FALSE(result.is_error) << result.text;
+    auto json = nlohmann::json::parse(result.text);
+    ASSERT_TRUE(json.contains("context")) << result.text;
+    // All six keys still present (bogus whitelisted nothing, but keys are
+    // never omitted).
+    for (const char* key :
+         {"direct_relationships", "variable_context", "semantic_context",
+          "structure_context", "usage_analysis", "ai_context"}) {
+        EXPECT_TRUE(json["context"].contains(key)) << key;
+    }
+}
+
+TEST_F(HandlersFixture, GetContextModeSemanticSelectsSemanticAndAi) {
+    nlohmann::json params;
+    params["name"] = "main";
+    params["mode"] = "semantic";  // preset -> include_sections=[semantic,ai]
+    auto result = handle_get_context(params, *indexer_);
+    ASSERT_FALSE(result.is_error) << result.text;
+    auto json = nlohmann::json::parse(result.text);
+    ASSERT_TRUE(json.contains("context")) << result.text;
+    const auto& c = json["context"];
+    EXPECT_TRUE(c.contains("semantic_context"));
+    EXPECT_TRUE(c.contains("ai_context"));
+    // The four non-selected sections remain present-but-empty.
+    for (const char* key :
+         {"direct_relationships", "variable_context", "structure_context",
+          "usage_analysis"}) {
+        EXPECT_TRUE(c.contains(key)) << key;
+    }
 }
 
 // =============================================================================

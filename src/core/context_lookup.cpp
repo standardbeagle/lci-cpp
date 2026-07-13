@@ -124,6 +124,13 @@ std::vector<ObjectReference> ContextLookupEngine::filter_high_confidence(
     return out;
 }
 
+void ContextLookupEngine::filter_context_sections(
+    CodeObjectContext& /*ctx*/,
+    const std::vector<std::string>& /*include_sections*/,
+    const std::vector<std::string>& /*exclude_sections*/) {
+    // RED stub — replaced with the real zeroing logic in the GREEN commit.
+}
+
 void ContextLookupEngine::dedup_references(std::vector<ObjectReference>& refs) {
     absl::flat_hash_set<std::string> seen;
     seen.reserve(refs.size());
