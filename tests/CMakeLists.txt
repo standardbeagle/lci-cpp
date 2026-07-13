@@ -23,6 +23,7 @@ FetchContent_MakeAvailable(googlebenchmark)
 # ---------------------------------------------------------------------------
 add_executable(lci_tests
     version_test.cpp
+    language_map_test.cpp
     types_test.cpp
     side_effects_test.cpp
     idcodec_test.cpp
