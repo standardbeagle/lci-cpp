@@ -12,6 +12,7 @@
 
 #include <absl/container/flat_hash_map.h>
 
+#include <lci/language_map.h>
 #include <lci/reference.h>
 #include <lci/scope.h>
 #include <lci/symbol.h>
@@ -223,23 +224,11 @@ struct ScopeChainCacheEntry {
 
 class ReferenceTracker {
   public:
-    /// Language family for cross-language link gating. Families, not exact
-    /// languages: C/C++ headers and JS/TS interop legitimately share symbols
-    /// within a family, but a Python call must never resolve into a C++ file.
-    enum class LangFamily : uint8_t {
-        kUnknown = 0,
-        kPython,
-        kCFamily,
-        kJsTs,
-        kGo,
-        kJava,
-        kCSharp,
-        kRust,
-        kPhp,
-        kKotlin,
-        kRuby,
-        kZig,
-    };
+    /// Language family for cross-language link gating. Now owned by the
+    /// foundation extension table (lci::LangFamily in <lci/language_map.h>) so
+    /// the map can key on it without a core dependency; aliased here to keep
+    /// the ReferenceTracker::LangFamily::kXxx spelling used across the code.
+    using LangFamily = lci::LangFamily;
 
     explicit ReferenceTracker(SymbolLocationIndex* location_index = nullptr);
 

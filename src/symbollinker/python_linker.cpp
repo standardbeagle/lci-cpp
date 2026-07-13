@@ -1,5 +1,7 @@
 #include <lci/symbollinker/python_linker.h>
 
+#include <lci/language_map.h>
+
 #include <string>
 #include <string_view>
 #include <vector>
@@ -38,11 +40,6 @@ int node_line(TSNode node) {
 
 int node_column(TSNode node) {
     return static_cast<int>(ts_node_start_point(node).column);
-}
-
-bool ends_with(std::string_view str, std::string_view suffix) {
-    if (suffix.size() > str.size()) return false;
-    return str.substr(str.size() - suffix.size()) == suffix;
 }
 
 bool starts_with(std::string_view str, std::string_view prefix) {
@@ -125,9 +122,8 @@ void traverse(TSNode node,
 // ---------------------------------------------------------------------------
 
 bool PythonExtractor::can_handle(std::string_view path) const {
-    return ends_with(path, ".py") || ends_with(path, ".pyw") ||
-           ends_with(path, ".pyi") || ends_with(path, ".pyx") ||
-           ends_with(path, ".pxd");
+    // Single source of truth: the centralized extension table (language_map.h).
+    return language_info_for_path(path).family == LangFamily::kPython;
 }
 
 SymbolTable PythonExtractor::extract_symbols(FileID file_id,

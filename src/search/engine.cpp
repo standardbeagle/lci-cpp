@@ -2,6 +2,7 @@
 
 #include <lci/core/reference_tracker.h>
 #include <lci/core/text.h>
+#include <lci/language_map.h>
 #include <lci/indexing/master_index.h>
 #include <lci/indexing/pipeline_scanner.h>
 
@@ -266,18 +267,8 @@ std::string_view file_base(std::string_view path) {
 }
 
 bool is_code_extension(std::string_view ext) {
-    static constexpr std::string_view exts[] = {
-        ".go", ".rs", ".py", ".pyx", ".pxd", ".js", ".jsx", ".ts", ".tsx",
-        ".java", ".c", ".cpp", ".cc", ".cxx", ".h", ".hpp",
-        ".cs", ".php", ".rb", ".swift", ".kt", ".scala",
-        ".lua", ".pl", ".pm", ".r", ".jl", ".ex", ".exs",
-        ".erl", ".hrl", ".hs", ".clj", ".cljs", ".elm",
-        ".vue", ".svelte", ".zig", ".nim", ".v", ".d", ".m", ".mm",
-    };
-    for (auto e : exts) {
-        if (has_extension(ext, e)) return true;
-    }
-    return false;
+    // Single source of truth: the centralized extension table (language_map.h).
+    return language_info(ext).is_code;
 }
 
 bool is_doc_extension(std::string_view ext) {

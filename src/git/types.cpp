@@ -1,5 +1,7 @@
 #include <lci/git/types.h>
 
+#include <lci/language_map.h>
+
 #include <algorithm>
 #include <string>
 
@@ -234,35 +236,29 @@ const ConventionTable& convention_table() {
     return table;
 }
 
-bool ends_with(std::string_view s, std::string_view suffix) {
-    return s.size() >= suffix.size() &&
-           s.substr(s.size() - suffix.size()) == suffix;
-}
-
 }  // namespace
 
 Language get_language_from_path(std::string_view path) {
-    auto dot = path.rfind('.');
-    if (dot == std::string_view::npos) return Language::Unknown;
-    auto ext = path.substr(dot);
-
-    if (ext == ".go") return Language::Go;
-    if (ext == ".js" || ext == ".jsx" || ext == ".mjs" || ext == ".cjs") return Language::JavaScript;
-    if (ext == ".ts" || ext == ".tsx" || ext == ".mts" || ext == ".cts") return Language::TypeScript;
-    if (ext == ".py" || ext == ".pyw" || ext == ".pyi" || ext == ".pyx" ||
-        ext == ".pxd")
-        return Language::Python;
-    if (ext == ".rs") return Language::Rust;
-    if (ext == ".java") return Language::Java;
-    if (ext == ".cs") return Language::CSharp;
-    if (ext == ".cpp" || ext == ".cc" || ext == ".cxx" || ext == ".hpp" || ext == ".hxx" || ends_with(ext, ".h++")) return Language::Cpp;
-    if (ext == ".c" || ext == ".h") return Language::C;
-    if (ext == ".php") return Language::PHP;
-    if (ext == ".rb") return Language::Ruby;
-    if (ext == ".swift") return Language::Swift;
-    if (ext == ".kt" || ext == ".kts") return Language::Kotlin;
-    if (ext == ".scala" || ext == ".sc") return Language::Scala;
-    if (ext == ".zig") return Language::Zig;
+    // Extension identity comes from the centralized table (language_map.h);
+    // this only maps the canonical LangId onto the naming-convention enum.
+    switch (language_info_for_path(path).language) {
+        case LangId::Go: return Language::Go;
+        case LangId::JavaScript: return Language::JavaScript;
+        case LangId::TypeScript: return Language::TypeScript;
+        case LangId::Python: return Language::Python;
+        case LangId::Rust: return Language::Rust;
+        case LangId::Java: return Language::Java;
+        case LangId::CSharp: return Language::CSharp;
+        case LangId::Cpp: return Language::Cpp;
+        case LangId::C: return Language::C;
+        case LangId::PHP: return Language::PHP;
+        case LangId::Ruby: return Language::Ruby;
+        case LangId::Swift: return Language::Swift;
+        case LangId::Kotlin: return Language::Kotlin;
+        case LangId::Scala: return Language::Scala;
+        case LangId::Zig: return Language::Zig;
+        case LangId::Unknown: return Language::Unknown;
+    }
     return Language::Unknown;
 }
 

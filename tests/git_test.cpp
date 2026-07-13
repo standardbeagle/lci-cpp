@@ -111,7 +111,12 @@ TEST(GitTypes, GetLanguageFromPath) {
     EXPECT_EQ(get_language_from_path("main.cpp"), Language::Cpp);
     EXPECT_EQ(get_language_from_path("main.cc"), Language::Cpp);
     EXPECT_EQ(get_language_from_path("main.c"), Language::C);
-    EXPECT_EQ(get_language_from_path("main.h"), Language::C);
+    // Ambiguous C/C++ header: the centralized extension table (language_map.h)
+    // classifies .h as Cpp so it parses with the C++ grammar superset, matching
+    // the parser, the language summary, and the Go reference which groups
+    // .c/.h/.hpp as "cpp". Reconciles the pre-existing drift where only the
+    // naming-convention site called .h "C".
+    EXPECT_EQ(get_language_from_path("main.h"), Language::Cpp);
     EXPECT_EQ(get_language_from_path("index.php"), Language::PHP);
     EXPECT_EQ(get_language_from_path("app.rb"), Language::Ruby);
     EXPECT_EQ(get_language_from_path("main.swift"), Language::Swift);

@@ -1,5 +1,7 @@
 #include <lci/parser/parser.h>
 
+#include <lci/language_map.h>
+
 #include <tree_sitter/api.h>
 
 // Each grammar exposes a C function returning its TSLanguage pointer.
@@ -23,26 +25,32 @@ const TSLanguage* tree_sitter_ruby();
 namespace lci::parser {
 
 bool language_from_extension(std::string_view ext, Language& out) {
-    if (ext == ".go") { out = Language::Go; return true; }
-    // Cython sources (.pyx) and declaration files (.pxd) are a Python dialect;
-    // tree-sitter-python parses their bodies best-effort and the unified
-    // extractor recovers cpdef/cdef signatures the grammar cannot.
-    if (ext == ".py" || ext == ".pyx" || ext == ".pxd") {
-        out = Language::Python;
-        return true;
+    // Extension identity comes from the centralized table (language_map.h);
+    // this only maps the canonical LangId onto the parser's grammar enum,
+    // returning false for languages with no linked tree-sitter grammar.
+    // Note: Cython .pyx/.pxd map to Python -- tree-sitter-python parses their
+    // bodies best-effort and the unified extractor recovers cpdef/cdef
+    // signatures the grammar cannot. C/C++ headers use the C++ grammar
+    // superset (the table classifies .h/.hpp/.hxx/.hh as Cpp).
+    switch (language_info(ext).language) {
+        case LangId::Go: out = Language::Go; return true;
+        case LangId::Python: out = Language::Python; return true;
+        case LangId::JavaScript: out = Language::JavaScript; return true;
+        case LangId::TypeScript: out = Language::TypeScript; return true;
+        case LangId::Rust: out = Language::Rust; return true;
+        case LangId::C: out = Language::C; return true;
+        case LangId::Cpp: out = Language::Cpp; return true;
+        case LangId::Java: out = Language::Java; return true;
+        case LangId::CSharp: out = Language::CSharp; return true;
+        case LangId::PHP: out = Language::PHP; return true;
+        case LangId::Kotlin: out = Language::Kotlin; return true;
+        case LangId::Zig: out = Language::Zig; return true;
+        case LangId::Ruby: out = Language::Ruby; return true;
+        case LangId::Swift:   // no tree-sitter-swift grammar linked
+        case LangId::Scala:   // no tree-sitter-scala grammar linked
+        case LangId::Unknown:
+            return false;
     }
-    if (ext == ".js" || ext == ".jsx") { out = Language::JavaScript; return true; }
-    if (ext == ".ts" || ext == ".tsx") { out = Language::TypeScript; return true; }
-    if (ext == ".rs") { out = Language::Rust; return true; }
-    if (ext == ".c") { out = Language::C; return true; }
-    if (ext == ".cpp" || ext == ".cc" || ext == ".cxx" ||
-        ext == ".h" || ext == ".hpp") { out = Language::Cpp; return true; }
-    if (ext == ".java") { out = Language::Java; return true; }
-    if (ext == ".cs") { out = Language::CSharp; return true; }
-    if (ext == ".php" || ext == ".phtml") { out = Language::PHP; return true; }
-    if (ext == ".kt" || ext == ".kts") { out = Language::Kotlin; return true; }
-    if (ext == ".zig") { out = Language::Zig; return true; }
-    if (ext == ".rb") { out = Language::Ruby; return true; }
     return false;
 }
 

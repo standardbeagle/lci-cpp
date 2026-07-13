@@ -588,25 +588,21 @@ bool ReferenceTracker::compute_is_exported(std::string_view path,
                                             std::string_view symbol_name) {
     if (symbol_name.empty()) return false;
 
-    auto ext_pos = path.rfind('.');
-    if (ext_pos == std::string_view::npos) return true;
-    auto ext = path.substr(ext_pos);
-
-    if (ext == ".go") {
-        return std::isupper(static_cast<unsigned char>(symbol_name[0])) != 0;
+    // Visibility rule is keyed by language family from the centralized table
+    // (language_map.h) rather than a private extension list.
+    switch (language_info_for_path(path).family) {
+        case LangFamily::kGo:
+            return std::isupper(static_cast<unsigned char>(symbol_name[0])) != 0;
+        case LangFamily::kPython:
+        case LangFamily::kRuby:
+            return !symbol_name.starts_with('_');
+        case LangFamily::kJsTs:
+            return !symbol_name.starts_with('_') && !symbol_name.starts_with('#');
+        default:
+            // C/C++, Java, Kotlin, Rust, C#, PHP, Zig, and unknown: assume
+            // exported.
+            return true;
     }
-    if (ext == ".py" || ext == ".pyx" || ext == ".pxd") {
-        return !symbol_name.starts_with('_');
-    }
-    if (ext == ".js" || ext == ".jsx" || ext == ".ts" || ext == ".tsx" ||
-        ext == ".mjs" || ext == ".cjs") {
-        return !symbol_name.starts_with('_') && !symbol_name.starts_with('#');
-    }
-    if (ext == ".rb") {
-        return !symbol_name.starts_with('_');
-    }
-    // C/C++, Java, Kotlin, Rust, and unknown: assume exported.
-    return true;
 }
 
 std::vector<ScopeInfo> ReferenceTracker::build_symbol_scope_chain(
@@ -753,31 +749,10 @@ bool symbol_matches_receiver_type(const EnhancedSymbol& sym,
 }
 
 // See LangFamily in the header for why families rather than exact languages.
-// NOTE: this extension table overlaps FileScanner::detect_language and
-// friends; a shared extension→language map is tracked as consolidation debt
-// (the family grouping here is deliberately coarser than Language).
+// Delegates to the centralized extension table (language_map.h): the single
+// source of truth for extension -> family, shared with every other site.
 ReferenceTracker::LangFamily language_family_for_path(std::string_view path) {
-    using LF = ReferenceTracker::LangFamily;
-    auto dot = path.rfind('.');
-    if (dot == std::string_view::npos) return LF::kUnknown;
-    std::string_view ext = path.substr(dot + 1);
-    if (ext == "py" || ext == "pyx" || ext == "pxd" || ext == "pyi")
-        return LF::kPython;
-    if (ext == "c" || ext == "cc" || ext == "cpp" || ext == "cxx" ||
-        ext == "h" || ext == "hh" || ext == "hpp" || ext == "cu")
-        return LF::kCFamily;
-    if (ext == "js" || ext == "jsx" || ext == "mjs" || ext == "cjs" ||
-        ext == "ts" || ext == "tsx")
-        return LF::kJsTs;
-    if (ext == "go") return LF::kGo;
-    if (ext == "java") return LF::kJava;
-    if (ext == "cs") return LF::kCSharp;
-    if (ext == "rs") return LF::kRust;
-    if (ext == "php") return LF::kPhp;
-    if (ext == "kt" || ext == "kts") return LF::kKotlin;
-    if (ext == "rb") return LF::kRuby;
-    if (ext == "zig") return LF::kZig;
-    return LF::kUnknown;
+    return language_info_for_path(path).family;
 }
 
 // Test/example/vendored files lose to library code when an ambiguous name

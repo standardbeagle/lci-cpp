@@ -15,16 +15,20 @@ FileImportData ImportResolver::extract_file_imports(
     FileImportData data;
     data.file_id = file_id;
 
-    // Determine language from extension.
-    auto dot_pos = file_path.rfind('.');
-    if (dot_pos == std::string_view::npos) return data;
-
-    auto ext = file_path.substr(dot_pos);
-    std::string ext_lower;
-    ext_lower.reserve(ext.size());
-    for (char c : ext) {
-        ext_lower.push_back(
-            static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+    // Determine the import-extractor to use from the centralized extension
+    // table (language_map.h), keyed by language family. Files whose family has
+    // no import extractor are skipped without scanning lines.
+    LangFamily family = language_info_for_path(file_path).family;
+    switch (family) {
+        case LangFamily::kGo:
+        case LangFamily::kJsTs:
+        case LangFamily::kPython:
+        case LangFamily::kRust:
+        case LangFamily::kCSharp:
+        case LangFamily::kCFamily:
+            break;
+        default:
+            return data;
     }
 
     // Simple line-based import extraction.
@@ -39,23 +43,20 @@ FileImportData ImportResolver::extract_file_imports(
                                     line_end - line_start);
 
         std::vector<ImportBinding> bindings;
-        if (ext_lower == ".go") {
-            bindings = extract_go_imports(line);
-        } else if (ext_lower == ".js" || ext_lower == ".ts" ||
-                   ext_lower == ".tsx") {
-            bindings = extract_js_imports(line);
-        } else if (ext_lower == ".py" || ext_lower == ".pyx" ||
-                   ext_lower == ".pxd") {
-            bindings = extract_python_imports(line);
-        } else if (ext_lower == ".rs") {
-            bindings = extract_rust_imports(line);
-        } else if (ext_lower == ".cs") {
-            bindings = extract_csharp_imports(line);
-        } else if (ext_lower == ".cpp" || ext_lower == ".cc" ||
-                   ext_lower == ".cxx" || ext_lower == ".c" ||
-                   ext_lower == ".h" || ext_lower == ".hpp" ||
-                   ext_lower == ".hh" || ext_lower == ".hxx") {
-            bindings = extract_cpp_imports(line);
+        switch (family) {
+            case LangFamily::kGo: bindings = extract_go_imports(line); break;
+            case LangFamily::kJsTs: bindings = extract_js_imports(line); break;
+            case LangFamily::kPython:
+                bindings = extract_python_imports(line);
+                break;
+            case LangFamily::kRust: bindings = extract_rust_imports(line); break;
+            case LangFamily::kCSharp:
+                bindings = extract_csharp_imports(line);
+                break;
+            case LangFamily::kCFamily:
+                bindings = extract_cpp_imports(line);
+                break;
+            default: break;
         }
 
         for (auto& b : bindings) {

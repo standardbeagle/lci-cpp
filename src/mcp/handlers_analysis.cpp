@@ -7,6 +7,7 @@
 
 #include <lci/analysis/call_graph.h>
 #include <lci/analysis/ci_vocabulary_analyzer.h>
+#include <lci/language_map.h>
 #include <lci/analysis/codebase_intelligence.h>
 #include <lci/analysis/coupling_analyzer.h>
 #include <lci/analysis/feature_analyzer.h>
@@ -1310,26 +1311,12 @@ void emit_summary(std::ostringstream& out,
     absl::flat_hash_map<std::string, int> lang_files;
     absl::flat_hash_set<std::string> dirs;
     int max_depth = 0;
-    auto lang_of = [](std::string_view path) -> const char* {
-        auto dot = path.rfind('.');
-        if (dot == std::string_view::npos) return nullptr;
-        auto ext = path.substr(dot);
-        if (ext == ".go") return "go";
-        if (ext == ".py" || ext == ".pyx" || ext == ".pxd") return "python";
-        if (ext == ".ts" || ext == ".tsx") return "typescript";
-        if (ext == ".js" || ext == ".jsx" || ext == ".mjs") return "javascript";
-        if (ext == ".cpp" || ext == ".cc" || ext == ".cxx" || ext == ".hpp" ||
-            ext == ".hh" || ext == ".h")
-            return "cpp";
-        if (ext == ".c") return "c";
-        if (ext == ".rs") return "rust";
-        if (ext == ".java") return "java";
-        if (ext == ".rb") return "ruby";
-        if (ext == ".php") return "php";
-        if (ext == ".cs") return "csharp";
-        if (ext == ".kt") return "kotlin";
-        if (ext == ".swift") return "swift";
-        return nullptr;
+    // Language name comes from the centralized extension table
+    // (language_map.h); files with no canonical language are not counted.
+    auto lang_of = [](std::string_view path) -> std::string_view {
+        LangId id = language_info_for_path(path).language;
+        if (id == LangId::Unknown) return {};
+        return to_string(id);
     };
     for (const auto& f : files) {
         std::string rel = f.path;
@@ -1343,7 +1330,8 @@ void emit_summary(std::ostringstream& out,
         auto slash = rel.rfind('/');
         dirs.insert(slash == std::string::npos ? std::string(".")
                                                : rel.substr(0, slash));
-        if (const char* l = lang_of(f.path)) lang_files[l]++;
+        if (std::string_view l = lang_of(f.path); !l.empty())
+            lang_files[std::string(l)]++;
     }
     out << "== SUMMARY ==\n"
         << "files=" << file_count << " symbols=" << symbol_count
