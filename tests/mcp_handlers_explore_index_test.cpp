@@ -662,6 +662,47 @@ TEST_F(ExploreIndexTestFixture, RegisterIndexHandlers) {
     EXPECT_EQ(server.tool_count(), before + 3);
 }
 
+// =============================================================================
+// Extension -> language centralization (regression guard)
+// =============================================================================
+
+// A .mjs file must classify as "javascript" in the index language breakdown.
+// Before ext->language centralization reached this handler, language_from_path
+// had no .mjs case and returned "unknown", so index-summary disagreed with the
+// analysis-summary (which routes through the central table). This pins the
+// index handler to the central lci::language_map classification.
+TEST(IndexLanguageCentralization, MjsFileClassifiesAsJavaScript) {
+    auto dir = lci::test::unique_temp_dir("lci_mjs_lang_test_");
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+
+    {
+        std::ofstream out(dir / "foo.mjs");
+        out << "export function greet(name) {\n"
+               "    return `hello ${name}`;\n"
+               "}\n";
+    }
+
+    Config config;
+    config.project.root = dir.string();
+    MasterIndex indexer(config);
+    indexer.index_directory(dir.string());
+
+    nlohmann::json params;
+    params["mode"] = "files";
+    auto result = handle_debug_info(params, indexer);
+    ASSERT_FALSE(result.is_error);
+    auto j = nlohmann::json::parse(result.text);
+    ASSERT_TRUE(j.contains("files_by_language"));
+    const auto& langs = j["files_by_language"];
+    EXPECT_TRUE(langs.contains("javascript"))
+        << "files_by_language=" << langs.dump();
+    EXPECT_FALSE(langs.contains("unknown"))
+        << "files_by_language=" << langs.dump();
+
+    std::filesystem::remove_all(dir);
+}
+
 }  // namespace
 }  // namespace mcp
 }  // namespace lci
