@@ -1166,6 +1166,38 @@ TEST(CIEngine, BuildStructureCategorizesViaClassifyFile) {
     EXPECT_EQ(s.config, 1);
 }
 
+// Go parity: extension-less files (bare README, LICENSE, Makefile, Dockerfile)
+// are FileCategoryUnknown and Go's categorizeFile
+// (internal/mcp/codebase_intelligence_tools.go:846) routes them to the distinct
+// "other" bucket (FileCategories.Other, json:"other" — types.go:745), NOT to
+// "code" and NOT to "doc". Regression guard: build_structure previously folded
+// FileCategory::Unknown into the code count, inflating it. The old C++
+// rel.find("README") -> docs rule was a non-Go invention and must NOT return.
+TEST(CIEngine, BuildStructureRoutesUnknownToOther) {
+    CodebaseIntelligenceEngine engine;
+    CodebaseIntelligenceParams params;
+    params.mode = "structure";
+
+    std::vector<std::string> file_paths = {
+        "/proj/README",             // no extension -> Unknown -> other
+        "/proj/LICENSE",            // no extension -> Unknown -> other
+        "/proj/Makefile",           // no extension -> Unknown -> other
+        "/proj/src/lib.cpp",        // .cpp -> code
+    };
+
+    auto resp = engine.build_structure(params, {}, file_paths, "/proj",
+                                       /*file_count=*/4, /*total_functions=*/0);
+    ASSERT_TRUE(resp.structure_analysis.has_value());
+    const auto& s = *resp.structure_analysis;
+
+    // The three extension-less files land in "other", matching Go's default
+    // categorizeFile bucket; only the real source file counts as code.
+    EXPECT_EQ(s.other, 3);
+    EXPECT_EQ(s.code, 1);
+    // Guard against re-inventing the removed README->docs rule.
+    EXPECT_EQ(s.docs, 0);
+}
+
 TEST(CIEngine, GitAnalyzeModeDispatch) {
     CodebaseIntelligenceEngine engine;
     CodebaseIntelligenceParams params;
