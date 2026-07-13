@@ -1089,6 +1089,36 @@ TEST(ContextComponentTiming, EqualDistributionMatchesGoPlaceholder) {
     EXPECT_EQ(ContextLookupEngine::per_component_time_ms(0), 0);
 }
 
+// End-to-end guard for the get_context performance envelope: all seven
+// component_breakdown fields are the equal-distribution placeholder
+// (total_time_ms / 7), matching what the Go reference binary emits. Locks
+// both the exact Go field names and the equal-distribution invariant, so a
+// future "fix" that injects independent per-section timing (diverging from
+// the reference and its parity golden) turns this red.
+TEST_F(HandlersFixture, GetContextPerfBreakdownIsGoEqualDistribution) {
+    nlohmann::json params;
+    params["name"] = "main";
+    params["mode"] = "full";
+    auto result = handle_get_context(params, *indexer_);
+    ASSERT_FALSE(result.is_error) << result.text;
+    auto json = nlohmann::json::parse(result.text);
+    ASSERT_TRUE(json.contains("performance")) << result.text;
+    const auto& perf = json["performance"];
+    ASSERT_TRUE(perf.contains("total_time_ms"));
+    ASSERT_TRUE(perf.contains("component_breakdown"));
+    const auto& cb = perf["component_breakdown"];
+    const int64_t total = perf["total_time_ms"].get<int64_t>();
+    const int64_t expected = total / 7;  // Go's perComponentTime.
+    // Exactly the seven Go-named fields, every one the placeholder value.
+    for (const char* key :
+         {"basic_info_time", "relationships_time", "variables_time",
+          "semantic_time", "structure_time", "usage_time", "ai_time"}) {
+        ASSERT_TRUE(cb.contains(key)) << key;
+        EXPECT_EQ(cb[key].get<int64_t>(), expected) << key;
+    }
+    EXPECT_EQ(cb.size(), 7u);
+}
+
 TEST_F(HandlersFixture, GetContextIncludeSectionsKeepsAllSectionKeys) {
     nlohmann::json params;
     params["name"] = "main";

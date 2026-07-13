@@ -237,8 +237,11 @@ void ContextLookupEngine::dedup_references(std::vector<ObjectReference>& refs) {
 }
 
 int64_t ContextLookupEngine::per_component_time_ms(int64_t total_ms) {
-    // RED stub: not yet divided across components.
-    return total_ms;
+    // Equal-distribution placeholder, bug-for-bug with Go
+    // handleGetObjectContextWithMode (internal/mcp/handlers.go:2297-2299).
+    // Truncating integer division matches Go's int64/int arithmetic. See the
+    // header for why this stays a placeholder rather than real measurement.
+    return total_ms / kContextComponentCount;
 }
 
 }  // namespace lci

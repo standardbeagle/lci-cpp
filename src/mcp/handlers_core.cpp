@@ -1659,9 +1659,19 @@ ToolResult handle_get_context(const nlohmann::json& params,
                     {"index_size", stats.total_symbols},
                     {"server_version", std::string(kVersion)},
                 };
-                constexpr int kComponentCount = 7;  // basic_info,
-                // relationships, variables, semantic, structure, usage, ai
-                auto per_component = lookup_elapsed_ms / kComponentCount;
+                // component_breakdown is an equal-distribution PLACEHOLDER,
+                // bug-for-bug with Go's handleGetObjectContextWithMode
+                // (internal/mcp/handlers.go:2297-2299) — the reference divides
+                // the single wall-clock total by the component count and emits
+                // that same value for all seven fields; it does NO real
+                // per-section measurement. per_component_time_ms centralizes
+                // and documents that fabrication (reference-port rule 5) so it
+                // is a recorded divergence-from-correct, not stray synthesized
+                // data. Do not replace with independent timing without an
+                // upstream Go change — it would break the parity golden.
+                auto per_component =
+                    ContextLookupEngine::per_component_time_ms(
+                        lookup_elapsed_ms);
                 response["performance"] = {
                     {"total_time_ms", lookup_elapsed_ms},
                     {"component_breakdown",
