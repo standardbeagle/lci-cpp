@@ -312,22 +312,6 @@ int run_debug_info(const GlobalFlags& flags, bool verbose, bool incremental) {
     char updated_at[20];
     std::strftime(updated_at, sizeof(updated_at), "%Y-%m-%d %H:%M:%S", &tm);
 
-    // Fingerprint the current on-disk file set (size + FNV-1a content hash),
-    // keyed by root-relative path. Reused by both the snapshot diff and the
-    // snapshot rewrite below.
-    std::vector<std::pair<std::string, SnapshotEntry>> current_entries;
-    current_entries.reserve(go_files.size());
-    for (const auto& file : go_files) {
-        std::error_code rel_ec;
-        auto rel = std::filesystem::relative(file, root, rel_ec);
-        std::string rel_key = rel_ec ? file.string() : rel.generic_string();
-        std::string content = read_text_file(file);
-        SnapshotEntry entry;
-        entry.size = content.size();
-        entry.hash = hash_fnv1a(content);
-        current_entries.emplace_back(std::move(rel_key), entry);
-    }
-
     std::printf("Debug Info - Lightning Code Index Symbol Linking System\n");
     std::printf("Root Path: %s\n", display_root_path(root).c_str());
     std::printf("Incremental Mode: %s\n", incremental ? "true" : "false");
@@ -341,6 +325,23 @@ int run_debug_info(const GlobalFlags& flags, bool verbose, bool incremental) {
     std::printf("\n");
 
     if (incremental) {
+        // Fingerprint the current on-disk file set (size + FNV-1a content
+        // hash), keyed by root-relative path. Only the incremental path
+        // consumes this — the default `debug info` stays a pure listing and
+        // must not pay a full-corpus content read + hash.
+        std::vector<std::pair<std::string, SnapshotEntry>> current_entries;
+        current_entries.reserve(go_files.size());
+        for (const auto& file : go_files) {
+            std::error_code rel_ec;
+            auto rel = std::filesystem::relative(file, root, rel_ec);
+            std::string rel_key = rel_ec ? file.string() : rel.generic_string();
+            std::string content = read_text_file(file);
+            SnapshotEntry entry;
+            entry.size = content.size();
+            entry.hash = hash_fnv1a(content);
+            current_entries.emplace_back(std::move(rel_key), entry);
+        }
+
         auto snapshot_path = snapshot_path_for_root(root);
         auto prior = load_snapshot(snapshot_path);
 
