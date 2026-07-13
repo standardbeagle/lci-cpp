@@ -17,6 +17,7 @@
 #include <vector>
 
 #include <nlohmann/json.hpp>
+#include <lci/core/mmap.h>
 #include <lci/string_ref.h>
 #include <lci/symbollinker/go_linker.h>
 #include <lci/symbollinker/linker_engine.h>
@@ -36,11 +37,23 @@ struct DependencySummary {
     int circular_dependencies = 0;
 };
 
+// mmap-first read matching file_loader's idiom; the istreambuf_iterator
+// pattern grows the string byte-by-byte with no size reservation.
 std::string read_text_file(const std::filesystem::path& path) {
-    std::ifstream in(path, std::ios::binary);
+    MappedFile mapped;
+    std::string mmap_error;
+    if (mapped.open(path.string(), &mmap_error)) {
+        auto view = mapped.view();
+        return std::string(view.data(), view.size());
+    }
+    std::ifstream in(path, std::ios::binary | std::ios::ate);
     if (!in) return {};
-    return std::string(std::istreambuf_iterator<char>(in),
-                       std::istreambuf_iterator<char>());
+    auto size = in.tellg();
+    if (size < 0) return {};
+    in.seekg(0, std::ios::beg);
+    std::string content(static_cast<size_t>(size), '\0');
+    if (!in.read(content.data(), size)) return {};
+    return content;
 }
 
 bool is_go_source_file(const std::filesystem::path& path) {
