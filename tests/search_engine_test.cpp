@@ -162,6 +162,15 @@ TEST(FileClassification, UnknownFiles) {
     EXPECT_EQ(FileCategory::Unknown, classify_file("data.bin"));
 }
 
+TEST(FileClassification, ExtensionFromBasenameOnly) {
+    // Go filepath.Ext takes the extension from the FINAL path element only; a
+    // dot in a parent directory name must not leak into the extension.
+    EXPECT_EQ("", file_extension("dir.v1/Makefile"));
+    EXPECT_EQ(FileCategory::Unknown, classify_file("dir.v1/Makefile"));
+    // Sanity: a genuine basename extension is still returned.
+    EXPECT_EQ(".go", file_extension("dir.v1/main.go"));
+}
+
 TEST(FileClassification, ScoreFileType) {
     EXPECT_DOUBLE_EQ(kCodeFileBoost, score_file_type("main.go"));
     EXPECT_DOUBLE_EQ(kDocFilePenalty, score_file_type("README.md"));

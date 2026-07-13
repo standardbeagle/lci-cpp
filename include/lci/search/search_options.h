@@ -42,6 +42,12 @@ enum class FileCategory : uint8_t {
     Unknown,
 };
 
+/// Returns the file extension (including the leading dot) of a path, taken from
+/// the final path element only. Mirrors Go's filepath.Ext: a dot in a parent
+/// directory name never leaks into the extension. Empty if the basename has no
+/// dot.
+std::string_view file_extension(std::string_view path);
+
 /// Classifies a file by its path and extension.
 FileCategory classify_file(std::string_view path);
 

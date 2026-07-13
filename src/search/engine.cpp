@@ -251,12 +251,6 @@ bool has_extension(std::string_view path, std::string_view ext) {
     return true;
 }
 
-std::string_view file_extension(std::string_view path) {
-    auto dot = path.rfind('.');
-    if (dot == std::string_view::npos) return {};
-    return path.substr(dot);
-}
-
 std::string_view file_base(std::string_view path) {
     auto slash = path.rfind('/');
     if (slash == std::string_view::npos) {
@@ -294,6 +288,12 @@ bool is_config_extension(std::string_view ext) {
 }
 
 }  // namespace
+
+std::string_view file_extension(std::string_view path) {
+    auto dot = path.rfind('.');
+    if (dot == std::string_view::npos) return {};
+    return path.substr(dot);
+}
 
 FileCategory classify_file(std::string_view path) {
     auto base = file_base(path);
