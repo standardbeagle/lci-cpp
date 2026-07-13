@@ -54,6 +54,12 @@ void fill_usage_analysis(CodeObjectContext& ctx,
                          const ReferenceTracker::Snapshot& snap,
                          MasterIndex& indexer);
 
+// Defined in context_lookup_ai.cpp (CLX S8). Fills ctx.ai_context by reading
+// sections already populated above (relationships/semantic/usage/structure)
+// rather than recomputing anything. No snapshot/indexer needed. Gated
+// wholesale on `include_ai_text` — false leaves the whole section empty.
+void fill_ai_context(CodeObjectContext& ctx, bool include_ai_text);
+
 namespace {
 
 // Formats now() as an RFC3339 UTC timestamp. generated_at is time.Now() in Go
@@ -146,10 +152,7 @@ CodeObjectContext ContextLookupEngine::get_context(
                           semantic_annotator_);
     fill_structure_context(ctx, *snap, indexer_);
     fill_usage_analysis(ctx, *snap, indexer_);
-
-    // Remaining sections stay empty-but-present: CodeObjectContext default-
-    // constructs each and to_json emits its keys with `[]` / zero values.
-    // S8 populates it in place, soft-failing into diagnostics.
+    fill_ai_context(ctx, include_ai_text());
 
     ok = true;
     return ctx;
