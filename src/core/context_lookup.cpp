@@ -16,6 +16,14 @@
 
 namespace lci {
 
+// Defined in context_lookup_relationships.cpp (CLX S3). Fills
+// ctx.direct_relationships from the pinned snapshot plus the engine's live
+// ReferenceTracker (needed for get_caller_symbols/get_callee_symbols) and the
+// engine's current confidence_threshold().
+void fill_direct_relationships(CodeObjectContext& ctx,
+                               const ReferenceTracker::Snapshot& snap,
+                               ReferenceTracker& tracker, double threshold);
+
 // Defined in context_lookup_variables.cpp (CLX S4). Fills ctx.variable_context
 // from the pinned snapshot. Declared here (not in the header) to keep
 // context_lookup.h free of the heavy reference_tracker.h include; both TUs see
@@ -123,6 +131,8 @@ CodeObjectContext ContextLookupEngine::get_context(
     // Section fills run in order basic_info -> relationships -> variables ->
     // semantic -> structure -> ... Relationships (S3) lands independently;
     // the variables/semantic/structure sections do not depend on it.
+    fill_direct_relationships(ctx, *snap, indexer_.ref_tracker(),
+                              confidence_threshold());
     fill_variable_context(ctx, *snap);
     fill_semantic_context(ctx, *snap, indexer_, graph_propagator_,
                           semantic_annotator_);

@@ -60,6 +60,7 @@ add_library(lci_lib STATIC
     core/graph_propagator.cpp
     core/semantic_annotator.cpp
     core/context_lookup.cpp
+    core/context_lookup_relationships.cpp
     core/context_lookup_variables.cpp
     core/context_lookup_structure.cpp
     core/context_lookup_semantic.cpp
