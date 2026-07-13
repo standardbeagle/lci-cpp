@@ -290,9 +290,13 @@ bool is_config_extension(std::string_view ext) {
 }  // namespace
 
 std::string_view file_extension(std::string_view path) {
-    auto dot = path.rfind('.');
+    // Match Go filepath.Ext: the extension is the suffix beginning at the final
+    // dot in the FINAL path element. Strip the directory first so a dot in a
+    // parent directory name (e.g. "dir.v1/Makefile") cannot leak in.
+    auto base = file_base(path);
+    auto dot = base.rfind('.');
     if (dot == std::string_view::npos) return {};
-    return path.substr(dot);
+    return base.substr(dot);
 }
 
 FileCategory classify_file(std::string_view path) {
