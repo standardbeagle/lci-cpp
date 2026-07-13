@@ -1,6 +1,7 @@
 #include <lci/core/reference_tracker.h>
 
 #include <absl/container/inlined_vector.h>
+#include <lci/search/search_options.h>  // is_test_file (canonical test rule)
 
 #include <algorithm>
 #include <cctype>
@@ -791,13 +792,12 @@ bool is_low_quality_path(std::string_view path) {
         has_dir("benchmarks") || has_dir("vendor") ||
         has_dir("third_party") || has_dir("fixtures"))
         return true;
-    // Basename prefixed test_ / suffixed _test.<ext>.
-    auto slash = path.rfind('/');
-    std::string_view base =
-        slash == std::string_view::npos ? path : path.substr(slash + 1);
-    if (base.rfind("test_", 0) == 0) return true;
-    if (base.find("_test.") != std::string_view::npos) return true;
-    return false;
+    // Delegate test-basename detection to the canonical classifier instead of
+    // re-implementing a narrower subset (this file previously matched only
+    // `test_` prefix and `_test.`, diverging from classify_file which also
+    // covers `.test.` and `.spec.`). Single source of truth for the rule; the
+    // vendored/examples directory heuristics above remain this function's own.
+    return is_test_file(path);
 }
 }  // namespace
 
