@@ -466,9 +466,17 @@ int main(int argc, char* argv[]) {
     refs_cmd->add_flag("--all", refs_all,
                        "Include lexical-only matches (strings/comments/"
                        "docstrings) in a separate section");
+    bool refs_count = false;
+    refs_cmd->add_flag("-c,--count", refs_count,
+                       "Print only the number of code references "
+                       "(with --all: code + lexical)");
+    bool refs_terse = false;
+    refs_cmd->add_flag("--terse", refs_terse,
+                       "One line per reference: path:line");
 
     refs_cmd->callback([&]() {
-        std::exit(run_refs(gflags, refs_symbol, refs_json, refs_all));
+        std::exit(run_refs(gflags, refs_symbol, refs_json, refs_all,
+                           refs_count, refs_terse));
     });
 
     // -- Tree subcommand ------------------------------------------------------

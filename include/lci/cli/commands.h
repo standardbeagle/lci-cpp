@@ -130,8 +130,12 @@ int run_def(const GlobalFlags& flags, const std::string& symbol);
 /// `show_all` prints the lexical-only (string/comment/docstring) matches in a
 /// separate tail section; without it those matches are suppressed behind a
 /// counted summary line so real code references surface first.
+/// `count_only` prints a single integer (code refs; with `show_all` code +
+/// lexical) — agents were piping refs output through `grep -c` for this.
+/// `terse` emits one `path:line` per reference with no context text.
 int run_refs(const GlobalFlags& flags, const std::string& symbol,
-             bool json_output, bool show_all);
+             bool json_output, bool show_all, bool count_only = false,
+             bool terse = false);
 
 // -- refs ranking -------------------------------------------------------------
 

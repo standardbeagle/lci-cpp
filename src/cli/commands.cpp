@@ -324,7 +324,7 @@ PartitionedReferences partition_references(
 }
 
 int run_refs(const GlobalFlags& flags, const std::string& symbol,
-             bool json_output, bool show_all) {
+             bool json_output, bool show_all, bool count_only, bool terse) {
     if (json_output) {
         std::cout
             << "Incorrect Usage: flag provided but not defined: -json\n\n"
@@ -366,8 +366,17 @@ int run_refs(const GlobalFlags& flags, const std::string& symbol,
     // natural-language occurrences that would otherwise bury the real refs.
     PartitionedReferences parts = partition_references(*results);
 
-    auto print_ref = [](const ReferenceLocation& r) {
-        if (!r.context.empty()) {
+    if (count_only) {
+        size_t n = parts.code.size();
+        if (show_all) n += parts.lexical.size();
+        std::printf("%zu\n", n);
+        return 0;
+    }
+
+    auto print_ref = [&](const ReferenceLocation& r) {
+        if (terse) {
+            std::printf("%s:%d\n", r.file_path.c_str(), r.line);
+        } else if (!r.context.empty()) {
             std::printf("%s:%d: %s\n", r.file_path.c_str(), r.line,
                         r.context.c_str());
         } else {
