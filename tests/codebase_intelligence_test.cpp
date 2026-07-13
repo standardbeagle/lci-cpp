@@ -1070,6 +1070,71 @@ TEST(CIEngine, StructureModeRequiresIndexBackedPath) {
     EXPECT_NE(result.error.find("index-backed"), std::string::npos);
 }
 
+// The index-backed builders (called by the MCP handler with explicit inputs)
+// must produce complete sections — this is what the removed defaults used to
+// silently degrade. Guard the two degradation cases the finding named.
+TEST(CIEngine, BuildDetailedFeaturesPopulatedWithCallGraph) {
+    CodebaseIntelligenceEngine engine;
+    CodebaseIntelligenceParams params;
+    params.mode = "detailed";
+    params.analysis = "features";
+
+    EnhancedSymbol a;
+    a.symbol.name = "Login";
+    a.symbol.type = SymbolType::Function;
+    a.id = 1;
+    EnhancedSymbol b;
+    b.symbol.name = "Register";
+    b.symbol.type = SymbolType::Function;
+    b.id = 2;
+    EnhancedSymbol c;
+    c.symbol.name = "Validate";
+    c.symbol.type = SymbolType::Function;
+    c.id = 3;
+    FileSymbolData fsd;
+    fsd.path = "src/auth/auth.go";
+    fsd.symbols = {&a, &b, &c};
+
+    // A connected triangle so feature clustering has real edges to work on.
+    auto callees_of = [](SymbolID id) -> std::vector<SymbolID> {
+        switch (id) {
+            case 1: return {2};
+            case 2: return {3};
+            case 3: return {1};
+            default: return {};
+        }
+    };
+
+    auto resp = engine.build_detailed(params, {fsd}, "", callees_of);
+    // With a call graph, feature analysis is run, not silently skipped.
+    ASSERT_TRUE(resp.feature_analysis.has_value());
+    EXPECT_GE(resp.feature_analysis->metrics.total_features, 1);
+}
+
+TEST(CIEngine, BuildStructurePopulatedWithFilePaths) {
+    CodebaseIntelligenceEngine engine;
+    CodebaseIntelligenceParams params;
+    params.mode = "structure";
+
+    EnhancedSymbol sym;
+    sym.symbol.name = "bar";
+    sym.symbol.type = SymbolType::Function;
+    FileSymbolData fsd;
+    fsd.path = "src/lib.go";
+    fsd.symbols = {&sym};
+
+    std::vector<std::string> file_paths = {"/proj/src/lib.go",
+                                           "/proj/src/util.go",
+                                           "/proj/cmd/main.go"};
+
+    auto resp = engine.build_structure(params, {fsd}, file_paths, "/proj",
+                                       /*file_count=*/3, /*total_functions=*/1);
+    // With real file paths the tree is populated, not an empty dirs=0 shell.
+    ASSERT_TRUE(resp.structure_analysis.has_value());
+    EXPECT_EQ(resp.structure_analysis->file_count, 3);
+    EXPECT_FALSE(resp.structure_analysis->top_dirs.empty());
+}
+
 TEST(CIEngine, GitAnalyzeModeDispatch) {
     CodebaseIntelligenceEngine engine;
     CodebaseIntelligenceParams params;
