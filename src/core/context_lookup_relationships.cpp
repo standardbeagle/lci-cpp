@@ -587,9 +587,14 @@ void fill_direct_relationships(CodeObjectContext& ctx, const Snapshot& snap,
     dr.parent_objects = get_parent_objects(snap, oid);
     dr.child_objects = get_child_objects(snap, oid);
 
-    // dispatch-gate bug (see file-level comment): both getters are
-    // unreachable-empty by construction for the objectID types that could
-    // otherwise satisfy their internal gates.
+    // dispatch-gate bug (see file-level comment): get_implementing_types is
+    // unreachable-empty by construction here (it requires an Interface
+    // objectID, which this Class||Method gate can never admit). get_parent_classes
+    // IS reachable for a Class objectID (Class satisfies both this outer gate
+    // and its own inner Struct||Class check) but still comes back empty in
+    // practice, for an unrelated reason: ReferenceType::Inheritance is never
+    // emitted by either extractor (dead code on both sides), not because of
+    // any gating logic.
     if (oid.type == SymbolType::Class || oid.type == SymbolType::Method) {
         dr.parent_classes = get_parent_classes(snap, oid);
         dr.implementing_types = get_implementing_types(snap, oid);
