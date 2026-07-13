@@ -417,7 +417,8 @@ std::vector<std::string> extract_oid_prefix(std::string_view s) {
 }
 
 /// Mode presets (Go applyContextLookupMode, handlers.go:2327). Mutates params
-/// in place. Unknown modes pass through unchanged.
+/// in place. Unrecognized non-empty modes normalize to "full" (Go's
+/// `default:` case); an empty mode is left untouched (compact id path).
 void apply_context_lookup_mode(nlohmann::json& params) {
     if (!params.is_object()) return;
     std::string mode = params.value("mode", "");
@@ -453,6 +454,15 @@ void apply_context_lookup_mode(nlohmann::json& params) {
         if (!params.contains("include_sections")) {
             params["include_sections"] = {"variables"};
         }
+    } else {
+        // Unrecognized non-empty mode → "full" (Go applyContextLookupMode
+        // `default: args.Mode = "full"`, handlers.go:2372-2374). Go dispatches
+        // any Mode != "" to the rich mode path, so an unknown mode yields the
+        // rich context/metadata/performance envelope, not the compact one.
+        // Mirror the default's SHALLOW normalization only: set mode=full so
+        // rich_request fires downstream; do NOT apply the "full" branch's
+        // max_depth/include_ai_text presets (Go's default case doesn't either).
+        params["mode"] = "full";
     }
 }
 
