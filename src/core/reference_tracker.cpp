@@ -8,6 +8,11 @@
 
 namespace lci {
 
+namespace {
+uint8_t language_group_for_path(std::string_view path);
+bool is_low_quality_path(std::string_view path);
+}  // namespace
+
 // FNV-1a constants for 64-bit hash.
 static constexpr uint64_t kFnvOffset64 = 14695981039346656037ULL;
 static constexpr uint64_t kFnvPrime64 = 1099511628211ULL;
@@ -192,6 +197,7 @@ void ReferenceTracker::clear() {
     import_data_.clear();
     reference_cache_.clear();
     scope_chain_cache_.clear();
+    file_resolution_meta_.clear();
     next_symbol_id_ = 1;
     next_ref_id_ = 1;
     import_resolver_.clear();
@@ -213,6 +219,9 @@ std::vector<EnhancedSymbol> ReferenceTracker::process_file(
 
     std::vector<EnhancedSymbol> enhanced;
     enhanced.reserve(symbols.size());
+
+    file_resolution_meta_[file_id] = FileResolutionMeta{
+        language_group_for_path(path), is_low_quality_path(path)};
 
     write_snapshot([&](Snapshot& s) {
         s.scopes_by_file[file_id].assign(scopes.begin(), scopes.end());
@@ -318,6 +327,7 @@ void ReferenceTracker::process_all_references() {
 }
 
 void ReferenceTracker::remove_file(FileID file_id) {
+    file_resolution_meta_.erase(file_id);
     write_snapshot([&](Snapshot& s) {
         auto file_syms = s.symbols.get_symbols_by_file(file_id);
         std::vector<SymbolID> ids(file_syms.begin(), file_syms.end());
@@ -738,6 +748,52 @@ bool symbol_matches_receiver_type(const EnhancedSymbol& sym,
     }
     return false;
 }
+
+// Language family for cross-language link gating. Families, not exact
+// languages: C/C++ headers and JS/TS interop legitimately share symbols
+// within a family, but a Python call must never resolve into a C++ file.
+uint8_t language_group_for_path(std::string_view path) {
+    auto dot = path.rfind('.');
+    if (dot == std::string_view::npos) return 0;
+    std::string_view ext = path.substr(dot + 1);
+    if (ext == "py" || ext == "pyx" || ext == "pxd" || ext == "pyi") return 1;
+    if (ext == "c" || ext == "cc" || ext == "cpp" || ext == "cxx" ||
+        ext == "h" || ext == "hh" || ext == "hpp" || ext == "cu")
+        return 2;
+    if (ext == "js" || ext == "jsx" || ext == "mjs" || ext == "cjs" ||
+        ext == "ts" || ext == "tsx")
+        return 3;
+    if (ext == "go") return 4;
+    if (ext == "java") return 5;
+    if (ext == "cs") return 6;
+    if (ext == "rs") return 7;
+    if (ext == "php") return 8;
+    if (ext == "kt" || ext == "kts") return 9;
+    if (ext == "rb") return 10;
+    if (ext == "zig") return 11;
+    return 0;
+}
+
+// Test/example/vendored files lose to library code when an ambiguous name
+// has to be resolved without import evidence.
+bool is_low_quality_path(std::string_view path) {
+    auto has_dir = [&](std::string_view dir) {
+        std::string with_slash = std::string(dir) + "/";
+        if (path.rfind(with_slash, 0) == 0) return true;  // leading segment
+        return path.find("/" + with_slash) != std::string_view::npos;
+    };
+    if (has_dir("tests") || has_dir("test") || has_dir("examples") ||
+        has_dir("benchmarks") || has_dir("vendor") ||
+        has_dir("third_party") || has_dir("fixtures"))
+        return true;
+    // Basename prefixed test_ / suffixed _test.<ext>.
+    auto slash = path.rfind('/');
+    std::string_view base =
+        slash == std::string_view::npos ? path : path.substr(slash + 1);
+    if (base.rfind("test_", 0) == 0) return true;
+    if (base.find("_test.") != std::string_view::npos) return true;
+    return false;
+}
 }  // namespace
 
 SymbolID ReferenceTracker::resolve_reference_target(
@@ -789,14 +845,53 @@ SymbolID ReferenceTracker::resolve_reference_target(
         }
     }
 
-    // Cross-file: use import resolver.
+    // Cross-file: gate candidates by language family first — a call in a
+    // Python file must not resolve to a same-named symbol in a vendored C++
+    // tree just because the name matches (unknown families stay eligible).
     auto candidates = s.symbols.get_symbols_by_name(name);
     SymbolID resolved = 0;
     if (!candidates.empty()) {
+        uint8_t ref_group = 0;
+        if (auto mit = file_resolution_meta_.find(ref.file_id);
+            mit != file_resolution_meta_.end()) {
+            ref_group = mit->second.lang_group;
+        }
+        std::vector<SymbolID> filtered;
+        filtered.reserve(candidates.size());
+        for (SymbolID id : candidates) {
+            const auto* sym = s.symbols.get(id);
+            if (sym == nullptr) continue;
+            uint8_t g = 0;
+            if (auto it2 = file_resolution_meta_.find(sym->symbol.file_id);
+                it2 != file_resolution_meta_.end()) {
+                g = it2->second.lang_group;
+            }
+            if (ref_group == 0 || g == 0 || g == ref_group) {
+                filtered.push_back(id);
+            }
+        }
+
         resolved = import_resolver_.resolve_symbol_reference(
-            ref.file_id, name, candidates,
+            ref.file_id, name, filtered,
             [&s](SymbolID id) { return s.symbols.get(id); });
-        if (resolved == 0) resolved = candidates[0];
+
+        // Ambiguous-name fallback: no import/same-file/export evidence.
+        // Prefer library code over test/example/vendored files; if every
+        // same-family candidate is low-quality, take the first rather than
+        // dropping the link. Cross-family candidates never link.
+        if (resolved == 0) {
+            for (SymbolID id : filtered) {
+                const auto* sym = s.symbols.get(id);
+                auto it2 = file_resolution_meta_.find(sym->symbol.file_id);
+                bool low_quality = it2 != file_resolution_meta_.end() &&
+                                   it2->second.low_quality;
+                if (!low_quality) {
+                    resolved = id;
+                    break;
+                }
+            }
+            if (resolved == 0 && !filtered.empty()) resolved = filtered[0];
+        }
     }
 
     reference_cache_[cache_key] = resolved;

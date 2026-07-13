@@ -793,5 +793,101 @@ TEST(ImportResolverTest, BuildAndResolveImportGraph) {
     EXPECT_EQ(resolved, 300u);
 }
 
+TEST(ImportResolverTest, NoEvidenceReturnsUndecided) {
+    ImportResolver resolver;
+
+    // Unexported symbol in another file, no import binding: the resolver
+    // must NOT guess the first candidate — the caller owns the fallback.
+    EnhancedSymbol sym;
+    sym.symbol.name = "_hidden";
+    sym.symbol.file_id = 2;
+    sym.is_exported = false;
+
+    std::vector<SymbolID> candidates = {100};
+    auto lookup = [&](SymbolID id) -> const EnhancedSymbol* {
+        return id == 100 ? &sym : nullptr;
+    };
+
+    EXPECT_EQ(resolver.resolve_symbol_reference(1, "_hidden", candidates,
+                                                lookup),
+              0u);
+}
+
+// ---------------------------------------------------------------------------
+// Cross-language and path-quality resolution
+// ---------------------------------------------------------------------------
+
+TEST(ReferenceTrackerTest, CrossLanguageCandidateStaysUnresolved) {
+    ReferenceTracker rt;
+
+    // Vendored C++ file defines `len`; a Python file calls len(). The call
+    // must stay unlinked — Python's len is a builtin, not the C++ symbol.
+    std::vector<Symbol> cpp_syms = {
+        make_sym("len", SymbolType::Function, 2, 170, 180),
+    };
+    std::vector<Reference> no_refs;
+    std::vector<ScopeInfo> no_scopes;
+    rt.process_file(2, "sklearn/svm/src/libsvm/svm.cpp", cpp_syms, no_refs,
+                    no_scopes);
+
+    std::vector<Symbol> py_syms = {
+        make_sym("caller", SymbolType::Function, 1, 1, 10),
+    };
+    Reference call;
+    call.type = ReferenceType::Call;
+    call.referenced_name = "len";
+    call.line = 5;
+    std::vector<Reference> py_refs = {call};
+    auto enhanced =
+        rt.process_file(1, "sklearn/utils/validation.py", py_syms, py_refs,
+                        no_scopes);
+    ASSERT_EQ(enhanced.size(), 1u);
+
+    rt.process_all_references();
+
+    EXPECT_TRUE(rt.get_callee_symbols(enhanced[0].id).empty());
+}
+
+TEST(ReferenceTrackerTest, LibraryPathBeatsExamplesPathOnFallback) {
+    ReferenceTracker rt;
+
+    std::vector<Reference> no_refs;
+    std::vector<ScopeInfo> no_scopes;
+
+    // Same-named dunder (unexported, never imported) defined in an examples
+    // file — indexed first so it is the natural first candidate — and in a
+    // library file. The ambiguous-name fallback must prefer library code.
+    std::vector<Symbol> example_syms = {
+        make_sym("__hook__", SymbolType::Function, 2, 10, 20),
+    };
+    rt.process_file(2, "examples/developing_estimators/demo.py", example_syms,
+                    no_refs, no_scopes);
+
+    std::vector<Symbol> lib_syms = {
+        make_sym("__hook__", SymbolType::Function, 3, 30, 40),
+    };
+    auto lib =
+        rt.process_file(3, "sklearn/pipeline.py", lib_syms, no_refs, no_scopes);
+    ASSERT_EQ(lib.size(), 1u);
+
+    std::vector<Symbol> caller_syms = {
+        make_sym("run", SymbolType::Function, 1, 1, 10),
+    };
+    Reference call;
+    call.type = ReferenceType::Call;
+    call.referenced_name = "__hook__";
+    call.line = 5;
+    std::vector<Reference> caller_refs = {call};
+    auto caller = rt.process_file(1, "sklearn/base.py", caller_syms,
+                                  caller_refs, no_scopes);
+    ASSERT_EQ(caller.size(), 1u);
+
+    rt.process_all_references();
+
+    auto callees = rt.get_callee_symbols(caller[0].id);
+    ASSERT_EQ(callees.size(), 1u);
+    EXPECT_EQ(callees[0], lib[0].id);
+}
+
 }  // namespace
 }  // namespace lci

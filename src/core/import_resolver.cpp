@@ -113,9 +113,10 @@ SymbolID ImportResolver::resolve_symbol_reference(
         }
     }
 
-    // Strategy 4: First candidate.
-    if (!candidates.empty()) return candidates[0];
-
+    // No import, same-file, or export evidence: report "couldn't decide"
+    // and let the caller apply its ranked fallback. Blindly returning the
+    // first candidate here linked Python calls to same-named symbols in
+    // vendored C++ and preferred examples/ files over library code.
     return 0;
 }
 

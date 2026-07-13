@@ -384,6 +384,16 @@ class ReferenceTracker {
     absl::flat_hash_map<uint64_t, SymbolID> reference_cache_;
     absl::flat_hash_map<uint64_t, ScopeChainCacheEntry> scope_chain_cache_;
 
+    /// Per-file resolution metadata derived from the path at process_file
+    /// time. lang_group gates cross-language linking (a Python call must not
+    /// resolve to a same-named C++ symbol in a vendored tree); low_quality
+    /// demotes test/example/vendored files in the ambiguous-name fallback.
+    struct FileResolutionMeta {
+        uint8_t lang_group{0};  // 0 = unknown, otherwise a language family
+        bool low_quality{false};
+    };
+    absl::flat_hash_map<FileID, FileResolutionMeta> file_resolution_meta_;
+
     SymbolID next_symbol_id_{1};
     uint64_t next_ref_id_{1};
 
