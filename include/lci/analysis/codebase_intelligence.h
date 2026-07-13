@@ -100,24 +100,28 @@ class CodebaseIntelligenceEngine {
     /// feature_analysis / domain_terms). `project_root` relativizes module
     /// paths; `callees_of` supplies the reference-graph edges for feature
     /// clustering (typically ref_tracker.get_callee_symbols). Both are
-    /// optional so the plain analyze() dispatch can call this without a live
-    /// index; the features analysis is skipped when `callees_of` is unset.
+    /// required: they come from a live index, so this builder is only reachable
+    /// through the index-backed caller (the MCP handler), never through the
+    /// index-less analyze() dispatch. Passing an empty `callees_of` would
+    /// silently skip feature clustering, so it is not defaulted.
     CodebaseIntelligenceResponse build_detailed(
         const CodebaseIntelligenceParams& params,
         const std::vector<FileSymbolData>& files,
-        std::string_view project_root = {},
-        const std::function<std::vector<SymbolID>(SymbolID)>& callees_of =
-            {}) const;
+        std::string_view project_root,
+        const std::function<std::vector<SymbolID>(SymbolID)>& callees_of)
+        const;
 
     /// Builds statistics analysis (Tier 3). Runs the coupling analyzer and
     /// derives quality from complexity, populating statistics_report.
-    /// `purity_ratio` is supplied by the caller (from the side-effect
-    /// analyzer, which the engine does not own).
+    /// `project_root` relativizes module paths and `purity_ratio` is supplied
+    /// by the caller (from the side-effect analyzer, which the engine does not
+    /// own). Both are required — they come from the index-backed caller, so
+    /// this builder is not reachable through the index-less analyze() dispatch.
     CodebaseIntelligenceResponse build_statistics(
         const CodebaseIntelligenceParams& params,
         const std::vector<FileSymbolData>& files,
-        std::string_view project_root = {},
-        double purity_ratio = 0.0) const;
+        std::string_view project_root,
+        double purity_ratio) const;
 
     /// Builds unified analysis (all tiers combined).
     CodebaseIntelligenceResponse build_unified(
@@ -128,13 +132,16 @@ class CodebaseIntelligenceEngine {
     /// Builds structure analysis (directory tree exploration). `file_paths`
     /// is the full set of indexed file paths (relativized against
     /// `project_root`); `file_count` and `total_functions` populate the
-    /// summary line. Populates structure_analysis.
+    /// summary line. Populates structure_analysis. All inputs are required —
+    /// they come from a live index, so this builder is only reachable through
+    /// the index-backed caller (the MCP handler); an empty `file_paths` would
+    /// yield an empty tree, so it is not defaulted.
     CodebaseIntelligenceResponse build_structure(
         const CodebaseIntelligenceParams& params,
         const std::vector<FileSymbolData>& files,
-        const std::vector<std::string>& file_paths = {},
-        std::string_view project_root = {}, int file_count = 0,
-        int total_functions = 0) const;
+        const std::vector<std::string>& file_paths,
+        std::string_view project_root, int file_count,
+        int total_functions) const;
 
 
   private:

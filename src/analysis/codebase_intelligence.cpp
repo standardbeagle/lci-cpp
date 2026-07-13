@@ -140,19 +140,30 @@ CodebaseIntelligenceEngine::Result CodebaseIntelligenceEngine::analyze(
         return Result{{}, "no files provided for analysis"};
     }
 
+    // detailed/statistics/structure need index-derived inputs (call-graph
+    // edges, project root, the full file-path set) that this pre-collected-data
+    // entry point cannot supply. Building them here would silently degrade the
+    // output — skipped feature clustering, an empty directory tree — so fail
+    // fast and direct callers to the index-backed builders, which the MCP
+    // handler invokes with those inputs. (No FALLBACKS / no silent empty
+    // sections.)
+    if (params.mode == "detailed" || params.mode == "statistics" ||
+        params.mode == "structure") {
+        return Result{
+            {}, "mode '" + params.mode +
+                    "' is not available through the index-less analyze() path; "
+                    "it requires the index-backed builders "
+                    "(build_detailed/build_statistics/build_structure) with "
+                    "call-graph, project-root and file-path inputs"};
+    }
+
     auto start = std::chrono::steady_clock::now();
 
     CodebaseIntelligenceResponse response;
     if (params.mode == "overview") {
         response = build_overview(params, files, file_count, symbol_count);
-    } else if (params.mode == "detailed") {
-        response = build_detailed(params, files);
-    } else if (params.mode == "statistics") {
-        response = build_statistics(params, files);
     } else if (params.mode == "unified") {
         response = build_unified(params, files, file_count, symbol_count);
-    } else if (params.mode == "structure") {
-        response = build_structure(params, files);
     }
     // git_analyze / git_hotspots are handled entirely in the MCP layer
     // (handle_code_insight), which owns the git::Provider; the engine has no
