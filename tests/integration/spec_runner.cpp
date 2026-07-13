@@ -121,6 +121,16 @@ void NormalizeMcpInnerText(nlohmann::json& node,
                             "symbol_count",
                             "total_size_bytes",
                             "contexts[].purity",
+                            // CLX S8: get_context's rich (mode/sections)
+                            // response wraps CodeObjectContext (whose
+                            // generated_at is wall-clock time.Now()) in a
+                            // performance/metadata envelope carrying its own
+                            // wall-clock timing breakdown. Neither is
+                            // load-bearing for parity; mask both so a
+                            // mode=semantic/full golden is reproducible.
+                            "context.generated_at",
+                            "performance.total_time_ms",
+                            "performance.component_breakdown",
                         };
                         inner_opts.sort_array_paths = {"results", "symbols",
                                                        "metrics_issues",

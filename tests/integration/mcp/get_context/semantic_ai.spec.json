@@ -1,0 +1,48 @@
+{
+  "id": "mcp/get_context/semantic_ai",
+  "golden": "goldens/mcp/get_context/semantic_ai.json",
+  "mode": "mcp",
+  "corpus": "multi-lang",
+  "go_binary": "${LCI_GO}",
+  "cpp_binary": "${LCI_CPP}",
+  "invocation": {
+    "args": [
+      "mcp"
+    ],
+    "stdin": "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"get_context\",\"arguments\":{\"name\":\"Add\",\"mode\":\"semantic\",\"include_ai_text\":true}}}",
+    "cwd": "${CORPUS}"
+  },
+  "capture": [
+    "stdout",
+    "exit"
+  ],
+  "parse": "json",
+  "_rationale": "CLX S8 (final get_context slice): mode=semantic selects [semantic, ai] sections; include_ai_text=true forces the ai section to populate rather than gate off. `Add` is trivial (2-line function, no branches) so no code_smells fire here -- this golden pins the AI SECTION SHAPE (natural_language_summary mentions the symbol name, all five ai_context keys present) end-to-end through the MCP envelope, complementing the direct-engine AiContextFixture unit tests (tests/mcp_handlers_core_test.cpp) that exercise the long-function/high-cyclomatic-complexity smell paths against a purpose-built high-complexity fixture the shared multi-lang corpus does not contain.",
+  "_rationale_sort_arrays": "Trap 1 (CLX port map): Go map/hash-iteration order is not stable across runs for several array-shaped fields this response can carry (e.g. ai_context.code_smells/best_practices/refactoring_suggestions, semantic_context.propagation_labels). None of those fire non-deterministically for this trivial `Add` fixture today, but the tier is declared so a future corpus/fixture change that does populate them compares set-wise (content match) rather than positional -- the same sort_arrays mechanism already used by tests/integration/http/search.spec.json and cli/search/json.spec.json for the identical class of non-determinism.",
+  "tiers": {
+    "stable": [
+      "result.content[].type",
+      "result.content[].text"
+    ],
+    "_rationale_stable": "Full envelope + body; content[].text carries the full JSON-RPC-wrapped get_context response (context + metadata + performance).",
+    "ignore": [
+      "id",
+      "jsonrpc",
+      "result.meta.elapsed_ms",
+      "result.meta.server_pid"
+    ],
+    "_rationale_ignore": "Standard JSON-RPC envelope noise plus timing residue. The metadata/performance envelope's own timing/index fields are masked inside content[].text by the MCP-mode inner-text normalization the runner already applies (spec_runner.cpp:NormalizeMcpInnerText) rather than by this outer tier map.",
+    "sort_arrays": [
+      "code_smells",
+      "best_practices",
+      "refactoring_suggestions",
+      "similar_objects",
+      "propagation_labels"
+    ]
+  },
+  "tolerances": {
+    "score_abs": 0.05,
+    "timed_max_ms": 60000
+  },
+  "expect_exit": 0
+}
