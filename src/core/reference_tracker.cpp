@@ -1,5 +1,7 @@
 #include <lci/core/reference_tracker.h>
 
+#include <absl/container/inlined_vector.h>
+
 #include <algorithm>
 #include <cctype>
 #include <cstddef>
@@ -9,7 +11,7 @@
 namespace lci {
 
 namespace {
-uint8_t language_group_for_path(std::string_view path);
+ReferenceTracker::LangFamily language_family_for_path(std::string_view path);
 bool is_low_quality_path(std::string_view path);
 }  // namespace
 
@@ -221,7 +223,7 @@ std::vector<EnhancedSymbol> ReferenceTracker::process_file(
     enhanced.reserve(symbols.size());
 
     file_resolution_meta_[file_id] = FileResolutionMeta{
-        language_group_for_path(path), is_low_quality_path(path)};
+        language_family_for_path(path), is_low_quality_path(path)};
 
     write_snapshot([&](Snapshot& s) {
         s.scopes_by_file[file_id].assign(scopes.begin(), scopes.end());
@@ -749,29 +751,32 @@ bool symbol_matches_receiver_type(const EnhancedSymbol& sym,
     return false;
 }
 
-// Language family for cross-language link gating. Families, not exact
-// languages: C/C++ headers and JS/TS interop legitimately share symbols
-// within a family, but a Python call must never resolve into a C++ file.
-uint8_t language_group_for_path(std::string_view path) {
+// See LangFamily in the header for why families rather than exact languages.
+// NOTE: this extension table overlaps FileScanner::detect_language and
+// friends; a shared extension→language map is tracked as consolidation debt
+// (the family grouping here is deliberately coarser than Language).
+ReferenceTracker::LangFamily language_family_for_path(std::string_view path) {
+    using LF = ReferenceTracker::LangFamily;
     auto dot = path.rfind('.');
-    if (dot == std::string_view::npos) return 0;
+    if (dot == std::string_view::npos) return LF::kUnknown;
     std::string_view ext = path.substr(dot + 1);
-    if (ext == "py" || ext == "pyx" || ext == "pxd" || ext == "pyi") return 1;
+    if (ext == "py" || ext == "pyx" || ext == "pxd" || ext == "pyi")
+        return LF::kPython;
     if (ext == "c" || ext == "cc" || ext == "cpp" || ext == "cxx" ||
         ext == "h" || ext == "hh" || ext == "hpp" || ext == "cu")
-        return 2;
+        return LF::kCFamily;
     if (ext == "js" || ext == "jsx" || ext == "mjs" || ext == "cjs" ||
         ext == "ts" || ext == "tsx")
-        return 3;
-    if (ext == "go") return 4;
-    if (ext == "java") return 5;
-    if (ext == "cs") return 6;
-    if (ext == "rs") return 7;
-    if (ext == "php") return 8;
-    if (ext == "kt" || ext == "kts") return 9;
-    if (ext == "rb") return 10;
-    if (ext == "zig") return 11;
-    return 0;
+        return LF::kJsTs;
+    if (ext == "go") return LF::kGo;
+    if (ext == "java") return LF::kJava;
+    if (ext == "cs") return LF::kCSharp;
+    if (ext == "rs") return LF::kRust;
+    if (ext == "php") return LF::kPhp;
+    if (ext == "kt" || ext == "kts") return LF::kKotlin;
+    if (ext == "rb") return LF::kRuby;
+    if (ext == "zig") return LF::kZig;
+    return LF::kUnknown;
 }
 
 // Test/example/vendored files lose to library code when an ambiguous name
@@ -851,22 +856,25 @@ SymbolID ReferenceTracker::resolve_reference_target(
     auto candidates = s.symbols.get_symbols_by_name(name);
     SymbolID resolved = 0;
     if (!candidates.empty()) {
-        uint8_t ref_group = 0;
+        LangFamily ref_family = LangFamily::kUnknown;
         if (auto mit = file_resolution_meta_.find(ref.file_id);
             mit != file_resolution_meta_.end()) {
-            ref_group = mit->second.lang_group;
+            ref_family = mit->second.language_family;
         }
-        std::vector<SymbolID> filtered;
-        filtered.reserve(candidates.size());
+        // Inline capacity covers the overwhelmingly common 1-2 candidate
+        // case; this runs per cache-miss on the index-build path, so a
+        // throwaway heap allocation here is against the perf mandate.
+        absl::InlinedVector<SymbolID, 8> filtered;
         for (SymbolID id : candidates) {
             const auto* sym = s.symbols.get(id);
             if (sym == nullptr) continue;
-            uint8_t g = 0;
+            LangFamily family = LangFamily::kUnknown;
             if (auto it2 = file_resolution_meta_.find(sym->symbol.file_id);
                 it2 != file_resolution_meta_.end()) {
-                g = it2->second.lang_group;
+                family = it2->second.language_family;
             }
-            if (ref_group == 0 || g == 0 || g == ref_group) {
+            if (ref_family == LangFamily::kUnknown ||
+                family == LangFamily::kUnknown || family == ref_family) {
                 filtered.push_back(id);
             }
         }

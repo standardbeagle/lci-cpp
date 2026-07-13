@@ -223,6 +223,24 @@ struct ScopeChainCacheEntry {
 
 class ReferenceTracker {
   public:
+    /// Language family for cross-language link gating. Families, not exact
+    /// languages: C/C++ headers and JS/TS interop legitimately share symbols
+    /// within a family, but a Python call must never resolve into a C++ file.
+    enum class LangFamily : uint8_t {
+        kUnknown = 0,
+        kPython,
+        kCFamily,
+        kJsTs,
+        kGo,
+        kJava,
+        kCSharp,
+        kRust,
+        kPhp,
+        kKotlin,
+        kRuby,
+        kZig,
+    };
+
     explicit ReferenceTracker(SymbolLocationIndex* location_index = nullptr);
 
     // -- File processing -----------------------------------------------------
@@ -385,11 +403,10 @@ class ReferenceTracker {
     absl::flat_hash_map<uint64_t, ScopeChainCacheEntry> scope_chain_cache_;
 
     /// Per-file resolution metadata derived from the path at process_file
-    /// time. lang_group gates cross-language linking (a Python call must not
-    /// resolve to a same-named C++ symbol in a vendored tree); low_quality
+    /// time. language_family gates cross-language linking; low_quality
     /// demotes test/example/vendored files in the ambiguous-name fallback.
     struct FileResolutionMeta {
-        uint8_t lang_group{0};  // 0 = unknown, otherwise a language family
+        LangFamily language_family{LangFamily::kUnknown};
         bool low_quality{false};
     };
     absl::flat_hash_map<FileID, FileResolutionMeta> file_resolution_meta_;
