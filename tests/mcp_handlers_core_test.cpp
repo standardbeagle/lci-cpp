@@ -1860,6 +1860,135 @@ TEST(SearchHelpers, ExpandPatternSynonymsNonGroupWordStaysSingle) {
     EXPECT_FALSE(flags[0]);
 }
 
+// =============================================================================
+// CLX S4 — VariableContext (fill_variable_context) port parity
+// =============================================================================
+// Exercises the six VariableContext buckets against a real Go index. The C++
+// Go extractor emits package var/const, struct fields, and `var`-declared
+// locals as symbols; it does NOT emit `:=` short-var locals or parameters as
+// symbols, so the fixture uses `var` locals deliberately. See the per-bucket
+// comments below for the traps each assertion pins:
+//   trap 4  — class/global var type = real-type field (type_info); local/param
+//             type = symbol-KIND string.
+//   trap 5  — return_values is ALWAYS [] (never populated).
+//   trap 6d — parameter detection is Go's self-referential scope heuristic
+//             (bug-for-bug); on this index it yields no params.
+//   folder-scope trap — every symbol's scope chain carries a `folder` scope
+//             (EndLine=0), so getGlobalVariables' "all scopes ∈
+//             File/Package/Namespace" gate always rejects → globals empty.
+
+class VariableContextFixture : public ::testing::Test {
+  protected:
+    void SetUp() override {
+        temp_dir_ = lci::test::unique_temp_dir("lci_varctx_test_");
+        std::filesystem::create_directories(temp_dir_);
+        std::ofstream(temp_dir_ / "vars.go") << R"(package sample
+
+var GlobalCounter = 0
+const MaxItems = 100
+
+type Widget struct {
+	Name  string
+	Count int
+}
+
+func Process(input string, limit int) int {
+	var total int = 0
+	var scratch string = input
+	return total + len(scratch)
+}
+)";
+        Config config;
+        config.project.root = temp_dir_.string();
+        indexer_ = std::make_unique<MasterIndex>(config);
+        indexer_->index_directory(temp_dir_.string());
+    }
+
+    void TearDown() override {
+        indexer_.reset();
+        std::error_code ec;
+        std::filesystem::remove_all(temp_dir_, ec);
+    }
+
+    // Resolves a symbol by name to a CodeObjectID (as get_context expects).
+    CodeObjectID object_id_for(const std::string& name) {
+        auto snap = indexer_->ref_tracker().pin();
+        auto syms = snap->find_symbols_by_name(name);
+        EXPECT_FALSE(syms.empty()) << "no symbol named " << name;
+        CodeObjectID oid;
+        if (syms.empty()) return oid;
+        const auto& s = syms.front();
+        oid.file_id = s->symbol.file_id;
+        oid.symbol_id = encode_symbol_id(s->id);
+        oid.name = std::string(s->symbol.name);
+        oid.type = s->symbol.type;
+        return oid;
+    }
+
+    std::filesystem::path temp_dir_;
+    std::unique_ptr<MasterIndex> indexer_;
+};
+
+// A struct object populates class_variables from its field symbols. Trap:
+// getClassVariables' dual gate (line-range nesting AND scope-chain class/struct
+// membership) admits the Widget fields; the fill gate is widened to Struct
+// (Go's getClassVariables body already supports Struct).
+TEST_F(VariableContextFixture, StructPopulatesClassVariables) {
+    ContextLookupEngine engine(*indexer_);
+    bool ok = false;
+    auto ctx = engine.get_context(object_id_for("Widget"), ok);
+    ASSERT_TRUE(ok);
+
+    const auto& cvars = ctx.variable_context.class_variables;
+    ASSERT_EQ(cvars.size(), 2u);
+    // Deterministic order (trap 1): sorted by line -> Name(7), Count(8).
+    EXPECT_EQ(cvars[0].name, "Name");
+    EXPECT_EQ(cvars[1].name, "Count");
+    for (const auto& v : cvars) {
+        EXPECT_EQ(v.scope, "class");
+        EXPECT_FALSE(v.is_mutable);  // index carries is_mutable=false for fields
+        // trap 4: class-var type is the real-type field (type_info), NOT the
+        // symbol-KIND string. The C++ Go index leaves type_info empty here.
+        EXPECT_NE(v.type, "field");
+        EXPECT_NE(v.type, "variable");
+    }
+    // A struct is neither a function nor a global holder.
+    EXPECT_TRUE(ctx.variable_context.local_variables.empty());
+    EXPECT_TRUE(ctx.variable_context.parameters.empty());
+    EXPECT_TRUE(ctx.variable_context.return_values.empty());
+    EXPECT_TRUE(ctx.variable_context.global_variables.empty());
+}
+
+// A function object populates local_variables from `var`-declared locals with
+// is_mutable=true and the symbol-KIND type string (trap 4 local path).
+TEST_F(VariableContextFixture, FunctionPopulatesLocalsAndPinsParamsReturns) {
+    ContextLookupEngine engine(*indexer_);
+    bool ok = false;
+    auto ctx = engine.get_context(object_id_for("Process"), ok);
+    ASSERT_TRUE(ok);
+
+    const auto& locals = ctx.variable_context.local_variables;
+    ASSERT_EQ(locals.size(), 2u);
+    EXPECT_EQ(locals[0].name, "total");    // line 12
+    EXPECT_EQ(locals[1].name, "scratch");  // line 13
+    for (const auto& v : locals) {
+        EXPECT_EQ(v.scope, "local");
+        EXPECT_TRUE(v.is_mutable);  // getLocalVariables hardcodes is_mutable=true
+        // trap 4: local-var type is the symbol-KIND string, not a real type.
+        EXPECT_EQ(v.type, "variable");
+    }
+
+    // trap 6d: the self-referential parameter heuristic finds no params on this
+    // index (the Go extractor emits no parameter symbols). Pin empty.
+    EXPECT_TRUE(ctx.variable_context.parameters.empty());
+    // trap 5: return_values is ALWAYS []. Pin empty.
+    EXPECT_TRUE(ctx.variable_context.return_values.empty());
+    // folder-scope trap: package var/const never qualify as global.
+    EXPECT_TRUE(ctx.variable_context.global_variables.empty());
+    EXPECT_TRUE(ctx.variable_context.used_globals.empty());
+    EXPECT_TRUE(ctx.variable_context.class_variables.empty());
+}
+
 }  // namespace
 }  // namespace mcp
 }  // namespace lci
