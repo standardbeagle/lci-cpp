@@ -467,9 +467,10 @@ int main(int argc, char* argv[]) {
                        "Include lexical-only matches (strings/comments/"
                        "docstrings) in a separate section");
     bool refs_count = false;
-    refs_cmd->add_flag("-c,--count", refs_count,
-                       "Print only the number of code references "
-                       "(with --all: code + lexical)");
+    refs_cmd->add_flag("--count", refs_count,
+                       "Print a single total of code references "
+                       "(unlike search/grep --count, which is per-file; "
+                       "with --all: code + lexical)");
     bool refs_terse = false;
     refs_cmd->add_flag("--terse", refs_terse,
                        "One line per reference: path:line");
