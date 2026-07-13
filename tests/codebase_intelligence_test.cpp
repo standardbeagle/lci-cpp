@@ -1135,6 +1135,37 @@ TEST(CIEngine, BuildStructurePopulatedWithFilePaths) {
     EXPECT_FALSE(resp.structure_analysis->top_dirs.empty());
 }
 
+// build_structure must categorize files through the canonical classify_file
+// rule (1:1 FileCategory mapping), NOT loose substring matching. Regression
+// guard for the review finding: the old code used rel.find("/test"), which
+// wrongly counted any path under a "/testing/" directory as a test, and
+// rel.find(".md") which matched a mid-path ".md". A file under "/testing/"
+// with no test basename marker is source code, not a test.
+TEST(CIEngine, BuildStructureCategorizesViaClassifyFile) {
+    CodebaseIntelligenceEngine engine;
+    CodebaseIntelligenceParams params;
+    params.mode = "structure";
+
+    std::vector<std::string> file_paths = {
+        "/proj/src/testing/helper.cpp",  // /testing/ dir -> code, NOT test
+        "/proj/src/widget_test.cpp",     // _test. basename -> test
+        "/proj/docs/guide.md",           // .md extension -> docs
+        "/proj/config/settings.json",    // .json extension -> config
+    };
+
+    auto resp = engine.build_structure(params, {}, file_paths, "/proj",
+                                       /*file_count=*/4, /*total_functions=*/0);
+    ASSERT_TRUE(resp.structure_analysis.has_value());
+    const auto& s = *resp.structure_analysis;
+
+    // The "/testing/" file is source, so exactly one real test file counts.
+    EXPECT_EQ(s.tests, 1);
+    // The "/testing/" file lands in code, giving one code file.
+    EXPECT_EQ(s.code, 1);
+    EXPECT_EQ(s.docs, 1);
+    EXPECT_EQ(s.config, 1);
+}
+
 TEST(CIEngine, GitAnalyzeModeDispatch) {
     CodebaseIntelligenceEngine engine;
     CodebaseIntelligenceParams params;
