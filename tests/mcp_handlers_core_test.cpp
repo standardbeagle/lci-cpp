@@ -20,6 +20,7 @@
 #include <filesystem>
 #include <fstream>
 #include <set>
+#include <sstream>
 #include <string>
 
 namespace lci {
@@ -2773,6 +2774,188 @@ TEST_F(UsageAnalysisFixture, RequiresTestsAlwaysTrueTestCoverageAlwaysEmpty) {
     EXPECT_TRUE(ctx.usage_analysis.change_impact.requires_tests);
     EXPECT_FALSE(ctx.usage_analysis.test_coverage.has_tests);
     EXPECT_TRUE(ctx.usage_analysis.test_coverage.test_file_paths.empty());
+}
+
+// =============================================================================
+// ai_context (CLX S8) — C++ port of internal/core/context_lookup_ai.go
+// =============================================================================
+// `ComplexOp` has 18 sequential `if` branches (cyclomatic complexity ~19,
+// well past the >10 high-cyclomatic-complexity threshold and the summary's
+// >5 "high cyclomatic complexity" phrase threshold) and ~58 source lines
+// (past the >50 long-function threshold). `Simple` is a trivial one-liner
+// used to pin the include_ai_text=false gate without a smell/suggestion
+// signal muddying the assertion.
+class AiContextFixture : public ::testing::Test {
+  protected:
+    void SetUp() override {
+        temp_dir_ = lci::test::unique_temp_dir("lci_aictx_test_");
+        std::filesystem::create_directories(temp_dir_);
+        std::ostringstream src;
+        src << "package sample\n\nfunc Simple(x int) int {\n\treturn x\n}\n\n"
+               "func ComplexOp(a int) int {\n\tx := 0\n";
+        for (int i = 1; i <= 18; ++i) {
+            src << "\tif a > " << i << " {\n\t\tx++\n\t}\n";
+        }
+        src << "\treturn x\n}\n";
+        std::ofstream(temp_dir_ / "complex.go") << src.str();
+
+        Config config;
+        config.project.root = temp_dir_.string();
+        indexer_ = std::make_unique<MasterIndex>(config);
+        indexer_->index_directory(temp_dir_.string());
+    }
+
+    void TearDown() override {
+        indexer_.reset();
+        std::error_code ec;
+        std::filesystem::remove_all(temp_dir_, ec);
+    }
+
+    CodeObjectID object_id_for(const std::string& name) {
+        auto snap = indexer_->ref_tracker().pin();
+        auto syms = snap->find_symbols_by_name(name);
+        EXPECT_FALSE(syms.empty()) << "no symbol named " << name;
+        CodeObjectID oid;
+        if (syms.empty()) return oid;
+        const auto& s = syms.front();
+        oid.file_id = s->symbol.file_id;
+        oid.symbol_id = encode_symbol_id(s->id);
+        oid.name = std::string(s->symbol.name);
+        oid.type = s->symbol.type;
+        return oid;
+    }
+
+    std::filesystem::path temp_dir_;
+    std::unique_ptr<MasterIndex> indexer_;
+};
+
+// RED (per task acceptance criteria): mode=semantic + include_ai_text ->
+// summary mentions the symbol name.
+TEST_F(AiContextFixture, SummaryMentionsSymbolName) {
+    ContextLookupEngine engine(*indexer_);
+    engine.set_include_ai_text(true);
+    bool ok = false;
+    auto ctx = engine.get_context(object_id_for("Simple"), ok);
+    ASSERT_TRUE(ok);
+
+    EXPECT_NE(ctx.ai_context.natural_language_summary.find("Simple"),
+             std::string::npos)
+        << ctx.ai_context.natural_language_summary;
+}
+
+// RED: high-complexity/long fixture -> long-function code smell, with a
+// severity, keyed to the function's own location.
+TEST_F(AiContextFixture, LongFunctionSmellDetected) {
+    ContextLookupEngine engine(*indexer_);
+    engine.set_include_ai_text(true);
+    bool ok = false;
+    auto oid = object_id_for("ComplexOp");
+    auto ctx = engine.get_context(oid, ok);
+    ASSERT_TRUE(ok);
+
+    bool found = false;
+    for (const auto& smell : ctx.ai_context.code_smells) {
+        if (smell.type == "long-function") {
+            found = true;
+            EXPECT_FALSE(smell.severity.empty());
+            EXPECT_EQ(smell.location.file_id, oid.file_id);
+        }
+    }
+    EXPECT_TRUE(found) << "expected a long-function code smell";
+}
+
+// High cyclomatic complexity (>10) is also its own smell, independent of
+// the long-function check.
+TEST_F(AiContextFixture, HighCyclomaticComplexitySmellDetected) {
+    ContextLookupEngine engine(*indexer_);
+    engine.set_include_ai_text(true);
+    bool ok = false;
+    auto ctx = engine.get_context(object_id_for("ComplexOp"), ok);
+    ASSERT_TRUE(ok);
+
+    bool found = false;
+    for (const auto& smell : ctx.ai_context.code_smells) {
+        if (smell.type == "high-cyclomatic-complexity") found = true;
+    }
+    EXPECT_TRUE(found);
+}
+
+// best_practices is never empty once ai text is included (Go always appends
+// two baseline naming/self-documentation practices unconditionally).
+TEST_F(AiContextFixture, BestPracticesNonEmpty) {
+    ContextLookupEngine engine(*indexer_);
+    engine.set_include_ai_text(true);
+    bool ok = false;
+    auto ctx = engine.get_context(object_id_for("Simple"), ok);
+    ASSERT_TRUE(ok);
+
+    EXPECT_FALSE(ctx.ai_context.best_practices.empty());
+}
+
+// similar_objects is capped at <=5 (trap 5: Go's finder chain is a stub that
+// always yields empty, so this is trivially satisfied — asserted anyway as
+// the acceptance-criteria cap).
+TEST_F(AiContextFixture, SimilarObjectsCappedAtFive) {
+    ContextLookupEngine engine(*indexer_);
+    engine.set_include_ai_text(true);
+    bool ok = false;
+    auto ctx = engine.get_context(object_id_for("ComplexOp"), ok);
+    ASSERT_TRUE(ok);
+
+    EXPECT_LE(ctx.ai_context.similar_objects.size(), 5u);
+}
+
+// include_ai_text=false gates the WHOLE section, per task spec — every field
+// stays default/empty even for a fixture that would otherwise trigger smells.
+TEST_F(AiContextFixture, IncludeAiTextFalseSkipsWholeSection) {
+    ContextLookupEngine engine(*indexer_);
+    engine.set_include_ai_text(false);
+    bool ok = false;
+    auto ctx = engine.get_context(object_id_for("ComplexOp"), ok);
+    ASSERT_TRUE(ok);
+
+    EXPECT_TRUE(ctx.ai_context.natural_language_summary.empty());
+    EXPECT_TRUE(ctx.ai_context.code_smells.empty());
+    EXPECT_TRUE(ctx.ai_context.best_practices.empty());
+    EXPECT_TRUE(ctx.ai_context.refactoring_suggestions.empty());
+    EXPECT_TRUE(ctx.ai_context.similar_objects.empty());
+}
+
+// Trap 6a (Go ordering bug, ported bug-for-bug): generateRefactoringSuggestions
+// reads AIContext.CodeSmells BEFORE detectCodeSmells populates it, so the
+// smell-driven suggestion line ("Address <type>: <description>") never
+// fires even when code_smells ends up non-empty.
+TEST_F(AiContextFixture, RefactoringSuggestionsNeverReflectSameRequestSmells) {
+    ContextLookupEngine engine(*indexer_);
+    engine.set_include_ai_text(true);
+    bool ok = false;
+    auto ctx = engine.get_context(object_id_for("ComplexOp"), ok);
+    ASSERT_TRUE(ok);
+
+    ASSERT_FALSE(ctx.ai_context.code_smells.empty());
+    for (const auto& suggestion : ctx.ai_context.refactoring_suggestions) {
+        EXPECT_EQ(suggestion.find("Address "), std::string::npos)
+            << "trap 6a: suggestions must not reflect this request's own "
+               "code_smells (Go reads them before detection runs): "
+            << suggestion;
+    }
+}
+
+// End-to-end through the MCP handler: mode=semantic selects
+// [semantic, ai]; the ai section is populated (not just present-but-empty).
+TEST_F(AiContextFixture, HandlerModeSemanticPopulatesAiSection) {
+    nlohmann::json params;
+    params["name"] = "ComplexOp";
+    params["mode"] = "semantic";
+    auto result = handle_get_context(params, *indexer_);
+    ASSERT_FALSE(result.is_error) << result.text;
+    auto json = nlohmann::json::parse(result.text);
+    ASSERT_TRUE(json.contains("context")) << result.text;
+    const auto& ai = json["context"]["ai_context"];
+    EXPECT_NE(ai["natural_language_summary"].get<std::string>().find("ComplexOp"),
+             std::string::npos);
+    EXPECT_FALSE(ai["code_smells"].empty());
+    EXPECT_FALSE(ai["best_practices"].empty());
 }
 
 }  // namespace
