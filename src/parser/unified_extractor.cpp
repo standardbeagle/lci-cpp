@@ -3,6 +3,7 @@
 
 #include <lci/analysis/side_effect_analyzer.h>
 
+#include <absl/container/flat_hash_set.h>
 #include <tree_sitter/api.h>
 
 #include <algorithm>
@@ -237,12 +238,19 @@ void UnifiedExtractor::extract(TSTree* tree) {
     // cannot turn into symbols. Detect Cython by the real path (ext_ has been
     // normalised to ".py") and recover them from a light source scan.
     if (path_.ends_with(".pyx") || path_.ends_with(".pxd")) {
+        // One pass over existing symbols instead of an any_of scan per
+        // recovered callable — large .pyx files made that quadratic. Keys
+        // are owned copies: views into symbols_ would dangle when push_back
+        // reallocates the vector (SSO names relocate on move).
+        absl::flat_hash_set<std::pair<int, std::string>> seen;
+        seen.reserve(symbols_.size());
+        for (const Symbol& s : symbols_) {
+            seen.emplace(s.line, s.name);
+        }
         for (auto& sym : scan_cython_callables(content_, file_id_)) {
-            bool exists = std::any_of(
-                symbols_.begin(), symbols_.end(), [&](const Symbol& s) {
-                    return s.line == sym.line && s.name == sym.name;
-                });
-            if (!exists) symbols_.push_back(std::move(sym));
+            if (seen.emplace(sym.line, sym.name).second) {
+                symbols_.push_back(std::move(sym));
+            }
         }
     }
 }
