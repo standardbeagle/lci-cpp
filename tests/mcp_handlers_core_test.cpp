@@ -2617,6 +2617,164 @@ TEST_F(SemanticContextFixture, HandlerNamePurposeHeuristic) {
     EXPECT_DOUBLE_EQ(ctx.semantic_context.confidence, 0.9);
 }
 
+// =============================================================================
+// CLX S6 — UsageAnalysis (fill_usage_analysis) port parity
+// =============================================================================
+// Fixture: Target(x int) branches on `if x > 0` (cyclomatic complexity 2 on
+// this extractor) and calls helperA/helperB (fan_out=2). Three callers
+// (callerOne/Two/Three) invoke Target — real callers, visible in
+// direct_relationships.caller_functions — but fan_in is pinned to 0.
+//
+// Trap 10 empirical finding (MANDATORY per task spec, verified BEFORE writing
+// any C++ code): the actual Go binary at /home/beagle/work/core/lci/lci was
+// driven over stdio MCP JSON-RPC (initialize -> tools/call "search" ->
+// tools/call "get_context" mode=full) against a hand-built Go fixture with a
+// `target` function having 3 real callers (callerOne/Two/Three) and 2 real
+// callees (helperA/helperB). Go's own get_context response showed
+// caller_functions correctly populated with all 3 callers (confidence 0.95
+// each) YET usage_analysis.fan_in was 0 and usage_analysis.call_frequency was
+// 0, while fan_out was correctly 2. Root cause read from
+// internal/core/context_lookup_usage.go: calculateFanIn/calculateCallFrequency
+// both route through the LEGACY `cle.symbolIndex.FindReferences` +
+// `findContainingFunction` path (the same tree-sitter-AST-based helper the S3
+// port map already identified as dead under the index-driven live path — see
+// context_lookup_relationships.cpp's file-level comment), which does not
+// populate under this build and yields zero every time. fan_out, by contrast,
+// routes through `getCalledFunctions` (the index-driven live path, already
+// ported in S3), and is correctly non-zero. This port pins fan_in and
+// call_frequency to 0 as constant stubs (same treatment as trap 5's
+// test_coverage/requires_tests) rather than computing them from the call
+// graph, matching OBSERVED Go behavior rather than a plausible-looking
+// derivation from caller_functions.size().
+class UsageAnalysisFixture : public ::testing::Test {
+  protected:
+    void SetUp() override {
+        temp_dir_ = lci::test::unique_temp_dir("lci_usagectx_test_");
+        std::filesystem::create_directories(temp_dir_);
+        std::ofstream(temp_dir_ / "usage.go") << R"(package sample
+
+func Target(x int) int {
+	if x > 0 {
+		return helperA(x)
+	}
+	return helperB(x)
+}
+
+func helperA(x int) int { return x + 1 }
+func helperB(x int) int { return x - 1 }
+
+func callerOne() int { return Target(1) }
+func callerTwo() int { return Target(2) }
+func callerThree() int { return Target(3) }
+)";
+        Config config;
+        config.project.root = temp_dir_.string();
+        indexer_ = std::make_unique<MasterIndex>(config);
+        indexer_->index_directory(temp_dir_.string());
+    }
+
+    void TearDown() override {
+        indexer_.reset();
+        std::error_code ec;
+        std::filesystem::remove_all(temp_dir_, ec);
+    }
+
+    CodeObjectID object_id_for(const std::string& name) {
+        auto snap = indexer_->ref_tracker().pin();
+        auto syms = snap->find_symbols_by_name(name);
+        EXPECT_FALSE(syms.empty()) << "no symbol named " << name;
+        CodeObjectID oid;
+        if (syms.empty()) return oid;
+        const auto& s = syms.front();
+        oid.file_id = s->symbol.file_id;
+        oid.symbol_id = encode_symbol_id(s->id);
+        oid.name = std::string(s->symbol.name);
+        oid.type = s->symbol.type;
+        return oid;
+    }
+
+    std::filesystem::path temp_dir_;
+    std::unique_ptr<MasterIndex> indexer_;
+};
+
+// trap 10: fan_in stays 0 despite 3 real callers visible in caller_functions
+// (see file-level comment for the empirical Go-binary trace). fan_out is the
+// real, correctly-derived call-graph count (helperA + helperB).
+TEST_F(UsageAnalysisFixture, FanOutCountsCalleesFanInPinnedZeroPerTrap10) {
+    ContextLookupEngine engine(*indexer_);
+    bool ok = false;
+    auto ctx = engine.get_context(object_id_for("Target"), ok);
+    ASSERT_TRUE(ok);
+
+    ASSERT_EQ(ctx.direct_relationships.caller_functions.size(), 3u)
+        << "fixture sanity: Target should have 3 real callers";
+    EXPECT_EQ(ctx.usage_analysis.fan_out, 2);
+    EXPECT_EQ(ctx.usage_analysis.fan_in, 0);
+    EXPECT_EQ(ctx.usage_analysis.call_frequency, 0);
+}
+
+// complexity_metrics mirror EnhancedSymbol fields directly (cyclomatic =
+// Complexity, cognitive = Complexity [Go's fallback for both is the same
+// indexed field], line_count = EndLine-Line, nesting_depth = Complexity/2 when
+// Complexity>1).
+TEST_F(UsageAnalysisFixture, ComplexityMetricsMirrorSymbolFields) {
+    auto snap = indexer_->ref_tracker().pin();
+    auto oid = object_id_for("Target");
+    auto target_syms = snap->find_symbols_by_name("Target");
+    ASSERT_FALSE(target_syms.empty());
+    const auto& target_sym = target_syms.front();
+
+    ContextLookupEngine engine(*indexer_);
+    bool ok = false;
+    auto ctx = engine.get_context(oid, ok);
+    ASSERT_TRUE(ok);
+
+    const auto& metrics = ctx.usage_analysis.complexity_metrics;
+    EXPECT_EQ(metrics.cyclomatic_complexity, target_sym->complexity);
+    EXPECT_EQ(metrics.cognitive_complexity, target_sym->complexity);
+    EXPECT_EQ(metrics.line_count,
+             target_sym->symbol.end_line > target_sym->symbol.line
+                 ? target_sym->symbol.end_line - target_sym->symbol.line
+                 : 0);
+    // This indexer never populates EnhancedSymbol.parameter_count (verified:
+    // it stays 0 for every symbol on this build), so the port's Go-mirrored
+    // fallback (parse the signature's parenthesized param list; 0 commas + a
+    // "(" present -> 1 param) is the path actually exercised here for
+    // Target(x int) — a single, unnamed-comma parameter.
+    EXPECT_EQ(metrics.parameter_count, 1);
+    EXPECT_EQ(metrics.nesting_depth, target_sym->complexity > 1
+                                         ? target_sym->complexity / 2
+                                         : 0);
+}
+
+// change_impact: low risk (fan_in=0, fan_out=2, both <=3); dependent_components
+// derives one module name from the 3 callers (all in the same file/module, so
+// it dedups to a single entry).
+TEST_F(UsageAnalysisFixture, ChangeImpactLowRiskAndDependentComponentsFromCallers) {
+    ContextLookupEngine engine(*indexer_);
+    bool ok = false;
+    auto ctx = engine.get_context(object_id_for("Target"), ok);
+    ASSERT_TRUE(ok);
+
+    const auto& impact = ctx.usage_analysis.change_impact;
+    EXPECT_EQ(impact.breaking_change_risk, "low");
+    ASSERT_EQ(impact.dependent_components.size(), 1u);
+    EXPECT_EQ(impact.dependent_components[0], temp_dir_.filename().string());
+}
+
+// trap 5: requires_tests is always true; test_coverage is always
+// false/empty — both Go stub values, pinned as constants, not computed.
+TEST_F(UsageAnalysisFixture, RequiresTestsAlwaysTrueTestCoverageAlwaysEmpty) {
+    ContextLookupEngine engine(*indexer_);
+    bool ok = false;
+    auto ctx = engine.get_context(object_id_for("Target"), ok);
+    ASSERT_TRUE(ok);
+
+    EXPECT_TRUE(ctx.usage_analysis.change_impact.requires_tests);
+    EXPECT_FALSE(ctx.usage_analysis.test_coverage.has_tests);
+    EXPECT_TRUE(ctx.usage_analysis.test_coverage.test_file_paths.empty());
+}
+
 }  // namespace
 }  // namespace mcp
 }  // namespace lci
