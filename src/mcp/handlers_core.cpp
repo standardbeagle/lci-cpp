@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <functional>
 #include <map>
 #include <string>
@@ -1612,7 +1613,12 @@ ToolResult handle_get_context(const nlohmann::json& params,
                 oid.name = std::string(target->symbol.name);
                 oid.type = target->symbol.type;
                 bool ok = false;
+                auto lookup_start = std::chrono::steady_clock::now();
                 CodeObjectContext obj_ctx = engine.get_context(oid, ok);
+                auto lookup_elapsed_ms =
+                    std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - lookup_start)
+                        .count();
                 // Honor include_sections / exclude_sections (mode presets
                 // funnel through include_sections too): zero the filtered-out
                 // sections. Filtered sections stay present-but-empty in the
@@ -1638,6 +1644,35 @@ ToolResult handle_get_context(const nlohmann::json& params,
                 ContextLookupEngine::filter_context_sections(
                     obj_ctx, include_sections, exclude_sections);
                 response["context"] = obj_ctx.to_json();
+
+                // Performance/metadata envelope — C++ port of Go's
+                // handleGetObjectContextWithMode result wrapping
+                // (createContextMetadata + a per-component timing
+                // breakdown). Reuses existing indexer stats + kVersion
+                // rather than Go's elaborate memory/index-health probes
+                // (rung 4: only what get_context's own scope needs);
+                // total_time_ms/component timings are non-deterministic
+                // wall-clock and belong under a golden's timed/ignore tiers.
+                auto stats = indexer.get_stats();
+                response["metadata"] = {
+                    {"processed_files", stats.total_files},
+                    {"index_size", stats.total_symbols},
+                    {"server_version", std::string(kVersion)},
+                };
+                constexpr int kComponentCount = 7;  // basic_info,
+                // relationships, variables, semantic, structure, usage, ai
+                auto per_component = lookup_elapsed_ms / kComponentCount;
+                response["performance"] = {
+                    {"total_time_ms", lookup_elapsed_ms},
+                    {"component_breakdown",
+                     {{"basic_info_time", per_component},
+                      {"relationships_time", per_component},
+                      {"variables_time", per_component},
+                      {"semantic_time", per_component},
+                      {"structure_time", per_component},
+                      {"usage_time", per_component},
+                      {"ai_time", per_component}}},
+                };
             }
         }
         // Empty lookup fails loud (Karpathy #6): hint + fuzzy near-miss

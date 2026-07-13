@@ -2958,6 +2958,34 @@ TEST_F(AiContextFixture, HandlerModeSemanticPopulatesAiSection) {
     EXPECT_FALSE(ai["best_practices"].empty());
 }
 
+// The rich (mode/sections) get_context path wraps the context in a
+// performance/metadata envelope — Go parity: handleGetObjectContextWithMode's
+// {"context", "metadata", "performance"} result shape (component timing +
+// server/index metadata alongside the context payload).
+TEST_F(AiContextFixture, HandlerRichRequestCarriesPerformanceMetadataEnvelope) {
+    nlohmann::json params;
+    params["name"] = "ComplexOp";
+    params["mode"] = "semantic";
+    auto result = handle_get_context(params, *indexer_);
+    ASSERT_FALSE(result.is_error) << result.text;
+    auto json = nlohmann::json::parse(result.text);
+    ASSERT_TRUE(json.contains("context")) << result.text;
+
+    ASSERT_TRUE(json.contains("metadata")) << result.text;
+    EXPECT_TRUE(json["metadata"].contains("server_version"));
+    EXPECT_TRUE(json["metadata"].contains("processed_files"));
+
+    ASSERT_TRUE(json.contains("performance")) << result.text;
+    EXPECT_TRUE(json["performance"].contains("total_time_ms"));
+    ASSERT_TRUE(json["performance"].contains("component_breakdown"));
+    const auto& breakdown = json["performance"]["component_breakdown"];
+    for (const char* key : {"basic_info_time", "relationships_time",
+                            "variables_time", "semantic_time",
+                            "structure_time", "usage_time", "ai_time"}) {
+        EXPECT_TRUE(breakdown.contains(key)) << key;
+    }
+}
+
 }  // namespace
 }  // namespace mcp
 }  // namespace lci
