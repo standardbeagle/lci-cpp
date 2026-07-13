@@ -984,7 +984,15 @@ TEST(CIEngine, OverviewEntryPoints) {
 // CodebaseIntelligenceEngine - other modes dispatch correctly
 // ===========================================================================
 
-TEST(CIEngine, DetailedModeDispatch) {
+// analyze() operates on pre-collected file/symbol data with no live index, so
+// it cannot supply the call-graph / project-root / file-path inputs that the
+// detailed (features), statistics and structure builders need. Rather than
+// emit silently-degraded sections (skipped feature clustering, an empty
+// directory tree), it fails fast and directs callers to the index-backed path
+// (build_detailed/build_statistics/build_structure with explicit inputs, as
+// the MCP handler calls them). These modes stay valid modes; they are just not
+// reachable through the index-less analyze() entry point.
+TEST(CIEngine, DetailedModeRequiresIndexBackedPath) {
     CodebaseIntelligenceEngine engine;
     CodebaseIntelligenceParams params;
     params.mode = "detailed";
@@ -998,11 +1006,11 @@ TEST(CIEngine, DetailedModeDispatch) {
     fsd.symbols = {&sym};
 
     auto result = engine.analyze(params, {fsd}, 1, 1);
-    EXPECT_TRUE(result.ok());
-    EXPECT_EQ(result.response.analysis_mode, "detailed");
+    EXPECT_FALSE(result.ok());
+    EXPECT_NE(result.error.find("index-backed"), std::string::npos);
 }
 
-TEST(CIEngine, StatisticsModeDispatch) {
+TEST(CIEngine, StatisticsModeRequiresIndexBackedPath) {
     CodebaseIntelligenceEngine engine;
     CodebaseIntelligenceParams params;
     params.mode = "statistics";
@@ -1018,9 +1026,8 @@ TEST(CIEngine, StatisticsModeDispatch) {
     fsd.symbols = {&sym};
 
     auto result = engine.analyze(params, {fsd}, 1, 1);
-    EXPECT_TRUE(result.ok());
-    EXPECT_EQ(result.response.analysis_mode, "statistics");
-    EXPECT_NE(result.response.health_dashboard, nullptr);
+    EXPECT_FALSE(result.ok());
+    EXPECT_NE(result.error.find("index-backed"), std::string::npos);
 }
 
 TEST(CIEngine, UnifiedModeIncludesOverview) {
@@ -1046,7 +1053,7 @@ TEST(CIEngine, UnifiedModeIncludesOverview) {
     EXPECT_NE(result.response.entry_points, nullptr);
 }
 
-TEST(CIEngine, StructureModeDispatch) {
+TEST(CIEngine, StructureModeRequiresIndexBackedPath) {
     CodebaseIntelligenceEngine engine;
     CodebaseIntelligenceParams params;
     params.mode = "structure";
@@ -1059,8 +1066,8 @@ TEST(CIEngine, StructureModeDispatch) {
     fsd.symbols = {&sym};
 
     auto result = engine.analyze(params, {fsd}, 1, 1);
-    EXPECT_TRUE(result.ok());
-    EXPECT_EQ(result.response.analysis_mode, "structure");
+    EXPECT_FALSE(result.ok());
+    EXPECT_NE(result.error.find("index-backed"), std::string::npos);
 }
 
 TEST(CIEngine, GitAnalyzeModeDispatch) {
