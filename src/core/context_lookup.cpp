@@ -236,4 +236,9 @@ void ContextLookupEngine::dedup_references(std::vector<ObjectReference>& refs) {
     refs = std::move(out);
 }
 
+int64_t ContextLookupEngine::per_component_time_ms(int64_t total_ms) {
+    // RED stub: not yet divided across components.
+    return total_ms;
+}
+
 }  // namespace lci

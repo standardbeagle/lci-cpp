@@ -1070,6 +1070,25 @@ TEST(FilterContextSections, NoSectionsIsNoOp) {
 // exclude_sections and the mode presets that funnel through them. Filtered
 // sections stay PRESENT-but-empty in the JSON; keys are never dropped.
 
+// Pins the equal-distribution placeholder that Go's get_context uses for its
+// component_breakdown timing (internal/mcp/handlers.go:2297-2299:
+// perComponentTime := totalTime / componentCount). Deterministic pure-function
+// input, so no wall-clock flakiness. Guards two regressions: (1) changing the
+// component count away from Go's 7, and (2) replacing the truncating integer
+// division with something else. Reverting to real independent per-section
+// timing would make per_component_time_ms meaningless and this test red.
+TEST(ContextComponentTiming, EqualDistributionMatchesGoPlaceholder) {
+    EXPECT_EQ(ContextLookupEngine::kContextComponentCount, 7);
+    // 70 / 7 == 10, exact.
+    EXPECT_EQ(ContextLookupEngine::per_component_time_ms(70), 10);
+    // 14 / 7 == 2, exact.
+    EXPECT_EQ(ContextLookupEngine::per_component_time_ms(14), 2);
+    // 6 / 7 truncates to 0 — matches Go int64/int division.
+    EXPECT_EQ(ContextLookupEngine::per_component_time_ms(6), 0);
+    // Sub-millisecond lookups measure 0ms total -> 0 per component.
+    EXPECT_EQ(ContextLookupEngine::per_component_time_ms(0), 0);
+}
+
 TEST_F(HandlersFixture, GetContextIncludeSectionsKeepsAllSectionKeys) {
     nlohmann::json params;
     params["name"] = "main";

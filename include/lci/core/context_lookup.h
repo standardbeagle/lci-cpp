@@ -105,6 +105,28 @@ class ContextLookupEngine {
         const std::vector<std::string>& include_sections,
         const std::vector<std::string>& exclude_sections);
 
+    // Number of component_breakdown timing fields Go's get_context emits:
+    // basic_info, relationships, variables, semantic, structure, usage, ai.
+    static constexpr int kContextComponentCount = 7;
+
+    // Per-component timing for the get_context performance envelope.
+    //
+    // BUG-FOR-BUG PORT of Go's handleGetObjectContextWithMode
+    // (internal/mcp/handlers.go:2297-2299), which comments the value
+    // "equal distribution as placeholder" and computes
+    //   perComponentTime := totalTime / componentCount
+    // then emits that SAME value for all seven component_breakdown fields.
+    // Go performs NO real per-section measurement — there are no per-section
+    // instrumentation points in the reference. Inventing independent timing
+    // here would DIVERGE from the reference emission and break the parity
+    // golden, so we reproduce the placeholder exactly. Integer (truncating)
+    // division matches Go's int64/int arithmetic.
+    //
+    // TODO(parity, reference-port rule 5): the reference fabricates this
+    // breakdown. If upstream Go ever adds real per-section measurement,
+    // port that instead of this equal-distribution placeholder.
+    static int64_t per_component_time_ms(int64_t total_ms);
+
   private:
     // Fills identification/signature/location from the resolved symbol.
     // Returns false only if the symbol is unusable (fatal).
