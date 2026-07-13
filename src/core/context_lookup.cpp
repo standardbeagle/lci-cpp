@@ -16,6 +16,13 @@
 
 namespace lci {
 
+// Defined in context_lookup_variables.cpp (CLX S4). Fills ctx.variable_context
+// from the pinned snapshot. Declared here (not in the header) to keep
+// context_lookup.h free of the heavy reference_tracker.h include; both TUs see
+// ReferenceTracker::Snapshot, so the linker enforces the signature.
+void fill_variable_context(CodeObjectContext& ctx,
+                           const ReferenceTracker::Snapshot& snap);
+
 namespace {
 
 // Formats now() as an RFC3339 UTC timestamp. generated_at is time.Now() in Go
@@ -98,9 +105,14 @@ CodeObjectContext ContextLookupEngine::get_context(
 
     fill_basic_info(ctx, *sym);
 
-    // S1 leaves the remaining sections empty-but-present: CodeObjectContext
-    // default-constructs each section and to_json emits its keys with `[]` /
-    // zero values. S3-S8 populate them in place, soft-failing into diagnostics.
+    // Section fills run in order basic_info -> relationships -> variables ->
+    // ... Relationships (S3) lands independently; the variables section does
+    // not depend on it, so it fills directly after basic_info here.
+    fill_variable_context(ctx, *snap);
+
+    // Remaining sections stay empty-but-present: CodeObjectContext default-
+    // constructs each and to_json emits its keys with `[]` / zero values.
+    // S3/S5-S8 populate them in place, soft-failing into diagnostics.
 
     ok = true;
     return ctx;
