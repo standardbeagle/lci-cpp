@@ -1,1 +1,1 @@
-${CORPUS}/a.go:3: lines Add
+${CORPUS}/a.go:3 [function] func Add(a, b int) int { return a + b }

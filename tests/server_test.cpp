@@ -6,11 +6,13 @@
 #include <lci/server/server.h>
 #include <lci/server/request_decode.h>
 
+#include <cctype>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include <httplib.h>
 #include <nlohmann/json.hpp>
@@ -582,6 +584,149 @@ TEST_F(ServerTest, DefinitionEndpointTreatsNegativeLimitAsDefault) {
     auto j = post("/definition", {{"pattern", "Add"}, {"max_results", -1}});
     ASSERT_TRUE(j.contains("definitions")) << j.dump();
     EXPECT_TRUE(j["definitions"].is_array());
+}
+
+// -- /definition kind + signature --------------------------------------------
+
+// Verifies that /definition surfaces the REAL symbol kind and a verbatim
+// signature line for function / class / method symbols across Go, Python, and
+// TypeScript — rather than the generic text-search block_type "lines" with no
+// signature. Discrimination: before this behavior existed, `type` was the
+// literal "lines" and `signature` was absent/empty for every hit; each case
+// below asserts a real kind AND a non-empty signature sliced from the
+// declaration line, so a regression to the old generic path fails the test.
+// The nested-method cases (Python/TS) additionally pin that a method is not
+// reported as its enclosing class.
+class DefinitionKindSignatureTest : public ::testing::Test {
+  protected:
+    void SetUp() override {
+        tmp_.write_file("m.go",
+                        "package m\n"
+                        "\n"
+                        "func Greet(name string) string { return name }\n"
+                        "\n"
+                        "type Greeter struct{ Prefix string }\n"
+                        "\n"
+                        "func (g *Greeter) Hello(name string) string {\n"
+                        "    return g.Prefix + name\n"
+                        "}\n");
+        tmp_.write_file("m.py",
+                        "def compute(x, y):\n"
+                        "    return x + y\n"
+                        "\n"
+                        "\n"
+                        "class Widget:\n"
+                        "    def render(self, ctx):\n"
+                        "        return ctx\n");
+        tmp_.write_file("m.ts",
+                        "export function makeThing(x: number): number {\n"
+                        "  return x;\n"
+                        "}\n"
+                        "\n"
+                        "export class Box {\n"
+                        "  open(k: string): string {\n"
+                        "    return k;\n"
+                        "  }\n"
+                        "}\n");
+
+        config_.project.root = tmp_.path().string();
+        config_.project.name = "test";
+
+        indexer_ = std::make_unique<MasterIndex>(config_);
+        indexer_->index_directory(config_.project.root);
+        search_engine_ = std::make_unique<SearchEngine>(*indexer_);
+        server_ = std::make_unique<IndexServer>(config_, *indexer_,
+                                                search_engine_.get());
+        socket_path_ = test::next_test_server_address();
+        server_->set_socket_path(socket_path_);
+        server_->set_build_id_override("test-build-id");
+        ASSERT_TRUE(server_->start());
+    }
+
+    void TearDown() override {
+        if (server_ && server_->is_running()) server_->shutdown();
+        std::error_code ec;
+        std::filesystem::remove(socket_path_, ec);
+    }
+
+    // Returns the /definition entry for `pattern` whose file_path ends with
+    // `file_suffix` (disambiguates same-name hits across the three languages).
+    nlohmann::json def_for(const std::string& pattern,
+                           const std::string& file_suffix) {
+        auto cli = test::make_test_http_client(socket_path_);
+        nlohmann::json body{{"pattern", pattern}};
+        auto res = cli.Post("/definition", body.dump(), "application/json");
+        if (!res) return {};
+        auto j = nlohmann::json::parse(res->body);
+        if (!j.contains("definitions")) return {};
+        for (const auto& d : j["definitions"]) {
+            std::string fp = d.value("file_path", "");
+            if (fp.size() >= file_suffix.size() &&
+                fp.compare(fp.size() - file_suffix.size(), file_suffix.size(),
+                           file_suffix) == 0) {
+                return d;
+            }
+        }
+        return {};
+    }
+
+    TempDir tmp_;
+    Config config_;
+    std::unique_ptr<MasterIndex> indexer_;
+    std::unique_ptr<SearchEngine> search_engine_;
+    std::unique_ptr<IndexServer> server_;
+    std::string socket_path_;
+};
+
+TEST_F(DefinitionKindSignatureTest, RealKindAndSignatureAcrossLanguages) {
+    struct Case {
+        std::string pattern;
+        std::string file_suffix;
+        std::string want_type;
+        std::string want_sig_substr;
+    };
+    const std::vector<Case> cases = {
+        // Go: function, struct, method.
+        {"Greet", "m.go", "function", "func Greet(name string)"},
+        {"Greeter", "m.go", "struct", "type Greeter struct"},
+        {"Hello", "m.go", "method", "Hello(name string)"},
+        // Python: function, class, nested method.
+        {"compute", "m.py", "function", "def compute(x, y):"},
+        {"Widget", "m.py", "class", "class Widget:"},
+        {"render", "m.py", "method", "def render(self, ctx):"},
+        // TypeScript: function, class, nested method.
+        {"makeThing", "m.ts", "function", "function makeThing(x: number)"},
+        {"Box", "m.ts", "class", "class Box"},
+        {"open", "m.ts", "method", "open(k: string)"},
+    };
+
+    for (const auto& c : cases) {
+        SCOPED_TRACE(c.pattern + " @ " + c.file_suffix);
+        auto d = def_for(c.pattern, c.file_suffix);
+        ASSERT_TRUE(d.is_object() && d.contains("type"))
+            << "no /definition hit for " << c.pattern;
+
+        // Real kind, never the generic text-search "lines".
+        EXPECT_EQ(d.value("type", ""), c.want_type);
+        EXPECT_NE(d.value("type", ""), "lines");
+
+        // Verbatim, trimmed declaration line — populated for the first time.
+        std::string sig = d.value("signature", "");
+        EXPECT_FALSE(sig.empty()) << "signature must be populated";
+        EXPECT_NE(sig.find(c.want_sig_substr), std::string::npos)
+            << "signature was: " << sig;
+        // Trimmed: no leading/trailing whitespace.
+        if (!sig.empty()) {
+            EXPECT_FALSE(std::isspace(static_cast<unsigned char>(sig.front())));
+            EXPECT_FALSE(std::isspace(static_cast<unsigned char>(sig.back())));
+        }
+
+        // Backward-compatible fields still present.
+        EXPECT_TRUE(d.contains("name"));
+        EXPECT_TRUE(d.contains("file_path"));
+        EXPECT_TRUE(d.contains("line"));
+        EXPECT_TRUE(d.contains("column"));
+    }
 }
 
 TEST_F(ServerTest, ReferencesEndpoint) {

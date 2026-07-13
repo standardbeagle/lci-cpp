@@ -8,6 +8,19 @@
 
 namespace lci {
 
+namespace {
+
+// Trims leading/trailing ASCII whitespace and returns an owned copy. Used to
+// turn a raw source line into a compact one-line signature.
+std::string trim_ws(std::string_view s) {
+    size_t first = s.find_first_not_of(" \t\r\n");
+    if (first == std::string_view::npos) return {};
+    size_t last = s.find_last_not_of(" \t\r\n");
+    return std::string(s.substr(first, last - first + 1));
+}
+
+}  // namespace
+
 // -- Endpoint: /search --------------------------------------------------------
 
 void IndexServer::handle_search(const httplib::Request& req,
@@ -155,17 +168,63 @@ void IndexServer::handle_definition(const httplib::Request& req,
         results.resize(static_cast<size_t>(request->max_results));
     }
 
+    // Resolve each hit's REAL symbol kind and a verbatim signature line.
+    // search_definitions is a generic text-search path, so its
+    // context.block_type is the hardcoded literal "lines" and it carries no
+    // signature — forcing `lci def` consumers into a second file read just to
+    // learn what kind of symbol was found and how it is declared. The symbol
+    // table already holds the true SymbolType and the declaration line, so
+    // resolve each hit against it and surface the real kind plus the trimmed
+    // definition line. `type` stays backward compatible (real kind instead of
+    // "lines"); `signature` is populated for the first time. Both keys are
+    // always emitted so the JSON shape stays stable across resolved and
+    // unresolved hits.
+    //
+    // Resolution prefers the symbol DECLARED ON the matched line over the
+    // enclosing one: a definition hit lands on the declaration line, and a
+    // nested method shares its body lines with the enclosing class — so
+    // get_symbol_at_line (nearest enclosing) would report a Python/TS method
+    // as its class. Match on the exact declaration line first (name-disambiguated
+    // when several symbols share a line), and only fall back to the enclosing
+    // symbol when nothing is declared on the line.
+    auto rt_snap = indexer_->ref_tracker().pin();
+    const FileContentStore& fcs = indexer_->file_content_store();
+
     nlohmann::json defs = nlohmann::json::array();
     for (const auto& r : results) {
         std::string name = r.context.block_name.empty()
                                ? r.match_text
                                : r.context.block_name;
+
+        ReferenceTracker::Snapshot::SymbolHandle sym;
+        for (const auto& s : rt_snap->get_file_enhanced_symbols(r.file_id)) {
+            if (s->symbol.line != r.line) continue;
+            if (!sym) sym = s;                     // first symbol on the line
+            if (s->symbol.name == name) {          // exact name match wins
+                sym = s;
+                break;
+            }
+        }
+        if (!sym) sym = rt_snap->get_symbol_at_line(r.file_id, r.line);
+
+        std::string type = r.context.block_type;
+        std::string signature;
+        if (sym) {
+            type = std::string(to_string(sym->symbol.type));
+            // get_line_view is 0-based and pins into a single thread-local
+            // slot; copy it out immediately via trim_ws before the next store
+            // read can clobber the slot.
+            signature =
+                trim_ws(fcs.get_line_view(r.file_id, sym->symbol.line - 1));
+        }
+
         nlohmann::json d;
         d["name"] = name;
-        d["type"] = r.context.block_type;
+        d["type"] = type;
         d["file_path"] = r.path;
         d["line"] = r.line;
         d["column"] = r.column;
+        d["signature"] = signature;
         defs.push_back(d);
     }
 

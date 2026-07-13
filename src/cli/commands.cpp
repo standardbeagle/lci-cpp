@@ -112,9 +112,17 @@ int run_def(const GlobalFlags& flags, const std::string& symbol) {
     if (!results->empty()) {
         for (const auto& r : *results) {
             if (!r.signature.empty()) {
-                std::printf("%s:%d: %s\n", r.file_path.c_str(), r.line,
-                            r.signature.c_str());
+                // Real symbol kind in brackets + the verbatim declaration line,
+                // e.g. `path:1455 [function] def check_random_state(seed)`. The
+                // signature already names the symbol/keyword, so the kind
+                // annotates it rather than repeating `type name`. Answers the
+                // "what kind + what signature" question without a follow-up read.
+                std::printf("%s:%d [%s] %s\n", r.file_path.c_str(), r.line,
+                            r.type.c_str(), r.signature.c_str());
             } else {
+                // No signature resolved (generic text hit, no indexed symbol at
+                // this location): degrade to the prior `type name` form rather
+                // than printing empty brackets.
                 std::printf("%s:%d: %s %s\n", r.file_path.c_str(), r.line,
                             r.type.c_str(), r.name.c_str());
             }
