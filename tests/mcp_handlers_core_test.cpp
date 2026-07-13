@@ -1862,6 +1862,296 @@ TEST(SearchHelpers, ExpandPatternSynonymsNonGroupWordStaysSingle) {
 }
 
 // =============================================================================
+// CLX S3 — DirectRelationships (fill_direct_relationships) port parity
+// =============================================================================
+// Fixture: caller() calls helper(); Widget struct carries a Name field and a
+// Greet method (receiver method, not a struct-lexical member). Exercises:
+//   trap 3  — incoming/outgoing ref Context is the decimal string of the Go
+//             RefType ordinal (Call=1 on this corpus, since Import/Usage are
+//             the only other ref types this extractor emits for Go source).
+//   caller/called functions — RefTypeCall + Function|Method gate, reusing
+//             ReferenceTracker::get_caller_symbols/get_callee_symbols.
+//   parent_objects — from scope_chain, SymbolID="scope_<name>".
+//   dispatch-gate bug — child_objects/parent_classes/implementing_types are
+//             empirically empty on this Go corpus (see the file-level
+//             comment in context_lookup_relationships.cpp): child_objects
+//             gates methods/fields on SymbolType::Class only (Widget is
+//             Struct); parent_classes/implementing_types are unreachable-
+//             empty by construction regardless of objectID type.
+//   used_types / imported_modules — empirically empty: this extractor never
+//             emits ReferenceType::Declaration/Assignment for any language,
+//             and never emits ReferenceType::Import for Go (only via JS/TS's
+//             import_statement handling — see DirectRelationshipsJsFixture
+//             below for a positive imported_modules case, trap 9).
+class DirectRelationshipsFixture : public ::testing::Test {
+  protected:
+    void SetUp() override {
+        temp_dir_ = lci::test::unique_temp_dir("lci_relctx_test_");
+        std::filesystem::create_directories(temp_dir_);
+        std::ofstream(temp_dir_ / "relations.go") << R"(package sample
+
+type Widget struct {
+	Name string
+}
+
+func (w *Widget) Greet() string {
+	return w.Name
+}
+
+func helper(x int) int {
+	return x + 1
+}
+
+func caller() int {
+	return helper(5)
+}
+)";
+        Config config;
+        config.project.root = temp_dir_.string();
+        indexer_ = std::make_unique<MasterIndex>(config);
+        indexer_->index_directory(temp_dir_.string());
+    }
+
+    void TearDown() override {
+        indexer_.reset();
+        std::error_code ec;
+        std::filesystem::remove_all(temp_dir_, ec);
+    }
+
+    // Resolves a symbol by name to a CodeObjectID (as get_context expects).
+    // `nth` selects among same-named matches (Widget the struct vs. a field
+    // named the same is not a concern here, but ambiguity between symbols
+    // sharing a name in one file is guarded by the caller passing a distinct
+    // name where needed).
+    CodeObjectID object_id_for(const std::string& name) {
+        auto snap = indexer_->ref_tracker().pin();
+        auto syms = snap->find_symbols_by_name(name);
+        EXPECT_FALSE(syms.empty()) << "no symbol named " << name;
+        CodeObjectID oid;
+        if (syms.empty()) return oid;
+        const auto& s = syms.front();
+        oid.file_id = s->symbol.file_id;
+        oid.symbol_id = encode_symbol_id(s->id);
+        oid.name = std::string(s->symbol.name);
+        oid.type = s->symbol.type;
+        return oid;
+    }
+
+    std::filesystem::path temp_dir_;
+    std::unique_ptr<MasterIndex> indexer_;
+};
+
+// trap 3: outgoing ref to a Call target carries Context "1" (Go's
+// RefTypeCall ordinal), confidence 0.9.
+TEST_F(DirectRelationshipsFixture, OutgoingReferencesCarryCallOrdinalContext) {
+    ContextLookupEngine engine(*indexer_);
+    bool ok = false;
+    auto ctx = engine.get_context(object_id_for("caller"), ok);
+    ASSERT_TRUE(ok);
+
+    bool found = false;
+    for (const auto& ref : ctx.direct_relationships.outgoing_references) {
+        if (ref.object_id.name != "helper") continue;
+        found = true;
+        EXPECT_EQ(ref.context, "1");
+        EXPECT_DOUBLE_EQ(ref.confidence, 0.9);
+    }
+    EXPECT_TRUE(found) << "caller's outgoing_references missing helper";
+}
+
+TEST_F(DirectRelationshipsFixture, IncomingReferencesCarryCallOrdinalContext) {
+    ContextLookupEngine engine(*indexer_);
+    bool ok = false;
+    auto ctx = engine.get_context(object_id_for("helper"), ok);
+    ASSERT_TRUE(ok);
+
+    bool found = false;
+    for (const auto& ref : ctx.direct_relationships.incoming_references) {
+        if (ref.object_id.name != "caller") continue;
+        found = true;
+        EXPECT_EQ(ref.context, "1");
+        EXPECT_DOUBLE_EQ(ref.confidence, 0.9);
+    }
+    EXPECT_TRUE(found) << "helper's incoming_references missing caller";
+}
+
+// caller/called functions: RefTypeCall + Function|Method gate, Context=
+// "function_call", confidence 0.95 — reuses get_caller_symbols/
+// get_callee_symbols.
+TEST_F(DirectRelationshipsFixture, CallerAndCalledFunctionsUseFunctionCallContext) {
+    ContextLookupEngine engine(*indexer_);
+    bool ok = false;
+
+    auto helper_ctx = engine.get_context(object_id_for("helper"), ok);
+    ASSERT_TRUE(ok);
+    ASSERT_EQ(helper_ctx.direct_relationships.caller_functions.size(), 1u);
+    EXPECT_EQ(helper_ctx.direct_relationships.caller_functions[0].object_id.name,
+             "caller");
+    EXPECT_EQ(helper_ctx.direct_relationships.caller_functions[0].context,
+             "function_call");
+    EXPECT_DOUBLE_EQ(
+        helper_ctx.direct_relationships.caller_functions[0].confidence, 0.95);
+
+    auto caller_ctx = engine.get_context(object_id_for("caller"), ok);
+    ASSERT_TRUE(ok);
+    ASSERT_EQ(caller_ctx.direct_relationships.called_functions.size(), 1u);
+    EXPECT_EQ(caller_ctx.direct_relationships.called_functions[0].object_id.name,
+             "helper");
+    EXPECT_EQ(caller_ctx.direct_relationships.called_functions[0].context,
+             "function_call");
+    EXPECT_DOUBLE_EQ(
+        caller_ctx.direct_relationships.called_functions[0].confidence, 0.95);
+}
+
+// parent_objects: scope_chain entries, skip-anonymous, SymbolID="scope_<name>".
+// Name's field scope_chain includes the enclosing Widget struct scope (a
+// ScopeType::Class scope on this extractor — see convert_scope_type_to_
+// symbol_type's file-level comment on the dormant ScopeType::Struct gap).
+TEST_F(DirectRelationshipsFixture, ParentObjectsIncludesEnclosingStructScope) {
+    ContextLookupEngine engine(*indexer_);
+    bool ok = false;
+    auto ctx = engine.get_context(object_id_for("Name"), ok);
+    ASSERT_TRUE(ok);
+
+    bool found = false;
+    for (const auto& parent : ctx.direct_relationships.parent_objects) {
+        if (parent.object_id.name != "Widget") continue;
+        found = true;
+        EXPECT_EQ(parent.object_id.type, SymbolType::Class);
+        EXPECT_EQ(parent.object_id.symbol_id, "scope_Widget");
+        EXPECT_EQ(parent.context, "class");
+        EXPECT_DOUBLE_EQ(parent.confidence, 0.95);
+    }
+    EXPECT_TRUE(found) << "Name field's parent_objects missing Widget scope";
+}
+
+// dispatch-gate bug: child_objects gates methods/fields on SymbolType::Class
+// ONLY (context_lookup_relationships.go:465) — Widget is SymbolType::Struct
+// in this index, so it never reaches get_class_methods/get_class_fields.
+// Pinned empty rather than fabricated (no stub data).
+TEST_F(DirectRelationshipsFixture, ChildObjectsEmptyForGoStructGoParity) {
+    ContextLookupEngine engine(*indexer_);
+    bool ok = false;
+    auto ctx = engine.get_context(object_id_for("Widget"), ok);
+    ASSERT_TRUE(ok);
+    EXPECT_TRUE(ctx.direct_relationships.child_objects.empty());
+}
+
+// dispatch-gate bug: parent_classes/implementing_types are unreachable-empty
+// by construction (see context_lookup_relationships.cpp file-level comment)
+// — fillDirectRelationships only calls either getter for Class||Method
+// objectIDs, but getParentClasses requires Struct||Class (Method never
+// qualifies) and getImplementingTypes requires Interface (which the outer
+// Class||Method gate can never satisfy). Verified here against a Method
+// (Greet) and confirmed empty independent of any Inheritance-ref data (this
+// extractor never emits ReferenceType::Inheritance either — see S5's
+// StructExcludedFromInterfaceAndInheritanceGates finding).
+TEST_F(DirectRelationshipsFixture,
+      ParentClassesAndImplementingTypesUnreachableForMethod) {
+    ContextLookupEngine engine(*indexer_);
+    bool ok = false;
+    auto ctx = engine.get_context(object_id_for("Greet"), ok);
+    ASSERT_TRUE(ok);
+    EXPECT_TRUE(ctx.direct_relationships.parent_classes.empty());
+    EXPECT_TRUE(ctx.direct_relationships.implementing_types.empty());
+}
+
+// used_types is gated on ReferenceType::Declaration/Assignment outgoing refs;
+// this extractor never emits either reference type for any language. Pinned
+// empty (no stub data) rather than fabricated.
+TEST_F(DirectRelationshipsFixture, UsedTypesEmptyNoDeclarationOrAssignmentRefs) {
+    ContextLookupEngine engine(*indexer_);
+    bool ok = false;
+    auto ctx = engine.get_context(object_id_for("caller"), ok);
+    ASSERT_TRUE(ok);
+    EXPECT_TRUE(ctx.direct_relationships.used_types.empty());
+}
+
+// imported_modules is file-wide RefTypeImport; Go source never produces an
+// Import-type outgoing ref in this extractor (only JS/TS's import_statement
+// handling does — see DirectRelationshipsJsFixture below for trap 9's
+// positive case). Pinned empty on this Go corpus.
+TEST_F(DirectRelationshipsFixture, ImportedModulesEmptyOnGoCorpus) {
+    ContextLookupEngine engine(*indexer_);
+    bool ok = false;
+    auto ctx = engine.get_context(object_id_for("caller"), ok);
+    ASSERT_TRUE(ok);
+    EXPECT_TRUE(ctx.direct_relationships.imported_modules.empty());
+}
+
+// JS's import_statement handling DOES emit ReferenceType::Import
+// (unified_extractor_references.cpp) — unlike Go, which never emits it at
+// all. But this getter (like Go's) scans get_file_enhanced_symbols(file_id)
+// and reads each symbol's OWN outgoing_refs; ReferenceTracker::
+// process_all_references only attaches a ref to a symbol when
+// find_symbol_at_location finds a symbol whose [line, end_line] CONTAINS the
+// ref's line (reference_tracker.cpp:679-696). An import statement is
+// syntactically required to precede every declaration in the file, so its
+// line is never contained by any symbol's range — source_symbol stays 0 and
+// the ref is never attached to any symbol's outgoing_refs. Verified directly
+// against this fixture's snapshot: the Import ref exists in
+// Snapshot::references (source_symbol=0) but appears in no symbol's
+// outgoing_refs. imported_modules is therefore empirically EMPTY on both
+// Go and JS/TS corpora under this port's ref-attachment infra — a deeper,
+// language-independent gap than trap 9's stylistic divergence. Pinned here
+// (no stub data) rather than fabricated; the getter itself stays a faithful,
+// dormant port that will start producing data the day ref-attachment covers
+// file-level/orphaned references.
+class DirectRelationshipsJsFixture : public ::testing::Test {
+  protected:
+    void SetUp() override {
+        temp_dir_ = lci::test::unique_temp_dir("lci_relctx_js_test_");
+        std::filesystem::create_directories(temp_dir_);
+        std::ofstream(temp_dir_ / "app.js") << R"(import { helper } from './helper';
+
+function caller() {
+  return helper(5);
+}
+)";
+        Config config;
+        config.project.root = temp_dir_.string();
+        indexer_ = std::make_unique<MasterIndex>(config);
+        indexer_->index_directory(temp_dir_.string());
+    }
+
+    void TearDown() override {
+        indexer_.reset();
+        std::error_code ec;
+        std::filesystem::remove_all(temp_dir_, ec);
+    }
+
+    CodeObjectID object_id_for(const std::string& name) {
+        auto snap = indexer_->ref_tracker().pin();
+        auto syms = snap->find_symbols_by_name(name);
+        EXPECT_FALSE(syms.empty()) << "no symbol named " << name;
+        CodeObjectID oid;
+        if (syms.empty()) return oid;
+        const auto& s = syms.front();
+        oid.file_id = s->symbol.file_id;
+        oid.symbol_id = encode_symbol_id(s->id);
+        oid.name = std::string(s->symbol.name);
+        oid.type = s->symbol.type;
+        return oid;
+    }
+
+    std::filesystem::path temp_dir_;
+    std::unique_ptr<MasterIndex> indexer_;
+};
+
+TEST_F(DirectRelationshipsJsFixture, ImportedModulesEmptyOrphanedImportRef) {
+    ContextLookupEngine engine(*indexer_);
+    bool ok = false;
+    auto ctx = engine.get_context(object_id_for("caller"), ok);
+    ASSERT_TRUE(ok);
+
+    // See the fixture-level comment: the Import ref is real (verified via
+    // Snapshot::references) but orphaned (source_symbol=0, never attached to
+    // any symbol's outgoing_refs), so this getter's per-symbol scan cannot
+    // reach it. Pinned empty rather than fabricated.
+    EXPECT_TRUE(ctx.direct_relationships.imported_modules.empty());
+}
+
+// =============================================================================
 // CLX S4 — VariableContext (fill_variable_context) port parity
 // =============================================================================
 // Exercises the six VariableContext buckets against a real Go index. The C++
