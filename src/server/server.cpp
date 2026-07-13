@@ -16,6 +16,7 @@
 #include <lci/git/provider.h>
 #include <lci/idcodec.h>
 #include <lci/indexing/master_index.h>
+#include <lci/language_map.h>
 #include <lci/search/search_engine.h>
 #include <lci/search/search_options.h>
 #include <lci/server/request_decode.h>
@@ -227,25 +228,14 @@ bool kind_matches(SymbolType st, const KindSet& kinds) {
     return std::find(kinds.begin(), kinds.end(), st) != kinds.end();
 }
 
+// Classifies programming language from file extension via the central
+// ext->language table (lci::language_map). Unknown/extensionless paths report
+// "" (empty), matching Go's httpLanguageFromPath default and the field-omission
+// contract downstream.
 std::string language_from_extension(const std::string& path) {
-    auto ext = std::filesystem::path(path).extension().string();
-    auto low = text::ascii_lower(ext);
-    if (low == ".go") return "go";
-    if (low == ".js") return "javascript";
-    if (low == ".ts") return "typescript";
-    if (low == ".tsx") return "tsx";
-    if (low == ".jsx") return "jsx";
-    if (low == ".py" || low == ".pyx" || low == ".pxd") return "python";
-    if (low == ".rs") return "rust";
-    if (low == ".java") return "java";
-    if (low == ".cs") return "csharp";
-    if (low == ".cpp" || low == ".cc" || low == ".cxx") return "cpp";
-    if (low == ".c") return "c";
-    if (low == ".rb") return "ruby";
-    if (low == ".php") return "php";
-    if (low == ".kt") return "kotlin";
-    if (low == ".zig") return "zig";
-    return "";
+    auto info = language_info_for_path(path);
+    if (info.language == LangId::Unknown) return "";
+    return std::string(to_string(info.language));
 }
 
 double get_rss_mb() {

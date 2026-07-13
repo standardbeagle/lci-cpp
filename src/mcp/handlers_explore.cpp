@@ -7,6 +7,7 @@
 #include <lci/core/reference_tracker.h>
 #include <lci/idcodec.h>
 #include <lci/indexing/master_index.h>
+#include <lci/language_map.h>
 #include <lci/mcp/handlers_core.h>  // similar_symbol_suggestions
 #include <lci/mcp/validation.h>
 #include <lci/search/search_engine.h>  // relative_to_root
@@ -58,27 +59,14 @@ int clamp_int(int value, int lo, int hi) {
     return value;
 }
 
-/// Guesses programming language from file extension.
+/// Classifies programming language from file extension via the central
+/// ext->language table (lci::language_map). Unknown/extensionless paths
+/// report "" (empty), matching the pre-centralization contract callers rely
+/// on to omit the language field.
 std::string language_from_path(const std::string& path) {
-    auto dot = path.rfind('.');
-    if (dot == std::string::npos) return "";
-    auto ext = to_lower(path.substr(dot));
-    if (ext == ".go") return "go";
-    if (ext == ".js") return "javascript";
-    if (ext == ".ts") return "typescript";
-    if (ext == ".jsx") return "jsx";
-    if (ext == ".tsx") return "tsx";
-    if (ext == ".py" || ext == ".pyx" || ext == ".pxd") return "python";
-    if (ext == ".rs") return "rust";
-    if (ext == ".java") return "java";
-    if (ext == ".cs") return "csharp";
-    if (ext == ".kt") return "kotlin";
-    if (ext == ".rb") return "ruby";
-    if (ext == ".swift") return "swift";
-    if (ext == ".cpp" || ext == ".cc" || ext == ".cxx") return "cpp";
-    if (ext == ".c") return "c";
-    if (ext == ".h" || ext == ".hpp") return "c/cpp";
-    return "";
+    auto info = language_info_for_path(path);
+    if (info.language == LangId::Unknown) return "";
+    return std::string(to_string(info.language));
 }
 
 /// Parses a kind string (comma-separated) into a set of SymbolType values.
