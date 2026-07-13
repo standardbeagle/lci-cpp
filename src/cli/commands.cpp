@@ -1,5 +1,7 @@
 #include <lci/cli/commands.h>
 
+#include "name_aggregation.h"
+
 #include <algorithm>
 #include <cctype>
 #include <chrono>
@@ -1355,6 +1357,20 @@ int run_symbols(const GlobalFlags& flags, const std::string& kind,
 
 // -- inspect command ----------------------------------------------------------
 
+namespace {
+
+// JSON output keeps the full list; text mode aggregates via
+// cli::format_aggregated_names.
+void print_aggregated_names(const nlohmann::json& arr, const char* label) {
+    std::vector<std::string> names;
+    names.reserve(arr.size());
+    for (const auto& c : arr) names.push_back(c.get<std::string>());
+    std::printf("  %s: %s\n", label,
+                format_aggregated_names(names).c_str());
+}
+
+}  // namespace
+
 int run_inspect(const GlobalFlags& flags, const std::string& name,
                 const std::string& type, const std::string& file,
                 const std::string& include_sections, bool json_output) {
@@ -1419,25 +1435,11 @@ int run_inspect(const GlobalFlags& flags, const std::string& name,
             }
             if (sym.contains("callers") && sym["callers"].is_array() &&
                 !sym["callers"].empty()) {
-                std::printf("  Callers: ");
-                bool first = true;
-                for (const auto& c : sym["callers"]) {
-                    if (!first) std::printf(", ");
-                    std::printf("%s", c.get<std::string>().c_str());
-                    first = false;
-                }
-                std::printf("\n");
+                print_aggregated_names(sym["callers"], "Callers");
             }
             if (sym.contains("callees") && sym["callees"].is_array() &&
                 !sym["callees"].empty()) {
-                std::printf("  Callees: ");
-                bool first = true;
-                for (const auto& c : sym["callees"]) {
-                    if (!first) std::printf(", ");
-                    std::printf("%s", c.get<std::string>().c_str());
-                    first = false;
-                }
-                std::printf("\n");
+                print_aggregated_names(sym["callees"], "Callees");
             }
             if (sym.contains("type_hierarchy") &&
                 !sym["type_hierarchy"].is_null()) {

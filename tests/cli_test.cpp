@@ -14,6 +14,7 @@
 
 #include "../src/cli/ast_filters.h"
 #include "../src/cli/grep_filters.h"
+#include "../src/cli/name_aggregation.h"
 #include "../src/cli/query_parser.h"
 #include "../src/cli/rank_options.h"
 #include "../src/cli/symbol_filters.h"
@@ -908,6 +909,38 @@ TEST(SymbolFiltersMaxLimit, MaxLargerThanInputIsPassthrough) {
     arr.push_back({{"name", "b"}});
     auto out = sf::apply_max_limit(arr, 100);
     EXPECT_EQ(out.size(), 2u);
+}
+
+// ---------------------------------------------------------------------------
+// name aggregation (inspect Callers/Callees rendering)
+// ---------------------------------------------------------------------------
+
+TEST(NameAggregation, DuplicatesCollapseWithCounts) {
+    std::vector<std::string> names = {"fit", "predict", "fit", "fit"};
+    // Discrimination: raw joining would repeat "fit" three times.
+    EXPECT_EQ(format_aggregated_names(names),
+              "fit x3, predict  (2 unique / 4 total)");
+}
+
+TEST(NameAggregation, TestCallersDemotedBelowProduction) {
+    std::vector<std::string> names = {"test_alpha", "test_alpha", "test_alpha",
+                                      "fit"};
+    // test_* loses to production even at higher frequency.
+    EXPECT_EQ(format_aggregated_names(names),
+              "fit, test_alpha x3  (2 unique / 4 total)");
+}
+
+TEST(NameAggregation, CapAppendsRemainderAndTotals) {
+    std::vector<std::string> names;
+    for (int i = 0; i < 30; ++i) names.push_back("f" + std::to_string(i));
+    auto out = format_aggregated_names(names, 25);
+    EXPECT_NE(out.find("+5 more"), std::string::npos);
+    EXPECT_NE(out.find("(30 unique / 30 total)"), std::string::npos);
+}
+
+TEST(NameAggregation, ShortUniqueListRendersPlain) {
+    std::vector<std::string> names = {"alpha", "beta"};
+    EXPECT_EQ(format_aggregated_names(names), "alpha, beta");
 }
 
 // ---------------------------------------------------------------------------
