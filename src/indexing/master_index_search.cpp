@@ -50,6 +50,11 @@ bool rel_in_any_scope(std::string_view rel,
 
 /// Returns the portion of `abs` relative to `root` (root-relative path), or
 /// `abs` unchanged when it does not sit under `root`.
+///
+/// Intentional duplicate of lci::relative_to_root (src/search/engine.cpp) —
+/// reusing it would invert the indexing→search layering. Semantics must stay
+/// identical except for the trailing-slash tolerance below, which the engine
+/// copy does not need (its roots are pre-normalized).
 std::string_view relative_to_root(std::string_view abs, std::string_view root) {
     while (root.size() > 1 && root.back() == '/') root.remove_suffix(1);
     if (root.empty() || abs.size() <= root.size()) return abs;
