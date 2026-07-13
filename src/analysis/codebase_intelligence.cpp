@@ -393,16 +393,22 @@ CodebaseIntelligenceResponse CodebaseIntelligenceEngine::build_structure(
         // Categorize through the canonical classify_file rule (1:1 FileCategory
         // mapping) instead of loose substring matching. This fixes the review
         // finding where rel.find("/test") wrongly matched "/testing" and
-        // rel.find(".md") matched a mid-path ".md". Unknown (no recognized
-        // extension) falls into the code bucket, preserving the old default.
+        // rel.find(".md") matched a mid-path ".md". FileCategory::Unknown
+        // (no recognized extension: bare README, LICENSE, Makefile, ...) routes
+        // to the "other" bucket, matching Go categorizeFile's default return
+        // "other" (codebase_intelligence_tools.go:846) — never to code.
         switch (classify_file(rel)) {
             case FileCategory::Test: ++s.tests; break;
             case FileCategory::Documentation: ++s.docs; break;
             case FileCategory::Config: ++s.config; break;
-            case FileCategory::Code:
-            case FileCategory::Unknown: ++s.code; break;
+            case FileCategory::Code: ++s.code; break;
+            case FileCategory::Unknown: ++s.other; break;
         }
     }
+    // Go parity: FileCategories.Other is limitSlice(Other, 10) before emit
+    // (codebase_intelligence_tools.go:780). The count-based C++ shape clamps to
+    // the same cap so the emitted category figure matches Go's list length.
+    if (s.other > 10) s.other = 10;
     s.dir_count = static_cast<int>(top_dir_files.size());
     s.types.assign(types_count.begin(), types_count.end());
     std::sort(s.types.begin(), s.types.end(),

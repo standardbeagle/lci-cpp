@@ -491,6 +491,10 @@ struct StructureAnalysis {
     int tests{};
     int config{};
     int docs{};
+    // Go parity: FileCategories.Other (json:"other",
+    // codebase_intelligence_types.go:745). Extension-less files that
+    // categorizeFile leaves as the default bucket land here, NOT in code.
+    int other{};
     std::vector<std::pair<std::string, int>> top_dirs;
 };
 

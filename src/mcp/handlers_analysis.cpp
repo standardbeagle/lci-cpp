@@ -1614,7 +1614,8 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
         for (const auto& [ext, n] : s.types) out << " " << ext << "=" << n;
         out << "\n"
             << "categories: code=" << s.code << " tests=" << s.tests
-            << " config=" << s.config << " docs=" << s.docs << "\n"
+            << " config=" << s.config << " docs=" << s.docs
+            << " other=" << s.other << "\n"
             << "top_dirs:\n";
         size_t shown = std::min(s.top_dirs.size(), size_t{10});
         for (size_t i = 0; i < shown; ++i)
