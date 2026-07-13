@@ -263,16 +263,19 @@ std::vector<VariableInfo> get_function_parameters(const Snapshot& snap,
 
 // Populates ctx.variable_context from the pinned snapshot. Mirrors Go's
 // fillVariableContext dispatch, reading ctx.object_id (refreshed by
-// fill_basic_info) as the objectID. The class-variable gate is widened to
-// Struct: Go gates getClassVariables on SymbolTypeClass only, but its body
-// already supports Struct and the CLX port requires struct fields to surface.
+// fill_basic_info) as the objectID.
 void fill_variable_context(CodeObjectContext& ctx, const Snapshot& snap) {
     const CodeObjectID& oid = ctx.object_id;
 
     ctx.variable_context.global_variables = get_global_variables(snap, oid);
     ctx.variable_context.used_globals = get_used_global_variables(snap, oid);
 
-    if (oid.type == SymbolType::Class || oid.type == SymbolType::Struct) {
+    // Go parity: class-variable dispatch gates on Class only
+    // (context_lookup_variables.go:31); structs yield empty class_variables.
+    // get_class_variables' internal Class||Struct check (Go:161) stays
+    // faithful to Go's body but is dead for structs since this dispatch never
+    // reaches it with a Struct objectID.
+    if (oid.type == SymbolType::Class) {
         ctx.variable_context.class_variables = get_class_variables(snap, oid);
     }
 

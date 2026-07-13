@@ -1929,29 +1929,19 @@ func Process(input string, limit int) int {
     std::unique_ptr<MasterIndex> indexer_;
 };
 
-// A struct object populates class_variables from its field symbols. Trap:
-// getClassVariables' dual gate (line-range nesting AND scope-chain class/struct
-// membership) admits the Widget fields; the fill gate is widened to Struct
-// (Go's getClassVariables body already supports Struct).
-TEST_F(VariableContextFixture, StructPopulatesClassVariables) {
+// A struct object leaves class_variables empty. Go parity: the
+// fillVariableContext dispatch (context_lookup_variables.go:31) gates the call
+// to getClassVariables on SymbolTypeClass ONLY — a Struct objectID never
+// reaches it, even though getClassVariables' own body (Go:161) accepts both
+// Class and Struct. That body support is dead code for structs in Go, and the
+// C++ port must stay bug-for-bug faithful rather than "fixing" the dispatch.
+TEST_F(VariableContextFixture, StructLeavesClassVariablesEmptyForGoParity) {
     ContextLookupEngine engine(*indexer_);
     bool ok = false;
     auto ctx = engine.get_context(object_id_for("Widget"), ok);
     ASSERT_TRUE(ok);
 
-    const auto& cvars = ctx.variable_context.class_variables;
-    ASSERT_EQ(cvars.size(), 2u);
-    // Deterministic order (trap 1): sorted by line -> Name(7), Count(8).
-    EXPECT_EQ(cvars[0].name, "Name");
-    EXPECT_EQ(cvars[1].name, "Count");
-    for (const auto& v : cvars) {
-        EXPECT_EQ(v.scope, "class");
-        EXPECT_FALSE(v.is_mutable);  // index carries is_mutable=false for fields
-        // trap 4: class-var type is the real-type field (type_info), NOT the
-        // symbol-KIND string. The C++ Go index leaves type_info empty here.
-        EXPECT_NE(v.type, "field");
-        EXPECT_NE(v.type, "variable");
-    }
+    EXPECT_TRUE(ctx.variable_context.class_variables.empty());
     // A struct is neither a function nor a global holder.
     EXPECT_TRUE(ctx.variable_context.local_variables.empty());
     EXPECT_TRUE(ctx.variable_context.parameters.empty());
