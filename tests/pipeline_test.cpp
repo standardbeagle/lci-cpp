@@ -726,8 +726,24 @@ TEST(FileScannerTest, DetectsLanguages) {
     dir.write_file("app.py", "print('hello')");
     dir.write_file("index.ts", "const x = 1;");
     dir.write_file("lib.rs", "fn main() {}");
+    // detect_language routes through the central language_map (language_info +
+    // to_string(LangId)), so it emits the canonical, index-wide language names.
+    // .tsx canonicalizes to "typescript" (not the old "tsx" drift) and .cs to
+    // "csharp" (not the old "c_sharp" underscore divergence). These strings are
+    // NOT load-bearing: FileTask/ProcessedFile.language is never read downstream
+    // (grammar selection uses parser::language_from_extension; MCP output uses
+    // to_string(LangId) directly), so aligning them fixes drift with no consumer
+    // impact. Reverting the routing fix turns the assertions below RED.
     dir.write_file("App.tsx", "export default {};");
     dir.write_file("main.cpp", "int main() {}");
+    // Central table adds the ESM/CJS TypeScript+JavaScript variants the old
+    // hard-coded switch dropped, and reconciles .h to the C++ grammar superset.
+    dir.write_file("esm.mjs", "export const x = 1;");
+    dir.write_file("cjs.cjs", "module.exports = {};");
+    dir.write_file("mod.mts", "export const y = 2;");
+    dir.write_file("legacy.cts", "export const z = 3;");
+    dir.write_file("svc.cs", "class C {}");
+    dir.write_file("header.h", "int f(void);");
 
     Config cfg = make_default_config();
     cfg.project.root = dir.path().string();
@@ -736,8 +752,12 @@ TEST(FileScannerTest, DetectsLanguages) {
     auto tasks = scanner.scan();
 
     absl::flat_hash_map<std::string, std::string> expected = {
-        {"main.go", "go"}, {"app.py", "python"}, {"index.ts", "typescript"},
-        {"lib.rs", "rust"}, {"App.tsx", "tsx"}, {"main.cpp", "cpp"},
+        {"main.go", "go"},          {"app.py", "python"},
+        {"index.ts", "typescript"}, {"lib.rs", "rust"},
+        {"App.tsx", "typescript"},  {"main.cpp", "cpp"},
+        {"esm.mjs", "javascript"},  {"cjs.cjs", "javascript"},
+        {"mod.mts", "typescript"},  {"legacy.cts", "typescript"},
+        {"svc.cs", "csharp"},       {"header.h", "cpp"},
     };
 
     for (const auto& t : tasks) {
