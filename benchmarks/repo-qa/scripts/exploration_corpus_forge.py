@@ -28,6 +28,7 @@ Usage:
 
 import argparse
 import ast
+import collections
 import hashlib
 import io
 import json
@@ -49,6 +50,7 @@ CORPORA_PATH = os.path.join(BENCH_ROOT, "exploration", "corpora.json")
 DEFAULT_OUT_ROOT = os.path.join(BENCH_ROOT, ".work", "exploration")
 
 _ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
+_WORD = re.compile(r"\w+")
 _TS_EXTENSIONS = (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".json", ".d.ts")
 
 
@@ -142,7 +144,11 @@ def materialize(spec, out_dir):
             f"{archive.stderr.decode(errors='replace').strip()}"
         )
     with tarfile.open(fileobj=io.BytesIO(archive.stdout)) as tar:
-        tar.extractall(tree, filter="data")
+        # "tar" rather than "data": real repos carry symlinks to absolute paths
+        # (next.js has one under a test fixture) which the stricter "data" filter
+        # rejects outright. The archive is a pinned commit from a trusted local
+        # checkout, and "tar" still blocks extraction outside the destination.
+        tar.extractall(tree, filter="tar")
     return tree
 
 
@@ -152,10 +158,16 @@ def materialize(spec, out_dir):
 
 
 def list_files(tree):
+    """Every path in the tree. Symlinks are entries in their own right: they are
+    never followed, so a link to a directory is listed, not descended into."""
     found = []
     for root, dirs, names in os.walk(tree):
+        for name in list(dirs):
+            if os.path.islink(os.path.join(root, name)):
+                found.append(os.path.relpath(os.path.join(root, name), tree))
+                dirs.remove(name)
         dirs.sort()
-        for name in sorted(names):
+        for name in names:
             found.append(os.path.relpath(os.path.join(root, name), tree))
     return sorted(found)
 
@@ -172,10 +184,16 @@ def list_dirs(tree):
 
 
 def tree_hash(tree):
-    """Content hash over (mode, blob, path) for every file, in sorted order."""
+    """Content hash over (mode, blob, path) for every path, in sorted order."""
     digest = hashlib.sha256()
     for rel in list_files(tree):
         path = os.path.join(tree, rel)
+        if os.path.islink(path):
+            # Hash the link target: a symlink's content is where it points, and
+            # it may well dangle.
+            blob = hashlib.sha256(os.readlink(path).encode()).hexdigest()
+            digest.update(f"120000 {blob} {rel}\n".encode())
+            continue
         mode = "100755" if os.access(path, os.X_OK) else "100644"
         with open(path, "rb") as handle:
             blob = hashlib.sha256(handle.read()).hexdigest()
@@ -184,11 +202,13 @@ def tree_hash(tree):
 
 
 def _read_text(path):
+    if os.path.islink(path):
+        return None  # never rewrite through a link
     try:
         with open(path, encoding="utf-8") as handle:
             return handle.read()
-    except (UnicodeDecodeError, ValueError):
-        return None  # binary: never rewritten
+    except (UnicodeDecodeError, ValueError, OSError):
+        return None  # binary or unreadable: never rewritten
 
 
 def _write_text(path, body):
@@ -335,7 +355,13 @@ def _rewrite_python_relative_imports(tree, old_mod, new_mod):
     return count
 
 
-_TS_RELATIVE = re.compile(r"(['\"])(\.{1,2}/[^'\"]*)\1")
+# Only real module specifiers. Matching any relative-looking string literal would
+# sweep up route paths, URLs and path.join() arguments -- next.js is full of
+# `'./relative'` strings that are not imports -- and drown the check in noise.
+_TS_RELATIVE = re.compile(
+    r"(?P<prefix>\bfrom\s*|\bimport\s*\(\s*|\bimport\s+|\brequire\s*\(\s*)"
+    r"(?P<quote>['\"])(?P<spec>\.{1,2}(?:/[^'\"]*)?)(?P=quote)"
+)
 
 
 def _rewrite_ts_relative_imports(tree, old_mod, new_mod):
@@ -352,8 +378,10 @@ def _rewrite_ts_relative_imports(tree, old_mod, new_mod):
 
         def repoint(match):
             nonlocal count
-            quote, spec_text = match.group(1), match.group(2)
-            target = os.path.normpath(os.path.join(here, spec_text)).replace(os.sep, "/")
+            quote = match.group("quote")
+            target = os.path.normpath(
+                os.path.join(here, match.group("spec"))
+            ).replace(os.sep, "/")
             if target != old_mod and not target.startswith(old_mod + "/"):
                 return match.group(0)
             new_target = new_mod + target[len(old_mod) :]
@@ -361,7 +389,7 @@ def _rewrite_ts_relative_imports(tree, old_mod, new_mod):
             if not new_spec.startswith("."):
                 new_spec = "./" + new_spec
             count += 1
-            return f"{quote}{new_spec}{quote}"
+            return f"{match.group('prefix')}{quote}{new_spec}{quote}"
 
         updated = _TS_RELATIVE.sub(repoint, body)
         if updated != body:
@@ -493,7 +521,25 @@ def _captures(pattern, body):
     return found
 
 
-def _is_safe_donor(body, spec):
+def _twin_names(body, symbol_pattern):
+    """Top-level symbol names a twin would rename."""
+    names = []
+    for match in symbol_pattern.finditer(body):
+        name = next(group for group in match.groups() if group)
+        # `_` is the blank identifier, not a symbol. Go's `var _ Provider =
+        # (*Instagram)(nil)` interface assertion matches a var pattern, and
+        # twinning it would rename every `_` in the file -- including
+        # `for _, x := range` -- turning discards into real variables.
+        if name == "_" or name in names:
+            continue
+        names.append(name)
+    return names
+
+
+_SELECTOR = re.compile(r"\.\s*(\w+)")
+
+
+def _is_safe_donor(body, spec, names):
     """Reject donors whose twin would not be self-consistent.
 
     Twinning renames a file's top-level declarations but deliberately leaves
@@ -503,7 +549,25 @@ def _is_safe_donor(body, spec):
     `Cron` lives in another file would either duplicate a method on the real
     type, or rename the receiver and strand `c.runDue()` on a type that no
     longer has it. Both stop the corpus building.
+
+    decoy_donor_exclude_pattern rejects donors whose declarations the symbol
+    pattern cannot see at all. Go's grouped `const (...)` / `var (...)` blocks
+    indent their names, so a line-anchored pattern misses them and the twin
+    redeclares them in the same package. Such files are simply not twinned --
+    a decoy only has to be plausible, not universal.
+
+    Finally, a top-level name that doubles as a member name is untwinnable:
+    ghupdate declares `type HttpClient interface` AND a `HttpClient HttpClient`
+    struct field, so renaming the type also renames the field declaration while
+    `p.config.HttpClient` -- selector-guarded -- keeps the old name.
     """
+    unsafe = spec.get("decoy_donor_exclude_pattern")
+    if unsafe and re.search(unsafe, body, re.MULTILINE):
+        return False
+
+    if set(names) & set(_SELECTOR.findall(body)):
+        return False
+
     receiver_pattern = spec.get("decoy_receiver_pattern")
     if not receiver_pattern:
         return True
@@ -525,23 +589,45 @@ def _inject_decoys(tree, spec, rng, ops, to_original):
 
     for _ in range(spec["mutations"].get("decoys", 0)):
         existing = {op["path"] for op in decoys}
-        candidates = []
+        bodies = {}
         for rel in _source_files(tree, spec):
             if rel in existing or os.path.basename(rel).startswith("__"):
                 continue
             body = _read_text(os.path.join(tree, rel))
-            if body and symbol_pattern.search(body) and _is_safe_donor(body, spec):
-                candidates.append(rel)
+            if body is not None:
+                bodies[rel] = body
+
+        # How many files in each directory mention each identifier. Go resolves
+        # across a whole package with no imports, so a sibling file can declare
+        # `ReapplyCondition func(r *MigrationsRunner)`; twinning that type then
+        # hands the twin's renamed type to a signature still naming the original.
+        # A Go donor must therefore be isolated within its package. Python and TS
+        # bind through imports, so their twins cannot collide this way.
+        tokens = {rel: set(_WORD.findall(body)) for rel, body in bodies.items()}
+        per_dir = collections.defaultdict(collections.Counter)
+        for rel, names in tokens.items():
+            per_dir[os.path.dirname(rel)].update(names)
+
+        def used_by_sibling(rel, name):
+            here = per_dir[os.path.dirname(rel)]
+            return here[name] - (1 if name in tokens[rel] else 0) > 0
+
+        candidates = []
+        for rel, body in bodies.items():
+            names = _twin_names(body, symbol_pattern)
+            if not names or not _is_safe_donor(body, spec, names):
+                continue
+            if spec.get("decoy_package_isolated") and any(
+                used_by_sibling(rel, name) for name in names
+            ):
+                continue
+            candidates.append(rel)
         if not candidates:
             raise ForgeError(f"{spec['id']}: no donor module for a decoy")
 
         donor = rng.choice(sorted(candidates))
         body = _read_text(os.path.join(tree, donor))
-        names = []
-        for match in symbol_pattern.finditer(body):
-            name = next(group for group in match.groups() if group)
-            if name not in names:
-                names.append(name)
+        names = _twin_names(body, symbol_pattern)
 
         suffix = _token(rng)
         twins = []
@@ -608,22 +694,44 @@ def run_validation(validation, tree):
     }
 
 
-def check_imports(root, language):
+def check_imports(root, language, exclude=None, allow_unresolved=None):
     """Non-mutating import resolvability check. Returns a list of problems.
 
     This is the oracle for path mutations: if a rename broke a module path,
-    an import stops resolving and the corpus is not usable.
+    an import stops resolving and the corpus is not usable. It only earns that
+    role if it is silent on the UNMUTATED tree -- a check that already fails on
+    pristine source cannot tell you what your mutation broke, so `exclude` exists
+    to drop areas it cannot honestly model (vendored trees, deliberately broken
+    test fixtures, non-JS source).
     """
     if language == "python":
         return _check_python_imports(root)
     if language in ("typescript", "javascript"):
-        return _check_ts_imports(root)
+        return _check_ts_imports(root, exclude, allow_unresolved)
     raise ForgeError(f"check-imports: unsupported language {language!r}")
+
+
+# A python module is not always a .py file: `sklearn.utils._isfinite` is a Cython
+# source (and `_weight_vector` a .pyx.tp template) that imports as an extension
+# module. Treating those as unresolved would flood the check with false positives
+# and mask a real break.
+_PY_MODULE_SUFFIXES = (
+    ".py",
+    ".pyx",
+    ".pxd",
+    ".pyi",
+    ".so",
+    ".pyd",
+    ".pyx.tp",
+    ".pxd.tp",
+)
 
 
 def _py_exists(root, parts):
     base = os.path.join(root, *parts)
-    return os.path.isfile(base + ".py") or os.path.isdir(base)
+    if os.path.isdir(base):
+        return True
+    return any(os.path.isfile(base + suffix) for suffix in _PY_MODULE_SUFFIXES)
 
 
 def _check_python_imports(root):
@@ -677,6 +785,18 @@ def _check_python_imports(root):
     return problems
 
 
+# TypeScript/ESM resolution is not "the file is literally there": `./x.js` is the
+# idiomatic way to import `x.ts` under NodeNext, and a directory resolves via its
+# index file or its package.json. Modelling these is what separates a real check
+# from a noise generator.
+_TS_JS_TO_TS = {
+    ".js": (".ts", ".tsx"),
+    ".jsx": (".tsx",),
+    ".mjs": (".mts", ".ts"),
+    ".cjs": (".cts", ".ts"),
+}
+
+
 def _ts_resolves(root, target):
     base = os.path.join(root, target)
     if os.path.isfile(base):
@@ -684,26 +804,54 @@ def _ts_resolves(root, target):
     for ext in _TS_EXTENSIONS:
         if os.path.isfile(base + ext):
             return True
+
+    stem, ext = os.path.splitext(base)
+    for candidate in _TS_JS_TO_TS.get(ext, ()):
+        if os.path.isfile(stem + candidate):
+            return True
+
     if os.path.isdir(base):
+        if os.path.isfile(os.path.join(base, "package.json")):
+            return True
         for ext in _TS_EXTENSIONS:
             if os.path.isfile(os.path.join(base, "index" + ext)):
                 return True
     return False
 
 
-def _check_ts_imports(root):
+# Commented-out and doc-example imports are not imports. next.js documents its
+# barrel-loader with `* export { a } from './a'` in JSDoc; scanning that as code
+# invents failures.
+_TS_BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
+_TS_LINE_COMMENT = re.compile(r"(?m)^[ \t]*//.*$")
+
+
+def _strip_ts_comments(body):
+    return _TS_LINE_COMMENT.sub("", _TS_BLOCK_COMMENT.sub("", body))
+
+
+def _check_ts_imports(root, exclude=None, allow_unresolved=None):
+    excluded = re.compile(exclude) if exclude else None
+    allowed = re.compile(allow_unresolved) if allow_unresolved else None
     problems = []
     for rel in list_files(root):
         if not rel.endswith(_TS_EXTENSIONS) or rel.endswith(".json"):
             continue
+        if excluded and excluded.search(rel):
+            continue
         body = _read_text(os.path.join(root, rel))
         if body is None:
             continue
+        body = _strip_ts_comments(body)
         here = os.path.dirname(rel)
         for match in _TS_RELATIVE.finditer(body):
-            target = os.path.normpath(os.path.join(here, match.group(2)))
-            if not _ts_resolves(root, target):
-                problems.append(f"{rel}: unresolved import {match.group(2)!r}")
+            spec = match.group("spec")
+            if "${" in spec:
+                continue  # computed at runtime; not statically resolvable
+            if allowed and allowed.search(spec):
+                continue
+            if not _ts_resolves(root, os.path.normpath(os.path.join(here, spec))):
+                problems.append(f"{rel}: unresolved import {spec!r}")
     return problems
 
 
@@ -844,6 +992,17 @@ def main(argv=None):
     check = sub.add_parser("check-imports", help="non-mutating import check")
     check.add_argument("--language", required=True)
     check.add_argument("--root", default=".")
+    check.add_argument(
+        "--exclude",
+        default=None,
+        help="regex of paths the check cannot honestly model (must be silent on pristine source)",
+    )
+    check.add_argument(
+        "--allow-unresolved",
+        default=None,
+        help="regex of specifiers that legitimately do not resolve from source "
+        "(build-generated modules, deliberately-missing fixtures)",
+    )
 
     trans = sub.add_parser("translate", help="original -> mutated path")
     trans.add_argument("--manifest", required=True)
@@ -852,7 +1011,12 @@ def main(argv=None):
     args = parser.parse_args(argv)
 
     if args.command == "check-imports":
-        problems = check_imports(os.path.abspath(args.root), args.language)
+        problems = check_imports(
+            os.path.abspath(args.root),
+            args.language,
+            args.exclude,
+            args.allow_unresolved,
+        )
         for problem in problems:
             print(f"UNRESOLVED {problem}")
         if problems:

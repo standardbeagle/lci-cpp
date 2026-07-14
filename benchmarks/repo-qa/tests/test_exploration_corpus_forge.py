@@ -309,6 +309,15 @@ GO_FIXTURE = {
     ),
     # No methods at all: always a safe donor.
     "tools/cron/pure.go": "package cron\n\nfunc Add(a int, b int) int {\n\treturn a + b\n}\n",
+    # Blank identifiers: an interface assertion and a discard in a range loop.
+    "tools/auth/provider.go": (
+        "package auth\n\ntype Provider struct {\n\tname string\n}\n\n"
+        "var _ any = (*Provider)(nil)\n\n"
+        "func Names(items []Provider) []string {\n"
+        "\tout := []string{}\n"
+        "\tfor _, item := range items {\n\t\tout = append(out, item.name)\n\t}\n"
+        "\treturn out\n}\n"
+    ),
 }
 
 
@@ -351,7 +360,48 @@ class TestDecoyDonorSafety(unittest.TestCase):
             )
             donors = {decoy["derived_from"] for decoy in manifest["decoys"]}
             self.assertNotIn("tools/cron/helpers.go", donors, f"seed {seed}")
-            self.assertTrue(donors <= {"tools/cron/cron.go", "tools/cron/pure.go"})
+            self.assertTrue(
+                donors <= {"tools/cron/cron.go", "tools/cron/pure.go", "tools/auth/provider.go"}
+            )
+
+    def test_blank_identifier_is_never_twinned(self):
+        """`_` is a discard, not a symbol.
+
+        Caught by `go build` on real PocketBase at seed 8: `var _ Provider =
+        (*Instagram)(nil)` matches a var declaration, and twinning `_` renamed
+        every discard in the file -- `for _, x := range` included -- turning them
+        into real, unused variables.
+        """
+        spec = {
+            "id": "go-fixture",
+            "source_path": self.source,
+            "pinned_commit": self.commit,
+            "language": "go",
+            "source_extensions": [".go"],
+            "mutable_roots": ["tools"],
+            "protect": [],
+            "reference_forms": ["slashed"],
+            "symbol_pattern": r"^func\s+(\w+)\s*[(\[]|^type\s+(\w+)|^var\s+(\w+)",
+            "decoy_receiver_pattern": r"^func\s+\(\s*\w+\s+\*?(\w+)",
+            "decoy_type_pattern": r"^type\s+(\w+)",
+            "mutations": {"dir_renames": 0, "module_shuffles": 0, "decoys": 4},
+            "validation": {"argv": ["{python}", "-c", "pass"]},
+        }
+        for seed in range(8):
+            manifest = forge.forge_corpus(
+                spec, seed=seed, out_dir=os.path.join(self.tmp, "out", f"b{seed}")
+            )
+            tree = os.path.join(self.tmp, "out", f"b{seed}", "tree")
+            for decoy in manifest["decoys"]:
+                self.assertNotIn(
+                    "_", [s["original"] for s in decoy["symbols"]], f"seed {seed}"
+                )
+                if decoy["derived_from"] != "tools/auth/provider.go":
+                    continue
+                with open(os.path.join(tree, decoy["path"])) as f:
+                    body = f.read()
+                self.assertIn("for _, item := range", body)
+                self.assertRegex(body, r"var _ any = \(\*Provider_\w+\)\(nil\)")
 
     def test_method_names_are_not_twinned(self):
         """Renaming `func (c *Cron) runDue` would strand the twin's `c.runDue()`."""

@@ -77,6 +77,8 @@
       "symbol_pattern": "^func\\s+(\\w+)\\s*[(\\[]|^type\\s+(\\w+)|^var\\s+(\\w+)|^const\\s+(\\w+)",
       "decoy_receiver_pattern": "^func\\s+\\(\\s*\\w+\\s+\\*?(\\w+)",
       "decoy_type_pattern": "^type\\s+(\\w+)",
+      "decoy_donor_exclude_pattern": "^(?:var|const)\\s*\\(",
+      "decoy_package_isolated": true,
       "mutations": {
         "dir_renames": 3,
         "module_shuffles": 3,
@@ -124,12 +126,26 @@
         "decoys": 5
       },
       "validation": {
+        "comment": [
+          "The import check is only an oracle if it is SILENT on the pristine tree.",
+          "--exclude drops areas it cannot honestly model: vendored/build-generated",
+          "shims (compiled/, bundles/), non-JS source (crates, turbopack), and test",
+          "trees full of deliberately-broken fixtures.",
+          "--allow-unresolved names the specifiers that legitimately do not resolve",
+          "from source: polyfill-module and routes.js are emitted by the build, and",
+          "./missing-module is an intentionally-absent Storybook build-error fixture.",
+          "Verified: 0 problems on pristine 9753217."
+        ],
         "argv": [
           "{python}",
           "{forge}",
           "check-imports",
           "--language",
-          "typescript"
+          "typescript",
+          "--exclude",
+          "(^|/)(node_modules|__tests__)/|^packages/next/src/(compiled|bundles)/|^(test|tests|turbopack|crates|rspack|apps|\\.github|bench|docs|errors|scripts|examples)/|^packages/(?!next/src/)",
+          "--allow-unresolved",
+          "^\\.\\./build/polyfills/polyfill-module$|^\\./routes\\.js$|^\\./missing-module$"
         ],
         "expect_exit": 0,
         "timeout_seconds": 900
