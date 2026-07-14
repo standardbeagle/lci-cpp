@@ -1,5 +1,7 @@
 #include <lci/indexing/pipeline_scanner.h>
 
+#include <lci/language_map.h>
+
 #include <algorithm>
 #include <cstdint>
 #include <string>
@@ -188,25 +190,15 @@ int FileScanner::get_file_priority(std::string_view path) {
 }
 
 std::string FileScanner::detect_language(std::string_view path) {
-    auto ext = extension_no_dot(path);
-    if (ext == "go") return "go";
-    if (ext == "py") return "python";
-    if (ext == "js") return "javascript";
-    if (ext == "ts") return "typescript";
-    if (ext == "tsx") return "tsx";
-    if (ext == "jsx") return "javascript";
-    if (ext == "rs") return "rust";
-    if (ext == "c" || ext == "h") return "c";
-    if (ext == "cpp" || ext == "cxx" || ext == "cc" || ext == "hpp" ||
-        ext == "hxx")
-        return "cpp";
-    if (ext == "java") return "java";
-    if (ext == "cs") return "c_sharp";
-    if (ext == "php") return "php";
-    if (ext == "kt" || ext == "kts") return "kotlin";
-    if (ext == "zig") return "zig";
-    if (ext == "rb") return "ruby";
-    return "unknown";
+    // Route through the central language_map (include/lci/language_map.h) so
+    // this site cannot drift from every other classification site the way the
+    // old hard-coded switch did: it emitted "tsx"/"c_sharp" naming divergences,
+    // mapped .h to "c", and dropped the ESM/CJS variants. language_info_for_path
+    // + to_string(LangId) yield the canonical, index-wide names and pick up the
+    // full extension set (.mjs/.cjs/.mts/.cts, .h -> "cpp") for free. Unknown
+    // extensions resolve to LangId::Unknown -> "unknown" (no silent fallback to
+    // a wrong language).
+    return std::string(to_string(language_info_for_path(path).language));
 }
 
 namespace {
