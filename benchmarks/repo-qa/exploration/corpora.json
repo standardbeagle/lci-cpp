@@ -1,0 +1,139 @@
+{
+  "schema": "exploration_corpora_v1",
+  "forge_version": "1",
+  "comment": [
+    "Stage-1 exploration corpora. Each entry names a LOCAL source checkout and the",
+    "commit it is pinned to; the forge exports that commit with `git archive` and",
+    "never writes back into the source.",
+    "",
+    "Generated corpora land under benchmarks/repo-qa/.work/exploration/ which is",
+    "gitignored: corpus contents are NEVER vendored into git, only regenerated from",
+    "(source commit, forge version, seed).",
+    "",
+    "mutable_roots bound the blast radius. Directory renames only apply STRICTLY",
+    "BELOW a root, so the root itself stays a stable anchor for the import rewriter.",
+    "validation is the oracle: a corpus that fails it is never marked ready."
+  ],
+  "corpora": [
+    {
+      "id": "scikit-learn",
+      "source_path": "/home/beagle/work/core/lci/scikit-learn",
+      "pinned_commit": "0885712e436b07cd04d60e955101aaf6a8cbb709",
+      "language": "python",
+      "source_extensions": [
+        ".py"
+      ],
+      "mutable_roots": [
+        "sklearn"
+      ],
+      "protect": [
+        "sklearn/externals",
+        "sklearn/tests"
+      ],
+      "source_exclude_pattern": "(^|/)tests?/|(^|/)test_[^/]*\\.py$|(^|/)conftest\\.py$|(^|/)setup\\.py$",
+      "reference_forms": [
+        "slashed",
+        "dotted"
+      ],
+      "symbol_pattern": "^(?:def|class)\\s+(\\w+)",
+      "mutations": {
+        "dir_renames": 3,
+        "module_shuffles": 3,
+        "decoys": 5
+      },
+      "validation": {
+        "argv": [
+          "{python}",
+          "{forge}",
+          "check-imports",
+          "--language",
+          "python"
+        ],
+        "expect_exit": 0,
+        "timeout_seconds": 900
+      }
+    },
+    {
+      "id": "pocketbase",
+      "source_path": "/home/beagle/work/core/lci-cpp/real_projects/go/pocketbase",
+      "pinned_commit": "d438c6a96a0252ff9df62c1cfe193480ed9ff15d",
+      "language": "go",
+      "source_extensions": [
+        ".go"
+      ],
+      "mutable_roots": [
+        "apis",
+        "core",
+        "forms",
+        "mails",
+        "plugins",
+        "tools"
+      ],
+      "protect": [],
+      "source_exclude_pattern": "_test\\.go$",
+      "reference_forms": [
+        "slashed"
+      ],
+      "symbol_pattern": "^func\\s+(\\w+)\\s*[(\\[]|^type\\s+(\\w+)|^var\\s+(\\w+)|^const\\s+(\\w+)",
+      "decoy_receiver_pattern": "^func\\s+\\(\\s*\\w+\\s+\\*?(\\w+)",
+      "decoy_type_pattern": "^type\\s+(\\w+)",
+      "mutations": {
+        "dir_renames": 3,
+        "module_shuffles": 3,
+        "decoys": 5
+      },
+      "validation": {
+        "argv": [
+          "go",
+          "build",
+          "./..."
+        ],
+        "env": {
+          "GOPROXY": "off",
+          "GOWORK": "off"
+        },
+        "expect_exit": 0,
+        "timeout_seconds": 900
+      }
+    },
+    {
+      "id": "next.js",
+      "source_path": "/home/beagle/work/core/lci/real_projects/typescript/next.js",
+      "pinned_commit": "97532172c065ca2b49dd79d1fa44c3a0b864065b",
+      "language": "typescript",
+      "source_extensions": [
+        ".ts",
+        ".tsx"
+      ],
+      "mutable_roots": [
+        "packages/next/src/server",
+        "packages/next/src/shared",
+        "packages/next/src/client"
+      ],
+      "protect": [
+        "packages/next/src/compiled"
+      ],
+      "source_exclude_pattern": "\\.(test|spec)\\.tsx?$|(^|/)__tests__/",
+      "reference_forms": [
+        "slashed"
+      ],
+      "symbol_pattern": "^export\\s+(?:async\\s+)?(?:function|class|const|interface|type|enum)\\s+(\\w+)",
+      "mutations": {
+        "dir_renames": 3,
+        "module_shuffles": 3,
+        "decoys": 5
+      },
+      "validation": {
+        "argv": [
+          "{python}",
+          "{forge}",
+          "check-imports",
+          "--language",
+          "typescript"
+        ],
+        "expect_exit": 0,
+        "timeout_seconds": 900
+      }
+    }
+  ]
+}

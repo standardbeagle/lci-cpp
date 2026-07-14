@@ -32,19 +32,30 @@ def git(cwd, *args):
     )
 
 
-# A tiny python "project": two packages, absolute cross-package imports, and a
-# donor module with top-level symbols the forge can twin into a decoy.
+# A tiny python "project" that exercises every reference shape a path move has
+# to repoint: absolute dotted imports, absolute slashed paths in prose, relative
+# imports within a package, and parent-relative imports across sibling packages.
+# It also carries sub-packages, because directory renames only apply below a root.
 FIXTURE_FILES = {
-    "alpha/__init__.py": "from alpha.core import Engine\n",
+    "alpha/__init__.py": "from .core import Engine\n",
     "alpha/core.py": (
-        "import alpha.util\n"
+        "from alpha.util.helpers import helper\n"
         "\n"
         "\n"
         "class Engine:\n"
         "    def run(self):\n"
-        "        return alpha.util.helper()\n"
+        "        return helper()\n"
     ),
-    "alpha/util.py": "def helper():\n    return 1\n",
+    "alpha/util/__init__.py": "from .helpers import helper\n",
+    "alpha/util/helpers.py": "def helper():\n    return 1\n",
+    "alpha/engine/__init__.py": "",
+    "alpha/engine/runner.py": (
+        "from ..util.helpers import helper\n"
+        "\n"
+        "\n"
+        "def run():\n"
+        "    return helper()\n"
+    ),
     "beta/__init__.py": "",
     "beta/client.py": (
         "from alpha.core import Engine\n"
@@ -54,12 +65,13 @@ FIXTURE_FILES = {
         "    return Engine()\n"
     ),
     "beta/models.py": "class Record:\n    pass\n",
-    "docs/guide.md": "See `alpha/core.py` and the alpha.util module.\n",
+    "beta/test_client.py": "from beta.client import make\n\n\ndef test_make():\n    assert make()\n",
+    "docs/guide.md": "See `alpha/core.py` and the alpha.util package.\n",
 }
 
 
-def make_fixture_repo(root):
-    for rel, body in FIXTURE_FILES.items():
+def make_fixture_repo(root, files=None):
+    for rel, body in (files or FIXTURE_FILES).items():
         path = os.path.join(root, rel)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w") as f:
@@ -89,8 +101,8 @@ def spec_for(source_path, commit, validation=None):
         "mutable_roots": ["alpha", "beta"],
         "protect": [],
         "reference_forms": ["slashed", "dotted"],
+        "source_exclude_pattern": r"(^|/)test_[^/]*\.py$",
         "symbol_pattern": r"^(?:def|class)\s+(\w+)",
-        "no_shuffle_pattern": r"^\s*from\s+\.",
         "mutations": {"dir_renames": 1, "module_shuffles": 1, "decoys": 2},
         "validation": validation
         or {"argv": ["{python}", "{forge}", "check-imports", "--language", "python"]},
@@ -152,7 +164,7 @@ class TestSeedChange(ForgeTestCase):
 
         # Both keep a usable original -> mutated anchor translation.
         for manifest, out in ((a, self.out("a")), (b, self.out("b"))):
-            for original in ("alpha/core.py", "alpha/util.py", "beta/client.py"):
+            for original in ("alpha/core.py", "alpha/util/helpers.py", "beta/client.py"):
                 mutated = forge.translate_path(manifest, original)
                 self.assertTrue(
                     os.path.isfile(os.path.join(out, "tree", mutated)),
@@ -260,9 +272,123 @@ class TestDecoyProvenance(ForgeTestCase):
                     )
 
 
+class TestExcludedSources(ForgeTestCase):
+    def test_test_files_are_never_shuffled_or_cloned(self):
+        """Test files carry compiler-visible naming contracts and must be left alone.
+
+        A Go `_test.go` file declares `package foo_test`; renaming it, or cloning
+        it into a decoy that no longer ends in `_test.go`, lands two packages in
+        one directory and the corpus stops building. Swept across seeds because
+        donor choice is random.
+        """
+        for seed in range(12):
+            manifest = forge.forge_corpus(
+                spec_for(self.source, self.commit),
+                seed=seed,
+                out_dir=self.out(f"x{seed}"),
+            )
+            for op in manifest["mutations"]:
+                for key in ("from", "to", "path", "derived_from"):
+                    self.assertNotIn(
+                        "test_client",
+                        op.get(key, ""),
+                        f"seed {seed}: excluded test file mutated by {op}",
+                    )
+
+
+GO_FIXTURE = {
+    # Declares Cron AND its method: twinning it is self-consistent.
+    "tools/cron/cron.go": (
+        "package cron\n\ntype Cron struct {\n\tname string\n}\n\n"
+        "func New() *Cron {\n\treturn &Cron{}\n}\n\n"
+        "func (c *Cron) runDue() string {\n\treturn c.name\n}\n"
+    ),
+    # Hangs a method off a type declared in ANOTHER file: NOT a safe donor.
+    "tools/cron/helpers.go": (
+        "package cron\n\nfunc (c *Cron) Stop() string {\n\treturn c.runDue()\n}\n"
+    ),
+    # No methods at all: always a safe donor.
+    "tools/cron/pure.go": "package cron\n\nfunc Add(a int, b int) int {\n\treturn a + b\n}\n",
+}
+
+
+class TestDecoyDonorSafety(unittest.TestCase):
+    """Regression: a decoy must never be minted from a file it cannot twin cleanly.
+
+    Caught by `go build` on the real PocketBase corpus: cloning a file whose
+    methods hang off a type declared elsewhere either duplicates a method on the
+    real type or strands the twin's own call sites.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="forge-go-")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.source = os.path.join(self.tmp, "source")
+        os.makedirs(self.source)
+        self.commit = make_fixture_repo(self.source, GO_FIXTURE)
+
+    def test_donor_with_foreign_receiver_is_never_cloned(self):
+        spec = {
+            "id": "go-fixture",
+            "source_path": self.source,
+            "pinned_commit": self.commit,
+            "language": "go",
+            "source_extensions": [".go"],
+            "mutable_roots": ["tools"],
+            "protect": [],
+            "source_exclude_pattern": r"_test\.go$",
+            "reference_forms": ["slashed"],
+            "symbol_pattern": r"^func\s+(\w+)\s*[(\[]|^type\s+(\w+)",
+            "decoy_receiver_pattern": r"^func\s+\(\s*\w+\s+\*?(\w+)",
+            "decoy_type_pattern": r"^type\s+(\w+)",
+            "mutations": {"dir_renames": 0, "module_shuffles": 0, "decoys": 3},
+            "validation": {"argv": ["{python}", "-c", "pass"]},
+        }
+
+        for seed in range(10):
+            manifest = forge.forge_corpus(
+                spec, seed=seed, out_dir=os.path.join(self.tmp, "out", str(seed))
+            )
+            donors = {decoy["derived_from"] for decoy in manifest["decoys"]}
+            self.assertNotIn("tools/cron/helpers.go", donors, f"seed {seed}")
+            self.assertTrue(donors <= {"tools/cron/cron.go", "tools/cron/pure.go"})
+
+    def test_method_names_are_not_twinned(self):
+        """Renaming `func (c *Cron) runDue` would strand the twin's `c.runDue()`."""
+        spec = {
+            "id": "go-fixture",
+            "source_path": self.source,
+            "pinned_commit": self.commit,
+            "language": "go",
+            "source_extensions": [".go"],
+            "mutable_roots": ["tools"],
+            "protect": [],
+            "reference_forms": ["slashed"],
+            "symbol_pattern": r"^func\s+(\w+)\s*[(\[]|^type\s+(\w+)",
+            "decoy_receiver_pattern": r"^func\s+\(\s*\w+\s+\*?(\w+)",
+            "decoy_type_pattern": r"^type\s+(\w+)",
+            "mutations": {"dir_renames": 0, "module_shuffles": 0, "decoys": 3},
+            "validation": {"argv": ["{python}", "-c", "pass"]},
+        }
+        manifest = forge.forge_corpus(
+            spec, seed=1, out_dir=os.path.join(self.tmp, "out", "m")
+        )
+        tree = os.path.join(self.tmp, "out", "m", "tree")
+        for decoy in manifest["decoys"]:
+            twinned = {s["original"] for s in decoy["symbols"]}
+            self.assertNotIn("runDue", twinned)
+            self.assertNotIn("Stop", twinned)
+            if decoy["derived_from"] == "tools/cron/cron.go":
+                with open(os.path.join(tree, decoy["path"])) as f:
+                    body = f.read()
+                # receiver retyped to the twin, method name and call site intact
+                self.assertIn("runDue", body)
+                self.assertRegex(body, r"func \(c \*Cron_\w+\) runDue")
+
+
 class TestSourceGuards(ForgeTestCase):
     def test_dirty_source_is_refused(self):
-        with open(os.path.join(self.source, "alpha", "util.py"), "a") as f:
+        with open(os.path.join(self.source, "alpha", "util", "helpers.py"), "a") as f:
             f.write("# dirty\n")
 
         with self.assertRaises(forge.ForgeError) as ctx:
@@ -270,7 +396,7 @@ class TestSourceGuards(ForgeTestCase):
         self.assertIn("dirty", str(ctx.exception).lower())
 
     def test_dirty_source_is_allowed_with_explicit_override(self):
-        with open(os.path.join(self.source, "alpha", "util.py"), "a") as f:
+        with open(os.path.join(self.source, "alpha", "util", "helpers.py"), "a") as f:
             f.write("# dirty\n")
 
         manifest = self.forge(seed=7, allow_dirty=True)
@@ -285,7 +411,7 @@ class TestSourceGuards(ForgeTestCase):
 
     def test_head_mismatch_is_refused(self):
         spec = spec_for(self.source, self.commit)
-        with open(os.path.join(self.source, "alpha", "util.py"), "a") as f:
+        with open(os.path.join(self.source, "alpha", "util", "helpers.py"), "a") as f:
             f.write("# moved on\n")
         git(self.source, "commit", "-qam", "move HEAD off the pin")
 
@@ -295,7 +421,7 @@ class TestSourceGuards(ForgeTestCase):
 
     def test_head_mismatch_allowed_with_explicit_override(self):
         spec = spec_for(self.source, self.commit)
-        with open(os.path.join(self.source, "alpha", "util.py"), "a") as f:
+        with open(os.path.join(self.source, "alpha", "util", "helpers.py"), "a") as f:
             f.write("# moved on\n")
         git(self.source, "commit", "-qam", "move HEAD off the pin")
 
@@ -362,20 +488,32 @@ class TestValidation(ForgeTestCase):
 
     def test_mutation_that_breaks_imports_fails_validation(self):
         """The import check is a real oracle: break a path, validation must catch it."""
+        manifest = self.forge(seed=7)
         tree = os.path.join(self.out("s7"), "tree")
-        self.forge(seed=7)
-        os.rename(
-            os.path.join(tree, "beta", "models.py"),
-            os.path.join(tree, "beta", "models_moved.py"),
-        )
-        with open(os.path.join(tree, "beta", "client.py"), "a") as f:
-            f.write("\nfrom beta.models import Record\n")
+
+        models = forge.translate_path(manifest, "beta/models.py")
+        client = forge.translate_path(manifest, "beta/client.py")
+
+        # Take the module away without repointing its importer.
+        os.rename(os.path.join(tree, models), os.path.join(tree, models + ".bak"))
+        module = os.path.splitext(models)[0].replace("/", ".")
+        with open(os.path.join(tree, client), "a") as f:
+            f.write(f"\nfrom {module} import Record\n")
 
         result = forge.run_validation(
             {"argv": ["{python}", "{forge}", "check-imports", "--language", "python"]},
             tree,
         )
         self.assertFalse(result["passed"])
+        self.assertIn("unresolved", result["stdout_tail"])
+
+    def test_forged_tree_passes_its_import_check(self):
+        """The forge's own mutations must leave every import resolving."""
+        self.forge(seed=7)
+        problems = forge.check_imports(
+            os.path.join(self.out("s7"), "tree"), "python"
+        )
+        self.assertEqual(problems, [])
 
 
 class TestRealCorporaConfig(unittest.TestCase):
