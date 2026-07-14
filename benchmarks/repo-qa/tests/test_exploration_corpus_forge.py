@@ -436,6 +436,212 @@ class TestDecoyDonorSafety(unittest.TestCase):
                 self.assertRegex(body, r"func \(c \*Cron_\w+\) runDue")
 
 
+# A tiny TypeScript monorepo. The load-bearing detail is the BARE first-party
+# specifier: next.js refers to its own source as `next/dist/server/...` (126 such
+# self-references at the pinned commit), which maps to `packages/next/src/...`.
+# A relative-only rewriter never repoints those, and a relative-only checker never
+# notices -- so a dir_rename silently breaks the corpus while validation says ok.
+TS_FIXTURE = {
+    "packages/app/src/server/deep/nested.ts": (
+        "export function helper(): number {\n  return 1\n}\n"
+    ),
+    "packages/app/src/server/handler.ts": (
+        "import { helper } from './deep/nested'\n"
+        "import { shared } from 'myapp/dist/shared/const'\n"
+        "\n"
+        "export function handle(): number {\n  return helper() + shared\n}\n"
+    ),
+    # bare first-party self-reference pointing INTO a renameable directory
+    "packages/app/src/client/entry.ts": (
+        "import { helper } from 'myapp/dist/server/deep/nested'\n"
+        "\n"
+        "export const entry = helper\n"
+    ),
+    "packages/app/src/shared/const.ts": "export const shared = 2\n",
+    "packages/app/src/server/legacy.ts": (
+        "// import { gone } from './deep/removed'\n"
+        "/* import { alsoGone } from './deep/vanished' */\n"
+        "export const legacy = 3\n"
+    ),
+}
+
+TS_FIRST_PARTY = {"myapp/dist/": "packages/app/src/"}
+
+
+def ts_spec(source_path, commit):
+    return {
+        "id": "ts-fixture",
+        "source_path": source_path,
+        "pinned_commit": commit,
+        "language": "typescript",
+        "source_extensions": [".ts", ".tsx"],
+        # only ONE renameable subdir below the root, so the rename is pinned
+        "mutable_roots": ["packages/app/src/server"],
+        "protect": [],
+        "reference_forms": ["slashed"],
+        "first_party_prefixes": TS_FIRST_PARTY,
+        "symbol_pattern": r"^export\s+(?:function|const|class|interface|type)\s+(\w+)",
+        "mutations": {"dir_renames": 1, "module_shuffles": 1, "decoys": 1},
+        "validation": {
+            "argv": [
+                "{python}", "{forge}", "check-imports",
+                "--language", "typescript",
+                "--first-party", "myapp/dist/=packages/app/src/",
+            ]
+        },
+    }
+
+
+class TestTypeScriptResolution(unittest.TestCase):
+    """Unit coverage for the resolver the TS oracle is built on."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="forge-ts-res-")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        for rel, body in {
+            "src/mod.ts": "export const a = 1\n",
+            "src/pack/index.ts": "export const b = 2\n",
+            "src/plain.js": "module.exports = 3\n",
+        }.items():
+            path = os.path.join(self.tmp, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as f:
+                f.write(body)
+
+    def test_extensionless_directory_index_and_js_to_ts(self):
+        self.assertTrue(forge._ts_resolves(self.tmp, "src/mod"))  # extensionless
+        self.assertTrue(forge._ts_resolves(self.tmp, "src/pack"))  # directory index
+        self.assertTrue(forge._ts_resolves(self.tmp, "src/mod.js"))  # NodeNext .js
+        self.assertTrue(forge._ts_resolves(self.tmp, "src/plain.js"))
+        self.assertFalse(forge._ts_resolves(self.tmp, "src/absent"))
+
+    def test_commented_out_imports_are_not_imports(self):
+        path = os.path.join(self.tmp, "src", "c.ts")
+        with open(path, "w") as f:
+            f.write(
+                "// import { x } from './gone'\n"
+                "/* import { y } from './vanished' */\n"
+                "import { a } from './mod'\n"
+            )
+        self.assertEqual(forge.check_imports(self.tmp, "typescript"), [])
+
+    def test_bare_first_party_specifier_is_resolved_and_can_fail(self):
+        path = os.path.join(self.tmp, "src", "d.ts")
+        with open(path, "w") as f:
+            f.write("import { a } from 'lib/dist/mod'\n")
+        first_party = {"lib/dist/": "src/"}
+
+        # resolves through the prefix map...
+        self.assertEqual(
+            forge.check_imports(self.tmp, "typescript", first_party=first_party), []
+        )
+        # ...and a bare specifier pointing nowhere is a real problem
+        with open(path, "w") as f:
+            f.write("import { a } from 'lib/dist/absent'\n")
+        problems = forge.check_imports(
+            self.tmp, "typescript", first_party=first_party
+        )
+        self.assertTrue(any("lib/dist/absent" in p for p in problems), problems)
+
+    def test_third_party_bare_specifiers_are_ignored(self):
+        path = os.path.join(self.tmp, "src", "e.ts")
+        with open(path, "w") as f:
+            f.write("import React from 'react'\nimport { a } from './mod'\n")
+        self.assertEqual(
+            forge.check_imports(
+                self.tmp, "typescript", first_party={"lib/dist/": "src/"}
+            ),
+            [],
+        )
+
+
+class TestTypeScriptCorpus(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="forge-ts-")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.source = os.path.join(self.tmp, "source")
+        os.makedirs(self.source)
+        self.commit = make_fixture_repo(self.source, TS_FIXTURE)
+
+    def forge(self, seed=3):
+        return forge.forge_corpus(
+            ts_spec(self.source, self.commit),
+            seed=seed,
+            out_dir=os.path.join(self.tmp, "out", str(seed)),
+        )
+
+    def tree(self, seed=3):
+        return os.path.join(self.tmp, "out", str(seed), "tree")
+
+    def test_forged_ts_corpus_passes_its_own_check(self):
+        manifest = self.forge()
+        self.assertEqual(manifest["status"], "ready")
+        self.assertEqual(
+            forge.check_imports(
+                self.tree(), "typescript", first_party=TS_FIRST_PARTY
+            ),
+            [],
+        )
+
+    def test_bare_first_party_specifier_is_repointed_by_a_dir_rename(self):
+        manifest = self.forge()
+        rename = next(
+            op for op in manifest["mutations"] if op["kind"] == "dir_rename"
+        )
+        self.assertEqual(rename["from"], "packages/app/src/server/deep")
+        new_dir = rename["to"].split("/")[-1]
+
+        entry = forge.translate_path(manifest, "packages/app/src/client/entry.ts")
+        with open(os.path.join(self.tree(), entry)) as f:
+            body = f.read()
+
+        # the bare self-reference now names the RENAMED directory
+        self.assertIn(f"myapp/dist/server/{new_dir}/nested", body)
+        self.assertNotIn("myapp/dist/server/deep/nested", body)
+
+    def test_oracle_catches_an_unrepointed_bare_specifier(self):
+        """Discrimination test: prove the checker is not blind to what the
+        rewriter handles. Put a stale bare specifier back and the check MUST fail.
+
+        Without this, checker and rewriter share one notion of a specifier and the
+        oracle can only ever confirm the rewriter's own assumptions.
+        """
+        manifest = self.forge()
+        rename = next(
+            op for op in manifest["mutations"] if op["kind"] == "dir_rename"
+        )
+        new_dir = rename["to"].split("/")[-1]
+
+        # clean tree first
+        self.assertEqual(
+            forge.check_imports(
+                self.tree(), "typescript", first_party=TS_FIRST_PARTY
+            ),
+            [],
+        )
+
+        entry = os.path.join(
+            self.tree(),
+            forge.translate_path(manifest, "packages/app/src/client/entry.ts"),
+        )
+        with open(entry) as f:
+            body = f.read()
+        with open(entry, "w") as f:
+            f.write(
+                body.replace(
+                    f"myapp/dist/server/{new_dir}/nested",
+                    "myapp/dist/server/deep/nested",
+                )
+            )
+
+        problems = forge.check_imports(
+            self.tree(), "typescript", first_party=TS_FIRST_PARTY
+        )
+        self.assertTrue(
+            any("myapp/dist/server/deep/nested" in p for p in problems), problems
+        )
+
+
 class TestSourceGuards(ForgeTestCase):
     def test_dirty_source_is_refused(self):
         with open(os.path.join(self.source, "alpha", "util", "helpers.py"), "a") as f:
