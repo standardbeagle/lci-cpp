@@ -1,0 +1,52 @@
+name: exploration-leak
+
+# Required gate for the stage-1 exploration task bank. Runs structural/anchor
+# validation and the prompt leak linter whenever an exploration task, its
+# schema, the forge, or the linter/validator changes. Fully hermetic: it checks
+# out this repo only and reads the committed task/annotation JSON. It NEVER
+# clones the three real corpora (sklearn/pocketbase/next.js) and does no network
+# I/O beyond checkout + the python toolchain — the leak checks are prompt-only
+# and need no forged tree.
+on:
+  push:
+    branches: [main]
+    paths: &exploration_paths
+      - "benchmarks/repo-qa/exploration/**"
+      - "benchmarks/repo-qa/scripts/lint_exploration_leaks.py"
+      - "benchmarks/repo-qa/scripts/validate_exploration_tasks.py"
+      - "benchmarks/repo-qa/scripts/exploration_corpus_forge.py"
+      - "benchmarks/repo-qa/tests/test_exploration_leak_linter.py"
+      - "benchmarks/repo-qa/tests/test_exploration_task_schema.py"
+      - ".github/workflows/exploration-leak.yml"
+  pull_request:
+    paths: *exploration_paths
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  leak-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: benchmarks/repo-qa
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      # jsonschema is the only dependency the validator needs; nothing here
+      # touches the real corpora or any benchmark network endpoint.
+      - name: Install validator dependency
+        run: python -m pip install --disable-pip-version-check jsonschema
+      - name: Structural + anchor validation
+        run: python3 scripts/validate_exploration_tasks.py
+      - name: Prompt leak linter
+        run: python3 scripts/lint_exploration_leaks.py
+      - name: Linter + schema contract tests
+        run: >-
+          python3 -m unittest
+          tests.test_exploration_leak_linter
+          tests.test_exploration_task_schema
