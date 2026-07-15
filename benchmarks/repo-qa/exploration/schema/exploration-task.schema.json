@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lci/benchmarks/repo-qa/exploration-task.schema.json",
+  "title": "Stage-1 exploration task",
+  "description": "A goal-oriented, intentionally under-specified exploration task pinned to a forged/mutated corpus. The prompt asks a tool to FIND something; the evidence anchors are the adjudicated answer key, expressed against MUTATED relative paths so a tool that memorised the upstream repo cannot short-circuit them.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "id", "corpus", "manifest_ref", "prompt", "rubric", "evidence", "adjudication"],
+  "properties": {
+    "schema": {
+      "const": "exploration_task_v1"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+      "description": "Stable, filesystem-safe task id. Never renumbered once shipped."
+    },
+    "corpus": {
+      "type": "string",
+      "enum": ["scikit-learn", "pocketbase", "next.js"]
+    },
+    "manifest_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Pins the exact forged corpus the anchors were verified against. The validator forges/locates this manifest to re-verify every anchor.",
+      "required": ["corpus_id", "source_commit", "seed", "forge_version"],
+      "properties": {
+        "corpus_id": {"type": "string"},
+        "source_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "seed": {"type": "integer"},
+        "forge_version": {"type": "string"}
+      }
+    },
+    "prompt": {
+      "type": "string",
+      "minLength": 20,
+      "description": "Under-specified, goal-oriented question (where / how / what-breaks). MUST NOT name target paths, target symbols, patch locations, or solution hints; the validator fails a prompt that leaks any evidence path segment or target identifier."
+    },
+    "rubric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["must_surface", "answer_shape"],
+      "description": "The grading key. Unlike the prompt, the rubric MAY name symbols/paths.",
+      "properties": {
+        "must_surface": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "string"},
+          "description": "Facts/locations a correct exploration answer must surface."
+        },
+        "answer_shape": {"type": "string"}
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "minItems": 2,
+      "description": "Adjudicated final evidence set: >=2 independently supporting anchors, each against a MUTATED relative path.",
+      "items": {"$ref": "#/$defs/anchor"}
+    },
+    "adjudication": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["annotators", "resolved"],
+      "properties": {
+        "annotators": {
+          "type": "array",
+          "minItems": 2,
+          "uniqueItems": true,
+          "items": {"type": "string"},
+          "description": "The (>=2) independent human annotators whose records back this task."
+        },
+        "resolved": {
+          "type": "boolean",
+          "description": "True once every annotator disagreement is adjudicated. A task with disagreeing annotators and resolved=false is invalid."
+        },
+        "notes": {"type": "string"}
+      }
+    }
+  },
+  "$defs": {
+    "anchor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "lines", "claim", "target_identifiers"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "MUTATED relative path within the forged corpus tree."
+        },
+        "lines": {
+          "type": "array",
+          "items": {"type": "integer", "minimum": 1},
+          "minItems": 1,
+          "maxItems": 2,
+          "description": "Exact line [n] or bounded inclusive range [start, end] (start <= end)."
+        },
+        "claim": {
+          "type": "string",
+          "minLength": 1,
+          "description": "What this location supports about the answer."
+        },
+        "target_identifiers": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string"},
+          "description": "Identifiers that MUST occur within the bounded evidence; consumed by downstream leakage checks."
+        }
+      }
+    }
+  }
+}
