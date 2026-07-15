@@ -19,15 +19,19 @@ The bullets these tests pin (one acceptance criterion each, at least):
     unless the caller explicitly groups by that field.
 """
 
+import json
 import os
 import sys
 import unittest
+from tempfile import TemporaryDirectory
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 BENCH_ROOT = os.path.dirname(HERE)
 EXPLORATION_ROOT = os.path.join(BENCH_ROOT, "exploration")
-if EXPLORATION_ROOT not in sys.path:
-    sys.path.insert(0, EXPLORATION_ROOT)
+SCRIPTS = os.path.join(BENCH_ROOT, "scripts")
+for _p in (EXPLORATION_ROOT, SCRIPTS):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 from scoring import (  # noqa: E402
     AGGREGATE_SCHEMA,
@@ -288,6 +292,63 @@ class AggregateTests(unittest.TestCase):
         ]
         with self.assertRaises(IncompatibleRuns):
             aggregate(scores)
+
+
+class CliTests(unittest.TestCase):
+    def _write_bank(self, root):
+        tasks_dir = os.path.join(root, "tasks")
+        os.makedirs(tasks_dir)
+        task = answer_key()
+        with open(os.path.join(tasks_dir, task["id"] + ".json"), "w") as handle:
+            json.dump(task, handle)
+        records_path = os.path.join(root, "records.jsonl")
+        recs = [
+            make_record(task, arm="treatment",
+                        final_answer=f"{CORPUS_FILE}:3 and {CORPUS_FILE}:7"),
+            make_record(task, arm="baseline", status="timeout", final_answer=None),
+        ]
+        with open(records_path, "w") as handle:
+            for rec in recs:
+                handle.write(json.dumps(rec) + "\n")
+        return tasks_dir, records_path
+
+    def test_cli_emits_scores_and_aggregate_json(self):
+        import score_exploration
+
+        with TemporaryDirectory() as root:
+            tasks_dir, records_path = self._write_bank(root)
+            out_dir = os.path.join(root, "out")
+            rc = score_exploration.main(
+                ["--tasks-dir", tasks_dir, "--records", records_path,
+                 "--out-dir", out_dir]
+            )
+            self.assertEqual(rc, 0)
+            with open(os.path.join(out_dir, "scores.json")) as handle:
+                scores = json.load(handle)
+            self.assertEqual(scores["schema"], "exploration_score_set_v1")
+            self.assertEqual(len(scores["scores"]), 2)
+            with open(os.path.join(out_dir, "aggregate.json")) as handle:
+                agg = json.load(handle)
+            self.assertEqual(agg["schema"], AGGREGATE_SCHEMA)
+            # timeout preserved: baseline answered 0/1, treatment answered 1/1
+            self.assertEqual(agg["arms"]["baseline"]["answered"], 0)
+            self.assertEqual(agg["arms"]["treatment"]["evidence"]["precision"], 1.0)
+
+    def test_cli_fails_loud_on_unknown_task_id(self):
+        import score_exploration
+
+        with TemporaryDirectory() as root:
+            tasks_dir, records_path = self._write_bank(root)
+            # append a record referencing a task not in the bank
+            with open(records_path, "a") as handle:
+                handle.write(json.dumps({"task_id": "ghost", "arm": "treatment",
+                                         "status": "answered"}) + "\n")
+            with self.assertRaises(SystemExit) as caught:
+                score_exploration.main(
+                    ["--tasks-dir", tasks_dir, "--records", records_path,
+                     "--out-dir", os.path.join(root, "out")]
+                )
+            self.assertNotEqual(caught.exception.code, 0)
 
 
 if __name__ == "__main__":
