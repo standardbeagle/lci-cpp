@@ -1,0 +1,49 @@
+{
+  "schema": "exploration_task_v1",
+  "id": "skl-column-gap-fill",
+  "corpus": "scikit-learn",
+  "manifest_ref": {
+    "corpus_id": "scikit-learn",
+    "source_commit": "0885712e436b07cd04d60e955101aaf6a8cbb709",
+    "seed": 7,
+    "forge_version": "1"
+  },
+  "prompt": "When a table has holes in it, this library can fill each empty cell with a simple per-column summary such as the average or the most frequent value. Where does the estimator that performs that straightforward fill live, and what shared parent class gives every filler its notion of an indicator for where values were originally absent?",
+  "rubric": {
+    "must_surface": [
+      "the mean/most-frequent fill estimator",
+      "the shared parent that models missingness indicators"
+    ],
+    "answer_shape": "one estimator class, one shared parent class"
+  },
+  "evidence": [
+    {
+      "path": "sklearn/impute_vegv84/_base.py",
+      "lines": [
+        171
+      ],
+      "target_identifiers": [
+        "SimpleImputer"
+      ],
+      "claim": "the simple per-column fill estimator"
+    },
+    {
+      "path": "sklearn/impute_vegv84/_base.py",
+      "lines": [
+        95
+      ],
+      "target_identifiers": [
+        "_BaseImputer"
+      ],
+      "claim": "shared parent modelling the missingness indicator"
+    }
+  ],
+  "adjudication": {
+    "annotators": [
+      "ann-hyde",
+      "ann-quill"
+    ],
+    "resolved": true,
+    "notes": "Two independent passes selected the same anchors; no disagreement to resolve."
+  }
+}

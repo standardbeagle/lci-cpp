@@ -1,0 +1,49 @@
+{
+  "schema": "exploration_task_v1",
+  "id": "skl-estimator-copy",
+  "corpus": "scikit-learn",
+  "manifest_ref": {
+    "corpus_id": "scikit-learn",
+    "source_commit": "0885712e436b07cd04d60e955101aaf6a8cbb709",
+    "seed": 7,
+    "forge_version": "1"
+  },
+  "prompt": "Throughout this library there is a canonical way to make a fresh, unfitted duplicate of an estimator that keeps its configuration but drops everything learned from data. Where is that duplication helper, and where is the mixin that defines how an estimator reports the configuration the helper copies?",
+  "rubric": {
+    "must_surface": [
+      "the fresh-duplicate helper",
+      "the params/config mixin it reads"
+    ],
+    "answer_shape": "one helper function, one foundational estimator class"
+  },
+  "evidence": [
+    {
+      "path": "sklearn/base.py",
+      "lines": [
+        46
+      ],
+      "target_identifiers": [
+        "clone"
+      ],
+      "claim": "produces an unfitted duplicate keeping configuration"
+    },
+    {
+      "path": "sklearn/base.py",
+      "lines": [
+        165
+      ],
+      "target_identifiers": [
+        "BaseEstimator"
+      ],
+      "claim": "defines how configuration is reported and copied"
+    }
+  ],
+  "adjudication": {
+    "annotators": [
+      "ann-hyde",
+      "ann-quill"
+    ],
+    "resolved": true,
+    "notes": "Two independent passes selected the same anchors; no disagreement to resolve."
+  }
+}

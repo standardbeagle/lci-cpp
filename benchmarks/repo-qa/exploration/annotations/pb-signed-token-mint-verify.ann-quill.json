@@ -1,0 +1,25 @@
+{
+  "schema": "exploration_annotation_v1",
+  "task_id": "pb-signed-token-mint-verify",
+  "annotator": "ann-quill",
+  "evidence": [
+    {
+      "path": "tools/security/jwt_d8lame.go",
+      "lines": [
+        46
+      ],
+      "target_identifiers": [
+        "NewJWT"
+      ]
+    },
+    {
+      "path": "tools/security/jwt_d8lame.go",
+      "lines": [
+        14
+      ],
+      "target_identifiers": [
+        "ParseUnverifiedJWT"
+      ]
+    }
+  ]
+}

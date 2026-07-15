@@ -1,0 +1,25 @@
+{
+  "schema": "exploration_annotation_v1",
+  "task_id": "skl-estimator-copy",
+  "annotator": "ann-quill",
+  "evidence": [
+    {
+      "path": "sklearn/base.py",
+      "lines": [
+        46
+      ],
+      "target_identifiers": [
+        "clone"
+      ]
+    },
+    {
+      "path": "sklearn/base.py",
+      "lines": [
+        165
+      ],
+      "target_identifiers": [
+        "BaseEstimator"
+      ]
+    }
+  ]
+}

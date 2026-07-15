@@ -1,0 +1,25 @@
+{
+  "schema": "exploration_annotation_v1",
+  "task_id": "nx-redirect-status-codes",
+  "annotator": "ann-hyde",
+  "evidence": [
+    {
+      "path": "packages/next/src/lib/redirect-status.ts",
+      "lines": [
+        3
+      ],
+      "target_identifiers": [
+        "allowedStatusCodes"
+      ]
+    },
+    {
+      "path": "packages/next/src/lib/redirect-status.ts",
+      "lines": [
+        5
+      ],
+      "target_identifiers": [
+        "getRedirectStatus"
+      ]
+    }
+  ]
+}

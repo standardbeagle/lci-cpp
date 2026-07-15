@@ -1,0 +1,49 @@
+{
+  "schema": "exploration_task_v1",
+  "id": "skl-binned-tree-ensemble",
+  "corpus": "scikit-learn",
+  "manifest_ref": {
+    "corpus_id": "scikit-learn",
+    "source_commit": "0885712e436b07cd04d60e955101aaf6a8cbb709",
+    "seed": 7,
+    "forge_version": "1"
+  },
+  "prompt": "There is a much faster sequential-tree predictor in this codebase that first squeezes each feature's continuous values into a small fixed set of buckets before training on them. Where is its class-label producing variant defined, and what shared parent holds the bucketed fitting loop they all reuse?",
+  "rubric": {
+    "must_surface": [
+      "the fast binned classifier",
+      "the shared binned-fitting parent"
+    ],
+    "answer_shape": "one classifier class, one shared parent class"
+  },
+  "evidence": [
+    {
+      "path": "sklearn/ensemble/_hist_gradient_boosting/gradient_boosting_apgaq0.py",
+      "lines": [
+        1762
+      ],
+      "target_identifiers": [
+        "HistGradientBoostingClassifier"
+      ],
+      "claim": "the fast binned classifier variant"
+    },
+    {
+      "path": "sklearn/ensemble/_hist_gradient_boosting/gradient_boosting_apgaq0.py",
+      "lines": [
+        143
+      ],
+      "target_identifiers": [
+        "BaseHistGradientBoosting"
+      ],
+      "claim": "shared parent with the bucketed fitting loop"
+    }
+  ],
+  "adjudication": {
+    "annotators": [
+      "ann-hyde",
+      "ann-quill"
+    ],
+    "resolved": true,
+    "notes": "Two independent passes selected the same anchors; no disagreement to resolve."
+  }
+}

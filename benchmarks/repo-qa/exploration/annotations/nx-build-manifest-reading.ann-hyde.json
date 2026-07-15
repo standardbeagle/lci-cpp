@@ -1,0 +1,25 @@
+{
+  "schema": "exploration_annotation_v1",
+  "task_id": "nx-build-manifest-reading",
+  "annotator": "ann-hyde",
+  "evidence": [
+    {
+      "path": "packages/next/src/server/load-manifest.external.ts",
+      "lines": [
+        21
+      ],
+      "target_identifiers": [
+        "loadManifest"
+      ]
+    },
+    {
+      "path": "packages/next/src/server/load-manifest.external.ts",
+      "lines": [
+        66
+      ],
+      "target_identifiers": [
+        "evalManifest"
+      ]
+    }
+  ]
+}

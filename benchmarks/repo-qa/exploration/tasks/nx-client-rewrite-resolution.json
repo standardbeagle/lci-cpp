@@ -1,0 +1,49 @@
+{
+  "schema": "exploration_task_v1",
+  "id": "nx-client-rewrite-resolution",
+  "corpus": "next.js",
+  "manifest_ref": {
+    "corpus_id": "next.js",
+    "source_commit": "97532172c065ca2b49dd79d1fa44c3a0b864065b",
+    "seed": 7,
+    "forge_version": "1"
+  },
+  "prompt": "On the client side the framework has to work out, from the configured forwarding rules, which real address a requested one should map to, and part of that involves turning a fixed template value into a concrete string with no capture placeholders. Where is the client-side resolution of a requested address against the rules, and where is a non-capturing template compiled to its literal value?",
+  "rubric": {
+    "must_surface": [
+      "the client rewrite resolver",
+      "the non-capturing template compiler"
+    ],
+    "answer_shape": "one resolver, one compile helper"
+  },
+  "evidence": [
+    {
+      "path": "packages/next/src/shared/lib/router/utils/resolve-rewrites_n7480o.ts",
+      "lines": [
+        12
+      ],
+      "target_identifiers": [
+        "resolveRewrites"
+      ],
+      "claim": "resolves a requested address against the rules client-side"
+    },
+    {
+      "path": "packages/next/src/shared/lib/router/utils/prepare-destination.ts",
+      "lines": [
+        127
+      ],
+      "target_identifiers": [
+        "compileNonPath"
+      ],
+      "claim": "compiles a non-capturing template to a literal value"
+    }
+  ],
+  "adjudication": {
+    "annotators": [
+      "ann-hyde",
+      "ann-quill"
+    ],
+    "resolved": true,
+    "notes": "Two independent passes selected the same anchors; no disagreement to resolve."
+  }
+}

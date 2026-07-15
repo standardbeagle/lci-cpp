@@ -1,0 +1,49 @@
+{
+  "schema": "exploration_task_v1",
+  "id": "nx-rewrite-destination-build",
+  "corpus": "next.js",
+  "manifest_ref": {
+    "corpus_id": "next.js",
+    "source_commit": "97532172c065ca2b49dd79d1fa44c3a0b864065b",
+    "seed": 7,
+    "forge_version": "1"
+  },
+  "prompt": "When a configured rule redirects one address to another, the framework must both check that any required conditions match and then build the concrete target address with captured values filled in. Where does it test those match conditions, and where does it assemble the final destination from a template plus captured parameters?",
+  "rubric": {
+    "must_surface": [
+      "the condition matcher",
+      "the destination builder"
+    ],
+    "answer_shape": "one matcher, one destination assembler"
+  },
+  "evidence": [
+    {
+      "path": "packages/next/src/shared/lib/router/utils/prepare-destination.ts",
+      "lines": [
+        48
+      ],
+      "target_identifiers": [
+        "matchHas"
+      ],
+      "claim": "tests the required match conditions"
+    },
+    {
+      "path": "packages/next/src/shared/lib/router/utils/prepare-destination.ts",
+      "lines": [
+        217
+      ],
+      "target_identifiers": [
+        "prepareDestination"
+      ],
+      "claim": "assembles the final destination address"
+    }
+  ],
+  "adjudication": {
+    "annotators": [
+      "ann-hyde",
+      "ann-quill"
+    ],
+    "resolved": true,
+    "notes": "Two independent passes selected the same anchors; no disagreement to resolve."
+  }
+}

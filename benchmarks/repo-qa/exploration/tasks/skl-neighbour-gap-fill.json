@@ -1,0 +1,49 @@
+{
+  "schema": "exploration_task_v1",
+  "id": "skl-neighbour-gap-fill",
+  "corpus": "scikit-learn",
+  "manifest_ref": {
+    "corpus_id": "scikit-learn",
+    "source_commit": "0885712e436b07cd04d60e955101aaf6a8cbb709",
+    "seed": 7,
+    "forge_version": "1"
+  },
+  "prompt": "One of the gap-filling strategies here does not use a column summary at all: it looks at the rows most similar to the incomplete one and borrows their values. Where is that similarity-based filler defined, and where does it actually assemble the completed matrix from the closest matches?",
+  "rubric": {
+    "must_surface": [
+      "the neighbour-based filler class",
+      "the method that produces the filled matrix"
+    ],
+    "answer_shape": "one class, one method producing the completed output"
+  },
+  "evidence": [
+    {
+      "path": "sklearn/impute_vegv84/_knn.py",
+      "lines": [
+        24
+      ],
+      "target_identifiers": [
+        "KNNImputer"
+      ],
+      "claim": "the neighbour-based filler"
+    },
+    {
+      "path": "sklearn/impute_vegv84/_knn.py",
+      "lines": [
+        254
+      ],
+      "target_identifiers": [
+        "transform"
+      ],
+      "claim": "produces the completed matrix from nearest matches"
+    }
+  ],
+  "adjudication": {
+    "annotators": [
+      "ann-hyde",
+      "ann-quill"
+    ],
+    "resolved": true,
+    "notes": "Two independent passes selected the same anchors; no disagreement to resolve."
+  }
+}

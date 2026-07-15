@@ -1,0 +1,49 @@
+{
+  "schema": "exploration_task_v1",
+  "id": "nx-internal-param-stripping",
+  "corpus": "next.js",
+  "manifest_ref": {
+    "corpus_id": "next.js",
+    "source_commit": "97532172c065ca2b49dd79d1fa44c3a0b864065b",
+    "seed": 7,
+    "forge_version": "1"
+  },
+  "prompt": "Before user code sees an incoming request's parameters, the framework removes its own private, framework-only keys so they never leak into application logic. Where does it strip those private keys from a parsed parameter bag, and where does it do the same directly on a URL's search parameters?",
+  "rubric": {
+    "must_surface": [
+      "the query-object stripper",
+      "the URL search-param stripper"
+    ],
+    "answer_shape": "two stripping functions"
+  },
+  "evidence": [
+    {
+      "path": "packages/next/src/server/internal-utils.ts",
+      "lines": [
+        7
+      ],
+      "target_identifiers": [
+        "stripInternalQueries"
+      ],
+      "claim": "strips private keys from a parsed parameter bag"
+    },
+    {
+      "path": "packages/next/src/server/internal-utils.ts",
+      "lines": [
+        13
+      ],
+      "target_identifiers": [
+        "stripInternalSearchParams"
+      ],
+      "claim": "strips private keys from URL search params"
+    }
+  ],
+  "adjudication": {
+    "annotators": [
+      "ann-hyde",
+      "ann-quill"
+    ],
+    "resolved": true,
+    "notes": "Two independent passes selected the same anchors; no disagreement to resolve."
+  }
+}

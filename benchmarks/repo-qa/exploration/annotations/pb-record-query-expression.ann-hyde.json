@@ -1,0 +1,25 @@
+{
+  "schema": "exploration_annotation_v1",
+  "task_id": "pb-record-query-expression",
+  "annotator": "ann-hyde",
+  "evidence": [
+    {
+      "path": "tools/search/filter_diqa62.go",
+      "lines": [
+        27
+      ],
+      "target_identifiers": [
+        "FilterData"
+      ]
+    },
+    {
+      "path": "tools/search/filter_diqa62.go",
+      "lines": [
+        40
+      ],
+      "target_identifiers": [
+        "BuildExpr"
+      ]
+    }
+  ]
+}

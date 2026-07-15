@@ -1,0 +1,49 @@
+{
+  "schema": "exploration_task_v1",
+  "id": "skl-remote-corpus-fetch",
+  "corpus": "scikit-learn",
+  "manifest_ref": {
+    "corpus_id": "scikit-learn",
+    "source_commit": "0885712e436b07cd04d60e955101aaf6a8cbb709",
+    "seed": 7,
+    "forge_version": "1"
+  },
+  "prompt": "One of the bundled dataset loaders pulls a large text-categorization collection down from a remote mirror on first use and caches it locally. Where is that download-and-cache entry point, and where are the remote file names and checksums it relies on declared?",
+  "rubric": {
+    "must_surface": [
+      "the fetch/download entry point",
+      "the remote file metadata table"
+    ],
+    "answer_shape": "one loader function, one metadata declaration"
+  },
+  "evidence": [
+    {
+      "path": "sklearn/datasets/_rcv1_5zcnt4.py",
+      "lines": [
+        95
+      ],
+      "target_identifiers": [
+        "fetch_rcv1"
+      ],
+      "claim": "downloads and caches the remote collection"
+    },
+    {
+      "path": "sklearn/datasets/_rcv1_5zcnt4.py",
+      "lines": [
+        43
+      ],
+      "target_identifiers": [
+        "XY_METADATA"
+      ],
+      "claim": "declares remote file names and checksums"
+    }
+  ],
+  "adjudication": {
+    "annotators": [
+      "ann-hyde",
+      "ann-quill"
+    ],
+    "resolved": true,
+    "notes": "Two independent passes selected the same anchors; no disagreement to resolve."
+  }
+}

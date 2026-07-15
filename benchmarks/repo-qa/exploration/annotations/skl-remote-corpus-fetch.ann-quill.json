@@ -1,0 +1,25 @@
+{
+  "schema": "exploration_annotation_v1",
+  "task_id": "skl-remote-corpus-fetch",
+  "annotator": "ann-quill",
+  "evidence": [
+    {
+      "path": "sklearn/datasets/_rcv1_5zcnt4.py",
+      "lines": [
+        95
+      ],
+      "target_identifiers": [
+        "fetch_rcv1"
+      ]
+    },
+    {
+      "path": "sklearn/datasets/_rcv1_5zcnt4.py",
+      "lines": [
+        43
+      ],
+      "target_identifiers": [
+        "XY_METADATA"
+      ]
+    }
+  ]
+}

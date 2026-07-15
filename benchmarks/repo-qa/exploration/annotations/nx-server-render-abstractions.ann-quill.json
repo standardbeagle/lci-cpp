@@ -1,0 +1,25 @@
+{
+  "schema": "exploration_annotation_v1",
+  "task_id": "nx-server-render-abstractions",
+  "annotator": "ann-quill",
+  "evidence": [
+    {
+      "path": "packages/next/src/server/base-server.ts",
+      "lines": [
+        348
+      ],
+      "target_identifiers": [
+        "findPageComponents"
+      ]
+    },
+    {
+      "path": "packages/next/src/server/base-server.ts",
+      "lines": [
+        389
+      ],
+      "target_identifiers": [
+        "renderHTML"
+      ]
+    }
+  ]
+}

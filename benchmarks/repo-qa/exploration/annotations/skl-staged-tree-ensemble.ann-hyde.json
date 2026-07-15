@@ -1,0 +1,25 @@
+{
+  "schema": "exploration_annotation_v1",
+  "task_id": "skl-staged-tree-ensemble",
+  "annotator": "ann-hyde",
+  "evidence": [
+    {
+      "path": "sklearn/ensemble/_gb_oyj339.py",
+      "lines": [
+        342
+      ],
+      "target_identifiers": [
+        "BaseGradientBoosting"
+      ]
+    },
+    {
+      "path": "sklearn/ensemble/_gb_oyj339.py",
+      "lines": [
+        1127
+      ],
+      "target_identifiers": [
+        "GradientBoostingClassifier"
+      ]
+    }
+  ]
+}

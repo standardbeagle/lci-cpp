@@ -1,0 +1,49 @@
+{
+  "schema": "exploration_task_v1",
+  "id": "nx-page-path-canonicalization",
+  "corpus": "next.js",
+  "manifest_ref": {
+    "corpus_id": "next.js",
+    "source_commit": "97532172c065ca2b49dd79d1fa44c3a0b864065b",
+    "seed": 7,
+    "forge_version": "1"
+  },
+  "prompt": "The framework moves between a public-looking address and the internal file-style identifier for the same page, canonicalizing along the way. Where does it convert an address into that internal canonical identifier, and where does it perform the reverse conversion back toward the public form?",
+  "rubric": {
+    "must_surface": [
+      "the to-internal normalizer",
+      "the reverse denormalizer"
+    ],
+    "answer_shape": "two conversion functions, opposite directions"
+  },
+  "evidence": [
+    {
+      "path": "packages/next/src/shared/lib/page-path/normalize-page-path.ts",
+      "lines": [
+        14
+      ],
+      "target_identifiers": [
+        "normalizePagePath"
+      ],
+      "claim": "converts an address to the internal identifier"
+    },
+    {
+      "path": "packages/next/src/shared/lib/page-path/denormalize-page-path.ts",
+      "lines": [
+        12
+      ],
+      "target_identifiers": [
+        "denormalizePagePath"
+      ],
+      "claim": "reverses back toward the public form"
+    }
+  ],
+  "adjudication": {
+    "annotators": [
+      "ann-hyde",
+      "ann-quill"
+    ],
+    "resolved": true,
+    "notes": "Two independent passes selected the same anchors; no disagreement to resolve."
+  }
+}

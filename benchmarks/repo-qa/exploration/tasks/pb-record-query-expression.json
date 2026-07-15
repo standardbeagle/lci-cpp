@@ -1,0 +1,49 @@
+{
+  "schema": "exploration_task_v1",
+  "id": "pb-record-query-expression",
+  "corpus": "pocketbase",
+  "manifest_ref": {
+    "corpus_id": "pocketbase",
+    "source_commit": "d438c6a96a0252ff9df62c1cfe193480ed9ff15d",
+    "seed": 7,
+    "forge_version": "1"
+  },
+  "prompt": "The API lets clients narrow down which records they get back using a small textual query language passed on the URL. Where is the type that represents one of those raw client-supplied query strings, and where is it turned into a safe, parameterised database expression?",
+  "rubric": {
+    "must_surface": [
+      "the raw query-string type",
+      "the compile-to-expression method"
+    ],
+    "answer_shape": "one type, one method producing a parameterised expression"
+  },
+  "evidence": [
+    {
+      "path": "tools/search/filter_diqa62.go",
+      "lines": [
+        27
+      ],
+      "target_identifiers": [
+        "FilterData"
+      ],
+      "claim": "represents a raw client query string"
+    },
+    {
+      "path": "tools/search/filter_diqa62.go",
+      "lines": [
+        40
+      ],
+      "target_identifiers": [
+        "BuildExpr"
+      ],
+      "claim": "compiles it into a safe parameterised expression"
+    }
+  ],
+  "adjudication": {
+    "annotators": [
+      "ann-hyde",
+      "ann-quill"
+    ],
+    "resolved": true,
+    "notes": "Two independent passes selected the same anchors; no disagreement to resolve."
+  }
+}

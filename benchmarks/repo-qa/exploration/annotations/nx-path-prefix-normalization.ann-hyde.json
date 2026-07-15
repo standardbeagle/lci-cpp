@@ -1,0 +1,25 @@
+{
+  "schema": "exploration_annotation_v1",
+  "task_id": "nx-path-prefix-normalization",
+  "annotator": "ann-hyde",
+  "evidence": [
+    {
+      "path": "packages/next/src/shared/lib/router/utils/add-path-prefix.ts",
+      "lines": [
+        7
+      ],
+      "target_identifiers": [
+        "addPathPrefix"
+      ]
+    },
+    {
+      "path": "packages/next/src/shared/lib/router/utils/remove-trailing-slash.ts",
+      "lines": [
+        8
+      ],
+      "target_identifiers": [
+        "removeTrailingSlash"
+      ]
+    }
+  ]
+}

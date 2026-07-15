@@ -1,0 +1,25 @@
+{
+  "schema": "exploration_annotation_v1",
+  "task_id": "skl-distance-embedding",
+  "annotator": "ann-hyde",
+  "evidence": [
+    {
+      "path": "sklearn/manifold/_mds.py",
+      "lines": [
+        215
+      ],
+      "target_identifiers": [
+        "smacof"
+      ]
+    },
+    {
+      "path": "sklearn/manifold/_mds.py",
+      "lines": [
+        431
+      ],
+      "target_identifiers": [
+        "MDS"
+      ]
+    }
+  ]
+}

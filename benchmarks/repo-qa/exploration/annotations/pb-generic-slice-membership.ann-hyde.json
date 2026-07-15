@@ -1,0 +1,25 @@
+{
+  "schema": "exploration_annotation_v1",
+  "task_id": "pb-generic-slice-membership",
+  "annotator": "ann-hyde",
+  "evidence": [
+    {
+      "path": "tools/list_ouicjv/list.go",
+      "lines": [
+        29
+      ],
+      "target_identifiers": [
+        "ExistInSlice"
+      ]
+    },
+    {
+      "path": "tools/list_ouicjv/list.go",
+      "lines": [
+        90
+      ],
+      "target_identifiers": [
+        "NonzeroUniques"
+      ]
+    }
+  ]
+}

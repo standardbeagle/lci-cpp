@@ -1,0 +1,49 @@
+{
+  "schema": "exploration_task_v1",
+  "id": "pb-email-delivery-contract",
+  "corpus": "pocketbase",
+  "manifest_ref": {
+    "corpus_id": "pocketbase",
+    "source_commit": "d438c6a96a0252ff9df62c1cfe193480ed9ff15d",
+    "seed": 7,
+    "forge_version": "1"
+  },
+  "prompt": "This backend can deliver outbound email through more than one transport. Where is the small interface that every email transport must satisfy, and where does the direct-to-server transport actually push a composed message out over the wire?",
+  "rubric": {
+    "must_surface": [
+      "the transport interface",
+      "the server-transport delivery method"
+    ],
+    "answer_shape": "one interface, one concrete delivery method"
+  },
+  "evidence": [
+    {
+      "path": "tools/mailer/mailer.go",
+      "lines": [
+        27
+      ],
+      "target_identifiers": [
+        "Mailer"
+      ],
+      "claim": "the interface every email transport satisfies"
+    },
+    {
+      "path": "tools/mailer/smtp.go",
+      "lines": [
+        54
+      ],
+      "target_identifiers": [
+        "Send"
+      ],
+      "claim": "pushes a composed message over the wire"
+    }
+  ],
+  "adjudication": {
+    "annotators": [
+      "ann-hyde",
+      "ann-quill"
+    ],
+    "resolved": true,
+    "notes": "Two independent passes selected the same anchors; no disagreement to resolve."
+  }
+}

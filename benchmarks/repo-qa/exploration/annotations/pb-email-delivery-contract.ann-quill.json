@@ -1,0 +1,25 @@
+{
+  "schema": "exploration_annotation_v1",
+  "task_id": "pb-email-delivery-contract",
+  "annotator": "ann-quill",
+  "evidence": [
+    {
+      "path": "tools/mailer/mailer.go",
+      "lines": [
+        27
+      ],
+      "target_identifiers": [
+        "Mailer"
+      ]
+    },
+    {
+      "path": "tools/mailer/smtp.go",
+      "lines": [
+        54
+      ],
+      "target_identifiers": [
+        "Send"
+      ]
+    }
+  ]
+}

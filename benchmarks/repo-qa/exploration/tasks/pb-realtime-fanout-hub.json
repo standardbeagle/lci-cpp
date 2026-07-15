@@ -1,0 +1,49 @@
+{
+  "schema": "exploration_task_v1",
+  "id": "pb-realtime-fanout-hub",
+  "corpus": "pocketbase",
+  "manifest_ref": {
+    "corpus_id": "pocketbase",
+    "source_commit": "d438c6a96a0252ff9df62c1cfe193480ed9ff15d",
+    "seed": 7,
+    "forge_version": "1"
+  },
+  "prompt": "The realtime feature keeps a set of connected clients and pushes events out to whichever of them are interested. Where is the hub type that owns that set of live client connections, and where is its constructor that stands up an empty hub ready to register clients?",
+  "rubric": {
+    "must_surface": [
+      "the connection-hub type",
+      "its constructor"
+    ],
+    "answer_shape": "one hub type, one constructor"
+  },
+  "evidence": [
+    {
+      "path": "tools/subscriptions/broker.go",
+      "lines": [
+        11
+      ],
+      "target_identifiers": [
+        "Broker"
+      ],
+      "claim": "owns the set of live client connections"
+    },
+    {
+      "path": "tools/subscriptions/broker.go",
+      "lines": [
+        16
+      ],
+      "target_identifiers": [
+        "NewBroker"
+      ],
+      "claim": "constructs an empty hub"
+    }
+  ],
+  "adjudication": {
+    "annotators": [
+      "ann-hyde",
+      "ann-quill"
+    ],
+    "resolved": true,
+    "notes": "Two independent passes selected the same anchors; no disagreement to resolve."
+  }
+}

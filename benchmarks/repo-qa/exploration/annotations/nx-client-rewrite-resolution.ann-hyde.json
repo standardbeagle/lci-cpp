@@ -1,0 +1,25 @@
+{
+  "schema": "exploration_annotation_v1",
+  "task_id": "nx-client-rewrite-resolution",
+  "annotator": "ann-hyde",
+  "evidence": [
+    {
+      "path": "packages/next/src/shared/lib/router/utils/resolve-rewrites_n7480o.ts",
+      "lines": [
+        12
+      ],
+      "target_identifiers": [
+        "resolveRewrites"
+      ]
+    },
+    {
+      "path": "packages/next/src/shared/lib/router/utils/prepare-destination.ts",
+      "lines": [
+        127
+      ],
+      "target_identifiers": [
+        "compileNonPath"
+      ]
+    }
+  ]
+}

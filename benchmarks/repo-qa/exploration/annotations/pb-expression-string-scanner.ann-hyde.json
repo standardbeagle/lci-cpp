@@ -1,0 +1,25 @@
+{
+  "schema": "exploration_annotation_v1",
+  "task_id": "pb-expression-string-scanner",
+  "annotator": "ann-hyde",
+  "evidence": [
+    {
+      "path": "tools/tokenizer_yj0pp7/tokenizer.go",
+      "lines": [
+        27
+      ],
+      "target_identifiers": [
+        "NewFromString"
+      ]
+    },
+    {
+      "path": "tools/tokenizer_yj0pp7/tokenizer.go",
+      "lines": [
+        86
+      ],
+      "target_identifiers": [
+        "Scan"
+      ]
+    }
+  ]
+}

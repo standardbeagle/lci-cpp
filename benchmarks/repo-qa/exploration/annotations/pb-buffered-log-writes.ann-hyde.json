@@ -1,0 +1,25 @@
+{
+  "schema": "exploration_annotation_v1",
+  "task_id": "pb-buffered-log-writes",
+  "annotator": "ann-hyde",
+  "evidence": [
+    {
+      "path": "tools/logger/log_armh4p.go",
+      "lines": [
+        12
+      ],
+      "target_identifiers": [
+        "Log"
+      ]
+    },
+    {
+      "path": "tools/logger/batch_handler.go",
+      "lines": [
+        81
+      ],
+      "target_identifiers": [
+        "BatchHandler"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "schema": "exploration_annotation_v1",
+  "task_id": "skl-conditional-method",
+  "annotator": "ann-quill",
+  "evidence": [
+    {
+      "path": "sklearn/utils/_available_if.py",
+      "lines": [
+        57
+      ],
+      "target_identifiers": [
+        "available_if"
+      ]
+    },
+    {
+      "path": "sklearn/utils/_available_if.py",
+      "lines": [
+        8
+      ],
+      "target_identifiers": [
+        "_AvailableIfDescriptor"
+      ]
+    }
+  ]
+}

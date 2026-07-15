@@ -1,0 +1,25 @@
+{
+  "schema": "exploration_annotation_v1",
+  "task_id": "skl-grouping-quality-score",
+  "annotator": "ann-hyde",
+  "evidence": [
+    {
+      "path": "sklearn/metrics/cluster_ljrpyn/_unsupervised.py",
+      "lines": [
+        211
+      ],
+      "target_identifiers": [
+        "silhouette_samples"
+      ]
+    },
+    {
+      "path": "sklearn/metrics/cluster_ljrpyn/_unsupervised.py",
+      "lines": [
+        31
+      ],
+      "target_identifiers": [
+        "check_number_of_labels"
+      ]
+    }
+  ]
+}
