@@ -109,7 +109,19 @@ jobs:
 
       - name: Test
         if: ${{ !matrix.main_only || github.ref == 'refs/heads/main' }}
-        run: ctest --preset ${{ matrix.preset }} --parallel
+        env:
+          # ASan self-aborts a runaway test at this RSS instead of ballooning
+          # the shared WSL runner's VM until it freezes. Non-ASan presets ignore it.
+          ASAN_OPTIONS: "hard_rss_limit_mb=6144:allocator_may_return_null=1"
+        run: |
+          # Instrumented (ASan/TSan/MSan) tests use several GB each; cap their
+          # concurrency far below the compile level so parallel instrumented
+          # processes can't exhaust the VM. Other presets use the normal level.
+          case "${{ matrix.preset }}" in
+            sanitizer|tsan|msan) jobs=2 ;;
+            *) jobs="${CTEST_PARALLEL_LEVEL:-4}" ;;
+          esac
+          ctest --preset ${{ matrix.preset }} --parallel "$jobs"
 
       - name: Build diff-engine unit tests
         if: matrix.preset == 'release'
