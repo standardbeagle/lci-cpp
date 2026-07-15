@@ -1,0 +1,25 @@
+{
+  "schema": "exploration_annotation_v1",
+  "task_id": "pb-realtime-fanout-hub",
+  "annotator": "ann-quill",
+  "evidence": [
+    {
+      "path": "tools/subscriptions/broker.go",
+      "lines": [
+        11
+      ],
+      "target_identifiers": [
+        "Broker"
+      ]
+    },
+    {
+      "path": "tools/subscriptions/broker.go",
+      "lines": [
+        16
+      ],
+      "target_identifiers": [
+        "NewBroker"
+      ]
+    }
+  ]
+}

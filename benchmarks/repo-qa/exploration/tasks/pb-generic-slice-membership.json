@@ -1,0 +1,49 @@
+{
+  "schema": "exploration_task_v1",
+  "id": "pb-generic-slice-membership",
+  "corpus": "pocketbase",
+  "manifest_ref": {
+    "corpus_id": "pocketbase",
+    "source_commit": "d438c6a96a0252ff9df62c1cfe193480ed9ff15d",
+    "seed": 7,
+    "forge_version": "1"
+  },
+  "prompt": "This codebase has a small kit of type-generic helpers for working with simple sequences of values. Where is the helper that answers whether a given value is already present in such a sequence, and where is the one that returns only the non-empty, de-duplicated values from it?",
+  "rubric": {
+    "must_surface": [
+      "the membership-test helper",
+      "the non-empty-unique helper"
+    ],
+    "answer_shape": "two generic sequence helpers"
+  },
+  "evidence": [
+    {
+      "path": "tools/list_ouicjv/list.go",
+      "lines": [
+        29
+      ],
+      "target_identifiers": [
+        "ExistInSlice"
+      ],
+      "claim": "tests membership in a sequence"
+    },
+    {
+      "path": "tools/list_ouicjv/list.go",
+      "lines": [
+        90
+      ],
+      "target_identifiers": [
+        "NonzeroUniques"
+      ],
+      "claim": "returns non-empty de-duplicated values"
+    }
+  ],
+  "adjudication": {
+    "annotators": [
+      "ann-hyde",
+      "ann-quill"
+    ],
+    "resolved": true,
+    "notes": "Two independent passes selected the same anchors; no disagreement to resolve."
+  }
+}

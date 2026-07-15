@@ -1,0 +1,25 @@
+{
+  "schema": "exploration_annotation_v1",
+  "task_id": "skl-neighbour-gap-fill",
+  "annotator": "ann-quill",
+  "evidence": [
+    {
+      "path": "sklearn/impute_vegv84/_knn.py",
+      "lines": [
+        24
+      ],
+      "target_identifiers": [
+        "KNNImputer"
+      ]
+    },
+    {
+      "path": "sklearn/impute_vegv84/_knn.py",
+      "lines": [
+        254
+      ],
+      "target_identifiers": [
+        "transform"
+      ]
+    }
+  ]
+}

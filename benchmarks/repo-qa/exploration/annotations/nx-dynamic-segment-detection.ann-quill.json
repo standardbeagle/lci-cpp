@@ -1,0 +1,25 @@
+{
+  "schema": "exploration_annotation_v1",
+  "task_id": "nx-dynamic-segment-detection",
+  "annotator": "ann-quill",
+  "evidence": [
+    {
+      "path": "packages/next/src/shared/lib/router/utils/is-dynamic_f7yxhy.ts",
+      "lines": [
+        19
+      ],
+      "target_identifiers": [
+        "isDynamicRoute"
+      ]
+    },
+    {
+      "path": "packages/next/src/shared/lib/router/utils/sorted-routes.ts",
+      "lines": [
+        207
+      ],
+      "target_identifiers": [
+        "getSortedRoutes"
+      ]
+    }
+  ]
+}

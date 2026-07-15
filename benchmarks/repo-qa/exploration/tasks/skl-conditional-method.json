@@ -1,0 +1,49 @@
+{
+  "schema": "exploration_task_v1",
+  "id": "skl-conditional-method",
+  "corpus": "scikit-learn",
+  "manifest_ref": {
+    "corpus_id": "scikit-learn",
+    "source_commit": "0885712e436b07cd04d60e955101aaf6a8cbb709",
+    "seed": 7,
+    "forge_version": "1"
+  },
+  "prompt": "Some estimator methods here should only appear when a delegated sub-object actually supports them, so that feature-detection checks report them honestly. Where is the decorator that hides or exposes a method based on such a runtime condition, and where is the descriptor object it returns implemented?",
+  "rubric": {
+    "must_surface": [
+      "the conditional-exposure decorator",
+      "the descriptor implementing the behaviour"
+    ],
+    "answer_shape": "one decorator function, one descriptor class"
+  },
+  "evidence": [
+    {
+      "path": "sklearn/utils/_available_if.py",
+      "lines": [
+        57
+      ],
+      "target_identifiers": [
+        "available_if"
+      ],
+      "claim": "decorator that conditionally exposes a method"
+    },
+    {
+      "path": "sklearn/utils/_available_if.py",
+      "lines": [
+        8
+      ],
+      "target_identifiers": [
+        "_AvailableIfDescriptor"
+      ],
+      "claim": "the descriptor implementing the conditional behaviour"
+    }
+  ],
+  "adjudication": {
+    "annotators": [
+      "ann-hyde",
+      "ann-quill"
+    ],
+    "resolved": true,
+    "notes": "Two independent passes selected the same anchors; no disagreement to resolve."
+  }
+}

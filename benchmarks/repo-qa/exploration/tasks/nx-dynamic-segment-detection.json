@@ -1,0 +1,49 @@
+{
+  "schema": "exploration_task_v1",
+  "id": "nx-dynamic-segment-detection",
+  "corpus": "next.js",
+  "manifest_ref": {
+    "corpus_id": "next.js",
+    "source_commit": "97532172c065ca2b49dd79d1fa44c3a0b864065b",
+    "seed": 7,
+    "forge_version": "1"
+  },
+  "prompt": "This framework has to tell apart a fixed page address from one that carries variable, bracketed segments, and it also has to put a set of such addresses into a stable priority order. Where does it decide whether a single address contains variable segments, and where does it sort a collection of addresses into their matching precedence?",
+  "rubric": {
+    "must_surface": [
+      "the single-route dynamic test",
+      "the route-ordering function"
+    ],
+    "answer_shape": "one predicate, one sort function"
+  },
+  "evidence": [
+    {
+      "path": "packages/next/src/shared/lib/router/utils/is-dynamic_f7yxhy.ts",
+      "lines": [
+        19
+      ],
+      "target_identifiers": [
+        "isDynamicRoute"
+      ],
+      "claim": "decides whether one address has variable segments"
+    },
+    {
+      "path": "packages/next/src/shared/lib/router/utils/sorted-routes.ts",
+      "lines": [
+        207
+      ],
+      "target_identifiers": [
+        "getSortedRoutes"
+      ],
+      "claim": "sorts addresses into matching precedence"
+    }
+  ],
+  "adjudication": {
+    "annotators": [
+      "ann-hyde",
+      "ann-quill"
+    ],
+    "resolved": true,
+    "notes": "Two independent passes selected the same anchors; no disagreement to resolve."
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "schema": "exploration_task_v1",
+  "id": "skl-staged-tree-ensemble",
+  "corpus": "scikit-learn",
+  "manifest_ref": {
+    "corpus_id": "scikit-learn",
+    "source_commit": "0885712e436b07cd04d60e955101aaf6a8cbb709",
+    "seed": 7,
+    "forge_version": "1"
+  },
+  "prompt": "This library builds a predictor by fitting many small trees one after another, each new tree correcting the errors left by the ones before it. Where does the shared machinery for that sequential, error-correcting tree fitting live, and where is the variant that produces class labels defined?",
+  "rubric": {
+    "must_surface": [
+      "the shared sequential-boosting base",
+      "the classification variant"
+    ],
+    "answer_shape": "one shared base class, one classifier class"
+  },
+  "evidence": [
+    {
+      "path": "sklearn/ensemble/_gb_oyj339.py",
+      "lines": [
+        342
+      ],
+      "target_identifiers": [
+        "BaseGradientBoosting"
+      ],
+      "claim": "shared sequential error-correcting tree machinery"
+    },
+    {
+      "path": "sklearn/ensemble/_gb_oyj339.py",
+      "lines": [
+        1127
+      ],
+      "target_identifiers": [
+        "GradientBoostingClassifier"
+      ],
+      "claim": "the classification variant"
+    }
+  ],
+  "adjudication": {
+    "annotators": [
+      "ann-hyde",
+      "ann-quill"
+    ],
+    "resolved": true,
+    "notes": "Two independent passes selected the same anchors; no disagreement to resolve."
+  }
+}

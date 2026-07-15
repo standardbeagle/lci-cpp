@@ -1,0 +1,25 @@
+{
+  "schema": "exploration_annotation_v1",
+  "task_id": "nx-page-path-canonicalization",
+  "annotator": "ann-hyde",
+  "evidence": [
+    {
+      "path": "packages/next/src/shared/lib/page-path/normalize-page-path.ts",
+      "lines": [
+        14
+      ],
+      "target_identifiers": [
+        "normalizePagePath"
+      ]
+    },
+    {
+      "path": "packages/next/src/shared/lib/page-path/denormalize-page-path.ts",
+      "lines": [
+        12
+      ],
+      "target_identifiers": [
+        "denormalizePagePath"
+      ]
+    }
+  ]
+}

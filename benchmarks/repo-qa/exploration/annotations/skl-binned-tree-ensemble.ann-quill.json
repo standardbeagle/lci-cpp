@@ -1,0 +1,25 @@
+{
+  "schema": "exploration_annotation_v1",
+  "task_id": "skl-binned-tree-ensemble",
+  "annotator": "ann-quill",
+  "evidence": [
+    {
+      "path": "sklearn/ensemble/_hist_gradient_boosting/gradient_boosting_apgaq0.py",
+      "lines": [
+        1762
+      ],
+      "target_identifiers": [
+        "HistGradientBoostingClassifier"
+      ]
+    },
+    {
+      "path": "sklearn/ensemble/_hist_gradient_boosting/gradient_boosting_apgaq0.py",
+      "lines": [
+        143
+      ],
+      "target_identifiers": [
+        "BaseHistGradientBoosting"
+      ]
+    }
+  ]
+}

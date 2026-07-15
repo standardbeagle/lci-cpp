@@ -1,0 +1,49 @@
+{
+  "schema": "exploration_task_v1",
+  "id": "nx-path-prefix-normalization",
+  "corpus": "next.js",
+  "manifest_ref": {
+    "corpus_id": "next.js",
+    "source_commit": "97532172c065ca2b49dd79d1fa44c3a0b864065b",
+    "seed": 7,
+    "forge_version": "1"
+  },
+  "prompt": "When composing addresses the framework often needs to attach a leading segment to one and, separately, to tidy a redundant terminal separator off another. Where does it prepend such a leading segment to an address, and where does it strip a redundant trailing separator?",
+  "rubric": {
+    "must_surface": [
+      "the prefix-adding helper",
+      "the trailing-separator remover"
+    ],
+    "answer_shape": "two small path helpers"
+  },
+  "evidence": [
+    {
+      "path": "packages/next/src/shared/lib/router/utils/add-path-prefix.ts",
+      "lines": [
+        7
+      ],
+      "target_identifiers": [
+        "addPathPrefix"
+      ],
+      "claim": "prepends a leading segment to an address"
+    },
+    {
+      "path": "packages/next/src/shared/lib/router/utils/remove-trailing-slash.ts",
+      "lines": [
+        8
+      ],
+      "target_identifiers": [
+        "removeTrailingSlash"
+      ],
+      "claim": "strips a redundant trailing separator"
+    }
+  ],
+  "adjudication": {
+    "annotators": [
+      "ann-hyde",
+      "ann-quill"
+    ],
+    "resolved": true,
+    "notes": "Two independent passes selected the same anchors; no disagreement to resolve."
+  }
+}

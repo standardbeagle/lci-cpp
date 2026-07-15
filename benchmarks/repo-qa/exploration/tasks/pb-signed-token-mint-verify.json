@@ -1,0 +1,49 @@
+{
+  "schema": "exploration_task_v1",
+  "id": "pb-signed-token-mint-verify",
+  "corpus": "pocketbase",
+  "manifest_ref": {
+    "corpus_id": "pocketbase",
+    "source_commit": "d438c6a96a0252ff9df62c1cfe193480ed9ff15d",
+    "seed": 7,
+    "forge_version": "1"
+  },
+  "prompt": "This backend hands out compact signed credentials to authenticated callers and later checks them on incoming requests. Where does it mint one of these signed credentials with a payload and an expiry, and where does it crack a credential open to read its claims without yet trusting the signature?",
+  "rubric": {
+    "must_surface": [
+      "the signing/mint function",
+      "the unverified-decode function"
+    ],
+    "answer_shape": "one function that creates a signed token, one that decodes claims unverified"
+  },
+  "evidence": [
+    {
+      "path": "tools/security/jwt_d8lame.go",
+      "lines": [
+        46
+      ],
+      "target_identifiers": [
+        "NewJWT"
+      ],
+      "claim": "mints a signed credential with payload and expiry"
+    },
+    {
+      "path": "tools/security/jwt_d8lame.go",
+      "lines": [
+        14
+      ],
+      "target_identifiers": [
+        "ParseUnverifiedJWT"
+      ],
+      "claim": "reads claims without verifying the signature"
+    }
+  ],
+  "adjudication": {
+    "annotators": [
+      "ann-hyde",
+      "ann-quill"
+    ],
+    "resolved": true,
+    "notes": "Two independent passes selected the same anchors; no disagreement to resolve."
+  }
+}

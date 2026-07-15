@@ -1,0 +1,49 @@
+{
+  "schema": "exploration_task_v1",
+  "id": "skl-distance-embedding",
+  "corpus": "scikit-learn",
+  "manifest_ref": {
+    "corpus_id": "scikit-learn",
+    "source_commit": "0885712e436b07cd04d60e955101aaf6a8cbb709",
+    "seed": 7,
+    "forge_version": "1"
+  },
+  "prompt": "This library can place points in a low-dimensional space so that their pairwise distances match a given dissimilarity table as closely as possible, by iteratively relaxing the layout. Where is the single iterative relaxation routine, and where is the user-facing estimator that wraps it?",
+  "rubric": {
+    "must_surface": [
+      "the iterative stress-relaxation routine",
+      "the wrapping estimator"
+    ],
+    "answer_shape": "one core routine, one estimator class"
+  },
+  "evidence": [
+    {
+      "path": "sklearn/manifold/_mds.py",
+      "lines": [
+        215
+      ],
+      "target_identifiers": [
+        "smacof"
+      ],
+      "claim": "the iterative distance-matching relaxation"
+    },
+    {
+      "path": "sklearn/manifold/_mds.py",
+      "lines": [
+        431
+      ],
+      "target_identifiers": [
+        "MDS"
+      ],
+      "claim": "the user-facing estimator wrapping it"
+    }
+  ],
+  "adjudication": {
+    "annotators": [
+      "ann-hyde",
+      "ann-quill"
+    ],
+    "resolved": true,
+    "notes": "Two independent passes selected the same anchors; no disagreement to resolve."
+  }
+}

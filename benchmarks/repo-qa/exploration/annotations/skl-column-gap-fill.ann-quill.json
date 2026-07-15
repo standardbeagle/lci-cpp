@@ -1,0 +1,25 @@
+{
+  "schema": "exploration_annotation_v1",
+  "task_id": "skl-column-gap-fill",
+  "annotator": "ann-quill",
+  "evidence": [
+    {
+      "path": "sklearn/impute_vegv84/_base.py",
+      "lines": [
+        171
+      ],
+      "target_identifiers": [
+        "SimpleImputer"
+      ]
+    },
+    {
+      "path": "sklearn/impute_vegv84/_base.py",
+      "lines": [
+        95
+      ],
+      "target_identifiers": [
+        "_BaseImputer"
+      ]
+    }
+  ]
+}

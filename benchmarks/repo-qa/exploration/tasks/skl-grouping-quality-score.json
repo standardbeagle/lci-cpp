@@ -1,0 +1,49 @@
+{
+  "schema": "exploration_task_v1",
+  "id": "skl-grouping-quality-score",
+  "corpus": "scikit-learn",
+  "manifest_ref": {
+    "corpus_id": "scikit-learn",
+    "source_commit": "0885712e436b07cd04d60e955101aaf6a8cbb709",
+    "seed": 7,
+    "forge_version": "1"
+  },
+  "prompt": "This toolkit can score how cleanly a dataset was partitioned into groups, giving each point a value for how well it sits in its own group versus the nearest other one. Where is that per-point score actually computed, and what guard refuses the request when the number of groups is degenerate (fewer than two, or as many as there are samples)?",
+  "rubric": {
+    "must_surface": [
+      "the per-sample cohesion/separation computation",
+      "the validity guard on label count"
+    ],
+    "answer_shape": "one location computing the score, one guard rejecting degenerate label counts"
+  },
+  "evidence": [
+    {
+      "path": "sklearn/metrics/cluster_ljrpyn/_unsupervised.py",
+      "lines": [
+        211
+      ],
+      "target_identifiers": [
+        "silhouette_samples"
+      ],
+      "claim": "computes the per-sample grouping-quality score"
+    },
+    {
+      "path": "sklearn/metrics/cluster_ljrpyn/_unsupervised.py",
+      "lines": [
+        31
+      ],
+      "target_identifiers": [
+        "check_number_of_labels"
+      ],
+      "claim": "raises when the group count is degenerate"
+    }
+  ],
+  "adjudication": {
+    "annotators": [
+      "ann-hyde",
+      "ann-quill"
+    ],
+    "resolved": true,
+    "notes": "Two independent passes selected the same anchors; no disagreement to resolve."
+  }
+}

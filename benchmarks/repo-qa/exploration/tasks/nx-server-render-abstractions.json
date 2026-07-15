@@ -1,0 +1,49 @@
+{
+  "schema": "exploration_task_v1",
+  "id": "nx-server-render-abstractions",
+  "corpus": "next.js",
+  "manifest_ref": {
+    "corpus_id": "next.js",
+    "source_commit": "97532172c065ca2b49dd79d1fa44c3a0b864065b",
+    "seed": 7,
+    "forge_version": "1"
+  },
+  "prompt": "There is a central abstract engine every concrete request-serving implementation extends, and it leaves certain steps for subclasses to supply. Where is the abstract step that locates the components backing a matched address, and where is the abstract step that turns matched components into rendered markup?",
+  "rubric": {
+    "must_surface": [
+      "the abstract component-lookup step",
+      "the abstract render step"
+    ],
+    "answer_shape": "two abstract methods on the shared engine"
+  },
+  "evidence": [
+    {
+      "path": "packages/next/src/server/base-server.ts",
+      "lines": [
+        348
+      ],
+      "target_identifiers": [
+        "findPageComponents"
+      ],
+      "claim": "abstract step locating components for an address"
+    },
+    {
+      "path": "packages/next/src/server/base-server.ts",
+      "lines": [
+        389
+      ],
+      "target_identifiers": [
+        "renderHTML"
+      ],
+      "claim": "abstract step rendering components to markup"
+    }
+  ],
+  "adjudication": {
+    "annotators": [
+      "ann-hyde",
+      "ann-quill"
+    ],
+    "resolved": true,
+    "notes": "Two independent passes selected the same anchors; no disagreement to resolve."
+  }
+}

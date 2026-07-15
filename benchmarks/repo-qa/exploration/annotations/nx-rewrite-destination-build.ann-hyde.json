@@ -1,0 +1,25 @@
+{
+  "schema": "exploration_annotation_v1",
+  "task_id": "nx-rewrite-destination-build",
+  "annotator": "ann-hyde",
+  "evidence": [
+    {
+      "path": "packages/next/src/shared/lib/router/utils/prepare-destination.ts",
+      "lines": [
+        48
+      ],
+      "target_identifiers": [
+        "matchHas"
+      ]
+    },
+    {
+      "path": "packages/next/src/shared/lib/router/utils/prepare-destination.ts",
+      "lines": [
+        217
+      ],
+      "target_identifiers": [
+        "prepareDestination"
+      ]
+    }
+  ]
+}

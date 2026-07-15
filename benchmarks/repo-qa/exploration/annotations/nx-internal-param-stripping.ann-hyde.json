@@ -1,0 +1,25 @@
+{
+  "schema": "exploration_annotation_v1",
+  "task_id": "nx-internal-param-stripping",
+  "annotator": "ann-hyde",
+  "evidence": [
+    {
+      "path": "packages/next/src/server/internal-utils.ts",
+      "lines": [
+        7
+      ],
+      "target_identifiers": [
+        "stripInternalQueries"
+      ]
+    },
+    {
+      "path": "packages/next/src/server/internal-utils.ts",
+      "lines": [
+        13
+      ],
+      "target_identifiers": [
+        "stripInternalSearchParams"
+      ]
+    }
+  ]
+}

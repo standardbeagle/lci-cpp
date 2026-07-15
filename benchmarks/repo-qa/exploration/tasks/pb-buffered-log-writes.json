@@ -1,0 +1,49 @@
+{
+  "schema": "exploration_task_v1",
+  "id": "pb-buffered-log-writes",
+  "corpus": "pocketbase",
+  "manifest_ref": {
+    "corpus_id": "pocketbase",
+    "source_commit": "d438c6a96a0252ff9df62c1cfe193480ed9ff15d",
+    "seed": 7,
+    "forge_version": "1"
+  },
+  "prompt": "So it does not hammer storage on every diagnostic line, this backend accumulates emitted records and flushes them in groups on a size or time trigger. Where is the record type that carries one emitted entry's fields, and where is the accumulate-and-flush machinery that batches them before they are persisted?",
+  "rubric": {
+    "must_surface": [
+      "the single-entry record type",
+      "the batching/flush handler"
+    ],
+    "answer_shape": "one entry type, one batching handler"
+  },
+  "evidence": [
+    {
+      "path": "tools/logger/log_armh4p.go",
+      "lines": [
+        12
+      ],
+      "target_identifiers": [
+        "Log"
+      ],
+      "claim": "carries one emitted entry's fields"
+    },
+    {
+      "path": "tools/logger/batch_handler.go",
+      "lines": [
+        81
+      ],
+      "target_identifiers": [
+        "BatchHandler"
+      ],
+      "claim": "accumulates and flushes entries in groups"
+    }
+  ],
+  "adjudication": {
+    "annotators": [
+      "ann-hyde",
+      "ann-quill"
+    ],
+    "resolved": true,
+    "notes": "Two independent passes selected the same anchors; no disagreement to resolve."
+  }
+}

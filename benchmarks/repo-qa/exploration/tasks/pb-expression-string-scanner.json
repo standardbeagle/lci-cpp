@@ -1,0 +1,49 @@
+{
+  "schema": "exploration_task_v1",
+  "id": "pb-expression-string-scanner",
+  "corpus": "pocketbase",
+  "manifest_ref": {
+    "corpus_id": "pocketbase",
+    "source_commit": "d438c6a96a0252ff9df62c1cfe193480ed9ff15d",
+    "seed": 7,
+    "forge_version": "1"
+  },
+  "prompt": "Parsing the client query language needs to walk an input string and hand back one meaningful chunk at a time, respecting quotes and grouping. Where is the constructor that wraps a plain string into such a stepping reader, and where is the method that returns the next chunk from it?",
+  "rubric": {
+    "must_surface": [
+      "the string-wrapping constructor",
+      "the next-chunk method"
+    ],
+    "answer_shape": "one constructor, one advancing method"
+  },
+  "evidence": [
+    {
+      "path": "tools/tokenizer_yj0pp7/tokenizer.go",
+      "lines": [
+        27
+      ],
+      "target_identifiers": [
+        "NewFromString"
+      ],
+      "claim": "wraps a string into a stepping reader"
+    },
+    {
+      "path": "tools/tokenizer_yj0pp7/tokenizer.go",
+      "lines": [
+        86
+      ],
+      "target_identifiers": [
+        "Scan"
+      ],
+      "claim": "returns the next meaningful chunk"
+    }
+  ],
+  "adjudication": {
+    "annotators": [
+      "ann-hyde",
+      "ann-quill"
+    ],
+    "resolved": true,
+    "notes": "Two independent passes selected the same anchors; no disagreement to resolve."
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "schema": "exploration_task_v1",
+  "id": "nx-redirect-status-codes",
+  "corpus": "next.js",
+  "manifest_ref": {
+    "corpus_id": "next.js",
+    "source_commit": "97532172c065ca2b49dd79d1fa44c3a0b864065b",
+    "seed": 7,
+    "forge_version": "1"
+  },
+  "prompt": "The framework only permits a specific handful of HTTP status numbers when one address forwards to another. Where is the allow-set of those permitted numbers declared, and where is the routine that picks the right number for a given forwarding rule?",
+  "rubric": {
+    "must_surface": [
+      "the permitted-status set",
+      "the status-selection routine"
+    ],
+    "answer_shape": "one declared set, one selection function"
+  },
+  "evidence": [
+    {
+      "path": "packages/next/src/lib/redirect-status.ts",
+      "lines": [
+        3
+      ],
+      "target_identifiers": [
+        "allowedStatusCodes"
+      ],
+      "claim": "declares the permitted forwarding status numbers"
+    },
+    {
+      "path": "packages/next/src/lib/redirect-status.ts",
+      "lines": [
+        5
+      ],
+      "target_identifiers": [
+        "getRedirectStatus"
+      ],
+      "claim": "selects the status number for a forwarding rule"
+    }
+  ],
+  "adjudication": {
+    "annotators": [
+      "ann-hyde",
+      "ann-quill"
+    ],
+    "resolved": true,
+    "notes": "Two independent passes selected the same anchors; no disagreement to resolve."
+  }
+}
