@@ -1,0 +1,282 @@
+{
+  "candidates": {
+    "s2": [
+      "gtest_discover_tests per-entry spawn overhead = 22.4s (79.9% of unit entry wall) across 1851 single-test processes (~12.1 ms/process). Coarser discovery granularity (fewer ctest entries per binary) directly reclaims this.",
+      "RUN_SERIAL entries force sequential execution and cannot overlap the -j pool: `lci_integration_suite` (272.9s), `lci_real_project_suite` (26.9s). On a 12-way box these gate the tail of the wall clock."
+    ],
+    "s3": [
+      "`lci_integration_suite` (binary `lci_integration_tests`) = 272.9s (67.46% of entry wall), RUN_SERIAL=True. These bundles index real corpora; repeated per-corpus indexing across cases/suites is the measured cost surface S3 owns.",
+      "`lci_real_project_suite` (binary `lci_real_project_tests`) = 26.9s (6.66% of entry wall), RUN_SERIAL=True. These bundles index real corpora; repeated per-corpus indexing across cases/suites is the measured cost surface S3 owns."
+    ]
+  },
+  "environment": {
+    "build_dir": "build/release",
+    "build_type": "Release",
+    "captured_at_utc": "2026-07-15T05:05:09+00:00",
+    "ccache_path": "/usr/bin/ccache",
+    "ccache_stats_after": {
+      "Cache size (GiB)": "2.7 /   5.0 (54.36%)",
+      "Cacheable calls": "43119 / 53813 (80.13%)",
+      "Direct": "36205 / 36485 (99.23%)",
+      "Hits": "36485 / 43119 (84.61%)",
+      "Local storage": "",
+      "Misses": "6634 / 43119 (15.39%)",
+      "Preprocessed": "280 / 36485 ( 0.77%)",
+      "Uncacheable calls": "10694 / 53813 (19.87%)"
+    },
+    "ccache_stats_before": {
+      "Cache size (GiB)": "2.7 /   5.0 (54.36%)",
+      "Cacheable calls": "43119 / 53813 (80.13%)",
+      "Direct": "36205 / 36485 (99.23%)",
+      "Hits": "36485 / 43119 (84.61%)",
+      "Local storage": "",
+      "Misses": "6634 / 43119 (15.39%)",
+      "Preprocessed": "280 / 36485 ( 0.77%)",
+      "Uncacheable calls": "10694 / 53813 (19.87%)"
+    },
+    "cmake_preset": "release",
+    "cmake_version": "cmake version 3.28.3",
+    "cpu_count": 12,
+    "ctest_parallelism": 4,
+    "ctest_version": "ctest version 3.28.3",
+    "cxx_compiler": "/usr/bin/c++",
+    "cxx_compiler_id": "GNU",
+    "cxx_compiler_version": "",
+    "cxx_flags": "",
+    "cxx_flags_release": "-O3 -DNDEBUG",
+    "git_branch": "worktrack/test-suite-perf",
+    "git_commit": "f941b0eb47040e32a0174f726120bbf16a3f344c",
+    "git_dirty": true
+  },
+  "gate_runs": [
+    {
+      "build_wall_s": 0.912,
+      "ctest_exit": 0,
+      "gate_wall_s": 378.049,
+      "junit_path": "/tmp/claude-1000/-home-beagle-work-core-lci-cpp/f4816464-14aa-4bc0-b98f-816c620b315d/scratchpad/profile_run/ctest_junit_run1.xml",
+      "log_path": "/tmp/claude-1000/-home-beagle-work-core-lci-cpp/f4816464-14aa-4bc0-b98f-816c620b315d/scratchpad/profile_run/ctest_run1.log",
+      "run_index": 1,
+      "tests_failed": 0,
+      "tests_passed": 0,
+      "tests_total": 1996
+    },
+    {
+      "build_wall_s": 0.914,
+      "ctest_exit": 0,
+      "gate_wall_s": 376.185,
+      "junit_path": "/tmp/claude-1000/-home-beagle-work-core-lci-cpp/f4816464-14aa-4bc0-b98f-816c620b315d/scratchpad/profile_run/ctest_junit_run2.xml",
+      "log_path": "/tmp/claude-1000/-home-beagle-work-core-lci-cpp/f4816464-14aa-4bc0-b98f-816c620b315d/scratchpad/profile_run/ctest_run2.log",
+      "run_index": 2,
+      "tests_failed": 0,
+      "tests_passed": 0,
+      "tests_total": 1996
+    },
+    {
+      "build_wall_s": 0.959,
+      "ctest_exit": 0,
+      "gate_wall_s": 375.938,
+      "junit_path": "/tmp/claude-1000/-home-beagle-work-core-lci-cpp/f4816464-14aa-4bc0-b98f-816c620b315d/scratchpad/profile_run/ctest_junit_run3.xml",
+      "log_path": "/tmp/claude-1000/-home-beagle-work-core-lci-cpp/f4816464-14aa-4bc0-b98f-816c620b315d/scratchpad/profile_run/ctest_run3.log",
+      "run_index": 3,
+      "tests_failed": 0,
+      "tests_passed": 0,
+      "tests_total": 1996
+    }
+  ],
+  "gate_wall": {
+    "cpu_count": 12,
+    "max_s": 378.049,
+    "mean_s": 376.724,
+    "median_s": 376.185,
+    "min_s": 375.938,
+    "range_s": 2.111,
+    "run_count": 3,
+    "runs_s": [
+      375.938,
+      376.185,
+      378.049
+    ]
+  },
+  "generated_at_utc": "2026-07-15T05:26:10+00:00",
+  "overhead_reconciliation": {
+    "gtest_reported_overall_s": 5.918,
+    "gtest_sum_body_s": 5.644,
+    "gtest_test_count": 1851,
+    "overhead_pct_of_entry_wall": 79.86,
+    "overhead_per_entry_ms": 12.09,
+    "process_spawn_discovery_overhead_s": 22.376,
+    "sum_ctest_entry_wall_s": 28.02,
+    "unit_binary": "lci_tests",
+    "unit_ctest_entry_count": 1851
+  },
+  "ranking_run_index": 2,
+  "rankings": {
+    "entry_count": 1996,
+    "summed_entry_wall_s": 404.454,
+    "top_suites": [
+      {
+        "binary": "lci_integration_tests",
+        "entry_count": 1,
+        "run_serial": true,
+        "share_pct": 67.462,
+        "suite": "lci_integration_suite",
+        "wall_s": 272.853
+      },
+      {
+        "binary": "lci_benchmarks",
+        "entry_count": 1,
+        "run_serial": false,
+        "share_pct": 18.737,
+        "suite": "lci_benchmarks",
+        "wall_s": 75.783
+      },
+      {
+        "binary": "lci_real_project_tests",
+        "entry_count": 1,
+        "run_serial": true,
+        "share_pct": 6.659,
+        "suite": "lci_real_project_suite",
+        "wall_s": 26.9316
+      },
+      {
+        "binary": "lci_tests",
+        "entry_count": 2,
+        "run_serial": false,
+        "share_pct": 0.44,
+        "suite": "IndexPerformanceRequirements",
+        "wall_s": 1.7813
+      },
+      {
+        "binary": "lci_tests",
+        "entry_count": 81,
+        "run_serial": false,
+        "share_pct": 0.411,
+        "suite": "HandlersFixture",
+        "wall_s": 1.6616
+      },
+      {
+        "binary": "lci_tests",
+        "entry_count": 50,
+        "run_serial": false,
+        "share_pct": 0.401,
+        "suite": "ServerTest",
+        "wall_s": 1.6203
+      },
+      {
+        "binary": "lci_tests",
+        "entry_count": 9,
+        "run_serial": false,
+        "share_pct": 0.239,
+        "suite": "FileWatcherTest",
+        "wall_s": 0.9686
+      },
+      {
+        "binary": "lci_tests",
+        "entry_count": 17,
+        "run_serial": false,
+        "share_pct": 0.224,
+        "suite": "ClientTest",
+        "wall_s": 0.9044
+      },
+      {
+        "binary": "lci_tests",
+        "entry_count": 40,
+        "run_serial": false,
+        "share_pct": 0.18,
+        "suite": "ExploreIndexTestFixture",
+        "wall_s": 0.7285
+      },
+      {
+        "binary": "lci_tests",
+        "entry_count": 30,
+        "run_serial": false,
+        "share_pct": 0.14,
+        "suite": "MasterIndexTest",
+        "wall_s": 0.5682
+      }
+    ],
+    "top_tests": [
+      {
+        "binary": "lci_integration_tests",
+        "name": "lci_integration_suite",
+        "resource_lock": null,
+        "run_serial": true,
+        "share_pct": 67.462,
+        "wall_s": 272.853
+      },
+      {
+        "binary": "lci_benchmarks",
+        "name": "lci_benchmarks",
+        "resource_lock": null,
+        "run_serial": false,
+        "share_pct": 18.737,
+        "wall_s": 75.783
+      },
+      {
+        "binary": "lci_real_project_tests",
+        "name": "lci_real_project_suite",
+        "resource_lock": null,
+        "run_serial": true,
+        "share_pct": 6.659,
+        "wall_s": 26.9316
+      },
+      {
+        "binary": "lci_tests",
+        "name": "IndexPerformanceRequirements.FileAccessScalesSublinearly",
+        "resource_lock": null,
+        "run_serial": false,
+        "share_pct": 0.419,
+        "wall_s": 1.6934
+      },
+      {
+        "binary": "lci_tests",
+        "name": "ClientTest.WaitForReadyTimeout",
+        "resource_lock": null,
+        "run_serial": false,
+        "share_pct": 0.082,
+        "wall_s": 0.3309
+      },
+      {
+        "binary": "lci_tests",
+        "name": "DebouncedRebuilderTest.DebouncePreventsImmediateFiring",
+        "resource_lock": null,
+        "run_serial": false,
+        "share_pct": 0.065,
+        "wall_s": 0.2626
+      },
+      {
+        "binary": "lci_tests",
+        "name": "MaxParseFileSize.OversizeSourceSkipsParseButStaysSearchable",
+        "resource_lock": null,
+        "run_serial": false,
+        "share_pct": 0.052,
+        "wall_s": 0.2101
+      },
+      {
+        "binary": "lci_tests",
+        "name": "FileWatcherTest.DetectsFileModify",
+        "resource_lock": null,
+        "run_serial": false,
+        "share_pct": 0.051,
+        "wall_s": 0.2072
+      },
+      {
+        "binary": "lci_tests",
+        "name": "FileWatcherTest.DetectsFileDelete",
+        "resource_lock": null,
+        "run_serial": false,
+        "share_pct": 0.05,
+        "wall_s": 0.2002
+      },
+      {
+        "binary": "lci_tests",
+        "name": "FileWatcherTest.StartAndStopNoLeak",
+        "resource_lock": null,
+        "run_serial": false,
+        "share_pct": 0.042,
+        "wall_s": 0.1706
+      }
+    ]
+  },
+  "schema": "lci-test-suite-baseline/v1"
+}
