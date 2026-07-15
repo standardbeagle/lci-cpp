@@ -51,7 +51,10 @@
         ],
         "expect_exit": 0,
         "timeout_seconds": 900
-      }
+      },
+      "subdir_directive_files": [
+        "meson.build"
+      ]
     },
     {
       "id": "pocketbase",
@@ -134,7 +137,13 @@
           "--allow-unresolved names the specifiers that legitimately do not resolve",
           "from source: polyfill-module and routes.js are emitted by the build, and",
           "./missing-module is an intentionally-absent Storybook build-error fixture.",
-          "Verified: 0 problems on pristine 9753217."
+          "Verified: 0 problems on pristine 9753217.",
+          "--first-party teaches the check that next.js references its own source",
+          "as bare `next/dist/...` specifiers (126 at the pinned commit). The",
+          "rewriter repoints them independently; the checker resolves them with its",
+          "OWN scanner, so a missed rewrite surfaces instead of being assumed away.",
+          "next/dist/compiled/, next/dist/esm/ and capsize-font-metrics.json are all",
+          "emitted by the build, not present in src. Verified: 0 problems on pristine."
         ],
         "argv": [
           "{python}",
@@ -145,10 +154,15 @@
           "--exclude",
           "(^|/)(node_modules|__tests__)/|^packages/next/src/(compiled|bundles)/|^(test|tests|turbopack|crates|rspack|apps|\\.github|bench|docs|errors|scripts|examples)/|^packages/(?!next/src/)",
           "--allow-unresolved",
-          "^\\.\\./build/polyfills/polyfill-module$|^\\./routes\\.js$|^\\./missing-module$"
+          "^\\.\\./build/polyfills/polyfill-module$|^\\./routes\\.js$|^\\./missing-module$|^next/dist/compiled/|^next/dist/esm/|^next/dist/server/capsize-font-metrics\\.json$",
+          "--first-party",
+          "next/dist/=packages/next/src/"
         ],
         "expect_exit": 0,
         "timeout_seconds": 900
+      },
+      "first_party_prefixes": {
+        "next/dist/": "packages/next/src/"
       }
     }
   ]

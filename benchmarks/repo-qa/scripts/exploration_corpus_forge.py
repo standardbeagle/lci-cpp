@@ -397,6 +397,59 @@ def _rewrite_ts_relative_imports(tree, old_mod, new_mod):
     return count
 
 
+def _rewrite_bare_first_party(tree, spec, old_mod, new_mod):
+    """Repoint BARE first-party specifiers at a moved path.
+
+    next.js imports its own source as `next/dist/server/...`, which resolves to
+    `packages/next/src/server/...` -- 126 such self-references at the pinned
+    commit. They are not relative, so the relative rewriter never touches them,
+    and a dir_rename under a mutable root would silently break every one.
+    """
+    count = 0
+    for prefix, root in spec.get("first_party_prefixes", {}).items():
+        if not old_mod.startswith(root):
+            continue
+        old_bare = prefix + old_mod[len(root) :]
+        new_bare = prefix + new_mod[len(root) :]
+        pattern = re.compile(r"(?<![\w./-])" + re.escape(old_bare) + r"(?![\w])")
+        for rel in list_files(tree):
+            path = os.path.join(tree, rel)
+            body = _read_text(path)
+            if body is None:
+                continue
+            updated, hits = pattern.subn(new_bare, body)
+            if hits:
+                _write_text(path, updated)
+                count += hits
+    return count
+
+
+def _rewrite_subdir_directive(tree, build_file, old_rel, new_rel):
+    """Repoint a meson `subdir('utils')` entry at a renamed directory.
+
+    meson names a child directory by BARE name, not by repo-relative path, so the
+    slashed rewriter -- which matches full paths -- never sees it. Renaming
+    sklearn/utils without this leaves sklearn/meson.build calling subdir('utils')
+    on a directory that no longer exists.
+    """
+    parent = os.path.dirname(old_rel)
+    if os.path.dirname(new_rel) != parent:
+        return 0
+    path = os.path.join(tree, parent, build_file)
+    body = _read_text(path)
+    if body is None:
+        return 0
+
+    old_name, new_name = os.path.basename(old_rel), os.path.basename(new_rel)
+    pattern = re.compile(
+        r"(subdir\s*\(\s*)(['\"])" + re.escape(old_name) + r"(['\"])"
+    )
+    updated, hits = pattern.subn(rf"\g<1>\g<2>{new_name}\g<3>", body)
+    if hits:
+        _write_text(path, updated)
+    return hits
+
+
 def _apply_move(tree, spec, old_rel, new_rel):
     """Move a path and repoint every reference to it. Returns rewrite count."""
     old_path, new_path = os.path.join(tree, old_rel), os.path.join(tree, new_rel)
@@ -411,6 +464,10 @@ def _apply_move(tree, spec, old_rel, new_rel):
         count += _rewrite_python_relative_imports(tree, old_mod, new_mod)
     elif spec["language"] in ("typescript", "javascript"):
         count += _rewrite_ts_relative_imports(tree, old_mod, new_mod)
+        count += _rewrite_bare_first_party(tree, spec, old_mod, new_mod)
+
+    for name in spec.get("subdir_directive_files", []):
+        count += _rewrite_subdir_directive(tree, name, old_rel, new_rel)
     return count
 
 
@@ -694,7 +751,9 @@ def run_validation(validation, tree):
     }
 
 
-def check_imports(root, language, exclude=None, allow_unresolved=None):
+def check_imports(
+    root, language, exclude=None, allow_unresolved=None, first_party=None
+):
     """Non-mutating import resolvability check. Returns a list of problems.
 
     This is the oracle for path mutations: if a rename broke a module path,
@@ -707,8 +766,21 @@ def check_imports(root, language, exclude=None, allow_unresolved=None):
     if language == "python":
         return _check_python_imports(root)
     if language in ("typescript", "javascript"):
-        return _check_ts_imports(root, exclude, allow_unresolved)
+        return _check_ts_imports(root, exclude, allow_unresolved, first_party)
     raise ForgeError(f"check-imports: unsupported language {language!r}")
+
+
+def _parse_first_party(raw):
+    """`prefix=root,prefix=root` -> {prefix: root}."""
+    mapping = {}
+    for pair in (raw or "").split(","):
+        if not pair.strip():
+            continue
+        if "=" not in pair:
+            raise ForgeError(f"--first-party expects prefix=root, got {pair!r}")
+        prefix, root = pair.split("=", 1)
+        mapping[prefix.strip()] = root.strip()
+    return mapping
 
 
 # A python module is not always a .py file: `sklearn.utils._isfinite` is a Cython
@@ -830,9 +902,21 @@ def _strip_ts_comments(body):
     return _TS_LINE_COMMENT.sub("", _TS_BLOCK_COMMENT.sub("", body))
 
 
-def _check_ts_imports(root, exclude=None, allow_unresolved=None):
+# The checker scans with its OWN pattern, deliberately not the rewriter's.
+# _TS_RELATIVE matches only what the rewriter knows how to repoint; if the check
+# reused it, it could never see a specifier shape the rewriter forgot -- it would
+# just confirm the rewriter's assumptions back to itself. This one captures EVERY
+# module specifier, bare ones included, so a missed rewrite shows up as a failure.
+_TS_ANY_SPECIFIER = re.compile(
+    r"(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+|\brequire\s*\(\s*)"
+    r"(['\"])(?P<spec>[^'\"]+)\1"
+)
+
+
+def _check_ts_imports(root, exclude=None, allow_unresolved=None, first_party=None):
     excluded = re.compile(exclude) if exclude else None
     allowed = re.compile(allow_unresolved) if allow_unresolved else None
+    first_party = first_party or {}
     problems = []
     for rel in list_files(root):
         if not rel.endswith(_TS_EXTENSIONS) or rel.endswith(".json"):
@@ -844,13 +928,29 @@ def _check_ts_imports(root, exclude=None, allow_unresolved=None):
             continue
         body = _strip_ts_comments(body)
         here = os.path.dirname(rel)
-        for match in _TS_RELATIVE.finditer(body):
+        for match in _TS_ANY_SPECIFIER.finditer(body):
             spec = match.group("spec")
             if "${" in spec:
                 continue  # computed at runtime; not statically resolvable
             if allowed and allowed.search(spec):
                 continue
-            if not _ts_resolves(root, os.path.normpath(os.path.join(here, spec))):
+
+            if spec.startswith("."):
+                # A relative specifier is `./x` or `../x`. A bare `'...'` -- which
+                # next.js uses as a placeholder inside a babel plugin's error text
+                # -- is not a module reference.
+                if not re.match(r"^\.\.?(/|$)", spec):
+                    continue
+                target = os.path.normpath(os.path.join(here, spec))
+            else:
+                prefix = next(
+                    (p for p in first_party if spec.startswith(p)), None
+                )
+                if prefix is None:
+                    continue  # third-party package: not ours to resolve
+                target = first_party[prefix] + spec[len(prefix) :]
+
+            if not _ts_resolves(root, target):
                 problems.append(f"{rel}: unresolved import {spec!r}")
     return problems
 
@@ -1003,6 +1103,11 @@ def main(argv=None):
         help="regex of specifiers that legitimately do not resolve from source "
         "(build-generated modules, deliberately-missing fixtures)",
     )
+    check.add_argument(
+        "--first-party",
+        default=None,
+        help="bare self-reference prefixes, e.g. 'next/dist/=packages/next/src/'",
+    )
 
     trans = sub.add_parser("translate", help="original -> mutated path")
     trans.add_argument("--manifest", required=True)
@@ -1016,6 +1121,7 @@ def main(argv=None):
             args.language,
             args.exclude,
             args.allow_unresolved,
+            _parse_first_party(args.first_party),
         )
         for problem in problems:
             print(f"UNRESOLVED {problem}")
