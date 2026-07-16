@@ -134,6 +134,7 @@ def score_run(task, record):
         "schema": SCORE_SCHEMA,
         "run_key": record.get("run_key"),
         "task_id": record.get("task_id"),
+        "seed": record.get("seed"),
         "corpus_id": record.get("corpus_id"),
         "arm": record.get("arm"),
         "model": record.get("model"),
@@ -252,13 +253,60 @@ def _deltas(arms):
     }
 
 
+def _latest_by_run_key(scores):
+    """Keep the last score for each run key, matching append-log semantics."""
+    latest = {}
+    for score in scores:
+        key = score.get("run_key")
+        if key is None:
+            raise IncompatibleRuns("score record is missing required run_key")
+        latest[key] = score
+    return list(latest.values())
+
+
+def _pair_scores(scores):
+    """Return exact task/seed pairs and a forensic list of unmatched cells."""
+    cells = {}
+    for score in scores:
+        cell = (score.get("task_id"), score.get("seed"))
+        arm = score.get("arm")
+        arms = cells.setdefault(cell, {})
+        if arm in arms:
+            previous = arms[arm]
+            raise IncompatibleRuns(
+                "multiple run keys claim the same task/seed/arm cell: "
+                f"{previous.get('run_key')!r} and {score.get('run_key')!r}"
+            )
+        arms[arm] = score
+
+    paired = []
+    unpaired = []
+    for (task_id, seed), arms in sorted(
+        cells.items(), key=lambda item: (str(item[0][0]), str(item[0][1]))
+    ):
+        treatment = arms.get("treatment")
+        baseline = arms.get("baseline")
+        if treatment is not None and baseline is not None:
+            paired.extend((treatment, baseline))
+        for arm, score in sorted(arms.items(), key=lambda item: str(item[0])):
+            if treatment is None or baseline is None:
+                unpaired.append({
+                    "task_id": task_id,
+                    "seed": seed,
+                    "arm": arm,
+                    "run_key": score.get("run_key"),
+                    "status": score.get("status"),
+                })
+    return paired, unpaired
+
+
 def aggregate(score_records, *, group_by=()):
     """Pair the arms of a homogeneous run set and emit deltas.
 
     Refuses (raises IncompatibleRuns) if the records disagree on model, forge
     version, or task-bank version unless that field is named in `group_by`.
     """
-    scores = list(score_records)
+    scores = _latest_by_run_key(list(score_records))
     if not scores:
         raise IncompatibleRuns("no score records to aggregate")
 
@@ -270,10 +318,23 @@ def aggregate(score_records, *, group_by=()):
     arms = {arm: _arm_summary(sorted(by_arm[arm], key=lambda s: s["run_key"]))
             for arm in sorted(by_arm)}
 
+    paired_scores, unpaired = _pair_scores(scores)
+    paired_by_arm = {}
+    for score in paired_scores:
+        paired_by_arm.setdefault(score["arm"], []).append(score)
+    paired_arms = {
+        arm: _arm_summary(paired_by_arm[arm]) for arm in sorted(paired_by_arm)
+    }
+
     return {
         "schema": AGGREGATE_SCHEMA,
         "grouped_by": sorted(group_by or ()),
         "compatibility": shared,
         "arms": arms,
-        "deltas": _deltas(arms),
+        "pairing": {
+            "paired_count": len(paired_scores) // 2,
+            "unpaired_count": len(unpaired),
+            "unpaired": unpaired,
+        },
+        "deltas": _deltas(paired_arms),
     }

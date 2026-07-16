@@ -89,6 +89,7 @@ def make_record(
     duration=1.5,
     model="opus",
     forge_version="1",
+    seed=None,
 ):
     """An S4-shaped per-run record (see runner/run.py `_finish`)."""
     ref = task["manifest_ref"]
@@ -97,13 +98,14 @@ def make_record(
         if input_tokens is None
         else {"input": input_tokens, "output": output_tokens}
     )
+    seed = ref["seed"] if seed is None else seed
     return {
-        "run_key": f"{task['id']}::{arm}::seed-{ref['seed']}",
+        "run_key": f"{task['id']}::{arm}::seed-{seed}",
         "task_id": task["id"],
         "corpus_id": ref["corpus_id"],
         "source_commit": ref["source_commit"],
         "forge_version": forge_version,
-        "seed": ref["seed"],
+        "seed": seed,
         "arm": arm,
         "model": model,
         "manifest_id": "tree-hash-xyz",
@@ -243,13 +245,13 @@ class AggregateTests(unittest.TestCase):
         weak = f"Maybe {CORPUS_FILE}:4."  # invalid line -> zero evidence
         return [
             score_run(task, make_record(task, arm="treatment", final_answer=good,
-                                        tool_calls=4, duration=1.0)),
+                                        tool_calls=4, duration=1.0, seed=7)),
             score_run(task, make_record(task, arm="treatment", final_answer=good,
-                                        tool_calls=6, duration=2.0)),
+                                        tool_calls=6, duration=2.0, seed=8)),
             score_run(task, make_record(task, arm="baseline", final_answer=weak,
-                                        tool_calls=10, duration=5.0)),
+                                        tool_calls=10, duration=5.0, seed=7)),
             score_run(task, make_record(task, arm="baseline", final_answer=weak,
-                                        tool_calls=12, duration=7.0)),
+                                        tool_calls=12, duration=7.0, seed=8)),
         ]
 
     def test_paired_aggregate_reports_arms_and_deltas(self):
@@ -267,6 +269,66 @@ class AggregateTests(unittest.TestCase):
         self.assertEqual(agg["deltas"]["precision"], 1.0)
         self.assertEqual(agg["deltas"]["recall"], 1.0)
         self.assertLess(agg["deltas"]["wall_clock_mean"], 0.0)
+        self.assertEqual(agg["pairing"]["paired_count"], 2)
+        self.assertEqual(agg["pairing"]["unpaired"], [])
+
+    def test_latest_duplicate_run_key_wins(self):
+        task = answer_key()
+        failed = score_run(task, make_record(
+            task, arm="treatment", status="timeout", final_answer=None
+        ))
+        succeeded = score_run(task, make_record(
+            task, arm="treatment", final_answer=f"{CORPUS_FILE}:3"
+        ))
+        baseline = score_run(task, make_record(
+            task, arm="baseline", final_answer=f"{CORPUS_FILE}:3"
+        ))
+        agg = aggregate([failed, succeeded, baseline])
+        self.assertEqual(agg["arms"]["treatment"]["count"], 1)
+        self.assertEqual(agg["arms"]["treatment"]["answered"], 1)
+        self.assertEqual(agg["pairing"]["paired_count"], 1)
+
+    def test_missing_or_mismatched_cells_are_unpaired_and_not_in_deltas(self):
+        task = answer_key()
+        good = f"{CORPUS_FILE}:3 and {CORPUS_FILE}:7"
+        weak = f"{CORPUS_FILE}:4"
+        scores = [
+            score_run(task, make_record(task, arm="treatment", seed=7,
+                                        final_answer=good)),
+            score_run(task, make_record(task, arm="baseline", seed=7,
+                                        final_answer=weak)),
+            score_run(task, make_record(task, arm="treatment", seed=8,
+                                        final_answer=weak)),
+            score_run(task, make_record(task, arm="baseline", seed=9,
+                                        final_answer=good)),
+        ]
+        agg = aggregate(scores)
+        self.assertEqual(agg["pairing"]["paired_count"], 1)
+        self.assertEqual(agg["pairing"]["unpaired_count"], 2)
+        self.assertEqual(agg["deltas"]["precision"], 1.0)
+        self.assertEqual(
+            {(cell["arm"], cell["seed"]) for cell in agg["pairing"]["unpaired"]},
+            {("treatment", 8), ("baseline", 9)},
+        )
+
+    def test_rejects_distinct_run_keys_claiming_same_cell(self):
+        task = answer_key()
+        first = score_run(task, make_record(task, arm="treatment"))
+        second_record = make_record(task, arm="treatment")
+        second_record["run_key"] = "legacy-distinct-key"
+        second = score_run(task, second_record)
+        baseline = score_run(task, make_record(task, arm="baseline"))
+        with self.assertRaisesRegex(IncompatibleRuns, "same task/seed/arm cell"):
+            aggregate([first, second, baseline])
+        with self.assertRaisesRegex(IncompatibleRuns, "same task/seed/arm cell"):
+            aggregate([second, first, baseline])
+
+    def test_rejects_missing_run_key(self):
+        task = answer_key()
+        rec = make_record(task)
+        rec["run_key"] = None
+        with self.assertRaisesRegex(IncompatibleRuns, "missing required run_key"):
+            aggregate([score_run(task, rec)])
 
     def test_refuses_mixed_models(self):
         task = answer_key()
@@ -349,6 +411,67 @@ class CliTests(unittest.TestCase):
                      "--out-dir", os.path.join(root, "out")]
                 )
             self.assertNotEqual(caught.exception.code, 0)
+
+    def test_cli_scores_latest_retry_and_collapses_duplicate_completed_records(self):
+        import score_exploration
+
+        with TemporaryDirectory() as root:
+            tasks_dir, records_path = self._write_bank(root)
+            task = answer_key()
+            with open(records_path, "a") as handle:
+                handle.write(json.dumps(make_record(
+                    task, arm="baseline", final_answer=f"{CORPUS_FILE}:4"
+                )) + "\n")
+                handle.write(json.dumps(make_record(
+                    task, arm="baseline",
+                    final_answer=f"{CORPUS_FILE}:3 and {CORPUS_FILE}:7"
+                )) + "\n")
+            out_dir = os.path.join(root, "out")
+            self.assertEqual(score_exploration.main([
+                "--tasks-dir", tasks_dir, "--records", records_path,
+                "--out-dir", out_dir,
+            ]), 0)
+            with open(os.path.join(out_dir, "scores.json")) as handle:
+                scores = json.load(handle)["scores"]
+            self.assertEqual(len(scores), 2)
+            baseline = next(s for s in scores if s["arm"] == "baseline")
+            self.assertEqual(baseline["status"], "answered")
+            self.assertEqual(baseline["evidence"]["recall"], 1.0)
+
+    def test_cli_rejects_unkeyed_record(self):
+        import score_exploration
+
+        with TemporaryDirectory() as root:
+            tasks_dir, records_path = self._write_bank(root)
+            with open(records_path, "a") as handle:
+                handle.write(json.dumps({"task_id": answer_key()["id"]}) + "\n")
+            with self.assertRaisesRegex(SystemExit, "missing required run_key"):
+                score_exploration.main([
+                    "--tasks-dir", tasks_dir, "--records", records_path,
+                    "--out-dir", os.path.join(root, "out"),
+                ])
+
+    def test_cli_empty_aggregate_has_stable_schema_shape(self):
+        import score_exploration
+
+        with TemporaryDirectory() as root:
+            tasks_dir = os.path.join(root, "tasks")
+            os.makedirs(tasks_dir)
+            records_path = os.path.join(root, "records.jsonl")
+            with open(records_path, "w"):
+                pass
+            out_dir = os.path.join(root, "out")
+            self.assertEqual(score_exploration.main([
+                "--tasks-dir", tasks_dir, "--records", records_path,
+                "--out-dir", out_dir, "--group-by", "model",
+            ]), 0)
+            with open(os.path.join(out_dir, "aggregate.json")) as handle:
+                agg = json.load(handle)
+            self.assertEqual(agg["grouped_by"], ["model"])
+            self.assertEqual(agg["compatibility"], {})
+            self.assertEqual(agg["pairing"], {
+                "paired_count": 0, "unpaired_count": 0, "unpaired": [],
+            })
 
 
 if __name__ == "__main__":

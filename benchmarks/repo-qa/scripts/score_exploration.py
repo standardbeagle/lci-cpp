@@ -54,9 +54,20 @@ def _write_json(path, payload):
 
 
 def score_bank(tasks, records):
-    """Score every record; fail loud on a record for an unknown task."""
+    """Score the latest record per run key; fail on an unknown task."""
+    latest = {}
+    for index, rec in enumerate(records):
+        key = rec.get("run_key")
+        if key is None:
+            raise SystemExit(
+                f"error: run record at log index {index} is missing required run_key"
+            )
+        latest[key] = (index, rec)
+    selected = list(latest.values())
+    selected.sort(key=lambda item: item[0])
+
     scores = []
-    for rec in records:
+    for _, rec in selected:
         task_id = rec.get("task_id")
         task = tasks.get(task_id)
         if task is None:
@@ -89,7 +100,16 @@ def main(argv=None):
     group_by = [field for field in args.group_by.split(",") if field]
     try:
         agg = aggregate(scores, group_by=group_by) if scores else {
-            "schema": AGGREGATE_SCHEMA, "arms": {}, "deltas": {},
+            "schema": AGGREGATE_SCHEMA,
+            "grouped_by": sorted(group_by),
+            "compatibility": {},
+            "arms": {},
+            "pairing": {
+                "paired_count": 0,
+                "unpaired_count": 0,
+                "unpaired": [],
+            },
+            "deltas": {},
         }
     except IncompatibleRuns as error:
         raise SystemExit(f"error: {error}")
