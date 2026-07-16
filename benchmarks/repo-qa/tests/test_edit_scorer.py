@@ -24,6 +24,7 @@ Acceptance criteria pinned here (one+ test each):
 import json
 import os
 import sys
+import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -31,6 +32,7 @@ BENCH_ROOT = os.path.dirname(HERE)
 for _p in (
     os.path.join(BENCH_ROOT, "edits", "scoring"),
     os.path.join(BENCH_ROOT, "edits", "runner"),
+    os.path.join(BENCH_ROOT, "edits", "conformance"),
 ):
     if _p not in sys.path:
         sys.path.insert(0, _p)
@@ -39,6 +41,11 @@ import jsonschema  # noqa: E402
 
 import edit_record  # noqa: E402
 import edit_scorer  # noqa: E402
+
+# The REAL S3.2 gate. Imported so the rule-level tests below judge the shape the
+# gate actually emits rather than a hand-written imitation of it -- a hand-copied
+# diagnostic string would keep passing after S3.2 reformatted the real one.
+import conformance_gate  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -677,6 +684,89 @@ class FailureClasses(unittest.TestCase):
         self.assertEqual(breakdown["harness_failure"], 1)
         self.assertEqual(breakdown["oracle_failure"], 1)
         self.assertEqual(breakdown["patch_rejected"], 0)
+
+
+# ---------------------------------------------------------------------------
+# criterion 4 (rule-level half) -- OUR broken rule is never charged to the agent
+# ---------------------------------------------------------------------------
+
+
+def real_rule_level_outcome(reason):
+    """A REAL conformance_gate_v1 outcome for a rule-level failure.
+
+    Sourced from the live S3.2 gate, never hand-written: these outcomes are the
+    scorer's actual input shape, and the leading-token contract the scorer parses
+    is S3.2's to change. Hermetic -- the two rule shapes never touch the disk,
+    and MANIFEST_ABSENT looks for a manifest under an empty temp dir.
+    """
+    if reason == "RULE_MALFORMED":
+        # no convention.rule_id at all
+        return conformance_gate.evaluate_task({"id": "t1"}, None, None)
+    if reason == "RULE_UNSUPPORTED":
+        return conformance_gate.evaluate_task(
+            {"id": "t1", "convention": {"rule_id": "no-such-rule"}}, None, None
+        )
+    if reason == "MANIFEST_ABSENT":
+        with tempfile.TemporaryDirectory() as empty_corpus:
+            return conformance_gate.evaluate_task_in_corpus(
+                {
+                    "id": "t1",
+                    "corpus": "next.js",
+                    "manifest_ref": {"seed": 7},
+                    "convention": {"rule_id": "ts-throw-typed-error"},
+                },
+                empty_corpus,
+            )
+    raise AssertionError("unknown rule-level reason " + reason)
+
+
+RULE_LEVEL_REASONS = ("RULE_MALFORMED", "RULE_UNSUPPORTED", "MANIFEST_ABSENT")
+
+
+class RuleLevelConformance(unittest.TestCase):
+    """The anchors:[] path -- a rule WE broke must never read as a bad patch.
+
+    A rule-level conformance failure (malformed rule, unsupported rule, absent
+    manifest) is OUR harness breaking before the patch was ever judged. It emits
+    NO anchors, so its reason code exists only in the diagnostic's leading token
+    and the scorer must recover it from there. If that recovery is lost the cell
+    silently becomes `patch_rejected` -- the one bucket that blames the agent --
+    and our broken rule reads as evidence the model was wrong.
+    """
+
+    def test_the_real_gate_emits_rule_level_failures_with_no_anchors(self):
+        """The precondition the fallback exists for, pinned against the REAL gate.
+
+        Every one of these carries its reason ONLY in the diagnostic. If S3.2
+        ever grows a top-level reason field or starts emitting a synthetic
+        anchor, this fails and the fallback should be revisited rather than left
+        parsing prose.
+        """
+        for reason in RULE_LEVEL_REASONS:
+            outcome = real_rule_level_outcome(reason)
+            with self.subTest(reason=reason):
+                self.assertEqual(outcome["schema"], "conformance_gate_v1")
+                self.assertFalse(outcome["passed"])
+                self.assertEqual(outcome["anchors"], [])
+                self.assertNotIn("reason", outcome)
+
+    def test_the_gate_diagnostic_leads_with_the_bare_reason_code(self):
+        """Pin the S3.2 boundary the scorer's split(':', 1)[0] parse depends on.
+
+        Asserted as an exact leading token -- not a substring -- so an S3.2
+        diagnostic reformat (a prefix, a wrapped code, a different separator)
+        breaks here LOUDLY instead of silently degrading every rule-level cell to
+        REASON_UNCLASSIFIED. The proper fix is a top-level `reason` field on
+        conformance_gate_v1; until S3.2 carries one, this test is the contract.
+        """
+        for reason in RULE_LEVEL_REASONS:
+            diagnostic = real_rule_level_outcome(reason)["diagnostic"]
+            with self.subTest(reason=reason):
+                self.assertEqual(diagnostic.split(":", 1)[0], reason)
+                # ...and the scorer's own parse agrees with the gate's emission
+                self.assertEqual(
+                    edit_scorer._reason_from_diagnostic(diagnostic), reason
+                )
 
 
 # ---------------------------------------------------------------------------
