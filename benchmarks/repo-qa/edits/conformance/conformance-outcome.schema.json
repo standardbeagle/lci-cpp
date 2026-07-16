@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lci/benchmarks/repo-qa/conformance-outcome.schema.json",
+  "title": "Stage-3 mechanical convention-conformance gate outcome",
+  "description": "The versioned machine-readable verdict emitted by conformance_gate.evaluate_task for one edit task. Deterministic and byte-stable: anchors are ordered by (path, lines) and reason codes are drawn from a stable enum. FAILS CLOSED -- any abnormal condition (missing/decoy/non-live anchor, stale bound, absent identifier, ambiguous or absent structural match, malformed/unsupported rule, tool failure) yields passed=false with the exact reason code.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "task_id", "rule_id", "kind", "passed", "diagnostic", "anchors"],
+  "properties": {
+    "schema": {"const": "conformance_gate_v1"},
+    "task_id": {"type": ["string", "null"], "description": "The edit task id evaluated."},
+    "rule_id": {"type": ["string", "null"], "description": "The convention rule id; null when the rule was malformed."},
+    "kind": {"type": ["string", "null"], "description": "The structural handler family that judged the rule; null when unsupported/malformed."},
+    "passed": {"type": "boolean", "description": "True only when every anchor conforms."},
+    "diagnostic": {"type": "string", "minLength": 1, "description": "Human-readable summary; leads with the first failing reason code."},
+    "anchors": {
+      "type": "array",
+      "description": "Per-anchor outcomes, sorted by (path, lines).",
+      "items": {"$ref": "#/$defs/anchor_outcome"}
+    }
+  },
+  "$defs": {
+    "reason": {
+      "type": "string",
+      "enum": [
+        "CONFORMS",
+        "RULE_MALFORMED",
+        "RULE_UNSUPPORTED",
+        "MANIFEST_ABSENT",
+        "ANCHOR_DECOY",
+        "ANCHOR_NOT_LIVE",
+        "ANCHOR_MISSING",
+        "ANCHOR_BOUND_STALE",
+        "ANCHOR_IDENTIFIER_ABSENT",
+        "MATCH_ABSENT",
+        "MATCH_AMBIGUOUS",
+        "TOOL_FAILURE"
+      ],
+      "description": "Stable reason-code enum. CONFORMS is the only passing code; every other code is a fail-closed condition."
+    },
+    "anchor_outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "lines", "passed", "reason", "evidence", "detail"],
+      "properties": {
+        "path": {"type": "string", "description": "The anchor's mutated relative path."},
+        "lines": {"type": "array", "items": {"type": "integer", "minimum": 1}, "minItems": 1, "maxItems": 2},
+        "passed": {"type": "boolean"},
+        "reason": {"$ref": "#/$defs/reason"},
+        "evidence": {"type": "string", "description": "The matched conforming construct, or '' when none matched."},
+        "detail": {"type": "string", "description": "Diagnostic detail for the reason."}
+      }
+    }
+  }
+}
