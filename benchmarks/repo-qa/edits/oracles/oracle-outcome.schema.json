@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lci/benchmarks/repo-qa/oracle-outcome.schema.json",
+  "title": "Stage-3 behaviour-oracle + blast-radius gate outcome",
+  "description": "The versioned machine-readable verdict emitted by oracle_gate.evaluate_oracle for one edit task and its reference (oracle) patch. It carries FOUR independently versioned sub-outcomes -- existing_suite, discrimination, changed_path and api_impact -- each with its own schema tag and its own stable reason code. Deterministic and byte-stable: changed paths, impacted symbols and escaped references are sorted before emit. FAILS CLOSED -- a timeout, a missing command, a tool error, a patch that escapes the declared blast radius, a non-discriminating or wrong-direction test, or an absent forged corpus all yield passed=false with the exact reason code and BOUNDED captured output.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "task_id", "passed", "diagnostic", "existing_suite", "discrimination", "changed_path", "api_impact"],
+  "properties": {
+    "schema": {"const": "oracle_gate_v1"},
+    "task_id": {"type": ["string", "null"], "description": "The edit task id evaluated."},
+    "passed": {"type": "boolean", "description": "True only when all four sub-gates passed."},
+    "diagnostic": {"type": "string", "minLength": 1, "description": "Human-readable summary; leads with the first failing sub-gate's reason code."},
+    "existing_suite": {"$ref": "#/$defs/existing_suite"},
+    "discrimination": {"$ref": "#/$defs/discrimination"},
+    "changed_path": {"$ref": "#/$defs/changed_path"},
+    "api_impact": {"$ref": "#/$defs/api_impact"}
+  },
+  "$defs": {
+    "reason": {
+      "type": "string",
+      "enum": [
+        "SUITE_GREEN",
+        "SUITE_RED",
+        "DISCRIMINATES",
+        "NON_DISCRIMINATING",
+        "WRONG_DIRECTION",
+        "RUN_ERROR",
+        "WITHIN_SCOPE",
+        "PATH_OUT_OF_SCOPE",
+        "TOO_MANY_FILES",
+        "NO_CHANGES",
+        "BLAST_RADIUS_MALFORMED",
+        "NO_ESCAPE",
+        "API_IMPACT_ESCAPE",
+        "LCI_ABSENT",
+        "TIMEOUT",
+        "COMMAND_NOT_FOUND",
+        "COMMAND_ABSENT",
+        "TOOL_FAILURE",
+        "MANIFEST_ABSENT"
+      ],
+      "description": "Stable reason-code enum shared across all sub-gates. The per-gate passing codes are SUITE_GREEN, DISCRIMINATES, WITHIN_SCOPE and NO_ESCAPE; every other code is a fail-closed condition."
+    },
+    "command_run": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The bounded result of running one argv. exit_code is null when the command never produced one (timeout, missing binary, os error).",
+      "required": ["argv", "exit_code", "reason", "observed", "stdout_tail", "stderr_tail"],
+      "properties": {
+        "argv": {"type": "array", "items": {"type": "string"}},
+        "exit_code": {"type": ["integer", "null"]},
+        "reason": {"type": ["string", "null"], "$comment": "null on a clean run; else TIMEOUT / COMMAND_NOT_FOUND / TOOL_FAILURE / COMMAND_ABSENT"},
+        "observed": {"type": "string", "enum": ["green", "red", "error"], "description": "green = exit 0, red = nonzero exit, error = the run failed closed with a reason."},
+        "stdout_tail": {"type": "string", "description": "Last bytes of stdout, capped."},
+        "stderr_tail": {"type": "string", "description": "Last bytes of stderr, capped."}
+      }
+    },
+    "existing_suite": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The repository's DECLARED existing test suite, run once on the patched tree as a regression guard -- separate from the task-specific discrimination test.",
+      "required": ["schema", "passed", "reason", "detail", "run"],
+      "properties": {
+        "schema": {"const": "existing_suite_v1"},
+        "passed": {"type": "boolean"},
+        "reason": {"$ref": "#/$defs/reason"},
+        "detail": {"type": "string"},
+        "run": {"anyOf": [{"$ref": "#/$defs/command_run"}, {"type": "null"}]}
+      }
+    },
+    "discrimination": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The red->green discrimination proof: the behaviour command run on the pristine tree (must be RED) and again on the oracle-patched tree (must be GREEN). Same-direction (both green / both red) and wrong-direction (green pristine) outcomes are REJECTED.",
+      "required": ["schema", "passed", "reason", "detail", "pristine", "patched"],
+      "properties": {
+        "schema": {"const": "discrimination_v1"},
+        "passed": {"type": "boolean"},
+        "reason": {"$ref": "#/$defs/reason"},
+        "detail": {"type": "string"},
+        "pristine": {"anyOf": [{"$ref": "#/$defs/command_run"}, {"type": "null"}]},
+        "patched": {"anyOf": [{"$ref": "#/$defs/command_run"}, {"type": "null"}]}
+      }
+    },
+    "changed_path": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Declared changed-path (blast radius) enforcement. Every file the oracle patch touches must match at least one blast_radius.allow glob and stay within any max_files cap.",
+      "required": ["schema", "passed", "reason", "detail", "changed", "out_of_scope", "allow", "max_files"],
+      "properties": {
+        "schema": {"const": "changed_path_v1"},
+        "passed": {"type": "boolean"},
+        "reason": {"$ref": "#/$defs/reason"},
+        "detail": {"type": "string"},
+        "changed": {"type": "array", "items": {"type": "string"}, "description": "Sorted set of patch-touched relative paths."},
+        "out_of_scope": {"type": "array", "items": {"type": "string"}, "description": "Sorted subset of changed paths matching no allow glob."},
+        "allow": {"type": "array", "items": {"type": "string"}},
+        "max_files": {"type": ["integer", "null"]}
+      }
+    },
+    "api_impact": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Public-API / call-hierarchy blast-radius check. For each symbol the patch changes, references are resolved with LCI; any reference living OUTSIDE the declared allow scope is an escape (the edit rippled past its declared blast radius).",
+      "required": ["schema", "passed", "reason", "detail", "symbols", "escaped_refs"],
+      "properties": {
+        "schema": {"const": "api_impact_v1"},
+        "passed": {"type": "boolean"},
+        "reason": {"$ref": "#/$defs/reason"},
+        "detail": {"type": "string"},
+        "symbols": {"type": "array", "items": {"type": "string"}, "description": "Sorted set of impacted symbols queried."},
+        "escaped_refs": {
+          "type": "array",
+          "description": "Sorted references that fall outside the declared allow scope.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["symbol", "path"],
+            "properties": {
+              "symbol": {"type": "string"},
+              "path": {"type": "string"}
+            }
+          }
+        }
+      }
+    }
+  }
+}
