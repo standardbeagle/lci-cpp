@@ -15,6 +15,11 @@ jobs:
   build-linux:
     runs-on: [self-hosted, linux, lci-linux]
     timeout-minutes: 60
+    # Cap parallelism on the shared self-hosted runner — an uncapped 12-way
+    # compile spiked RAM and froze the WSL VM. cmake honors this with no number.
+    env:
+      CMAKE_BUILD_PARALLEL_LEVEL: "6"
+      CTEST_PARALLEL_LEVEL: "6"
     name: build / lci-linux-amd64
     steps:
       - uses: actions/checkout@v4
@@ -97,6 +102,10 @@ jobs:
   build-windows:
     runs-on: [self-hosted, windows, lci-windows]
     timeout-minutes: 75
+    # Cap parallelism on the shared self-hosted runner — see build-linux.
+    env:
+      CMAKE_BUILD_PARALLEL_LEVEL: "6"
+      CTEST_PARALLEL_LEVEL: "6"
     name: build / lci-windows-amd64
     steps:
       - uses: actions/checkout@v4

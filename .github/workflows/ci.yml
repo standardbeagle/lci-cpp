@@ -40,6 +40,12 @@ jobs:
     # occupy the self-hosted runner indefinitely — GitHub kills the job and
     # frees the runner. Generous vs the ~30-40 min normal Linux build.
     timeout-minutes: 60
+    # Cap parallelism: this self-hosted runner's 12 cores share a memory-capped
+    # WSL VM; an uncapped `--parallel` compile spiked RAM and froze the VM. 6
+    # halves peak memory. cmake/ctest honor these when --parallel has no number.
+    env:
+      CMAKE_BUILD_PARALLEL_LEVEL: "6"
+      CTEST_PARALLEL_LEVEL: "6"
     strategy:
       fail-fast: false
       matrix:
@@ -103,7 +109,19 @@ jobs:
 
       - name: Test
         if: ${{ !matrix.main_only || github.ref == 'refs/heads/main' }}
-        run: ctest --preset ${{ matrix.preset }} --parallel
+        env:
+          # ASan self-aborts a runaway test at this RSS instead of ballooning
+          # the shared WSL runner's VM until it freezes. Non-ASan presets ignore it.
+          ASAN_OPTIONS: "hard_rss_limit_mb=6144:allocator_may_return_null=1"
+        run: |
+          # Instrumented (ASan/TSan/MSan) tests use several GB each; cap their
+          # concurrency far below the compile level so parallel instrumented
+          # processes can't exhaust the VM. Other presets use the normal level.
+          case "${{ matrix.preset }}" in
+            sanitizer|tsan|msan) jobs=2 ;;
+            *) jobs="${CTEST_PARALLEL_LEVEL:-4}" ;;
+          esac
+          ctest --preset ${{ matrix.preset }} --parallel "$jobs"
 
       - name: Build diff-engine unit tests
         if: matrix.preset == 'release'
@@ -117,7 +135,7 @@ jobs:
         if: matrix.preset == 'release'
         run: |
           cd build/release
-          ctest -L diff --output-on-failure --parallel $(nproc)
+          ctest -L diff --output-on-failure --parallel "${CTEST_PARALLEL_LEVEL}"
 
       # Free the build tree after the run so the self-hosted host doesn't
       # accumulate per-preset build dirs across the matrix. ccache + vcpkg
@@ -136,6 +154,10 @@ jobs:
     # Ceiling vs the ~45 min normal MSVC build; prevents a hung vcpkg/log step
     # from wedging the Windows runner (as happened: a 2h+ hung log-dump step).
     timeout-minutes: 75
+    # Cap parallelism on the shared self-hosted runner — see the linux job.
+    env:
+      CMAKE_BUILD_PARALLEL_LEVEL: "6"
+      CTEST_PARALLEL_LEVEL: "6"
     name: windows msvc / release
     steps:
       - uses: actions/checkout@v4
@@ -284,6 +306,10 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: [self-hosted, linux, lci-linux]
     timeout-minutes: 60
+    # Cap parallelism on the shared self-hosted runner — see the linux job.
+    env:
+      CMAKE_BUILD_PARALLEL_LEVEL: "6"
+      CTEST_PARALLEL_LEVEL: "6"
     name: benchmarks
     steps:
       - uses: actions/checkout@v4
