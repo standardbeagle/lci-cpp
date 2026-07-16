@@ -19,6 +19,12 @@ REQUIRED_ENVIRONMENT = (
 )
 
 
+def missing_metadata(section: object) -> list[str]:
+    if not isinstance(section, dict):
+        return list(REQUIRED_ENVIRONMENT)
+    return [key for key in REQUIRED_ENVIRONMENT if not section.get(key)]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -34,9 +40,15 @@ def main() -> int:
         print(f"test-gate-budget: invalid evidence: {exc}", file=sys.stderr)
         return 2
 
-    missing = [key for key in REQUIRED_ENVIRONMENT if not data.get("environment", {}).get(key)]
-    if missing:
-        print(f"test-gate-budget: missing comparison metadata: {', '.join(missing)}", file=sys.stderr)
+    missing_final = missing_metadata(data.get("environment"))
+    missing_baseline = missing_metadata(data.get("baseline"))
+    if missing_final or missing_baseline:
+        details = []
+        if missing_baseline:
+            details.append(f"baseline: {', '.join(missing_baseline)}")
+        if missing_final:
+            details.append(f"final: {', '.join(missing_final)}")
+        print(f"test-gate-budget: missing comparison metadata: {'; '.join(details)}", file=sys.stderr)
         return 2
 
     runs = data.get("gate_runs", [])

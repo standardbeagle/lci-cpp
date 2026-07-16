@@ -1,5 +1,10 @@
 {
   "baseline": {
+    "cmake_preset": "release",
+    "cpu_count": 12,
+    "ctest_parallelism": 4,
+    "cxx_compiler": "/usr/bin/c++",
+    "gate_command": "cmake --build build/release --parallel && ctest --test-dir build/release --output-on-failure -j 4",
     "git_commit": "f941b0eb47040e32a0174f726120bbf16a3f344c",
     "median_total_wall_s": 377.099,
     "runs_total_wall_s": [378.961, 377.099, 376.897],
