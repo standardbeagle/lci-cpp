@@ -1,0 +1,43 @@
+{
+  "schema": "edit_annotation_v1",
+  "task_id": "pb-retry-2",
+  "annotator": "ann-quill",
+  "exemplars": [
+    {
+      "path": "apis/middlewares.go",
+      "lines": [
+        253,
+        275
+      ],
+      "target_identifiers": [
+        "panicRecover",
+        "DefaultPanicRecoverMiddlewareId"
+      ],
+      "conforms": true
+    },
+    {
+      "path": "apis/record_auth_password_reset_request.go",
+      "lines": [
+        16,
+        38
+      ],
+      "target_identifiers": [
+        "recordRequestPasswordReset",
+        "findAuthCollection"
+      ],
+      "conforms": true
+    },
+    {
+      "path": "apis/record_auth_verification_request.go",
+      "lines": [
+        16,
+        38
+      ],
+      "target_identifiers": [
+        "recordRequestVerification",
+        "findAuthCollection"
+      ],
+      "conforms": true
+    }
+  ]
+}

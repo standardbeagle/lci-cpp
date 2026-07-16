@@ -1,0 +1,29 @@
+{
+  "schema": "edit_annotation_v1",
+  "task_id": "nx-retry-2",
+  "annotator": "ann-quill",
+  "exemplars": [
+    {
+      "path": "packages/next/src/build/compiler.ts",
+      "lines": [
+        82
+      ],
+      "target_identifiers": [
+        "Stats"
+      ],
+      "conforms": true
+    },
+    {
+      "path": "packages/next/src/build/generate-build-id.ts",
+      "lines": [
+        1,
+        16
+      ],
+      "target_identifiers": [
+        "generateBuildId",
+        "buildId"
+      ],
+      "conforms": true
+    }
+  ]
+}

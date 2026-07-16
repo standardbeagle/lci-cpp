@@ -1,0 +1,78 @@
+{
+  "schema": "edit_task_v1",
+  "id": "skl-retry-2",
+  "corpus": "scikit-learn",
+  "category": "retry-error-handling",
+  "manifest_ref": {
+    "corpus_id": "scikit-learn",
+    "source_commit": "0885712e436b07cd04d60e955101aaf6a8cbb709",
+    "seed": 7,
+    "forge_version": "1"
+  },
+  "prompt": "Bring one input-validation path in line with the library convention of raising an explanatory error on bad arguments.",
+  "rubric": {
+    "must_surface": [
+      "rejects invalid input by raising ValueError with a message",
+      "the exemplar locations to imitate"
+    ],
+    "answer_shape": "a small patch that makes the off-pattern site follow the convention"
+  },
+  "behavior": {
+    "command": [
+      "python",
+      "-m",
+      "pytest",
+      "-q"
+    ],
+    "assertion": "a bad argument raises ValueError with a message",
+    "discrimination": {
+      "red": "a bad argument passes silently or returns None",
+      "green": "a bad argument raises ValueError with a message"
+    }
+  },
+  "convention": {
+    "rule_id": "py-raise-valueerror-informative",
+    "statement": "Invalid arguments are rejected by raising ValueError with an explanatory message, not by returning None or asserting.",
+    "conforms_pattern": "raise ValueError\\("
+  },
+  "exemplars": [
+    {
+      "path": "sklearn/_loss/loss.py",
+      "lines": [
+        496,
+        525
+      ],
+      "claim": "rejects invalid input by raising ValueError with a message",
+      "target_identifiers": [
+        "init_gradient_and_hessian",
+        "n_samples"
+      ]
+    },
+    {
+      "path": "sklearn/base.py",
+      "lines": [
+        400,
+        428
+      ],
+      "claim": "rejects invalid input by raising ValueError with a message",
+      "target_identifiers": [
+        "set_params",
+        "Parameters"
+      ]
+    }
+  ],
+  "blast_radius": {
+    "allow": [
+      "sklearn/**"
+    ],
+    "max_files": 2
+  },
+  "adjudication": {
+    "annotators": [
+      "ann-hyde",
+      "ann-quill"
+    ],
+    "resolved": true,
+    "notes": "Two independent passes selected the same live exemplars; no disagreement to resolve."
+  }
+}

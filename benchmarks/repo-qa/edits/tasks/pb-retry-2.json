@@ -1,0 +1,80 @@
+{
+  "schema": "edit_task_v1",
+  "id": "pb-retry-2",
+  "corpus": "pocketbase",
+  "category": "retry-error-handling",
+  "manifest_ref": {
+    "corpus_id": "pocketbase",
+    "source_commit": "d438c6a96a0252ff9df62c1cfe193480ed9ff15d",
+    "seed": 7,
+    "forge_version": "1"
+  },
+  "prompt": "A failure path here loses the original cause when it bubbles up; bring it in line with how neighbouring routines forward their causes so unwrapping keeps working.",
+  "rubric": {
+    "must_surface": [
+      "wraps the cause with the %w verb when forwarding a failure",
+      "the exemplar locations to imitate"
+    ],
+    "answer_shape": "a small patch that makes the off-pattern site follow the convention"
+  },
+  "behavior": {
+    "command": [
+      "go",
+      "test",
+      "./..."
+    ],
+    "assertion": "errors.Is/As can reach the original cause from the returned error",
+    "discrimination": {
+      "red": "the returned failure is opaque; errors.Unwrap yields nil",
+      "green": "errors.Unwrap reaches the wrapped cause"
+    }
+  },
+  "convention": {
+    "rule_id": "go-wrap-errors-percent-w",
+    "statement": "Errors returned across a boundary are wrapped with fmt.Errorf and the %w verb so the cause chain is preserved.",
+    "conforms_pattern": "fmt\\.Errorf\\([^)]*%w"
+  },
+  "exemplars": [
+    {
+      "path": "apis/middlewares.go",
+      "lines": [
+        253,
+        275
+      ],
+      "claim": "wraps the cause with the %w verb when forwarding a failure",
+      "target_identifiers": [
+        "panicRecover",
+        "DefaultPanicRecoverMiddlewareId"
+      ]
+    },
+    {
+      "path": "apis/record_auth_password_reset_request.go",
+      "lines": [
+        16,
+        38
+      ],
+      "claim": "wraps the cause with the %w verb when forwarding a failure",
+      "target_identifiers": [
+        "recordRequestPasswordReset",
+        "findAuthCollection"
+      ]
+    }
+  ],
+  "blast_radius": {
+    "allow": [
+      "apis/**",
+      "core/**",
+      "forms/**",
+      "tools/**"
+    ],
+    "max_files": 3
+  },
+  "adjudication": {
+    "annotators": [
+      "ann-hyde",
+      "ann-quill"
+    ],
+    "resolved": true,
+    "notes": "ann-quill additionally proposed a third exemplar; adjudicated down to the two both annotators agreed were clearest. All final exemplars are attested live and conforming by both annotators."
+  }
+}

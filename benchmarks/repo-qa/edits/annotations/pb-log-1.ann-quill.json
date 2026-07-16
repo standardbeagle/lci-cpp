@@ -1,0 +1,31 @@
+{
+  "schema": "edit_annotation_v1",
+  "task_id": "pb-log-1",
+  "annotator": "ann-quill",
+  "exemplars": [
+    {
+      "path": "apis/backup.go",
+      "lines": [
+        124,
+        155
+      ],
+      "target_identifiers": [
+        "backupRestore",
+        "existsCtx"
+      ],
+      "conforms": true
+    },
+    {
+      "path": "apis/batch.go",
+      "lines": [
+        275,
+        303
+      ],
+      "target_identifiers": [
+        "processInternalRequest",
+        "activeApp"
+      ],
+      "conforms": true
+    }
+  ]
+}

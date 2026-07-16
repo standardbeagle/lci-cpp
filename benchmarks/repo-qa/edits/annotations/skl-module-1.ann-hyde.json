@@ -1,0 +1,31 @@
+{
+  "schema": "edit_annotation_v1",
+  "task_id": "skl-module-1",
+  "annotator": "ann-hyde",
+  "exemplars": [
+    {
+      "path": "sklearn/__init__.py",
+      "lines": [
+        115,
+        119
+      ],
+      "target_identifiers": [
+        "_submodules",
+        "get_config"
+      ],
+      "conforms": true
+    },
+    {
+      "path": "sklearn/_loss/__init__.py",
+      "lines": [
+        24,
+        28
+      ],
+      "target_identifiers": [
+        "AbsoluteError",
+        "HalfBinomialLoss"
+      ],
+      "conforms": true
+    }
+  ]
+}

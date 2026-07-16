@@ -1,0 +1,73 @@
+{
+  "schema": "edit_task_v1",
+  "id": "nx-api-2",
+  "corpus": "next.js",
+  "category": "api-shape-consistency",
+  "manifest_ref": {
+    "corpus_id": "next.js",
+    "source_commit": "97532172c065ca2b49dd79d1fa44c3a0b864065b",
+    "seed": 7,
+    "forge_version": "1"
+  },
+  "prompt": "Bring one helper in line with the exported-function-declaration shape used by its neighbours.",
+  "rubric": {
+    "must_surface": [
+      "is exposed as an exported function declaration with explicit parameters",
+      "the exemplar locations to imitate"
+    ],
+    "answer_shape": "a small patch that makes the off-pattern site follow the convention"
+  },
+  "behavior": {
+    "command": [
+      "pnpm",
+      "-w",
+      "test"
+    ],
+    "assertion": "the helper imports as a named function export",
+    "discrimination": {
+      "red": "the helper is a re-assigned const and its type shape is opaque",
+      "green": "the helper imports as a named function export"
+    }
+  },
+  "convention": {
+    "rule_id": "ts-exported-function-declaration",
+    "statement": "A public helper is exposed as an exported function declaration with an explicit parameter shape, consistent with the module's other helpers.",
+    "conforms_pattern": "^export function \\w+\\("
+  },
+  "exemplars": [
+    {
+      "path": "packages/next/src/lib/client-and-server-references.ts",
+      "lines": [
+        45
+      ],
+      "claim": "is exposed as an exported function declaration with explicit parameters",
+      "target_identifiers": [
+        "isClientReference"
+      ]
+    },
+    {
+      "path": "packages/next/src/lib/create-client-router-filter.ts",
+      "lines": [
+        12
+      ],
+      "claim": "is exposed as an exported function declaration with explicit parameters",
+      "target_identifiers": [
+        "createClientRouterFilter"
+      ]
+    }
+  ],
+  "blast_radius": {
+    "allow": [
+      "packages/next/src/lib/**"
+    ],
+    "max_files": 2
+  },
+  "adjudication": {
+    "annotators": [
+      "ann-hyde",
+      "ann-quill"
+    ],
+    "resolved": true,
+    "notes": "Two independent passes selected the same live exemplars; no disagreement to resolve."
+  }
+}

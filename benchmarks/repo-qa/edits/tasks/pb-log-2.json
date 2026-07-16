@@ -1,0 +1,78 @@
+{
+  "schema": "edit_task_v1",
+  "id": "pb-log-2",
+  "corpus": "pocketbase",
+  "category": "logging",
+  "manifest_ref": {
+    "corpus_id": "pocketbase",
+    "source_commit": "d438c6a96a0252ff9df62c1cfe193480ed9ff15d",
+    "seed": 7,
+    "forge_version": "1"
+  },
+  "prompt": "Bring one stray diagnostic in line with the structured, attribute-tagged logging convention used across neighbouring handlers.",
+  "rubric": {
+    "must_surface": [
+      "emits a diagnostic through the structured app logger with attribute pairs",
+      "the exemplar locations to imitate"
+    ],
+    "answer_shape": "a small patch that makes the off-pattern site follow the convention"
+  },
+  "behavior": {
+    "command": [
+      "go",
+      "test",
+      "./..."
+    ],
+    "assertion": "the diagnostic appears as a structured record with attribute keys",
+    "discrimination": {
+      "red": "the diagnostic is a bare printed line with no attributes",
+      "green": "the diagnostic is a structured record with attribute keys"
+    }
+  },
+  "convention": {
+    "rule_id": "go-structured-logger-attrs",
+    "statement": "Diagnostics go through the app logger with a message plus key/value attribute pairs, never fmt.Print or bare string concatenation.",
+    "conforms_pattern": "\\.Logger\\(\\)\\.(?:Error|Info|Warn|Debug)\\("
+  },
+  "exemplars": [
+    {
+      "path": "apis/extensions.go",
+      "lines": [
+        19,
+        44
+      ],
+      "claim": "emits a diagnostic through the structured app logger with attribute pairs",
+      "target_identifiers": [
+        "bindUIExtensions",
+        "Bind"
+      ]
+    },
+    {
+      "path": "apis/middlewares.go",
+      "lines": [
+        184,
+        201
+      ],
+      "claim": "emits a diagnostic through the structured app logger with attribute pairs",
+      "target_identifiers": [
+        "loadAuthToken",
+        "DefaultLoadAuthTokenMiddlewareId"
+      ]
+    }
+  ],
+  "blast_radius": {
+    "allow": [
+      "apis/**",
+      "core/**"
+    ],
+    "max_files": 2
+  },
+  "adjudication": {
+    "annotators": [
+      "ann-hyde",
+      "ann-quill"
+    ],
+    "resolved": true,
+    "notes": "Two independent passes selected the same live exemplars; no disagreement to resolve."
+  }
+}

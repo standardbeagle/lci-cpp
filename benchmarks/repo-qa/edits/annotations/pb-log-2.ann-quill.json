@@ -1,0 +1,31 @@
+{
+  "schema": "edit_annotation_v1",
+  "task_id": "pb-log-2",
+  "annotator": "ann-quill",
+  "exemplars": [
+    {
+      "path": "apis/extensions.go",
+      "lines": [
+        19,
+        44
+      ],
+      "target_identifiers": [
+        "bindUIExtensions",
+        "Bind"
+      ],
+      "conforms": true
+    },
+    {
+      "path": "apis/middlewares.go",
+      "lines": [
+        184,
+        201
+      ],
+      "target_identifiers": [
+        "loadAuthToken",
+        "DefaultLoadAuthTokenMiddlewareId"
+      ],
+      "conforms": true
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "schema": "edit_annotation_v1",
+  "task_id": "skl-api-2",
+  "annotator": "ann-quill",
+  "exemplars": [
+    {
+      "path": "sklearn/cluster/_bicluster.py",
+      "lines": [
+        118,
+        137
+      ],
+      "target_identifiers": [
+        "Create",
+        "Parameters"
+      ],
+      "conforms": true
+    },
+    {
+      "path": "sklearn/compose/_column_transformer.py",
+      "lines": [
+        333,
+        372
+      ],
+      "target_identifiers": [
+        "set_output",
+        "fit_transform"
+      ],
+      "conforms": true
+    }
+  ]
+}

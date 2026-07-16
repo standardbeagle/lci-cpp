@@ -1,0 +1,29 @@
+{
+  "schema": "edit_annotation_v1",
+  "task_id": "nx-log-1",
+  "annotator": "ann-quill",
+  "exemplars": [
+    {
+      "path": "packages/next/src/build/adapter/build-complete.ts",
+      "lines": [
+        853
+      ],
+      "target_identifiers": [
+        "Failed",
+        "pageFile"
+      ],
+      "conforms": true
+    },
+    {
+      "path": "packages/next/src/build/after-production-compile.ts",
+      "lines": [
+        52
+      ],
+      "target_identifiers": [
+        "Completed",
+        "runAfterProductionCompile"
+      ],
+      "conforms": true
+    }
+  ]
+}

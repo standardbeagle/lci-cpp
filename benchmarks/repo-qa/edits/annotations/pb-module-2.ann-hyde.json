@@ -1,0 +1,29 @@
+{
+  "schema": "edit_annotation_v1",
+  "task_id": "pb-module-2",
+  "annotator": "ann-hyde",
+  "exemplars": [
+    {
+      "path": "core/collection_model.go",
+      "lines": [
+        391
+      ],
+      "target_identifiers": [
+        "NewCollection",
+        "optId"
+      ],
+      "conforms": true
+    },
+    {
+      "path": "core/external_auth_model.go",
+      "lines": [
+        36
+      ],
+      "target_identifiers": [
+        "NewExternalAuth",
+        "ExternalAuth"
+      ],
+      "conforms": true
+    }
+  ]
+}

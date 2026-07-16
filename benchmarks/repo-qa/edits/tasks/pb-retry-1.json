@@ -1,0 +1,79 @@
+{
+  "schema": "edit_task_v1",
+  "id": "pb-retry-1",
+  "corpus": "pocketbase",
+  "category": "retry-error-handling",
+  "manifest_ref": {
+    "corpus_id": "pocketbase",
+    "source_commit": "d438c6a96a0252ff9df62c1cfe193480ed9ff15d",
+    "seed": 7,
+    "forge_version": "1"
+  },
+  "prompt": "One routine in the backend swallows the underlying cause when it reports a failure upward; make it report failures the same way the rest of this package does, so callers can still unwrap the original.",
+  "rubric": {
+    "must_surface": [
+      "wraps the cause with the %w verb when forwarding a failure",
+      "the exemplar locations to imitate"
+    ],
+    "answer_shape": "a small patch that makes the off-pattern site follow the convention"
+  },
+  "behavior": {
+    "command": [
+      "go",
+      "test",
+      "./..."
+    ],
+    "assertion": "errors.Is/As can reach the original cause from the returned error",
+    "discrimination": {
+      "red": "the returned failure is opaque; errors.Unwrap yields nil",
+      "green": "errors.Unwrap reaches the wrapped cause"
+    }
+  },
+  "convention": {
+    "rule_id": "go-wrap-errors-percent-w",
+    "statement": "Errors returned across a boundary are wrapped with fmt.Errorf and the %w verb so the cause chain is preserved.",
+    "conforms_pattern": "fmt\\.Errorf\\([^)]*%w"
+  },
+  "exemplars": [
+    {
+      "path": "apis/base.go",
+      "lines": [
+        81,
+        86
+      ],
+      "claim": "wraps the cause with the %w verb when forwarding a failure",
+      "target_identifiers": [
+        "MustSubFS",
+        "ToSlash"
+      ]
+    },
+    {
+      "path": "apis/extensions.go",
+      "lines": [
+        72,
+        79
+      ],
+      "claim": "wraps the cause with the %w verb when forwarding a failure",
+      "target_identifiers": [
+        "copyExtensionMainjs"
+      ]
+    }
+  ],
+  "blast_radius": {
+    "allow": [
+      "apis/**",
+      "core/**",
+      "forms/**",
+      "tools/**"
+    ],
+    "max_files": 3
+  },
+  "adjudication": {
+    "annotators": [
+      "ann-hyde",
+      "ann-quill"
+    ],
+    "resolved": true,
+    "notes": "Two independent passes selected the same live exemplars; no disagreement to resolve."
+  }
+}

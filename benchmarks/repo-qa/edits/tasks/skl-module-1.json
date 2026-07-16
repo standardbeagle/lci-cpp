@@ -1,0 +1,77 @@
+{
+  "schema": "edit_task_v1",
+  "id": "skl-module-1",
+  "corpus": "scikit-learn",
+  "category": "module-extraction-layout",
+  "manifest_ref": {
+    "corpus_id": "scikit-learn",
+    "source_commit": "0885712e436b07cd04d60e955101aaf6a8cbb709",
+    "seed": 7,
+    "forge_version": "1"
+  },
+  "prompt": "One package module leaves its public surface implicit; give it the explicit export declaration its sibling packages already carry.",
+  "rubric": {
+    "must_surface": [
+      "declares the module's public surface with an explicit __all__ list",
+      "the exemplar locations to imitate"
+    ],
+    "answer_shape": "a small patch that makes the off-pattern site follow the convention"
+  },
+  "behavior": {
+    "command": [
+      "python",
+      "-c",
+      "import sklearn"
+    ],
+    "assertion": "the module exposes a curated __all__",
+    "discrimination": {
+      "red": "the module has no __all__ and leaks every top-level name",
+      "green": "the module exposes a curated __all__"
+    }
+  },
+  "convention": {
+    "rule_id": "py-all-export-list",
+    "statement": "A package module declares its public surface with an explicit __all__ list so re-exports and star-imports are deliberate.",
+    "conforms_pattern": "^__all__ = "
+  },
+  "exemplars": [
+    {
+      "path": "sklearn/__init__.py",
+      "lines": [
+        115,
+        119
+      ],
+      "claim": "declares the module's public surface with an explicit __all__ list",
+      "target_identifiers": [
+        "_submodules",
+        "get_config"
+      ]
+    },
+    {
+      "path": "sklearn/_loss/__init__.py",
+      "lines": [
+        24,
+        28
+      ],
+      "claim": "declares the module's public surface with an explicit __all__ list",
+      "target_identifiers": [
+        "AbsoluteError",
+        "HalfBinomialLoss"
+      ]
+    }
+  ],
+  "blast_radius": {
+    "allow": [
+      "sklearn/**/__init__.py"
+    ],
+    "max_files": 2
+  },
+  "adjudication": {
+    "annotators": [
+      "ann-hyde",
+      "ann-quill"
+    ],
+    "resolved": true,
+    "notes": "Two independent passes selected the same live exemplars; no disagreement to resolve."
+  }
+}

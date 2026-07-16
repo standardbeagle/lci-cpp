@@ -1,0 +1,73 @@
+{
+  "schema": "edit_task_v1",
+  "id": "nx-api-1",
+  "corpus": "next.js",
+  "category": "api-shape-consistency",
+  "manifest_ref": {
+    "corpus_id": "next.js",
+    "source_commit": "97532172c065ca2b49dd79d1fa44c3a0b864065b",
+    "seed": 7,
+    "forge_version": "1"
+  },
+  "prompt": "One helper is exported in a shape that diverges from the exported-function-declaration convention its module siblings share; align it.",
+  "rubric": {
+    "must_surface": [
+      "is exposed as an exported function declaration with explicit parameters",
+      "the exemplar locations to imitate"
+    ],
+    "answer_shape": "a small patch that makes the off-pattern site follow the convention"
+  },
+  "behavior": {
+    "command": [
+      "pnpm",
+      "-w",
+      "test"
+    ],
+    "assertion": "the helper imports as a named function export",
+    "discrimination": {
+      "red": "the helper is a re-assigned const and its type shape is opaque",
+      "green": "the helper imports as a named function export"
+    }
+  },
+  "convention": {
+    "rule_id": "ts-exported-function-declaration",
+    "statement": "A public helper is exposed as an exported function declaration with an explicit parameter shape, consistent with the module's other helpers.",
+    "conforms_pattern": "^export function \\w+\\("
+  },
+  "exemplars": [
+    {
+      "path": "packages/next/src/lib/build-custom-route.ts",
+      "lines": [
+        16
+      ],
+      "claim": "is exposed as an exported function declaration with explicit parameters",
+      "target_identifiers": [
+        "buildCustomRoute"
+      ]
+    },
+    {
+      "path": "packages/next/src/lib/bundler.ts",
+      "lines": [
+        15
+      ],
+      "claim": "is exposed as an exported function declaration with explicit parameters",
+      "target_identifiers": [
+        "parseBundlerArgs"
+      ]
+    }
+  ],
+  "blast_radius": {
+    "allow": [
+      "packages/next/src/lib/**"
+    ],
+    "max_files": 2
+  },
+  "adjudication": {
+    "annotators": [
+      "ann-hyde",
+      "ann-quill"
+    ],
+    "resolved": true,
+    "notes": "ann-quill additionally proposed a third exemplar; adjudicated down to the two both annotators agreed were clearest. All final exemplars are attested live and conforming by both annotators."
+  }
+}

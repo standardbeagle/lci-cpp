@@ -1,0 +1,73 @@
+{
+  "schema": "edit_task_v1",
+  "id": "pb-api-1",
+  "corpus": "pocketbase",
+  "category": "api-shape-consistency",
+  "manifest_ref": {
+    "corpus_id": "pocketbase",
+    "source_commit": "d438c6a96a0252ff9df62c1cfe193480ed9ff15d",
+    "seed": 7,
+    "forge_version": "1"
+  },
+  "prompt": "One route handler in the API layer has a signature that departs from the uniform handler shape the router expects; reshape it to match its peers.",
+  "rubric": {
+    "must_surface": [
+      "matches the uniform *core.RequestEvent-in, error-out handler signature",
+      "the exemplar locations to imitate"
+    ],
+    "answer_shape": "a small patch that makes the off-pattern site follow the convention"
+  },
+  "behavior": {
+    "command": [
+      "go",
+      "test",
+      "./apis/..."
+    ],
+    "assertion": "the handler registers with the router without an adapter",
+    "discrimination": {
+      "red": "the handler needs a bespoke adapter to register",
+      "green": "the handler registers directly like its peers"
+    }
+  },
+  "convention": {
+    "rule_id": "go-request-event-handler-shape",
+    "statement": "HTTP route handlers take a single *core.RequestEvent and return error, matching every other handler registered on the router.",
+    "conforms_pattern": "\\*core\\.RequestEvent\\) error"
+  },
+  "exemplars": [
+    {
+      "path": "apis/backup.go",
+      "lines": [
+        33
+      ],
+      "claim": "matches the uniform *core.RequestEvent-in, error-out handler signature",
+      "target_identifiers": [
+        "backupsList"
+      ]
+    },
+    {
+      "path": "apis/backup_create.go",
+      "lines": [
+        12
+      ],
+      "claim": "matches the uniform *core.RequestEvent-in, error-out handler signature",
+      "target_identifiers": [
+        "backupCreate"
+      ]
+    }
+  ],
+  "blast_radius": {
+    "allow": [
+      "apis/**"
+    ],
+    "max_files": 2
+  },
+  "adjudication": {
+    "annotators": [
+      "ann-hyde",
+      "ann-quill"
+    ],
+    "resolved": true,
+    "notes": "Two independent passes selected the same live exemplars; no disagreement to resolve."
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "schema": "edit_annotation_v1",
+  "task_id": "nx-module-1",
+  "annotator": "ann-hyde",
+  "exemplars": [
+    {
+      "path": "packages/next/src/build/get-babel-loader-config.ts",
+      "lines": [
+        118
+      ],
+      "target_identifiers": [
+        "getBabelLoader",
+        "getReactCompilerLoader"
+      ],
+      "conforms": true
+    },
+    {
+      "path": "packages/next/src/build/templates/app-page.ts",
+      "lines": [
+        80,
+        84
+      ],
+      "target_identifiers": [
+        "GlobalError",
+        "These"
+      ],
+      "conforms": true
+    }
+  ]
+}

@@ -1,0 +1,74 @@
+{
+  "schema": "edit_task_v1",
+  "id": "nx-retry-1",
+  "corpus": "next.js",
+  "category": "retry-error-handling",
+  "manifest_ref": {
+    "corpus_id": "next.js",
+    "source_commit": "97532172c065ca2b49dd79d1fa44c3a0b864065b",
+    "seed": 7,
+    "forge_version": "1"
+  },
+  "prompt": "One build-time routine swallows an unexpected state instead of throwing the way its neighbours do; make it fail loudly.",
+  "rubric": {
+    "must_surface": [
+      "throws an Error on an unexpected state instead of returning a sentinel",
+      "the exemplar locations to imitate"
+    ],
+    "answer_shape": "a small patch that makes the off-pattern site follow the convention"
+  },
+  "behavior": {
+    "command": [
+      "pnpm",
+      "-w",
+      "test"
+    ],
+    "assertion": "the unexpected state throws and is caught by the test",
+    "discrimination": {
+      "red": "the unexpected state returns a sentinel and the test sees no throw",
+      "green": "the unexpected state throws as expected"
+    }
+  },
+  "convention": {
+    "rule_id": "ts-throw-typed-error",
+    "statement": "Unexpected states are surfaced by throwing an Error (or a typed subclass), never by returning a sentinel or silently continuing.",
+    "conforms_pattern": "throw new \\w*Error\\("
+  },
+  "exemplars": [
+    {
+      "path": "packages/next/src/build/analysis/extract-const-value.ts",
+      "lines": [
+        123
+      ],
+      "claim": "throws an Error on an unexpected state instead of returning a sentinel",
+      "target_identifiers": [
+        "UnsupportedValueError"
+      ]
+    },
+    {
+      "path": "packages/next/src/build/babel/plugins/next-ssg-transform.ts",
+      "lines": [
+        83
+      ],
+      "claim": "throws an Error on an unexpected state instead of returning a sentinel",
+      "target_identifiers": [
+        "SERVER_PROPS_SSG_CONFLICT"
+      ]
+    }
+  ],
+  "blast_radius": {
+    "allow": [
+      "packages/next/src/lib/**",
+      "packages/next/src/build/**"
+    ],
+    "max_files": 3
+  },
+  "adjudication": {
+    "annotators": [
+      "ann-hyde",
+      "ann-quill"
+    ],
+    "resolved": true,
+    "notes": "Two independent passes selected the same live exemplars; no disagreement to resolve."
+  }
+}

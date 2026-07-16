@@ -1,0 +1,29 @@
+{
+  "schema": "edit_annotation_v1",
+  "task_id": "nx-log-2",
+  "annotator": "ann-hyde",
+  "exemplars": [
+    {
+      "path": "packages/next/src/build/analyze/index.ts",
+      "lines": [
+        64
+      ],
+      "target_identifiers": [
+        "Analyzing"
+      ],
+      "conforms": true
+    },
+    {
+      "path": "packages/next/src/build/handle-entrypoints.ts",
+      "lines": [
+        11,
+        37
+      ],
+      "target_identifiers": [
+        "rawEntrypointsToEntrypoints",
+        "entrypointsOp"
+      ],
+      "conforms": true
+    }
+  ]
+}

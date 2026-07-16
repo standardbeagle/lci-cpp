@@ -1,0 +1,31 @@
+{
+  "schema": "edit_annotation_v1",
+  "task_id": "skl-retry-2",
+  "annotator": "ann-hyde",
+  "exemplars": [
+    {
+      "path": "sklearn/_loss/loss.py",
+      "lines": [
+        496,
+        525
+      ],
+      "target_identifiers": [
+        "init_gradient_and_hessian",
+        "n_samples"
+      ],
+      "conforms": true
+    },
+    {
+      "path": "sklearn/base.py",
+      "lines": [
+        400,
+        428
+      ],
+      "target_identifiers": [
+        "set_params",
+        "Parameters"
+      ],
+      "conforms": true
+    }
+  ]
+}

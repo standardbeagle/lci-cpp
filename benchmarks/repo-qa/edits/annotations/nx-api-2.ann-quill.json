@@ -1,0 +1,27 @@
+{
+  "schema": "edit_annotation_v1",
+  "task_id": "nx-api-2",
+  "annotator": "ann-quill",
+  "exemplars": [
+    {
+      "path": "packages/next/src/lib/client-and-server-references.ts",
+      "lines": [
+        45
+      ],
+      "target_identifiers": [
+        "isClientReference"
+      ],
+      "conforms": true
+    },
+    {
+      "path": "packages/next/src/lib/create-client-router-filter.ts",
+      "lines": [
+        12
+      ],
+      "target_identifiers": [
+        "createClientRouterFilter"
+      ],
+      "conforms": true
+    }
+  ]
+}

@@ -1,0 +1,78 @@
+{
+  "schema": "edit_task_v1",
+  "id": "nx-module-2",
+  "corpus": "next.js",
+  "category": "module-extraction-layout",
+  "manifest_ref": {
+    "corpus_id": "next.js",
+    "source_commit": "97532172c065ca2b49dd79d1fa44c3a0b864065b",
+    "seed": 7,
+    "forge_version": "1"
+  },
+  "prompt": "Bring one module's re-export in line with the explicit named-export convention used nearby.",
+  "rubric": {
+    "must_surface": [
+      "re-exports named members through an explicit export block",
+      "the exemplar locations to imitate"
+    ],
+    "answer_shape": "a small patch that makes the off-pattern site follow the convention"
+  },
+  "behavior": {
+    "command": [
+      "pnpm",
+      "-w",
+      "test"
+    ],
+    "assertion": "the module's named surface is enumerable and stable",
+    "discrimination": {
+      "red": "the module star-re-exports and its surface is implicit",
+      "green": "the module enumerates its named surface"
+    }
+  },
+  "convention": {
+    "rule_id": "ts-named-reexport-barrel",
+    "statement": "A module re-exports its public members with an explicit named export block, not a wildcard star re-export.",
+    "conforms_pattern": "^export \\{"
+  },
+  "exemplars": [
+    {
+      "path": "packages/next/src/build/templates/app-route.ts",
+      "lines": [
+        77,
+        81
+      ],
+      "claim": "re-exports named members through an explicit export block",
+      "target_identifiers": [
+        "routeModule",
+        "workAsyncStorage"
+      ]
+    },
+    {
+      "path": "packages/next/src/build/turborepo-access-trace/index.ts",
+      "lines": [
+        2,
+        6
+      ],
+      "claim": "re-exports named members through an explicit export block",
+      "target_identifiers": [
+        "turborepoTraceAccess",
+        "writeTurborepoAccessTraceResult"
+      ]
+    }
+  ],
+  "blast_radius": {
+    "allow": [
+      "packages/next/src/build/**",
+      "packages/next/src/lib/**"
+    ],
+    "max_files": 3
+  },
+  "adjudication": {
+    "annotators": [
+      "ann-hyde",
+      "ann-quill"
+    ],
+    "resolved": true,
+    "notes": "Two independent passes selected the same live exemplars; no disagreement to resolve."
+  }
+}

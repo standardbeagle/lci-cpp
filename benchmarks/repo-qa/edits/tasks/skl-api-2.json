@@ -1,0 +1,78 @@
+{
+  "schema": "edit_task_v1",
+  "id": "skl-api-2",
+  "corpus": "scikit-learn",
+  "category": "api-shape-consistency",
+  "manifest_ref": {
+    "corpus_id": "scikit-learn",
+    "source_commit": "0885712e436b07cd04d60e955101aaf6a8cbb709",
+    "seed": 7,
+    "forge_version": "1"
+  },
+  "prompt": "Bring one estimator method in line with the return-self contract its siblings follow.",
+  "rubric": {
+    "must_surface": [
+      "returns self at the end of a fit-style method for call chaining",
+      "the exemplar locations to imitate"
+    ],
+    "answer_shape": "a small patch that makes the off-pattern site follow the convention"
+  },
+  "behavior": {
+    "command": [
+      "python",
+      "-m",
+      "pytest",
+      "-q"
+    ],
+    "assertion": "the method returns the estimator instance",
+    "discrimination": {
+      "red": "the method returns None and chaining raises AttributeError",
+      "green": "the method returns the estimator instance"
+    }
+  },
+  "convention": {
+    "rule_id": "py-fit-returns-self",
+    "statement": "A fit-style estimator method ends by returning self so calls can be chained, consistent with the estimator API.",
+    "conforms_pattern": "^        return self$"
+  },
+  "exemplars": [
+    {
+      "path": "sklearn/cluster/_bicluster.py",
+      "lines": [
+        118,
+        137
+      ],
+      "claim": "returns self at the end of a fit-style method for call chaining",
+      "target_identifiers": [
+        "Create",
+        "Parameters"
+      ]
+    },
+    {
+      "path": "sklearn/compose/_column_transformer.py",
+      "lines": [
+        333,
+        372
+      ],
+      "claim": "returns self at the end of a fit-style method for call chaining",
+      "target_identifiers": [
+        "set_output",
+        "fit_transform"
+      ]
+    }
+  ],
+  "blast_radius": {
+    "allow": [
+      "sklearn/**"
+    ],
+    "max_files": 3
+  },
+  "adjudication": {
+    "annotators": [
+      "ann-hyde",
+      "ann-quill"
+    ],
+    "resolved": true,
+    "notes": "Two independent passes selected the same live exemplars; no disagreement to resolve."
+  }
+}

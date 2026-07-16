@@ -1,0 +1,77 @@
+{
+  "schema": "edit_task_v1",
+  "id": "pb-module-2",
+  "corpus": "pocketbase",
+  "category": "module-extraction-layout",
+  "manifest_ref": {
+    "corpus_id": "pocketbase",
+    "source_commit": "d438c6a96a0252ff9df62c1cfe193480ed9ff15d",
+    "seed": 7,
+    "forge_version": "1"
+  },
+  "prompt": "One type lacks the New<Type> constructor its neighbours all provide; introduce it and have callers go through it.",
+  "rubric": {
+    "must_surface": [
+      "constructs the type through a New<Type> function returning a pointer",
+      "the exemplar locations to imitate"
+    ],
+    "answer_shape": "a small patch that makes the off-pattern site follow the convention"
+  },
+  "behavior": {
+    "command": [
+      "go",
+      "build",
+      "./..."
+    ],
+    "assertion": "callers obtain the value from a New<Type> constructor",
+    "discrimination": {
+      "red": "callers hand-assemble the struct literal",
+      "green": "callers obtain the value from the New<Type> constructor"
+    }
+  },
+  "convention": {
+    "rule_id": "go-constructor-new-pointer",
+    "statement": "A model or tool type is created through a New<Type> constructor that returns a pointer, rather than by exported struct-literal assembly at the call site.",
+    "conforms_pattern": "^func New\\w+\\("
+  },
+  "exemplars": [
+    {
+      "path": "core/collection_model.go",
+      "lines": [
+        391
+      ],
+      "claim": "constructs the type through a New<Type> function returning a pointer",
+      "target_identifiers": [
+        "NewCollection",
+        "optId"
+      ]
+    },
+    {
+      "path": "core/external_auth_model.go",
+      "lines": [
+        36
+      ],
+      "claim": "constructs the type through a New<Type> function returning a pointer",
+      "target_identifiers": [
+        "NewExternalAuth",
+        "ExternalAuth"
+      ]
+    }
+  ],
+  "blast_radius": {
+    "allow": [
+      "core/**",
+      "tools/**",
+      "forms/**"
+    ],
+    "max_files": 3
+  },
+  "adjudication": {
+    "annotators": [
+      "ann-hyde",
+      "ann-quill"
+    ],
+    "resolved": true,
+    "notes": "Two independent passes selected the same live exemplars; no disagreement to resolve."
+  }
+}

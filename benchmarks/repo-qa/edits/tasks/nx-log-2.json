@@ -1,0 +1,76 @@
+{
+  "schema": "edit_task_v1",
+  "id": "nx-log-2",
+  "corpus": "next.js",
+  "category": "logging",
+  "manifest_ref": {
+    "corpus_id": "next.js",
+    "source_commit": "97532172c065ca2b49dd79d1fa44c3a0b864065b",
+    "seed": 7,
+    "forge_version": "1"
+  },
+  "prompt": "One diagnostic bypasses the shared build log namespace its neighbours use; route it through the convention.",
+  "rubric": {
+    "must_surface": [
+      "emits a build diagnostic through the shared Log namespace",
+      "the exemplar locations to imitate"
+    ],
+    "answer_shape": "a small patch that makes the off-pattern site follow the convention"
+  },
+  "behavior": {
+    "command": [
+      "pnpm",
+      "-w",
+      "test"
+    ],
+    "assertion": "the diagnostic is routed through the mockable Log namespace",
+    "discrimination": {
+      "red": "the diagnostic goes straight to console and the Log spy sees nothing",
+      "green": "the diagnostic is routed through the Log namespace"
+    }
+  },
+  "convention": {
+    "rule_id": "ts-central-log-namespace",
+    "statement": "Build diagnostics go through the shared Log namespace (Log.warn/info/event), not raw console calls.",
+    "conforms_pattern": "Log\\.(?:warn|error|info|event|warnOnce)\\("
+  },
+  "exemplars": [
+    {
+      "path": "packages/next/src/build/analyze/index.ts",
+      "lines": [
+        64
+      ],
+      "claim": "emits a build diagnostic through the shared Log namespace",
+      "target_identifiers": [
+        "Analyzing"
+      ]
+    },
+    {
+      "path": "packages/next/src/build/handle-entrypoints.ts",
+      "lines": [
+        11,
+        37
+      ],
+      "claim": "emits a build diagnostic through the shared Log namespace",
+      "target_identifiers": [
+        "rawEntrypointsToEntrypoints",
+        "entrypointsOp"
+      ]
+    }
+  ],
+  "blast_radius": {
+    "allow": [
+      "packages/next/src/build/**",
+      "packages/next/src/lib/**"
+    ],
+    "max_files": 3
+  },
+  "adjudication": {
+    "annotators": [
+      "ann-hyde",
+      "ann-quill"
+    ],
+    "resolved": true,
+    "notes": "Two independent passes selected the same live exemplars; no disagreement to resolve."
+  }
+}

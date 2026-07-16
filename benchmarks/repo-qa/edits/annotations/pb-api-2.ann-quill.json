@@ -1,0 +1,27 @@
+{
+  "schema": "edit_annotation_v1",
+  "task_id": "pb-api-2",
+  "annotator": "ann-quill",
+  "exemplars": [
+    {
+      "path": "apis/backup_upload.go",
+      "lines": [
+        12
+      ],
+      "target_identifiers": [
+        "backupUpload"
+      ],
+      "conforms": true
+    },
+    {
+      "path": "apis/base.go",
+      "lines": [
+        59
+      ],
+      "target_identifiers": [
+        "WrapStdHandler"
+      ],
+      "conforms": true
+    }
+  ]
+}

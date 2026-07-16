@@ -1,0 +1,76 @@
+{
+  "schema": "edit_task_v1",
+  "id": "skl-log-1",
+  "corpus": "scikit-learn",
+  "category": "logging",
+  "manifest_ref": {
+    "corpus_id": "scikit-learn",
+    "source_commit": "0885712e436b07cd04d60e955101aaf6a8cbb709",
+    "seed": 7,
+    "forge_version": "1"
+  },
+  "prompt": "A non-fatal advisory in one estimator is printed instead of routed through the standard warning channel the library uses; align it.",
+  "rubric": {
+    "must_surface": [
+      "raises a non-fatal advisory through warnings.warn",
+      "the exemplar locations to imitate"
+    ],
+    "answer_shape": "a small patch that makes the off-pattern site follow the convention"
+  },
+  "behavior": {
+    "command": [
+      "python",
+      "-m",
+      "pytest",
+      "-q"
+    ],
+    "assertion": "the advisory is captured by pytest.warns",
+    "discrimination": {
+      "red": "the advisory is printed to stdout and pytest.warns captures nothing",
+      "green": "the advisory is captured by pytest.warns"
+    }
+  },
+  "convention": {
+    "rule_id": "py-warnings-warn-channel",
+    "statement": "Non-fatal advisories are surfaced through warnings.warn with an appropriate category, not printed or logged ad hoc.",
+    "conforms_pattern": "warnings\\.warn\\("
+  },
+  "exemplars": [
+    {
+      "path": "sklearn/base.py",
+      "lines": [
+        521,
+        525
+      ],
+      "claim": "raises a non-fatal advisory through warnings.warn",
+      "target_identifiers": [
+        "__setstate__",
+        "pickle_version"
+      ]
+    },
+    {
+      "path": "sklearn/callback/_callback_context.py",
+      "lines": [
+        513
+      ],
+      "claim": "raises a non-fatal advisory through warnings.warn",
+      "target_identifiers": [
+        "warning_message"
+      ]
+    }
+  ],
+  "blast_radius": {
+    "allow": [
+      "sklearn/**"
+    ],
+    "max_files": 2
+  },
+  "adjudication": {
+    "annotators": [
+      "ann-hyde",
+      "ann-quill"
+    ],
+    "resolved": true,
+    "notes": "Two independent passes selected the same live exemplars; no disagreement to resolve."
+  }
+}
