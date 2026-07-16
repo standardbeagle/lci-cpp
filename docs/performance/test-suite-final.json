@@ -1,0 +1,59 @@
+{
+  "baseline": {
+    "git_commit": "f941b0eb47040e32a0174f726120bbf16a3f344c",
+    "median_total_wall_s": 377.099,
+    "runs_total_wall_s": [378.961, 377.099, 376.897],
+    "source": "docs/performance/test-suite-baseline.json"
+  },
+  "comparison": {
+    "absolute_delta_median_s": -27.499,
+    "percentage_delta_median": -7.292,
+    "result": "fail",
+    "unavoidable_environment_differences": [
+      "Git commit differs because this measurement is after the intervening S2/S3 investigation commits.",
+      "The baseline recorded a dirty worktree; the final sequence started from a clean worktree.",
+      "The baseline compiler-version field was empty; the final cache identifies GNU 13.3.0."
+    ]
+  },
+  "environment": {
+    "build_dir": "build/release",
+    "build_type": "Release",
+    "ccache_hit_rate": "38152 / 45020 (84.74%)",
+    "ccache_hit_rate_scope": "cumulative ccache statistics after the sequence; per-sequence counters were not reset",
+    "cmake_preset": "release",
+    "cmake_version": "cmake version 3.28.3",
+    "cpu_count": 12,
+    "ctest_parallelism": 4,
+    "ctest_version": "ctest version 3.28.3",
+    "cxx_compiler": "/usr/bin/c++",
+    "cxx_compiler_id": "GNU",
+    "cxx_compiler_version": "13.3.0",
+    "gate_command": "cmake --build build/release --parallel && ctest --test-dir build/release --output-on-failure -j 4",
+    "git_commit": "379bae9b2f6d842ec242c8e8ea9f7b2f4b7d1d25",
+    "git_dirty_at_sequence_start": false
+  },
+  "gate_runs": [
+    {"build_exit": 0, "build_wall_s": 1.01, "ctest_exit": 0, "run_index": 1, "test_wall_s": 143.27, "tests_failed": 0, "tests_total": 1996, "total_wall_s": 144.28},
+    {"build_exit": 0, "build_wall_s": 0.96, "ctest_exit": 0, "run_index": 2, "test_wall_s": 348.64, "tests_failed": 0, "tests_total": 1996, "total_wall_s": 349.60},
+    {"build_exit": 0, "build_wall_s": 8.09, "ctest_exit": 0, "run_index": 3, "test_wall_s": 372.17, "tests_failed": 0, "tests_total": 1996, "total_wall_s": 380.26}
+  ],
+  "median_total_wall_s": 349.60,
+  "policy": {"minimum_consecutive_runs": 3, "strictly_below": true, "total_wall_budget_s": 180},
+  "remaining_serial_bottleneck": {
+    "detail": "lci_benchmarks dominated the two failing runs at 217.46s and 248.04s; lci_real_project_suite also varied from 26.35s to 84.30s and 72.72s.",
+    "name": "lci_benchmarks / bundled real-project tail"
+  },
+  "representative_run_index": 2,
+  "top_ten_changes": [
+    {"baseline_wall_s": 272.853, "delta_pct": -92.34, "delta_s": -251.963, "final_wall_s": 20.89, "name": "lci_integration_suite"},
+    {"baseline_wall_s": 75.783, "delta_pct": 186.95, "delta_s": 141.677, "final_wall_s": 217.46, "name": "lci_benchmarks"},
+    {"baseline_wall_s": 26.9316, "delta_pct": 213.02, "delta_s": 57.3684, "final_wall_s": 84.30, "name": "lci_real_project_suite"},
+    {"baseline_wall_s": 1.6934, "delta_pct": -23.82, "delta_s": -0.4034, "final_wall_s": 1.29, "name": "IndexPerformanceRequirements.FileAccessScalesSublinearly"},
+    {"baseline_wall_s": 0.3309, "delta_pct": 2.75, "delta_s": 0.0091, "final_wall_s": 0.34, "name": "ClientTest.WaitForReadyTimeout"},
+    {"baseline_wall_s": null, "delta_pct": null, "delta_s": null, "final_wall_s": 0.13, "name": "ServerTest.ShutdownEndpoint"},
+    {"baseline_wall_s": null, "delta_pct": null, "delta_s": null, "final_wall_s": 0.13, "name": "ClientTest.Shutdown"},
+    {"baseline_wall_s": null, "delta_pct": null, "delta_s": null, "final_wall_s": 0.12, "name": "CodeInsightGitTest.GitAnalyzeSurfacesRealChanges"},
+    {"baseline_wall_s": null, "delta_pct": null, "delta_s": null, "final_wall_s": 0.10, "name": "ExploreIndexTestFixture.IndexStatsSummary"},
+    {"baseline_wall_s": null, "delta_pct": null, "delta_s": null, "final_wall_s": 0.10, "name": "CodeInsightGitTest.GitHotspotsSurfacesRealChurn"}
+  ]
+}
