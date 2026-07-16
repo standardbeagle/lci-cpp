@@ -80,10 +80,14 @@ class ClaudeCliAdapter:
     the clean checkout so every file tool is rooted there.
     """
 
-    def __init__(self, claude_bin="claude", mcp_config=None, extra_args=()):
+    def __init__(self, claude_bin="claude", mcp_config=None, extra_args=(),
+                 disallowed_tools=("Bash", "Edit", "Write")):
         self.claude_bin = claude_bin
         self.mcp_config = mcp_config
         self.extra_args = tuple(extra_args)
+        # Exploration keeps the default (read-only: no shell, no mutation). The
+        # edit-mode caller narrows this to just Bash so the agent MAY edit.
+        self.disallowed_tools = tuple(disallowed_tools)
 
     def _argv(self, request):
         argv = [
@@ -102,9 +106,7 @@ class ClaudeCliAdapter:
             # Defence in depth: name-deny the escape hatches even if a future
             # default would expose them. The runner's gate re-checks regardless.
             "--disallowedTools",
-            "Bash",
-            "Edit",
-            "Write",
+            *self.disallowed_tools,
             "--permission-mode",
             "default",
         ]

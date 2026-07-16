@@ -81,6 +81,20 @@ _TOOL_ARGUMENTS = {
                     "include", "show_imports", "show_stats"},
         "paths": {"file", "path"},
     },
+    # Mutation tools. Present only in the EDIT-mode arms (edits/runner); an
+    # exploration arm never allowlists them, so adding their schemas here is
+    # inert for the read-only exploration path and lets the shared gate check
+    # path-escape on an agent's edits rather than standing up a parallel table.
+    "Edit": {
+        "required": {"file_path"},
+        "allowed": {"file_path", "old_string", "new_string", "replace_all"},
+        "paths": {"file_path"},
+    },
+    "Write": {
+        "required": {"file_path"},
+        "allowed": {"file_path", "content"},
+        "paths": {"file_path"},
+    },
     # Kept explicit because these legacy names remain in the experiment's
     # allowlist even though the current server folds them into get_context.
     "mcp__lci__references": {
@@ -101,6 +115,7 @@ _INTEGER_ARGUMENTS = {
     "max_complexity", "min_params", "max_params",
 }
 _BOOLEAN_ARGUMENTS = {
+    "replace_all",
     "-n", "-i", "multiline", "semantic", "include_hidden", "exported",
     "include_full_symbol", "include_call_hierarchy", "include_all_references",
     "include_dependencies", "include_file_context", "include_quality_metrics",
