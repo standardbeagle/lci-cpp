@@ -768,6 +768,56 @@ class RuleLevelConformance(unittest.TestCase):
                     edit_scorer._reason_from_diagnostic(diagnostic), reason
                 )
 
+    def test_a_rule_level_conformance_failure_is_a_HARNESS_fault(self):
+        """The discrimination test for the anchors:[] fallback.
+
+        Fails if the diagnostic fallback is removed: with no anchors to read a
+        reason from, the convention gate reports zero reasons, and a reasonless
+        failure classifies as `patch_rejected` -- charging our own broken rule to
+        the agent.
+        """
+        for reason in RULE_LEVEL_REASONS:
+            score = edit_scorer.score_run(
+                record(
+                    status=edit_record.STATUS_GATE_FAILED,
+                    reason="GATE_FAILED",
+                    gate_outcomes=gates(
+                        conformance=real_rule_level_outcome(reason)
+                    ),
+                )
+            )
+            with self.subTest(reason=reason):
+                # the rule-level code survives the anchorless outcome...
+                self.assertEqual(score["gates"]["convention"]["reasons"], [reason])
+                # ...so the cell is bucketed as OUR breakage...
+                self.assertEqual(
+                    score["failure_class"], edit_scorer.FAILURE_HARNESS
+                )
+                # ...and never as evidence against the agent.
+                self.assertNotEqual(
+                    score["failure_class"], edit_scorer.FAILURE_PATCH_REJECTED
+                )
+                self.assertFalse(score["all_gates_passed"])
+
+    def test_an_unrecognised_diagnostic_head_still_fails_to_HARNESS(self):
+        """The fallback's own fail-safe: an unmappable code is OUR stale mapping,
+        so it degrades to harness -- never to blaming the agent."""
+        outcome = conformance_outcome(False, "MATCH_ABSENT")
+        outcome["anchors"] = []
+        outcome["diagnostic"] = "SOME_FUTURE_CODE: a reason this scorer predates"
+        score = edit_scorer.score_run(
+            record(
+                status=edit_record.STATUS_GATE_FAILED,
+                reason="GATE_FAILED",
+                gate_outcomes=gates(conformance=outcome),
+            )
+        )
+        self.assertEqual(
+            score["gates"]["convention"]["reasons"],
+            [edit_scorer.REASON_UNCLASSIFIED],
+        )
+        self.assertEqual(score["failure_class"], edit_scorer.FAILURE_HARNESS)
+
 
 # ---------------------------------------------------------------------------
 # determinism
