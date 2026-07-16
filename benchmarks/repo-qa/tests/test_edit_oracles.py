@@ -280,5 +280,183 @@ class ApiImpactTest(unittest.TestCase):
         self.assertEqual(out["reason"], gate.Reason.TOOL_FAILURE)
 
 
+# ---------------------------------------------------------------------------
+# aggregate gate + worktree hygiene + determinism (criteria 2, 4)
+# ---------------------------------------------------------------------------
+
+import jsonschema  # noqa: E402
+
+SCHEMA_PATH = os.path.join(ORACLES, "oracle-outcome.schema.json")
+
+
+def _load_schema():
+    with open(SCHEMA_PATH, encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def _dir_fingerprint(root):
+    """A stable hash of every file's relpath + bytes under root."""
+    digest = hashlib.sha256()
+    for dirpath, _dirs, names in sorted(os.walk(root)):
+        for name in sorted(names):
+            full = os.path.join(dirpath, name)
+            digest.update(os.path.relpath(full, root).encode())
+            with open(full, "rb") as handle:
+                digest.update(handle.read())
+    return digest.hexdigest()
+
+
+# A behaviour command that is RED until the handler file carries the NEW marker.
+_BEHAVIOR = [
+    sys.executable,
+    "-c",
+    "import sys; sys.exit(0 if 'NEW' in open('apis/handler.go').read() else 1)",
+]
+_GREEN_SUITE = [sys.executable, "-c", "pass"]
+
+
+def _edit_task():
+    return {
+        "id": "t-oracle",
+        "corpus": "pocketbase",
+        "manifest_ref": {"corpus_id": "pocketbase", "seed": 7},
+        "behavior": {"command": _BEHAVIOR},
+        "blast_radius": {"allow": ["apis/**"], "max_files": 2},
+    }
+
+
+class AggregateGateTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.source = os.path.join(self._tmp.name, "src")
+        os.makedirs(os.path.join(self.source, "apis"))
+        with open(os.path.join(self.source, "apis", "handler.go"), "w") as fh:
+            fh.write("OLD handler body\n")
+        self.workspace = os.path.join(self._tmp.name, "ws")
+        os.makedirs(self.workspace)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_discriminating_in_scope_edit_passes_all_four(self):
+        out = gate.evaluate_oracle(
+            _edit_task(), self.source,
+            {"apis/handler.go": "NEW handler body\n"},
+            existing_suite_command=_GREEN_SUITE,
+            workspace_root=self.workspace,
+        )
+        self.assertTrue(out["passed"], msg=out["diagnostic"])
+        self.assertEqual(out["discrimination"]["reason"], gate.Reason.DISCRIMINATES)
+        self.assertEqual(out["changed_path"]["reason"], gate.Reason.WITHIN_SCOPE)
+        self.assertEqual(out["existing_suite"]["reason"], gate.Reason.SUITE_GREEN)
+        self.assertEqual(out["api_impact"]["reason"], gate.Reason.NO_ESCAPE)
+        # the four sub-outcomes are independently versioned fields.
+        self.assertEqual(out["discrimination"]["schema"], "discrimination_v1")
+        self.assertEqual(out["changed_path"]["schema"], "changed_path_v1")
+        self.assertEqual(out["existing_suite"]["schema"], "existing_suite_v1")
+        self.assertEqual(out["api_impact"]["schema"], "api_impact_v1")
+
+    def test_out_of_scope_patch_fails_aggregate(self):
+        out = gate.evaluate_oracle(
+            _edit_task(), self.source,
+            {"apis/handler.go": "NEW handler body\n", "core/db.go": "leak\n"},
+            existing_suite_command=_GREEN_SUITE,
+            workspace_root=self.workspace,
+        )
+        self.assertFalse(out["passed"])
+        self.assertEqual(out["changed_path"]["reason"], gate.Reason.PATH_OUT_OF_SCOPE)
+
+    def test_worktree_cleaned_after_success(self):
+        gate.evaluate_oracle(
+            _edit_task(), self.source,
+            {"apis/handler.go": "NEW handler body\n"},
+            existing_suite_command=_GREEN_SUITE,
+            workspace_root=self.workspace,
+        )
+        self.assertEqual(os.listdir(self.workspace), [])
+
+    def test_source_tree_never_mutated(self):
+        before = _dir_fingerprint(self.source)
+        gate.evaluate_oracle(
+            _edit_task(), self.source,
+            {"apis/handler.go": "NEW handler body\n"},
+            existing_suite_command=_GREEN_SUITE,
+            workspace_root=self.workspace,
+        )
+        self.assertEqual(_dir_fingerprint(self.source), before)
+
+    def test_traversal_patch_fails_closed_and_cleans_worktree(self):
+        # A patch that tries to escape the worktree must NOT write outside it,
+        # must fail closed, and must still leave no throwaway tree behind.
+        before = _dir_fingerprint(self.source)
+        out = gate.evaluate_oracle(
+            _edit_task(), self.source,
+            {"../escape.go": "evil\n"},
+            existing_suite_command=_GREEN_SUITE,
+            workspace_root=self.workspace,
+        )
+        self.assertFalse(out["passed"])
+        self.assertEqual(os.listdir(self.workspace), [])
+        self.assertEqual(_dir_fingerprint(self.source), before)
+        self.assertFalse(os.path.exists(os.path.join(self.source, "..", "escape.go")))
+
+    def test_outcome_is_byte_stable_and_schema_valid(self):
+        schema = _load_schema()
+        args = dict(
+            existing_suite_command=_GREEN_SUITE,
+            impacted_symbols=["handler"],
+            lci=FakeLci({"handler": ["apis/handler.go"]}),
+            workspace_root=self.workspace,
+        )
+        first = gate.evaluate_oracle(
+            _edit_task(), self.source, {"apis/handler.go": "NEW\n"}, **args
+        )
+        second = gate.evaluate_oracle(
+            _edit_task(), self.source, {"apis/handler.go": "NEW\n"}, **args
+        )
+        self.assertEqual(gate.to_json(first), gate.to_json(second))
+        jsonschema.Draft202012Validator(schema).validate(first)
+
+
+class WorktreeContextManagerTest(unittest.TestCase):
+    def test_worktree_removed_after_exception(self):
+        with tempfile.TemporaryDirectory() as src:
+            open(os.path.join(src, "f.txt"), "w").close()
+            captured = {}
+            with self.assertRaises(RuntimeError):
+                with gate.materialized_worktree(src) as tree:
+                    captured["holder"] = os.path.dirname(tree)
+                    self.assertTrue(os.path.isdir(tree))
+                    raise RuntimeError("boom")
+            self.assertFalse(os.path.exists(captured["holder"]))
+
+
+# ---------------------------------------------------------------------------
+# real committed bank: the gate runs over every task and fails closed because
+# the forged corpus is never vendored (criteria 2, 3).
+# ---------------------------------------------------------------------------
+
+
+class RealBankOracleTest(unittest.TestCase):
+    def test_gate_over_committed_bank_is_deterministic_and_fail_closed(self):
+        tasks_dir = os.path.join(
+            os.path.dirname(ORACLES), "tasks"
+        )
+        names = sorted(n for n in os.listdir(tasks_dir) if n.endswith(".json"))
+        self.assertGreaterEqual(len(names), 20)
+        schema = _load_schema()
+        validator = jsonschema.Draft202012Validator(schema)
+        with tempfile.TemporaryDirectory() as empty_root:
+            for name in names:
+                with open(os.path.join(tasks_dir, name)) as fh:
+                    task = json.load(fh)
+                first = gate.evaluate_task_in_corpus(task, empty_root)
+                second = gate.evaluate_task_in_corpus(task, empty_root)
+                self.assertEqual(gate.to_json(first), gate.to_json(second))
+                validator.validate(first)
+                self.assertFalse(first["passed"])
+                self.assertIn(gate.Reason.MANIFEST_ABSENT, first["diagnostic"])
+
+
 if __name__ == "__main__":
     unittest.main()

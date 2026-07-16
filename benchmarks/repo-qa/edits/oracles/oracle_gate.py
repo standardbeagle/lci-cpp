@@ -536,6 +536,148 @@ def check_api_impact(impacted_symbols, blast_allow, lci, tree_dir, timeout=DEFAU
     )
 
 
+# ---------------------------------------------------------------------------
+# aggregate gate
+# ---------------------------------------------------------------------------
+
+
+def _behavior_command_of(task):
+    behavior = task.get("behavior")
+    if not isinstance(behavior, dict):
+        return []
+    command = behavior.get("command")
+    return list(command) if isinstance(command, list) else []
+
+
+def _aggregate(task_id, existing_suite, discrimination, changed_path, api_impact):
+    subgates = (
+        ("discrimination", discrimination),
+        ("changed_path", changed_path),
+        ("api_impact", api_impact),
+        ("existing_suite", existing_suite),
+    )
+    passed = all(sub["passed"] for _name, sub in subgates)
+    if passed:
+        diagnostic = "all four oracle sub-gates passed"
+    else:
+        first = next(sub for _name, sub in subgates if not sub["passed"])
+        diagnostic = f"{first['reason']}: {first['detail']}"
+    return {
+        "schema": AGGREGATE_SCHEMA,
+        "task_id": task_id,
+        "passed": passed,
+        "diagnostic": diagnostic,
+        "existing_suite": existing_suite,
+        "discrimination": discrimination,
+        "changed_path": changed_path,
+        "api_impact": api_impact,
+    }
+
+
+def _tool_failure_run(detail):
+    return _command_run([], None, Reason.TOOL_FAILURE, "", detail)
+
+
+def evaluate_oracle(
+    task,
+    source_tree_dir,
+    oracle_patch,
+    behavior_command=None,
+    existing_suite_command=None,
+    impacted_symbols=(),
+    lci=None,
+    timeout=DEFAULT_TIMEOUT,
+    workspace_root=None,
+):
+    """Evaluate one edit task + its oracle patch against a pristine source tree.
+
+    Materializes the tree into a throwaway worktree, runs the behaviour command
+    RED (pristine) then GREEN (patched), runs the existing suite on the patched
+    tree, enforces the changed-path scope, and checks the public-API blast
+    radius. Returns an ``oracle_gate_v1`` aggregate. The worktree is cleaned on
+    BOTH success and failure and the source tree is never mutated.
+    """
+    task_id = task.get("id")
+    blast_allow, max_files = _blast_radius_of(task)
+
+    changed_path = check_changed_paths(
+        patch_changed_paths(oracle_patch), blast_allow, max_files
+    )
+
+    behavior_command = behavior_command or _behavior_command_of(task)
+
+    try:
+        with materialized_worktree(source_tree_dir, workspace_root) as tree:
+            pristine = run_command(behavior_command or [], tree, timeout)
+            apply_patch(tree, oracle_patch)
+            patched = run_command(behavior_command or [], tree, timeout)
+            discrimination = discriminate(pristine, patched)
+            existing_suite = run_existing_suite(
+                existing_suite_command, tree, timeout
+            )
+            api_impact = check_api_impact(
+                impacted_symbols, blast_allow, lci, tree, timeout
+            )
+    except Exception as err:  # noqa: BLE001 -- fail closed on any orchestration fault
+        run = _tool_failure_run(f"oracle orchestration raised: {err}")
+        discrimination = _discrimination_outcome(
+            False, Reason.TOOL_FAILURE, run, run,
+            f"oracle orchestration raised: {err}",
+        )
+        existing_suite = _existing_suite_outcome(
+            False, Reason.TOOL_FAILURE, run,
+            f"oracle orchestration raised: {err}",
+        )
+        api_impact = _api_impact_outcome(
+            False, Reason.TOOL_FAILURE, impacted_symbols, [],
+            f"oracle orchestration raised: {err}",
+        )
+
+    return _aggregate(
+        task_id, existing_suite, discrimination, changed_path, api_impact
+    )
+
+
+def _manifest_absent_aggregate(task, corpus_id, seed):
+    blast_allow, max_files = _blast_radius_of(task)
+    detail = (
+        f"forged corpus for {corpus_id!r} seed {seed!r} not found "
+        f"(never vendored)"
+    )
+    run = _command_run([], None, Reason.MANIFEST_ABSENT, "", detail)
+    return _aggregate(
+        task.get("id"),
+        _existing_suite_outcome(False, Reason.MANIFEST_ABSENT, run, detail),
+        _discrimination_outcome(
+            False, Reason.MANIFEST_ABSENT, run, run, detail
+        ),
+        _changed_path_outcome(
+            False, Reason.MANIFEST_ABSENT, [], [], blast_allow or [], max_files,
+            detail,
+        ),
+        _api_impact_outcome(False, Reason.MANIFEST_ABSENT, [], [], detail),
+    )
+
+
+def evaluate_task_in_corpus(
+    task, corpus_root, oracle_patch=None, **kwargs
+):
+    """Locate the forged manifest/tree for ``task`` and evaluate its oracle.
+
+    Fails closed with MANIFEST_ABSENT when the never-vendored forged corpus is
+    absent (the CI case) or when no oracle patch is supplied -- the gate is a
+    judgement, not a linter. When both are present it delegates to
+    :func:`evaluate_oracle` against the forged tree.
+    """
+    ref = task.get("manifest_ref", {})
+    corpus_id = task.get("corpus")
+    seed = ref.get("seed")
+    manifest, tree_dir = vet.locate_manifest(corpus_root, corpus_id, seed)
+    if manifest is None or oracle_patch is None:
+        return _manifest_absent_aggregate(task, corpus_id, seed)
+    return evaluate_oracle(task, tree_dir, oracle_patch, **kwargs)
+
+
 def to_json(outcome):
     """Byte-stable rendering of any gate outcome (deterministic key order)."""
     return json.dumps(outcome, sort_keys=True, ensure_ascii=True, indent=2)
