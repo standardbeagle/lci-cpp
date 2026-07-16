@@ -386,6 +386,156 @@ def discriminate(pristine, patched):
     )
 
 
+# ---------------------------------------------------------------------------
+# existing-suite regression guard (separate from discrimination)
+# ---------------------------------------------------------------------------
+
+
+def _existing_suite_outcome(passed, reason, run, detail):
+    return {
+        "schema": EXISTING_SUITE_SCHEMA,
+        "passed": passed,
+        "reason": reason,
+        "detail": detail,
+        "run": run,
+    }
+
+
+def run_existing_suite(command, cwd, timeout=DEFAULT_TIMEOUT):
+    """Run the repository's DECLARED existing test suite on the patched tree.
+
+    This is the regression guard and is kept SEPARATE from the task-specific
+    discrimination test. Exit 0 -> SUITE_GREEN; a nonzero exit -> SUITE_RED; a
+    timeout / missing command / tool error propagates its own fail-closed reason;
+    a missing declared command is COMMAND_ABSENT (never a silent skip).
+    """
+    if not command:
+        return _existing_suite_outcome(
+            False, Reason.COMMAND_ABSENT, None,
+            "no existing-suite command declared",
+        )
+    run = run_command(command, cwd, timeout)
+    if run["reason"] is not None:
+        return _existing_suite_outcome(
+            False, run["reason"], run,
+            f"existing suite failed closed: {run['reason']}",
+        )
+    if run["exit_code"] == 0:
+        return _existing_suite_outcome(
+            True, Reason.SUITE_GREEN, run,
+            "existing suite is green on the patched tree",
+        )
+    return _existing_suite_outcome(
+        False, Reason.SUITE_RED, run,
+        f"existing suite is red on the patched tree (exit {run['exit_code']})",
+    )
+
+
+# ---------------------------------------------------------------------------
+# public-API / call-hierarchy blast radius (LCI)
+# ---------------------------------------------------------------------------
+
+
+class LciRefsAdapter:
+    """Resolve a symbol's references with the LCI binary.
+
+    The gate depends only on the ``available()`` / ``refs()`` interface, so the
+    hermetic tests inject a fake and the real corpus wiring supplies this. When
+    the binary is absent the api-impact gate fails closed (LCI_ABSENT) rather
+    than assuming no impact.
+    """
+
+    def __init__(self, lci_bin, timeout=DEFAULT_TIMEOUT):
+        self.lci_bin = lci_bin
+        self.timeout = timeout
+
+    def available(self):
+        if not self.lci_bin:
+            return False
+        return os.path.isfile(self.lci_bin) or shutil.which(self.lci_bin) is not None
+
+    def refs(self, symbol, tree_dir):
+        proc = subprocess.run(
+            [self.lci_bin, "refs", symbol, "-r", tree_dir],
+            capture_output=True,
+            text=True,
+            timeout=self.timeout,
+        )
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"lci refs {symbol!r} exited {proc.returncode}: "
+                f"{_tail(proc.stderr)}"
+            )
+        paths = []
+        for line in proc.stdout.splitlines():
+            token = line.strip().split(":", 1)[0].strip()
+            if token:
+                paths.append(os.path.relpath(token, tree_dir) if os.path.isabs(token) else token)
+        return paths
+
+
+def _api_impact_outcome(passed, reason, symbols, escaped_refs, detail):
+    return {
+        "schema": API_IMPACT_SCHEMA,
+        "passed": passed,
+        "reason": reason,
+        "detail": detail,
+        "symbols": sorted(set(symbols)),
+        "escaped_refs": escaped_refs,
+    }
+
+
+def check_api_impact(impacted_symbols, blast_allow, lci, tree_dir, timeout=DEFAULT_TIMEOUT):
+    """Detect public-API / call-hierarchy breakage outside the declared scope.
+
+    For each symbol the patch changes, LCI resolves references; any reference in
+    a file that matches no ``blast_radius.allow`` glob is an ESCAPE -- the edit
+    ripples beyond its declared blast radius. Fails closed when LCI is
+    unavailable or errors. Deterministic: symbols and escaped refs are sorted.
+    """
+    symbols = sorted(set(impacted_symbols))
+    if not symbols:
+        return _api_impact_outcome(
+            True, Reason.NO_ESCAPE, [], [],
+            "no impacted symbols declared; no API blast radius to check",
+        )
+    if blast_allow is None:
+        return _api_impact_outcome(
+            False, Reason.BLAST_RADIUS_MALFORMED, symbols, [],
+            "blast_radius.allow is missing; cannot bound API impact",
+        )
+    if lci is None or not lci.available():
+        return _api_impact_outcome(
+            False, Reason.LCI_ABSENT, symbols, [],
+            "LCI unavailable; cannot verify public-API blast radius",
+        )
+    escaped = []
+    for symbol in symbols:
+        try:
+            refs = lci.refs(symbol, tree_dir)
+        except Exception as err:  # noqa: BLE001 -- fail closed on any tool fault
+            return _api_impact_outcome(
+                False, Reason.TOOL_FAILURE, symbols,
+                sorted(escaped, key=lambda e: (e["symbol"], e["path"])),
+                f"lci refs raised for {symbol!r}: {err}",
+            )
+        for path in refs:
+            if not _matches_any(path, blast_allow):
+                escaped.append({"symbol": symbol, "path": path})
+    escaped = sorted(escaped, key=lambda e: (e["symbol"], e["path"]))
+    if escaped:
+        return _api_impact_outcome(
+            False, Reason.API_IMPACT_ESCAPE, symbols, escaped,
+            f"{len(escaped)} reference(s) escape the declared blast radius "
+            f"(first: {escaped[0]['symbol']} @ {escaped[0]['path']})",
+        )
+    return _api_impact_outcome(
+        True, Reason.NO_ESCAPE, symbols, [],
+        f"all references to {len(symbols)} symbol(s) stay within the "
+        f"declared blast radius",
+    )
+
+
 def to_json(outcome):
     """Byte-stable rendering of any gate outcome (deterministic key order)."""
     return json.dumps(outcome, sort_keys=True, ensure_ascii=True, indent=2)

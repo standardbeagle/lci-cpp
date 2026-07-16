@@ -188,5 +188,97 @@ class CommandRunnerTest(unittest.TestCase):
         self.assertLessEqual(len(out["stdout_tail"]), gate._MAX_TAIL)
 
 
+# ---------------------------------------------------------------------------
+# existing-suite regression guard (criteria 2, 3)
+# ---------------------------------------------------------------------------
+
+
+class ExistingSuiteTest(unittest.TestCase):
+    def test_green_suite_passes(self):
+        out = gate.run_existing_suite([sys.executable, "-c", "pass"], cwd=None)
+        self.assertTrue(out["passed"])
+        self.assertEqual(out["reason"], gate.Reason.SUITE_GREEN)
+
+    def test_red_suite_fails(self):
+        out = gate.run_existing_suite(
+            [sys.executable, "-c", "import sys; sys.exit(1)"], cwd=None
+        )
+        self.assertFalse(out["passed"])
+        self.assertEqual(out["reason"], gate.Reason.SUITE_RED)
+
+    def test_absent_command_fails_closed(self):
+        out = gate.run_existing_suite(None, cwd=None)
+        self.assertFalse(out["passed"])
+        self.assertEqual(out["reason"], gate.Reason.COMMAND_ABSENT)
+        self.assertIsNone(out["run"])
+
+    def test_timeout_propagates_fail_closed(self):
+        out = gate.run_existing_suite(
+            [sys.executable, "-c", "import time; time.sleep(30)"],
+            cwd=None,
+            timeout=1,
+        )
+        self.assertFalse(out["passed"])
+        self.assertEqual(out["reason"], gate.Reason.TIMEOUT)
+
+
+# ---------------------------------------------------------------------------
+# api-impact detector (criterion 5)
+# ---------------------------------------------------------------------------
+
+
+class FakeLci:
+    def __init__(self, refs_map, available=True, boom=False):
+        self._refs_map = refs_map
+        self._available = available
+        self._boom = boom
+
+    def available(self):
+        return self._available
+
+    def refs(self, symbol, tree_dir):
+        if self._boom:
+            raise RuntimeError("lci exploded")
+        return self._refs_map.get(symbol, [])
+
+
+class ApiImpactTest(unittest.TestCase):
+    def test_no_symbols_passes_vacuously(self):
+        out = gate.check_api_impact([], ["apis/**"], FakeLci({}), "/t")
+        self.assertTrue(out["passed"])
+        self.assertEqual(out["reason"], gate.Reason.NO_ESCAPE)
+
+    def test_refs_within_scope_pass(self):
+        lci = FakeLci({"backupsList": ["apis/backup.go", "apis/router.go"]})
+        out = gate.check_api_impact(["backupsList"], ["apis/**"], lci, "/t")
+        self.assertTrue(out["passed"], msg=out["detail"])
+        self.assertEqual(out["reason"], gate.Reason.NO_ESCAPE)
+
+    def test_ref_outside_scope_is_escape(self):
+        # the changed handler is called from core/, outside the declared apis/**.
+        lci = FakeLci({"backupsList": ["apis/backup.go", "core/hooks.go"]})
+        out = gate.check_api_impact(["backupsList"], ["apis/**"], lci, "/t")
+        self.assertFalse(out["passed"])
+        self.assertEqual(out["reason"], gate.Reason.API_IMPACT_ESCAPE)
+        self.assertEqual(
+            out["escaped_refs"],
+            [{"symbol": "backupsList", "path": "core/hooks.go"}],
+        )
+
+    def test_absent_lci_fails_closed(self):
+        out = gate.check_api_impact(
+            ["backupsList"], ["apis/**"], FakeLci({}, available=False), "/t"
+        )
+        self.assertFalse(out["passed"])
+        self.assertEqual(out["reason"], gate.Reason.LCI_ABSENT)
+
+    def test_lci_error_fails_closed(self):
+        out = gate.check_api_impact(
+            ["backupsList"], ["apis/**"], FakeLci({}, boom=True), "/t"
+        )
+        self.assertFalse(out["passed"])
+        self.assertEqual(out["reason"], gate.Reason.TOOL_FAILURE)
+
+
 if __name__ == "__main__":
     unittest.main()
