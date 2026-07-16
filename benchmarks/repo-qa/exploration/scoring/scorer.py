@@ -140,6 +140,7 @@ def score_run(task, record):
         "model": record.get("model"),
         "forge_version": record.get("forge_version"),
         "task_bank_version": task.get("schema"),
+        "task_digest": record.get("task_digest"),
         "status": status,
         "answered": answered,
         "evidence": evidence,

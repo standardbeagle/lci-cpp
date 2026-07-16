@@ -15,7 +15,10 @@ on:
       - "benchmarks/repo-qa/scripts/lint_exploration_leaks.py"
       - "benchmarks/repo-qa/scripts/validate_exploration_tasks.py"
       - "benchmarks/repo-qa/scripts/exploration_corpus_forge.py"
+      - "benchmarks/repo-qa/scripts/score_exploration.py"
       - "benchmarks/repo-qa/tests/test_exploration_leak_linter.py"
+      - "benchmarks/repo-qa/tests/test_exploration_runner.py"
+      - "benchmarks/repo-qa/tests/test_exploration_scorer.py"
       - "benchmarks/repo-qa/tests/test_exploration_task_schema.py"
       - ".github/workflows/exploration-leak.yml"
   pull_request:
@@ -41,12 +44,14 @@ jobs:
       # touches the real corpora or any benchmark network endpoint.
       - name: Install validator dependency
         run: python -m pip install --disable-pip-version-check jsonschema
-      - name: Structural + anchor validation
-        run: python3 scripts/validate_exploration_tasks.py
-      - name: Prompt leak linter
+      # The linter runs structural validation first and redacts its diagnostics;
+      # invoking the raw validator here could expose adjudicated coordinates.
+      - name: Structural validation + prompt leak linter
         run: python3 scripts/lint_exploration_leaks.py
-      - name: Linter + schema contract tests
+      - name: Exploration contract tests
         run: >-
           python3 -m unittest
           tests.test_exploration_leak_linter
+          tests.test_exploration_runner
+          tests.test_exploration_scorer
           tests.test_exploration_task_schema

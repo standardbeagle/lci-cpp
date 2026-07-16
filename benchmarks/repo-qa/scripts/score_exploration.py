@@ -27,6 +27,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
 
 from runner import record as record_log  # noqa: E402
 from scoring import AGGREGATE_SCHEMA, IncompatibleRuns, aggregate, score_run  # noqa: E402
+from task_digest import task_digest  # noqa: E402
 
 SCORE_SET_SCHEMA = "exploration_score_set_v1"
 
@@ -74,6 +75,14 @@ def score_bank(tasks, records):
             raise SystemExit(
                 f"error: run record references unknown task_id {task_id!r} "
                 f"(not in the task bank)"
+            )
+        expected_digest = task_digest(task)
+        recorded_digest = rec.get("task_digest")
+        if recorded_digest != expected_digest:
+            reason = "missing" if recorded_digest is None else "does not match"
+            raise SystemExit(
+                f"error: run record task digest {reason} current task content "
+                f"for task_id {task_id!r}; rerun the task before scoring"
             )
         scores.append(score_run(task, rec))
     scores.sort(key=lambda s: s["run_key"] or "")

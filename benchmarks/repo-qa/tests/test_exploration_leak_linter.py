@@ -156,6 +156,33 @@ class RedactionTests(unittest.TestCase):
             self.assertNotIn(secret_id, redacted)
             self.assertNotIn("load-manifest", redacted)
 
+    def test_cli_redacts_malformed_oracle_validator_diagnostics(self):
+        import contextlib
+        import io
+        import tempfile
+        import json
+
+        secret = "packages/private/adjudicated-answer.ts"
+        with tempfile.TemporaryDirectory() as tmp:
+            tasks_dir = os.path.join(tmp, "tasks")
+            os.makedirs(tasks_dir)
+            with open(os.path.join(tasks_dir, "bad.json"), "w") as fh:
+                json.dump({
+                    "schema": "exploration_task_v1", "id": "bad",
+                    "evidence": [{"path": secret, "lines": [987654]}],
+                }, fh)
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                rc = linter.main([
+                    "--tasks-dir", tasks_dir,
+                    "--annotations-dir", os.path.join(tmp, "annotations"),
+                ])
+            rendered = output.getvalue()
+            self.assertEqual(rc, 1)
+            self.assertIn("details redacted", rendered)
+            self.assertNotIn(secret, rendered)
+            self.assertNotIn("987654", rendered)
+
 
 class RealBankTests(unittest.TestCase):
     def test_committed_bank_passes_validator_then_linter(self):

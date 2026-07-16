@@ -236,8 +236,11 @@ def main(argv=None):
     )
 
     if problems:
-        for problem in sorted(problems):
-            print(f"INVALID {problem}")
+        # Validator details can contain adjudicated paths, identifiers, and line
+        # spans. Keep those available to direct validator users, but never echo
+        # them from this CI-facing leak gate.
+        for index, _problem in enumerate(sorted(problems), 1):
+            print(f"INVALID task-bank validation problem #{index} (details redacted)")
         print(
             f"structural validation FAILED before leak scan: "
             f"{len(problems)} problem(s)"

@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from runner import corpus, gate, record, toolsets
+from task_digest import task_digest
 
 
 @dataclass(frozen=True)
@@ -55,6 +56,7 @@ def _base_record(task, arm, base, seed, key):
         "seed": seed,
         "arm": arm,
         "model": base.model,
+        "task_digest": task_digest(task),
         "effective_allowlist": list(toolsets.arm_allowlist(arm)),
     }
 
@@ -65,8 +67,9 @@ def run_task(task, arm, adapter, base, *, corpus_root, records_path, work_root):
     seed = task["manifest_ref"]["seed"]
     key = record.run_key(task["id"], arm, seed)
 
-    if key in record.completed_keys(records_path):
-        existing = _find_record(records_path, key)
+    digest = task_digest(task)
+    existing = _find_record(records_path, key, digest)
+    if existing:
         existing["skipped"] = True
         return existing
 
@@ -145,12 +148,16 @@ def _finish(records_path, rec, *, status, manifest_id, started, ended, final_ans
     return rec
 
 
-def _find_record(records_path, key):
+def _find_record(records_path, key, digest):
     match = None
     for rec in record.load_records(records_path):
-        if rec.get("run_key") == key and rec.get("status") in record.COMPLETED_STATUSES:
+        if (
+            rec.get("run_key") == key
+            and rec.get("task_digest") == digest
+            and rec.get("status") in record.COMPLETED_STATUSES
+        ):
             match = rec
-    return dict(match) if match else {"run_key": key}
+    return dict(match) if match else None
 
 
 def run_task_both_arms(task, adapter_factory, base, *, corpus_root, records_path, work_root):

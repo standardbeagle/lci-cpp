@@ -39,6 +39,7 @@ from runner.adapter import (  # noqa: E402
     FakeAgent,
     ToolCall,
 )
+from task_digest import task_digest  # noqa: E402
 
 FAKE_COMMIT = "0" * 40
 
@@ -365,6 +366,7 @@ class RecordShapeTest(unittest.TestCase):
             self.assertEqual(rec["task_id"], task["id"])
             self.assertEqual(rec["corpus_id"], "pocketbase")
             self.assertEqual(rec["manifest_id"], manifest["tree_hash"])
+            self.assertEqual(rec["task_digest"], task_digest(task))
             self.assertEqual(rec["arm"], toolsets.BASELINE)
             self.assertEqual(rec["model"], "claude-test-model")
             self.assertEqual(rec["seed"], 7)
@@ -510,6 +512,28 @@ class ResumeTest(unittest.TestCase):
             # exactly one record persisted for this key
             keys = [r["run_key"] for r in record.load_records(records_path)]
             self.assertEqual(keys.count(record.run_key(task["id"], toolsets.BASELINE, 7)), 1)
+
+    def test_changed_task_content_is_rerun_under_same_task_id(self):
+        with TemporaryDirectory() as root:
+            forge_fixture(root)
+            task = fake_task()
+            records_path = os.path.join(root, "records.jsonl")
+            work = os.path.join(root, "work")
+            run.run_task(
+                task, toolsets.BASELINE, FakeAgent(answered_result([])), base_config(),
+                corpus_root=root, records_path=records_path, work_root=work,
+            )
+            changed = dict(task)
+            changed["prompt"] = task["prompt"] + " Also explain the call chain."
+            second = FakeAgent(answered_result([]))
+            rec = run.run_task(
+                changed, toolsets.BASELINE, second, base_config(),
+                corpus_root=root, records_path=records_path, work_root=work,
+            )
+            self.assertNotIn("skipped", rec)
+            self.assertEqual(len(second.calls), 1)
+            self.assertEqual(rec["task_digest"], task_digest(changed))
+            self.assertEqual(len(record.load_records(records_path)), 2)
 
     def test_retryable_failure_is_rerun(self):
         with TemporaryDirectory() as root:

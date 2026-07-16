@@ -41,6 +41,7 @@ from scoring import (  # noqa: E402
     parse_citations,
     score_run,
 )
+from task_digest import task_digest  # noqa: E402
 
 CORPUS_FILE = "packages/next/src/lib/redirect-status.ts"
 
@@ -109,6 +110,7 @@ def make_record(
         "arm": arm,
         "model": model,
         "manifest_id": "tree-hash-xyz",
+        "task_digest": task_digest(task),
         "status": status,
         "final_answer": final_answer,
         "tool_calls": [{"name": "Read", "arguments": {}} for _ in range(tool_calls)],
@@ -411,6 +413,43 @@ class CliTests(unittest.TestCase):
                      "--out-dir", os.path.join(root, "out")]
                 )
             self.assertNotEqual(caught.exception.code, 0)
+
+    def test_cli_rejects_run_when_answer_key_digest_changed(self):
+        import score_exploration
+
+        with TemporaryDirectory() as root:
+            tasks_dir, records_path = self._write_bank(root)
+            task_path = os.path.join(tasks_dir, answer_key()["id"] + ".json")
+            with open(task_path) as handle:
+                changed = json.load(handle)
+            changed["evidence"][0]["lines"] = [30]
+            with open(task_path, "w") as handle:
+                json.dump(changed, handle)
+            with self.assertRaisesRegex(SystemExit, "task digest does not match"):
+                score_exploration.main([
+                    "--tasks-dir", tasks_dir, "--records", records_path,
+                    "--out-dir", os.path.join(root, "out"),
+                ])
+
+    def test_cli_rejects_legacy_run_without_task_digest(self):
+        import score_exploration
+
+        with TemporaryDirectory() as root:
+            tasks_dir, records_path = self._write_bank(root)
+            records = []
+            with open(records_path) as handle:
+                for line in handle:
+                    record = json.loads(line)
+                    record.pop("task_digest")
+                    records.append(record)
+            with open(records_path, "w") as handle:
+                for record in records:
+                    handle.write(json.dumps(record) + "\n")
+            with self.assertRaisesRegex(SystemExit, "task digest missing"):
+                score_exploration.main([
+                    "--tasks-dir", tasks_dir, "--records", records_path,
+                    "--out-dir", os.path.join(root, "out"),
+                ])
 
     def test_cli_scores_latest_retry_and_collapses_duplicate_completed_records(self):
         import score_exploration
