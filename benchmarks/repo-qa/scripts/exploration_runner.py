@@ -27,7 +27,8 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 BENCH_ROOT = os.path.dirname(HERE)
 EXPLORATION_ROOT = os.path.join(BENCH_ROOT, "exploration")
-for _p in (EXPLORATION_ROOT, HERE):
+EDITS_RUNNER = os.path.join(BENCH_ROOT, "edits", "runner")
+for _p in (EXPLORATION_ROOT, HERE, EDITS_RUNNER):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
@@ -35,6 +36,15 @@ import exploration_corpus_forge as forge  # noqa: E402
 from runner import toolsets  # noqa: E402
 from runner.adapter import ClaudeCliAdapter  # noqa: E402
 from runner.run import BaseConfig, run_task, run_task_both_arms  # noqa: E402
+
+# Edit mode (Stage-3) reuses this same paired runner: same arms + isolation +
+# record log, extended with the mutation toolset and the behaviour/convention
+# gates. Imported here so `edit-run` / `edit-smoke` share the CLI wiring.
+import edit_run  # noqa: E402
+import edit_toolsets  # noqa: E402
+
+DEFAULT_EDIT_TASKS_DIR = os.path.join(BENCH_ROOT, "edits", "tasks")
+EDIT_SYSTEM_PROMPT = edit_toolsets.EDIT_SYSTEM_PROMPT
 
 DEFAULT_TASKS_DIR = os.path.join(EXPLORATION_ROOT, "tasks")
 DEFAULT_CORPUS_ROOT = forge.DEFAULT_OUT_ROOT
@@ -153,6 +163,86 @@ def _cmd_smoke(args):
     return 0
 
 
+def _edit_base_config(args):
+    # Edit mode uses its own generic system prompt (no oracle material) unless
+    # the caller overrides it; everything else is shared with exploration.
+    prompt = args.system_prompt
+    if prompt is DEFAULT_SYSTEM_PROMPT:
+        prompt = EDIT_SYSTEM_PROMPT
+    return BaseConfig(
+        model=args.model, system_prompt=prompt, timeout_seconds=args.timeout
+    )
+
+
+def _edit_adapter_for(arm, args, mcp_config):
+    # Both arms MAY edit (disallow only Bash); the treatment arm additionally
+    # gets the LCI MCP server. The runner's gate re-checks every emitted call.
+    if arm == edit_toolsets.BASELINE:
+        return ClaudeCliAdapter(
+            claude_bin=args.claude_bin, disallowed_tools=("Bash",)
+        )
+    return ClaudeCliAdapter(
+        claude_bin=args.claude_bin, mcp_config=mcp_config,
+        disallowed_tools=("Bash",),
+    )
+
+
+def _cmd_edit_run(args):
+    base = _edit_base_config(args)
+    mcp_config = _lci_mcp_config(args.lci_bin)
+    tasks = _load_tasks(args.tasks_dir, only=args.task)
+    count = 0
+    for rec in edit_run.run_edit_bank(
+        tasks,
+        lambda arm: _edit_adapter_for(arm, args, mcp_config),
+        base,
+        corpus_root=args.corpus_root,
+        records_path=args.records,
+        work_root=args.work_root,
+    ):
+        count += 1
+        marker = "skip" if rec.get("skipped") else rec.get("status")
+        print(f"{rec['run_key']}: {marker}")
+    print(f"{count} edit run(s) -> {args.records}")
+    return 0
+
+
+def _cmd_edit_smoke(args):
+    claude_bin = shutil.which(args.claude_bin)
+    lci_bin = args.lci_bin if os.path.isfile(args.lci_bin) else shutil.which(args.lci_bin)
+    live = args.live or os.environ.get("EXPLORATION_RUNNER_LIVE") == "1"
+
+    reasons = []
+    if not claude_bin:
+        reasons.append(f"claude CLI {args.claude_bin!r} not found")
+    if not lci_bin:
+        reasons.append(f"lci binary {args.lci_bin!r} not found")
+    if not live:
+        reasons.append("not opted in (pass --live or EXPLORATION_RUNNER_LIVE=1)")
+    if reasons:
+        print("EDIT SMOKE SKIPPED: " + "; ".join(reasons))
+        return 0
+
+    tasks = _load_tasks(args.tasks_dir, only=args.task)
+    if not tasks:
+        print(f"error: no task matched {args.task!r} in {args.tasks_dir}", file=sys.stderr)
+        return 2
+    task = tasks[0]
+    base = _edit_base_config(args)
+    mcp_config = _lci_mcp_config(lci_bin)
+    results = edit_run.run_edit_task_both_arms(
+        task,
+        lambda arm: _edit_adapter_for(arm, args, mcp_config),
+        base,
+        corpus_root=args.corpus_root,
+        records_path=args.records,
+        work_root=args.work_root,
+    )
+    for arm, rec in results.items():
+        print(f"{arm}: {rec.get('status')} ({len(rec.get('patch_files') or [])} file(s))")
+    return 0
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--tasks-dir", default=DEFAULT_TASKS_DIR)
@@ -181,6 +271,25 @@ def main(argv=None):
     smoke.add_argument("--task", default=None, help="task id (default: first)")
     smoke.add_argument("--live", action="store_true", help="opt in to a real run")
     smoke.set_defaults(func=_cmd_smoke)
+
+    edit_run_cmd = sub.add_parser(
+        "edit-run", help="batch the EDIT task bank, both arms (real adapter)"
+    )
+    edit_run_cmd.add_argument(
+        "--tasks-dir", default=DEFAULT_EDIT_TASKS_DIR, dest="tasks_dir"
+    )
+    edit_run_cmd.add_argument("--task", default=None, help="restrict to one task id")
+    edit_run_cmd.set_defaults(func=_cmd_edit_run)
+
+    edit_smoke = sub.add_parser(
+        "edit-smoke", help="one EDIT task/two arms, guarded live check"
+    )
+    edit_smoke.add_argument(
+        "--tasks-dir", default=DEFAULT_EDIT_TASKS_DIR, dest="tasks_dir"
+    )
+    edit_smoke.add_argument("--task", default=None, help="task id (default: first)")
+    edit_smoke.add_argument("--live", action="store_true", help="opt in to a real run")
+    edit_smoke.set_defaults(func=_cmd_edit_smoke)
 
     args = parser.parse_args(argv)
     return args.func(args)
