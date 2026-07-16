@@ -20,6 +20,7 @@ import os
 import sys
 import unittest
 from tempfile import TemporaryDirectory
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 BENCH_ROOT = os.path.dirname(HERE)
@@ -31,7 +32,13 @@ for _p in (EXPLORATION_ROOT, SCRIPTS):
 
 import exploration_corpus_forge as forge  # noqa: E402
 from runner import corpus, gate, record, run, toolsets  # noqa: E402
-from runner.adapter import AgentResult, FakeAgent, ToolCall  # noqa: E402
+from runner.adapter import (  # noqa: E402
+    AgentRequest,
+    AgentResult,
+    ClaudeCliAdapter,
+    FakeAgent,
+    ToolCall,
+)
 
 FAKE_COMMIT = "0" * 40
 
@@ -177,6 +184,166 @@ class ToolIsolationTest(unittest.TestCase):
             self.assertEqual(rec["status"], record.STATUS_TOOL_VIOLATION)
             self.assertEqual(rec["violations"][0]["reason"], "path_escape")
 
+    def test_glob_pattern_escaping_checkout_is_rejected(self):
+        with TemporaryDirectory() as checkout:
+            violations = gate.enforce(
+                [ToolCall("Glob", {"pattern": "../annotations/**/*.json"})],
+                ("Glob",), checkout,
+            )
+        self.assertEqual(violations[0]["reason"], "path_escape")
+        self.assertIn("pattern=", violations[0]["detail"])
+
+    def test_malformed_and_unknown_arguments_are_rejected(self):
+        with TemporaryDirectory() as checkout:
+            malformed = gate.enforce(
+                [ToolCall("Read", ["secret.py"])], ("Read",), checkout
+            )
+            unknown = gate.enforce(
+                [ToolCall("Glob", {"pattern": "**/*.py", "cwd": "/tmp"})],
+                ("Glob",), checkout,
+            )
+            missing = gate.enforce([ToolCall("Glob", {})], ("Glob",), checkout)
+            bad_path = gate.enforce(
+                [ToolCall("Grep", {"pattern": "x", "path": ["src"]})],
+                ("Grep",), checkout,
+            )
+        self.assertEqual(malformed[0]["reason"], "malformed_arguments")
+        self.assertEqual(unknown[0]["reason"], "unknown_argument")
+        self.assertEqual(missing[0]["reason"], "malformed_arguments")
+        self.assertEqual(bad_path[0]["reason"], "malformed_arguments")
+
+    def test_existing_symlink_escape_is_rejected(self):
+        with TemporaryDirectory() as checkout, TemporaryDirectory() as outside:
+            os.symlink(outside, os.path.join(checkout, "escape"))
+            violations = gate.enforce(
+                [ToolCall("Read", {"file_path": "escape/answer.json"})],
+                ("Read",), checkout,
+            )
+        self.assertEqual(violations[0]["reason"], "path_escape")
+
+    def test_mcp_path_arguments_and_unknown_fields_fail_closed(self):
+        cases = (
+            ("mcp__lci__browse_file", {"file": "../answer.json"}, "path_escape"),
+            ("mcp__lci__inspect_symbol", {"name": "x", "file": "/etc/passwd"}, "path_escape"),
+            ("mcp__lci__find_files", {"pattern": "x", "directory": "../"}, "path_escape"),
+            ("mcp__lci__search", {"pattern": "x", "cwd": "/tmp"}, "unknown_argument"),
+            ("mcp__lci__list_symbols", {"kind": "all", "file": []}, "malformed_arguments"),
+        )
+        with TemporaryDirectory() as checkout:
+            for name, arguments, reason in cases:
+                with self.subTest(name=name, arguments=arguments):
+                    violations = gate.enforce(
+                        [ToolCall(name, arguments)], (name,), checkout
+                    )
+                    self.assertEqual(violations[0]["reason"], reason)
+
+
+class ClaudeCliAdapterTest(unittest.TestCase):
+    def request(self, checkout):
+        return AgentRequest(
+            model="claude-test-model", system_prompt="system", timeout_seconds=10,
+            checkout_dir=checkout, allowed_tools=("Read",),
+            tool_instructions="read only", prompt="find it",
+        )
+
+    @mock.patch("runner.adapter.subprocess.run")
+    def test_stream_json_preserves_tool_history(self, run_mock):
+        events = [
+            {"type": "system", "subtype": "init"},
+            {"type": "assistant", "message": {"content": [
+                {"type": "tool_use", "name": "Read",
+                 "input": {"file_path": "apis/base.go"}}
+            ]}},
+            {"type": "result", "subtype": "success", "result": "answer",
+             "usage": {"input_tokens": 12, "output_tokens": 3}},
+        ]
+        run_mock.return_value = mock.Mock(
+            returncode=0,
+            stdout="\n".join(json.dumps(event) for event in events) + "\n",
+            stderr="",
+        )
+        with TemporaryDirectory() as checkout:
+            result = ClaudeCliAdapter().run(self.request(checkout))
+        argv = run_mock.call_args.args[0]
+        self.assertIn("stream-json", argv)
+        self.assertIn("--verbose", argv)
+        self.assertEqual(result.status_hint, "ok")
+        self.assertEqual(result.tool_calls, (
+            ToolCall("Read", {"file_path": "apis/base.go"}),
+        ))
+        self.assertEqual(result.final_answer, "answer")
+        self.assertEqual(result.transcript, events)
+
+    def test_missing_assistant_history_fails_closed(self):
+        result = ClaudeCliAdapter._parse(
+            json.dumps({"type": "result", "subtype": "success", "result": "answer"}),
+            "",
+        )
+        self.assertEqual(result.status_hint, "provider_error")
+        self.assertEqual(result.transcript["error"], "missing_tool_history")
+
+    def test_malformed_assistant_history_fails_closed(self):
+        malformed_messages = [
+            {"content": "text"},
+            {"content": [{"type": "tool_use", "name": "", "input": {}}]},
+            {"content": [{"type": "tool_use", "name": "Read", "input": []}]},
+            {"content": [{"type": "tool_use", "name": "Read"}]},
+            {"content": ["not-a-block"]},
+        ]
+        for message in malformed_messages:
+            with self.subTest(message=message):
+                stdout = "\n".join(json.dumps(event) for event in (
+                    {"type": "assistant", "message": message},
+                    {"type": "result", "result": "answer"},
+                ))
+                result = ClaudeCliAdapter._parse(stdout, "")
+                self.assertEqual(result.status_hint, "provider_error")
+                self.assertEqual(
+                    result.transcript["error"], "malformed_tool_history"
+                )
+
+    def test_invalid_result_event_fails_closed(self):
+        valid_assistant = {
+            "type": "assistant", "message": {"content": [
+                {"type": "text", "text": "answer"}
+            ]},
+        }
+        invalid_results = (
+            {"type": "result", "subtype": "error", "result": "answer", "usage": {}},
+            {"type": "result", "result": "answer", "usage": {}},
+            {"type": "result", "subtype": "success", "result": "", "usage": {}},
+            {"type": "result", "subtype": "success", "result": 7, "usage": {}},
+            {"type": "result", "subtype": "success", "result": "answer", "usage": []},
+            {"type": "result", "subtype": "success", "result": "answer",
+             "usage": {"input_tokens": True}},
+            {"type": "result", "subtype": "success", "result": "answer",
+             "usage": {"input_tokens": "1"}},
+            {"type": "result", "subtype": "success", "result": "answer",
+             "usage": {"output_tokens": -1}},
+        )
+        for result_event in invalid_results:
+            with self.subTest(result=result_event):
+                stdout = "\n".join(json.dumps(event) for event in (
+                    valid_assistant, result_event,
+                ))
+                result = ClaudeCliAdapter._parse(stdout, "")
+                self.assertEqual(result.status_hint, "provider_error")
+                self.assertEqual(result.transcript["error"], "invalid_cli_result")
+
+    def test_valid_success_result_allows_absent_token_counters(self):
+        events = (
+            {"type": "assistant", "message": {"content": [
+                {"type": "text", "text": "answer"}
+            ]}},
+            {"type": "result", "subtype": "success", "result": "answer",
+             "usage": {}},
+        )
+        result = ClaudeCliAdapter._parse(
+            "\n".join(json.dumps(event) for event in events), ""
+        )
+        self.assertEqual(result.status_hint, "ok")
+        self.assertEqual((result.input_tokens, result.output_tokens), (0, 0))
+
 
 class RecordShapeTest(unittest.TestCase):
     def test_answered_run_records_every_mandated_field(self):
@@ -272,6 +439,56 @@ class TreeHashRejectionTest(unittest.TestCase):
             )
             self.assertEqual(rec["status"], record.STATUS_CONFIG_ERROR)
             self.assertEqual(adapter.calls, [])
+
+    def test_prepare_checkout_rejects_escaping_symlink(self):
+        with TemporaryDirectory() as root, TemporaryDirectory() as outside:
+            corpus_dir, tree, manifest = forge_fixture(root)
+            os.symlink(outside, os.path.join(tree, "escape"))
+            manifest["tree_hash"] = forge.tree_hash(tree)
+            forge._write_json_atomic(os.path.join(corpus_dir, "manifest.json"), manifest)
+            with self.assertRaises(corpus.EscapingSymlink):
+                corpus.prepare_checkout(
+                    root, fake_task()["manifest_ref"], os.path.join(root, "co")
+                )
+
+    def test_prepare_checkout_rejects_absolute_symlink_within_source(self):
+        with TemporaryDirectory() as root:
+            corpus_dir, tree, manifest = forge_fixture(root)
+            os.symlink(
+                os.path.join(tree, "apis", "base.go"),
+                os.path.join(tree, "absolute-link"),
+            )
+            manifest["tree_hash"] = forge.tree_hash(tree)
+            forge._write_json_atomic(os.path.join(corpus_dir, "manifest.json"), manifest)
+            with self.assertRaises(corpus.EscapingSymlink):
+                corpus.prepare_checkout(
+                    root, fake_task()["manifest_ref"], os.path.join(root, "co")
+                )
+
+    def test_prepare_checkout_preserves_contained_relative_symlink(self):
+        with TemporaryDirectory() as root:
+            corpus_dir, tree, manifest = forge_fixture(root)
+            os.symlink("apis/base.go", os.path.join(tree, "base-link"))
+            manifest["tree_hash"] = forge.tree_hash(tree)
+            forge._write_json_atomic(os.path.join(corpus_dir, "manifest.json"), manifest)
+            dest = os.path.join(root, "co")
+            corpus.prepare_checkout(root, fake_task()["manifest_ref"], dest)
+            self.assertTrue(os.path.islink(os.path.join(dest, "base-link")))
+            self.assertEqual(os.readlink(os.path.join(dest, "base-link")), "apis/base.go")
+
+    def test_prepare_checkout_validates_copied_destination(self):
+        with TemporaryDirectory() as root:
+            forge_fixture(root)
+            with mock.patch(
+                "runner.corpus.reject_escaping_symlinks",
+                side_effect=(None, corpus.EscapingSymlink("late escape")),
+            ) as reject:
+                with self.assertRaises(corpus.EscapingSymlink):
+                    corpus.prepare_checkout(
+                        root, fake_task()["manifest_ref"], os.path.join(root, "co")
+                    )
+            self.assertEqual(reject.call_count, 2)
+            self.assertFalse(os.path.exists(os.path.join(root, "co")))
 
 
 class ResumeTest(unittest.TestCase):

@@ -30,6 +30,31 @@ class TreeHashMismatch(CorpusError):
     """The forged tree's content no longer matches the manifest's pinned hash."""
 
 
+class EscapingSymlink(CorpusError):
+    """A forged tree symlink resolves outside the corpus tree."""
+
+
+def reject_escaping_symlinks(tree_dir):
+    """Reject links that would grant a checkout access to host files."""
+    root = os.path.realpath(tree_dir)
+    for walk_root, dirs, files in os.walk(tree_dir, followlinks=False):
+        for name in dirs + files:
+            path = os.path.join(walk_root, name)
+            if not os.path.islink(path):
+                continue
+            if os.path.isabs(os.readlink(path)):
+                rel = os.path.relpath(path, tree_dir)
+                raise EscapingSymlink(
+                    f"forged corpus symlink {rel!r} has an absolute target"
+                )
+            resolved = os.path.realpath(path)
+            if resolved != root and not resolved.startswith(root + os.sep):
+                rel = os.path.relpath(path, tree_dir)
+                raise EscapingSymlink(
+                    f"forged corpus symlink {rel!r} resolves outside its tree"
+                )
+
+
 def locate_forged_corpus(corpus_root, corpus_id, seed):
     """Return (manifest, tree_dir) for a forged corpus. Raise MissingCorpus if
     the forge has not produced it under the standard layout."""
@@ -74,7 +99,15 @@ def prepare_checkout(corpus_root, manifest_ref, dest):
             f"task manifest_ref.source_commit {manifest_ref['source_commit']}"
         )
     verify_tree_hash(tree_dir, manifest)
+    reject_escaping_symlinks(tree_dir)
     if os.path.exists(dest):
         shutil.rmtree(dest)
     shutil.copytree(tree_dir, dest, symlinks=True)
+    # Re-check the actual checkout: this catches copy races and ensures link
+    # interpretation is safe at the destination, not merely at the source.
+    try:
+        reject_escaping_symlinks(dest)
+    except EscapingSymlink:
+        shutil.rmtree(dest)
+        raise
     return manifest, dest

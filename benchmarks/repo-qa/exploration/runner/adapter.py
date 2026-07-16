@@ -75,10 +75,9 @@ class FakeAgent:
 class ClaudeCliAdapter:
     """Real adapter over the installed non-interactive Claude CLI.
 
-    Invokes `claude -p --output-format json` with the arm's allowlist, the
-    shared model / appended system prompt / timeout, and cwd set to the clean
-    checkout so every file tool is rooted there. Never exercised by unit tests;
-    only the guarded smoke command drives it.
+    Invokes `claude -p --output-format stream-json --verbose` with the arm's
+    allowlist, shared model / appended system prompt / timeout, and cwd set to
+    the clean checkout so every file tool is rooted there.
     """
 
     def __init__(self, claude_bin="claude", mcp_config=None, extra_args=()):
@@ -94,7 +93,8 @@ class ClaudeCliAdapter:
             "--model",
             request.model,
             "--output-format",
-            "json",
+            "stream-json",
+            "--verbose",
             "--append-system-prompt",
             request.system_prompt + "\n\n" + request.tool_instructions,
             "--allowedTools",
@@ -138,37 +138,104 @@ class ClaudeCliAdapter:
 
     @staticmethod
     def _parse(stdout, stderr):
+        events = []
         try:
-            payload = json.loads(stdout)
-        except json.JSONDecodeError:
+            for line in stdout.splitlines():
+                if line.strip():
+                    events.append(json.loads(line))
+        except (json.JSONDecodeError, TypeError):
             return AgentResult(
                 "provider_error", None, (), 0, 0,
                 {"error": "unparseable_cli_json", "stdout": stdout, "stderr": stderr},
             )
-        usage = payload.get("usage", {}) or {}
+        assistant_events = [
+            event for event in events
+            if isinstance(event, dict) and event.get("type") == "assistant"
+        ]
+        results = [
+            event for event in events
+            if isinstance(event, dict) and event.get("type") == "result"
+        ]
+        if not assistant_events:
+            return AgentResult(
+                "provider_error", None, (), 0, 0,
+                {"error": "missing_tool_history", "transcript": events,
+                 "stderr": stderr},
+            )
+        if not results:
+            return AgentResult(
+                "provider_error", None, (), 0, 0,
+                {"error": "missing_cli_result", "transcript": events,
+                 "stderr": stderr},
+            )
+        try:
+            tool_calls = tuple(_extract_tool_calls(events))
+        except ValueError as exc:
+            return AgentResult(
+                "provider_error", None, (), 0, 0,
+                {"error": "malformed_tool_history", "detail": str(exc),
+                 "transcript": events, "stderr": stderr},
+            )
+        for payload in results:
+            error = _result_validation_error(payload)
+            if error:
+                return AgentResult(
+                    "provider_error", None, (), 0, 0,
+                    {"error": "invalid_cli_result", "detail": error,
+                     "transcript": events, "stderr": stderr},
+                )
+        payload = results[-1]
+        usage = payload["usage"]
         return AgentResult(
             status_hint="ok",
             final_answer=payload.get("result"),
-            tool_calls=tuple(_extract_tool_calls(payload)),
+            tool_calls=tool_calls,
             input_tokens=int(usage.get("input_tokens", 0) or 0),
             output_tokens=int(usage.get("output_tokens", 0) or 0),
-            transcript=payload,
+            transcript=events,
         )
 
 
-def _extract_tool_calls(payload):
-    """Ordered tool calls from a `claude -p --output-format json` transcript.
-
-    The CLI's JSON carries the assistant turns under keys that have shifted
-    across versions; read the messages defensively and preserve order.
-    """
-    calls = []
-    messages = payload.get("messages") or payload.get("transcript") or []
-    for message in messages:
-        content = message.get("content") if isinstance(message, dict) else None
-        if not isinstance(content, list):
+def _result_validation_error(payload):
+    """Return a reason when a stream-json result is not a valid success."""
+    if payload.get("subtype") != "success":
+        return "result subtype must be success"
+    result = payload.get("result")
+    if not isinstance(result, str) or not result:
+        return "result must be a nonempty string"
+    usage = payload.get("usage")
+    if not isinstance(usage, dict):
+        return "usage must be an object"
+    for key, value in usage.items():
+        if not key.endswith("_tokens"):
             continue
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            return f"usage.{key} must be a nonnegative integer"
+    return None
+
+
+def _extract_tool_calls(events):
+    """Extract ordered tool calls from stream-json assistant events."""
+    calls = []
+    for event in events:
+        if not isinstance(event, dict) or event.get("type") != "assistant":
+            continue
+        message = event.get("message")
+        if not isinstance(message, dict):
+            raise ValueError("assistant event message must be an object")
+        content = message.get("content")
+        if not isinstance(content, list):
+            raise ValueError("assistant message content must be an array")
         for block in content:
-            if isinstance(block, dict) and block.get("type") == "tool_use":
-                calls.append(ToolCall(block.get("name", ""), block.get("input", {}) or {}))
+            if not isinstance(block, dict) or not isinstance(block.get("type"), str):
+                raise ValueError("assistant content blocks must be typed objects")
+            if block["type"] != "tool_use":
+                continue
+            name = block.get("name")
+            arguments = block.get("input")
+            if not isinstance(name, str) or not name:
+                raise ValueError("tool_use name must be a nonempty string")
+            if not isinstance(arguments, dict):
+                raise ValueError("tool_use input must be an object")
+            calls.append(ToolCall(name, arguments))
     return calls
