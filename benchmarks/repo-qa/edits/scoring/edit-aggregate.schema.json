@@ -1,0 +1,170 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lci/benchmarks/repo-qa/edit-aggregate.schema.json",
+  "title": "Stage-3 edit-benchmark aggregate report",
+  "description": "The versioned per-arm aggregate emitted by edit_scorer.aggregate. The HEADLINE metric is the all-three-gates pass rate per arm -- behaviour AND convention AND blast -- and its DENOMINATOR is the PLANNED cell set (task x arm x repetition), never the observed one, so a cell that never ran cannot inflate a rate by leaving the denominator. Absent cells are enumerated under completeness, fail it, and are bucketed as missing_cell. The full behaviour x convention x blast matrix, the individual gate rates, the paired arm deltas and the process distributions ride alongside; failure buckets are reported separately because only patch_rejected is evidence the agent was wrong. Deterministic and byte-stable: cells, reasons and arms are sorted before emit.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "grouped_by", "compatibility", "headline", "completeness", "arms", "pairing", "deltas"],
+  "properties": {
+    "schema": {"const": "edit_aggregate_v1"},
+    "grouped_by": {"type": "array", "items": {"type": "string"}, "description": "Compatibility fields the caller explicitly opted into mixing."},
+    "compatibility": {"type": "object", "description": "The shared (or explicitly grouped) model / forge_version / task_bank_version values."},
+    "headline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["metric", "definition", "denominator", "complete", "arms"],
+      "description": "The single number this benchmark reports.",
+      "properties": {
+        "metric": {"const": "all_three_gates_pass_rate"},
+        "definition": {"type": "string", "description": "Human-readable statement of the conjunction."},
+        "denominator": {"const": "planned_cells"},
+        "complete": {"type": "boolean", "description": "Mirrors completeness.passed. FALSE means the rates below are computed over a planned cell set that was not fully observed -- the headline is not trustworthy as a comparison."},
+        "arms": {
+          "type": "object",
+          "description": "Arm name -> headline rate over PLANNED cells.",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["planned", "observed", "all_pass", "rate"],
+            "properties": {
+              "planned": {"type": "integer", "minimum": 0, "description": "Planned cells for this arm -- the denominator."},
+              "observed": {"type": "integer", "minimum": 0, "description": "Planned cells that actually produced a record."},
+              "all_pass": {"type": "integer", "minimum": 0, "description": "Cells where behaviour AND convention AND blast all passed."},
+              "rate": {"type": ["number", "null"], "description": "all_pass / planned; null only when planned is 0."}
+            }
+          }
+        }
+      }
+    },
+    "completeness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["passed", "planned_cells", "observed_cells", "missing_cells", "missing", "unplanned"],
+      "description": "Criterion 2: every planned cell must be observed. Absent cells are reported, never dropped.",
+      "properties": {
+        "passed": {"type": "boolean", "description": "True only when missing is empty AND unplanned is empty."},
+        "planned_cells": {"type": "integer", "minimum": 0},
+        "observed_cells": {"type": "integer", "minimum": 0},
+        "missing_cells": {"type": "integer", "minimum": 0},
+        "missing": {
+          "type": "array",
+          "description": "Planned cells with no record, sorted by (task_id, arm, seed).",
+          "items": {"$ref": "#/$defs/cell"}
+        },
+        "unplanned": {
+          "type": "array",
+          "description": "Observed cells absent from the plan -- a drifted plan or a stray record; fails completeness rather than being folded into a rate.",
+          "items": {"$ref": "#/$defs/cell"}
+        }
+      }
+    },
+    "arms": {
+      "type": "object",
+      "description": "Arm name -> full breakdown.",
+      "additionalProperties": {"$ref": "#/$defs/arm_summary"}
+    },
+    "pairing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["paired_count", "unpaired_count", "unpaired"],
+      "description": "Exact (task_id, seed) pairs observed across both arms; deltas are computed over these.",
+      "properties": {
+        "paired_count": {"type": "integer", "minimum": 0},
+        "unpaired_count": {"type": "integer", "minimum": 0},
+        "unpaired": {"type": "array", "items": {"type": "object"}}
+      }
+    },
+    "deltas": {
+      "type": "object",
+      "description": "Treatment-minus-baseline over PAIRED cells. Empty when an arm is absent; a member is null when either side lacks the metric.",
+      "additionalProperties": true
+    }
+  },
+  "$defs": {
+    "cell": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task_id", "arm", "seed"],
+      "properties": {
+        "task_id": {"type": ["string", "null"]},
+        "arm": {"type": ["string", "null"]},
+        "seed": {"type": ["integer", "null"]}
+      }
+    },
+    "distribution": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["n", "min", "median", "mean", "max", "total"],
+          "properties": {
+            "n": {"type": "integer"},
+            "min": {"type": "number"},
+            "median": {"type": "number"},
+            "mean": {"type": "number"},
+            "max": {"type": "number"},
+            "total": {"type": "number"}
+          }
+        },
+        {"type": "null"}
+      ]
+    },
+    "arm_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["planned", "observed", "all_pass", "gates", "matrix", "failure_reasons", "tool_calls", "input_tokens", "output_tokens", "wall_clock_seconds"],
+      "properties": {
+        "planned": {"type": "integer", "minimum": 0},
+        "observed": {"type": "integer", "minimum": 0},
+        "all_pass": {"type": "integer", "minimum": 0},
+        "gates": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["behavior", "convention", "blast"],
+          "description": "Per-gate rates, each over PLANNED cells like the headline.",
+          "properties": {
+            "behavior": {"$ref": "#/$defs/gate_rate"},
+            "convention": {"$ref": "#/$defs/gate_rate"},
+            "blast": {"$ref": "#/$defs/gate_rate"}
+          }
+        },
+        "matrix": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["TTT", "TTF", "TFT", "TFF", "FTT", "FTF", "FFT", "FFF"],
+          "description": "The eight-cell behaviour x convention x blast pass matrix over OBSERVED cells; keys are ordered behavior, convention, blast. All eight keys are always present (zero-filled). Sums to observed; the missing_cells shortfall lives in completeness.",
+          "patternProperties": {"^[TF]{3}$": {"type": "integer", "minimum": 0}}
+        },
+        "failure_reasons": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["agent_failure", "invalid_patch", "harness_failure", "oracle_failure", "patch_rejected", "missing_cell"],
+          "description": "Failure buckets over PLANNED cells; all keys always present (zero-filled). all_pass + the sum of these equals planned. Kept distinct because they support opposite conclusions -- only patch_rejected is evidence the agent was wrong.",
+          "properties": {
+            "agent_failure": {"type": "integer", "minimum": 0},
+            "invalid_patch": {"type": "integer", "minimum": 0},
+            "harness_failure": {"type": "integer", "minimum": 0},
+            "oracle_failure": {"type": "integer", "minimum": 0},
+            "patch_rejected": {"type": "integer", "minimum": 0},
+            "missing_cell": {"type": "integer", "minimum": 0}
+          }
+        },
+        "tool_calls": {"$ref": "#/$defs/distribution"},
+        "input_tokens": {"$ref": "#/$defs/distribution"},
+        "output_tokens": {"$ref": "#/$defs/distribution"},
+        "wall_clock_seconds": {"$ref": "#/$defs/distribution"}
+      }
+    },
+    "gate_rate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["passed", "judged", "rate"],
+      "properties": {
+        "passed": {"type": "integer", "minimum": 0},
+        "judged": {"type": "integer", "minimum": 0, "description": "Cells where this gate actually rendered a verdict; unjudged cells still count against the rate (fail closed)."},
+        "rate": {"type": ["number", "null"], "description": "passed / planned; null only when planned is 0."}
+      }
+    }
+  }
+}

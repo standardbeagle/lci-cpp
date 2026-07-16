@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lci/benchmarks/repo-qa/edit-score.schema.json",
+  "title": "Stage-3 per-attempt edit score",
+  "description": "The versioned score of ONE edit run record (one task x arm x repetition cell), emitted by edit_scorer.score_run. Three gates are derived from the record's raw gate outcomes: behavior (oracle existing_suite AND discrimination), convention (conformance) and blast (oracle changed_path AND api_impact). all_gates_passed -- the headline predicate -- is the CONJUNCTION of the three; a patch that only satisfies behaviour is not fully correct. FAILS CLOSED: an absent or unjudged gate scores passed=false with reason GATE_ABSENT and can never contribute to the headline.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "run_key", "task_id", "arm", "seed", "cell", "status", "gates", "all_gates_passed", "matrix_cell", "failure_class", "process"],
+  "properties": {
+    "schema": {"const": "edit_score_v1"},
+    "run_key": {"type": ["string", "null"]},
+    "task_id": {"type": ["string", "null"]},
+    "arm": {"type": ["string", "null"]},
+    "seed": {"type": ["integer", "null"], "description": "The repetition identity of the cell."},
+    "cell": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task_id", "arm", "seed"],
+      "description": "The planned-cell coordinate this score fills.",
+      "properties": {
+        "task_id": {"type": ["string", "null"]},
+        "arm": {"type": ["string", "null"]},
+        "seed": {"type": ["integer", "null"]}
+      }
+    },
+    "corpus_id": {"type": ["string", "null"]},
+    "model": {"type": ["string", "null"]},
+    "forge_version": {"type": ["string", "null"]},
+    "task_bank_version": {"type": ["string", "null"]},
+    "task_digest": {"type": ["string", "null"]},
+    "patch_hash": {"type": ["string", "null"]},
+    "status": {"type": ["string", "null"], "description": "The S3.4 runner's terminal status for the cell."},
+    "reason": {"type": ["string", "null"], "description": "The S3.4 runner's terminal sub-reason code."},
+    "gates": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["behavior", "convention", "blast"],
+      "properties": {
+        "behavior": {"$ref": "#/$defs/gate"},
+        "convention": {"$ref": "#/$defs/gate"},
+        "blast": {"$ref": "#/$defs/gate"}
+      }
+    },
+    "all_gates_passed": {"type": "boolean", "description": "HEADLINE predicate: behavior AND convention AND blast."},
+    "matrix_cell": {
+      "type": "string",
+      "enum": ["TTT", "TTF", "TFT", "TFF", "FTT", "FTF", "FFT", "FFF"],
+      "description": "This attempt's cell in the eight-cell pass matrix, ordered behavior, convention, blast."
+    },
+    "failure_class": {
+      "anyOf": [{"$ref": "#/$defs/failure_class"}, {"type": "null"}],
+      "description": "null exactly when all_gates_passed is true; otherwise the single bucket this failure belongs to."
+    },
+    "process": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tool_calls", "input_tokens", "output_tokens", "wall_clock_seconds"],
+      "properties": {
+        "tool_calls": {"type": "integer", "minimum": 0},
+        "input_tokens": {"type": ["integer", "null"]},
+        "output_tokens": {"type": ["integer", "null"]},
+        "wall_clock_seconds": {"type": ["number", "null"]}
+      }
+    }
+  },
+  "$defs": {
+    "gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["passed", "judged", "reasons"],
+      "properties": {
+        "passed": {"type": "boolean"},
+        "judged": {"type": "boolean", "description": "False when no gate outcome was recorded for this cell; such a gate is scored passed=false (fail closed)."},
+        "reasons": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Sorted reason codes from the underlying sub-gates; GATE_ABSENT when unjudged."
+        }
+      }
+    },
+    "failure_class": {
+      "type": "string",
+      "enum": ["agent_failure", "invalid_patch", "harness_failure", "oracle_failure", "patch_rejected", "missing_cell"],
+      "description": "agent_failure: the agent never produced a judgeable attempt (provider error, timeout, tool-isolation violation). invalid_patch: a patch existed but was empty or unappliable. harness_failure: our tooling/environment broke (config error, missing command, tool failure, malformed rule) -- NOT evidence about the agent. oracle_failure: the gate ran but the oracle material itself is defective (non-discriminating or wrong-direction test, decoy/stale/absent anchor, ambiguous match). patch_rejected: the gates judged the patch and it was genuinely wrong. missing_cell: the cell was planned but never observed. These are never collapsed: only patch_rejected is evidence the agent was wrong."
+    }
+  }
+}
