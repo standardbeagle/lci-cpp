@@ -152,13 +152,24 @@ def record(
     seed=7,
     status=edit_record.STATUS_PASSED,
     reason="ALL_GREEN",
-    gate_outcomes=None,
+    gate_outcomes="auto",
     tool_calls=3,
     input_tokens=100,
     output_tokens=20,
     duration=1.5,
 ):
-    """One S3.4-shaped edit run record."""
+    """One S3.4-shaped edit run record.
+
+    Gates default to the runner's real behaviour: only a cell that reached a
+    verdict (passed / gate_failed) carries gate outcomes -- an agent failure or
+    an invalid patch never gets judged, so its gates are absent.
+    """
+    if gate_outcomes == "auto":
+        gate_outcomes = (
+            gates()
+            if status in (edit_record.STATUS_PASSED, edit_record.STATUS_GATE_FAILED)
+            else None
+        )
     return {
         "mode": "edit",
         "run_key": edit_record.run_key(task_id, arm, seed),
@@ -173,7 +184,7 @@ def record(
         "arm": arm,
         "status": status,
         "reason": reason,
-        "gates": gate_outcomes if gate_outcomes is not None else gates(),
+        "gates": gate_outcomes,
         "patch_hash": "p" * 16,
         "tool_calls": [{"name": "n", "arguments": {}}] * tool_calls,
         "token_usage": {"input": input_tokens, "output": output_tokens},
@@ -290,6 +301,7 @@ class ThreeGateConjunction(unittest.TestCase):
     def test_absent_gates_fail_closed_and_are_marked_unjudged(self):
         """gates=None (the agent never got judged) is a FAIL, never a pass."""
         raw = record(status=edit_record.STATUS_AGENT_FAILURE, reason="AGENT_ERROR")
+        self.assertIsNone(raw["gates"])
         raw["gates"] = None
         score = edit_scorer.score_run(raw)
         for name in edit_scorer.GATE_NAMES:
