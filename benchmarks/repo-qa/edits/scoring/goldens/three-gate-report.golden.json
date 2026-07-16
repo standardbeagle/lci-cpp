@@ -1,0 +1,1165 @@
+{
+  "description": "Hermetic golden for the Stage-3 three-gate edit scorer. Eight synthetic run records covering one fully-correct patch per arm, a BEHAVIOUR-ONLY patch (passes the tests, breaks the convention and the blast radius), a blast-radius escape, a convention miss, an agent failure with no gates, and a defective (non-discriminating) oracle. Every expected value below is hand-computed from the records, NOT captured from the scorer -- a golden regenerated from the code under test cannot catch that code being wrong.",
+  "expected": {
+    "_behaviour_only_trap": {
+      "cell": {
+        "arm": "baseline",
+        "seed": 7,
+        "task_id": "t1"
+      },
+      "matrix_cell": "TFF",
+      "note": "This patch makes the behaviour tests green. Reporting a behaviour-only rate would score the baseline arm 0.5; the three-gate headline scores it 0.0. The gap is the whole point of the metric."
+    },
+    "completeness": {
+      "missing_cells": 0,
+      "observed_cells": 8,
+      "passed": true,
+      "planned_cells": 8
+    },
+    "deltas": {
+      "all_three_gates_pass_rate": 0.75,
+      "behavior_rate": 0.5,
+      "blast_rate": 0.75,
+      "convention_rate": 0.25,
+      "input_tokens_mean": -3270.0,
+      "output_tokens_mean": -53.75,
+      "tool_calls_mean": -5.25,
+      "wall_clock_mean": -57.5
+    },
+    "failure_reasons": {
+      "baseline": {
+        "agent_failure": 1,
+        "harness_failure": 0,
+        "invalid_patch": 0,
+        "missing_cell": 0,
+        "oracle_failure": 1,
+        "patch_rejected": 2
+      },
+      "treatment": {
+        "agent_failure": 0,
+        "harness_failure": 0,
+        "invalid_patch": 0,
+        "missing_cell": 0,
+        "oracle_failure": 0,
+        "patch_rejected": 1
+      }
+    },
+    "gate_rates": {
+      "baseline": {
+        "behavior": 0.5,
+        "blast": 0.25,
+        "convention": 0.5
+      },
+      "treatment": {
+        "behavior": 1.0,
+        "blast": 1.0,
+        "convention": 0.75
+      }
+    },
+    "headline": {
+      "baseline": {
+        "all_pass": 0,
+        "observed": 4,
+        "planned": 4,
+        "rate": 0.0
+      },
+      "treatment": {
+        "all_pass": 3,
+        "observed": 4,
+        "planned": 4,
+        "rate": 0.75
+      }
+    },
+    "matrix": {
+      "baseline": {
+        "FFF": 1,
+        "FFT": 0,
+        "FTF": 0,
+        "FTT": 1,
+        "TFF": 1,
+        "TFT": 0,
+        "TTF": 1,
+        "TTT": 0
+      },
+      "treatment": {
+        "FFF": 0,
+        "FFT": 0,
+        "FTF": 0,
+        "FTT": 0,
+        "TFF": 0,
+        "TFT": 1,
+        "TTF": 0,
+        "TTT": 3
+      }
+    }
+  },
+  "planned": [
+    {
+      "arm": "baseline",
+      "seed": 7,
+      "task_id": "t1"
+    },
+    {
+      "arm": "treatment",
+      "seed": 7,
+      "task_id": "t1"
+    },
+    {
+      "arm": "baseline",
+      "seed": 7,
+      "task_id": "t2"
+    },
+    {
+      "arm": "treatment",
+      "seed": 7,
+      "task_id": "t2"
+    },
+    {
+      "arm": "baseline",
+      "seed": 7,
+      "task_id": "t3"
+    },
+    {
+      "arm": "treatment",
+      "seed": 7,
+      "task_id": "t3"
+    },
+    {
+      "arm": "baseline",
+      "seed": 7,
+      "task_id": "t4"
+    },
+    {
+      "arm": "treatment",
+      "seed": 7,
+      "task_id": "t4"
+    }
+  ],
+  "records": [
+    {
+      "arm": "treatment",
+      "corpus_id": "next.js",
+      "duration_seconds": 41.0,
+      "forge_version": "1",
+      "gates": {
+        "conformance": {
+          "anchors": [
+            {
+              "detail": "",
+              "evidence": "",
+              "lines": [
+                12
+              ],
+              "passed": true,
+              "path": "src/a.ts",
+              "reason": "CONFORMS"
+            }
+          ],
+          "diagnostic": "synthetic",
+          "kind": "structural",
+          "passed": true,
+          "rule_id": "rule-1",
+          "schema": "conformance_gate_v1",
+          "task_id": "t1"
+        },
+        "oracle": {
+          "api_impact": {
+            "detail": "",
+            "escaped_refs": [],
+            "passed": true,
+            "reason": "NO_ESCAPE",
+            "schema": "api_impact_v1",
+            "symbols": []
+          },
+          "changed_path": {
+            "allow": [
+              "src/*.ts"
+            ],
+            "changed": [
+              "src/a.ts"
+            ],
+            "detail": "",
+            "max_files": null,
+            "out_of_scope": [],
+            "passed": true,
+            "reason": "WITHIN_SCOPE",
+            "schema": "changed_path_v1"
+          },
+          "diagnostic": "synthetic",
+          "discrimination": {
+            "detail": "",
+            "passed": true,
+            "patched": {
+              "argv": [
+                "true"
+              ],
+              "exit_code": 0,
+              "observed": "green",
+              "reason": null,
+              "stderr_tail": "",
+              "stdout_tail": ""
+            },
+            "pristine": {
+              "argv": [
+                "true"
+              ],
+              "exit_code": 1,
+              "observed": "red",
+              "reason": null,
+              "stderr_tail": "",
+              "stdout_tail": ""
+            },
+            "reason": "DISCRIMINATES",
+            "schema": "discrimination_v1"
+          },
+          "existing_suite": {
+            "detail": "",
+            "passed": true,
+            "reason": "SUITE_GREEN",
+            "run": {
+              "argv": [
+                "true"
+              ],
+              "exit_code": 0,
+              "observed": "green",
+              "reason": null,
+              "stderr_tail": "",
+              "stdout_tail": ""
+            },
+            "schema": "existing_suite_v1"
+          },
+          "passed": true,
+          "schema": "oracle_gate_v1",
+          "task_id": "t1"
+        }
+      },
+      "mode": "edit",
+      "model": "test-model",
+      "patch_hash": "pppppppppppppppp",
+      "reason": "ALL_GREEN",
+      "run_key": "t1::treatment::seed-7",
+      "seed": 7,
+      "source_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "status": "edit_passed",
+      "task_digest": "dddddddddddddddd",
+      "task_id": "t1",
+      "task_schema": "edit_task_v1",
+      "token_usage": {
+        "input": 900,
+        "output": 120
+      },
+      "tool_calls": [
+        {
+          "arguments": {},
+          "name": "n"
+        },
+        {
+          "arguments": {},
+          "name": "n"
+        },
+        {
+          "arguments": {},
+          "name": "n"
+        },
+        {
+          "arguments": {},
+          "name": "n"
+        }
+      ]
+    },
+    {
+      "arm": "baseline",
+      "corpus_id": "next.js",
+      "duration_seconds": 96.0,
+      "forge_version": "1",
+      "gates": {
+        "conformance": {
+          "anchors": [
+            {
+              "detail": "",
+              "evidence": "",
+              "lines": [
+                12
+              ],
+              "passed": false,
+              "path": "src/a.ts",
+              "reason": "MATCH_ABSENT"
+            }
+          ],
+          "diagnostic": "synthetic",
+          "kind": "structural",
+          "passed": false,
+          "rule_id": "rule-1",
+          "schema": "conformance_gate_v1",
+          "task_id": "t1"
+        },
+        "oracle": {
+          "api_impact": {
+            "detail": "",
+            "escaped_refs": [],
+            "passed": true,
+            "reason": "NO_ESCAPE",
+            "schema": "api_impact_v1",
+            "symbols": []
+          },
+          "changed_path": {
+            "allow": [
+              "src/*.ts"
+            ],
+            "changed": [
+              "src/a.ts"
+            ],
+            "detail": "",
+            "max_files": null,
+            "out_of_scope": [],
+            "passed": false,
+            "reason": "PATH_OUT_OF_SCOPE",
+            "schema": "changed_path_v1"
+          },
+          "diagnostic": "synthetic",
+          "discrimination": {
+            "detail": "",
+            "passed": true,
+            "patched": {
+              "argv": [
+                "true"
+              ],
+              "exit_code": 0,
+              "observed": "green",
+              "reason": null,
+              "stderr_tail": "",
+              "stdout_tail": ""
+            },
+            "pristine": {
+              "argv": [
+                "true"
+              ],
+              "exit_code": 1,
+              "observed": "red",
+              "reason": null,
+              "stderr_tail": "",
+              "stdout_tail": ""
+            },
+            "reason": "DISCRIMINATES",
+            "schema": "discrimination_v1"
+          },
+          "existing_suite": {
+            "detail": "",
+            "passed": true,
+            "reason": "SUITE_GREEN",
+            "run": {
+              "argv": [
+                "true"
+              ],
+              "exit_code": 0,
+              "observed": "green",
+              "reason": null,
+              "stderr_tail": "",
+              "stdout_tail": ""
+            },
+            "schema": "existing_suite_v1"
+          },
+          "passed": false,
+          "schema": "oracle_gate_v1",
+          "task_id": "t1"
+        }
+      },
+      "mode": "edit",
+      "model": "test-model",
+      "patch_hash": "pppppppppppppppp",
+      "reason": "GATE_FAILED",
+      "run_key": "t1::baseline::seed-7",
+      "seed": 7,
+      "source_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "status": "edit_gate_failed",
+      "task_digest": "dddddddddddddddd",
+      "task_id": "t1",
+      "task_schema": "edit_task_v1",
+      "token_usage": {
+        "input": 5200,
+        "output": 260
+      },
+      "tool_calls": [
+        {
+          "arguments": {},
+          "name": "n"
+        },
+        {
+          "arguments": {},
+          "name": "n"
+        },
+        {
+          "arguments": {},
+          "name": "n"
+        },
+        {
+          "arguments": {},
+          "name": "n"
+        },
+        {
+          "arguments": {},
+          "name": "n"
+        },
+        {
+          "arguments": {},
+          "name": "n"
+        },
+        {
+          "arguments": {},
+          "name": "n"
+        },
+        {
+          "arguments": {},
+          "name": "n"
+        },
+        {
+          "arguments": {},
+          "name": "n"
+        },
+        {
+          "arguments": {},
+          "name": "n"
+        },
+        {
+          "arguments": {},
+          "name": "n"
+        }
+      ]
+    },
+    {
+      "arm": "treatment",
+      "corpus_id": "next.js",
+      "duration_seconds": 33.0,
+      "forge_version": "1",
+      "gates": {
+        "conformance": {
+          "anchors": [
+            {
+              "detail": "",
+              "evidence": "",
+              "lines": [
+                12
+              ],
+              "passed": true,
+              "path": "src/a.ts",
+              "reason": "CONFORMS"
+            }
+          ],
+          "diagnostic": "synthetic",
+          "kind": "structural",
+          "passed": true,
+          "rule_id": "rule-1",
+          "schema": "conformance_gate_v1",
+          "task_id": "t1"
+        },
+        "oracle": {
+          "api_impact": {
+            "detail": "",
+            "escaped_refs": [],
+            "passed": true,
+            "reason": "NO_ESCAPE",
+            "schema": "api_impact_v1",
+            "symbols": []
+          },
+          "changed_path": {
+            "allow": [
+              "src/*.ts"
+            ],
+            "changed": [
+              "src/a.ts"
+            ],
+            "detail": "",
+            "max_files": null,
+            "out_of_scope": [],
+            "passed": true,
+            "reason": "WITHIN_SCOPE",
+            "schema": "changed_path_v1"
+          },
+          "diagnostic": "synthetic",
+          "discrimination": {
+            "detail": "",
+            "passed": true,
+            "patched": {
+              "argv": [
+                "true"
+              ],
+              "exit_code": 0,
+              "observed": "green",
+              "reason": null,
+              "stderr_tail": "",
+              "stdout_tail": ""
+            },
+            "pristine": {
+              "argv": [
+                "true"
+              ],
+              "exit_code": 1,
+              "observed": "red",
+              "reason": null,
+              "stderr_tail": "",
+              "stdout_tail": ""
+            },
+            "reason": "DISCRIMINATES",
+            "schema": "discrimination_v1"
+          },
+          "existing_suite": {
+            "detail": "",
+            "passed": true,
+            "reason": "SUITE_GREEN",
+            "run": {
+              "argv": [
+                "true"
+              ],
+              "exit_code": 0,
+              "observed": "green",
+              "reason": null,
+              "stderr_tail": "",
+              "stdout_tail": ""
+            },
+            "schema": "existing_suite_v1"
+          },
+          "passed": true,
+          "schema": "oracle_gate_v1",
+          "task_id": "t1"
+        }
+      },
+      "mode": "edit",
+      "model": "test-model",
+      "patch_hash": "pppppppppppppppp",
+      "reason": "ALL_GREEN",
+      "run_key": "t2::treatment::seed-7",
+      "seed": 7,
+      "source_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "status": "edit_passed",
+      "task_digest": "dddddddddddddddd",
+      "task_id": "t2",
+      "task_schema": "edit_task_v1",
+      "token_usage": {
+        "input": 780,
+        "output": 95
+      },
+      "tool_calls": [
+        {
+          "arguments": {},
+          "name": "n"
+        },
+        {
+          "arguments": {},
+          "name": "n"
+        },
+        {
+          "arguments": {},
+          "name": "n"
+        }
+      ]
+    },
+    {
+      "arm": "baseline",
+      "corpus_id": "next.js",
+      "duration_seconds": 88.0,
+      "forge_version": "1",
+      "gates": {
+        "conformance": {
+          "anchors": [
+            {
+              "detail": "",
+              "evidence": "",
+              "lines": [
+                12
+              ],
+              "passed": true,
+              "path": "src/a.ts",
+              "reason": "CONFORMS"
+            }
+          ],
+          "diagnostic": "synthetic",
+          "kind": "structural",
+          "passed": true,
+          "rule_id": "rule-1",
+          "schema": "conformance_gate_v1",
+          "task_id": "t2"
+        },
+        "oracle": {
+          "api_impact": {
+            "detail": "",
+            "escaped_refs": [],
+            "passed": false,
+            "reason": "API_IMPACT_ESCAPE",
+            "schema": "api_impact_v1",
+            "symbols": []
+          },
+          "changed_path": {
+            "allow": [
+              "src/*.ts"
+            ],
+            "changed": [
+              "src/a.ts"
+            ],
+            "detail": "",
+            "max_files": null,
+            "out_of_scope": [],
+            "passed": true,
+            "reason": "WITHIN_SCOPE",
+            "schema": "changed_path_v1"
+          },
+          "diagnostic": "synthetic",
+          "discrimination": {
+            "detail": "",
+            "passed": true,
+            "patched": {
+              "argv": [
+                "true"
+              ],
+              "exit_code": 0,
+              "observed": "green",
+              "reason": null,
+              "stderr_tail": "",
+              "stdout_tail": ""
+            },
+            "pristine": {
+              "argv": [
+                "true"
+              ],
+              "exit_code": 1,
+              "observed": "red",
+              "reason": null,
+              "stderr_tail": "",
+              "stdout_tail": ""
+            },
+            "reason": "DISCRIMINATES",
+            "schema": "discrimination_v1"
+          },
+          "existing_suite": {
+            "detail": "",
+            "passed": true,
+            "reason": "SUITE_GREEN",
+            "run": {
+              "argv": [
+                "true"
+              ],
+              "exit_code": 0,
+              "observed": "green",
+              "reason": null,
+              "stderr_tail": "",
+              "stdout_tail": ""
+            },
+            "schema": "existing_suite_v1"
+          },
+          "passed": false,
+          "schema": "oracle_gate_v1",
+          "task_id": "t2"
+        }
+      },
+      "mode": "edit",
+      "model": "test-model",
+      "patch_hash": "pppppppppppppppp",
+      "reason": "GATE_FAILED",
+      "run_key": "t2::baseline::seed-7",
+      "seed": 7,
+      "source_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "status": "edit_gate_failed",
+      "task_digest": "dddddddddddddddd",
+      "task_id": "t2",
+      "task_schema": "edit_task_v1",
+      "token_usage": {
+        "input": 4100,
+        "output": 210
+      },
+      "tool_calls": [
+        {
+          "arguments": {},
+          "name": "n"
+        },
+        {
+          "arguments": {},
+          "name": "n"
+        },
+        {
+          "arguments": {},
+          "name": "n"
+        },
+        {
+          "arguments": {},
+          "name": "n"
+        },
+        {
+          "arguments": {},
+          "name": "n"
+        },
+        {
+          "arguments": {},
+          "name": "n"
+        },
+        {
+          "arguments": {},
+          "name": "n"
+        },
+        {
+          "arguments": {},
+          "name": "n"
+        },
+        {
+          "arguments": {},
+          "name": "n"
+        }
+      ]
+    },
+    {
+      "arm": "treatment",
+      "corpus_id": "next.js",
+      "duration_seconds": 47.0,
+      "forge_version": "1",
+      "gates": {
+        "conformance": {
+          "anchors": [
+            {
+              "detail": "",
+              "evidence": "",
+              "lines": [
+                12
+              ],
+              "passed": false,
+              "path": "src/a.ts",
+              "reason": "MATCH_ABSENT"
+            }
+          ],
+          "diagnostic": "synthetic",
+          "kind": "structural",
+          "passed": false,
+          "rule_id": "rule-1",
+          "schema": "conformance_gate_v1",
+          "task_id": "t3"
+        },
+        "oracle": {
+          "api_impact": {
+            "detail": "",
+            "escaped_refs": [],
+            "passed": true,
+            "reason": "NO_ESCAPE",
+            "schema": "api_impact_v1",
+            "symbols": []
+          },
+          "changed_path": {
+            "allow": [
+              "src/*.ts"
+            ],
+            "changed": [
+              "src/a.ts"
+            ],
+            "detail": "",
+            "max_files": null,
+            "out_of_scope": [],
+            "passed": true,
+            "reason": "WITHIN_SCOPE",
+            "schema": "changed_path_v1"
+          },
+          "diagnostic": "synthetic",
+          "discrimination": {
+            "detail": "",
+            "passed": true,
+            "patched": {
+              "argv": [
+                "true"
+              ],
+              "exit_code": 0,
+              "observed": "green",
+              "reason": null,
+              "stderr_tail": "",
+              "stdout_tail": ""
+            },
+            "pristine": {
+              "argv": [
+                "true"
+              ],
+              "exit_code": 1,
+              "observed": "red",
+              "reason": null,
+              "stderr_tail": "",
+              "stdout_tail": ""
+            },
+            "reason": "DISCRIMINATES",
+            "schema": "discrimination_v1"
+          },
+          "existing_suite": {
+            "detail": "",
+            "passed": true,
+            "reason": "SUITE_GREEN",
+            "run": {
+              "argv": [
+                "true"
+              ],
+              "exit_code": 0,
+              "observed": "green",
+              "reason": null,
+              "stderr_tail": "",
+              "stdout_tail": ""
+            },
+            "schema": "existing_suite_v1"
+          },
+          "passed": true,
+          "schema": "oracle_gate_v1",
+          "task_id": "t3"
+        }
+      },
+      "mode": "edit",
+      "model": "test-model",
+      "patch_hash": "pppppppppppppppp",
+      "reason": "GATE_FAILED",
+      "run_key": "t3::treatment::seed-7",
+      "seed": 7,
+      "source_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "status": "edit_gate_failed",
+      "task_digest": "dddddddddddddddd",
+      "task_id": "t3",
+      "task_schema": "edit_task_v1",
+      "token_usage": {
+        "input": 1100,
+        "output": 140
+      },
+      "tool_calls": [
+        {
+          "arguments": {},
+          "name": "n"
+        },
+        {
+          "arguments": {},
+          "name": "n"
+        },
+        {
+          "arguments": {},
+          "name": "n"
+        },
+        {
+          "arguments": {},
+          "name": "n"
+        },
+        {
+          "arguments": {},
+          "name": "n"
+        }
+      ]
+    },
+    {
+      "arm": "baseline",
+      "corpus_id": "next.js",
+      "duration_seconds": 120.0,
+      "forge_version": "1",
+      "gates": null,
+      "mode": "edit",
+      "model": "test-model",
+      "patch_hash": "pppppppppppppppp",
+      "reason": "AGENT_ERROR",
+      "run_key": "t3::baseline::seed-7",
+      "seed": 7,
+      "source_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "status": "edit_agent_failure",
+      "task_digest": "dddddddddddddddd",
+      "task_id": "t3",
+      "task_schema": "edit_task_v1",
+      "token_usage": {
+        "input": 3300,
+        "output": 0
+      },
+      "tool_calls": [
+        {
+          "arguments": {},
+          "name": "n"
+        },
+        {
+          "arguments": {},
+          "name": "n"
+        },
+        {
+          "arguments": {},
+          "name": "n"
+        },
+        {
+          "arguments": {},
+          "name": "n"
+        },
+        {
+          "arguments": {},
+          "name": "n"
+        },
+        {
+          "arguments": {},
+          "name": "n"
+        },
+        {
+          "arguments": {},
+          "name": "n"
+        }
+      ]
+    },
+    {
+      "arm": "treatment",
+      "corpus_id": "next.js",
+      "duration_seconds": 28.0,
+      "forge_version": "1",
+      "gates": {
+        "conformance": {
+          "anchors": [
+            {
+              "detail": "",
+              "evidence": "",
+              "lines": [
+                12
+              ],
+              "passed": true,
+              "path": "src/a.ts",
+              "reason": "CONFORMS"
+            }
+          ],
+          "diagnostic": "synthetic",
+          "kind": "structural",
+          "passed": true,
+          "rule_id": "rule-1",
+          "schema": "conformance_gate_v1",
+          "task_id": "t1"
+        },
+        "oracle": {
+          "api_impact": {
+            "detail": "",
+            "escaped_refs": [],
+            "passed": true,
+            "reason": "NO_ESCAPE",
+            "schema": "api_impact_v1",
+            "symbols": []
+          },
+          "changed_path": {
+            "allow": [
+              "src/*.ts"
+            ],
+            "changed": [
+              "src/a.ts"
+            ],
+            "detail": "",
+            "max_files": null,
+            "out_of_scope": [],
+            "passed": true,
+            "reason": "WITHIN_SCOPE",
+            "schema": "changed_path_v1"
+          },
+          "diagnostic": "synthetic",
+          "discrimination": {
+            "detail": "",
+            "passed": true,
+            "patched": {
+              "argv": [
+                "true"
+              ],
+              "exit_code": 0,
+              "observed": "green",
+              "reason": null,
+              "stderr_tail": "",
+              "stdout_tail": ""
+            },
+            "pristine": {
+              "argv": [
+                "true"
+              ],
+              "exit_code": 1,
+              "observed": "red",
+              "reason": null,
+              "stderr_tail": "",
+              "stdout_tail": ""
+            },
+            "reason": "DISCRIMINATES",
+            "schema": "discrimination_v1"
+          },
+          "existing_suite": {
+            "detail": "",
+            "passed": true,
+            "reason": "SUITE_GREEN",
+            "run": {
+              "argv": [
+                "true"
+              ],
+              "exit_code": 0,
+              "observed": "green",
+              "reason": null,
+              "stderr_tail": "",
+              "stdout_tail": ""
+            },
+            "schema": "existing_suite_v1"
+          },
+          "passed": true,
+          "schema": "oracle_gate_v1",
+          "task_id": "t1"
+        }
+      },
+      "mode": "edit",
+      "model": "test-model",
+      "patch_hash": "pppppppppppppppp",
+      "reason": "ALL_GREEN",
+      "run_key": "t4::treatment::seed-7",
+      "seed": 7,
+      "source_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "status": "edit_passed",
+      "task_digest": "dddddddddddddddd",
+      "task_id": "t4",
+      "task_schema": "edit_task_v1",
+      "token_usage": {
+        "input": 640,
+        "output": 80
+      },
+      "tool_calls": [
+        {
+          "arguments": {},
+          "name": "n"
+        },
+        {
+          "arguments": {},
+          "name": "n"
+        }
+      ]
+    },
+    {
+      "arm": "baseline",
+      "corpus_id": "next.js",
+      "duration_seconds": 75.0,
+      "forge_version": "1",
+      "gates": {
+        "conformance": {
+          "anchors": [
+            {
+              "detail": "",
+              "evidence": "",
+              "lines": [
+                12
+              ],
+              "passed": true,
+              "path": "src/a.ts",
+              "reason": "CONFORMS"
+            }
+          ],
+          "diagnostic": "synthetic",
+          "kind": "structural",
+          "passed": true,
+          "rule_id": "rule-1",
+          "schema": "conformance_gate_v1",
+          "task_id": "t4"
+        },
+        "oracle": {
+          "api_impact": {
+            "detail": "",
+            "escaped_refs": [],
+            "passed": true,
+            "reason": "NO_ESCAPE",
+            "schema": "api_impact_v1",
+            "symbols": []
+          },
+          "changed_path": {
+            "allow": [
+              "src/*.ts"
+            ],
+            "changed": [
+              "src/a.ts"
+            ],
+            "detail": "",
+            "max_files": null,
+            "out_of_scope": [],
+            "passed": true,
+            "reason": "WITHIN_SCOPE",
+            "schema": "changed_path_v1"
+          },
+          "diagnostic": "synthetic",
+          "discrimination": {
+            "detail": "",
+            "passed": false,
+            "patched": {
+              "argv": [
+                "true"
+              ],
+              "exit_code": 0,
+              "observed": "green",
+              "reason": null,
+              "stderr_tail": "",
+              "stdout_tail": ""
+            },
+            "pristine": {
+              "argv": [
+                "true"
+              ],
+              "exit_code": 1,
+              "observed": "red",
+              "reason": null,
+              "stderr_tail": "",
+              "stdout_tail": ""
+            },
+            "reason": "NON_DISCRIMINATING",
+            "schema": "discrimination_v1"
+          },
+          "existing_suite": {
+            "detail": "",
+            "passed": true,
+            "reason": "SUITE_GREEN",
+            "run": {
+              "argv": [
+                "true"
+              ],
+              "exit_code": 0,
+              "observed": "green",
+              "reason": null,
+              "stderr_tail": "",
+              "stdout_tail": ""
+            },
+            "schema": "existing_suite_v1"
+          },
+          "passed": false,
+          "schema": "oracle_gate_v1",
+          "task_id": "t4"
+        }
+      },
+      "mode": "edit",
+      "model": "test-model",
+      "patch_hash": "pppppppppppppppp",
+      "reason": "GATE_FAILED",
+      "run_key": "t4::baseline::seed-7",
+      "seed": 7,
+      "source_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "status": "edit_gate_failed",
+      "task_digest": "dddddddddddddddd",
+      "task_id": "t4",
+      "task_schema": "edit_task_v1",
+      "token_usage": {
+        "input": 3900,
+        "output": 180
+      },
+      "tool_calls": [
+        {
+          "arguments": {},
+          "name": "n"
+        },
+        {
+          "arguments": {},
+          "name": "n"
+        },
+        {
+          "arguments": {},
+          "name": "n"
+        },
+        {
+          "arguments": {},
+          "name": "n"
+        },
+        {
+          "arguments": {},
+          "name": "n"
+        },
+        {
+          "arguments": {},
+          "name": "n"
+        },
+        {
+          "arguments": {},
+          "name": "n"
+        },
+        {
+          "arguments": {},
+          "name": "n"
+        }
+      ]
+    }
+  ]
+}

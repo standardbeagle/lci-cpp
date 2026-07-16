@@ -712,5 +712,130 @@ class Determinism(unittest.TestCase):
         self.assertEqual(keys, sorted(keys))
 
 
+# ---------------------------------------------------------------------------
+# criterion 5 -- goldens
+# ---------------------------------------------------------------------------
+
+GOLDEN_PATH = os.path.join(
+    BENCH_ROOT, "edits", "scoring", "goldens", "three-gate-report.golden.json"
+)
+
+
+def _reference_headline(records, plan, arm):
+    """Recompute the headline from the RAW records, independently of the scorer.
+
+    Deliberately duplicates the conjunction by reading the gate outcomes
+    straight out of the JSON: it shares no code with edit_scorer, so if the
+    scorer's derivation drifts (a dropped sub-gate, a missing cell quietly
+    leaving the denominator) this disagrees instead of moving with it. The
+    denominator is the plan; an absent record is simply not a pass.
+    """
+    by_cell = {(r["task_id"], r["arm"], r["seed"]): r for r in records}
+    cells = [c for c in plan if c["arm"] == arm]
+    passed = 0
+    for cell in cells:
+        rec = by_cell.get((cell["task_id"], cell["arm"], cell["seed"]))
+        gate_outcomes = (rec or {}).get("gates")
+        if not gate_outcomes:
+            continue
+        oracle = gate_outcomes.get("oracle")
+        conformance = gate_outcomes.get("conformance")
+        if not oracle or not conformance:
+            continue
+        if (
+            oracle["existing_suite"]["passed"]
+            and oracle["discrimination"]["passed"]
+            and oracle["changed_path"]["passed"]
+            and oracle["api_impact"]["passed"]
+            and conformance["passed"]
+        ):
+            passed += 1
+    return passed, len(cells), (passed / len(cells) if cells else None)
+
+
+class GoldenReport(unittest.TestCase):
+    def setUp(self):
+        with open(GOLDEN_PATH, encoding="utf-8") as handle:
+            self.golden = json.load(handle)
+        self.plan = self.golden["planned"]
+        self.records = self.golden["records"]
+        self.report = edit_scorer.aggregate(
+            [edit_scorer.score_run(r) for r in self.records], self.plan
+        )
+
+    def test_golden_report_matches_the_hand_pinned_expectations(self):
+        expected = self.golden["expected"]
+        edit_scorer.validate_aggregate(self.report)
+        for field, value in expected["completeness"].items():
+            self.assertEqual(self.report["completeness"][field], value, msg=field)
+        for arm, want in expected["headline"].items():
+            self.assertEqual(self.report["headline"]["arms"][arm], want, msg=arm)
+        for arm, want in expected["gate_rates"].items():
+            got = {
+                name: self.report["arms"][arm]["gates"][name]["rate"]
+                for name in edit_scorer.GATE_NAMES
+            }
+            self.assertEqual(got, want, msg=arm)
+        for arm, want in expected["matrix"].items():
+            self.assertEqual(self.report["arms"][arm]["matrix"], want, msg=arm)
+        for arm, want in expected["failure_reasons"].items():
+            self.assertEqual(
+                self.report["arms"][arm]["failure_reasons"], want, msg=arm
+            )
+        self.assertEqual(self.report["deltas"], expected["deltas"])
+
+    def test_golden_headline_recomputes_independently_from_the_raw_records(self):
+        """The headline is re-derived from the records by a separate path --
+        never read back from a stored value."""
+        for arm in ("treatment", "baseline"):
+            passed, planned_n, rate = _reference_headline(self.records, self.plan, arm)
+            headline = self.report["headline"]["arms"][arm]
+            self.assertEqual(headline["all_pass"], passed, msg=arm)
+            self.assertEqual(headline["planned"], planned_n, msg=arm)
+            self.assertEqual(headline["rate"], rate, msg=arm)
+
+    def test_golden_behaviour_only_patch_does_NOT_score_as_fully_correct(self):
+        """The load-bearing golden: a patch that makes the tests green while
+        breaking the convention and the blast radius is not a win."""
+        trap = self.golden["expected"]["_behaviour_only_trap"]
+        cell = trap["cell"]
+        raw = next(
+            r
+            for r in self.records
+            if (r["task_id"], r["arm"], r["seed"])
+            == (cell["task_id"], cell["arm"], cell["seed"])
+        )
+        score = edit_scorer.score_run(raw)
+
+        # it really does pass behaviour...
+        self.assertTrue(score["gates"]["behavior"]["passed"])
+        # ...and is still not fully correct
+        self.assertFalse(score["all_gates_passed"])
+        self.assertEqual(score["matrix_cell"], trap["matrix_cell"])
+
+        # and it cannot reach the headline through the aggregate either
+        baseline = self.report["arms"]["baseline"]
+        self.assertEqual(self.report["headline"]["arms"]["baseline"]["rate"], 0.0)
+        self.assertEqual(baseline["matrix"]["TFF"], 1)
+
+        # the gap this metric exists to expose: a behaviour-only rate would have
+        # reported this arm at 0.5 rather than 0.0
+        self.assertEqual(baseline["gates"]["behavior"]["rate"], 0.5)
+        self.assertGreater(
+            baseline["gates"]["behavior"]["rate"],
+            self.report["headline"]["arms"]["baseline"]["rate"],
+        )
+
+    def test_golden_report_is_byte_stable_across_record_order(self):
+        shuffled = list(reversed(self.records))
+        again = edit_scorer.aggregate(
+            [edit_scorer.score_run(r) for r in shuffled], list(reversed(self.plan))
+        )
+        self.assertEqual(
+            json.dumps(self.report, sort_keys=True),
+            json.dumps(again, sort_keys=True),
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
