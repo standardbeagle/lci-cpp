@@ -220,6 +220,172 @@ def _changed_path_outcome(passed, reason, changed, out_of_scope, allow, max_file
     }
 
 
+# ---------------------------------------------------------------------------
+# bounded, fail-closed command runner
+# ---------------------------------------------------------------------------
+
+
+def _tail(text):
+    """Keep the last _MAX_TAIL bytes so a flood cannot blow the outcome up."""
+    if text is None:
+        return ""
+    if len(text) <= _MAX_TAIL:
+        return text
+    return text[-_MAX_TAIL:]
+
+
+def _command_run(argv, exit_code, reason, stdout, stderr):
+    if reason is not None:
+        observed = "error"
+    elif exit_code == 0:
+        observed = "green"
+    else:
+        observed = "red"
+    return {
+        "argv": list(argv),
+        "exit_code": exit_code,
+        "reason": reason,
+        "observed": observed,
+        "stdout_tail": _tail(stdout),
+        "stderr_tail": _tail(stderr),
+    }
+
+
+def run_command(argv, cwd, timeout=DEFAULT_TIMEOUT):
+    """Run one argv, returning a bounded command-run dict. Fails closed.
+
+    A missing binary -> COMMAND_NOT_FOUND, a timeout -> TIMEOUT, any other OS
+    error -> TOOL_FAILURE. Captured stdout/stderr are always tail-bounded, so a
+    runaway command cannot produce an unbounded outcome.
+    """
+    if not argv:
+        return _command_run([], None, Reason.COMMAND_ABSENT, "", "no argv provided")
+    try:
+        proc = subprocess.run(
+            list(argv),
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except FileNotFoundError as err:
+        return _command_run(argv, None, Reason.COMMAND_NOT_FOUND, "", str(err))
+    except subprocess.TimeoutExpired as err:
+        return _command_run(
+            argv, None, Reason.TIMEOUT,
+            err.stdout if isinstance(err.stdout, str) else "",
+            f"timed out after {timeout}s",
+        )
+    except OSError as err:  # permission denied, exec format, etc.
+        return _command_run(argv, None, Reason.TOOL_FAILURE, "", str(err))
+    return _command_run(argv, proc.returncode, None, proc.stdout, proc.stderr)
+
+
+# ---------------------------------------------------------------------------
+# throwaway worktree + oracle-patch application (criterion 4)
+# ---------------------------------------------------------------------------
+
+
+@contextlib.contextmanager
+def materialized_worktree(source_tree_dir, workspace_root=None):
+    """Copy the pristine corpus tree into a throwaway worktree and yield it.
+
+    The copy is removed on BOTH normal exit and exception, so the source corpora
+    are never mutated and no throwaway tree leaks. Reads the source only.
+    """
+    holder = tempfile.mkdtemp(prefix="edit-oracle-", dir=workspace_root)
+    dest = os.path.join(holder, "tree")
+    try:
+        shutil.copytree(source_tree_dir, dest)
+        yield dest
+    finally:
+        shutil.rmtree(holder, ignore_errors=True)
+
+
+def patch_changed_paths(oracle_patch):
+    """The set of relative paths an oracle patch touches (no disk access)."""
+    return sorted(oracle_patch)
+
+
+def apply_patch(tree_dir, oracle_patch):
+    """Apply an oracle patch (``{relpath: new_text_or_None}``) to a worktree.
+
+    ``None`` deletes the file; a string (over)writes it. Refuses any path that
+    escapes the worktree root, guaranteeing the source tree outside the copy is
+    never written. Returns the sorted set of touched paths.
+    """
+    root = os.path.abspath(tree_dir)
+    for rel, content in oracle_patch.items():
+        dest = os.path.abspath(os.path.join(root, rel))
+        if dest != root and not dest.startswith(root + os.sep):
+            raise ValueError(f"oracle patch path escapes the worktree: {rel!r}")
+        if content is None:
+            if os.path.isfile(dest):
+                os.remove(dest)
+            continue
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        with open(dest, "w", encoding="utf-8") as handle:
+            handle.write(content)
+    return patch_changed_paths(oracle_patch)
+
+
+# ---------------------------------------------------------------------------
+# red -> green discrimination classifier
+# ---------------------------------------------------------------------------
+
+
+def _discrimination_outcome(passed, reason, pristine, patched, detail):
+    return {
+        "schema": DISCRIMINATION_SCHEMA,
+        "passed": passed,
+        "reason": reason,
+        "detail": detail,
+        "pristine": pristine,
+        "patched": patched,
+    }
+
+
+def discriminate(pristine, patched):
+    """Classify a behaviour command's pristine vs oracle-patched runs.
+
+    The only PASS is RED-pristine -> GREEN-patched (Reason.DISCRIMINATES). A run
+    that failed closed (timeout/missing/tool error) makes the pair RUN_ERROR;
+    passing both or failing both is NON_DISCRIMINATING; a pristine that already
+    passes and then regresses is WRONG_DIRECTION. Every non-passing case is a
+    hard reject -- a test that discriminates nothing must never be accepted.
+    """
+    for label, run in (("pristine", pristine), ("patched", patched)):
+        if run["reason"] is not None:
+            return _discrimination_outcome(
+                False, Reason.RUN_ERROR, pristine, patched,
+                f"{label} run failed closed: {run['reason']}",
+            )
+    pre_green = pristine["exit_code"] == 0
+    post_green = patched["exit_code"] == 0
+    if pre_green and post_green:
+        return _discrimination_outcome(
+            False, Reason.NON_DISCRIMINATING, pristine, patched,
+            "behaviour passes on BOTH pristine and patched trees "
+            "(discriminates nothing)",
+        )
+    if not pre_green and not post_green:
+        return _discrimination_outcome(
+            False, Reason.NON_DISCRIMINATING, pristine, patched,
+            "behaviour fails on BOTH pristine and patched trees "
+            "(patch does not make it pass)",
+        )
+    if pre_green and not post_green:
+        return _discrimination_outcome(
+            False, Reason.WRONG_DIRECTION, pristine, patched,
+            "behaviour passes pristine and FAILS patched "
+            "(wrong direction: the patch regresses it)",
+        )
+    return _discrimination_outcome(
+        True, Reason.DISCRIMINATES, pristine, patched,
+        "behaviour is RED pristine and GREEN patched (the edit discriminates)",
+    )
+
+
 def to_json(outcome):
     """Byte-stable rendering of any gate outcome (deterministic key order)."""
     return json.dumps(outcome, sort_keys=True, ensure_ascii=True, indent=2)

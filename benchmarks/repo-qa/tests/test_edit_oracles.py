@@ -103,5 +103,90 @@ class ChangedPathTest(unittest.TestCase):
         self.assertEqual(out["changed"], ["apis/a.go", "apis/z.go"])
 
 
+# ---------------------------------------------------------------------------
+# discrimination classifier (criteria 1, 2)
+# ---------------------------------------------------------------------------
+
+
+def _run(exit_code=0, reason=None):
+    return gate._command_run(["t"], exit_code, reason, "", "")
+
+
+class DiscriminationClassifierTest(unittest.TestCase):
+    def test_red_pristine_green_patched_discriminates(self):
+        out = gate.discriminate(_run(exit_code=1), _run(exit_code=0))
+        self.assertTrue(out["passed"], msg=out["detail"])
+        self.assertEqual(out["reason"], gate.Reason.DISCRIMINATES)
+
+    def test_both_green_is_non_discriminating(self):
+        out = gate.discriminate(_run(exit_code=0), _run(exit_code=0))
+        self.assertFalse(out["passed"])
+        self.assertEqual(out["reason"], gate.Reason.NON_DISCRIMINATING)
+
+    def test_both_red_is_non_discriminating(self):
+        out = gate.discriminate(_run(exit_code=1), _run(exit_code=1))
+        self.assertFalse(out["passed"])
+        self.assertEqual(out["reason"], gate.Reason.NON_DISCRIMINATING)
+
+    def test_green_pristine_red_patched_is_wrong_direction(self):
+        out = gate.discriminate(_run(exit_code=0), _run(exit_code=1))
+        self.assertFalse(out["passed"])
+        self.assertEqual(out["reason"], gate.Reason.WRONG_DIRECTION)
+
+    def test_failed_closed_run_makes_pair_run_error(self):
+        out = gate.discriminate(
+            _run(reason=gate.Reason.TIMEOUT), _run(exit_code=0)
+        )
+        self.assertFalse(out["passed"])
+        self.assertEqual(out["reason"], gate.Reason.RUN_ERROR)
+
+
+# ---------------------------------------------------------------------------
+# fail-closed command runner (criterion 3)
+# ---------------------------------------------------------------------------
+
+
+class CommandRunnerTest(unittest.TestCase):
+    def test_clean_exit_zero_is_green(self):
+        out = gate.run_command([sys.executable, "-c", "pass"], cwd=None)
+        self.assertIsNone(out["reason"])
+        self.assertEqual(out["exit_code"], 0)
+        self.assertEqual(out["observed"], "green")
+
+    def test_nonzero_exit_is_red(self):
+        out = gate.run_command(
+            [sys.executable, "-c", "import sys; sys.exit(3)"], cwd=None
+        )
+        self.assertIsNone(out["reason"])
+        self.assertEqual(out["exit_code"], 3)
+        self.assertEqual(out["observed"], "red")
+
+    def test_missing_command_fails_closed(self):
+        out = gate.run_command(["definitely-not-a-real-binary-xyz"], cwd=None)
+        self.assertEqual(out["reason"], gate.Reason.COMMAND_NOT_FOUND)
+        self.assertIsNone(out["exit_code"])
+        self.assertEqual(out["observed"], "error")
+
+    def test_timeout_fails_closed(self):
+        out = gate.run_command(
+            [sys.executable, "-c", "import time; time.sleep(30)"],
+            cwd=None,
+            timeout=1,
+        )
+        self.assertEqual(out["reason"], gate.Reason.TIMEOUT)
+        self.assertIsNone(out["exit_code"])
+
+    def test_empty_argv_fails_closed(self):
+        out = gate.run_command([], cwd=None)
+        self.assertEqual(out["reason"], gate.Reason.COMMAND_ABSENT)
+
+    def test_captured_output_is_bounded(self):
+        flood = "x" * (gate._MAX_TAIL * 4)
+        out = gate.run_command(
+            [sys.executable, "-c", f"print({flood!r})"], cwd=None
+        )
+        self.assertLessEqual(len(out["stdout_tail"]), gate._MAX_TAIL)
+
+
 if __name__ == "__main__":
     unittest.main()
