@@ -1,0 +1,168 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lci/benchmarks/repo-qa/edit-task.schema.json",
+  "title": "Stage-3 convention-conformance edit task",
+  "description": "A goal-only small-edit/refactor task pinned to a forged/mutated corpus. The prompt states ONLY the desired behavioural/convention outcome; it never names the target path or symbol. The oracle key carries a behaviour command with a red->green discrimination, a mechanical convention rule, >=2 LIVE convention-exemplar anchors (each independently annotated), and a declared patch scope (blast radius). Anchors are expressed against MUTATED relative paths so a tool that memorised the upstream repo cannot short-circuit them.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "id", "corpus", "category", "manifest_ref", "prompt", "rubric", "behavior", "convention", "exemplars", "blast_radius", "adjudication"],
+  "properties": {
+    "schema": {
+      "const": "edit_task_v1"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+      "description": "Stable, filesystem-safe task id. Never renumbered once shipped."
+    },
+    "corpus": {
+      "type": "string",
+      "enum": ["scikit-learn", "pocketbase", "next.js"]
+    },
+    "category": {
+      "type": "string",
+      "enum": ["retry-error-handling", "logging", "module-extraction-layout", "api-shape-consistency"],
+      "description": "The convention family this edit exercises. The bank must cover all four."
+    },
+    "manifest_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Pins the exact forged corpus the anchors were verified against; sufficient to translate every anchor's mutated path back to its origin.",
+      "required": ["corpus_id", "source_commit", "seed", "forge_version"],
+      "properties": {
+        "corpus_id": {"type": "string"},
+        "source_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "seed": {"type": "integer"},
+        "forge_version": {"type": "string"}
+      }
+    },
+    "prompt": {
+      "type": "string",
+      "minLength": 20,
+      "description": "Under-specified, goal-ONLY instruction (make X behave like Y / bring X in line with the house style). MUST NOT name target paths, target symbols, patch locations, or the exemplar files; the validator fails a prompt that leaks any exemplar path segment or target identifier."
+    },
+    "rubric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["must_surface", "answer_shape"],
+      "description": "The grading key. Unlike the prompt, the rubric MAY name symbols/paths.",
+      "properties": {
+        "must_surface": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "string"}
+        },
+        "answer_shape": {"type": "string"}
+      }
+    },
+    "behavior": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "How to tell the edit worked: a command that exercises the behaviour plus a red->green discrimination assertion (what is observed before the edit vs. after).",
+      "required": ["command", "assertion", "discrimination"],
+      "properties": {
+        "command": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "string", "minLength": 1},
+          "description": "argv that exercises the target behaviour."
+        },
+        "assertion": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The observable the command checks."
+        },
+        "discrimination": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["red", "green"],
+          "description": "red != green: the pre-edit observation must differ from the post-edit one, or the assertion discriminates nothing.",
+          "properties": {
+            "red": {"type": "string", "minLength": 1, "description": "What is observed BEFORE the edit (the failing state)."},
+            "green": {"type": "string", "minLength": 1, "description": "What is observed AFTER the edit (the passing state)."}
+          }
+        }
+      }
+    },
+    "convention": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The mechanical house-style rule the edit must satisfy. conforms_pattern is a regex every LIVE exemplar's bounded text must match; it is the machine-checkable form of the statement.",
+      "required": ["rule_id", "statement", "conforms_pattern"],
+      "properties": {
+        "rule_id": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+        "statement": {"type": "string", "minLength": 12},
+        "conforms_pattern": {"type": "string", "minLength": 1, "description": "Regex (matched multi-line) that conforming code exhibits."}
+      }
+    },
+    "exemplars": {
+      "type": "array",
+      "minItems": 2,
+      "description": "Adjudicated LIVE convention-exemplar anchors: >=2 real (non-decoy) locations that already follow the convention, each against a MUTATED relative path.",
+      "items": {"$ref": "#/$defs/anchor"}
+    },
+    "blast_radius": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The declared patch scope. allow is a non-empty set of path globs the edit may touch; a match-everything glob is rejected by the validator as degenerate.",
+      "required": ["allow"],
+      "properties": {
+        "allow": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "max_files": {"type": "integer", "minimum": 1}
+      }
+    },
+    "adjudication": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["annotators", "resolved"],
+      "properties": {
+        "annotators": {
+          "type": "array",
+          "minItems": 2,
+          "uniqueItems": true,
+          "items": {"type": "string"}
+        },
+        "resolved": {"type": "boolean"},
+        "notes": {"type": "string"}
+      }
+    }
+  },
+  "$defs": {
+    "anchor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "lines", "claim", "target_identifiers"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "MUTATED relative path within the forged corpus tree."
+        },
+        "lines": {
+          "type": "array",
+          "items": {"type": "integer", "minimum": 1},
+          "minItems": 1,
+          "maxItems": 2,
+          "description": "Exact line [n] or bounded inclusive range [start, end] (start <= end)."
+        },
+        "claim": {
+          "type": "string",
+          "minLength": 1,
+          "description": "How this location demonstrates the convention."
+        },
+        "target_identifiers": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string"},
+          "description": "Identifiers that MUST occur within the bounded evidence; consumed by the leakage check."
+        }
+      }
+    }
+  }
+}
