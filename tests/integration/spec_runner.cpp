@@ -12,15 +12,24 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <atomic>
+#include <cerrno>
+#include <chrono>
+#include <cctype>
+#include <csignal>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <optional>
+#include <poll.h>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <thread>
 
+#include <sys/syscall.h>
 #include <unistd.h>
 
 namespace fs = std::filesystem;
@@ -328,6 +337,176 @@ fs::path MakeTempArtifactPath(const fs::path& golden_path) {
             std::to_string(counter++) + golden_path.extension().string());
 }
 
+constexpr std::string_view kOwnerEnvironmentName =
+    "LCI_SPEC_RUNNER_PROCESS_OWNER";
+
+bool EnvironmentHasOwnershipToken(std::string_view environment,
+                                  std::string_view token) {
+    const std::string expected =
+        std::string(kOwnerEnvironmentName) + "=" + std::string(token);
+    size_t offset = 0;
+    while (offset < environment.size()) {
+        const size_t end = environment.find('\0', offset);
+        const size_t length =
+            end == std::string_view::npos ? environment.size() - offset
+                                          : end - offset;
+        if (environment.substr(offset, length) == expected) return true;
+        if (end == std::string_view::npos) break;
+        offset = end + 1;
+    }
+    return false;
+}
+
+int PidfdOpen(pid_t pid) {
+    return static_cast<int>(::syscall(SYS_pidfd_open, pid, 0));
+}
+
+int PidfdSendSignal(int pidfd, int signal) {
+    int result = -1;
+    do {
+        result = static_cast<int>(
+            ::syscall(SYS_pidfd_send_signal, pidfd, signal, nullptr, 0));
+    } while (result < 0 && errno == EINTR);
+    return result;
+}
+
+struct OwnedPidfd {
+    pid_t pid = -1;
+    int fd = -1;
+};
+
+std::vector<OwnedPidfd> OpenOwnedProcesses(std::string_view token) {
+    std::vector<OwnedPidfd> result;
+    std::error_code ec;
+    for (const auto& entry : fs::directory_iterator("/proc", ec)) {
+        if (ec) break;
+        const std::string name = entry.path().filename().string();
+        if (name.empty() ||
+            !std::all_of(name.begin(), name.end(),
+                         [](unsigned char c) { return std::isdigit(c); })) {
+            continue;
+        }
+        char* tail = nullptr;
+        const long value = std::strtol(name.c_str(), &tail, 10);
+        if (value <= 0 || value == ::getpid() || !tail || *tail != '\0') {
+            continue;
+        }
+        const pid_t pid = static_cast<pid_t>(value);
+        const int pidfd = PidfdOpen(pid);
+        if (pidfd < 0) continue;
+
+        // Acquire stable process identity first, then verify ownership. If the
+        // numeric PID is recycled while /proc is read, the pidfd still refers
+        // to the original process and can never signal its replacement.
+        std::ifstream input(entry.path() / "environ", std::ios::binary);
+        std::ostringstream contents;
+        if (input) contents << input.rdbuf();
+        if (input && EnvironmentHasOwnershipToken(contents.str(), token)) {
+            result.push_back({pid, pidfd});
+        } else {
+            ::close(pidfd);
+        }
+    }
+    return result;
+}
+
+void CleanupOwnedProcesses(std::string_view token) {
+    auto processes = OpenOwnedProcesses(token);
+    for (const auto& process : processes) {
+        PidfdSendSignal(process.fd, SIGTERM);
+    }
+
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    for (auto& process : processes) {
+        int remaining_ms = static_cast<int>(std::chrono::duration_cast<
+                                                std::chrono::milliseconds>(
+                                                deadline -
+                                                std::chrono::steady_clock::now())
+                                                .count());
+        if (remaining_ms < 0) remaining_ms = 0;
+        pollfd descriptor{process.fd, POLLIN, 0};
+        int poll_result = -1;
+        do {
+            poll_result = ::poll(&descriptor, 1, remaining_ms);
+        } while (poll_result < 0 && errno == EINTR);
+        if (poll_result <= 0) {
+            if (PidfdSendSignal(process.fd, SIGKILL) == 0) {
+                // A readable pidfd is the kernel confirmation that the exact
+                // process exited. Do not return while a successfully
+                // force-killed child lives.
+                do {
+                    poll_result = ::poll(&descriptor, 1, -1);
+                } while (poll_result < 0 && errno == EINTR);
+                // Linux documents POLLIN on process exit; POLLHUP is also
+                // reported for a dead pidfd on supported kernels. Any other
+                // result (including a non-EINTR error) is a terminal bounded
+                // cleanup failure, never a reason to spin.
+                const bool exit_confirmed =
+                    poll_result > 0 &&
+                    (descriptor.revents & (POLLIN | POLLHUP)) != 0;
+                if (!exit_confirmed) {
+                    ::close(process.fd);
+                    process.fd = -1;
+                    continue;
+                }
+            } else {
+                // A failed signal must never turn teardown into an unbounded
+                // hang. Give a concurrent natural exit one bounded chance to
+                // become observable, then return the descriptor result.
+                do {
+                    poll_result = ::poll(&descriptor, 1, 100);
+                } while (poll_result < 0 && errno == EINTR);
+            }
+        }
+        ::close(process.fd);
+        process.fd = -1;
+    }
+}
+
+// Marks every exec performed by one descriptor with a unique inherited token.
+// Detached servers retain the token after reparenting, giving cleanup an
+// explicit ownership proof that does not depend on pgrep command-line matches.
+class OwnedProcessGuard {
+  public:
+    OwnedProcessGuard() {
+        static std::atomic<unsigned long> sequence{0};
+        token_ = std::to_string(::getpid()) + "-" +
+                 std::to_string(sequence.fetch_add(1));
+        if (const char* previous = std::getenv(kOwnerEnvironmentName.data())) {
+            previous_ = previous;
+        }
+        if (::setenv(kOwnerEnvironmentName.data(), token_.c_str(), 1) != 0) {
+            throw std::runtime_error("cannot set process ownership token: " +
+                                     std::string(std::strerror(errno)));
+        }
+    }
+
+    OwnedProcessGuard(const OwnedProcessGuard&) = delete;
+    OwnedProcessGuard& operator=(const OwnedProcessGuard&) = delete;
+
+    ~OwnedProcessGuard() noexcept {
+        cleanup();
+        if (previous_) {
+            ::setenv(kOwnerEnvironmentName.data(), previous_->c_str(), 1);
+        } else {
+            ::unsetenv(kOwnerEnvironmentName.data());
+        }
+    }
+
+  private:
+    void cleanup() noexcept {
+        try {
+            CleanupOwnedProcesses(token_);
+        } catch (...) {
+            // Teardown must never replace the descriptor's test result.
+        }
+    }
+
+    std::string token_;
+    std::optional<std::string> previous_;
+};
+
 std::optional<fs::path> RewriteOutputArgument(Descriptor& descriptor,
                                               const fs::path& golden_path) {
     fs::path artifact_path = MakeTempArtifactPath(golden_path);
@@ -366,14 +545,6 @@ CapturedOutput RunCppSide(const std::string& cpp_binary,
         default:
             throw std::runtime_error("unsupported descriptor mode");
     }
-    // The lci CLI auto-spawns a detached per-corpus server daemon
-    // (setsid) for cli / mcp / index modes; the daemon survives the
-    // parent CLI exit by design. Without cleanup, a leftover daemon from a
-    // prior integration test holds /tmp/lci-<hash(corpus)>.sock and the
-    // next http-mode
-    // test either fails to bind or gets stale responses (10s
-    // wait_for_ready timeout, then golden-mismatch).
-    lci::parity::shutdown_corpus_servers(corpus_path);
     return out;
 }
 
@@ -441,6 +612,7 @@ void ExpectSpecMatches(const SpecCase& spec_case) {
 
     CapturedOutput capture;
     try {
+        OwnedProcessGuard owned_processes;
         capture = RunCppSide(cpp_binary, corpus_path, exec_descriptor);
     } catch (const std::exception& error) {
         FAIL() << "Failed to execute descriptor: " << error.what();
@@ -510,6 +682,23 @@ void ExpectSpecMatches(const SpecCase& spec_case) {
         std::error_code ec;
         fs::remove(*artifact_path, ec);
     }
+}
+
+bool ProcessEnvironmentHasOwnershipTokenForTest(
+    std::string_view environment, std::string_view token) {
+    return EnvironmentHasOwnershipToken(environment, token);
+}
+
+bool PidfdCleanupSupportedForTest() {
+    const int fd = PidfdOpen(::getpid());
+    if (fd < 0) return false;
+    const bool supported = PidfdSendSignal(fd, 0) == 0;
+    ::close(fd);
+    return supported;
+}
+
+void CleanupOwnedProcessesForTest(std::string_view token) {
+    CleanupOwnedProcesses(token);
 }
 
 namespace {

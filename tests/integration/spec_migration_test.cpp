@@ -4,8 +4,98 @@
 #include <string>
 #include <string_view>
 
+#include <cerrno>
+#include <csignal>
+#include <cstring>
+#include <sys/wait.h>
+#include <unistd.h>
+
 namespace lci::integration {
 namespace {
+
+TEST(SpecRunnerProcessOwnership, RequiresExactInheritedToken) {
+    const std::string token = "runner-42";
+    std::string owned("PATH=/bin", 9);
+    owned += '\0';
+    owned += "LCI_SPEC_RUNNER_PROCESS_OWNER=runner-42";
+    owned += '\0';
+    std::string ancestor("PATH=/bin", 9);
+    ancestor += '\0';
+    ancestor += "HOME=/tmp";
+    ancestor += '\0';
+    std::string other_runner =
+        "LCI_SPEC_RUNNER_PROCESS_OWNER=runner-420";
+    other_runner += '\0';
+
+    EXPECT_TRUE(ProcessEnvironmentHasOwnershipTokenForTest(owned, token));
+    EXPECT_FALSE(ProcessEnvironmentHasOwnershipTokenForTest(ancestor, token));
+    EXPECT_FALSE(
+        ProcessEnvironmentHasOwnershipTokenForTest(other_runner, token));
+}
+
+TEST(SpecRunnerProcessOwnership, CleansOwnedChildAndPreservesUnrelatedChild) {
+    if (!PidfdCleanupSupportedForTest()) {
+        GTEST_SKIP() << "pidfd_open/pidfd_send_signal are unsupported by this "
+                        "Linux kernel";
+    }
+
+    constexpr const char* token = "real-child-lifecycle";
+    auto spawn_sleep = [](const char* ownership_token) {
+        const pid_t pid = ::fork();
+        EXPECT_GE(pid, 0);
+        if (pid == 0) {
+            if (ownership_token) {
+                ::setenv("LCI_SPEC_RUNNER_PROCESS_OWNER", ownership_token, 1);
+            } else {
+                ::unsetenv("LCI_SPEC_RUNNER_PROCESS_OWNER");
+            }
+            ::execl("/bin/sleep", "sleep", "30", static_cast<char*>(nullptr));
+            ::_exit(127);
+        }
+        return pid;
+    };
+
+    const pid_t owned = spawn_sleep(token);
+    const pid_t unrelated = spawn_sleep(nullptr);
+    ASSERT_GT(owned, 0);
+    ASSERT_GT(unrelated, 0);
+    ::usleep(100000);
+
+    CleanupOwnedProcessesForTest(token);
+
+    int status = 0;
+    EXPECT_EQ(::waitpid(owned, &status, 0), owned);
+    EXPECT_TRUE(WIFSIGNALED(status));
+    EXPECT_EQ(::kill(unrelated, 0), 0) << std::strerror(errno);
+
+    ::kill(unrelated, SIGKILL);
+    EXPECT_EQ(::waitpid(unrelated, nullptr, 0), unrelated);
+}
+
+TEST(SpecRunnerProcessOwnership, ForceKillsTermResistantOwnedChild) {
+    if (!PidfdCleanupSupportedForTest()) {
+        GTEST_SKIP() << "pidfd_open/pidfd_send_signal are unsupported by this "
+                        "Linux kernel";
+    }
+
+    constexpr const char* token = "term-resistant-child";
+    const pid_t child = ::fork();
+    ASSERT_GE(child, 0);
+    if (child == 0) {
+        ::setenv("LCI_SPEC_RUNNER_PROCESS_OWNER", token, 1);
+        ::signal(SIGTERM, SIG_IGN);
+        ::execl("/bin/sleep", "sleep", "30", static_cast<char*>(nullptr));
+        ::_exit(127);
+    }
+    ::usleep(100000);
+
+    CleanupOwnedProcessesForTest(token);
+
+    int status = 0;
+    ASSERT_EQ(::waitpid(child, &status, 0), child);
+    ASSERT_TRUE(WIFSIGNALED(status));
+    EXPECT_EQ(WTERMSIG(status), SIGKILL);
+}
 
 // ---------------------------------------------------------------------------
 // Migration anchors moved to the directory-walking pattern across migrations

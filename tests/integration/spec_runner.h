@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace lci::integration {
@@ -62,5 +63,15 @@ std::vector<SpecCase> DiscoverIntegrationSpecs(
 // `tests/integration/` (e.g. "cli" → tests/integration/cli/).
 std::vector<SpecCase> DiscoverIntegrationSpecsFromTestsDir(
     const std::string& subdir);
+
+// Returns true when a /proc/<pid>/environ payload contains the exact
+// NUL-delimited ownership entry. Exposed to lock the process-discrimination
+// rule without requiring tests to inspect or signal real processes.
+bool ProcessEnvironmentHasOwnershipTokenForTest(
+    std::string_view environment, std::string_view token);
+
+// Linux-only lifecycle hooks used by the focused ownership regression.
+bool PidfdCleanupSupportedForTest();
+void CleanupOwnedProcessesForTest(std::string_view token);
 
 }  // namespace lci::integration
