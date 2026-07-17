@@ -304,16 +304,30 @@ class DegradePathTest(unittest.TestCase):
     exists to fail if its degrade is widened.
     """
 
-    # Captured verbatim from gopls v0.23.0. The oracle's degrade width is
-    # defined by these observed sentences and nothing else; two earlier
-    # alternates ("is not a type", "no objects implement") were guesses that
-    # gopls never actually emits, which is precisely why they get pinned now.
+    # Captured verbatim by running gopls v0.23.0 against PocketBase @ d438c6a.
+    # The oracle's degrade width is defined by these observed sentences and
+    # nothing else; two earlier alternates ("is not a type", "no objects
+    # implement") were guesses the binary never emits, which is exactly why the
+    # real ones get pinned here.
+    #
+    #   $ gopls implementation tools/inflector/inflector.go:13:6   # func
     STDERR_FUNC_NOT_METHOD = (
         "gopls: UcFirst is a function, not a method "
         "(query at 'func' token to find matching signatures)"
     )
+    #   $ gopls implementation tools/inflector/inflector.go:18:2   # var s
+    # gopls names whichever identifier sits at the queried position, so the
+    # leading name is positional, not fixed ("str" at 35:2 emits the same form).
     STDERR_VAR_NOT_TYPE = "gopls: s is a var, not a type"
-    STDERR_NO_IDENTIFIER = "gopls: no identifier found"
+
+    # The two forms are NOT interchangeable: gopls words this differently per
+    # subcommand, and pinning the wrong one would misdescribe the binary even
+    # while the test still passed.
+    #   $ gopls implementation tools/inflector/inflector.go:15:12  # a literal
+    #   $ gopls references     tools/inflector/inflector.go:15:12
+    STDERR_IMPL_NO_IDENTIFIER = "gopls: no identifier found"
+    #   $ gopls call_hierarchy tools/inflector/inflector.go:12:1   # a comment
+    STDERR_CALLH_IDENTIFIER_NOT_FOUND = "gopls: identifier not found"
 
     def setUp(self):
         self.tmp = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_tmp_dg")
@@ -350,7 +364,7 @@ class DegradePathTest(unittest.TestCase):
         for stderr in (
             "gopls: internal error: package load failed",
             "gopls: no views in this session",
-            self.STDERR_NO_IDENTIFIER,
+            self.STDERR_IMPL_NO_IDENTIFIER,  # a broken anchor, not an empty answer
         ):
             oracle = self._oracle(implementation=exec_error(stderr))
             with self.assertRaises(gopls_oracle.GoplsError, msg=stderr) as ctx:
@@ -401,7 +415,12 @@ class DegradePathTest(unittest.TestCase):
         # gopls itself just reported this position as `function NAME in
         # path:line:col`. It cannot then benignly fail to find an identifier
         # there; that combination means something is genuinely wrong.
-        oracle = self._oracle(call_hierarchy=exec_error(self.STDERR_NO_IDENTIFIER))
+        # Note the wording: call_hierarchy says "identifier not found", where
+        # implementation says "no identifier found". Using the other subcommand's
+        # phrasing here would still pass, while documenting gopls incorrectly.
+        oracle = self._oracle(
+            call_hierarchy=exec_error(self.STDERR_CALLH_IDENTIFIER_NOT_FOUND)
+        )
         with self.assertRaises(gopls_oracle.GoplsError) as ctx:
             oracle.answer_key(UCFIRST, max_depth=2)
         self.assertEqual(ctx.exception.reason, gopls_oracle.REASON_EXEC_FAILED)

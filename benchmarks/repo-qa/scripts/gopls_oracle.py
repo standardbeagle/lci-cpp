@@ -22,6 +22,17 @@ degenerate outcome -- missing binary, version drift, non-zero exit, an empty
 reference set for a symbol that demonstrably resolves -- raises with a distinct
 reason code. No fallbacks, no dummy keys, no partial cache writes.
 
+There is exactly ONE degrade path in this module, and this is the whole of it:
+`_implementations` turns a gopls error into [] when, and only when, gopls'
+stderr says the symbol's kind cannot have implementations ("X is a function,
+not a method" / "X is a var, not a type"). Both forms were observed from the
+pinned binary; the match is anchored and reads stderr alone. Everything else
+raises, including every error from the call-hierarchy walk -- see
+`_call_hierarchy_callers` for why an error there is a contradiction rather than
+an empty answer. A degrade path with no proven failure case is indistinguishable
+from a swallowed bug, so each one's width is pinned by DegradePathTest: widening
+either turns the suite red.
+
 Determinism
 -----------
 Same corpus commit + same gopls version => byte-identical key. Every list is
@@ -65,11 +76,18 @@ REASON_CORPUS_MISSING = "CORPUS_MISSING"
 
 
 class GoplsError(RuntimeError):
-    """Any refusal to produce a key. Carries a machine-readable reason code."""
+    """Any refusal to produce a key. Carries a machine-readable reason code.
 
-    def __init__(self, reason, message):
+    `stderr` holds gopls' own diagnostic verbatim, kept apart from the assembled
+    message. Classification decisions must read this field and never the
+    message, which also embeds the command line and would let an incidentally
+    named file or symbol masquerade as a known-benign diagnostic.
+    """
+
+    def __init__(self, reason, message, stderr=""):
         super().__init__("[%s] %s" % (reason, message))
         self.reason = reason
+        self.stderr = stderr or ""
 
 
 class SymbolAnchor:
@@ -113,11 +131,28 @@ _CALLER_RE = re.compile(
     r"(?P<def_path>.+):(?P<def_line>\d+):(?P<def_col>\d+)-(?P<def_endcol>\d+)$"
 )
 
-# gopls refuses `implementation` on a non-method with a non-zero exit. That is a
-# legitimately empty answer, not a broken oracle, and is the ONLY error text
-# allowed to degrade to []. Everything else propagates.
+# gopls refuses `implementation` on a symbol whose kind cannot have one, and
+# reports it as a non-zero exit rather than an empty result. Observed from
+# v0.23.0 by probing the real binary:
+#
+#   func    -> exit 2, "gopls: UcFirst is a function, not a method (query at ...)"
+#   var     -> exit 2, "gopls: s is a var, not a type"  (name is positional)
+#   struct  -> exit 0, empty output          (no error; needs no exemption)
+#   literal -> exit 2, "gopls: no identifier found"   (a broken anchor: fatal)
+#
+# Wording is per-subcommand: `implementation` and `references` say "no
+# identifier found", while `call_hierarchy` says "identifier not found". Both
+# are fatal here, but they are not interchangeable when describing the binary.
+#
+# Only the first two are benign, and only they degrade to []. The pattern is
+# ANCHORED and matched against gopls' stderr alone, never against a message
+# that also carries the joined argv -- an unanchored search over that would
+# trip on a file or symbol merely named like the benign text. An unobserved
+# kind error (say "is a const, not a type") deliberately fails loud rather
+# than being guessed at: that is a new fact about gopls, and it should be
+# checked and pinned here rather than silently absorbed.
 _BENIGN_IMPLEMENTATION_RE = re.compile(
-    r"is a function, not a method|is not a type|no objects implement"
+    r"^gopls: \S+ is an? [a-z]+, not an? (?:method|type)\b"
 )
 
 
@@ -169,6 +204,7 @@ def subprocess_runner(binary):
                 REASON_EXEC_FAILED,
                 "gopls %s exited %d: %s"
                 % (" ".join(args), proc.returncode, proc.stderr.strip()),
+                stderr=proc.stderr.strip(),
             )
         return proc.stdout.strip()
 
@@ -322,23 +358,29 @@ class GoplsOracle:
         try:
             raw = self.runner(["implementation", anchor.position], cwd=self.corpus_root)
         except GoplsError as exc:
-            if _BENIGN_IMPLEMENTATION_RE.search(str(exc)):
-                # Not an interface/method: genuinely no implementations.
+            # Match gopls' own diagnostic only -- never str(exc), which carries
+            # the argv too. This is the sole degrade path outside the caller
+            # walk, and its width is pinned by DegradePathTest.
+            if _BENIGN_IMPLEMENTATION_RE.match(exc.stderr):
+                # The symbol's kind cannot have implementations: genuinely [].
                 return []
             raise
         impls = self._parse_locations(raw)
         return sorted(impls, key=lambda r: (r["path"], r["line"], r["column"]))
 
     def _call_hierarchy_callers(self, path, line, column):
-        try:
-            raw = self.runner(
-                ["call_hierarchy", "%s:%d:%d" % (path, line, column)],
-                cwd=self.corpus_root,
-            )
-        except GoplsError as exc:
-            if "identifier not found" in str(exc):
-                return []
-            raise
+        # No degrade path here, deliberately. Every position reached by this
+        # walk was either supplied deliberately or reported by gopls itself as
+        # `function NAME in path:line:col`, so gopls failing to find an
+        # identifier there is a contradiction, not a benign empty answer.
+        # Swallowing it would truncate the caller set mid-recursion and cache
+        # the short result as ground truth. A symbol with genuinely no callers
+        # is expressed as exit 0 with no caller[N] lines, which needs no
+        # exception handling at all.
+        raw = self.runner(
+            ["call_hierarchy", "%s:%d:%d" % (path, line, column)],
+            cwd=self.corpus_root,
+        )
         callers = []
         for text in raw.strip().split("\n"):
             m = _CALLER_RE.match(text.strip())
