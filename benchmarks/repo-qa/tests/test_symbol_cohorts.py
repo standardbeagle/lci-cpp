@@ -192,6 +192,45 @@ class EnumerationTest(unittest.TestCase):
         self.assertEqual(counts["Type"], 3)
         self.assertEqual(counts["lonely"], 1)
 
+    def test_declaration_counts_still_count_kinds_that_cannot_be_candidates(self):
+        # Being ineligible to BE a benchmark cell and shadowing a name are
+        # different things. A type declaration still collides with a method of
+        # the same name in grep's output, so it must keep counting here even
+        # though enumerate_declarations refuses to select it.
+        counts = sc.declaration_counts(self.root)
+        self.assertEqual(counts["Alpha"], 1)
+        self.assertEqual(counts["Beta"], 1)
+
+    def test_type_declarations_are_not_candidates(self):
+        # gopls call_hierarchy refuses a type ("X is not a function"), so a
+        # type can never be measured on the fan-in axis and is dropped by the
+        # oracle every single time. Enumerating types anyway does not add
+        # breadth -- it silently deletes one declaration kind from the sample
+        # after it has already consumed pool slots.
+        names = {c.name for c in sc.enumerate_declarations(self.root)}
+        self.assertNotIn("Alpha", names)
+        self.assertNotIn("Beta", names)
+        self.assertIn("lonely", names)
+
+    def test_compiler_invoked_entrypoints_are_not_candidates(self):
+        # init and main are called by the runtime, never referenced in source.
+        # Their reference count is ~0 by construction, so their noise ratio is
+        # an artifact of that rather than a measure of collision, and "find
+        # references to init" is not a question any developer asks.
+        write_corpus(
+            self.root,
+            {
+                "c/gamma.go": (
+                    "package c\n\nfunc init() {\n}\n\nfunc main() {\n}\n\n"
+                    "func real() int {\n\treturn 1\n}\n"
+                )
+            },
+        )
+        names = {c.name for c in sc.enumerate_declarations(self.root)}
+        self.assertNotIn("init", names)
+        self.assertNotIn("main", names)
+        self.assertIn("real", names)
+
     def test_enumeration_is_ordered_deterministically(self):
         first = [c.slug() for c in sc.enumerate_declarations(self.root)]
         second = [c.slug() for c in sc.enumerate_declarations(self.root)]
