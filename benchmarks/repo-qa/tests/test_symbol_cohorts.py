@@ -344,48 +344,100 @@ class RiggedSweepGuardTest(unittest.TestCase):
         self.assertIn("control", str(ctx.exception).lower())
 
 
+def synthetic_corpus(root, count=80):
+    """A corpus big enough that the seed has room to act.
+
+    A handful of symbols cannot exercise seeded sampling: with fewer
+    candidates than strata*quota every stratum is drawn whole and the seed is
+    unobservable by construction. Sizing this above the sample size is what
+    makes the seed test meaningful rather than vacuously green.
+    """
+    files = {}
+    for index in range(count):
+        pkg = "p%d" % (index % 8)
+        files.setdefault("%s/%s.go" % (pkg, pkg), "package %s\n\n" % pkg)
+        files["%s/%s.go" % (pkg, pkg)] += (
+            "func fn%02d(n int) int {\n\treturn n + %d\n}\n\n" % (index, index)
+        )
+    return write_corpus(root, files)
+
+
+def git_init(root):
+    """corpus_commit() reads git, so a corpus fixture must be a real repo."""
+    env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t",
+               GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
+    for args in (["init", "-q"], ["add", "-A"], ["commit", "-qm", "fixture"]):
+        subprocess.run(["git"] + args, cwd=root, env=env, check=True,
+                       capture_output=True)
+    return root
+
+
 class DeterminismTest(unittest.TestCase):
     def setUp(self):
         import tempfile
 
         self.root = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.root)
-        write_corpus(self.root, MINI_CORPUS)
+        synthetic_corpus(self.root)
+        git_init(self.root)
+        self.cands = sc.enumerate_declarations(self.root)
+        # Spread hits so stratification has real strata to draw from.
+        self.hits = {c.name: (i % 40) + 1 for i, c in enumerate(self.cands)}
         self.keys = {
-            ("a/alpha.go", 5, 17): fake_key(total=1, callers=0),
-            ("a/alpha.go", 3, 6): fake_key(total=2, callers=0),
-            ("a/alpha.go", 9, 6): fake_key(total=1, callers=0),
-            ("b/beta.go", 5, 16): fake_key(total=3, test=1, callers=1),
-            ("b/beta.go", 3, 6): fake_key(total=4, test=1, callers=0),
-            ("b/beta.go", 9, 6): fake_key(total=1, callers=0),
+            (c.path, c.line, c.column): fake_key(total=3, test=1, callers=1)
+            for c in self.cands
         }
 
     def test_same_seed_yields_identical_pool(self):
-        cands = sc.enumerate_declarations(self.root)
-        first = sc.stratified_pool(cands, {c.name: 5 for c in cands}, seed="s", size=3)
-        second = sc.stratified_pool(cands, {c.name: 5 for c in cands}, seed="s", size=3)
+        first = sc.stratified_pool(self.cands, self.hits, seed="s", size=12)
+        second = sc.stratified_pool(self.cands, self.hits, seed="s", size=12)
         self.assertEqual([c.slug() for c in first], [c.slug() for c in second])
 
     def test_pool_ordering_does_not_depend_on_input_ordering(self):
-        cands = sc.enumerate_declarations(self.root)
-        hits = {c.name: 5 for c in cands}
-        forward = sc.stratified_pool(cands, hits, seed="s", size=3)
-        backward = sc.stratified_pool(list(reversed(cands)), hits, seed="s", size=3)
+        forward = sc.stratified_pool(self.cands, self.hits, seed="s", size=12)
+        backward = sc.stratified_pool(
+            list(reversed(self.cands)), self.hits, seed="s", size=12
+        )
         self.assertEqual([c.slug() for c in forward], [c.slug() for c in backward])
 
-    def test_different_seed_can_yield_a_different_pool(self):
+    def test_pool_is_stable_across_processes(self):
+        # hash() is salted per process, so a pool built on it would differ run
+        # to run while looking deterministic inside one process.
+        script = (
+            "import sys; sys.path.insert(0, %r);\n"
+            "import select_symbol_cohorts as sc;\n"
+            "cands = sc.enumerate_declarations(%r);\n"
+            "hits = {c.name: (i %% 40) + 1 for i, c in enumerate(cands)};\n"
+            "print(','.join(c.slug() for c in "
+            "sc.stratified_pool(cands, hits, seed='s', size=12)))"
+            % (SCRIPTS, self.root)
+        )
+        runs = set()
+        for _ in range(3):
+            out = subprocess.run(
+                [sys.executable, "-c", script],
+                capture_output=True, text=True,
+                env=dict(os.environ, PYTHONHASHSEED="random"),
+            )
+            self.assertEqual(out.returncode, 0, out.stderr)
+            runs.add(out.stdout.strip())
+        self.assertEqual(len(runs), 1, "pool differs across processes: %r" % runs)
+
+    def test_different_seed_yields_a_different_pool(self):
         # If the seed did nothing, "deterministic from a committed seed" would
         # be a false claim -- the pool would just be an arbitrary fixed prefix.
-        cands = sc.enumerate_declarations(self.root)
-        hits = {c.name: 5 for c in cands}
-        a = [c.slug() for c in sc.stratified_pool(cands, hits, seed="a", size=2)]
-        seen = set()
-        for seed in ("b", "c", "d", "e", "f", "g"):
-            seen.add(
-                tuple(c.slug() for c in sc.stratified_pool(cands, hits, seed=seed, size=2))
+        baseline = tuple(
+            c.slug() for c in sc.stratified_pool(self.cands, self.hits, seed="a", size=12)
+        )
+        variants = {
+            tuple(
+                c.slug()
+                for c in sc.stratified_pool(self.cands, self.hits, seed=seed, size=12)
             )
+            for seed in ("b", "c", "d")
+        }
         self.assertTrue(
-            any(s != tuple(a) for s in seen), "seed has no effect on selection"
+            any(v != baseline for v in variants), "seed has no effect on selection"
         )
 
     def test_full_selection_is_byte_identical_across_runs(self):
@@ -394,7 +446,7 @@ class DeterminismTest(unittest.TestCase):
                 corpus_root=self.root,
                 oracle=FakeOracle(self.keys),
                 seed="fixed-seed",
-                pool_size=6,
+                pool_size=12,
                 validate=False,
             )
 
