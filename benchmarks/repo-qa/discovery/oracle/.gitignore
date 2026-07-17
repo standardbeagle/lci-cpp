@@ -1,0 +1,5 @@
+# Answer keys are regenerable from (corpus commit, gopls version) and are large
+# enough to swamp review diffs, so the cache itself is not tracked. Provenance
+# lives inside each key, and a mismatch is refused rather than served, so a
+# stale cache cannot silently become ground truth.
+cache/
