@@ -55,6 +55,28 @@ Thresholds are measured, not guessed. Observed on the pinned corpus:
 `vacuum` 3/3 = 1.0, `wwwRedirect` 3/2 = 1.5, `Record.Set` 529/119 = 4.4,
 `GeoPointField.Type` 351/29 = 12.1.
 
+### Reading the ratio (matters for D5)
+
+The two sides of the ratio are scoped differently, by design — it is the
+asymmetry the task defines, and it is what makes the number mean "noise a grep
+user wades through":
+
+- **numerator** — `grep_hit_count` is *name-scoped, corpus-wide*: every
+  whole-word hit on the identifier, whoever declared it.
+- **denominator** — `true_reference_count` is *declaration-scoped*: references
+  to the one anchored symbol, per gopls.
+
+Two consequences D5 should not misread:
+
+- **Identical metrics on same-named cells are real, not duplicates.** Both
+  `FetchAuthUser` cells (lark.go, planningcenter.go) carry grep=64, refs=2. The
+  numerator is shared by construction because it counts the name.
+- **Noise below 1.0 is not measurement error.** grep counts matching *lines*
+  while gopls counts *references*, so two references on one line are one grep
+  hit. `getFileName` sits at 7/8 = 0.88. Sub-1.0 simply means "grep has fewer
+  lines to read than there are references" — the easiest possible case, which
+  is exactly what a control cell should look like.
+
 ## Why N = 48
 
 Breadth over depth, per the parent epic's method. Each cell costs a gopls

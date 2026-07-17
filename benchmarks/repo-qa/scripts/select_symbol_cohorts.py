@@ -35,6 +35,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 
@@ -42,6 +43,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from gopls_oracle import (  # noqa: E402
     PINNED_GOPLS_VERSION,
+    REASON_GOPLS_MISSING,
+    GoplsError,
     GoplsOracle,
     SymbolAnchor,
     corpus_commit,
@@ -304,6 +307,16 @@ def stratified_pool(candidates, hits_by_name, seed, size, strata=STRATA):
         end = len(by_hits) if index == strata - 1 else (index + 1) * per_stratum
         bucket = sorted(by_hits[start:end], key=lambda c: _stable_rank(seed, c.slug()))
         picked.extend(bucket[: quota[index]])
+    if len(picked) != size:
+        # Silently returning a short pool would leave the emitted document
+        # advertising `pool_size` cells while carrying fewer -- its own
+        # provenance turned into a lie, and the sample quietly reshaped by
+        # whichever strata ran thin.
+        raise SelectionError(
+            "requested a pool of %d but only %d candidates could be drawn from "
+            "%d across %d strata; refusing to emit a sample that does not match "
+            "its own recorded size" % (size, len(picked), len(by_hits), strata)
+        )
     return sorted(picked, key=lambda c: c.slug())
 
 
@@ -367,10 +380,30 @@ def validate_cohorts(cohorts):
     return cohorts
 
 
-def resolve_gopls_binary_or_none():
+def resolve_gopls_binary_or_none(candidate=None):
+    """The gopls path, or None if gopls is genuinely absent.
+
+    Only absence is answered with None, because None is what gates the
+    discrimination tests into a skip. A gopls that is present but unusable
+    (not executable, wrong permissions) raises: it means the environment is
+    broken, and reporting that as "absent" would silently switch off the tests
+    that prove the selector discriminates -- the pass-by-skip that already hid
+    a real find_files defect in this repo.
+    """
     try:
-        return resolve_gopls_binary()
-    except Exception:
+        return resolve_gopls_binary(candidate)
+    except GoplsError as exc:
+        if exc.reason != REASON_GOPLS_MISSING:
+            raise
+        # The oracle reports "no binary anywhere" and "found but not
+        # executable" under one reason code, so decide absence by probing the
+        # filesystem rather than by matching its message text -- a message this
+        # module does not own and must not depend on the wording of.
+        probe = candidate or os.environ.get("GOPLS_BIN") or shutil.which("gopls")
+        if probe is None:
+            probe = os.path.expanduser("~/go/bin/gopls")
+        if os.path.exists(probe):
+            raise
         return None
 
 
