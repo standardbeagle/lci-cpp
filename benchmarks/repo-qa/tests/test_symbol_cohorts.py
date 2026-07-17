@@ -168,13 +168,15 @@ class EnumerationTest(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.root)
         write_corpus(self.root, MINI_CORPUS)
 
-    def test_enumerates_funcs_methods_and_types_from_production_files(self):
+    def test_enumerates_funcs_and_methods_from_production_files(self):
+        # Both Type methods are distinct cells: the same identifier on two
+        # receivers is exactly the collision the noise axis measures.
         cands = sc.enumerate_declarations(self.root)
         found = {(c.name, c.path) for c in cands}
         self.assertIn(("Type", "a/alpha.go"), found)
         self.assertIn(("Type", "b/beta.go"), found)
         self.assertIn(("lonely", "a/alpha.go"), found)
-        self.assertIn(("Alpha", "a/alpha.go"), found)
+        self.assertIn(("useType", "b/beta.go"), found)
 
     def test_test_file_declarations_are_not_candidates(self):
         # A _test.go declaration must never become a benchmark cell: the sweep

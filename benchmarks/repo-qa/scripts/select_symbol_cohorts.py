@@ -83,6 +83,20 @@ _TYPE_RE = re.compile(r"^type\s+(?P<name>[A-Za-z_]\w*)\s")
 
 _SKIP_DIRS = {"vendor", ".git", "testdata"}
 
+# Declaration kinds eligible to be a benchmark cell. Types are enumerated for
+# shadowing but never selected: gopls call_hierarchy refuses a type, so fan-in
+# is undefined for them and the oracle drops every one -- they would consume
+# pool slots and then vanish, biasing the sample toward what gopls will answer.
+# Lifting this needs a way to express "fan-in undefined" in the D1 oracle.
+_CANDIDATE_KINDS = ("func",)
+
+# Compiler-invoked entrypoints. Go calls these; source never references them,
+# so their reference count is ~0 by construction and any noise ratio built on
+# it measures that artifact rather than collision. yandex.go's init scored 80.0
+# (61 declarations, 1 reference) -- the noisiest "symbol" in the corpus, and a
+# question no developer asks.
+_NON_REFERENCEABLE = frozenset(("init", "main"))
+
 
 class SelectionError(RuntimeError):
     """Raised instead of degrading. A bad sample is worse than no sample."""
@@ -146,15 +160,21 @@ def _declarations_in(full_path, rel_path):
 def enumerate_declarations(corpus_root):
     """Candidate symbols: production declarations only, deterministically ordered.
 
-    Test-file declarations are excluded as candidates -- the sweep measures how
-    tools find production symbols -- but they still count toward shadowing (see
-    declaration_counts).
+    The population is deliberately narrower than "every declaration": test-file
+    declarations, type declarations, and compiler-invoked entrypoints are all
+    excluded (see _CANDIDATE_KINDS and _NON_REFERENCEABLE for why each is
+    unmeasurable rather than merely unwanted). All of them still count toward
+    shadowing -- see declaration_counts.
     """
     found = []
     for full, rel in _walk_go_files(corpus_root):
         if is_test_file(rel):
             continue
-        found.extend(_declarations_in(full, rel))
+        found.extend(
+            c
+            for c in _declarations_in(full, rel)
+            if c.kind in _CANDIDATE_KINDS and c.name not in _NON_REFERENCEABLE
+        )
     return sorted(found, key=lambda c: c.slug())
 
 
