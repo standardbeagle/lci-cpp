@@ -1,0 +1,469 @@
+{
+  "schema_version": 1,
+  "registry_id": "d3-discovery-predictions-v1",
+  "registered_at": "2026-07-17",
+  "registered_before_any_run": true,
+  "amendment_policy": "This file is the timestamped pre-registration record. It MUST NOT be edited after D4's runner executes. D5 records deltas against it instead. If a family's prompt is later found broken, set voided=true with a void_reason on that family in a NEW commit and report the void explicitly; never retune a prediction, a threshold, or a confidence after seeing an outcome.",
+
+  "cohort_source": {
+    "path": "benchmarks/repo-qa/discovery/cohorts/cohorts.json",
+    "commit": "d91a268",
+    "seed": "d2-pocketbase-cohorts-v1",
+    "corpus": "pocketbase",
+    "corpus_commit": "d438c6a96a0252ff9df62c1cfe193480ed9ff15d",
+    "gopls_version": "golang.org/x/tools/gopls v0.23.0",
+    "pool_size": 48,
+    "skipped": 0
+  },
+
+  "population": {
+    "symbol_kinds": ["func"],
+    "note": "D2's population is FUNCTIONS AND METHODS ONLY (recorded kind=func for all 48 cells; methods appear as func with a receiver). Type declarations and init/main are excluded from the sample. No prediction in this registry may presume type symbols are present. See task 01KXQHK2P9845S9W03VEJ4DS7F."
+  },
+
+  "arms": {
+    "treatment": {
+      "tools": ["Read", "mcp__lci__browse_file", "mcp__lci__callers", "mcp__lci__find_files", "mcp__lci__get_context", "mcp__lci__inspect_symbol", "mcp__lci__list_symbols", "mcp__lci__references", "mcp__lci__search"],
+      "note": "Has NO Grep and NO Glob. Every lexical question must be answered through the LCI semantic surface."
+    },
+    "baseline": {
+      "tools": ["Glob", "Grep", "Read"],
+      "note": "Has no LCI MCP server at all."
+    },
+    "disjointness_note": "The arms are DISJOINT, not nested. The treatment arm cannot fall back to grep. This is what gives the literal-string control (control_literal_string_search) real teeth: it probes a task shape where the baseline holds the natively-correct tool and the treatment does not."
+  },
+
+  "primary_metrics": {
+    "mean_f1": {
+      "description": "Mean over cells of per-cell evidence F1 of the reported location set against the oracle answer set (score_exploration.py evidence P/R/F1).",
+      "polarity": "higher_is_better"
+    },
+    "mean_precision": {
+      "description": "Mean over cells of per-cell evidence precision. Primary where the failure mode under test is false positives (collision noise).",
+      "polarity": "higher_is_better"
+    },
+    "mean_recall": {
+      "description": "Mean over cells of per-cell evidence recall. Primary where the failure mode under test is incomplete enumeration.",
+      "polarity": "higher_is_better"
+    },
+    "dnf_rate_pct": {
+      "description": "Percentage of cells where the arm did not produce an answer within the budget/timeout.",
+      "polarity": "lower_is_better",
+      "polarity_note": "DNF is the one metric here where the winning arm scores LOWER. A threshold signed as if DNF were higher-is-better would predict the OPPOSITE of its stated outcome, so polarity is recorded explicitly rather than left to a reader's assumption."
+    }
+  },
+
+  "power": {
+    "alpha": 0.05,
+    "power_target": 0.80,
+    "paired_test": "sign test / McNemar over paired cells (both arms run the same cell)",
+    "derivations": {
+      "min_n_unanimous_significant": "Smallest n whose UNANIMOUS split reaches two-sided p<0.05 under a sign test: n=6, since 2*(0.5^6)=0.031. At n=5, 2*(0.5^5)=0.063 > 0.05, so nothing below 6 can ever reach significance regardless of effect size.",
+      "min_n_for_80pct_power": "n≈25 paired cells to detect the predicted large effect (discordant-pair win rate ≈0.85) at alpha=0.05 with 80% power.",
+      "n_equals_2": "At n=2 the smallest attainable two-sided sign-test p is 2*(0.5^2)=0.50. NO outcome at n=2 can reach significance. n=2 supports no conclusion whatsoever — not a weak one, none."
+    },
+    "status_rule": "A family's power status is derived from its OWN n against its OWN min_n_for_80pct_power — NOT from a single global cell-count bar. The required n depends on the metric and the effect size under test: the F1/precision/recall families need n≈25, while the rare-event DNF proportion needs n≈900 to detect the prior tiers' 4.3pp gap. A global 'n>=25 is powered' rule would have mislabelled token_budgeted_completion (n=48) as powered when it is nowhere near able to test its own prediction.",
+    "status_meanings": {
+      "powered": "n >= the family's min_n_for_80pct_power. A threshold is stated and the sample can test it at the predicted effect size.",
+      "underpowered": "2 < n < the family's min_n_for_80pct_power. A threshold is stated but ONLY a large or unanimous effect is detectable. A non-unanimous or moderate result is NOT evidence and must be reported by D5 as 'directionally consistent, underpowered'.",
+      "untestable_at_this_n": "n <= 2. NO threshold is authored, because the sample cannot falsify any threshold. The prediction is recorded as directional intuition only and D5 MUST NOT report it as a result in either direction."
+    }
+  },
+
+  "registry_findings": {
+    "disjoint_hard_axes": "fan_in_high ∩ noise_high = 0 cells. In this corpus the two axes where LCI is predicted to win are mutually exclusive: every fan_in_high symbol is low-noise (noise_ratio 1.02-3.42) and every noise_high symbol has low fan_in (0-4). The epic's phrase 'exhaustive callers of a COMMON-NAMED symbol' conflates two properties this corpus separates. Consequently callers_high_fan_in is calibrated to parity (grep's hits there are nearly all true) while callers_high_noise carries the collision-noise hypothesis. No cell tests both at once; a sweep on this corpus cannot test the conjunction.",
+    "empty_answer_set_cell": "noise_high contains 'send' (tools/mailer/sendmail.go) with fan_in=0 — its true caller answer set is EMPTY. D4 MUST define grading for empty answer sets before running (F1 is undefined when both the oracle set and a correct reply are empty; a correct 'there are none' must score as a win, not a division-by-zero or a silent skip). This cell is also the sharpest baseline trap in the pool: grep returns ~47 hits for a symbol with zero callers.",
+    "impl_many_confounded": "impl_many's two cells are Close (tools/filesystem/internal/fileblob/fileblob.go) and Write (tools/filesystem/internal/s3blob/s3blob.go). Close is also the noisiest symbol in the entire pool (noise_ratio 38.43). So impl_many is not merely n=2 — its cells are confounded with extreme collision noise, and any apparent implementations effect could not be separated from a noise effect even if n were adequate.",
+    "control_cohort_is_clean": "shadowing_unique ∩ noise_control = 26 = all of noise_control. Every control-noise cell is also a unique-name cell, so the control families are not contaminated by shadowing."
+  },
+
+  "families": [
+    {
+      "id": "callers_high_fan_in",
+      "title": "Exhaustive callers of a high-fan-in function",
+      "role": "hypothesis",
+      "task_shape": "exhaustive_callers",
+      "cohort": { "axis": "fan_in", "cell": "fan_in_high", "n": 6, "selector": "cohorts.fan_in_high" },
+      "arm_visible_prompt": "In this checkout, find every call site of the function `{{symbol_name}}` defined at {{file_path}}:{{line}}. List each call site as path:line. Report the complete set; if there are none, say so explicitly.",
+      "answer_set": {
+        "oracle": "gopls",
+        "method": "gopls references at the definition position, filtered to call sites, minus the definition itself",
+        "gradable": true,
+        "independence_note": "gopls is an external oracle sharing no mechanism with either arm (neither arm may run gopls)."
+      },
+      "epic_intuition": "lci_wins",
+      "prediction": {
+        "outcome": "parity",
+        "mechanism": "The epic's intuition assumed high fan-in implies a common (noisy) name. D2's sample refutes the premise: these 6 cells have noise_ratio 1.02-3.42, so a single baseline grep on the name returns approximately the true caller set (e.g. BindBody: 25 true refs, noise 1.07). The enumeration is bounded (fan_in 9-28) and directly readable off grep output. LCI's callers is more direct but there is no collision noise here for semantics to cut through, so neither arm should separate on accuracy.",
+        "confidence": 0.55,
+        "note": "This prediction deliberately CONTRADICTS the epic's stated intuition, on the strength of D2's measured cohort data. It is registered as a calibrated prediction, not a hedge: it is falsified by any |delta| > 0.10. Recording epic_intuition alongside it lets D5 score BOTH — where the calibrated prediction and the original intuition disagree is exactly the 'where are predictions failing' signal the user asked for. Residual risk to this prediction: at fan_in 28 (GetName) the baseline may truncate its enumeration, which would move this toward lci_wins on recall."
+      },
+      "threshold": {
+        "metric": "mean_f1",
+        "comparison": "abs_treatment_minus_baseline",
+        "operator": "<=",
+        "value": 0.10,
+        "falsified_if": "|mean_f1(treatment) - mean_f1(baseline)| > 0.10 in either direction."
+      },
+      "power": {
+        "status": "underpowered",
+        "n": 6,
+        "min_n_unanimous_significant": 6,
+        "min_n_for_80pct_power": 25,
+        "note": "n=6: only a unanimous 6/0 split reaches p=0.031. Any non-unanimous result is uninterpretable and D5 must report it as underpowered. Note also that a parity prediction cannot be CONFIRMED by a small sample — absence of a detected difference at n=6 is weak evidence of absence. D5 must report a met parity threshold here as 'no separation detected, underpowered to detect one', never as 'parity established'."
+      },
+      "control_counterpart": "control_low_fan_in_callers",
+      "shares_cells_with": ["transitive_callers_depth2"],
+      "voided": false
+    },
+
+    {
+      "id": "callers_high_noise",
+      "title": "Exhaustive callers of a high-collision-noise function",
+      "role": "hypothesis",
+      "task_shape": "exhaustive_callers",
+      "cohort": { "axis": "noise", "cell": "noise_high", "n": 6, "selector": "cohorts.noise_high" },
+      "arm_visible_prompt": "In this checkout, find every call site of the function `{{symbol_name}}` defined at {{file_path}}:{{line}}. List each call site as path:line. Report the complete set; if there are none, say so explicitly.",
+      "answer_set": {
+        "oracle": "gopls",
+        "method": "gopls references at the definition position, filtered to call sites, minus the definition itself",
+        "gradable": true,
+        "independence_note": "gopls is an external oracle sharing no mechanism with either arm."
+      },
+      "epic_intuition": "lci_wins",
+      "prediction": {
+        "outcome": "lci_wins",
+        "mechanism": "This is the epic's central hypothesis and D2's data supports its premise here: these 6 cells have noise_ratio 10.0-38.4, i.e. grep on the name returns 10-38 hits for every true reference (Close: 269 grep hits for 4 true callers; FetchAuthUser: 32x; send: 47 hits for ZERO callers). The baseline must open and classify each hit to separate real calls from same-name methods on other receivers, comments, and string literals — precision collapses, or it exhausts its budget. The treatment's callers resolves by symbol identity, so collision noise cannot enter its answer set at all. Precision, not recall, is the discriminating metric: the true sets are tiny (fan_in 0-4).",
+        "confidence": 0.65,
+        "note": "Confidence is held to 0.65 rather than higher because prior tiers measured dead accuracy parity (base 0.96 vs LCI 0.96) on a non-cohort-selected population; the entire epic thesis is that cohort selection is what those tiers lacked. That thesis is itself unproven, so a high confidence here would be assuming the conclusion."
+      },
+      "threshold": {
+        "metric": "mean_precision",
+        "comparison": "treatment_minus_baseline",
+        "operator": ">=",
+        "value": 0.20,
+        "additional_requirement": { "kind": "unanimous_cells", "value": 6, "description": "treatment precision >= baseline precision in all 6/6 cells; required because n=6 reaches p<0.05 only on a unanimous split" },
+        "falsified_if": "mean_precision(treatment) - mean_precision(baseline) < 0.20, OR the split is not unanimous 6/0."
+      },
+      "power": {
+        "status": "underpowered",
+        "n": 6,
+        "min_n_unanimous_significant": 6,
+        "min_n_for_80pct_power": 25,
+        "note": "UNDERPOWERED, and this is the family the epic most needs. n=6 admits a significant result ONLY on a unanimous 6/0 sweep (p=0.031); at 5/1 or worse the cell cannot distinguish a real effect from run-to-run variance, which is aggravated by model nondeterminism in the agent arm. Per the epic's binding power warning: if this trends LCI-positive but non-unanimously, the honest conclusion is 'directionally consistent, underpowered, needs a bigger or different corpus' — NOT a beachhead. The correct next lever is then a corpus with more high-noise symbols (n>=25), not more repetitions over these same 6 cells."
+      },
+      "control_counterpart": "control_low_fan_in_callers",
+      "shares_cells_with": ["shadowed_definition"],
+      "voided": false
+    },
+
+    {
+      "id": "shadowed_definition",
+      "title": "Definition of a shadowed name disambiguated by receiver type",
+      "role": "hypothesis",
+      "task_shape": "definition_lookup",
+      "cohort": { "axis": "shadowing", "cell": "shadowing_multi", "n": 17, "selector": "cohorts.shadowing_multi" },
+      "arm_visible_prompt": "In this checkout, find the definition of the function named `{{symbol_name}}` whose receiver type is `{{receiver_type}}`. Report it as path:line.",
+      "answer_set": {
+        "oracle": "gopls",
+        "method": "gopls definition at the cohort cell's recorded definition position; the cell's def_count>1 is what makes the name ambiguous",
+        "gradable": true,
+        "independence_note": "gopls is an external oracle sharing no mechanism with either arm. The prompt is phrased neutrally and identically to the control family's so it does not disclose that the name is shadowed."
+      },
+      "epic_intuition": "lci_wins",
+      "prediction": {
+        "outcome": "lci_wins",
+        "mechanism": "def_count>1 means a baseline grep for the name returns several definitions; the arm must open each and match the receiver type by reading, and receiver matching is precisely the semantic step grep cannot perform. The treatment's inspect_symbol resolves receiver-typed identity directly. Failure mode under test is picking the wrong same-named definition, so F1 is the metric (a wrong single answer is both a precision and recall miss).",
+        "confidence": 0.60
+      },
+      "threshold": {
+        "metric": "mean_f1",
+        "comparison": "treatment_minus_baseline",
+        "operator": ">=",
+        "value": 0.15,
+        "additional_requirement": { "kind": "sign_test_p", "value": 0.05, "description": "requires >= 13/17 discordant-pair wins to reach two-sided p<0.05" },
+        "falsified_if": "mean_f1(treatment) - mean_f1(baseline) < 0.15, OR the sign test over discordant pairs does not reach p<0.05."
+      },
+      "power": {
+        "status": "underpowered",
+        "n": 17,
+        "min_n_unanimous_significant": 6,
+        "min_n_for_80pct_power": 25,
+        "note": "n=17 is the best-powered hypothesis family in this registry but still short of the n≈25 needed for 80% power at the predicted effect. It CAN reach significance at a realistic (non-unanimous) split — 13/17 gives p≈0.049 — so unlike the n=6 families this one is genuinely testable, just with reduced power against moderate effects. A null here is not evidence of no effect."
+      },
+      "control_counterpart": "control_unique_name_definition",
+      "shares_cells_with": ["callers_high_noise"],
+      "non_independence_note": "shadowing_multi ∩ noise_high = 6 cells. This family and callers_high_noise are evaluated over overlapping symbols (different task shapes). D5 MUST NOT treat agreeing outcomes on these two families as independent corroboration.",
+      "voided": false
+    },
+
+    {
+      "id": "transitive_callers_depth2",
+      "title": "Transitive caller impact set, depth >= 2",
+      "role": "hypothesis",
+      "task_shape": "transitive_callers_depth2",
+      "cohort": { "axis": "fan_in", "cell": "fan_in_high", "n": 6, "selector": "cohorts.fan_in_high" },
+      "arm_visible_prompt": "Starting from the function `{{symbol_name}}` at {{file_path}}:{{line}}, find every function that can reach it through at most two levels of calls — its direct callers, and the callers of those callers. List each as path:line.",
+      "answer_set": {
+        "oracle": "gopls",
+        "method": "transitive closure to depth 2 over gopls references/call sites from the definition position, computed by the oracle harness, not by either arm",
+        "gradable": true,
+        "independence_note": "gopls is an external oracle sharing no mechanism with either arm."
+      },
+      "epic_intuition": "lci_wins",
+      "prediction": {
+        "outcome": "lci_wins",
+        "mechanism": "This is where high fan-in actually bites, and it is a DIFFERENT mechanism from collision noise. Depth-2 closure over a fan_in 9-28 symbol requires one grep round per depth-1 caller — 9-28 sequential greps plus per-hit classification — so baseline cost compounds multiplicatively with fan-in and it truncates the frontier or exhausts its budget. The treatment issues one callers call per frontier node with no classification step. Recall is the discriminating metric: the predicted baseline failure is an incomplete frontier, not a polluted one (noise here is only 1.02-3.42).",
+        "confidence": 0.60,
+        "note": "Because these cells are low-noise, this family isolates ENUMERATION COST from COLLISION NOISE. Paired against callers_high_fan_in (same cells, depth-1, predicted parity), a win here with parity there localises LCI's advantage to compounding traversal rather than to name disambiguation — a sharper claim than either family alone."
+      },
+      "threshold": {
+        "metric": "mean_recall",
+        "comparison": "treatment_minus_baseline",
+        "operator": ">=",
+        "value": 0.20,
+        "additional_requirement": { "kind": "unanimous_cells", "value": 6, "description": "treatment recall >= baseline recall in all 6/6 cells; required because n=6 reaches p<0.05 only on a unanimous split" },
+        "falsified_if": "mean_recall(treatment) - mean_recall(baseline) < 0.20, OR the split is not unanimous 6/0."
+      },
+      "power": {
+        "status": "underpowered",
+        "n": 6,
+        "min_n_unanimous_significant": 6,
+        "min_n_for_80pct_power": 25,
+        "note": "n=6, unanimous-only, same constraint as callers_high_noise. Additionally these are the SAME 6 cells as callers_high_fan_in, so the two families are paired-by-construction and their outcomes are not independent evidence."
+      },
+      "control_counterpart": null,
+      "control_counterpart_rationale": "A matched control would be depth-2 closure over fan_in_low cells (fan_in <= 2, where the depth-2 frontier is trivially small). It is deliberately NOT registered: at fan_in <= 2 the depth-2 answer set collapses to near the depth-1 set, so the control would not be a control for the same mechanism — it would test nothing. callers_high_fan_in over the same cells serves as the depth-1 baseline against which this family's depth-2 effect is read.",
+      "shares_cells_with": ["callers_high_fan_in"],
+      "voided": false
+    },
+
+    {
+      "id": "referenced_outside_tests",
+      "title": "Referenced outside tests / dead-symbol determination",
+      "role": "hypothesis",
+      "task_shape": "production_reference_partition",
+      "cohort": { "axis": "refs", "cell": "refs_test_dominant", "n": 10, "selector": "cohorts.refs_test_dominant" },
+      "arm_visible_prompt": "Is the function `{{symbol_name}}` at {{file_path}}:{{line}} referenced anywhere outside of test files (files whose names end in _test.go)? List every non-test reference as path:line, or state explicitly that there are none.",
+      "answer_set": {
+        "oracle": "gopls",
+        "method": "gopls references at the definition position, partitioned by path suffix _test.go; the non-test partition is the answer set",
+        "gradable": true,
+        "independence_note": "gopls is an external oracle sharing no mechanism with either arm."
+      },
+      "epic_intuition": "lci_wins",
+      "prediction": {
+        "outcome": "parity",
+        "mechanism": "Partitioning references by path is a LEXICAL operation, not a semantic one: `grep -rn --include='*.go'` plus reading the path column separates _test.go from production directly, and Glob makes the include-filter native to the baseline. The treatment's references returns the same set and must also be partitioned by path. Neither arm holds a mechanism the other lacks for the partition step itself.",
+        "confidence": 0.55,
+        "note": "This prediction deliberately CONTRADICTS the epic's stated intuition (lci_wins). It is the family I most expect the epic's intuition to miss on, and it is registered as such BEFORE the run precisely so that a miss is recorded as a miss rather than reinterpreted afterwards. Residual risk: this family inherits whatever collision noise its cells carry — if a refs_test_dominant cell is also high-noise, the baseline's partition is polluted upstream of the partition step and this moves toward lci_wins. That is a confound in this family, not a rescue of the intuition, and D5 must read it that way."
+      },
+      "threshold": {
+        "metric": "mean_f1",
+        "comparison": "abs_treatment_minus_baseline",
+        "operator": "<=",
+        "value": 0.10,
+        "falsified_if": "|mean_f1(treatment) - mean_f1(baseline)| > 0.10 in either direction."
+      },
+      "power": {
+        "status": "underpowered",
+        "n": 10,
+        "min_n_unanimous_significant": 6,
+        "min_n_for_80pct_power": 25,
+        "note": "n=10 can reach p<0.05 only at 9/10 or better. As with every parity prediction at small n, a met threshold is 'no separation detected, underpowered to detect one', never 'parity established'."
+      },
+      "control_counterpart": null,
+      "control_counterpart_rationale": "This family is already calibrated to parity and therefore acts as its own null check; a control for a parity prediction would be the same task shape on an easier cell, which tests nothing additional. The registry's instrument-level null checks are control_unique_name_definition and control_low_fan_in_callers.",
+      "voided": false
+    },
+
+    {
+      "id": "interface_implementations",
+      "title": "Interface implementations of a method",
+      "role": "hypothesis",
+      "task_shape": "implementations_lookup",
+      "cohort": { "axis": "impl", "cell": "impl_many", "n": 2, "selector": "cohorts.impl_many" },
+      "arm_visible_prompt": "In this checkout, find every type that implements `{{symbol_name}}` as declared at {{file_path}}:{{line}}. List each implementation as path:line.",
+      "answer_set": {
+        "oracle": "gopls",
+        "method": "gopls implementation at the definition position",
+        "gradable": true,
+        "independence_note": "gopls is an external oracle sharing no mechanism with either arm."
+      },
+      "epic_intuition": "lci_wins",
+      "prediction": {
+        "outcome": "lci_wins",
+        "mechanism": "RECORDED AS DIRECTIONAL INTUITION ONLY — NOT A TESTABLE PREDICTION AT THIS N. The intuition is that implementation discovery requires type-relationship knowledge (which types satisfy the interface) that grep cannot compute, so the baseline must guess from method-name matches. No threshold is authored for it because this sample cannot falsify one.",
+        "confidence": null,
+        "note": "confidence is deliberately null. Attaching a confidence number to a claim the sample cannot test would dress an untestable statement up as a measurement."
+      },
+      "threshold": null,
+      "power": {
+        "status": "untestable_at_this_n",
+        "n": 2,
+        "min_n_unanimous_significant": 6,
+        "min_n_for_80pct_power": 25,
+        "note": "UNTESTABLE. At n=2 the smallest attainable two-sided sign-test p is 2*(0.5^2)=0.50, so NO outcome — including a perfect 2/0 sweep — can reach significance. n=2 supports no conclusion in either direction. This family is retained in the registry rather than dropped so that the gap is on the record: D5 MUST report it as 'not tested', and MUST NOT report a 2/0 result as a win. SECOND, INDEPENDENT DEFECT: the two cells are Close and Write, and Close is the noisiest symbol in the entire pool (noise_ratio 38.43) — so even at adequate n these cells would confound an implementations effect with a collision-noise effect. Testing this family needs a corpus with >= 25 many-implementor symbols that are not noise outliers; more repetitions over these 2 cells cannot help."
+      },
+      "control_counterpart": null,
+      "control_counterpart_rationale": "A control would be implementations_lookup over impl_none (n=29, expected answer: empty). It is not registered because the hypothesis family it would control for is itself untestable at n=2 — a powered control for an untestable treatment yields no comparison. If a future corpus raises impl_many to n>=25, that control MUST be registered alongside it, and it would additionally require the empty-answer-set grading rule (see registry_findings.empty_answer_set_cell).",
+      "voided": false
+    },
+
+    {
+      "id": "control_unique_name_definition",
+      "title": "CONTROL — definition lookup for a unique, low-noise name",
+      "role": "control",
+      "task_shape": "definition_lookup",
+      "cohort": { "axis": "shadowing+noise", "cell": "shadowing_unique ∩ noise_control", "n": 26, "selector": "intersect(cohorts.shadowing_unique, cohorts.noise_control)" },
+      "arm_visible_prompt": "In this checkout, find the definition of the function named `{{symbol_name}}`. Report it as path:line.",
+      "answer_set": {
+        "oracle": "gopls",
+        "method": "gopls definition at the cohort cell's recorded definition position",
+        "gradable": true,
+        "independence_note": "gopls is an external oracle sharing no mechanism with either arm."
+      },
+      "epic_intuition": "parity",
+      "prediction": {
+        "outcome": "parity",
+        "mechanism": "def_count=1 and noise_ratio <= 2.0 means a baseline grep on the name lands on the definition within one or two hits, with nothing to disambiguate. The treatment reaches the same answer through its index. There is no collision noise and no receiver ambiguity, so no mechanism distinguishes the arms.",
+        "confidence": 0.80
+      },
+      "threshold": {
+        "metric": "mean_f1",
+        "comparison": "abs_treatment_minus_baseline",
+        "operator": "<=",
+        "value": 0.05,
+        "falsified_if": "|mean_f1(treatment) - mean_f1(baseline)| > 0.05 in either direction."
+      },
+      "power": {
+        "status": "powered",
+        "n": 26,
+        "min_n_unanimous_significant": 6,
+        "min_n_for_80pct_power": 25,
+        "note": "n=26 meets the n>=25 bar for 80% power at the predicted effect size. This is the registry's PRIMARY INSTRUMENT NULL CHECK and it is one of only three powered families — deliberately, because a null check that cannot detect a violation is not a check."
+      },
+      "controls_for": ["shadowed_definition"],
+      "instrument_check": "If the treatment WINS here beyond the 0.05 band, the instrument is biased toward LCI on definition lookups generally, and shadowed_definition's result cannot be attributed to shadowing. This family is what makes shadowed_definition interpretable.",
+      "voided": false
+    },
+
+    {
+      "id": "control_literal_string_search",
+      "title": "CONTROL — exhaustive literal string occurrence search",
+      "role": "control",
+      "task_shape": "literal_string_search",
+      "cohort": { "axis": "noise", "cell": "noise_control", "n": 26, "selector": "cohorts.noise_control (literal drawn deterministically from each cell's defining file)" },
+      "arm_visible_prompt": "In this checkout, find every occurrence of the exact text `{{literal}}`, including occurrences inside string literals and comments. List each as path:line.",
+      "answer_set": {
+        "oracle": "independent_literal_scanner",
+        "method": "A byte-exact substring scan over the checkout implemented in the oracle harness (Python, its own scanning path), enumerating every path:line containing the literal.",
+        "gradable": true,
+        "independence_note": "BINDING CONSTRAINT ON D4 — the oracle for this family MUST NOT be grep(1). The baseline arm's entire mechanism IS grep(1); grading a grep arm with a grep oracle would mean the arm is graded by its own matching mechanism, which is exactly the shared-blind-spot failure .claude/rules/bench-harness-oracle-independence.md forbids, and it would bias this family toward grep_wins BY CONSTRUCTION. The oracle must be an independently authored literal scanner that shares no code object with the arm's tooling, and it must carry a discrimination test: inject a known occurrence that the scanner must FIND and a near-miss (e.g. differing by case or by one byte) that it must NOT report."
+      },
+      "epic_intuition": "parity_or_grep_wins",
+      "prediction": {
+        "outcome": "grep_wins",
+        "mechanism": "The arms are disjoint: the treatment has NO Grep. Exhaustive byte-exact substring retrieval — including inside comments and string literals — is grep's native operation and is the LCI index's structural blind spot, since a symbol/semantic index does not enumerate arbitrary raw byte matches in non-code text. The treatment must approximate the task through mcp__lci__search, which is a semantic/symbol query rather than a substring enumerator, and should lose recall on occurrences that are not symbol references.",
+        "confidence": 0.65,
+        "note": "This is the registry's proof that the instrument CAN report a loss for LCI. If no family can report grep_wins, the sweep is rigged and every LCI win it reports is uninterpretable. Confidence is held at 0.65, not higher, because the treatment retains Read and could brute-force small files, and because mcp__lci__search's substring behaviour on non-code text is an assumption here, not a measured fact."
+      },
+      "threshold": {
+        "metric": "mean_f1",
+        "comparison": "baseline_minus_treatment",
+        "operator": ">=",
+        "value": 0.10,
+        "falsified_if": "mean_f1(baseline) - mean_f1(treatment) < 0.10 — including the case where the treatment wins, which would be a strong and surprising result worth reporting on its own."
+      },
+      "power": {
+        "status": "powered",
+        "n": 26,
+        "min_n_unanimous_significant": 6,
+        "min_n_for_80pct_power": 25,
+        "note": "n=26 meets the n>=25 bar for 80% power at the predicted effect size. One of only three powered families in the registry."
+      },
+      "controls_for": ["callers_high_noise", "callers_high_fan_in", "shadowed_definition", "transitive_callers_depth2"],
+      "instrument_check": "This is the registry's DIRECTIONAL null check: it verifies the sweep can report a grep win at all. If this family reports parity or an LCI win, the harness's ability to detect an LCI loss is unproven and every other family's LCI-positive result must be discounted accordingly.",
+      "voided": false
+    },
+
+    {
+      "id": "control_low_fan_in_callers",
+      "title": "CONTROL — exhaustive callers of a low-fan-in, low-noise function",
+      "role": "control",
+      "task_shape": "exhaustive_callers",
+      "cohort": { "axis": "fan_in+noise", "cell": "fan_in_low ∩ noise_control", "n": 16, "selector": "intersect(cohorts.fan_in_low, cohorts.noise_control)" },
+      "arm_visible_prompt": "In this checkout, find every call site of the function `{{symbol_name}}` defined at {{file_path}}:{{line}}. List each call site as path:line. Report the complete set; if there are none, say so explicitly.",
+      "answer_set": {
+        "oracle": "gopls",
+        "method": "gopls references at the definition position, filtered to call sites, minus the definition itself",
+        "gradable": true,
+        "independence_note": "gopls is an external oracle sharing no mechanism with either arm."
+      },
+      "epic_intuition": "parity",
+      "prediction": {
+        "outcome": "parity",
+        "mechanism": "MATCHED CONTROL: identical task shape and identical prompt template to callers_high_noise and callers_high_fan_in, run on the easy cell (fan_in <= 2, noise_ratio <= 2.0). One grep returns at most a handful of hits, nearly all true. Holding task shape fixed and varying only cohort difficulty is what isolates the collision-noise mechanism from a generic tool-affordance advantage.",
+        "confidence": 0.75
+      },
+      "threshold": {
+        "metric": "mean_f1",
+        "comparison": "abs_treatment_minus_baseline",
+        "operator": "<=",
+        "value": 0.05,
+        "falsified_if": "|mean_f1(treatment) - mean_f1(baseline)| > 0.05 in either direction."
+      },
+      "power": {
+        "status": "underpowered",
+        "n": 16,
+        "min_n_unanimous_significant": 6,
+        "min_n_for_80pct_power": 25,
+        "note": "n=16 falls short of the n>=25 bar; it can reach p<0.05 only at 13/16 or better. This weakens the matched-control comparison: a met parity threshold here is 'no separation detected, underpowered to detect one'. Using the full fan_in_low cell (n=26) would be powered but would let noise vary inside the control, defeating its purpose. The intersection is the honest choice and its reduced power is recorded rather than traded away."
+      },
+      "controls_for": ["callers_high_noise", "callers_high_fan_in"],
+      "instrument_check": "This is the registry's MECHANISM null check. If the treatment wins HERE as well as on callers_high_noise, then LCI's advantage is a property of the callers task shape (or of tool affordance generally) and NOT of collision noise — which would falsify the epic's stated mechanism even while its outcome prediction appeared to succeed. D5 must read callers_high_noise against this family, never on its own.",
+      "voided": false
+    },
+
+    {
+      "id": "token_budgeted_completion",
+      "title": "Token-budgeted variants — completion rate (DNF)",
+      "role": "hypothesis",
+      "task_shape": "budget_constrained_variant",
+      "variant_of": ["callers_high_noise", "callers_high_fan_in", "shadowed_definition", "transitive_callers_depth2", "referenced_outside_tests", "control_unique_name_definition", "control_literal_string_search", "control_low_fan_in_callers"],
+      "cohort": { "axis": "all", "cell": "full_pool", "n": 48, "selector": "all cells in the pool, each run under the constrained token budget" },
+      "arm_visible_prompt": "(unchanged from the underlying family's prompt; the variant is enforced by the runner's token budget, not by the prompt — the agent is not told a budget applies)",
+      "answer_set": {
+        "oracle": "runner_status",
+        "method": "Per (cell, arm) completion status from the runner's own record log: DNF = no answer produced within the token budget. Not an answer-set comparison.",
+        "gradable": true,
+        "independence_note": "Completion status is recorded by the runner, independently of any scoring of answer content."
+      },
+      "epic_intuition": "lci_wins",
+      "prediction": {
+        "outcome": "lci_wins",
+        "mechanism": "Prior tiers' ONLY reproducible LCI win was completion rate (DNF 10.8% -> 6.5%, a 4.3pp gap) while accuracy sat at dead parity (0.96 vs 0.96). The mechanism: the baseline spends budget on grep output volume and the file reads needed to classify hits, whereas the treatment's answers arrive in fewer, denser calls. Under a constrained budget this pre-existing gap should widen, because the baseline's per-answer token cost scales with collision noise while the treatment's does not.",
+        "confidence": 0.55,
+        "note": "This is the one family with a real prior measurement behind it, which is why it is registered at all — but see the power note: the prior's own effect size is far too small for this sample to confirm. The 0.15 threshold is therefore NOT a prediction that the prior's 4.3pp gap will reappear; it is the smallest gap this sample can actually detect. If the observed gap lands near 4pp, this family reports 'consistent with the prior, underpowered to confirm', which is a failure to test, not a success."
+      },
+      "threshold": {
+        "metric": "dnf_rate_pct",
+        "comparison": "baseline_minus_treatment",
+        "operator": ">=",
+        "value": 15.0,
+        "additional_requirement": { "kind": "mcnemar_p", "value": 0.05, "description": "McNemar over the 48 paired cells on discordant completion outcomes" },
+        "falsified_if": "dnf_rate_pct(baseline) - dnf_rate_pct(treatment) < 15.0 percentage points, OR McNemar over discordant pairs does not reach p<0.05."
+      },
+      "power": {
+        "status": "underpowered",
+        "n": 48,
+        "min_n_unanimous_significant": 6,
+        "min_n_for_80pct_power": 900,
+        "note": "UNDERPOWERED FOR THE PRIOR'S EFFECT SIZE, despite being the largest family here. DNF events are rare: at the prior tiers' rates (10.8% vs 6.5%) the expected counts at n=48 are ~5 vs ~3, and detecting a 4.3pp difference in proportions at 80% power needs roughly n≈900 per arm. n=48 can only detect a LARGE gap — McNemar needs roughly 10 discordant pairs net (e.g. 10 vs 1, p≈0.012), which corresponds to a gap around 15-20pp. Hence the 15.0pp threshold: it is the honest detection floor of this sample, NOT a prediction of the prior's magnitude. A gap between 4pp and 15pp is real-but-undetectable here and MUST be reported as such rather than as either a win or a null."
+      },
+      "control_counterpart": null,
+      "control_counterpart_rationale": "The controls are built into the variant's own cell set: the pool of 48 includes the control families' cells, so the DNF comparison spans both hard and easy cohorts. The per-cohort DNF breakdown IS the control — if the baseline's DNF excess appears uniformly across noise_control cells as well as noise_high cells, the completion gap is a generic tool-affordance effect rather than the predicted noise-driven one.",
+      "voided": false
+    }
+  ]
+}
