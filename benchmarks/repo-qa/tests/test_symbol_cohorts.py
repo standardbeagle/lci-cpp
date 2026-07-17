@@ -494,6 +494,45 @@ class DeterminismTest(unittest.TestCase):
         self.assertEqual(sc.serialize(run()), sc.serialize(run()))
 
 
+class FailClosedTest(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root)
+        synthetic_corpus(self.root, count=12)
+        self.cands = sc.enumerate_declarations(self.root)
+        self.hits = {c.name: (i % 40) + 1 for i, c in enumerate(self.cands)}
+
+    def test_a_pool_that_cannot_be_filled_is_refused(self):
+        # Truncating quietly would leave the document recording pool_size=48
+        # while carrying fewer cells -- its own provenance field would be a
+        # lie, and the sample would shrink toward whatever the strata allow.
+        with self.assertRaises(sc.SelectionError) as ctx:
+            sc.stratified_pool(self.cands, self.hits, seed="s", size=999)
+        self.assertIn("999", str(ctx.exception))
+
+    def test_a_fillable_pool_is_exactly_the_requested_size(self):
+        pool = sc.stratified_pool(self.cands, self.hits, seed="s", size=8)
+        self.assertEqual(len(pool), 8)
+
+    def test_absent_gopls_reads_as_absent(self):
+        self.assertIsNone(sc.resolve_gopls_binary_or_none("/nonexistent/gopls"))
+
+    def test_a_broken_gopls_is_not_reported_as_absent(self):
+        # "Absent" gates the discrimination tests into a skip. A gopls that is
+        # present but broken must NOT read as absent, or the tests that prove
+        # the selector discriminates would silently stop running -- exactly the
+        # pass-by-skip that hid the find_files glob bug in this repo before.
+        broken = os.path.join(self.root, "gopls")
+        with open(broken, "w") as handle:
+            handle.write("#!/bin/sh\nexit 1\n")
+        os.chmod(broken, 0o644)  # present, not executable
+        with self.assertRaises(Exception) as ctx:
+            sc.resolve_gopls_binary_or_none(broken)
+        self.assertNotIsInstance(ctx.exception, unittest.SkipTest)
+
+
 class LciIndependenceTest(unittest.TestCase):
     def test_selector_never_references_the_tool_under_test(self):
         # The oracle and the sample must both be independent of LCI, or the
