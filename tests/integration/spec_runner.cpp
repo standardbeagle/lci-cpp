@@ -464,12 +464,23 @@ void CleanupOwnedProcesses(std::string_view token) {
     }
 }
 
+void CleanupOwnedProcessesAndSockets(std::string_view token,
+                                     const std::string& corpus_path) {
+    CleanupOwnedProcesses(token);
+    for (const auto& socket_path :
+         lci::parity::candidate_socket_paths_for_test(corpus_path)) {
+        std::error_code ec;
+        fs::remove(socket_path, ec);
+    }
+}
+
 // Marks every exec performed by one descriptor with a unique inherited token.
 // Detached servers retain the token after reparenting, giving cleanup an
 // explicit ownership proof that does not depend on pgrep command-line matches.
 class OwnedProcessGuard {
   public:
-    OwnedProcessGuard() {
+    explicit OwnedProcessGuard(std::string corpus_path)
+        : corpus_path_(std::move(corpus_path)) {
         static std::atomic<unsigned long> sequence{0};
         token_ = std::to_string(::getpid()) + "-" +
                  std::to_string(sequence.fetch_add(1));
@@ -497,13 +508,19 @@ class OwnedProcessGuard {
   private:
     void cleanup() noexcept {
         try {
-            CleanupOwnedProcesses(token_);
+            // SIGTERM/SIGKILL can reap a detached server before its normal
+            // IndexServer teardown unlinks the AF_UNIX socket. Remove both
+            // supported per-corpus names only after the exact token-owned
+            // processes are gone, so the next descriptor/test entry never
+            // inherits a dead listener pathname.
+            CleanupOwnedProcessesAndSockets(token_, corpus_path_);
         } catch (...) {
             // Teardown must never replace the descriptor's test result.
         }
     }
 
     std::string token_;
+    std::string corpus_path_;
     std::optional<std::string> previous_;
 };
 
@@ -612,7 +629,7 @@ void ExpectSpecMatches(const SpecCase& spec_case) {
 
     CapturedOutput capture;
     try {
-        OwnedProcessGuard owned_processes;
+        OwnedProcessGuard owned_processes(corpus_path);
         capture = RunCppSide(cpp_binary, corpus_path, exec_descriptor);
     } catch (const std::exception& error) {
         FAIL() << "Failed to execute descriptor: " << error.what();
@@ -699,6 +716,11 @@ bool PidfdCleanupSupportedForTest() {
 
 void CleanupOwnedProcessesForTest(std::string_view token) {
     CleanupOwnedProcesses(token);
+}
+
+void CleanupOwnedProcessesAndSocketsForTest(std::string_view token,
+                                            const std::string& corpus_path) {
+    CleanupOwnedProcessesAndSockets(token, corpus_path);
 }
 
 namespace {

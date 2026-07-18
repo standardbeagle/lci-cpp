@@ -1,4 +1,5 @@
 #include "integration/spec_runner.h"
+#include "runner/modes/http.h"
 
 #include <cctype>
 #include <string>
@@ -7,6 +8,8 @@
 #include <cerrno>
 #include <csignal>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -95,6 +98,28 @@ TEST(SpecRunnerProcessOwnership, ForceKillsTermResistantOwnedChild) {
     ASSERT_EQ(::waitpid(child, &status, 0), child);
     ASSERT_TRUE(WIFSIGNALED(status));
     EXPECT_EQ(WTERMSIG(status), SIGKILL);
+}
+
+TEST(SpecRunnerProcessOwnership, RemovesCorpusSocketsAfterOwnedProcessCleanup) {
+    const auto corpus = std::filesystem::temp_directory_path() /
+                        ("lci-owned-corpus-" + std::to_string(::getpid()));
+    std::filesystem::create_directories(corpus);
+    const auto candidates =
+        lci::parity::candidate_socket_paths_for_test(corpus.string());
+    ASSERT_FALSE(candidates.empty());
+
+    for (const auto& path : candidates) {
+        std::ofstream(path) << "stale socket marker";
+        ASSERT_TRUE(std::filesystem::exists(path));
+    }
+
+    CleanupOwnedProcessesAndSocketsForTest("no-live-process", corpus.string());
+
+    for (const auto& path : candidates) {
+        EXPECT_FALSE(std::filesystem::exists(path)) << path;
+    }
+    std::error_code ec;
+    std::filesystem::remove_all(corpus, ec);
 }
 
 // ---------------------------------------------------------------------------

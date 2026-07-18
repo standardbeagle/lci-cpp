@@ -73,5 +73,7 @@ bool ProcessEnvironmentHasOwnershipTokenForTest(
 // Linux-only lifecycle hooks used by the focused ownership regression.
 bool PidfdCleanupSupportedForTest();
 void CleanupOwnedProcessesForTest(std::string_view token);
+void CleanupOwnedProcessesAndSocketsForTest(std::string_view token,
+                                            const std::string& corpus_path);
 
 }  // namespace lci::integration
