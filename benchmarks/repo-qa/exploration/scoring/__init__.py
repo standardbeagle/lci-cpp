@@ -8,6 +8,14 @@ from scoring.scorer import (
     aggregate,
     score_run,
 )
+from scoring.claim_validation import (
+    CLAIM_AGGREGATE_SCHEMA,
+    CLAIM_SCORE_SCHEMA,
+    CLAIM_SCORE_SET_SCHEMA,
+    aggregate_claim_scores,
+    parse_claim_answer,
+    score_claim_run,
+)
 
 __all__ = [
     "AGGREGATE_SCHEMA",
@@ -17,4 +25,10 @@ __all__ = [
     "normalize_path",
     "parse_citations",
     "score_run",
+    "CLAIM_AGGREGATE_SCHEMA",
+    "CLAIM_SCORE_SCHEMA",
+    "CLAIM_SCORE_SET_SCHEMA",
+    "aggregate_claim_scores",
+    "parse_claim_answer",
+    "score_claim_run",
 ]
