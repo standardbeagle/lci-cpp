@@ -727,56 +727,76 @@ def _assert_decoys_unreachable(tree, spec, decoys, path_map):
     for both ways a twin can become reachable: its generated module path or
     any of its renamed symbols.
     """
+    def module_name(path):
+        for extension in spec["source_extensions"]:
+            if path.endswith(extension):
+                return path[: -len(extension)]
+        return path
+
+    def imported_modules(rel, body):
+        found = set()
+        if spec.get("language") == "python":
+            try:
+                syntax = ast.parse(body)
+            except SyntaxError:
+                return found
+            package = os.path.dirname(rel).replace(os.sep, "/").split("/")
+            for node in ast.walk(syntax):
+                if isinstance(node, ast.Import):
+                    found.update(alias.name.replace(".", "/") for alias in node.names)
+                elif isinstance(node, ast.ImportFrom):
+                    if node.level:
+                        up = node.level - 1
+                        if up > len(package):
+                            continue
+                        base = package[: len(package) - up]
+                    else:
+                        base = []
+                    if node.module:
+                        base += node.module.split(".")
+                    target = "/".join(base)
+                    if target:
+                        found.add(target)
+                    for alias in node.names:
+                        if alias.name != "*":
+                            found.add("/".join(base + alias.name.split(".")))
+        elif rel.endswith(_TS_EXTENSIONS):
+            for match in _TS_ANY_SPECIFIER.finditer(_strip_ts_comments(body)):
+                reference = match.group("spec")
+                if re.match(r"^\.\.?(/|$)", reference):
+                    reference = os.path.normpath(
+                        os.path.join(os.path.dirname(rel), reference)
+                    ).replace(os.sep, "/")
+                found.add(module_name(reference))
+        return found
+
+    def explicitly_names(body, reference):
+        return re.search(
+            r"(?<![A-Za-z0-9_])" + re.escape(reference) + r"(?![A-Za-z0-9_])",
+            body,
+        ) is not None
+
     live_sources = sorted(set(path_map.values()) & set(_source_files(tree, spec)))
     for decoy in decoys:
-        module = _strip_ext(decoy["path"], spec)
-        module_patterns = [
-            pattern
-            for pattern, _replacement in _absolute_ref_patterns(
-                spec, module, module
-            )
-        ]
-        # Relative JS/TS/Python-like specifiers may name only the generated
-        # basename when the importing file is in the same directory.
-        stem = os.path.basename(module)
-        module_patterns.append(
-            re.compile(r"(?<![\w])(?:\.\.?/)+" + re.escape(stem) + r"(?![\w])")
-        )
-        symbol_patterns = [
-            (
-                symbol["twin"],
-                re.compile(
-                    r"(?<![\w])" + re.escape(symbol["twin"]) + r"(?![\w])"
-                ),
-            )
-            for symbol in decoy["symbols"]
-        ]
+        module = module_name(decoy["path"])
 
         for rel in live_sources:
             body = _read_text(os.path.join(tree, rel))
             if body is None:
                 continue
-            relative_modules = set()
-            if rel.endswith(_TS_EXTENSIONS):
-                for match in _TS_ANY_SPECIFIER.finditer(_strip_ts_comments(body)):
-                    relative = match.group("spec")
-                    if re.match(r"^\.\.?(/|$)", relative):
-                        target = os.path.normpath(
-                            os.path.join(os.path.dirname(rel), relative)
-                        ).replace(os.sep, "/")
-                        relative_modules.add(_strip_ext(target, spec))
-            if module in relative_modules:
+            imports = imported_modules(rel, body)
+            if (
+                module in imports
+                or explicitly_names(body, module)
+                or explicitly_names(body, module.replace("/", "."))
+            ):
                 raise ForgeError(
                     f"{spec['id']}: live source {rel} references dead twin "
                     f"module {decoy['path']}"
                 )
-            if any(pattern.search(body) for pattern in module_patterns):
-                raise ForgeError(
-                    f"{spec['id']}: live source {rel} references dead twin "
-                    f"module {decoy['path']}"
-                )
-            for twin, pattern in symbol_patterns:
-                if pattern.search(body):
+            for symbol in decoy["symbols"]:
+                twin = symbol["twin"]
+                if explicitly_names(body, twin):
                     raise ForgeError(
                         f"{spec['id']}: live source {rel} references dead twin "
                         f"symbol {twin} from {decoy['path']}"

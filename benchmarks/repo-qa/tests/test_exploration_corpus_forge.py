@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 SCRIPTS = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts"
@@ -337,6 +338,62 @@ class TestDecoyProvenance(ForgeTestCase):
             forge.ForgeError, rf"{re.escape(live)}.*{re.escape(dead)}"
         ):
             forge._assert_decoys_unreachable(tree, spec, decoys, {live: live})
+
+    def test_reachability_check_resolves_python_package_relative_import(self):
+        tree = os.path.join(self.tmp, "python-relative-twin")
+        live = "pkg/live/deep/consumer.py"
+        dead = "pkg/dead/generated_twin.py"
+        for rel, body in {
+            live: "from ...dead import generated_twin\n",
+            dead: "trap = 1\n",
+        }.items():
+            path = os.path.join(tree, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as f:
+                f.write(body)
+
+        spec = {
+            "id": "python-relative-twin-fixture",
+            "language": "python",
+            "source_extensions": [".py"],
+            "mutable_roots": ["pkg"],
+            "reference_forms": ["dotted"],
+        }
+        decoys = [{"path": dead, "symbols": []}]
+        with self.assertRaisesRegex(
+            forge.ForgeError, rf"{re.escape(live)}.*{re.escape(dead)}"
+        ):
+            forge._assert_decoys_unreachable(tree, spec, decoys, {live: live})
+
+    def test_reachability_oracle_does_not_reuse_production_rewrite_matchers(self):
+        tree = os.path.join(self.tmp, "independent-oracle")
+        live = "pkg/live.py"
+        dead = "pkg/dead/generated_twin.py"
+        for rel, body in {
+            live: "import pkg.dead.generated_twin\n",
+            dead: "class Original_renamed:\n    pass\n",
+        }.items():
+            path = os.path.join(tree, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as f:
+                f.write(body)
+
+        spec = {
+            "id": "independent-oracle-fixture",
+            "language": "python",
+            "source_extensions": [".py"],
+            "mutable_roots": ["pkg"],
+            "reference_forms": ["dotted"],
+        }
+        decoys = [{"path": dead, "symbols": [
+            {"original": "Original", "twin": "Original_renamed"}
+        ]}]
+        with mock.patch.object(forge, "_absolute_ref_patterns", return_value=[]), \
+             mock.patch.object(forge, "_PY_FROM_DOTS", None):
+            with self.assertRaisesRegex(
+                forge.ForgeError, rf"{re.escape(live)}.*{re.escape(dead)}"
+            ):
+                forge._assert_decoys_unreachable(tree, spec, decoys, {live: live})
 
 
 class TestAdversarialTrapInjections(ForgeTestCase):
