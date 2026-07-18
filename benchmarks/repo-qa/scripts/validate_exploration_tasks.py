@@ -49,6 +49,13 @@ DEFAULT_CORPUS_ROOT = forge.DEFAULT_OUT_ROOT
 
 TASK_SCHEMA_CONST = "exploration_task_v1"
 ANNOTATION_SCHEMA_CONST = "exploration_annotation_v1"
+BANK_MIN_TASKS = 30
+BANK_MAX_TASKS = 50
+EXPECTED_CORPORA = {"scikit-learn", "pocketbase", "next.js"}
+EXPECTED_CATEGORIES = {
+    "true", "wrong-layer", "misleading-doc", "dead-code", "false-premise",
+    "unsupported",
+}
 
 
 class Problem(Exception):
@@ -117,6 +124,16 @@ def _check_annotation_record(record):
         raise Problem("annotation has no evidence")
     if record.get("verdict") not in {"true", "false", "unsupported"}:
         raise Problem("annotation has no valid independent verdict")
+    classifications = record.get("anchor_classification")
+    if not isinstance(classifications, list):
+        raise Problem("annotation has no independent anchor classification")
+    if len(classifications) != len(evidence):
+        raise Problem("annotation anchor classification count must match evidence")
+    if any(
+        item not in {"authoritative-live", "misleading", "dead"}
+        for item in classifications
+    ):
+        raise Problem("annotation has an invalid anchor classification")
     for anchor in evidence:
         for field in ("path", "lines", "target_identifiers"):
             if field not in anchor:
@@ -193,6 +210,18 @@ def verify_anchor_live(anchor, manifest, tree_dir):
                 f"{path}:{start}-{end}: target identifier {identifier!r} does "
                 f"not occur within the bounded evidence"
             )
+
+
+def classify_anchor_live(anchor, manifest, tree_dir):
+    """Classify an anchor from independent forged-corpus evidence."""
+    path = anchor["path"]
+    if path in {decoy["path"] for decoy in manifest.get("decoys", [])}:
+        return "dead"
+    start, end = anchor["lines"][0], anchor["lines"][-1]
+    segment = _read_range(os.path.join(tree_dir, path), start, end)
+    if "FORGE TRAP" in segment:
+        return "misleading"
+    return "authoritative-live"
 
 
 # ---------------------------------------------------------------------------
@@ -301,6 +330,7 @@ def validate_task(
 
     annotation_sigs = []
     annotation_verdicts = []
+    annotation_classifications = []
     for annotator, record in sorted(annotations.items()):
         try:
             _check_annotation_record(record)
@@ -318,6 +348,12 @@ def validate_task(
             )
         annotation_sigs.append(sigs)
         annotation_verdicts.append(record["verdict"])
+        annotation_classifications.append({
+            _anchor_signature(anchor): classification
+            for anchor, classification in zip(
+                record["evidence"], record["anchor_classification"]
+            )
+        })
 
     if len(annotation_sigs) >= 2:
         disagreement = any(
@@ -344,6 +380,21 @@ def validate_task(
             problems.append(f"{task_id}: resolved verdict is unsupported by either annotation")
         if len(set(annotation_verdicts)) > 1 and not task["adjudication"].get("notes"):
             problems.append(f"{task_id}: verdict disagreement needs resolved adjudication notes")
+
+        for index, anchor in enumerate(evidence):
+            signature = _anchor_signature(anchor)
+            classifications = {
+                item[signature]
+                for item in annotation_classifications
+                if signature in item
+            }
+            adjudicated = task["author"]["anchor_classification"][index]
+            if adjudicated not in classifications:
+                problems.append(
+                    f"{task_id}: adjudicated anchor classification {adjudicated!r} "
+                    f"for {anchor['path']}:{anchor['lines']} is unsupported by "
+                    "either annotation"
+                )
 
     if len(task["author"]["anchor_classification"]) != len(evidence):
         problems.append(f"{task_id}: anchor classification count must match evidence set")
@@ -379,9 +430,36 @@ def validate_task(
                 f"{task_id}: forged manifest seed {manifest.get('seed')} != "
                 f"manifest_ref.seed {ref['seed']}"
             )
+        valid_live_anchors = []
         for anchor in evidence:
-            for message in verify_anchor_live(anchor, manifest, tree_dir):
+            anchor_problems = list(verify_anchor_live(anchor, manifest, tree_dir))
+            for message in anchor_problems:
                 problems.append(f"{task_id}: {message}")
+            if not anchor_problems:
+                valid_live_anchors.append(anchor)
+        for anchor in valid_live_anchors:
+            index = evidence.index(anchor)
+            expected = classify_anchor_live(anchor, manifest, tree_dir)
+            adjudicated = task["author"]["anchor_classification"][index]
+            if adjudicated != expected:
+                problems.append(
+                    f"{task_id}: anchor classification {adjudicated!r} for "
+                    f"{anchor['path']}:{anchor['lines']} contradicts pinned "
+                    f"manifest/live evidence ({expected!r})"
+                )
+            for annotator, record in sorted(annotations.items()):
+                if "anchor_classification" not in record:
+                    continue
+                for ann_index, ann_anchor in enumerate(record.get("evidence", [])):
+                    if _anchor_signature(ann_anchor) != _anchor_signature(anchor):
+                        continue
+                    recorded = record["anchor_classification"][ann_index]
+                    if recorded != expected:
+                        problems.append(
+                            f"{task_id}[{annotator}]: anchor classification "
+                            f"{recorded!r} contradicts pinned manifest/live "
+                            f"evidence ({expected!r})"
+                        )
 
     return problems
 
@@ -445,12 +523,25 @@ def validate_bank(
         category_counts[category] = category_counts.get(category, 0) + 1
         verdict_counts[verdict] = verdict_counts.get(verdict, 0) + 1
     total = len(task_files)
-    expected_categories = {"true", "wrong-layer", "misleading-doc", "dead-code", "false-premise", "unsupported"}
-    if total >= 30:
-        if set(category_counts) != expected_categories:
-            problems.append(f"bank must cover every category; got {sorted(category_counts, key=str)}")
-        if max(category_counts.values(), default=0) > total / 2 or max(verdict_counts.values(), default=0) > total / 2:
-            problems.append("bank balance limit exceeded: no category or verdict may be a majority")
+    if not BANK_MIN_TASKS <= total <= BANK_MAX_TASKS:
+        problems.append(
+            f"bank must contain {BANK_MIN_TASKS}-{BANK_MAX_TASKS} tasks; got {total}"
+        )
+    if set(per_corpus) != EXPECTED_CORPORA:
+        problems.append(
+            f"bank must cover every corpus; got {sorted(per_corpus, key=str)}"
+        )
+    if set(category_counts) != EXPECTED_CATEGORIES:
+        problems.append(
+            f"bank must cover every category; got {sorted(category_counts, key=str)}"
+        )
+    if (
+        max(category_counts.values(), default=0) > total / 2
+        or max(verdict_counts.values(), default=0) > total / 2
+    ):
+        problems.append(
+            "bank balance limit exceeded: no category or verdict may be a majority"
+        )
     summary = {"tasks": total, "per_corpus": per_corpus,
                "per_category": category_counts, "per_verdict": verdict_counts}
     return problems, summary

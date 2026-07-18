@@ -53,8 +53,8 @@
     "category": "misleading-doc",
     "adjudication_notes": "Two independent annotations were reconciled against the pinned mutated checkout.",
     "anchor_classification": [
-      "misleading",
-      "misleading"
+      "authoritative-live",
+      "authoritative-live"
     ],
     "trap_id": "trap-nx-manifest-claim-boundary",
     "falsification_evidence": "The cited counter-evidence and bounded reference search do not establish the public claim.",

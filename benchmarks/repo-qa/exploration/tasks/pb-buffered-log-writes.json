@@ -54,8 +54,8 @@
     "trap_id": "trap-pb-buffered-log-writes",
     "adjudication_notes": "Two independent annotations were reconciled against the pinned mutated checkout.",
     "anchor_classification": [
-      "dead",
-      "dead"
+      "authoritative-live",
+      "authoritative-live"
     ]
   }
 }

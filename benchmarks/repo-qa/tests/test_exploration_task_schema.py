@@ -141,7 +141,7 @@ class Fixture:
         self._annotation("ann-b")
         self._flush_task()
 
-    def _annotation(self, annotator, evidence=None):
+    def _annotation(self, annotator, evidence=None, classifications=None):
         record = {
             "schema": "exploration_annotation_v1",
             "task_id": self.task["id"],
@@ -149,6 +149,11 @@ class Fixture:
             "verdict": self.task["author"]["verdict"],
             "evidence": copy.deepcopy(
                 evidence if evidence is not None else self.task["evidence"]
+            ),
+            "anchor_classification": copy.deepcopy(
+                classifications
+                if classifications is not None
+                else self.task["author"]["anchor_classification"]
             ),
         }
         _write(
@@ -162,14 +167,14 @@ class Fixture:
         )
 
     def run(self, require_live=True):
-        return vet.validate_bank(
-            tasks_dir=self.tasks_dir,
-            annotations_dir=self.annotations_dir,
-            schema_path=vet.DEFAULT_SCHEMA_PATH,
-            corpora_path=vet.DEFAULT_CORPORA_PATH,
-            corpus_root=self.corpus_root,
-            require_live=require_live,
-        )[0]
+        return vet.validate_task(
+            self.task,
+            vet.load_schema(),
+            vet.load_corpora(),
+            self.annotations_dir,
+            self.corpus_root,
+            require_live,
+        )
 
 
 class ValidatorTest(unittest.TestCase):
@@ -206,6 +211,65 @@ class ValidatorTest(unittest.TestCase):
         del record["verdict"]
         _write(path, record)
         self.assertTrue(any("independent verdict" in p for p in self.fx.run()))
+
+    def test_annotation_without_independent_classification_fails(self):
+        path = os.path.join(
+            self.fx.annotations_dir, "pb-app-bootstrap.ann-b.json"
+        )
+        record = vet._load_json(path)
+        del record["anchor_classification"]
+        _write(path, record)
+        self.assertTrue(
+            any("independent anchor classification" in p for p in self.fx.run())
+        )
+
+    def test_live_anchor_misclassification_fails(self):
+        wrong = ["dead", "authoritative-live"]
+        self.fx.task["author"]["anchor_classification"] = wrong
+        self.fx._annotation("ann-a", classifications=wrong)
+        self.fx._annotation("ann-b", classifications=wrong)
+        self.fx._flush_task()
+        self.assertTrue(
+            any("contradicts pinned manifest/live evidence" in p for p in self.fx.run())
+        )
+
+    def test_annotation_misclassification_fails_even_when_adjudication_is_live(self):
+        wrong = ["dead", "authoritative-live"]
+        self.fx._annotation("ann-a", classifications=wrong)
+        self.assertTrue(
+            any("ann-a" in p and "contradicts pinned" in p for p in self.fx.run())
+        )
+
+    def test_dead_decoy_misclassified_as_authoritative_fails(self):
+        manifest_path = os.path.join(
+            self.fx.corpus_root, CORPUS_ID, f"seed-{SEED}", "manifest.json"
+        )
+        manifest = vet._load_json(manifest_path)
+        manifest["decoys"] = [{"path": FILE_REL}]
+        _write(manifest_path, manifest)
+        self.assertTrue(
+            any("('dead')" in p for p in self.fx.run())
+        )
+
+    def test_misleading_forge_trap_misclassified_as_authoritative_fails(self):
+        tree_path = os.path.join(
+            self.fx.corpus_root, CORPUS_ID, f"seed-{SEED}", "tree", FILE_REL
+        )
+        lines = FILE_BODY.splitlines()
+        lines[2] = "// FORGE TRAP: App is obsolete and never used."
+        _write(tree_path, "\n".join(lines) + "\n")
+        self.fx.task["evidence"][0] = {
+            "path": FILE_REL,
+            "lines": [3],
+            "claim": "a misleading injected statement",
+            "target_identifiers": ["App"],
+        }
+        self.fx._annotation("ann-a")
+        self.fx._annotation("ann-b")
+        self.fx._flush_task()
+        self.assertTrue(
+            any("('misleading')" in p for p in self.fx.run())
+        )
 
     def test_fewer_than_two_anchors_fails(self):
         self.fx.task["evidence"] = self.fx.task["evidence"][:1]
@@ -268,8 +332,8 @@ class RealTaskBankTest(unittest.TestCase):
     def test_bank_size_and_corpora_coverage(self):
         problems, summary = vet.validate_bank(require_live=False)
         self.assertEqual(problems, [], msg="\n".join(problems))
-        self.assertGreaterEqual(summary["tasks"], 25)
-        self.assertLessEqual(summary["tasks"], 40)
+        self.assertGreaterEqual(summary["tasks"], 30)
+        self.assertLessEqual(summary["tasks"], 50)
         self.assertEqual(
             set(summary["per_corpus"]),
             {"scikit-learn", "pocketbase", "next.js"},
@@ -282,6 +346,38 @@ class RealTaskBankTest(unittest.TestCase):
         })
         self.assertLessEqual(max(summary["per_category"].values()), summary["tasks"] / 2)
         self.assertLessEqual(max(summary["per_verdict"].values()), summary["tasks"] / 2)
+
+    def test_bank_size_boundaries_are_enforced_hermetically(self):
+        for count, expected_problem in ((29, True), (30, False), (50, False), (51, True)):
+            with self.subTest(count=count):
+                problems = self._composition_problems(count)
+                has_size_problem = any("must contain 30-50 tasks" in p for p in problems)
+                self.assertEqual(has_size_problem, expected_problem)
+
+    def test_bank_imbalance_is_rejected_below_thirty_tasks(self):
+        problems = self._composition_problems(29, majority=True)
+        self.assertTrue(any("balance limit exceeded" in p for p in problems))
+
+    def _composition_problems(self, count, majority=False):
+        with tempfile.TemporaryDirectory() as root:
+            tasks = os.path.join(root, "tasks")
+            annotations = os.path.join(root, "annotations")
+            os.makedirs(tasks)
+            os.makedirs(annotations)
+            corpora = sorted(vet.EXPECTED_CORPORA)
+            categories = sorted(vet.EXPECTED_CATEGORIES)
+            template_root = os.path.join(root, "template")
+            template = Fixture(template_root).task
+            for index in range(count):
+                task = copy.deepcopy(template)
+                task["id"] = f"task-{index}"
+                task["corpus"] = corpora[index % len(corpora)]
+                task["author"]["category"] = categories[index % len(categories)]
+                task["author"]["verdict"] = "true" if majority else ["true", "false", "unsupported"][index % 3]
+                _write(os.path.join(tasks, f"task-{index}.json"), task)
+            return vet.validate_bank(
+                tasks_dir=tasks, annotations_dir=annotations, require_live=False
+            )[0]
 
 
 if __name__ == "__main__":

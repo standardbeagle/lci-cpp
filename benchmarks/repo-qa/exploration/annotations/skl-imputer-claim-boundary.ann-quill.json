@@ -22,5 +22,9 @@
       ]
     }
   ],
-  "verdict": "false"
+  "verdict": "false",
+  "anchor_classification": [
+    "authoritative-live",
+    "authoritative-live"
+  ]
 }
