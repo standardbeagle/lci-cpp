@@ -1,0 +1,784 @@
+{
+  "corpus": "pocketbase",
+  "corpus_commit": "d438c6a96a0252ff9df62c1cfe193480ed9ff15d",
+  "gopls_version": "golang.org/x/tools/gopls v0.23.0",
+  "schema": "lci.comprehension.tool-surface.v1",
+  "source": "live JSON-RPC tools/list from `lci mcp`",
+  "tool_count": 14,
+  "tools": [
+    {
+      "answer": [
+        "Execute",
+        "Start"
+      ],
+      "description": "📂 Browse all symbols in a file - the outline view. Shows the complete symbol table for a specific file with filtering, sorting, optional imports and stats. The outline is source-derived; do not open the file merely to verify symbol names, signatures, or line numbers already shown. See 'info browse_file'.",
+      "input_schema": {
+        "properties": {
+          "exported": {
+            "description": "Visibility filter",
+            "type": "boolean"
+          },
+          "file": {
+            "description": "File path (exact, suffix, or glob match)",
+            "type": "string"
+          },
+          "file_id": {
+            "description": "File ID (alternative to path)",
+            "type": "integer"
+          },
+          "include": {
+            "description": "Same as list_symbols. Default: signature,ids",
+            "type": "string"
+          },
+          "kind": {
+            "description": "Filter by symbol kinds (same as list_symbols)",
+            "type": "string"
+          },
+          "max": {
+            "description": "Max symbols (default: 100)",
+            "type": "integer"
+          },
+          "path": {
+            "description": "Alias for 'file'",
+            "type": "string"
+          },
+          "show_imports": {
+            "description": "Include import list",
+            "type": "boolean"
+          },
+          "show_stats": {
+            "description": "Include file-level statistics (symbol counts, avg complexity)",
+            "type": "boolean"
+          },
+          "sort": {
+            "description": "Sort by: line (default), name, type, complexity, refs",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "browse_file",
+      "oracle_command": "rg -n '^func \\(pb \\*PocketBase\\) [A-Z]' pocketbase.go",
+      "output_schema": null,
+      "question": "What exported methods are declared in pocketbase.go?"
+    },
+    {
+      "answer": [
+        "447"
+      ],
+      "description": "🎯 Comprehensive codebase intelligence system for AI agents. Provides high-level overview (79.8% context reduction), detailed analysis (2-4x accuracy improvement), code statistics, and git analysis. Modes: overview, detailed, statistics, unified, structure, git_analyze, git_hotspots. See 'info code_insight'.",
+      "input_schema": {
+        "properties": {
+          "analysis": {
+            "description": "Type of analysis",
+            "type": "string"
+          },
+          "focus": {
+            "description": "Analysis focus",
+            "type": "string"
+          },
+          "languages": {
+            "description": "Filter by programming languages (e.g., [\"go\"], [\"typescript\", \"javascript\"], [\"csharp\"]). Case-insensitive with aliases (e.g., 'ts' for TypeScript, 'cs' for C#).",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "max_results": {
+            "description": "Maximum results (keep small to avoid token overload)",
+            "type": "integer"
+          },
+          "metrics": {
+            "description": "Metrics to include",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "mode": {
+            "description": "Analysis mode",
+            "type": "string"
+          },
+          "target": {
+            "description": "Target to analyze",
+            "type": "string"
+          },
+          "tier": {
+            "description": "Analysis tier",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "name": "code_insight",
+      "oracle_command": "find . -type f -name '*.go' -print | LC_ALL=C sort | wc -l",
+      "output_schema": null,
+      "question": "How many Go source files are in the repository?"
+    },
+    {
+      "answer": [
+        "pocketbase.go:160-181"
+      ],
+      "description": "🎯 Capture and hydrate code context manifests for efficient agent handoff. Save compact symbol references (2-5KB manifest), load to get instant full context with source code + call graphs. Eliminates redundant exploration across agent sessions. Operations: 'save' to create manifest, 'load' to hydrate. See 'info context'.",
+      "input_schema": {
+        "properties": {
+          "append": {
+            "description": "Append to existing manifest (default: false)",
+            "type": "boolean"
+          },
+          "exclude": {
+            "description": "Exclude these roles",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "filter": {
+            "description": "Only include these roles (e.g., ['modify', 'contract'])",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "format": {
+            "description": "Output format: 'full' (default), 'signatures', 'outline'",
+            "type": "string"
+          },
+          "from_file": {
+            "description": "Load manifest from file path (for 'load' operation)",
+            "type": "string"
+          },
+          "from_string": {
+            "description": "Load manifest from inline JSON string",
+            "type": "string"
+          },
+          "max_tokens": {
+            "description": "Approximate token limit for hydrated context (0 = no limit)",
+            "type": "integer"
+          },
+          "operation": {
+            "description": "Operation: 'save' to create manifest, 'load' to hydrate context",
+            "type": "string"
+          },
+          "refs": {
+            "description": "Code references to save (for 'save' operation)",
+            "items": {
+              "properties": {
+                "f": {
+                  "description": "File path (required)",
+                  "type": "string"
+                },
+                "l": {
+                  "description": "Line range {start, end} (optional)",
+                  "properties": {
+                    "end": {
+                      "description": "End line (1-indexed)",
+                      "type": "integer"
+                    },
+                    "start": {
+                      "description": "Start line (1-indexed)",
+                      "type": "integer"
+                    }
+                  },
+                  "type": "object"
+                },
+                "note": {
+                  "description": "Architect annotation (free-form text)",
+                  "type": "string"
+                },
+                "role": {
+                  "description": "Semantic role: 'modify', 'contract', 'pattern', 'boundary'",
+                  "type": "string"
+                },
+                "s": {
+                  "description": "Symbol name (optional)",
+                  "type": "string"
+                },
+                "x": {
+                  "description": "Expansion directives: 'callers', 'callees:2' (with purity info), 'implementations', 'tests', etc.",
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "f"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "task": {
+            "description": "Task description/directive (free-form text)",
+            "type": "string"
+          },
+          "to_file": {
+            "description": "Write manifest to file path (relative to project root)",
+            "type": "string"
+          },
+          "to_string": {
+            "description": "Return manifest as JSON string instead of writing to file",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "operation"
+        ],
+        "type": "object"
+      },
+      "name": "context",
+      "oracle_command": "sed -n '160,181p' pocketbase.go",
+      "output_schema": null,
+      "question": "What source range contains PocketBase.Start and its adjacent documentation?"
+    },
+    {
+      "answer": [
+        "pocketbase.go"
+      ],
+      "description": "🔬 Deep debug information for troubleshooting index issues. Shows symbol distribution, type breakdown, reference statistics, and file-level details. Use when index_stats shows problems or when relationships return empty. Modes: overview, symbols, references, types, files. See 'info debug_info'.",
+      "input_schema": {
+        "properties": {
+          "file_id": {
+            "description": "File ID to debug (for 'files' mode)",
+            "type": "integer"
+          },
+          "file_path": {
+            "description": "File path to debug (for 'files' mode)",
+            "type": "string"
+          },
+          "max_results": {
+            "description": "Maximum results for lists (default: 20)",
+            "type": "integer"
+          },
+          "mode": {
+            "description": "Debug mode: 'overview' (default), 'symbols', 'references', 'types', 'files'",
+            "type": "string"
+          },
+          "verbose": {
+            "description": "Include detailed symbol info (for 'files' mode)",
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "name": "debug_info",
+      "oracle_command": "rg -l '^func \\(pb \\*PocketBase\\) Start' --glob '*.go'",
+      "output_schema": null,
+      "question": "Which file declares PocketBase.Start?"
+    },
+    {
+      "answer": [
+        "forms/record_upsert.go",
+        "forms/record_upsert_test.go"
+      ],
+      "description": "📁 Like 'find' or 'fd' - searches file paths, not content, on an in-memory index. Supports fuzzy matching, glob patterns, and filters. Use search/browse_file/get_context for source evidence before reading matched files. See 'info find_files'.",
+      "input_schema": {
+        "properties": {
+          "directory": {
+            "description": "Directory to search within (relative to project root)",
+            "type": "string"
+          },
+          "filter": {
+            "description": "Filter by file type or glob pattern (e.g., 'go', '*.ts', 'src/**/*.js')",
+            "type": "string"
+          },
+          "flags": {
+            "description": "Search flags: 'ci' (case-insensitive), 'exact' (exact match only)",
+            "type": "string"
+          },
+          "include_hidden": {
+            "description": "Include hidden files/directories (default: false)",
+            "type": "boolean"
+          },
+          "max": {
+            "description": "Maximum results (default: 50, max: 200)",
+            "type": "integer"
+          },
+          "path": {
+            "description": "Alias for 'directory' (matches search's path param)",
+            "type": "string"
+          },
+          "pattern": {
+            "description": "File/path pattern to search for (supports fuzzy matching)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "pattern"
+        ],
+        "type": "object"
+      },
+      "name": "find_files",
+      "oracle_command": "find . -type f -name '*record_upsert*.go' -printf '%P\\n' | LC_ALL=C sort",
+      "output_schema": null,
+      "question": "Which Go files have record_upsert in their path?"
+    },
+    {
+      "answer": [
+        "func (pb *PocketBase) Start() error",
+        "Start starts the application"
+      ],
+      "description": "📋 Get detailed context for specific code objects. Use the 'id' parameter with object IDs from search results. The returned signature, file path, line numbers, callers/callees, references, source_excerpt, and snippets are intended to replace opening the source file; read files only when this context is missing the exact lines you must quote. See 'info get_context' for examples.",
+      "input_schema": {
+        "properties": {
+          "column": {
+            "description": "Column number",
+            "type": "integer"
+          },
+          "confidence_threshold": {
+            "description": "Confidence threshold",
+            "type": "number"
+          },
+          "exclude_sections": {
+            "description": "Exclude sections",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "exclude_test_files": {
+            "description": "Exclude test files",
+            "type": "boolean"
+          },
+          "file_id": {
+            "description": "File ID to narrow name lookup scope",
+            "type": "integer"
+          },
+          "id": {
+            "description": "Concise object ID(s) from search results (e.g., \"VE\" or \"VE,tG\" for multiple)",
+            "type": "string"
+          },
+          "include_ai_text": {
+            "description": "Include AI text",
+            "type": "boolean"
+          },
+          "include_all_references": {
+            "description": "Include references",
+            "type": "boolean"
+          },
+          "include_call_hierarchy": {
+            "description": "Include call hierarchy",
+            "type": "boolean"
+          },
+          "include_dependencies": {
+            "description": "Include dependencies",
+            "type": "boolean"
+          },
+          "include_file_context": {
+            "description": "Include file context",
+            "type": "boolean"
+          },
+          "include_full_symbol": {
+            "description": "Include full symbol info",
+            "type": "boolean"
+          },
+          "include_quality_metrics": {
+            "description": "Include quality metrics",
+            "type": "boolean"
+          },
+          "include_sections": {
+            "description": "Include sections",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "line": {
+            "description": "Line number",
+            "type": "integer"
+          },
+          "max_depth": {
+            "description": "Max depth",
+            "type": "integer"
+          },
+          "mode": {
+            "description": "Lookup mode",
+            "type": "string"
+          },
+          "name": {
+            "description": "Symbol name for direct lookup (alternative to id)",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "get_context",
+      "oracle_command": "gopls definition pocketbase.go:166:24",
+      "output_schema": null,
+      "question": "What is the definition and documentation of PocketBase.Start?"
+    },
+    {
+      "answer": [
+        "d438c6a96a0252ff9df62c1cfe193480ed9ff15d"
+      ],
+      "description": "🔍 Analyze git changes for code quality issues. Compares new/modified code against the existing codebase to find duplicates, naming inconsistencies, and function complexity issues. Scopes: 'staged' (default), 'wip', 'commit', 'range'. Focus areas: duplicates, naming, metrics. Use before committing to catch issues early. See 'info git_analysis'.",
+      "input_schema": {
+        "properties": {
+          "base_ref": {
+            "description": "Base git reference for commit/range scope (e.g., 'HEAD~1', 'main')",
+            "type": "string"
+          },
+          "focus": {
+            "description": "Analysis areas to focus on: 'duplicates', 'naming', 'metrics' (defaults to all)",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "max_findings": {
+            "description": "Maximum findings to return per category (default: 20)",
+            "type": "integer"
+          },
+          "scope": {
+            "description": "Analysis scope: 'staged' (default), 'wip' (all uncommitted), 'commit' (specific commit), 'range' (commit range)",
+            "type": "string"
+          },
+          "similarity_threshold": {
+            "description": "Similarity threshold for duplicate detection (0.0-1.0, default: 0.8)",
+            "type": "number"
+          },
+          "target_ref": {
+            "description": "Target git reference for range scope (defaults to HEAD)",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "git_analysis",
+      "oracle_command": "git rev-parse HEAD",
+      "output_schema": null,
+      "question": "What commit is checked out for this corpus?"
+    },
+    {
+      "answer": [
+        "ready"
+      ],
+      "control": true,
+      "description": "📊 Comprehensive index status and health monitoring. Shows indexing progress, component health, memory usage, and file watcher status. Use this to diagnose 'index not ready' issues or understand why searches return empty. Modes: summary, detailed, progress, health. See 'info index_stats'.",
+      "input_schema": {
+        "properties": {
+          "include_components": {
+            "description": "Include per-component health (default: false for summary)",
+            "type": "boolean"
+          },
+          "include_memory": {
+            "description": "Include memory usage statistics (default: false for summary)",
+            "type": "boolean"
+          },
+          "include_watch_mode": {
+            "description": "Include file watcher status (default: false for summary)",
+            "type": "boolean"
+          },
+          "mode": {
+            "description": "Query mode: 'summary' (default), 'detailed', 'progress', 'health'",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "index_stats",
+      "oracle_command": "find . -type f -name '*.go' -print -quit | grep -q . && printf ready",
+      "output_schema": null,
+      "question": "Is the index ready to answer queries?"
+    },
+    {
+      "answer": [
+        "searches indexed source text"
+      ],
+      "control": true,
+      "description": "🔍 Get detailed help and examples for any tool - start here! Use 'info' for overview or 'info <tool>' for specifics. Use 'info version' for server version info.",
+      "input_schema": {
+        "properties": {
+          "tool": {
+            "description": "Tool name to get information about (e.g., 'search', 'get_context', 'version')",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "info",
+      "oracle_command": "printf '%s\\n' 'searches indexed source text'",
+      "output_schema": null,
+      "question": "What is the purpose of the search operation?"
+    },
+    {
+      "answer": [
+        "pocketbase.go:166",
+        "func (pb *PocketBase) Start() error"
+      ],
+      "description": "🔎 Deep inspect a single symbol. Given a name or object ID, returns all metadata: signature, doc, complexity, callers, callees, type hierarchy, scope chain, flags, and a bounded source_excerpt. Treat this output as the source-backed answer; read the file only if you need lines outside source_excerpt. See 'info inspect_symbol'.",
+      "input_schema": {
+        "properties": {
+          "file": {
+            "description": "File path pattern to disambiguate",
+            "type": "string"
+          },
+          "id": {
+            "description": "Object ID from search/list_symbols results",
+            "type": "string"
+          },
+          "include": {
+            "description": "Sections: signature, doc, callers, callees, type_hierarchy, scope, refs, annotations, flags, all. Default: all",
+            "type": "string"
+          },
+          "max_depth": {
+            "description": "Max depth for hierarchy traversal (default: 3)",
+            "type": "integer"
+          },
+          "name": {
+            "description": "Symbol name (exact match; may return multiple if ambiguous)",
+            "type": "string"
+          },
+          "type": {
+            "description": "Symbol type to disambiguate (e.g., 'function', 'struct')",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "inspect_symbol",
+      "oracle_command": "gopls definition pocketbase.go:166:24",
+      "output_schema": null,
+      "question": "Where is PocketBase.Start defined?"
+    },
+    {
+      "answer": [
+        "Execute",
+        "Start"
+      ],
+      "description": "📋 Enumerate and filter symbols in the index. Like 'ls' for code: list all functions, types, methods with filtering by kind, file, complexity, params, exported status, and more. Use to discover what's in the codebase without searching. Returned signatures, files, line numbers, ids, and refs are source evidence; do not read files just to confirm them. See 'info list_symbols'.",
+      "input_schema": {
+        "properties": {
+          "exported": {
+            "description": "true=exported only, false=unexported only, omit=all",
+            "type": "boolean"
+          },
+          "file": {
+            "description": "Glob pattern for file path filter (e.g., 'internal/mcp/*.go')",
+            "type": "string"
+          },
+          "flags": {
+            "description": "Comma-separated flags: async, variadic, generator, method",
+            "type": "string"
+          },
+          "include": {
+            "description": "Comma-separated extras: signature, doc, refs, callers, callees, scope, ids, all. Default: signature,ids",
+            "type": "string"
+          },
+          "kind": {
+            "description": "REQUIRED: Symbol kinds (comma-separated): func, type, struct, interface, method, class, enum, variable, constant, all. Aliases: fn, var, const, cls, iface",
+            "type": "string"
+          },
+          "max": {
+            "description": "Max results (default: 50, max: 500)",
+            "type": "integer"
+          },
+          "max_complexity": {
+            "description": "Maximum cyclomatic complexity",
+            "type": "integer"
+          },
+          "max_params": {
+            "description": "Maximum parameter count",
+            "type": "integer"
+          },
+          "min_complexity": {
+            "description": "Minimum cyclomatic complexity",
+            "type": "integer"
+          },
+          "min_params": {
+            "description": "Minimum parameter count",
+            "type": "integer"
+          },
+          "name": {
+            "description": "Substring filter on symbol name (case-insensitive)",
+            "type": "string"
+          },
+          "offset": {
+            "description": "Pagination offset",
+            "type": "integer"
+          },
+          "receiver": {
+            "description": "Filter methods by receiver type (e.g., 'Server')",
+            "type": "string"
+          },
+          "sort": {
+            "description": "Sort by: name (default), complexity, refs, line, params",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "type": "object"
+      },
+      "name": "list_symbols",
+      "oracle_command": "rg -o '^func \\(pb \\*PocketBase\\) [A-Z][A-Za-z0-9_]+' pocketbase.go | awk '{print $4}' | LC_ALL=C sort",
+      "output_schema": null,
+      "question": "Which exported PocketBase methods are declared in pocketbase.go?"
+    },
+    {
+      "answer": [
+        "examples/base/main.go:119",
+        "pocketbase.go:166"
+      ],
+      "description": "Sub-millisecond in-memory semantic code search. Use instead of grep, rg, find. Results are grouped per file (root-relative paths) with per-hit line numbers; symbol hits carry sym/type/id (id feeds get_context) and callers (incoming-reference count). The returned lines are source evidence: answer from them without reading the file unless you need lines outside the result. total_matches is the TRUE match count; truncated:true + dirs histogram appear when the cap bit — narrow with path=. Note: JSON parameters, not CLI flags. See 'info search' for details.",
+      "input_schema": {
+        "properties": {
+          "filter": {
+            "description": "Include ONLY matching files: comma-separated languages, extensions or globs, e.g. 'go', 'md,*.yml', 'src/**/*.py'",
+            "type": "string"
+          },
+          "flags": {
+            "description": "Comma-separated: cs (case-sensitive), rx (regex), wb (word-boundary), nt (skip tests), nc (skip comments), iv (invert)",
+            "type": "string"
+          },
+          "include": {
+            "description": "Result add-ons, comma-separated. ONLY: object_ids, breadcrumbs, refs, safety, deps. NOT a file filter (use 'filter').",
+            "type": "string"
+          },
+          "languages": {
+            "description": "Filter by programming languages (e.g., [\"go\"], [\"typescript\", \"javascript\"], [\"csharp\"]). Case-insensitive with aliases (e.g., 'ts' for TypeScript, 'cs' for C#).",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "max": {
+            "description": "Maximum results (default: 15, max: 100)",
+            "type": "integer"
+          },
+          "max_per_file": {
+            "description": "Max per file",
+            "type": "integer"
+          },
+          "output": {
+            "description": "Output format: 'line' (default), 'ctx:N' (N context lines), 'full', 'files', 'count'",
+            "type": "string"
+          },
+          "path": {
+            "description": "Root-relative scope: directory prefix ('src/http') or glob ('**/*.kt') applied to file paths",
+            "type": "string"
+          },
+          "pattern": {
+            "description": "Search pattern",
+            "type": "string"
+          },
+          "patterns": {
+            "description": "Multiple patterns",
+            "type": "string"
+          },
+          "semantic": {
+            "description": "Enable semantic",
+            "type": "boolean"
+          },
+          "symbol_types": {
+            "description": "Symbol types to filter results (comma-separated). Valid types: function, class, method, variable, constant, interface, type, struct, module, namespace, property, event, delegate, enum, record, operator, indexer, object, companion, extension, annotation, field, enum_member. Aliases: func->function, var->variable, const->constant, cls->class, meth->method, iface->interface, def->function (Python), fn->function (Rust), trait->interface (Rust). Prefix and fuzzy matching supported with warnings.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "pattern"
+        ],
+        "type": "object"
+      },
+      "name": "search",
+      "oracle_command": "gopls references -d examples/base/main.go:119:16",
+      "output_schema": null,
+      "question": "Where is PocketBase.Start called in non-test Go source?"
+    },
+    {
+      "answer": [],
+      "control": true,
+      "description": "🏷️  Query symbols by semantic labels or categories. Supports direct @lci: annotations, external annotation manifests, and propagated labels through call graphs. See 'info semantic_annotations'.",
+      "input_schema": {
+        "properties": {
+          "category": {
+            "description": "Semantic category",
+            "type": "string"
+          },
+          "include_direct": {
+            "description": "Include direct annotations",
+            "type": "boolean"
+          },
+          "include_propagated": {
+            "description": "Include propagated labels",
+            "type": "boolean"
+          },
+          "label": {
+            "description": "Semantic label to search for",
+            "type": "string"
+          },
+          "max_results": {
+            "description": "Maximum results (keep small to avoid token overload)",
+            "type": "integer"
+          },
+          "min_strength": {
+            "description": "Minimum label strength",
+            "type": "number"
+          }
+        },
+        "type": "object"
+      },
+      "name": "semantic_annotations",
+      "oracle_command": "rg -n '@lci:' --glob '*.go' . || true",
+      "output_schema": null,
+      "question": "Which Go source lines contain an @lci semantic annotation?"
+    },
+    {
+      "answer": [
+        "Execute"
+      ],
+      "description": "🔬 Query function purity and side effects. Detects writes to parameters, globals, closures, I/O operations, and exception handling. Supports transitive analysis through call graphs. See 'info side_effects'.",
+      "input_schema": {
+        "properties": {
+          "category": {
+            "description": "Side effect category: param_write, global_write, io, network, throw, channel, external_call",
+            "type": "string"
+          },
+          "file_id": {
+            "description": "File ID for file mode",
+            "type": "integer"
+          },
+          "file_path": {
+            "description": "File path for file mode",
+            "type": "string"
+          },
+          "include_confidence": {
+            "description": "Include confidence levels",
+            "type": "boolean"
+          },
+          "include_reasons": {
+            "description": "Include reasons for impurity",
+            "type": "boolean"
+          },
+          "include_transitive": {
+            "description": "Include transitive side effects from callees",
+            "type": "boolean"
+          },
+          "max_results": {
+            "description": "Maximum results (keep small to avoid token overload)",
+            "type": "integer"
+          },
+          "mode": {
+            "description": "Query mode: symbol, file, pure, impure, category, summary",
+            "type": "string"
+          },
+          "symbol_id": {
+            "description": "Symbol ID for symbol mode",
+            "type": "string"
+          },
+          "symbol_name": {
+            "description": "Symbol name for symbol mode",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "side_effects",
+      "oracle_command": "sed -n '166,175p' pocketbase.go | rg -o 'pb\\.[A-Za-z0-9_]+\\(' | sed -E 's/^pb\\.//; s/\\($//' | LC_ALL=C sort -u",
+      "output_schema": null,
+      "question": "Which method does PocketBase.Start directly invoke to execute the application?"
+    }
+  ]
+}
