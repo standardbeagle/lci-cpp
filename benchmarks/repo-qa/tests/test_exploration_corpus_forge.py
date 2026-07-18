@@ -313,6 +313,31 @@ class TestDecoyProvenance(ForgeTestCase):
                 manifest["path_map"],
             )
 
+    def test_reachability_check_resolves_relative_twin_through_intermediate_dir(self):
+        tree = os.path.join(self.tmp, "relative-twin")
+        live = "pkg/live/deep/consumer.ts"
+        dead = "pkg/dead/generated_twin.ts"
+        for rel, body in {
+            live: "import { trap } from '../../dead/generated_twin'\n",
+            dead: "export const trap = 1\n",
+        }.items():
+            path = os.path.join(tree, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as f:
+                f.write(body)
+
+        spec = {
+            "id": "relative-twin-fixture",
+            "source_extensions": [".ts"],
+            "mutable_roots": ["pkg"],
+            "reference_forms": ["slashed"],
+        }
+        decoys = [{"path": dead, "symbols": []}]
+        with self.assertRaisesRegex(
+            forge.ForgeError, rf"{re.escape(live)}.*{re.escape(dead)}"
+        ):
+            forge._assert_decoys_unreachable(tree, spec, decoys, {live: live})
+
 
 class TestAdversarialTrapInjections(ForgeTestCase):
     def test_comment_contradicts_authoritative_live_code(self):

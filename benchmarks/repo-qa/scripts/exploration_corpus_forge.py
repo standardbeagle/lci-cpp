@@ -756,6 +756,20 @@ def _assert_decoys_unreachable(tree, spec, decoys, path_map):
             body = _read_text(os.path.join(tree, rel))
             if body is None:
                 continue
+            relative_modules = set()
+            if rel.endswith(_TS_EXTENSIONS):
+                for match in _TS_ANY_SPECIFIER.finditer(_strip_ts_comments(body)):
+                    relative = match.group("spec")
+                    if re.match(r"^\.\.?(/|$)", relative):
+                        target = os.path.normpath(
+                            os.path.join(os.path.dirname(rel), relative)
+                        ).replace(os.sep, "/")
+                        relative_modules.add(_strip_ext(target, spec))
+            if module in relative_modules:
+                raise ForgeError(
+                    f"{spec['id']}: live source {rel} references dead twin "
+                    f"module {decoy['path']}"
+                )
             if any(pattern.search(body) for pattern in module_patterns):
                 raise ForgeError(
                     f"{spec['id']}: live source {rel} references dead twin "
