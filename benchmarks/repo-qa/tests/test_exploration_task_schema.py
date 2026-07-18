@@ -13,11 +13,14 @@ so a malformed committed task is caught even where the forged tree is absent.
 """
 
 import copy
+import contextlib
+import io
 import json
 import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 SCRIPTS = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts"
@@ -324,6 +327,30 @@ class ValidatorTest(unittest.TestCase):
         self.fx._annotation("ann-b", self.fx.task["evidence"])
         self.fx._flush_task()
         self.assertTrue(self.fx.run())
+
+    def test_success_output_publishes_complete_category_and_verdict_counts(self):
+        summary = {
+            "tasks": 30,
+            "per_corpus": {"pocketbase": 10, "next.js": 10, "scikit-learn": 10},
+            "per_category": {
+                "true": 5,
+                "wrong-layer": 5,
+                "misleading-doc": 5,
+                "dead-code": 5,
+                "false-premise": 5,
+                "unsupported": 5,
+            },
+            "per_verdict": {"true": 10, "false": 10, "unsupported": 10},
+        }
+        stdout = io.StringIO()
+
+        with mock.patch.object(vet, "validate_bank", return_value=([], summary)):
+            with contextlib.redirect_stdout(stdout):
+                self.assertEqual(vet.main([]), 0)
+
+        output = stdout.getvalue()
+        self.assertIn(f"categories={summary['per_category']}", output)
+        self.assertIn(f"verdicts={summary['per_verdict']}", output)
 
 
 class RealTaskBankTest(unittest.TestCase):
