@@ -1,0 +1,42 @@
+{
+  "answer": "{\"answers\":[\"func (pb *PocketBase) Start() error at pocketbase.go:166\",\"func (pb *PocketBase) Execute() error at pocketbase.go:179\",\"func (colored *coloredWriter) Write(p []byte) (n int, err error) at pocketbase.go:326\"]}",
+  "capability_tier": "weak",
+  "cell_key": "browse_file__current__opencode_deepseek-v4-flash-free-7bb7a1d306__r2",
+  "extracted": [
+    "func (pb *PocketBase) Start() error at pocketbase.go:166",
+    "func (pb *PocketBase) Execute() error at pocketbase.go:179",
+    "func (colored *coloredWriter) Write(p []byte) (n int, err error) at pocketbase.go:326"
+  ],
+  "input_digest": "f50f9c2837b14c229d4fa3c2b6439d9fe0ac0ddb5c46db207552c258a7cbfb02",
+  "malformed_event": false,
+  "model": "opencode/deepseek-v4-flash-free",
+  "production_faithful": true,
+  "prompt_digest": "720f83fdde8935f7f233ba48f54bd7cf2118819a4b0d6af9e4da4c6220d1aab7",
+  "provider_error": null,
+  "repetition": 2,
+  "schema": "lci.comprehension.cell.v1",
+  "score": {
+    "exact": false,
+    "false_negatives": [
+      "execute",
+      "start"
+    ],
+    "false_positive_count": 3,
+    "false_positives": [
+      "func (colored *coloredwriter) write(p []byte) (n int, err error) at pocketbase.go:326",
+      "func (pb *pocketbase) execute() error at pocketbase.go:179",
+      "func (pb *pocketbase) start() error at pocketbase.go:166"
+    ],
+    "precision": 0.0,
+    "recall": 0.0
+  },
+  "status": "answered",
+  "tokens": {
+    "input": 0,
+    "output": 0,
+    "reasoning": 0
+  },
+  "tool": "browse_file",
+  "variant": "current",
+  "wall_seconds": 9.995
+}

@@ -1,0 +1,33 @@
+{
+  "answer": "{\"answers\":[]}",
+  "capability_tier": "strong",
+  "cell_key": "side_effects__current__opencode-go_glm-5.2-734ff77ba3__r2",
+  "extracted": [],
+  "input_digest": "682cc0fc158a95e84b5c99bb8a1ba6ec80f5f49f445c3222acb13e97654e8d03",
+  "malformed_event": false,
+  "model": "opencode-go/glm-5.2",
+  "production_faithful": false,
+  "prompt_digest": "0dd84794d9c04b1948c1b9bbe6342172213c20256c1e6972dd93ddc16e6507ad",
+  "provider_error": null,
+  "repetition": 2,
+  "schema": "lci.comprehension.cell.v1",
+  "score": {
+    "exact": false,
+    "false_negatives": [
+      "execute"
+    ],
+    "false_positive_count": 0,
+    "false_positives": [],
+    "precision": 0.0,
+    "recall": 0.0
+  },
+  "status": "answered",
+  "tokens": {
+    "input": 0,
+    "output": 0,
+    "reasoning": 0
+  },
+  "tool": "side_effects",
+  "variant": "current",
+  "wall_seconds": 5.327
+}

@@ -1,0 +1,24 @@
+{
+  "answer": "447",
+  "capability_tier": "strong",
+  "cell_key": "code_insight__current__opencode-go_glm-5.2-734ff77ba3__r1",
+  "input_digest": "f9e78eaf54ff5e592928687430695796f33becf91ad99c48974a607c8c71ae45",
+  "malformed_event": false,
+  "model": "opencode-go/glm-5.2",
+  "parse_error": "answer JSON root must be an object",
+  "production_faithful": true,
+  "prompt_digest": "3f8a39130cec6d90d2702d033f62d21a109923a57beee2e3dc10573ac57fd868",
+  "provider_error": null,
+  "repetition": 1,
+  "schema": "lci.comprehension.cell.v1",
+  "score": null,
+  "status": "malformed_answer",
+  "tokens": {
+    "input": 0,
+    "output": 0,
+    "reasoning": 0
+  },
+  "tool": "code_insight",
+  "variant": "current",
+  "wall_seconds": 4.128
+}

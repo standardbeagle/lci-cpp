@@ -1,0 +1,34 @@
+{
+  "answer": "{\"answers\":[\"forms/record_upsert.go\",\"forms/record_upsert_test.go\"]}",
+  "capability_tier": "weak",
+  "cell_key": "find_files__annotated__opencode_deepseek-v4-flash-free-7bb7a1d306__r2",
+  "extracted": [
+    "forms/record_upsert.go",
+    "forms/record_upsert_test.go"
+  ],
+  "input_digest": "0939b60674049563131b75b83c8e717d13f6af1d890d32837bf146d952d5b6a4",
+  "malformed_event": false,
+  "model": "opencode/deepseek-v4-flash-free",
+  "production_faithful": true,
+  "prompt_digest": "ef93a6f76a7a378b3cfed1d961187cd14bed5e8f1b99b5e3001ec0ff46250378",
+  "provider_error": null,
+  "repetition": 2,
+  "schema": "lci.comprehension.cell.v1",
+  "score": {
+    "exact": true,
+    "false_negatives": [],
+    "false_positive_count": 0,
+    "false_positives": [],
+    "precision": 1.0,
+    "recall": 1.0
+  },
+  "status": "answered",
+  "tokens": {
+    "input": 0,
+    "output": 0,
+    "reasoning": 0
+  },
+  "tool": "find_files",
+  "variant": "annotated",
+  "wall_seconds": 6.198
+}

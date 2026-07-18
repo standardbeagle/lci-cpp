@@ -1,0 +1,34 @@
+{
+  "answer": "{\"answers\":[\"forms/record_upsert.go\",\"forms/record_upsert_test.go\"]}",
+  "capability_tier": "strong",
+  "cell_key": "find_files__current__opencode-go_glm-5.2-734ff77ba3__r1",
+  "extracted": [
+    "forms/record_upsert.go",
+    "forms/record_upsert_test.go"
+  ],
+  "input_digest": "696632d70362501becd30a972cc97436cd9c948c59f54b35fcf81eff1fd8fe56",
+  "malformed_event": false,
+  "model": "opencode-go/glm-5.2",
+  "production_faithful": true,
+  "prompt_digest": "ef2812246e77aaa9d17483e9369cb55f46d7ac614935385d95d3c0b0312df8e0",
+  "provider_error": null,
+  "repetition": 1,
+  "schema": "lci.comprehension.cell.v1",
+  "score": {
+    "exact": true,
+    "false_negatives": [],
+    "false_positive_count": 0,
+    "false_positives": [],
+    "precision": 1.0,
+    "recall": 1.0
+  },
+  "status": "answered",
+  "tokens": {
+    "input": 0,
+    "output": 0,
+    "reasoning": 0
+  },
+  "tool": "find_files",
+  "variant": "current",
+  "wall_seconds": 5.926
+}

@@ -1,0 +1,37 @@
+{
+  "answer": "{\"answers\":[\"Start\",\"Execute\",\"Write\"]}",
+  "capability_tier": "weak",
+  "cell_key": "browse_file__current__opencode_deepseek-v4-flash-free-7bb7a1d306__r1",
+  "extracted": [
+    "Start",
+    "Execute",
+    "Write"
+  ],
+  "input_digest": "f50f9c2837b14c229d4fa3c2b6439d9fe0ac0ddb5c46db207552c258a7cbfb02",
+  "malformed_event": false,
+  "model": "opencode/deepseek-v4-flash-free",
+  "production_faithful": true,
+  "prompt_digest": "720f83fdde8935f7f233ba48f54bd7cf2118819a4b0d6af9e4da4c6220d1aab7",
+  "provider_error": null,
+  "repetition": 1,
+  "schema": "lci.comprehension.cell.v1",
+  "score": {
+    "exact": false,
+    "false_negatives": [],
+    "false_positive_count": 1,
+    "false_positives": [
+      "write"
+    ],
+    "precision": 0.6666666666666666,
+    "recall": 1.0
+  },
+  "status": "answered",
+  "tokens": {
+    "input": 0,
+    "output": 0,
+    "reasoning": 0
+  },
+  "tool": "browse_file",
+  "variant": "current",
+  "wall_seconds": 7.141
+}

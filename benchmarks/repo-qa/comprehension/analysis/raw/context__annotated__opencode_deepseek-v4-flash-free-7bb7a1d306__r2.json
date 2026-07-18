@@ -1,0 +1,40 @@
+{
+  "answer": "{\"answers\":[\"pocketbase.go:166: func (pb *PocketBase) Start() error\",\"// Start starts the application\"]}",
+  "capability_tier": "weak",
+  "cell_key": "context__annotated__opencode_deepseek-v4-flash-free-7bb7a1d306__r2",
+  "extracted": [
+    "pocketbase.go:166: func (pb *PocketBase) Start() error",
+    "// Start starts the application"
+  ],
+  "input_digest": "bc287b26a1acde1df86785dea6d2a1d404436d76cac3c120f7abdfc1b438f870",
+  "malformed_event": false,
+  "model": "opencode/deepseek-v4-flash-free",
+  "production_faithful": false,
+  "prompt_digest": "810758f1684ddadb3e1c79095eb67c00df3199ec79cb10d9b46f4c5ec2cb78b6",
+  "provider_error": null,
+  "repetition": 2,
+  "schema": "lci.comprehension.cell.v1",
+  "score": {
+    "exact": false,
+    "false_negatives": [
+      "func (pb *pocketbase) start() error",
+      "start starts the application"
+    ],
+    "false_positive_count": 2,
+    "false_positives": [
+      "// start starts the application",
+      "pocketbase.go:166: func (pb *pocketbase) start() error"
+    ],
+    "precision": 0.0,
+    "recall": 0.0
+  },
+  "status": "answered",
+  "tokens": {
+    "input": 0,
+    "output": 0,
+    "reasoning": 0
+  },
+  "tool": "context",
+  "variant": "annotated",
+  "wall_seconds": 22.271
+}

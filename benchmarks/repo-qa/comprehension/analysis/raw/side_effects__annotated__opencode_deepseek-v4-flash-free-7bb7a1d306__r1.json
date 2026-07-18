@@ -1,0 +1,33 @@
+{
+  "answer": "{\"answers\":[\"Execute\"]}",
+  "capability_tier": "weak",
+  "cell_key": "side_effects__annotated__opencode_deepseek-v4-flash-free-7bb7a1d306__r1",
+  "extracted": [
+    "Execute"
+  ],
+  "input_digest": "a3294d078851be8abfc3f07fead48145e33fc080d91af672801bab3c14b85127",
+  "malformed_event": false,
+  "model": "opencode/deepseek-v4-flash-free",
+  "production_faithful": false,
+  "prompt_digest": "f10cdd81be47c9a91c002e530d58c35fbcb1f3157c12375084b4b6f4f8e401d7",
+  "provider_error": null,
+  "repetition": 1,
+  "schema": "lci.comprehension.cell.v1",
+  "score": {
+    "exact": true,
+    "false_negatives": [],
+    "false_positive_count": 0,
+    "false_positives": [],
+    "precision": 1.0,
+    "recall": 1.0
+  },
+  "status": "answered",
+  "tokens": {
+    "input": 0,
+    "output": 0,
+    "reasoning": 0
+  },
+  "tool": "side_effects",
+  "variant": "annotated",
+  "wall_seconds": 6.455
+}

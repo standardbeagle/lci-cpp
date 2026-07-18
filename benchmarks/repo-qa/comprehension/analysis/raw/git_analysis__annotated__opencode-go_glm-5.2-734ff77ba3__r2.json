@@ -1,0 +1,33 @@
+{
+  "answer": "{\"answers\":[\"d438c6a96a0252ff9df62c1cfe193480ed9ff15d\"]}",
+  "capability_tier": "strong",
+  "cell_key": "git_analysis__annotated__opencode-go_glm-5.2-734ff77ba3__r2",
+  "extracted": [
+    "d438c6a96a0252ff9df62c1cfe193480ed9ff15d"
+  ],
+  "input_digest": "b5003c6286b0a8f33cfc7622dabf8cb6418b9a1f042aacbde9be56122bf55a95",
+  "malformed_event": false,
+  "model": "opencode-go/glm-5.2",
+  "production_faithful": false,
+  "prompt_digest": "b2c757bb05a28676c4ac9fa8033077ddd1337cf7bb5cc279728537646456e20e",
+  "provider_error": null,
+  "repetition": 2,
+  "schema": "lci.comprehension.cell.v1",
+  "score": {
+    "exact": true,
+    "false_negatives": [],
+    "false_positive_count": 0,
+    "false_positives": [],
+    "precision": 1.0,
+    "recall": 1.0
+  },
+  "status": "answered",
+  "tokens": {
+    "input": 0,
+    "output": 0,
+    "reasoning": 0
+  },
+  "tool": "git_analysis",
+  "variant": "annotated",
+  "wall_seconds": 7.287
+}

@@ -1,0 +1,37 @@
+{
+  "answer": "{\"answers\":[\"Sub-millisecond semantic code search with multi-layer matching.\"]}",
+  "capability_tier": "weak",
+  "cell_key": "info__current__opencode_deepseek-v4-flash-free-7bb7a1d306__r2",
+  "extracted": [
+    "Sub-millisecond semantic code search with multi-layer matching."
+  ],
+  "input_digest": "6167bf9964f9d73f3b1a7742a6d1729b5d8477da5fb565c4d42fa3705bbf2a57",
+  "malformed_event": false,
+  "model": "opencode/deepseek-v4-flash-free",
+  "production_faithful": false,
+  "prompt_digest": "f5e80933ad51a87fed14485fc9117f9487e570abec27213da92fc5aa7c3f5c4a",
+  "provider_error": null,
+  "repetition": 2,
+  "schema": "lci.comprehension.cell.v1",
+  "score": {
+    "exact": false,
+    "false_negatives": [
+      "searches indexed source text"
+    ],
+    "false_positive_count": 1,
+    "false_positives": [
+      "sub-millisecond semantic code search with multi-layer matching."
+    ],
+    "precision": 0.0,
+    "recall": 0.0
+  },
+  "status": "answered",
+  "tokens": {
+    "input": 0,
+    "output": 0,
+    "reasoning": 0
+  },
+  "tool": "info",
+  "variant": "current",
+  "wall_seconds": 5.576
+}

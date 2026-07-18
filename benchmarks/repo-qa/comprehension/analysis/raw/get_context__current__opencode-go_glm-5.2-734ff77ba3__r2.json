@@ -1,0 +1,38 @@
+{
+  "answer": "{\"answers\":[\"PocketBase.Start is defined at pocketbase.go:166 as `func (pb *PocketBase) Start() error`; it registers system commands (calling NewSuperuserCommand and NewServeCommand on pb.RootCmd) and returns pb.Execute(), with documentation '// commands (serve, superuser, version) and executes pb.RootCmd.'\"]}",
+  "capability_tier": "strong",
+  "cell_key": "get_context__current__opencode-go_glm-5.2-734ff77ba3__r2",
+  "extracted": [
+    "PocketBase.Start is defined at pocketbase.go:166 as `func (pb *PocketBase) Start() error`; it registers system commands (calling NewSuperuserCommand and NewServeCommand on pb.RootCmd) and returns pb.Execute(), with documentation '// commands (serve, superuser, version) and executes pb.RootCmd.'"
+  ],
+  "input_digest": "087ddc6abefbeb7e99e7163160218d500b4ae2a3e5916cca4c749a0c00fbe732",
+  "malformed_event": false,
+  "model": "opencode-go/glm-5.2",
+  "production_faithful": false,
+  "prompt_digest": "ce0c8c2e42f1284af5b7148bc9365e89d8f1703ee0fdbbc5d5df8e661ecc1f36",
+  "provider_error": null,
+  "repetition": 2,
+  "schema": "lci.comprehension.cell.v1",
+  "score": {
+    "exact": false,
+    "false_negatives": [
+      "func (pb *pocketbase) start() error",
+      "start starts the application"
+    ],
+    "false_positive_count": 1,
+    "false_positives": [
+      "pocketbase.start is defined at pocketbase.go:166 as `func (pb *pocketbase) start() error`; it registers system commands (calling newsuperusercommand and newservecommand on pb.rootcmd) and returns pb.execute(), with documentation '// commands (serve, superuser, version) and executes pb.rootcmd.'"
+    ],
+    "precision": 0.0,
+    "recall": 0.0
+  },
+  "status": "answered",
+  "tokens": {
+    "input": 0,
+    "output": 0,
+    "reasoning": 0
+  },
+  "tool": "get_context",
+  "variant": "current",
+  "wall_seconds": 4.887
+}

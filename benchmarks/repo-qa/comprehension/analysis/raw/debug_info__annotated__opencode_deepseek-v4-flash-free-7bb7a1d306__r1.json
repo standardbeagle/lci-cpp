@@ -1,0 +1,33 @@
+{
+  "answer": "{\"answers\":[\"pocketbase.go\"]}",
+  "capability_tier": "weak",
+  "cell_key": "debug_info__annotated__opencode_deepseek-v4-flash-free-7bb7a1d306__r1",
+  "extracted": [
+    "pocketbase.go"
+  ],
+  "input_digest": "8f121d881c71618631c05b7ec5174834081f26fa95dff26f40e13a0ec49af6f3",
+  "malformed_event": false,
+  "model": "opencode/deepseek-v4-flash-free",
+  "production_faithful": true,
+  "prompt_digest": "5566592101fbe9b24273c3cb128a30a8f5fb876fc01f6e410b50a27a185d9a7e",
+  "provider_error": null,
+  "repetition": 1,
+  "schema": "lci.comprehension.cell.v1",
+  "score": {
+    "exact": true,
+    "false_negatives": [],
+    "false_positive_count": 0,
+    "false_positives": [],
+    "precision": 1.0,
+    "recall": 1.0
+  },
+  "status": "answered",
+  "tokens": {
+    "input": 0,
+    "output": 0,
+    "reasoning": 0
+  },
+  "tool": "debug_info",
+  "variant": "annotated",
+  "wall_seconds": 6.291
+}

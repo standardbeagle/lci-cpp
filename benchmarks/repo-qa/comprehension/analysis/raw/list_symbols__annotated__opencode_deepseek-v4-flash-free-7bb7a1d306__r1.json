@@ -1,0 +1,40 @@
+{
+  "answer": "{\"answers\":[\"Execute — receiver=PocketBase definition=line 179\",\"Start — receiver=PocketBase definition=line 166\"]}",
+  "capability_tier": "weak",
+  "cell_key": "list_symbols__annotated__opencode_deepseek-v4-flash-free-7bb7a1d306__r1",
+  "extracted": [
+    "Execute — receiver=PocketBase definition=line 179",
+    "Start — receiver=PocketBase definition=line 166"
+  ],
+  "input_digest": "93673232ccd27345b7d323dca9737d3e1f8d1a53fe57393c484df0c874fa5a63",
+  "malformed_event": false,
+  "model": "opencode/deepseek-v4-flash-free",
+  "production_faithful": true,
+  "prompt_digest": "a8566a51aabfa3d10eed5f3643159e3514f38348903b73bb99462d5b11c25d13",
+  "provider_error": null,
+  "repetition": 1,
+  "schema": "lci.comprehension.cell.v1",
+  "score": {
+    "exact": false,
+    "false_negatives": [
+      "execute",
+      "start"
+    ],
+    "false_positive_count": 2,
+    "false_positives": [
+      "execute — receiver=pocketbase definition=line 179",
+      "start — receiver=pocketbase definition=line 166"
+    ],
+    "precision": 0.0,
+    "recall": 0.0
+  },
+  "status": "answered",
+  "tokens": {
+    "input": 0,
+    "output": 0,
+    "reasoning": 0
+  },
+  "tool": "list_symbols",
+  "variant": "annotated",
+  "wall_seconds": 8.661
+}

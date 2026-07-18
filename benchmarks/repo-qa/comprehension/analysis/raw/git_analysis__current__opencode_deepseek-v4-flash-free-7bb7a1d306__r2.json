@@ -1,0 +1,37 @@
+{
+  "answer": "{\"answers\":[\"HEAD\"]}",
+  "capability_tier": "weak",
+  "cell_key": "git_analysis__current__opencode_deepseek-v4-flash-free-7bb7a1d306__r2",
+  "extracted": [
+    "HEAD"
+  ],
+  "input_digest": "1c5b53074ff1b20d3edaa7f4d16d2a752c3f6623b6fe35646a495fe49a857686",
+  "malformed_event": false,
+  "model": "opencode/deepseek-v4-flash-free",
+  "production_faithful": false,
+  "prompt_digest": "eea1e041666425d677774e8f22a935b5aeb6b919df39f932e2bd1d23265c316a",
+  "provider_error": null,
+  "repetition": 2,
+  "schema": "lci.comprehension.cell.v1",
+  "score": {
+    "exact": false,
+    "false_negatives": [
+      "d438c6a96a0252ff9df62c1cfe193480ed9ff15d"
+    ],
+    "false_positive_count": 1,
+    "false_positives": [
+      "head"
+    ],
+    "precision": 0.0,
+    "recall": 0.0
+  },
+  "status": "answered",
+  "tokens": {
+    "input": 0,
+    "output": 0,
+    "reasoning": 0
+  },
+  "tool": "git_analysis",
+  "variant": "current",
+  "wall_seconds": 21.381
+}

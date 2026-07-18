@@ -1,0 +1,42 @@
+{
+  "answer": "{\"answers\":[\"Start (pocketbase.go:166)\",\"Execute (pocketbase.go:179)\",\"Write (pocketbase.go:326)\"]}",
+  "capability_tier": "strong",
+  "cell_key": "browse_file__current__opencode-go_glm-5.2-734ff77ba3__r2",
+  "extracted": [
+    "Start (pocketbase.go:166)",
+    "Execute (pocketbase.go:179)",
+    "Write (pocketbase.go:326)"
+  ],
+  "input_digest": "f50f9c2837b14c229d4fa3c2b6439d9fe0ac0ddb5c46db207552c258a7cbfb02",
+  "malformed_event": false,
+  "model": "opencode-go/glm-5.2",
+  "production_faithful": true,
+  "prompt_digest": "720f83fdde8935f7f233ba48f54bd7cf2118819a4b0d6af9e4da4c6220d1aab7",
+  "provider_error": null,
+  "repetition": 2,
+  "schema": "lci.comprehension.cell.v1",
+  "score": {
+    "exact": false,
+    "false_negatives": [
+      "execute",
+      "start"
+    ],
+    "false_positive_count": 3,
+    "false_positives": [
+      "execute (pocketbase.go:179)",
+      "start (pocketbase.go:166)",
+      "write (pocketbase.go:326)"
+    ],
+    "precision": 0.0,
+    "recall": 0.0
+  },
+  "status": "answered",
+  "tokens": {
+    "input": 0,
+    "output": 0,
+    "reasoning": 0
+  },
+  "tool": "browse_file",
+  "variant": "current",
+  "wall_seconds": 4.506
+}

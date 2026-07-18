@@ -1,0 +1,37 @@
+{
+  "answer": "{\"answers\":[\"Yes\"]}",
+  "capability_tier": "weak",
+  "cell_key": "index_stats__current__opencode_deepseek-v4-flash-free-7bb7a1d306__r2",
+  "extracted": [
+    "Yes"
+  ],
+  "input_digest": "6f8a6497cef6e00fd22443721c8ecb3e334b5fe7bf87b1c809984d4b9690ec26",
+  "malformed_event": false,
+  "model": "opencode/deepseek-v4-flash-free",
+  "production_faithful": true,
+  "prompt_digest": "7d9df9a0314bb5b9b92d23a0fae1667b52f255a05e70af729f9b834c9678773e",
+  "provider_error": null,
+  "repetition": 2,
+  "schema": "lci.comprehension.cell.v1",
+  "score": {
+    "exact": false,
+    "false_negatives": [
+      "ready"
+    ],
+    "false_positive_count": 1,
+    "false_positives": [
+      "yes"
+    ],
+    "precision": 0.0,
+    "recall": 0.0
+  },
+  "status": "answered",
+  "tokens": {
+    "input": 0,
+    "output": 0,
+    "reasoning": 0
+  },
+  "tool": "index_stats",
+  "variant": "current",
+  "wall_seconds": 7.291
+}

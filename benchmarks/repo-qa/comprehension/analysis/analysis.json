@@ -1,0 +1,1598 @@
+{
+  "findings": [
+    {
+      "annotated_exact_delta": 0.5,
+      "boundary": "Comprehension result only: models can consume this format; this does not prove LCI emits it.",
+      "control": false,
+      "control_investigation": null,
+      "control_suspect": false,
+      "historical_calls": 204,
+      "noise_floor": 0.4330127018922193,
+      "production_faithful": true,
+      "tier_sensitivity": "weak_more",
+      "tiers": {
+        "strong": {
+          "annotated": {
+            "exact_rate": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "false_positives": {
+              "mean": 2.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "precision": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "recall": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            }
+          },
+          "current": {
+            "exact_rate": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "false_positives": {
+              "mean": 3.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "precision": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "recall": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            }
+          }
+        },
+        "weak": {
+          "annotated": {
+            "exact_rate": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "false_positives": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "precision": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "recall": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            }
+          },
+          "current": {
+            "exact_rate": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "false_positives": {
+              "mean": 2.0,
+              "n": 2,
+              "stdev": 1.0
+            },
+            "precision": {
+              "mean": 0.3333333333333333,
+              "n": 2,
+              "stdev": 0.3333333333333333
+            },
+            "recall": {
+              "mean": 0.5,
+              "n": 2,
+              "stdev": 0.5
+            }
+          }
+        }
+      },
+      "tool": "browse_file",
+      "winner": "annotated"
+    },
+    {
+      "annotated_exact_delta": 0.0,
+      "boundary": "Comprehension result only: models can consume this format; this does not prove LCI emits it.",
+      "control": false,
+      "control_investigation": null,
+      "control_suspect": false,
+      "historical_calls": 23,
+      "noise_floor": 0.02,
+      "production_faithful": true,
+      "tier_sensitivity": "none",
+      "tiers": {
+        "strong": {
+          "annotated": {
+            "exact_rate": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "false_positives": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "precision": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "recall": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            }
+          },
+          "current": {
+            "exact_rate": {
+              "mean": 1.0,
+              "n": 1,
+              "stdev": 0.0
+            },
+            "false_positives": {
+              "mean": 0.0,
+              "n": 1,
+              "stdev": 0.0
+            },
+            "precision": {
+              "mean": 1.0,
+              "n": 1,
+              "stdev": 0.0
+            },
+            "recall": {
+              "mean": 1.0,
+              "n": 1,
+              "stdev": 0.0
+            }
+          }
+        },
+        "weak": {
+          "annotated": {
+            "exact_rate": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "false_positives": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "precision": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "recall": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            }
+          },
+          "current": {
+            "exact_rate": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "false_positives": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "precision": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "recall": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            }
+          }
+        }
+      },
+      "tool": "code_insight",
+      "winner": "parity"
+    },
+    {
+      "annotated_exact_delta": 0.0,
+      "boundary": "Comprehension result only: models can consume this format; this does not prove LCI emits it. The annotated arm is idealized and requires production capability work.",
+      "control": false,
+      "control_investigation": null,
+      "control_suspect": false,
+      "historical_calls": 7,
+      "noise_floor": 0.02,
+      "production_faithful": false,
+      "tier_sensitivity": "none",
+      "tiers": {
+        "strong": {
+          "annotated": {
+            "exact_rate": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "false_positives": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "precision": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "recall": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            }
+          },
+          "current": {
+            "exact_rate": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "false_positives": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "precision": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "recall": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            }
+          }
+        },
+        "weak": {
+          "annotated": {
+            "exact_rate": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "false_positives": {
+              "mean": 2.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "precision": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "recall": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            }
+          },
+          "current": {
+            "exact_rate": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "false_positives": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "precision": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "recall": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            }
+          }
+        }
+      },
+      "tool": "context",
+      "winner": "parity"
+    },
+    {
+      "annotated_exact_delta": 0.25,
+      "boundary": "Comprehension result only: models can consume this format; this does not prove LCI emits it.",
+      "control": false,
+      "control_investigation": null,
+      "control_suspect": false,
+      "historical_calls": 2,
+      "noise_floor": 0.4841229182759271,
+      "production_faithful": true,
+      "tier_sensitivity": "weak_more",
+      "tiers": {
+        "strong": {
+          "annotated": {
+            "exact_rate": {
+              "mean": 0.5,
+              "n": 2,
+              "stdev": 0.5
+            },
+            "false_positives": {
+              "mean": 0.5,
+              "n": 2,
+              "stdev": 0.5
+            },
+            "precision": {
+              "mean": 0.5,
+              "n": 2,
+              "stdev": 0.5
+            },
+            "recall": {
+              "mean": 0.5,
+              "n": 2,
+              "stdev": 0.5
+            }
+          },
+          "current": {
+            "exact_rate": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "false_positives": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "precision": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "recall": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            }
+          }
+        },
+        "weak": {
+          "annotated": {
+            "exact_rate": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "false_positives": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "precision": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "recall": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            }
+          },
+          "current": {
+            "exact_rate": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "false_positives": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "precision": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "recall": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            }
+          }
+        }
+      },
+      "tool": "debug_info",
+      "winner": "parity"
+    },
+    {
+      "annotated_exact_delta": 0.0,
+      "boundary": "Comprehension result only: models can consume this format; this does not prove LCI emits it.",
+      "control": false,
+      "control_investigation": null,
+      "control_suspect": false,
+      "historical_calls": 381,
+      "noise_floor": 0.02,
+      "production_faithful": true,
+      "tier_sensitivity": "none",
+      "tiers": {
+        "strong": {
+          "annotated": {
+            "exact_rate": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "false_positives": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "precision": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "recall": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            }
+          },
+          "current": {
+            "exact_rate": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "false_positives": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "precision": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "recall": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            }
+          }
+        },
+        "weak": {
+          "annotated": {
+            "exact_rate": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "false_positives": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "precision": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "recall": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            }
+          },
+          "current": {
+            "exact_rate": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "false_positives": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "precision": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "recall": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            }
+          }
+        }
+      },
+      "tool": "find_files",
+      "winner": "parity"
+    },
+    {
+      "annotated_exact_delta": 0.0,
+      "boundary": "Comprehension result only: models can consume this format; this does not prove LCI emits it. The annotated arm is idealized and requires production capability work.",
+      "control": false,
+      "control_investigation": null,
+      "control_suspect": false,
+      "historical_calls": 320,
+      "noise_floor": 0.02,
+      "production_faithful": false,
+      "tier_sensitivity": "none",
+      "tiers": {
+        "strong": {
+          "annotated": {
+            "exact_rate": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "false_positives": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "precision": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "recall": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            }
+          },
+          "current": {
+            "exact_rate": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "false_positives": {
+              "mean": 2.0,
+              "n": 2,
+              "stdev": 1.0
+            },
+            "precision": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "recall": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            }
+          }
+        },
+        "weak": {
+          "annotated": {
+            "exact_rate": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "false_positives": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "precision": {
+              "mean": 0.5,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "recall": {
+              "mean": 0.5,
+              "n": 2,
+              "stdev": 0.0
+            }
+          },
+          "current": {
+            "exact_rate": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "false_positives": {
+              "mean": 2.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "precision": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "recall": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            }
+          }
+        }
+      },
+      "tool": "get_context",
+      "winner": "parity"
+    },
+    {
+      "annotated_exact_delta": 1.0,
+      "boundary": "Comprehension result only: models can consume this format; this does not prove LCI emits it. The annotated arm is idealized and requires production capability work.",
+      "control": false,
+      "control_investigation": null,
+      "control_suspect": false,
+      "historical_calls": 2,
+      "noise_floor": 0.5,
+      "production_faithful": false,
+      "tier_sensitivity": "none",
+      "tiers": {
+        "strong": {
+          "annotated": {
+            "exact_rate": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "false_positives": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "precision": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "recall": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            }
+          },
+          "current": {
+            "exact_rate": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "false_positives": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "precision": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "recall": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            }
+          }
+        },
+        "weak": {
+          "annotated": {
+            "exact_rate": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "false_positives": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "precision": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "recall": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            }
+          },
+          "current": {
+            "exact_rate": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "false_positives": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "precision": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "recall": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            }
+          }
+        }
+      },
+      "tool": "git_analysis",
+      "winner": "annotated"
+    },
+    {
+      "annotated_exact_delta": 0.0,
+      "boundary": "Comprehension result only: models can consume this format; this does not prove LCI emits it.",
+      "control": true,
+      "control_investigation": null,
+      "control_suspect": false,
+      "historical_calls": 15,
+      "noise_floor": 0.02,
+      "production_faithful": true,
+      "tier_sensitivity": "none",
+      "tiers": {
+        "strong": {
+          "annotated": {
+            "exact_rate": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "false_positives": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "precision": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "recall": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            }
+          },
+          "current": {
+            "exact_rate": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "false_positives": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "precision": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "recall": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            }
+          }
+        },
+        "weak": {
+          "annotated": {
+            "exact_rate": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "false_positives": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "precision": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "recall": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            }
+          },
+          "current": {
+            "exact_rate": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "false_positives": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "precision": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "recall": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            }
+          }
+        }
+      },
+      "tool": "index_stats",
+      "winner": "parity"
+    },
+    {
+      "annotated_exact_delta": 1.0,
+      "boundary": "Comprehension result only: models can consume this format; this does not prove LCI emits it. The annotated arm is idealized and requires production capability work.",
+      "control": true,
+      "control_investigation": "Invalid null control: the current info blob paraphrases the oracle answer, while the annotated blob states the exact grading phrase. The measured gap tests answer wording, not neutral formatting; exclude it from production evidence.",
+      "control_suspect": true,
+      "historical_calls": 7,
+      "noise_floor": 0.5,
+      "production_faithful": false,
+      "tier_sensitivity": "none",
+      "tiers": {
+        "strong": {
+          "annotated": {
+            "exact_rate": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "false_positives": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "precision": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "recall": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            }
+          },
+          "current": {
+            "exact_rate": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "false_positives": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "precision": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "recall": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            }
+          }
+        },
+        "weak": {
+          "annotated": {
+            "exact_rate": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "false_positives": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "precision": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "recall": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            }
+          },
+          "current": {
+            "exact_rate": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "false_positives": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "precision": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "recall": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            }
+          }
+        }
+      },
+      "tool": "info",
+      "winner": "annotated"
+    },
+    {
+      "annotated_exact_delta": 0.0,
+      "boundary": "Comprehension result only: models can consume this format; this does not prove LCI emits it.",
+      "control": false,
+      "control_investigation": null,
+      "control_suspect": false,
+      "historical_calls": 230,
+      "noise_floor": 0.02,
+      "production_faithful": true,
+      "tier_sensitivity": "none",
+      "tiers": {
+        "strong": {
+          "annotated": {
+            "exact_rate": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "false_positives": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "precision": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "recall": {
+              "mean": 0.5,
+              "n": 2,
+              "stdev": 0.0
+            }
+          },
+          "current": {
+            "exact_rate": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "false_positives": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "precision": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "recall": {
+              "mean": 0.5,
+              "n": 2,
+              "stdev": 0.0
+            }
+          }
+        },
+        "weak": {
+          "annotated": {
+            "exact_rate": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "false_positives": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "precision": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "recall": {
+              "mean": 0.5,
+              "n": 2,
+              "stdev": 0.0
+            }
+          },
+          "current": {
+            "exact_rate": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "false_positives": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "precision": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "recall": {
+              "mean": 0.5,
+              "n": 2,
+              "stdev": 0.0
+            }
+          }
+        }
+      },
+      "tool": "inspect_symbol",
+      "winner": "parity"
+    },
+    {
+      "annotated_exact_delta": 0.0,
+      "boundary": "Comprehension result only: models can consume this format; this does not prove LCI emits it.",
+      "control": false,
+      "control_investigation": null,
+      "control_suspect": false,
+      "historical_calls": 73,
+      "noise_floor": 0.02,
+      "production_faithful": true,
+      "tier_sensitivity": "none",
+      "tiers": {
+        "strong": {
+          "annotated": {
+            "exact_rate": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "false_positives": {
+              "mean": 3.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "precision": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "recall": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            }
+          },
+          "current": {
+            "exact_rate": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "false_positives": {
+              "mean": 2.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "precision": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "recall": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            }
+          }
+        },
+        "weak": {
+          "annotated": {
+            "exact_rate": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "false_positives": {
+              "mean": 2.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "precision": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "recall": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            }
+          },
+          "current": {
+            "exact_rate": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "false_positives": {
+              "mean": 2.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "precision": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "recall": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            }
+          }
+        }
+      },
+      "tool": "list_symbols",
+      "winner": "parity"
+    },
+    {
+      "annotated_exact_delta": 0.0,
+      "boundary": "Comprehension result only: models can consume this format; this does not prove LCI emits it. The annotated arm is idealized and requires production capability work.",
+      "control": false,
+      "control_investigation": null,
+      "control_suspect": false,
+      "historical_calls": 2170,
+      "noise_floor": 0.02,
+      "production_faithful": false,
+      "tier_sensitivity": "none",
+      "tiers": {
+        "strong": {
+          "annotated": {
+            "exact_rate": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "false_positives": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "precision": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "recall": {
+              "mean": 0.5,
+              "n": 2,
+              "stdev": 0.0
+            }
+          },
+          "current": {
+            "exact_rate": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "false_positives": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "precision": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "recall": {
+              "mean": 0.5,
+              "n": 2,
+              "stdev": 0.0
+            }
+          }
+        },
+        "weak": {
+          "annotated": {
+            "exact_rate": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "false_positives": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "precision": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "recall": {
+              "mean": 0.5,
+              "n": 2,
+              "stdev": 0.0
+            }
+          },
+          "current": {
+            "exact_rate": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "false_positives": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "precision": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "recall": {
+              "mean": 0.5,
+              "n": 2,
+              "stdev": 0.0
+            }
+          }
+        }
+      },
+      "tool": "search",
+      "winner": "parity"
+    },
+    {
+      "annotated_exact_delta": 0.25,
+      "boundary": "Comprehension result only: models can consume this format; this does not prove LCI emits it.",
+      "control": true,
+      "control_investigation": null,
+      "control_suspect": false,
+      "historical_calls": 34,
+      "noise_floor": 0.33071891388307384,
+      "production_faithful": true,
+      "tier_sensitivity": "weak_more",
+      "tiers": {
+        "strong": {
+          "annotated": {
+            "exact_rate": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "false_positives": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "precision": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "recall": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            }
+          },
+          "current": {
+            "exact_rate": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "false_positives": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "precision": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "recall": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            }
+          }
+        },
+        "weak": {
+          "annotated": {
+            "exact_rate": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "false_positives": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "precision": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "recall": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            }
+          },
+          "current": {
+            "exact_rate": {
+              "mean": 0.5,
+              "n": 2,
+              "stdev": 0.5
+            },
+            "false_positives": {
+              "mean": 0.5,
+              "n": 2,
+              "stdev": 0.5
+            },
+            "precision": {
+              "mean": 0.5,
+              "n": 2,
+              "stdev": 0.5
+            },
+            "recall": {
+              "mean": 0.5,
+              "n": 2,
+              "stdev": 0.5
+            }
+          }
+        }
+      },
+      "tool": "semantic_annotations",
+      "winner": "parity"
+    },
+    {
+      "annotated_exact_delta": 1.0,
+      "boundary": "Comprehension result only: models can consume this format; this does not prove LCI emits it. The annotated arm is idealized and requires production capability work.",
+      "control": false,
+      "control_investigation": null,
+      "control_suspect": false,
+      "historical_calls": 2,
+      "noise_floor": 0.5,
+      "production_faithful": false,
+      "tier_sensitivity": "none",
+      "tiers": {
+        "strong": {
+          "annotated": {
+            "exact_rate": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "false_positives": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "precision": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "recall": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            }
+          },
+          "current": {
+            "exact_rate": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "false_positives": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "precision": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "recall": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            }
+          }
+        },
+        "weak": {
+          "annotated": {
+            "exact_rate": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "false_positives": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "precision": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "recall": {
+              "mean": 1.0,
+              "n": 2,
+              "stdev": 0.0
+            }
+          },
+          "current": {
+            "exact_rate": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "false_positives": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "precision": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            },
+            "recall": {
+              "mean": 0.0,
+              "n": 2,
+              "stdev": 0.0
+            }
+          }
+        }
+      },
+      "tool": "side_effects",
+      "winner": "annotated"
+    }
+  ],
+  "grid": {
+    "expected": 112,
+    "observed": 112,
+    "statuses": {
+      "answered": 111,
+      "malformed_answer": 1
+    }
+  },
+  "history_frequency_source": {
+    "method": "count lci_* tool_trace events from local repo-qa historical results",
+    "result_files_scanned": 2497
+  },
+  "prediction_misses": [
+    {
+      "tool": "code_insight",
+      "why": "winner predicted annotated but observed parity; delta=0.000, noise_floor=0.020; tier sensitivity predicted weak_more but observed none"
+    },
+    {
+      "tool": "context",
+      "why": "winner predicted annotated but observed parity; delta=0.000, noise_floor=0.020; tier sensitivity predicted weak_more but observed none"
+    },
+    {
+      "tool": "debug_info",
+      "why": "tier sensitivity predicted none but observed weak_more"
+    },
+    {
+      "tool": "find_files",
+      "why": "winner predicted annotated but observed parity; delta=0.000, noise_floor=0.020; tier sensitivity predicted weak_more but observed none"
+    },
+    {
+      "tool": "get_context",
+      "why": "winner predicted annotated but observed parity; delta=0.000, noise_floor=0.020; tier sensitivity predicted weak_more but observed none"
+    },
+    {
+      "tool": "git_analysis",
+      "why": "tier sensitivity predicted weak_more but observed none"
+    },
+    {
+      "tool": "info",
+      "why": "winner predicted parity but observed annotated; delta=1.000, noise_floor=0.500"
+    },
+    {
+      "tool": "inspect_symbol",
+      "why": "winner predicted annotated but observed parity; delta=0.000, noise_floor=0.020; tier sensitivity predicted weak_more but observed none"
+    },
+    {
+      "tool": "list_symbols",
+      "why": "winner predicted annotated but observed parity; delta=0.000, noise_floor=0.020; tier sensitivity predicted weak_more but observed none"
+    },
+    {
+      "tool": "search",
+      "why": "winner predicted annotated but observed parity; delta=0.000, noise_floor=0.020; tier sensitivity predicted weak_more but observed none"
+    },
+    {
+      "tool": "semantic_annotations",
+      "why": "tier sensitivity predicted none but observed weak_more"
+    },
+    {
+      "tool": "side_effects",
+      "why": "tier sensitivity predicted weak_more but observed none"
+    }
+  ],
+  "recommendations": [
+    {
+      "exact_gain": 0.5,
+      "historical_calls": 204,
+      "priority_score": 102.0,
+      "production_faithful": true,
+      "tool": "browse_file"
+    },
+    {
+      "exact_gain": 1.0,
+      "historical_calls": 2,
+      "priority_score": 2.0,
+      "production_faithful": false,
+      "tool": "git_analysis"
+    },
+    {
+      "exact_gain": 1.0,
+      "historical_calls": 2,
+      "priority_score": 2.0,
+      "production_faithful": false,
+      "tool": "side_effects"
+    }
+  ],
+  "schema": "lci.comprehension.analysis.v1",
+  "surface_verdict": {
+    "annotated_wins": 4,
+    "controls_suspect": [
+      "info"
+    ],
+    "current_wins": 0,
+    "generality": "The fileblob.Close pattern did not generalize across the surface: annotation won 4 of 14 tools, reached parity on 10, and only browse_file was both a measured winner and production-faithful. Three other wins used idealized arms.",
+    "parity": 10,
+    "variance_caveat": "code_insight/current/strong has one scored repetition because the other response was malformed and remained unscored; all other arms have two scored repetitions."
+  }
+}

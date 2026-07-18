@@ -1,0 +1,40 @@
+{
+  "answer": "```json\n{\"answers\":[\"Definition of PocketBase.Start: `func (pb *PocketBase) Start() error` at pocketbase.go:166\",\"Documentation of PocketBase.Start: `// commands (serve, superuser, version) and executes pb.RootCmd.` at pocketbase.go:166\"]}\n```",
+  "capability_tier": "weak",
+  "cell_key": "get_context__current__opencode_deepseek-v4-flash-free-7bb7a1d306__r2",
+  "extracted": [
+    "Definition of PocketBase.Start: `func (pb *PocketBase) Start() error` at pocketbase.go:166",
+    "Documentation of PocketBase.Start: `// commands (serve, superuser, version) and executes pb.RootCmd.` at pocketbase.go:166"
+  ],
+  "input_digest": "087ddc6abefbeb7e99e7163160218d500b4ae2a3e5916cca4c749a0c00fbe732",
+  "malformed_event": false,
+  "model": "opencode/deepseek-v4-flash-free",
+  "production_faithful": false,
+  "prompt_digest": "ce0c8c2e42f1284af5b7148bc9365e89d8f1703ee0fdbbc5d5df8e661ecc1f36",
+  "provider_error": null,
+  "repetition": 2,
+  "schema": "lci.comprehension.cell.v1",
+  "score": {
+    "exact": false,
+    "false_negatives": [
+      "func (pb *pocketbase) start() error",
+      "start starts the application"
+    ],
+    "false_positive_count": 2,
+    "false_positives": [
+      "definition of pocketbase.start: `func (pb *pocketbase) start() error` at pocketbase.go:166",
+      "documentation of pocketbase.start: `// commands (serve, superuser, version) and executes pb.rootcmd.` at pocketbase.go:166"
+    ],
+    "precision": 0.0,
+    "recall": 0.0
+  },
+  "status": "answered",
+  "tokens": {
+    "input": 0,
+    "output": 0,
+    "reasoning": 0
+  },
+  "tool": "get_context",
+  "variant": "current",
+  "wall_seconds": 8.284
+}

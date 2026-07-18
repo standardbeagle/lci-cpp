@@ -1,0 +1,38 @@
+{
+  "answer": "{\"answers\":[\"pocketbase.go:166 // Start starts the application\\nfunc (pb *PocketBase) Start() error\"]}",
+  "capability_tier": "strong",
+  "cell_key": "context__annotated__opencode-go_glm-5.2-734ff77ba3__r1",
+  "extracted": [
+    "pocketbase.go:166 // Start starts the application\nfunc (pb *PocketBase) Start() error"
+  ],
+  "input_digest": "bc287b26a1acde1df86785dea6d2a1d404436d76cac3c120f7abdfc1b438f870",
+  "malformed_event": false,
+  "model": "opencode-go/glm-5.2",
+  "production_faithful": false,
+  "prompt_digest": "810758f1684ddadb3e1c79095eb67c00df3199ec79cb10d9b46f4c5ec2cb78b6",
+  "provider_error": null,
+  "repetition": 1,
+  "schema": "lci.comprehension.cell.v1",
+  "score": {
+    "exact": false,
+    "false_negatives": [
+      "func (pb *pocketbase) start() error",
+      "start starts the application"
+    ],
+    "false_positive_count": 1,
+    "false_positives": [
+      "pocketbase.go:166 // start starts the application func (pb *pocketbase) start() error"
+    ],
+    "precision": 0.0,
+    "recall": 0.0
+  },
+  "status": "answered",
+  "tokens": {
+    "input": 0,
+    "output": 0,
+    "reasoning": 0
+  },
+  "tool": "context",
+  "variant": "annotated",
+  "wall_seconds": 5.276
+}

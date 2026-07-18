@@ -1,0 +1,31 @@
+{
+  "answer": "{\"answers\":[]}",
+  "capability_tier": "weak",
+  "cell_key": "semantic_annotations__annotated__opencode_deepseek-v4-flash-free-7bb7a1d306__r1",
+  "extracted": [],
+  "input_digest": "68e023661186a2a315d6cc6a6afb90617c01eb52b75210d09eca628052b5232b",
+  "malformed_event": false,
+  "model": "opencode/deepseek-v4-flash-free",
+  "production_faithful": true,
+  "prompt_digest": "ebaa09d8289dc26e2986c4d26ae92550d301332f0ee9ba55bbd0b9ab3a273258",
+  "provider_error": null,
+  "repetition": 1,
+  "schema": "lci.comprehension.cell.v1",
+  "score": {
+    "exact": true,
+    "false_negatives": [],
+    "false_positive_count": 0,
+    "false_positives": [],
+    "precision": 1.0,
+    "recall": 1.0
+  },
+  "status": "answered",
+  "tokens": {
+    "input": 0,
+    "output": 0,
+    "reasoning": 0
+  },
+  "tool": "semantic_annotations",
+  "variant": "annotated",
+  "wall_seconds": 4.969
+}

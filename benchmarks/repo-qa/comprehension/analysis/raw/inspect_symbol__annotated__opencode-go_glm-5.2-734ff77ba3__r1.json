@@ -1,0 +1,35 @@
+{
+  "answer": "{\"answers\":[\"pocketbase.go:166\"]}",
+  "capability_tier": "strong",
+  "cell_key": "inspect_symbol__annotated__opencode-go_glm-5.2-734ff77ba3__r1",
+  "extracted": [
+    "pocketbase.go:166"
+  ],
+  "input_digest": "b52f9b6c736e30358e8b003ddad5db3489c9d549e6e8756a98aa8cd066157cf6",
+  "malformed_event": false,
+  "model": "opencode-go/glm-5.2",
+  "production_faithful": true,
+  "prompt_digest": "b6038b350766a12d6e49df5073a23d5d4b38339ea91fedac802920f17b0d634e",
+  "provider_error": null,
+  "repetition": 1,
+  "schema": "lci.comprehension.cell.v1",
+  "score": {
+    "exact": false,
+    "false_negatives": [
+      "func (pb *pocketbase) start() error"
+    ],
+    "false_positive_count": 0,
+    "false_positives": [],
+    "precision": 1.0,
+    "recall": 0.5
+  },
+  "status": "answered",
+  "tokens": {
+    "input": 0,
+    "output": 0,
+    "reasoning": 0
+  },
+  "tool": "inspect_symbol",
+  "variant": "annotated",
+  "wall_seconds": 5.55
+}

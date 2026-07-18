@@ -1,0 +1,37 @@
+{
+  "answer": "{\"answers\":[\"yes\"]}",
+  "capability_tier": "strong",
+  "cell_key": "index_stats__annotated__opencode-go_glm-5.2-734ff77ba3__r2",
+  "extracted": [
+    "yes"
+  ],
+  "input_digest": "f49af9bb5fc10f883a7b20a7c009b034f41b29deb09a41f2e3038ca666ae831e",
+  "malformed_event": false,
+  "model": "opencode-go/glm-5.2",
+  "production_faithful": true,
+  "prompt_digest": "d3e3d21c79bf9219c1ff240d70b385ecfeabbc6e0462b78c804215ae7ee48969",
+  "provider_error": null,
+  "repetition": 2,
+  "schema": "lci.comprehension.cell.v1",
+  "score": {
+    "exact": false,
+    "false_negatives": [
+      "ready"
+    ],
+    "false_positive_count": 1,
+    "false_positives": [
+      "yes"
+    ],
+    "precision": 0.0,
+    "recall": 0.0
+  },
+  "status": "answered",
+  "tokens": {
+    "input": 0,
+    "output": 0,
+    "reasoning": 0
+  },
+  "tool": "index_stats",
+  "variant": "annotated",
+  "wall_seconds": 4.293
+}

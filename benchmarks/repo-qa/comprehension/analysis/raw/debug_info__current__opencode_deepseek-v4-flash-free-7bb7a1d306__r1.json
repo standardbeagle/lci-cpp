@@ -1,0 +1,33 @@
+{
+  "answer": "{\"answers\":[]}",
+  "capability_tier": "weak",
+  "cell_key": "debug_info__current__opencode_deepseek-v4-flash-free-7bb7a1d306__r1",
+  "extracted": [],
+  "input_digest": "09e61b29ef42c54f7332f172789a9dae092b57367280d0da5a2861ebe08fdb51",
+  "malformed_event": false,
+  "model": "opencode/deepseek-v4-flash-free",
+  "production_faithful": true,
+  "prompt_digest": "6379543c6674246d7970ecb994a7c66cae11de866110e7eba76e1c0c61806913",
+  "provider_error": null,
+  "repetition": 1,
+  "schema": "lci.comprehension.cell.v1",
+  "score": {
+    "exact": false,
+    "false_negatives": [
+      "pocketbase.go"
+    ],
+    "false_positive_count": 0,
+    "false_positives": [],
+    "precision": 0.0,
+    "recall": 0.0
+  },
+  "status": "answered",
+  "tokens": {
+    "input": 0,
+    "output": 0,
+    "reasoning": 0
+  },
+  "tool": "debug_info",
+  "variant": "current",
+  "wall_seconds": 6.82
+}

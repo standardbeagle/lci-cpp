@@ -1,0 +1,35 @@
+{
+  "answer": "{\"answers\":[\"examples/base/main.go:119\"]}",
+  "capability_tier": "strong",
+  "cell_key": "search__annotated__opencode-go_glm-5.2-734ff77ba3__r1",
+  "extracted": [
+    "examples/base/main.go:119"
+  ],
+  "input_digest": "414229defc69927aad0ccd9e6ef5907cec884ee644105f8aed5204436379a90a",
+  "malformed_event": false,
+  "model": "opencode-go/glm-5.2",
+  "production_faithful": false,
+  "prompt_digest": "14a25ca23d6e66e8f61bea86331be868d0173fc921a1969e409a476658f4539e",
+  "provider_error": null,
+  "repetition": 1,
+  "schema": "lci.comprehension.cell.v1",
+  "score": {
+    "exact": false,
+    "false_negatives": [
+      "pocketbase.go:166"
+    ],
+    "false_positive_count": 0,
+    "false_positives": [],
+    "precision": 1.0,
+    "recall": 0.5
+  },
+  "status": "answered",
+  "tokens": {
+    "input": 0,
+    "output": 0,
+    "reasoning": 0
+  },
+  "tool": "search",
+  "variant": "annotated",
+  "wall_seconds": 4.033
+}
