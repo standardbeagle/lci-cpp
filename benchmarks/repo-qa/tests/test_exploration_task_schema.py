@@ -351,6 +351,8 @@ class ValidatorTest(unittest.TestCase):
         output = stdout.getvalue()
         self.assertIn(f"categories={summary['per_category']}", output)
         self.assertIn(f"verdicts={summary['per_verdict']}", output)
+        for verdict in ("true", "false", "unsupported"):
+            self.assertIn(f"'{verdict}':", output)
 
 
 class RealTaskBankTest(unittest.TestCase):
@@ -371,6 +373,7 @@ class RealTaskBankTest(unittest.TestCase):
             "true", "wrong-layer", "misleading-doc", "dead-code",
             "false-premise", "unsupported",
         })
+        self.assertEqual(set(summary["per_verdict"]), vet.EXPECTED_VERDICTS)
         self.assertLessEqual(max(summary["per_category"].values()), summary["tasks"] / 2)
         self.assertLessEqual(max(summary["per_verdict"].values()), summary["tasks"] / 2)
 
@@ -388,6 +391,7 @@ class RealTaskBankTest(unittest.TestCase):
         problems = self._composition_problems(29, majority=True)
         self.assertEqual(problems, [
             "bank must contain 30-50 tasks; got 29",
+            "bank must cover every verdict; got ['true']",
             "bank balance limit exceeded: no category or verdict may be a majority",
         ])
 
@@ -409,6 +413,15 @@ class RealTaskBankTest(unittest.TestCase):
                     problems, [f"bank must cover every category; got {covered}"]
                 )
 
+    def test_each_missing_verdict_is_rejected_hermetically(self):
+        for missing in sorted(vet.EXPECTED_VERDICTS):
+            with self.subTest(missing=missing):
+                problems = self._composition_problems(30, missing_verdict=missing)
+                covered = sorted(vet.EXPECTED_VERDICTS - {missing})
+                self.assertEqual(
+                    problems, [f"bank must cover every verdict; got {covered}"]
+                )
+
     def test_category_majority_is_rejected_hermetically(self):
         problems = self._composition_problems(30, category_majority=True)
         self.assertEqual(problems, [
@@ -427,6 +440,7 @@ class RealTaskBankTest(unittest.TestCase):
         majority=False,
         missing_corpus=None,
         missing_category=None,
+        missing_verdict=None,
         category_majority=False,
         verdict_majority=False,
     ):
@@ -441,6 +455,9 @@ class RealTaskBankTest(unittest.TestCase):
                 corpora.remove(missing_corpus)
             if missing_category is not None:
                 categories.remove(missing_category)
+            verdicts = sorted(vet.EXPECTED_VERDICTS)
+            if missing_verdict is not None:
+                verdicts.remove(missing_verdict)
             template_root = os.path.join(root, "template")
             template = Fixture(template_root).task
             corpus_specs = vet.load_corpora()
@@ -460,7 +477,7 @@ class RealTaskBankTest(unittest.TestCase):
                 verdict = (
                     "true"
                     if majority or (verdict_majority and index < count // 2 + 1)
-                    else ["true", "false", "unsupported"][index % 3]
+                    else verdicts[index % len(verdicts)]
                 )
                 task["author"]["category"] = category
                 task["author"]["verdict"] = verdict

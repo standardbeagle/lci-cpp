@@ -56,6 +56,7 @@ EXPECTED_CATEGORIES = {
     "true", "wrong-layer", "misleading-doc", "dead-code", "false-premise",
     "unsupported",
 }
+EXPECTED_VERDICTS = {"true", "false", "unsupported"}
 
 
 class Problem(Exception):
@@ -534,6 +535,10 @@ def validate_bank(
     if set(category_counts) != EXPECTED_CATEGORIES:
         problems.append(
             f"bank must cover every category; got {sorted(category_counts, key=str)}"
+        )
+    if set(verdict_counts) != EXPECTED_VERDICTS:
+        problems.append(
+            f"bank must cover every verdict; got {sorted(verdict_counts, key=str)}"
         )
     if (
         max(category_counts.values(), default=0) > total / 2
