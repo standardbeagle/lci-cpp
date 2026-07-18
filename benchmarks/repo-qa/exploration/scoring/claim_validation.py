@@ -70,7 +70,9 @@ def _evidence(task, citations):
     for citation in citations:
         hits = {i for i, anchor in enumerate(anchors) if _within(citation, anchor)}
         live_hits = hits & acceptable
-        if live_hits:
+        # Ambiguous coordinates fail closed: a live anchor cannot launder a
+        # citation that also points at any forbidden/misleading anchor.
+        if live_hits and not (hits & dead_or_misleading):
             valid += 1
             matched.update(live_hits)
     total = len(citations)
@@ -124,6 +126,7 @@ def score_claim_run(task, record, *, task_bank_digest=None, settings=None):
         # forge_version is the cross-corpus manifest compatibility knob; the
         # tree hash itself legitimately differs for every forged corpus.
         "forge_manifest": record.get("forge_version"),
+        "claim_task_digest": record.get("claim_task_digest"),
         "task_bank_digest": task_bank_digest or record.get("task_bank_digest"),
         "settings": effective_settings,
         "process": {"tool_calls": len(record.get("tool_calls") or []),
@@ -166,7 +169,12 @@ def _latest_and_pair(scores):
         key = score.get("run_key")
         if key is None:
             raise IncompatibleRuns("score record is missing required run_key")
-        latest[key] = score
+        # Append logs may contain retries.  Once a run key has a completed
+        # answer, a later timeout/provider failure must not erase it.  Among
+        # completed retries the latest answer still wins.
+        previous = latest.get(key)
+        if previous is None or score.get("status") == "answered" or previous.get("status") != "answered":
+            latest[key] = score
     cells = {}
     for score in latest.values():
         key = (score.get("task_id"), score.get("seed"))
@@ -176,7 +184,8 @@ def _latest_and_pair(scores):
         cells[key][arm] = score
     paired, unpaired = [], []
     for key, arms in sorted(cells.items()):
-        if set(arms) >= {"treatment", "baseline"}:
+        complete = {arm for arm, score in arms.items() if score.get("status") == "answered"}
+        if complete >= {"treatment", "baseline"}:
             paired.extend((arms["treatment"], arms["baseline"]))
         else:
             unpaired.extend({"task_id": key[0], "seed": key[1], "arm": arm,

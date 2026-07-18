@@ -46,7 +46,9 @@ def score_bank(tasks, records, settings=None):
         key = rec.get("run_key")
         if key is None:
             raise SystemExit(f"error: record {index} is missing run_key")
-        latest[key] = rec
+        previous = latest.get(key)
+        if previous is None or rec.get("status") == "answered" or previous.get("status") != "answered":
+            latest[key] = rec
     digest = _bank_digest(tasks)
     scores = []
     for rec in latest.values():
@@ -67,13 +69,13 @@ def main(argv=None):
     parser.add_argument("--tasks-dir", required=True)
     parser.add_argument("--records", required=True)
     parser.add_argument("--out-dir", required=True)
-    parser.add_argument("--settings-json", default="{}")
+    parser.add_argument("--settings-json")
     args = parser.parse_args(argv)
     try:
-        settings = json.loads(args.settings_json)
+        settings = json.loads(args.settings_json) if args.settings_json is not None else None
     except json.JSONDecodeError as error:
         raise SystemExit(f"error: invalid settings JSON: {error}")
-    if not isinstance(settings, dict):
+    if settings is not None and not isinstance(settings, dict):
         raise SystemExit("error: settings JSON must be an object")
     tasks = _load_tasks(args.tasks_dir)
     scores = score_bank(tasks, record_log.load_records(args.records), settings)

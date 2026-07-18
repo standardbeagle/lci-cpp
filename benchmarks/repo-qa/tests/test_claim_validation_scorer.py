@@ -3,9 +3,12 @@
 import os
 import sys
 import unittest
+from tempfile import TemporaryDirectory
+from unittest import mock
 
 ROOT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "exploration")
 sys.path.insert(0, ROOT)
+sys.path.insert(0, os.path.join(os.path.dirname(ROOT), "scripts"))
 
 from scoring import (IncompatibleRuns, aggregate_claim_scores, parse_claim_answer,
                      score_claim_run)  # noqa: E402
@@ -85,6 +88,15 @@ class ScoringTests(unittest.TestCase):
         self.assertFalse(failed["valid_answer"])
         self.assertIsNone(failed["evidence"]["precision"])
 
+    def test_overlap_with_every_disallowed_anchor_class_fails_closed(self):
+        for classification in ("misleading", "dead", "wrong-layer", "disallowed"):
+            overlap = task(classes=["authoritative-live", classification])
+            overlap["evidence"][1] = {"path": "src/live.py", "lines": [3]}
+            with self.subTest(classification=classification):
+                scored = score_claim_run(overlap, record(answer()), task_bank_digest="bank")
+                self.assertFalse(scored["grounded"])
+                self.assertEqual(scored["evidence"]["cited_invalid"], 1)
+
 
 class AggregateTests(unittest.TestCase):
     def _score(self, arm, verdict="false", **updates):
@@ -100,13 +112,27 @@ class AggregateTests(unittest.TestCase):
         self.assertIn("confusion", agg["arms"]["treatment"]["categories"]["false-premise"])
         self.assertIn("citation_f1", agg["deltas"])
 
-    def test_latest_run_key_wins_and_unpaired_is_forensic(self):
+    def test_answered_retry_survives_later_timeout_and_failures_remain_forensic(self):
         failed = self._score("treatment", status="timeout", structured_answer=None)
         good = self._score("treatment")
         lonely = self._score("baseline", seed=2, run_key="claim-one::baseline::seed-2")
-        agg = aggregate_claim_scores([failed, good, lonely])
+        agg = aggregate_claim_scores([good, failed, lonely])
         self.assertEqual(agg["arms"]["treatment"]["answered"], 1)
         self.assertEqual(agg["pairing"]["unpaired_count"], 2)
+
+    def test_incomplete_counterpart_is_not_used_for_paired_delta(self):
+        treatment = self._score("treatment")
+        baseline = self._score("baseline", status="provider_error", structured_answer=None)
+        agg = aggregate_claim_scores([treatment, baseline])
+        self.assertEqual(agg["pairing"]["paired_count"], 0)
+        self.assertEqual(agg["pairing"]["unpaired_count"], 2)
+        self.assertEqual(agg["deltas"], {})
+
+    def test_latest_completed_retry_wins(self):
+        wrong = self._score("treatment", verdict="true")
+        right = self._score("treatment")
+        agg = aggregate_claim_scores([wrong, right])
+        self.assertEqual(agg["arms"]["treatment"]["verdict_accuracy"], 1.0)
 
     def test_rejects_every_mixed_compatibility_dimension(self):
         base = [self._score("treatment"), self._score("baseline")]
@@ -117,6 +143,40 @@ class AggregateTests(unittest.TestCase):
             records[1][field] = value
             with self.subTest(field=field), self.assertRaises(IncompatibleRuns):
                 aggregate_claim_scores(records)
+
+
+class CliTests(unittest.TestCase):
+    def test_absent_settings_override_preserves_records_and_rejects_mixture(self):
+        import score_claim_validation
+
+        first = score_claim_run(task(), record(answer(), settings={"temperature": 0}),
+                                task_bank_digest="bank")
+        second = score_claim_run(task(), record(answer(), arm="baseline",
+                                                settings={"temperature": 1}),
+                                 task_bank_digest="bank")
+        with TemporaryDirectory() as root, \
+                mock.patch.object(score_claim_validation, "_load_tasks", return_value={}), \
+                mock.patch.object(score_claim_validation.record_log, "load_records", return_value=[]), \
+                mock.patch.object(score_claim_validation, "score_bank", return_value=[first, second]) as scorer:
+            with self.assertRaisesRegex(SystemExit, "incompatible 'settings'"):
+                score_claim_validation.main(["--tasks-dir", root, "--records", "records",
+                                             "--out-dir", os.path.join(root, "out")])
+            self.assertIsNone(scorer.call_args.args[2])
+
+    def test_explicit_settings_override_is_distinct(self):
+        import score_claim_validation
+
+        scored = score_claim_run(task(), record(answer()), task_bank_digest="bank",
+                                 settings={"evidence_min_valid": 1})
+        with TemporaryDirectory() as root, \
+                mock.patch.object(score_claim_validation, "_load_tasks", return_value={}), \
+                mock.patch.object(score_claim_validation.record_log, "load_records", return_value=[]), \
+                mock.patch.object(score_claim_validation, "score_bank", return_value=[scored]) as scorer:
+            self.assertEqual(score_claim_validation.main([
+                "--tasks-dir", root, "--records", "records", "--out-dir", os.path.join(root, "out"),
+                "--settings-json", '{"evidence_min_valid": 1}',
+            ]), 0)
+            self.assertEqual(scorer.call_args.args[2], {"evidence_min_valid": 1})
 
 
 if __name__ == "__main__":
