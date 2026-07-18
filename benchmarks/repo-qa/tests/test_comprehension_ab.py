@@ -27,12 +27,17 @@ class ComprehensionAbTest(unittest.TestCase):
                 "print(json.dumps({'part': {'type': 'text', 'messageID': 'm1', 'text': answer}}))\n"
             )
             fake.chmod(0o755)
-            annotated_run = ab.run_model(str(fake), ROOT, "provider/model", "ANNOTATED", 300)
-            flat_run = ab.run_model(str(fake), ROOT, "provider/model", "FLAT", 300)
+            base = {"tool": "fileblob_close", "question": "find callers", "expected": fixture["expected"], "production_faithful": True}
+            annotated_cell = {**base, "variant": "annotated", "blob": "ANNOTATED"}
+            flat_cell = {**base, "variant": "flat", "blob": "FLAT"}
+            annotated_run = ab.execute_cell(str(fake), ROOT, annotated_cell, "provider/model", 1, 300, Path(parent) / "annotated.json")
+            flat_run = ab.execute_cell(str(fake), ROOT, flat_cell, "provider/model", 1, 300, Path(parent) / "flat.json")
+            self.assertTrue((Path(parent) / "annotated.json").exists())
+            self.assertTrue((Path(parent) / "flat.json").exists())
         self.assertEqual(annotated_run["status"], "answered")
         self.assertEqual(flat_run["status"], "answered")
-        annotated = ab.grade(ab.parse_answers(annotated_run["answer"]), fixture["expected"])
-        flat = ab.grade(ab.parse_answers(flat_run["answer"]), fixture["expected"])
+        annotated = annotated_run["score"]
+        flat = flat_run["score"]
         self.assertEqual((annotated["precision"], annotated["recall"], annotated["false_positive_count"]), (1.0, 1.0, 0))
         self.assertEqual((flat["precision"], flat["recall"], flat["false_positive_count"]), (0.75, 1.0, 2))
 
@@ -45,6 +50,9 @@ class ComprehensionAbTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as parent:
             workspace = ab.empty_git_workspace(Path(parent))
             self.assertTrue((workspace / ".git").is_dir())
+            config = json.loads((workspace / "opencode.json").read_text())
+            self.assertEqual(config["tools"], {"*": False})
+            self.assertEqual(config["permission"], {"*": "deny"})
             files = ab.subprocess.run(["git", "ls-files"], cwd=workspace, text=True, capture_output=True, check=True).stdout.splitlines()
             self.assertEqual(files, [".gitignore", "opencode.json"])
 
@@ -54,7 +62,11 @@ class ComprehensionAbTest(unittest.TestCase):
 
     def test_resume_key_and_atomic_result_are_stable(self):
         key = ab.cell_key("search", "annotated", "opencode-go/glm-5.2", 2)
-        self.assertEqual(key, "search__annotated__opencode-go_glm-5.2__r2")
+        self.assertRegex(key, r"^search__annotated__opencode-go_glm-5\.2-[0-9a-f]{10}__r2$")
+        self.assertNotEqual(
+            ab.cell_key("search", "annotated", "p/a_b", 1),
+            ab.cell_key("search", "annotated", "p_a/b", 1),
+        )
         with tempfile.TemporaryDirectory() as parent:
             path = Path(parent) / "cell.json"
             ab.write_atomic(path, {"status": "answered"})
@@ -65,6 +77,26 @@ class ComprehensionAbTest(unittest.TestCase):
             ab.parse_answers("not json")
         with self.assertRaises(ValueError):
             ab.parse_answers('{"answers":"not-a-list"}')
+        for malformed in ("[]", "null", "1"):
+            with self.assertRaises(ValueError):
+                ab.parse_answers(malformed)
+
+    def test_quota_classification_and_timeout_floor_contract(self):
+        self.assertEqual(ab.classify_failure("HTTP 429 rate limit exceeded"), "provider_quota")
+        self.assertIsNone(ab.classify_failure("ordinary provider failure"))
+
+    def test_resume_rejects_corrupt_stale_and_retryable_results(self):
+        identity = {"schema": "lci.comprehension.cell.v1", "prompt_digest": "new"}
+        with tempfile.TemporaryDirectory() as parent:
+            path = Path(parent) / "cell.json"
+            path.write_text("not json")
+            with self.assertRaises(RuntimeError):
+                ab.reusable_result(path, identity)
+            path.write_text(json.dumps({**identity, "status": "provider_quota"}))
+            self.assertFalse(ab.reusable_result(path, identity))
+            path.write_text(json.dumps({**identity, "status": "answered"}))
+            self.assertTrue(ab.reusable_result(path, identity))
+            self.assertFalse(ab.reusable_result(path, {**identity, "prompt_digest": "changed"}))
 
 
 if __name__ == "__main__":
