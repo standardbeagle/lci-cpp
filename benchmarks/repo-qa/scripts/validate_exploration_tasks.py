@@ -580,7 +580,8 @@ def main(argv=None):
         return 1
     print(
         f"exploration task validation passed: {summary['tasks']} task(s) "
-        f"{summary['per_corpus']}"
+        f"{summary['per_corpus']} categories={summary['per_category']} "
+        f"verdicts={summary['per_verdict']}"
     )
     return 0
 
