@@ -17,6 +17,7 @@ STATUS_TIMEOUT = "timeout"            # adapter hit the wall-clock deadline
 STATUS_PROVIDER_ERROR = "provider_error"  # provider/CLI failure or empty answer
 STATUS_TOOL_VIOLATION = "tool_violation"  # isolation gate rejected a tool call
 STATUS_CONFIG_ERROR = "config_error"  # corpus missing / tree-hash drift / bad arm
+STATUS_MALFORMED_OUTPUT = "malformed_output"  # answer did not match mode schema
 
 ALL_STATUSES = frozenset(
     {
@@ -25,13 +26,16 @@ ALL_STATUSES = frozenset(
         STATUS_PROVIDER_ERROR,
         STATUS_TOOL_VIOLATION,
         STATUS_CONFIG_ERROR,
+        STATUS_MALFORMED_OUTPUT,
     }
 )
 
 # Terminal outcomes are a deterministic property of (task, arm, corpus, toolset):
 # re-running cannot change them, so resume skips them. Everything else is a
 # transient/infra failure worth retrying on the next pass.
-COMPLETED_STATUSES = frozenset({STATUS_ANSWERED, STATUS_TOOL_VIOLATION})
+COMPLETED_STATUSES = frozenset(
+    {STATUS_ANSWERED, STATUS_TOOL_VIOLATION, STATUS_MALFORMED_OUTPUT}
+)
 RETRYABLE_STATUSES = ALL_STATUSES - COMPLETED_STATUSES
 
 
@@ -39,8 +43,11 @@ class CorruptRecords(Exception):
     """A non-final record line failed to parse -- real corruption, fail loud."""
 
 
-def run_key(task_id, arm, seed):
-    return f"{task_id}::{arm}::seed-{seed}"
+def run_key(task_id, arm, seed, mode=None, schema_version=None):
+    key = f"{task_id}::{arm}::seed-{seed}"
+    if mode is not None or schema_version is not None:
+        key += f"::mode-{mode}::schema-{schema_version}"
+    return key
 
 
 def append_record(records_path, rec):

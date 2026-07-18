@@ -116,6 +116,119 @@ def answered_result(tool_calls):
     )
 
 
+def claim_result(tool_calls=(), verdict="false"):
+    return AgentResult(
+        status_hint="ok",
+        final_answer=json.dumps({
+            "verdict": verdict,
+            "evidence": [{"path": "apis/base.go", "line": 3}],
+            "rationale": "The router, rather than the helper alone, owns wiring.",
+        }),
+        tool_calls=tuple(tool_calls), input_tokens=11, output_tokens=7,
+        transcript={"events": []},
+    )
+
+
+class ClaimValidationModeTest(unittest.TestCase):
+    def _run(self, root, adapter, arm=toolsets.BASELINE, **kwargs):
+        return run.run_task(
+            fake_task(), arm, adapter, base_config(), corpus_root=root,
+            records_path=os.path.join(root, "records.jsonl"),
+            work_root=os.path.join(root, "work"),
+            mode=run.CLAIM_VALIDATION_MODE, **kwargs,
+        )
+
+    def test_two_arms_share_complete_contract_except_tool_surface(self):
+        with TemporaryDirectory() as root:
+            forge_fixture(root)
+            adapters = {
+                arm: FakeAgent(claim_result())
+                for arm in (toolsets.TREATMENT, toolsets.BASELINE)
+            }
+            run.run_task_both_arms(
+                fake_task(), lambda arm: adapters[arm], base_config(),
+                corpus_root=root, records_path=os.path.join(root, "records.jsonl"),
+                work_root=os.path.join(root, "work"),
+                mode=run.CLAIM_VALIDATION_MODE,
+            )
+            left, right = (adapters[arm].calls[0] for arm in
+                           (toolsets.TREATMENT, toolsets.BASELINE))
+            for field in ("model", "system_prompt", "timeout_seconds",
+                          "checkout_dir", "prompt"):
+                self.assertEqual(getattr(left, field), getattr(right, field), field)
+            self.assertNotEqual(left.allowed_tools, right.allowed_tools)
+            self.assertNotEqual(left.tool_instructions, right.tool_instructions)
+            self.assertIn('"verdict":"true|false|unsupported"', left.prompt)
+
+    def test_structured_answer_and_sealed_record_metadata(self):
+        with TemporaryDirectory() as root:
+            forge_fixture(root)
+            rec = self._run(root, FakeAgent(claim_result()))
+        self.assertEqual(rec["status"], record.STATUS_ANSWERED)
+        self.assertEqual(rec["structured_answer"]["verdict"], "false")
+        self.assertEqual(rec["mode"], run.CLAIM_VALIDATION_MODE)
+        self.assertEqual(rec["schema_version"], run.CLAIM_VALIDATION_SCHEMA)
+        self.assertRegex(rec["claim_task_digest"], r"^sha256:[0-9a-f]{64}$")
+        self.assertEqual(rec["sealed_metadata"], {
+            "task_id": "pb-password-login-route", "category": None,
+        })
+        self.assertNotIn("task_id", rec)
+        self.assertNotIn("task_digest", rec)
+
+    def test_malformed_output_is_captured_and_terminal(self):
+        with TemporaryDirectory() as root:
+            forge_fixture(root)
+            malformed = AgentResult("ok", "not json", (), 1, 2, {"raw": True})
+            first = FakeAgent(malformed)
+            rec = self._run(root, first)
+            second = FakeAgent(claim_result())
+            resumed = self._run(root, second)
+        self.assertEqual(rec["status"], record.STATUS_MALFORMED_OUTPUT)
+        self.assertEqual(rec["final_answer"], "not json")
+        self.assertIsNone(rec["structured_answer"])
+        self.assertTrue(rec["error"].startswith("malformed_claim_answer:"))
+        self.assertTrue(resumed["skipped"])
+        self.assertEqual(second.calls, [])
+
+    def test_mode_and_schema_version_have_distinct_resume_keys(self):
+        with TemporaryDirectory() as root:
+            forge_fixture(root)
+            self._run(root, FakeAgent(claim_result()), schema_version="claim_v1")
+            second = FakeAgent(claim_result())
+            rec = self._run(root, second, schema_version="claim_v2")
+        self.assertFalse(rec.get("skipped", False))
+        self.assertIn("mode-claim-validation::schema-claim_v2", rec["run_key"])
+
+    def test_sensitive_reads_and_write_tools_fail_closed(self):
+        with TemporaryDirectory() as root:
+            forge_fixture(root)
+            cases = (
+                (ToolCall("Read", {"file_path": "annotations/key.json"}), "sealed_path"),
+                (ToolCall("Read", {"file_path": "oracle.json"}), "sealed_path"),
+                (ToolCall("Read", {"file_path": "trap-manifest.json"}), "sealed_path"),
+                (ToolCall("Write", {"file_path": "apis/base.go", "content": "x"}),
+                 "tool_not_allowed"),
+            )
+            for index, (call, reason) in enumerate(cases):
+                with self.subTest(call=call):
+                    rec = self._run(
+                        root, FakeAgent(claim_result((call,))),
+                        schema_version=f"isolation-{index}",
+                    )
+                    self.assertEqual(rec["status"], record.STATUS_TOOL_VIOLATION)
+                    self.assertEqual(rec["violations"][0]["reason"], reason)
+
+    def test_structured_citations_reject_escape_and_sealed_paths(self):
+        for path in ("../answer.json", "annotations/key.json", "/etc/passwd"):
+            raw = json.dumps({
+                "verdict": "true", "evidence": [{"path": path, "line": 1}],
+                "rationale": "bad",
+            })
+            parsed, error = run._parse_claim_answer(raw)
+            self.assertIsNone(parsed)
+            self.assertEqual(error, "malformed_claim_answer: citation")
+
+
 class ConfigParityTest(unittest.TestCase):
     def test_agent_visible_task_contains_only_claim_and_request(self):
         task = fake_task()

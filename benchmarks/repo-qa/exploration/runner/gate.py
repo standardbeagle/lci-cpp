@@ -17,6 +17,16 @@ and never scores it as an answer.
 """
 
 import os
+import re
+
+_SEALED_PATH_COMPONENTS = frozenset({
+    "annotations", "annotation", "answer-key", "answer_keys", "answer-keys",
+    "oracle", "oracles", "trap", "traps", "manifests",
+})
+_SEALED_FILE_RE = re.compile(
+    r"(?:^|[._-])(annotation|answer[._-]?key|oracle|trap|manifest)(?:[._-]|$)",
+    re.IGNORECASE,
+)
 
 # Per-tool schemas keep path interpretation explicit. In particular, Glob's
 # pattern is path-bearing while Grep's pattern is source text and is not.
@@ -153,6 +163,15 @@ def _escapes(candidate, checkout_dir):
     return resolved != root and not resolved.startswith(root + os.sep)
 
 
+def _is_sealed_path(candidate):
+    """Reject author/oracle material even if it is accidentally copied in-tree."""
+    normal = candidate.replace("\\", "/")
+    components = [part.lower() for part in normal.split("/") if part not in ("", ".")]
+    return any(part in _SEALED_PATH_COMPONENTS for part in components) or any(
+        _SEALED_FILE_RE.search(part) for part in components
+    )
+
+
 def enforce(tool_calls, allowed_tools, checkout_dir):
     """Return an ordered list of violations (empty when the run is clean)."""
     allowed = set(allowed_tools)
@@ -227,6 +246,15 @@ def enforce(tool_calls, allowed_tools, checkout_dir):
                         "name": call.name,
                         "reason": "path_escape",
                         "detail": f"{key}={value!r} resolves outside the checkout",
+                    }
+                )
+            elif _is_sealed_path(value):
+                violations.append(
+                    {
+                        "index": index,
+                        "name": call.name,
+                        "reason": "sealed_path",
+                        "detail": f"{key} targets sealed benchmark metadata",
                     }
                 )
     return violations

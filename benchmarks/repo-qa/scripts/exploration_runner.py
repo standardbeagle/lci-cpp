@@ -35,7 +35,12 @@ for _p in (EXPLORATION_ROOT, HERE, EDITS_RUNNER):
 import exploration_corpus_forge as forge  # noqa: E402
 from runner import toolsets  # noqa: E402
 from runner.adapter import ClaudeCliAdapter  # noqa: E402
-from runner.run import BaseConfig, run_task, run_task_both_arms  # noqa: E402
+from runner.run import (  # noqa: E402
+    CLAIM_VALIDATION_MODE,
+    BaseConfig,
+    run_task,
+    run_task_both_arms,
+)
 
 # Edit mode (Stage-3) reuses this same paired runner: same arms + isolation +
 # record log, extended with the mutation toolset and the behaviour/convention
@@ -115,6 +120,7 @@ def _cmd_run(args):
                 corpus_root=args.corpus_root,
                 records_path=args.records,
                 work_root=args.work_root,
+                mode=getattr(args, "runner_mode", "exploration"),
             )
             count += 1
             marker = "skip" if rec.get("skipped") else rec.get("status")
@@ -157,6 +163,7 @@ def _cmd_smoke(args):
         corpus_root=args.corpus_root,
         records_path=args.records,
         work_root=args.work_root,
+        mode=getattr(args, "runner_mode", "exploration"),
     )
     for arm, rec in results.items():
         print(f"{arm}: {rec.get('status')} ({len(rec.get('tool_calls', []))} tool calls)")
@@ -267,10 +274,26 @@ def main(argv=None):
     run.add_argument("--arm", choices=[toolsets.TREATMENT, toolsets.BASELINE, "both"], default="both")
     run.set_defaults(func=_cmd_run)
 
+    claim_run = sub.add_parser(
+        "claim-run", help="batch isolated structured claim validation"
+    )
+    claim_run.add_argument("--task", default=None, help="restrict to one task id")
+    claim_run.add_argument(
+        "--arm", choices=[toolsets.TREATMENT, toolsets.BASELINE, "both"], default="both"
+    )
+    claim_run.set_defaults(func=_cmd_run, runner_mode=CLAIM_VALIDATION_MODE)
+
     smoke = sub.add_parser("smoke", help="one task/two arms, guarded live check")
     smoke.add_argument("--task", default=None, help="task id (default: first)")
     smoke.add_argument("--live", action="store_true", help="opt in to a real run")
     smoke.set_defaults(func=_cmd_smoke)
+
+    claim_smoke = sub.add_parser(
+        "claim-smoke", help="one claim/two arms, guarded live structured check"
+    )
+    claim_smoke.add_argument("--task", default=None, help="task id (default: first)")
+    claim_smoke.add_argument("--live", action="store_true", help="opt in to a real run")
+    claim_smoke.set_defaults(func=_cmd_smoke, runner_mode=CLAIM_VALIDATION_MODE)
 
     edit_run_cmd = sub.add_parser(
         "edit-run", help="batch the EDIT task bank, both arms (real adapter)"
