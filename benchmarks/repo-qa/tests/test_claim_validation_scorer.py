@@ -186,12 +186,27 @@ class AggregateTests(unittest.TestCase):
     def test_rejects_every_mixed_compatibility_dimension(self):
         base = [self._score("treatment"), self._score("baseline")]
         fields = {"task_bank_digest": "other", "forge_manifest": "other", "model": "other",
-                  "mode": "other", "schema_version": "other", "settings": {"temperature": 1}}
+                  "mode": "other", "schema_version": "other",
+                  "run_settings": {"temperature": 1},
+                  "scoring_settings": {"evidence_min_valid": 2}}
         for field, value in fields.items():
             records = [dict(base[0]), dict(base[1])]
             records[1][field] = value
             with self.subTest(field=field), self.assertRaises(IncompatibleRuns):
                 aggregate_claim_scores(records)
+
+    def test_explicit_scoring_policy_does_not_hide_incompatible_run_settings(self):
+        policy = {"evidence_min_valid": 1}
+        treatment = score_claim_run(
+            task(), record(answer(), settings={"temperature": 0}),
+            task_bank_digest="bank", settings=policy)
+        baseline = score_claim_run(
+            task(), record(answer(), arm="baseline", settings={"temperature": 1}),
+            task_bank_digest="bank", settings=policy)
+        self.assertEqual(treatment["run_settings"], {"temperature": 0})
+        self.assertEqual(treatment["scoring_settings"], policy)
+        with self.assertRaisesRegex(IncompatibleRuns, "run_settings"):
+            aggregate_claim_scores([treatment, baseline])
 
 
 class CliTests(unittest.TestCase):
@@ -238,7 +253,7 @@ class CliTests(unittest.TestCase):
                 mock.patch.object(score_claim_validation, "_load_tasks", return_value={}), \
                 mock.patch.object(score_claim_validation.record_log, "load_records", return_value=[]), \
                 mock.patch.object(score_claim_validation, "score_bank", return_value=[first, second]) as scorer:
-            with self.assertRaisesRegex(SystemExit, "incompatible 'settings'"):
+            with self.assertRaisesRegex(SystemExit, "incompatible 'run_settings'"):
                 score_claim_validation.main(["--tasks-dir", root, "--records", "records",
                                              "--out-dir", os.path.join(root, "out")])
             self.assertIsNone(scorer.call_args.args[2])
@@ -257,6 +272,27 @@ class CliTests(unittest.TestCase):
                 "--settings-json", '{"evidence_min_valid": 1}',
             ]), 0)
             self.assertEqual(scorer.call_args.args[2], {"evidence_min_valid": 1})
+
+    def test_cli_explicit_policy_rejects_records_with_different_run_settings(self):
+        import score_claim_validation
+
+        policy = {"evidence_min_valid": 1}
+        first = score_claim_run(task(), record(answer(), settings={"temperature": 0}),
+                                task_bank_digest="bank", settings=policy)
+        second = score_claim_run(task(), record(answer(), arm="baseline",
+                                                settings={"temperature": 1}),
+                                 task_bank_digest="bank", settings=policy)
+        with TemporaryDirectory() as root, \
+                mock.patch.object(score_claim_validation, "_load_tasks", return_value={}), \
+                mock.patch.object(score_claim_validation.record_log, "load_records", return_value=[]), \
+                mock.patch.object(score_claim_validation, "score_bank",
+                                  return_value=[first, second]):
+            with self.assertRaisesRegex(SystemExit, "incompatible 'run_settings'"):
+                score_claim_validation.main([
+                    "--tasks-dir", root, "--records", "records",
+                    "--out-dir", os.path.join(root, "out"),
+                    "--settings-json", '{"evidence_min_valid": 1}',
+                ])
 
 
 if __name__ == "__main__":

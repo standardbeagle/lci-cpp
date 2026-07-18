@@ -18,7 +18,7 @@ CLAIM_SCORE_SET_SCHEMA = "claim_validation_score_set_v1"
 _VERDICTS = frozenset({"true", "false", "unsupported"})
 _COMPAT_FIELDS = (
     "task_bank_digest", "forge_manifest", "model", "mode",
-    "schema_version", "settings",
+    "schema_version", "run_settings", "scoring_settings",
 )
 
 
@@ -96,7 +96,8 @@ def _null_evidence(task):
 
 def score_claim_run(task, record, *, task_bank_digest=None, settings=None):
     """Score one run. Infrastructure/malformed failures remain explicit."""
-    effective_settings = settings if settings is not None else (record.get("settings") or {})
+    run_settings = record.get("settings") or {}
+    effective_settings = settings if settings is not None else run_settings
     min_valid = effective_settings.get("evidence_min_valid", 1)
     min_recall = effective_settings.get("evidence_min_recall", 0.0)
     if (not isinstance(min_valid, int) or isinstance(min_valid, bool) or min_valid < 1
@@ -128,7 +129,12 @@ def score_claim_run(task, record, *, task_bank_digest=None, settings=None):
         "forge_manifest": record.get("forge_version"),
         "claim_task_digest": record.get("claim_task_digest"),
         "task_bank_digest": task_bank_digest or record.get("task_bank_digest"),
-        "settings": effective_settings,
+        # Run configuration and post-hoc scoring policy are independent
+        # provenance dimensions.  In particular, an explicit evidence-policy
+        # override must never erase experimental settings and make unlike arms
+        # appear pairable.
+        "run_settings": run_settings,
+        "scoring_settings": effective_settings,
         "process": {"tool_calls": len(record.get("tool_calls") or []),
                     "input_tokens": tokens.get("input"), "output_tokens": tokens.get("output"),
                     "wall_clock_seconds": record.get("duration_seconds") or 0.0},
