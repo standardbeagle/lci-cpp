@@ -95,8 +95,31 @@ class ComprehensionAbTest(unittest.TestCase):
             path.write_text(json.dumps({**identity, "status": "provider_quota"}))
             self.assertFalse(ab.reusable_result(path, identity))
             path.write_text(json.dumps({**identity, "status": "answered"}))
+            self.assertFalse(ab.reusable_result(path, identity))
+            complete = {
+                **identity, "status": "answered", "answer": '{"answers":[]}',
+                "extracted": [], "score": ab.grade([], []),
+            }
+            path.write_text(json.dumps(complete))
             self.assertTrue(ab.reusable_result(path, identity))
             self.assertFalse(ab.reusable_result(path, {**identity, "prompt_digest": "changed"}))
+
+    def test_malformed_provider_events_are_unscored_not_crashes(self):
+        malformed = [
+            json.dumps({"part": {"type": "text", "messageID": [], "text": "x"}}),
+            json.dumps({"part": {"type": "text", "messageID": "m", "text": 1}}),
+            json.dumps({"part": {"type": "step_finish", "tokens": {"input": "many"}}}),
+        ]
+        answer, metadata = ab.parse_events(malformed)
+        self.assertEqual(answer, "")
+        self.assertTrue(metadata["malformed_event"])
+
+    def test_input_digest_changes_when_oracle_changes(self):
+        cell = {"tool": "x", "variant": "current", "question": "q", "blob": "b", "expected": ["a"], "production_faithful": True}
+        prompt = ab.PROMPT.format(question="q", blob="b")
+        first = ab.hashlib.sha256(ab.canonical({"grading_schema": "precision-recall-fp.v1", "question": "q", "blob": "b", "expected": ["a"], "production_faithful": True}).encode()).hexdigest()
+        second = ab.hashlib.sha256(ab.canonical({"grading_schema": "precision-recall-fp.v1", "question": "q", "blob": "b", "expected": ["changed"], "production_faithful": True}).encode()).hexdigest()
+        self.assertNotEqual(first, second)
 
 
 if __name__ == "__main__":

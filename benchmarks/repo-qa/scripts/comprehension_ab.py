@@ -44,6 +44,7 @@ def parse_events(lines: list[str]) -> tuple[str, dict]:
     order: list[str] = []
     usage = {"input": 0, "output": 0, "reasoning": 0}
     provider_error = None
+    malformed_event = False
     for line in lines:
         try:
             event = json.loads(line)
@@ -57,20 +58,29 @@ def parse_events(lines: list[str]) -> tuple[str, dict]:
         kind = part.get("type")
         if kind == "text":
             message = part.get("messageID", "?")
+            text = part.get("text", "")
+            if not isinstance(message, str) or not isinstance(text, str):
+                malformed_event = True
+                continue
             if message not in texts:
                 texts[message] = []
                 order.append(message)
-            texts[message].append(part.get("text", ""))
+            texts[message].append(text)
         elif kind == "step_finish":
             tokens = part.get("tokens") or {}
             if not isinstance(tokens, dict):
                 tokens = {}
             for key in usage:
-                usage[key] += tokens.get(key, 0) or 0
+                value = tokens.get(key, 0) or 0
+                if not isinstance(value, (int, float)) or isinstance(value, bool):
+                    malformed_event = True
+                    continue
+                usage[key] += value
         elif kind == "error":
             provider_error = event.get("error") or part.get("error") or "provider error"
     return ("\n".join(texts[order[-1]]) if order else ""), {
         "tokens": usage, "provider_error": provider_error,
+        "malformed_event": malformed_event,
     }
 
 
@@ -158,7 +168,9 @@ def run_model(opencode: str, workspace: Path, model: str, prompt: str, timeout: 
         raw_answer, metadata = parse_events(proc.stdout.splitlines())
         failure_text = json.dumps(metadata["provider_error"]) + "\n" + proc.stderr
         classified = classify_failure(failure_text)
-        if classified:
+        if metadata["malformed_event"]:
+            status = "malformed_provider_stream"
+        elif classified:
             status = classified
         elif metadata["provider_error"]:
             status = "provider_error"
@@ -222,7 +234,23 @@ def reusable_result(path: Path, identity: dict) -> bool:
     for key, value in identity.items():
         if existing.get(key) != value:
             return False
-    return existing.get("status") in {"answered", "malformed_answer"}
+    status = existing.get("status")
+    if status == "answered":
+        score = existing.get("score")
+        return (
+            isinstance(existing.get("answer"), str)
+            and isinstance(existing.get("extracted"), list)
+            and all(isinstance(item, str) for item in existing["extracted"])
+            and isinstance(score, dict)
+            and {"precision", "recall", "false_positive_count", "false_positives", "false_negatives", "exact"} <= set(score)
+        )
+    if status == "malformed_answer":
+        return (
+            isinstance(existing.get("answer"), str)
+            and existing.get("score") is None
+            and isinstance(existing.get("parse_error"), str)
+        )
+    return False
 
 
 def execute_cell(opencode: str, workspace: Path, cell: dict, model: str,
@@ -234,6 +262,12 @@ def execute_cell(opencode: str, workspace: Path, cell: dict, model: str,
         "tool": cell["tool"], "variant": cell["variant"], "model": model,
         "capability_tier": MODEL_TIERS.get(model, "unclassified"),
         "repetition": repetition, "prompt_digest": prompt_digest(prompt),
+        "input_digest": hashlib.sha256(canonical({
+            "grading_schema": "precision-recall-fp.v1",
+            "question": cell["question"], "blob": cell["blob"],
+            "expected": cell["expected"],
+            "production_faithful": cell["production_faithful"],
+        }).encode()).hexdigest(),
     }
     if reusable_result(path, identity):
         return json.loads(path.read_text())
