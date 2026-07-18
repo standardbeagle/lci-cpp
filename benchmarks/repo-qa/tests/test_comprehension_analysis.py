@@ -25,6 +25,17 @@ class ComprehensionAnalysisTest(unittest.TestCase):
         self.assertEqual(measured["mean"], 0.5)
         self.assertEqual(measured["stdev"], 0.5)
 
+    def test_noise_is_pooled_within_cells_not_across_format_arms(self):
+        self.assertEqual(analysis.pooled_within_cell_stdev([[0.0, 0.0], [1.0, 1.0]]), 0.0)
+        self.assertEqual(analysis.pooled_within_cell_stdev([[0.0, 1.0], [0.0, 1.0]]), 0.5)
+
+    def test_duplicate_logical_grid_cell_fails_closed(self):
+        predictions = {"predictions": [{"tool": "only", "winner": "parity", "tier_sensitivity": "none"}]}
+        variants = {"tools": [{"name": "only", "variants": [{"id": "annotated", "production_faithful": True}]}]}
+        row = {"tool": "only", "variant": "current", "model": "opencode/deepseek-v4-flash-free", "repetition": 1}
+        with self.assertRaisesRegex(ValueError, "duplicate logical grid cell"):
+            analysis.analyze([row, dict(row)], predictions, variants, Counter(), 0)
+
     def test_grid_completeness_fails_closed(self):
         predictions = {"predictions": [{"tool": "only", "winner": "parity", "tier_sensitivity": "none"}]}
         variants = {"tools": [{"name": "only", "variants": [{"id": "annotated", "production_faithful": True}]}]}

@@ -69,6 +69,16 @@ def winner(delta: float, noise: float) -> str:
     return "parity"
 
 
+def pooled_within_cell_stdev(cells: list[list[float]]) -> float:
+    """Pool repetition residuals without folding the format effect into noise."""
+    residuals = [
+        value - statistics.fmean(cell)
+        for cell in cells if cell
+        for value in cell
+    ]
+    return (statistics.fmean(value * value for value in residuals) ** 0.5) if residuals else 0.0
+
+
 def analyze(rows: list[dict], predictions: dict, variants: dict,
             frequencies: Counter, history_files: int) -> dict:
     tools = [entry["tool"] for entry in predictions["predictions"]]
@@ -79,6 +89,8 @@ def analyze(rows: list[dict], predictions: dict, variants: dict,
         for rep in (1, 2)
     }
     observed_keys = {(r["tool"], r["variant"], r["model"], r["repetition"]) for r in rows}
+    if len(observed_keys) != len(rows):
+        raise ValueError("duplicate logical grid cell")
     missing = sorted(expected_keys - observed_keys)
     extra = sorted(observed_keys - expected_keys)
     if missing or extra:
@@ -99,11 +111,13 @@ def analyze(rows: list[dict], predictions: dict, variants: dict,
         tiers = {}
         tier_deltas = {}
         all_exact = {"current": [], "annotated": []}
+        exact_cells = []
         for tier in ("weak", "strong"):
             arms = {}
             for arm in ("current", "annotated"):
                 scores = grouped[(tool, tier, arm)]
                 exact = [float(score["exact"]) for score in scores]
+                exact_cells.append(exact)
                 all_exact[arm].extend(exact)
                 arms[arm] = {
                     "exact_rate": metric(exact),
@@ -118,8 +132,7 @@ def analyze(rows: list[dict], predictions: dict, variants: dict,
         current_mean = statistics.fmean(all_exact["current"]) if all_exact["current"] else 0.0
         annotated_mean = statistics.fmean(all_exact["annotated"]) if all_exact["annotated"] else 0.0
         delta = annotated_mean - current_mean
-        noise_values = all_exact["current"] + all_exact["annotated"]
-        noise = statistics.pstdev(noise_values) if len(noise_values) > 1 else 0.0
+        noise = pooled_within_cell_stdev(exact_cells)
         actual_winner = winner(delta, noise)
         weak_delta, strong_delta = tier_deltas["weak"], tier_deltas["strong"]
         if weak_delta is None or strong_delta is None or abs(weak_delta - strong_delta) <= 0.02:

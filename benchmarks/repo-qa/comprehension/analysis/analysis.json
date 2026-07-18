@@ -7,7 +7,7 @@
       "control_investigation": null,
       "control_suspect": false,
       "historical_calls": 204,
-      "noise_floor": 0.4330127018922193,
+      "noise_floor": 0.02,
       "production_faithful": true,
       "tier_sensitivity": "weak_more",
       "tiers": {
@@ -328,7 +328,7 @@
       "control_investigation": null,
       "control_suspect": false,
       "historical_calls": 2,
-      "noise_floor": 0.4841229182759271,
+      "noise_floor": 0.25,
       "production_faithful": true,
       "tier_sensitivity": "weak_more",
       "tiers": {
@@ -649,7 +649,7 @@
       "control_investigation": null,
       "control_suspect": false,
       "historical_calls": 2,
-      "noise_floor": 0.5,
+      "noise_floor": 0.02,
       "production_faithful": false,
       "tier_sensitivity": "none",
       "tiers": {
@@ -863,7 +863,7 @@
       "control_investigation": "Invalid null control: the current info blob paraphrases the oracle answer, while the annotated blob states the exact grading phrase. The measured gap tests answer wording, not neutral formatting; exclude it from production evidence.",
       "control_suspect": true,
       "historical_calls": 7,
-      "noise_floor": 0.5,
+      "noise_floor": 0.02,
       "production_faithful": false,
       "tier_sensitivity": "none",
       "tiers": {
@@ -1291,7 +1291,7 @@
       "control_investigation": null,
       "control_suspect": false,
       "historical_calls": 34,
-      "noise_floor": 0.33071891388307384,
+      "noise_floor": 0.25,
       "production_faithful": true,
       "tier_sensitivity": "weak_more",
       "tiers": {
@@ -1398,7 +1398,7 @@
       "control_investigation": null,
       "control_suspect": false,
       "historical_calls": 2,
-      "noise_floor": 0.5,
+      "noise_floor": 0.02,
       "production_faithful": false,
       "tier_sensitivity": "none",
       "tiers": {
@@ -1538,7 +1538,7 @@
     },
     {
       "tool": "info",
-      "why": "winner predicted parity but observed annotated; delta=1.000, noise_floor=0.500"
+      "why": "winner predicted parity but observed annotated; delta=1.000, noise_floor=0.020"
     },
     {
       "tool": "inspect_symbol",

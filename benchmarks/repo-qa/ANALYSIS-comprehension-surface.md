@@ -11,20 +11,20 @@ A format win means the tested models can consume that canned representation. It 
 
 | Tool | Winner | Exact Δ | Noise floor | Tier split | Production faithful | Historical calls |
 |---|---:|---:|---:|---|---:|---:|
-| browse_file | annotated | +0.500 | 0.433 | weak_more | true | 204 |
+| browse_file | annotated | +0.500 | 0.020 | weak_more | true | 204 |
 | code_insight | parity | +0.000 | 0.020 | none | true | 23 |
 | context | parity | +0.000 | 0.020 | none | false | 7 |
-| debug_info | parity | +0.250 | 0.484 | weak_more | true | 2 |
+| debug_info | parity | +0.250 | 0.250 | weak_more | true | 2 |
 | find_files | parity | +0.000 | 0.020 | none | true | 381 |
 | get_context | parity | +0.000 | 0.020 | none | false | 320 |
-| git_analysis | annotated | +1.000 | 0.500 | none | false | 2 |
+| git_analysis | annotated | +1.000 | 0.020 | none | false | 2 |
 | index_stats | parity | +0.000 | 0.020 | none | true | 15 |
-| info | annotated | +1.000 | 0.500 | none | false | 7 |
+| info | annotated | +1.000 | 0.020 | none | false | 7 |
 | inspect_symbol | parity | +0.000 | 0.020 | none | true | 230 |
 | list_symbols | parity | +0.000 | 0.020 | none | true | 73 |
 | search | parity | +0.000 | 0.020 | none | false | 2170 |
-| semantic_annotations | parity | +0.250 | 0.331 | weak_more | true | 34 |
-| side_effects | annotated | +1.000 | 0.500 | none | false | 2 |
+| semantic_annotations | parity | +0.250 | 0.250 | weak_more | true | 34 |
+| side_effects | annotated | +1.000 | 0.020 | none | false | 2 |
 
 ## Comprehension–production boundary
 
@@ -51,7 +51,7 @@ A format win means the tested models can consume that canned representation. It 
 - **find_files**: winner predicted annotated but observed parity; delta=0.000, noise_floor=0.020; tier sensitivity predicted weak_more but observed none
 - **get_context**: winner predicted annotated but observed parity; delta=0.000, noise_floor=0.020; tier sensitivity predicted weak_more but observed none
 - **git_analysis**: tier sensitivity predicted weak_more but observed none
-- **info**: winner predicted parity but observed annotated; delta=1.000, noise_floor=0.500
+- **info**: winner predicted parity but observed annotated; delta=1.000, noise_floor=0.020
 - **inspect_symbol**: winner predicted annotated but observed parity; delta=0.000, noise_floor=0.020; tier sensitivity predicted weak_more but observed none
 - **list_symbols**: winner predicted annotated but observed parity; delta=0.000, noise_floor=0.020; tier sensitivity predicted weak_more but observed none
 - **search**: winner predicted annotated but observed parity; delta=0.000, noise_floor=0.020; tier sensitivity predicted weak_more but observed none
