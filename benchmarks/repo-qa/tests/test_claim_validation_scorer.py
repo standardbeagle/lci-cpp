@@ -51,6 +51,14 @@ class ParseTests(unittest.TestCase):
 
 
 class ScoringTests(unittest.TestCase):
+    def test_all_verdicts_are_scored_deterministically(self):
+        for verdict in ("true", "false", "unsupported"):
+            with self.subTest(verdict=verdict):
+                scored = score_claim_run(task(verdict=verdict), record(answer(verdict)),
+                                         task_bank_digest="bank")
+                self.assertEqual(scored["predicted_verdict"], verdict)
+                self.assertTrue(scored["success"])
+
     def test_correct_verdict_requires_grounding(self):
         good = score_claim_run(task(), record(answer()), task_bank_digest="bank")
         uncited = score_claim_run(task(), record(answer(evidence=[{"path": "unknown.py", "line": 3}])),
@@ -70,6 +78,34 @@ class ScoringTests(unittest.TestCase):
                                    settings={"evidence_min_recall": 1.0})
         self.assertFalse(one_of_two["success"])
         self.assertTrue(complete["success"])
+
+    def test_correct_but_uncited_guess_scores_zero(self):
+        scored = score_claim_run(task(), record(answer(evidence=[{"path": "guess.py", "line": 1}])),
+                                 task_bank_digest="bank")
+        self.assertTrue(scored["verdict_correct"])
+        self.assertFalse(scored["grounded"])
+        self.assertFalse(scored["success"])
+        self.assertEqual(scored["evidence"]["precision"], 0.0)
+
+    def test_partial_anchor_set_reports_recall_and_obeys_threshold(self):
+        scored = score_claim_run(task(), record(answer()), task_bank_digest="bank",
+                                 settings={"evidence_min_recall": .5})
+        self.assertEqual(scored["evidence"]["answer_key_matched"], 1)
+        self.assertEqual(scored["evidence"]["recall"], .5)
+        self.assertTrue(scored["success"])
+
+    def test_each_forbidden_anchor_class_alone_scores_zero(self):
+        for classification in ("wrong-layer", "misleading", "dead"):
+            with self.subTest(classification=classification):
+                scored = score_claim_run(task(classes=[classification, "authoritative-live"]),
+                                         record(answer()), task_bank_digest="bank")
+                self.assertEqual(scored["evidence"]["cited_valid"], 0)
+                self.assertFalse(scored["success"])
+
+    def test_claim_task_digest_is_preserved_in_score(self):
+        scored = score_claim_run(task(), record(answer(), claim_task_digest="sha256:claim"),
+                                 task_bank_digest="bank")
+        self.assertEqual(scored["claim_task_digest"], "sha256:claim")
 
     def test_stale_line_duplicate_and_dead_only_do_not_score(self):
         mixed = answer(evidence=[{"path": "src/live.py", "line": 3},
@@ -119,6 +155,19 @@ class AggregateTests(unittest.TestCase):
         agg = aggregate_claim_scores([good, failed, lonely])
         self.assertEqual(agg["arms"]["treatment"]["answered"], 1)
         self.assertEqual(agg["pairing"]["unpaired_count"], 2)
+        history = next(row for row in agg["attempts"] if row["run_key"] == good["run_key"])
+        self.assertEqual([attempt["status"] for attempt in history["attempts"]],
+                         ["answered", "timeout"])
+        self.assertEqual(agg["arms"]["treatment"]["grounded_accuracy"], 1.0)
+
+    def test_answered_retry_survives_later_provider_error(self):
+        good = self._score("treatment")
+        failed = self._score("treatment", status="provider_error", structured_answer=None)
+        agg = aggregate_claim_scores([good, failed])
+        history = agg["attempts"][0]["attempts"]
+        self.assertEqual([attempt["status"] for attempt in history],
+                         ["answered", "provider_error"])
+        self.assertEqual(agg["arms"]["treatment"]["grounded_accuracy"], 1.0)
 
     def test_incomplete_counterpart_is_not_used_for_paired_delta(self):
         treatment = self._score("treatment")
@@ -146,6 +195,37 @@ class AggregateTests(unittest.TestCase):
 
 
 class CliTests(unittest.TestCase):
+    def test_outputs_retain_good_then_failed_retry_while_metrics_use_good_answer(self):
+        import score_claim_validation
+
+        for failure in ("timeout", "provider_error"):
+            good = record(answer(), claim_task_digest="digest",
+                          sealed_metadata={"task_id": "claim-one"})
+            failed = record(None, status=failure, claim_task_digest="digest",
+                            sealed_metadata={"task_id": "claim-one"})
+            writes = {}
+
+            def capture(path, value):
+                writes[os.path.basename(path)] = value
+
+            with self.subTest(failure=failure), TemporaryDirectory() as root, \
+                    mock.patch.object(score_claim_validation, "_load_tasks",
+                                      return_value={"claim-one": task()}), \
+                    mock.patch.object(score_claim_validation.record_log, "load_records",
+                                      return_value=[good, failed]), \
+                    mock.patch.object(score_claim_validation, "_claim_digest", return_value="digest"), \
+                    mock.patch.object(score_claim_validation, "_write", side_effect=capture):
+                self.assertEqual(score_claim_validation.main([
+                    "--tasks-dir", root, "--records", "records", "--out-dir", root,
+                ]), 0)
+            score = writes["scores.json"]["scores"][0]
+            self.assertEqual(score["status"], "answered")
+            self.assertEqual([attempt["status"] for attempt in score["attempts"]],
+                             ["answered", failure])
+            aggregate = writes["aggregate.json"]
+            self.assertEqual(aggregate["arms"]["treatment"]["grounded_accuracy"], 1.0)
+            self.assertEqual(aggregate["attempts"][0]["attempts"], score["attempts"])
+
     def test_absent_settings_override_preserves_records_and_rejects_mixture(self):
         import score_claim_validation
 

@@ -42,6 +42,7 @@ def _write(path, value):
 
 def score_bank(tasks, records, settings=None):
     latest = {}
+    attempts = {}
     for index, rec in enumerate(records):
         key = rec.get("run_key")
         if key is None:
@@ -49,6 +50,14 @@ def score_bank(tasks, records, settings=None):
         previous = latest.get(key)
         if previous is None or rec.get("status") == "answered" or previous.get("status") != "answered":
             latest[key] = rec
+        tokens = rec.get("token_usage") or {}
+        attempts.setdefault(key, []).append({
+            "status": rec.get("status"),
+            "duration_seconds": rec.get("duration_seconds") or 0.0,
+            "tool_calls": len(rec.get("tool_calls") or []),
+            "input_tokens": tokens.get("input"),
+            "output_tokens": tokens.get("output"),
+        })
     digest = _bank_digest(tasks)
     scores = []
     for rec in latest.values():
@@ -60,7 +69,9 @@ def score_bank(tasks, records, settings=None):
             raise SystemExit(f"error: unknown sealed task_id {task_id!r}")
         if rec.get("claim_task_digest") != _claim_digest(task, rec.get("schema_version")):
             raise SystemExit(f"error: claim task digest mismatch for {task_id!r}")
-        scores.append(score_claim_run(task, rec, task_bank_digest=digest, settings=settings))
+        score = score_claim_run(task, rec, task_bank_digest=digest, settings=settings)
+        score["attempts"] = attempts[rec["run_key"]]
+        scores.append(score)
     return sorted(scores, key=lambda score: score["run_key"])
 
 

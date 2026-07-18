@@ -165,10 +165,14 @@ def _arm_summary(scores):
 
 def _latest_and_pair(scores):
     latest = {}
+    attempts = {}
     for score in scores:
         key = score.get("run_key")
         if key is None:
             raise IncompatibleRuns("score record is missing required run_key")
+        attempt = {field: score.get(field) for field in
+                   ("status", "valid_answer", "predicted_verdict", "success", "process")}
+        attempts.setdefault(key, []).extend(score.get("attempts") or [attempt])
         # Append logs may contain retries.  Once a run key has a completed
         # answer, a later timeout/provider failure must not erase it.  Among
         # completed retries the latest answer still wins.
@@ -191,11 +195,11 @@ def _latest_and_pair(scores):
             unpaired.extend({"task_id": key[0], "seed": key[1], "arm": arm,
                              "run_key": score["run_key"], "status": score["status"]}
                             for arm, score in arms.items())
-    return list(latest.values()), paired, unpaired
+    return list(latest.values()), paired, unpaired, attempts
 
 
 def aggregate_claim_scores(score_records):
-    scores, paired, unpaired = _latest_and_pair(list(score_records))
+    scores, paired, unpaired, attempts = _latest_and_pair(list(score_records))
     if not scores:
         raise IncompatibleRuns("no score records to aggregate")
     compatibility = {}
@@ -217,4 +221,6 @@ def aggregate_claim_scores(score_records):
             deltas["citation_" + field] = None if a is None or b is None else a - b
     return {"schema": CLAIM_AGGREGATE_SCHEMA, "compatibility": compatibility,
             "arms": arms, "pairing": {"paired_count": len(paired) // 2,
-            "unpaired_count": len(unpaired), "unpaired": unpaired}, "deltas": deltas}
+            "unpaired_count": len(unpaired), "unpaired": unpaired}, "deltas": deltas,
+            "attempts": [{"run_key": key, "attempts": value}
+                         for key, value in sorted(attempts.items())]}
