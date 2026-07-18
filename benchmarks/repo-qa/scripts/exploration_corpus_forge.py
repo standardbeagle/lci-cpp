@@ -42,7 +42,11 @@ import tarfile
 import tempfile
 
 FORGE_VERSION = "1"
-MANIFEST_SCHEMA = "exploration_corpus_manifest_v1"
+MANIFEST_SCHEMA = "exploration_corpus_manifest_v2"
+READABLE_MANIFEST_SCHEMAS = {
+    "exploration_corpus_manifest_v1",
+    MANIFEST_SCHEMA,
+}
 
 BENCH_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CORPORA_PATH = os.path.join(BENCH_ROOT, "exploration", "corpora.json")
@@ -715,6 +719,101 @@ def _inject_decoys(tree, spec, rng, ops, to_original):
     return decoys
 
 
+def _inject_misleading_comments(tree, spec, rng, ops, to_original, seed):
+    """Place explicit contradictions immediately above live declarations."""
+    count = spec["mutations"].get("misleading_comments", 0)
+    if not count:
+        return []
+
+    symbol_pattern = re.compile(spec["symbol_pattern"], re.MULTILINE)
+    candidates = []
+    for rel in _source_files(tree, spec):
+        body = _read_text(os.path.join(tree, rel))
+        if body is None:
+            continue
+        match = symbol_pattern.search(body)
+        if not match:
+            continue
+        symbol = next((group for group in match.groups() if group), None)
+        if not symbol or symbol == "_":
+            continue
+        line = body.count("\n", 0, match.start()) + 1
+        candidates.append((rel, symbol, line))
+    if count > len(candidates):
+        raise ForgeError(
+            f"{spec['id']}: requested {count} misleading comments but only "
+            f"{len(candidates)} live declaration(s) are eligible"
+        )
+
+    selected = rng.sample(sorted(candidates), count)
+    traps = []
+    # Descending line order preserves already-recorded locations in a shared file.
+    for rel, symbol, line in sorted(selected, key=lambda item: (item[0], -item[2])):
+        path = os.path.join(tree, rel)
+        lines = _read_text(path).splitlines(keepends=True)
+        marker = "#" if spec["language"] == "python" else "//"
+        trap_id = f"misleading-comment-{_token(rng)}"
+        comment = (
+            f"{marker} FORGE TRAP {trap_id}: {symbol} is obsolete and never used.\n"
+        )
+        lines.insert(line - 1, comment)
+        _write_text(path, "".join(lines))
+        original = to_original[rel]
+        trap = {
+            "trap_id": trap_id,
+            "category": "misleading_comment",
+            "injected_location": {"path": rel, "line": line},
+            "authoritative_live_anchors": [
+                {"original_path": original, "path": rel, "line": line + 1, "symbol": symbol}
+            ],
+            "misleading_or_dead_anchors": [{"path": rel, "line": line}],
+            "reachability_rationale": (
+                "The injected prose contradicts the authoritative live declaration "
+                "immediately below it; executable code remains authoritative."
+            ),
+            "seed": seed,
+            "provenance": {
+                "source_commit": spec["pinned_commit"],
+                "operation": "seeded_declaration_comment",
+            },
+        }
+        traps.append(trap)
+        ops.append({"index": len(ops), "kind": "misleading_comment", **trap})
+    return traps
+
+
+def _dead_twin_traps(decoys, path_map, seed):
+    traps = []
+    for ordinal, decoy in enumerate(decoys):
+        original = decoy["derived_from"]
+        live = path_map[original]
+        trap_id = f"dead-code-twin-{ordinal}"
+        traps.append(
+            {
+                "trap_id": trap_id,
+                "category": "dead_code_twin",
+                "injected_location": {"path": decoy["path"], "line": 1},
+                "authoritative_live_anchors": [
+                    {"original_path": original, "path": live, "line": 1}
+                ],
+                "misleading_or_dead_anchors": [
+                    {"path": decoy["path"], "line": 1, "symbols": decoy["symbols"]}
+                ],
+                "reachability_rationale": (
+                    "The twin is emitted in a new module and no source file references "
+                    "its generated module path or renamed symbols."
+                ),
+                "seed": seed,
+                "provenance": {
+                    "source_commit": decoy["source_commit"],
+                    "derived_from": original,
+                    "operation": "unreferenced_module_twin",
+                },
+            }
+        )
+    return traps
+
+
 # ---------------------------------------------------------------------------
 # validation
 # ---------------------------------------------------------------------------
@@ -973,6 +1072,12 @@ def load_corpora(path=CORPORA_PATH):
 
 def translate_path(manifest, original):
     """Translate an original oracle anchor path to the mutated checkout."""
+    schema = manifest.get("schema", "exploration_corpus_manifest_v1")
+    if schema not in READABLE_MANIFEST_SCHEMAS:
+        raise ForgeError(
+            f"unsupported exploration corpus manifest schema version {schema!r}; "
+            f"readable versions are {sorted(READABLE_MANIFEST_SCHEMAS)}"
+        )
     try:
         return manifest["path_map"][original]
     except KeyError:
@@ -1033,7 +1138,9 @@ def forge_corpus(
         tracked(_shuffle_one_module)
 
     to_original = {current: original for original, current in path_map.items()}
+    traps = _inject_misleading_comments(tree, spec, rng, ops, to_original, seed)
     decoys = _inject_decoys(tree, spec, rng, ops, to_original)
+    traps.extend(_dead_twin_traps(decoys, path_map, seed))
 
     hash_before = tree_hash(tree)
     validation = run_validation(spec["validation"], tree)
@@ -1054,6 +1161,7 @@ def forge_corpus(
         "mutations": ops,
         "path_map": dict(sorted(path_map.items())),
         "decoys": decoys,
+        "traps": traps,
         "tree_hash": hash_before,
         "validation": validation,
         "status": "ready" if validation["passed"] else "validation_failed",

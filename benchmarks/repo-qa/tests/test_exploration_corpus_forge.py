@@ -103,7 +103,12 @@ def spec_for(source_path, commit, validation=None):
         "reference_forms": ["slashed", "dotted"],
         "source_exclude_pattern": r"(^|/)test_[^/]*\.py$",
         "symbol_pattern": r"^(?:def|class)\s+(\w+)",
-        "mutations": {"dir_renames": 1, "module_shuffles": 1, "decoys": 2},
+        "mutations": {
+            "dir_renames": 1,
+            "module_shuffles": 1,
+            "decoys": 2,
+            "misleading_comments": 2,
+        },
         "validation": validation
         or {"argv": ["{python}", "{forge}", "check-imports", "--language", "python"]},
     }
@@ -194,6 +199,7 @@ class TestManifestContents(ForgeTestCase):
             "mutations",
             "path_map",
             "decoys",
+            "traps",
             "tree_hash",
             "validation",
             "status",
@@ -205,11 +211,23 @@ class TestManifestContents(ForgeTestCase):
         self.assertEqual(manifest["seed"], 7)
         self.assertEqual(manifest["forge_version"], forge.FORGE_VERSION)
         self.assertEqual(manifest["status"], "ready")
+        self.assertEqual(manifest["schema"], "exploration_corpus_manifest_v2")
+
+        for trap in manifest["traps"]:
+            self.assertEqual(trap["seed"], 7)
+            for field in (
+                "trap_id", "category", "injected_location",
+                "authoritative_live_anchors", "misleading_or_dead_anchors",
+                "reachability_rationale", "provenance",
+            ):
+                self.assertIn(field, trap)
 
         # Mutation ops are ordered and only of the three sanctioned kinds.
         kinds = {op["kind"] for op in manifest["mutations"]}
         self.assertTrue(
-            kinds <= {"dir_rename", "module_shuffle", "decoy_module"}, kinds
+            kinds <= {
+                "dir_rename", "module_shuffle", "decoy_module", "misleading_comment"
+            }, kinds
         )
         self.assertEqual(
             [op["index"] for op in manifest["mutations"]],
@@ -270,6 +288,49 @@ class TestDecoyProvenance(ForgeTestCase):
                     self.assertNotIn(
                         stem, body, f"{rel} must not reference decoy {decoy['path']}"
                     )
+
+
+class TestAdversarialTrapInjections(ForgeTestCase):
+    def test_comment_contradicts_authoritative_live_code(self):
+        manifest = self.forge(seed=7)
+        comments = [t for t in manifest["traps"] if t["category"] == "misleading_comment"]
+        self.assertEqual(len(comments), 2)
+        for trap in comments:
+            location = trap["injected_location"]
+            with open(os.path.join(self.out("s7"), "tree", location["path"])) as f:
+                line = f.readlines()[location["line"] - 1]
+            self.assertIn("FORGE TRAP", line)
+            self.assertIn("contradicts", trap["reachability_rationale"])
+
+    def test_dead_twins_are_recorded_as_unreachable(self):
+        manifest = self.forge(seed=7)
+        twins = [t for t in manifest["traps"] if t["category"] == "dead_code_twin"]
+        self.assertEqual(len(twins), 2)
+        live_paths = {path for path in manifest["path_map"].values()}
+        for trap in twins:
+            dead = trap["misleading_or_dead_anchors"][0]
+            self.assertNotIn(dead["path"], live_paths)
+            self.assertIn("no source file references", trap["reachability_rationale"])
+
+    def test_trap_anchor_paths_follow_manifest_translation(self):
+        manifest = self.forge(seed=7)
+        for trap in manifest["traps"]:
+            for anchor in trap["authoritative_live_anchors"]:
+                self.assertEqual(anchor["path"], forge.translate_path(manifest, anchor["original_path"]))
+
+    def test_changed_seed_selects_different_traps(self):
+        a = self.forge(seed=7)
+        b = self.forge(seed=19)
+        selected = lambda m: [(t["category"], t["injected_location"]) for t in m["traps"]]
+        self.assertNotEqual(selected(a), selected(b))
+
+    def test_stage_one_manifest_translates_and_unknown_schema_fails_loudly(self):
+        legacy = {"schema": "exploration_corpus_manifest_v1", "source_commit": self.commit,
+                  "path_map": {"alpha/core.py": "alpha/core_moved.py"}}
+        self.assertEqual(forge.translate_path(legacy, "alpha/core.py"), "alpha/core_moved.py")
+        legacy["schema"] = "exploration_corpus_manifest_v999"
+        with self.assertRaisesRegex(forge.ForgeError, "schema version"):
+            forge.translate_path(legacy, "alpha/core.py")
 
 
 class TestExcludedSources(ForgeTestCase):
@@ -350,7 +411,8 @@ class TestDecoyDonorSafety(unittest.TestCase):
             "symbol_pattern": r"^func\s+(\w+)\s*[(\[]|^type\s+(\w+)",
             "decoy_receiver_pattern": r"^func\s+\(\s*\w+\s+\*?(\w+)",
             "decoy_type_pattern": r"^type\s+(\w+)",
-            "mutations": {"dir_renames": 0, "module_shuffles": 0, "decoys": 3},
+            "mutations": {"dir_renames": 0, "module_shuffles": 0, "decoys": 3,
+                          "misleading_comments": 1},
             "validation": {"argv": ["{python}", "-c", "pass"]},
         }
 
@@ -384,7 +446,8 @@ class TestDecoyDonorSafety(unittest.TestCase):
             "symbol_pattern": r"^func\s+(\w+)\s*[(\[]|^type\s+(\w+)|^var\s+(\w+)",
             "decoy_receiver_pattern": r"^func\s+\(\s*\w+\s+\*?(\w+)",
             "decoy_type_pattern": r"^type\s+(\w+)",
-            "mutations": {"dir_renames": 0, "module_shuffles": 0, "decoys": 4},
+            "mutations": {"dir_renames": 0, "module_shuffles": 0, "decoys": 4,
+                          "misleading_comments": 1},
             "validation": {"argv": ["{python}", "-c", "pass"]},
         }
         for seed in range(8):
@@ -417,7 +480,8 @@ class TestDecoyDonorSafety(unittest.TestCase):
             "symbol_pattern": r"^func\s+(\w+)\s*[(\[]|^type\s+(\w+)",
             "decoy_receiver_pattern": r"^func\s+\(\s*\w+\s+\*?(\w+)",
             "decoy_type_pattern": r"^type\s+(\w+)",
-            "mutations": {"dir_renames": 0, "module_shuffles": 0, "decoys": 3},
+            "mutations": {"dir_renames": 0, "module_shuffles": 0, "decoys": 3,
+                          "misleading_comments": 1},
             "validation": {"argv": ["{python}", "-c", "pass"]},
         }
         manifest = forge.forge_corpus(
@@ -481,7 +545,8 @@ def ts_spec(source_path, commit):
         "reference_forms": ["slashed"],
         "first_party_prefixes": TS_FIRST_PARTY,
         "symbol_pattern": r"^export\s+(?:function|const|class|interface|type)\s+(\w+)",
-        "mutations": {"dir_renames": 1, "module_shuffles": 1, "decoys": 1},
+        "mutations": {"dir_renames": 1, "module_shuffles": 1, "decoys": 1,
+                      "misleading_comments": 1},
         "validation": {
             "argv": [
                 "{python}", "{forge}", "check-imports",
