@@ -1,0 +1,21 @@
+{
+  "schema": "lci.comprehension.predictions.v1",
+  "registered_before_results": true,
+  "decision_rule": "annotated/current/parity from mean exact-rate delta; call parity when |delta| <= max(0.02, pooled within-cell standard deviation)",
+  "predictions": [
+    {"tool": "browse_file", "winner": "annotated", "tier_sensitivity": "weak_more", "why": "Grouping and receiver labels should reduce outline scanning load."},
+    {"tool": "code_insight", "winner": "annotated", "tier_sensitivity": "weak_more", "why": "The live overview is long; a focused true-count block should help extraction."},
+    {"tool": "context", "winner": "annotated", "tier_sensitivity": "weak_more", "why": "The current save receipt lacks source content; the idealized hydrated form exposes it."},
+    {"tool": "debug_info", "winner": "parity", "tier_sensitivity": "none", "why": "The file path is already a single explicit scalar."},
+    {"tool": "find_files", "winner": "annotated", "tier_sensitivity": "weak_more", "why": "Ranked labeled paths should reduce score-field distraction."},
+    {"tool": "get_context", "winner": "annotated", "tier_sensitivity": "weak_more", "why": "The current response is extremely large and name-ambiguous."},
+    {"tool": "git_analysis", "winner": "annotated", "tier_sensitivity": "weak_more", "why": "Only the idealized form exposes the resolved commit requested by the oracle."},
+    {"tool": "index_stats", "winner": "parity", "tier_sensitivity": "none", "why": "Control: ready is an obvious scalar in both formats."},
+    {"tool": "info", "winner": "parity", "tier_sensitivity": "none", "why": "Control: both formats plainly state search's purpose."},
+    {"tool": "inspect_symbol", "winner": "annotated", "tier_sensitivity": "weak_more", "why": "Definition and signature labels should aid exact extraction."},
+    {"tool": "list_symbols", "winner": "annotated", "tier_sensitivity": "weak_more", "why": "Receiver labels separate PocketBase methods from coloredWriter.Write."},
+    {"tool": "search", "winner": "annotated", "tier_sensitivity": "weak_more", "why": "Call-site and possible-definition tags should expose the two requested locations."},
+    {"tool": "semantic_annotations", "winner": "parity", "tier_sensitivity": "none", "why": "Control: both variants report an empty set."},
+    {"tool": "side_effects", "winner": "annotated", "tier_sensitivity": "weak_more", "why": "The idealized direct-call label exposes Execute while current output does not."}
+  ]
+}
