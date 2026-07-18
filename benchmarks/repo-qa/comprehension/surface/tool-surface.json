@@ -234,7 +234,7 @@
       "oracle_command": "sed -n '160,181p' pocketbase.go",
       "oracle_output": "\n\treturn pb\n}\n\n// Start starts the application, aka. registers the default system\n// commands (serve, superuser, version) and executes pb.RootCmd.\nfunc (pb *PocketBase) Start() error {\n\t// register system commands\n\tpb.RootCmd.AddCommand(cmd.NewSuperuserCommand(pb))\n\tpb.RootCmd.AddCommand(cmd.NewServeCommand(pb, !pb.hideStartBanner))\n\n\treturn pb.Execute()\n}\n\n// Execute initializes the application (if not already) and executes\n// the pb.RootCmd with graceful shutdown support.\n//\n// This method differs from pb.Start() by not registering the default\n// system commands!\nfunc (pb *PocketBase) Execute() error {\n\tif !pb.skipBootstrap() {\n\t\tif err := pb.Bootstrap(); err != nil {",
       "output_schema": null,
-      "question": "What source range contains PocketBase.Start and its adjacent documentation?"
+      "question": "What definition and documentation describe PocketBase.Start?"
     },
     {
       "answer": [
@@ -734,7 +734,11 @@
         "type": "object"
       },
       "name": "semantic_annotations",
-      "oracle_command": "rg -n '@lci:' --glob '*.go' . || true",
+      "oracle_allowed_exit_codes": [
+        0,
+        1
+      ],
+      "oracle_command": "rg -n '@lci:' --glob '*.go' .",
       "oracle_output": "",
       "output_schema": null,
       "question": "Which Go source lines contain an @lci semantic annotation?"

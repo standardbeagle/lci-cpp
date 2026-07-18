@@ -22,7 +22,7 @@ CASES = {
         "answer": ["447"],
     },
     "context": {
-        "question": "What source range contains PocketBase.Start and its adjacent documentation?",
+        "question": "What definition and documentation describe PocketBase.Start?",
         "oracle_command": "sed -n '160,181p' pocketbase.go",
         "answer": ["Start starts the application", "func (pb *PocketBase) Start() error"],
     },
@@ -75,7 +75,8 @@ CASES = {
     },
     "semantic_annotations": {
         "question": "Which Go source lines contain an @lci semantic annotation?",
-        "oracle_command": "rg -n '@lci:' --glob '*.go' . || true",
+        "oracle_command": "rg -n '@lci:' --glob '*.go' .",
+        "oracle_allowed_exit_codes": [0, 1],
         "answer": [],
         "control": True,
     },
@@ -148,7 +149,10 @@ def build_manifest(tools: list[dict], corpus: Path) -> dict:
     for name in sorted(by_name):
         live = by_name[name]
         case = CASES[name]
-        oracle_output = run_oracle(case["oracle_command"], corpus)
+        oracle_output = run_oracle(
+            case["oracle_command"], corpus,
+            set(case.get("oracle_allowed_exit_codes", [0])),
+        )
         missing_answers = [answer for answer in case["answer"] if answer not in oracle_output]
         if missing_answers:
             raise ValueError(
@@ -173,7 +177,9 @@ def build_manifest(tools: list[dict], corpus: Path) -> dict:
     }
 
 
-def run_oracle(command: str, corpus: Path) -> str:
+def run_oracle(
+    command: str, corpus: Path, allowed_exit_codes: set[int] | None = None,
+) -> str:
     """Execute one curated independent oracle, failing closed on any error."""
     env = os.environ.copy()
     env["GOCACHE"] = "/tmp/lci-comprehension-gocache"
@@ -181,7 +187,8 @@ def run_oracle(command: str, corpus: Path) -> str:
         ["bash", "-lc", command], cwd=corpus.resolve(), env=env,
         text=True, capture_output=True,
     )
-    if result.returncode != 0:
+    allowed = {0} if allowed_exit_codes is None else allowed_exit_codes
+    if result.returncode not in allowed:
         raise RuntimeError(
             f"oracle failed ({result.returncode}): {command}\n{result.stderr.strip()}"
         )

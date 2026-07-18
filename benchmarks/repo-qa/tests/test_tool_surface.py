@@ -52,6 +52,11 @@ class ToolSurfaceTest(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             surface.run_oracle("printf partial; exit 7", ROOT)
 
+    def test_no_match_can_be_explicit_without_masking_tool_failure(self):
+        self.assertEqual(surface.run_oracle("exit 1", ROOT, {0, 1}), "")
+        with self.assertRaises(RuntimeError):
+            surface.run_oracle("exit 127", ROOT, {0, 1})
+
 
 if __name__ == "__main__":
     unittest.main()
