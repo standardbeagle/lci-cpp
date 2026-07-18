@@ -8,6 +8,7 @@ exactly like these fixtures, so fixture coverage is the real coverage.
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -273,21 +274,44 @@ class TestDecoyProvenance(ForgeTestCase):
     def test_decoys_are_dead_nothing_references_them(self):
         manifest = self.forge(seed=7)
         tree = os.path.join(self.out("s7"), "tree")
-        decoy_paths = {d["path"] for d in manifest["decoys"]}
+        forge._assert_decoys_unreachable(
+            tree, spec_for(self.source, self.commit), manifest["decoys"],
+            manifest["path_map"],
+        )
 
-        for root, _dirs, files in os.walk(tree):
-            for name in files:
-                path = os.path.join(root, name)
-                rel = os.path.relpath(path, tree)
-                if rel in decoy_paths:
-                    continue
-                with open(path, errors="replace") as f:
-                    body = f.read()
-                for decoy in manifest["decoys"]:
-                    stem = os.path.splitext(os.path.basename(decoy["path"]))[0]
-                    self.assertNotIn(
-                        stem, body, f"{rel} must not reference decoy {decoy['path']}"
-                    )
+    def test_reachability_check_rejects_a_live_import_of_a_twin_module(self):
+        manifest = self.forge(seed=7)
+        tree = os.path.join(self.out("s7"), "tree")
+        decoy = manifest["decoys"][0]
+        module = os.path.splitext(decoy["path"])[0].replace("/", ".")
+        live = forge.translate_path(manifest, "beta/client.py")
+        with open(os.path.join(tree, live), "a") as f:
+            f.write(f"\nimport {module}\n")
+
+        with self.assertRaisesRegex(
+            forge.ForgeError, rf"{re.escape(live)}.*{re.escape(decoy['path'])}"
+        ):
+            forge._assert_decoys_unreachable(
+                tree, spec_for(self.source, self.commit), manifest["decoys"],
+                manifest["path_map"],
+            )
+
+    def test_reachability_check_rejects_a_live_use_of_a_twin_symbol(self):
+        manifest = self.forge(seed=7)
+        tree = os.path.join(self.out("s7"), "tree")
+        decoy = manifest["decoys"][0]
+        twin = decoy["symbols"][0]["twin"]
+        live = forge.translate_path(manifest, "beta/client.py")
+        with open(os.path.join(tree, live), "a") as f:
+            f.write(f"\n{twin}\n")
+
+        with self.assertRaisesRegex(
+            forge.ForgeError, rf"{re.escape(live)}.*{re.escape(twin)}"
+        ):
+            forge._assert_decoys_unreachable(
+                tree, spec_for(self.source, self.commit), manifest["decoys"],
+                manifest["path_map"],
+            )
 
 
 class TestAdversarialTrapInjections(ForgeTestCase):

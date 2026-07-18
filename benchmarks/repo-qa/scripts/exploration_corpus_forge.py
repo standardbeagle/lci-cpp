@@ -719,6 +719,56 @@ def _inject_decoys(tree, spec, rng, ops, to_original):
     return decoys
 
 
+def _assert_decoys_unreachable(tree, spec, decoys, path_map):
+    """Prove that no forged live source names a generated dead twin.
+
+    This check is deliberately independent of decoy construction.  It reads
+    the final live files recorded by the original-to-forged path map and looks
+    for both ways a twin can become reachable: its generated module path or
+    any of its renamed symbols.
+    """
+    live_sources = sorted(set(path_map.values()) & set(_source_files(tree, spec)))
+    for decoy in decoys:
+        module = _strip_ext(decoy["path"], spec)
+        module_patterns = [
+            pattern
+            for pattern, _replacement in _absolute_ref_patterns(
+                spec, module, module
+            )
+        ]
+        # Relative JS/TS/Python-like specifiers may name only the generated
+        # basename when the importing file is in the same directory.
+        stem = os.path.basename(module)
+        module_patterns.append(
+            re.compile(r"(?<![\w])(?:\.\.?/)+" + re.escape(stem) + r"(?![\w])")
+        )
+        symbol_patterns = [
+            (
+                symbol["twin"],
+                re.compile(
+                    r"(?<![\w])" + re.escape(symbol["twin"]) + r"(?![\w])"
+                ),
+            )
+            for symbol in decoy["symbols"]
+        ]
+
+        for rel in live_sources:
+            body = _read_text(os.path.join(tree, rel))
+            if body is None:
+                continue
+            if any(pattern.search(body) for pattern in module_patterns):
+                raise ForgeError(
+                    f"{spec['id']}: live source {rel} references dead twin "
+                    f"module {decoy['path']}"
+                )
+            for twin, pattern in symbol_patterns:
+                if pattern.search(body):
+                    raise ForgeError(
+                        f"{spec['id']}: live source {rel} references dead twin "
+                        f"symbol {twin} from {decoy['path']}"
+                    )
+
+
 def _inject_misleading_comments(tree, spec, rng, ops, to_original, seed):
     """Place explicit contradictions immediately above live declarations."""
     count = spec["mutations"].get("misleading_comments", 0)
@@ -1140,6 +1190,7 @@ def forge_corpus(
     to_original = {current: original for original, current in path_map.items()}
     traps = _inject_misleading_comments(tree, spec, rng, ops, to_original, seed)
     decoys = _inject_decoys(tree, spec, rng, ops, to_original)
+    _assert_decoys_unreachable(tree, spec, decoys, path_map)
     traps.extend(_dead_twin_traps(decoys, path_map, seed))
 
     hash_before = tree_hash(tree)
