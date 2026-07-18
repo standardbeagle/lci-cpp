@@ -45,5 +45,19 @@
     ],
     "resolved": true,
     "notes": "Two independent passes selected the same anchors; no disagreement to resolve."
+  },
+  "claim": "Documentation near the candidate code establishes the runtime behavior for every supported configuration.",
+  "request": "This framework has to tell apart a fixed page address from one that carries variable, bracketed segments, and it also has to put a set of such addresses into a stable priority order. Where does it decide whether a single address contains variable segments, and where does it sort a collection of addresses into their matching precedence?",
+  "author": {
+    "verdict": "unsupported",
+    "category": "misleading-doc",
+    "trap_id": "trap-nx-dynamic-segment-detection",
+    "adjudication_notes": "Two independent annotations were reconciled against the pinned mutated checkout.",
+    "falsification_evidence": "The cited counter-evidence and bounded reference search do not establish the public claim.",
+    "search_boundary": "Pinned mutated checkout; definitions, references, tests, documentation, and production entrypoints adjacent to both anchors.",
+    "anchor_classification": [
+      "misleading",
+      "misleading"
+    ]
   }
 }

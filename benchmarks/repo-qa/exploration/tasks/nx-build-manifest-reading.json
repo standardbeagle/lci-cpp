@@ -45,5 +45,16 @@
     ],
     "resolved": true,
     "notes": "Two independent passes selected the same anchors; no disagreement to resolve."
+  },
+  "claim": "The behavior described in the request is implemented by the live production path.",
+  "request": "At runtime the server reads JSON descriptor files the build wrote to disk, and it can also treat one as executable module text. Where does it read and cache one of these on-disk descriptors, and where does it instead evaluate a descriptor's contents as a module?",
+  "author": {
+    "verdict": "true",
+    "category": "true",
+    "adjudication_notes": "Two independent annotations were reconciled against the pinned mutated checkout.",
+    "anchor_classification": [
+      "authoritative-live",
+      "authoritative-live"
+    ]
   }
 }

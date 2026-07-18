@@ -45,5 +45,19 @@
     ],
     "resolved": true,
     "notes": "Two independent passes selected the same anchors; no disagreement to resolve."
+  },
+  "claim": "Documentation near the candidate code establishes the runtime behavior for every supported configuration.",
+  "request": "The realtime feature keeps a set of connected clients and pushes events out to whichever of them are interested. Where is the hub type that owns that set of live client connections, and where is its constructor that stands up an empty hub ready to register clients?",
+  "author": {
+    "verdict": "unsupported",
+    "category": "misleading-doc",
+    "trap_id": "trap-pb-realtime-fanout-hub",
+    "adjudication_notes": "Two independent annotations were reconciled against the pinned mutated checkout.",
+    "falsification_evidence": "The cited counter-evidence and bounded reference search do not establish the public claim.",
+    "search_boundary": "Pinned mutated checkout; definitions, references, tests, documentation, and production entrypoints adjacent to both anchors.",
+    "anchor_classification": [
+      "misleading",
+      "misleading"
+    ]
   }
 }

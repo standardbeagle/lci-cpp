@@ -45,5 +45,16 @@
     ],
     "resolved": true,
     "notes": "Two independent passes selected the same anchors; no disagreement to resolve."
+  },
+  "claim": "The behavior described in the request is implemented by the live production path.",
+  "request": "This codebase has a small kit of type-generic helpers for working with simple sequences of values. Where is the helper that answers whether a given value is already present in such a sequence, and where is the one that returns only the non-empty, de-duplicated values from it?",
+  "author": {
+    "verdict": "true",
+    "category": "true",
+    "adjudication_notes": "Two independent annotations were reconciled against the pinned mutated checkout.",
+    "anchor_classification": [
+      "authoritative-live",
+      "authoritative-live"
+    ]
   }
 }

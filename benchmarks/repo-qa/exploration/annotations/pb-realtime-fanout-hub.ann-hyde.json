@@ -21,5 +21,6 @@
         "NewBroker"
       ]
     }
-  ]
+  ],
+  "verdict": "unsupported"
 }

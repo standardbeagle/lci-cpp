@@ -154,7 +154,8 @@ def _iter_terms(task, manifest):
 
 def find_leaks(task, manifest=None):
     """Return sorted [(task_id, category, redacted)] leaks in this task's prompt."""
-    prompt_tokens = normalize_tokens(task["prompt"])
+    public = f"{task.get('claim', '')} {task.get('request', task.get('prompt', ''))}"
+    prompt_tokens = normalize_tokens(public)
     task_id = task["id"]
     leaks = []
     seen = set()
@@ -169,6 +170,22 @@ def find_leaks(task, manifest=None):
             leaks.append((task_id, category, redact(raw)))
     leaks.sort()
     return leaks
+
+
+def find_metadata_leaks(task):
+    """Reject author-only labels, trap ids, mappings, paths, or symbols in public text."""
+    public = f"{task.get('claim', '')} {task.get('request', '')}"
+    author = task.get("author", {})
+    leaks = []
+    forbidden = [author.get("verdict"), author.get("category"), author.get("trap_id")]
+    forbidden.extend(a.get("path") for a in task.get("evidence", []))
+    for anchor in task.get("evidence", []):
+        forbidden.extend(anchor.get("target_identifiers", []))
+    normalized_public = "".join(normalize_tokens(public))
+    for raw in forbidden:
+        if raw and "".join(normalize_tokens(str(raw))) in normalized_public:
+            leaks.append((task.get("id"), "author-metadata", redact(str(raw))))
+    return sorted(set(leaks))
 
 
 def lint_bank(
@@ -206,6 +223,7 @@ def lint_bank(
             corpus_root, task["corpus"], ref["seed"]
         )
         leaks.extend(find_leaks(task, manifest))
+        leaks.extend(find_metadata_leaks(task))
     leaks.sort()
     return problems, summary, leaks
 

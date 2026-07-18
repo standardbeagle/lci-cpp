@@ -45,5 +45,17 @@
     ],
     "resolved": true,
     "notes": "Two independent passes selected the same anchors; no disagreement to resolve."
+  },
+  "claim": "The candidate implementation is disconnected from production entrypoints and cannot own the observed behavior.",
+  "request": "So it does not hammer storage on every diagnostic line, this backend accumulates emitted records and flushes them in groups on a size or time trigger. Where is the record type that carries one emitted entry's fields, and where is the accumulate-and-flush machinery that batches them before they are persisted?",
+  "author": {
+    "verdict": "true",
+    "category": "dead-code",
+    "trap_id": "trap-pb-buffered-log-writes",
+    "adjudication_notes": "Two independent annotations were reconciled against the pinned mutated checkout.",
+    "anchor_classification": [
+      "dead",
+      "dead"
+    ]
   }
 }

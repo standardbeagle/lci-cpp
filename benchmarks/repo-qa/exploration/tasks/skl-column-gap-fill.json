@@ -45,5 +45,16 @@
     ],
     "resolved": true,
     "notes": "Two independent passes selected the same anchors; no disagreement to resolve."
+  },
+  "claim": "The behavior described in the request is implemented by the live production path.",
+  "request": "When a table has holes in it, this library can fill each empty cell with a simple per-column summary such as the average or the most frequent value. Where does the estimator that performs that straightforward fill live, and what shared parent class gives every filler its notion of an indicator for where values were originally absent?",
+  "author": {
+    "verdict": "true",
+    "category": "true",
+    "adjudication_notes": "Two independent annotations were reconciled against the pinned mutated checkout.",
+    "anchor_classification": [
+      "authoritative-live",
+      "authoritative-live"
+    ]
   }
 }

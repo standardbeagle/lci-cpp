@@ -45,5 +45,18 @@
     ],
     "resolved": true,
     "notes": "Two independent passes selected the same anchors; no disagreement to resolve."
+  },
+  "claim": "The repository contains the feature presupposed by the request at the stated architectural layer.",
+  "request": "This backend hands out compact signed credentials to authenticated callers and later checks them on incoming requests. Where does it mint one of these signed credentials with a payload and an expiry, and where does it crack a credential open to read its claims without yet trusting the signature?",
+  "author": {
+    "verdict": "false",
+    "category": "false-premise",
+    "adjudication_notes": "Two independent annotations were reconciled against the pinned mutated checkout.",
+    "falsification_evidence": "The cited counter-evidence and bounded reference search do not establish the public claim.",
+    "search_boundary": "Pinned mutated checkout; definitions, references, tests, documentation, and production entrypoints adjacent to both anchors.",
+    "anchor_classification": [
+      "authoritative-live",
+      "authoritative-live"
+    ]
   }
 }

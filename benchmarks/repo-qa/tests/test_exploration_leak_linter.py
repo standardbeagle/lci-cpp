@@ -127,6 +127,19 @@ class LeakCategoryTests(unittest.TestCase):
             "translated-path", self._cats(linter.find_leaks(task, manifest))
         )
 
+    def test_author_label_and_trap_id_leaks(self):
+        task = _task("neutral", [])
+        task.update({
+            "claim": "Inspect secret trap 42 and decide whether it is unsupported.",
+            "request": "Give a conclusion.",
+            "author": {
+                "verdict": "unsupported", "category": "dead-code",
+                "trap_id": "secret-trap-42",
+            },
+        })
+        categories = self._cats(linter.find_metadata_leaks(task))
+        self.assertEqual(categories, {"author-metadata"})
+
 
 class NoFalsePositiveTests(unittest.TestCase):
     def test_generic_architecture_words_not_flagged(self):

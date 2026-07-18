@@ -45,5 +45,17 @@
     ],
     "resolved": true,
     "notes": "Two independent passes selected the same anchors; no disagreement to resolve."
+  },
+  "claim": "The candidate implementation is disconnected from production entrypoints and cannot own the observed behavior.",
+  "request": "Throughout this library there is a canonical way to make a fresh, unfitted duplicate of an estimator that keeps its configuration but drops everything learned from data. Where is that duplication helper, and where is the mixin that defines how an estimator reports the configuration the helper copies?",
+  "author": {
+    "verdict": "true",
+    "category": "dead-code",
+    "trap_id": "trap-skl-estimator-copy",
+    "adjudication_notes": "Two independent annotations were reconciled against the pinned mutated checkout.",
+    "anchor_classification": [
+      "dead",
+      "dead"
+    ]
   }
 }

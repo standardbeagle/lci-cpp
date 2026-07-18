@@ -115,6 +115,8 @@ def _check_annotation_record(record):
     evidence = record.get("evidence")
     if not isinstance(evidence, list) or not evidence:
         raise Problem("annotation has no evidence")
+    if record.get("verdict") not in {"true", "false", "unsupported"}:
+        raise Problem("annotation has no valid independent verdict")
     for anchor in evidence:
         for field in ("path", "lines", "target_identifiers"):
             if field not in anchor:
@@ -298,6 +300,7 @@ def validate_task(
         )
 
     annotation_sigs = []
+    annotation_verdicts = []
     for annotator, record in sorted(annotations.items()):
         try:
             _check_annotation_record(record)
@@ -314,6 +317,7 @@ def validate_task(
                 )
             )
         annotation_sigs.append(sigs)
+        annotation_verdicts.append(record["verdict"])
 
     if len(annotation_sigs) >= 2:
         disagreement = any(
@@ -336,6 +340,13 @@ def validate_task(
                     f"{task_id}: adjudicated anchor {anchor['path']}:"
                     f"{anchor['lines']} is not supported by any annotation record"
                 )
+        if task["author"]["verdict"] not in annotation_verdicts:
+            problems.append(f"{task_id}: resolved verdict is unsupported by either annotation")
+        if len(set(annotation_verdicts)) > 1 and not task["adjudication"].get("notes"):
+            problems.append(f"{task_id}: verdict disagreement needs resolved adjudication notes")
+
+    if len(task["author"]["anchor_classification"]) != len(evidence):
+        problems.append(f"{task_id}: anchor classification count must match evidence set")
     if not task["adjudication"]["resolved"]:
         problems.append(f"{task_id}: adjudication.resolved is false")
 
@@ -424,7 +435,24 @@ def validate_bank(
         )
         per_corpus[task.get("corpus")] = per_corpus.get(task.get("corpus"), 0) + 1
 
-    summary = {"tasks": len(task_files), "per_corpus": per_corpus}
+    category_counts = {}
+    verdict_counts = {}
+    for name in task_files:
+        task = _load_json(os.path.join(tasks_dir, name))
+        author = task.get("author", {})
+        category = author.get("category")
+        verdict = author.get("verdict")
+        category_counts[category] = category_counts.get(category, 0) + 1
+        verdict_counts[verdict] = verdict_counts.get(verdict, 0) + 1
+    total = len(task_files)
+    expected_categories = {"true", "wrong-layer", "misleading-doc", "dead-code", "false-premise", "unsupported"}
+    if total >= 30:
+        if set(category_counts) != expected_categories:
+            problems.append(f"bank must cover every category; got {sorted(category_counts, key=str)}")
+        if max(category_counts.values(), default=0) > total / 2 or max(verdict_counts.values(), default=0) > total / 2:
+            problems.append("bank balance limit exceeded: no category or verdict may be a majority")
+    summary = {"tasks": total, "per_corpus": per_corpus,
+               "per_category": category_counts, "per_verdict": verdict_counts}
     return problems, summary
 
 

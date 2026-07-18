@@ -45,5 +45,19 @@
     ],
     "resolved": true,
     "notes": "Two independent passes selected the same anchors; no disagreement to resolve."
+  },
+  "claim": "The low-level helper alone owns the user-visible behavior described in the request.",
+  "request": "On the client side the framework has to work out, from the configured forwarding rules, which real address a requested one should map to, and part of that involves turning a fixed template value into a concrete string with no capture placeholders. Where is the client-side resolution of a requested address against the rules, and where is a non-capturing template compiled to its literal value?",
+  "author": {
+    "verdict": "false",
+    "category": "wrong-layer",
+    "adjudication_notes": "Two independent annotations were reconciled against the pinned mutated checkout.",
+    "falsification_evidence": "The cited counter-evidence and bounded reference search do not establish the public claim.",
+    "search_boundary": "Pinned mutated checkout; definitions, references, tests, documentation, and production entrypoints adjacent to both anchors.",
+    "abstraction_boundary": "The decisive behavior belongs to the public orchestration layer, not the lower-level helper named by the claim.",
+    "anchor_classification": [
+      "authoritative-live",
+      "authoritative-live"
+    ]
   }
 }

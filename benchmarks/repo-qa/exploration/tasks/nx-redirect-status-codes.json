@@ -45,5 +45,16 @@
     ],
     "resolved": true,
     "notes": "Two independent passes selected the same anchors; no disagreement to resolve."
+  },
+  "claim": "The behavior described in the request is implemented by the live production path.",
+  "request": "The framework only permits a specific handful of HTTP status numbers when one address forwards to another. Where is the allow-set of those permitted numbers declared, and where is the routine that picks the right number for a given forwarding rule?",
+  "author": {
+    "verdict": "true",
+    "category": "true",
+    "adjudication_notes": "Two independent annotations were reconciled against the pinned mutated checkout.",
+    "anchor_classification": [
+      "authoritative-live",
+      "authoritative-live"
+    ]
   }
 }

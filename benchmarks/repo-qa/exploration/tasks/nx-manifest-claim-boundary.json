@@ -1,0 +1,63 @@
+{
+  "schema": "exploration_task_v1",
+  "id": "nx-manifest-claim-boundary",
+  "corpus": "next.js",
+  "manifest_ref": {
+    "corpus_id": "next.js",
+    "source_commit": "97532172c065ca2b49dd79d1fa44c3a0b864065b",
+    "seed": 7,
+    "forge_version": "1"
+  },
+  "prompt": "At runtime the server reads JSON descriptor files the build wrote to disk, and it can also treat one as executable module text. Where does it read and cache one of these on-disk descriptors, and where does it instead evaluate a descriptor's contents as a module?",
+  "rubric": {
+    "must_surface": [
+      "the read-and-cache path",
+      "the evaluate-as-module path"
+    ],
+    "answer_shape": "two functions, one reading, one evaluating"
+  },
+  "evidence": [
+    {
+      "path": "packages/next/src/server/load-manifest.external.ts",
+      "lines": [
+        21
+      ],
+      "target_identifiers": [
+        "loadManifest"
+      ],
+      "claim": "reads and caches an on-disk descriptor"
+    },
+    {
+      "path": "packages/next/src/server/load-manifest.external.ts",
+      "lines": [
+        66
+      ],
+      "target_identifiers": [
+        "evalManifest"
+      ],
+      "claim": "evaluates a descriptor as a module"
+    }
+  ],
+  "adjudication": {
+    "annotators": [
+      "ann-hyde",
+      "ann-quill"
+    ],
+    "resolved": true,
+    "notes": "Two independent passes selected the same anchors; no disagreement to resolve."
+  },
+  "claim": "Documentation near the candidate code establishes the runtime behavior for every supported configuration.",
+  "request": "At runtime the server reads JSON descriptor files the build wrote to disk, and it can also treat one as executable module text. Where does it read and cache one of these on-disk descriptors, and where does it instead evaluate a descriptor's contents as a module?",
+  "author": {
+    "verdict": "unsupported",
+    "category": "misleading-doc",
+    "adjudication_notes": "Two independent annotations were reconciled against the pinned mutated checkout.",
+    "anchor_classification": [
+      "misleading",
+      "misleading"
+    ],
+    "trap_id": "trap-nx-manifest-claim-boundary",
+    "falsification_evidence": "The cited counter-evidence and bounded reference search do not establish the public claim.",
+    "search_boundary": "Pinned mutated checkout; definitions, references, tests, documentation, and production entrypoints adjacent to both anchors."
+  }
+}

@@ -45,5 +45,16 @@
     ],
     "resolved": true,
     "notes": "Two independent passes selected the same anchors; no disagreement to resolve."
+  },
+  "claim": "The behavior described in the request is implemented by the live production path.",
+  "request": "One of the bundled dataset loaders pulls a large text-categorization collection down from a remote mirror on first use and caches it locally. Where is that download-and-cache entry point, and where are the remote file names and checksums it relies on declared?",
+  "author": {
+    "verdict": "true",
+    "category": "true",
+    "adjudication_notes": "Two independent annotations were reconciled against the pinned mutated checkout.",
+    "anchor_classification": [
+      "authoritative-live",
+      "authoritative-live"
+    ]
   }
 }

@@ -45,5 +45,18 @@
     ],
     "resolved": true,
     "notes": "Two independent passes selected the same anchors; no disagreement to resolve."
+  },
+  "claim": "The available implementation establishes the requested behavior across every supported configuration.",
+  "request": "One of the gap-filling strategies here does not use a column summary at all: it looks at the rows most similar to the incomplete one and borrows their values. Where is that similarity-based filler defined, and where does it actually assemble the completed matrix from the closest matches?",
+  "author": {
+    "verdict": "unsupported",
+    "category": "unsupported",
+    "adjudication_notes": "Two independent annotations were reconciled against the pinned mutated checkout.",
+    "falsification_evidence": "The cited counter-evidence and bounded reference search do not establish the public claim.",
+    "search_boundary": "Pinned mutated checkout; definitions, references, tests, documentation, and production entrypoints adjacent to both anchors.",
+    "anchor_classification": [
+      "authoritative-live",
+      "authoritative-live"
+    ]
   }
 }

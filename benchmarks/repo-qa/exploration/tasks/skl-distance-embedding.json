@@ -45,5 +45,19 @@
     ],
     "resolved": true,
     "notes": "Two independent passes selected the same anchors; no disagreement to resolve."
+  },
+  "claim": "Documentation near the candidate code establishes the runtime behavior for every supported configuration.",
+  "request": "This library can place points in a low-dimensional space so that their pairwise distances match a given dissimilarity table as closely as possible, by iteratively relaxing the layout. Where is the single iterative relaxation routine, and where is the user-facing estimator that wraps it?",
+  "author": {
+    "verdict": "unsupported",
+    "category": "misleading-doc",
+    "trap_id": "trap-skl-distance-embedding",
+    "adjudication_notes": "Two independent annotations were reconciled against the pinned mutated checkout.",
+    "falsification_evidence": "The cited counter-evidence and bounded reference search do not establish the public claim.",
+    "search_boundary": "Pinned mutated checkout; definitions, references, tests, documentation, and production entrypoints adjacent to both anchors.",
+    "anchor_classification": [
+      "misleading",
+      "misleading"
+    ]
   }
 }

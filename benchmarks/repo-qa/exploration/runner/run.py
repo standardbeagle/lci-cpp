@@ -61,6 +61,11 @@ def _base_record(task, arm, base, seed, key):
     }
 
 
+def agent_visible_task(task):
+    """The sole task payload exposed to an agent; never include author keys."""
+    return {"claim": task["claim"], "request": task["request"]}
+
+
 def run_task(task, arm, adapter, base, *, corpus_root, records_path, work_root):
     """Run one (task, arm). Returns the persisted record dict; on resume-skip
     returns the existing record annotated with skipped=True (adapter untouched)."""
@@ -95,7 +100,9 @@ def run_task(task, arm, adapter, base, *, corpus_root, records_path, work_root):
 
     rec["manifest_id"] = manifest.get("tree_hash")
 
-    request = toolsets.build_request(base, arm, checkout_dir, task["prompt"])
+    public = agent_visible_task(task)
+    prompt = f"Claim: {public['claim']}\n\nRequest: {public['request']}"
+    request = toolsets.build_request(base, arm, checkout_dir, prompt)
     started = _now()
     result = adapter.run(request)
     ended = _now()

@@ -105,6 +105,8 @@ class Fixture:
                 "When this backend first comes up, where does it wire the "
                 "central object together, and how does it start its persistence?"
             ),
+            "claim": "The startup behavior described in the request holds.",
+            "request": "Determine whether the startup and persistence behavior is implemented.",
             "rubric": {
                 "must_surface": ["the constructor", "the bootstrap path"],
                 "answer_shape": "one location for construction, one for startup",
@@ -128,6 +130,12 @@ class Fixture:
                 "resolved": True,
                 "notes": "concurring",
             },
+            "author": {
+                "verdict": "true",
+                "category": "true",
+                "adjudication_notes": "Two independent annotations concurred.",
+                "anchor_classification": ["authoritative-live", "authoritative-live"],
+            },
         }
         self._annotation("ann-a")
         self._annotation("ann-b")
@@ -138,6 +146,7 @@ class Fixture:
             "schema": "exploration_annotation_v1",
             "task_id": self.task["id"],
             "annotator": annotator,
+            "verdict": self.task["author"]["verdict"],
             "evidence": copy.deepcopy(
                 evidence if evidence is not None else self.task["evidence"]
             ),
@@ -188,6 +197,15 @@ class ValidatorTest(unittest.TestCase):
         self.fx.task["adjudication"]["resolved"] = False
         self.fx._flush_task()
         self.assertTrue(any("disagree" in p for p in self.fx.run()))
+
+    def test_annotation_without_independent_verdict_fails(self):
+        path = os.path.join(
+            self.fx.annotations_dir, "pb-app-bootstrap.ann-b.json"
+        )
+        record = vet._load_json(path)
+        del record["verdict"]
+        _write(path, record)
+        self.assertTrue(any("independent verdict" in p for p in self.fx.run()))
 
     def test_fewer_than_two_anchors_fails(self):
         self.fx.task["evidence"] = self.fx.task["evidence"][:1]
@@ -258,6 +276,12 @@ class RealTaskBankTest(unittest.TestCase):
         )
         for corpus, count in summary["per_corpus"].items():
             self.assertGreater(count, 0, msg=f"{corpus} has no tasks")
+        self.assertEqual(set(summary["per_category"]), {
+            "true", "wrong-layer", "misleading-doc", "dead-code",
+            "false-premise", "unsupported",
+        })
+        self.assertLessEqual(max(summary["per_category"].values()), summary["tasks"] / 2)
+        self.assertLessEqual(max(summary["per_verdict"].values()), summary["tasks"] / 2)
 
 
 if __name__ == "__main__":

@@ -45,5 +45,17 @@
     ],
     "resolved": true,
     "notes": "Two independent passes selected the same anchors; no disagreement to resolve."
+  },
+  "claim": "The candidate implementation is disconnected from production entrypoints and cannot own the observed behavior.",
+  "request": "Before user code sees an incoming request's parameters, the framework removes its own private, framework-only keys so they never leak into application logic. Where does it strip those private keys from a parsed parameter bag, and where does it do the same directly on a URL's search parameters?",
+  "author": {
+    "verdict": "true",
+    "category": "dead-code",
+    "trap_id": "trap-nx-internal-param-stripping",
+    "adjudication_notes": "Two independent annotations were reconciled against the pinned mutated checkout.",
+    "anchor_classification": [
+      "dead",
+      "dead"
+    ]
   }
 }

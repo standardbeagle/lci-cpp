@@ -5,7 +5,7 @@
   "description": "A goal-oriented, intentionally under-specified exploration task pinned to a forged/mutated corpus. The prompt asks a tool to FIND something; the evidence anchors are the adjudicated answer key, expressed against MUTATED relative paths so a tool that memorised the upstream repo cannot short-circuit them.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "id", "corpus", "manifest_ref", "prompt", "rubric", "evidence", "adjudication"],
+  "required": ["schema", "id", "corpus", "manifest_ref", "claim", "request", "prompt", "rubric", "evidence", "adjudication", "author"],
   "properties": {
     "schema": {
       "const": "exploration_task_v1"
@@ -35,6 +35,30 @@
       "type": "string",
       "minLength": 20,
       "description": "Under-specified, goal-oriented question (where / how / what-breaks). MUST NOT name target paths, target symbols, patch locations, or solution hints; the validator fails a prompt that leaks any evidence path segment or target identifier."
+    },
+    "claim": {"type": "string", "minLength": 12},
+    "request": {"type": "string", "minLength": 12},
+    "author": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["verdict", "category", "adjudication_notes", "anchor_classification"],
+      "properties": {
+        "verdict": {"enum": ["true", "false", "unsupported"]},
+        "category": {"enum": ["true", "wrong-layer", "misleading-doc", "dead-code", "false-premise", "unsupported"]},
+        "trap_id": {"type": ["string", "null"]},
+        "adjudication_notes": {"type": "string", "minLength": 1},
+        "falsification_evidence": {"type": "string", "minLength": 1},
+        "search_boundary": {"type": "string", "minLength": 1},
+        "abstraction_boundary": {"type": "string", "minLength": 1},
+        "anchor_classification": {
+          "type": "array", "minItems": 2,
+          "items": {"enum": ["authoritative-live", "misleading", "dead"]}
+        }
+      },
+      "allOf": [
+        {"if": {"properties": {"verdict": {"enum": ["false", "unsupported"]}}}, "then": {"required": ["falsification_evidence", "search_boundary"]}},
+        {"if": {"properties": {"category": {"const": "wrong-layer"}}}, "then": {"required": ["abstraction_boundary"]}}
+      ]
     },
     "rubric": {
       "type": "object",

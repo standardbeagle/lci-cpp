@@ -21,5 +21,6 @@
         "check_number_of_labels"
       ]
     }
-  ]
+  ],
+  "verdict": "false"
 }

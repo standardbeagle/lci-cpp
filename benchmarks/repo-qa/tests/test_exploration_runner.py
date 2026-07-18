@@ -89,6 +89,8 @@ def fake_task(corpus_id="pocketbase", seed=7, task_id="pb-password-login-route")
             "forge_version": forge.FORGE_VERSION,
         },
         "prompt": "Where is the identity/secret handler and where is the router built?",
+        "claim": "The request's described behavior exists in this checkout.",
+        "request": "Determine whether the described identity and routing behavior holds.",
         "rubric": {"must_surface": ["handler", "router"], "answer_shape": "two funcs"},
         "evidence": [],
         "adjudication": {"annotators": ["ann-hyde", "ann-quill"], "resolved": True},
@@ -115,6 +117,15 @@ def answered_result(tool_calls):
 
 
 class ConfigParityTest(unittest.TestCase):
+    def test_agent_visible_task_contains_only_claim_and_request(self):
+        task = fake_task()
+        task["author"] = {"verdict": "false", "trap_id": "secret-trap"}
+        task["evidence"] = [{"path": "secret/oracle.py"}]
+        self.assertEqual(
+            run.agent_visible_task(task),
+            {"claim": task["claim"], "request": task["request"]},
+        )
+
     def test_arms_differ_only_in_toolset_and_instructions(self):
         base = base_config()
         checkout = "/tmp/checkout-x"
