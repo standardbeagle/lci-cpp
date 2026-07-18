@@ -6,15 +6,41 @@
 #include <string_view>
 
 #include <cerrno>
+#include <chrono>
 #include <csignal>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
-#include <fstream>
+#include <sys/socket.h>
+#include <sys/un.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
 namespace lci::integration {
 namespace {
+
+int RunDetachedListenerHelperIfRequested() {
+    const char* pathname = ::getenv("LCI_TEST_LISTENER_PATH");
+    const char* ready_fd_text = ::getenv("LCI_TEST_LISTENER_READY_FD");
+    if (!pathname || !ready_fd_text) return 0;
+    const int ready_fd = std::atoi(ready_fd_text);
+    const int fd = ::socket(AF_UNIX, SOCK_STREAM, 0);
+    sockaddr_un address{};
+    address.sun_family = AF_UNIX;
+    if (fd < 0 || std::strlen(pathname) >= sizeof(address.sun_path)) ::_exit(2);
+    std::memcpy(address.sun_path, pathname, std::strlen(pathname) + 1);
+    if (::bind(fd, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0 ||
+        ::listen(fd, 4) != 0) {
+        ::_exit(3);
+    }
+    const char marker = 'R';
+    if (::write(ready_fd, &marker, 1) != 1) ::_exit(4);
+    ::close(ready_fd);
+    for (;;) ::pause();
+}
+
+[[maybe_unused]] const int kDetachedListenerHelper =
+    RunDetachedListenerHelperIfRequested();
 
 TEST(SpecRunnerProcessOwnership, RequiresExactInheritedToken) {
     const std::string token = "runner-42";
@@ -100,25 +126,112 @@ TEST(SpecRunnerProcessOwnership, ForceKillsTermResistantOwnedChild) {
     EXPECT_EQ(WTERMSIG(status), SIGKILL);
 }
 
-TEST(SpecRunnerProcessOwnership, RemovesCorpusSocketsAfterOwnedProcessCleanup) {
+pid_t SpawnDetachedUnixListener(const std::filesystem::path& path,
+                                const char* ownership_token) {
+    int ready[2];
+    EXPECT_EQ(::pipe(ready), 0);
+    const pid_t child = ::fork();
+    EXPECT_GE(child, 0);
+    if (child == 0) {
+        ::close(ready[0]);
+        if (ownership_token) {
+            ::setenv("LCI_SPEC_RUNNER_PROCESS_OWNER", ownership_token, 1);
+        } else {
+            ::unsetenv("LCI_SPEC_RUNNER_PROCESS_OWNER");
+        }
+        (void)::setsid();
+        const std::string pathname = path.string();
+        const std::string ready_fd = std::to_string(ready[1]);
+        ::setenv("LCI_TEST_LISTENER_PATH", pathname.c_str(), 1);
+        ::setenv("LCI_TEST_LISTENER_READY_FD", ready_fd.c_str(), 1);
+        ::execl("/proc/self/exe", "lci_integration_tests-listener-helper",
+                static_cast<char*>(nullptr));
+        ::_exit(5);
+    }
+    ::close(ready[1]);
+    char marker = 0;
+    EXPECT_EQ(::read(ready[0], &marker, 1), 1);
+    EXPECT_EQ(marker, 'R');
+    ::close(ready[0]);
+    return child;
+}
+
+bool CanConnectUnixSocket(const std::filesystem::path& path) {
+    const int fd = ::socket(AF_UNIX, SOCK_STREAM, 0);
+    if (fd < 0) return false;
+    sockaddr_un address{};
+    address.sun_family = AF_UNIX;
+    const std::string pathname = path.string();
+    if (pathname.size() >= sizeof(address.sun_path)) {
+        ::close(fd);
+        return false;
+    }
+    std::memcpy(address.sun_path, pathname.c_str(), pathname.size() + 1);
+    const bool connected =
+        ::connect(fd, reinterpret_cast<sockaddr*>(&address), sizeof(address)) ==
+        0;
+    ::close(fd);
+    return connected;
+}
+
+TEST(SpecRunnerProcessOwnership,
+     RemovesSocketAfterDetachedOwnedListenerIsConfirmedDead) {
+    if (!PidfdCleanupSupportedForTest()) {
+        GTEST_SKIP() << "pidfd cleanup unsupported";
+    }
+    constexpr const char* token = "detached-owned-listener";
     const auto corpus = std::filesystem::temp_directory_path() /
-                        ("lci-owned-corpus-" + std::to_string(::getpid()));
+                        ("lci-owned-corpus-" + std::to_string(::getpid()) +
+                         "-" + std::to_string(std::chrono::steady_clock::now()
+                                                   .time_since_epoch()
+                                                   .count()));
     std::filesystem::create_directories(corpus);
     const auto candidates =
         lci::parity::candidate_socket_paths_for_test(corpus.string());
     ASSERT_FALSE(candidates.empty());
+    const auto socket_path = candidates.front();
+    const pid_t listener = SpawnDetachedUnixListener(socket_path, token);
+    ASSERT_GT(listener, 0);
+    ASSERT_TRUE(CanConnectUnixSocket(socket_path));
 
-    for (const auto& path : candidates) {
-        std::ofstream(path) << "stale socket marker";
-        ASSERT_TRUE(std::filesystem::exists(path));
-    }
+    CleanupOwnedProcessesAndSocketsForTest(token, corpus.string());
 
-    CleanupOwnedProcessesAndSocketsForTest("no-live-process", corpus.string());
+    int status = 0;
+    ASSERT_EQ(::waitpid(listener, &status, 0), listener);
+    EXPECT_TRUE(WIFSIGNALED(status));
+    EXPECT_FALSE(std::filesystem::exists(socket_path));
+    std::error_code ec;
+    std::filesystem::remove_all(corpus, ec);
+}
 
-    for (const auto& path : candidates) {
-        EXPECT_FALSE(std::filesystem::exists(path)) << path;
+TEST(SpecRunnerProcessOwnership,
+     PreservesUnrelatedLiveListenerOnCandidatePath) {
+    const auto corpus = std::filesystem::temp_directory_path() /
+                        ("lci-unrelated-corpus-" + std::to_string(::getpid()) +
+                         "-" + std::to_string(std::chrono::steady_clock::now()
+                                                   .time_since_epoch()
+                                                   .count()));
+    std::filesystem::create_directories(corpus);
+    const auto candidates =
+        lci::parity::candidate_socket_paths_for_test(corpus.string());
+    ASSERT_FALSE(candidates.empty());
+    const auto socket_path = candidates.front();
+    const pid_t listener = SpawnDetachedUnixListener(socket_path, nullptr);
+    ASSERT_GT(listener, 0);
+    ASSERT_TRUE(CanConnectUnixSocket(socket_path));
+
+    CleanupOwnedProcessesAndSocketsForTest("some-other-owner",
+                                           corpus.string());
+
+    EXPECT_EQ(::kill(listener, 0), 0) << std::strerror(errno);
+    EXPECT_TRUE(std::filesystem::exists(socket_path));
+    EXPECT_TRUE(CanConnectUnixSocket(socket_path));
+
+    if (::kill(listener, SIGKILL) == 0) {
+        EXPECT_EQ(::waitpid(listener, nullptr, 0), listener);
     }
     std::error_code ec;
+    std::filesystem::remove(socket_path, ec);
     std::filesystem::remove_all(corpus, ec);
 }
 

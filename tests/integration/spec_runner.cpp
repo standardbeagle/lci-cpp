@@ -30,6 +30,8 @@
 #include <thread>
 
 #include <sys/syscall.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 #include <unistd.h>
 
 namespace fs = std::filesystem;
@@ -410,8 +412,9 @@ std::vector<OwnedPidfd> OpenOwnedProcesses(std::string_view token) {
     return result;
 }
 
-void CleanupOwnedProcesses(std::string_view token) {
+bool CleanupOwnedProcesses(std::string_view token) {
     auto processes = OpenOwnedProcesses(token);
+    bool all_exits_confirmed = true;
     for (const auto& process : processes) {
         PidfdSendSignal(process.fd, SIGTERM);
     }
@@ -446,6 +449,7 @@ void CleanupOwnedProcesses(std::string_view token) {
                     poll_result > 0 &&
                     (descriptor.revents & (POLLIN | POLLHUP)) != 0;
                 if (!exit_confirmed) {
+                    all_exits_confirmed = false;
                     ::close(process.fd);
                     process.fd = -1;
                     continue;
@@ -457,18 +461,55 @@ void CleanupOwnedProcesses(std::string_view token) {
                 do {
                     poll_result = ::poll(&descriptor, 1, 100);
                 } while (poll_result < 0 && errno == EINTR);
+                if (poll_result <= 0 ||
+                    (descriptor.revents & (POLLIN | POLLHUP)) == 0) {
+                    all_exits_confirmed = false;
+                }
             }
         }
         ::close(process.fd);
         process.fd = -1;
     }
+    // Catch descendants which appeared while the original snapshot was being
+    // terminated. Socket cleanup is safe only when no process carrying this
+    // exact ownership token remains.
+    auto remaining = OpenOwnedProcesses(token);
+    for (const auto& process : remaining) ::close(process.fd);
+    return all_exits_confirmed && remaining.empty();
+}
+
+bool IsNonConnectableUnixSocket(const fs::path& path) {
+    std::error_code ec;
+    if (!fs::is_socket(path, ec) || ec) return false;
+
+    const std::string pathname = path.string();
+    sockaddr_un address{};
+    if (pathname.size() >= sizeof(address.sun_path)) return false;
+    address.sun_family = AF_UNIX;
+    std::memcpy(address.sun_path, pathname.c_str(), pathname.size() + 1);
+
+    const int fd = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    if (fd < 0) return false;
+    int result = -1;
+    do {
+        result = ::connect(fd, reinterpret_cast<sockaddr*>(&address),
+                           sizeof(address));
+    } while (result < 0 && errno == EINTR);
+    const int connect_error = errno;
+    ::close(fd);
+
+    // ECONNREFUSED is positive evidence of a pathname left behind without a
+    // listener. Never unlink on ambiguous failures (permissions, exhaustion,
+    // unsupported socket type) or when a listener accepted the connection.
+    return result < 0 && connect_error == ECONNREFUSED;
 }
 
 void CleanupOwnedProcessesAndSockets(std::string_view token,
                                      const std::string& corpus_path) {
-    CleanupOwnedProcesses(token);
+    if (!CleanupOwnedProcesses(token)) return;
     for (const auto& socket_path :
          lci::parity::candidate_socket_paths_for_test(corpus_path)) {
+        if (!IsNonConnectableUnixSocket(socket_path)) continue;
         std::error_code ec;
         fs::remove(socket_path, ec);
     }
@@ -715,7 +756,7 @@ bool PidfdCleanupSupportedForTest() {
 }
 
 void CleanupOwnedProcessesForTest(std::string_view token) {
-    CleanupOwnedProcesses(token);
+    (void)CleanupOwnedProcesses(token);
 }
 
 void CleanupOwnedProcessesAndSocketsForTest(std::string_view token,
