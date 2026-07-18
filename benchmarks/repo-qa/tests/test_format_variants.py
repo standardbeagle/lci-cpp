@@ -6,21 +6,25 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 SURFACE = ROOT / "benchmarks/repo-qa/comprehension/surface/tool-surface.json"
 VARIANTS = ROOT / "benchmarks/repo-qa/comprehension/formats/variants.json"
+CAPTURES = ROOT / "benchmarks/repo-qa/comprehension/formats/live-captures.json"
 
 
 class FormatVariantsTest(unittest.TestCase):
     def setUp(self):
         self.surface = json.loads(SURFACE.read_text())
         self.bank = json.loads(VARIANTS.read_text())
+        self.captures = json.loads(CAPTURES.read_text())
 
     def test_every_live_tool_has_current_and_annotated_plain_text(self):
         live = {tool["name"] for tool in self.surface["tools"]}
-        bank = {tool["name"] for tool in self.bank["tools"]}
+        names = [tool["name"] for tool in self.bank["tools"]]
+        bank = set(names)
         self.assertEqual(live, bank)
+        self.assertEqual(len(names), len(bank), "duplicate tool entries")
         for tool in self.bank["tools"]:
+            ids = [variant["id"] for variant in tool["variants"]]
+            self.assertEqual(ids, ["current", "annotated"])
             variants = {variant["id"]: variant for variant in tool["variants"]}
-            self.assertIn("current", variants)
-            self.assertIn("annotated", variants)
             for variant in variants.values():
                 self.assertIsInstance(variant["text"], str)
                 self.assertTrue(variant["text"].strip())
@@ -45,15 +49,25 @@ class FormatVariantsTest(unittest.TestCase):
                         else:
                             self.assertIn(answer, variant["text"])
 
+    def test_current_blobs_equal_normalized_live_captures(self):
+        records = self.captures["captures"]
+        self.assertEqual(len(records), len({record["name"] for record in records}))
+        captured = {record["name"]: record["normalized_output"] for record in records}
+        self.assertEqual(set(captured), {tool["name"] for tool in self.bank["tools"]})
+        for tool in self.bank["tools"]:
+            current = tool["variants"][0]
+            self.assertEqual(current["text"], captured[tool["name"]])
+
     def test_controls_receive_both_formats(self):
         surface_controls = {t["name"] for t in self.surface["tools"] if t.get("control")}
         bank_controls = {t["name"] for t in self.bank["tools"] if t.get("control")}
         self.assertEqual(surface_controls, bank_controls)
 
-    def test_serialization_is_byte_stable(self):
-        first = json.dumps(self.bank, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
-        second = json.dumps(json.loads(first), indent=2, sort_keys=True, ensure_ascii=False) + "\n"
-        self.assertEqual(first, second)
+    def test_committed_json_is_canonical_and_byte_stable(self):
+        for path in (VARIANTS, CAPTURES):
+            value = json.loads(path.read_text())
+            encoded = json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+            self.assertEqual(path.read_text(), encoded)
 
 
 if __name__ == "__main__":
