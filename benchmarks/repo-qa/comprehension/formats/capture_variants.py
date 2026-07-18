@@ -44,7 +44,12 @@ def normalize_text(text: str, corpus: Path) -> str:
 
     def clean(item):
         if isinstance(item, dict):
-            return {key: clean(val) for key, val in item.items() if key not in VOLATILE_KEYS}
+            return {
+                key: clean(val) for key, val in item.items()
+                if key not in VOLATILE_KEYS
+                and not key.endswith("_time")
+                and not key.endswith("_time_ms")
+            }
         if isinstance(item, list):
             return [clean(value) for value in item]
         if isinstance(item, str):

@@ -1,4 +1,5 @@
 import json
+import importlib.util
 import unittest
 from pathlib import Path
 
@@ -7,6 +8,11 @@ ROOT = Path(__file__).resolve().parents[3]
 SURFACE = ROOT / "benchmarks/repo-qa/comprehension/surface/tool-surface.json"
 VARIANTS = ROOT / "benchmarks/repo-qa/comprehension/formats/variants.json"
 CAPTURES = ROOT / "benchmarks/repo-qa/comprehension/formats/live-captures.json"
+CAPTURE_SCRIPT = ROOT / "benchmarks/repo-qa/comprehension/formats/capture_variants.py"
+SPEC = importlib.util.spec_from_file_location("capture_variants", CAPTURE_SCRIPT)
+capture = importlib.util.module_from_spec(SPEC)
+assert SPEC.loader
+SPEC.loader.exec_module(capture)
 
 
 class FormatVariantsTest(unittest.TestCase):
@@ -68,6 +74,12 @@ class FormatVariantsTest(unittest.TestCase):
             value = json.loads(path.read_text())
             encoded = json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
             self.assertEqual(path.read_text(), encoded)
+
+    def test_normalization_removes_all_runtime_timings(self):
+        first = '{"performance":{"total_time_ms":2,"component_breakdown":{"ai_time":1}},"count":3}'
+        second = '{"performance":{"total_time_ms":999,"component_breakdown":{"ai_time":88}},"count":3}'
+        self.assertEqual(capture.normalize_text(first, ROOT), capture.normalize_text(second, ROOT))
+        self.assertEqual(capture.normalize_text(first, ROOT), '{"count":3,"performance":{"component_breakdown":{}}}')
 
 
 if __name__ == "__main__":
