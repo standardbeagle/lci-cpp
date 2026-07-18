@@ -43,8 +43,18 @@ ctest --test-dir build/release --output-on-failure -j 4
 
 ## Full release confirmation status
 
-Three green confirmations could not be collected in the current shared host
-state. The first attempt measured the corrected tails at 124.69s and 34.25s,
+Three consecutive exact gates passed on
+`2df9da5103914355d85a2d9497250d2b85d79afb` after the separately tracked socket
+lifecycle fix. No orphan cleanup was required during the sequence.
+
+| run | build (s) | test (s) | total (s) | benchmark (s) | real project (s) | integration (s) | result |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | :---: |
+| 1 | 31.96 | 279.63 | 311.59 | 187.26 | 62.67 | 19.57 | 1997/1997 |
+| 2 | 2.43 | 269.81 | 272.24 | 185.95 | 55.19 | 17.97 | 1997/1997 |
+| 3 | 2.17 | 241.02 | 243.19 | 178.33 | 45.56 | 16.32 | 1997/1997 |
+
+Prior invalid attempts remain part of the record. The first measured the
+corrected tails at 124.69s and 34.25s,
 then `lci_integration_suite` timed out at 600s after socket bind failures. A
 second attempt had server tests fail `server.start()` immediately. Read-only
 process inspection identified two pre-existing long-lived `lci` servers; the
@@ -54,5 +64,5 @@ again had every integration `server.start()` fail before the integration bundle
 timed out at 600.05s. That clean-start result demonstrates a distinct
 server-process/socket isolation defect inside the exact release gate rather
 than residual pre-run host state. These attempts are invalid evidence, not
-confirmations. Zero green confirmations are claimed. This slice makes no
-180-second policy or baseline decision.
+confirmations. The later three-run sequence above is the confirmation evidence.
+This slice makes no 180-second policy or baseline decision.

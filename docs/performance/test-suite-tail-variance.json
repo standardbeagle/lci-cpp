@@ -34,12 +34,18 @@
     "fix": "Declare lci_benchmarks RUN_SERIAL and enforce both bundled-tail declarations with a regression test."
   },
   "release_confirmation": {
-    "status": "blocked_by_release_gate_server_isolation_defect",
+    "status": "pass",
+    "confirmed_commit": "2df9da5103914355d85a2d9497250d2b85d79afb",
+    "green_runs": [
+      {"run": 1, "build_wall_s": 31.96, "test_wall_s": 279.63, "total_wall_s": 311.59, "tests_passed": 1997, "tests_failed": 0, "lci_benchmarks_wall_s": 187.26, "lci_real_project_suite_wall_s": 62.67, "lci_integration_suite_wall_s": 19.57},
+      {"run": 2, "build_wall_s": 2.43, "test_wall_s": 269.81, "total_wall_s": 272.24, "tests_passed": 1997, "tests_failed": 0, "lci_benchmarks_wall_s": 185.95, "lci_real_project_suite_wall_s": 55.19, "lci_integration_suite_wall_s": 17.97},
+      {"run": 3, "build_wall_s": 2.17, "test_wall_s": 241.02, "total_wall_s": 243.19, "tests_passed": 1997, "tests_failed": 0, "lci_benchmarks_wall_s": 178.33, "lci_real_project_suite_wall_s": 45.56, "lci_integration_suite_wall_s": 16.32}
+    ],
     "invalid_attempts": [
       "Attempt 1: benchmark 124.69s, real-project 34.25s; integration timed out at 600s after socket bind failures.",
       "Attempt 2: server tests immediately failed server.start() before tail entries; stopped as invalid.",
       "Clean-window attempt after orphan cleanup: build 1.00s; unit phase ran first, then lci_integration_suite failed every server.start() and timed out at 600.05s. This demonstrates server/socket state is leaked or retained within the exact gate itself."
     ],
-    "note": "Zero green confirmations; the exact gate needs a separate server-process/socket isolation fix. No release-budget or 180-second policy conclusion is made by this slice."
+    "note": "Three consecutive exact gates passed after the separately tracked socket lifecycle fix. No orphan cleanup was required during the sequence. No release-budget or 180-second policy conclusion is made by this slice."
   }
 }
