@@ -1,0 +1,4 @@
+interface:
+  display_name: "Design Unbiased Benchmarks"
+  short_description: "Design preregistered evaluations without leading bias"
+  default_prompt: "Use $design-unbiased-benchmarks to design a neutral, reproducible benchmark before collecting results."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Audit Benchmark Evidence"
+  short_description: "Audit benchmark validity and evidence claims"
+  default_prompt: "Use $audit-benchmark-evidence to audit this benchmark from raw artifacts and grade its claims."
