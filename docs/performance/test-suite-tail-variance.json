@@ -34,11 +34,12 @@
     "fix": "Declare lci_benchmarks RUN_SERIAL and enforce both bundled-tail declarations with a regression test."
   },
   "release_confirmation": {
-    "status": "blocked_by_preexisting_server_processes",
+    "status": "blocked_by_release_gate_server_isolation_defect",
     "invalid_attempts": [
       "Attempt 1: benchmark 124.69s, real-project 34.25s; integration timed out at 600s after socket bind failures.",
-      "Attempt 2: server tests immediately failed server.start() before tail entries; stopped as invalid."
+      "Attempt 2: server tests immediately failed server.start() before tail entries; stopped as invalid.",
+      "Clean-window attempt after orphan cleanup: build 1.00s; unit phase ran first, then lci_integration_suite failed every server.start() and timed out at 600.05s. This demonstrates server/socket state is leaked or retained within the exact gate itself."
     ],
-    "note": "No release-budget or 180-second policy conclusion is made by this slice."
+    "note": "Zero green confirmations; the exact gate needs a separate server-process/socket isolation fix. No release-budget or 180-second policy conclusion is made by this slice."
   }
 }

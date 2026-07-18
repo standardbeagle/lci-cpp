@@ -48,5 +48,11 @@ state. The first attempt measured the corrected tails at 124.69s and 34.25s,
 then `lci_integration_suite` timed out at 600s after socket bind failures. A
 second attempt had server tests fail `server.start()` immediately. Read-only
 process inspection identified two pre-existing long-lived `lci` servers; the
-task did not authorize terminating them. These attempts are invalid evidence,
-not confirmations. This slice makes no 180-second policy or baseline decision.
+task initially did not authorize terminating them. After those exact orphans
+were removed, a clean-window retry built in 1.00s, ran the unit phase, and then
+again had every integration `server.start()` fail before the integration bundle
+timed out at 600.05s. That clean-start result demonstrates a distinct
+server-process/socket isolation defect inside the exact release gate rather
+than residual pre-run host state. These attempts are invalid evidence, not
+confirmations. Zero green confirmations are claimed. This slice makes no
+180-second policy or baseline decision.
