@@ -1,0 +1,228 @@
+#!/usr/bin/env python3
+"""Run and grade canned-output comprehension cells across LCI's tool surface."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import re
+import shutil
+import subprocess
+import tempfile
+import time
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[3]
+SURFACE = ROOT / "benchmarks/repo-qa/comprehension/surface/tool-surface.json"
+VARIANTS = ROOT / "benchmarks/repo-qa/comprehension/formats/variants.json"
+DEFAULT_MODELS = ["opencode/deepseek-v4-flash-free", "opencode-go/glm-5.2"]
+PROMPT = """Answer the QUESTION using ONLY the TOOL OUTPUT below. Do not use tools or outside knowledge.
+Return strict JSON only: {\"answers\":[\"one atomic answer\",\"another\"]}.
+Include every supported answer and nothing unsupported. Preserve file:line locations exactly.
+
+QUESTION:
+{question}
+
+TOOL OUTPUT:
+{blob}
+"""
+
+
+def canonical(value: object) -> str:
+    return json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+
+
+def parse_events(lines: list[str]) -> tuple[str, dict]:
+    texts: dict[str, list[str]] = {}
+    order: list[str] = []
+    usage = {"input": 0, "output": 0, "reasoning": 0}
+    provider_error = None
+    for line in lines:
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        part = event.get("part", event)
+        kind = part.get("type")
+        if kind == "text":
+            message = part.get("messageID", "?")
+            if message not in texts:
+                texts[message] = []
+                order.append(message)
+            texts[message].append(part.get("text", ""))
+        elif kind == "step_finish":
+            tokens = part.get("tokens") or {}
+            for key in usage:
+                usage[key] += tokens.get(key, 0) or 0
+        elif kind == "error":
+            provider_error = event.get("error") or part.get("error") or "provider error"
+    return ("\n".join(texts[order[-1]]) if order else ""), {
+        "tokens": usage, "provider_error": provider_error,
+    }
+
+
+def parse_answers(answer: str) -> list[str]:
+    candidate = answer.strip()
+    fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", candidate, re.DOTALL)
+    if fenced:
+        candidate = fenced.group(1)
+    value = json.loads(candidate)
+    answers = value.get("answers")
+    if not isinstance(answers, list) or any(not isinstance(item, str) for item in answers):
+        raise ValueError("answer must be a JSON object with string answers[]")
+    return answers
+
+
+def normalize_answer(value: str) -> str:
+    return " ".join(value.casefold().split())
+
+
+def grade(extracted: list[str], expected: list[str]) -> dict:
+    predicted = {normalize_answer(item) for item in extracted}
+    truth = {normalize_answer(item) for item in expected}
+    true_positive = len(predicted & truth)
+    false_positive = sorted(predicted - truth)
+    false_negative = sorted(truth - predicted)
+    precision = true_positive / len(predicted) if predicted else (1.0 if not truth else 0.0)
+    recall = true_positive / len(truth) if truth else (1.0 if not predicted else 0.0)
+    return {
+        "precision": precision,
+        "recall": recall,
+        "false_positive_count": len(false_positive),
+        "false_positives": false_positive,
+        "false_negatives": false_negative,
+        "exact": not false_positive and not false_negative,
+    }
+
+
+def empty_git_workspace(parent: Path) -> Path:
+    workspace = Path(tempfile.mkdtemp(prefix="comprehension-empty-", dir=parent))
+    subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
+    (workspace / ".gitignore").write_text("*\n!.gitignore\n!opencode.json\n")
+    (workspace / "opencode.json").write_text(canonical({
+        "$schema": "https://opencode.ai/config.json", "mcp": {},
+        "permission": {"bash": "deny", "edit": "deny", "external_directory": "deny"},
+    }))
+    subprocess.run(["git", "add", ".gitignore", "opencode.json"], cwd=workspace, check=True)
+    subprocess.run(
+        ["git", "-c", "user.name=Comprehension Harness", "-c", "user.email=harness@invalid", "commit", "-qm", "empty harness workspace"],
+        cwd=workspace, check=True,
+    )
+    return workspace
+
+
+def cell_key(tool: str, variant: str, model: str, repetition: int) -> str:
+    model_key = re.sub(r"[^A-Za-z0-9_.-]+", "_", model)
+    return f"{tool}__{variant}__{model_key}__r{repetition}"
+
+
+def run_model(opencode: str, workspace: Path, model: str, prompt: str, timeout: int) -> dict:
+    started = time.monotonic()
+    try:
+        proc = subprocess.run(
+            [opencode, "run", "--format", "json", "-m", model, prompt],
+            cwd=workspace, text=True, capture_output=True, timeout=timeout,
+        )
+        raw_answer, metadata = parse_events(proc.stdout.splitlines())
+        if metadata["provider_error"]:
+            status = "provider_error"
+        elif proc.returncode != 0:
+            status = f"exit_{proc.returncode}"
+        elif not raw_answer.strip():
+            status = "empty_answer"
+        else:
+            status = "answered"
+    except subprocess.TimeoutExpired as exc:
+        raw = exc.stdout if isinstance(exc.stdout, str) else ""
+        raw_answer, metadata = parse_events(raw.splitlines())
+        status = "provider_timeout"
+    return {
+        "status": status, "answer": raw_answer,
+        "wall_seconds": round(time.monotonic() - started, 3), **metadata,
+    }
+
+
+def write_atomic(path: Path, value: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_name = tempfile.mkstemp(prefix=path.name, suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w") as handle:
+            handle.write(canonical(value))
+        os.replace(temp_name, path)
+    except BaseException:
+        os.unlink(temp_name)
+        raise
+
+
+def load_bank() -> list[dict]:
+    surface = json.loads(SURFACE.read_text())
+    variants = json.loads(VARIANTS.read_text())
+    questions = {item["name"]: item["question"] for item in surface["tools"]}
+    cells = []
+    for tool in variants["tools"]:
+        for variant in tool["variants"]:
+            cells.append({
+                "tool": tool["name"], "variant": variant["id"],
+                "question": questions[tool["name"]], "blob": variant["text"],
+                "expected": tool["answer"],
+                "production_faithful": variant["production_faithful"],
+            })
+    return cells
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--models", default=",".join(DEFAULT_MODELS))
+    parser.add_argument("--reps", type=int, default=1)
+    parser.add_argument("--timeout", type=int, default=600)
+    parser.add_argument("--opencode", default="opencode")
+    parser.add_argument("--tool", action="append", help="restrict to a tool (repeatable)")
+    parser.add_argument("--dry-run", action="store_true")
+    args = parser.parse_args()
+    models = args.models.split(",")
+    if any("/" not in model for model in models):
+        parser.error("models must be full provider/model ids, not aliases")
+    cells = [cell for cell in load_bank() if not args.tool or cell["tool"] in args.tool]
+    jobs = [(cell, model, rep) for cell in cells for model in models for rep in range(1, args.reps + 1)]
+    if args.dry_run:
+        print(json.dumps({"cells": len(jobs), "models": models}, sort_keys=True))
+        return 0
+    args.out.mkdir(parents=True, exist_ok=True)
+    workspace = empty_git_workspace(args.out)
+    try:
+        for cell, model, repetition in jobs:
+            key = cell_key(cell["tool"], cell["variant"], model, repetition)
+            path = args.out / f"{key}.json"
+            if path.exists():
+                continue
+            prompt = PROMPT.format(question=cell["question"], blob=cell["blob"])
+            run = run_model(args.opencode, workspace, model, prompt, args.timeout)
+            result = {
+                "schema": "lci.comprehension.cell.v1", "cell_key": key,
+                "tool": cell["tool"], "variant": cell["variant"],
+                "model": model, "repetition": repetition,
+                "production_faithful": cell["production_faithful"], **run,
+            }
+            if run["status"] == "answered":
+                try:
+                    extracted = parse_answers(run["answer"])
+                    result["extracted"] = extracted
+                    result["score"] = grade(extracted, cell["expected"])
+                except (json.JSONDecodeError, ValueError) as exc:
+                    result["status"] = "malformed_answer"
+                    result["score"] = None
+                    result["parse_error"] = str(exc)
+            else:
+                result["score"] = None
+            write_atomic(path, result)
+    finally:
+        shutil.rmtree(workspace)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

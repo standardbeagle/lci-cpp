@@ -1,0 +1,5 @@
+{
+  "expected": ["a.go:10", "b.go:20", "c.go:30", "d.go:40", "e.go:50", "f.go:60"],
+  "annotated_answer": "{\"answers\":[\"a.go:10\",\"b.go:20\",\"c.go:30\",\"d.go:40\",\"e.go:50\",\"f.go:60\"]}",
+  "flat_weak_answer": "{\"answers\":[\"a.go:10\",\"b.go:20\",\"c.go:30\",\"d.go:40\",\"e.go:50\",\"f.go:60\",\"invented.go:610\",\"invented.go:653\"]}"
+}
