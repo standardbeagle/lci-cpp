@@ -351,20 +351,26 @@ class RealTaskBankTest(unittest.TestCase):
         for count, expected_problem in ((29, True), (30, False), (50, False), (51, True)):
             with self.subTest(count=count):
                 problems = self._composition_problems(count)
-                has_size_problem = any("must contain 30-50 tasks" in p for p in problems)
-                self.assertEqual(has_size_problem, expected_problem)
+                expected = (
+                    [f"bank must contain 30-50 tasks; got {count}"]
+                    if expected_problem else []
+                )
+                self.assertEqual(problems, expected)
 
     def test_bank_imbalance_is_rejected_below_thirty_tasks(self):
         problems = self._composition_problems(29, majority=True)
-        self.assertTrue(any("balance limit exceeded" in p for p in problems))
+        self.assertEqual(problems, [
+            "bank must contain 30-50 tasks; got 29",
+            "bank balance limit exceeded: no category or verdict may be a majority",
+        ])
 
     def test_each_missing_corpus_is_rejected_hermetically(self):
         for missing in sorted(vet.EXPECTED_CORPORA):
             with self.subTest(missing=missing):
                 problems = self._composition_problems(30, missing_corpus=missing)
                 covered = sorted(vet.EXPECTED_CORPORA - {missing})
-                self.assertIn(
-                    f"bank must cover every corpus; got {covered}", problems
+                self.assertEqual(
+                    problems, [f"bank must cover every corpus; got {covered}"]
                 )
 
     def test_each_missing_category_is_rejected_hermetically(self):
@@ -372,23 +378,21 @@ class RealTaskBankTest(unittest.TestCase):
             with self.subTest(missing=missing):
                 problems = self._composition_problems(30, missing_category=missing)
                 covered = sorted(vet.EXPECTED_CATEGORIES - {missing})
-                self.assertIn(
-                    f"bank must cover every category; got {covered}", problems
+                self.assertEqual(
+                    problems, [f"bank must cover every category; got {covered}"]
                 )
 
     def test_category_majority_is_rejected_hermetically(self):
         problems = self._composition_problems(30, category_majority=True)
-        self.assertIn(
-            "bank balance limit exceeded: no category or verdict may be a majority",
-            problems,
-        )
+        self.assertEqual(problems, [
+            "bank balance limit exceeded: no category or verdict may be a majority"
+        ])
 
     def test_verdict_majority_is_rejected_hermetically(self):
         problems = self._composition_problems(30, verdict_majority=True)
-        self.assertIn(
-            "bank balance limit exceeded: no category or verdict may be a majority",
-            problems,
-        )
+        self.assertEqual(problems, [
+            "bank balance limit exceeded: no category or verdict may be a majority"
+        ])
 
     def _composition_problems(
         self,
@@ -412,21 +416,60 @@ class RealTaskBankTest(unittest.TestCase):
                 categories.remove(missing_category)
             template_root = os.path.join(root, "template")
             template = Fixture(template_root).task
+            corpus_specs = vet.load_corpora()
             for index in range(count):
                 task = copy.deepcopy(template)
                 task["id"] = f"task-{index}"
                 task["corpus"] = corpora[index % len(corpora)]
-                task["author"]["category"] = (
+                task["manifest_ref"]["corpus_id"] = task["corpus"]
+                task["manifest_ref"]["source_commit"] = corpus_specs[
+                    task["corpus"]
+                ]["pinned_commit"]
+                category = (
                     categories[0]
                     if category_majority and index < count // 2 + 1
                     else categories[index % len(categories)]
                 )
-                task["author"]["verdict"] = (
+                verdict = (
                     "true"
                     if majority or (verdict_majority and index < count // 2 + 1)
                     else ["true", "false", "unsupported"][index % 3]
                 )
+                task["author"]["category"] = category
+                task["author"]["verdict"] = verdict
+                for field in (
+                    "falsification_evidence", "search_boundary",
+                    "abstraction_boundary",
+                ):
+                    task["author"].pop(field, None)
+                if verdict in {"false", "unsupported"}:
+                    task["author"]["falsification_evidence"] = (
+                        "The bounded evidence does not establish the claim."
+                    )
+                    task["author"]["search_boundary"] = (
+                        "The synthetic fixture evidence was searched."
+                    )
+                if category == "wrong-layer":
+                    task["author"]["abstraction_boundary"] = (
+                        "The behavior belongs to a different layer."
+                    )
                 _write(os.path.join(tasks, f"task-{index}.json"), task)
+                for annotator in task["adjudication"]["annotators"]:
+                    _write(
+                        os.path.join(
+                            annotations, f"task-{index}.{annotator}.json"
+                        ),
+                        {
+                            "schema": "exploration_annotation_v1",
+                            "task_id": task["id"],
+                            "annotator": annotator,
+                            "verdict": verdict,
+                            "evidence": copy.deepcopy(task["evidence"]),
+                            "anchor_classification": copy.deepcopy(
+                                task["author"]["anchor_classification"]
+                            ),
+                        },
+                    )
             return vet.validate_bank(
                 tasks_dir=tasks, annotations_dir=annotations, require_live=False
             )[0]
