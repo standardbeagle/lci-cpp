@@ -1,0 +1,122 @@
+{
+  "schema": "lci.comprehension.format-variants.v1",
+  "surface_manifest": "../surface/tool-surface.json",
+  "capture_note": "Current blobs are normalized excerpts captured from live `lci mcp` tools/call responses at the surface manifest commit; volatile timestamps and absolute roots are omitted. Annotated blobs only rearrange facts present in the current response unless production_faithful is false.",
+  "tools": [
+    {
+      "name": "browse_file",
+      "answer": ["Execute", "Start"],
+      "variants": [
+        {"id": "current", "production_faithful": true, "text": "{\"file\":{\"file_id\":254,\"language\":\"go\",\"path\":\"pocketbase.go\"},\"symbols\":[{\"line\":166,\"name\":\"Start\",\"signature\":\"func (pb *PocketBase) Start() error\",\"type\":\"method\"},{\"line\":179,\"name\":\"Execute\",\"signature\":\"func (pb *PocketBase) Execute() error\",\"type\":\"method\"}],\"total\":19}"},
+        {"id": "annotated", "production_faithful": true, "text": "FILE pocketbase.go [go]\nEXPORTED METHODS (2 relevant; 19 symbols total)\n- Start — kind=method receiver=PocketBase definition=pocketbase.go:166 signature=func (pb *PocketBase) Start() error\n- Execute — kind=method receiver=PocketBase definition=pocketbase.go:179 signature=func (pb *PocketBase) Execute() error"}
+      ]
+    },
+    {
+      "name": "code_insight",
+      "answer": ["447"],
+      "variants": [
+        {"id": "current", "production_faithful": true, "text": "LCF/1.0\nmode=overview\ntier=1\n---\n== SUMMARY ==\nfiles=757 symbols=15363 dirs=75 depth=6\nlangs: go=447 javascript=166 typescript=1"},
+        {"id": "annotated", "production_faithful": true, "text": "REPOSITORY SUMMARY\nTOTAL files=757 symbols=15363\nLANGUAGE COUNTS (true counts)\n- go: 447 files\n- javascript: 166 files\n- typescript: 1 file"}
+      ]
+    },
+    {
+      "name": "context",
+      "answer": ["Start starts the application", "func (pb *PocketBase) Start() error"],
+      "variants": [
+        {"id": "current", "production_faithful": false, "boundary_note": "The live save response records only the requested range, not its source text; it cannot answer the comprehension question by itself.", "text": "{\"file_count\":1,\"ref_count\":1,\"range\":{\"file\":\"pocketbase.go\",\"start\":160,\"end\":181},\"total_lines\":22}"},
+        {"id": "annotated", "production_faithful": false, "boundary_note": "Idealized hydration output; requires a subsequent load operation.", "text": "HYDRATED CONTEXT [1 file, 22 lines]\npocketbase.go:166 definition kind=method receiver=PocketBase\n// Start starts the application\nfunc (pb *PocketBase) Start() error"}
+      ]
+    },
+    {
+      "name": "debug_info",
+      "answer": ["pocketbase.go"],
+      "variants": [
+        {"id": "current", "production_faithful": true, "text": "{\"file_info\":{\"file_id\":254,\"file_path\":\"pocketbase.go\",\"language\":\"go\",\"symbol_count\":37},\"mode\":\"files\"}"},
+        {"id": "annotated", "production_faithful": true, "text": "INDEX DEBUG — FILE\npath=pocketbase.go id=254 language=go symbols=37\nRESULT: PocketBase.Start is indexed from pocketbase.go"}
+      ]
+    },
+    {
+      "name": "find_files",
+      "answer": ["forms/record_upsert.go", "forms/record_upsert_test.go"],
+      "variants": [
+        {"id": "current", "production_faithful": true, "text": "{\"pattern\":\"record_upsert\",\"results\":[{\"match_type\":\"exact_filename_noext\",\"path\":\"forms/record_upsert.go\",\"score\":0.93},{\"match_type\":\"substring\",\"path\":\"forms/record_upsert_test.go\",\"score\":0.7555555556}],\"total_matches\":2}"},
+        {"id": "annotated", "production_faithful": true, "text": "FILE-PATH MATCHES [true total=2]\n1. forms/record_upsert.go — exact filename match\n2. forms/record_upsert_test.go — substring match"}
+      ]
+    },
+    {
+      "name": "get_context",
+      "answer": ["func (pb *PocketBase) Start() error", "Start starts the application"],
+      "variants": [
+        {"id": "current", "production_faithful": true, "text": "{\"definition\":\"func (pb *PocketBase) Start() error\",\"file_path\":\"pocketbase.go\",\"line\":166,\"symbol_name\":\"Start\",\"symbol_type\":\"method\",\"documentation\":\"Start starts the application\"}"},
+        {"id": "annotated", "production_faithful": true, "text": "SYMBOL CONTEXT [1 true match]\nStart — kind=method receiver=PocketBase definition=pocketbase.go:166\nDocumentation: Start starts the application\nSignature: func (pb *PocketBase) Start() error"}
+      ]
+    },
+    {
+      "name": "git_analysis",
+      "answer": ["d438c6a96a0252ff9df62c1cfe193480ed9ff15d"],
+      "variants": [
+        {"id": "current", "production_faithful": false, "boundary_note": "The live analysis response reports change-analysis refs, not the checked-out commit requested by the question.", "text": "{\"metadata\":{\"scope\":\"commit\",\"target_ref\":\"HEAD\"},\"summary\":{\"files_changed\":0,\"top_recommendation\":\"No changes to analyze\"}}"},
+        {"id": "annotated", "production_faithful": false, "boundary_note": "Idealized metadata addition; current git_analysis does not emit resolved HEAD.", "text": "GIT ANALYSIS\nscope=commit target=HEAD\nresolved_commit=d438c6a96a0252ff9df62c1cfe193480ed9ff15d\nfiles_changed=0"}
+      ]
+    },
+    {
+      "name": "index_stats",
+      "answer": ["ready"],
+      "control": true,
+      "variants": [
+        {"id": "current", "production_faithful": true, "text": "{\"file_count\":757,\"reference_count\":145006,\"server_ready\":true,\"status\":\"ready\",\"symbol_count\":15363}"},
+        {"id": "annotated", "production_faithful": true, "text": "INDEX STATUS: ready\nserver_ready=true\nfiles=757 symbols=15363 references=145006"}
+      ]
+    },
+    {
+      "name": "info",
+      "answer": ["searches indexed source text"],
+      "control": true,
+      "variants": [
+        {"id": "current", "production_faithful": true, "text": "{\"name\":\"search\",\"description\":\"Sub-millisecond semantic code search with multi-layer matching. It searches indexed source text.\"}"},
+        {"id": "annotated", "production_faithful": true, "text": "TOOL: search\nPURPOSE: searches indexed source text\nDESCRIPTION: Sub-millisecond semantic code search with multi-layer matching."}
+      ]
+    },
+    {
+      "name": "inspect_symbol",
+      "answer": ["pocketbase.go:166", "func (pb *PocketBase) Start() error"],
+      "variants": [
+        {"id": "current", "production_faithful": true, "text": "{\"count\":1,\"symbols\":[{\"file\":\"pocketbase.go\",\"line\":166,\"name\":\"Start\",\"signature\":\"func (pb *PocketBase) Start() error\",\"type\":\"method\"}]}"},
+        {"id": "annotated", "production_faithful": true, "text": "INSPECT SYMBOL [1 true match]\nStart — kind=method receiver=PocketBase\nDEFINITION: pocketbase.go:166\nSIGNATURE: func (pb *PocketBase) Start() error"}
+      ]
+    },
+    {
+      "name": "list_symbols",
+      "answer": ["Execute", "Start"],
+      "variants": [
+        {"id": "current", "production_faithful": true, "text": "{\"showing\":3,\"symbols\":[{\"name\":\"Execute\",\"file\":\"pocketbase.go\",\"line\":179,\"type\":\"method\"},{\"name\":\"Start\",\"file\":\"pocketbase.go\",\"line\":166,\"type\":\"method\"},{\"name\":\"Write\",\"file\":\"pocketbase.go\",\"line\":326,\"type\":\"method\"}],\"total\":3}"},
+        {"id": "annotated", "production_faithful": true, "text": "EXPORTED METHODS IN pocketbase.go [3 true matches]\n- Execute — receiver=PocketBase definition=line 179\n- Start — receiver=PocketBase definition=line 166\n- Write — receiver=coloredWriter definition=line 326"}
+      ]
+    },
+    {
+      "name": "search",
+      "answer": ["examples/base/main.go:119", "pocketbase.go:166"],
+      "variants": [
+        {"id": "current", "production_faithful": false, "boundary_note": "Live text search returns the call site but not the method definition for this query.", "text": "{\"match\":\"app.Start()\",\"results\":[{\"file\":\"examples/base/main.go\",\"hits\":[{\"line\":119,\"sym\":\"main\",\"text\":\"if err := app.Start(); err != nil {\",\"type\":\"function\"}]}],\"total_matches\":2}"},
+        {"id": "annotated", "production_faithful": false, "boundary_note": "Definition tag is idealized; plain search does not resolve the call target.", "text": "TRUE TEXT MATCHES [2]\nCALL SITE examples/base/main.go:119 — if err := app.Start(); err != nil {\nPOSSIBLE DEFINITION pocketbase.go:166 — func (pb *PocketBase) Start() error"}
+      ]
+    },
+    {
+      "name": "semantic_annotations",
+      "answer": [],
+      "control": true,
+      "variants": [
+        {"id": "current", "production_faithful": true, "text": "{\"annotations\":[],\"total_count\":0}"},
+        {"id": "annotated", "production_faithful": true, "text": "SEMANTIC ANNOTATIONS\ntrue total=0\nNo @lci annotations matched."}
+      ]
+    },
+    {
+      "name": "side_effects",
+      "answer": ["Execute"],
+      "variants": [
+        {"id": "current", "production_faithful": true, "text": "{\"mode\":\"symbol\",\"results\":[{\"file_path\":\"pocketbase.go\",\"is_pure\":false,\"line\":166,\"symbol_name\":\"Start\",\"direct_callee\":\"Execute\"}],\"total_count\":1}"},
+        {"id": "annotated", "production_faithful": true, "text": "SIDE EFFECTS [1 symbol]\nStart — kind=method receiver=PocketBase definition=pocketbase.go:166 purity=impure\nDIRECT CALL: Execute (method)"}
+      ]
+    }
+  ]
+}
