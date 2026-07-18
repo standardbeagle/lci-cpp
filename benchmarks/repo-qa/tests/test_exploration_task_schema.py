@@ -358,7 +358,47 @@ class RealTaskBankTest(unittest.TestCase):
         problems = self._composition_problems(29, majority=True)
         self.assertTrue(any("balance limit exceeded" in p for p in problems))
 
-    def _composition_problems(self, count, majority=False):
+    def test_each_missing_corpus_is_rejected_hermetically(self):
+        for missing in sorted(vet.EXPECTED_CORPORA):
+            with self.subTest(missing=missing):
+                problems = self._composition_problems(30, missing_corpus=missing)
+                covered = sorted(vet.EXPECTED_CORPORA - {missing})
+                self.assertIn(
+                    f"bank must cover every corpus; got {covered}", problems
+                )
+
+    def test_each_missing_category_is_rejected_hermetically(self):
+        for missing in sorted(vet.EXPECTED_CATEGORIES):
+            with self.subTest(missing=missing):
+                problems = self._composition_problems(30, missing_category=missing)
+                covered = sorted(vet.EXPECTED_CATEGORIES - {missing})
+                self.assertIn(
+                    f"bank must cover every category; got {covered}", problems
+                )
+
+    def test_category_majority_is_rejected_hermetically(self):
+        problems = self._composition_problems(30, category_majority=True)
+        self.assertIn(
+            "bank balance limit exceeded: no category or verdict may be a majority",
+            problems,
+        )
+
+    def test_verdict_majority_is_rejected_hermetically(self):
+        problems = self._composition_problems(30, verdict_majority=True)
+        self.assertIn(
+            "bank balance limit exceeded: no category or verdict may be a majority",
+            problems,
+        )
+
+    def _composition_problems(
+        self,
+        count,
+        majority=False,
+        missing_corpus=None,
+        missing_category=None,
+        category_majority=False,
+        verdict_majority=False,
+    ):
         with tempfile.TemporaryDirectory() as root:
             tasks = os.path.join(root, "tasks")
             annotations = os.path.join(root, "annotations")
@@ -366,14 +406,26 @@ class RealTaskBankTest(unittest.TestCase):
             os.makedirs(annotations)
             corpora = sorted(vet.EXPECTED_CORPORA)
             categories = sorted(vet.EXPECTED_CATEGORIES)
+            if missing_corpus is not None:
+                corpora.remove(missing_corpus)
+            if missing_category is not None:
+                categories.remove(missing_category)
             template_root = os.path.join(root, "template")
             template = Fixture(template_root).task
             for index in range(count):
                 task = copy.deepcopy(template)
                 task["id"] = f"task-{index}"
                 task["corpus"] = corpora[index % len(corpora)]
-                task["author"]["category"] = categories[index % len(categories)]
-                task["author"]["verdict"] = "true" if majority else ["true", "false", "unsupported"][index % 3]
+                task["author"]["category"] = (
+                    categories[0]
+                    if category_majority and index < count // 2 + 1
+                    else categories[index % len(categories)]
+                )
+                task["author"]["verdict"] = (
+                    "true"
+                    if majority or (verdict_majority and index < count // 2 + 1)
+                    else ["true", "false", "unsupported"][index % 3]
+                )
                 _write(os.path.join(tasks, f"task-{index}.json"), task)
             return vet.validate_bank(
                 tasks_dir=tasks, annotations_dir=annotations, require_live=False
