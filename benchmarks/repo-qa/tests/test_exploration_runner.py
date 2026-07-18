@@ -153,11 +153,15 @@ class ClaimValidationModeTest(unittest.TestCase):
             )
             left, right = (adapters[arm].calls[0] for arm in
                            (toolsets.TREATMENT, toolsets.BASELINE))
-            for field in ("model", "system_prompt", "timeout_seconds",
-                          "checkout_dir", "prompt"):
-                self.assertEqual(getattr(left, field), getattr(right, field), field)
-            self.assertNotEqual(left.allowed_tools, right.allowed_tools)
-            self.assertNotEqual(left.tool_instructions, right.tool_instructions)
+            for field in left.__dataclass_fields__:
+                if field == "allowed_tools":
+                    self.assertNotEqual(getattr(left, field), getattr(right, field))
+                else:
+                    self.assertEqual(getattr(left, field), getattr(right, field), field)
+            self.assertEqual(
+                left.tool_instructions,
+                toolsets.CLAIM_VALIDATION_INSTRUCTIONS,
+            )
             self.assertIn('"verdict":"true|false|unsupported"', left.prompt)
 
     def test_structured_answer_and_sealed_record_metadata(self):

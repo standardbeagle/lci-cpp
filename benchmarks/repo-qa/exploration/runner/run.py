@@ -155,7 +155,14 @@ def run_task(task, arm, adapter, base, *, corpus_root, records_path, work_root,
             '[{"path":"relative/file","line":1}],"rationale":"concise explanation"}. '
             "Cite only files in this checkout."
         )
-    request = toolsets.build_request(base, arm, checkout_dir, prompt)
+    shared_instructions = (
+        toolsets.CLAIM_VALIDATION_INSTRUCTIONS
+        if mode == CLAIM_VALIDATION_MODE else None
+    )
+    request = toolsets.build_request(
+        base, arm, checkout_dir, prompt,
+        tool_instructions=shared_instructions,
+    )
     started = _now()
     result = adapter.run(request)
     ended = _now()

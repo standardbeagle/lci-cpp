@@ -2,8 +2,9 @@
 
 One interface, `AgentAdapter.run(AgentRequest) -> AgentResult`, backs BOTH arms
 and BOTH the unit tests and the live smoke command. The request carries the
-whole configuration; the arms differ only in `allowed_tools` and
-`tool_instructions` (see `runner.toolsets`). Because the interface is injected,
+whole configuration. Claim-validation arms differ only in `allowed_tools`;
+legacy exploration also varies `tool_instructions` (see `runner.toolsets`).
+Because the interface is injected,
 unit tests substitute `FakeAgent` (a canned transcript) and never touch a
 provider, while the guarded smoke path uses `ClaudeCliAdapter`.
 """
@@ -26,8 +27,7 @@ class ToolCall:
 
 @dataclass(frozen=True)
 class AgentRequest:
-    """Everything an adapter needs. Shared fields are byte-identical across arms;
-    only `allowed_tools` + `tool_instructions` vary."""
+    """Everything an adapter needs for one arm of a paired run."""
 
     model: str
     system_prompt: str

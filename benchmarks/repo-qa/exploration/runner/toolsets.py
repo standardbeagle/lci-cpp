@@ -1,8 +1,9 @@
-"""Arm definitions: the two allowlists and the arm-specific tool instructions.
+"""Arm definitions: allowlists and mode-appropriate tool instructions.
 
 The experiment isolates ONE variable. Both arms get the same model, system
-prompt, timeout, and clean checkout; they differ only in which tools are
-exposed and a minimal instruction telling the agent how to navigate with them:
+prompt, timeout, and clean checkout. Claim validation differs only in which
+tools are exposed. Legacy exploration also uses an arm-specific instruction
+that tells the agent how to navigate with its tool surface:
 
   * TREATMENT  -> LCI MCP semantic exploration tools + Read.
   * BASELINE   -> lexical Grep, file-discovery Glob, and Read only.
@@ -45,6 +46,10 @@ BASELINE_INSTRUCTIONS = (
     "You have no semantic code-intelligence tools. Do not guess from memory; ground "
     "every claim in a location you found in this checkout."
 )
+CLAIM_VALIDATION_INSTRUCTIONS = (
+    "Investigate the claim using only the tools available to you. Do not guess "
+    "from memory; ground every claim in a location you found in this checkout."
+)
 
 _ARMS = {
     TREATMENT: (TREATMENT_TOOLS, TREATMENT_INSTRUCTIONS),
@@ -56,12 +61,13 @@ def arm_allowlist(arm):
     return _ARMS[arm][0]
 
 
-def build_request(base, arm, checkout_dir, prompt):
-    """Assemble the arm's request from the SHARED base config. Only the toolset
-    and the tool instructions vary between arms; everything else is identical."""
+def build_request(base, arm, checkout_dir, prompt, *, tool_instructions=None):
+    """Assemble a request, optionally overriding legacy arm instructions."""
     if arm not in _ARMS:
         raise ValueError(f"unknown arm {arm!r}; have {sorted(_ARMS)}")
-    allowed_tools, instructions = _ARMS[arm]
+    allowed_tools, arm_instructions = _ARMS[arm]
+    instructions = (arm_instructions if tool_instructions is None
+                    else tool_instructions)
     return AgentRequest(
         model=base.model,
         system_prompt=base.system_prompt,
