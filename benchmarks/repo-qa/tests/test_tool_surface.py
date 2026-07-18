@@ -27,6 +27,9 @@ class ToolSurfaceTest(unittest.TestCase):
             self.assertTrue(tool["question"])
             self.assertTrue(tool["oracle_command"])
             self.assertIsInstance(tool["answer"], list)
+            self.assertIn("oracle_output", tool)
+            for answer in tool["answer"]:
+                self.assertIn(answer, tool["oracle_output"])
 
     def test_manifest_is_canonical_and_byte_stable(self):
         self.assertEqual(MANIFEST.read_text(), surface.canonical_json(self.manifest))
@@ -38,11 +41,16 @@ class ToolSurfaceTest(unittest.TestCase):
     def test_independent_oracle_discriminates_a_wrong_answer(self):
         case = next(t for t in self.manifest["tools"] if t["name"] == "search")
         deliberately_wrong = ["examples/base/main.go:610", "pocketbase.go:653"]
-        self.assertNotEqual(set(case["answer"]), set(deliberately_wrong))
+        for wrong in deliberately_wrong:
+            self.assertNotIn(wrong, case["oracle_output"])
         self.assertEqual(
             set(case["answer"]),
             {"examples/base/main.go:119", "pocketbase.go:166"},
         )
+
+    def test_oracle_execution_fails_closed(self):
+        with self.assertRaises(RuntimeError):
+            surface.run_oracle("printf partial; exit 7", ROOT)
 
 
 if __name__ == "__main__":

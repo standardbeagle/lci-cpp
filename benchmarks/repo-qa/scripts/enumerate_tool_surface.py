@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -23,7 +24,7 @@ CASES = {
     "context": {
         "question": "What source range contains PocketBase.Start and its adjacent documentation?",
         "oracle_command": "sed -n '160,181p' pocketbase.go",
-        "answer": ["pocketbase.go:160-181"],
+        "answer": ["Start starts the application", "func (pb *PocketBase) Start() error"],
     },
     "debug_info": {
         "question": "Which file declares PocketBase.Start?",
@@ -146,12 +147,20 @@ def build_manifest(tools: list[dict], corpus: Path) -> dict:
     entries = []
     for name in sorted(by_name):
         live = by_name[name]
+        case = CASES[name]
+        oracle_output = run_oracle(case["oracle_command"], corpus)
+        missing_answers = [answer for answer in case["answer"] if answer not in oracle_output]
+        if missing_answers:
+            raise ValueError(
+                f"oracle for {name} does not support answers: {missing_answers}"
+            )
         entries.append({
             "name": name,
             "description": live.get("description", ""),
             "input_schema": live.get("inputSchema"),
             "output_schema": live.get("outputSchema"),
-            **CASES[name],
+            **case,
+            "oracle_output": oracle_output,
         })
     return {
         "schema": "lci.comprehension.tool-surface.v1",
@@ -162,6 +171,23 @@ def build_manifest(tools: list[dict], corpus: Path) -> dict:
         "tool_count": len(entries),
         "tools": entries,
     }
+
+
+def run_oracle(command: str, corpus: Path) -> str:
+    """Execute one curated independent oracle, failing closed on any error."""
+    env = os.environ.copy()
+    env["GOCACHE"] = "/tmp/lci-comprehension-gocache"
+    result = subprocess.run(
+        ["bash", "-lc", command], cwd=corpus.resolve(), env=env,
+        text=True, capture_output=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"oracle failed ({result.returncode}): {command}\n{result.stderr.strip()}"
+        )
+    root = str(corpus.resolve())
+    normalized = result.stdout.replace(root + "/", "").replace(root, ".")
+    return normalized.rstrip("\n")
 
 
 def canonical_json(value: dict) -> str:

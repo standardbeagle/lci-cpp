@@ -59,6 +59,7 @@
       },
       "name": "browse_file",
       "oracle_command": "rg -n '^func \\(pb \\*PocketBase\\) [A-Z]' pocketbase.go",
+      "oracle_output": "166:func (pb *PocketBase) Start() error {\n179:func (pb *PocketBase) Execute() error {",
       "output_schema": null,
       "question": "What exported methods are declared in pocketbase.go?"
     },
@@ -112,12 +113,14 @@
       },
       "name": "code_insight",
       "oracle_command": "find . -type f -name '*.go' -print | LC_ALL=C sort | wc -l",
+      "oracle_output": "447",
       "output_schema": null,
       "question": "How many Go source files are in the repository?"
     },
     {
       "answer": [
-        "pocketbase.go:160-181"
+        "Start starts the application",
+        "func (pb *PocketBase) Start() error"
       ],
       "description": "🎯 Capture and hydrate code context manifests for efficient agent handoff. Save compact symbol references (2-5KB manifest), load to get instant full context with source code + call graphs. Eliminates redundant exploration across agent sessions. Operations: 'save' to create manifest, 'load' to hydrate. See 'info context'.",
       "input_schema": {
@@ -229,6 +232,7 @@
       },
       "name": "context",
       "oracle_command": "sed -n '160,181p' pocketbase.go",
+      "oracle_output": "\n\treturn pb\n}\n\n// Start starts the application, aka. registers the default system\n// commands (serve, superuser, version) and executes pb.RootCmd.\nfunc (pb *PocketBase) Start() error {\n\t// register system commands\n\tpb.RootCmd.AddCommand(cmd.NewSuperuserCommand(pb))\n\tpb.RootCmd.AddCommand(cmd.NewServeCommand(pb, !pb.hideStartBanner))\n\n\treturn pb.Execute()\n}\n\n// Execute initializes the application (if not already) and executes\n// the pb.RootCmd with graceful shutdown support.\n//\n// This method differs from pb.Start() by not registering the default\n// system commands!\nfunc (pb *PocketBase) Execute() error {\n\tif !pb.skipBootstrap() {\n\t\tif err := pb.Bootstrap(); err != nil {",
       "output_schema": null,
       "question": "What source range contains PocketBase.Start and its adjacent documentation?"
     },
@@ -264,6 +268,7 @@
       },
       "name": "debug_info",
       "oracle_command": "rg -l '^func \\(pb \\*PocketBase\\) Start' --glob '*.go'",
+      "oracle_output": "pocketbase.go",
       "output_schema": null,
       "question": "Which file declares PocketBase.Start?"
     },
@@ -311,6 +316,7 @@
       },
       "name": "find_files",
       "oracle_command": "find . -type f -name '*record_upsert*.go' -printf '%P\\n' | LC_ALL=C sort",
+      "oracle_output": "forms/record_upsert.go\nforms/record_upsert_test.go",
       "output_schema": null,
       "question": "Which Go files have record_upsert in their path?"
     },
@@ -405,6 +411,7 @@
       },
       "name": "get_context",
       "oracle_command": "gopls definition pocketbase.go:166:24",
+      "oracle_output": "pocketbase.go:166:23-28: defined here as func (pb *PocketBase) Start() error\nStart starts the application, aka. registers the default system\ncommands (serve, superuser, version) and executes pb.RootCmd.",
       "output_schema": null,
       "question": "What is the definition and documentation of PocketBase.Start?"
     },
@@ -447,6 +454,7 @@
       },
       "name": "git_analysis",
       "oracle_command": "git rev-parse HEAD",
+      "oracle_output": "d438c6a96a0252ff9df62c1cfe193480ed9ff15d",
       "output_schema": null,
       "question": "What commit is checked out for this corpus?"
     },
@@ -479,6 +487,7 @@
       },
       "name": "index_stats",
       "oracle_command": "find . -type f -name '*.go' -print -quit | grep -q . && printf ready",
+      "oracle_output": "ready",
       "output_schema": null,
       "question": "Is the index ready to answer queries?"
     },
@@ -499,6 +508,7 @@
       },
       "name": "info",
       "oracle_command": "printf '%s\\n' 'searches indexed source text'",
+      "oracle_output": "searches indexed source text",
       "output_schema": null,
       "question": "What is the purpose of the search operation?"
     },
@@ -539,6 +549,7 @@
       },
       "name": "inspect_symbol",
       "oracle_command": "gopls definition pocketbase.go:166:24",
+      "oracle_output": "pocketbase.go:166:23-28: defined here as func (pb *PocketBase) Start() error\nStart starts the application, aka. registers the default system\ncommands (serve, superuser, version) and executes pb.RootCmd.",
       "output_schema": null,
       "question": "Where is PocketBase.Start defined?"
     },
@@ -614,6 +625,7 @@
       },
       "name": "list_symbols",
       "oracle_command": "rg -o '^func \\(pb \\*PocketBase\\) [A-Z][A-Za-z0-9_]+' pocketbase.go | awk '{print $4}' | LC_ALL=C sort",
+      "oracle_output": "Execute\nStart",
       "output_schema": null,
       "question": "Which exported PocketBase methods are declared in pocketbase.go?"
     },
@@ -684,6 +696,7 @@
       },
       "name": "search",
       "oracle_command": "gopls references -d examples/base/main.go:119:16",
+      "oracle_output": "examples/base/main.go:119:16-21\npocketbase.go:166:23-28",
       "output_schema": null,
       "question": "Where is PocketBase.Start called in non-test Go source?"
     },
@@ -722,6 +735,7 @@
       },
       "name": "semantic_annotations",
       "oracle_command": "rg -n '@lci:' --glob '*.go' . || true",
+      "oracle_output": "",
       "output_schema": null,
       "question": "Which Go source lines contain an @lci semantic annotation?"
     },
@@ -777,6 +791,7 @@
       },
       "name": "side_effects",
       "oracle_command": "sed -n '166,175p' pocketbase.go | rg -o 'pb\\.[A-Za-z0-9_]+\\(' | sed -E 's/^pb\\.//; s/\\($//' | LC_ALL=C sort -u",
+      "oracle_output": "Execute",
       "output_schema": null,
       "question": "Which method does PocketBase.Start directly invoke to execute the application?"
     }
