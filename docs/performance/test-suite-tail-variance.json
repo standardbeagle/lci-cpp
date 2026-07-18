@@ -1,0 +1,44 @@
+{
+  "task": "S4a",
+  "commit_measured": "1330bca900b50668a96c03e81d79803d12f8b90e",
+  "environment": {
+    "preset": "release",
+    "build_type": "Release",
+    "compiler": "GNU 13.3.0 /usr/bin/c++",
+    "cpu": "Intel Core i7-8750H, 12 logical CPUs",
+    "corpus": "repository real_projects checkout",
+    "cache": "warm build and filesystem cache; no corpus changes"
+  },
+  "commands": {
+    "entry": "ctest --test-dir build/release --output-on-failure -R '^<entry>$' -j 1",
+    "corrected_entry": "ctest --test-dir build/release --output-on-failure -R '^<entry>$' -j 4",
+    "release_gate": "cmake --build build/release --parallel && ctest --test-dir build/release --output-on-failure -j 4"
+  },
+  "before": {
+    "lci_benchmarks_wall_s": [102.80, 128.22, 120.74, 105.59, 111.66],
+    "lci_real_project_suite_wall_s": [27.88, 29.09, 30.76, 27.55, 27.27]
+  },
+  "after": {
+    "lci_benchmarks_wall_s": [91.48, 95.16, 146.96, 91.27, 104.23],
+    "lci_real_project_suite_wall_s": [36.86, 49.20, 39.80, 47.82, 37.15],
+    "max_min_ratio": {"lci_benchmarks": 1.607, "lci_real_project_suite": 1.335}
+  },
+  "measured_cause": {
+    "summary": "CTest allowed lci_benchmarks to overlap other work despite its internally parallel, memory-heavy MasterIndex workload.",
+    "observations": [
+      "lci_benchmarks used 250-298% CPU and 2.12-2.18 GiB RSS.",
+      "lci_real_project_suite used 252-317% CPU and 2.54-2.61 GiB RSS.",
+      "Higher load coincided with reduced CPU efficiency and longer wall time.",
+      "Generated CTest metadata had RUN_SERIAL for lci_real_project_suite but not lci_benchmarks."
+    ],
+    "fix": "Declare lci_benchmarks RUN_SERIAL and enforce both bundled-tail declarations with a regression test."
+  },
+  "release_confirmation": {
+    "status": "blocked_by_preexisting_server_processes",
+    "invalid_attempts": [
+      "Attempt 1: benchmark 124.69s, real-project 34.25s; integration timed out at 600s after socket bind failures.",
+      "Attempt 2: server tests immediately failed server.start() before tail entries; stopped as invalid."
+    ],
+    "note": "No release-budget or 180-second policy conclusion is made by this slice."
+  }
+}

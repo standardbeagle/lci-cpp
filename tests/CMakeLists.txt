@@ -219,6 +219,13 @@ set_tests_properties(lci_real_project_suite PROPERTIES
     RUN_SERIAL TRUE
 )
 
+add_test(NAME tail_bundle_isolation_contract
+    COMMAND ${CMAKE_COMMAND}
+        -DCTEST_FILE=${CMAKE_CURRENT_BINARY_DIR}/CTestTestfile.cmake
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/helpers/tail_isolation_test.cmake)
+set_tests_properties(tail_bundle_isolation_contract PROPERTIES
+    LABELS "infrastructure")
+
 endif() # NOT WIN32 AND NOT APPLE
 
 # ---------------------------------------------------------------------------
@@ -248,7 +255,12 @@ if(NOT WIN32 AND NOT APPLE)
 
     # CTest labels for benchmarks (run separately from unit tests)
     add_test(NAME lci_benchmarks COMMAND lci_benchmarks --benchmark_min_time=0.01s)
-    set_tests_properties(lci_benchmarks PROPERTIES LABELS "benchmark")
+    set_tests_properties(lci_benchmarks PROPERTIES
+        LABELS "benchmark"
+        # MasterIndex uses its own worker pool and this process peaks above
+        # 2 GiB.  Letting CTest overlap it with another bundled suite turns
+        # host contention into 2x wall-time variance.
+        RUN_SERIAL TRUE)
 endif() # NOT WIN32 AND NOT APPLE
 
 # ---------------------------------------------------------------------------
