@@ -1,0 +1,20 @@
+{
+  "schema": "lci.response-shape.manifest.v1",
+  "analysis_revision": "paired-task-v1",
+  "grading_schema": "atomic-evidence-v1",
+  "models": [
+    {"id": "opencode/deepseek-v4-flash-free", "tier": "weak"},
+    {"id": "opencode-go/glm-5.2", "tier": "strong"}
+  ],
+  "repetitions": 2,
+  "timeout_seconds": 600,
+  "arm_mapping": {"shape_17": "compact", "shape_42": "labeled"},
+  "tokenizer": "whitespace-v1",
+  "token_tolerance": {"absolute": 10, "relative": 0.10},
+  "practical_rule": {
+    "correctness_delta": 0.05,
+    "hallucination_noninferiority": 0.02,
+    "completion_noninferiority": 0.02
+  },
+  "retryable_statuses": ["provider_timeout", "provider_quota", "provider_error"]
+}

@@ -1,0 +1,41 @@
+{
+  "schema": "lci.response-shape.tasks.v1",
+  "tasks": [
+    {
+      "id": "direct-symbol", "stratum": "direct_lookup", "tool": "search", "question": "Where is WidgetFactory defined?",
+      "facts": ["result=src/widget.cc:18", "action=inspect src/widget.cc:18"],
+      "expected_answers": ["src/widget.cc:18"], "required_evidence": ["src/widget.cc:18"],
+      "arms": {"shape_17": "ok; result=src/widget.cc:18; action=inspect src/widget.cc:18", "shape_42": "status: ok\nkey_result: result=src/widget.cc:18\nevidence:\nnext_action: action=inspect src/widget.cc:18"}
+    },
+    {
+      "id": "multi-callers", "stratum": "multi_item", "tool": "incoming", "question": "List every caller of parse_item.",
+      "facts": ["result=src/a.cc:7", "result=src/b.cc:29", "action=review both callers"],
+      "expected_answers": ["src/a.cc:7", "src/b.cc:29"], "required_evidence": ["src/a.cc:7", "src/b.cc:29"],
+      "arms": {"shape_17": "ok; result=src/a.cc:7; result=src/b.cc:29; action=review both callers", "shape_42": "status: ok\nkey_result: result=src/a.cc:7; result=src/b.cc:29\nevidence:\nnext_action: action=review both callers"}
+    },
+    {
+      "id": "negative-match", "stratum": "negative_evidence", "tool": "search", "question": "Are there calls to removed_api?",
+      "facts": ["result=no matches", "evidence=searched src/**", "action=none"],
+      "expected_answers": ["no matches"], "required_evidence": ["searched src/**"],
+      "arms": {"shape_17": "ok; result=no matches; evidence=searched src/**; action=none", "shape_42": "status: ok\nkey_result: result=no matches\nevidence: evidence=searched src/**\nnext_action: action=none"}
+    },
+    {
+      "id": "file-lines", "stratum": "file_line", "tool": "fileblob", "question": "Give the configured timeout and its source location.",
+      "facts": ["result=timeout is 30 seconds", "evidence=config/runtime.toml:12", "action=none"],
+      "expected_answers": ["timeout is 30 seconds"], "required_evidence": ["config/runtime.toml:12"],
+      "arms": {"shape_17": "ok; result=timeout is 30 seconds; evidence=config/runtime.toml:12; action=none", "shape_42": "status: ok\nkey_result: result=timeout is 30 seconds\nevidence: evidence=config/runtime.toml:12\nnext_action: action=none"}
+    },
+    {
+      "id": "status-error", "stratum": "status", "tool": "fileblob", "question": "Why was the requested file not returned?",
+      "facts": ["status=not_found", "result=path missing", "evidence=lib/absent.cc", "action=check the path"],
+      "expected_answers": ["path missing"], "required_evidence": ["lib/absent.cc"],
+      "arms": {"shape_17": "not_found; result=path missing; evidence=lib/absent.cc; action=check the path", "shape_42": "status: not_found\nkey_result: result=path missing\nevidence: evidence=lib/absent.cc\nnext_action: action=check the path"}
+    },
+    {
+      "id": "null-explicit", "stratum": "null_control", "tool": "search", "question": "What is the result?",
+      "facts": ["result=READY", "action=none"],
+      "expected_answers": ["READY"], "required_evidence": [],
+      "arms": {"shape_17": "ok; result=READY; action=none", "shape_42": "status: ok\nkey_result: result=READY\nevidence:\nnext_action: action=none"}
+    }
+  ]
+}
