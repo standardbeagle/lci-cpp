@@ -2,7 +2,7 @@
 """Run the preregistered, canned tool-response-shape experiment."""
 from __future__ import annotations
 
-import argparse, hashlib, json, os, re, tempfile
+import argparse, hashlib, json, os, tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -78,18 +78,27 @@ def score_answer(task, answer):
     supported=_norm(task["facts"] + task["expected_answers"] + task["required_evidence"])
     claims=_norm(answer["claims"]); unsupported=sorted(claims-supported)
     tp=len(predicted&expected); ep=len(evidence&required)
+    omissions=sorted(expected-predicted)
     return {"correct": predicted==expected, "answer_precision": tp/len(predicted) if predicted else (1.0 if not expected else 0.0),
             "answer_recall": tp/len(expected) if expected else (1.0 if not predicted else 0.0),
             "evidence_precision": ep/len(evidence) if evidence else (1.0 if not required else 0.0),
             "evidence_recall": ep/len(required) if required else (1.0 if not evidence else 0.0),
-            "hallucinated": bool(unsupported), "unsupported_claim_count": len(unsupported), "unsupported_claims": unsupported}
+            "hallucinated": bool(unsupported), "unsupported_claim_count": len(unsupported), "unsupported_claims": unsupported,
+            "omission_count":len(omissions), "omissions":omissions}
 
 class FakeProvider:
     """Hermetic adapter: responses are injected; it has no corpus/provider handle."""
     def __init__(self, answers): self.answers=dict(answers); self.calls=[]
     def run(self, *, prompt, task, arm, model, timeout):
         self.calls.append((task["id"],arm,model)); value=self.answers[(task["id"],arm,model)]
-        return value if isinstance(value,dict) else {"status":"answered","answer":value,"tokens":{},"wall_seconds":0}
+        return value if isinstance(value,dict) else {"status":"answered","answer":value,"tokens":{"input":0,"output":0},"wall_seconds":0}
+
+class DeterministicModelProvider:
+    """Hermetic full-grid provider used to exercise multi-model scorecards."""
+    def run(self, *, prompt, task, arm, model, timeout):
+        del prompt, arm, model, timeout
+        answer={"answers":task["expected_answers"],"evidence":task["required_evidence"],"claims":task["expected_answers"]}
+        return {"status":"answered","answer":canonical(answer),"tokens":{"input":len(task["facts"]),"output":len(answer["answers"])+len(answer["evidence"])},"wall_seconds":0.001}
 
 def cell_identity(manifest, task, arm, model, repetition):
     prompt=PROMPT.format(question=task["question"],tool=task["tool"],response=task["arms"][arm])
@@ -135,10 +144,16 @@ def planned_grid(manifest,tasks):
                 jobs.extend((task,arm,model,rep) for arm in arm_order(task["id"],model,rep,manifest["arm_mapping"]))
     return jobs
 
+def run_grid(provider, manifest, tasks, out):
+    return [execute(provider,manifest,task,arm,model,rep,out) for task,arm,model,rep in planned_grid(manifest,tasks)]
+
 def main():
-    p=argparse.ArgumentParser(); p.add_argument("--out",type=Path,required=True); p.add_argument("--dry-run",action="store_true")
-    args=p.parse_args(); manifest,tasks=load_inputs(); jobs=planned_grid(manifest,tasks)
+    p=argparse.ArgumentParser(); p.add_argument("--out",type=Path,required=True); p.add_argument("--manifest",type=Path,default=MANIFEST); p.add_argument("--tasks",type=Path,default=TASKS); p.add_argument("--dry-run",action="store_true"); p.add_argument("--fake-provider",action="store_true")
+    args=p.parse_args(); manifest,tasks=load_inputs(args.manifest,args.tasks); jobs=planned_grid(manifest,tasks)
     if args.dry_run:
         print(json.dumps({"cells":len(jobs),"order":[[t["id"],a,m,r] for t,a,m,r in jobs]},sort_keys=True)); return 0
-    p.error("provider execution is intentionally guarded; use the provider integration explicitly")
+    if args.fake_provider:
+        records=run_grid(DeterministicModelProvider(),manifest,tasks,args.out)
+        print(json.dumps({"cells":len(records),"out":str(args.out)},sort_keys=True)); return 0
+    p.error("real provider execution is intentionally guarded; configure and invoke a provider adapter explicitly")
 if __name__=="__main__": raise SystemExit(main())

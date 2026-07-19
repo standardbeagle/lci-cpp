@@ -65,4 +65,10 @@ class ResponseShapeABTest(unittest.TestCase):
         self.assertEqual(jobs,ab.planned_grid(self.manifest,self.tasks))
         first=[x[1] for x in jobs[::2]]; self.assertEqual(set(first),{"shape_17","shape_42"})
 
+    def test_fake_multi_model_grid_is_complete(self):
+        with tempfile.TemporaryDirectory() as d:
+            records=ab.run_grid(ab.DeterministicModelProvider(),self.manifest,self.tasks,Path(d))
+            self.assertEqual(len(records),48); self.assertTrue(all(x["score"]["correct"] for x in records))
+            self.assertEqual({x["model"] for x in records},{x["id"] for x in self.manifest["models"]})
+
 if __name__=="__main__": unittest.main()
