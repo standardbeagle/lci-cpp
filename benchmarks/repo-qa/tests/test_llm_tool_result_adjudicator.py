@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import unittest
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -22,6 +23,13 @@ class LlmToolResultAdjudicatorTest(unittest.TestCase):
                  "missing_claims": [], "reason": "r", "heuristic_gap": None}
         with self.assertRaisesRegex(ValueError, "contradicts"):
             module.validate(value)
+
+    def test_checkpoint_is_valid_and_replaces_prior_prefix(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "out.json"
+            module.write_checkpoint(path, [{"cell_key": "a"}])
+            module.write_checkpoint(path, [{"cell_key": "a"}, {"cell_key": "b"}])
+            self.assertEqual(len(json.loads(path.read_text())["records"]), 2)
 
 
 if __name__ == "__main__":

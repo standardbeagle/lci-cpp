@@ -1,0 +1,17 @@
+{
+  "schema": "benchmark.audit.v1",
+  "gates": [
+    {"id":"G1","hard":true,"status":"pass","severity":"none","evidence":["Locked design 958c6ec predates all provider results; unlock 46bf75a binds it."]},
+    {"id":"G2","hard":true,"status":"pass","severity":"none","evidence":["224 preflight checks prove canonical equivalence and one-pointer treatment isolation."]},
+    {"id":"G3","hard":true,"status":"pass","severity":"none","evidence":["Opaque arm ids, cyclic position balance, alternating model order."]},
+    {"id":"G4","hard":true,"status":"pass","severity":"none","evidence":["Stateless direct continuations with no tools; expected answers absent from provider requests."]},
+    {"id":"G5","hard":true,"status":"fail","severity":"major","evidence":["Two adjudication truth constructions were rejected post-hoc; final grounded pass has six invalid and 20 unpromoted correct regression candidates."]},
+    {"id":"G6","hard":true,"status":"pass","severity":"none","evidence":["448/448 unique immutable attempts across every declared tool/scenario/model/arm/repetition."]},
+    {"id":"G7","hard":true,"status":"pass","severity":"none","evidence":["11 empty completions remain unscored; zero retries and no infrastructure failure converted to wrong."]},
+    {"id":"G8","hard":true,"status":"inconclusive","severity":"major","evidence":["Manipulation control passes, but no sufficiently repeated semantic positive control and oracle completion is unresolved."]},
+    {"id":"G9","hard":true,"status":"pass","severity":"none","evidence":["Two repetitions were preregistered as a non-selecting pilot; report makes no effect decision."]},
+    {"id":"G10","hard":true,"status":"pass","severity":"none","evidence":["Tools, scenarios, and models are not pooled for selection."]},
+    {"id":"G11","hard":true,"status":"pass","severity":"none","evidence":["Raw attempts, derived analysis, all rejected adjudication batches, and final grounded batch are preserved."]},
+    {"id":"G12","hard":true,"status":"pass","severity":"none","evidence":["No format winner or production recommendation is claimed."]}
+  ]
+}

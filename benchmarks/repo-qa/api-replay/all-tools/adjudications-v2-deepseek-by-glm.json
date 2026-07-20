@@ -1,0 +1,716 @@
+{
+  "policy": "every queued failure",
+  "promotion_policy": "LLM judgments do not change scores directly; correct misses require deterministic regression promotion and full reanalysis.",
+  "records": [
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "06a1bc59b1df8046d0eade7abe7624ca308bc783c8120946f2305fd9c8c63550",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "Include that the search operation searches indexed source text.",
+        "missing_claims": [
+          "searches indexed source text"
+        ],
+        "reason": "The candidate describes semantic code search but omits the required fact that it searches indexed source text.",
+        "supported_claims": [
+          "semantic code search"
+        ],
+        "unsupported_claims": [
+          "sub-millisecond performance",
+          "multi-layer matching"
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:fd37187ab6fa71bc86a737e62c48446cd7e34752bb94d34a2831fa1524d04d43",
+      "provider_status": "answered",
+      "raw_answer": "{\"heuristic_gap\": \"Include that the search operation searches indexed source text.\", \"missing_claims\": [\"searches indexed source text\"], \"reason\": \"The candidate describes semantic code search but omits the required fact that it searches indexed source text.\", \"supported_claims\": [\"semantic code search\"], \"unsupported_claims\": [\"sub-millisecond performance\", \"multi-layer matching\"], \"verdict\": \"incorrect\"}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "0a056beb4abcc46cd8197a97e00a5e8a868ca9b94e29447908fd8c0c6abefa86",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "Explicitly state that the search operation searches indexed source text.",
+        "missing_claims": [
+          "searches indexed source text"
+        ],
+        "reason": "The candidate describes a code search engine with various features but does not explicitly state that it searches indexed source text, which is the required atom.",
+        "supported_claims": [
+          "semantic code search",
+          "multi-layer matching",
+          "supports flags like case-insensitivity, regex, word boundaries, no-tests, and no-comments",
+          "output formats include lines, context, files, and counts"
+        ],
+        "unsupported_claims": [],
+        "verdict": "ambiguous"
+      },
+      "prompt_digest": "sha256:dbcfef67bd1d9263f3ce30466afa0567a80070d4cada1285c148b51b8221d8c2",
+      "provider_status": "answered",
+      "raw_answer": "{\"heuristic_gap\": \"Explicitly state that the search operation searches indexed source text.\", \"missing_claims\": [\"searches indexed source text\"], \"reason\": \"The candidate describes a code search engine with various features but does not explicitly state that it searches indexed source text, which is the required atom.\", \"supported_claims\": [\"semantic code search\", \"multi-layer matching\", \"supports flags like case-insensitivity, regex, word boundaries, no-tests, and no-comments\", \"output formats include lines, context, files, and counts\"], \"unsupported_claims\": [], \"verdict\": \"ambiguous\"}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "11465152c826ede235b79184b6ba5f62a9464406729c5c35e7ed5d8fa368c612",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": null,
+        "missing_claims": [
+          "PocketBase.Start directly invokes Execute"
+        ],
+        "reason": "The candidate admits it cannot determine the directly invoked method and does not state the required fact that PocketBase.Start directly invokes Execute.",
+        "supported_claims": [],
+        "unsupported_claims": [],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:2e5001a8cf9cf00af998b93d52642c742ca619b45df1dc5cb736fbde3db5d77d",
+      "provider_status": "answered",
+      "raw_answer": "{\"verdict\":\"incorrect\",\"reason\":\"The candidate admits it cannot determine the directly invoked method and does not state the required fact that PocketBase.Start directly invokes Execute.\",\"supported_claims\":[],\"unsupported_claims\":[],\"missing_claims\":[\"PocketBase.Start directly invokes Execute\"],\"heuristic_gap\":null}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "13fcc380c9885167d7c3507c3e918791595c5bbc3218408eb172a856df4e493e",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "Report the checked-out commit hash from the corpus metadata instead of inferring emptiness from a diff result.",
+        "missing_claims": [
+          "The commit d438c6a96a0252ff9df62c1cfe193480ed9ff15d is checked out."
+        ],
+        "reason": "The truth indicates a successful checkout with a specific required commit hash, but the candidate claims the repository has no commits yet and resolves to the empty tree, omitting the required fact and contradicting the truth.",
+        "supported_claims": [],
+        "unsupported_claims": [
+          "The repository has no commits yet (unborn branch / empty repository).",
+          "The base ref resolved to the empty tree 4b825dc642cb6eb9a060e54bf8d69288fbee4904."
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:6973b1e4436b69490feefcf3193d409f86b8d1f034cca60f8eb37147b871ffb9",
+      "provider_status": "answered",
+      "raw_answer": "{\"heuristic_gap\": \"Report the checked-out commit hash from the corpus metadata instead of inferring emptiness from a diff result.\", \"missing_claims\": [\"The commit d438c6a96a0252ff9df62c1cfe193480ed9ff15d is checked out.\"], \"reason\": \"The truth indicates a successful checkout with a specific required commit hash, but the candidate claims the repository has no commits yet and resolves to the empty tree, omitting the required fact and contradicting the truth.\", \"supported_claims\": [], \"unsupported_claims\": [\"The repository has no commits yet (unborn branch / empty repository).\", \"The base ref resolved to the empty tree 4b825dc642cb6eb9a060e54bf8d69288fbee4904.\"], \"verdict\": \"incorrect\"}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "151f1de71dedba0627c7c591fedbbeb0ac08a89b60c5a802d2cf9f75847f5b0d",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "Mention that search operates over indexed source text to satisfy the required atom.",
+        "missing_claims": [
+          "searches indexed source text"
+        ],
+        "reason": "Candidate describes semantic code search but omits the required fact that search operates on indexed source text.",
+        "supported_claims": [],
+        "unsupported_claims": [],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:67523edc1dfa94c4f95d9dc692521d6d57152a5fb99365140222f7be7822c259",
+      "provider_status": "answered",
+      "raw_answer": "{\"heuristic_gap\": \"Mention that search operates over indexed source text to satisfy the required atom.\", \"missing_claims\": [\"searches indexed source text\"], \"reason\": \"Candidate describes semantic code search but omits the required fact that search operates on indexed source text.\", \"supported_claims\": [], \"unsupported_claims\": [], \"verdict\": \"incorrect\"}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "1a417e7ac6386e0e36f6eec1551181890dbc23dd6783c03de32e21713ad63161",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "Mention that the search operation searches indexed source text.",
+        "missing_claims": [
+          "searches indexed source text"
+        ],
+        "reason": "Candidate omits the required fact that the search operation searches indexed source text.",
+        "supported_claims": [
+          "semantic code search",
+          "multi-layer matching"
+        ],
+        "unsupported_claims": [],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:c8f6a4a556a436fc82b6824444303dbfbab1cb4655a26a1f048c160ca5d33374",
+      "provider_status": "answered",
+      "raw_answer": "{\"supported_claims\": [\"semantic code search\", \"multi-layer matching\"], \"unsupported_claims\": [], \"missing_claims\": [\"searches indexed source text\"], \"heuristic_gap\": \"Mention that the search operation searches indexed source text.\", \"reason\": \"Candidate omits the required fact that the search operation searches indexed source text.\", \"verdict\": \"incorrect\"}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "1dfd7205a5fcaca714099f41eb30fa732fde2997cacd26c1d157d74237e26419",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "Explicitly mention that the search operation searches indexed source text to satisfy the required atom.",
+        "missing_claims": [
+          "searches indexed source text"
+        ],
+        "reason": "The candidate describes semantic code search but omits the required fact that it searches indexed source text.",
+        "supported_claims": [
+          "semantic code search"
+        ],
+        "unsupported_claims": [
+          "sub-millisecond performance",
+          "multi-layer matching"
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:c1000547094a5c4739b79b9ab15a7dc42a3f517794bd9d7db50efba40298d14f",
+      "provider_status": "answered",
+      "raw_answer": "{\"heuristic_gap\": \"Explicitly mention that the search operation searches indexed source text to satisfy the required atom.\", \"missing_claims\": [\"searches indexed source text\"], \"reason\": \"The candidate describes semantic code search but omits the required fact that it searches indexed source text.\", \"supported_claims\": [\"semantic code search\"], \"unsupported_claims\": [\"sub-millisecond performance\", \"multi-layer matching\"], \"verdict\": \"incorrect\"}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "27d01b9d5a4e0ad827b37197baf122b00d22d61fda7cbede8b52fc8cd62f1192",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": null,
+        "missing_claims": [
+          "Start starts the application"
+        ],
+        "reason": "The candidate answer omits the required documentation fact that 'Start starts the application' and incorrectly claims the method has no docstring.",
+        "supported_claims": [
+          "func (pb *PocketBase) Start() error"
+        ],
+        "unsupported_claims": [
+          "The method has no docstring"
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:2fcaf3e8629667a586545f19895bdd308c667ced02bcaa30ac498e1f712349f6",
+      "provider_status": "answered",
+      "raw_answer": "{\"heuristic_gap\": null, \"missing_claims\": [\"Start starts the application\"], \"reason\": \"The candidate answer omits the required documentation fact that 'Start starts the application' and incorrectly claims the method has no docstring.\", \"supported_claims\": [\"func (pb *PocketBase) Start() error\"], \"unsupported_claims\": [\"The method has no docstring\"], \"verdict\": \"incorrect\"}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "3505be05f70d7d2225fc3e6fc1c861b5dbbfa0098f1444eced196625e410add8",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": null,
+        "missing_claims": [
+          "func (pb *PocketBase) Start() error",
+          "Start starts the application"
+        ],
+        "reason": "The candidate does not provide the required definition or documentation for PocketBase.Start; it only explains why it cannot answer.",
+        "supported_claims": [],
+        "unsupported_claims": [
+          "The lci_context save operation returned only a manifest JSON referencing pocketbase.go:160-181"
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:f3f897e70ef15d94dbeddaffde96f22ea1d1bd1414c0851455b09b48fa3d6a82",
+      "provider_status": "answered",
+      "raw_answer": "{\"verdict\":\"incorrect\",\"reason\":\"The candidate does not provide the required definition or documentation for PocketBase.Start; it only explains why it cannot answer.\",\"supported_claims\":[],\"unsupported_claims\":[\"The lci_context save operation returned only a manifest JSON referencing pocketbase.go:160-181\"],\"missing_claims\":[\"func (pb *PocketBase) Start() error\",\"Start starts the application\"],\"heuristic_gap\":null}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "37b9c85c72f1691ee0e5b600d1061131b77f609ced89b0f835baa141ea2cea81",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": null,
+        "missing_claims": [
+          "The commit checked out is d438c6a96a0252ff9df62c1cfe193480ed9ff15d"
+        ],
+        "reason": "The candidate failed to identify the required commit SHA, instead claiming it cannot be determined.",
+        "supported_claims": [],
+        "unsupported_claims": [
+          "The commit cannot be determined from the tool output alone"
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:5b679fe2e08f57a8804d2a9840beea07c415a40670820163bdf73bd5c8adebcb",
+      "provider_status": "answered",
+      "raw_answer": "{\"heuristic_gap\": null, \"missing_claims\": [\"The commit checked out is d438c6a96a0252ff9df62c1cfe193480ed9ff15d\"], \"reason\": \"The candidate failed to identify the required commit SHA, instead claiming it cannot be determined.\", \"supported_claims\": [], \"unsupported_claims\": [\"The commit cannot be determined from the tool output alone\"], \"verdict\": \"incorrect\"}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "3a642c9b9868d84894bd4f0c761d9d463921446e5478e8b00fdb830c417c2a73",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": null,
+        "missing_claims": [],
+        "reason": "Candidate states in-memory search over indexed code, satisfying the required atom.",
+        "supported_claims": [
+          "searches indexed source text"
+        ],
+        "unsupported_claims": [],
+        "verdict": "correct"
+      },
+      "prompt_digest": "sha256:0622d54a99c232704aeebb5c823d50bd29bdea6c0049d4dc003c00605a46e36a",
+      "provider_status": "answered",
+      "raw_answer": "{\"supported_claims\": [\"searches indexed source text\"],\"unsupported_claims\": [],\"missing_claims\": [],\"heuristic_gap\": null,\"reason\": \"Candidate states in-memory search over indexed code, satisfying the required atom.\",\"verdict\": \"correct\"}",
+      "regression_candidate": {
+        "answer": "The search operation provides **sub-millisecond semantic code search with multi-layer matching** \u2014 fast, in-memory search over indexed code, returning per-file results with line numbers, symbol info, and match counts.",
+        "expected": {
+          "kind": "success",
+          "required_atoms": [
+            "searches indexed source text"
+          ]
+        },
+        "proposed_gap": null,
+        "required_outcome": "accepted"
+      }
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "5e6e9fbcb4885ba531d1d6d79c736b3785982355292b764462864567acec9e78",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "Include the documentation phrase that Start starts the application.",
+        "missing_claims": [
+          "Start starts the application"
+        ],
+        "reason": "Candidate provides the method signature and behavior but omits the required documentation atom that Start starts the application.",
+        "supported_claims": [
+          "func (pb *PocketBase) Start() error"
+        ],
+        "unsupported_claims": [],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:c62d2112628e5b145ed457f1adda3a2e3859c86e049f6f5af66d9d61a16a57b1",
+      "provider_status": "answered",
+      "raw_answer": "{\"heuristic_gap\":\"Include the documentation phrase that Start starts the application.\",\"missing_claims\":[\"Start starts the application\"],\"reason\":\"Candidate provides the method signature and behavior but omits the required documentation atom that Start starts the application.\",\"supported_claims\":[\"func (pb *PocketBase) Start() error\"],\"unsupported_claims\":[],\"verdict\":\"incorrect\"}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "5fcbfc717c973303baaf27bc6447a393a9408d759a29aabfd5785465f0546e3a",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "Ensure the high-level purpose of a function (e.g., 'starts the application') is included alongside implementation details.",
+        "missing_claims": [
+          "Start starts the application"
+        ],
+        "reason": "The candidate correctly provides the function signature and describes its mechanics, but omits the required fact that Start starts the application.",
+        "supported_claims": [
+          "func (pb *PocketBase) Start() error"
+        ],
+        "unsupported_claims": [],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:816a6cfb3b12c36f352492983356658adbd14a0c50113404ee574ec69ef585b5",
+      "provider_status": "answered",
+      "raw_answer": "{\"supported_claims\":[\"func (pb *PocketBase) Start() error\"],\"unsupported_claims\":[],\"missing_claims\":[\"Start starts the application\"],\"reason\":\"The candidate correctly provides the function signature and describes its mechanics, but omits the required fact that Start starts the application.\",\"verdict\":\"incorrect\",\"heuristic_gap\":\"Ensure the high-level purpose of a function (e.g., 'starts the application') is included alongside implementation details.\"}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "6832bf90cc5f153c4f55f0c3ffaa2a05773b1c9a059d15d383a61f40f10cffc6",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "Mention that the search operation searches indexed source text, not just semantic code search.",
+        "missing_claims": [
+          "searches indexed source text"
+        ],
+        "reason": "The candidate describes semantic code search features but omits the required fact that the search operation searches indexed source text.",
+        "supported_claims": [
+          "provides semantic code search"
+        ],
+        "unsupported_claims": [],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:683a34322641cfb8066bc79a8fabe0cbb66caa711ac763f339de7b2ae3c90210",
+      "provider_status": "answered",
+      "raw_answer": "{\"heuristic_gap\": \"Mention that the search operation searches indexed source text, not just semantic code search.\", \"missing_claims\": [\"searches indexed source text\"], \"reason\": \"The candidate describes semantic code search features but omits the required fact that the search operation searches indexed source text.\", \"supported_claims\": [\"provides semantic code search\"], \"unsupported_claims\": [], \"verdict\": \"incorrect\"}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "686e6d0f0be64501877bcbbe683cfc2ff30b183793bc831daf910981388fd6f1",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "When a tool result is insufficient, still attempt to infer from available context or state the missing required atom explicitly rather than refusing to answer.",
+        "missing_claims": [
+          "PocketBase.Start directly invokes Execute"
+        ],
+        "reason": "The candidate declines to answer the question, whereas the truth indicates the required atom is Execute.",
+        "supported_claims": [],
+        "unsupported_claims": [
+          "PocketBase.Start directly invokes Execute"
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:68c2581c84c98b8b8e6ca9333186c7d7b712b396f9c43f4800bca425edcf1152",
+      "provider_status": "answered",
+      "raw_answer": "{\"verdict\": \"incorrect\", \"supported_claims\": [], \"unsupported_claims\": [\"PocketBase.Start directly invokes Execute\"], \"missing_claims\": [\"PocketBase.Start directly invokes Execute\"], \"reason\": \"The candidate declines to answer the question, whereas the truth indicates the required atom is Execute.\", \"heuristic_gap\": \"When a tool result is insufficient, still attempt to infer from available context or state the missing required atom explicitly rather than refusing to answer.\"}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "68c7a189c699ad8bb6218995b016e503b3341a5ccbb293f32a951496797dd26a",
+      "invalid_judgment": "invalid verdict",
+      "judgment": null,
+      "prompt_digest": "sha256:243119d01e22eb90cacc70c20d5f17c5809d1cafa25f8c4ec28442e8623e2ff8",
+      "provider_status": "answered",
+      "raw_answer": "{\"candidate_answer\": \"**Definition** (`pocketbase.go:166`):\\n```go\\nfunc (pb *PocketBase) Start() error\\n```\\n\\n**Body**: Registers system commands (`NewSuperuserCommand`, `NewServeCommand`) onto `pb.RootCmd`, then calls `pb.Execute()`.\\n\\n**Documentation**: \\\"commands (serve, superuser, version) and executes pb.RootCmd.\\\"\", \"independent_truth\": {\"kind\": \"success\", \"required_atoms\": [\"func (pb *PocketBase) Start() error\", \"Start starts the application\"]}, \"output_schema\": {\"heuristic_gap\": \"deterministic improvement suggestion or null\", \"missing_claims\": [\"claim\"], \"reason\": \"short reason\", \"supported_claims\": [\"claim\"], \"unsupported_claims\": [\"claim\"], \"verdict\": \"correct|incorrect|ambiguous\"}, \"question\": \"What is the definition and documentation of PocketBase.Start?\", \"rubric\": [\"Judge semantics, not exact wording.\", \"Reject invented results, omitted required facts, and confusing an error with an empty success.\", \"Use only the supplied candidate and truth.\"]}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "6f3897c126f9895af8738d080691f7e70ab5420840da0aa59b185bb834c78334",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": null,
+        "missing_claims": [
+          "Execute"
+        ],
+        "reason": "The candidate explicitly states it cannot determine the invoked method, omitting the required fact that PocketBase.Start directly invokes Execute.",
+        "supported_claims": [],
+        "unsupported_claims": [
+          "PocketBase.Start directly invokes Execute"
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:7e84ffd42bff57fe1f1ed262a16af43a489a8fd0f730535032519e65fb56b866",
+      "provider_status": "answered",
+      "raw_answer": "{\"verdict\":\"incorrect\",\"supported_claims\":[],\"unsupported_claims\":[\"PocketBase.Start directly invokes Execute\"],\"missing_claims\":[\"Execute\"],\"reason\":\"The candidate explicitly states it cannot determine the invoked method, omitting the required fact that PocketBase.Start directly invokes Execute.\",\"heuristic_gap\":null}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "886fa7c2714700f2c71a5ddc879ede6f8737bbfc28f1d55241ef243e2dcff656",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "If the tool output only shows target_ref: HEAD, report that explicitly and avoid guessing; request a command that resolves HEAD to a hash.",
+        "missing_claims": [
+          "The checked-out commit is d438c6a96a0252ff9df62c1cfe193480ed9ff15d"
+        ],
+        "reason": "The candidate does not provide the required commit hash and states it cannot be determined, so the required atom is missing.",
+        "supported_claims": [],
+        "unsupported_claims": [
+          "The checked-out commit cannot be determined from the tool output"
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:7c24dec71017b1953965f0f898abe832cde17a0fda09233f2ef38cff32f82fb0",
+      "provider_status": "answered",
+      "raw_answer": "{\"heuristic_gap\": \"If the tool output only shows target_ref: HEAD, report that explicitly and avoid guessing; request a command that resolves HEAD to a hash.\", \"missing_claims\": [\"The checked-out commit is d438c6a96a0252ff9df62c1cfe193480ed9ff15d\"], \"reason\": \"The candidate does not provide the required commit hash and states it cannot be determined, so the required atom is missing.\", \"supported_claims\": [], \"unsupported_claims\": [\"The checked-out commit cannot be determined from the tool output\"], \"verdict\": \"incorrect\"}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "890e1cf522d948c4ee0772167ebb2999678563527f87051c2895bcd763dc2603",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": null,
+        "missing_claims": [],
+        "reason": "Candidate includes the required atom pocketbase.go:166 and correctly identifies the definition location.",
+        "supported_claims": [
+          "PocketBase.Start is defined in pocketbase.go at line 166"
+        ],
+        "unsupported_claims": [],
+        "verdict": "correct"
+      },
+      "prompt_digest": "sha256:a7c75a50312337baf9e1c1b7ed2690fb296b9adf91034b9baf84166fea6f3665",
+      "provider_status": "answered",
+      "raw_answer": "{\"heuristic_gap\": null, \"missing_claims\": [], \"reason\": \"Candidate includes the required atom pocketbase.go:166 and correctly identifies the definition location.\", \"supported_claims\": [\"PocketBase.Start is defined in pocketbase.go at line 166\"], \"unsupported_claims\": [], \"verdict\": \"correct\"}",
+      "regression_candidate": {
+        "answer": "`PocketBase.Start` is defined as a method on `*PocketBase` in `pocketbase.go` at line 166.",
+        "expected": {
+          "kind": "success",
+          "required_atoms": [
+            "pocketbase.go:166"
+          ]
+        },
+        "proposed_gap": null,
+        "required_outcome": "accepted"
+      }
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "8c2bebc603a62c1dcd7b2e07648e89450576e574135717dab6e45c1bd4a41ae1",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": null,
+        "missing_claims": [
+          "The checked out commit is d438c6a96a0252ff9df62c1cfe193480ed9ff15d"
+        ],
+        "reason": "Candidate identifies a different commit (the empty tree) than the required atom.",
+        "supported_claims": [],
+        "unsupported_claims": [
+          "The commit checked out is 4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:5d018f573bfcfa70cedb9f301c9a0649ff154e7ed297dc37b8a4701ee71c921a",
+      "provider_status": "answered",
+      "raw_answer": "{\"heuristic_gap\":null,\"missing_claims\":[\"The checked out commit is d438c6a96a0252ff9df62c1cfe193480ed9ff15d\"],\"reason\":\"Candidate identifies a different commit (the empty tree) than the required atom.\",\"supported_claims\":[],\"unsupported_claims\":[\"The commit checked out is 4b825dc642cb6eb9a060e54bf8d69288fbee4904\"],\"verdict\":\"incorrect\"}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "93ca3b9c145ba185b21b2e67ac062674ff2a434bd16671cfa6663dac6bd49b25",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "When tool output is insufficient, still answer the question using known facts if available; PocketBase.Start directly invokes Execute.",
+        "missing_claims": [
+          "Execute"
+        ],
+        "reason": "The candidate failed to identify the required atom 'Execute' and instead stated it could not determine the invoked method.",
+        "supported_claims": [],
+        "unsupported_claims": [
+          "Cannot determine which method Start directly invokes"
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:399451f1d48c9e7e7979b1c4758ab4767e98aa0eb6c7254531e09839aad04826",
+      "provider_status": "answered",
+      "raw_answer": "{\"verdict\":\"incorrect\",\"reason\":\"The candidate failed to identify the required atom 'Execute' and instead stated it could not determine the invoked method.\",\"supported_claims\":[],\"unsupported_claims\":[\"Cannot determine which method Start directly invokes\"],\"missing_claims\":[\"Execute\"],\"heuristic_gap\":\"When tool output is insufficient, still answer the question using known facts if available; PocketBase.Start directly invokes Execute.\"}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "99f13d876737bf4683ed834af408332ef3c1a687feefdbcd324eff4e46df7b06",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "Inspect the full call graph or source for PocketBase.Start to identify direct callee methods, rather than relying solely on side effects output.",
+        "missing_claims": [
+          "PocketBase.Start directly invokes Execute"
+        ],
+        "reason": "The candidate does not answer the question and omits the required fact that PocketBase.Start directly invokes Execute.",
+        "supported_claims": [],
+        "unsupported_claims": [
+          "The side effects output does not include callee information"
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:d1d5fce6ad789f877c151f8de921ada34d1eacb331681c7291481673c5d16041",
+      "provider_status": "answered",
+      "raw_answer": "{\"heuristic_gap\": \"Inspect the full call graph or source for PocketBase.Start to identify direct callee methods, rather than relying solely on side effects output.\", \"missing_claims\": [\"PocketBase.Start directly invokes Execute\"], \"reason\": \"The candidate does not answer the question and omits the required fact that PocketBase.Start directly invokes Execute.\", \"supported_claims\": [], \"unsupported_claims\": [\"The side effects output does not include callee information\"], \"verdict\": \"incorrect\"}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "a20137d83df3a68b2b9c7fd641a40f8dec11075e551982d00059fd7c5f65978c",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "Include that the search operation searches indexed source text.",
+        "missing_claims": [
+          "searches indexed source text"
+        ],
+        "reason": "The candidate describes semantic code search but omits the required fact that it searches indexed source text.",
+        "supported_claims": [],
+        "unsupported_claims": [],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:f51fb66d1995b3089455bf21e06f48d256f7b5bd5dec49f00732a5a56eb4c301",
+      "provider_status": "answered",
+      "raw_answer": "{\"heuristic_gap\": \"Include that the search operation searches indexed source text.\", \"missing_claims\": [\"searches indexed source text\"], \"reason\": \"The candidate describes semantic code search but omits the required fact that it searches indexed source text.\", \"supported_claims\": [], \"unsupported_claims\": [], \"verdict\": \"incorrect\"}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "a32e75b5392a0ab1ac22bad8fa399f6f95caee48f1b8dbc8a59be0f978371738",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "When callee information is unavailable, state that explicitly rather than leaving the required fact unaddressed; consider surfacing the known direct callee from the source if accessible.",
+        "missing_claims": [
+          "PocketBase.Start directly invokes Execute to execute the application"
+        ],
+        "reason": "The candidate states the answer cannot be determined and does not provide the required fact that PocketBase.Start directly invokes Execute.",
+        "supported_claims": [],
+        "unsupported_claims": [
+          "The side effect analysis returned no callee information"
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:b83e7643779018e5d63c5308be0c4737b2642f4754671172e5192d334038dce2",
+      "provider_status": "answered",
+      "raw_answer": "{\"heuristic_gap\": \"When callee information is unavailable, state that explicitly rather than leaving the required fact unaddressed; consider surfacing the known direct callee from the source if accessible.\", \"missing_claims\": [\"PocketBase.Start directly invokes Execute to execute the application\"], \"reason\": \"The candidate states the answer cannot be determined and does not provide the required fact that PocketBase.Start directly invokes Execute.\", \"supported_claims\": [], \"unsupported_claims\": [\"The side effect analysis returned no callee information\"], \"verdict\": \"incorrect\"}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "c745026367dfd36f90e2bedec319a00bb8fc7b1550ef6602b6f39b22d6526bc9",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "Include the full doc comment, especially the leading sentence 'Start starts the application'.",
+        "missing_claims": [
+          "Start starts the application"
+        ],
+        "reason": "The candidate provides the correct function signature but omits the required documentation atom that 'Start starts the application'.",
+        "supported_claims": [
+          "func (pb *PocketBase) Start() error"
+        ],
+        "unsupported_claims": [],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:9c2e884a55c37580a280ee8011ab1cdc445fd53d162185d3075013c6eeba0077",
+      "provider_status": "answered",
+      "raw_answer": "{\"verdict\":\"incorrect\",\"reason\":\"The candidate provides the correct function signature but omits the required documentation atom that 'Start starts the application'.\",\"supported_claims\":[\"func (pb *PocketBase) Start() error\"],\"unsupported_claims\":[],\"missing_claims\":[\"Start starts the application\"],\"heuristic_gap\":\"Include the full doc comment, especially the leading sentence 'Start starts the application'.\"}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "d52c9c754d8b0e1907ed6aeab4f8d4c27df449a006512d140807c9467d46318d",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "Ensure the tool hydrates and returns the actual source definition and doc string, not just manifest metadata.",
+        "missing_claims": [
+          "Start starts the application",
+          "func (pb *PocketBase) Start() error"
+        ],
+        "reason": "The candidate answer fails to provide the required definition and documentation for PocketBase.Start; it only reports metadata and explicitly states the symbol was not loaded.",
+        "supported_claims": [],
+        "unsupported_claims": [
+          "The manifest confirms the file exists in the benchmark data directory",
+          "The file comprises 22 lines",
+          "No definition or documentation for PocketBase.Start was provided"
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:06b43f623ce705f8ae50614a37509625949d2b98f8785ae9d764a0c929441374",
+      "provider_status": "answered",
+      "raw_answer": "{\"supported_claims\":[],\"unsupported_claims\":[\"The manifest confirms the file exists in the benchmark data directory\",\"The file comprises 22 lines\",\"No definition or documentation for PocketBase.Start was provided\"],\"missing_claims\":[\"Start starts the application\",\"func (pb *PocketBase) Start() error\"],\"heuristic_gap\":\"Ensure the tool hydrates and returns the actual source definition and doc string, not just manifest metadata.\",\"reason\":\"The candidate answer fails to provide the required definition and documentation for PocketBase.Start; it only reports metadata and explicitly states the symbol was not loaded.\",\"verdict\":\"incorrect\"}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "e09d80760de888b1b39b30b3b6dcdcb0badf35ba257bcb708820169c647702e2",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "Replace symbolic ref 'HEAD' with the actual resolved commit hash from the corpus metadata.",
+        "missing_claims": [
+          "The checked out commit is d438c6a96a0252ff9df62c1cfe193480ed9ff15d"
+        ],
+        "reason": "Candidate says HEAD but truth requires the specific commit hash d438c6a96a0252ff9df62c1cfe193480ed9ff15d.",
+        "supported_claims": [],
+        "unsupported_claims": [
+          "The checked out commit is HEAD"
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:5c4d118157407073d697c3003b362dd2c695743ad6a7356d41c29ca8257f0821",
+      "provider_status": "answered",
+      "raw_answer": "{\"heuristic_gap\": \"Replace symbolic ref 'HEAD' with the actual resolved commit hash from the corpus metadata.\", \"missing_claims\": [\"The checked out commit is d438c6a96a0252ff9df62c1cfe193480ed9ff15d\"], \"reason\": \"Candidate says HEAD but truth requires the specific commit hash d438c6a96a0252ff9df62c1cfe193480ed9ff15d.\", \"supported_claims\": [], \"unsupported_claims\": [\"The checked out commit is HEAD\"], \"verdict\": \"incorrect\"}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "e3d043f78f9475e8d8f247f5cbdf7989da4c30cf6450f22d642430e0de5163db",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "Include the doc comment summary (e.g., 'Start starts the application') alongside the signature and behavior.",
+        "missing_claims": [
+          "Start starts the application"
+        ],
+        "reason": "The candidate provides the correct signature and describes behavior, but omits the required documentation atom that Start starts the application.",
+        "supported_claims": [
+          "func (pb *PocketBase) Start() error"
+        ],
+        "unsupported_claims": [],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:ee3edbf7614c8f6a9d576125c3c0ae853ca3399e4818cdcd2090af703d911d6c",
+      "provider_status": "answered",
+      "raw_answer": "{\"heuristic_gap\": \"Include the doc comment summary (e.g., 'Start starts the application') alongside the signature and behavior.\", \"missing_claims\": [\"Start starts the application\"], \"reason\": \"The candidate provides the correct signature and describes behavior, but omits the required documentation atom that Start starts the application.\", \"supported_claims\": [\"func (pb *PocketBase) Start() error\"], \"unsupported_claims\": [], \"verdict\": \"incorrect\"}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "e479658c57e5db2e1a7d6bf08e24080f0f5704fd58bf43098453d515d1641834",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "Answer the question directly instead of describing the analysis process.",
+        "missing_claims": [
+          "PocketBase.Start directly invokes Execute"
+        ],
+        "reason": "The candidate does not identify the method; it only discusses looking up callees.",
+        "supported_claims": [],
+        "unsupported_claims": [],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:5012d7ce72ef73d1841cd449327c8e696cd5a867cb3104775a39b7b4da6c5ef0",
+      "provider_status": "answered",
+      "raw_answer": "{\"heuristic_gap\": \"Answer the question directly instead of describing the analysis process.\", \"missing_claims\": [\"PocketBase.Start directly invokes Execute\"], \"reason\": \"The candidate does not identify the method; it only discusses looking up callees.\", \"supported_claims\": [], \"unsupported_claims\": [], \"verdict\": \"incorrect\"}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "e92d685e73fec24518efe72468669d07fe4940a5aa11bb94880fa1ffe9277e0c",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "Candidate should extract and report the checked-out commit hash from the tool output rather than declining to resolve it.",
+        "missing_claims": [
+          "The checked-out commit is d438c6a96a0252ff9df62c1cfe193480ed9ff15d"
+        ],
+        "reason": "The candidate explicitly states it cannot resolve the specific commit hash, omitting the required atom.",
+        "supported_claims": [],
+        "unsupported_claims": [
+          "The checked-out commit hash cannot be resolved"
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:35e799a0479aa99b207a00db4c8b77d9a82a3a2d300495355426ee106acd09d7",
+      "provider_status": "answered",
+      "raw_answer": "{\"heuristic_gap\": \"Candidate should extract and report the checked-out commit hash from the tool output rather than declining to resolve it.\", \"missing_claims\": [\"The checked-out commit is d438c6a96a0252ff9df62c1cfe193480ed9ff15d\"], \"reason\": \"The candidate explicitly states it cannot resolve the specific commit hash, omitting the required atom.\", \"supported_claims\": [], \"unsupported_claims\": [\"The checked-out commit hash cannot be resolved\"], \"verdict\": \"incorrect\"}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "f1e328ad5811134233430089ea9276a894498e58c1bf1ac35e95b3c9b1a93082",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "Include the doc comment text, e.g., 'Start starts the application'.",
+        "missing_claims": [
+          "Start starts the application"
+        ],
+        "reason": "Candidate provides the signature and behavior but omits the required documentation atom 'Start starts the application'.",
+        "supported_claims": [
+          "func (pb *PocketBase) Start() error"
+        ],
+        "unsupported_claims": [],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:21b398596bce7e438c3633a23a1e8838e85bc539e56fc9d795e30f3f420d597a",
+      "provider_status": "answered",
+      "raw_answer": "{\"supported_claims\": [\"func (pb *PocketBase) Start() error\"], \"missing_claims\": [\"Start starts the application\"], \"unsupported_claims\": [], \"heuristic_gap\": \"Include the doc comment text, e.g., 'Start starts the application'.\", \"reason\": \"Candidate provides the signature and behavior but omits the required documentation atom 'Start starts the application'.\", \"verdict\": \"incorrect\"}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "f65eb1b25429c66f14fff823d692b6a39b830d11a37fc72055bcf9759285edc3",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": null,
+        "missing_claims": [
+          "PocketBase.Start directly invokes Execute"
+        ],
+        "reason": "The candidate declined to identify the invoked method, whereas the truth requires the atom 'Execute'.",
+        "supported_claims": [],
+        "unsupported_claims": [
+          "PocketBase.Start directly invokes Execute"
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:bcdfcc86d5c2ca06e7c109633dd9f6bd4c6ca1eb7f4a712eab36fdb9a8a78932",
+      "provider_status": "answered",
+      "raw_answer": "{\n  \"verdict\": \"incorrect\",\n  \"supported_claims\": [],\n  \"unsupported_claims\": [\"PocketBase.Start directly invokes Execute\"],\n  \"missing_claims\": [\"PocketBase.Start directly invokes Execute\"],\n  \"reason\": \"The candidate declined to identify the invoked method, whereas the truth requires the atom 'Execute'.\",\n  \"heuristic_gap\": null\n}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "fa2c3be37cbab17ba7e63a2ddec05d528ac8d8dfda0a2d51a20e7a02b89406f8",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "Include the full doc comment line 'Start starts the application' to satisfy the required documentation atom.",
+        "missing_claims": [
+          "Start starts the application"
+        ],
+        "reason": "The candidate provides the correct signature and implementation details, but omits the required documentation atom stating that Start starts the application.",
+        "supported_claims": [
+          "func (pb *PocketBase) Start() error",
+          "Registers system commands (NewSuperuserCommand, NewServeCommand) then executes pb.RootCmd",
+          "Doc comment mentions commands (serve, superuser, version) and executes pb.RootCmd"
+        ],
+        "unsupported_claims": [],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:ca435cb5513ad3b7229090e097813e6ba274c7fa7501980299f5fef69bd5252d",
+      "provider_status": "answered",
+      "raw_answer": "{\"supported_claims\":[\"func (pb *PocketBase) Start() error\",\"Registers system commands (NewSuperuserCommand, NewServeCommand) then executes pb.RootCmd\",\"Doc comment mentions commands (serve, superuser, version) and executes pb.RootCmd\"],\"unsupported_claims\":[],\"missing_claims\":[\"Start starts the application\"],\"heuristic_gap\":\"Include the full doc comment line 'Start starts the application' to satisfy the required documentation atom.\",\"reason\":\"The candidate provides the correct signature and implementation details, but omits the required documentation atom stating that Start starts the application.\",\"verdict\":\"incorrect\"}",
+      "regression_candidate": null
+    }
+  ],
+  "schema": "lci.all-tools-adjudications.v1"
+}

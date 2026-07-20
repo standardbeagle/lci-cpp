@@ -1,0 +1,12 @@
+{
+  "schema": "lci.all-tools-heuristic-regressions.v1",
+  "source": "First cross-model adjudication batch",
+  "promotions": [
+    {"tool": "inspect_symbol", "rule": "Accept pocketbase.go:166 and the equivalent phrase pocketbase.go at line 166.", "confirmed_cells": 2, "adversarial_tests": ["wrong line", "missing line", "wrong file"]}
+  ],
+  "rejected_candidates": [
+    {"tools": ["info", "get_context", "inspect_symbol"], "reason": "Broad semantic aliases accepted 40 prior heuristic failures, including 24 judged incorrect and five invalid/ambiguous cases; discrimination gate failed."},
+    {"scope": "entire first adjudication batch", "reason": "The queue supplied case-folded truth atoms, causing the judge to treat valid source capitalization as semantic error. Batch rejected; no verdict changes a score."}
+    ,{"scope": "entire second adjudication batch", "reason": "Success-case truth omitted the genuine source tool output, causing supported details beyond the minimal atoms to be labeled unsupported. Batch rejected; no verdict changes a score."}
+  ]
+}

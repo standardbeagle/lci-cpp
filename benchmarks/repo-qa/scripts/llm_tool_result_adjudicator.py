@@ -6,6 +6,8 @@ import argparse
 import hashlib
 import json
 import sys
+import os
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -45,6 +47,18 @@ def parse(text: str) -> dict:
     return validate(json.loads(stripped))
 
 
+def write_checkpoint(path: Path, records: list[dict]) -> None:
+    result = {"schema": "lci.all-tools-adjudications.v1", "policy": "every queued failure",
+              "records": records,
+              "promotion_policy": "LLM judgments do not change scores directly; correct misses require deterministic regression promotion and full reanalysis."}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix=path.name, suffix=".tmp", dir=path.parent)
+    with os.fdopen(fd, "w") as handle:
+        json.dump(result, handle, indent=2, sort_keys=True)
+        handle.write("\n")
+    os.replace(temporary, path)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--queue", type=Path, required=True)
@@ -52,10 +66,13 @@ def main() -> int:
     parser.add_argument("--auth-file", type=Path, required=True)
     parser.add_argument("--header-profile", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--origin-model", help="only adjudicate failures produced by this model")
     parser.add_argument("--timeout", type=float, default=120)
     args = parser.parse_args()
     queue_doc = json.loads(args.queue.read_text())
     queue = queue_doc.get("adjudication_queue", queue_doc)
+    if args.origin_model:
+        queue = [item for item in queue if item.get("origin_model") == args.origin_model]
     headers = json.loads(args.header_profile.read_text())["headers"]
     provider = OpenCodeZenProvider(args.auth_file, args.timeout)
     records = []
@@ -65,18 +82,23 @@ def main() -> int:
                 "messages": [{"role": "system", "content": "You are a blinded benchmark adjudicator."},
                              {"role": "user", "content": text}]}
         response = provider.complete(body, args.model, headers)
-        judgment = parse(response["final_answer"]) if response["status"] == "answered" else None
+        judgment = None
+        invalid_judgment = None
+        if response["status"] == "answered":
+            try:
+                judgment = parse(response["final_answer"])
+            except (ValueError, json.JSONDecodeError) as error:
+                invalid_judgment = str(error)
         records.append({"cell_key": item["cell_key"], "provider_status": response["status"],
                         "adjudicator_model": args.model,
                         "prompt_digest": "sha256:" + hashlib.sha256(text.encode()).hexdigest(),
                         "judgment": judgment,
+                        "invalid_judgment": invalid_judgment,
+                        "raw_answer": response.get("final_answer", ""),
                         "regression_candidate": None if not judgment or judgment["verdict"] != "correct" else
                             {"answer": item["answer"], "expected": item["expected"],
                              "required_outcome": "accepted", "proposed_gap": judgment.get("heuristic_gap")}})
-    result = {"schema": "lci.all-tools-adjudications.v1", "policy": "every queued failure",
-              "records": records,
-              "promotion_policy": "LLM judgments do not change scores directly; correct misses require deterministic regression promotion and full reanalysis."}
-    args.out.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
+        write_checkpoint(args.out, records)
     return 0
 
 

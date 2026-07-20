@@ -1,0 +1,790 @@
+{
+  "policy": "every queued failure",
+  "promotion_policy": "LLM judgments do not change scores directly; correct misses require deterministic regression promotion and full reanalysis.",
+  "records": [
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "cell_key": "04cf28e3979c0b8a18029970ab2bc4b589c7cd1bfd5da1c249033d1036ed8873",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "Include the definition 'func (pb *PocketBase) Start() error' and documentation 'Start starts the application'.",
+        "missing_claims": [
+          "Start starts the application",
+          "func (pb *PocketBase) Start() error"
+        ],
+        "reason": "Candidate answer omits the required definition and documentation, stating they are unavailable, while the truth specifies them.",
+        "supported_claims": [],
+        "unsupported_claims": [
+          "The hydrated context does not include PocketBase.Start's definition, signature, or documentation."
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:2a7569010ca6241608771c742e78718508d228506d394221dbe40e994aad83ab",
+      "provider_status": "answered",
+      "raw_answer": "{\n  \"heuristic_gap\": \"Include the definition 'func (pb *PocketBase) Start() error' and documentation 'Start starts the application'.\",\n  \"missing_claims\": [\"Start starts the application\", \"func (pb *PocketBase) Start() error\"],\n  \"reason\": \"Candidate answer omits the required definition and documentation, stating they are unavailable, while the truth specifies them.\",\n  \"supported_claims\": [],\n  \"unsupported_claims\": [\"The hydrated context does not include PocketBase.Start's definition, signature, or documentation.\"],\n  \"verdict\": \"incorrect\"\n}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "cell_key": "061275796a334621b2156b9cf335d9ae5d5e17803022599e70780d574a835431",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "Consider mentioning that the search operates on indexed source text to satisfy the required atom.",
+        "missing_claims": [
+          "searches indexed source text"
+        ],
+        "reason": "Candidate describes searching code but does not explicitly state that it searches indexed source text as required.",
+        "supported_claims": [],
+        "unsupported_claims": [],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:de84c61a2ce63f6ccaadc8e359183f3504a829366fae39d789efe9745cbd02d1",
+      "provider_status": "answered",
+      "raw_answer": "{\n  \"heuristic_gap\": \"Consider mentioning that the search operates on indexed source text to satisfy the required atom.\",\n  \"missing_claims\": [\"searches indexed source text\"],\n  \"reason\": \"Candidate describes searching code but does not explicitly state that it searches indexed source text as required.\",\n  \"supported_claims\": [],\n  \"unsupported_claims\": [],\n  \"verdict\": \"incorrect\"\n}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "cell_key": "1c468ec00808f1b17d7e853eef1a6d18c2f79186fc8bbc872b858f8a063668b9",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": null,
+        "missing_claims": [],
+        "reason": "Candidate includes both required atoms: the function signature and the semantic equivalent of 'Start starts the application'.",
+        "supported_claims": [
+          "func (pb *PocketBase) Start() error",
+          "Start starts the application"
+        ],
+        "unsupported_claims": [],
+        "verdict": "correct"
+      },
+      "prompt_digest": "sha256:0e94948779828e66c3b9cf6f91d47cc19b83b191eeaca4320ff627e96df90ae7",
+      "provider_status": "answered",
+      "raw_answer": "{\n  \"heuristic_gap\": null,\n  \"missing_claims\": [],\n  \"reason\": \"Candidate includes both required atoms: the function signature and the semantic equivalent of 'Start starts the application'.\",\n  \"supported_claims\": [\n    \"func (pb *PocketBase) Start() error\",\n    \"Start starts the application\"\n  ],\n  \"unsupported_claims\": [],\n  \"verdict\": \"correct\"\n}",
+      "regression_candidate": {
+        "answer": "**Definition** (`pocketbase.go:166`):\n\n```go\nfunc (pb *PocketBase) Start() error\n```\n\n**Source body:**\n\n```go\nfunc (pb *PocketBase) Start() error {\n\t// register system commands\n\tpb.RootCmd.AddCommand(cmd.NewSuperuserCommand(pb))\n\tpb.RootCmd.AddCommand(cmd.NewServeCommand(pb, !pb.hideStartBanner))\n\n\treturn pb.Execute()\n}\n```\n\n**Documentation:** `// commands (serve, superuser, version) and executes pb.RootCmd.`\n\n`Start` is the PocketBase entrypoint: it registers the built-in system CLI commands (`NewSuperuserCommand`, `NewServeCommand`) onto `pb.RootCmd`, then delegates to `pb.Execute()` to run. It has 9 callers (including `main` and `LaunchURL`), is exported, and is non-pure (transitive effects via receiver/global/channel).",
+        "expected": {
+          "kind": "success",
+          "required_atoms": [
+            "func (pb *PocketBase) Start() error",
+            "Start starts the application"
+          ]
+        },
+        "proposed_gap": null,
+        "required_outcome": "accepted"
+      }
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "cell_key": "2bb5244996fdc9e60cfa8bc5a2133e56ecaf5f004187b9b89454ef8a046ad85e",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": null,
+        "missing_claims": [
+          "The checked-out commit is d438c6a96a0252ff9df62c1cfe193480ed9ff15d"
+        ],
+        "reason": "The candidate identifies the checked-out commit as the empty tree (4b825dc642cb6eb9a060e54bf8d69288fbee4904), but the required truth requires the commit d438c6a96a0252ff9df62c1cfe193480ed9ff15d.",
+        "supported_claims": [],
+        "unsupported_claims": [
+          "The checked-out commit is 4b825dc642cb6eb9a060e54bf8d69288fbee4904 (the empty Git tree)"
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:c79d850730aaa75c5760ff5904a6653f68e5a31ccd4ed0358512af5689f8bc69",
+      "provider_status": "answered",
+      "raw_answer": "{\n  \"heuristic_gap\": null,\n  \"missing_claims\": [\"The checked-out commit is d438c6a96a0252ff9df62c1cfe193480ed9ff15d\"],\n  \"reason\": \"The candidate identifies the checked-out commit as the empty tree (4b825dc642cb6eb9a060e54bf8d69288fbee4904), but the required truth requires the commit d438c6a96a0252ff9df62c1cfe193480ed9ff15d.\",\n  \"supported_claims\": [],\n  \"unsupported_claims\": [\"The checked-out commit is 4b825dc642cb6eb9a060e54bf8d69288fbee4904 (the empty Git tree)\"],\n  \"verdict\": \"incorrect\"\n}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "cell_key": "2f74280b122442ea90ef844fdf8e0db62843ea4cebc72b93c6810b9b6436be0d",
+      "invalid_judgment": "correct verdict contradicts claim lists",
+      "judgment": null,
+      "prompt_digest": "sha256:a49b40736dba089f4d327628af0cea4c9d05c105792d8232d596edb12d77e3ab",
+      "provider_status": "answered",
+      "raw_answer": "{\n  \"heuristic_gap\": \"The answer includes unsupported claims about callers and test coverage and an inaccurately rendered documentation comment (version is not shown in code). Recommend focusing solely on the required atoms without extraneous details.\",\n  \"missing_claims\": [],\n  \"reason\": \"Candidate provides both required atoms: the function signature and the semantic that Start starts the application. However, it adds claims not supported by the given truth.\",\n  \"supported_claims\": [\n    \"func (pb *PocketBase) Start() error\",\n    \"Start starts the application\"\n  ],\n  \"unsupported_claims\": [\n    \"// commands (serve, superuser, version)\",\n    \"referenced by 9 callers (including main, LaunchURL, TestCronStartStop)\",\n    \"currently lacks test coverage\"\n  ],\n  \"verdict\": \"correct\"\n}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "cell_key": "368dedd1d6951dd1a07590da10ac98781d3dc5541a270e571db13f5129bc50f2",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": null,
+        "missing_claims": [],
+        "reason": "Candidate provides the required function signature and equivalent documentation that Start starts the application.",
+        "supported_claims": [
+          "func (pb *PocketBase) Start() error",
+          "Start starts the application"
+        ],
+        "unsupported_claims": [],
+        "verdict": "correct"
+      },
+      "prompt_digest": "sha256:de302cdd6c9086f61f8fde1e04a95ce8866cb66cbdc21cbd63cd62847523ca23",
+      "provider_status": "answered",
+      "raw_answer": "{\n  \"heuristic_gap\": null,\n  \"missing_claims\": [],\n  \"reason\": \"Candidate provides the required function signature and equivalent documentation that Start starts the application.\",\n  \"supported_claims\": [\"func (pb *PocketBase) Start() error\", \"Start starts the application\"],\n  \"unsupported_claims\": [],\n  \"verdict\": \"correct\"\n}",
+      "regression_candidate": {
+        "answer": "**Definition** (`pocketbase.go:166`):\n\n```go\nfunc (pb *PocketBase) Start() error {\n\t// register system commands\n\tpb.RootCmd.AddCommand(cmd.NewSuperuserCommand(pb))\n\tpb.RootCmd.AddCommand(cmd.NewServeCommand(pb, !pb.hideStartBanner))\n\n\treturn pb.Execute()\n}\n```\n\n**Documentation**: `// commands (serve, superuser, version) and executes pb.RootCmd.`\n\nThis exported method on `*PocketBase` registers the system commands (superuser and serve) on `pb.RootCmd` and then executes the root command. It has 9 callers (e.g., `main`, `LaunchURL`, `TestCronStartStop`), cyclomatic complexity 1, and currently lacks test coverage.",
+        "expected": {
+          "kind": "success",
+          "required_atoms": [
+            "func (pb *PocketBase) Start() error",
+            "Start starts the application"
+          ]
+        },
+        "proposed_gap": null,
+        "required_outcome": "accepted"
+      }
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "cell_key": "3bd4f3bacfc38191316c89252df4267479835076db9d91e7d2fcf5839c164898",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": null,
+        "missing_claims": [],
+        "reason": "Candidate includes the required atom 'searches indexed source text' in its description of searching the index.",
+        "supported_claims": [
+          "searches indexed source text"
+        ],
+        "unsupported_claims": [],
+        "verdict": "correct"
+      },
+      "prompt_digest": "sha256:7b7eb8b6de9c0f3b4ff6fd8f597bd53acaf3c3e464a26531b57e90bb53bc2c92",
+      "provider_status": "answered",
+      "raw_answer": "{\n  \"heuristic_gap\": null,\n  \"missing_claims\": [],\n  \"reason\": \"Candidate includes the required atom 'searches indexed source text' in its description of searching the index.\",\n  \"supported_claims\": [\"searches indexed source text\"],\n  \"unsupported_claims\": [],\n  \"verdict\": \"correct\"\n}",
+      "regression_candidate": {
+        "answer": "To perform a \"Sub-millisecond semantic code search with multi-layer matching\" that searches for a pattern in the index, grouping hits by file and surfacing symbol metadata (including ids that feed get_context), flags/filters/path/max/output options, plus similar_symbols on zero matches and a true total_matches counter.",
+        "expected": {
+          "kind": "success",
+          "required_atoms": [
+            "searches indexed source text"
+          ]
+        },
+        "proposed_gap": null,
+        "required_outcome": "accepted"
+      }
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "cell_key": "4909bda8949b5f5a3d15e2191646af613f883f5e90e905f660a8271a18be5348",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "Include the required documentation phrase 'Start starts the application'.",
+        "missing_claims": [
+          "Start starts the application"
+        ],
+        "reason": "Candidate lacks required documentation claim and includes unsupported documentation claim.",
+        "supported_claims": [
+          "func (pb *PocketBase) Start() error"
+        ],
+        "unsupported_claims": [
+          "Documentation: `// commands (serve, superuser, version) and executes pb.RootCmd.`"
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:759401888a74315cd350bc2804fe3049ce492b0b61baaaea8bff17ffd1bac1a9",
+      "provider_status": "answered",
+      "raw_answer": "{\n  \"heuristic_gap\": \"Include the required documentation phrase 'Start starts the application'.\",\n  \"missing_claims\": [\"Start starts the application\"],\n  \"reason\": \"Candidate lacks required documentation claim and includes unsupported documentation claim.\",\n  \"supported_claims\": [\"func (pb *PocketBase) Start() error\"],\n  \"unsupported_claims\": [\"Documentation: `// commands (serve, superuser, version) and executes pb.RootCmd.`\"],\n  \"verdict\": \"incorrect\"\n}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "cell_key": "49d68e765f93b61b83687f415bd164b8073d57ca07fd811c7968328486838186",
+      "invalid_judgment": "correct verdict contradicts claim lists",
+      "judgment": null,
+      "prompt_digest": "sha256:977ebfbb3f7d21bc6b66a4bbc3e26f72e5d2aa8047f6a2e1f78f06305ce7088c",
+      "provider_status": "answered",
+      "raw_answer": "{\n  \"heuristic_gap\": null,\n  \"missing_claims\": [],\n  \"reason\": \"The candidate correctly identifies the purpose as searching source code, matching the truth's required atom.\",\n  \"supported_claims\": [\n    \"The search operation performs semantic code search\",\n    \"The search operation replaces grep/rg/find for locating code\"\n  ],\n  \"unsupported_claims\": [\n    \"The search operation performs sub-millisecond in-memory search\",\n    \"It uses multi-layer matching\",\n    \"It returns per-file hit groups (line numbers, symbol metadata, text snippets) scoped by path/filter/flags\",\n    \"It provides fuzzy near-miss suggestions for zero-match queries\"\n  ],\n  \"verdict\": \"correct\"\n}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "cell_key": "5805d7dcb22f6269f1bb2f33f5b20805d9df524e7b7cd64f5c236476a52ddab5",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": null,
+        "missing_claims": [
+          "PocketBase.Start directly invokes Execute."
+        ],
+        "reason": "The candidate claims no direct invocation, but the truth indicates that the directly invoked method is 'Execute'.",
+        "supported_claims": [],
+        "unsupported_claims": [
+          "PocketBase.Start directly invokes nothing.",
+          "PocketBase.Start is pure (no side effects/callees)."
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:5d07f3ccfdccad15371a7eb5cf791bba774212aec4eaaff1ac4fb1e9d642cebc",
+      "provider_status": "answered",
+      "raw_answer": "{\n  \"heuristic_gap\": null,\n  \"missing_claims\": [\"PocketBase.Start directly invokes Execute.\"],\n  \"reason\": \"The candidate claims no direct invocation, but the truth indicates that the directly invoked method is 'Execute'.\",\n  \"supported_claims\": [],\n  \"unsupported_claims\": [\n    \"PocketBase.Start directly invokes nothing.\",\n    \"PocketBase.Start is pure (no side effects/callees).\"\n  ],\n  \"verdict\": \"incorrect\"\n}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "cell_key": "59ffab6ad21a8f984e7f126cba09e3c3bb25ad2187fed827887d7057ea556c7a",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": null,
+        "missing_claims": [
+          "PocketBase.Start is declared in pocketbase.go"
+        ],
+        "reason": "Candidate answer fails to identify the correct file, instead claiming inability to determine, contradicting the independent truth.",
+        "supported_claims": [],
+        "unsupported_claims": [
+          "Cannot determine from debug info which file declares PocketBase.Start"
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:685d17a036c85fc27e09cbcd28f9d880281cd5281c957a913fe5a99c6cbb3c0e",
+      "provider_status": "answered",
+      "raw_answer": "{\n  \"heuristic_gap\": null,\n  \"missing_claims\": [\"PocketBase.Start is declared in pocketbase.go\"],\n  \"reason\": \"Candidate answer fails to identify the correct file, instead claiming inability to determine, contradicting the independent truth.\",\n  \"supported_claims\": [],\n  \"unsupported_claims\": [\"Cannot determine from debug info which file declares PocketBase.Start\"],\n  \"verdict\": \"incorrect\"\n}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "cell_key": "65ca7d85972eebcc5f5b089590cf44dcc79644e03be99b3b2de55d8684adcf6a",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": null,
+        "missing_claims": [],
+        "reason": "Candidate correctly identifies that PocketBase.Start is defined in pocketbase.go at line 166, matching the required atom.",
+        "supported_claims": [
+          "PocketBase.Start is defined in pocketbase.go at line 166"
+        ],
+        "unsupported_claims": [],
+        "verdict": "correct"
+      },
+      "prompt_digest": "sha256:6c1ebe1f5759974a0c9b83bf534d77c6f620a5fbc1abc984d7b4e7153aae56d7",
+      "provider_status": "answered",
+      "raw_answer": "{\n  \"heuristic_gap\": null,\n  \"missing_claims\": [],\n  \"reason\": \"Candidate correctly identifies that PocketBase.Start is defined in pocketbase.go at line 166, matching the required atom.\",\n  \"supported_claims\": [\"PocketBase.Start is defined in pocketbase.go at line 166\"],\n  \"unsupported_claims\": [],\n  \"verdict\": \"correct\"\n}",
+      "regression_candidate": {
+        "answer": "`PocketBase.Start` is defined in `pocketbase.go` at line 166.",
+        "expected": {
+          "kind": "success",
+          "required_atoms": [
+            "pocketbase.go:166"
+          ]
+        },
+        "proposed_gap": null,
+        "required_outcome": "accepted"
+      }
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "cell_key": "7e55366655d94ebf61aa337bc8988acc5386f704b1ba0c271cc36e514762c382",
+      "invalid_judgment": "correct verdict contradicts claim lists",
+      "judgment": null,
+      "prompt_digest": "sha256:23e80683aed2562382189457adf2676304d37e09d9d4def8c50d650c45df57ab",
+      "provider_status": "answered",
+      "raw_answer": "{\n  \"heuristic_gap\": \"Consider mentioning that the search is over indexed source text to align perfectly with the truth.\",\n  \"missing_claims\": [],\n  \"reason\": \"The candidate conveys the core purpose of searching code (which is indexed source text) and adds plausible implementation details; no required atom is omitted and nothing contradicts the truth.\",\n  \"supported_claims\": [\"performs semantic code search\"],\n  \"unsupported_claims\": [\"sub-millisecond performance\", \"multi-layer matching\", \"returns per-file groups of hits (line, symbol, type, id, callers) for a pattern\", \"optional filters, flags, path scope, and output formats\"],\n  \"verdict\": \"correct\"\n}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "cell_key": "8000c329adecc761b703cd9dc0ea44d05867f3a641c42eb8da9672bcada923ae",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "Replace the commit hash with d438c6a96a0252ff9df62c1cfe193480ed9ff15d.",
+        "missing_claims": [
+          "The commit checked out for this corpus is d438c6a96a0252ff9df62c1cfe193480ed9ff15d"
+        ],
+        "reason": "The candidate's commit does not match the required commit from the truth.",
+        "supported_claims": [],
+        "unsupported_claims": [
+          "The commit checked out for this corpus is 4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:3ab89f0a53468b1131ab02def0e22cbea29c9e6d5246551c44c6d449bebc2d5b",
+      "provider_status": "answered",
+      "raw_answer": "{\"heuristic_gap\": \"Replace the commit hash with d438c6a96a0252ff9df62c1cfe193480ed9ff15d.\", \"missing_claims\": [\"The commit checked out for this corpus is d438c6a96a0252ff9df62c1cfe193480ed9ff15d\"], \"reason\": \"The candidate's commit does not match the required commit from the truth.\", \"supported_claims\": [], \"unsupported_claims\": [\"The commit checked out for this corpus is 4b825dc642cb6eb9a060e54bf8d69288fbee4904\"], \"verdict\": \"incorrect\"}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "cell_key": "826ab984d95299a1af985c6b1f6be5ed18e35511c69d0e185781a124320dc859",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "The candidate should provide the exact documentation string and function signature from the source, rather than stating it is not possible.",
+        "missing_claims": [
+          "Start starts the application",
+          "func (pb *PocketBase) Start() error"
+        ],
+        "reason": "Candidate fails to include the required documentation and definition atoms; instead claims it cannot be described, contradicting the truth's success.",
+        "supported_claims": [],
+        "unsupported_claims": [
+          "The `save` call returned only a compact manifest (file path + line range 160\u2013181 of `pocketbase.go`, 22 lines, no source or doc content).",
+          "It did not surface any definition or documentation text\u2014`save` stores reference metadata for later `load`, not the code/doc itself.",
+          "To describe `PocketBase.Start` from this result alone is not possible, but the manifest records that `PockeyBase.Start` is defined in `pocketbase.go` lines 160\u2013181.",
+          "To read the actual definition and its documentation, run `load` against the saved manifest (or read lines 160\u2013181 of `pocketbase.go`)."
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:5db81cb0067b423526b75045968ad555132641f23b718547a3df7a6ff8a43eca",
+      "provider_status": "answered",
+      "raw_answer": "{\n  \"heuristic_gap\": \"The candidate should provide the exact documentation string and function signature from the source, rather than stating it is not possible.\",\n  \"missing_claims\": [\"Start starts the application\", \"func (pb *PocketBase) Start() error\"],\n  \"reason\": \"Candidate fails to include the required documentation and definition atoms; instead claims it cannot be described, contradicting the truth's success.\",\n  \"supported_claims\": [],\n  \"unsupported_claims\": [\n    \"The `save` call returned only a compact manifest (file path + line range 160\u2013181 of `pocketbase.go`, 22 lines, no source or doc content).\",\n    \"It did not surface any definition or documentation text\u2014`save` stores reference metadata for later `load`, not the code/doc itself.\",\n    \"To describe `PocketBase.Start` from this result alone is not possible, but the manifest records that `PockeyBase.Start` is defined in `pocketbase.go` lines 160\u2013181.\",\n    \"To read the actual definition and its documentation, run `load` against the saved manifest (or read lines 160\u2013181 of `pocketbase.go`).\"\n  ],\n  \"verdict\": \"incorrect\"\n}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "cell_key": "8362980a951ab203621c9991f927c9ea8932061b719eb9b82f15e933ab5efd39",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": null,
+        "missing_claims": [
+          "The checked-out commit is d438c6a96a0252ff9df62c1cfe193480ed9ff15d."
+        ],
+        "reason": "Candidate claims empty tree commit, but truth indicates a specific commit is checked out.",
+        "supported_claims": [],
+        "unsupported_claims": [
+          "The checked-out commit is 4b825dc642cb6eb9a060e54bf8d69288fbee4904.",
+          "No actual commit is checked out for this corpus."
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:bdb9badb73565a17f9181aa81300c355c77a39dbdffe68dac860fe138ccda7be",
+      "provider_status": "answered",
+      "raw_answer": "{\n  \"heuristic_gap\": null,\n  \"missing_claims\": [\n    \"The checked-out commit is d438c6a96a0252ff9df62c1cfe193480ed9ff15d.\"\n  ],\n  \"reason\": \"Candidate claims empty tree commit, but truth indicates a specific commit is checked out.\",\n  \"supported_claims\": [],\n  \"unsupported_claims\": [\n    \"The checked-out commit is 4b825dc642cb6eb9a060e54bf8d69288fbee4904.\",\n    \"No actual commit is checked out for this corpus.\"\n  ],\n  \"verdict\": \"incorrect\"\n}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "cell_key": "862006c5a8e0988d86aaa7e857309ef4b3661d2d154ae7c50bf0ba732aa70575",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": null,
+        "missing_claims": [
+          "commit d438c6a96a0252ff9df62c1cfe193480ed9ff15d is the checked-out commit"
+        ],
+        "reason": "Candidate claims commit 4b825dc642cb6eb9a060e54bf8d69288fbee4904 is checked out, but truth requires d438c6a96a0252ff9df62c1cfe193480ed9ff15d.",
+        "supported_claims": [],
+        "unsupported_claims": [
+          "HEX `4b825dc642cb6eb9a060e54bf8d69288fbee4904` is the checked-out commit for this corpus"
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:8df73affd2f7286b21e101f9db3d962df1440c1878271120b179c6c17c30e0a1",
+      "provider_status": "answered",
+      "raw_answer": "{\n  \"heuristic_gap\": null,\n  \"missing_claims\": [\"commit d438c6a96a0252ff9df62c1cfe193480ed9ff15d is the checked-out commit\"],\n  \"reason\": \"Candidate claims commit 4b825dc642cb6eb9a060e54bf8d69288fbee4904 is checked out, but truth requires d438c6a96a0252ff9df62c1cfe193480ed9ff15d.\",\n  \"supported_claims\": [],\n  \"unsupported_claims\": [\"HEX `4b825dc642cb6eb9a060e54bf8d69288fbee4904` is the checked-out commit for this corpus\"],\n  \"verdict\": \"incorrect\"\n}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "cell_key": "862e4f030290ebdceeb50b16e186532874e3b8930a44fc8a4c8b294a226bfda3",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "Include the documentation comment 'Start starts the application' as required.",
+        "missing_claims": [
+          "Start starts the application"
+        ],
+        "reason": "Candidate correctly provides function signature but omits required documentation 'Start starts the application' and includes extra unsupported details.",
+        "supported_claims": [
+          "func (pb *PocketBase) Start() error"
+        ],
+        "unsupported_claims": [
+          "Documentation: // commands (serve, superuser, version) and executes pb.RootCmd",
+          "Referenced by 9 callers",
+          "Cyclomatic/cognitive complexity 1",
+          "Impure",
+          "Lacks test coverage"
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:b50f9d3941a78ff27856f8c4df302d42ef4ca7d5bc06f8842f78055cf396d3a0",
+      "provider_status": "answered",
+      "raw_answer": "{\n  \"heuristic_gap\": \"Include the documentation comment 'Start starts the application' as required.\",\n  \"missing_claims\": [\"Start starts the application\"],\n  \"reason\": \"Candidate correctly provides function signature but omits required documentation 'Start starts the application' and includes extra unsupported details.\",\n  \"supported_claims\": [\"func (pb *PocketBase) Start() error\"],\n  \"unsupported_claims\": [\"Documentation: // commands (serve, superuser, version) and executes pb.RootCmd\", \"Referenced by 9 callers\", \"Cyclomatic/cognitive complexity 1\", \"Impure\", \"Lacks test coverage\"],\n  \"verdict\": \"incorrect\"\n}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "cell_key": "8aab33f6c7322b0c5f591b5d587ab5343b3989a79e86bd0b34b8f9511c2a41d4",
+      "invalid_judgment": "correct verdict contradicts claim lists",
+      "judgment": null,
+      "prompt_digest": "sha256:cac60484e7cd1b8885ef719c2ac293f74a583a14ccfb2a435380a9a6a00245c5",
+      "provider_status": "answered",
+      "raw_answer": "{\n  \"heuristic_gap\": null,\n  \"missing_claims\": [],\n  \"reason\": \"Candidate includes required atom of searching indexed source text, semantically covered by semantic code search and finding symbols across codebase.\",\n  \"supported_claims\": [\n    \"provides semantic code search\",\n    \"finds functions/types/symbols across the codebase\"\n  ],\n  \"unsupported_claims\": [\n    \"fast sub-millisecond\",\n    \"multi-layer matching\",\n    \"search by pattern, path, flags, output format\"\n  ],\n  \"verdict\": \"correct\"\n}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "cell_key": "97781856a17690907372f339287b131e00781398130a971748e0f385e55c9cd2",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": null,
+        "missing_claims": [
+          "Start starts the application"
+        ],
+        "reason": "Candidate includes the function signature but not the required documentation phrase 'Start starts the application'.",
+        "supported_claims": [
+          "func (pb *PocketBase) Start() error"
+        ],
+        "unsupported_claims": [],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:f49f73867a8d91842b5017e28b850364fbdf3ba8b901c1795045a47eaed9a207",
+      "provider_status": "answered",
+      "raw_answer": "{\n  \"heuristic_gap\": null,\n  \"missing_claims\": [\"Start starts the application\"],\n  \"supported_claims\": [\"func (pb *PocketBase) Start() error\"],\n  \"unsupported_claims\": [],\n  \"reason\": \"Candidate includes the function signature but not the required documentation phrase 'Start starts the application'.\",\n  \"verdict\": \"incorrect\"\n}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "cell_key": "977f3dea426499097b5416ee7cced931e61a13531cad372719ec808c9268b3c7",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "Candidate should include the actual definition and documentation instead of stating it is unavailable.",
+        "missing_claims": [
+          "Start starts the application",
+          "func (pb *PocketBase) Start() error"
+        ],
+        "reason": "Candidate claims definition is unavailable, but truth confirms it exists with specific atoms.",
+        "supported_claims": [],
+        "unsupported_claims": [
+          "Definition unavailable"
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:8a9b69af9626ae20ff4ca6787d1d212b2022dbadf3d70203d20920761f4622f6",
+      "provider_status": "answered",
+      "raw_answer": "{\n  \"heuristic_gap\": \"Candidate should include the actual definition and documentation instead of stating it is unavailable.\",\n  \"missing_claims\": [\"Start starts the application\", \"func (pb *PocketBase) Start() error\"],\n  \"reason\": \"Candidate claims definition is unavailable, but truth confirms it exists with specific atoms.\",\n  \"supported_claims\": [],\n  \"unsupported_claims\": [\"Definition unavailable\"],\n  \"verdict\": \"incorrect\"\n}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "cell_key": "9895f7320a5de4fcb449b6a465305b40f65cfb09494047907158badef1b1201b",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "The candidate should have directly provided the definition and documentation as per the required atoms.",
+        "missing_claims": [
+          "Start starts the application",
+          "func (pb *PocketBase) Start() error"
+        ],
+        "reason": "The candidate answer does not provide the requested definition and documentation; instead it gives an explanation about why it cannot, omitting the required facts.",
+        "supported_claims": [],
+        "unsupported_claims": [
+          "The manifest saved only compact references (no source/document text)",
+          "The manifest doesn't expose a definition or docs for PocketBase.Start",
+          "To answer the question I'd need to load/hydrate the manifest or inspect the symbol",
+          "That is disallowed by the single-call constraint"
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:3e10e17a97eb7ca259da84c77bc069fa0b22d746412b3026147afb090584fefd",
+      "provider_status": "answered",
+      "raw_answer": "{\n  \"heuristic_gap\": \"The candidate should have directly provided the definition and documentation as per the required atoms.\",\n  \"missing_claims\": [\n    \"Start starts the application\",\n    \"func (pb *PocketBase) Start() error\"\n  ],\n  \"reason\": \"The candidate answer does not provide the requested definition and documentation; instead it gives an explanation about why it cannot, omitting the required facts.\",\n  \"supported_claims\": [],\n  \"unsupported_claims\": [\n    \"The manifest saved only compact references (no source/document text)\",\n    \"The manifest doesn't expose a definition or docs for PocketBase.Start\",\n    \"To answer the question I'd need to load/hydrate the manifest or inspect the symbol\",\n    \"That is disallowed by the single-call constraint\"\n  ],\n  \"verdict\": \"incorrect\"\n}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "cell_key": "9d686348d3c22a355811a603ca4a10aa52d17c946ad0d0f24deb19ba617424e7",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": null,
+        "missing_claims": [
+          "The checked-out commit for this corpus is d438c6a96a0252ff9df62c1cfe193480ed9ff15d."
+        ],
+        "reason": "The candidate provided an incorrect commit hash (4b825dc642cb6eb9a060e54bf8d69288fbee4904) instead of the correct one (d438c6a96a0252ff9df62c1cfe193480ed9ff15d).",
+        "supported_claims": [],
+        "unsupported_claims": [
+          "The checked-out commit for this corpus is 4b825dc642cb6eb9a060e54bf8d69288fbee4904."
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:1fe6e6b2eb9e6a6d54371de4e47dcb9cc3373313e83e59ba7e5362125ebf45a8",
+      "provider_status": "answered",
+      "raw_answer": "{\n  \"heuristic_gap\": null,\n  \"missing_claims\": [\"The checked-out commit for this corpus is d438c6a96a0252ff9df62c1cfe193480ed9ff15d.\"],\n  \"reason\": \"The candidate provided an incorrect commit hash (4b825dc642cb6eb9a060e54bf8d69288fbee4904) instead of the correct one (d438c6a96a0252ff9df62c1cfe193480ed9ff15d).\",\n  \"supported_claims\": [],\n  \"unsupported_claims\": [\"The checked-out commit for this corpus is 4b825dc642cb6eb9a060e54bf8d69288fbee4904.\"],\n  \"verdict\": \"incorrect\"\n}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "cell_key": "9ed96bc6301f13e333dcd31203d9bac5e60af0f73367bb6dfce6ba2d0a93ac88",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "The candidate incorrectly uses the base_ref (empty tree) as the checked-out commit instead of the target_ref. The checked-out commit is the commit that HEAD points to after checkout, not the empty tree placeholder.",
+        "missing_claims": [
+          "The checked-out commit is d438c6a96a0252ff9df62c1cfe193480ed9ff15d"
+        ],
+        "reason": "The candidate claims the commit is the empty tree hash, which directly contradicts the provided truth that requires a different commit hash. The candidate omitted the necessary commit hash and invented a result.",
+        "supported_claims": [],
+        "unsupported_claims": [
+          "The checked-out commit for this corpus is 4b825dc642cb6eb9a060e54bf8d69288fbee4904 (the empty/initial tree)"
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:097c94d9f4660e793b6fcfc5292f712d8871f88e2846a583dc7599d5931e2ed8",
+      "provider_status": "answered",
+      "raw_answer": "{\n  \"heuristic_gap\": \"The candidate incorrectly uses the base_ref (empty tree) as the checked-out commit instead of the target_ref. The checked-out commit is the commit that HEAD points to after checkout, not the empty tree placeholder.\",\n  \"missing_claims\": [\"The checked-out commit is d438c6a96a0252ff9df62c1cfe193480ed9ff15d\"],\n  \"reason\": \"The candidate claims the commit is the empty tree hash, which directly contradicts the provided truth that requires a different commit hash. The candidate omitted the necessary commit hash and invented a result.\",\n  \"supported_claims\": [],\n  \"unsupported_claims\": [\"The checked-out commit for this corpus is 4b825dc642cb6eb9a060e54bf8d69288fbee4904 (the empty/initial tree)\"],\n  \"verdict\": \"incorrect\"\n}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "cell_key": "adc6d30c7c15d9f6708c6136af76cc9730ee16436b5fdb527f0807e6e5794ba6",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "Consider focusing solely on the purpose without adding unsupported implementation details.",
+        "missing_claims": [],
+        "reason": "Candidate includes the required purpose (searches indexed source text) but also includes unsupported claims about speed, semantics, matching, output details, and filtering options that are not present in the truth.",
+        "supported_claims": [
+          "searches across the indexed codebase (implied by truth's 'searches indexed source text')"
+        ],
+        "unsupported_claims": [
+          "fast sub-millisecond",
+          "semantic code search",
+          "multi-layer matching",
+          "returns per-file grouped hits with line numbers, symbol metadata",
+          "options for filtering by language/path/flags",
+          "different output formats (line, context, files, count)"
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:ba3960d3610e70cddacf702c0041526c4f6ddc2a98faca79dd022fae228620aa",
+      "provider_status": "answered",
+      "raw_answer": "{\n  \"heuristic_gap\": \"Consider focusing solely on the purpose without adding unsupported implementation details.\",\n  \"missing_claims\": [],\n  \"reason\": \"Candidate includes the required purpose (searches indexed source text) but also includes unsupported claims about speed, semantics, matching, output details, and filtering options that are not present in the truth.\",\n  \"supported_claims\": [\"searches across the indexed codebase (implied by truth's 'searches indexed source text')\"],\n  \"unsupported_claims\": [\"fast sub-millisecond\", \"semantic code search\", \"multi-layer matching\", \"returns per-file grouped hits with line numbers, symbol metadata\", \"options for filtering by language/path/flags\", \"different output formats (line, context, files, count)\"],\n  \"verdict\": \"incorrect\"\n}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "cell_key": "c7ee097f31e7bb845e4218c2dba591fe1b56b9f69dcc915cd33d8d9c66ee515a",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "The candidate incorrectly states the commit is the empty-tree commit; truth indicates a different commit.",
+        "missing_claims": [
+          "d438c6a96a0252ff9df62c1cfe193480ed9ff15d"
+        ],
+        "reason": "The truth indicates the commit is d438c6a96a0252ff9df62c1cfe193480ed9ff15d, but the candidate claims it is the empty-tree commit.",
+        "supported_claims": [],
+        "unsupported_claims": [
+          "HEAD is the empty-tree commit",
+          "no changes",
+          "corpus is on a clean/empty HEAD rather than a normal source commit"
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:6572025235681dc4d81fb890646a09467a95ff6a6540dbfa38b7984f3dbca0b0",
+      "provider_status": "answered",
+      "raw_answer": "{\n  \"heuristic_gap\": \"The candidate incorrectly states the commit is the empty-tree commit; truth indicates a different commit.\",\n  \"missing_claims\": [\n    \"d438c6a96a0252ff9df62c1cfe193480ed9ff15d\"\n  ],\n  \"reason\": \"The truth indicates the commit is d438c6a96a0252ff9df62c1cfe193480ed9ff15d, but the candidate claims it is the empty-tree commit.\",\n  \"supported_claims\": [],\n  \"unsupported_claims\": [\n    \"HEAD is the empty-tree commit\",\n    \"no changes\",\n    \"corpus is on a clean/empty HEAD rather than a normal source commit\"\n  ],\n  \"verdict\": \"incorrect\"\n}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "cell_key": "d87d16779bad75f6773ea192ff9bf935bc9717383b58156795fc0f40c5ec1217",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "Candidate commit hash does not match the required commit hash from truth.",
+        "missing_claims": [
+          "The checked out commit should be d438c6a96a0252ff9df62c1cfe193480ed9ff15d"
+        ],
+        "reason": "The candidate provided a commit hash that differs from the required commit hash in the truth.",
+        "supported_claims": [],
+        "unsupported_claims": [
+          "The checked out commit is 4b825dc642cb6eb9a060e54bf8d69288fbee4904 (the initial/empty commit)"
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:fd1b10a69fc7dc00f7e712aeb44698581326f7f52ba2937f6ebfd14ac0301270",
+      "provider_status": "answered",
+      "raw_answer": "{\n  \"heuristic_gap\": \"Candidate commit hash does not match the required commit hash from truth.\",\n  \"missing_claims\": [\"The checked out commit should be d438c6a96a0252ff9df62c1cfe193480ed9ff15d\"],\n  \"reason\": \"The candidate provided a commit hash that differs from the required commit hash in the truth.\",\n  \"supported_claims\": [],\n  \"unsupported_claims\": [\"The checked out commit is 4b825dc642cb6eb9a060e54bf8d69288fbee4904 (the initial/empty commit)\"],\n  \"verdict\": \"incorrect\"\n}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "cell_key": "dafd8b707e2134182b9089101ae10ed02878f9050f90ff60d146c545f7f29e2c",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "Provide the definition and documentation as required: 'Start starts the application' and 'func (pb *PocketBase) Start() error'.",
+        "missing_claims": [
+          "Start starts the application",
+          "func (pb *PocketBase) Start() error"
+        ],
+        "reason": "Candidate omitted required definition and documentation and instead reported absence.",
+        "supported_claims": [],
+        "unsupported_claims": [
+          "The result did not include the definition or documentation of PocketBase.Start."
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:0365e3d99cb37d6b9ec0e19700817ecf0f9c106500a51b9f5eaa46981d3abc92",
+      "provider_status": "answered",
+      "raw_answer": "{\n  \"heuristic_gap\": \"Provide the definition and documentation as required: 'Start starts the application' and 'func (pb *PocketBase) Start() error'.\",\n  \"missing_claims\": [\"Start starts the application\", \"func (pb *PocketBase) Start() error\"],\n  \"reason\": \"Candidate omitted required definition and documentation and instead reported absence.\",\n  \"supported_claims\": [],\n  \"unsupported_claims\": [\"The result did not include the definition or documentation of PocketBase.Start.\"],\n  \"verdict\": \"incorrect\"\n}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "cell_key": "dbf21b5e9126da4076f48bc5a4c3aa373ccce68c6801cf76e608da6a1b4d7fd8",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "Examine pocketbase.go to find the declaration of PocketBase.Start.",
+        "missing_claims": [
+          "The file declaring PocketBase.Start is pocketbase.go."
+        ],
+        "reason": "Candidate states inability to determine the file, but truth specifies it is pocketbase.go; candidate omits this required fact.",
+        "supported_claims": [],
+        "unsupported_claims": [
+          "Candidate cannot determine which file declares PocketBase.Start from debug_info."
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:0901542e7204988eda7dfae073e57460bffc0af4fb9851d108d63550ab013e29",
+      "provider_status": "answered",
+      "raw_answer": "{\n  \"heuristic_gap\": \"Examine pocketbase.go to find the declaration of PocketBase.Start.\",\n  \"missing_claims\": [\"The file declaring PocketBase.Start is pocketbase.go.\"],\n  \"reason\": \"Candidate states inability to determine the file, but truth specifies it is pocketbase.go; candidate omits this required fact.\",\n  \"supported_claims\": [],\n  \"unsupported_claims\": [\"Candidate cannot determine which file declares PocketBase.Start from debug_info.\"],\n  \"verdict\": \"incorrect\"\n}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "cell_key": "de6fc9fea2f36b5a5f6674b68ed73fc8fb9f0c0a3ceb28520be38c9cfbcfb8cb",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": null,
+        "missing_claims": [],
+        "reason": "The candidate describes the operation as a code search that returns matches, which semantically equals searching indexed source text.",
+        "supported_claims": [
+          "searches indexed source text"
+        ],
+        "unsupported_claims": [],
+        "verdict": "correct"
+      },
+      "prompt_digest": "sha256:560181e58cbaefd683a072a22fc67ad68db92dd681780c8329cc8449bc2c2a0f",
+      "provider_status": "answered",
+      "raw_answer": "{\n    \"heuristic_gap\": null,\n    \"missing_claims\": [],\n    \"reason\": \"The candidate describes the operation as a code search that returns matches, which semantically equals searching indexed source text.\",\n    \"supported_claims\": [\"searches indexed source text\"],\n    \"unsupported_claims\": [],\n    \"verdict\": \"correct\"\n}",
+      "regression_candidate": {
+        "answer": "Purpose of the search operation: Sub\u2011millisecond semantic code search with multi\u2011layer matching \u2014 given a required `pattern` (plus optional path, flags, filter, max, output), it returns per\u2011file groups of hits with line numbers, symbol metadata, object IDs for `get_context`, and incoming\u2011reference counts.",
+        "expected": {
+          "kind": "success",
+          "required_atoms": [
+            "searches indexed source text"
+          ]
+        },
+        "proposed_gap": null,
+        "required_outcome": "accepted"
+      }
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "cell_key": "e50a317545a52c4f413f74862877aac82c5361036ff533a802aab648f278705b",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": null,
+        "missing_claims": [],
+        "reason": "The candidate includes the required signature and semantically equivalent documentation.",
+        "supported_claims": [
+          "func (pb *PocketBase) Start() error",
+          "Start starts the application"
+        ],
+        "unsupported_claims": [],
+        "verdict": "correct"
+      },
+      "prompt_digest": "sha256:b5181b8bc1a6ced16cb1963e2b8c38c4b5ae4f2d8a0799d502ed7da2cdd494cb",
+      "provider_status": "answered",
+      "raw_answer": "{\n  \"heuristic_gap\": null,\n  \"missing_claims\": [],\n  \"reason\": \"The candidate includes the required signature and semantically equivalent documentation.\",\n  \"supported_claims\": [\"func (pb *PocketBase) Start() error\", \"Start starts the application\"],\n  \"unsupported_claims\": [],\n  \"verdict\": \"correct\"\n}",
+      "regression_candidate": {
+        "answer": "**Definition** (`pocketbase.go:166`):\n```go\nfunc (pb *PocketBase) Start() error {\n\t// register system commands\n\tpb.RootCmd.AddCommand(cmd.NewSuperuserCommand(pb))\n\tpb.RootCmd.AddCommand(cmd.NewServeCommand(pb, !pb.hideStartBanner))\n\n\treturn pb.Execute()\n}\n```\n\n**Documentation**: `// commands (serve, superuser, version) and executes pb.RootCmd.`\n\n`Start` is the PocketBase launch entry point: it registers the system commands (superuser and serve) on `pb.RootCmd` and then executes it via `pb.Execute()`. It returns an `error` from the command execution. The method has 9 incoming references (callers include `main` and `LaunchURL`), has low complexity (cyclomatic 1), no test coverage, and is considered impure (transitive effects: param_write, receiver_write, global_write, channel).",
+        "expected": {
+          "kind": "success",
+          "required_atoms": [
+            "func (pb *PocketBase) Start() error",
+            "Start starts the application"
+          ]
+        },
+        "proposed_gap": null,
+        "required_outcome": "accepted"
+      }
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "cell_key": "e64c46be3a0cdbfb826b9ac13211a44200f4b66c09bc79b7b86cb9ee3161ab4c",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "Include the required documentation comment 'Start starts the application' in the answer.",
+        "missing_claims": [
+          "Start starts the application"
+        ],
+        "reason": "Candidate provides the function signature but omits the required high-level documentation that 'Start starts the application'.",
+        "supported_claims": [
+          "func (pb *PocketBase) Start() error"
+        ],
+        "unsupported_claims": [],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:1d21c0443ddba82c2adb91c06604501f0b3ef4b018756ca447bdca94747ad1b0",
+      "provider_status": "answered",
+      "raw_answer": "{\n  \"heuristic_gap\": \"Include the required documentation comment 'Start starts the application' in the answer.\",\n  \"missing_claims\": [\"Start starts the application\"],\n  \"reason\": \"Candidate provides the function signature but omits the required high-level documentation that 'Start starts the application'.\",\n  \"supported_claims\": [\"func (pb *PocketBase) Start() error\"],\n  \"unsupported_claims\": [],\n  \"verdict\": \"incorrect\"\n}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "cell_key": "e7ce720cdb834b53c5e2baed8de3550f9b3eff0cb27ad6625c317ddc51b6b049",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "When the truth indicates success, the candidate should directly extract the required documentation from the available source context.",
+        "missing_claims": [
+          "Start starts the application",
+          "func (pb *PocketBase) Start() error"
+        ],
+        "reason": "Candidate fails to provide the required atoms and incorrectly states inability to retrieve them.",
+        "supported_claims": [],
+        "unsupported_claims": [
+          "The manifest only contains metadata, not actual source content, so I can't quote PocketBase.Start's definition or docs from this result."
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:4f93cef475a44bbd103b382bf4175e0ea5a81dff271040448274ce0af52ffaa3",
+      "provider_status": "answered",
+      "raw_answer": "{\n  \"heuristic_gap\": \"When the truth indicates success, the candidate should directly extract the required documentation from the available source context.\",\n  \"missing_claims\": [\"Start starts the application\", \"func (pb *PocketBase) Start() error\"],\n  \"reason\": \"Candidate fails to provide the required atoms and incorrectly states inability to retrieve them.\",\n  \"supported_claims\": [],\n  \"unsupported_claims\": [\"The manifest only contains metadata, not actual source content, so I can't quote PocketBase.Start's definition or docs from this result.\"],\n  \"verdict\": \"incorrect\"\n}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "cell_key": "e9e155e5a3be618220f76cfe2d992bea91acafd76b829768fc3878e8c55e20b1",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": null,
+        "missing_claims": [
+          "Execute"
+        ],
+        "reason": "Candidate states inability to determine the method, but truth requires 'Execute'.",
+        "supported_claims": [],
+        "unsupported_claims": [
+          "The side_effects result for Start does not include callee information, preventing determination of the directly invoked method."
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:ecfb461ffea02d9daae113946d3d45913f0567a273354f61f977363109ac117f",
+      "provider_status": "answered",
+      "raw_answer": "{\n  \"heuristic_gap\": null,\n  \"missing_claims\": [\"Execute\"],\n  \"reason\": \"Candidate states inability to determine the method, but truth requires 'Execute'.\",\n  \"supported_claims\": [],\n  \"unsupported_claims\": [\"The side_effects result for Start does not include callee information, preventing determination of the directly invoked method.\"],\n  \"verdict\": \"incorrect\"\n}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "cell_key": "f7dd3652a892076d0e2b7693bfa6bf49db9d03e087ba8e245a47ee61fc5dc62a",
+      "invalid_judgment": "correct verdict contradicts claim lists",
+      "judgment": null,
+      "prompt_digest": "sha256:d6a5840b86a19a626bfe62ca41edd65cdd59a417e81d67e3f6b38acd2fc8df5e",
+      "provider_status": "answered",
+      "raw_answer": "{\n  \"heuristic_gap\": null,\n  \"missing_claims\": [],\n  \"reason\": \"Candidate includes the required atom 'searches indexed source text' via 'matches patterns across the indexed codebase'. Additional details are not contradicted but also not required.\",\n  \"supported_claims\": [\"matches patterns across the indexed codebase\"],\n  \"unsupported_claims\": [\n    \"performs sub-millisecond semantic code search\",\n    \"acts as a fast replacement for grep/rg/find\",\n    \"returns per-file hit groups (file path, line numbers, symbol metadata, incoming references)\",\n    \"supports flags (case-insensitive, regex, etc.), output formats, and narrowing by path/filter\"\n  ],\n  \"verdict\": \"correct\"\n}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "cell_key": "fb653ff77fc8ad6ee83d12ec4e821dfd5d6b88f9140d40e87b90e5e61e7fb738",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "Ensure full hydration of source, signature, and doc for the function instead of relying on an opaque manifest path.",
+        "missing_claims": [
+          "Start starts the application",
+          "func (pb *PocketBase) Start() error"
+        ],
+        "reason": "Candidate answer does not provide the required atoms that describe PocketBase.Start and instead claims inability to reliably state the definition.",
+        "supported_claims": [],
+        "unsupported_claims": [
+          "Cannot reliably state definition/documentation"
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:55a1abf5c73b7a17dc738e6693108fb92e1b389281a882d16271645404506c99",
+      "provider_status": "answered",
+      "raw_answer": "{\n  \"heuristic_gap\": \"Ensure full hydration of source, signature, and doc for the function instead of relying on an opaque manifest path.\",\n  \"missing_claims\": [\"Start starts the application\", \"func (pb *PocketBase) Start() error\"],\n  \"reason\": \"Candidate answer does not provide the required atoms that describe PocketBase.Start and instead claims inability to reliably state the definition.\",\n  \"supported_claims\": [],\n  \"unsupported_claims\": [\"Cannot reliably state definition/documentation\"],\n  \"verdict\": \"incorrect\"\n}",
+      "regression_candidate": null
+    }
+  ],
+  "schema": "lci.all-tools-adjudications.v1"
+}

@@ -13,6 +13,13 @@ NEGATIVE_WORDS = re.compile(r"\b(?:no|none|zero|empty|not found|did not|failed?|
 ERROR_WORDS = re.compile(r"\b(?:failed?|error|not found|invalid|unable)\b", re.I)
 
 
+def required_success_atoms(tool: str, surface: dict) -> list[str]:
+    atoms = [str(item) for item in surface["answer"]]
+    # These questions ask for a callsite/definition location. The older surface
+    # bank also stored supporting definition atoms that are not required answers.
+    return atoms[:1] if tool in {"search", "inspect_symbol"} else atoms
+
+
 def negative_class(case: dict) -> str:
     if case["is_error"]:
         return "error"
@@ -32,14 +39,20 @@ def negative_class(case: dict) -> str:
 def score_answer(answer: str, case: dict, surface: dict) -> dict:
     folded = " ".join(answer.casefold().split())
     if case["scenario"] == "success":
-        atoms = [str(item).casefold() for item in surface["answer"]]
-        if atoms:
-            passed = all(atom in folded for atom in atoms)
+        original_atoms = required_success_atoms(case["tool"], surface)
+        folded_atoms = [item.casefold() for item in original_atoms]
+        if case["tool"] == "inspect_symbol":
+            passed = bool(re.search(r"pocketbase\.go[`'\"]?(?:\s+at)?\s+(?:line\s+)?166\b|pocketbase\.go:166\b",
+                                    folded))
+            reason = "semantic_definition_location" if passed else "definition_location_missing"
+        elif original_atoms:
+            passed = all(atom in folded for atom in folded_atoms)
             reason = "all_required_atoms" if passed else "missing_required_atoms"
         else:
             passed = bool(NEGATIVE_WORDS.search(answer))
             reason = "correct_empty_result" if passed else "empty_result_not_acknowledged"
-        expected = {"kind": "success", "required_atoms": atoms}
+        expected = {"kind": "success", "required_atoms": original_atoms,
+                    "source_tool_output": case["output"]}
     else:
         kind = negative_class(case)
         passed = bool(ERROR_WORDS.search(answer)) if kind == "error" else \
@@ -67,6 +80,7 @@ def analyze(cells: list[dict], matrix: dict, surface_doc: dict) -> dict:
         scores.append(score)
         if result["status"] == "needs_adjudication":
             queue.append({"cell_key": cell["cell_key"], "task_id": cell["task_id"],
+                          "origin_model": cell["model"],
                           "question": surfaces[case["tool"]]["question"] if case["scenario"] == "success" else
                                       f"Interpret the negative {case['tool']} result.",
                           "answer": cell["final_answer"], "expected": result["expected"]})
@@ -83,7 +97,9 @@ def analyze(cells: list[dict], matrix: dict, surface_doc: dict) -> dict:
 
 
 def load_cells(path: Path) -> list[dict]:
-    return [json.loads(item.read_text()) for item in sorted(path.glob("*.json"))]
+    attempts = path / "attempts"
+    source = attempts if attempts.is_dir() else path
+    return [json.loads(item.read_text()) for item in sorted(source.glob("*.json"))]
 
 
 def main() -> int:

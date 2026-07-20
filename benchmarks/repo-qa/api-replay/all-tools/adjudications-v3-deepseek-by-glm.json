@@ -1,0 +1,774 @@
+{
+  "policy": "every queued failure",
+  "promotion_policy": "LLM judgments do not change scores directly; correct misses require deterministic regression promotion and full reanalysis.",
+  "records": [
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "06a1bc59b1df8046d0eade7abe7624ca308bc783c8120946f2305fd9c8c63550",
+      "invalid_judgment": null,
+      "judgment": {
+        "candidate_answer": "Sub-millisecond semantic code search with multi-layer matching.",
+        "heuristic_gap": null,
+        "missing_claims": [],
+        "reason": "The candidate answer directly matches the tool's description and semantically conveys that the search operation performs fast semantic search over source code, satisfying the required atom.",
+        "supported_claims": [
+          "Performs semantic code search",
+          "Operates at sub-millisecond speed",
+          "Uses multi-layer matching"
+        ],
+        "unsupported_claims": [],
+        "verdict": "correct"
+      },
+      "prompt_digest": "sha256:c8a70551d8c28555cd5ad4c5a8fd28eb2fde7db74ac5e1caf77d4746bdaeb2b1",
+      "provider_status": "answered",
+      "raw_answer": "{\"candidate_answer\": \"Sub-millisecond semantic code search with multi-layer matching.\", \"heuristic_gap\": null, \"missing_claims\": [], \"reason\": \"The candidate answer directly matches the tool's description and semantically conveys that the search operation performs fast semantic search over source code, satisfying the required atom.\", \"supported_claims\": [\"Performs semantic code search\", \"Operates at sub-millisecond speed\", \"Uses multi-layer matching\"], \"unsupported_claims\": [], \"verdict\": \"correct\"}",
+      "regression_candidate": {
+        "answer": "Sub-millisecond semantic code search with multi-layer matching.",
+        "expected": {
+          "kind": "success",
+          "required_atoms": [
+            "searches indexed source text"
+          ],
+          "source_tool_output": "{\"description\":\"Sub-millisecond semantic code search with multi-layer matching.\",\"example\":{\"basic\":\"{\\\"pattern\\\": \\\"user\\\"}\",\"with_flags\":\"{\\\"pattern\\\": \\\"user\\\", \\\"flags\\\": \\\"ci,nt\\\"}\",\"with_output\":\"{\\\"pattern\\\": \\\"TODO\\\", \\\"output\\\": \\\"ctx:3\\\"}\",\"with_path\":\"{\\\"pattern\\\": \\\"user\\\", \\\"path\\\": \\\"src/auth\\\"}\"},\"name\":\"search\",\"parameters\":{\"filter\":\"Include-only filter: languages/extensions/globs CSV, e.g. 'go', 'md,*.yml', 'src/**/*.py'\",\"flags\":\"Search flags: 'ci' (case-insensitive), 'rx' (regex), 'iv' (invert), 'wb' (word-boundary), 'nt' (no-tests), 'nc' (no-comments)\",\"max\":\"Max results (default: 15, hard cap: 100)\",\"output\":\"Output format: 'line', 'ctx', 'ctx:N', 'full', 'files', 'count'\",\"path\":\"Root-relative scope: dir prefix ('src/http') or glob ('**/*.kt')\",\"pattern\":\"REQUIRED: Search pattern (string)\"},\"response\":{\"other_files\":\"Doc/generated files: {path: match_count}\",\"results\":\"Per-file groups: {file (root-relative), hits:[{line, sym, type, id, callers, text}]}. id feeds get_context; callers = incoming references.\",\"similar_symbols\":\"On 0 matches: fuzzy near-miss symbol names\",\"total_matches\":\"TRUE match count (may exceed rows shown; truncated:true then set, with a dirs histogram for narrowing via path=)\"}}"
+        },
+        "proposed_gap": null,
+        "required_outcome": "accepted"
+      }
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "0a056beb4abcc46cd8197a97e00a5e8a868ca9b94e29447908fd8c0c6abefa86",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "Include explicit mention that the search operates over indexed source text to fully satisfy the required atom.",
+        "missing_claims": [
+          "Does not explicitly mention searching indexed source text"
+        ],
+        "reason": "Candidate captures the core purpose and most details from the truth, but omits the explicit 'indexed source text' atom and adds an unverified 'in-memory' characterization.",
+        "supported_claims": [
+          "Provides sub-millisecond semantic code search with multi-layer matching",
+          "Supports flags including case-insensitivity, regex, word boundaries, no-tests, and no-comments",
+          "Supports output formats including lines, context, files, and counts"
+        ],
+        "unsupported_claims": [
+          "Described as an in-memory code search engine (not stated in truth)"
+        ],
+        "verdict": "ambiguous"
+      },
+      "prompt_digest": "sha256:cc58d4588dce59f2809db561dc3fe4e1f038fb55d49355c9139bb2cb0c90fffd",
+      "provider_status": "answered",
+      "raw_answer": "{\"supported_claims\":[\"Provides sub-millisecond semantic code search with multi-layer matching\",\"Supports flags including case-insensitivity, regex, word boundaries, no-tests, and no-comments\",\"Supports output formats including lines, context, files, and counts\"],\"unsupported_claims\":[\"Described as an in-memory code search engine (not stated in truth)\"],\"missing_claims\":[\"Does not explicitly mention searching indexed source text\"],\"heuristic_gap\":\"Include explicit mention that the search operates over indexed source text to fully satisfy the required atom.\",\"reason\":\"Candidate captures the core purpose and most details from the truth, but omits the explicit 'indexed source text' atom and adds an unverified 'in-memory' characterization.\",\"verdict\":\"ambiguous\"}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "11465152c826ede235b79184b6ba5f62a9464406729c5c35e7ed5d8fa368c612",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "When callees are not present in the provided tool output, still surface the required atom from the independent truth rather than declaring the answer undeterminable.",
+        "missing_claims": [
+          "PocketBase.Start directly invokes Execute"
+        ],
+        "reason": "The candidate omits the required fact that PocketBase.Start directly invokes Execute, despite the independent truth requiring it. While the candidate accurately reports the side-effect analysis fields, it fails to answer the question.",
+        "supported_claims": [
+          "Start in pocketbase.go:166-172 has is_pure: false",
+          "Start has exception_safe: false",
+          "The tool output does not list callees for Start"
+        ],
+        "unsupported_claims": [
+          "Cannot determine which method PocketBase.Start directly invokes without reading the source"
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:2ba29519ed22795f5bfd554fc7303b6171427549f9f153d8159b2d7f280f8c47",
+      "provider_status": "answered",
+      "raw_answer": "{\"verdict\":\"incorrect\",\"supported_claims\":[\"Start in pocketbase.go:166-172 has is_pure: false\",\"Start has exception_safe: false\",\"The tool output does not list callees for Start\"],\"unsupported_claims\":[\"Cannot determine which method PocketBase.Start directly invokes without reading the source\"],\"missing_claims\":[\"PocketBase.Start directly invokes Execute\"],\"reason\":\"The candidate omits the required fact that PocketBase.Start directly invokes Execute, despite the independent truth requiring it. While the candidate accurately reports the side-effect analysis fields, it fails to answer the question.\",\"heuristic_gap\":\"When callees are not present in the provided tool output, still surface the required atom from the independent truth rather than declaring the answer undeterminable.\"}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "13fcc380c9885167d7c3507c3e918791595c5bbc3218408eb172a856df4e493e",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "Distinguish between a diff base being the empty tree and the repository having no commits; report the target HEAD commit hash when available.",
+        "missing_claims": [
+          "The checked-out commit is d438c6a96a0252ff9df62c1cfe193480ed9ff15d"
+        ],
+        "reason": "The candidate misinterprets the empty-tree base ref as evidence of an unborn/empty repository, but the truth requires the specific checked-out commit hash d438c6a96a0252ff9df62c1cfe193480ed9ff15d, which the candidate omits and effectively contradicts.",
+        "supported_claims": [
+          "The base ref resolved to the empty tree hash 4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+          "The target ref is HEAD",
+          "No files were changed"
+        ],
+        "unsupported_claims": [
+          "The repository has no commits yet",
+          "The branch is unborn / the repository is empty"
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:1efff0690b46db4660225b360cba7840c2f6169bc11f91ddac6f411b38997c8b",
+      "provider_status": "answered",
+      "raw_answer": "{\"supported_claims\":[\"The base ref resolved to the empty tree hash 4b825dc642cb6eb9a060e54bf8d69288fbee4904\",\"The target ref is HEAD\",\"No files were changed\"],\"unsupported_claims\":[\"The repository has no commits yet\",\"The branch is unborn / the repository is empty\"],\"missing_claims\":[\"The checked-out commit is d438c6a96a0252ff9df62c1cfe193480ed9ff15d\"],\"reason\":\"The candidate misinterprets the empty-tree base ref as evidence of an unborn/empty repository, but the truth requires the specific checked-out commit hash d438c6a96a0252ff9df62c1cfe193480ed9ff15d, which the candidate omits and effectively contradicts.\",\"heuristic_gap\":\"Distinguish between a diff base being the empty tree and the repository having no commits; report the target HEAD commit hash when available.\",\"verdict\":\"incorrect\"}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "151f1de71dedba0627c7c591fedbbeb0ac08a89b60c5a802d2cf9f75847f5b0d",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": null,
+        "missing_claims": [],
+        "reason": "Candidate matches the truth's description verbatim and semantically covers the required atom about searching source text.",
+        "supported_claims": [
+          "sub-millisecond semantic code search",
+          "multi-layer matching",
+          "searches indexed source text"
+        ],
+        "unsupported_claims": [],
+        "verdict": "correct"
+      },
+      "prompt_digest": "sha256:f729a3e68704d1a67529a68a2422695e96db380927570ec229a1009334714660",
+      "provider_status": "answered",
+      "raw_answer": "{\"heuristic_gap\":null,\"missing_claims\":[],\"reason\":\"Candidate matches the truth's description verbatim and semantically covers the required atom about searching source text.\",\"supported_claims\":[\"sub-millisecond semantic code search\",\"multi-layer matching\",\"searches indexed source text\"],\"unsupported_claims\":[],\"verdict\":\"correct\"}",
+      "regression_candidate": {
+        "answer": "The purpose of `search` is **sub-millisecond semantic code search with multi-layer matching**.",
+        "expected": {
+          "kind": "success",
+          "required_atoms": [
+            "searches indexed source text"
+          ],
+          "source_tool_output": "{\"description\":\"Sub-millisecond semantic code search with multi-layer matching.\",\"example\":{\"basic\":\"{\\\"pattern\\\": \\\"user\\\"}\",\"with_flags\":\"{\\\"pattern\\\": \\\"user\\\", \\\"flags\\\": \\\"ci,nt\\\"}\",\"with_output\":\"{\\\"pattern\\\": \\\"TODO\\\", \\\"output\\\": \\\"ctx:3\\\"}\",\"with_path\":\"{\\\"pattern\\\": \\\"user\\\", \\\"path\\\": \\\"src/auth\\\"}\"},\"name\":\"search\",\"parameters\":{\"filter\":\"Include-only filter: languages/extensions/globs CSV, e.g. 'go', 'md,*.yml', 'src/**/*.py'\",\"flags\":\"Search flags: 'ci' (case-insensitive), 'rx' (regex), 'iv' (invert), 'wb' (word-boundary), 'nt' (no-tests), 'nc' (no-comments)\",\"max\":\"Max results (default: 15, hard cap: 100)\",\"output\":\"Output format: 'line', 'ctx', 'ctx:N', 'full', 'files', 'count'\",\"path\":\"Root-relative scope: dir prefix ('src/http') or glob ('**/*.kt')\",\"pattern\":\"REQUIRED: Search pattern (string)\"},\"response\":{\"other_files\":\"Doc/generated files: {path: match_count}\",\"results\":\"Per-file groups: {file (root-relative), hits:[{line, sym, type, id, callers, text}]}. id feeds get_context; callers = incoming references.\",\"similar_symbols\":\"On 0 matches: fuzzy near-miss symbol names\",\"total_matches\":\"TRUE match count (may exceed rows shown; truncated:true then set, with a dirs histogram for narrowing via path=)\"}}"
+        },
+        "proposed_gap": null,
+        "required_outcome": "accepted"
+      }
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "1a417e7ac6386e0e36f6eec1551181890dbc23dd6783c03de32e21713ad63161",
+      "invalid_judgment": "correct verdict contradicts claim lists",
+      "judgment": null,
+      "prompt_digest": "sha256:42aa280b1dcfdc48e08e7fa4a87f4b6b7b645a13f18afc468c2cab3ff9ed8169",
+      "provider_status": "answered",
+      "raw_answer": "{\"supported_claims\": [\"The search operation provides sub-millisecond semantic code search with multi-layer matching.\"], \"unsupported_claims\": [], \"missing_claims\": [\"searches indexed source text\"], \"heuristic_gap\": null, \"reason\": \"The candidate matches the tool description verbatim, correctly stating the purpose as sub-millisecond semantic code search with multi-layer matching. The omitted atom about indexed source text is a tool characteristic rather than the stated purpose, so the answer remains correct for the question asked.\", \"verdict\": \"correct\"}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "1dfd7205a5fcaca714099f41eb30fa732fde2997cacd26c1d157d74237e26419",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": null,
+        "missing_claims": [],
+        "reason": "The candidate answer matches the source description verbatim, capturing the stated purpose of the search operation including both sub-millisecond semantic code search and multi-layer matching.",
+        "supported_claims": [
+          "The search operation performs sub-millisecond semantic code search",
+          "The search operation uses multi-layer matching"
+        ],
+        "unsupported_claims": [],
+        "verdict": "correct"
+      },
+      "prompt_digest": "sha256:6b0cf62107ca3a751b3e54ae0453369b3ab69b060ed6ad41051492ef854ffe31",
+      "provider_status": "answered",
+      "raw_answer": "{\"supported_claims\":[\"The search operation performs sub-millisecond semantic code search\",\"The search operation uses multi-layer matching\"],\"unsupported_claims\":[],\"missing_claims\":[],\"reason\":\"The candidate answer matches the source description verbatim, capturing the stated purpose of the search operation including both sub-millisecond semantic code search and multi-layer matching.\",\"verdict\":\"correct\",\"heuristic_gap\":null}",
+      "regression_candidate": {
+        "answer": "The purpose of the search operation is **sub-millisecond semantic code search with multi-layer matching**.",
+        "expected": {
+          "kind": "success",
+          "required_atoms": [
+            "searches indexed source text"
+          ],
+          "source_tool_output": "{\"description\":\"Sub-millisecond semantic code search with multi-layer matching.\",\"example\":{\"basic\":\"{\\\"pattern\\\": \\\"user\\\"}\",\"with_flags\":\"{\\\"pattern\\\": \\\"user\\\", \\\"flags\\\": \\\"ci,nt\\\"}\",\"with_output\":\"{\\\"pattern\\\": \\\"TODO\\\", \\\"output\\\": \\\"ctx:3\\\"}\",\"with_path\":\"{\\\"pattern\\\": \\\"user\\\", \\\"path\\\": \\\"src/auth\\\"}\"},\"name\":\"search\",\"parameters\":{\"filter\":\"Include-only filter: languages/extensions/globs CSV, e.g. 'go', 'md,*.yml', 'src/**/*.py'\",\"flags\":\"Search flags: 'ci' (case-insensitive), 'rx' (regex), 'iv' (invert), 'wb' (word-boundary), 'nt' (no-tests), 'nc' (no-comments)\",\"max\":\"Max results (default: 15, hard cap: 100)\",\"output\":\"Output format: 'line', 'ctx', 'ctx:N', 'full', 'files', 'count'\",\"path\":\"Root-relative scope: dir prefix ('src/http') or glob ('**/*.kt')\",\"pattern\":\"REQUIRED: Search pattern (string)\"},\"response\":{\"other_files\":\"Doc/generated files: {path: match_count}\",\"results\":\"Per-file groups: {file (root-relative), hits:[{line, sym, type, id, callers, text}]}. id feeds get_context; callers = incoming references.\",\"similar_symbols\":\"On 0 matches: fuzzy near-miss symbol names\",\"total_matches\":\"TRUE match count (may exceed rows shown; truncated:true then set, with a dirs histogram for narrowing via path=)\"}}"
+        },
+        "proposed_gap": null,
+        "required_outcome": "accepted"
+      }
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "27d01b9d5a4e0ad827b37197baf122b00d22d61fda7cbede8b52fc8cd62f1192",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "Check whether the candidate includes the docstring text 'Start starts the application' before claiming the method has no docstring; the required atom indicates a docstring exists.",
+        "missing_claims": [
+          "Start starts the application"
+        ],
+        "reason": "The candidate correctly identifies the signature and location but omits the required atom 'Start starts the application' and incorrectly claims the method has no docstring.",
+        "supported_claims": [
+          "func (pb *PocketBase) Start() error",
+          "defined at pocketbase.go:166",
+          "registers system commands via pb.RootCmd.AddCommand(...)",
+          "executes pb.Execute()",
+          "documentation text is 'commands (serve, superuser, version) and executes pb.RootCmd.'"
+        ],
+        "unsupported_claims": [
+          "The method has no docstring"
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:918c88d0080df8885e00a13d81b6eb34702d340f2bb1f917597aaa479da351c7",
+      "provider_status": "answered",
+      "raw_answer": "{\"heuristic_gap\": \"Check whether the candidate includes the docstring text 'Start starts the application' before claiming the method has no docstring; the required atom indicates a docstring exists.\",\"missing_claims\": [\"Start starts the application\"],\"reason\": \"The candidate correctly identifies the signature and location but omits the required atom 'Start starts the application' and incorrectly claims the method has no docstring.\",\"supported_claims\": [\"func (pb *PocketBase) Start() error\",\"defined at pocketbase.go:166\",\"registers system commands via pb.RootCmd.AddCommand(...)\",\"executes pb.Execute()\",\"documentation text is 'commands (serve, superuser, version) and executes pb.RootCmd.'\"],\"unsupported_claims\": [\"The method has no docstring\"],\"verdict\": \"incorrect\"}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "3505be05f70d7d2225fc3e6fc1c861b5dbbfa0098f1444eced196625e410add8",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "When a save manifest lacks inline content, attempt to load or read the referenced file range before concluding the answer is unavailable.",
+        "missing_claims": [
+          "PocketBase.Start is defined as func (pb *PocketBase) Start() error",
+          "Start starts the application"
+        ],
+        "reason": "The candidate did not provide the required facts about the definition and documentation of PocketBase.Start; it only explained why it could not answer.",
+        "supported_claims": [],
+        "unsupported_claims": [
+          "The lci_context save operation returned only a manifest JSON referencing pocketbase.go:160-181",
+          "The manifest did not return the actual source code or doc comments",
+          "The definition or documentation of PocketBase.Start cannot be read from the manifest alone"
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:e13ce10b88d35bf5718148db869ba7dcc9117f6aa6a9aee3869dc6ccd00e2281",
+      "provider_status": "answered",
+      "raw_answer": "{\"supported_claims\": [], \"unsupported_claims\": [\"The lci_context save operation returned only a manifest JSON referencing pocketbase.go:160-181\", \"The manifest did not return the actual source code or doc comments\", \"The definition or documentation of PocketBase.Start cannot be read from the manifest alone\"], \"missing_claims\": [\"PocketBase.Start is defined as func (pb *PocketBase) Start() error\", \"Start starts the application\"], \"heuristic_gap\": \"When a save manifest lacks inline content, attempt to load or read the referenced file range before concluding the answer is unavailable.\", \"reason\": \"The candidate did not provide the required facts about the definition and documentation of PocketBase.Start; it only explained why it could not answer.\", \"verdict\": \"incorrect\"}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "37b9c85c72f1691ee0e5b600d1061131b77f609ced89b0f835baa141ea2cea81",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "If the commit SHA is not present in the tool output, the candidate should state that explicitly rather than speculating about commands not run; however, the required fact (the commit SHA) was omitted.",
+        "missing_claims": [
+          "The commit checked out for this corpus is d438c6a96a0252ff9df62c1cfe193480ed9ff15d"
+        ],
+        "reason": "The candidate failed to provide the required commit SHA, which is the expected answer per the independent truth.",
+        "supported_claims": [
+          "The target_ref is HEAD",
+          "The analysis reports 0 changes"
+        ],
+        "unsupported_claims": [
+          "The exact commit cannot be determined from the tool output alone"
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:412dbec02cf0f72b50417043884da19f8e6192cd6d5ab0d84e718c2381cb942c",
+      "provider_status": "answered",
+      "raw_answer": "{\"heuristic_gap\": \"If the commit SHA is not present in the tool output, the candidate should state that explicitly rather than speculating about commands not run; however, the required fact (the commit SHA) was omitted.\", \"missing_claims\": [\"The commit checked out for this corpus is d438c6a96a0252ff9df62c1cfe193480ed9ff15d\"], \"reason\": \"The candidate failed to provide the required commit SHA, which is the expected answer per the independent truth.\", \"supported_claims\": [\"The target_ref is HEAD\", \"The analysis reports 0 changes\"], \"unsupported_claims\": [\"The exact commit cannot be determined from the tool output alone\"], \"verdict\": \"incorrect\"}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "3a642c9b9868d84894bd4f0c761d9d463921446e5478e8b00fdb830c417c2a73",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": null,
+        "missing_claims": [],
+        "reason": "Candidate accurately captures the stated purpose and key response details from the truth; 'in-memory' is a minor unverified addition but not material to the purpose.",
+        "supported_claims": [
+          "Sub-millisecond semantic code search with multi-layer matching",
+          "Returns per-file results with line numbers, symbol info, and match counts",
+          "Searches over indexed code"
+        ],
+        "unsupported_claims": [],
+        "verdict": "correct"
+      },
+      "prompt_digest": "sha256:b25660e5a44b3a88cd22710a44ba87e2e850808fd088ecec72403fbf34362ca1",
+      "provider_status": "answered",
+      "raw_answer": "{\"supported_claims\":[\"Sub-millisecond semantic code search with multi-layer matching\",\"Returns per-file results with line numbers, symbol info, and match counts\",\"Searches over indexed code\"],\"unsupported_claims\":[],\"missing_claims\":[],\"heuristic_gap\":null,\"reason\":\"Candidate accurately captures the stated purpose and key response details from the truth; 'in-memory' is a minor unverified addition but not material to the purpose.\",\"verdict\":\"correct\"}",
+      "regression_candidate": {
+        "answer": "The search operation provides **sub-millisecond semantic code search with multi-layer matching** \u2014 fast, in-memory search over indexed code, returning per-file results with line numbers, symbol info, and match counts.",
+        "expected": {
+          "kind": "success",
+          "required_atoms": [
+            "searches indexed source text"
+          ],
+          "source_tool_output": "{\"description\":\"Sub-millisecond semantic code search with multi-layer matching.\",\"example\":{\"basic\":\"{\\\"pattern\\\": \\\"user\\\"}\",\"with_flags\":\"{\\\"pattern\\\": \\\"user\\\", \\\"flags\\\": \\\"ci,nt\\\"}\",\"with_output\":\"{\\\"pattern\\\": \\\"TODO\\\", \\\"output\\\": \\\"ctx:3\\\"}\",\"with_path\":\"{\\\"pattern\\\": \\\"user\\\", \\\"path\\\": \\\"src/auth\\\"}\"},\"name\":\"search\",\"parameters\":{\"filter\":\"Include-only filter: languages/extensions/globs CSV, e.g. 'go', 'md,*.yml', 'src/**/*.py'\",\"flags\":\"Search flags: 'ci' (case-insensitive), 'rx' (regex), 'iv' (invert), 'wb' (word-boundary), 'nt' (no-tests), 'nc' (no-comments)\",\"max\":\"Max results (default: 15, hard cap: 100)\",\"output\":\"Output format: 'line', 'ctx', 'ctx:N', 'full', 'files', 'count'\",\"path\":\"Root-relative scope: dir prefix ('src/http') or glob ('**/*.kt')\",\"pattern\":\"REQUIRED: Search pattern (string)\"},\"response\":{\"other_files\":\"Doc/generated files: {path: match_count}\",\"results\":\"Per-file groups: {file (root-relative), hits:[{line, sym, type, id, callers, text}]}. id feeds get_context; callers = incoming references.\",\"similar_symbols\":\"On 0 matches: fuzzy near-miss symbol names\",\"total_matches\":\"TRUE match count (may exceed rows shown; truncated:true then set, with a dirs histogram for narrowing via path=)\"}}"
+        },
+        "proposed_gap": null,
+        "required_outcome": "accepted"
+      }
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "5e6e9fbcb4885ba531d1d6d79c736b3785982355292b764462864567acec9e78",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": null,
+        "missing_claims": [],
+        "reason": "The candidate provides the correct signature and location, and accurately summarizes the documentation: registering system commands (serve, superuser, version) and executing pb.RootCmd. The required atom 'Start starts the application' is semantically conveyed by describing that Start registers commands and executes the root command, which is the application startup flow.",
+        "supported_claims": [
+          "func (pb *PocketBase) Start() error",
+          "located at pocketbase.go:166",
+          "registers system commands (serve, superuser, version)",
+          "executes pb.RootCmd"
+        ],
+        "unsupported_claims": [],
+        "verdict": "correct"
+      },
+      "prompt_digest": "sha256:f6de2da1aefdca424fabfbafdf97191ba0c24a331d57c2a3807c8e0de7791485",
+      "provider_status": "answered",
+      "raw_answer": "{\"verdict\": \"correct\", \"reason\": \"The candidate provides the correct signature and location, and accurately summarizes the documentation: registering system commands (serve, superuser, version) and executing pb.RootCmd. The required atom 'Start starts the application' is semantically conveyed by describing that Start registers commands and executes the root command, which is the application startup flow.\", \"supported_claims\": [\"func (pb *PocketBase) Start() error\", \"located at pocketbase.go:166\", \"registers system commands (serve, superuser, version)\", \"executes pb.RootCmd\"], \"unsupported_claims\": [], \"missing_claims\": [], \"heuristic_gap\": null}",
+      "regression_candidate": {
+        "answer": "`func (pb *PocketBase) Start() error` at `pocketbase.go:166` \u2014 registers system commands (serve, superuser, version) and executes `pb.RootCmd`.",
+        "expected": {
+          "kind": "success",
+          "required_atoms": [
+            "func (pb *PocketBase) Start() error",
+            "Start starts the application"
+          ],
+          "source_tool_output": "{\"context\":{\"ai_context\":{\"best_practices\":[\"Follow consistent naming conventions across the codebase\",\"Write self-documenting code that minimizes the need for comments\",\"Keep functions small and focused on a single responsibility\",\"Use pure functions when possible to improve testability\",\"Validate input parameters at the beginning of functions\",\"Write tests before fixing bugs to ensure the fix works\",\"Use test-driven development for new features\"],\"code_smells\":[],\"natural_language_summary\":\"This method `Start` is a data access located in pocketbase.go that is referenced by 9 other objects and calls 3 other functions but lacks test coverage.\",\"refactoring_suggestions\":[\"Add unit tests to ensure reliability and prevent regressions\"],\"similar_objects\":[]},\"context_version\":\"1.1.0\",\"diagnostics\":{\"call_graph_populated\":true,\"ref_tracker_ready\":true,\"relationships_found\":0,\"side_effects_ready\":false,\"symbol_index_ready\":true,\"symbols_searched\":0},\"direct_relationships\":{\"called_functions\":[{\"confidence\":0.95,\"context\":\"function_call\",\"location\":{\"Column\":1,\"FileID\":77,\"Line\":16},\"object_id\":{\"file_id\":77,\"name\":\"NewSuperuserCommand\",\"symbol_id\":\"1441\",\"type\":\"function\"}},{\"confidence\":0.95,\"context\":\"function_call\",\"location\":{\"Column\":1,\"FileID\":76,\"Line\":14},\"object_id\":{\"file_id\":76,\"name\":\"NewServeCommand\",\"symbol_id\":\"1436\",\"type\":\"function\"}},{\"confidence\":0.95,\"context\":\"function_call\",\"location\":{\"Column\":1,\"FileID\":254,\"Line\":179},\"object_id\":{\"file_id\":254,\"name\":\"Execute\",\"symbol_id\":\"8785\",\"type\":\"method\"}}],\"caller_functions\":[{\"confidence\":0.95,\"context\":\"function_call\",\"location\":{\"Column\":1,\"FileID\":368,\"Line\":20},\"object_id\":{\"file_id\":368,\"name\":\"LaunchURL\",\"symbol_id\":\"10598\",\"type\":\"function\"}},{\"confidence\":0.95,\"context\":\"function_call\",\"location\":{\"Column\":1,\"FileID\":213,\"Line\":19},\"object_id\":{\"file_id\":213,\"name\":\"main\",\"symbol_id\":\"5622\",\"type\":\"function\"}},{\"confidence\":0.95,\"context\":\"function_call\",\"location\":{\"Column\":1,\"FileID\":303,\"Line\":254},\"object_id\":{\"file_id\":303,\"name\":\"TestCronStartStop\",\"symbol_id\":\"9531\",\"type\":\"function\"}},{\"confidence\":0.95,\"context\":\"function_call\",\"location\":{\"Column\":9,\"FileID\":84,\"Line\":1352},\"object_id\":{\"file_id\":84,\"name\":\"\",\"symbol_id\":\"1821\",\"type\":\"function\"}}],\"child_objects\":[],\"implementing_types\":[],\"imported_modules\":[],\"incoming_references\":[{\"confidence\":0.9,\"context\":\"10\",\"location\":{\"Column\":23,\"FileID\":254,\"Line\":166},\"object_id\":{\"file_id\":254,\"name\":\"Start\",\"symbol_id\":\"8784\",\"type\":\"method\"}},{\"confidence\":0.9,\"context\":\"1\",\"location\":{\"Column\":71,\"FileID\":368,\"Line\":31},\"object_id\":{\"file_id\":368,\"name\":\"LaunchURL\",\"symbol_id\":\"10598\",\"type\":\"function\"}},{\"confidence\":0.9,\"context\":\"1\",\"location\":{\"Column\":16,\"FileID\":213,\"Line\":119},\"object_id\":{\"file_id\":213,\"name\":\"main\",\"symbol_id\":\"5622\",\"type\":\"function\"}},{\"confidence\":0.9,\"context\":\"1\",\"location\":{\"Column\":4,\"FileID\":303,\"Line\":300},\"object_id\":{\"file_id\":303,\"name\":\"TestCronStartStop\",\"symbol_id\":\"9531\",\"type\":\"function\"}},{\"confidence\":0.9,\"context\":\"1\",\"location\":{\"Column\":40,\"FileID\":368,\"Line\":33},\"object_id\":{\"file_id\":368,\"name\":\"LaunchURL\",\"symbol_id\":\"10598\",\"type\":\"function\"}},{\"confidence\":0.9,\"context\":\"1\",\"location\":{\"Column\":4,\"FileID\":303,\"Line\":280},\"object_id\":{\"file_id\":303,\"name\":\"TestCronStartStop\",\"symbol_id\":\"9531\",\"type\":\"function\"}},{\"confidence\":0.9,\"context\":\"1\",\"location\":{\"Column\":15,\"FileID\":84,\"Line\":1353},\"object_id\":{\"file_id\":84,\"name\":\"\",\"symbol_id\":\"1821\",\"type\":\"function\"}},{\"confidence\":0.9,\"context\":\"1\",\"location\":{\"Column\":4,\"FileID\":303,\"Line\":279},\"object_id\":{\"file_id\":303,\"name\":\"TestCronStartStop\",\"symbol_id\":\"9531\",\"type\":\"function\"}},{\"confidence\":0.9,\"context\":\"1\",\"location\":{\"Column\":36,\"FileID\":368,\"Line\":27},\"object_id\":{\"file_id\":368,\"name\":\"LaunchURL\",\"symbol_id\":\"10598\",\"type\":\"function\"}}],\"outgoing_references\":[{\"confidence\":0.9,\"context\":\"10\",\"location\":{\"Column\":52,\"FileID\":254,\"Line\":169},\"object_id\":{\"file_id\":254,\"name\":\"hideStartBanner\",\"symbol_id\":\"8767\",\"type\":\"field\"}},{\"confidence\":0.9,\"context\":\"10\",\"location\":{\"Column\":23,\"FileID\":254,\"Line\":166},\"object_id\":{\"file_id\":254,\"name\":\"Start\",\"symbol_id\":\"8784\",\"type\":\"method\"}},{\"confidence\":0.9,\"context\":\"1\",\"location\":{\"Column\":28,\"FileID\":254,\"Line\":168},\"object_id\":{\"file_id\":77,\"name\":\"NewSuperuserCommand\",\"symbol_id\":\"1441\",\"type\":\"function\"}},{\"confidence\":0.9,\"context\":\"10\",\"location\":{\"Column\":5,\"FileID\":254,\"Line\":168},\"object_id\":{\"file_id\":254,\"name\":\"RootCmd\",\"symbol_id\":\"8768\",\"type\":\"field\"}},{\"confidence\":0.9,\"context\":\"1\",\"location\":{\"Column\":28,\"FileID\":254,\"Line\":169},\"object_id\":{\"file_id\":76,\"name\":\"NewServeCommand\",\"symbol_id\":\"1436\",\"type\":\"function\"}},{\"confidence\":0.9,\"context\":\"10\",\"location\":{\"Column\":11,\"FileID\":254,\"Line\":166},\"object_id\":{\"file_id\":254,\"name\":\"PocketBase\",\"symbol_id\":\"8762\",\"type\":\"struct\"}},{\"confidence\":0.9,\"context\":\"1\",\"location\":{\"Column\":12,\"FileID\":254,\"Line\":171},\"object_id\":{\"file_id\":254,\"name\":\"Execute\",\"symbol_id\":\"8785\",\"type\":\"method\"}},{\"confidence\":0.9,\"context\":\"10\",\"location\":{\"Column\":31,\"FileID\":254,\"Line\":166},\"object_id\":{\"file_id\":394,\"name\":\"error\",\"symbol_id\":\"11145\",\"type\":\"field\"}}],\"parent_classes\":[],\"parent_objects\":[{\"confidence\":0.95,\"context\":\"folder\",\"location\":{\"Column\":0,\"FileID\":254,\"Line\":0},\"object_id\":{\"file_id\":254,\"name\":\"pocketbase-lci\",\"symbol_id\":\"scope_pocketbase-lci\",\"type\":\"module\"}},{\"confidence\":0.95,\"context\":\"file\",\"location\":{\"Column\":0,\"FileID\":254,\"Line\":0},\"object_id\":{\"file_id\":254,\"name\":\"pocketbase.go\",\"symbol_id\":\"scope_pocketbase.go\",\"type\":\"module\"}},{\"confidence\":0.95,\"context\":\"method\",\"location\":{\"Column\":0,\"FileID\":254,\"Line\":166},\"object_id\":{\"file_id\":254,\"name\":\"Start\",\"symbol_id\":\"scope_Start\",\"type\":\"function\"}}],\"used_types\":[]},\"documentation\":\"// commands (serve, superuser, version) and executes pb.RootCmd.\",\"generated_at\":\"2026-07-20T15:01:08.732769327Z\",\"location\":{\"Column\":1,\"FileID\":254,\"Line\":166},\"object_id\":{\"file_id\":254,\"name\":\"Start\",\"symbol_id\":\"CNb\",\"type\":\"method\"},\"semantic_context\":{\"confidence\":0.7,\"criticality_analysis\":{\"affected_components\":[],\"criticality_type\":\"\",\"impact_score\":0.0,\"is_critical\":false},\"entry_point_dependencies\":[{\"confidence\":0.8,\"entry_point_id\":{\"file_id\":213,\"name\":\"main\",\"symbol_id\":\"BaP\",\"type\":\"function\"},\"path\":\"\",\"type\":\"main function\"},{\"confidence\":0.8,\"entry_point_id\":{\"file_id\":245,\"name\":\"main\",\"symbol_id\":\"CKr\",\"type\":\"function\"},\"path\":\"\",\"type\":\"main function\"}],\"propagation_labels\":[],\"purpose\":\"data access\",\"service_dependencies\":[]},\"signature\":\"func (pb *PocketBase) Start() error\",\"structure_context\":{\"composition_pattern\":\"simple\",\"exports\":[{\"export_style\":\"named\",\"name\":\"Version\",\"type\":\"variable\",\"used_by\":[\"file:235\",\"file:234\",\"file:234\",\"file:234\",\"file:235\",\"file:234\"]},{\"export_style\":\"named\",\"name\":\"PocketBase\",\"type\":\"struct\",\"used_by\":[]},{\"export_style\":\"named\",\"name\":\"RootCmd\",\"type\":\"field\",\"used_by\":[\"file:213\",\"file:213\",\"file:255\",\"file:213\",\"file:213\",\"file:213\",\"file:255\",\"file:213\",\"file:255\",\"file:213\",\"file:255\",\"file:213\",\"file:255\",\"file:255\",\"file:213\",\"file:213\",\"file:213\",\"file:213\",\"file:213\",\"file:255\",\"file:213\",\"file:255\",\"file:213\",\"file:255\",\"file:213\",\"file:255\",\"file:213\",\"file:213\",\"file:213\",\"file:255\",\"file:255\",\"file:213\"]},{\"export_style\":\"named\",\"name\":\"Config\",\"type\":\"struct\",\"used_by\":[]},{\"export_style\":\"named\",\"name\":\"HideStartBanner\",\"type\":\"field\",\"used_by\":[]},{\"export_style\":\"named\",\"name\":\"DefaultDev\",\"type\":\"field\",\"used_by\":[]},{\"export_style\":\"named\",\"name\":\"DefaultDataDir\",\"type\":\"field\",\"used_by\":[]},{\"export_style\":\"named\",\"name\":\"DefaultEncryptionEnv\",\"type\":\"field\",\"used_by\":[]},{\"export_style\":\"named\",\"name\":\"DefaultQueryTimeout\",\"type\":\"field\",\"used_by\":[]},{\"export_style\":\"named\",\"name\":\"DataMaxOpenConns\",\"type\":\"field\",\"used_by\":[]},{\"export_style\":\"named\",\"name\":\"DataMaxIdleConns\",\"type\":\"field\",\"used_by\":[]},{\"export_style\":\"named\",\"name\":\"AuxMaxOpenConns\",\"type\":\"field\",\"used_by\":[]},{\"export_style\":\"named\",\"name\":\"AuxMaxIdleConns\",\"type\":\"field\",\"used_by\":[]},{\"export_style\":\"named\",\"name\":\"DBConnect\",\"type\":\"field\",\"used_by\":[]},{\"export_style\":\"named\",\"name\":\"New\",\"type\":\"function\",\"used_by\":[\"file:77\",\"file:71\",\"file:379\",\"file:345\",\"file:359\",\"file:172\",\"file:342\",\"file:216\",\"file:411\",\"file:181\",\"file:246\",\"file:73\",\"file:210\",\"file:240\",\"file:189\",\"file:297\",\"file:181\",\"file:240\",\"file:422\",\"file:189\",\"file:210\",\"file:422\",\"file:240\",\"file:321\",\"file:285\",\"file:345\",\"file:240\",\"file:240\",\"file:114\",\"file:211\",\"file:211\",\"file:181\",\"file:359\",\"file:403\",\"file:173\",\"file:240\",\"file:306\",\"file:240\",\"file:410\",\"file:253\",\"file:374\",\"file:202\",\"file:422\",\"file:95\",\"file:48\",\"file:95\",\"file:240\",\"file:202\",\"file:54\",\"file:393\",\"file:342\",\"file:239\",\"file:293\",\"file:411\",\"file:77\",\"file:192\",\"file:349\",\"file:245\",\"file:195\",\"file:189\",\"file:240\",\"file:122\",\"file:321\",\"file:210\",\"file:382\",\"file:403\",\"file:321\",\"file:359\",\"file:282\",\"file:271\",\"file:240\",\"file:73\",\"file:404\",\"file:240\",\"file:239\",\"file:422\",\"file:77\",\"file:237\",\"file:186\",\"file:337\",\"file:240\",\"file:220\",\"file:62\",\"file:382\",\"file:202\",\"file:365\",\"file:62\",\"file:393\",\"file:340\",\"file:189\",\"file:411\",\"file:359\",\"file:189\",\"file:8\",\"file:240\",\"file:366\",\"file:33\",\"file:240\",\"file:60\",\"file:211\",\"file:30\",\"file:85\",\"file:138\",\"file:85\",\"file:210\",\"file:345\",\"file:314\",\"file:193\",\"file:239\",\"file:240\",\"file:240\",\"file:287\",\"file:210\",\"file:386\",\"file:240\",\"file:80\",\"file:71\",\"file:345\",\"file:443\",\"file:392\",\"file:240\",\"file:431\",\"file:60\",\"file:59\",\"file:202\",\"file:240\",\"file:128\",\"file:240\",\"file:423\",\"file:434\",\"file:240\",\"file:111\",\"file:281\",\"file:29\",\"file:77\",\"file:246\",\"file:409\",\"file:345\",\"file:354\",\"file:189\",\"file:349\",\"file:181\",\"file:95\",\"file:253\",\"file:255\",\"file:114\",\"file:191\",\"file:397\",\"file:411\",\"file:77\",\"file:8\",\"file:189\",\"file:213\",\"file:59\",\"file:202\",\"file:239\",\"file:181\",\"file:321\",\"file:240\",\"file:429\",\"file:111\",\"file:71\",\"file:56\",\"file:429\",\"file:306\",\"file:403\",\"file:342\",\"file:137\",\"file:240\",\"file:115\",\"file:22\",\"file:184\",\"file:104\",\"file:282\",\"file:210\",\"file:306\",\"file:181\",\"file:240\",\"file:210\",\"file:84\",\"file:356\",\"file:240\",\"file:411\",\"file:210\",\"file:73\",\"file:345\",\"file:222\",\"file:275\",\"file:345\",\"file:240\",\"file:159\",\"file:411\",\"file:422\",\"file:359\",\"file:137\",\"file:422\",\"file:104\",\"file:429\",\"file:393\",\"file:345\",\"file:418\",\"file:202\",\"file:303\",\"file:337\",\"file:179\",\"file:267\",\"file:210\",\"file:382\",\"file:85\",\"file:29\",\"file:253\",\"file:239\",\"file:253\",\"file:366\",\"file:34\",\"file:240\",\"file:240\",\"file:411\",\"file:240\",\"file:393\",\"file:253\",\"file:306\",\"file:62\",\"file:193\",\"file:415\",\"file:429\",\"file:397\",\"file:177\",\"file:289\",\"file:8\",\"file:422\",\"file:56\",\"file:189\",\"file:146\",\"file:383\",\"file:211\",\"file:359\",\"file:73\",\"file:337\",\"file:60\",\"file:104\",\"file:186\",\"file:291\",\"file:116\",\"file:77\",\"file:240\",\"file:163\",\"file:181\",\"file:240\",\"file:239\",\"file:210\",\"file:151\",\"file:382\",\"file:146\",\"file:403\",\"file:342\",\"file:177\",\"file:303\",\"file:314\",\"file:73\",\"file:306\",\"file:345\",\"file:84\",\"file:359\",\"file:240\",\"file:235\",\"file:410\",\"file:172\",\"file:77\",\"file:211\",\"file:314\",\"file:303\",\"file:240\",\"file:189\",\"file:239\",\"file:84\",\"file:240\",\"file:391\",\"file:211\",\"file:422\",\"file:191\",\"file:192\",\"file:422\",\"file:240\",\"file:22\",\"file:374\",\"file:240\",\"file:403\",\"file:77\",\"file:393\",\"file:210\",\"file:303\",\"file:303\",\"file:240\",\"file:77\",\"file:379\",\"file:77\",\"file:210\",\"file:240\",\"file:239\",\"file:303\",\"file:159\",\"file:303\",\"file:411\",\"file:314\",\"file:84\",\"file:240\",\"file:95\",\"file:240\",\"file:432\",\"file:240\",\"file:282\",\"file:422\",\"file:25\",\"file:186\",\"file:240\",\"file:186\",\"file:202\",\"file:281\",\"file:319\",\"file:251\",\"file:189\",\"file:211\",\"file:411\",\"file:12\",\"file:98\",\"file:240\",\"file:240\",\"file:299\",\"file:240\",\"file:337\",\"file:98\",\"file:253\",\"file:432\",\"file:359\",\"file:210\",\"file:253\",\"file:240\",\"file:246\",\"file:239\",\"file:84\",\"file:422\",\"file:111\",\"file:210\",\"file:409\",\"file:88\",\"file:321\",\"file:374\",\"file:266\",\"file:30\",\"file:77\",\"file:240\",\"file:303\",\"file:240\",\"file:218\",\"file:116\",\"file:217\",\"file:303\",\"file:239\",\"file:84\",\"file:411\",\"file:239\",\"file:211\",\"file:345\",\"file:18\",\"file:57\"]},{\"export_style\":\"named\",\"name\":\"NewWithConfig\",\"type\":\"function\",\"used_by\":[\"file:255\",\"file:255\",\"file:255\",\"file:255\",\"file:255\",\"file:255\",\"file:255\",\"file:255\"]},{\"export_style\":\"named\",\"name\":\"Start\",\"type\":\"method\",\"used_by\":[\"file:368\",\"file:213\",\"file:303\",\"file:368\",\"file:303\",\"file:84\",\"file:303\",\"file:368\"]},{\"export_style\":\"named\",\"name\":\"Execute\",\"type\":\"method\",\"used_by\":[\"file:230\",\"file:228\",\"file:198\",\"file:231\",\"file:222\",\"file:170\",\"file:258\",\"file:100\",\"file:104\",\"file:100\",\"file:169\",\"file:100\",\"file:78\",\"file:100\",\"file:100\",\"file:84\",\"file:229\",\"file:78\",\"file:78\",\"file:198\",\"file:229\",\"file:161\",\"file:104\",\"file:100\",\"file:431\",\"file:87\",\"file:170\",\"file:404\",\"file:78\",\"file:84\",\"file:398\",\"file:87\",\"file:169\",\"file:169\",\"file:100\",\"file:170\",\"file:227\",\"file:112\",\"file:404\",\"file:228\",\"file:78\",\"file:78\",\"file:229\",\"file:170\",\"file:229\",\"file:112\",\"file:84\",\"file:229\",\"file:211\",\"file:85\",\"file:100\",\"file:87\",\"file:398\",\"file:229\",\"file:229\",\"file:100\",\"file:228\",\"file:229\",\"file:169\",\"file:257\",\"file:250\",\"file:227\",\"file:87\",\"file:100\",\"file:229\",\"file:229\",\"file:100\",\"file:100\",\"file:170\",\"file:100\",\"file:257\",\"file:404\",\"file:84\",\"file:104\",\"file:100\",\"file:211\",\"file:85\"]},{\"export_style\":\"named\",\"name\":\"Write\",\"type\":\"method\",\"used_by\":[]}],\"file_path\":\"pocketbase.go\",\"imports\":[],\"inheritance_chain\":[],\"interface_implementations\":[],\"module\":\".\",\"package\":\".\"},\"usage_analysis\":{\"call_frequency\":0,\"change_impact\":{\"breaking_change_risk\":\"low\",\"dependent_components\":[\"osutils\",\"base\",\"cron\",\"core\"],\"estimated_impact\":4,\"requires_tests\":true},\"complexity_metrics\":{\"cognitive_complexity\":1,\"cyclomatic_complexity\":1,\"line_count\":6,\"nesting_depth\":0,\"parameter_count\":1},\"fan_in\":0,\"fan_out\":3,\"test_coverage\":{\"has_tests\":false,\"test_file_paths\":[]}},\"variable_context\":{\"class_variables\":[],\"global_variables\":[],\"local_variables\":[],\"parameters\":[],\"return_values\":[],\"used_globals\":[]}},\"contexts\":[{\"callers\":9,\"context\":[\"func (pb *PocketBase) Start() error\"],\"definition\":\"func (pb *PocketBase) Start() error\",\"file_path\":\"pocketbase.go\",\"is_exported\":true,\"line\":166,\"object_id\":\"CNb\",\"purity\":{\"confidence\":\"high\",\"is_pure\":false,\"purity_score\":0.0,\"transitive_effects\":[\"param_write\",\"receiver_write\",\"global_write\",\"channel\"]},\"signature\":\"func (pb *PocketBase) Start() error\",\"source_excerpt\":{\"end_line\":172,\"lines\":[{\"line\":166,\"text\":\"func (pb *PocketBase) Start() error {\"},{\"line\":167,\"text\":\"\\t// register system commands\"},{\"line\":168,\"text\":\"\\tpb.RootCmd.AddCommand(cmd.NewSuperuserCommand(pb))\"},{\"line\":169,\"text\":\"\\tpb.RootCmd.AddCommand(cmd.NewServeCommand(pb, !pb.hideStartBanner))\"},{\"line\":170,\"text\":\"\"},{\"line\":171,\"text\":\"\\treturn pb.Execute()\"},{\"line\":172,\"text\":\"}\"}],\"start_line\":166,\"truncated\":false},\"source_hint\":\"source_excerpt is extracted from the indexed source. Use it for nearby code, initializer, and short body questions; read the file only if you need lines outside this excerpt.\",\"symbol_name\":\"Start\",\"symbol_type\":\"method\"},{\"callers\":2,\"context\":[\"func (c *Cron) Start()\"],\"definition\":\"func (c *Cron) Start()\",\"file_path\":\"tools/cron/cron.go\",\"is_exported\":true,\"line\":176,\"object_id\":\"CYy\",\"purity\":{\"confidence\":\"high\",\"is_pure\":false,\"local_effects\":[\"receiver_write\"],\"purity_score\":0.0,\"reasons\":[\"writes to receiver at line 185\",\"writes to receiver at line 187\"],\"transitive_effects\":[\"param_write\",\"receiver_write\",\"global_write\",\"channel\"]},\"signature\":\"func (c *Cron) Start()\",\"source_excerpt\":{\"end_line\":187,\"lines\":[{\"line\":176,\"text\":\"func (c *Cron) Start() {\"},{\"line\":177,\"text\":\"\\tc.Stop()\"},{\"line\":178,\"text\":\"\"},{\"line\":179,\"text\":\"\\t// delay the ticker to start at 00 of 1 c.interval duration\"},{\"line\":180,\"text\":\"\\tnow := time.Now()\"},{\"line\":181,\"text\":\"\\tnext := now.Add(c.interval).Truncate(c.interval)\"},{\"line\":182,\"text\":\"\\tdelay := next.Sub(now)\"},{\"line\":183,\"text\":\"\"},{\"line\":184,\"text\":\"\\tc.mux.Lock()\"},{\"line\":185,\"text\":\"\\tc.startTimer = time.AfterFunc(delay, func() {\"},{\"line\":186,\"text\":\"\\t\\tc.mux.Lock()\"},{\"line\":187,\"text\":\"\\t\\tc.ticker = time.NewTicker(c.interval)\"}],\"start_line\":176,\"truncated\":true},\"source_hint\":\"source_excerpt is extracted from the indexed source. Use it for nearby code, initializer, and short body questions; read the file only if you need lines outside this excerpt.\",\"symbol_name\":\"Start\",\"symbol_type\":\"method\"},{\"callers\":2,\"context\":[\"func (a *smtpLoginAuth) Start(server *smtp.ServerInfo) (string, []byte, error)\"],\"definition\":\"func (a *smtpLoginAuth) Start(server *smtp.ServerInfo) (string, []byte, error)\",\"file_path\":\"tools/mailer/smtp.go\",\"is_exported\":true,\"line\":185,\"object_id\":\"CqF\",\"purity\":{\"confidence\":\"high\",\"is_pure\":false,\"purity_score\":0.0,\"transitive_effects\":[\"param_write\",\"receiver_write\",\"global_write\"]},\"signature\":\"func (a *smtpLoginAuth) Start(server *smtp.ServerInfo) (string, []byte, error)\",\"source_excerpt\":{\"end_line\":196,\"lines\":[{\"line\":185,\"text\":\"func (a *smtpLoginAuth) Start(server *smtp.ServerInfo) (string, []byte, error) {\"},{\"line\":186,\"text\":\"\\t// Must have TLS, or else localhost server.\"},{\"line\":187,\"text\":\"\\t// Note: If TLS is not true, then we can't trust ANYTHING in ServerInfo.\"},{\"line\":188,\"text\":\"\\t// In particular, it doesn't matter if the server advertises LOGIN auth.\"},{\"line\":189,\"text\":\"\\t// That might just be the attacker saying\"},{\"line\":190,\"text\":\"\\t// \\\"it's ok, you can trust me with your password.\\\"\"},{\"line\":191,\"text\":\"\\tif !server.TLS && !isLocalhost(server.Name) {\"},{\"line\":192,\"text\":\"\\t\\treturn \\\"\\\", nil, errors.New(\\\"unencrypted connection\\\")\"},{\"line\":193,\"text\":\"\\t}\"},{\"line\":194,\"text\":\"\"},{\"line\":195,\"text\":\"\\treturn \\\"LOGIN\\\", nil, nil\"},{\"line\":196,\"text\":\"}\"}],\"start_line\":185,\"truncated\":false},\"source_hint\":\"source_excerpt is extracted from the indexed source. Use it for nearby code, initializer, and short body questions; read the file only if you need lines outside this excerpt.\",\"symbol_name\":\"Start\",\"symbol_type\":\"method\"}],\"count\":3,\"metadata\":{\"index_size\":15363,\"processed_files\":760,\"server_version\":\"0.7.0\"},\"performance\":{\"component_breakdown\":{\"ai_time\":0,\"basic_info_time\":0,\"relationships_time\":0,\"semantic_time\":0,\"structure_time\":0,\"usage_time\":0,\"variables_time\":0},\"total_time_ms\":3}}"
+        },
+        "proposed_gap": null,
+        "required_outcome": "accepted"
+      }
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "5fcbfc717c973303baaf27bc6447a393a9408d759a29aabfd5785465f0546e3a",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "Include a high-level purpose statement (e.g., 'Start starts the application') alongside the definition and documentation comment.",
+        "missing_claims": [
+          "Start starts the application"
+        ],
+        "reason": "The candidate accurately provides the function signature and the documentation comment, but does not state or convey that Start starts the application, which is a required atom.",
+        "supported_claims": [
+          "func (pb *PocketBase) Start() error",
+          "Documentation comment: // commands (serve, superuser, version) and executes pb.RootCmd."
+        ],
+        "unsupported_claims": [],
+        "verdict": "ambiguous"
+      },
+      "prompt_digest": "sha256:0b58945c619a3365d12174a56d5864a98ea53959e860bb2632c1fc376c3d7558",
+      "provider_status": "answered",
+      "raw_answer": "```json\n{\"heuristic_gap\": \"Include a high-level purpose statement (e.g., 'Start starts the application') alongside the definition and documentation comment.\", \"missing_claims\": [\"Start starts the application\"], \"reason\": \"The candidate accurately provides the function signature and the documentation comment, but does not state or convey that Start starts the application, which is a required atom.\", \"supported_claims\": [\"func (pb *PocketBase) Start() error\", \"Documentation comment: // commands (serve, superuser, version) and executes pb.RootCmd.\"], \"unsupported_claims\": [], \"verdict\": \"ambiguous\"}\n```",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "6832bf90cc5f153c4f55f0c3ffaa2a05773b1c9a059d15d383a61f40f10cffc6",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "Include that the search operation searches indexed source text, not just code generally.",
+        "missing_claims": [
+          "searches indexed source text"
+        ],
+        "reason": "Candidate accurately describes semantic code search and supported parameters, but omits the required fact that it searches indexed source text.",
+        "supported_claims": [
+          "The search operation provides sub-millisecond semantic code search with multi-layer matching",
+          "It supports flags",
+          "It supports filters",
+          "It supports scoped paths"
+        ],
+        "unsupported_claims": [],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:322caba721990d8bb2f127609a7f08ac82a48039de7ab1f57ee4911458762147",
+      "provider_status": "answered",
+      "raw_answer": "{\"supported_claims\":[\"The search operation provides sub-millisecond semantic code search with multi-layer matching\",\"It supports flags\",\"It supports filters\",\"It supports scoped paths\"],\"missing_claims\":[\"searches indexed source text\"],\"unsupported_claims\":[],\"heuristic_gap\":\"Include that the search operation searches indexed source text, not just code generally.\",\"reason\":\"Candidate accurately describes semantic code search and supported parameters, but omits the required fact that it searches indexed source text.\",\"verdict\":\"incorrect\"}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "686e6d0f0be64501877bcbbe683cfc2ff30b183793bc831daf910981388fd6f1",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "When a single tool call lacks call-graph data, the model could still reason from symbol naming conventions or known API patterns to suggest a likely invoked method, rather than refusing entirely.",
+        "missing_claims": [
+          "PocketBase.Start directly invokes Execute"
+        ],
+        "reason": "The candidate correctly notes the tool output lacks call-graph information, but the expected answer requires identifying the method 'Execute', which the candidate omits entirely.",
+        "supported_claims": [
+          "Start is impure (has side effects)"
+        ],
+        "unsupported_claims": [],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:4c7f7dfc3a143f0591aab0365ec9fb38f58ee79d49f0ce22eca973088bf12b5f",
+      "provider_status": "answered",
+      "raw_answer": "```json\n{\"heuristic_gap\": \"When a single tool call lacks call-graph data, the model could still reason from symbol naming conventions or known API patterns to suggest a likely invoked method, rather than refusing entirely.\", \"missing_claims\": [\"PocketBase.Start directly invokes Execute\"], \"reason\": \"The candidate correctly notes the tool output lacks call-graph information, but the expected answer requires identifying the method 'Execute', which the candidate omits entirely.\", \"supported_claims\": [\"Start is impure (has side effects)\"], \"unsupported_claims\": [], \"verdict\": \"incorrect\"}\n```",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "68c7a189c699ad8bb6218995b016e503b3341a5ccbb293f32a951496797dd26a",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "Include the full doc comment, not just the trailing line; the first line 'Start starts the application' is a required atom that was omitted.",
+        "missing_claims": [
+          "Start starts the application"
+        ],
+        "reason": "The candidate provides the correct signature and partial documentation, but omits the required atom 'Start starts the application' which is part of the method's documentation.",
+        "supported_claims": [
+          "func (pb *PocketBase) Start() error",
+          "commands (serve, superuser, version) and executes pb.RootCmd."
+        ],
+        "unsupported_claims": [],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:e1444ef81182e13f13fa585e59818ea01d68a633f0e170b5ae03a2339f792d05",
+      "provider_status": "answered",
+      "raw_answer": "```json\n{\"heuristic_gap\": \"Include the full doc comment, not just the trailing line; the first line 'Start starts the application' is a required atom that was omitted.\", \"missing_claims\": [\"Start starts the application\"], \"reason\": \"The candidate provides the correct signature and partial documentation, but omits the required atom 'Start starts the application' which is part of the method's documentation.\", \"supported_claims\": [\"func (pb *PocketBase) Start() error\", \"commands (serve, superuser, version) and executes pb.RootCmd.\"], \"unsupported_claims\": [], \"verdict\": \"incorrect\"}\n```",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "6f3897c126f9895af8738d080691f7e70ab5420840da0aa59b185bb834c78334",
+      "invalid_judgment": "invalid verdict",
+      "judgment": null,
+      "prompt_digest": "sha256:b89464fa449308d5d94f21ef0246c7c533b6eaee2f0937addc6e6eb37defefb7",
+      "provider_status": "answered",
+      "raw_answer": "{\"candidate_answer\": \"From the `lci_side_effects` output I can see `Start` in `pocketbase.go:166-172` is impure, but the side-effects tool does not return callee information. I cannot determine which method `PocketBase.Start` directly invokes from this data alone \\u2014 I would need to inspect its source or call graph.\", \"independent_truth\": {\"kind\": \"success\", \"required_atoms\": [\"Execute\"], \"source_tool_output\": \"{\\\"mode\\\":\\\"symbol\\\",\\\"results\\\":[{\\\"access_pattern\\\":\\\"pure\\\",\\\"can_throw\\\":false,\\\"end_line\\\":172,\\\"exception_neutral\\\":true,\\\"exception_safe\\\":false,\\\"file_path\\\":\\\"pocketbase.go\\\",\\\"is_pure\\\":false,\\\"line\\\":166,\\\"symbol_name\\\":\\\"Start\\\"}],\\\"total_count\\\":1}\"}, \"output_schema\": {\"heuristic_gap\": \"The side-effects tool output does not include callee information, making it insufficient to answer call-target questions without additional source or call-graph inspection.\", \"missing_claims\": [\"PocketBase.Start directly invokes Execute\"], \"reason\": \"The required answer is that PocketBase.Start directly invokes Execute. The candidate states it cannot determine the invoked method and omits the required fact.\", \"supported_claims\": [], \"unsupported_claims\": [\"The invoked method cannot be determined from the provided data\"], \"verdict\": \"incorrect\"}, \"question\": \"Which method does PocketBase.Start directly invoke to execute the application?\", \"rubric\": [\"Judge semantics, not exact wording.\", \"Reject invented results, omitted required facts, and confusing an error with an empty success.\", \"Use only the supplied candidate and truth.\"]}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "886fa7c2714700f2c71a5ddc879ede6f8737bbfc28f1d55241ef243e2dcff656",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "If target_ref is HEAD, resolve HEAD to its actual commit hash via a separate call rather than concluding it cannot be determined.",
+        "missing_claims": [
+          "The checked-out commit is d438c6a96a0252ff9df62c1cfe193480ed9ff15d"
+        ],
+        "reason": "The candidate failed to provide the required commit hash, instead claiming it could not be determined. The independent truth requires d438c6a96a0252ff9df62c1cfe193480ed9ff15d as the checked-out commit.",
+        "supported_claims": [],
+        "unsupported_claims": [
+          "The exact commit hash cannot be determined from the tool output"
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:5ad00dbb5951751c1e5c6efbf4595c186bb2a02c5cf1dafa0c4e76a8416a5792",
+      "provider_status": "answered",
+      "raw_answer": "```json\n{\"heuristic_gap\": \"If target_ref is HEAD, resolve HEAD to its actual commit hash via a separate call rather than concluding it cannot be determined.\", \"missing_claims\": [\"The checked-out commit is d438c6a96a0252ff9df62c1cfe193480ed9ff15d\"], \"reason\": \"The candidate failed to provide the required commit hash, instead claiming it could not be determined. The independent truth requires d438c6a96a0252ff9df62c1cfe193480ed9ff15d as the checked-out commit.\", \"supported_claims\": [], \"unsupported_claims\": [\"The exact commit hash cannot be determined from the tool output\"], \"verdict\": \"incorrect\"}\n```",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "890e1cf522d948c4ee0772167ebb2999678563527f87051c2895bcd763dc2603",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": null,
+        "missing_claims": [],
+        "reason": "The candidate correctly identifies the file and line where PocketBase.Start is defined, matching the independent truth.",
+        "supported_claims": [
+          "PocketBase.Start is defined in pocketbase.go at line 166"
+        ],
+        "unsupported_claims": [],
+        "verdict": "correct"
+      },
+      "prompt_digest": "sha256:3b3fcc679a4901f3fc3c71f5f29ec9ffb283ade09687fb9349fc7374fcbd1269",
+      "provider_status": "answered",
+      "raw_answer": "{\"heuristic_gap\":null,\"missing_claims\":[],\"reason\":\"The candidate correctly identifies the file and line where PocketBase.Start is defined, matching the independent truth.\",\"supported_claims\":[\"PocketBase.Start is defined in pocketbase.go at line 166\"],\"unsupported_claims\":[],\"verdict\":\"correct\"}",
+      "regression_candidate": {
+        "answer": "`PocketBase.Start` is defined as a method on `*PocketBase` in `pocketbase.go` at line 166.",
+        "expected": {
+          "kind": "success",
+          "required_atoms": [
+            "pocketbase.go:166"
+          ],
+          "source_tool_output": "{\"count\":1,\"symbols\":[{\"complexity\":1,\"doc_comment\":\"// commands (serve, superuser, version) and executes pb.RootCmd.\",\"file\":\"pocketbase.go\",\"incoming_refs\":9,\"is_exported\":true,\"line\":166,\"name\":\"Start\",\"object_id\":\"CNb\",\"outgoing_refs\":14,\"parameter_count\":0,\"signature\":\"func (pb *PocketBase) Start() error\",\"source_excerpt\":{\"end_line\":172,\"lines\":[{\"line\":166,\"text\":\"func (pb *PocketBase) Start() error {\"},{\"line\":167,\"text\":\"\\t// register system commands\"},{\"line\":168,\"text\":\"\\tpb.RootCmd.AddCommand(cmd.NewSuperuserCommand(pb))\"},{\"line\":169,\"text\":\"\\tpb.RootCmd.AddCommand(cmd.NewServeCommand(pb, !pb.hideStartBanner))\"},{\"line\":170,\"text\":\"\"},{\"line\":171,\"text\":\"\\treturn pb.Execute()\"},{\"line\":172,\"text\":\"}\"}],\"start_line\":166,\"truncated\":false},\"source_hint\":\"source_excerpt is extracted from the indexed source. Use it for nearby code, initializer, and short body questions; read the file only if you need lines outside this excerpt.\",\"type\":\"method\"}]}"
+        },
+        "proposed_gap": null,
+        "required_outcome": "accepted"
+      }
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "8c2bebc603a62c1dcd7b2e07648e89450576e574135717dab6e45c1bd4a41ae1",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "The candidate confused the empty-tree base_ref with the actual checked-out commit; the required atom d438c6a96a0252ff9df62c1cfe193480ed9ff15d was never mentioned.",
+        "missing_claims": [
+          "The commit checked out is d438c6a96a0252ff9df62c1cfe193480ed9ff15d"
+        ],
+        "reason": "The candidate identified 4b825dc642cb6eb9a060e54bf8d69288fbee4904 (the empty tree) as the checked-out commit, but the required atom indicates the actual commit is d438c6a96a0252ff9df62c1cfe193480ed9ff15d, which the candidate omitted entirely.",
+        "supported_claims": [],
+        "unsupported_claims": [
+          "The commit checked out is 4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:e217aab33872c19373f45d825dd5dd0ca5ec1c7057b562704728d7a40cffe0bd",
+      "provider_status": "answered",
+      "raw_answer": "{\"heuristic_gap\":\"The candidate confused the empty-tree base_ref with the actual checked-out commit; the required atom d438c6a96a0252ff9df62c1cfe193480ed9ff15d was never mentioned.\",\"missing_claims\":[\"The commit checked out is d438c6a96a0252ff9df62c1cfe193480ed9ff15d\"],\"reason\":\"The candidate identified 4b825dc642cb6eb9a060e54bf8d69288fbee4904 (the empty tree) as the checked-out commit, but the required atom indicates the actual commit is d438c6a96a0252ff9df62c1cfe193480ed9ff15d, which the candidate omitted entirely.\",\"supported_claims\":[],\"unsupported_claims\":[\"The commit checked out is 4b825dc642cb6eb9a060e54bf8d69288fbee4904\"],\"verdict\":\"incorrect\"}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "93ca3b9c145ba185b21b2e67ac062674ff2a434bd16671cfa6663dac6bd49b25",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "The tool output does not expose callee information, so the model cannot answer; consider providing a tool that returns direct callees or include callee data in the side-effects output.",
+        "missing_claims": [
+          "Execute"
+        ],
+        "reason": "The candidate does not mention the required atom 'Execute' and instead claims it cannot determine the invoked method, omitting the required fact.",
+        "supported_claims": [],
+        "unsupported_claims": [],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:329c37b66c39434597b17ab3f4bb9c5fb61ecff99084448583f48150bf756199",
+      "provider_status": "answered",
+      "raw_answer": "{\"verdict\":\"incorrect\",\"reason\":\"The candidate does not mention the required atom 'Execute' and instead claims it cannot determine the invoked method, omitting the required fact.\",\"supported_claims\":[],\"unsupported_claims\":[],\"missing_claims\":[\"Execute\"],\"heuristic_gap\":\"The tool output does not expose callee information, so the model cannot answer; consider providing a tool that returns direct callees or include callee data in the side-effects output.\"}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "99f13d876737bf4683ed834af408332ef3c1a687feefdbcd324eff4e46df7b06",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": null,
+        "missing_claims": [
+          "PocketBase.Start directly invokes Execute"
+        ],
+        "reason": "The candidate does not identify the directly invoked method (Execute) required by the truth, instead stating it cannot be determined.",
+        "supported_claims": [],
+        "unsupported_claims": [
+          "The side effects output for `Start` does not include callee information"
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:9cc1a0c3e14644348b21c36b1236bc36c2792a0ef74ed233076f04241b66b7b8",
+      "provider_status": "answered",
+      "raw_answer": "{\"supported_claims\": [], \"unsupported_claims\": [\"The side effects output for `Start` does not include callee information\"], \"missing_claims\": [\"PocketBase.Start directly invokes Execute\"], \"reason\": \"The candidate does not identify the directly invoked method (Execute) required by the truth, instead stating it cannot be determined.\", \"verdict\": \"incorrect\", \"heuristic_gap\": null}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "a20137d83df3a68b2b9c7fd641a40f8dec11075e551982d00059fd7c5f65978c",
+      "invalid_judgment": "Expecting ',' delimiter: line 1 column 2214 (char 2213)",
+      "judgment": null,
+      "prompt_digest": "sha256:36afb361a5d4d413557f89e13926e4daa27da5faadd2941c877e7b98711ac774",
+      "provider_status": "answered",
+      "raw_answer": "{\"candidate_answer\": \"The purpose of `search` is sub-millisecond semantic code search with multi-layer matching.\", \"independent_truth\": {\"kind\": \"success\", \"required_atoms\": [\"searches indexed source text\"], \"source_tool_output\": \"{\\\"description\\\":\\\"Sub-millisecond semantic code search with multi-layer matching.\\\",\\\"example\\\":{\\\"basic\\\":\\\"{\\\\\\\"pattern\\\\\\\": \\\\\\\"user\\\\\\\"}\\\",\\\"with_flags\\\":\\\"{\\\\\\\"pattern\\\\\\\": \\\\\\\"user\\\\\\\", \\\\\\\"flags\\\\\\\": \\\\\\\"ci,nt\\\\\\\"}\\\",\\\"with_output\\\":\\\"{\\\\\\\"pattern\\\\\\\": \\\\\\\"TODO\\\\\\\", \\\\\\\"output\\\\\\\": \\\\\\\"ctx:3\\\\\\\"}\\\",\\\"with_path\\\":\\\"{\\\\\\\"pattern\\\\\\\": \\\\\\\"user\\\\\\\", \\\\\\\"path\\\\\\\": \\\\\\\"src/auth\\\\\\\"}\\\"},\\\"name\\\":\\\"search\\\",\\\"parameters\\\":{\\\"filter\\\":\\\"Include-only filter: languages/extensions/globs CSV, e.g. 'go', 'md,*.yml', 'src/**/*.py'\\\",\\\"flags\\\":\\\"Search flags: 'ci' (case-insensitive), 'rx' (regex), 'iv' (invert), 'wb' (word-boundary), 'nt' (no-tests), 'nc' (no-comments)\\\",\\\"max\\\":\\\"Max results (default: 15, hard cap: 100)\\\",\\\"output\\\":\\\"Output format: 'line', 'ctx', 'ctx:N', 'full', 'files', 'count'\\\",\\\"path\\\":\\\"Root-relative scope: dir prefix ('src/http') or glob ('**/*.kt')\\\",\\\"pattern\\\":\\\"REQUIRED: Search pattern (string)\\\"},\\\"response\\\":{\\\"other_files\\\":\\\"Doc/generated files: {path: match_count}\\\",\\\"results\\\":\\\"Per-file groups: {file (root-relative), hits:[{line, sym, type, id, callers, text}]}. id feeds get_context; callers = incoming references.\\\",\\\"similar_symbols\\\":\\\"On 0 matches: fuzzy near-miss symbol names\\\",\\\"total_matches\\\":\\\"TRUE match count (may exceed rows shown; truncated:true then set, with a dirs histogram for narrowing via path=)\\\"}}\"}, \"output_schema\": {\"heuristic_gap\": null, \"missing_claims\": [], \"reason\": \"The candidate answer matches the tool description almost verbatim, capturing the purpose as sub-millisecond semantic code search with multi-layer matching. The required atom 'searches indexed source text' is semantically covered by 'semantic code search', where code implies source text and sub-millisecond performance implies indexing.\", \"supported_claims\": [\"The purpose of search is sub-millisecond semantic code search with multi-layer matching\", \"search searches indexed source text\"], \"unsupported_claims\": [], \"verdict\": \"correct\"}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "a32e75b5392a0ab1ac22bad8fa399f6f95caee48f1b8dbc8a59be0f978371738",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "The source tool output should include callee information when the question asks about directly invoked methods; consider emitting a callees list in symbol mode.",
+        "missing_claims": [
+          "Execute"
+        ],
+        "reason": "The candidate correctly observes that the tool output contains no callee information, but the required atom 'Execute' is not present in the source tool output either, making verification impossible from the supplied truth alone.",
+        "supported_claims": [],
+        "unsupported_claims": [],
+        "verdict": "ambiguous"
+      },
+      "prompt_digest": "sha256:cf051d0a012bab56458a6044e0754c618eecfdde939dc8a5df9e7e48fc4981f5",
+      "provider_status": "answered",
+      "raw_answer": "{\"heuristic_gap\": \"The source tool output should include callee information when the question asks about directly invoked methods; consider emitting a callees list in symbol mode.\", \"missing_claims\": [\"Execute\"], \"reason\": \"The candidate correctly observes that the tool output contains no callee information, but the required atom 'Execute' is not present in the source tool output either, making verification impossible from the supplied truth alone.\", \"supported_claims\": [], \"unsupported_claims\": [], \"verdict\": \"ambiguous\"}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "c745026367dfd36f90e2bedec319a00bb8fc7b1550ef6602b6f39b22d6526bc9",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": null,
+        "missing_claims": [
+          "Start starts the application"
+        ],
+        "reason": "The candidate correctly provides the function signature and the documentation comment about registering system commands and executing pb.RootCmd, matching the source. However, it omits the required atom 'Start starts the application', which is listed as a required fact in the independent truth.",
+        "supported_claims": [
+          "func (pb *PocketBase) Start() error",
+          "register system commands (serve, superuser, version) and executes pb.RootCmd"
+        ],
+        "unsupported_claims": [],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:3622a9b98c4f0399ada40a0348413810b3c94ec8310704542715a7dab2857fce",
+      "provider_status": "answered",
+      "raw_answer": "```json\n{\n  \"heuristic_gap\": null,\n  \"missing_claims\": [\n    \"Start starts the application\"\n  ],\n  \"reason\": \"The candidate correctly provides the function signature and the documentation comment about registering system commands and executing pb.RootCmd, matching the source. However, it omits the required atom 'Start starts the application', which is listed as a required fact in the independent truth.\",\n  \"supported_claims\": [\n    \"func (pb *PocketBase) Start() error\",\n    \"register system commands (serve, superuser, version) and executes pb.RootCmd\"\n  ],\n  \"unsupported_claims\": [],\n  \"verdict\": \"incorrect\"\n}\n```",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "d52c9c754d8b0e1907ed6aeab4f8d4c27df449a006512d140807c9467d46318d",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "When the tool output contains only manifest metadata, the candidate should still attempt to surface the required definition and documentation atoms if available; if genuinely absent, explicitly state that the required definition and doc string are missing rather than only describing the manifest.",
+        "missing_claims": [
+          "Start starts the application",
+          "func (pb *PocketBase) Start() error"
+        ],
+        "reason": "The candidate correctly describes the manifest-only output but omits the required atoms (the function signature and its documentation) that the question asks for.",
+        "supported_claims": [
+          "The tool returned only manifest metadata",
+          "The file pocketbase.go exists in the benchmark data directory",
+          "The referenced region comprises 22 lines (lines 160-181)"
+        ],
+        "unsupported_claims": [],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:93ed409ac3a34eb332d7853e93774f1579f215942ce8081005f3c5541588b688",
+      "provider_status": "answered",
+      "raw_answer": "{\"supported_claims\": [\"The tool returned only manifest metadata\", \"The file pocketbase.go exists in the benchmark data directory\", \"The referenced region comprises 22 lines (lines 160-181)\"], \"unsupported_claims\": [], \"missing_claims\": [\"Start starts the application\", \"func (pb *PocketBase) Start() error\"], \"heuristic_gap\": \"When the tool output contains only manifest metadata, the candidate should still attempt to surface the required definition and documentation atoms if available; if genuinely absent, explicitly state that the required definition and doc string are missing rather than only describing the manifest.\", \"reason\": \"The candidate correctly describes the manifest-only output but omits the required atoms (the function signature and its documentation) that the question asks for.\", \"verdict\": \"incorrect\"}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "e09d80760de888b1b39b30b3b6dcdcb0badf35ba257bcb708820169c647702e2",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": null,
+        "missing_claims": [],
+        "reason": "Candidate correctly identifies target_ref as HEAD, matching the truth.",
+        "supported_claims": [
+          "The target_ref is HEAD"
+        ],
+        "unsupported_claims": [],
+        "verdict": "correct"
+      },
+      "prompt_digest": "sha256:b3236ed40d66b1007e05f10660a7e765dfdb2723fa6789d3d53199984cd89b1a",
+      "provider_status": "answered",
+      "raw_answer": "{\"heuristic_gap\": null, \"missing_claims\": [], \"reason\": \"Candidate correctly identifies target_ref as HEAD, matching the truth.\", \"supported_claims\": [\"The target_ref is HEAD\"], \"unsupported_claims\": [], \"verdict\": \"correct\"}",
+      "regression_candidate": {
+        "answer": "The `target_ref` in the analysis response is **HEAD**.",
+        "expected": {
+          "kind": "success",
+          "required_atoms": [
+            "d438c6a96a0252ff9df62c1cfe193480ed9ff15d"
+          ],
+          "source_tool_output": "{\"metadata\":{\"analysis_time_ms\":11,\"analyzed_at\":\"2026-07-20T15:01:08Z\",\"base_ref\":\"4b825dc642cb6eb9a060e54bf8d69288fbee4904\",\"scope\":\"commit\",\"target_ref\":\"HEAD\"},\"summary\":{\"duplicates_found\":0,\"files_changed\":0,\"metrics_issues_found\":0,\"naming_issues_found\":0,\"risk_score\":0.0,\"symbols_added\":0,\"symbols_deleted\":0,\"symbols_modified\":0,\"top_recommendation\":\"No changes to analyze\"}}"
+        },
+        "proposed_gap": null,
+        "required_outcome": "accepted"
+      }
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "e3d043f78f9475e8d8f247f5cbdf7989da4c30cf6450f22d642430e0de5163db",
+      "invalid_judgment": "correct verdict contradicts claim lists",
+      "judgment": null,
+      "prompt_digest": "sha256:18bbf190ca2b9069dc13ba78eea03d15250324faca70f7a5d003563154088dc5",
+      "provider_status": "answered",
+      "raw_answer": "{\"verdict\":\"correct\",\"supported_claims\":[\"Identifies PocketBase.Start with signature func (pb *PocketBase) Start() error\",\"Locates it in pocketbase.go:166\",\"Describes registering superuser and serve commands on pb.RootCmd\",\"Notes delegation to pb.Execute() and returning an error\"],\"unsupported_claims\":[],\"missing_claims\":[\"Does not include the documentation comment fragment: // commands (serve, superuser, version) and executes pb.RootCmd.\",\"Does not mention the version command referenced in the documentation\"],\"reason\":\"The candidate accurately captures the definition and behavior of PocketBase.Start, matching the source excerpt and signature. It omits the documentation comment and the version command mention, but the core semantics are correct.\",\"heuristic_gap\":\"Include the actual documentation comment and note all commands referenced (serve, superuser, version) when asked for documentation.\"}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "e479658c57e5db2e1a7d6bf08e24080f0f5704fd58bf43098453d515d1641834",
+      "invalid_judgment": "invalid verdict",
+      "judgment": null,
+      "prompt_digest": "sha256:0d7ec7c4a90f88ec01040398d3f73bfb32b6778bc2fcbcd0fe330247493f48a9",
+      "provider_status": "answered",
+      "raw_answer": "{\"candidate_answer\": \"The side effect analysis didn't enumerate callees. Let me look up what `Start` calls directly.\", \"independent_truth\": {\"kind\": \"success\", \"required_atoms\": [\"Execute\"], \"source_tool_output\": \"{\\\"mode\\\":\\\"symbol\\\",\\\"results\\\":[{\\\"access_pattern\\\":\\\"pure\\\",\\\"can_throw\\\":false,\\\"end_line\\\":172,\\\"exception_neutral\\\":true,\\\"exception_safe\\\":false,\\\"file_path\\\":\\\"pocketbase.go\\\",\\\"is_pure\\\":false,\\\"line\\\":166,\\\"symbol_name\\\":\\\"Start\\\"}],\\\"total_count\\\":1}\"}, \"output_schema\": {\"heuristic_gap\": \"The candidate should state the invoked method name directly rather than deferring to a future lookup.\", \"missing_claims\": [\"PocketBase.Start directly invokes Execute\"], \"reason\": \"The candidate answer does not provide the required atom 'Execute'; it only states an intention to look up the callees without answering the question.\", \"supported_claims\": [], \"unsupported_claims\": [], \"verdict\": \"incorrect\"}, \"question\": \"Which method does PocketBase.Start directly invoke to execute the application?\", \"rubric\": [\"Judge semantics, not exact wording.\", \"Reject invented results, omitted required facts, and confusing an error with an empty success.\", \"Use only the supplied candidate and truth.\"]}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "e92d685e73fec24518efe72468669d07fe4940a5aa11bb94880fa1ffe9277e0c",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "Resolve HEAD via a ref-resolution tool when target_ref is symbolic, rather than stopping at HEAD.",
+        "missing_claims": [
+          "The checked-out commit is d438c6a96a0252ff9df62c1cfe193480ed9ff15d"
+        ],
+        "reason": "The candidate correctly identifies target_ref as HEAD and base_ref as the empty tree, but the required fact is the specific commit hash, which the candidate explicitly does not provide.",
+        "supported_claims": [
+          "target_ref is HEAD",
+          "base_ref is the empty tree 4b825dc6"
+        ],
+        "unsupported_claims": [],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:da31cca5e9b7e6b01b6d3155c5fd8504e5eacf9941fb03bf32688b20cc51f139",
+      "provider_status": "answered",
+      "raw_answer": "{\"heuristic_gap\": \"Resolve HEAD via a ref-resolution tool when target_ref is symbolic, rather than stopping at HEAD.\", \"missing_claims\": [\"The checked-out commit is d438c6a96a0252ff9df62c1cfe193480ed9ff15d\"], \"reason\": \"The candidate correctly identifies target_ref as HEAD and base_ref as the empty tree, but the required fact is the specific commit hash, which the candidate explicitly does not provide.\", \"supported_claims\": [\"target_ref is HEAD\", \"base_ref is the empty tree 4b825dc6\"], \"unsupported_claims\": [], \"verdict\": \"incorrect\"}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "f1e328ad5811134233430089ea9276a894498e58c1bf1ac35e95b3c9b1a93082",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": null,
+        "missing_claims": [],
+        "reason": "The candidate correctly identifies the signature and describes the behavior of the Start method, which semantically fulfills the required atom that Start starts the application.",
+        "supported_claims": [
+          "Signature: func (pb *PocketBase) Start() error",
+          "Registers system subcommands (superuser, serve) onto pb.RootCmd, then calls pb.Execute()"
+        ],
+        "unsupported_claims": [],
+        "verdict": "correct"
+      },
+      "prompt_digest": "sha256:acd5fd44cb19ecca39c2f29d7ffa290b582676b97bc6a46dfb3e3c63b3f62e97",
+      "provider_status": "answered",
+      "raw_answer": "{\n  \"verdict\": \"correct\",\n  \"reason\": \"The candidate correctly identifies the signature and describes the behavior of the Start method, which semantically fulfills the required atom that Start starts the application.\",\n  \"supported_claims\": [\n    \"Signature: func (pb *PocketBase) Start() error\",\n    \"Registers system subcommands (superuser, serve) onto pb.RootCmd, then calls pb.Execute()\"\n  ],\n  \"unsupported_claims\": [],\n  \"missing_claims\": [],\n  \"heuristic_gap\": null\n}",
+      "regression_candidate": {
+        "answer": "**Signature**: `func (pb *PocketBase) Start() error` (pocketbase.go:166)\n\n**Doc/behavior**: Registers system subcommands (superuser, serve) onto `pb.RootCmd`, then calls `pb.Execute()`.",
+        "expected": {
+          "kind": "success",
+          "required_atoms": [
+            "func (pb *PocketBase) Start() error",
+            "Start starts the application"
+          ],
+          "source_tool_output": "{\"context\":{\"ai_context\":{\"best_practices\":[\"Follow consistent naming conventions across the codebase\",\"Write self-documenting code that minimizes the need for comments\",\"Keep functions small and focused on a single responsibility\",\"Use pure functions when possible to improve testability\",\"Validate input parameters at the beginning of functions\",\"Write tests before fixing bugs to ensure the fix works\",\"Use test-driven development for new features\"],\"code_smells\":[],\"natural_language_summary\":\"This method `Start` is a data access located in pocketbase.go that is referenced by 9 other objects and calls 3 other functions but lacks test coverage.\",\"refactoring_suggestions\":[\"Add unit tests to ensure reliability and prevent regressions\"],\"similar_objects\":[]},\"context_version\":\"1.1.0\",\"diagnostics\":{\"call_graph_populated\":true,\"ref_tracker_ready\":true,\"relationships_found\":0,\"side_effects_ready\":false,\"symbol_index_ready\":true,\"symbols_searched\":0},\"direct_relationships\":{\"called_functions\":[{\"confidence\":0.95,\"context\":\"function_call\",\"location\":{\"Column\":1,\"FileID\":77,\"Line\":16},\"object_id\":{\"file_id\":77,\"name\":\"NewSuperuserCommand\",\"symbol_id\":\"1441\",\"type\":\"function\"}},{\"confidence\":0.95,\"context\":\"function_call\",\"location\":{\"Column\":1,\"FileID\":76,\"Line\":14},\"object_id\":{\"file_id\":76,\"name\":\"NewServeCommand\",\"symbol_id\":\"1436\",\"type\":\"function\"}},{\"confidence\":0.95,\"context\":\"function_call\",\"location\":{\"Column\":1,\"FileID\":254,\"Line\":179},\"object_id\":{\"file_id\":254,\"name\":\"Execute\",\"symbol_id\":\"8785\",\"type\":\"method\"}}],\"caller_functions\":[{\"confidence\":0.95,\"context\":\"function_call\",\"location\":{\"Column\":1,\"FileID\":368,\"Line\":20},\"object_id\":{\"file_id\":368,\"name\":\"LaunchURL\",\"symbol_id\":\"10598\",\"type\":\"function\"}},{\"confidence\":0.95,\"context\":\"function_call\",\"location\":{\"Column\":1,\"FileID\":213,\"Line\":19},\"object_id\":{\"file_id\":213,\"name\":\"main\",\"symbol_id\":\"5622\",\"type\":\"function\"}},{\"confidence\":0.95,\"context\":\"function_call\",\"location\":{\"Column\":1,\"FileID\":303,\"Line\":254},\"object_id\":{\"file_id\":303,\"name\":\"TestCronStartStop\",\"symbol_id\":\"9531\",\"type\":\"function\"}},{\"confidence\":0.95,\"context\":\"function_call\",\"location\":{\"Column\":9,\"FileID\":84,\"Line\":1352},\"object_id\":{\"file_id\":84,\"name\":\"\",\"symbol_id\":\"1821\",\"type\":\"function\"}}],\"child_objects\":[],\"implementing_types\":[],\"imported_modules\":[],\"incoming_references\":[{\"confidence\":0.9,\"context\":\"10\",\"location\":{\"Column\":23,\"FileID\":254,\"Line\":166},\"object_id\":{\"file_id\":254,\"name\":\"Start\",\"symbol_id\":\"8784\",\"type\":\"method\"}},{\"confidence\":0.9,\"context\":\"1\",\"location\":{\"Column\":71,\"FileID\":368,\"Line\":31},\"object_id\":{\"file_id\":368,\"name\":\"LaunchURL\",\"symbol_id\":\"10598\",\"type\":\"function\"}},{\"confidence\":0.9,\"context\":\"1\",\"location\":{\"Column\":16,\"FileID\":213,\"Line\":119},\"object_id\":{\"file_id\":213,\"name\":\"main\",\"symbol_id\":\"5622\",\"type\":\"function\"}},{\"confidence\":0.9,\"context\":\"1\",\"location\":{\"Column\":4,\"FileID\":303,\"Line\":300},\"object_id\":{\"file_id\":303,\"name\":\"TestCronStartStop\",\"symbol_id\":\"9531\",\"type\":\"function\"}},{\"confidence\":0.9,\"context\":\"1\",\"location\":{\"Column\":40,\"FileID\":368,\"Line\":33},\"object_id\":{\"file_id\":368,\"name\":\"LaunchURL\",\"symbol_id\":\"10598\",\"type\":\"function\"}},{\"confidence\":0.9,\"context\":\"1\",\"location\":{\"Column\":4,\"FileID\":303,\"Line\":280},\"object_id\":{\"file_id\":303,\"name\":\"TestCronStartStop\",\"symbol_id\":\"9531\",\"type\":\"function\"}},{\"confidence\":0.9,\"context\":\"1\",\"location\":{\"Column\":15,\"FileID\":84,\"Line\":1353},\"object_id\":{\"file_id\":84,\"name\":\"\",\"symbol_id\":\"1821\",\"type\":\"function\"}},{\"confidence\":0.9,\"context\":\"1\",\"location\":{\"Column\":4,\"FileID\":303,\"Line\":279},\"object_id\":{\"file_id\":303,\"name\":\"TestCronStartStop\",\"symbol_id\":\"9531\",\"type\":\"function\"}},{\"confidence\":0.9,\"context\":\"1\",\"location\":{\"Column\":36,\"FileID\":368,\"Line\":27},\"object_id\":{\"file_id\":368,\"name\":\"LaunchURL\",\"symbol_id\":\"10598\",\"type\":\"function\"}}],\"outgoing_references\":[{\"confidence\":0.9,\"context\":\"10\",\"location\":{\"Column\":52,\"FileID\":254,\"Line\":169},\"object_id\":{\"file_id\":254,\"name\":\"hideStartBanner\",\"symbol_id\":\"8767\",\"type\":\"field\"}},{\"confidence\":0.9,\"context\":\"10\",\"location\":{\"Column\":23,\"FileID\":254,\"Line\":166},\"object_id\":{\"file_id\":254,\"name\":\"Start\",\"symbol_id\":\"8784\",\"type\":\"method\"}},{\"confidence\":0.9,\"context\":\"1\",\"location\":{\"Column\":28,\"FileID\":254,\"Line\":168},\"object_id\":{\"file_id\":77,\"name\":\"NewSuperuserCommand\",\"symbol_id\":\"1441\",\"type\":\"function\"}},{\"confidence\":0.9,\"context\":\"10\",\"location\":{\"Column\":5,\"FileID\":254,\"Line\":168},\"object_id\":{\"file_id\":254,\"name\":\"RootCmd\",\"symbol_id\":\"8768\",\"type\":\"field\"}},{\"confidence\":0.9,\"context\":\"1\",\"location\":{\"Column\":28,\"FileID\":254,\"Line\":169},\"object_id\":{\"file_id\":76,\"name\":\"NewServeCommand\",\"symbol_id\":\"1436\",\"type\":\"function\"}},{\"confidence\":0.9,\"context\":\"10\",\"location\":{\"Column\":11,\"FileID\":254,\"Line\":166},\"object_id\":{\"file_id\":254,\"name\":\"PocketBase\",\"symbol_id\":\"8762\",\"type\":\"struct\"}},{\"confidence\":0.9,\"context\":\"1\",\"location\":{\"Column\":12,\"FileID\":254,\"Line\":171},\"object_id\":{\"file_id\":254,\"name\":\"Execute\",\"symbol_id\":\"8785\",\"type\":\"method\"}},{\"confidence\":0.9,\"context\":\"10\",\"location\":{\"Column\":31,\"FileID\":254,\"Line\":166},\"object_id\":{\"file_id\":394,\"name\":\"error\",\"symbol_id\":\"11145\",\"type\":\"field\"}}],\"parent_classes\":[],\"parent_objects\":[{\"confidence\":0.95,\"context\":\"folder\",\"location\":{\"Column\":0,\"FileID\":254,\"Line\":0},\"object_id\":{\"file_id\":254,\"name\":\"pocketbase-lci\",\"symbol_id\":\"scope_pocketbase-lci\",\"type\":\"module\"}},{\"confidence\":0.95,\"context\":\"file\",\"location\":{\"Column\":0,\"FileID\":254,\"Line\":0},\"object_id\":{\"file_id\":254,\"name\":\"pocketbase.go\",\"symbol_id\":\"scope_pocketbase.go\",\"type\":\"module\"}},{\"confidence\":0.95,\"context\":\"method\",\"location\":{\"Column\":0,\"FileID\":254,\"Line\":166},\"object_id\":{\"file_id\":254,\"name\":\"Start\",\"symbol_id\":\"scope_Start\",\"type\":\"function\"}}],\"used_types\":[]},\"documentation\":\"// commands (serve, superuser, version) and executes pb.RootCmd.\",\"generated_at\":\"2026-07-20T15:01:08.732769327Z\",\"location\":{\"Column\":1,\"FileID\":254,\"Line\":166},\"object_id\":{\"file_id\":254,\"name\":\"Start\",\"symbol_id\":\"CNb\",\"type\":\"method\"},\"semantic_context\":{\"confidence\":0.7,\"criticality_analysis\":{\"affected_components\":[],\"criticality_type\":\"\",\"impact_score\":0.0,\"is_critical\":false},\"entry_point_dependencies\":[{\"confidence\":0.8,\"entry_point_id\":{\"file_id\":213,\"name\":\"main\",\"symbol_id\":\"BaP\",\"type\":\"function\"},\"path\":\"\",\"type\":\"main function\"},{\"confidence\":0.8,\"entry_point_id\":{\"file_id\":245,\"name\":\"main\",\"symbol_id\":\"CKr\",\"type\":\"function\"},\"path\":\"\",\"type\":\"main function\"}],\"propagation_labels\":[],\"purpose\":\"data access\",\"service_dependencies\":[]},\"signature\":\"func (pb *PocketBase) Start() error\",\"structure_context\":{\"composition_pattern\":\"simple\",\"exports\":[{\"export_style\":\"named\",\"name\":\"Version\",\"type\":\"variable\",\"used_by\":[\"file:235\",\"file:234\",\"file:234\",\"file:234\",\"file:235\",\"file:234\"]},{\"export_style\":\"named\",\"name\":\"PocketBase\",\"type\":\"struct\",\"used_by\":[]},{\"export_style\":\"named\",\"name\":\"RootCmd\",\"type\":\"field\",\"used_by\":[\"file:213\",\"file:213\",\"file:255\",\"file:213\",\"file:213\",\"file:213\",\"file:255\",\"file:213\",\"file:255\",\"file:213\",\"file:255\",\"file:213\",\"file:255\",\"file:255\",\"file:213\",\"file:213\",\"file:213\",\"file:213\",\"file:213\",\"file:255\",\"file:213\",\"file:255\",\"file:213\",\"file:255\",\"file:213\",\"file:255\",\"file:213\",\"file:213\",\"file:213\",\"file:255\",\"file:255\",\"file:213\"]},{\"export_style\":\"named\",\"name\":\"Config\",\"type\":\"struct\",\"used_by\":[]},{\"export_style\":\"named\",\"name\":\"HideStartBanner\",\"type\":\"field\",\"used_by\":[]},{\"export_style\":\"named\",\"name\":\"DefaultDev\",\"type\":\"field\",\"used_by\":[]},{\"export_style\":\"named\",\"name\":\"DefaultDataDir\",\"type\":\"field\",\"used_by\":[]},{\"export_style\":\"named\",\"name\":\"DefaultEncryptionEnv\",\"type\":\"field\",\"used_by\":[]},{\"export_style\":\"named\",\"name\":\"DefaultQueryTimeout\",\"type\":\"field\",\"used_by\":[]},{\"export_style\":\"named\",\"name\":\"DataMaxOpenConns\",\"type\":\"field\",\"used_by\":[]},{\"export_style\":\"named\",\"name\":\"DataMaxIdleConns\",\"type\":\"field\",\"used_by\":[]},{\"export_style\":\"named\",\"name\":\"AuxMaxOpenConns\",\"type\":\"field\",\"used_by\":[]},{\"export_style\":\"named\",\"name\":\"AuxMaxIdleConns\",\"type\":\"field\",\"used_by\":[]},{\"export_style\":\"named\",\"name\":\"DBConnect\",\"type\":\"field\",\"used_by\":[]},{\"export_style\":\"named\",\"name\":\"New\",\"type\":\"function\",\"used_by\":[\"file:77\",\"file:71\",\"file:379\",\"file:345\",\"file:359\",\"file:172\",\"file:342\",\"file:216\",\"file:411\",\"file:181\",\"file:246\",\"file:73\",\"file:210\",\"file:240\",\"file:189\",\"file:297\",\"file:181\",\"file:240\",\"file:422\",\"file:189\",\"file:210\",\"file:422\",\"file:240\",\"file:321\",\"file:285\",\"file:345\",\"file:240\",\"file:240\",\"file:114\",\"file:211\",\"file:211\",\"file:181\",\"file:359\",\"file:403\",\"file:173\",\"file:240\",\"file:306\",\"file:240\",\"file:410\",\"file:253\",\"file:374\",\"file:202\",\"file:422\",\"file:95\",\"file:48\",\"file:95\",\"file:240\",\"file:202\",\"file:54\",\"file:393\",\"file:342\",\"file:239\",\"file:293\",\"file:411\",\"file:77\",\"file:192\",\"file:349\",\"file:245\",\"file:195\",\"file:189\",\"file:240\",\"file:122\",\"file:321\",\"file:210\",\"file:382\",\"file:403\",\"file:321\",\"file:359\",\"file:282\",\"file:271\",\"file:240\",\"file:73\",\"file:404\",\"file:240\",\"file:239\",\"file:422\",\"file:77\",\"file:237\",\"file:186\",\"file:337\",\"file:240\",\"file:220\",\"file:62\",\"file:382\",\"file:202\",\"file:365\",\"file:62\",\"file:393\",\"file:340\",\"file:189\",\"file:411\",\"file:359\",\"file:189\",\"file:8\",\"file:240\",\"file:366\",\"file:33\",\"file:240\",\"file:60\",\"file:211\",\"file:30\",\"file:85\",\"file:138\",\"file:85\",\"file:210\",\"file:345\",\"file:314\",\"file:193\",\"file:239\",\"file:240\",\"file:240\",\"file:287\",\"file:210\",\"file:386\",\"file:240\",\"file:80\",\"file:71\",\"file:345\",\"file:443\",\"file:392\",\"file:240\",\"file:431\",\"file:60\",\"file:59\",\"file:202\",\"file:240\",\"file:128\",\"file:240\",\"file:423\",\"file:434\",\"file:240\",\"file:111\",\"file:281\",\"file:29\",\"file:77\",\"file:246\",\"file:409\",\"file:345\",\"file:354\",\"file:189\",\"file:349\",\"file:181\",\"file:95\",\"file:253\",\"file:255\",\"file:114\",\"file:191\",\"file:397\",\"file:411\",\"file:77\",\"file:8\",\"file:189\",\"file:213\",\"file:59\",\"file:202\",\"file:239\",\"file:181\",\"file:321\",\"file:240\",\"file:429\",\"file:111\",\"file:71\",\"file:56\",\"file:429\",\"file:306\",\"file:403\",\"file:342\",\"file:137\",\"file:240\",\"file:115\",\"file:22\",\"file:184\",\"file:104\",\"file:282\",\"file:210\",\"file:306\",\"file:181\",\"file:240\",\"file:210\",\"file:84\",\"file:356\",\"file:240\",\"file:411\",\"file:210\",\"file:73\",\"file:345\",\"file:222\",\"file:275\",\"file:345\",\"file:240\",\"file:159\",\"file:411\",\"file:422\",\"file:359\",\"file:137\",\"file:422\",\"file:104\",\"file:429\",\"file:393\",\"file:345\",\"file:418\",\"file:202\",\"file:303\",\"file:337\",\"file:179\",\"file:267\",\"file:210\",\"file:382\",\"file:85\",\"file:29\",\"file:253\",\"file:239\",\"file:253\",\"file:366\",\"file:34\",\"file:240\",\"file:240\",\"file:411\",\"file:240\",\"file:393\",\"file:253\",\"file:306\",\"file:62\",\"file:193\",\"file:415\",\"file:429\",\"file:397\",\"file:177\",\"file:289\",\"file:8\",\"file:422\",\"file:56\",\"file:189\",\"file:146\",\"file:383\",\"file:211\",\"file:359\",\"file:73\",\"file:337\",\"file:60\",\"file:104\",\"file:186\",\"file:291\",\"file:116\",\"file:77\",\"file:240\",\"file:163\",\"file:181\",\"file:240\",\"file:239\",\"file:210\",\"file:151\",\"file:382\",\"file:146\",\"file:403\",\"file:342\",\"file:177\",\"file:303\",\"file:314\",\"file:73\",\"file:306\",\"file:345\",\"file:84\",\"file:359\",\"file:240\",\"file:235\",\"file:410\",\"file:172\",\"file:77\",\"file:211\",\"file:314\",\"file:303\",\"file:240\",\"file:189\",\"file:239\",\"file:84\",\"file:240\",\"file:391\",\"file:211\",\"file:422\",\"file:191\",\"file:192\",\"file:422\",\"file:240\",\"file:22\",\"file:374\",\"file:240\",\"file:403\",\"file:77\",\"file:393\",\"file:210\",\"file:303\",\"file:303\",\"file:240\",\"file:77\",\"file:379\",\"file:77\",\"file:210\",\"file:240\",\"file:239\",\"file:303\",\"file:159\",\"file:303\",\"file:411\",\"file:314\",\"file:84\",\"file:240\",\"file:95\",\"file:240\",\"file:432\",\"file:240\",\"file:282\",\"file:422\",\"file:25\",\"file:186\",\"file:240\",\"file:186\",\"file:202\",\"file:281\",\"file:319\",\"file:251\",\"file:189\",\"file:211\",\"file:411\",\"file:12\",\"file:98\",\"file:240\",\"file:240\",\"file:299\",\"file:240\",\"file:337\",\"file:98\",\"file:253\",\"file:432\",\"file:359\",\"file:210\",\"file:253\",\"file:240\",\"file:246\",\"file:239\",\"file:84\",\"file:422\",\"file:111\",\"file:210\",\"file:409\",\"file:88\",\"file:321\",\"file:374\",\"file:266\",\"file:30\",\"file:77\",\"file:240\",\"file:303\",\"file:240\",\"file:218\",\"file:116\",\"file:217\",\"file:303\",\"file:239\",\"file:84\",\"file:411\",\"file:239\",\"file:211\",\"file:345\",\"file:18\",\"file:57\"]},{\"export_style\":\"named\",\"name\":\"NewWithConfig\",\"type\":\"function\",\"used_by\":[\"file:255\",\"file:255\",\"file:255\",\"file:255\",\"file:255\",\"file:255\",\"file:255\",\"file:255\"]},{\"export_style\":\"named\",\"name\":\"Start\",\"type\":\"method\",\"used_by\":[\"file:368\",\"file:213\",\"file:303\",\"file:368\",\"file:303\",\"file:84\",\"file:303\",\"file:368\"]},{\"export_style\":\"named\",\"name\":\"Execute\",\"type\":\"method\",\"used_by\":[\"file:230\",\"file:228\",\"file:198\",\"file:231\",\"file:222\",\"file:170\",\"file:258\",\"file:100\",\"file:104\",\"file:100\",\"file:169\",\"file:100\",\"file:78\",\"file:100\",\"file:100\",\"file:84\",\"file:229\",\"file:78\",\"file:78\",\"file:198\",\"file:229\",\"file:161\",\"file:104\",\"file:100\",\"file:431\",\"file:87\",\"file:170\",\"file:404\",\"file:78\",\"file:84\",\"file:398\",\"file:87\",\"file:169\",\"file:169\",\"file:100\",\"file:170\",\"file:227\",\"file:112\",\"file:404\",\"file:228\",\"file:78\",\"file:78\",\"file:229\",\"file:170\",\"file:229\",\"file:112\",\"file:84\",\"file:229\",\"file:211\",\"file:85\",\"file:100\",\"file:87\",\"file:398\",\"file:229\",\"file:229\",\"file:100\",\"file:228\",\"file:229\",\"file:169\",\"file:257\",\"file:250\",\"file:227\",\"file:87\",\"file:100\",\"file:229\",\"file:229\",\"file:100\",\"file:100\",\"file:170\",\"file:100\",\"file:257\",\"file:404\",\"file:84\",\"file:104\",\"file:100\",\"file:211\",\"file:85\"]},{\"export_style\":\"named\",\"name\":\"Write\",\"type\":\"method\",\"used_by\":[]}],\"file_path\":\"pocketbase.go\",\"imports\":[],\"inheritance_chain\":[],\"interface_implementations\":[],\"module\":\".\",\"package\":\".\"},\"usage_analysis\":{\"call_frequency\":0,\"change_impact\":{\"breaking_change_risk\":\"low\",\"dependent_components\":[\"osutils\",\"base\",\"cron\",\"core\"],\"estimated_impact\":4,\"requires_tests\":true},\"complexity_metrics\":{\"cognitive_complexity\":1,\"cyclomatic_complexity\":1,\"line_count\":6,\"nesting_depth\":0,\"parameter_count\":1},\"fan_in\":0,\"fan_out\":3,\"test_coverage\":{\"has_tests\":false,\"test_file_paths\":[]}},\"variable_context\":{\"class_variables\":[],\"global_variables\":[],\"local_variables\":[],\"parameters\":[],\"return_values\":[],\"used_globals\":[]}},\"contexts\":[{\"callers\":9,\"context\":[\"func (pb *PocketBase) Start() error\"],\"definition\":\"func (pb *PocketBase) Start() error\",\"file_path\":\"pocketbase.go\",\"is_exported\":true,\"line\":166,\"object_id\":\"CNb\",\"purity\":{\"confidence\":\"high\",\"is_pure\":false,\"purity_score\":0.0,\"transitive_effects\":[\"param_write\",\"receiver_write\",\"global_write\",\"channel\"]},\"signature\":\"func (pb *PocketBase) Start() error\",\"source_excerpt\":{\"end_line\":172,\"lines\":[{\"line\":166,\"text\":\"func (pb *PocketBase) Start() error {\"},{\"line\":167,\"text\":\"\\t// register system commands\"},{\"line\":168,\"text\":\"\\tpb.RootCmd.AddCommand(cmd.NewSuperuserCommand(pb))\"},{\"line\":169,\"text\":\"\\tpb.RootCmd.AddCommand(cmd.NewServeCommand(pb, !pb.hideStartBanner))\"},{\"line\":170,\"text\":\"\"},{\"line\":171,\"text\":\"\\treturn pb.Execute()\"},{\"line\":172,\"text\":\"}\"}],\"start_line\":166,\"truncated\":false},\"source_hint\":\"source_excerpt is extracted from the indexed source. Use it for nearby code, initializer, and short body questions; read the file only if you need lines outside this excerpt.\",\"symbol_name\":\"Start\",\"symbol_type\":\"method\"},{\"callers\":2,\"context\":[\"func (c *Cron) Start()\"],\"definition\":\"func (c *Cron) Start()\",\"file_path\":\"tools/cron/cron.go\",\"is_exported\":true,\"line\":176,\"object_id\":\"CYy\",\"purity\":{\"confidence\":\"high\",\"is_pure\":false,\"local_effects\":[\"receiver_write\"],\"purity_score\":0.0,\"reasons\":[\"writes to receiver at line 185\",\"writes to receiver at line 187\"],\"transitive_effects\":[\"param_write\",\"receiver_write\",\"global_write\",\"channel\"]},\"signature\":\"func (c *Cron) Start()\",\"source_excerpt\":{\"end_line\":187,\"lines\":[{\"line\":176,\"text\":\"func (c *Cron) Start() {\"},{\"line\":177,\"text\":\"\\tc.Stop()\"},{\"line\":178,\"text\":\"\"},{\"line\":179,\"text\":\"\\t// delay the ticker to start at 00 of 1 c.interval duration\"},{\"line\":180,\"text\":\"\\tnow := time.Now()\"},{\"line\":181,\"text\":\"\\tnext := now.Add(c.interval).Truncate(c.interval)\"},{\"line\":182,\"text\":\"\\tdelay := next.Sub(now)\"},{\"line\":183,\"text\":\"\"},{\"line\":184,\"text\":\"\\tc.mux.Lock()\"},{\"line\":185,\"text\":\"\\tc.startTimer = time.AfterFunc(delay, func() {\"},{\"line\":186,\"text\":\"\\t\\tc.mux.Lock()\"},{\"line\":187,\"text\":\"\\t\\tc.ticker = time.NewTicker(c.interval)\"}],\"start_line\":176,\"truncated\":true},\"source_hint\":\"source_excerpt is extracted from the indexed source. Use it for nearby code, initializer, and short body questions; read the file only if you need lines outside this excerpt.\",\"symbol_name\":\"Start\",\"symbol_type\":\"method\"},{\"callers\":2,\"context\":[\"func (a *smtpLoginAuth) Start(server *smtp.ServerInfo) (string, []byte, error)\"],\"definition\":\"func (a *smtpLoginAuth) Start(server *smtp.ServerInfo) (string, []byte, error)\",\"file_path\":\"tools/mailer/smtp.go\",\"is_exported\":true,\"line\":185,\"object_id\":\"CqF\",\"purity\":{\"confidence\":\"high\",\"is_pure\":false,\"purity_score\":0.0,\"transitive_effects\":[\"param_write\",\"receiver_write\",\"global_write\"]},\"signature\":\"func (a *smtpLoginAuth) Start(server *smtp.ServerInfo) (string, []byte, error)\",\"source_excerpt\":{\"end_line\":196,\"lines\":[{\"line\":185,\"text\":\"func (a *smtpLoginAuth) Start(server *smtp.ServerInfo) (string, []byte, error) {\"},{\"line\":186,\"text\":\"\\t// Must have TLS, or else localhost server.\"},{\"line\":187,\"text\":\"\\t// Note: If TLS is not true, then we can't trust ANYTHING in ServerInfo.\"},{\"line\":188,\"text\":\"\\t// In particular, it doesn't matter if the server advertises LOGIN auth.\"},{\"line\":189,\"text\":\"\\t// That might just be the attacker saying\"},{\"line\":190,\"text\":\"\\t// \\\"it's ok, you can trust me with your password.\\\"\"},{\"line\":191,\"text\":\"\\tif !server.TLS && !isLocalhost(server.Name) {\"},{\"line\":192,\"text\":\"\\t\\treturn \\\"\\\", nil, errors.New(\\\"unencrypted connection\\\")\"},{\"line\":193,\"text\":\"\\t}\"},{\"line\":194,\"text\":\"\"},{\"line\":195,\"text\":\"\\treturn \\\"LOGIN\\\", nil, nil\"},{\"line\":196,\"text\":\"}\"}],\"start_line\":185,\"truncated\":false},\"source_hint\":\"source_excerpt is extracted from the indexed source. Use it for nearby code, initializer, and short body questions; read the file only if you need lines outside this excerpt.\",\"symbol_name\":\"Start\",\"symbol_type\":\"method\"}],\"count\":3,\"metadata\":{\"index_size\":15363,\"processed_files\":760,\"server_version\":\"0.7.0\"},\"performance\":{\"component_breakdown\":{\"ai_time\":0,\"basic_info_time\":0,\"relationships_time\":0,\"semantic_time\":0,\"structure_time\":0,\"usage_time\":0,\"variables_time\":0},\"total_time_ms\":3}}"
+        },
+        "proposed_gap": null,
+        "required_outcome": "accepted"
+      }
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "f65eb1b25429c66f14fff823d692b6a39b830d11a37fc72055bcf9759285edc3",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": "Candidate should infer the required atom from the independent truth even when the tool output lacks callee details, rather than refusing to answer.",
+        "missing_claims": [
+          "PocketBase.Start directly invokes Execute to execute the application."
+        ],
+        "reason": "The candidate declined to identify the invoked method, omitting the required atom 'Execute' that the truth expects.",
+        "supported_claims": [],
+        "unsupported_claims": [
+          "Cannot determine what Start directly invokes from the tool output alone."
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:97e53295444271258efbd625c7f23c2294190726a25b869a7e43ed7970e5d739",
+      "provider_status": "answered",
+      "raw_answer": "{\"heuristic_gap\": \"Candidate should infer the required atom from the independent truth even when the tool output lacks callee details, rather than refusing to answer.\", \"missing_claims\": [\"PocketBase.Start directly invokes Execute to execute the application.\"], \"reason\": \"The candidate declined to identify the invoked method, omitting the required atom 'Execute' that the truth expects.\", \"supported_claims\": [], \"unsupported_claims\": [\"Cannot determine what Start directly invokes from the tool output alone.\"], \"verdict\": \"incorrect\"}",
+      "regression_candidate": null
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "cell_key": "fa2c3be37cbab17ba7e63a2ddec05d528ac8d8dfda0a2d51a20e7a02b89406f8",
+      "invalid_judgment": null,
+      "judgment": {
+        "heuristic_gap": null,
+        "missing_claims": [],
+        "reason": "The candidate correctly provides the method signature, describes its behavior (registering commands and executing RootCmd, which is how the application starts), and includes the exact documentation string from the source. All required atoms are satisfied semantically.",
+        "supported_claims": [
+          "func (pb *PocketBase) Start() error",
+          "Registers system commands (NewSuperuserCommand, NewServeCommand) then executes pb.RootCmd",
+          "Documentation: // commands (serve, superuser, version) and executes pb.RootCmd."
+        ],
+        "unsupported_claims": [],
+        "verdict": "correct"
+      },
+      "prompt_digest": "sha256:7424e683226faff0e44fe6970840d25f8d9eae3d0b829c2e00650a79b3490706",
+      "provider_status": "answered",
+      "raw_answer": "{\"verdict\":\"correct\",\"supported_claims\":[\"func (pb *PocketBase) Start() error\",\"Registers system commands (NewSuperuserCommand, NewServeCommand) then executes pb.RootCmd\",\"Documentation: // commands (serve, superuser, version) and executes pb.RootCmd.\"],\"unsupported_claims\":[],\"missing_claims\":[],\"reason\":\"The candidate correctly provides the method signature, describes its behavior (registering commands and executing RootCmd, which is how the application starts), and includes the exact documentation string from the source. All required atoms are satisfied semantically.\",\"heuristic_gap\":null}",
+      "regression_candidate": {
+        "answer": "**`func (pb *PocketBase) Start() error`** (pocketbase.go:166)\n\nRegisters system commands (`NewSuperuserCommand`, `NewServeCommand`) then executes `pb.RootCmd`.\n\n```go\nfunc (pb *PocketBase) Start() error {\n\tpb.RootCmd.AddCommand(cmd.NewSuperuserCommand(pb))\n\tpb.RootCmd.AddCommand(cmd.NewServeCommand(pb, !pb.hideStartBanner))\n\treturn pb.Execute()\n}\n```\n\n**Doc:** \"// commands (serve, superuser, version) and executes pb.RootCmd.\"",
+        "expected": {
+          "kind": "success",
+          "required_atoms": [
+            "func (pb *PocketBase) Start() error",
+            "Start starts the application"
+          ],
+          "source_tool_output": "{\"context\":{\"ai_context\":{\"best_practices\":[\"Follow consistent naming conventions across the codebase\",\"Write self-documenting code that minimizes the need for comments\",\"Keep functions small and focused on a single responsibility\",\"Use pure functions when possible to improve testability\",\"Validate input parameters at the beginning of functions\",\"Write tests before fixing bugs to ensure the fix works\",\"Use test-driven development for new features\"],\"code_smells\":[],\"natural_language_summary\":\"This method `Start` is a data access located in pocketbase.go that is referenced by 9 other objects and calls 3 other functions but lacks test coverage.\",\"refactoring_suggestions\":[\"Add unit tests to ensure reliability and prevent regressions\"],\"similar_objects\":[]},\"context_version\":\"1.1.0\",\"diagnostics\":{\"call_graph_populated\":true,\"ref_tracker_ready\":true,\"relationships_found\":0,\"side_effects_ready\":false,\"symbol_index_ready\":true,\"symbols_searched\":0},\"direct_relationships\":{\"called_functions\":[{\"confidence\":0.95,\"context\":\"function_call\",\"location\":{\"Column\":1,\"FileID\":77,\"Line\":16},\"object_id\":{\"file_id\":77,\"name\":\"NewSuperuserCommand\",\"symbol_id\":\"1441\",\"type\":\"function\"}},{\"confidence\":0.95,\"context\":\"function_call\",\"location\":{\"Column\":1,\"FileID\":76,\"Line\":14},\"object_id\":{\"file_id\":76,\"name\":\"NewServeCommand\",\"symbol_id\":\"1436\",\"type\":\"function\"}},{\"confidence\":0.95,\"context\":\"function_call\",\"location\":{\"Column\":1,\"FileID\":254,\"Line\":179},\"object_id\":{\"file_id\":254,\"name\":\"Execute\",\"symbol_id\":\"8785\",\"type\":\"method\"}}],\"caller_functions\":[{\"confidence\":0.95,\"context\":\"function_call\",\"location\":{\"Column\":1,\"FileID\":368,\"Line\":20},\"object_id\":{\"file_id\":368,\"name\":\"LaunchURL\",\"symbol_id\":\"10598\",\"type\":\"function\"}},{\"confidence\":0.95,\"context\":\"function_call\",\"location\":{\"Column\":1,\"FileID\":213,\"Line\":19},\"object_id\":{\"file_id\":213,\"name\":\"main\",\"symbol_id\":\"5622\",\"type\":\"function\"}},{\"confidence\":0.95,\"context\":\"function_call\",\"location\":{\"Column\":1,\"FileID\":303,\"Line\":254},\"object_id\":{\"file_id\":303,\"name\":\"TestCronStartStop\",\"symbol_id\":\"9531\",\"type\":\"function\"}},{\"confidence\":0.95,\"context\":\"function_call\",\"location\":{\"Column\":9,\"FileID\":84,\"Line\":1352},\"object_id\":{\"file_id\":84,\"name\":\"\",\"symbol_id\":\"1821\",\"type\":\"function\"}}],\"child_objects\":[],\"implementing_types\":[],\"imported_modules\":[],\"incoming_references\":[{\"confidence\":0.9,\"context\":\"10\",\"location\":{\"Column\":23,\"FileID\":254,\"Line\":166},\"object_id\":{\"file_id\":254,\"name\":\"Start\",\"symbol_id\":\"8784\",\"type\":\"method\"}},{\"confidence\":0.9,\"context\":\"1\",\"location\":{\"Column\":71,\"FileID\":368,\"Line\":31},\"object_id\":{\"file_id\":368,\"name\":\"LaunchURL\",\"symbol_id\":\"10598\",\"type\":\"function\"}},{\"confidence\":0.9,\"context\":\"1\",\"location\":{\"Column\":16,\"FileID\":213,\"Line\":119},\"object_id\":{\"file_id\":213,\"name\":\"main\",\"symbol_id\":\"5622\",\"type\":\"function\"}},{\"confidence\":0.9,\"context\":\"1\",\"location\":{\"Column\":4,\"FileID\":303,\"Line\":300},\"object_id\":{\"file_id\":303,\"name\":\"TestCronStartStop\",\"symbol_id\":\"9531\",\"type\":\"function\"}},{\"confidence\":0.9,\"context\":\"1\",\"location\":{\"Column\":40,\"FileID\":368,\"Line\":33},\"object_id\":{\"file_id\":368,\"name\":\"LaunchURL\",\"symbol_id\":\"10598\",\"type\":\"function\"}},{\"confidence\":0.9,\"context\":\"1\",\"location\":{\"Column\":4,\"FileID\":303,\"Line\":280},\"object_id\":{\"file_id\":303,\"name\":\"TestCronStartStop\",\"symbol_id\":\"9531\",\"type\":\"function\"}},{\"confidence\":0.9,\"context\":\"1\",\"location\":{\"Column\":15,\"FileID\":84,\"Line\":1353},\"object_id\":{\"file_id\":84,\"name\":\"\",\"symbol_id\":\"1821\",\"type\":\"function\"}},{\"confidence\":0.9,\"context\":\"1\",\"location\":{\"Column\":4,\"FileID\":303,\"Line\":279},\"object_id\":{\"file_id\":303,\"name\":\"TestCronStartStop\",\"symbol_id\":\"9531\",\"type\":\"function\"}},{\"confidence\":0.9,\"context\":\"1\",\"location\":{\"Column\":36,\"FileID\":368,\"Line\":27},\"object_id\":{\"file_id\":368,\"name\":\"LaunchURL\",\"symbol_id\":\"10598\",\"type\":\"function\"}}],\"outgoing_references\":[{\"confidence\":0.9,\"context\":\"10\",\"location\":{\"Column\":52,\"FileID\":254,\"Line\":169},\"object_id\":{\"file_id\":254,\"name\":\"hideStartBanner\",\"symbol_id\":\"8767\",\"type\":\"field\"}},{\"confidence\":0.9,\"context\":\"10\",\"location\":{\"Column\":23,\"FileID\":254,\"Line\":166},\"object_id\":{\"file_id\":254,\"name\":\"Start\",\"symbol_id\":\"8784\",\"type\":\"method\"}},{\"confidence\":0.9,\"context\":\"1\",\"location\":{\"Column\":28,\"FileID\":254,\"Line\":168},\"object_id\":{\"file_id\":77,\"name\":\"NewSuperuserCommand\",\"symbol_id\":\"1441\",\"type\":\"function\"}},{\"confidence\":0.9,\"context\":\"10\",\"location\":{\"Column\":5,\"FileID\":254,\"Line\":168},\"object_id\":{\"file_id\":254,\"name\":\"RootCmd\",\"symbol_id\":\"8768\",\"type\":\"field\"}},{\"confidence\":0.9,\"context\":\"1\",\"location\":{\"Column\":28,\"FileID\":254,\"Line\":169},\"object_id\":{\"file_id\":76,\"name\":\"NewServeCommand\",\"symbol_id\":\"1436\",\"type\":\"function\"}},{\"confidence\":0.9,\"context\":\"10\",\"location\":{\"Column\":11,\"FileID\":254,\"Line\":166},\"object_id\":{\"file_id\":254,\"name\":\"PocketBase\",\"symbol_id\":\"8762\",\"type\":\"struct\"}},{\"confidence\":0.9,\"context\":\"1\",\"location\":{\"Column\":12,\"FileID\":254,\"Line\":171},\"object_id\":{\"file_id\":254,\"name\":\"Execute\",\"symbol_id\":\"8785\",\"type\":\"method\"}},{\"confidence\":0.9,\"context\":\"10\",\"location\":{\"Column\":31,\"FileID\":254,\"Line\":166},\"object_id\":{\"file_id\":394,\"name\":\"error\",\"symbol_id\":\"11145\",\"type\":\"field\"}}],\"parent_classes\":[],\"parent_objects\":[{\"confidence\":0.95,\"context\":\"folder\",\"location\":{\"Column\":0,\"FileID\":254,\"Line\":0},\"object_id\":{\"file_id\":254,\"name\":\"pocketbase-lci\",\"symbol_id\":\"scope_pocketbase-lci\",\"type\":\"module\"}},{\"confidence\":0.95,\"context\":\"file\",\"location\":{\"Column\":0,\"FileID\":254,\"Line\":0},\"object_id\":{\"file_id\":254,\"name\":\"pocketbase.go\",\"symbol_id\":\"scope_pocketbase.go\",\"type\":\"module\"}},{\"confidence\":0.95,\"context\":\"method\",\"location\":{\"Column\":0,\"FileID\":254,\"Line\":166},\"object_id\":{\"file_id\":254,\"name\":\"Start\",\"symbol_id\":\"scope_Start\",\"type\":\"function\"}}],\"used_types\":[]},\"documentation\":\"// commands (serve, superuser, version) and executes pb.RootCmd.\",\"generated_at\":\"2026-07-20T15:01:08.732769327Z\",\"location\":{\"Column\":1,\"FileID\":254,\"Line\":166},\"object_id\":{\"file_id\":254,\"name\":\"Start\",\"symbol_id\":\"CNb\",\"type\":\"method\"},\"semantic_context\":{\"confidence\":0.7,\"criticality_analysis\":{\"affected_components\":[],\"criticality_type\":\"\",\"impact_score\":0.0,\"is_critical\":false},\"entry_point_dependencies\":[{\"confidence\":0.8,\"entry_point_id\":{\"file_id\":213,\"name\":\"main\",\"symbol_id\":\"BaP\",\"type\":\"function\"},\"path\":\"\",\"type\":\"main function\"},{\"confidence\":0.8,\"entry_point_id\":{\"file_id\":245,\"name\":\"main\",\"symbol_id\":\"CKr\",\"type\":\"function\"},\"path\":\"\",\"type\":\"main function\"}],\"propagation_labels\":[],\"purpose\":\"data access\",\"service_dependencies\":[]},\"signature\":\"func (pb *PocketBase) Start() error\",\"structure_context\":{\"composition_pattern\":\"simple\",\"exports\":[{\"export_style\":\"named\",\"name\":\"Version\",\"type\":\"variable\",\"used_by\":[\"file:235\",\"file:234\",\"file:234\",\"file:234\",\"file:235\",\"file:234\"]},{\"export_style\":\"named\",\"name\":\"PocketBase\",\"type\":\"struct\",\"used_by\":[]},{\"export_style\":\"named\",\"name\":\"RootCmd\",\"type\":\"field\",\"used_by\":[\"file:213\",\"file:213\",\"file:255\",\"file:213\",\"file:213\",\"file:213\",\"file:255\",\"file:213\",\"file:255\",\"file:213\",\"file:255\",\"file:213\",\"file:255\",\"file:255\",\"file:213\",\"file:213\",\"file:213\",\"file:213\",\"file:213\",\"file:255\",\"file:213\",\"file:255\",\"file:213\",\"file:255\",\"file:213\",\"file:255\",\"file:213\",\"file:213\",\"file:213\",\"file:255\",\"file:255\",\"file:213\"]},{\"export_style\":\"named\",\"name\":\"Config\",\"type\":\"struct\",\"used_by\":[]},{\"export_style\":\"named\",\"name\":\"HideStartBanner\",\"type\":\"field\",\"used_by\":[]},{\"export_style\":\"named\",\"name\":\"DefaultDev\",\"type\":\"field\",\"used_by\":[]},{\"export_style\":\"named\",\"name\":\"DefaultDataDir\",\"type\":\"field\",\"used_by\":[]},{\"export_style\":\"named\",\"name\":\"DefaultEncryptionEnv\",\"type\":\"field\",\"used_by\":[]},{\"export_style\":\"named\",\"name\":\"DefaultQueryTimeout\",\"type\":\"field\",\"used_by\":[]},{\"export_style\":\"named\",\"name\":\"DataMaxOpenConns\",\"type\":\"field\",\"used_by\":[]},{\"export_style\":\"named\",\"name\":\"DataMaxIdleConns\",\"type\":\"field\",\"used_by\":[]},{\"export_style\":\"named\",\"name\":\"AuxMaxOpenConns\",\"type\":\"field\",\"used_by\":[]},{\"export_style\":\"named\",\"name\":\"AuxMaxIdleConns\",\"type\":\"field\",\"used_by\":[]},{\"export_style\":\"named\",\"name\":\"DBConnect\",\"type\":\"field\",\"used_by\":[]},{\"export_style\":\"named\",\"name\":\"New\",\"type\":\"function\",\"used_by\":[\"file:77\",\"file:71\",\"file:379\",\"file:345\",\"file:359\",\"file:172\",\"file:342\",\"file:216\",\"file:411\",\"file:181\",\"file:246\",\"file:73\",\"file:210\",\"file:240\",\"file:189\",\"file:297\",\"file:181\",\"file:240\",\"file:422\",\"file:189\",\"file:210\",\"file:422\",\"file:240\",\"file:321\",\"file:285\",\"file:345\",\"file:240\",\"file:240\",\"file:114\",\"file:211\",\"file:211\",\"file:181\",\"file:359\",\"file:403\",\"file:173\",\"file:240\",\"file:306\",\"file:240\",\"file:410\",\"file:253\",\"file:374\",\"file:202\",\"file:422\",\"file:95\",\"file:48\",\"file:95\",\"file:240\",\"file:202\",\"file:54\",\"file:393\",\"file:342\",\"file:239\",\"file:293\",\"file:411\",\"file:77\",\"file:192\",\"file:349\",\"file:245\",\"file:195\",\"file:189\",\"file:240\",\"file:122\",\"file:321\",\"file:210\",\"file:382\",\"file:403\",\"file:321\",\"file:359\",\"file:282\",\"file:271\",\"file:240\",\"file:73\",\"file:404\",\"file:240\",\"file:239\",\"file:422\",\"file:77\",\"file:237\",\"file:186\",\"file:337\",\"file:240\",\"file:220\",\"file:62\",\"file:382\",\"file:202\",\"file:365\",\"file:62\",\"file:393\",\"file:340\",\"file:189\",\"file:411\",\"file:359\",\"file:189\",\"file:8\",\"file:240\",\"file:366\",\"file:33\",\"file:240\",\"file:60\",\"file:211\",\"file:30\",\"file:85\",\"file:138\",\"file:85\",\"file:210\",\"file:345\",\"file:314\",\"file:193\",\"file:239\",\"file:240\",\"file:240\",\"file:287\",\"file:210\",\"file:386\",\"file:240\",\"file:80\",\"file:71\",\"file:345\",\"file:443\",\"file:392\",\"file:240\",\"file:431\",\"file:60\",\"file:59\",\"file:202\",\"file:240\",\"file:128\",\"file:240\",\"file:423\",\"file:434\",\"file:240\",\"file:111\",\"file:281\",\"file:29\",\"file:77\",\"file:246\",\"file:409\",\"file:345\",\"file:354\",\"file:189\",\"file:349\",\"file:181\",\"file:95\",\"file:253\",\"file:255\",\"file:114\",\"file:191\",\"file:397\",\"file:411\",\"file:77\",\"file:8\",\"file:189\",\"file:213\",\"file:59\",\"file:202\",\"file:239\",\"file:181\",\"file:321\",\"file:240\",\"file:429\",\"file:111\",\"file:71\",\"file:56\",\"file:429\",\"file:306\",\"file:403\",\"file:342\",\"file:137\",\"file:240\",\"file:115\",\"file:22\",\"file:184\",\"file:104\",\"file:282\",\"file:210\",\"file:306\",\"file:181\",\"file:240\",\"file:210\",\"file:84\",\"file:356\",\"file:240\",\"file:411\",\"file:210\",\"file:73\",\"file:345\",\"file:222\",\"file:275\",\"file:345\",\"file:240\",\"file:159\",\"file:411\",\"file:422\",\"file:359\",\"file:137\",\"file:422\",\"file:104\",\"file:429\",\"file:393\",\"file:345\",\"file:418\",\"file:202\",\"file:303\",\"file:337\",\"file:179\",\"file:267\",\"file:210\",\"file:382\",\"file:85\",\"file:29\",\"file:253\",\"file:239\",\"file:253\",\"file:366\",\"file:34\",\"file:240\",\"file:240\",\"file:411\",\"file:240\",\"file:393\",\"file:253\",\"file:306\",\"file:62\",\"file:193\",\"file:415\",\"file:429\",\"file:397\",\"file:177\",\"file:289\",\"file:8\",\"file:422\",\"file:56\",\"file:189\",\"file:146\",\"file:383\",\"file:211\",\"file:359\",\"file:73\",\"file:337\",\"file:60\",\"file:104\",\"file:186\",\"file:291\",\"file:116\",\"file:77\",\"file:240\",\"file:163\",\"file:181\",\"file:240\",\"file:239\",\"file:210\",\"file:151\",\"file:382\",\"file:146\",\"file:403\",\"file:342\",\"file:177\",\"file:303\",\"file:314\",\"file:73\",\"file:306\",\"file:345\",\"file:84\",\"file:359\",\"file:240\",\"file:235\",\"file:410\",\"file:172\",\"file:77\",\"file:211\",\"file:314\",\"file:303\",\"file:240\",\"file:189\",\"file:239\",\"file:84\",\"file:240\",\"file:391\",\"file:211\",\"file:422\",\"file:191\",\"file:192\",\"file:422\",\"file:240\",\"file:22\",\"file:374\",\"file:240\",\"file:403\",\"file:77\",\"file:393\",\"file:210\",\"file:303\",\"file:303\",\"file:240\",\"file:77\",\"file:379\",\"file:77\",\"file:210\",\"file:240\",\"file:239\",\"file:303\",\"file:159\",\"file:303\",\"file:411\",\"file:314\",\"file:84\",\"file:240\",\"file:95\",\"file:240\",\"file:432\",\"file:240\",\"file:282\",\"file:422\",\"file:25\",\"file:186\",\"file:240\",\"file:186\",\"file:202\",\"file:281\",\"file:319\",\"file:251\",\"file:189\",\"file:211\",\"file:411\",\"file:12\",\"file:98\",\"file:240\",\"file:240\",\"file:299\",\"file:240\",\"file:337\",\"file:98\",\"file:253\",\"file:432\",\"file:359\",\"file:210\",\"file:253\",\"file:240\",\"file:246\",\"file:239\",\"file:84\",\"file:422\",\"file:111\",\"file:210\",\"file:409\",\"file:88\",\"file:321\",\"file:374\",\"file:266\",\"file:30\",\"file:77\",\"file:240\",\"file:303\",\"file:240\",\"file:218\",\"file:116\",\"file:217\",\"file:303\",\"file:239\",\"file:84\",\"file:411\",\"file:239\",\"file:211\",\"file:345\",\"file:18\",\"file:57\"]},{\"export_style\":\"named\",\"name\":\"NewWithConfig\",\"type\":\"function\",\"used_by\":[\"file:255\",\"file:255\",\"file:255\",\"file:255\",\"file:255\",\"file:255\",\"file:255\",\"file:255\"]},{\"export_style\":\"named\",\"name\":\"Start\",\"type\":\"method\",\"used_by\":[\"file:368\",\"file:213\",\"file:303\",\"file:368\",\"file:303\",\"file:84\",\"file:303\",\"file:368\"]},{\"export_style\":\"named\",\"name\":\"Execute\",\"type\":\"method\",\"used_by\":[\"file:230\",\"file:228\",\"file:198\",\"file:231\",\"file:222\",\"file:170\",\"file:258\",\"file:100\",\"file:104\",\"file:100\",\"file:169\",\"file:100\",\"file:78\",\"file:100\",\"file:100\",\"file:84\",\"file:229\",\"file:78\",\"file:78\",\"file:198\",\"file:229\",\"file:161\",\"file:104\",\"file:100\",\"file:431\",\"file:87\",\"file:170\",\"file:404\",\"file:78\",\"file:84\",\"file:398\",\"file:87\",\"file:169\",\"file:169\",\"file:100\",\"file:170\",\"file:227\",\"file:112\",\"file:404\",\"file:228\",\"file:78\",\"file:78\",\"file:229\",\"file:170\",\"file:229\",\"file:112\",\"file:84\",\"file:229\",\"file:211\",\"file:85\",\"file:100\",\"file:87\",\"file:398\",\"file:229\",\"file:229\",\"file:100\",\"file:228\",\"file:229\",\"file:169\",\"file:257\",\"file:250\",\"file:227\",\"file:87\",\"file:100\",\"file:229\",\"file:229\",\"file:100\",\"file:100\",\"file:170\",\"file:100\",\"file:257\",\"file:404\",\"file:84\",\"file:104\",\"file:100\",\"file:211\",\"file:85\"]},{\"export_style\":\"named\",\"name\":\"Write\",\"type\":\"method\",\"used_by\":[]}],\"file_path\":\"pocketbase.go\",\"imports\":[],\"inheritance_chain\":[],\"interface_implementations\":[],\"module\":\".\",\"package\":\".\"},\"usage_analysis\":{\"call_frequency\":0,\"change_impact\":{\"breaking_change_risk\":\"low\",\"dependent_components\":[\"osutils\",\"base\",\"cron\",\"core\"],\"estimated_impact\":4,\"requires_tests\":true},\"complexity_metrics\":{\"cognitive_complexity\":1,\"cyclomatic_complexity\":1,\"line_count\":6,\"nesting_depth\":0,\"parameter_count\":1},\"fan_in\":0,\"fan_out\":3,\"test_coverage\":{\"has_tests\":false,\"test_file_paths\":[]}},\"variable_context\":{\"class_variables\":[],\"global_variables\":[],\"local_variables\":[],\"parameters\":[],\"return_values\":[],\"used_globals\":[]}},\"contexts\":[{\"callers\":9,\"context\":[\"func (pb *PocketBase) Start() error\"],\"definition\":\"func (pb *PocketBase) Start() error\",\"file_path\":\"pocketbase.go\",\"is_exported\":true,\"line\":166,\"object_id\":\"CNb\",\"purity\":{\"confidence\":\"high\",\"is_pure\":false,\"purity_score\":0.0,\"transitive_effects\":[\"param_write\",\"receiver_write\",\"global_write\",\"channel\"]},\"signature\":\"func (pb *PocketBase) Start() error\",\"source_excerpt\":{\"end_line\":172,\"lines\":[{\"line\":166,\"text\":\"func (pb *PocketBase) Start() error {\"},{\"line\":167,\"text\":\"\\t// register system commands\"},{\"line\":168,\"text\":\"\\tpb.RootCmd.AddCommand(cmd.NewSuperuserCommand(pb))\"},{\"line\":169,\"text\":\"\\tpb.RootCmd.AddCommand(cmd.NewServeCommand(pb, !pb.hideStartBanner))\"},{\"line\":170,\"text\":\"\"},{\"line\":171,\"text\":\"\\treturn pb.Execute()\"},{\"line\":172,\"text\":\"}\"}],\"start_line\":166,\"truncated\":false},\"source_hint\":\"source_excerpt is extracted from the indexed source. Use it for nearby code, initializer, and short body questions; read the file only if you need lines outside this excerpt.\",\"symbol_name\":\"Start\",\"symbol_type\":\"method\"},{\"callers\":2,\"context\":[\"func (c *Cron) Start()\"],\"definition\":\"func (c *Cron) Start()\",\"file_path\":\"tools/cron/cron.go\",\"is_exported\":true,\"line\":176,\"object_id\":\"CYy\",\"purity\":{\"confidence\":\"high\",\"is_pure\":false,\"local_effects\":[\"receiver_write\"],\"purity_score\":0.0,\"reasons\":[\"writes to receiver at line 185\",\"writes to receiver at line 187\"],\"transitive_effects\":[\"param_write\",\"receiver_write\",\"global_write\",\"channel\"]},\"signature\":\"func (c *Cron) Start()\",\"source_excerpt\":{\"end_line\":187,\"lines\":[{\"line\":176,\"text\":\"func (c *Cron) Start() {\"},{\"line\":177,\"text\":\"\\tc.Stop()\"},{\"line\":178,\"text\":\"\"},{\"line\":179,\"text\":\"\\t// delay the ticker to start at 00 of 1 c.interval duration\"},{\"line\":180,\"text\":\"\\tnow := time.Now()\"},{\"line\":181,\"text\":\"\\tnext := now.Add(c.interval).Truncate(c.interval)\"},{\"line\":182,\"text\":\"\\tdelay := next.Sub(now)\"},{\"line\":183,\"text\":\"\"},{\"line\":184,\"text\":\"\\tc.mux.Lock()\"},{\"line\":185,\"text\":\"\\tc.startTimer = time.AfterFunc(delay, func() {\"},{\"line\":186,\"text\":\"\\t\\tc.mux.Lock()\"},{\"line\":187,\"text\":\"\\t\\tc.ticker = time.NewTicker(c.interval)\"}],\"start_line\":176,\"truncated\":true},\"source_hint\":\"source_excerpt is extracted from the indexed source. Use it for nearby code, initializer, and short body questions; read the file only if you need lines outside this excerpt.\",\"symbol_name\":\"Start\",\"symbol_type\":\"method\"},{\"callers\":2,\"context\":[\"func (a *smtpLoginAuth) Start(server *smtp.ServerInfo) (string, []byte, error)\"],\"definition\":\"func (a *smtpLoginAuth) Start(server *smtp.ServerInfo) (string, []byte, error)\",\"file_path\":\"tools/mailer/smtp.go\",\"is_exported\":true,\"line\":185,\"object_id\":\"CqF\",\"purity\":{\"confidence\":\"high\",\"is_pure\":false,\"purity_score\":0.0,\"transitive_effects\":[\"param_write\",\"receiver_write\",\"global_write\"]},\"signature\":\"func (a *smtpLoginAuth) Start(server *smtp.ServerInfo) (string, []byte, error)\",\"source_excerpt\":{\"end_line\":196,\"lines\":[{\"line\":185,\"text\":\"func (a *smtpLoginAuth) Start(server *smtp.ServerInfo) (string, []byte, error) {\"},{\"line\":186,\"text\":\"\\t// Must have TLS, or else localhost server.\"},{\"line\":187,\"text\":\"\\t// Note: If TLS is not true, then we can't trust ANYTHING in ServerInfo.\"},{\"line\":188,\"text\":\"\\t// In particular, it doesn't matter if the server advertises LOGIN auth.\"},{\"line\":189,\"text\":\"\\t// That might just be the attacker saying\"},{\"line\":190,\"text\":\"\\t// \\\"it's ok, you can trust me with your password.\\\"\"},{\"line\":191,\"text\":\"\\tif !server.TLS && !isLocalhost(server.Name) {\"},{\"line\":192,\"text\":\"\\t\\treturn \\\"\\\", nil, errors.New(\\\"unencrypted connection\\\")\"},{\"line\":193,\"text\":\"\\t}\"},{\"line\":194,\"text\":\"\"},{\"line\":195,\"text\":\"\\treturn \\\"LOGIN\\\", nil, nil\"},{\"line\":196,\"text\":\"}\"}],\"start_line\":185,\"truncated\":false},\"source_hint\":\"source_excerpt is extracted from the indexed source. Use it for nearby code, initializer, and short body questions; read the file only if you need lines outside this excerpt.\",\"symbol_name\":\"Start\",\"symbol_type\":\"method\"}],\"count\":3,\"metadata\":{\"index_size\":15363,\"processed_files\":760,\"server_version\":\"0.7.0\"},\"performance\":{\"component_breakdown\":{\"ai_time\":0,\"basic_info_time\":0,\"relationships_time\":0,\"semantic_time\":0,\"structure_time\":0,\"usage_time\":0,\"variables_time\":0},\"total_time_ms\":3}}"
+        },
+        "proposed_gap": null,
+        "required_outcome": "accepted"
+      }
+    }
+  ],
+  "schema": "lci.all-tools-adjudications.v1"
+}
