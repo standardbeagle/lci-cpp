@@ -1,0 +1,259 @@
+{
+  "cases": [
+    {
+      "category": "lci_search",
+      "id": "search-single-hit",
+      "value": {
+        "match": "app.Start()",
+        "results": [
+          {
+            "file": "examples/base/main.go",
+            "hits": [
+              {
+                "id": "BaP",
+                "line": 119,
+                "sym": "main",
+                "text": "if err := app.Start(); err != nil {",
+                "type": "function"
+              }
+            ]
+          }
+        ],
+        "showing": 1,
+        "total_matches": 1
+      }
+    },
+    {
+      "category": "lci_search",
+      "id": "search-empty",
+      "value": {
+        "match": "definitely_missing_symbol",
+        "results": [],
+        "showing": 0,
+        "total_matches": 0
+      }
+    },
+    {
+      "category": "lci_search",
+      "id": "search-multiple-files-and-hits",
+      "value": {
+        "match": "Start",
+        "results": [
+          {
+            "file": "cmd/server/main.go",
+            "hits": [
+              {
+                "id": "A1",
+                "line": 17,
+                "sym": "main",
+                "text": "return server.Start(ctx)",
+                "type": "function"
+              },
+              {
+                "id": "A2",
+                "line": 42,
+                "sym": "run",
+                "text": "// Start only after config is loaded",
+                "type": "comment"
+              }
+            ]
+          },
+          {
+            "file": "internal/server/server.go",
+            "hits": [
+              {
+                "id": "B1",
+                "line": 203,
+                "sym": "Server.Start",
+                "text": "func (s *Server) Start(ctx context.Context) error {",
+                "type": "method"
+              }
+            ]
+          }
+        ],
+        "showing": 3,
+        "total_matches": 3
+      }
+    },
+    {
+      "category": "lci_error",
+      "id": "structured-error",
+      "value": {
+        "error": {
+          "code": "INVALID_ARGUMENT",
+          "details": {
+            "allowed": [
+              "function",
+              "method"
+            ],
+            "argument": "symbol_types",
+            "received": "functions"
+          },
+          "message": "unknown symbol type"
+        },
+        "ok": false
+      }
+    },
+    {
+      "category": "lci_multi",
+      "id": "multi-mixed-results",
+      "value": {
+        "results": [
+          {
+            "index": 0,
+            "result": {
+              "file": "src/a.cc",
+              "line_end": 14,
+              "line_start": 8,
+              "text": "int answer() {\n  return 42;\n}"
+            },
+            "tool": "browse_file"
+          },
+          {
+            "error": {
+              "code": "NOT_FOUND",
+              "message": "symbol not found"
+            },
+            "index": 1,
+            "tool": "get_symbol"
+          },
+          {
+            "index": 2,
+            "result": {
+              "matches": [],
+              "total": 0
+            },
+            "tool": "search"
+          }
+        ]
+      }
+    },
+    {
+      "category": "json_root",
+      "id": "root-null",
+      "value": null
+    },
+    {
+      "category": "json_root",
+      "id": "root-false",
+      "value": false
+    },
+    {
+      "category": "json_root",
+      "id": "root-zero",
+      "value": 0
+    },
+    {
+      "category": "json_root",
+      "id": "root-negative-fraction",
+      "value": -12.5
+    },
+    {
+      "category": "json_root",
+      "id": "root-string",
+      "value": "root: [] {} <tag> | = , newline\nend"
+    },
+    {
+      "category": "json_unicode",
+      "id": "escaped-lone-surrogates",
+      "value": "before\ud800middle\udfffafter"
+    },
+    {
+      "category": "json_container",
+      "id": "empty-containers",
+      "value": {
+        "empty_array": [],
+        "empty_object": {},
+        "empty_string": ""
+      }
+    },
+    {
+      "category": "json_keys",
+      "id": "ambiguous-object-keys",
+      "value": {
+        "": "empty key",
+        "0": "numeric-looking",
+        "01": "leading zero",
+        "a.b": "dot",
+        "a/b": "slash",
+        "a[b]": "brackets",
+        "false": "boolean-looking",
+        "null": "null-looking",
+        "~0~1": "pointer escapes"
+      }
+    },
+    {
+      "category": "json_strings",
+      "id": "escaping-and-delimiters",
+      "value": {
+        "backslash": "C:\\tmp\\x",
+        "controls": "tab\there\rreturn\nnewline\bbackspace\fformfeed\u0000nul",
+        "markup": "<result id=\"1\">& 'quoted'</result>",
+        "quotes": "double \" and single '",
+        "recordish": "FILE src/x\nLINE 7\n---\nkey: value | next=value"
+      }
+    },
+    {
+      "category": "json_unicode",
+      "id": "unicode-and-normalization",
+      "value": {
+        "combining": "é",
+        "emoji": "🧪🚀",
+        "languages": "日本語 Ελληνικά العربية",
+        "line_separators": "before middle after",
+        "precomposed": "é"
+      }
+    },
+    {
+      "category": "json_numbers",
+      "id": "number-boundaries",
+      "value": {
+        "decimal": 0.125,
+        "large_integer": 9007199254740991,
+        "negative_integer": -9007199254740991,
+        "negative_zero_float": -0.0,
+        "small_exponent": 1e-20
+      }
+    },
+    {
+      "category": "json_array",
+      "id": "heterogeneous-null-filled-array",
+      "value": [
+        null,
+        false,
+        0,
+        "",
+        [],
+        {},
+        null,
+        {
+          "0": [
+            null,
+            null,
+            "tail"
+          ]
+        }
+      ]
+    },
+    {
+      "category": "json_nesting",
+      "id": "deep-alternating-containers",
+      "value": {
+        "a": [
+          {
+            "b": [
+              {
+                "c": [
+                  {
+                    "d": []
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "schema": "lci.api-replay.candidate-value-bank.v1"
+}

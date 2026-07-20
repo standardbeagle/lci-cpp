@@ -1,0 +1,569 @@
+{
+  "candidates": [
+    {
+      "byte_ratio": 4.847034764826176,
+      "candidate": "typed-xml-v1",
+      "cases": [
+        {
+          "id": "search-single-hit",
+          "rendered_characters": 1120,
+          "rendered_lines": 1,
+          "rendered_utf8_bytes": 1120,
+          "source_utf8_bytes": 207
+        },
+        {
+          "id": "search-empty",
+          "rendered_characters": 394,
+          "rendered_lines": 1,
+          "rendered_utf8_bytes": 394,
+          "source_utf8_bytes": 80
+        },
+        {
+          "id": "search-multiple-files-and-hits",
+          "rendered_characters": 2382,
+          "rendered_lines": 1,
+          "rendered_utf8_bytes": 2382,
+          "source_utf8_bytes": 449
+        },
+        {
+          "id": "structured-error",
+          "rendered_characters": 899,
+          "rendered_lines": 1,
+          "rendered_utf8_bytes": 899,
+          "source_utf8_bytes": 173
+        },
+        {
+          "id": "multi-mixed-results",
+          "rendered_characters": 1685,
+          "rendered_lines": 1,
+          "rendered_utf8_bytes": 1685,
+          "source_utf8_bytes": 297
+        },
+        {
+          "id": "root-null",
+          "rendered_characters": 33,
+          "rendered_lines": 1,
+          "rendered_utf8_bytes": 33,
+          "source_utf8_bytes": 4
+        },
+        {
+          "id": "root-false",
+          "rendered_characters": 49,
+          "rendered_lines": 1,
+          "rendered_utf8_bytes": 49,
+          "source_utf8_bytes": 5
+        },
+        {
+          "id": "root-zero",
+          "rendered_characters": 43,
+          "rendered_lines": 1,
+          "rendered_utf8_bytes": 43,
+          "source_utf8_bytes": 1
+        },
+        {
+          "id": "root-negative-fraction",
+          "rendered_characters": 47,
+          "rendered_lines": 1,
+          "rendered_utf8_bytes": 47,
+          "source_utf8_bytes": 5
+        },
+        {
+          "id": "root-string",
+          "rendered_characters": 108,
+          "rendered_lines": 1,
+          "rendered_utf8_bytes": 108,
+          "source_utf8_bytes": 38
+        },
+        {
+          "id": "escaped-lone-surrogates",
+          "rendered_characters": 92,
+          "rendered_lines": 1,
+          "rendered_utf8_bytes": 92,
+          "source_utf8_bytes": 31
+        },
+        {
+          "id": "empty-containers",
+          "rendered_characters": 275,
+          "rendered_lines": 1,
+          "rendered_utf8_bytes": 275,
+          "source_utf8_bytes": 54
+        },
+        {
+          "id": "ambiguous-object-keys",
+          "rendered_characters": 947,
+          "rendered_lines": 1,
+          "rendered_utf8_bytes": 947,
+          "source_utf8_bytes": 175
+        },
+        {
+          "id": "escaping-and-delimiters",
+          "rendered_characters": 711,
+          "rendered_lines": 1,
+          "rendered_utf8_bytes": 711,
+          "source_utf8_bytes": 241
+        },
+        {
+          "id": "unicode-and-normalization",
+          "rendered_characters": 623,
+          "rendered_lines": 1,
+          "rendered_utf8_bytes": 623,
+          "source_utf8_bytes": 256
+        },
+        {
+          "id": "number-boundaries",
+          "rendered_characters": 508,
+          "rendered_lines": 1,
+          "rendered_utf8_bytes": 508,
+          "source_utf8_bytes": 137
+        },
+        {
+          "id": "heterogeneous-null-filled-array",
+          "rendered_characters": 429,
+          "rendered_lines": 1,
+          "rendered_utf8_bytes": 429,
+          "source_utf8_bytes": 53
+        },
+        {
+          "id": "deep-alternating-containers",
+          "rendered_characters": 386,
+          "rendered_lines": 1,
+          "rendered_utf8_bytes": 386,
+          "source_utf8_bytes": 32
+        },
+        {
+          "id": "live:search-callsite",
+          "rendered_characters": 1120,
+          "rendered_lines": 1,
+          "rendered_utf8_bytes": 1120,
+          "source_utf8_bytes": 207
+        }
+      ],
+      "rendered_utf8_bytes": 11851,
+      "source_utf8_bytes": 2445
+    },
+    {
+      "byte_ratio": 3.2282208588957055,
+      "candidate": "readable-xml-v1",
+      "cases": [
+        {
+          "id": "search-single-hit",
+          "rendered_characters": 707,
+          "rendered_lines": 1,
+          "rendered_utf8_bytes": 707,
+          "source_utf8_bytes": 207
+        },
+        {
+          "id": "search-empty",
+          "rendered_characters": 271,
+          "rendered_lines": 1,
+          "rendered_utf8_bytes": 271,
+          "source_utf8_bytes": 80
+        },
+        {
+          "id": "search-multiple-files-and-hits",
+          "rendered_characters": 1456,
+          "rendered_lines": 1,
+          "rendered_utf8_bytes": 1456,
+          "source_utf8_bytes": 449
+        },
+        {
+          "id": "structured-error",
+          "rendered_characters": 567,
+          "rendered_lines": 1,
+          "rendered_utf8_bytes": 567,
+          "source_utf8_bytes": 173
+        },
+        {
+          "id": "multi-mixed-results",
+          "rendered_characters": 1070,
+          "rendered_lines": 3,
+          "rendered_utf8_bytes": 1070,
+          "source_utf8_bytes": 297
+        },
+        {
+          "id": "root-null",
+          "rendered_characters": 47,
+          "rendered_lines": 1,
+          "rendered_utf8_bytes": 47,
+          "source_utf8_bytes": 4
+        },
+        {
+          "id": "root-false",
+          "rendered_characters": 63,
+          "rendered_lines": 1,
+          "rendered_utf8_bytes": 63,
+          "source_utf8_bytes": 5
+        },
+        {
+          "id": "root-zero",
+          "rendered_characters": 57,
+          "rendered_lines": 1,
+          "rendered_utf8_bytes": 57,
+          "source_utf8_bytes": 1
+        },
+        {
+          "id": "root-negative-fraction",
+          "rendered_characters": 61,
+          "rendered_lines": 1,
+          "rendered_utf8_bytes": 61,
+          "source_utf8_bytes": 5
+        },
+        {
+          "id": "root-string",
+          "rendered_characters": 97,
+          "rendered_lines": 2,
+          "rendered_utf8_bytes": 97,
+          "source_utf8_bytes": 38
+        },
+        {
+          "id": "escaped-lone-surrogates",
+          "rendered_characters": 106,
+          "rendered_lines": 1,
+          "rendered_utf8_bytes": 106,
+          "source_utf8_bytes": 31
+        },
+        {
+          "id": "empty-containers",
+          "rendered_characters": 192,
+          "rendered_lines": 1,
+          "rendered_utf8_bytes": 192,
+          "source_utf8_bytes": 54
+        },
+        {
+          "id": "ambiguous-object-keys",
+          "rendered_characters": 545,
+          "rendered_lines": 1,
+          "rendered_utf8_bytes": 545,
+          "source_utf8_bytes": 175
+        },
+        {
+          "id": "escaping-and-delimiters",
+          "rendered_characters": 505,
+          "rendered_lines": 4,
+          "rendered_utf8_bytes": 505,
+          "source_utf8_bytes": 241
+        },
+        {
+          "id": "unicode-and-normalization",
+          "rendered_characters": 354,
+          "rendered_lines": 1,
+          "rendered_utf8_bytes": 387,
+          "source_utf8_bytes": 256
+        },
+        {
+          "id": "number-boundaries",
+          "rendered_characters": 377,
+          "rendered_lines": 1,
+          "rendered_utf8_bytes": 377,
+          "source_utf8_bytes": 137
+        },
+        {
+          "id": "heterogeneous-null-filled-array",
+          "rendered_characters": 378,
+          "rendered_lines": 1,
+          "rendered_utf8_bytes": 378,
+          "source_utf8_bytes": 53
+        },
+        {
+          "id": "deep-alternating-containers",
+          "rendered_characters": 300,
+          "rendered_lines": 1,
+          "rendered_utf8_bytes": 300,
+          "source_utf8_bytes": 32
+        },
+        {
+          "id": "live:search-callsite",
+          "rendered_characters": 707,
+          "rendered_lines": 1,
+          "rendered_utf8_bytes": 707,
+          "source_utf8_bytes": 207
+        }
+      ],
+      "rendered_utf8_bytes": 7893,
+      "source_utf8_bytes": 2445
+    },
+    {
+      "byte_ratio": 2.2016359918200408,
+      "candidate": "path-records-v1",
+      "cases": [
+        {
+          "id": "search-single-hit",
+          "rendered_characters": 504,
+          "rendered_lines": 16,
+          "rendered_utf8_bytes": 504,
+          "source_utf8_bytes": 207
+        },
+        {
+          "id": "search-empty",
+          "rendered_characters": 139,
+          "rendered_lines": 7,
+          "rendered_utf8_bytes": 139,
+          "source_utf8_bytes": 80
+        },
+        {
+          "id": "search-multiple-files-and-hits",
+          "rendered_characters": 1157,
+          "rendered_lines": 31,
+          "rendered_utf8_bytes": 1157,
+          "source_utf8_bytes": 449
+        },
+        {
+          "id": "structured-error",
+          "rendered_characters": 422,
+          "rendered_lines": 13,
+          "rendered_utf8_bytes": 422,
+          "source_utf8_bytes": 173
+        },
+        {
+          "id": "multi-mixed-results",
+          "rendered_characters": 808,
+          "rendered_lines": 24,
+          "rendered_utf8_bytes": 808,
+          "source_utf8_bytes": 297
+        },
+        {
+          "id": "root-null",
+          "rendered_characters": 28,
+          "rendered_lines": 3,
+          "rendered_utf8_bytes": 28,
+          "source_utf8_bytes": 4
+        },
+        {
+          "id": "root-false",
+          "rendered_characters": 33,
+          "rendered_lines": 3,
+          "rendered_utf8_bytes": 33,
+          "source_utf8_bytes": 5
+        },
+        {
+          "id": "root-zero",
+          "rendered_characters": 29,
+          "rendered_lines": 3,
+          "rendered_utf8_bytes": 29,
+          "source_utf8_bytes": 1
+        },
+        {
+          "id": "root-negative-fraction",
+          "rendered_characters": 33,
+          "rendered_lines": 3,
+          "rendered_utf8_bytes": 33,
+          "source_utf8_bytes": 5
+        },
+        {
+          "id": "root-string",
+          "rendered_characters": 67,
+          "rendered_lines": 3,
+          "rendered_utf8_bytes": 67,
+          "source_utf8_bytes": 38
+        },
+        {
+          "id": "escaped-lone-surrogates",
+          "rendered_characters": 60,
+          "rendered_lines": 3,
+          "rendered_utf8_bytes": 60,
+          "source_utf8_bytes": 31
+        },
+        {
+          "id": "empty-containers",
+          "rendered_characters": 104,
+          "rendered_lines": 6,
+          "rendered_utf8_bytes": 104,
+          "source_utf8_bytes": 54
+        },
+        {
+          "id": "ambiguous-object-keys",
+          "rendered_characters": 273,
+          "rendered_lines": 12,
+          "rendered_utf8_bytes": 273,
+          "source_utf8_bytes": 175
+        },
+        {
+          "id": "escaping-and-delimiters",
+          "rendered_characters": 314,
+          "rendered_lines": 8,
+          "rendered_utf8_bytes": 314,
+          "source_utf8_bytes": 241
+        },
+        {
+          "id": "unicode-and-normalization",
+          "rendered_characters": 327,
+          "rendered_lines": 8,
+          "rendered_utf8_bytes": 327,
+          "source_utf8_bytes": 256
+        },
+        {
+          "id": "number-boundaries",
+          "rendered_characters": 207,
+          "rendered_lines": 8,
+          "rendered_utf8_bytes": 207,
+          "source_utf8_bytes": 137
+        },
+        {
+          "id": "heterogeneous-null-filled-array",
+          "rendered_characters": 189,
+          "rendered_lines": 15,
+          "rendered_utf8_bytes": 189,
+          "source_utf8_bytes": 53
+        },
+        {
+          "id": "deep-alternating-containers",
+          "rendered_characters": 185,
+          "rendered_lines": 10,
+          "rendered_utf8_bytes": 185,
+          "source_utf8_bytes": 32
+        },
+        {
+          "id": "live:search-callsite",
+          "rendered_characters": 504,
+          "rendered_lines": 16,
+          "rendered_utf8_bytes": 504,
+          "source_utf8_bytes": 207
+        }
+      ],
+      "rendered_utf8_bytes": 5383,
+      "source_utf8_bytes": 2445
+    },
+    {
+      "byte_ratio": 1.9378323108384459,
+      "candidate": "tagged-blocks-v1",
+      "cases": [
+        {
+          "id": "search-single-hit",
+          "rendered_characters": 413,
+          "rendered_lines": 27,
+          "rendered_utf8_bytes": 413,
+          "source_utf8_bytes": 207
+        },
+        {
+          "id": "search-empty",
+          "rendered_characters": 166,
+          "rendered_lines": 11,
+          "rendered_utf8_bytes": 166,
+          "source_utf8_bytes": 80
+        },
+        {
+          "id": "search-multiple-files-and-hits",
+          "rendered_characters": 856,
+          "rendered_lines": 54,
+          "rendered_utf8_bytes": 856,
+          "source_utf8_bytes": 449
+        },
+        {
+          "id": "structured-error",
+          "rendered_characters": 331,
+          "rendered_lines": 21,
+          "rendered_utf8_bytes": 331,
+          "source_utf8_bytes": 173
+        },
+        {
+          "id": "multi-mixed-results",
+          "rendered_characters": 611,
+          "rendered_lines": 42,
+          "rendered_utf8_bytes": 611,
+          "source_utf8_bytes": 297
+        },
+        {
+          "id": "root-null",
+          "rendered_characters": 25,
+          "rendered_lines": 3,
+          "rendered_utf8_bytes": 25,
+          "source_utf8_bytes": 4
+        },
+        {
+          "id": "root-false",
+          "rendered_characters": 27,
+          "rendered_lines": 3,
+          "rendered_utf8_bytes": 27,
+          "source_utf8_bytes": 5
+        },
+        {
+          "id": "root-zero",
+          "rendered_characters": 31,
+          "rendered_lines": 3,
+          "rendered_utf8_bytes": 31,
+          "source_utf8_bytes": 1
+        },
+        {
+          "id": "root-negative-fraction",
+          "rendered_characters": 35,
+          "rendered_lines": 3,
+          "rendered_utf8_bytes": 35,
+          "source_utf8_bytes": 5
+        },
+        {
+          "id": "root-string",
+          "rendered_characters": 69,
+          "rendered_lines": 3,
+          "rendered_utf8_bytes": 69,
+          "source_utf8_bytes": 38
+        },
+        {
+          "id": "escaped-lone-surrogates",
+          "rendered_characters": 62,
+          "rendered_lines": 3,
+          "rendered_utf8_bytes": 62,
+          "source_utf8_bytes": 31
+        },
+        {
+          "id": "empty-containers",
+          "rendered_characters": 123,
+          "rendered_lines": 9,
+          "rendered_utf8_bytes": 123,
+          "source_utf8_bytes": 54
+        },
+        {
+          "id": "ambiguous-object-keys",
+          "rendered_characters": 345,
+          "rendered_lines": 21,
+          "rendered_utf8_bytes": 345,
+          "source_utf8_bytes": 175
+        },
+        {
+          "id": "escaping-and-delimiters",
+          "rendered_characters": 352,
+          "rendered_lines": 13,
+          "rendered_utf8_bytes": 352,
+          "source_utf8_bytes": 241
+        },
+        {
+          "id": "unicode-and-normalization",
+          "rendered_characters": 367,
+          "rendered_lines": 13,
+          "rendered_utf8_bytes": 367,
+          "source_utf8_bytes": 256
+        },
+        {
+          "id": "number-boundaries",
+          "rendered_characters": 246,
+          "rendered_lines": 13,
+          "rendered_utf8_bytes": 246,
+          "source_utf8_bytes": 137
+        },
+        {
+          "id": "heterogeneous-null-filled-array",
+          "rendered_characters": 138,
+          "rendered_lines": 16,
+          "rendered_utf8_bytes": 138,
+          "source_utf8_bytes": 53
+        },
+        {
+          "id": "deep-alternating-containers",
+          "rendered_characters": 128,
+          "rendered_lines": 14,
+          "rendered_utf8_bytes": 128,
+          "source_utf8_bytes": 32
+        },
+        {
+          "id": "live:search-callsite",
+          "rendered_characters": 413,
+          "rendered_lines": 27,
+          "rendered_utf8_bytes": 413,
+          "source_utf8_bytes": 207
+        }
+      ],
+      "rendered_utf8_bytes": 4738,
+      "source_utf8_bytes": 2445
+    }
+  ],
+  "schema": "lci.api-replay.candidate-comparison.v1"
+}

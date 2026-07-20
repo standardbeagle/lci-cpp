@@ -1,0 +1,28 @@
+{
+  "schema": "lci.api-replay.candidate-exploration.v1",
+  "status": "exploratory-no-provider-outcomes",
+  "decision": "Choose which fact-equivalent tool-result encodings, if any, merit a newly preregistered provider-request replay.",
+  "claim_boundary": "Mechanical conformance and size measurements can reject invalid or impractical codecs; they cannot establish that a model understands one encoding better.",
+  "experimental_unit": "One arbitrary JSON value encoded and decoded by one candidate codec.",
+  "candidates": [
+    "production canonical JSON",
+    "typed XML",
+    "framed path records",
+    "tagged semi-structured blocks"
+  ],
+  "hard_gates": [
+    "decoder(encoder(value)) equals the original JSON value under canonical JSON equality for every fixed adversarial value",
+    "encoder output is deterministic",
+    "candidate adds no semantic field or inferred fact",
+    "candidate can occupy the existing provider tool-message content string without changing any other request field",
+    "malformed candidate input fails closed"
+  ],
+  "diagnostics": [
+    "UTF-8 byte count",
+    "character count",
+    "line count"
+  ],
+  "selection_rule": "Reject any hard-gate failure. Retain production JSON as a candidate. Advance no more than three non-production codecs, selected by complementary structure and size behavior rather than by a favorable single fixture.",
+  "prohibited_inference": "Do not interpret byte or character savings, model interviews, or codec elegance as model-quality evidence.",
+  "provider_execution_gate": "No provider replay until candidate implementations, adversarial bank, selection, fixtures, metrics, stopping rule, and revised manifest are frozen in a prior commit."
+}
