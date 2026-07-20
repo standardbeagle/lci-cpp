@@ -124,6 +124,12 @@ class OpenCodeProvider:
             environment["XDG_STATE_HOME"]=str(workspace/".xdg-state")
             environment["XDG_DATA_HOME"]=str(workspace/".xdg-data")
             environment["XDG_CACHE_HOME"]=str(workspace/".xdg-cache")
+            shared_cache=Path(os.environ.get("XDG_CACHE_HOME",Path.home()/".cache"))/"opencode"/"models.json"
+            shared_auth=Path(os.environ.get("XDG_DATA_HOME",Path.home()/".local/share"))/"opencode"/"auth.json"
+            isolated_cache=workspace/".xdg-cache/opencode"; isolated_cache.mkdir(parents=True,exist_ok=True)
+            isolated_data=workspace/".xdg-data/opencode"; isolated_data.mkdir(parents=True,exist_ok=True)
+            if shared_cache.exists(): shutil.copy2(shared_cache,isolated_cache/"models.json")
+            if shared_auth.exists(): shutil.copy2(shared_auth,isolated_data/"auth.json")
             try:
                 proc=subprocess.run([self.executable,"run","--format","json","-m",model,prompt],cwd=workspace,
                     env=environment,text=True,capture_output=True,timeout=timeout)
