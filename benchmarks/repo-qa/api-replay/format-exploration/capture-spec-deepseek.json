@@ -1,0 +1,13 @@
+{
+  "provider_api": "openai-compatible-chat-completions",
+  "recorded_model": "opencode-go/deepseek-v4-flash",
+  "opencode_version": "1.4.3",
+  "corpus": "pocketbase",
+  "corpus_commit": "d438c6a96a0252ff9df62c1cfe193480ed9ff15d",
+  "tool": "search",
+  "task_id": "search-callsite-v2",
+  "question": "Where is PocketBase.Start called in non-test Go source?",
+  "expected_answers": ["examples/base/main.go:119"],
+  "null_control": false,
+  "renderer": "result-envelope-v1"
+}

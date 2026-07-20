@@ -1,0 +1,23 @@
+{
+  "schema": "lci.api-replay.format-schedule.v1",
+  "benchmark_id": "lci-live-search-format-exploration-v1",
+  "arm_order_rows": [
+    ["fmt_07", "fmt_19", "fmt_43", "fmt_31"],
+    ["fmt_19", "fmt_31", "fmt_07", "fmt_43"],
+    ["fmt_31", "fmt_43", "fmt_19", "fmt_07"],
+    ["fmt_43", "fmt_07", "fmt_31", "fmt_19"]
+  ],
+  "blocks": [
+    {"block": 1, "cycle": 1, "model_order": ["opencode-go/deepseek-v4-flash", "opencode-go/glm-5.2"], "arm_order_row": 1},
+    {"block": 2, "cycle": 1, "model_order": ["opencode-go/glm-5.2", "opencode-go/deepseek-v4-flash"], "arm_order_row": 2},
+    {"block": 3, "cycle": 1, "model_order": ["opencode-go/deepseek-v4-flash", "opencode-go/glm-5.2"], "arm_order_row": 3},
+    {"block": 4, "cycle": 1, "model_order": ["opencode-go/glm-5.2", "opencode-go/deepseek-v4-flash"], "arm_order_row": 4},
+    {"block": 5, "cycle": 2, "model_order": ["opencode-go/glm-5.2", "opencode-go/deepseek-v4-flash"], "arm_order_row": 1},
+    {"block": 6, "cycle": 2, "model_order": ["opencode-go/deepseek-v4-flash", "opencode-go/glm-5.2"], "arm_order_row": 2},
+    {"block": 7, "cycle": 2, "model_order": ["opencode-go/glm-5.2", "opencode-go/deepseek-v4-flash"], "arm_order_row": 3},
+    {"block": 8, "cycle": 2, "model_order": ["opencode-go/deepseek-v4-flash", "opencode-go/glm-5.2"], "arm_order_row": 4}
+  ],
+  "logical_cell_key": "benchmark_id/model_id/block/arm_id",
+  "total_cells": 64,
+  "note": "Rows are a balanced Latin square: every arm occurs twice in each ordinal position across eight blocks, and every directed adjacent arm pair occurs equally often within each four-block cycle."
+}

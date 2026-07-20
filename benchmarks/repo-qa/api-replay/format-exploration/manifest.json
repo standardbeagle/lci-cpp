@@ -1,0 +1,111 @@
+{
+  "schema": "benchmark.preregistration.v1",
+  "benchmark_id": "lci-live-search-format-exploration-v1",
+  "study_status": "exploratory-preregistered-no-provider-outcomes",
+  "decision": "Decide which, if any, mechanically invertible representation of the recorded LCI search result merits testing on additional tools and tasks.",
+  "claim_boundary": "This study can establish only whether answer quality differs among four fact-equivalent tool-result encodings for one genuine OpenCode search-callsite continuation and either frozen model. It cannot establish a general LCI format benefit, production effectiveness, or effects on other tools, tasks, prompts, providers, or models.",
+  "experimental_unit": "One stateless direct-provider continuation of the frozen request for one model, opaque arm, schedule block, and repetition.",
+  "population": "Two provider-native sanitized OpenCode 1.4.3 requests for the same search-callsite task and identical LCI result on the frozen PocketBase corpus: one captured from opencode-go/deepseek-v4-flash and one from opencode-go/glm-5.2.",
+  "models": [
+    {"id": "opencode-go/deepseek-v4-flash", "tier": "weak"},
+    {"id": "opencode-go/glm-5.2", "tier": "strong"}
+  ],
+  "arms": [
+    {"id": "fmt_07", "treatment": "Recorded production canonical JSON content", "renderer": "identity-v1", "production_faithful": true},
+    {"id": "fmt_19", "treatment": "Readable typed XML encoding of the same parsed JSON value", "renderer": "readable-xml-v1", "production_faithful": false},
+    {"id": "fmt_31", "treatment": "Typed framed path-record encoding of the same parsed JSON value", "renderer": "path-records-v1", "production_faithful": false},
+    {"id": "fmt_43", "treatment": "Recursive tagged-block encoding of the same parsed JSON value", "renderer": "tagged-blocks-v1", "production_faithful": false}
+  ],
+  "equivalence": {
+    "invariants": [
+      "same provider endpoint and resolved model version within each model stratum",
+      "same request parameters, system message, user message, assistant tool call, tool_call_id, and message order",
+      "same parsed JSON value and therefore the same available answer facts",
+      "same timeout, retry policy, answer extractor, and oracle",
+      "fresh stateless provider request for every cell"
+    ],
+    "known_differences": [
+      "Only /messages/3/content changes between arms",
+      "Serialization syntax, length, line count, and provider-token count necessarily differ by treatment"
+    ],
+    "verification": "Before execution, deep structural diff of every candidate request against fmt_07 must equal [/messages/3/content]; each candidate decoder must recover a value canonically equal to JSON.parse(fmt_07 content); renderer source and request digests must match this manifest. A failed check blocks the affected arm before any provider call."
+  },
+  "hypotheses": [
+    {"id": "h1", "prediction": "At least one non-production encoding has a nonzero paired exact-answer-rate difference from fmt_07 on at least one model; no direction or winning encoding is predicted.", "metric": "exact_rate"},
+    {"id": "h2", "prediction": "Byte-identical fmt_07 repetitions show no exact-rate difference attributable to their first-versus-second Latin-square cycle.", "metric": "exact_rate"}
+  ],
+  "metrics": [
+    {"id": "exact_rate", "primary": true, "direction": "higher", "definition": "Fraction of usable responses containing the complete frozen answer set and no false-positive location"},
+    {"id": "answer_precision", "primary": false, "direction": "higher"},
+    {"id": "answer_recall", "primary": false, "direction": "higher"},
+    {"id": "completion_rate", "primary": false, "direction": "higher"},
+    {"id": "latency_seconds", "primary": false, "direction": "diagnostic"},
+    {"id": "input_bytes", "primary": false, "direction": "diagnostic"},
+    {"id": "provider_input_tokens", "primary": false, "direction": "diagnostic"},
+    {"id": "provider_output_tokens", "primary": false, "direction": "diagnostic"}
+  ],
+  "strata": ["model id"],
+  "controls": [
+    {"id": "cycle-null", "kind": "null", "expected": "For each model, the four byte-identical fmt_07 requests in schedule cycle one and the four in cycle two differ only by run time and have exact-rate parity within the declared noise threshold."},
+    {"id": "roundtrip-manipulation-check", "kind": "manipulation", "expected": "All four arm contents decode to the identical canonical JSON value and all request pairs differ at exactly one JSON pointer."}
+  ],
+  "repetitions": 8,
+  "schedule": {
+    "file": "schedule.json",
+    "blocks_per_model": 8,
+    "cells_per_block": 4,
+    "total_planned_cells": 64,
+    "rule": "Use the frozen balanced Latin-square rows in order for blocks 1-4 and repeat them for blocks 5-8. Alternate model-first execution by block as recorded in schedule.json. Do not reorder based on observed outputs."
+  },
+  "stopping_rule": "Run all 64 planned logical cells after all preflight gates pass. Do not stop for significance, apparent parity, a preferred result, cost, or latency. A provider-wide outage may pause execution but does not reduce the grid; unresolved cells remain missing and the study is incomplete.",
+  "noise_rule": "For each model and arm, report the exact binomial 95% confidence interval. For paired arm contrasts, report paired delta and an exact two-sided McNemar test. The practical-parity band is an absolute exact-rate delta below 0.25; this threshold is fixed by the 1/8 repetition resolution and is not a significance substitute.",
+  "practical_effect_threshold": 0.25,
+  "multiplicity": {
+    "family": "Six primary comparisons: each of fmt_19, fmt_31, and fmt_43 versus fmt_07, separately for each of two models",
+    "procedure": "Holm step-down adjustment of exact two-sided McNemar p-values",
+    "familywise_alpha": 0.05,
+    "other_comparisons": "Candidate-versus-candidate, pooled-model, latency, token, precision, recall, completion, order, and subgroup analyses are descriptive exploratory analyses and cannot select an arm."
+  },
+  "selection_rule": "Advance a non-production encoding to a broader preregistered benchmark only if at least one model comparison versus fmt_07 has Holm-adjusted p < 0.05 and paired exact-rate delta >= 0.25, neither model has paired exact-rate delta <= -0.25, completion-rate delta is not below -0.125 on either model, both null and manipulation controls behave as expected, and all eight planned cells per arm/model are usable. If multiple encodings qualify, advance all qualifiers; token or byte cost may order but not exclude them. Otherwise retain production JSON and report that no candidate advanced. Advancing is not a production recommendation.",
+  "exclusions": [
+    "Provider timeout, quota/rate-limit response, transport failure, malformed provider stream, empty completion, invalid response schema, stale or duplicate logical cell, request digest mismatch, renderer digest mismatch, non-invertible content, or undeclared request difference remains unscored",
+    "A semantically wrong but well-formed model answer is scored, not excluded",
+    "No outcome-based, latency-based, or arm-specific post-hoc exclusion is allowed"
+  ],
+  "failure_policy": "Persist every attempt and reason code. Retry only timeout, quota/rate-limit, transport, or provider 5xx failures, at most two replacement attempts after the original and only after all other scheduled cells; preserve all attempts and bind the first successful replacement to the original logical cell. Never retry or replace an answered cell, never score infrastructure failure as an incorrect answer, and never silently shrink denominators.",
+  "oracle": {
+    "source": "The frozen PocketBase source at corpus commit d438c6a and the literal callsite location established independently of candidate renderers: examples/base/main.go:119.",
+    "independence_argument": "The oracle checks the final answer against a corpus-derived file-and-line atom and does not use any candidate decoder, LCI response parser, model judgment, or provider output to establish truth.",
+    "good_case": "A response identifying examples/base/main.go:119 as the non-test app.Start() call and adding no other callsite is exact with precision and recall 1.",
+    "bad_case": "A response naming pocketbase.go:166, omitting line 119, or adding a second unsupported callsite fails exact scoring; the first two cases respectively exercise plausible definition/callsite confusion and omission.",
+    "discrimination_gate": "Frozen oracle tests must accept the good case and reject each bad case before execution."
+  },
+  "prompt_neutrality": "Send the frozen provider request verbatim except for the declared tool-content pointer. Arm IDs, renderer names, benchmark purpose, expected answer, oracle, prior benchmark outcomes, model interviews, and selection rule remain outside model-visible content.",
+  "leakage_controls": [
+    "No repository, shell, network, MCP, or other tool is exposed during direct continuation replay",
+    "The expected answer and grading implementation are absent from provider messages",
+    "Each cell is stateless and receives no response from another arm or repetition",
+    "Sanitized artifacts contain no authorization headers, cookies, or provider credentials"
+  ],
+  "analysis_plan": "Validate completeness and unique logical-cell keys first. Within each model, pair repetitions by schedule block and compare each candidate with fmt_07. Compute exact rate, precision, recall, completion, unusable counts, paired deltas, exact two-sided McNemar p-values, Holm adjustments across the six-test family, exact binomial intervals, and cycle-null behavior. Do not pool models for inference or impute failures. Apply the frozen selection rule mechanically; label every additional analysis post-hoc exploratory.",
+  "reporting_plan": "Publish the manifest and schedule revision, sanitized request and renderer digests, every raw attempt with provenance and status, machine-readable scoring and analysis, a concise human report, missing/unusable cells, retries, null-control behavior, multiplicity-adjusted and raw results, prediction misses, format costs, production-faithfulness limits, and an explicit statement that this single-task study cannot support production rollout.",
+  "fixture_digests": {
+    "fixture-deepseek-search.json": "sha256:41c125058162af8cd2b2d7fec3d34b40b7eaecc61281ea0118b3cb4e163db2c1",
+    "fixture-glm-search.json": "sha256:0aaf844c81ebe1d6150f54d07a31174b86bb368074c9711e5eb74e8b76a92897",
+    "../candidates/readable_xml_v1.py": "sha256:87f546dd6d06a4bea5ed2d778a3b0015038a0e677c826d509a9b110c7fe9bc07",
+    "../candidates/path_records_v1.py": "sha256:daa4a1690f161b776824e5422400184c1d5de34541dc25174bb57cb6f78a7516",
+    "../candidates/tagged_blocks_v1.py": "sha256:c0d86983d5062f612629cbd02a7f38591a881f4e2e52785f9ba00450ff86c00e",
+    "../candidates/value-bank.json": "sha256:f56258a17702fc3d10b38be6224f2f2c81e2c0d75f88098a37da9a8aab2580a1"
+  },
+  "execution_gates": [
+    "Manifest and schedule validate and are committed before the first provider replay",
+    "analysis_revision is replaced with the immutable commit containing the frozen harness, oracle tests, manifest, schedule, and renderer sources",
+    "All fixture and renderer digests match",
+    "All four formats pass the fixed adversarial round-trip bank and malformed-input tests",
+    "All candidate requests pass exact one-pointer structural-diff checks",
+    "Oracle discrimination tests pass",
+    "No provider outcome for this study has been observed before all gates are frozen"
+  ],
+  "analysis_revision": "UNFROZEN-provider-execution-prohibited",
+  "registered_at": "2026-07-20T12:49:00-05:00"
+}

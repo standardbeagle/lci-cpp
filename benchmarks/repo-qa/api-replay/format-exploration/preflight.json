@@ -1,0 +1,73 @@
+{
+  "cells": 64,
+  "fixtures": [
+    {
+      "arms": {
+        "fmt_07": {
+          "content_digest": "sha256:c886d6a4a5b4a9f1dc67483f636f3286250222567a03a098509fc88386084d5a",
+          "diff_pointers": [],
+          "request_digest": "sha256:dd2ef37cbb504971bc168afce78737b653b42c68bc69e1f8d5988644642516c0"
+        },
+        "fmt_19": {
+          "content_digest": "sha256:eb559dfa2a42c5efdcba5d848d6224826fd49b6c2b9c2eabd91e086c865b4c75",
+          "diff_pointers": [
+            "/messages/3/content"
+          ],
+          "request_digest": "sha256:4a8ed44d6c7b88d1940fab9df8ebde96cc27a15f4f8db0fb0d4779a43aa7c765"
+        },
+        "fmt_31": {
+          "content_digest": "sha256:5a04d26d2c82239b9355ebefd8a9e03f7bf6f0ec6ecc765e3480563acee5fbdb",
+          "diff_pointers": [
+            "/messages/3/content"
+          ],
+          "request_digest": "sha256:7bf362c091d9d0656e3b817be15f9367dd63e63aca72fd687aadc14838ff35f2"
+        },
+        "fmt_43": {
+          "content_digest": "sha256:51773ed7df8a7cc57a6751f59671dff8c11b2fb5daa097d26f78daa08c4113af",
+          "diff_pointers": [
+            "/messages/3/content"
+          ],
+          "request_digest": "sha256:d4adbf1d6909689227e74dac3f153bd9e9d0ac3b774f992ce489b66244f9ea22"
+        }
+      },
+      "fixture_digest": "sha256:056e5969cee3e1d6d43eed9ff73b93e5b3c8e82a5a688549f46dd19408853314",
+      "recorded_model": "opencode-go/deepseek-v4-flash",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arms": {
+        "fmt_07": {
+          "content_digest": "sha256:c886d6a4a5b4a9f1dc67483f636f3286250222567a03a098509fc88386084d5a",
+          "diff_pointers": [],
+          "request_digest": "sha256:7414abced2f6e40c5c7c1e543049b2adeb97bc437541c4bde173df3202043d99"
+        },
+        "fmt_19": {
+          "content_digest": "sha256:eb559dfa2a42c5efdcba5d848d6224826fd49b6c2b9c2eabd91e086c865b4c75",
+          "diff_pointers": [
+            "/messages/3/content"
+          ],
+          "request_digest": "sha256:c171f3ec7a334604ba3cf290dd3acc178a3cccc23ebea0064498361330cd28e4"
+        },
+        "fmt_31": {
+          "content_digest": "sha256:5a04d26d2c82239b9355ebefd8a9e03f7bf6f0ec6ecc765e3480563acee5fbdb",
+          "diff_pointers": [
+            "/messages/3/content"
+          ],
+          "request_digest": "sha256:965cf5e06bc1073335f424528cdd65d271fa249034ab382a62e7ce424d1091e7"
+        },
+        "fmt_43": {
+          "content_digest": "sha256:51773ed7df8a7cc57a6751f59671dff8c11b2fb5daa097d26f78daa08c4113af",
+          "diff_pointers": [
+            "/messages/3/content"
+          ],
+          "request_digest": "sha256:1d7934b320697ac9b8812e5dfb620551adbeb85783c504ab3505cc84a45fe973"
+        }
+      },
+      "fixture_digest": "sha256:7e8acfa5aa2602c628b3d89413eaac8ff935bf99bdb0d0301cf26e620e21e971",
+      "recorded_model": "opencode-go/glm-5.2",
+      "task_id": "search-callsite-v2"
+    }
+  ],
+  "provider_executed": false,
+  "schema": "lci.api-replay.format-plan.v1"
+}
