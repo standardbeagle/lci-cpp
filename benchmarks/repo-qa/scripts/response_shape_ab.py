@@ -121,6 +121,9 @@ class OpenCodeProvider:
             environment=os.environ.copy()
             environment["OPENCODE_CONFIG"]=str(workspace/"opencode.json")
             environment["XDG_CONFIG_HOME"]=str(workspace/".xdg-config")
+            environment["XDG_STATE_HOME"]=str(workspace/".xdg-state")
+            environment["XDG_DATA_HOME"]=str(workspace/".xdg-data")
+            environment["XDG_CACHE_HOME"]=str(workspace/".xdg-cache")
             try:
                 proc=subprocess.run([self.executable,"run","--format","json","-m",model,prompt],cwd=workspace,
                     env=environment,text=True,capture_output=True,timeout=timeout)
@@ -171,6 +174,11 @@ def reusable(path, identity):
 def execute(provider, manifest, task, arm, model, repetition, out):
     identity,prompt=cell_identity(manifest,task,arm,model,repetition); path=Path(out)/(identity["cell_key"]+".json")
     if reusable(path,identity): return json.loads(path.read_text())
+    if path.exists():
+        attempts=Path(out)/"attempts"; attempts.mkdir(parents=True,exist_ok=True)
+        number=1
+        while (attempts/f"{identity['cell_key']}.attempt-{number}.json").exists(): number+=1
+        os.replace(path,attempts/f"{identity['cell_key']}.attempt-{number}.json")
     run=provider.run(prompt=prompt,task=task,arm=arm,model=model,timeout=manifest["timeout_seconds"])
     status=run.get("status","harness_error"); rec={**identity,**run,"score":None,"failure_reason":run.get("failure_reason")}
     if status=="answered":

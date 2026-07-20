@@ -60,6 +60,19 @@ class ResponseShapeABTest(unittest.TestCase):
             path.write_text(json.dumps({**one,"status":"provider_timeout","answer":"","score":None})); self.assertFalse(ab.reusable(path,one))
             stale={**one,"fixture_digest":"sha256:stale"}; path.write_text(json.dumps({**stale,"status":"answered","answer":"{}","score":{}})); self.assertFalse(ab.reusable(path,one))
 
+    def test_retry_preserves_failed_attempt(self):
+        task=self.tasks[0]; model=self.manifest["models"][0]["id"]
+        failure={"status":"provider_error","answer":"","failure_reason":"startup"}
+        good=json.dumps({"answers":["src/widget.cc:18"],"evidence":["src/widget.cc:18"],"claims":["src/widget.cc:18"]})
+        with tempfile.TemporaryDirectory() as d:
+            out=Path(d)
+            ab.execute(ab.FakeProvider({(task["id"],"shape_17",model):failure}),self.manifest,task,"shape_17",model,1,out)
+            rec=ab.execute(ab.FakeProvider({(task["id"],"shape_17",model):good}),self.manifest,task,"shape_17",model,1,out)
+            archived=list((out/"attempts").glob("*.json"))
+            self.assertEqual(len(archived),1)
+            self.assertEqual(json.loads(archived[0].read_text())["status"],"provider_error")
+            self.assertEqual(rec["status"],"answered")
+
     def test_order_is_deterministic_counterbalanced_and_grid_is_exact(self):
         jobs=ab.planned_grid(self.manifest,self.tasks); self.assertEqual(len(jobs),48)
         self.assertEqual(jobs,ab.planned_grid(self.manifest,self.tasks))
