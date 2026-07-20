@@ -102,10 +102,15 @@ def diff_pointers(left: object, right: object, path: str = "") -> list[str]:
     return [] if left == right else [path or "/"]
 
 
-def transform(source: str, arm: str) -> tuple[str, object]:
+def transform(source: str, arm: str, *, allow_text: bool = False) -> tuple[str, object]:
     if arm not in ARM_CODECS:
         raise ValueError(f"unknown arm: {arm}")
-    value = json.loads(source)
+    try:
+        value = json.loads(source)
+    except json.JSONDecodeError:
+        if not allow_text:
+            raise
+        value = source  # Explicitly declared compact textual protocol (for example LCF).
     filename = ARM_CODECS[arm]
     if filename is None:
         return source, value
@@ -122,7 +127,8 @@ def transform(source: str, arm: str) -> tuple[str, object]:
 def build_request(fixture: dict, arm: str) -> dict:
     request = copy.deepcopy(fixture["request"])
     index, source = tool_content_pointer(request, fixture["tool_call_id"])
-    request["messages"][index]["content"] = transform(source, arm)[0]
+    request["messages"][index]["content"] = transform(
+        source, arm, allow_text=fixture.get("tool_content_kind") == "text_protocol")[0]
     return request
 
 
@@ -144,7 +150,8 @@ def validate_fixture(fixture: dict) -> dict:
     for arm in ARMS:
         request = build_request(fixture, arm)
         _, rendered = tool_content_pointer(request, fixture["tool_call_id"])
-        _, recovered = transform(source, arm)
+        _, recovered = transform(source, arm,
+                                 allow_text=fixture.get("tool_content_kind") == "text_protocol")
         if canonical(recovered) != canonical(source_value):
             raise ValueError(f"canonical inverse mismatch for {arm}")
         differences = diff_pointers(identity, request)

@@ -1,0 +1,2137 @@
+{
+  "all_equivalent": true,
+  "checks": [
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:d894fb903dcb3e05a5a7e2602652be84df30d04ac8429595395453f3d5863e56",
+      "content_digest": "sha256:d894fb903dcb3e05a5a7e2602652be84df30d04ac8429595395453f3d5863e56",
+      "diff_pointers": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "browse_file--success"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:d894fb903dcb3e05a5a7e2602652be84df30d04ac8429595395453f3d5863e56",
+      "content_digest": "sha256:569ad3a14b6dad1fc556165187473f0dfabff827ee8e84a641462b7a6ca9c206",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "browse_file--success"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:d894fb903dcb3e05a5a7e2602652be84df30d04ac8429595395453f3d5863e56",
+      "content_digest": "sha256:5df572c862b1121a57dc48c974ba713294dada98ecb94e76a0ddd0729575bd9a",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "browse_file--success"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:d894fb903dcb3e05a5a7e2602652be84df30d04ac8429595395453f3d5863e56",
+      "content_digest": "sha256:99259835bb59595107abb43100fad6a88e0e8b26fe475f0650885240e9fac4e6",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "browse_file--success"
+    },
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:d894fb903dcb3e05a5a7e2602652be84df30d04ac8429595395453f3d5863e56",
+      "content_digest": "sha256:d894fb903dcb3e05a5a7e2602652be84df30d04ac8429595395453f3d5863e56",
+      "diff_pointers": [],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "browse_file--success"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:d894fb903dcb3e05a5a7e2602652be84df30d04ac8429595395453f3d5863e56",
+      "content_digest": "sha256:569ad3a14b6dad1fc556165187473f0dfabff827ee8e84a641462b7a6ca9c206",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "browse_file--success"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:d894fb903dcb3e05a5a7e2602652be84df30d04ac8429595395453f3d5863e56",
+      "content_digest": "sha256:5df572c862b1121a57dc48c974ba713294dada98ecb94e76a0ddd0729575bd9a",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "browse_file--success"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:d894fb903dcb3e05a5a7e2602652be84df30d04ac8429595395453f3d5863e56",
+      "content_digest": "sha256:99259835bb59595107abb43100fad6a88e0e8b26fe475f0650885240e9fac4e6",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "browse_file--success"
+    },
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:468647b776f033816dea057454d34e394e3e1befe3b9177329023d660c3f37c1",
+      "content_digest": "sha256:468647b776f033816dea057454d34e394e3e1befe3b9177329023d660c3f37c1",
+      "diff_pointers": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "browse_file--negative"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:468647b776f033816dea057454d34e394e3e1befe3b9177329023d660c3f37c1",
+      "content_digest": "sha256:c49686470667fbc4b3df6a1bdab46bee9d1a104022450a63379ba748d6d4c03e",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "browse_file--negative"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:468647b776f033816dea057454d34e394e3e1befe3b9177329023d660c3f37c1",
+      "content_digest": "sha256:ea6c5e39b864f4da06a9534948e891d50dc3115a31e7bceaec93b60a8cbcd2e5",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "browse_file--negative"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:468647b776f033816dea057454d34e394e3e1befe3b9177329023d660c3f37c1",
+      "content_digest": "sha256:e7a6c9be17fe4016cc14e6592a3aa0cfd6a1833c495df535aa4b9d6f534cced7",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "browse_file--negative"
+    },
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:468647b776f033816dea057454d34e394e3e1befe3b9177329023d660c3f37c1",
+      "content_digest": "sha256:468647b776f033816dea057454d34e394e3e1befe3b9177329023d660c3f37c1",
+      "diff_pointers": [],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "browse_file--negative"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:468647b776f033816dea057454d34e394e3e1befe3b9177329023d660c3f37c1",
+      "content_digest": "sha256:c49686470667fbc4b3df6a1bdab46bee9d1a104022450a63379ba748d6d4c03e",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "browse_file--negative"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:468647b776f033816dea057454d34e394e3e1befe3b9177329023d660c3f37c1",
+      "content_digest": "sha256:ea6c5e39b864f4da06a9534948e891d50dc3115a31e7bceaec93b60a8cbcd2e5",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "browse_file--negative"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:468647b776f033816dea057454d34e394e3e1befe3b9177329023d660c3f37c1",
+      "content_digest": "sha256:e7a6c9be17fe4016cc14e6592a3aa0cfd6a1833c495df535aa4b9d6f534cced7",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "browse_file--negative"
+    },
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:f1845a002b962b7c882ca320feab450b4b58bf76c3828809ec554801db9faf20",
+      "content_digest": "sha256:f1845a002b962b7c882ca320feab450b4b58bf76c3828809ec554801db9faf20",
+      "diff_pointers": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "code_insight--success"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:f1845a002b962b7c882ca320feab450b4b58bf76c3828809ec554801db9faf20",
+      "content_digest": "sha256:07c0ead4da39b815f36ce476eb16fed215872ad9d62025000d1afc3393dbb625",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "code_insight--success"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:f1845a002b962b7c882ca320feab450b4b58bf76c3828809ec554801db9faf20",
+      "content_digest": "sha256:6e1d11d8d0f6be465bb6a15894826d5f65b5c46226746eed719046b2283ce584",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "code_insight--success"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:f1845a002b962b7c882ca320feab450b4b58bf76c3828809ec554801db9faf20",
+      "content_digest": "sha256:137e03a5afbbbff7d0cf0e2f1434dfc04b3eb17b4b5c956e1d0a10819f4a7c05",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "code_insight--success"
+    },
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:f1845a002b962b7c882ca320feab450b4b58bf76c3828809ec554801db9faf20",
+      "content_digest": "sha256:f1845a002b962b7c882ca320feab450b4b58bf76c3828809ec554801db9faf20",
+      "diff_pointers": [],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "code_insight--success"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:f1845a002b962b7c882ca320feab450b4b58bf76c3828809ec554801db9faf20",
+      "content_digest": "sha256:07c0ead4da39b815f36ce476eb16fed215872ad9d62025000d1afc3393dbb625",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "code_insight--success"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:f1845a002b962b7c882ca320feab450b4b58bf76c3828809ec554801db9faf20",
+      "content_digest": "sha256:6e1d11d8d0f6be465bb6a15894826d5f65b5c46226746eed719046b2283ce584",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "code_insight--success"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:f1845a002b962b7c882ca320feab450b4b58bf76c3828809ec554801db9faf20",
+      "content_digest": "sha256:137e03a5afbbbff7d0cf0e2f1434dfc04b3eb17b4b5c956e1d0a10819f4a7c05",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "code_insight--success"
+    },
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:a63b89c05671f197e8ee078a55d91fd53b57a12c0d8d07a86400694439abf764",
+      "content_digest": "sha256:a63b89c05671f197e8ee078a55d91fd53b57a12c0d8d07a86400694439abf764",
+      "diff_pointers": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "code_insight--negative"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:a63b89c05671f197e8ee078a55d91fd53b57a12c0d8d07a86400694439abf764",
+      "content_digest": "sha256:7c9223e62a35e1ca34e6f7ed996f75fc1ead5525b30dd2cf5af233084a7f8113",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "code_insight--negative"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:a63b89c05671f197e8ee078a55d91fd53b57a12c0d8d07a86400694439abf764",
+      "content_digest": "sha256:2ee74a09495b3dd9032246e18097a561e903c08a4cc7dcce0e4b3cf7f42da60a",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "code_insight--negative"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:a63b89c05671f197e8ee078a55d91fd53b57a12c0d8d07a86400694439abf764",
+      "content_digest": "sha256:8b694d40e631bab9307a2c34a41e73bf9dbcb2a1c680fc9065d2a44ce10d0bec",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "code_insight--negative"
+    },
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:a63b89c05671f197e8ee078a55d91fd53b57a12c0d8d07a86400694439abf764",
+      "content_digest": "sha256:a63b89c05671f197e8ee078a55d91fd53b57a12c0d8d07a86400694439abf764",
+      "diff_pointers": [],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "code_insight--negative"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:a63b89c05671f197e8ee078a55d91fd53b57a12c0d8d07a86400694439abf764",
+      "content_digest": "sha256:7c9223e62a35e1ca34e6f7ed996f75fc1ead5525b30dd2cf5af233084a7f8113",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "code_insight--negative"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:a63b89c05671f197e8ee078a55d91fd53b57a12c0d8d07a86400694439abf764",
+      "content_digest": "sha256:2ee74a09495b3dd9032246e18097a561e903c08a4cc7dcce0e4b3cf7f42da60a",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "code_insight--negative"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:a63b89c05671f197e8ee078a55d91fd53b57a12c0d8d07a86400694439abf764",
+      "content_digest": "sha256:8b694d40e631bab9307a2c34a41e73bf9dbcb2a1c680fc9065d2a44ce10d0bec",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "code_insight--negative"
+    },
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:bdca12eed4dc940e96313f63ff9d09af15ad745b29e34fc2c4fc30d9099f1ebf",
+      "content_digest": "sha256:bdca12eed4dc940e96313f63ff9d09af15ad745b29e34fc2c4fc30d9099f1ebf",
+      "diff_pointers": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "context--success"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:bdca12eed4dc940e96313f63ff9d09af15ad745b29e34fc2c4fc30d9099f1ebf",
+      "content_digest": "sha256:269fbe8febc08ca1aca14e2cf24fbafe503b7edb42725ad37e1a382f8020550c",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "context--success"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:bdca12eed4dc940e96313f63ff9d09af15ad745b29e34fc2c4fc30d9099f1ebf",
+      "content_digest": "sha256:6e7351ba7b04c697d9b14d2be3cd4aef0460b8993cbd0a19819d985c973543ff",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "context--success"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:bdca12eed4dc940e96313f63ff9d09af15ad745b29e34fc2c4fc30d9099f1ebf",
+      "content_digest": "sha256:e7642fc464f9d83d668d0f9af00ce4b317fb359a1d7a2ffe33843e095e1dcf70",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "context--success"
+    },
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:bdca12eed4dc940e96313f63ff9d09af15ad745b29e34fc2c4fc30d9099f1ebf",
+      "content_digest": "sha256:bdca12eed4dc940e96313f63ff9d09af15ad745b29e34fc2c4fc30d9099f1ebf",
+      "diff_pointers": [],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "context--success"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:bdca12eed4dc940e96313f63ff9d09af15ad745b29e34fc2c4fc30d9099f1ebf",
+      "content_digest": "sha256:269fbe8febc08ca1aca14e2cf24fbafe503b7edb42725ad37e1a382f8020550c",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "context--success"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:bdca12eed4dc940e96313f63ff9d09af15ad745b29e34fc2c4fc30d9099f1ebf",
+      "content_digest": "sha256:6e7351ba7b04c697d9b14d2be3cd4aef0460b8993cbd0a19819d985c973543ff",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "context--success"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:bdca12eed4dc940e96313f63ff9d09af15ad745b29e34fc2c4fc30d9099f1ebf",
+      "content_digest": "sha256:e7642fc464f9d83d668d0f9af00ce4b317fb359a1d7a2ffe33843e095e1dcf70",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "context--success"
+    },
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:4cb44b6a0b37aeaca1cd5befcc883d3519da09addcba34810813601a66f7b4c4",
+      "content_digest": "sha256:4cb44b6a0b37aeaca1cd5befcc883d3519da09addcba34810813601a66f7b4c4",
+      "diff_pointers": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "context--negative"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:4cb44b6a0b37aeaca1cd5befcc883d3519da09addcba34810813601a66f7b4c4",
+      "content_digest": "sha256:1d420ab5a2d2d5a8be867c784f4667aa9202ef5b41a34addb75d61cc7f251901",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "context--negative"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:4cb44b6a0b37aeaca1cd5befcc883d3519da09addcba34810813601a66f7b4c4",
+      "content_digest": "sha256:e871f380aa55a7bbf0afdac8d19f741e01166d662a27b617cba2b97d0cac2018",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "context--negative"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:4cb44b6a0b37aeaca1cd5befcc883d3519da09addcba34810813601a66f7b4c4",
+      "content_digest": "sha256:c3f1e729119fe35ebe3a3b227d2e934546fb9034c9b61d06c182d66b51ef8ecc",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "context--negative"
+    },
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:4cb44b6a0b37aeaca1cd5befcc883d3519da09addcba34810813601a66f7b4c4",
+      "content_digest": "sha256:4cb44b6a0b37aeaca1cd5befcc883d3519da09addcba34810813601a66f7b4c4",
+      "diff_pointers": [],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "context--negative"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:4cb44b6a0b37aeaca1cd5befcc883d3519da09addcba34810813601a66f7b4c4",
+      "content_digest": "sha256:1d420ab5a2d2d5a8be867c784f4667aa9202ef5b41a34addb75d61cc7f251901",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "context--negative"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:4cb44b6a0b37aeaca1cd5befcc883d3519da09addcba34810813601a66f7b4c4",
+      "content_digest": "sha256:e871f380aa55a7bbf0afdac8d19f741e01166d662a27b617cba2b97d0cac2018",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "context--negative"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:4cb44b6a0b37aeaca1cd5befcc883d3519da09addcba34810813601a66f7b4c4",
+      "content_digest": "sha256:c3f1e729119fe35ebe3a3b227d2e934546fb9034c9b61d06c182d66b51ef8ecc",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "context--negative"
+    },
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:c0b698f1edfde9bcbe8b980d866473f09934b009e753b27f4a9034111022a75c",
+      "content_digest": "sha256:c0b698f1edfde9bcbe8b980d866473f09934b009e753b27f4a9034111022a75c",
+      "diff_pointers": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "debug_info--success"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:c0b698f1edfde9bcbe8b980d866473f09934b009e753b27f4a9034111022a75c",
+      "content_digest": "sha256:68fd19d9bd217a89c2014ebcafc88520e2b1e5923876bd770eece23b5c683693",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "debug_info--success"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:c0b698f1edfde9bcbe8b980d866473f09934b009e753b27f4a9034111022a75c",
+      "content_digest": "sha256:60b8e796b6bf8ae8389f968ee705d1928180383f38cdca2a10bb138c93a0ef80",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "debug_info--success"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:c0b698f1edfde9bcbe8b980d866473f09934b009e753b27f4a9034111022a75c",
+      "content_digest": "sha256:3f66a73d4bb25bf522f6994581f49466a0cbedece5d9e63e6cd080a550b4ec82",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "debug_info--success"
+    },
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:c0b698f1edfde9bcbe8b980d866473f09934b009e753b27f4a9034111022a75c",
+      "content_digest": "sha256:c0b698f1edfde9bcbe8b980d866473f09934b009e753b27f4a9034111022a75c",
+      "diff_pointers": [],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "debug_info--success"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:c0b698f1edfde9bcbe8b980d866473f09934b009e753b27f4a9034111022a75c",
+      "content_digest": "sha256:68fd19d9bd217a89c2014ebcafc88520e2b1e5923876bd770eece23b5c683693",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "debug_info--success"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:c0b698f1edfde9bcbe8b980d866473f09934b009e753b27f4a9034111022a75c",
+      "content_digest": "sha256:60b8e796b6bf8ae8389f968ee705d1928180383f38cdca2a10bb138c93a0ef80",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "debug_info--success"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:c0b698f1edfde9bcbe8b980d866473f09934b009e753b27f4a9034111022a75c",
+      "content_digest": "sha256:3f66a73d4bb25bf522f6994581f49466a0cbedece5d9e63e6cd080a550b4ec82",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "debug_info--success"
+    },
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:cab55e4864e98c5e4b0edcf5e3f00df7be227cd99917b6245663be7e9ce42d97",
+      "content_digest": "sha256:cab55e4864e98c5e4b0edcf5e3f00df7be227cd99917b6245663be7e9ce42d97",
+      "diff_pointers": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "debug_info--negative"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:cab55e4864e98c5e4b0edcf5e3f00df7be227cd99917b6245663be7e9ce42d97",
+      "content_digest": "sha256:b77a7ec4957862fc9bcd96b8e6ff34a6db083bddfc23a4af5484de89fbad0d31",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "debug_info--negative"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:cab55e4864e98c5e4b0edcf5e3f00df7be227cd99917b6245663be7e9ce42d97",
+      "content_digest": "sha256:95c40d67eaaaafa4feefd2210ce6cfbcc9a32fcc2b4091cfc90ba8233643e9fd",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "debug_info--negative"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:cab55e4864e98c5e4b0edcf5e3f00df7be227cd99917b6245663be7e9ce42d97",
+      "content_digest": "sha256:b613bf5ef587cf0656c58ccf04c4ac4eb8019b6ad5e5763bfeb948ee7b0543cb",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "debug_info--negative"
+    },
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:cab55e4864e98c5e4b0edcf5e3f00df7be227cd99917b6245663be7e9ce42d97",
+      "content_digest": "sha256:cab55e4864e98c5e4b0edcf5e3f00df7be227cd99917b6245663be7e9ce42d97",
+      "diff_pointers": [],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "debug_info--negative"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:cab55e4864e98c5e4b0edcf5e3f00df7be227cd99917b6245663be7e9ce42d97",
+      "content_digest": "sha256:b77a7ec4957862fc9bcd96b8e6ff34a6db083bddfc23a4af5484de89fbad0d31",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "debug_info--negative"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:cab55e4864e98c5e4b0edcf5e3f00df7be227cd99917b6245663be7e9ce42d97",
+      "content_digest": "sha256:95c40d67eaaaafa4feefd2210ce6cfbcc9a32fcc2b4091cfc90ba8233643e9fd",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "debug_info--negative"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:cab55e4864e98c5e4b0edcf5e3f00df7be227cd99917b6245663be7e9ce42d97",
+      "content_digest": "sha256:b613bf5ef587cf0656c58ccf04c4ac4eb8019b6ad5e5763bfeb948ee7b0543cb",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "debug_info--negative"
+    },
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:51150e165d05e69fec2c98935530dea18b18d16ecb32706bfb0d8be584f8992c",
+      "content_digest": "sha256:51150e165d05e69fec2c98935530dea18b18d16ecb32706bfb0d8be584f8992c",
+      "diff_pointers": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "find_files--success"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:51150e165d05e69fec2c98935530dea18b18d16ecb32706bfb0d8be584f8992c",
+      "content_digest": "sha256:470be71c3c0305aff5b219cbd9c17d29fa603db30c40206359696b356c340a0b",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "find_files--success"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:51150e165d05e69fec2c98935530dea18b18d16ecb32706bfb0d8be584f8992c",
+      "content_digest": "sha256:bbe88f1a734719c3eb642324f7009200b174036c2d0d554cf1a306d5b6b92011",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "find_files--success"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:51150e165d05e69fec2c98935530dea18b18d16ecb32706bfb0d8be584f8992c",
+      "content_digest": "sha256:c8fcc1da35b089eb0d8465a1a03ef247bad0be29654abb44719928eb00b652c2",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "find_files--success"
+    },
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:51150e165d05e69fec2c98935530dea18b18d16ecb32706bfb0d8be584f8992c",
+      "content_digest": "sha256:51150e165d05e69fec2c98935530dea18b18d16ecb32706bfb0d8be584f8992c",
+      "diff_pointers": [],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "find_files--success"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:51150e165d05e69fec2c98935530dea18b18d16ecb32706bfb0d8be584f8992c",
+      "content_digest": "sha256:470be71c3c0305aff5b219cbd9c17d29fa603db30c40206359696b356c340a0b",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "find_files--success"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:51150e165d05e69fec2c98935530dea18b18d16ecb32706bfb0d8be584f8992c",
+      "content_digest": "sha256:bbe88f1a734719c3eb642324f7009200b174036c2d0d554cf1a306d5b6b92011",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "find_files--success"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:51150e165d05e69fec2c98935530dea18b18d16ecb32706bfb0d8be584f8992c",
+      "content_digest": "sha256:c8fcc1da35b089eb0d8465a1a03ef247bad0be29654abb44719928eb00b652c2",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "find_files--success"
+    },
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:aea3e432a7a2fc19a4f32ff5a35d2d9f6f95279d6c01535670a4c89c3a7d9ef8",
+      "content_digest": "sha256:aea3e432a7a2fc19a4f32ff5a35d2d9f6f95279d6c01535670a4c89c3a7d9ef8",
+      "diff_pointers": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "find_files--negative"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:aea3e432a7a2fc19a4f32ff5a35d2d9f6f95279d6c01535670a4c89c3a7d9ef8",
+      "content_digest": "sha256:80e2afc9ffab00be1f61903679f23b199ef9ac806b705eb83a90cb9e5a561fc8",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "find_files--negative"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:aea3e432a7a2fc19a4f32ff5a35d2d9f6f95279d6c01535670a4c89c3a7d9ef8",
+      "content_digest": "sha256:b9806c3f7cc0fa45e180ef88178d9d924e91bc14fd9991a1a90a7ca5399ca68e",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "find_files--negative"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:aea3e432a7a2fc19a4f32ff5a35d2d9f6f95279d6c01535670a4c89c3a7d9ef8",
+      "content_digest": "sha256:c051b64dbc3c017cbfb0bc0e504268327f7c66427a1b2cf370fa1fa9c55e1841",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "find_files--negative"
+    },
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:aea3e432a7a2fc19a4f32ff5a35d2d9f6f95279d6c01535670a4c89c3a7d9ef8",
+      "content_digest": "sha256:aea3e432a7a2fc19a4f32ff5a35d2d9f6f95279d6c01535670a4c89c3a7d9ef8",
+      "diff_pointers": [],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "find_files--negative"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:aea3e432a7a2fc19a4f32ff5a35d2d9f6f95279d6c01535670a4c89c3a7d9ef8",
+      "content_digest": "sha256:80e2afc9ffab00be1f61903679f23b199ef9ac806b705eb83a90cb9e5a561fc8",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "find_files--negative"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:aea3e432a7a2fc19a4f32ff5a35d2d9f6f95279d6c01535670a4c89c3a7d9ef8",
+      "content_digest": "sha256:b9806c3f7cc0fa45e180ef88178d9d924e91bc14fd9991a1a90a7ca5399ca68e",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "find_files--negative"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:aea3e432a7a2fc19a4f32ff5a35d2d9f6f95279d6c01535670a4c89c3a7d9ef8",
+      "content_digest": "sha256:c051b64dbc3c017cbfb0bc0e504268327f7c66427a1b2cf370fa1fa9c55e1841",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "find_files--negative"
+    },
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:24c3123276c56a7350c17ad0bb4e7d5f2a36a60c8426db3c3ac6dede092def54",
+      "content_digest": "sha256:24c3123276c56a7350c17ad0bb4e7d5f2a36a60c8426db3c3ac6dede092def54",
+      "diff_pointers": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "get_context--success"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:24c3123276c56a7350c17ad0bb4e7d5f2a36a60c8426db3c3ac6dede092def54",
+      "content_digest": "sha256:8dcfc316dd7d02741e5bbd21e515282e21d70c7b441593f9cddb8b7d9bcf9caf",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "get_context--success"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:24c3123276c56a7350c17ad0bb4e7d5f2a36a60c8426db3c3ac6dede092def54",
+      "content_digest": "sha256:b330ae515546239b7ec903df2b12084c4e61fa8297fd018601bc772b7806ae87",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "get_context--success"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:24c3123276c56a7350c17ad0bb4e7d5f2a36a60c8426db3c3ac6dede092def54",
+      "content_digest": "sha256:860d698b2ee36a6562f7fa55707399893193bdca67c7eef00d90d49412248836",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "get_context--success"
+    },
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:24c3123276c56a7350c17ad0bb4e7d5f2a36a60c8426db3c3ac6dede092def54",
+      "content_digest": "sha256:24c3123276c56a7350c17ad0bb4e7d5f2a36a60c8426db3c3ac6dede092def54",
+      "diff_pointers": [],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "get_context--success"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:24c3123276c56a7350c17ad0bb4e7d5f2a36a60c8426db3c3ac6dede092def54",
+      "content_digest": "sha256:8dcfc316dd7d02741e5bbd21e515282e21d70c7b441593f9cddb8b7d9bcf9caf",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "get_context--success"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:24c3123276c56a7350c17ad0bb4e7d5f2a36a60c8426db3c3ac6dede092def54",
+      "content_digest": "sha256:b330ae515546239b7ec903df2b12084c4e61fa8297fd018601bc772b7806ae87",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "get_context--success"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:24c3123276c56a7350c17ad0bb4e7d5f2a36a60c8426db3c3ac6dede092def54",
+      "content_digest": "sha256:860d698b2ee36a6562f7fa55707399893193bdca67c7eef00d90d49412248836",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "get_context--success"
+    },
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:1b106ea4f8bcb8f9353c5b67bd0d2f11d81356d06caba6874d9b4178e9570c20",
+      "content_digest": "sha256:1b106ea4f8bcb8f9353c5b67bd0d2f11d81356d06caba6874d9b4178e9570c20",
+      "diff_pointers": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "get_context--negative"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:1b106ea4f8bcb8f9353c5b67bd0d2f11d81356d06caba6874d9b4178e9570c20",
+      "content_digest": "sha256:6cbb97d65be934fa1f00d2d25faf101bb3c4741cb3b102da571023e8fad22260",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "get_context--negative"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:1b106ea4f8bcb8f9353c5b67bd0d2f11d81356d06caba6874d9b4178e9570c20",
+      "content_digest": "sha256:74f613e80c2d4a1448628ad3855f641c5608005f6419c703321fb46796340c3e",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "get_context--negative"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:1b106ea4f8bcb8f9353c5b67bd0d2f11d81356d06caba6874d9b4178e9570c20",
+      "content_digest": "sha256:74594d8590996607fe5798f11417f4aac5e60cdba7858e72b3661fc555649769",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "get_context--negative"
+    },
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:1b106ea4f8bcb8f9353c5b67bd0d2f11d81356d06caba6874d9b4178e9570c20",
+      "content_digest": "sha256:1b106ea4f8bcb8f9353c5b67bd0d2f11d81356d06caba6874d9b4178e9570c20",
+      "diff_pointers": [],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "get_context--negative"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:1b106ea4f8bcb8f9353c5b67bd0d2f11d81356d06caba6874d9b4178e9570c20",
+      "content_digest": "sha256:6cbb97d65be934fa1f00d2d25faf101bb3c4741cb3b102da571023e8fad22260",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "get_context--negative"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:1b106ea4f8bcb8f9353c5b67bd0d2f11d81356d06caba6874d9b4178e9570c20",
+      "content_digest": "sha256:74f613e80c2d4a1448628ad3855f641c5608005f6419c703321fb46796340c3e",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "get_context--negative"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:1b106ea4f8bcb8f9353c5b67bd0d2f11d81356d06caba6874d9b4178e9570c20",
+      "content_digest": "sha256:74594d8590996607fe5798f11417f4aac5e60cdba7858e72b3661fc555649769",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "get_context--negative"
+    },
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:ba671c846c27565cae6587027bb5f41402f0207dd068112bd02c726c434dfa75",
+      "content_digest": "sha256:ba671c846c27565cae6587027bb5f41402f0207dd068112bd02c726c434dfa75",
+      "diff_pointers": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "git_analysis--success"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:ba671c846c27565cae6587027bb5f41402f0207dd068112bd02c726c434dfa75",
+      "content_digest": "sha256:e3130e48d206113c3ca24e33fd49956acae790b12be1157f170a43b5d9883371",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "git_analysis--success"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:ba671c846c27565cae6587027bb5f41402f0207dd068112bd02c726c434dfa75",
+      "content_digest": "sha256:26fef0096f4683b6441f8d21cd6787688253048915dec4ef47a566f62255ef3f",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "git_analysis--success"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:ba671c846c27565cae6587027bb5f41402f0207dd068112bd02c726c434dfa75",
+      "content_digest": "sha256:c754def9354c8672aad52082899c9ba7a0bdd4b80302a3b6a4201baa3d37c6a6",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "git_analysis--success"
+    },
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:ba671c846c27565cae6587027bb5f41402f0207dd068112bd02c726c434dfa75",
+      "content_digest": "sha256:ba671c846c27565cae6587027bb5f41402f0207dd068112bd02c726c434dfa75",
+      "diff_pointers": [],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "git_analysis--success"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:ba671c846c27565cae6587027bb5f41402f0207dd068112bd02c726c434dfa75",
+      "content_digest": "sha256:e3130e48d206113c3ca24e33fd49956acae790b12be1157f170a43b5d9883371",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "git_analysis--success"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:ba671c846c27565cae6587027bb5f41402f0207dd068112bd02c726c434dfa75",
+      "content_digest": "sha256:26fef0096f4683b6441f8d21cd6787688253048915dec4ef47a566f62255ef3f",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "git_analysis--success"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:ba671c846c27565cae6587027bb5f41402f0207dd068112bd02c726c434dfa75",
+      "content_digest": "sha256:c754def9354c8672aad52082899c9ba7a0bdd4b80302a3b6a4201baa3d37c6a6",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "git_analysis--success"
+    },
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:0daddaec18d60ec48f06305d62b7f2fe850b53e26613b174a188701fc3f8be1b",
+      "content_digest": "sha256:0daddaec18d60ec48f06305d62b7f2fe850b53e26613b174a188701fc3f8be1b",
+      "diff_pointers": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "git_analysis--negative"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:0daddaec18d60ec48f06305d62b7f2fe850b53e26613b174a188701fc3f8be1b",
+      "content_digest": "sha256:e51cfb55d2106c47e1f851f7f86afc61ba5099fc98993f45517df447cd7fc5f4",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "git_analysis--negative"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:0daddaec18d60ec48f06305d62b7f2fe850b53e26613b174a188701fc3f8be1b",
+      "content_digest": "sha256:6e871afbf0d3d3c505549eeca540e79da47d2c8b87521f6ecd46e952fc145d36",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "git_analysis--negative"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:0daddaec18d60ec48f06305d62b7f2fe850b53e26613b174a188701fc3f8be1b",
+      "content_digest": "sha256:6141a85c60c50a69f0d4baf7f1d6872721e4ff72b01aaa6a05604015b7c94940",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "git_analysis--negative"
+    },
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:0daddaec18d60ec48f06305d62b7f2fe850b53e26613b174a188701fc3f8be1b",
+      "content_digest": "sha256:0daddaec18d60ec48f06305d62b7f2fe850b53e26613b174a188701fc3f8be1b",
+      "diff_pointers": [],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "git_analysis--negative"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:0daddaec18d60ec48f06305d62b7f2fe850b53e26613b174a188701fc3f8be1b",
+      "content_digest": "sha256:e51cfb55d2106c47e1f851f7f86afc61ba5099fc98993f45517df447cd7fc5f4",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "git_analysis--negative"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:0daddaec18d60ec48f06305d62b7f2fe850b53e26613b174a188701fc3f8be1b",
+      "content_digest": "sha256:6e871afbf0d3d3c505549eeca540e79da47d2c8b87521f6ecd46e952fc145d36",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "git_analysis--negative"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:0daddaec18d60ec48f06305d62b7f2fe850b53e26613b174a188701fc3f8be1b",
+      "content_digest": "sha256:6141a85c60c50a69f0d4baf7f1d6872721e4ff72b01aaa6a05604015b7c94940",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "git_analysis--negative"
+    },
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:7ecfc4b9b61bc2d298870d624ca4b52dcb3b95946b3f9cce194e9bba0227acfe",
+      "content_digest": "sha256:7ecfc4b9b61bc2d298870d624ca4b52dcb3b95946b3f9cce194e9bba0227acfe",
+      "diff_pointers": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "index_stats--success"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:7ecfc4b9b61bc2d298870d624ca4b52dcb3b95946b3f9cce194e9bba0227acfe",
+      "content_digest": "sha256:10ff683b72474c6b8d32c0680205d1d53c8652bf0ed9e90a554bb56d476211c1",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "index_stats--success"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:7ecfc4b9b61bc2d298870d624ca4b52dcb3b95946b3f9cce194e9bba0227acfe",
+      "content_digest": "sha256:80297ad04374c0253daefbc18d9c067e5756303e8dc373b0335b071f49997cf5",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "index_stats--success"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:7ecfc4b9b61bc2d298870d624ca4b52dcb3b95946b3f9cce194e9bba0227acfe",
+      "content_digest": "sha256:56709b8d745385e66a010a0323c50cdb92a51c6f41c7156303befd4c6902f180",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "index_stats--success"
+    },
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:7ecfc4b9b61bc2d298870d624ca4b52dcb3b95946b3f9cce194e9bba0227acfe",
+      "content_digest": "sha256:7ecfc4b9b61bc2d298870d624ca4b52dcb3b95946b3f9cce194e9bba0227acfe",
+      "diff_pointers": [],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "index_stats--success"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:7ecfc4b9b61bc2d298870d624ca4b52dcb3b95946b3f9cce194e9bba0227acfe",
+      "content_digest": "sha256:10ff683b72474c6b8d32c0680205d1d53c8652bf0ed9e90a554bb56d476211c1",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "index_stats--success"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:7ecfc4b9b61bc2d298870d624ca4b52dcb3b95946b3f9cce194e9bba0227acfe",
+      "content_digest": "sha256:80297ad04374c0253daefbc18d9c067e5756303e8dc373b0335b071f49997cf5",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "index_stats--success"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:7ecfc4b9b61bc2d298870d624ca4b52dcb3b95946b3f9cce194e9bba0227acfe",
+      "content_digest": "sha256:56709b8d745385e66a010a0323c50cdb92a51c6f41c7156303befd4c6902f180",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "index_stats--success"
+    },
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:b0c80e346365734198d3a3fd8031f4ac1246955b444c1806f60d6d399996564e",
+      "content_digest": "sha256:b0c80e346365734198d3a3fd8031f4ac1246955b444c1806f60d6d399996564e",
+      "diff_pointers": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "index_stats--negative"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:b0c80e346365734198d3a3fd8031f4ac1246955b444c1806f60d6d399996564e",
+      "content_digest": "sha256:45cf1fd2455731188868430c18bc3d1d9ce73cb1cf8763468e144f7109143d58",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "index_stats--negative"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:b0c80e346365734198d3a3fd8031f4ac1246955b444c1806f60d6d399996564e",
+      "content_digest": "sha256:0b28dca30e0c0c69f7bbdaab7831058d1b555e5924d3da74b4b8b8fb145f8922",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "index_stats--negative"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:b0c80e346365734198d3a3fd8031f4ac1246955b444c1806f60d6d399996564e",
+      "content_digest": "sha256:6d0cf9d3d8b53bebc398782c5167c4706f574ea196d14665ea625dbbdedec236",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "index_stats--negative"
+    },
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:b0c80e346365734198d3a3fd8031f4ac1246955b444c1806f60d6d399996564e",
+      "content_digest": "sha256:b0c80e346365734198d3a3fd8031f4ac1246955b444c1806f60d6d399996564e",
+      "diff_pointers": [],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "index_stats--negative"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:b0c80e346365734198d3a3fd8031f4ac1246955b444c1806f60d6d399996564e",
+      "content_digest": "sha256:45cf1fd2455731188868430c18bc3d1d9ce73cb1cf8763468e144f7109143d58",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "index_stats--negative"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:b0c80e346365734198d3a3fd8031f4ac1246955b444c1806f60d6d399996564e",
+      "content_digest": "sha256:0b28dca30e0c0c69f7bbdaab7831058d1b555e5924d3da74b4b8b8fb145f8922",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "index_stats--negative"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:b0c80e346365734198d3a3fd8031f4ac1246955b444c1806f60d6d399996564e",
+      "content_digest": "sha256:6d0cf9d3d8b53bebc398782c5167c4706f574ea196d14665ea625dbbdedec236",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "index_stats--negative"
+    },
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:ff0a55d76b28d879354d29b6c92171a008efd988fd3c0189f07ce94000c290d8",
+      "content_digest": "sha256:ff0a55d76b28d879354d29b6c92171a008efd988fd3c0189f07ce94000c290d8",
+      "diff_pointers": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "info--success"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:ff0a55d76b28d879354d29b6c92171a008efd988fd3c0189f07ce94000c290d8",
+      "content_digest": "sha256:d9fcd8f77df842afb8745093225260553a52662fa0803804c17345b669bd4f24",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "info--success"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:ff0a55d76b28d879354d29b6c92171a008efd988fd3c0189f07ce94000c290d8",
+      "content_digest": "sha256:e411dd9912d8ed772613897e8d41e934a328311569b355ec18d0f0dbca371e37",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "info--success"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:ff0a55d76b28d879354d29b6c92171a008efd988fd3c0189f07ce94000c290d8",
+      "content_digest": "sha256:9c566067bffc3a249cc588fd7a2cea4363c7adfe0e8882eb9b421842a60f1746",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "info--success"
+    },
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:ff0a55d76b28d879354d29b6c92171a008efd988fd3c0189f07ce94000c290d8",
+      "content_digest": "sha256:ff0a55d76b28d879354d29b6c92171a008efd988fd3c0189f07ce94000c290d8",
+      "diff_pointers": [],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "info--success"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:ff0a55d76b28d879354d29b6c92171a008efd988fd3c0189f07ce94000c290d8",
+      "content_digest": "sha256:d9fcd8f77df842afb8745093225260553a52662fa0803804c17345b669bd4f24",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "info--success"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:ff0a55d76b28d879354d29b6c92171a008efd988fd3c0189f07ce94000c290d8",
+      "content_digest": "sha256:e411dd9912d8ed772613897e8d41e934a328311569b355ec18d0f0dbca371e37",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "info--success"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:ff0a55d76b28d879354d29b6c92171a008efd988fd3c0189f07ce94000c290d8",
+      "content_digest": "sha256:9c566067bffc3a249cc588fd7a2cea4363c7adfe0e8882eb9b421842a60f1746",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "info--success"
+    },
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:847481fcfe48ff7f5b6d32bbee0dbb1ebafa80ee61bb5a3dd4b420a53dbc2726",
+      "content_digest": "sha256:847481fcfe48ff7f5b6d32bbee0dbb1ebafa80ee61bb5a3dd4b420a53dbc2726",
+      "diff_pointers": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "info--negative"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:847481fcfe48ff7f5b6d32bbee0dbb1ebafa80ee61bb5a3dd4b420a53dbc2726",
+      "content_digest": "sha256:7b8f9b73f05a45eb40b3451f96f57f12d916b20a491d0b26c41ba62748a10d80",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "info--negative"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:847481fcfe48ff7f5b6d32bbee0dbb1ebafa80ee61bb5a3dd4b420a53dbc2726",
+      "content_digest": "sha256:dac116068d2e567972eb9b1ec0a880f03ca21ac04117d8e8cae1f7ee31b14891",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "info--negative"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:847481fcfe48ff7f5b6d32bbee0dbb1ebafa80ee61bb5a3dd4b420a53dbc2726",
+      "content_digest": "sha256:9586053d72c3030283b1c04f2c847cab5307181eca88ea99e072a6f1709a1983",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "info--negative"
+    },
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:847481fcfe48ff7f5b6d32bbee0dbb1ebafa80ee61bb5a3dd4b420a53dbc2726",
+      "content_digest": "sha256:847481fcfe48ff7f5b6d32bbee0dbb1ebafa80ee61bb5a3dd4b420a53dbc2726",
+      "diff_pointers": [],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "info--negative"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:847481fcfe48ff7f5b6d32bbee0dbb1ebafa80ee61bb5a3dd4b420a53dbc2726",
+      "content_digest": "sha256:7b8f9b73f05a45eb40b3451f96f57f12d916b20a491d0b26c41ba62748a10d80",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "info--negative"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:847481fcfe48ff7f5b6d32bbee0dbb1ebafa80ee61bb5a3dd4b420a53dbc2726",
+      "content_digest": "sha256:dac116068d2e567972eb9b1ec0a880f03ca21ac04117d8e8cae1f7ee31b14891",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "info--negative"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:847481fcfe48ff7f5b6d32bbee0dbb1ebafa80ee61bb5a3dd4b420a53dbc2726",
+      "content_digest": "sha256:9586053d72c3030283b1c04f2c847cab5307181eca88ea99e072a6f1709a1983",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "info--negative"
+    },
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:dd51af079df02ff160cb293c47947cc592c01f4ea70d03f2c9bbfbf2e63c5444",
+      "content_digest": "sha256:dd51af079df02ff160cb293c47947cc592c01f4ea70d03f2c9bbfbf2e63c5444",
+      "diff_pointers": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "inspect_symbol--success"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:dd51af079df02ff160cb293c47947cc592c01f4ea70d03f2c9bbfbf2e63c5444",
+      "content_digest": "sha256:a963c3263be00c77cd1ca5127ed82598f862824e70d0f9354c580bfa8b3cfe30",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "inspect_symbol--success"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:dd51af079df02ff160cb293c47947cc592c01f4ea70d03f2c9bbfbf2e63c5444",
+      "content_digest": "sha256:82aa01513f9297375030230bf8243226db367e6d588e2f4ad2a02365dd707ef0",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "inspect_symbol--success"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:dd51af079df02ff160cb293c47947cc592c01f4ea70d03f2c9bbfbf2e63c5444",
+      "content_digest": "sha256:b2420b61999e725a645c42f94cb3ba94aec3907dbe381e9c36178d2cf3771cb0",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "inspect_symbol--success"
+    },
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:dd51af079df02ff160cb293c47947cc592c01f4ea70d03f2c9bbfbf2e63c5444",
+      "content_digest": "sha256:dd51af079df02ff160cb293c47947cc592c01f4ea70d03f2c9bbfbf2e63c5444",
+      "diff_pointers": [],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "inspect_symbol--success"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:dd51af079df02ff160cb293c47947cc592c01f4ea70d03f2c9bbfbf2e63c5444",
+      "content_digest": "sha256:a963c3263be00c77cd1ca5127ed82598f862824e70d0f9354c580bfa8b3cfe30",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "inspect_symbol--success"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:dd51af079df02ff160cb293c47947cc592c01f4ea70d03f2c9bbfbf2e63c5444",
+      "content_digest": "sha256:82aa01513f9297375030230bf8243226db367e6d588e2f4ad2a02365dd707ef0",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "inspect_symbol--success"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:dd51af079df02ff160cb293c47947cc592c01f4ea70d03f2c9bbfbf2e63c5444",
+      "content_digest": "sha256:b2420b61999e725a645c42f94cb3ba94aec3907dbe381e9c36178d2cf3771cb0",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "inspect_symbol--success"
+    },
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:0be17c1bd879e4c732932f7363fe9ffae840db7a972eb0908eed6a7f727ebec4",
+      "content_digest": "sha256:0be17c1bd879e4c732932f7363fe9ffae840db7a972eb0908eed6a7f727ebec4",
+      "diff_pointers": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "inspect_symbol--negative"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:0be17c1bd879e4c732932f7363fe9ffae840db7a972eb0908eed6a7f727ebec4",
+      "content_digest": "sha256:53939efc6e60b2324a37bac9acf4e5c30d73696aca90df8b25041adea8b29286",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "inspect_symbol--negative"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:0be17c1bd879e4c732932f7363fe9ffae840db7a972eb0908eed6a7f727ebec4",
+      "content_digest": "sha256:95fb47058a561bd95d4c1cf276da325542a9530090d6ae148c2b6dadba06572c",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "inspect_symbol--negative"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:0be17c1bd879e4c732932f7363fe9ffae840db7a972eb0908eed6a7f727ebec4",
+      "content_digest": "sha256:9479051a2fbfd69d29e6c8fa260a27422a4a81f712d6767403bc33ca36742b4b",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "inspect_symbol--negative"
+    },
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:0be17c1bd879e4c732932f7363fe9ffae840db7a972eb0908eed6a7f727ebec4",
+      "content_digest": "sha256:0be17c1bd879e4c732932f7363fe9ffae840db7a972eb0908eed6a7f727ebec4",
+      "diff_pointers": [],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "inspect_symbol--negative"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:0be17c1bd879e4c732932f7363fe9ffae840db7a972eb0908eed6a7f727ebec4",
+      "content_digest": "sha256:53939efc6e60b2324a37bac9acf4e5c30d73696aca90df8b25041adea8b29286",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "inspect_symbol--negative"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:0be17c1bd879e4c732932f7363fe9ffae840db7a972eb0908eed6a7f727ebec4",
+      "content_digest": "sha256:95fb47058a561bd95d4c1cf276da325542a9530090d6ae148c2b6dadba06572c",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "inspect_symbol--negative"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:0be17c1bd879e4c732932f7363fe9ffae840db7a972eb0908eed6a7f727ebec4",
+      "content_digest": "sha256:9479051a2fbfd69d29e6c8fa260a27422a4a81f712d6767403bc33ca36742b4b",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "inspect_symbol--negative"
+    },
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:e94e85f7d5a6bddea604cbe5cad8f0fd3556056a9272b80e4bca110cd04a401d",
+      "content_digest": "sha256:e94e85f7d5a6bddea604cbe5cad8f0fd3556056a9272b80e4bca110cd04a401d",
+      "diff_pointers": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "list_symbols--success"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:e94e85f7d5a6bddea604cbe5cad8f0fd3556056a9272b80e4bca110cd04a401d",
+      "content_digest": "sha256:96bbb12a2754d0b7ebfe4a413f9385cd81e8767dc61abe01949998f8ec529539",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "list_symbols--success"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:e94e85f7d5a6bddea604cbe5cad8f0fd3556056a9272b80e4bca110cd04a401d",
+      "content_digest": "sha256:f3f78a6c98835dfe45115a64b282c7597860a054ea3f35b7820cb9b8f25b0f95",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "list_symbols--success"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:e94e85f7d5a6bddea604cbe5cad8f0fd3556056a9272b80e4bca110cd04a401d",
+      "content_digest": "sha256:1c61bd0d04c81e99fdf093defb5c917dbf0edcf2e1742fa5006bd24a14b9b73c",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "list_symbols--success"
+    },
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:e94e85f7d5a6bddea604cbe5cad8f0fd3556056a9272b80e4bca110cd04a401d",
+      "content_digest": "sha256:e94e85f7d5a6bddea604cbe5cad8f0fd3556056a9272b80e4bca110cd04a401d",
+      "diff_pointers": [],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "list_symbols--success"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:e94e85f7d5a6bddea604cbe5cad8f0fd3556056a9272b80e4bca110cd04a401d",
+      "content_digest": "sha256:96bbb12a2754d0b7ebfe4a413f9385cd81e8767dc61abe01949998f8ec529539",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "list_symbols--success"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:e94e85f7d5a6bddea604cbe5cad8f0fd3556056a9272b80e4bca110cd04a401d",
+      "content_digest": "sha256:f3f78a6c98835dfe45115a64b282c7597860a054ea3f35b7820cb9b8f25b0f95",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "list_symbols--success"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:e94e85f7d5a6bddea604cbe5cad8f0fd3556056a9272b80e4bca110cd04a401d",
+      "content_digest": "sha256:1c61bd0d04c81e99fdf093defb5c917dbf0edcf2e1742fa5006bd24a14b9b73c",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "list_symbols--success"
+    },
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:ff534b7ba1a2d78eb4f9c7af9af511372c999e71a7558232d7b81e5153df71b7",
+      "content_digest": "sha256:ff534b7ba1a2d78eb4f9c7af9af511372c999e71a7558232d7b81e5153df71b7",
+      "diff_pointers": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "list_symbols--negative"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:ff534b7ba1a2d78eb4f9c7af9af511372c999e71a7558232d7b81e5153df71b7",
+      "content_digest": "sha256:d5cb69136f373ccb550fc24f8b9f0542ef034d5606e8e767d848b8ab26f002ca",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "list_symbols--negative"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:ff534b7ba1a2d78eb4f9c7af9af511372c999e71a7558232d7b81e5153df71b7",
+      "content_digest": "sha256:5b742a1e9b66420786c00c7de6ad4cbba89b1f1ab804b331c486669caab60a3e",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "list_symbols--negative"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:ff534b7ba1a2d78eb4f9c7af9af511372c999e71a7558232d7b81e5153df71b7",
+      "content_digest": "sha256:69847458ec22425d4306241a5cc45d1a71f163e7204debfb0819b39422c8b6fa",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "list_symbols--negative"
+    },
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:ff534b7ba1a2d78eb4f9c7af9af511372c999e71a7558232d7b81e5153df71b7",
+      "content_digest": "sha256:ff534b7ba1a2d78eb4f9c7af9af511372c999e71a7558232d7b81e5153df71b7",
+      "diff_pointers": [],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "list_symbols--negative"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:ff534b7ba1a2d78eb4f9c7af9af511372c999e71a7558232d7b81e5153df71b7",
+      "content_digest": "sha256:d5cb69136f373ccb550fc24f8b9f0542ef034d5606e8e767d848b8ab26f002ca",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "list_symbols--negative"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:ff534b7ba1a2d78eb4f9c7af9af511372c999e71a7558232d7b81e5153df71b7",
+      "content_digest": "sha256:5b742a1e9b66420786c00c7de6ad4cbba89b1f1ab804b331c486669caab60a3e",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "list_symbols--negative"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:ff534b7ba1a2d78eb4f9c7af9af511372c999e71a7558232d7b81e5153df71b7",
+      "content_digest": "sha256:69847458ec22425d4306241a5cc45d1a71f163e7204debfb0819b39422c8b6fa",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "list_symbols--negative"
+    },
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:c886d6a4a5b4a9f1dc67483f636f3286250222567a03a098509fc88386084d5a",
+      "content_digest": "sha256:c886d6a4a5b4a9f1dc67483f636f3286250222567a03a098509fc88386084d5a",
+      "diff_pointers": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "search--success"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:c886d6a4a5b4a9f1dc67483f636f3286250222567a03a098509fc88386084d5a",
+      "content_digest": "sha256:eb559dfa2a42c5efdcba5d848d6224826fd49b6c2b9c2eabd91e086c865b4c75",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "search--success"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:c886d6a4a5b4a9f1dc67483f636f3286250222567a03a098509fc88386084d5a",
+      "content_digest": "sha256:5a04d26d2c82239b9355ebefd8a9e03f7bf6f0ec6ecc765e3480563acee5fbdb",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "search--success"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:c886d6a4a5b4a9f1dc67483f636f3286250222567a03a098509fc88386084d5a",
+      "content_digest": "sha256:51773ed7df8a7cc57a6751f59671dff8c11b2fb5daa097d26f78daa08c4113af",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "search--success"
+    },
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:c886d6a4a5b4a9f1dc67483f636f3286250222567a03a098509fc88386084d5a",
+      "content_digest": "sha256:c886d6a4a5b4a9f1dc67483f636f3286250222567a03a098509fc88386084d5a",
+      "diff_pointers": [],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "search--success"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:c886d6a4a5b4a9f1dc67483f636f3286250222567a03a098509fc88386084d5a",
+      "content_digest": "sha256:eb559dfa2a42c5efdcba5d848d6224826fd49b6c2b9c2eabd91e086c865b4c75",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "search--success"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:c886d6a4a5b4a9f1dc67483f636f3286250222567a03a098509fc88386084d5a",
+      "content_digest": "sha256:5a04d26d2c82239b9355ebefd8a9e03f7bf6f0ec6ecc765e3480563acee5fbdb",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "search--success"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:c886d6a4a5b4a9f1dc67483f636f3286250222567a03a098509fc88386084d5a",
+      "content_digest": "sha256:51773ed7df8a7cc57a6751f59671dff8c11b2fb5daa097d26f78daa08c4113af",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "search--success"
+    },
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:977640d374c42e7b9d799c3c3d5a23d8ed993c32764e1aac3e22a7360e97e16c",
+      "content_digest": "sha256:7b856c1b0c0799cb6210311dda09e9376f7841c2ce1e33c1c7838ac69dc63e64",
+      "diff_pointers": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "search--negative"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:977640d374c42e7b9d799c3c3d5a23d8ed993c32764e1aac3e22a7360e97e16c",
+      "content_digest": "sha256:b9ada7b0149db225b9de806c051544ab6b7e5bd1c867c9526936214c3389e0aa",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "search--negative"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:977640d374c42e7b9d799c3c3d5a23d8ed993c32764e1aac3e22a7360e97e16c",
+      "content_digest": "sha256:4129a575fa7d9fcecfb890ca1f37c283cfbc8e4502ed2d84b80ec5dff16d1db8",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "search--negative"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:977640d374c42e7b9d799c3c3d5a23d8ed993c32764e1aac3e22a7360e97e16c",
+      "content_digest": "sha256:834306c86452ff6fd63979f83d84d01622c2a06adabfc7c76235c1c79670bad5",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "search--negative"
+    },
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:977640d374c42e7b9d799c3c3d5a23d8ed993c32764e1aac3e22a7360e97e16c",
+      "content_digest": "sha256:7b856c1b0c0799cb6210311dda09e9376f7841c2ce1e33c1c7838ac69dc63e64",
+      "diff_pointers": [],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "search--negative"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:977640d374c42e7b9d799c3c3d5a23d8ed993c32764e1aac3e22a7360e97e16c",
+      "content_digest": "sha256:b9ada7b0149db225b9de806c051544ab6b7e5bd1c867c9526936214c3389e0aa",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "search--negative"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:977640d374c42e7b9d799c3c3d5a23d8ed993c32764e1aac3e22a7360e97e16c",
+      "content_digest": "sha256:4129a575fa7d9fcecfb890ca1f37c283cfbc8e4502ed2d84b80ec5dff16d1db8",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "search--negative"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:977640d374c42e7b9d799c3c3d5a23d8ed993c32764e1aac3e22a7360e97e16c",
+      "content_digest": "sha256:834306c86452ff6fd63979f83d84d01622c2a06adabfc7c76235c1c79670bad5",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "search--negative"
+    },
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:27ced407f49cebfca33374d8f88ddee442a4782688ba9f6e2c323fedb5cf2ea1",
+      "content_digest": "sha256:27ced407f49cebfca33374d8f88ddee442a4782688ba9f6e2c323fedb5cf2ea1",
+      "diff_pointers": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "semantic_annotations--success"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:27ced407f49cebfca33374d8f88ddee442a4782688ba9f6e2c323fedb5cf2ea1",
+      "content_digest": "sha256:cd011e12e4e2413a8ff5d854f1088abdb4bfdc582cc12d91b41d09a727f9efe8",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "semantic_annotations--success"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:27ced407f49cebfca33374d8f88ddee442a4782688ba9f6e2c323fedb5cf2ea1",
+      "content_digest": "sha256:2aaf5c6a77e79d94948ca6f016017ebea96d8d8db7865a10abc39435fd18f4f9",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "semantic_annotations--success"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:27ced407f49cebfca33374d8f88ddee442a4782688ba9f6e2c323fedb5cf2ea1",
+      "content_digest": "sha256:6bb928f3bca5c9d21b36fc486558242595d386c58dc6b327286b92e2bec7f2a6",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "semantic_annotations--success"
+    },
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:27ced407f49cebfca33374d8f88ddee442a4782688ba9f6e2c323fedb5cf2ea1",
+      "content_digest": "sha256:27ced407f49cebfca33374d8f88ddee442a4782688ba9f6e2c323fedb5cf2ea1",
+      "diff_pointers": [],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "semantic_annotations--success"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:27ced407f49cebfca33374d8f88ddee442a4782688ba9f6e2c323fedb5cf2ea1",
+      "content_digest": "sha256:cd011e12e4e2413a8ff5d854f1088abdb4bfdc582cc12d91b41d09a727f9efe8",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "semantic_annotations--success"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:27ced407f49cebfca33374d8f88ddee442a4782688ba9f6e2c323fedb5cf2ea1",
+      "content_digest": "sha256:2aaf5c6a77e79d94948ca6f016017ebea96d8d8db7865a10abc39435fd18f4f9",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "semantic_annotations--success"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:27ced407f49cebfca33374d8f88ddee442a4782688ba9f6e2c323fedb5cf2ea1",
+      "content_digest": "sha256:6bb928f3bca5c9d21b36fc486558242595d386c58dc6b327286b92e2bec7f2a6",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "semantic_annotations--success"
+    },
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:27ced407f49cebfca33374d8f88ddee442a4782688ba9f6e2c323fedb5cf2ea1",
+      "content_digest": "sha256:27ced407f49cebfca33374d8f88ddee442a4782688ba9f6e2c323fedb5cf2ea1",
+      "diff_pointers": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "semantic_annotations--negative"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:27ced407f49cebfca33374d8f88ddee442a4782688ba9f6e2c323fedb5cf2ea1",
+      "content_digest": "sha256:cd011e12e4e2413a8ff5d854f1088abdb4bfdc582cc12d91b41d09a727f9efe8",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "semantic_annotations--negative"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:27ced407f49cebfca33374d8f88ddee442a4782688ba9f6e2c323fedb5cf2ea1",
+      "content_digest": "sha256:2aaf5c6a77e79d94948ca6f016017ebea96d8d8db7865a10abc39435fd18f4f9",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "semantic_annotations--negative"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:27ced407f49cebfca33374d8f88ddee442a4782688ba9f6e2c323fedb5cf2ea1",
+      "content_digest": "sha256:6bb928f3bca5c9d21b36fc486558242595d386c58dc6b327286b92e2bec7f2a6",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "semantic_annotations--negative"
+    },
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:27ced407f49cebfca33374d8f88ddee442a4782688ba9f6e2c323fedb5cf2ea1",
+      "content_digest": "sha256:27ced407f49cebfca33374d8f88ddee442a4782688ba9f6e2c323fedb5cf2ea1",
+      "diff_pointers": [],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "semantic_annotations--negative"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:27ced407f49cebfca33374d8f88ddee442a4782688ba9f6e2c323fedb5cf2ea1",
+      "content_digest": "sha256:cd011e12e4e2413a8ff5d854f1088abdb4bfdc582cc12d91b41d09a727f9efe8",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "semantic_annotations--negative"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:27ced407f49cebfca33374d8f88ddee442a4782688ba9f6e2c323fedb5cf2ea1",
+      "content_digest": "sha256:2aaf5c6a77e79d94948ca6f016017ebea96d8d8db7865a10abc39435fd18f4f9",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "semantic_annotations--negative"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:27ced407f49cebfca33374d8f88ddee442a4782688ba9f6e2c323fedb5cf2ea1",
+      "content_digest": "sha256:6bb928f3bca5c9d21b36fc486558242595d386c58dc6b327286b92e2bec7f2a6",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "semantic_annotations--negative"
+    },
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:b8c89385bf4f5aa120d21d744c133ef7786818babeaef938ceec1fd50d7bafe5",
+      "content_digest": "sha256:b8c89385bf4f5aa120d21d744c133ef7786818babeaef938ceec1fd50d7bafe5",
+      "diff_pointers": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "side_effects--success"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:b8c89385bf4f5aa120d21d744c133ef7786818babeaef938ceec1fd50d7bafe5",
+      "content_digest": "sha256:73456f09df83ddcfb5da2e5d4aa2ee18fb2c2556a01f1fb02f2c994e335586db",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "side_effects--success"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:b8c89385bf4f5aa120d21d744c133ef7786818babeaef938ceec1fd50d7bafe5",
+      "content_digest": "sha256:7954c19c75e098d04271d43e902613a930f3e8e98b0656256c4f4e0616d56702",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "side_effects--success"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:b8c89385bf4f5aa120d21d744c133ef7786818babeaef938ceec1fd50d7bafe5",
+      "content_digest": "sha256:85f173ada0aac6985ab05a3fe1942fb2edc30c7a6884028d41b8f7b16f84d425",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "side_effects--success"
+    },
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:b8c89385bf4f5aa120d21d744c133ef7786818babeaef938ceec1fd50d7bafe5",
+      "content_digest": "sha256:b8c89385bf4f5aa120d21d744c133ef7786818babeaef938ceec1fd50d7bafe5",
+      "diff_pointers": [],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "side_effects--success"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:b8c89385bf4f5aa120d21d744c133ef7786818babeaef938ceec1fd50d7bafe5",
+      "content_digest": "sha256:73456f09df83ddcfb5da2e5d4aa2ee18fb2c2556a01f1fb02f2c994e335586db",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "side_effects--success"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:b8c89385bf4f5aa120d21d744c133ef7786818babeaef938ceec1fd50d7bafe5",
+      "content_digest": "sha256:7954c19c75e098d04271d43e902613a930f3e8e98b0656256c4f4e0616d56702",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "side_effects--success"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:b8c89385bf4f5aa120d21d744c133ef7786818babeaef938ceec1fd50d7bafe5",
+      "content_digest": "sha256:85f173ada0aac6985ab05a3fe1942fb2edc30c7a6884028d41b8f7b16f84d425",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "side_effects--success"
+    },
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:f907032598f2296a44c827e7ce2b6cd05ddaa002774d070345dc6494e4b9697a",
+      "content_digest": "sha256:f907032598f2296a44c827e7ce2b6cd05ddaa002774d070345dc6494e4b9697a",
+      "diff_pointers": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "side_effects--negative"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:f907032598f2296a44c827e7ce2b6cd05ddaa002774d070345dc6494e4b9697a",
+      "content_digest": "sha256:1051e13974ef29512af1d9b8810e3c7d268e7a0a675034f99779980f960bfd18",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "side_effects--negative"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:f907032598f2296a44c827e7ce2b6cd05ddaa002774d070345dc6494e4b9697a",
+      "content_digest": "sha256:e10f01a7a75a6253ea678930117656bdfa80d9fed655ccf928dbca62e160371a",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "side_effects--negative"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:f907032598f2296a44c827e7ce2b6cd05ddaa002774d070345dc6494e4b9697a",
+      "content_digest": "sha256:92731f832eca38066f198263d3ebf6c7859c72aec347195c5a641a4043675b93",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/deepseek-v4-flash",
+      "task_id": "side_effects--negative"
+    },
+    {
+      "arm": "fmt_07",
+      "canonical_digest": "sha256:f907032598f2296a44c827e7ce2b6cd05ddaa002774d070345dc6494e4b9697a",
+      "content_digest": "sha256:f907032598f2296a44c827e7ce2b6cd05ddaa002774d070345dc6494e4b9697a",
+      "diff_pointers": [],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "side_effects--negative"
+    },
+    {
+      "arm": "fmt_19",
+      "canonical_digest": "sha256:f907032598f2296a44c827e7ce2b6cd05ddaa002774d070345dc6494e4b9697a",
+      "content_digest": "sha256:1051e13974ef29512af1d9b8810e3c7d268e7a0a675034f99779980f960bfd18",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "side_effects--negative"
+    },
+    {
+      "arm": "fmt_31",
+      "canonical_digest": "sha256:f907032598f2296a44c827e7ce2b6cd05ddaa002774d070345dc6494e4b9697a",
+      "content_digest": "sha256:e10f01a7a75a6253ea678930117656bdfa80d9fed655ccf928dbca62e160371a",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "side_effects--negative"
+    },
+    {
+      "arm": "fmt_43",
+      "canonical_digest": "sha256:f907032598f2296a44c827e7ce2b6cd05ddaa002774d070345dc6494e4b9697a",
+      "content_digest": "sha256:92731f832eca38066f198263d3ebf6c7859c72aec347195c5a641a4043675b93",
+      "diff_pointers": [
+        "/messages/3/content"
+      ],
+      "model": "opencode-go/glm-5.2",
+      "task_id": "side_effects--negative"
+    }
+  ],
+  "fixture_count": 56,
+  "planned_cells": 448,
+  "provider_executed": false,
+  "schema": "lci.api-replay.all-tools-preflight.v1"
+}

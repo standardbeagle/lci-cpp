@@ -1,0 +1,41 @@
+{
+  "schema": "lci.api-replay.all-tools-manifest.v1",
+  "benchmark_id": "lci-all-tools-format-replay-v1",
+  "status": "preregistered-provider-locked",
+  "decision": "Decide whether any alternative tool-result encoding should advance to a larger production-faithful agent benchmark, separately by tool and success/negative scenario.",
+  "claim_boundary": "This measures comprehension of simulated post-tool OpenCode continuations derived from genuine provider request structure and genuine LCI outputs. It does not measure live tool selection, task completion, or production rollout value.",
+  "population": {"tools": "all 14 tools exposed by the frozen LCI MCP tools/list", "scenarios_per_tool": 2, "task_count": 28},
+  "arms": [
+    {"id": "fmt_07", "codec": "production output"},
+    {"id": "fmt_19", "codec": "readable_xml_v1"},
+    {"id": "fmt_31", "codec": "path_records_v1"},
+    {"id": "fmt_43", "codec": "tagged_blocks_v1"}
+  ],
+  "models": ["opencode-go/deepseek-v4-flash", "opencode-go/glm-5.2"],
+  "repetitions": 2,
+  "planned_cells": 448,
+  "experimental_unit": "one stateless direct continuation request for one tool/scenario/model/arm/repetition",
+  "scenario_selection": "For every live tool, one frozen successful request from the prior genuine MCP capture bank and one preselected missing/empty/error/corrective request executed against the same frozen PocketBase corpus.",
+  "request_derivation": "For each model, start from its successful sanitized live OpenCode provider capture. Replace the final user request, assistant tool call name/arguments/reasoning summary, and exact tool result to form the task fixture. Within a task, treatment changes only the selected tool message content.",
+  "primary_metric": "semantic exact correctness per tool/scenario/model/arm",
+  "oracle_protocol": "Named deterministic heuristics first. Every provisional failure is exhaustively sent to a blinded cross-model structured LLM adjudicator. A correct adjudication cannot directly overwrite a score: it creates a regression candidate, the deterministic heuristic is repaired with positive/adversarial tests, and the full analysis is rerun. Selection is blocked while any adjudication remains.",
+  "success_oracle": "Require all independently frozen answer atoms supported by the genuine output and reject unsupported contradictory claims.",
+  "negative_oracle": "Distinguish explicit tool error, successful empty/not-found, and usable corrective/fallback output; require the answer not to invent requested results.",
+  "controls": [
+    "All codecs must decode to the identical canonical source value.",
+    "Every treatment request must differ from its production control at exactly the selected tool-content pointer.",
+    "Arm order is cyclically position-balanced across task/repetition rows and model order alternates.",
+    "Success and negative scenarios are reported separately; tools and models are never pooled for selection."
+  ],
+  "selection_rule": "An arm may advance for a tool/scenario only with complete adjudication, no failed controls, no completion harm greater than 0.125, paired exact improvement at least 0.25, and Holm-adjusted two-sided McNemar p below 0.05. Two repetitions cannot satisfy the inferential threshold, so v1 is explicitly a transport/oracle pilot and cannot advance an arm; it may only identify designs for a preregistered higher-repetition v2.",
+  "failure_policy": "Persist every attempt. Provider transport/quota/5xx failures may retry twice only after the initial grid; all other failures remain unscored. Never score infrastructure failures as wrong answers or retry answered cells.",
+  "stopping_rule": "Execute exactly 448 planned cells, then stop. Do not add repetitions based on observed outcomes.",
+  "frozen_inputs": {
+    "tool_output_matrix": "sha256:b979f31db3bf4dc704d17fee61921e4dc8b08cbb42779e3d342db9c8f64d0e09",
+    "deepseek_base_fixture": "sha256:2d7ceb8433fbb1c9643bceafea609a6463f18893260bda890756fc819d098e8a",
+    "glm_base_fixture": "sha256:ca963293426f0cb5404506fae5df1d2b8fac1ad7647d79f8dbdb65aee719f808",
+    "corpus_commit": "d438c6a96a0252ff9df62c1cfe193480ed9ff15d"
+  },
+  "analysis_revision": "pending",
+  "provider_execution_allowed": false
+}
