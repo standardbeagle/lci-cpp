@@ -2,8 +2,16 @@
 """Run the preregistered, canned tool-response-shape experiment."""
 from __future__ import annotations
 
-import argparse, hashlib, json, os, tempfile
+import argparse, hashlib, importlib.util, json, os, shutil, subprocess, tempfile, time
 from pathlib import Path
+
+_COMPREHENSION_PATH=Path(__file__).with_name("comprehension_ab.py")
+_COMPREHENSION_SPEC=importlib.util.spec_from_file_location("response_shape_comprehension_helpers",_COMPREHENSION_PATH)
+if _COMPREHENSION_SPEC is None or _COMPREHENSION_SPEC.loader is None: raise ImportError(f"cannot load {_COMPREHENSION_PATH}")
+_COMPREHENSION=importlib.util.module_from_spec(_COMPREHENSION_SPEC); _COMPREHENSION_SPEC.loader.exec_module(_COMPREHENSION)
+classify_failure=_COMPREHENSION.classify_failure
+empty_git_workspace=_COMPREHENSION.empty_git_workspace
+parse_events=_COMPREHENSION.parse_events
 
 ROOT = Path(__file__).resolve().parents[3]
 BASE = ROOT / "benchmarks/repo-qa/response-shape"
@@ -100,6 +108,41 @@ class DeterministicModelProvider:
         answer={"answers":task["expected_answers"],"evidence":task["required_evidence"],"claims":task["expected_answers"]}
         return {"status":"answered","answer":canonical(answer),"tokens":{"input":len(task["facts"]),"output":len(answer["answers"])+len(answer["evidence"])},"wall_seconds":0.001}
 
+class OpenCodeProvider:
+    """Run one isolated, tool-disabled OpenCode session per experimental cell."""
+    def __init__(self, executable="opencode"):
+        self.executable=executable
+
+    def run(self, *, prompt, task, arm, model, timeout):
+        del task, arm
+        started=time.monotonic()
+        with tempfile.TemporaryDirectory(prefix="response-shape-parent-") as parent:
+            workspace=empty_git_workspace(Path(parent))
+            environment=os.environ.copy()
+            environment["OPENCODE_CONFIG"]=str(workspace/"opencode.json")
+            environment["XDG_CONFIG_HOME"]=str(workspace/".xdg-config")
+            try:
+                proc=subprocess.run([self.executable,"run","--format","json","-m",model,prompt],cwd=workspace,
+                    env=environment,text=True,capture_output=True,timeout=timeout)
+                raw_stdout=proc.stdout; raw_stderr=proc.stderr
+                answer,metadata=parse_events(raw_stdout.splitlines())
+                failure_text=json.dumps(metadata.get("provider_error"))+"\n"+raw_stderr
+                classified=classify_failure(failure_text)
+                if metadata.get("malformed_event"): status="malformed_provider_stream"
+                elif classified: status=classified
+                elif metadata.get("provider_error") or proc.returncode: status="provider_error"
+                elif not answer.strip(): status="empty_answer"
+                else: status="answered"
+            except subprocess.TimeoutExpired as exc:
+                raw_stdout=exc.stdout if isinstance(exc.stdout,str) else ""
+                raw_stderr=exc.stderr if isinstance(exc.stderr,str) else ""
+                answer,metadata=parse_events(raw_stdout.splitlines())
+                status="provider_timeout"
+            finally:
+                shutil.rmtree(workspace,ignore_errors=True)
+        return {"status":status,"answer":answer,"raw_provider_stdout":raw_stdout,"raw_provider_stderr":raw_stderr,
+            "wall_seconds":round(time.monotonic()-started,3),"failure_reason":None if status=="answered" else status,**metadata}
+
 def cell_identity(manifest, task, arm, model, repetition):
     prompt=PROMPT.format(question=task["question"],tool=task["tool"],response=task["arms"][arm])
     identity={"schema":"lci.response-shape.cell.v1","task":task["id"],"arm":arm,"model":model,"repetition":repetition,
@@ -148,12 +191,15 @@ def run_grid(provider, manifest, tasks, out):
     return [execute(provider,manifest,task,arm,model,rep,out) for task,arm,model,rep in planned_grid(manifest,tasks)]
 
 def main():
-    p=argparse.ArgumentParser(); p.add_argument("--out",type=Path,required=True); p.add_argument("--manifest",type=Path,default=MANIFEST); p.add_argument("--tasks",type=Path,default=TASKS); p.add_argument("--dry-run",action="store_true"); p.add_argument("--fake-provider",action="store_true")
+    p=argparse.ArgumentParser(); p.add_argument("--out",type=Path,required=True); p.add_argument("--manifest",type=Path,default=MANIFEST); p.add_argument("--tasks",type=Path,default=TASKS); p.add_argument("--dry-run",action="store_true"); p.add_argument("--fake-provider",action="store_true"); p.add_argument("--run-provider",action="store_true"); p.add_argument("--opencode",default="opencode")
     args=p.parse_args(); manifest,tasks=load_inputs(args.manifest,args.tasks); jobs=planned_grid(manifest,tasks)
     if args.dry_run:
         print(json.dumps({"cells":len(jobs),"order":[[t["id"],a,m,r] for t,a,m,r in jobs]},sort_keys=True)); return 0
     if args.fake_provider:
         records=run_grid(DeterministicModelProvider(),manifest,tasks,args.out)
+        print(json.dumps({"cells":len(records),"out":str(args.out)},sort_keys=True)); return 0
+    if args.run_provider:
+        records=run_grid(OpenCodeProvider(args.opencode),manifest,tasks,args.out)
         print(json.dumps({"cells":len(records),"out":str(args.out)},sort_keys=True)); return 0
     p.error("real provider execution is intentionally guarded; configure and invoke a provider adapter explicitly")
 if __name__=="__main__": raise SystemExit(main())
