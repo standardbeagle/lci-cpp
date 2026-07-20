@@ -1,0 +1,17 @@
+{
+  "schema": "benchmark.audit.v1",
+  "gates": [
+    {"id": "G1", "hard": true, "status": "pass", "severity": "none", "evidence": ["design commit 5aa1d8f6209d392805725f639ab8b10844071512 predates every result attempt", "gate-unlock commit f8f0f95"]},
+    {"id": "G2", "hard": true, "status": "pass", "severity": "none", "evidence": ["preflight.json: both fixtures recover identical content digest and each treatment differs only at /messages/3/content"]},
+    {"id": "G3", "hard": true, "status": "pass", "severity": "none", "evidence": ["opaque fmt arm ids and frozen provider messages", "schedule.json"]},
+    {"id": "G4", "hard": true, "status": "pass", "severity": "none", "evidence": ["direct stateless requests expose no tools", "oracle absent from request bodies"]},
+    {"id": "G5", "hard": true, "status": "pass", "severity": "none", "evidence": ["test_api_replay_analysis.py good/wrong/omission/invention discrimination cases"]},
+    {"id": "G6", "hard": true, "status": "inconclusive", "severity": "major", "evidence": ["64/64 immutable logical attempts exist", "all 64 attempts are HTTP 403 and no model response is usable"]},
+    {"id": "G7", "hard": true, "status": "pass", "severity": "none", "evidence": ["analysis-v1.json preserves 64 unusable provider_error cells with null quality scores"]},
+    {"id": "G8", "hard": true, "status": "inconclusive", "severity": "major", "evidence": ["round-trip manipulation control passes", "cycle null cannot be evaluated without answered cells"]},
+    {"id": "G9", "hard": true, "status": "inconclusive", "severity": "major", "evidence": ["no answered repetitions or estimable effects"]},
+    {"id": "G10", "hard": true, "status": "inconclusive", "severity": "major", "evidence": ["both model strata have 0/32 usable cells"]},
+    {"id": "G11", "hard": true, "status": "pass", "severity": "none", "evidence": ["analysis-v1.json regenerates from immutable attempts, fixtures, manifest, schedule, and preflight"]},
+    {"id": "G12", "hard": true, "status": "pass", "severity": "none", "evidence": ["no model-quality, format-effect, or production recommendation is made from v1"]}
+  ]
+}
