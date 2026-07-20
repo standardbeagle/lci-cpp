@@ -106,6 +106,6 @@
     "Oracle discrimination tests pass",
     "No provider outcome for this study has been observed before all gates are frozen"
   ],
-  "analysis_revision": "UNFROZEN-provider-execution-prohibited",
+  "analysis_revision": "5aa1d8f6209d392805725f639ab8b10844071512",
   "registered_at": "2026-07-20T12:49:00-05:00"
 }
