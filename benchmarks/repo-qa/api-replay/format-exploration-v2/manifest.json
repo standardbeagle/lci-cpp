@@ -97,6 +97,6 @@
     "Oracle discrimination tests pass",
     "No v2 provider outcome has been observed before all gates are frozen"
   ],
-  "analysis_revision": "824690c6cacdeac6818f22c1178b3b4c5426cc06",
+  "analysis_revision": "57d93f42ef82b323040258cd0f0a59af0ba03bb7",
   "registered_at": "2026-07-20T18:00:00-05:00"
 }
