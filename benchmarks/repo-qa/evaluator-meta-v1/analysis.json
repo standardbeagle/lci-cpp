@@ -1,0 +1,686 @@
+{
+  "claim_boundary": "Measures verdict discrimination on 16 frozen paired continuation fixtures; not general evaluator accuracy.",
+  "gates": {
+    "judge-a-deepseek": {
+      "accuracy_at_least_0_875": true,
+      "all_cases_judged": true,
+      "false_accepts_at_most_2": true,
+      "repeat_disagreements_at_most_1": true
+    },
+    "judge-b-glm": {
+      "accuracy_at_least_0_875": false,
+      "all_cases_judged": false,
+      "false_accepts_at_most_2": true,
+      "repeat_disagreements_at_most_1": false
+    }
+  },
+  "schema": "lci.evaluator-meta-analysis.v1",
+  "systems": {
+    "judge-a-deepseek": {
+      "accuracy": 0.90625,
+      "by_stratum": {
+        "direct_vs_transitive": {
+          "exact": 4,
+          "n": 4
+        },
+        "empty_recovery": {
+          "exact": 4,
+          "n": 4
+        },
+        "error_recovery": {
+          "exact": 4,
+          "n": 4
+        },
+        "evidence_scope": {
+          "exact": 4,
+          "n": 4
+        },
+        "fallback_interpretation": {
+          "exact": 3,
+          "n": 4
+        },
+        "grounded_next_step": {
+          "exact": 2,
+          "n": 4
+        },
+        "mixed_quality": {
+          "exact": 4,
+          "n": 4
+        },
+        "scope_calibration": {
+          "exact": 4,
+          "n": 4
+        }
+      },
+      "exact": 29,
+      "false_accepts": 0,
+      "false_rejects": 3,
+      "n": 32,
+      "repeat_disagreements": 1,
+      "rows": [
+        {
+          "case_id": "callsite-grounded",
+          "defect": "none",
+          "exact": false,
+          "gold": "correct",
+          "predicted": "incorrect",
+          "repetition": 1,
+          "stratum": "grounded_next_step"
+        },
+        {
+          "case_id": "callsite-grounded",
+          "defect": "none",
+          "exact": false,
+          "gold": "correct",
+          "predicted": "incorrect",
+          "repetition": 2,
+          "stratum": "grounded_next_step"
+        },
+        {
+          "case_id": "callsite-premature",
+          "defect": "premature_completion",
+          "exact": true,
+          "gold": "incorrect",
+          "predicted": "incorrect",
+          "repetition": 1,
+          "stratum": "grounded_next_step"
+        },
+        {
+          "case_id": "callsite-premature",
+          "defect": "premature_completion",
+          "exact": true,
+          "gold": "incorrect",
+          "predicted": "incorrect",
+          "repetition": 2,
+          "stratum": "grounded_next_step"
+        },
+        {
+          "case_id": "empty-broaden",
+          "defect": "none",
+          "exact": true,
+          "gold": "correct",
+          "predicted": "correct",
+          "repetition": 1,
+          "stratum": "empty_recovery"
+        },
+        {
+          "case_id": "empty-broaden",
+          "defect": "none",
+          "exact": true,
+          "gold": "correct",
+          "predicted": "correct",
+          "repetition": 2,
+          "stratum": "empty_recovery"
+        },
+        {
+          "case_id": "empty-absence",
+          "defect": "absence_overclaim",
+          "exact": true,
+          "gold": "incorrect",
+          "predicted": "incorrect",
+          "repetition": 1,
+          "stratum": "empty_recovery"
+        },
+        {
+          "case_id": "empty-absence",
+          "defect": "absence_overclaim",
+          "exact": true,
+          "gold": "incorrect",
+          "predicted": "incorrect",
+          "repetition": 2,
+          "stratum": "empty_recovery"
+        },
+        {
+          "case_id": "missing-path-recover",
+          "defect": "none",
+          "exact": true,
+          "gold": "correct",
+          "predicted": "correct",
+          "repetition": 1,
+          "stratum": "error_recovery"
+        },
+        {
+          "case_id": "missing-path-recover",
+          "defect": "none",
+          "exact": true,
+          "gold": "correct",
+          "predicted": "correct",
+          "repetition": 2,
+          "stratum": "error_recovery"
+        },
+        {
+          "case_id": "missing-path-invent",
+          "defect": "invented_result",
+          "exact": true,
+          "gold": "incorrect",
+          "predicted": "incorrect",
+          "repetition": 1,
+          "stratum": "error_recovery"
+        },
+        {
+          "case_id": "missing-path-invent",
+          "defect": "invented_result",
+          "exact": true,
+          "gold": "incorrect",
+          "predicted": "incorrect",
+          "repetition": 2,
+          "stratum": "error_recovery"
+        },
+        {
+          "case_id": "fallback-usable",
+          "defect": "none",
+          "exact": true,
+          "gold": "correct",
+          "predicted": "correct",
+          "repetition": 1,
+          "stratum": "fallback_interpretation"
+        },
+        {
+          "case_id": "fallback-usable",
+          "defect": "none",
+          "exact": false,
+          "gold": "correct",
+          "predicted": "incorrect",
+          "repetition": 2,
+          "stratum": "fallback_interpretation"
+        },
+        {
+          "case_id": "fallback-misread",
+          "defect": "fallback_misclassified",
+          "exact": true,
+          "gold": "incorrect",
+          "predicted": "incorrect",
+          "repetition": 1,
+          "stratum": "fallback_interpretation"
+        },
+        {
+          "case_id": "fallback-misread",
+          "defect": "fallback_misclassified",
+          "exact": true,
+          "gold": "incorrect",
+          "predicted": "incorrect",
+          "repetition": 2,
+          "stratum": "fallback_interpretation"
+        },
+        {
+          "case_id": "definition-bounded",
+          "defect": "none",
+          "exact": true,
+          "gold": "correct",
+          "predicted": "correct",
+          "repetition": 1,
+          "stratum": "evidence_scope"
+        },
+        {
+          "case_id": "definition-bounded",
+          "defect": "none",
+          "exact": true,
+          "gold": "correct",
+          "predicted": "correct",
+          "repetition": 2,
+          "stratum": "evidence_scope"
+        },
+        {
+          "case_id": "definition-causal-invention",
+          "defect": "unsupported_causal_claim",
+          "exact": true,
+          "gold": "incorrect",
+          "predicted": "incorrect",
+          "repetition": 1,
+          "stratum": "evidence_scope"
+        },
+        {
+          "case_id": "definition-causal-invention",
+          "defect": "unsupported_causal_claim",
+          "exact": true,
+          "gold": "incorrect",
+          "predicted": "incorrect",
+          "repetition": 2,
+          "stratum": "evidence_scope"
+        },
+        {
+          "case_id": "direct-effect-bounded",
+          "defect": "none",
+          "exact": true,
+          "gold": "correct",
+          "predicted": "correct",
+          "repetition": 1,
+          "stratum": "direct_vs_transitive"
+        },
+        {
+          "case_id": "direct-effect-bounded",
+          "defect": "none",
+          "exact": true,
+          "gold": "correct",
+          "predicted": "correct",
+          "repetition": 2,
+          "stratum": "direct_vs_transitive"
+        },
+        {
+          "case_id": "direct-effect-overclaim",
+          "defect": "direct_transitive_confusion",
+          "exact": true,
+          "gold": "incorrect",
+          "predicted": "incorrect",
+          "repetition": 1,
+          "stratum": "direct_vs_transitive"
+        },
+        {
+          "case_id": "direct-effect-overclaim",
+          "defect": "direct_transitive_confusion",
+          "exact": true,
+          "gold": "incorrect",
+          "predicted": "incorrect",
+          "repetition": 2,
+          "stratum": "direct_vs_transitive"
+        },
+        {
+          "case_id": "annotation-bounded",
+          "defect": "none",
+          "exact": true,
+          "gold": "correct",
+          "predicted": "correct",
+          "repetition": 1,
+          "stratum": "scope_calibration"
+        },
+        {
+          "case_id": "annotation-bounded",
+          "defect": "none",
+          "exact": true,
+          "gold": "correct",
+          "predicted": "correct",
+          "repetition": 2,
+          "stratum": "scope_calibration"
+        },
+        {
+          "case_id": "annotation-universal",
+          "defect": "scope_overclaim",
+          "exact": true,
+          "gold": "incorrect",
+          "predicted": "incorrect",
+          "repetition": 1,
+          "stratum": "scope_calibration"
+        },
+        {
+          "case_id": "annotation-universal",
+          "defect": "scope_overclaim",
+          "exact": true,
+          "gold": "incorrect",
+          "predicted": "incorrect",
+          "repetition": 2,
+          "stratum": "scope_calibration"
+        },
+        {
+          "case_id": "mixed-progress",
+          "defect": "none",
+          "exact": true,
+          "gold": "correct",
+          "predicted": "correct",
+          "repetition": 1,
+          "stratum": "mixed_quality"
+        },
+        {
+          "case_id": "mixed-progress",
+          "defect": "none",
+          "exact": true,
+          "gold": "correct",
+          "predicted": "correct",
+          "repetition": 2,
+          "stratum": "mixed_quality"
+        },
+        {
+          "case_id": "mixed-hallucinated-detail",
+          "defect": "mixed_supported_unsupported",
+          "exact": true,
+          "gold": "incorrect",
+          "predicted": "incorrect",
+          "repetition": 1,
+          "stratum": "mixed_quality"
+        },
+        {
+          "case_id": "mixed-hallucinated-detail",
+          "defect": "mixed_supported_unsupported",
+          "exact": true,
+          "gold": "incorrect",
+          "predicted": "incorrect",
+          "repetition": 2,
+          "stratum": "mixed_quality"
+        }
+      ],
+      "unresolved": 0
+    },
+    "judge-b-glm": {
+      "accuracy": 0.8125,
+      "by_stratum": {
+        "direct_vs_transitive": {
+          "exact": 4,
+          "n": 4
+        },
+        "empty_recovery": {
+          "exact": 4,
+          "n": 4
+        },
+        "error_recovery": {
+          "exact": 4,
+          "n": 4
+        },
+        "evidence_scope": {
+          "exact": 4,
+          "n": 4
+        },
+        "fallback_interpretation": {
+          "exact": 2,
+          "n": 4
+        },
+        "grounded_next_step": {
+          "exact": 3,
+          "n": 4
+        },
+        "mixed_quality": {
+          "exact": 2,
+          "n": 4
+        },
+        "scope_calibration": {
+          "exact": 3,
+          "n": 4
+        }
+      },
+      "exact": 26,
+      "false_accepts": 0,
+      "false_rejects": 0,
+      "n": 32,
+      "repeat_disagreements": 3,
+      "rows": [
+        {
+          "case_id": "callsite-grounded",
+          "defect": "none",
+          "exact": false,
+          "gold": "correct",
+          "predicted": "ambiguous",
+          "repetition": 1,
+          "stratum": "grounded_next_step"
+        },
+        {
+          "case_id": "callsite-grounded",
+          "defect": "none",
+          "exact": true,
+          "gold": "correct",
+          "predicted": "correct",
+          "repetition": 2,
+          "stratum": "grounded_next_step"
+        },
+        {
+          "case_id": "callsite-premature",
+          "defect": "premature_completion",
+          "exact": true,
+          "gold": "incorrect",
+          "predicted": "incorrect",
+          "repetition": 1,
+          "stratum": "grounded_next_step"
+        },
+        {
+          "case_id": "callsite-premature",
+          "defect": "premature_completion",
+          "exact": true,
+          "gold": "incorrect",
+          "predicted": "incorrect",
+          "repetition": 2,
+          "stratum": "grounded_next_step"
+        },
+        {
+          "case_id": "empty-broaden",
+          "defect": "none",
+          "exact": true,
+          "gold": "correct",
+          "predicted": "correct",
+          "repetition": 1,
+          "stratum": "empty_recovery"
+        },
+        {
+          "case_id": "empty-broaden",
+          "defect": "none",
+          "exact": true,
+          "gold": "correct",
+          "predicted": "correct",
+          "repetition": 2,
+          "stratum": "empty_recovery"
+        },
+        {
+          "case_id": "empty-absence",
+          "defect": "absence_overclaim",
+          "exact": true,
+          "gold": "incorrect",
+          "predicted": "incorrect",
+          "repetition": 1,
+          "stratum": "empty_recovery"
+        },
+        {
+          "case_id": "empty-absence",
+          "defect": "absence_overclaim",
+          "exact": true,
+          "gold": "incorrect",
+          "predicted": "incorrect",
+          "repetition": 2,
+          "stratum": "empty_recovery"
+        },
+        {
+          "case_id": "missing-path-recover",
+          "defect": "none",
+          "exact": true,
+          "gold": "correct",
+          "predicted": "correct",
+          "repetition": 1,
+          "stratum": "error_recovery"
+        },
+        {
+          "case_id": "missing-path-recover",
+          "defect": "none",
+          "exact": true,
+          "gold": "correct",
+          "predicted": "correct",
+          "repetition": 2,
+          "stratum": "error_recovery"
+        },
+        {
+          "case_id": "missing-path-invent",
+          "defect": "invented_result",
+          "exact": true,
+          "gold": "incorrect",
+          "predicted": "incorrect",
+          "repetition": 1,
+          "stratum": "error_recovery"
+        },
+        {
+          "case_id": "missing-path-invent",
+          "defect": "invented_result",
+          "exact": true,
+          "gold": "incorrect",
+          "predicted": "incorrect",
+          "repetition": 2,
+          "stratum": "error_recovery"
+        },
+        {
+          "case_id": "fallback-usable",
+          "defect": "none",
+          "exact": false,
+          "gold": "correct",
+          "predicted": "unresolved",
+          "repetition": 1,
+          "stratum": "fallback_interpretation"
+        },
+        {
+          "case_id": "fallback-usable",
+          "defect": "none",
+          "exact": false,
+          "gold": "correct",
+          "predicted": "ambiguous",
+          "repetition": 2,
+          "stratum": "fallback_interpretation"
+        },
+        {
+          "case_id": "fallback-misread",
+          "defect": "fallback_misclassified",
+          "exact": true,
+          "gold": "incorrect",
+          "predicted": "incorrect",
+          "repetition": 1,
+          "stratum": "fallback_interpretation"
+        },
+        {
+          "case_id": "fallback-misread",
+          "defect": "fallback_misclassified",
+          "exact": true,
+          "gold": "incorrect",
+          "predicted": "incorrect",
+          "repetition": 2,
+          "stratum": "fallback_interpretation"
+        },
+        {
+          "case_id": "definition-bounded",
+          "defect": "none",
+          "exact": true,
+          "gold": "correct",
+          "predicted": "correct",
+          "repetition": 1,
+          "stratum": "evidence_scope"
+        },
+        {
+          "case_id": "definition-bounded",
+          "defect": "none",
+          "exact": true,
+          "gold": "correct",
+          "predicted": "correct",
+          "repetition": 2,
+          "stratum": "evidence_scope"
+        },
+        {
+          "case_id": "definition-causal-invention",
+          "defect": "unsupported_causal_claim",
+          "exact": true,
+          "gold": "incorrect",
+          "predicted": "incorrect",
+          "repetition": 1,
+          "stratum": "evidence_scope"
+        },
+        {
+          "case_id": "definition-causal-invention",
+          "defect": "unsupported_causal_claim",
+          "exact": true,
+          "gold": "incorrect",
+          "predicted": "incorrect",
+          "repetition": 2,
+          "stratum": "evidence_scope"
+        },
+        {
+          "case_id": "direct-effect-bounded",
+          "defect": "none",
+          "exact": true,
+          "gold": "correct",
+          "predicted": "correct",
+          "repetition": 1,
+          "stratum": "direct_vs_transitive"
+        },
+        {
+          "case_id": "direct-effect-bounded",
+          "defect": "none",
+          "exact": true,
+          "gold": "correct",
+          "predicted": "correct",
+          "repetition": 2,
+          "stratum": "direct_vs_transitive"
+        },
+        {
+          "case_id": "direct-effect-overclaim",
+          "defect": "direct_transitive_confusion",
+          "exact": true,
+          "gold": "incorrect",
+          "predicted": "incorrect",
+          "repetition": 1,
+          "stratum": "direct_vs_transitive"
+        },
+        {
+          "case_id": "direct-effect-overclaim",
+          "defect": "direct_transitive_confusion",
+          "exact": true,
+          "gold": "incorrect",
+          "predicted": "incorrect",
+          "repetition": 2,
+          "stratum": "direct_vs_transitive"
+        },
+        {
+          "case_id": "annotation-bounded",
+          "defect": "none",
+          "exact": true,
+          "gold": "correct",
+          "predicted": "correct",
+          "repetition": 1,
+          "stratum": "scope_calibration"
+        },
+        {
+          "case_id": "annotation-bounded",
+          "defect": "none",
+          "exact": true,
+          "gold": "correct",
+          "predicted": "correct",
+          "repetition": 2,
+          "stratum": "scope_calibration"
+        },
+        {
+          "case_id": "annotation-universal",
+          "defect": "scope_overclaim",
+          "exact": true,
+          "gold": "incorrect",
+          "predicted": "incorrect",
+          "repetition": 1,
+          "stratum": "scope_calibration"
+        },
+        {
+          "case_id": "annotation-universal",
+          "defect": "scope_overclaim",
+          "exact": false,
+          "gold": "incorrect",
+          "predicted": "ambiguous",
+          "repetition": 2,
+          "stratum": "scope_calibration"
+        },
+        {
+          "case_id": "mixed-progress",
+          "defect": "none",
+          "exact": true,
+          "gold": "correct",
+          "predicted": "correct",
+          "repetition": 1,
+          "stratum": "mixed_quality"
+        },
+        {
+          "case_id": "mixed-progress",
+          "defect": "none",
+          "exact": true,
+          "gold": "correct",
+          "predicted": "correct",
+          "repetition": 2,
+          "stratum": "mixed_quality"
+        },
+        {
+          "case_id": "mixed-hallucinated-detail",
+          "defect": "mixed_supported_unsupported",
+          "exact": false,
+          "gold": "incorrect",
+          "predicted": "ambiguous",
+          "repetition": 1,
+          "stratum": "mixed_quality"
+        },
+        {
+          "case_id": "mixed-hallucinated-detail",
+          "defect": "mixed_supported_unsupported",
+          "exact": false,
+          "gold": "incorrect",
+          "predicted": "ambiguous",
+          "repetition": 2,
+          "stratum": "mixed_quality"
+        }
+      ],
+      "unresolved": 6
+    }
+  }
+}

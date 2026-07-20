@@ -1,0 +1,889 @@
+{
+  "judge_id": "judge-b-glm",
+  "policy": "every queued failure",
+  "promotion_policy": "Judgments never change scores directly; only two-judge consensus may nominate a regression, which still requires a deterministic test and full reanalysis.",
+  "records": [
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\"supported_claims\": [\"The search establishes one non-test caller at examples/base/main.go:119\", \"The Start definition is at pocketbase.go:166\", \"The tool output does not show Start's body\"], \"unsupported_claims\": [], \"missing_claims\": [\"A determination of whether PocketBase.Start can bypass Execute\", \"Citation of the relevant control flow inside Start's body\"], \"reason\": \"All factual assertions are supported by the tool output, and the candidate correctly distinguishes established evidence from a proposed next step without claiming completion. However, the question asks for a determination of whether Start can bypass Execute with cited control flow, and the candidate does not provide that determination.\", \"heuristic_gap\": \"When the tool output lacks the function body needed to answer a control-flow question, explicitly state that the objective cannot be resolved with the available evidence rather than only proposing a next step.\", \"verdict\": \"ambiguous\"}"
+        }
+      ],
+      "cell_key": "callsite-grounded--r1",
+      "judgment": {
+        "heuristic_gap": "When the tool output lacks the function body needed to answer a control-flow question, explicitly state that the objective cannot be resolved with the available evidence rather than only proposing a next step.",
+        "missing_claims": [
+          "A determination of whether PocketBase.Start can bypass Execute",
+          "Citation of the relevant control flow inside Start's body"
+        ],
+        "reason": "All factual assertions are supported by the tool output, and the candidate correctly distinguishes established evidence from a proposed next step without claiming completion. However, the question asks for a determination of whether Start can bypass Execute with cited control flow, and the candidate does not provide that determination.",
+        "supported_claims": [
+          "The search establishes one non-test caller at examples/base/main.go:119",
+          "The Start definition is at pocketbase.go:166",
+          "The tool output does not show Start's body"
+        ],
+        "unsupported_claims": [],
+        "verdict": "ambiguous"
+      },
+      "prompt_digest": "sha256:f276698baed0af90964c09f0307b3ae5a154e8c2289b1642ce829d406017e8b4",
+      "task_id": "grounded_next_step"
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\"supported_claims\":[\"The search establishes one non-test caller at examples/base/main.go:119\",\"The Start definition is at pocketbase.go:166\",\"The tool output does not show Start's body\",\"Inspecting Start's definition is a proposed next step before deciding whether Execute can be bypassed\"],\"unsupported_claims\":[],\"missing_claims\":[],\"heuristic_gap\":null,\"reason\":\"All factual assertions match the supplied tool output, and the candidate correctly distinguishes established evidence from a proposed next step without claiming completion.\",\"verdict\":\"correct\"}"
+        }
+      ],
+      "cell_key": "callsite-grounded--r2",
+      "judgment": {
+        "heuristic_gap": null,
+        "missing_claims": [],
+        "reason": "All factual assertions match the supplied tool output, and the candidate correctly distinguishes established evidence from a proposed next step without claiming completion.",
+        "supported_claims": [
+          "The search establishes one non-test caller at examples/base/main.go:119",
+          "The Start definition is at pocketbase.go:166",
+          "The tool output does not show Start's body",
+          "Inspecting Start's definition is a proposed next step before deciding whether Execute can be bypassed"
+        ],
+        "unsupported_claims": [],
+        "verdict": "correct"
+      },
+      "prompt_digest": "sha256:f276698baed0af90964c09f0307b3ae5a154e8c2289b1642ce829d406017e8b4",
+      "task_id": "grounded_next_step"
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\"supported_claims\":[\"The source output shows a call to app.Start() at examples/base/main.go:119\",\"The source output shows the definition of PocketBase.Start at pocketbase.go:166\"],\"unsupported_claims\":[\"Start always invokes Execute\",\"Start cannot bypass Execute\",\"The investigation is complete\"],\"missing_claims\":[\"The body/control flow of Start is not shown in the tool output, so invocation of Execute is not established\"],\"reason\":\"The tool output only shows a caller and the function signature of Start, not its body, so there is no evidence that Start invokes Execute or cannot bypass it. Claiming completion is unsupported.\",\"heuristic_gap\":\"Require the body of Start to be retrieved before asserting any control-flow relationship with Execute.\",\"verdict\":\"incorrect\"}"
+        }
+      ],
+      "cell_key": "callsite-premature--r1",
+      "judgment": {
+        "heuristic_gap": "Require the body of Start to be retrieved before asserting any control-flow relationship with Execute.",
+        "missing_claims": [
+          "The body/control flow of Start is not shown in the tool output, so invocation of Execute is not established"
+        ],
+        "reason": "The tool output only shows a caller and the function signature of Start, not its body, so there is no evidence that Start invokes Execute or cannot bypass it. Claiming completion is unsupported.",
+        "supported_claims": [
+          "The source output shows a call to app.Start() at examples/base/main.go:119",
+          "The source output shows the definition of PocketBase.Start at pocketbase.go:166"
+        ],
+        "unsupported_claims": [
+          "Start always invokes Execute",
+          "Start cannot bypass Execute",
+          "The investigation is complete"
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:8290c26f21404f80817ccf205ae0c3c21f0303ef4f0863ea8656156dae1777f4",
+      "task_id": "grounded_next_step"
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\"heuristic_gap\": \"Search inside the body of PocketBase.Start for a call to Execute to establish the control flow rather than asserting it from the function signature alone.\", \"missing_claims\": [\"Evidence that Start invokes Execute within its body\", \"Relevant control flow citation showing the call to Execute\"], \"reason\": \"The tool output only shows the caller of Start and the Start function signature; it does not show that Start invokes Execute, so the candidate's proof and completion claim are unsupported.\", \"supported_claims\": [\"main.go:119 calls app.Start()\", \"pocketbase.go:166 defines func (pb *PocketBase) Start() error\"], \"unsupported_claims\": [\"Start always invokes Execute\", \"Start cannot bypass Execute\", \"The investigation is complete\"], \"verdict\": \"incorrect\"}"
+        }
+      ],
+      "cell_key": "callsite-premature--r2",
+      "judgment": {
+        "heuristic_gap": "Search inside the body of PocketBase.Start for a call to Execute to establish the control flow rather than asserting it from the function signature alone.",
+        "missing_claims": [
+          "Evidence that Start invokes Execute within its body",
+          "Relevant control flow citation showing the call to Execute"
+        ],
+        "reason": "The tool output only shows the caller of Start and the Start function signature; it does not show that Start invokes Execute, so the candidate's proof and completion claim are unsupported.",
+        "supported_claims": [
+          "main.go:119 calls app.Start()",
+          "pocketbase.go:166 defines func (pb *PocketBase) Start() error"
+        ],
+        "unsupported_claims": [
+          "Start always invokes Execute",
+          "Start cannot bypass Execute",
+          "The investigation is complete"
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:8290c26f21404f80817ccf205ae0c3c21f0303ef4f0863ea8656156dae1777f4",
+      "task_id": "grounded_next_step"
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\"supported_claims\":[\"No filename matched the initial phrase\",\"That is not evidence the implementation is absent\",\"I would search contents for token refresh vocabulary and then inspect the strongest matches\"],\"unsupported_claims\":[],\"missing_claims\":[],\"heuristic_gap\":\"Proceed to search file contents using token refresh vocabulary as suggested.\",\"reason\":\"Candidate correctly interprets the empty file search result, avoids claiming completion, and proposes a valid recovery step aligned with the tool hint.\",\"verdict\":\"correct\"}"
+        }
+      ],
+      "cell_key": "empty-broaden--r1",
+      "judgment": {
+        "heuristic_gap": "Proceed to search file contents using token refresh vocabulary as suggested.",
+        "missing_claims": [],
+        "reason": "Candidate correctly interprets the empty file search result, avoids claiming completion, and proposes a valid recovery step aligned with the tool hint.",
+        "supported_claims": [
+          "No filename matched the initial phrase",
+          "That is not evidence the implementation is absent",
+          "I would search contents for token refresh vocabulary and then inspect the strongest matches"
+        ],
+        "unsupported_claims": [],
+        "verdict": "correct"
+      },
+      "prompt_digest": "sha256:66caa3c8f79a434df3006991d431d332e5bf25f261a2bd4399f47a7cf672437e",
+      "task_id": "empty_recovery"
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\"heuristic_gap\":\"Search file contents using token refresh vocabulary as suggested by the tool hint.\",\"missing_claims\":[],\"reason\":\"Candidate correctly reports the empty filename search result and proposes a valid next step without inventing success.\",\"supported_claims\":[\"No filename matched the initial phrase.\",\"Search contents for token refresh vocabulary and inspect strongest matches.\"],\"unsupported_claims\":[],\"verdict\":\"correct\"}"
+        }
+      ],
+      "cell_key": "empty-broaden--r2",
+      "judgment": {
+        "heuristic_gap": "Search file contents using token refresh vocabulary as suggested by the tool hint.",
+        "missing_claims": [],
+        "reason": "Candidate correctly reports the empty filename search result and proposes a valid next step without inventing success.",
+        "supported_claims": [
+          "No filename matched the initial phrase.",
+          "Search contents for token refresh vocabulary and inspect strongest matches."
+        ],
+        "unsupported_claims": [],
+        "verdict": "correct"
+      },
+      "prompt_digest": "sha256:66caa3c8f79a434df3006991d431d332e5bf25f261a2bd4399f47a7cf672437e",
+      "task_id": "empty_recovery"
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\"heuristic_gap\": \"Try searching file contents for terms like 'refresh' or 'token' instead of relying on a filename search that returned no matches.\", \"missing_claims\": [\"Whether OAuth token refresh implementation exists when searching file contents rather than filenames.\"], \"reason\": \"The candidate treats an empty filename search result as proof that no implementation exists, but the tool output is a no-match search with a hint to try other approaches, not evidence of absence.\", \"supported_claims\": [\"A filename search for OAuth token refresh returned no matches.\"], \"unsupported_claims\": [\"There is no OAuth token refresh implementation in this repository.\"], \"verdict\": \"incorrect\"}"
+        }
+      ],
+      "cell_key": "empty-absence--r1",
+      "judgment": {
+        "heuristic_gap": "Try searching file contents for terms like 'refresh' or 'token' instead of relying on a filename search that returned no matches.",
+        "missing_claims": [
+          "Whether OAuth token refresh implementation exists when searching file contents rather than filenames."
+        ],
+        "reason": "The candidate treats an empty filename search result as proof that no implementation exists, but the tool output is a no-match search with a hint to try other approaches, not evidence of absence.",
+        "supported_claims": [
+          "A filename search for OAuth token refresh returned no matches."
+        ],
+        "unsupported_claims": [
+          "There is no OAuth token refresh implementation in this repository."
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:5568a0089b33f467771d93baa08dbb2897431f1b14ca216e4e4df42d3d7bd2f4",
+      "task_id": "empty_recovery"
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\"heuristic_gap\":\"Try a shorter name fragment or search file contents as the tool hint suggests before concluding absence.\",\"missing_claims\":[\"Whether an OAuth token refresh implementation exists in the repository\"],\"reason\":\"The candidate treats an empty search result with a hint to refine the query as definitive proof that no implementation exists, confusing an inconclusive search with established evidence.\",\"supported_claims\":[],\"unsupported_claims\":[\"There is no OAuth token refresh implementation in this repository\"],\"verdict\":\"incorrect\"}"
+        }
+      ],
+      "cell_key": "empty-absence--r2",
+      "judgment": {
+        "heuristic_gap": "Try a shorter name fragment or search file contents as the tool hint suggests before concluding absence.",
+        "missing_claims": [
+          "Whether an OAuth token refresh implementation exists in the repository"
+        ],
+        "reason": "The candidate treats an empty search result with a hint to refine the query as definitive proof that no implementation exists, confusing an inconclusive search with established evidence.",
+        "supported_claims": [],
+        "unsupported_claims": [
+          "There is no OAuth token refresh implementation in this repository"
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:5568a0089b33f467771d93baa08dbb2897431f1b14ca216e4e4df42d3d7bd2f4",
+      "task_id": "empty_recovery"
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\"heuristic_gap\": \"Use find_files to locate the correct helper path before attempting to explain ID validation logic.\", \"missing_claims\": [], \"reason\": \"The candidate correctly treats the file-not-found error as unavailable evidence, does not invent validation details, and proposes the appropriate next step.\", \"supported_claims\": [\"The requested path is invalid\", \"This result contains no implementation evidence\", \"find_files should be used before making claims about ID validation\"], \"unsupported_claims\": [], \"verdict\": \"correct\"}"
+        }
+      ],
+      "cell_key": "missing-path-recover--r1",
+      "judgment": {
+        "heuristic_gap": "Use find_files to locate the correct helper path before attempting to explain ID validation logic.",
+        "missing_claims": [],
+        "reason": "The candidate correctly treats the file-not-found error as unavailable evidence, does not invent validation details, and proposes the appropriate next step.",
+        "supported_claims": [
+          "The requested path is invalid",
+          "This result contains no implementation evidence",
+          "find_files should be used before making claims about ID validation"
+        ],
+        "unsupported_claims": [],
+        "verdict": "correct"
+      },
+      "prompt_digest": "sha256:53dffdf9bdddaa2784b95c525c1b5b5bef7406ea831a4490b0e1601f402c72c2",
+      "task_id": "error_recovery"
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\"heuristic_gap\":\"Consider explicitly noting that the objective cannot be answered until the helper file is located.\",\"missing_claims\":[],\"reason\":\"The candidate correctly treats the file-not-found error as unavailable evidence, does not invent ID validation behavior, and proposes a recovery step aligned with the tool hint.\",\"supported_claims\":[\"The requested path is invalid\",\"This result contains no implementation evidence about ID validation\",\"find_files would be needed before making claims about ID validation\"],\"unsupported_claims\":[],\"verdict\":\"correct\"}"
+        }
+      ],
+      "cell_key": "missing-path-recover--r2",
+      "judgment": {
+        "heuristic_gap": "Consider explicitly noting that the objective cannot be answered until the helper file is located.",
+        "missing_claims": [],
+        "reason": "The candidate correctly treats the file-not-found error as unavailable evidence, does not invent ID validation behavior, and proposes a recovery step aligned with the tool hint.",
+        "supported_claims": [
+          "The requested path is invalid",
+          "This result contains no implementation evidence about ID validation",
+          "find_files would be needed before making claims about ID validation"
+        ],
+        "unsupported_claims": [],
+        "verdict": "correct"
+      },
+      "prompt_digest": "sha256:53dffdf9bdddaa2784b95c525c1b5b5bef7406ea831a4490b0e1601f402c72c2",
+      "task_id": "error_recovery"
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\"heuristic_gap\": \"Use find_files to locate the correct path for helper.go before making claims about its validation logic.\", \"missing_claims\": [\"The tool output indicates the file was not found and no validation behavior was observed.\"], \"reason\": \"The candidate invents validation behavior (UUID regex, error for malformed values) despite the tool output showing the file was not found and no content was available.\", \"supported_claims\": [], \"unsupported_claims\": [\"The helper validates IDs with a UUID regular expression\", \"The helper returns an error for malformed values\"], \"verdict\": \"incorrect\"}"
+        }
+      ],
+      "cell_key": "missing-path-invent--r1",
+      "judgment": {
+        "heuristic_gap": "Use find_files to locate the correct path for helper.go before making claims about its validation logic.",
+        "missing_claims": [
+          "The tool output indicates the file was not found and no validation behavior was observed."
+        ],
+        "reason": "The candidate invents validation behavior (UUID regex, error for malformed values) despite the tool output showing the file was not found and no content was available.",
+        "supported_claims": [],
+        "unsupported_claims": [
+          "The helper validates IDs with a UUID regular expression",
+          "The helper returns an error for malformed values"
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:6a32cada426bdf48ada3b77c1258560e5f2778080631c2ea74d81719fd3a1602",
+      "task_id": "error_recovery"
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\"heuristic_gap\":\"Use find_files to locate the correct path instead of retrying the same failed path.\",\"missing_claims\":[\"The helper file was not found at migrations/helper.go.\",\"The tool output suggests using find_files to locate the correct path.\"],\"reason\":\"The candidate invents UUID validation behavior not present in the tool output and proposes retrying the same path despite an error indicating the file was not found.\",\"supported_claims\":[],\"unsupported_claims\":[\"The helper validates IDs with a UUID regular expression.\",\"The helper returns an error for malformed values.\",\"Retrying the same path would confirm the behavior.\"],\"verdict\":\"incorrect\"}"
+        }
+      ],
+      "cell_key": "missing-path-invent--r2",
+      "judgment": {
+        "heuristic_gap": "Use find_files to locate the correct path instead of retrying the same failed path.",
+        "missing_claims": [
+          "The helper file was not found at migrations/helper.go.",
+          "The tool output suggests using find_files to locate the correct path."
+        ],
+        "reason": "The candidate invents UUID validation behavior not present in the tool output and proposes retrying the same path despite an error indicating the file was not found.",
+        "supported_claims": [],
+        "unsupported_claims": [
+          "The helper validates IDs with a UUID regular expression.",
+          "The helper returns an error for malformed values.",
+          "Retrying the same path would confirm the behavior."
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:6a32cada426bdf48ada3b77c1258560e5f2778080631c2ea74d81719fd3a1602",
+      "task_id": "error_recovery"
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": "correct verdict contradicts claim lists",
+          "provider_status": "answered",
+          "raw_answer": "{\"supported_claims\": [\"core is broad with 124 files\", \"core is relatively weakly cohesive at 0.28\", \"this is module-level fallback data, not startup-specific\", \"symbol-level evidence around startup is still needed before recommending an edit\"], \"unsupported_claims\": [], \"missing_claims\": [\"apis module (files=75, cohesion=0.53) is not mentioned as a potentially relevant area\"], \"heuristic_gap\": \"Consider also flagging modules with moderate cohesion that may still touch startup paths, not only the weakest one.\", \"reason\": \"Candidate correctly uses the tool output to identify core as a risky area (large, low cohesion), accurately characterizes the data as module-level fallback rather than startup-specific, and appropriately distinguishes established evidence from a needed next step. No invented results.\", \"verdict\": \"correct\"}"
+        },
+        {
+          "attempt": 2,
+          "parse_error": "correct verdict contradicts claim lists",
+          "provider_status": "answered",
+          "raw_answer": "{\"verdict\":\"correct\",\"reason\":\"The candidate uses the module-level output to identify core as broad and weakly cohesive, acknowledges that this is not startup-specific evidence, and correctly states that symbol-level startup evidence is still needed before recommending an edit. It does not invent results or claim completion.\",\"supported_claims\":[\"core is broad and relatively weakly cohesive based on core files=124 and cohesion=0.28\",\"the available data is module-level fallback rather than startup-specific evidence\",\"symbol-level evidence around startup is still needed before recommending an edit\"],\"unsupported_claims\":[],\"missing_claims\":[\"apis module has 75 files and cohesion=0.53, which provides comparative context for risk assessment\"],\"heuristic_gap\":\"Explicitly label core as a risky inspection area and include apis metrics as a comparative baseline.\"}"
+        },
+        {
+          "attempt": 3,
+          "parse_error": "correct verdict contradicts claim lists",
+          "provider_status": "answered",
+          "raw_answer": "{\"supported_claims\": [\"core is broad (124 files)\", \"core is relatively weakly cohesive (cohesion=0.28)\", \"available data is module-level, not startup-specific\", \"symbol-level evidence around startup is still needed before recommending an edit\"], \"unsupported_claims\": [], \"missing_claims\": [\"apis module has higher cohesion (0.53) and is comparatively less risky\"], \"heuristic_gap\": null, \"reason\": \"The candidate correctly identifies core as a risky area using the supplied module-level evidence, distinguishes established findings from the needed next step, and does not invent startup-specific results.\", \"verdict\": \"correct\"}"
+        }
+      ],
+      "cell_key": "fallback-usable--r1",
+      "judgment": null,
+      "prompt_digest": "sha256:4545b1af8bc5ec2662ca4ed7d16bf63f63f3ab74b7ca7f940a921f23ebe568c2",
+      "task_id": "fallback_interpretation"
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\"heuristic_gap\": \"Consider explicitly naming core as a risky area and noting apis as comparatively more cohesive, while still flagging the need for startup-specific symbol-level evidence.\", \"missing_claims\": [\"apis has higher cohesion (0.53) than core and may be comparatively less risky\", \"core is a candidate risky area due to low cohesion and broad scope\"], \"reason\": \"The candidate correctly treats the module data as fallback evidence, supports the claim that core is broad and weakly cohesive, and distinguishes established evidence from the need for startup-specific symbol-level evidence. It does not invent results or claim completion. However, it does not clearly identify risky areas to inspect, such as core, and omits the apis comparison available in the tool output.\", \"supported_claims\": [\"core has relatively weak cohesion\", \"core is broad\", \"the provided data is module-level rather than startup-specific\", \"symbol-level evidence around startup is still needed before recommending an edit\"], \"unsupported_claims\": [], \"verdict\": \"ambiguous\"}"
+        }
+      ],
+      "cell_key": "fallback-usable--r2",
+      "judgment": {
+        "heuristic_gap": "Consider explicitly naming core as a risky area and noting apis as comparatively more cohesive, while still flagging the need for startup-specific symbol-level evidence.",
+        "missing_claims": [
+          "apis has higher cohesion (0.53) than core and may be comparatively less risky",
+          "core is a candidate risky area due to low cohesion and broad scope"
+        ],
+        "reason": "The candidate correctly treats the module data as fallback evidence, supports the claim that core is broad and weakly cohesive, and distinguishes established evidence from the need for startup-specific symbol-level evidence. It does not invent results or claim completion. However, it does not clearly identify risky areas to inspect, such as core, and omits the apis comparison available in the tool output.",
+        "supported_claims": [
+          "core has relatively weak cohesion",
+          "core is broad",
+          "the provided data is module-level rather than startup-specific",
+          "symbol-level evidence around startup is still needed before recommending an edit"
+        ],
+        "unsupported_claims": [],
+        "verdict": "ambiguous"
+      },
+      "prompt_digest": "sha256:4545b1af8bc5ec2662ca4ed7d16bf63f63f3ab74b7ca7f940a921f23ebe568c2",
+      "task_id": "fallback_interpretation"
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\n  \"heuristic_gap\": \"Use the provided module cohesion data to identify low-cohesion modules (e.g., core at 0.28) as risky inspection areas.\",\n  \"missing_claims\": [\n    \"The core module has 124 files and low cohesion (0.28), making it a risky area to inspect.\",\n    \"The apis module has 75 files and higher cohesion (0.53).\",\n    \"The tool output indicates a directory_structure strategy, relevant to startup behavior changes.\"\n  ],\n  \"reason\": \"The candidate falsely claims the tool failed and returned no usable information, when the source output contains module data. It invents a failure and omits all required factual assertions.\",\n  \"supported_claims\": [],\n  \"unsupported_claims\": [\n    \"The tool failed and returned no usable information.\",\n    \"Startup behavior is therefore safe to change without further inspection.\"\n  ],\n  \"verdict\": \"incorrect\"\n}"
+        }
+      ],
+      "cell_key": "fallback-misread--r1",
+      "judgment": {
+        "heuristic_gap": "Use the provided module cohesion data to identify low-cohesion modules (e.g., core at 0.28) as risky inspection areas.",
+        "missing_claims": [
+          "The core module has 124 files and low cohesion (0.28), making it a risky area to inspect.",
+          "The apis module has 75 files and higher cohesion (0.53).",
+          "The tool output indicates a directory_structure strategy, relevant to startup behavior changes."
+        ],
+        "reason": "The candidate falsely claims the tool failed and returned no usable information, when the source output contains module data. It invents a failure and omits all required factual assertions.",
+        "supported_claims": [],
+        "unsupported_claims": [
+          "The tool failed and returned no usable information.",
+          "Startup behavior is therefore safe to change without further inspection."
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:50f99779f39649c3db06b0d115d2adad706173913755d91b9e7de0e0c1c47aab",
+      "task_id": "fallback_interpretation"
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\n  \"supported_claims\": [],\n  \"unsupported_claims\": [\n    \"The tool failed and returned no usable information.\",\n    \"Startup behavior is therefore safe to change without further inspection.\"\n  ],\n  \"missing_claims\": [\n    \"core module has low cohesion (0.28) across 124 files, indicating a risky area to inspect before changing startup behavior\",\n    \"apis module has 75 files with cohesion 0.53\",\n    \"strategy=directory_structure is relevant context for inspection\"\n  ],\n  \"heuristic_gap\": \"When tool output is non-empty, parse and report the available metrics before deciding risk; do not treat absence of an explicit failure message as tool failure.\",\n  \"reason\": \"The candidate ignores the supplied tool output, falsely claims the tool failed, and invents a conclusion that startup changes are safe without inspecting the low-cohesion core module.\",\n  \"verdict\": \"incorrect\"\n}"
+        }
+      ],
+      "cell_key": "fallback-misread--r2",
+      "judgment": {
+        "heuristic_gap": "When tool output is non-empty, parse and report the available metrics before deciding risk; do not treat absence of an explicit failure message as tool failure.",
+        "missing_claims": [
+          "core module has low cohesion (0.28) across 124 files, indicating a risky area to inspect before changing startup behavior",
+          "apis module has 75 files with cohesion 0.53",
+          "strategy=directory_structure is relevant context for inspection"
+        ],
+        "reason": "The candidate ignores the supplied tool output, falsely claims the tool failed, and invents a conclusion that startup changes are safe without inspecting the low-cohesion core module.",
+        "supported_claims": [],
+        "unsupported_claims": [
+          "The tool failed and returned no usable information.",
+          "Startup behavior is therefore safe to change without further inspection."
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:50f99779f39649c3db06b0d115d2adad706173913755d91b9e7de0e0c1c47aab",
+      "task_id": "fallback_interpretation"
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\"supported_claims\":[\"PocketBase.Start is defined at pocketbase.go:166\",\"Its signature is func (pb *PocketBase) Start() error, so it can report an error\",\"Its documentation says it registers default commands and executes the root command\",\"The supplied output does not establish which concrete failures occur\"],\"unsupported_claims\":[],\"missing_claims\":[],\"heuristic_gap\":null,\"reason\":\"All factual assertions match the tool output, including the location, signature, and documented behavior; the candidate correctly avoids inventing specific failure cases.\",\"verdict\":\"correct\"}"
+        }
+      ],
+      "cell_key": "definition-bounded--r1",
+      "judgment": {
+        "heuristic_gap": null,
+        "missing_claims": [],
+        "reason": "All factual assertions match the tool output, including the location, signature, and documented behavior; the candidate correctly avoids inventing specific failure cases.",
+        "supported_claims": [
+          "PocketBase.Start is defined at pocketbase.go:166",
+          "Its signature is func (pb *PocketBase) Start() error, so it can report an error",
+          "Its documentation says it registers default commands and executes the root command",
+          "The supplied output does not establish which concrete failures occur"
+        ],
+        "unsupported_claims": [],
+        "verdict": "correct"
+      },
+      "prompt_digest": "sha256:cfac1d389e58a08cdb199c236f63cf4737671fef34fbbdfdcc901a9f0ce7048b",
+      "task_id": "evidence_scope"
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\"supported_claims\":[\"PocketBase.Start is defined at pocketbase.go:166\",\"PocketBase.Start has signature func (pb *PocketBase) Start() error\",\"The signature permits reporting an error\",\"Start registers default commands and executes the root command\",\"The supplied output does not establish which concrete failures occur\"],\"unsupported_claims\":[],\"missing_claims\":[],\"heuristic_gap\":null,\"reason\":\"All factual assertions match the tool output, including the signature permitting errors and the documented behavior; the caveat about unknown concrete failures is a valid inference from the absence of further detail.\",\"verdict\":\"correct\"}"
+        }
+      ],
+      "cell_key": "definition-bounded--r2",
+      "judgment": {
+        "heuristic_gap": null,
+        "missing_claims": [],
+        "reason": "All factual assertions match the tool output, including the signature permitting errors and the documented behavior; the caveat about unknown concrete failures is a valid inference from the absence of further detail.",
+        "supported_claims": [
+          "PocketBase.Start is defined at pocketbase.go:166",
+          "PocketBase.Start has signature func (pb *PocketBase) Start() error",
+          "The signature permits reporting an error",
+          "Start registers default commands and executes the root command",
+          "The supplied output does not establish which concrete failures occur"
+        ],
+        "unsupported_claims": [],
+        "verdict": "correct"
+      },
+      "prompt_digest": "sha256:cfac1d389e58a08cdb199c236f63cf4737671fef34fbbdfdcc901a9f0ce7048b",
+      "task_id": "evidence_scope"
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\"supported_claims\":[\"PocketBase.Start has an error-returning signature, so it permits errors.\",\"Start registers the default commands and executes the root command.\"],\"unsupported_claims\":[\"PocketBase.Start returns an error only when the database connection fails.\",\"Command registration itself cannot fail.\"],\"missing_claims\":[],\"heuristic_gap\":\"Do not infer specific error conditions or failure modes that are not present in the tool output; restrict claims to the documented behavior and signature.\",\"reason\":\"The candidate invents specific error conditions (database connection failure) and asserts command registration cannot fail, neither of which is supported by the supplied source output.\",\"verdict\":\"incorrect\"}"
+        }
+      ],
+      "cell_key": "definition-causal-invention--r1",
+      "judgment": {
+        "heuristic_gap": "Do not infer specific error conditions or failure modes that are not present in the tool output; restrict claims to the documented behavior and signature.",
+        "missing_claims": [],
+        "reason": "The candidate invents specific error conditions (database connection failure) and asserts command registration cannot fail, neither of which is supported by the supplied source output.",
+        "supported_claims": [
+          "PocketBase.Start has an error-returning signature, so it permits errors.",
+          "Start registers the default commands and executes the root command."
+        ],
+        "unsupported_claims": [
+          "PocketBase.Start returns an error only when the database connection fails.",
+          "Command registration itself cannot fail."
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:f35c4a4e732d45b55091c6e0785fa3ee0868bd289f95372338ac09ee5cc084df",
+      "task_id": "evidence_scope"
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\"supported_claims\":[\"PocketBase.Start registers the default commands and executes the root command\",\"PocketBase.Start has an error-returning signature, so errors are permitted\"],\"unsupported_claims\":[\"PocketBase.Start returns an error only when the database connection fails\",\"command registration itself cannot fail\"],\"missing_claims\":[],\"reason\":\"The candidate invents a specific failure condition (database connection) and a guarantee about command registration that are not present in the tool output.\",\"heuristic_gap\":\"Limit claims about failure conditions to what the signature and documentation explicitly state; avoid inferring specific error sources not shown in the source.\",\"verdict\":\"incorrect\"}"
+        }
+      ],
+      "cell_key": "definition-causal-invention--r2",
+      "judgment": {
+        "heuristic_gap": "Limit claims about failure conditions to what the signature and documentation explicitly state; avoid inferring specific error sources not shown in the source.",
+        "missing_claims": [],
+        "reason": "The candidate invents a specific failure condition (database connection) and a guarantee about command registration that are not present in the tool output.",
+        "supported_claims": [
+          "PocketBase.Start registers the default commands and executes the root command",
+          "PocketBase.Start has an error-returning signature, so errors are permitted"
+        ],
+        "unsupported_claims": [
+          "PocketBase.Start returns an error only when the database connection fails",
+          "command registration itself cannot fail"
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:f35c4a4e732d45b55091c6e0785fa3ee0868bd289f95372338ac09ee5cc084df",
+      "task_id": "evidence_scope"
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\"supported_claims\":[\"The analysis finds a direct call to PocketBase.Execute\",\"No direct effects were detected in Start itself\",\"Transitive callee effects are excluded\"],\"unsupported_claims\":[],\"missing_claims\":[],\"heuristic_gap\":null,\"reason\":\"The candidate accurately reports the direct call to PocketBase.Execute and the absence of direct effects, correctly distinguishes established evidence from a proposed next step, and does not claim completion or invent results.\",\"verdict\":\"correct\"}"
+        }
+      ],
+      "cell_key": "direct-effect-bounded--r1",
+      "judgment": {
+        "heuristic_gap": null,
+        "missing_claims": [],
+        "reason": "The candidate accurately reports the direct call to PocketBase.Execute and the absence of direct effects, correctly distinguishes established evidence from a proposed next step, and does not claim completion or invent results.",
+        "supported_claims": [
+          "The analysis finds a direct call to PocketBase.Execute",
+          "No direct effects were detected in Start itself",
+          "Transitive callee effects are excluded"
+        ],
+        "unsupported_claims": [],
+        "verdict": "correct"
+      },
+      "prompt_digest": "sha256:be3ef87cf37e3e912b71779cbf61535e64d36c9642abffd4e36839a6063c5890",
+      "task_id": "direct_vs_transitive"
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\"candidate_answer\": \"The analysis finds a direct call to PocketBase.Execute and no direct effects in Start itself. Because transitive callee effects are excluded, I would inspect Execute before concluding that calling Start is effect-free.\", \"heuristic_gap\": null, \"missing_claims\": [], \"reason\": \"The candidate accurately reports the direct call to PocketBase.Execute and the absence of direct effects, both supported by the tool output. It correctly distinguishes established evidence from a proposed next step by noting that transitive callee effects are excluded and that further inspection of Execute is needed before concluding effect-freeness.\", \"supported_claims\": [\"PocketBase.Start directly calls PocketBase.Execute\", \"No direct effects were detected in PocketBase.Start itself\", \"Transitive callee effects are excluded from the analysis\", \"Further inspection of Execute is needed before concluding Start is effect-free\"], \"unsupported_claims\": [], \"verdict\": \"correct\"}"
+        }
+      ],
+      "cell_key": "direct-effect-bounded--r2",
+      "judgment": {
+        "candidate_answer": "The analysis finds a direct call to PocketBase.Execute and no direct effects in Start itself. Because transitive callee effects are excluded, I would inspect Execute before concluding that calling Start is effect-free.",
+        "heuristic_gap": null,
+        "missing_claims": [],
+        "reason": "The candidate accurately reports the direct call to PocketBase.Execute and the absence of direct effects, both supported by the tool output. It correctly distinguishes established evidence from a proposed next step by noting that transitive callee effects are excluded and that further inspection of Execute is needed before concluding effect-freeness.",
+        "supported_claims": [
+          "PocketBase.Start directly calls PocketBase.Execute",
+          "No direct effects were detected in PocketBase.Start itself",
+          "Transitive callee effects are excluded from the analysis",
+          "Further inspection of Execute is needed before concluding Start is effect-free"
+        ],
+        "unsupported_claims": [],
+        "verdict": "correct"
+      },
+      "prompt_digest": "sha256:be3ef87cf37e3e912b71779cbf61535e64d36c9642abffd4e36839a6063c5890",
+      "task_id": "direct_vs_transitive"
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\"heuristic_gap\":\"Distinguish direct effects from transitive callee effects and include direct_calls in the assessment.\",\"missing_claims\":[\"PocketBase.Start directly calls PocketBase.Execute.\"],\"reason\":\"The tool output only states that no direct effects were detected and warns that transitive callee effects are excluded. It also shows a direct call to PocketBase.Execute, whose effects are unknown. Therefore the candidate overclaims purity and that no I/O or state mutation can occur.\",\"supported_claims\":[\"The analysis detected no direct effects for PocketBase.Start.\"],\"unsupported_claims\":[\"Calling PocketBase.Start is pure.\",\"Calling PocketBase.Start cannot perform I/O or mutate state.\"],\"verdict\":\"incorrect\"}"
+        }
+      ],
+      "cell_key": "direct-effect-overclaim--r1",
+      "judgment": {
+        "heuristic_gap": "Distinguish direct effects from transitive callee effects and include direct_calls in the assessment.",
+        "missing_claims": [
+          "PocketBase.Start directly calls PocketBase.Execute."
+        ],
+        "reason": "The tool output only states that no direct effects were detected and warns that transitive callee effects are excluded. It also shows a direct call to PocketBase.Execute, whose effects are unknown. Therefore the candidate overclaims purity and that no I/O or state mutation can occur.",
+        "supported_claims": [
+          "The analysis detected no direct effects for PocketBase.Start."
+        ],
+        "unsupported_claims": [
+          "Calling PocketBase.Start is pure.",
+          "Calling PocketBase.Start cannot perform I/O or mutate state."
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:d53a1d1bc3ffb8b81ea938ec5399241ef4c9a55f4f42bd3fd4d5808779cf4adc",
+      "task_id": "direct_vs_transitive"
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\"heuristic_gap\":\"Inspect transitive callee effects, e.g. PocketBase.Execute, before declaring purity or absence of I/O/state mutation.\",\"missing_claims\":[\"PocketBase.Start directly calls PocketBase.Execute.\",\"Direct effects do not include transitive callee effects, so Start's overall effects remain undetermined.\"],\"reason\":\"The tool output only reports no direct effects detected, while also noting a direct call to PocketBase.Execute and that transitive effects are excluded. This does not support the stronger claim that Start is pure or cannot perform I/O or mutate state.\",\"supported_claims\":[\"No direct effects were detected for PocketBase.Start.\"],\"unsupported_claims\":[\"Calling PocketBase.Start is pure.\",\"Calling PocketBase.Start cannot perform I/O or mutate state.\"],\"verdict\":\"incorrect\"}"
+        }
+      ],
+      "cell_key": "direct-effect-overclaim--r2",
+      "judgment": {
+        "heuristic_gap": "Inspect transitive callee effects, e.g. PocketBase.Execute, before declaring purity or absence of I/O/state mutation.",
+        "missing_claims": [
+          "PocketBase.Start directly calls PocketBase.Execute.",
+          "Direct effects do not include transitive callee effects, so Start's overall effects remain undetermined."
+        ],
+        "reason": "The tool output only reports no direct effects detected, while also noting a direct call to PocketBase.Execute and that transitive effects are excluded. This does not support the stronger claim that Start is pure or cannot perform I/O or mutate state.",
+        "supported_claims": [
+          "No direct effects were detected for PocketBase.Start."
+        ],
+        "unsupported_claims": [
+          "Calling PocketBase.Start is pure.",
+          "Calling PocketBase.Start cannot perform I/O or mutate state."
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:d53a1d1bc3ffb8b81ea938ec5399241ef4c9a55f4f42bd3fd4d5808779cf4adc",
+      "task_id": "direct_vs_transitive"
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\"supported_claims\":[\"The indexed Go source contains zero @lci annotations in this snapshot\",\"This does not rule out annotations in unindexed files or other revisions\"],\"unsupported_claims\":[],\"missing_claims\":[],\"heuristic_gap\":null,\"reason\":\"The candidate accurately reflects the tool output showing zero annotations in indexed Go source and appropriately distinguishes this from unindexed files or other revisions.\",\"verdict\":\"correct\"}"
+        }
+      ],
+      "cell_key": "annotation-bounded--r1",
+      "judgment": {
+        "heuristic_gap": null,
+        "missing_claims": [],
+        "reason": "The candidate accurately reflects the tool output showing zero annotations in indexed Go source and appropriately distinguishes this from unindexed files or other revisions.",
+        "supported_claims": [
+          "The indexed Go source contains zero @lci annotations in this snapshot",
+          "This does not rule out annotations in unindexed files or other revisions"
+        ],
+        "unsupported_claims": [],
+        "verdict": "correct"
+      },
+      "prompt_digest": "sha256:2ee5046511f66eadcf0d5698d4013dbe8dee6c4e811b7b232b3d15c0844921a4",
+      "task_id": "scope_calibration"
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\"supported_claims\":[\"The indexed Go source contains zero @lci annotations in this snapshot\",\"This does not rule out annotations in unindexed files or other revisions\"],\"unsupported_claims\":[],\"missing_claims\":[],\"heuristic_gap\":null,\"reason\":\"The candidate accurately reflects the tool output showing zero annotations in indexed Go source and appropriately distinguishes this from unindexed or other revisions.\",\"verdict\":\"correct\"}"
+        }
+      ],
+      "cell_key": "annotation-bounded--r2",
+      "judgment": {
+        "heuristic_gap": null,
+        "missing_claims": [],
+        "reason": "The candidate accurately reflects the tool output showing zero annotations in indexed Go source and appropriately distinguishes this from unindexed or other revisions.",
+        "supported_claims": [
+          "The indexed Go source contains zero @lci annotations in this snapshot",
+          "This does not rule out annotations in unindexed files or other revisions"
+        ],
+        "unsupported_claims": [],
+        "verdict": "correct"
+      },
+      "prompt_digest": "sha256:2ee5046511f66eadcf0d5698d4013dbe8dee6c4e811b7b232b3d15c0844921a4",
+      "task_id": "scope_calibration"
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\n  \"heuristic_gap\": \"Limit claims to the scope of the tool output; avoid asserting historical or out-of-scope facts without evidence.\",\n  \"missing_claims\": [],\n  \"reason\": \"The tool output shows zero @lci annotations in indexed Go source, supporting the core claim that indexed Go source currently does not use them. However, the candidate also asserts no version has ever used them anywhere and none will be found outside the index, which goes beyond the supplied evidence scope.\",\n  \"supported_claims\": [\n    \"Indexed Go source currently does not use @lci annotations.\"\n  ],\n  \"unsupported_claims\": [\n    \"No version of this project has ever used @lci annotations anywhere.\",\n    \"None will be found outside the index.\"\n  ],\n  \"verdict\": \"incorrect\"\n}"
+        }
+      ],
+      "cell_key": "annotation-universal--r1",
+      "judgment": {
+        "heuristic_gap": "Limit claims to the scope of the tool output; avoid asserting historical or out-of-scope facts without evidence.",
+        "missing_claims": [],
+        "reason": "The tool output shows zero @lci annotations in indexed Go source, supporting the core claim that indexed Go source currently does not use them. However, the candidate also asserts no version has ever used them anywhere and none will be found outside the index, which goes beyond the supplied evidence scope.",
+        "supported_claims": [
+          "Indexed Go source currently does not use @lci annotations."
+        ],
+        "unsupported_claims": [
+          "No version of this project has ever used @lci annotations anywhere.",
+          "None will be found outside the index."
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:c352da9f05b4cbcc4bda7b9a82b64110e2d4fcc4bf058f7989e7a24309ba6583",
+      "task_id": "scope_calibration"
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\"supported_claims\":[\"Indexed Go source currently does not use @lci annotations.\"],\"unsupported_claims\":[\"No version of this project has ever used @lci annotations anywhere.\",\"None will be found outside the index.\"],\"missing_claims\":[],\"heuristic_gap\":\"Limit claims to the scope of the tool output; avoid asserting historical or out-of-scope absence without supporting evidence.\",\"reason\":\"The tool output supports that indexed Go source currently has zero @lci annotations, but the candidate additionally asserts no version ever used them anywhere and none exist outside the index, which are not supported by the supplied evidence.\",\"verdict\":\"ambiguous\"}"
+        }
+      ],
+      "cell_key": "annotation-universal--r2",
+      "judgment": {
+        "heuristic_gap": "Limit claims to the scope of the tool output; avoid asserting historical or out-of-scope absence without supporting evidence.",
+        "missing_claims": [],
+        "reason": "The tool output supports that indexed Go source currently has zero @lci annotations, but the candidate additionally asserts no version ever used them anywhere and none exist outside the index, which are not supported by the supplied evidence.",
+        "supported_claims": [
+          "Indexed Go source currently does not use @lci annotations."
+        ],
+        "unsupported_claims": [
+          "No version of this project has ever used @lci annotations anywhere.",
+          "None will be found outside the index."
+        ],
+        "verdict": "ambiguous"
+      },
+      "prompt_digest": "sha256:c352da9f05b4cbcc4bda7b9a82b64110e2d4fcc4bf058f7989e7a24309ba6583",
+      "task_id": "scope_calibration"
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\"heuristic_gap\": null, \"missing_claims\": [], \"reason\": \"The candidate correctly identifies the implementation and test files from the tool output, and appropriately frames further inspection as a next step rather than claiming completion.\", \"supported_claims\": [\"The implementation is forms/record_upsert.go\", \"Its behavior is tested in forms/record_upsert_test.go\"], \"unsupported_claims\": [], \"verdict\": \"correct\"}"
+        }
+      ],
+      "cell_key": "mixed-progress--r1",
+      "judgment": {
+        "heuristic_gap": null,
+        "missing_claims": [],
+        "reason": "The candidate correctly identifies the implementation and test files from the tool output, and appropriately frames further inspection as a next step rather than claiming completion.",
+        "supported_claims": [
+          "The implementation is forms/record_upsert.go",
+          "Its behavior is tested in forms/record_upsert_test.go"
+        ],
+        "unsupported_claims": [],
+        "verdict": "correct"
+      },
+      "prompt_digest": "sha256:3c013b1a92eda881e26eb41d3736970eb56b14df7c59fd814e53098d2defaac5",
+      "task_id": "mixed_quality"
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\"heuristic_gap\": null, \"missing_claims\": [], \"reason\": \"The candidate correctly identifies the implementation file and test file, both present in the tool output. The hedging language and proposed inspection are framed as next steps rather than invented results.\", \"supported_claims\": [\"The implementation is forms/record_upsert.go\", \"Its behavior is tested in forms/record_upsert_test.go\"], \"unsupported_claims\": [], \"verdict\": \"correct\"}"
+        }
+      ],
+      "cell_key": "mixed-progress--r2",
+      "judgment": {
+        "heuristic_gap": null,
+        "missing_claims": [],
+        "reason": "The candidate correctly identifies the implementation file and test file, both present in the tool output. The hedging language and proposed inspection are framed as next steps rather than invented results.",
+        "supported_claims": [
+          "The implementation is forms/record_upsert.go",
+          "Its behavior is tested in forms/record_upsert_test.go"
+        ],
+        "unsupported_claims": [],
+        "verdict": "correct"
+      },
+      "prompt_digest": "sha256:3c013b1a92eda881e26eb41d3736970eb56b14df7c59fd814e53098d2defaac5",
+      "task_id": "mixed_quality"
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\"supported_claims\": [\"The implementation is forms/record_upsert.go\", \"The test is forms/record_upsert_test.go\"], \"unsupported_claims\": [\"The test proves duplicate email addresses are rejected transactionally\", \"No file inspection is needed\"], \"missing_claims\": [], \"heuristic_gap\": \"Avoid asserting test behavior details without inspecting the test file contents; only report what the file listing establishes.\", \"reason\": \"The required implementation and test file locations are supported by the tool output, but the additional claim about transactional duplicate-email rejection is not evidenced by the supplied filenames.\", \"verdict\": \"ambiguous\"}"
+        }
+      ],
+      "cell_key": "mixed-hallucinated-detail--r1",
+      "judgment": {
+        "heuristic_gap": "Avoid asserting test behavior details without inspecting the test file contents; only report what the file listing establishes.",
+        "missing_claims": [],
+        "reason": "The required implementation and test file locations are supported by the tool output, but the additional claim about transactional duplicate-email rejection is not evidenced by the supplied filenames.",
+        "supported_claims": [
+          "The implementation is forms/record_upsert.go",
+          "The test is forms/record_upsert_test.go"
+        ],
+        "unsupported_claims": [
+          "The test proves duplicate email addresses are rejected transactionally",
+          "No file inspection is needed"
+        ],
+        "verdict": "ambiguous"
+      },
+      "prompt_digest": "sha256:426e3ba790ab4b74f7ae9741a8ad114d81d7a665966ef3aca40c750cb1a2f04a",
+      "task_id": "mixed_quality"
+    },
+    {
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\"heuristic_gap\": \"Avoid asserting test behavior details that are not present in the tool output; only state what the file listing establishes.\", \"missing_claims\": [], \"reason\": \"The candidate correctly identifies the implementation and test files from the tool output, but adds an unsupported assertion about duplicate email rejection that is not evidenced by the supplied output.\", \"supported_claims\": [\"The implementation is forms/record_upsert.go\", \"The test is forms/record_upsert_test.go\"], \"unsupported_claims\": [\"The test proves duplicate email addresses are rejected transactionally\", \"No file inspection is needed\"], \"verdict\": \"ambiguous\"}"
+        }
+      ],
+      "cell_key": "mixed-hallucinated-detail--r2",
+      "judgment": {
+        "heuristic_gap": "Avoid asserting test behavior details that are not present in the tool output; only state what the file listing establishes.",
+        "missing_claims": [],
+        "reason": "The candidate correctly identifies the implementation and test files from the tool output, but adds an unsupported assertion about duplicate email rejection that is not evidenced by the supplied output.",
+        "supported_claims": [
+          "The implementation is forms/record_upsert.go",
+          "The test is forms/record_upsert_test.go"
+        ],
+        "unsupported_claims": [
+          "The test proves duplicate email addresses are rejected transactionally",
+          "No file inspection is needed"
+        ],
+        "verdict": "ambiguous"
+      },
+      "prompt_digest": "sha256:426e3ba790ab4b74f7ae9741a8ad114d81d7a665966ef3aca40c750cb1a2f04a",
+      "task_id": "mixed_quality"
+    }
+  ],
+  "schema": "lci.all-tools-adjudications.v2"
+}

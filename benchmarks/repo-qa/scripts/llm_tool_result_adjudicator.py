@@ -17,8 +17,12 @@ from opencode_zen_provider import OpenCodeZenProvider
 def prompt(item: dict) -> str:
     payload = {"question": item["question"], "candidate_answer": item["answer"],
                "independent_truth": item.get("truth", item.get("expected")),
+               "response_stage": "This is a post-tool continuation. It may be a valid intermediate response, not a final answer.",
                "rubric": ["Judge semantics, not exact wording.",
                            "Reject invented results, omitted required facts, and confusing an error with an empty success.",
+                           "Do not require the overall objective to be finished when the supplied evidence is insufficient and the candidate explicitly proposes an appropriate next step.",
+                           "Do not penalize omission of tool-output details that are unnecessary for the stated objective or next step.",
+                           "Use ambiguous only when the evidence genuinely cannot determine whether a candidate claim is supported; definite unsupported claims require incorrect.",
                            "Use only the supplied candidate and truth."],
                "output_schema": {"verdict": "correct|incorrect|ambiguous",
                                    "supported_claims": ["claim"], "unsupported_claims": ["claim"],
@@ -37,6 +41,8 @@ def validate(value: object) -> dict:
         raise ValueError("missing reason")
     if value["verdict"] == "correct" and (value["unsupported_claims"] or value["missing_claims"]):
         raise ValueError("correct verdict contradicts claim lists")
+    if value["verdict"] == "ambiguous" and value["unsupported_claims"]:
+        raise ValueError("ambiguous verdict contradicts definite unsupported claims")
     return value
 
 

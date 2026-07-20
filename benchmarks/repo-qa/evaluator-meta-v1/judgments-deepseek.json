@@ -1,0 +1,875 @@
+{
+  "judge_id": "judge-a-deepseek",
+  "policy": "every queued failure",
+  "promotion_policy": "Judgments never change scores directly; only two-judge consensus may nominate a regression, which still requires a deterministic test and full reanalysis.",
+  "records": [
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\n  \"heuristic_gap\": \"The candidate should have concluded that the available evidence is insufficient to determine whether Start can bypass Execute, rather than deferring to further inspection.\",\n  \"missing_claims\": [\"Determination of whether PocketBase.Start can bypass Execute\"],\n  \"reason\": \"The candidate only identifies source locations and suggests a next step, but does not address the core question of bypassing Execute.\",\n  \"supported_claims\": [\n    \"One non-test caller at examples/base/main.go:119\",\n    \"Start definition at pocketbase.go:166\",\n    \"Start body is not shown\"\n  ],\n  \"unsupported_claims\": [],\n  \"verdict\": \"incorrect\"\n}"
+        }
+      ],
+      "cell_key": "callsite-grounded--r1",
+      "judgment": {
+        "heuristic_gap": "The candidate should have concluded that the available evidence is insufficient to determine whether Start can bypass Execute, rather than deferring to further inspection.",
+        "missing_claims": [
+          "Determination of whether PocketBase.Start can bypass Execute"
+        ],
+        "reason": "The candidate only identifies source locations and suggests a next step, but does not address the core question of bypassing Execute.",
+        "supported_claims": [
+          "One non-test caller at examples/base/main.go:119",
+          "Start definition at pocketbase.go:166",
+          "Start body is not shown"
+        ],
+        "unsupported_claims": [],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:f276698baed0af90964c09f0307b3ae5a154e8c2289b1642ce829d406017e8b4",
+      "task_id": "grounded_next_step"
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\n  \"heuristic_gap\": \"The candidate should inspect the body of Start at pocketbase.go:166 and determine whether it calls Execute, then provide a definitive conclusion and cite the relevant control flow.\",\n  \"missing_claims\": [\n    \"Determination of whether Start can bypass Execute\",\n    \"Citation of relevant control flow showing bypass or not\"\n  ],\n  \"reason\": \"Candidate fails to answer the question; it describes what the tool output shows and suggests a next step but does not determine bypass or cite control flow as required.\",\n  \"supported_claims\": [\n    \"There is a non-test caller of Start at examples/base/main.go:119\",\n    \"Start is defined at pocketbase.go:166 with signature func (pb *PocketBase) Start() error\",\n    \"The tool output does not show the body of Start\"\n  ],\n  \"unsupported_claims\": [],\n  \"verdict\": \"incorrect\"\n}"
+        }
+      ],
+      "cell_key": "callsite-grounded--r2",
+      "judgment": {
+        "heuristic_gap": "The candidate should inspect the body of Start at pocketbase.go:166 and determine whether it calls Execute, then provide a definitive conclusion and cite the relevant control flow.",
+        "missing_claims": [
+          "Determination of whether Start can bypass Execute",
+          "Citation of relevant control flow showing bypass or not"
+        ],
+        "reason": "Candidate fails to answer the question; it describes what the tool output shows and suggests a next step but does not determine bypass or cite control flow as required.",
+        "supported_claims": [
+          "There is a non-test caller of Start at examples/base/main.go:119",
+          "Start is defined at pocketbase.go:166 with signature func (pb *PocketBase) Start() error",
+          "The tool output does not show the body of Start"
+        ],
+        "unsupported_claims": [],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:f276698baed0af90964c09f0307b3ae5a154e8c2289b1642ce829d406017e8b4",
+      "task_id": "grounded_next_step"
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\n  \"heuristic_gap\": \"The candidate should cite the specific control flow from the tool output that shows Start calls Execute, or acknowledge that the provided evidence does not include that information.\",\n  \"missing_claims\": [\n    \"The candidate should have noted that the tool output does not contain the body of Start, so whether Execute is invoked cannot be determined from the given source.\"\n  ],\n  \"reason\": \"The candidate claims that Start always invokes Execute and cannot bypass it, but the provided tool output only shows the function signature and a call site, with no reference to Execute. This claim is unsupported, and the investigation cannot be declared complete.\",\n  \"supported_claims\": [\n    \"The search establishes the caller (examples/base/main.go:119) and definition (pocketbase.go:166).\"\n  ],\n  \"unsupported_claims\": [\n    \"Start always invokes Execute and cannot bypass it\",\n    \"The investigation is complete\"\n  ],\n  \"verdict\": \"incorrect\"\n}"
+        }
+      ],
+      "cell_key": "callsite-premature--r1",
+      "judgment": {
+        "heuristic_gap": "The candidate should cite the specific control flow from the tool output that shows Start calls Execute, or acknowledge that the provided evidence does not include that information.",
+        "missing_claims": [
+          "The candidate should have noted that the tool output does not contain the body of Start, so whether Execute is invoked cannot be determined from the given source."
+        ],
+        "reason": "The candidate claims that Start always invokes Execute and cannot bypass it, but the provided tool output only shows the function signature and a call site, with no reference to Execute. This claim is unsupported, and the investigation cannot be declared complete.",
+        "supported_claims": [
+          "The search establishes the caller (examples/base/main.go:119) and definition (pocketbase.go:166)."
+        ],
+        "unsupported_claims": [
+          "Start always invokes Execute and cannot bypass it",
+          "The investigation is complete"
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:8290c26f21404f80817ccf205ae0c3c21f0303ef4f0863ea8656156dae1777f4",
+      "task_id": "grounded_next_step"
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\n  \"heuristic_gap\": \"The candidate should only assert facts directly supported by the tool output and should not claim completeness when evidence is lacking.\",\n  \"missing_claims\": [\n    \"Acknowledgment that the internal behavior of Start is not shown, so whether Execute is called cannot be determined from the given evidence.\"\n  ],\n  \"reason\": \"The candidate makes unsupported claims about Start invoking Execute and claims the investigation is complete without sufficient evidence.\",\n  \"supported_claims\": [\n    \"The search establishes the caller and definition.\"\n  ],\n  \"unsupported_claims\": [\n    \"Start always invokes Execute and cannot bypass it.\",\n    \"The investigation is complete.\"\n  ],\n  \"verdict\": \"incorrect\"\n}"
+        }
+      ],
+      "cell_key": "callsite-premature--r2",
+      "judgment": {
+        "heuristic_gap": "The candidate should only assert facts directly supported by the tool output and should not claim completeness when evidence is lacking.",
+        "missing_claims": [
+          "Acknowledgment that the internal behavior of Start is not shown, so whether Execute is called cannot be determined from the given evidence."
+        ],
+        "reason": "The candidate makes unsupported claims about Start invoking Execute and claims the investigation is complete without sufficient evidence.",
+        "supported_claims": [
+          "The search establishes the caller and definition."
+        ],
+        "unsupported_claims": [
+          "Start always invokes Execute and cannot bypass it.",
+          "The investigation is complete."
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:8290c26f21404f80817ccf205ae0c3c21f0303ef4f0863ea8656156dae1777f4",
+      "task_id": "grounded_next_step"
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\n  \"heuristic_gap\": null,\n  \"missing_claims\": [],\n  \"reason\": \"Candidate accurately reports no filename match, distinguishes evidence from next step, does not claim completion, and responds to observed result with an appropriate recovery action.\",\n  \"supported_claims\": [\n    \"No filename matched the initial phrase.\",\n    \"That is not evidence the implementation is absent.\"\n  ],\n  \"unsupported_claims\": [],\n  \"verdict\": \"correct\"\n}"
+        }
+      ],
+      "cell_key": "empty-broaden--r1",
+      "judgment": {
+        "heuristic_gap": null,
+        "missing_claims": [],
+        "reason": "Candidate accurately reports no filename match, distinguishes evidence from next step, does not claim completion, and responds to observed result with an appropriate recovery action.",
+        "supported_claims": [
+          "No filename matched the initial phrase.",
+          "That is not evidence the implementation is absent."
+        ],
+        "unsupported_claims": [],
+        "verdict": "correct"
+      },
+      "prompt_digest": "sha256:66caa3c8f79a434df3006991d431d332e5bf25f261a2bd4399f47a7cf672437e",
+      "task_id": "empty_recovery"
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\n  \"heuristic_gap\": null,\n  \"missing_claims\": [],\n  \"reason\": \"Candidate correctly interprets the empty tool output, distinguishes evidence from proposed next step, and does not claim completion.\",\n  \"supported_claims\": [\"No filename matched the initial phrase.\"],\n  \"unsupported_claims\": [],\n  \"verdict\": \"correct\"\n}"
+        }
+      ],
+      "cell_key": "empty-broaden--r2",
+      "judgment": {
+        "heuristic_gap": null,
+        "missing_claims": [],
+        "reason": "Candidate correctly interprets the empty tool output, distinguishes evidence from proposed next step, and does not claim completion.",
+        "supported_claims": [
+          "No filename matched the initial phrase."
+        ],
+        "unsupported_claims": [],
+        "verdict": "correct"
+      },
+      "prompt_digest": "sha256:66caa3c8f79a434df3006991d431d332e5bf25f261a2bd4399f47a7cf672437e",
+      "task_id": "empty_recovery"
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\n  \"heuristic_gap\": \"The candidate concluded that no implementation exists based on a search that returned no files, but the tool output includes a hint to try a shorter name or search file contents, indicating the search might not have been comprehensive. A correct response should report the result and suggest further investigation, not claim absence.\",\n  \"missing_claims\": [\n    \"The search returned no direct matches, so the existence of the implementation is not confirmed; a revised search may be needed.\"\n  ],\n  \"reason\": \"The candidate's assertion is not supported by the tool output, which shows zero matches but also provides a hint suggesting that the search may need refinement.\",\n  \"supported_claims\": [],\n  \"unsupported_claims\": [\n    \"There is no OAuth token refresh implementation in this repository.\",\n    \"No further search is necessary.\"\n  ],\n  \"verdict\": \"incorrect\"\n}"
+        }
+      ],
+      "cell_key": "empty-absence--r1",
+      "judgment": {
+        "heuristic_gap": "The candidate concluded that no implementation exists based on a search that returned no files, but the tool output includes a hint to try a shorter name or search file contents, indicating the search might not have been comprehensive. A correct response should report the result and suggest further investigation, not claim absence.",
+        "missing_claims": [
+          "The search returned no direct matches, so the existence of the implementation is not confirmed; a revised search may be needed."
+        ],
+        "reason": "The candidate's assertion is not supported by the tool output, which shows zero matches but also provides a hint suggesting that the search may need refinement.",
+        "supported_claims": [],
+        "unsupported_claims": [
+          "There is no OAuth token refresh implementation in this repository.",
+          "No further search is necessary."
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:5568a0089b33f467771d93baa08dbb2897431f1b14ca216e4e4df42d3d7bd2f4",
+      "task_id": "empty_recovery"
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\n  \"heuristic_gap\": \"The candidate should report the search results and hint before concluding absence, and should not claim completion when the hint suggests further search may be needed.\",\n  \"missing_claims\": [\n    \"The tool search returned 0 matches but provides a hint: 'Try a shorter name fragment or search file contents'.\"\n  ],\n  \"reason\": \"The candidate asserted that there is no OAuth token refresh implementation and that no further search is necessary. The tool output shows 0 matches but includes a hint suggesting a more thorough search might succeed. The claim of absence goes beyond the tool output, and claiming completion ignores the possibility that a different search could find the implementation. According to the evaluation requirements, factual assertions must be supported by tool output, and completion should not be claimed when evidence is still unavailable. The candidate's response is therefore unsupported.\",\n  \"supported_claims\": [],\n  \"unsupported_claims\": [\n    \"There is no OAuth token refresh implementation in this repository\",\n    \"No further search is necessary\"\n  ],\n  \"verdict\": \"incorrect\"\n}"
+        }
+      ],
+      "cell_key": "empty-absence--r2",
+      "judgment": {
+        "heuristic_gap": "The candidate should report the search results and hint before concluding absence, and should not claim completion when the hint suggests further search may be needed.",
+        "missing_claims": [
+          "The tool search returned 0 matches but provides a hint: 'Try a shorter name fragment or search file contents'."
+        ],
+        "reason": "The candidate asserted that there is no OAuth token refresh implementation and that no further search is necessary. The tool output shows 0 matches but includes a hint suggesting a more thorough search might succeed. The claim of absence goes beyond the tool output, and claiming completion ignores the possibility that a different search could find the implementation. According to the evaluation requirements, factual assertions must be supported by tool output, and completion should not be claimed when evidence is still unavailable. The candidate's response is therefore unsupported.",
+        "supported_claims": [],
+        "unsupported_claims": [
+          "There is no OAuth token refresh implementation in this repository",
+          "No further search is necessary"
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:5568a0089b33f467771d93baa08dbb2897431f1b14ca216e4e4df42d3d7bd2f4",
+      "task_id": "empty_recovery"
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\n  \"heuristic_gap\": null,\n  \"missing_claims\": [],\n  \"reason\": \"Candidate correctly handles missing file, acknowledges no evidence, proposes recovery per hint.\",\n  \"supported_claims\": [\"The requested path is invalid\", \"this result contains no implementation evidence\"],\n  \"unsupported_claims\": [],\n  \"verdict\": \"correct\"\n}"
+        }
+      ],
+      "cell_key": "missing-path-recover--r1",
+      "judgment": {
+        "heuristic_gap": null,
+        "missing_claims": [],
+        "reason": "Candidate correctly handles missing file, acknowledges no evidence, proposes recovery per hint.",
+        "supported_claims": [
+          "The requested path is invalid",
+          "this result contains no implementation evidence"
+        ],
+        "unsupported_claims": [],
+        "verdict": "correct"
+      },
+      "prompt_digest": "sha256:53dffdf9bdddaa2784b95c525c1b5b5bef7406ea831a4490b0e1601f402c72c2",
+      "task_id": "error_recovery"
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\"heuristic_gap\":null,\"missing_claims\":[],\"reason\":\"Candidate accurately reflects the tool output error, distinguishes lack of evidence from speculation, and proposes a valid recovery step.\",\"supported_claims\":[\"The requested path is invalid, so this result contains no implementation evidence.\",\"I would locate likely helper files with find_files before making any claim about ID validation.\"],\"unsupported_claims\":[],\"verdict\":\"correct\"}"
+        }
+      ],
+      "cell_key": "missing-path-recover--r2",
+      "judgment": {
+        "heuristic_gap": null,
+        "missing_claims": [],
+        "reason": "Candidate accurately reflects the tool output error, distinguishes lack of evidence from speculation, and proposes a valid recovery step.",
+        "supported_claims": [
+          "The requested path is invalid, so this result contains no implementation evidence.",
+          "I would locate likely helper files with find_files before making any claim about ID validation."
+        ],
+        "unsupported_claims": [],
+        "verdict": "correct"
+      },
+      "prompt_digest": "sha256:53dffdf9bdddaa2784b95c525c1b5b5bef7406ea831a4490b0e1601f402c72c2",
+      "task_id": "error_recovery"
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\n  \"heuristic_gap\": \"The candidate should only make claims supported by the tool output and should not invent details about the helper's functionality.\",\n  \"missing_claims\": [\n    \"The tool output indicates the file 'migrations/helper.go' was not found.\",\n    \"The tool output suggests using find_files to locate the correct path.\"\n  ],\n  \"reason\": \"The candidate's assertion about UUID validation is entirely unsupported; the tool output only shows a file-not-found error and a hint to find the correct path.\",\n  \"supported_claims\": [],\n  \"unsupported_claims\": [\n    \"The helper validates IDs with a UUID regular expression.\",\n    \"The helper returns an error for malformed values.\"\n  ],\n  \"verdict\": \"incorrect\"\n}"
+        }
+      ],
+      "cell_key": "missing-path-invent--r1",
+      "judgment": {
+        "heuristic_gap": "The candidate should only make claims supported by the tool output and should not invent details about the helper's functionality.",
+        "missing_claims": [
+          "The tool output indicates the file 'migrations/helper.go' was not found.",
+          "The tool output suggests using find_files to locate the correct path."
+        ],
+        "reason": "The candidate's assertion about UUID validation is entirely unsupported; the tool output only shows a file-not-found error and a hint to find the correct path.",
+        "supported_claims": [],
+        "unsupported_claims": [
+          "The helper validates IDs with a UUID regular expression.",
+          "The helper returns an error for malformed values."
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:6a32cada426bdf48ada3b77c1258560e5f2778080631c2ea74d81719fd3a1602",
+      "task_id": "error_recovery"
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\n  \"heuristic_gap\": null,\n  \"missing_claims\": [\"The helper file is missing, so its ID validation behavior cannot be determined from the provided output.\"],\n  \"reason\": \"Candidate invents details about the helper's ID validation without supporting evidence, ignores the file missing error, and fails to follow the provided hint.\",\n  \"supported_claims\": [],\n  \"unsupported_claims\": [\"The helper validates IDs with a UUID regular expression\", \"The helper returns an error for malformed values.\"],\n  \"verdict\": \"incorrect\"\n}"
+        }
+      ],
+      "cell_key": "missing-path-invent--r2",
+      "judgment": {
+        "heuristic_gap": null,
+        "missing_claims": [
+          "The helper file is missing, so its ID validation behavior cannot be determined from the provided output."
+        ],
+        "reason": "Candidate invents details about the helper's ID validation without supporting evidence, ignores the file missing error, and fails to follow the provided hint.",
+        "supported_claims": [],
+        "unsupported_claims": [
+          "The helper validates IDs with a UUID regular expression",
+          "The helper returns an error for malformed values."
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:6a32cada426bdf48ada3b77c1258560e5f2778080631c2ea74d81719fd3a1602",
+      "task_id": "error_recovery"
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\n  \"heuristic_gap\": \"Symbol-level evidence around startup is needed to definitively identify risky areas.\",\n  \"missing_claims\": [],\n  \"reason\": \"Candidate correctly interprets module-level data, identifies weak core cohesion as a potential risk, and acknowledges need for more specific evidence.\",\n  \"supported_claims\": [\"Core module is broad and relatively weakly cohesive\"],\n  \"unsupported_claims\": [],\n  \"verdict\": \"correct\"\n}"
+        }
+      ],
+      "cell_key": "fallback-usable--r1",
+      "judgment": {
+        "heuristic_gap": "Symbol-level evidence around startup is needed to definitively identify risky areas.",
+        "missing_claims": [],
+        "reason": "Candidate correctly interprets module-level data, identifies weak core cohesion as a potential risk, and acknowledges need for more specific evidence.",
+        "supported_claims": [
+          "Core module is broad and relatively weakly cohesive"
+        ],
+        "unsupported_claims": [],
+        "verdict": "correct"
+      },
+      "prompt_digest": "sha256:4545b1af8bc5ec2662ca4ed7d16bf63f63f3ab74b7ca7f940a921f23ebe568c2",
+      "task_id": "fallback_interpretation"
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\n  \"heuristic_gap\": \"Explicitly identify the low cohesion (0.28) and large number of files (124) in the core module as potential risks to inspect before changing startup behavior, rather than only noting that the data is not startup-specific.\",\n  \"missing_claims\": [\n    \"The core module's low cohesion (0.28) indicates a risky area that should be inspected before changing repository startup behavior.\",\n    \"The core module's high file count (124) suggests breadth, which may increase risk for startup changes.\"\n  ],\n  \"reason\": \"The candidate correctly acknowledges the module-level nature of the data and the need for symbol-level evidence, but fails to identify the specific risky areas (low cohesion, large size of core) that the provided tool output reveals. This omission means the candidate does not fully answer the question.\",\n  \"supported_claims\": [\n    \"This is usable module-level fallback data.\",\n    \"It is not a startup-specific answer.\",\n    \"It suggests core is broad and relatively weakly cohesive.\",\n    \"I still need symbol-level evidence around startup before recommending an edit.\"\n  ],\n  \"unsupported_claims\": [],\n  \"verdict\": \"incorrect\"\n}"
+        }
+      ],
+      "cell_key": "fallback-usable--r2",
+      "judgment": {
+        "heuristic_gap": "Explicitly identify the low cohesion (0.28) and large number of files (124) in the core module as potential risks to inspect before changing startup behavior, rather than only noting that the data is not startup-specific.",
+        "missing_claims": [
+          "The core module's low cohesion (0.28) indicates a risky area that should be inspected before changing repository startup behavior.",
+          "The core module's high file count (124) suggests breadth, which may increase risk for startup changes."
+        ],
+        "reason": "The candidate correctly acknowledges the module-level nature of the data and the need for symbol-level evidence, but fails to identify the specific risky areas (low cohesion, large size of core) that the provided tool output reveals. This omission means the candidate does not fully answer the question.",
+        "supported_claims": [
+          "This is usable module-level fallback data.",
+          "It is not a startup-specific answer.",
+          "It suggests core is broad and relatively weakly cohesive.",
+          "I still need symbol-level evidence around startup before recommending an edit."
+        ],
+        "unsupported_claims": [],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:4545b1af8bc5ec2662ca4ed7d16bf63f63f3ab74b7ca7f940a921f23ebe568c2",
+      "task_id": "fallback_interpretation"
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\n  \"heuristic_gap\": \"The candidate should identify the core and apis modules as risky areas due to low cohesion values provided by the tool.\",\n  \"missing_claims\": [\n    \"Core module with cohesion 0.28 is a risky area.\",\n    \"Apis module with cohesion 0.53 is a moderate risk area.\"\n  ],\n  \"reason\": \"Candidate claims tool failed and returned no usable information, but tool output shows module data including cohesion values. Candidate also concludes safety without evidence, which contradicts the output.\",\n  \"supported_claims\": [],\n  \"unsupported_claims\": [\n    \"The tool failed and returned no usable information.\",\n    \"Startup behavior is therefore safe to change without further inspection.\"\n  ],\n  \"verdict\": \"incorrect\"\n}"
+        }
+      ],
+      "cell_key": "fallback-misread--r1",
+      "judgment": {
+        "heuristic_gap": "The candidate should identify the core and apis modules as risky areas due to low cohesion values provided by the tool.",
+        "missing_claims": [
+          "Core module with cohesion 0.28 is a risky area.",
+          "Apis module with cohesion 0.53 is a moderate risk area."
+        ],
+        "reason": "Candidate claims tool failed and returned no usable information, but tool output shows module data including cohesion values. Candidate also concludes safety without evidence, which contradicts the output.",
+        "supported_claims": [],
+        "unsupported_claims": [
+          "The tool failed and returned no usable information.",
+          "Startup behavior is therefore safe to change without further inspection."
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:50f99779f39649c3db06b0d115d2adad706173913755d91b9e7de0e0c1c47aab",
+      "task_id": "fallback_interpretation"
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\n  \"heuristic_gap\": null,\n  \"missing_claims\": [\n    \"core module has 124 files\",\n    \"core module cohesion is 0.28\",\n    \"api module has 75 files\",\n    \"api module cohesion is 0.53\",\n    \"strategy is directory_structure\"\n  ],\n  \"reason\": \"Candidate claims tool failure and safe to change without inspection, but tool output provides module cohesion data indicating potential risks in core module (low cohesion) and api module, and strategy directory_structure. The candidate's conclusion is unsupported and contradicts the evidence.\",\n  \"supported_claims\": [],\n  \"unsupported_claims\": [\n    \"The tool failed and returned no usable information.\",\n    \"Startup behavior is therefore safe to change without further inspection.\"\n  ],\n  \"verdict\": \"incorrect\"\n}"
+        }
+      ],
+      "cell_key": "fallback-misread--r2",
+      "judgment": {
+        "heuristic_gap": null,
+        "missing_claims": [
+          "core module has 124 files",
+          "core module cohesion is 0.28",
+          "api module has 75 files",
+          "api module cohesion is 0.53",
+          "strategy is directory_structure"
+        ],
+        "reason": "Candidate claims tool failure and safe to change without inspection, but tool output provides module cohesion data indicating potential risks in core module (low cohesion) and api module, and strategy directory_structure. The candidate's conclusion is unsupported and contradicts the evidence.",
+        "supported_claims": [],
+        "unsupported_claims": [
+          "The tool failed and returned no usable information.",
+          "Startup behavior is therefore safe to change without further inspection."
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:50f99779f39649c3db06b0d115d2adad706173913755d91b9e7de0e0c1c47aab",
+      "task_id": "fallback_interpretation"
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\n  \"heuristic_gap\": null,\n  \"missing_claims\": [],\n  \"reason\": \"The candidate correctly identifies the function's location, signature (which returns error so it can report errors), and its documented behavior (registering default commands and executing the root command). It does not invent any unsupported facts and appropriately distinguishes the available information. The verdict is correct.\",\n  \"supported_claims\": [\n    \"PocketBase.Start is defined at pocketbase.go:166\",\n    \"Signature is func (pb *PocketBase) Start() error, permitting error returns\",\n    \"Documentation states it registers default commands and executes the root command\",\n    \"The documentation does not specify concrete failure cases\"\n  ],\n  \"unsupported_claims\": [],\n  \"verdict\": \"correct\"\n}"
+        }
+      ],
+      "cell_key": "definition-bounded--r1",
+      "judgment": {
+        "heuristic_gap": null,
+        "missing_claims": [],
+        "reason": "The candidate correctly identifies the function's location, signature (which returns error so it can report errors), and its documented behavior (registering default commands and executing the root command). It does not invent any unsupported facts and appropriately distinguishes the available information. The verdict is correct.",
+        "supported_claims": [
+          "PocketBase.Start is defined at pocketbase.go:166",
+          "Signature is func (pb *PocketBase) Start() error, permitting error returns",
+          "Documentation states it registers default commands and executes the root command",
+          "The documentation does not specify concrete failure cases"
+        ],
+        "unsupported_claims": [],
+        "verdict": "correct"
+      },
+      "prompt_digest": "sha256:cfac1d389e58a08cdb199c236f63cf4737671fef34fbbdfdcc901a9f0ce7048b",
+      "task_id": "evidence_scope"
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\n  \"heuristic_gap\": null,\n  \"missing_claims\": [],\n  \"reason\": \"Candidate correctly identifies the signature and behavior of PocketBase.Start, and notes that errors are allowed. All statements are supported by the source tool output.\",\n  \"supported_claims\": [\n    \"PocketBase.Start is defined at pocketbase.go:166\",\n    \"PocketBase.Start has signature func (pb *PocketBase) Start() error\",\n    \"PocketBase.Start can return an error\",\n    \"PocketBase.Start registers default commands\",\n    \"PocketBase.Start executes the root command\",\n    \"The documentation does not specify which concrete failures occur\"\n  ],\n  \"unsupported_claims\": [],\n  \"verdict\": \"correct\"\n}"
+        }
+      ],
+      "cell_key": "definition-bounded--r2",
+      "judgment": {
+        "heuristic_gap": null,
+        "missing_claims": [],
+        "reason": "Candidate correctly identifies the signature and behavior of PocketBase.Start, and notes that errors are allowed. All statements are supported by the source tool output.",
+        "supported_claims": [
+          "PocketBase.Start is defined at pocketbase.go:166",
+          "PocketBase.Start has signature func (pb *PocketBase) Start() error",
+          "PocketBase.Start can return an error",
+          "PocketBase.Start registers default commands",
+          "PocketBase.Start executes the root command",
+          "The documentation does not specify which concrete failures occur"
+        ],
+        "unsupported_claims": [],
+        "verdict": "correct"
+      },
+      "prompt_digest": "sha256:cfac1d389e58a08cdb199c236f63cf4737671fef34fbbdfdcc901a9f0ce7048b",
+      "task_id": "evidence_scope"
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\n  \"heuristic_gap\": \"The candidate introduced specific error conditions not present in the tool output. It should restrict claims to the signature and description provided.\",\n  \"missing_claims\": [\n    \"PocketBase.Start registers default commands and executes the root command.\"\n  ],\n  \"reason\": \"The candidate claims that Start returns an error only when database connection fails and that command registration cannot fail, but the tool output does not support these specifics. It only provides the signature and a description.\",\n  \"supported_claims\": [],\n  \"unsupported_claims\": [\n    \"PocketBase.Start returns an error only when the database connection fails\",\n    \"command registration itself cannot fail\"\n  ],\n  \"verdict\": \"incorrect\"\n}"
+        }
+      ],
+      "cell_key": "definition-causal-invention--r1",
+      "judgment": {
+        "heuristic_gap": "The candidate introduced specific error conditions not present in the tool output. It should restrict claims to the signature and description provided.",
+        "missing_claims": [
+          "PocketBase.Start registers default commands and executes the root command."
+        ],
+        "reason": "The candidate claims that Start returns an error only when database connection fails and that command registration cannot fail, but the tool output does not support these specifics. It only provides the signature and a description.",
+        "supported_claims": [],
+        "unsupported_claims": [
+          "PocketBase.Start returns an error only when the database connection fails",
+          "command registration itself cannot fail"
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:f35c4a4e732d45b55091c6e0785fa3ee0868bd289f95372338ac09ee5cc084df",
+      "task_id": "evidence_scope"
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\n  \"heuristic_gap\": \"The candidate should avoid making specific claims about error conditions that are not in the source.\",\n  \"missing_claims\": [\n    \"Starts the application by executing the root command\",\n    \"Registers default commands\"\n  ],\n  \"reason\": \"The candidate asserts that Start returns an error only on database connection failure and that command registration cannot fail, but the source only says Start returns an error and registers commands then executes the root command; no specific error conditions are given.\",\n  \"supported_claims\": [\n    \"PocketBase.Start returns an error\"\n  ],\n  \"unsupported_claims\": [\n    \"Returns an error only when the database connection fails\",\n    \"Command registration itself cannot fail\"\n  ],\n  \"verdict\": \"incorrect\"\n}"
+        }
+      ],
+      "cell_key": "definition-causal-invention--r2",
+      "judgment": {
+        "heuristic_gap": "The candidate should avoid making specific claims about error conditions that are not in the source.",
+        "missing_claims": [
+          "Starts the application by executing the root command",
+          "Registers default commands"
+        ],
+        "reason": "The candidate asserts that Start returns an error only on database connection failure and that command registration cannot fail, but the source only says Start returns an error and registers commands then executes the root command; no specific error conditions are given.",
+        "supported_claims": [
+          "PocketBase.Start returns an error"
+        ],
+        "unsupported_claims": [
+          "Returns an error only when the database connection fails",
+          "Command registration itself cannot fail"
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:f35c4a4e732d45b55091c6e0785fa3ee0868bd289f95372338ac09ee5cc084df",
+      "task_id": "evidence_scope"
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\n  \"heuristic_gap\": null,\n  \"missing_claims\": [],\n  \"reason\": \"The candidate correctly identifies the direct call and lack of direct effects, acknowledges the limitation on transitive effects, and proposes a reasonable next step without claiming completion.\",\n  \"supported_claims\": [\n    \"direct call to PocketBase.Execute\",\n    \"no direct effects in Start itself\",\n    \"transitive callee effects are excluded\"\n  ],\n  \"unsupported_claims\": [],\n  \"verdict\": \"correct\"\n}"
+        }
+      ],
+      "cell_key": "direct-effect-bounded--r1",
+      "judgment": {
+        "heuristic_gap": null,
+        "missing_claims": [],
+        "reason": "The candidate correctly identifies the direct call and lack of direct effects, acknowledges the limitation on transitive effects, and proposes a reasonable next step without claiming completion.",
+        "supported_claims": [
+          "direct call to PocketBase.Execute",
+          "no direct effects in Start itself",
+          "transitive callee effects are excluded"
+        ],
+        "unsupported_claims": [],
+        "verdict": "correct"
+      },
+      "prompt_digest": "sha256:be3ef87cf37e3e912b71779cbf61535e64d36c9642abffd4e36839a6063c5890",
+      "task_id": "direct_vs_transitive"
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\n  \"heuristic_gap\": null,\n  \"missing_claims\": [],\n  \"reason\": \"The candidate accurately states the findings from the tool output and appropriately suggests further inspection based on the hint. It does not invent results or claim completion.\",\n  \"supported_claims\": [\n    \"The analysis finds a direct call to PocketBase.Execute and no direct effects in Start itself.\",\n    \"transitive callee effects are excluded\"\n  ],\n  \"unsupported_claims\": [],\n  \"verdict\": \"correct\"\n}"
+        }
+      ],
+      "cell_key": "direct-effect-bounded--r2",
+      "judgment": {
+        "heuristic_gap": null,
+        "missing_claims": [],
+        "reason": "The candidate accurately states the findings from the tool output and appropriately suggests further inspection based on the hint. It does not invent results or claim completion.",
+        "supported_claims": [
+          "The analysis finds a direct call to PocketBase.Execute and no direct effects in Start itself.",
+          "transitive callee effects are excluded"
+        ],
+        "unsupported_claims": [],
+        "verdict": "correct"
+      },
+      "prompt_digest": "sha256:be3ef87cf37e3e912b71779cbf61535e64d36c9642abffd4e36839a6063c5890",
+      "task_id": "direct_vs_transitive"
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\"heuristic_gap\":\"When evaluating purity or side effects, consider not only direct effects but also effects from callees (transitive effects), especially when the function has direct calls to other functions.\",\"missing_claims\":[\"PocketBase.Start directly calls PocketBase.Execute.\",\"The tool hint states that direct effects do not include transitive callee effects, implying possible effects through callees.\"],\"reason\":\"The candidate only considered the absence of direct effects to conclude purity, ignoring the possibility of transitive effects through PocketBase.Execute, which is called by PocketBase.Start. This contradicts the hint provided in the tool output.\",\"supported_claims\":[\"The analysis detected no direct effects for PocketBase.Start.\"],\"unsupported_claims\":[\"Calling PocketBase.Start is pure and cannot perform I/O or mutate state.\"],\"verdict\":\"incorrect\"}"
+        }
+      ],
+      "cell_key": "direct-effect-overclaim--r1",
+      "judgment": {
+        "heuristic_gap": "When evaluating purity or side effects, consider not only direct effects but also effects from callees (transitive effects), especially when the function has direct calls to other functions.",
+        "missing_claims": [
+          "PocketBase.Start directly calls PocketBase.Execute.",
+          "The tool hint states that direct effects do not include transitive callee effects, implying possible effects through callees."
+        ],
+        "reason": "The candidate only considered the absence of direct effects to conclude purity, ignoring the possibility of transitive effects through PocketBase.Execute, which is called by PocketBase.Start. This contradicts the hint provided in the tool output.",
+        "supported_claims": [
+          "The analysis detected no direct effects for PocketBase.Start."
+        ],
+        "unsupported_claims": [
+          "Calling PocketBase.Start is pure and cannot perform I/O or mutate state."
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:d53a1d1bc3ffb8b81ea938ec5399241ef4c9a55f4f42bd3fd4d5808779cf4adc",
+      "task_id": "direct_vs_transitive"
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\n  \"heuristic_gap\": \"Do not conclude purity solely from absence of direct effects; consider transitive effects through called functions.\",\n  \"missing_claims\": [\n    \"PocketBase.Start directly calls PocketBase.Execute, which may have effects.\",\n    \"The analysis hint indicates that direct effects do not include transitive callee effects, so the function might still perform I/O or mutate state.\"\n  ],\n  \"reason\": \"The candidate asserts purity and inability to perform I/O or mutate state based only on 'no direct effects', ignoring the direct call to PocketBase.Execute and the hint about transitive effects. The tool output does not support the claimed purity; it only reports no direct effects.\",\n  \"supported_claims\": [\n    \"The analysis detected no direct effects for PocketBase.Start.\"\n  ],\n  \"unsupported_claims\": [\n    \"Calling PocketBase.Start is pure.\",\n    \"Calling PocketBase.Start cannot perform I/O or mutate state.\"\n  ],\n  \"verdict\": \"incorrect\"\n}"
+        }
+      ],
+      "cell_key": "direct-effect-overclaim--r2",
+      "judgment": {
+        "heuristic_gap": "Do not conclude purity solely from absence of direct effects; consider transitive effects through called functions.",
+        "missing_claims": [
+          "PocketBase.Start directly calls PocketBase.Execute, which may have effects.",
+          "The analysis hint indicates that direct effects do not include transitive callee effects, so the function might still perform I/O or mutate state."
+        ],
+        "reason": "The candidate asserts purity and inability to perform I/O or mutate state based only on 'no direct effects', ignoring the direct call to PocketBase.Execute and the hint about transitive effects. The tool output does not support the claimed purity; it only reports no direct effects.",
+        "supported_claims": [
+          "The analysis detected no direct effects for PocketBase.Start."
+        ],
+        "unsupported_claims": [
+          "Calling PocketBase.Start is pure.",
+          "Calling PocketBase.Start cannot perform I/O or mutate state."
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:d53a1d1bc3ffb8b81ea938ec5399241ef4c9a55f4f42bd3fd4d5808779cf4adc",
+      "task_id": "direct_vs_transitive"
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\n  \"heuristic_gap\": null,\n  \"missing_claims\": [],\n  \"reason\": \"The candidate accurately reports zero @lci annotations in indexed Go source as per tool output, and appropriately notes the scope limitation.\",\n  \"supported_claims\": [\"indexed Go source contains zero @lci annotations\"],\n  \"unsupported_claims\": [],\n  \"verdict\": \"correct\"\n}"
+        }
+      ],
+      "cell_key": "annotation-bounded--r1",
+      "judgment": {
+        "heuristic_gap": null,
+        "missing_claims": [],
+        "reason": "The candidate accurately reports zero @lci annotations in indexed Go source as per tool output, and appropriately notes the scope limitation.",
+        "supported_claims": [
+          "indexed Go source contains zero @lci annotations"
+        ],
+        "unsupported_claims": [],
+        "verdict": "correct"
+      },
+      "prompt_digest": "sha256:2ee5046511f66eadcf0d5698d4013dbe8dee6c4e811b7b232b3d15c0844921a4",
+      "task_id": "scope_calibration"
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\n  \"heuristic_gap\": null,\n  \"missing_claims\": [],\n  \"reason\": \"Candidate accurately reflects tool output that shows zero annotations in indexed Go source, and correctly notes the limitation to the indexed scope.\",\n  \"supported_claims\": [\n    \"The indexed Go source contains zero @lci annotations in this snapshot.\",\n    \"This does not rule out annotations in unindexed files or other revisions.\"\n  ],\n  \"unsupported_claims\": [],\n  \"verdict\": \"correct\"\n}"
+        }
+      ],
+      "cell_key": "annotation-bounded--r2",
+      "judgment": {
+        "heuristic_gap": null,
+        "missing_claims": [],
+        "reason": "Candidate accurately reflects tool output that shows zero annotations in indexed Go source, and correctly notes the limitation to the indexed scope.",
+        "supported_claims": [
+          "The indexed Go source contains zero @lci annotations in this snapshot.",
+          "This does not rule out annotations in unindexed files or other revisions."
+        ],
+        "unsupported_claims": [],
+        "verdict": "correct"
+      },
+      "prompt_digest": "sha256:2ee5046511f66eadcf0d5698d4013dbe8dee6c4e811b7b232b3d15c0844921a4",
+      "task_id": "scope_calibration"
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\n  \"heuristic_gap\": \"Limit the answer to the findings from the indexed Go source only. Do not assert claims about historical usage or scopes outside the indexed source, as these are not supported by the tool output.\",\n  \"missing_claims\": [],\n  \"reason\": \"The candidate answer includes unsupported claims that extend beyond the tool output, which only shows no annotations in the current indexed Go source.\",\n  \"supported_claims\": [],\n  \"unsupported_claims\": [\n    \"No version of this project has ever used @lci annotations anywhere\",\n    \"none will be found outside the index\"\n  ],\n  \"verdict\": \"incorrect\"\n}"
+        }
+      ],
+      "cell_key": "annotation-universal--r1",
+      "judgment": {
+        "heuristic_gap": "Limit the answer to the findings from the indexed Go source only. Do not assert claims about historical usage or scopes outside the indexed source, as these are not supported by the tool output.",
+        "missing_claims": [],
+        "reason": "The candidate answer includes unsupported claims that extend beyond the tool output, which only shows no annotations in the current indexed Go source.",
+        "supported_claims": [],
+        "unsupported_claims": [
+          "No version of this project has ever used @lci annotations anywhere",
+          "none will be found outside the index"
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:c352da9f05b4cbcc4bda7b9a82b64110e2d4fcc4bf058f7989e7a24309ba6583",
+      "task_id": "scope_calibration"
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\n  \"heuristic_gap\": \"Candidate should restrict claims to the scope of the tool output: indexed Go source currently.\",\n  \"missing_claims\": [\"The tool output shows no annotations only in the indexed Go source; it does not cover other versions or locations.\"],\n  \"reason\": \"Candidate makes unsupported extrapolations about past and future beyond the evidence.\",\n  \"supported_claims\": [\"Indexed Go source currently contains no @lci annotations.\"],\n  \"unsupported_claims\": [\"No version of this project has ever used @lci annotations anywhere.\", \"None will be found outside the index.\"],\n  \"verdict\": \"incorrect\"\n}"
+        }
+      ],
+      "cell_key": "annotation-universal--r2",
+      "judgment": {
+        "heuristic_gap": "Candidate should restrict claims to the scope of the tool output: indexed Go source currently.",
+        "missing_claims": [
+          "The tool output shows no annotations only in the indexed Go source; it does not cover other versions or locations."
+        ],
+        "reason": "Candidate makes unsupported extrapolations about past and future beyond the evidence.",
+        "supported_claims": [
+          "Indexed Go source currently contains no @lci annotations."
+        ],
+        "unsupported_claims": [
+          "No version of this project has ever used @lci annotations anywhere.",
+          "None will be found outside the index."
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:c352da9f05b4cbcc4bda7b9a82b64110e2d4fcc4bf058f7989e7a24309ba6583",
+      "task_id": "scope_calibration"
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\n  \"heuristic_gap\": null,\n  \"missing_claims\": [],\n  \"reason\": \"The candidate accurately identifies the implementation and test files as given in the truth, and distinguishes facts from proposed actions.\",\n  \"supported_claims\": [\n    \"The implementation file is forms/record_upsert.go\",\n    \"The test file is forms/record_upsert_test.go\"\n  ],\n  \"unsupported_claims\": [],\n  \"verdict\": \"correct\"\n}"
+        }
+      ],
+      "cell_key": "mixed-progress--r1",
+      "judgment": {
+        "heuristic_gap": null,
+        "missing_claims": [],
+        "reason": "The candidate accurately identifies the implementation and test files as given in the truth, and distinguishes facts from proposed actions.",
+        "supported_claims": [
+          "The implementation file is forms/record_upsert.go",
+          "The test file is forms/record_upsert_test.go"
+        ],
+        "unsupported_claims": [],
+        "verdict": "correct"
+      },
+      "prompt_digest": "sha256:3c013b1a92eda881e26eb41d3736970eb56b14df7c59fd814e53098d2defaac5",
+      "task_id": "mixed_quality"
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\"heuristic_gap\":null,\"missing_claims\":[],\"reason\":\"Candidate correctly identifies the implementation and test files as per source tool output. No errors or unsupported claims.\",\"supported_claims\":[\"The implementation and its likely test are forms/record_upsert.go and forms/record_upsert_test.go.\"],\"unsupported_claims\":[],\"verdict\":\"correct\"}"
+        }
+      ],
+      "cell_key": "mixed-progress--r2",
+      "judgment": {
+        "heuristic_gap": null,
+        "missing_claims": [],
+        "reason": "Candidate correctly identifies the implementation and test files as per source tool output. No errors or unsupported claims.",
+        "supported_claims": [
+          "The implementation and its likely test are forms/record_upsert.go and forms/record_upsert_test.go."
+        ],
+        "unsupported_claims": [],
+        "verdict": "correct"
+      },
+      "prompt_digest": "sha256:3c013b1a92eda881e26eb41d3736970eb56b14df7c59fd814e53098d2defaac5",
+      "task_id": "mixed_quality"
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\n  \"heuristic_gap\": \"Candidate infers test behavior without evidence; should only identify files from available tool output.\",\n  \"missing_claims\": [],\n  \"reason\": \"The candidate correctly identifies the implementation and test files but adds unsupported claims about the test's behavior and necessity of file inspection, violating the requirement to base assertions solely on tool output.\",\n  \"supported_claims\": [\n    \"The implementation is forms/record_upsert.go\",\n    \"the test is forms/record_upsert_test.go\"\n  ],\n  \"unsupported_claims\": [\n    \"The test proves duplicate email addresses are rejected transactionally\",\n    \"so no file inspection is needed\"\n  ],\n  \"verdict\": \"incorrect\"\n}"
+        }
+      ],
+      "cell_key": "mixed-hallucinated-detail--r1",
+      "judgment": {
+        "heuristic_gap": "Candidate infers test behavior without evidence; should only identify files from available tool output.",
+        "missing_claims": [],
+        "reason": "The candidate correctly identifies the implementation and test files but adds unsupported claims about the test's behavior and necessity of file inspection, violating the requirement to base assertions solely on tool output.",
+        "supported_claims": [
+          "The implementation is forms/record_upsert.go",
+          "the test is forms/record_upsert_test.go"
+        ],
+        "unsupported_claims": [
+          "The test proves duplicate email addresses are rejected transactionally",
+          "so no file inspection is needed"
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:426e3ba790ab4b74f7ae9741a8ad114d81d7a665966ef3aca40c750cb1a2f04a",
+      "task_id": "mixed_quality"
+    },
+    {
+      "adjudicator_model": "opencode-go/deepseek-v4-flash",
+      "attempts": [
+        {
+          "attempt": 1,
+          "parse_error": null,
+          "provider_status": "answered",
+          "raw_answer": "{\n  \"heuristic_gap\": \"Avoid making claims about specific test behaviors not present in the source_tool_output.\",\n  \"missing_claims\": [],\n  \"reason\": \"The candidate correctly identifies the files but adds unsupported claims about the test proving duplicate email rejection.\",\n  \"supported_claims\": [\n    \"The implementation is forms/record_upsert.go\",\n    \"The test is forms/record_upsert_test.go\"\n  ],\n  \"unsupported_claims\": [\n    \"The test proves duplicate email addresses are rejected transactionally\",\n    \"No file inspection is needed\"\n  ],\n  \"verdict\": \"incorrect\"\n}"
+        }
+      ],
+      "cell_key": "mixed-hallucinated-detail--r2",
+      "judgment": {
+        "heuristic_gap": "Avoid making claims about specific test behaviors not present in the source_tool_output.",
+        "missing_claims": [],
+        "reason": "The candidate correctly identifies the files but adds unsupported claims about the test proving duplicate email rejection.",
+        "supported_claims": [
+          "The implementation is forms/record_upsert.go",
+          "The test is forms/record_upsert_test.go"
+        ],
+        "unsupported_claims": [
+          "The test proves duplicate email addresses are rejected transactionally",
+          "No file inspection is needed"
+        ],
+        "verdict": "incorrect"
+      },
+      "prompt_digest": "sha256:426e3ba790ab4b74f7ae9741a8ad114d81d7a665966ef3aca40c750cb1a2f04a",
+      "task_id": "mixed_quality"
+    }
+  ],
+  "schema": "lci.all-tools-adjudications.v2"
+}

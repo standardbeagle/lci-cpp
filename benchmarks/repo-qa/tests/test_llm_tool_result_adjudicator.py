@@ -24,6 +24,18 @@ class LlmToolResultAdjudicatorTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "contradicts"):
             module.validate(value)
 
+    def test_validation_rejects_ambiguous_with_definite_unsupported_claims(self):
+        value = {"verdict": "ambiguous", "supported_claims": [],
+                 "unsupported_claims": ["invented behavior"], "missing_claims": [],
+                 "reason": "r", "heuristic_gap": None}
+        with self.assertRaisesRegex(ValueError, "ambiguous verdict contradicts"):
+            module.validate(value)
+
+    def test_prompt_allows_grounded_intermediate_continuation(self):
+        text = module.prompt({"question": "solve", "answer": "need another tool", "truth": {}})
+        self.assertIn("valid intermediate response", text)
+        self.assertIn("appropriate next step", text)
+
     def test_checkpoint_is_valid_and_replaces_prior_prefix(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "out.json"
