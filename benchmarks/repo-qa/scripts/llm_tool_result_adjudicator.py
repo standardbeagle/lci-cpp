@@ -16,7 +16,7 @@ from opencode_zen_provider import OpenCodeZenProvider
 
 def prompt(item: dict) -> str:
     payload = {"question": item["question"], "candidate_answer": item["answer"],
-               "independent_truth": item["expected"],
+               "independent_truth": item.get("truth", item.get("expected")),
                "rubric": ["Judge semantics, not exact wording.",
                            "Reject invented results, omitted required facts, and confusing an error with an empty success.",
                            "Use only the supplied candidate and truth."],
@@ -47,16 +47,44 @@ def parse(text: str) -> dict:
     return validate(json.loads(stripped))
 
 
-def write_checkpoint(path: Path, records: list[dict]) -> None:
-    result = {"schema": "lci.all-tools-adjudications.v1", "policy": "every queued failure",
+def write_checkpoint(path: Path, records: list[dict], *, judge_id: str = "unspecified") -> None:
+    result = {"schema": "lci.all-tools-adjudications.v2", "policy": "every queued failure",
+              "judge_id": judge_id,
               "records": records,
-              "promotion_policy": "LLM judgments do not change scores directly; correct misses require deterministic regression promotion and full reanalysis."}
+              "promotion_policy": "Judgments never change scores directly; only two-judge consensus may nominate a regression, which still requires a deterministic test and full reanalysis."}
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(prefix=path.name, suffix=".tmp", dir=path.parent)
     with os.fdopen(fd, "w") as handle:
         json.dump(result, handle, indent=2, sort_keys=True)
         handle.write("\n")
     os.replace(temporary, path)
+
+
+def adjudicate_item(item: dict, complete, *, model: str, headers: dict,
+                    max_format_attempts: int = 3) -> dict:
+    """Retry malformed structure only; never retry or reinterpret a valid verdict."""
+    text = prompt(item)
+    attempts = []
+    judgment = None
+    for number in range(1, max_format_attempts + 1):
+        body = {"model": model.split("/", 1)[-1], "temperature": 0, "stream": False,
+                "messages": [{"role": "system", "content": "You are a blinded benchmark adjudicator."},
+                             {"role": "user", "content": text}]}
+        response = complete(body, model, headers)
+        attempt = {"attempt": number, "provider_status": response["status"],
+                   "raw_answer": response.get("final_answer", ""), "parse_error": None}
+        if response["status"] == "answered":
+            try:
+                judgment = parse(attempt["raw_answer"])
+            except (ValueError, json.JSONDecodeError) as error:
+                attempt["parse_error"] = str(error)
+        attempts.append(attempt)
+        if judgment is not None or response["status"] != "answered":
+            break
+    return {"cell_key": item["cell_key"], "task_id": item.get("task_id"),
+            "adjudicator_model": model,
+            "prompt_digest": "sha256:" + hashlib.sha256(text.encode()).hexdigest(),
+            "judgment": judgment, "attempts": attempts}
 
 
 def main() -> int:
@@ -66,8 +94,10 @@ def main() -> int:
     parser.add_argument("--auth-file", type=Path, required=True)
     parser.add_argument("--header-profile", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--judge-id", required=True)
     parser.add_argument("--origin-model", help="only adjudicate failures produced by this model")
     parser.add_argument("--timeout", type=float, default=120)
+    parser.add_argument("--max-format-attempts", type=int, default=3)
     args = parser.parse_args()
     queue_doc = json.loads(args.queue.read_text())
     queue = queue_doc.get("adjudication_queue", queue_doc)
@@ -76,29 +106,18 @@ def main() -> int:
     headers = json.loads(args.header_profile.read_text())["headers"]
     provider = OpenCodeZenProvider(args.auth_file, args.timeout)
     records = []
+    if args.out.exists():
+        prior = json.loads(args.out.read_text())
+        if prior.get("judge_id") != args.judge_id:
+            raise SystemExit("refusing to resume a different judge-id")
+        records = prior.get("records", [])
+    completed = {item["cell_key"] for item in records}
     for item in queue:
-        text = prompt(item)
-        body = {"model": args.model.split("/", 1)[1], "temperature": 0, "stream": False,
-                "messages": [{"role": "system", "content": "You are a blinded benchmark adjudicator."},
-                             {"role": "user", "content": text}]}
-        response = provider.complete(body, args.model, headers)
-        judgment = None
-        invalid_judgment = None
-        if response["status"] == "answered":
-            try:
-                judgment = parse(response["final_answer"])
-            except (ValueError, json.JSONDecodeError) as error:
-                invalid_judgment = str(error)
-        records.append({"cell_key": item["cell_key"], "provider_status": response["status"],
-                        "adjudicator_model": args.model,
-                        "prompt_digest": "sha256:" + hashlib.sha256(text.encode()).hexdigest(),
-                        "judgment": judgment,
-                        "invalid_judgment": invalid_judgment,
-                        "raw_answer": response.get("final_answer", ""),
-                        "regression_candidate": None if not judgment or judgment["verdict"] != "correct" else
-                            {"answer": item["answer"], "expected": item["expected"],
-                             "required_outcome": "accepted", "proposed_gap": judgment.get("heuristic_gap")}})
-        write_checkpoint(args.out, records)
+        if item["cell_key"] in completed:
+            continue
+        records.append(adjudicate_item(item, provider.complete, model=args.model, headers=headers,
+                                       max_format_attempts=args.max_format_attempts))
+        write_checkpoint(args.out, records, judge_id=args.judge_id)
     return 0
 
 

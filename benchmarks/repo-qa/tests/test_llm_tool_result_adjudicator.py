@@ -31,6 +31,19 @@ class LlmToolResultAdjudicatorTest(unittest.TestCase):
             module.write_checkpoint(path, [{"cell_key": "a"}, {"cell_key": "b"}])
             self.assertEqual(len(json.loads(path.read_text())["records"]), 2)
 
+    def test_retries_malformed_structure_and_preserves_attempts(self):
+        responses = iter([
+            {"status": "answered", "final_answer": "not json"},
+            {"status": "answered", "final_answer": json.dumps({
+                "verdict": "incorrect", "supported_claims": [], "unsupported_claims": [],
+                "missing_claims": ["x"], "reason": "missing", "heuristic_gap": None})}])
+        result = module.adjudicate_item(
+            {"cell_key": "c", "task_id": "t", "question": "q", "answer": "a", "truth": {}},
+            lambda *_: next(responses), model="provider/model", headers={})
+        self.assertEqual(len(result["attempts"]), 2)
+        self.assertIsNotNone(result["attempts"][0]["parse_error"])
+        self.assertEqual(result["judgment"]["verdict"], "incorrect")
+
 
 if __name__ == "__main__":
     unittest.main()

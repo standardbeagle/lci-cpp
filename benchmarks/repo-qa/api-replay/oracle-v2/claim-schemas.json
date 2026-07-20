@@ -1,0 +1,654 @@
+{
+  "schema": "lci.typed-claim-bank.v1",
+  "schemas": [
+    {
+      "bad_answers": [
+        "Only Start is exported."
+      ],
+      "forbidden_patterns": [],
+      "good_answers": [
+        "The exported methods are Execute and Start."
+      ],
+      "question": "What exported methods are declared in pocketbase.go?",
+      "required_claims": [
+        {
+          "alternatives": [
+            [
+              "Execute",
+              "Start"
+            ]
+          ],
+          "id": "methods",
+          "kind": "semantic"
+        }
+      ],
+      "scenario": "success",
+      "source_output_digest": "sha256:d894fb903dcb3e05a5a7e2602652be84df30d04ac8429595395453f3d5863e56",
+      "task_id": "browse_file--success",
+      "tool": "browse_file"
+    },
+    {
+      "bad_answers": [
+        "The missing file was successfully read."
+      ],
+      "forbidden_patterns": [],
+      "good_answers": [
+        "The tool returned an error because the file was not found; use find_files."
+      ],
+      "question": "Interpret the captured negative browse_file result.",
+      "required_claims": [
+        {
+          "id": "outcome",
+          "kind": "outcome",
+          "value": "error"
+        }
+      ],
+      "scenario": "negative",
+      "source_output_digest": "sha256:468647b776f033816dea057454d34e394e3e1befe3b9177329023d660c3f37c1",
+      "task_id": "browse_file--negative",
+      "tool": "browse_file"
+    },
+    {
+      "bad_answers": [
+        "There are 448 Go files."
+      ],
+      "forbidden_patterns": [],
+      "good_answers": [
+        "There are 447 Go source files."
+      ],
+      "question": "How many Go source files are in the repository?",
+      "required_claims": [
+        {
+          "id": "go_files",
+          "kind": "integer",
+          "value": 447
+        }
+      ],
+      "scenario": "success",
+      "source_output_digest": "sha256:f1845a002b962b7c882ca320feab450b4b58bf76c3828809ec554801db9faf20",
+      "task_id": "code_insight--success",
+      "tool": "code_insight"
+    },
+    {
+      "bad_answers": [
+        "It returned no data."
+      ],
+      "forbidden_patterns": [],
+      "good_answers": [
+        "It returned module summary data despite the target request."
+      ],
+      "question": "Interpret the captured negative code_insight result.",
+      "required_claims": [
+        {
+          "id": "outcome",
+          "kind": "outcome",
+          "value": "fallback"
+        }
+      ],
+      "scenario": "negative",
+      "source_output_digest": "sha256:a63b89c05671f197e8ee078a55d91fd53b57a12c0d8d07a86400694439abf764",
+      "task_id": "code_insight--negative",
+      "tool": "code_insight"
+    },
+    {
+      "bad_answers": [
+        "Start is in pocketbase.go."
+      ],
+      "forbidden_patterns": [],
+      "good_answers": [
+        "func (pb *PocketBase) Start() error starts the application."
+      ],
+      "question": "What definition and documentation describe PocketBase.Start?",
+      "required_claims": [
+        {
+          "id": "signature",
+          "kind": "literal",
+          "value": "func (pb *PocketBase) Start() error"
+        },
+        {
+          "alternatives": [
+            [
+              "Start",
+              "starts",
+              "application"
+            ],
+            [
+              "Start",
+              "registers",
+              "commands",
+              "executes"
+            ]
+          ],
+          "id": "purpose",
+          "kind": "semantic"
+        }
+      ],
+      "scenario": "success",
+      "source_output_digest": "sha256:bdca12eed4dc940e96313f63ff9d09af15ad745b29e34fc2c4fc30d9099f1ebf",
+      "task_id": "context--success",
+      "tool": "context"
+    },
+    {
+      "bad_answers": [
+        "The context manifest loaded successfully."
+      ],
+      "forbidden_patterns": [],
+      "good_answers": [
+        "It failed with an error loading the missing manifest file."
+      ],
+      "question": "Interpret the captured negative context result.",
+      "required_claims": [
+        {
+          "id": "outcome",
+          "kind": "outcome",
+          "value": "error"
+        }
+      ],
+      "scenario": "negative",
+      "source_output_digest": "sha256:4cb44b6a0b37aeaca1cd5befcc883d3519da09addcba34810813601a66f7b4c4",
+      "task_id": "context--negative",
+      "tool": "context"
+    },
+    {
+      "bad_answers": [
+        "It is declared in app.go."
+      ],
+      "forbidden_patterns": [],
+      "good_answers": [
+        "PocketBase.Start is declared in pocketbase.go."
+      ],
+      "question": "Which file declares PocketBase.Start?",
+      "required_claims": [
+        {
+          "id": "file",
+          "kind": "literal",
+          "value": "pocketbase.go"
+        }
+      ],
+      "scenario": "success",
+      "source_output_digest": "sha256:c0b698f1edfde9bcbe8b980d866473f09934b009e753b27f4a9034111022a75c",
+      "task_id": "debug_info--success",
+      "tool": "debug_info"
+    },
+    {
+      "bad_answers": [
+        "The requested file was found."
+      ],
+      "forbidden_patterns": [],
+      "good_answers": [
+        "No indexed file was found; use a project-root-relative path."
+      ],
+      "question": "Interpret the captured negative debug_info result.",
+      "required_claims": [
+        {
+          "id": "outcome",
+          "kind": "outcome",
+          "value": "not_found"
+        }
+      ],
+      "scenario": "negative",
+      "source_output_digest": "sha256:cab55e4864e98c5e4b0edcf5e3f00df7be227cd99917b6245663be7e9ce42d97",
+      "task_id": "debug_info--negative",
+      "tool": "debug_info"
+    },
+    {
+      "bad_answers": [
+        "Only forms/record_upsert.go."
+      ],
+      "forbidden_patterns": [],
+      "good_answers": [
+        "forms/record_upsert.go and forms/record_upsert_test.go."
+      ],
+      "question": "Which Go files have record_upsert in their path?",
+      "required_claims": [
+        {
+          "id": "prod",
+          "kind": "literal",
+          "value": "forms/record_upsert.go"
+        },
+        {
+          "id": "test",
+          "kind": "literal",
+          "value": "forms/record_upsert_test.go"
+        }
+      ],
+      "scenario": "success",
+      "source_output_digest": "sha256:51150e165d05e69fec2c98935530dea18b18d16ecb32706bfb0d8be584f8992c",
+      "task_id": "find_files--success",
+      "tool": "find_files"
+    },
+    {
+      "bad_answers": [
+        "One file matched."
+      ],
+      "forbidden_patterns": [],
+      "good_answers": [
+        "No files matched; try a shorter filename fragment."
+      ],
+      "question": "Interpret the captured negative find_files result.",
+      "required_claims": [
+        {
+          "id": "outcome",
+          "kind": "outcome",
+          "value": "empty"
+        }
+      ],
+      "scenario": "negative",
+      "source_output_digest": "sha256:aea3e432a7a2fc19a4f32ff5a35d2d9f6f95279d6c01535670a4c89c3a7d9ef8",
+      "task_id": "find_files--negative",
+      "tool": "find_files"
+    },
+    {
+      "bad_answers": [
+        "It registers commands but the signature is unknown."
+      ],
+      "forbidden_patterns": [],
+      "good_answers": [
+        "func (pb *PocketBase) Start() error starts the application."
+      ],
+      "question": "What is the definition and documentation of PocketBase.Start?",
+      "required_claims": [
+        {
+          "id": "signature",
+          "kind": "literal",
+          "value": "func (pb *PocketBase) Start() error"
+        },
+        {
+          "alternatives": [
+            [
+              "Start",
+              "starts",
+              "application"
+            ],
+            [
+              "Start",
+              "registers",
+              "commands",
+              "executes"
+            ]
+          ],
+          "id": "purpose",
+          "kind": "semantic"
+        }
+      ],
+      "scenario": "success",
+      "source_output_digest": "sha256:24c3123276c56a7350c17ad0bb4e7d5f2a36a60c8426db3c3ac6dede092def54",
+      "task_id": "get_context--success",
+      "tool": "get_context"
+    },
+    {
+      "bad_answers": [
+        "The symbol context was returned."
+      ],
+      "forbidden_patterns": [],
+      "good_answers": [
+        "No symbol was found; use search or similar symbols."
+      ],
+      "question": "Interpret the captured negative get_context result.",
+      "required_claims": [
+        {
+          "id": "outcome",
+          "kind": "outcome",
+          "value": "not_found"
+        }
+      ],
+      "scenario": "negative",
+      "source_output_digest": "sha256:1b106ea4f8bcb8f9353c5b67bd0d2f11d81356d06caba6874d9b4178e9570c20",
+      "task_id": "get_context--negative",
+      "tool": "get_context"
+    },
+    {
+      "bad_answers": [
+        "The target is HEAD."
+      ],
+      "forbidden_patterns": [],
+      "good_answers": [
+        "The checked out commit is d438c6a96a0252ff9df62c1cfe193480ed9ff15d."
+      ],
+      "question": "What commit is checked out for this corpus?",
+      "required_claims": [
+        {
+          "id": "commit",
+          "kind": "sha",
+          "value": "d438c6a96a0252ff9df62c1cfe193480ed9ff15d"
+        }
+      ],
+      "scenario": "success",
+      "source_output_digest": "sha256:ba671c846c27565cae6587027bb5f41402f0207dd068112bd02c726c434dfa75",
+      "task_id": "git_analysis--success",
+      "tool": "git_analysis"
+    },
+    {
+      "bad_answers": [
+        "The range analysis succeeded."
+      ],
+      "forbidden_patterns": [],
+      "good_answers": [
+        "Git analysis failed with an error for the invalid ref."
+      ],
+      "question": "Interpret the captured negative git_analysis result.",
+      "required_claims": [
+        {
+          "id": "outcome",
+          "kind": "outcome",
+          "value": "error"
+        }
+      ],
+      "scenario": "negative",
+      "source_output_digest": "sha256:0daddaec18d60ec48f06305d62b7f2fe850b53e26613b174a188701fc3f8be1b",
+      "task_id": "git_analysis--negative",
+      "tool": "git_analysis"
+    },
+    {
+      "bad_answers": [
+        "The index is building."
+      ],
+      "forbidden_patterns": [],
+      "good_answers": [
+        "The index status is ready."
+      ],
+      "question": "Is the index ready to answer queries?",
+      "required_claims": [
+        {
+          "id": "ready",
+          "kind": "literal",
+          "value": "ready"
+        }
+      ],
+      "scenario": "success",
+      "source_output_digest": "sha256:7ecfc4b9b61bc2d298870d624ca4b52dcb3b95946b3f9cce194e9bba0227acfe",
+      "task_id": "index_stats--success",
+      "tool": "index_stats"
+    },
+    {
+      "bad_answers": [
+        "The index request failed."
+      ],
+      "forbidden_patterns": [],
+      "good_answers": [
+        "The call returned usable index summary data with ready status."
+      ],
+      "question": "Interpret the captured negative index_stats result.",
+      "required_claims": [
+        {
+          "id": "outcome",
+          "kind": "outcome",
+          "value": "fallback"
+        }
+      ],
+      "scenario": "negative",
+      "source_output_digest": "sha256:b0c80e346365734198d3a3fd8031f4ac1246955b444c1806f60d6d399996564e",
+      "task_id": "index_stats--negative",
+      "tool": "index_stats"
+    },
+    {
+      "bad_answers": [
+        "It edits indexed source."
+      ],
+      "forbidden_patterns": [],
+      "good_answers": [
+        "It provides semantic code search."
+      ],
+      "question": "What is the purpose of the search operation?",
+      "required_claims": [
+        {
+          "alternatives": [
+            [
+              "semantic code search"
+            ],
+            [
+              "search",
+              "indexed code"
+            ],
+            [
+              "search",
+              "indexed source"
+            ]
+          ],
+          "id": "purpose",
+          "kind": "semantic"
+        }
+      ],
+      "scenario": "success",
+      "source_output_digest": "sha256:ff0a55d76b28d879354d29b6c92171a008efd988fd3c0189f07ce94000c290d8",
+      "task_id": "info--success",
+      "tool": "info"
+    },
+    {
+      "bad_answers": [
+        "It returned details for the nonexistent tool."
+      ],
+      "forbidden_patterns": [],
+      "good_answers": [
+        "It returned available tools and corrective guidance."
+      ],
+      "question": "Interpret the captured negative info result.",
+      "required_claims": [
+        {
+          "id": "outcome",
+          "kind": "outcome",
+          "value": "corrective"
+        }
+      ],
+      "scenario": "negative",
+      "source_output_digest": "sha256:847481fcfe48ff7f5b6d32bbee0dbb1ebafa80ee61bb5a3dd4b420a53dbc2726",
+      "task_id": "info--negative",
+      "tool": "info"
+    },
+    {
+      "bad_answers": [
+        "It is defined in pocketbase.go at line 167."
+      ],
+      "forbidden_patterns": [],
+      "good_answers": [
+        "It is defined in pocketbase.go at line 166."
+      ],
+      "question": "Where is PocketBase.Start defined?",
+      "required_claims": [
+        {
+          "id": "definition",
+          "kind": "location",
+          "value": "pocketbase.go:166"
+        }
+      ],
+      "scenario": "success",
+      "source_output_digest": "sha256:dd51af079df02ff160cb293c47947cc592c01f4ea70d03f2c9bbfbf2e63c5444",
+      "task_id": "inspect_symbol--success",
+      "tool": "inspect_symbol"
+    },
+    {
+      "bad_answers": [
+        "The symbol definition was returned."
+      ],
+      "forbidden_patterns": [],
+      "good_answers": [
+        "No symbol was found; use similar symbols or search."
+      ],
+      "question": "Interpret the captured negative inspect_symbol result.",
+      "required_claims": [
+        {
+          "id": "outcome",
+          "kind": "outcome",
+          "value": "not_found"
+        }
+      ],
+      "scenario": "negative",
+      "source_output_digest": "sha256:0be17c1bd879e4c732932f7363fe9ffae840db7a972eb0908eed6a7f727ebec4",
+      "task_id": "inspect_symbol--negative",
+      "tool": "inspect_symbol"
+    },
+    {
+      "bad_answers": [
+        "The only method is Execute."
+      ],
+      "forbidden_patterns": [],
+      "good_answers": [
+        "The methods are Execute and Start."
+      ],
+      "question": "Which exported PocketBase methods are declared in pocketbase.go?",
+      "required_claims": [
+        {
+          "alternatives": [
+            [
+              "Execute",
+              "Start"
+            ]
+          ],
+          "id": "methods",
+          "kind": "semantic"
+        }
+      ],
+      "scenario": "success",
+      "source_output_digest": "sha256:e94e85f7d5a6bddea604cbe5cad8f0fd3556056a9272b80e4bca110cd04a401d",
+      "task_id": "list_symbols--success",
+      "tool": "list_symbols"
+    },
+    {
+      "bad_answers": [
+        "It returned a method."
+      ],
+      "forbidden_patterns": [],
+      "good_answers": [
+        "The successful result contained zero symbols."
+      ],
+      "question": "Interpret the captured negative list_symbols result.",
+      "required_claims": [
+        {
+          "id": "outcome",
+          "kind": "outcome",
+          "value": "empty"
+        }
+      ],
+      "scenario": "negative",
+      "source_output_digest": "sha256:ff534b7ba1a2d78eb4f9c7af9af511372c999e71a7558232d7b81e5153df71b7",
+      "task_id": "list_symbols--negative",
+      "tool": "list_symbols"
+    },
+    {
+      "bad_answers": [
+        "The definition is pocketbase.go:166."
+      ],
+      "forbidden_patterns": [],
+      "good_answers": [
+        "The callsite is examples/base/main.go at line 119."
+      ],
+      "question": "Where is PocketBase.Start called in non-test Go source?",
+      "required_claims": [
+        {
+          "id": "callsite",
+          "kind": "location",
+          "value": "examples/base/main.go:119"
+        }
+      ],
+      "scenario": "success",
+      "source_output_digest": "sha256:c886d6a4a5b4a9f1dc67483f636f3286250222567a03a098509fc88386084d5a",
+      "task_id": "search--success",
+      "tool": "search"
+    },
+    {
+      "bad_answers": [
+        "The requested symbol matched."
+      ],
+      "forbidden_patterns": [],
+      "good_answers": [
+        "There were zero matches; try broader flags or a different pattern."
+      ],
+      "question": "Interpret the captured negative search result.",
+      "required_claims": [
+        {
+          "id": "outcome",
+          "kind": "outcome",
+          "value": "empty"
+        }
+      ],
+      "scenario": "negative",
+      "source_output_digest": "sha256:7b856c1b0c0799cb6210311dda09e9376f7841c2ce1e33c1c7838ac69dc63e64",
+      "task_id": "search--negative",
+      "tool": "search"
+    },
+    {
+      "bad_answers": [
+        "There is an annotation at pocketbase.go:1."
+      ],
+      "forbidden_patterns": [],
+      "good_answers": [
+        "There are no semantic annotations."
+      ],
+      "question": "Which Go source lines contain an @lci semantic annotation?",
+      "required_claims": [
+        {
+          "id": "none",
+          "kind": "absence"
+        }
+      ],
+      "scenario": "success",
+      "source_output_digest": "sha256:27ced407f49cebfca33374d8f88ddee442a4782688ba9f6e2c323fedb5cf2ea1",
+      "task_id": "semantic_annotations--success",
+      "tool": "semantic_annotations"
+    },
+    {
+      "bad_answers": [
+        "A matching annotation was returned."
+      ],
+      "forbidden_patterns": [],
+      "good_answers": [
+        "There are no semantic annotations."
+      ],
+      "question": "Interpret the captured negative semantic_annotations result.",
+      "required_claims": [
+        {
+          "id": "outcome",
+          "kind": "outcome",
+          "value": "empty"
+        }
+      ],
+      "scenario": "negative",
+      "source_output_digest": "sha256:27ced407f49cebfca33374d8f88ddee442a4782688ba9f6e2c323fedb5cf2ea1",
+      "task_id": "semantic_annotations--negative",
+      "tool": "semantic_annotations"
+    },
+    {
+      "bad_answers": [
+        "It directly invokes Bootstrap."
+      ],
+      "forbidden_patterns": [],
+      "good_answers": [
+        "PocketBase.Start directly invokes Execute."
+      ],
+      "question": "Which method does PocketBase.Start directly invoke to execute the application?",
+      "required_claims": [
+        {
+          "id": "callee",
+          "kind": "literal",
+          "value": "Execute"
+        }
+      ],
+      "scenario": "success",
+      "source_output_digest": "sha256:b8c89385bf4f5aa120d21d744c133ef7786818babeaef938ceec1fd50d7bafe5",
+      "task_id": "side_effects--success",
+      "tool": "side_effects"
+    },
+    {
+      "bad_answers": [
+        "Side effects were returned for the symbol."
+      ],
+      "forbidden_patterns": [],
+      "good_answers": [
+        "The tool returned an error because the symbol was not found."
+      ],
+      "question": "Interpret the captured negative side_effects result.",
+      "required_claims": [
+        {
+          "id": "outcome",
+          "kind": "outcome",
+          "value": "error"
+        }
+      ],
+      "scenario": "negative",
+      "source_output_digest": "sha256:f907032598f2296a44c827e7ce2b6cd05ddaa002774d070345dc6494e4b9697a",
+      "task_id": "side_effects--negative",
+      "tool": "side_effects"
+    }
+  ],
+  "source": "independent corpus oracle plus genuine MCP output digests"
+}

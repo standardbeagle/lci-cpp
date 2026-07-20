@@ -1,0 +1,30 @@
+{
+  "schema": "lci.benchmark-audit.v1",
+  "date": "2026-07-20",
+  "design_verdict": "pass_for_preregistered_rerun",
+  "evidence_verdict": "no_confirmatory_result",
+  "historical_validation": {
+    "accepted": 353,
+    "needs_adjudication": 84,
+    "unscored_infrastructure": 11,
+    "total": 448
+  },
+  "controls": {
+    "all_28_cases_covered": true,
+    "source_digest_binding": true,
+    "adversarial_discrimination_required": true,
+    "claim_level_reason_codes": true,
+    "actual_source_output_sent_to_judges": true,
+    "all_misses_reviewed": true,
+    "independent_two_judge_consensus": true,
+    "malformed_only_retry_limit": 3,
+    "raw_attempts_preserved": true,
+    "direct_llm_score_override": false
+  },
+  "open_requirements": [
+    "complete two-judge review of all 84 historical misses for exploratory calibration",
+    "freeze provider and model revisions before collection",
+    "run a fresh preregistered confirmatory benchmark"
+  ],
+  "verification": {"tests_passed": 417, "tests_failed": 0}
+}
