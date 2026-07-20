@@ -1,0 +1,20 @@
+{
+  "schema": "lci.api-replay.posthoc-sensitivity.v1",
+  "status": "post-hoc-exploratory-not-selection-evidence",
+  "reason": "The frozen extractor recognizes path:line but not the semantically equivalent phrase 'path at line N'.",
+  "changed_cell": {
+    "model": "opencode-go/deepseek-v4-flash",
+    "arm": "fmt_07",
+    "repetition": 5,
+    "frozen_score": "incorrect",
+    "sensitivity_score": "correct",
+    "answer": "`app.Start()` is called in `examples/base/main.go` at line 119 inside the `main` function."
+  },
+  "recomputed_exact_counts": {
+    "opencode-go/deepseek-v4-flash": {"fmt_07": "8/8", "fmt_19": "8/8", "fmt_31": "8/8", "fmt_43": "8/8"},
+    "opencode-go/glm-5.2": {"fmt_07": "8/8", "fmt_19": "8/8", "fmt_31": "8/8", "fmt_43": "8/8"}
+  },
+  "recomputed_candidate_vs_json_deltas": "0.0 for all six contrasts",
+  "recomputed_cycle_null": "passes for both models",
+  "selection_effect": "unchanged: no candidate advances"
+}

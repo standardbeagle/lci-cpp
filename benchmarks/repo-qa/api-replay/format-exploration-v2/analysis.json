@@ -1,0 +1,1551 @@
+{
+  "by_model_and_arm": {
+    "opencode-go/deepseek-v4-flash": {
+      "fmt_07": {
+        "completion_rate": 1.0,
+        "exact_binomial_95_ci": [
+          0.4734903291247933,
+          0.9968402764687481
+        ],
+        "exact_n": 7,
+        "exact_rate": 0.875,
+        "missing_n": 0,
+        "observed_n": 8,
+        "planned_n": 8,
+        "precision": 0.875,
+        "recall": 0.875,
+        "unusable_n": 0,
+        "usable_n": 8
+      },
+      "fmt_19": {
+        "completion_rate": 1.0,
+        "exact_binomial_95_ci": [
+          0.6305833524471809,
+          1.0
+        ],
+        "exact_n": 8,
+        "exact_rate": 1.0,
+        "missing_n": 0,
+        "observed_n": 8,
+        "planned_n": 8,
+        "precision": 1.0,
+        "recall": 1.0,
+        "unusable_n": 0,
+        "usable_n": 8
+      },
+      "fmt_31": {
+        "completion_rate": 1.0,
+        "exact_binomial_95_ci": [
+          0.6305833524471809,
+          1.0
+        ],
+        "exact_n": 8,
+        "exact_rate": 1.0,
+        "missing_n": 0,
+        "observed_n": 8,
+        "planned_n": 8,
+        "precision": 1.0,
+        "recall": 1.0,
+        "unusable_n": 0,
+        "usable_n": 8
+      },
+      "fmt_43": {
+        "completion_rate": 1.0,
+        "exact_binomial_95_ci": [
+          0.6305833524471809,
+          1.0
+        ],
+        "exact_n": 8,
+        "exact_rate": 1.0,
+        "missing_n": 0,
+        "observed_n": 8,
+        "planned_n": 8,
+        "precision": 1.0,
+        "recall": 1.0,
+        "unusable_n": 0,
+        "usable_n": 8
+      }
+    },
+    "opencode-go/glm-5.2": {
+      "fmt_07": {
+        "completion_rate": 1.0,
+        "exact_binomial_95_ci": [
+          0.6305833524471809,
+          1.0
+        ],
+        "exact_n": 8,
+        "exact_rate": 1.0,
+        "missing_n": 0,
+        "observed_n": 8,
+        "planned_n": 8,
+        "precision": 1.0,
+        "recall": 1.0,
+        "unusable_n": 0,
+        "usable_n": 8
+      },
+      "fmt_19": {
+        "completion_rate": 1.0,
+        "exact_binomial_95_ci": [
+          0.6305833524471809,
+          1.0
+        ],
+        "exact_n": 8,
+        "exact_rate": 1.0,
+        "missing_n": 0,
+        "observed_n": 8,
+        "planned_n": 8,
+        "precision": 1.0,
+        "recall": 1.0,
+        "unusable_n": 0,
+        "usable_n": 8
+      },
+      "fmt_31": {
+        "completion_rate": 1.0,
+        "exact_binomial_95_ci": [
+          0.6305833524471809,
+          1.0
+        ],
+        "exact_n": 8,
+        "exact_rate": 1.0,
+        "missing_n": 0,
+        "observed_n": 8,
+        "planned_n": 8,
+        "precision": 1.0,
+        "recall": 1.0,
+        "unusable_n": 0,
+        "usable_n": 8
+      },
+      "fmt_43": {
+        "completion_rate": 1.0,
+        "exact_binomial_95_ci": [
+          0.6305833524471809,
+          1.0
+        ],
+        "exact_n": 8,
+        "exact_rate": 1.0,
+        "missing_n": 0,
+        "observed_n": 8,
+        "planned_n": 8,
+        "precision": 1.0,
+        "recall": 1.0,
+        "unusable_n": 0,
+        "usable_n": 8
+      }
+    }
+  },
+  "cycle_null": {
+    "opencode-go/deepseek-v4-flash": {
+      "cycle_1_exact_rate": 1.0,
+      "cycle_2_exact_rate": 0.75,
+      "delta": -0.25,
+      "passes": false
+    },
+    "opencode-go/glm-5.2": {
+      "cycle_1_exact_rate": 1.0,
+      "cycle_2_exact_rate": 1.0,
+      "delta": 0.0,
+      "passes": true
+    }
+  },
+  "exploratory": true,
+  "grid_complete": true,
+  "manipulation_control": {
+    "authenticated_probes": {
+      "artifact_digest": "sha256:fe8ebd555fc5bb3ef6880520dbeeb7cc516793d83c29723768b2b5355626602f",
+      "models": [
+        "opencode-go/deepseek-v4-flash",
+        "opencode-go/glm-5.2"
+      ],
+      "passed": true
+    },
+    "fixture_digests": {
+      "opencode-go/deepseek-v4-flash": "sha256:c0d49e5baab2e0e9650e5a76ff2c43f4886e0486863763be8fb749fb89d55d40",
+      "opencode-go/glm-5.2": "sha256:d423e1fb5887171fb0fa2a2802163ae1b6ae5b3aa82c49676b372479baea601e"
+    },
+    "passed": true,
+    "safe_header_profiles": [
+      {
+        "capture_request_digest": "sha256:54c0d56086f25e6fbff3838d18adf73a3cdcbed3791e83b30e972bbc13990034",
+        "headers_digest": "sha256:133648fcd84b53f7c3c3b98c514d6b080e02d98906e2a148b05f200fb3139dd8",
+        "model": "opencode-go/deepseek-v4-flash"
+      },
+      {
+        "capture_request_digest": "sha256:98aa9d6796ca4e08fd58102cef7175d996233c25a885e5b394c2364fe29dbb19",
+        "headers_digest": "sha256:0daf71c1a7d932edd9c495b35ca819bfbb2f44f8d826ebeff5a2c15ba78705d8",
+        "model": "opencode-go/glm-5.2"
+      }
+    ]
+  },
+  "missing_cells": [],
+  "multiplicity": {
+    "alpha": 0.05,
+    "family_size": 6,
+    "method": "Holm step-down"
+  },
+  "observed_logical_cells": 64,
+  "paired_contrasts_by_model": {
+    "opencode-go/deepseek-v4-flash": {
+      "fmt_19": {
+        "baseline_only_exact": 0,
+        "candidate_only_exact": 1,
+        "completion_rate_delta": 0.0,
+        "holm_adjusted_p": 1.0,
+        "mcnemar_exact_two_sided_p": 1.0,
+        "paired_exact_delta": 0.125,
+        "unusable_or_missing_pairs": 0,
+        "usable_pairs": 8,
+        "vs": "fmt_07"
+      },
+      "fmt_31": {
+        "baseline_only_exact": 0,
+        "candidate_only_exact": 1,
+        "completion_rate_delta": 0.0,
+        "holm_adjusted_p": 1.0,
+        "mcnemar_exact_two_sided_p": 1.0,
+        "paired_exact_delta": 0.125,
+        "unusable_or_missing_pairs": 0,
+        "usable_pairs": 8,
+        "vs": "fmt_07"
+      },
+      "fmt_43": {
+        "baseline_only_exact": 0,
+        "candidate_only_exact": 1,
+        "completion_rate_delta": 0.0,
+        "holm_adjusted_p": 1.0,
+        "mcnemar_exact_two_sided_p": 1.0,
+        "paired_exact_delta": 0.125,
+        "unusable_or_missing_pairs": 0,
+        "usable_pairs": 8,
+        "vs": "fmt_07"
+      }
+    },
+    "opencode-go/glm-5.2": {
+      "fmt_19": {
+        "baseline_only_exact": 0,
+        "candidate_only_exact": 0,
+        "completion_rate_delta": 0.0,
+        "holm_adjusted_p": 1.0,
+        "mcnemar_exact_two_sided_p": 1.0,
+        "paired_exact_delta": 0.0,
+        "unusable_or_missing_pairs": 0,
+        "usable_pairs": 8,
+        "vs": "fmt_07"
+      },
+      "fmt_31": {
+        "baseline_only_exact": 0,
+        "candidate_only_exact": 0,
+        "completion_rate_delta": 0.0,
+        "holm_adjusted_p": 1.0,
+        "mcnemar_exact_two_sided_p": 1.0,
+        "paired_exact_delta": 0.0,
+        "unusable_or_missing_pairs": 0,
+        "usable_pairs": 8,
+        "vs": "fmt_07"
+      },
+      "fmt_43": {
+        "baseline_only_exact": 0,
+        "candidate_only_exact": 0,
+        "completion_rate_delta": 0.0,
+        "holm_adjusted_p": 1.0,
+        "mcnemar_exact_two_sided_p": 1.0,
+        "paired_exact_delta": 0.0,
+        "unusable_or_missing_pairs": 0,
+        "usable_pairs": 8,
+        "vs": "fmt_07"
+      }
+    }
+  },
+  "planned_cells": 64,
+  "retries": [],
+  "retry_attempts": 0,
+  "retry_counts": {},
+  "schema": "lci.api-replay.format-analysis.v1",
+  "scores": [
+    {
+      "arm": "fmt_19",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "order": 4,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 4,
+      "run_key": "01f5f8078545b792c5928b09882eaa12db7a219b965544c88dd16cc3b4a30853",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_07",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/glm-5.2",
+      "order": 2,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 4,
+      "run_key": "02308ad0c85668415a45bff8e46496b31c6886da3aa39d36b999b9b413226c96",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_43",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/glm-5.2",
+      "order": 3,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 1,
+      "run_key": "055a2736173e55dbbe3761ef8f1e53548b92630d91bad569fb8b90757f929171",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_19",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/glm-5.2",
+      "order": 4,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 8,
+      "run_key": "0e271373c0ef9d592a62f3cdc63ffafb4bc0f8c791fda378c98ecb8c76b4ac9b",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_07",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/glm-5.2",
+      "order": 4,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 7,
+      "run_key": "1146290247d61131b04bbebdfe616a955ac1effa3b6c913c426a0361b9ba4098",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_31",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "order": 3,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 8,
+      "run_key": "19046822af8842d9f98110283d5bf9183099fea4cc528cf449f88b98b456d3d4",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_19",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/glm-5.2",
+      "order": 3,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 3,
+      "run_key": "1abc196ce38867ae86991feb13422ce1ef6c9035c11f33fad5b199eb1a56f103",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_43",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "order": 2,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 3,
+      "run_key": "1ac0eeac0fd28448113806288e7acbf0486e6a3fb051560d621d0f1fb2a82137",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_31",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "order": 2,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 6,
+      "run_key": "2c32c65fa156f6c329eab8a6fd4554980b0d981f88fd77c4a07f65fef508345f",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_31",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/glm-5.2",
+      "order": 1,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 7,
+      "run_key": "3013a423466266f3eb1cf083a3e5815f19dff1e0b8d4a260b4afa809d4e6d98d",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_19",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "order": 2,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 5,
+      "run_key": "326852ccb82f84feebf9b702bb743f84f1e5f6960da73ca6b72c0ea4bc056476",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_07",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/glm-5.2",
+      "order": 4,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 3,
+      "run_key": "32fc453edd89d6ef3336f482fa704cafb3c707a8efbc0ad2559463e5ddbef872",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_07",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/glm-5.2",
+      "order": 3,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 2,
+      "run_key": "3ac01e1657864c423ff3cd104c8cb397efe944466e867b1923d9ecb6eef0d0a3",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_31",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/glm-5.2",
+      "order": 3,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 4,
+      "run_key": "3b27d99856ebdce833f09b4f4069ebc1ad8b4577c5df6e3eeb008b7f3ec200a8",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_19",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/glm-5.2",
+      "order": 1,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 2,
+      "run_key": "3f247159ef667b4e2277e34642be10f953165aeb80732cc228944a2dfc12ecd0",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_07",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/glm-5.2",
+      "order": 1,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 1,
+      "run_key": "41cc9322ca368a6ace6f8e218a685c4a5b098f8f66c92665f318d992c75b06dc",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_31",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/glm-5.2",
+      "order": 4,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 5,
+      "run_key": "4ac41c5d82bf4098218a26ad073153b66fde89a1c3e4bb0af49a72d871e1395c",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_07",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "order": 3,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 2,
+      "run_key": "4f3eafaaabdd56615d83aab5403dc84ad87bb408d001dce24eab21432949f73c",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_07",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "order": 2,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 4,
+      "run_key": "4fd065e2b0c57f4ff948acb2f406742bc315fbdf7e714f0e641fb78534918a6d",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_43",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "order": 2,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 7,
+      "run_key": "51c8d6940c1dc4e3f1355e959e6285581161a6bd0b5599180166c37c026c5c6d",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_43",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/glm-5.2",
+      "order": 4,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 2,
+      "run_key": "5f9c582c8dc53d64f253ae640270cd9e43afaeff74940003cfc9897f7fa4b605",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_43",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "order": 3,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 1,
+      "run_key": "6138601c47282ffe15e6a687233ca7002e2d80a42c152634e7ba1151b80a7deb",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_43",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/glm-5.2",
+      "order": 2,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 7,
+      "run_key": "61b00fdcf8dd1529ae38b6e5f2b50904ae788621271b1d9f9afa0c8c23795315",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_07",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "order": 4,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 7,
+      "run_key": "655446566404530b22f2dab4ddff7d505ab1cf3c74cdaf78d1b0eabf96fcfced",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_31",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "order": 1,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 3,
+      "run_key": "65a1966f0d205bc9020a5dd9e2dc8cf7900b747e7201cfe9784c3f5ccb999184",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_19",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "order": 2,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 1,
+      "run_key": "6930b870dca46da51229185bca77fb8aebf01b5009975905b254a3bfc2827a34",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_19",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "order": 3,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 3,
+      "run_key": "6e1e727bee4d87767bf518b7689663268b342b3ef0175c50ee5fa3abf6d32adf",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_19",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "order": 4,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 8,
+      "run_key": "6fe09f1c72314ec933c47edaa91b923aa61e5d6f1e6e72d36bc16953427e1173",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_31",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/glm-5.2",
+      "order": 3,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 8,
+      "run_key": "73a0ffeb2f6ba236d5a04c61799905a2cf916a593814b068f650665754f16751",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_19",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "order": 3,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 7,
+      "run_key": "73b29ee5d5395ce508040fcf794ff48e9a96026395a2733716dd88f1501c0469",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_43",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "order": 1,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 4,
+      "run_key": "769539954bf0ed0ca269ff94ac6754cab8e7d3a1f094e012e6573757e4e132ef",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_07",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "order": 3,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 6,
+      "run_key": "7ba73ac975eb994cbfc9a41be523a4924bace6b8605724b9ba8b67de18cf94d1",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_43",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "order": 1,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 8,
+      "run_key": "7cd89c2587b4bda758ad281a0438da80dbf7c7f9fdec7e2dde89e2a3f5d3d246",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_43",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "order": 3,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 5,
+      "run_key": "7d6879a165fe198b6847e7271a25ad9bcb0c55e3f692283dc4b470ff50e9549f",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_19",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/glm-5.2",
+      "order": 3,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 7,
+      "run_key": "7f81b597d46182d0dfcda63387f83700f9872bbb7f50885ca8be63577c0773cb",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_19",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/glm-5.2",
+      "order": 4,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 4,
+      "run_key": "872acb0bb9e0d7b4cbfe0a407c979cfaac419c4c955acc6fc7c872ed75027314",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_19",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/glm-5.2",
+      "order": 2,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 1,
+      "run_key": "877cbb77cf7e6beff603cac812809a3d530504ab3db47682a264ea66892e28a2",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_43",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/glm-5.2",
+      "order": 1,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 8,
+      "run_key": "89460bbaed2b0e6e40b4914f703a7dfdc26345d98f736fa823036aad32845b04",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_31",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "order": 3,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 4,
+      "run_key": "8b722a2cecda40fcd5ddc63f414e9c29269e4ef2335bd0139043baacd37158ff",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_43",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/glm-5.2",
+      "order": 2,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 3,
+      "run_key": "8d612c55b2829d6eb9b58dcfdcb40b1a17945151f23b1c2c3426da2ca2a4f228",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_31",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/glm-5.2",
+      "order": 4,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 1,
+      "run_key": "94b892b07db35f56867c9aba4c0920726f27889b295e3184e7f91e552742d746",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_07",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "order": 2,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 8,
+      "run_key": "9e3664b0915bc10869cf9b391474f95c1b6139b9953d02f6c6b722e95d5ef1af",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_31",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/glm-5.2",
+      "order": 2,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 6,
+      "run_key": "9e7d83f46ab1c9f5739a2bd024399528638964d0207d0f35a253fd7daed4021f",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_07",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/glm-5.2",
+      "order": 2,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 8,
+      "run_key": "a770256e5df30154c6b66d9040d0bd4832033eb1edad6e4931be09a959a1af74",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_43",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/glm-5.2",
+      "order": 3,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 5,
+      "run_key": "b51dcdbd87457d8c632c80e761c88ea1ac7fd5bf6d14679e77da34b45633b2a6",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_07",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "order": 4,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 3,
+      "run_key": "bbcf8ffadbfab544fa3337646da28fabd00827bf44852c209d3da13b074a6eec",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_07",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/glm-5.2",
+      "order": 1,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 5,
+      "run_key": "bd36cdd9d1a9885b712dc2e3529910cd967a8e9443708d48c454ce92c9d9bb9e",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_07",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/glm-5.2",
+      "order": 3,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 6,
+      "run_key": "c4b1b8d4b902a22f24b6052255c28246e3fd61e75b6f3c55372f16ecb516b8b8",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_19",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/glm-5.2",
+      "order": 1,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 6,
+      "run_key": "c4c6e54b916b932b696065959bfe7f2fdd2b1bc73e8accd99a493b3b89f022cf",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_43",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/glm-5.2",
+      "order": 1,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 4,
+      "run_key": "c7230bcb56dabcb74f7c0535fd188caa7f7ac2bc969d553abc459c88fb3c3e21",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_43",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/glm-5.2",
+      "order": 4,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 6,
+      "run_key": "c99bd2909879ce03946fd60c450e22ec27bd64a904c864f6db263c0f5f370673",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_19",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/glm-5.2",
+      "order": 2,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 5,
+      "run_key": "caf6a3197c3abbf0495f94edf0122ced1b0adb0201b263f6d7363fdf23ca34db",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_31",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "order": 1,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 7,
+      "run_key": "cb01a61fe8ab80a70eb8d0f49dfd42eac9d8e199342a05aa5f11aa01ff46c9fb",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_43",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "order": 4,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 6,
+      "run_key": "cb29d6939e1e6eeef0d36e9f1699dd3e2da5d6865f6d03224a2238b6959d1053",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_07",
+      "completed": true,
+      "exact": false,
+      "extracted": [],
+      "failure": null,
+      "false_negatives": [
+        "examples/base/main.go:119"
+      ],
+      "false_positives": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "order": 1,
+      "precision": 0.0,
+      "recall": 0.0,
+      "repetition": 5,
+      "run_key": "e3b27ca1c67cce7e4291614b21a6aa18dce93a6df235d2508f8c6dbfdb01a8f5",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_31",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "order": 2,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 2,
+      "run_key": "e463443db027d97d65bf8c0b1867615267945a8dba0932300efd8cd22b031214",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_31",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/glm-5.2",
+      "order": 2,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 2,
+      "run_key": "e5b83c1a9a4694d31cdf4ade59294dd46daf68340ca4016063dceae265f25417",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_43",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "order": 4,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 2,
+      "run_key": "eb5e174073e05bfabd93bc6f20acf2341d452156f057b904b8029ab625ed3c1d",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_19",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "order": 1,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 6,
+      "run_key": "f09617633931018d2eea8d6b269e273d0ec761c6ba64ba487c570201838f37fb",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_19",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "order": 1,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 2,
+      "run_key": "f61699be7ab5ff9657dda608b370cb039713a5080a879a6131dc1c2d6e6bd8ef",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_07",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "order": 1,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 1,
+      "run_key": "f723c6a1daa819d188ccb66988d06387cd9d22b7a13e92b46c3b4186f30d194f",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_31",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/glm-5.2",
+      "order": 1,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 3,
+      "run_key": "f967fc5dfa7ee57bf3c5ec53baa49ae90fb6571f2617fe8b2efd3e1d5c13de55",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_31",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "order": 4,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 5,
+      "run_key": "fa4c78c4259a55e0daea4e78f2ccc7b5a99237fb54e2e51bb24873b2e0f5a9c4",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arm": "fmt_31",
+      "completed": true,
+      "exact": true,
+      "extracted": [
+        "examples/base/main.go:119"
+      ],
+      "failure": null,
+      "false_negatives": [],
+      "false_positives": [],
+      "model": "opencode-go/deepseek-v4-flash",
+      "order": 4,
+      "precision": 1.0,
+      "recall": 1.0,
+      "repetition": 1,
+      "run_key": "fe61e2bc8cf749ead0e5d16b32e126b948eb4a6d65df8b93e9af56200afbe069",
+      "schema": "lci.api-replay.format-score.v1",
+      "status": "answered",
+      "task_id": "search-callsite-v2"
+    }
+  ],
+  "selection": {
+    "advanced": [],
+    "decision": "retain fmt_07",
+    "production_recommendation": false
+  },
+  "unusable_cells": []
+}

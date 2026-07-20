@@ -1,0 +1,17 @@
+{
+  "schema": "benchmark.audit.v1",
+  "gates": [
+    {"id": "G1", "hard": true, "status": "pass", "severity": "none", "evidence": ["v2 design commit 824690c and probe-bound revision 57d93f4 predate the 64-cell grid"]},
+    {"id": "G2", "hard": true, "status": "pass", "severity": "none", "evidence": ["preflight.json exact one-pointer diffs and identical decoded facts"]},
+    {"id": "G3", "hard": true, "status": "pass", "severity": "none", "evidence": ["opaque arms and frozen balanced schedule"]},
+    {"id": "G4", "hard": true, "status": "pass", "severity": "none", "evidence": ["stateless direct continuation; oracle absent; no tools"]},
+    {"id": "G5", "hard": true, "status": "fail", "severity": "major", "evidence": ["frozen extractor rejects the semantically correct phrase examples/base/main.go at line 119", "sensitivity-file-at-line.json changes one primary score"]},
+    {"id": "G6", "hard": true, "status": "pass", "severity": "none", "evidence": ["64/64 unique scheduled cells; all raw streams and digests preserved"]},
+    {"id": "G7", "hard": true, "status": "pass", "severity": "none", "evidence": ["64 answered, zero exclusions, zero retries"]},
+    {"id": "G8", "hard": true, "status": "fail", "severity": "major", "evidence": ["DeepSeek frozen cycle-null delta is -0.25 and fails; sensitivity attributes it to the oracle defect"]},
+    {"id": "G9", "hard": true, "status": "pass", "severity": "none", "evidence": ["8 repetitions per arm/model; frozen McNemar, Holm, practical threshold applied"]},
+    {"id": "G10", "hard": true, "status": "pass", "severity": "none", "evidence": ["models reported separately; no pooled inference"]},
+    {"id": "G11", "hard": true, "status": "pass", "severity": "none", "evidence": ["analysis.json regenerates from immutable attempts and frozen artifacts"]},
+    {"id": "G12", "hard": true, "status": "pass", "severity": "none", "evidence": ["no candidate advances under frozen or sensitivity scoring; no production claim"]}
+  ]
+}
