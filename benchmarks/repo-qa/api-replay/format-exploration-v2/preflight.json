@@ -1,4 +1,12 @@
 {
+  "authenticated_probes": {
+    "artifact_digest": "sha256:fe8ebd555fc5bb3ef6880520dbeeb7cc516793d83c29723768b2b5355626602f",
+    "models": [
+      "opencode-go/deepseek-v4-flash",
+      "opencode-go/glm-5.2"
+    ],
+    "passed": true
+  },
   "cells": 64,
   "fixtures": [
     {

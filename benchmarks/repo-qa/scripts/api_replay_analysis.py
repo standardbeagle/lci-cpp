@@ -182,8 +182,14 @@ def validate_preflight(preflight: dict, manifest: dict, oracles: dict) -> dict:
             raise AnalysisError("preflight safe-header profiles do not match declared models")
         if any(not isinstance(item.get("headers_digest"), str) for item in profiles):
             raise AnalysisError("preflight safe-header profile is missing its digest")
+    auth_probes = preflight.get("authenticated_probes")
+    if manifest.get("authenticated_probe_digests"):
+        if not isinstance(auth_probes, dict) or auth_probes.get("passed") is not True:
+            raise AnalysisError("preflight authenticated probes did not pass")
+        if set(auth_probes.get("models", [])) != models:
+            raise AnalysisError("preflight authenticated probes do not match declared models")
     return {"passed": True, "fixture_digests": {item["recorded_model"]: item["fixture_digest"] for item in fixtures},
-            "safe_header_profiles": profiles}
+            "safe_header_profiles": profiles, "authenticated_probes": auth_probes}
 
 
 def resolve_attempts(cells: list[dict], expected: dict) -> tuple[dict, dict]:

@@ -80,6 +80,9 @@
     "header-profile-deepseek.json": "sha256:811afb2ba007d00dc9b2aaaeb3872629bd49616d9670075eaa94854d27968fc3",
     "header-profile-glm.json": "sha256:07fd73cda67b4eda5a967d55ddd246c2733aa962d8b674dcf057af070c0ac967"
   },
+  "authenticated_probe_digests": {
+    "authenticated-probes.json": "sha256:fe8ebd555fc5bb3ef6880520dbeeb7cc516793d83c29723768b2b5355626602f"
+  },
   "prior_study": {"benchmark_id": "lci-live-search-format-exploration-v1", "classification": "infrastructure-only", "observed_logical_cells": 64, "usable_model_outcomes": 0, "uniform_failure": "HTTP 403", "reuse_policy": "No v1 attempt, response, score, or timing enters v2 outcomes or inference."},
   "execution_gates": [
     "Two genuinely new successful post-tool provider captures exist, one per declared model",

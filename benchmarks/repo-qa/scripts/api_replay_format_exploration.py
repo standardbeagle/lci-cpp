@@ -187,7 +187,8 @@ def validate_protocol(manifest: dict, schedule: dict) -> None:
 
 
 def validate_frozen_files(manifest: dict, manifest_path: Path = DEFAULT_MANIFEST) -> None:
-    frozen = {**manifest.get("fixture_digests", {}), **manifest.get("safe_header_profile_digests", {})}
+    frozen = {**manifest.get("fixture_digests", {}), **manifest.get("safe_header_profile_digests", {}),
+              **manifest.get("authenticated_probe_digests", {})}
     for relative, expected in frozen.items():
         path = (manifest_path.parent / relative).resolve()
         actual = "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
@@ -217,6 +218,29 @@ def validate_header_profiles(manifest: dict, fixtures: list[dict], manifest_path
         summaries.append({"model": profile["model"], "capture_request_digest": profile["capture_request_digest"],
                           "headers_digest": digest(fixture_request_headers(fixture))})
     return summaries
+
+
+def validate_auth_probes(manifest: dict, fixtures: list[dict], manifest_path: Path) -> dict | None:
+    declared = manifest.get("authenticated_probe_digests", {})
+    if not declared:
+        return None
+    if len(declared) != 1:
+        raise ValueError("exactly one authenticated probe artifact must be declared")
+    relative = next(iter(declared))
+    artifact = json.loads((manifest_path.parent / relative).read_text())
+    if artifact.get("schema") != "lci.api-replay.auth-probes.v1" or artifact.get("all_succeeded") is not True:
+        raise ValueError("authenticated probes did not all succeed")
+    models = {fixture["recorded_model"] for fixture in fixtures}
+    probes = artifact.get("probes", [])
+    if {probe.get("model") for probe in probes} != models or len(probes) != len(models):
+        raise ValueError("authenticated probes do not match fixture models")
+    fixture_digests = {digest(fixture) for fixture in fixtures}
+    for probe in probes:
+        if probe.get("excluded_from_outcomes") is not True or probe.get("http_status") != 200 or probe.get("status") != "answered":
+            raise ValueError("authenticated probe is not a successful excluded infrastructure check")
+        if probe.get("fixture_digest") not in fixture_digests:
+            raise ValueError("authenticated probe fixture digest mismatch")
+    return {"passed": True, "models": sorted(models), "artifact_digest": declared[relative]}
 
 
 def planned_grid(fixtures: list[dict], manifest: dict, schedule: dict) -> list[tuple[dict, str, str, int, int]]:
@@ -410,6 +434,7 @@ def main() -> int:
     validate_frozen_files(manifest, args.manifest)
     jobs = planned_grid(fixtures, manifest, schedule)
     header_profiles = validate_header_profiles(manifest, fixtures, args.manifest)
+    auth_probes = validate_auth_probes(manifest, fixtures, args.manifest)
     if args.run_provider:
         require_frozen_analysis_revision(manifest)
         from opencode_zen_provider import OpenCodeZenProvider
@@ -417,10 +442,11 @@ def main() -> int:
         records, counts = run_provider_grid(provider, jobs, args.out)
         report = {"schema": "lci.api-replay.format-plan.v1", "provider_executed": True, "cells": len(jobs),
                   "recorded": len(records), **counts, "fixtures": [validate_fixture(f) for f in fixtures],
-                  "safe_header_profiles": header_profiles}
+                  "safe_header_profiles": header_profiles, "authenticated_probes": auth_probes}
     else:
         report = {"schema": "lci.api-replay.format-plan.v1", "provider_executed": False, "cells": len(jobs),
                   "fixtures": [validate_fixture(f) for f in fixtures], "safe_header_profiles": header_profiles}
+        report["authenticated_probes"] = auth_probes
     rendered = json.dumps(report, indent=2, sort_keys=True) + "\n"
     if args.plan_out:
         args.plan_out.parent.mkdir(parents=True, exist_ok=True)
