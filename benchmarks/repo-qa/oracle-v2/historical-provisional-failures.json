@@ -1,0 +1,8 @@
+[
+  {
+    "run_key": "search-callsite-v2|opencode-go/deepseek-v4-flash|5|fmt_07",
+    "task_id": "Where is PocketBase.Start called in non-test Go source?",
+    "answer": "`app.Start()` is called in `examples/base/main.go` at line 119 inside the `main` function.",
+    "expected": ["examples/base/main.go:119"]
+  }
+]

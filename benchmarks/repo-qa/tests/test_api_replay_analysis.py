@@ -54,6 +54,23 @@ class ApiReplayAnalysisTest(unittest.TestCase):
         extra = scored(GOOD + " and fake/other.go:7")
         self.assertEqual((extra["exact"], extra["precision"], extra["recall"]), (False, 0.5, 1.0))
 
+    def test_oracle_accepts_semantically_equivalent_file_at_line_wording(self):
+        raw = dict(complete_grid()[0],
+                   final_answer="Called in `examples/base/main.go` at line 119 inside main.")
+        score = analysis.score_cell(raw, ORACLES)
+        self.assertTrue(score["exact"])
+        self.assertEqual(score["adjudication_status"], "accepted")
+
+    def test_every_heuristic_failure_is_emitted_for_adjudication(self):
+        cells = complete_grid()
+        cells[0]["final_answer"] = "The call is near the end of the example."
+        report = analysis.analyze({"cells": cells}, ORACLES, MANIFEST, SCHEDULE, PREFLIGHT)
+        self.assertTrue(report["oracle_followup_required"])
+        self.assertEqual(report["analysis_status"], "pending_adjudication")
+        self.assertEqual(report["selection"]["decision"], "defer: pending adjudication")
+        self.assertEqual(len(report["adjudication_queue"]), 1)
+        self.assertEqual(report["adjudication_queue"][0]["answer"], cells[0]["final_answer"])
+
     def test_exact_binomial_intervals_and_mcnemar_known_values(self):
         self.assertAlmostEqual(analysis.exact_binomial_ci(0, 8)[1], 0.3694166476)
         self.assertAlmostEqual(analysis.exact_binomial_ci(8, 8)[0], 0.6305833524)
@@ -113,8 +130,8 @@ class ApiReplayAnalysisTest(unittest.TestCase):
                 return GOOD
             return "No callsite."
         report = analysis.analyze({"cells": complete_grid(answers)}, ORACLES, MANIFEST, SCHEDULE, PREFLIGHT)
-        self.assertEqual(report["selection"]["advanced"], ["fmt_19"])
-        self.assertEqual(report["selection"]["decision"], "advance")
+        self.assertEqual(report["selection"]["advanced"], [])
+        self.assertEqual(report["selection"]["decision"], "defer: pending adjudication")
         self.assertFalse(report["selection"]["production_recommendation"])
         broken = json.loads(json.dumps(PREFLIGHT))
         broken["fixtures"][0]["arms"]["fmt_19"]["diff_pointers"] = ["/temperature"]
@@ -123,7 +140,7 @@ class ApiReplayAnalysisTest(unittest.TestCase):
         incomplete = complete_grid(answers)[:-1]
         blocked = analysis.analyze({"cells": incomplete}, ORACLES, MANIFEST, SCHEDULE, PREFLIGHT)
         self.assertEqual(blocked["selection"]["advanced"], [])
-        self.assertEqual(blocked["selection"]["decision"], "retain fmt_07")
+        self.assertEqual(blocked["selection"]["decision"], "defer: pending adjudication")
 
     def test_wrong_task_order_and_duplicate_answer_fail_closed(self):
         cells = complete_grid()

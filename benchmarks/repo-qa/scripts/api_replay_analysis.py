@@ -8,8 +8,12 @@ import json
 import math
 import re
 import statistics
+import sys
 from collections import defaultdict
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from semantic_location_oracle import evaluate as evaluate_location_answer
 
 
 SCHEMA = "lci.api-replay.format-analysis.v1"
@@ -87,8 +91,11 @@ def score_cell(cell: dict, oracles: dict[str, dict]) -> dict:
     answer = cell.get("final_answer")
     if not isinstance(answer, str) or not answer.strip():
         raise AnalysisError("answered cell must contain a non-empty final_answer")
-    found = extract(answer)
-    return {**base, "extracted": found, **quality(found, oracle["expected"])}
+    semantic = evaluate_location_answer(answer, oracle["expected"])
+    return {**base, "answer": answer, "extracted": semantic["extracted"],
+            "oracle_stage": semantic["stage"],
+            "adjudication_status": semantic["status"],
+            **quality(semantic["extracted"], oracle["expected"])}
 
 
 def _binomial_cdf(k: int, n: int, p: float) -> float:
@@ -283,6 +290,14 @@ def analyze(document: dict, oracles: dict, manifest: dict, schedule: dict, prefl
                                    if (cell.get("task_id"), cell.get("model"), cell.get("repetition"),
                                        cell.get("arm")) == key]}
                      for key, count in retries.items() if count]
+    adjudication_queue = [
+        {"run_key": score["run_key"], "task_id": score["task_id"],
+         "answer": score["answer"], "expected": oracles[score["model"]]["expected"],
+         "heuristic": {key: score[key] for key in
+                       ("extracted", "false_positives", "false_negatives", "precision", "recall")}}
+        for score in scores if score.get("adjudication_status") == "needs_adjudication"
+    ]
+    oracle_complete = not adjudication_queue
     qualifiers = []
     for arm in arms[1:]:
         positive = any(contrasts[m][arm]["holm_adjusted_p"] < 0.05 and
@@ -292,7 +307,7 @@ def analyze(document: dict, oracles: dict, manifest: dict, schedule: dict, prefl
                       contrasts[m][arm]["paired_exact_delta"] > -0.25 for m in models)
         completion = all(contrasts[m][arm]["completion_rate_delta"] >= -0.125 for m in models)
         all_usable = all(summaries[m][arm]["usable_n"] == 8 for m in models)
-        if (positive and no_harm and completion and all_usable and null_passed
+        if (positive and no_harm and completion and all_usable and null_passed and oracle_complete
                 and manipulation_passed and grid_complete):
             qualifiers.append(arm)
     return {"schema": SCHEMA, "exploratory": True, "grid_complete": grid_complete,
@@ -300,10 +315,15 @@ def analyze(document: dict, oracles: dict, manifest: dict, schedule: dict, prefl
             "unusable_cells": unusable, "retry_attempts": sum(retries.values()),
             "retry_counts": {"|".join(map(str, key)): value for key, value in retries.items() if value},
             "retries": retry_details,
+            "oracle_followup_required": bool(adjudication_queue),
+            "analysis_status": "complete" if oracle_complete else "pending_adjudication",
+            "adjudication_queue": adjudication_queue,
             "scores": scores, "by_model_and_arm": summaries, "paired_contrasts_by_model": contrasts,
             "cycle_null": cycles, "manipulation_control": manipulation,
             "multiplicity": {"method": "Holm step-down", "family_size": 6, "alpha": 0.05},
-            "selection": {"advanced": qualifiers, "decision": "advance" if qualifiers else "retain fmt_07",
+            "selection": {"advanced": qualifiers,
+            "decision": "defer: pending adjudication" if not oracle_complete else
+                        "advance" if qualifiers else "retain fmt_07",
             "production_recommendation": False}}
 
 

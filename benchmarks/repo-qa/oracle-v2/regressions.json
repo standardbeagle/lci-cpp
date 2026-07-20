@@ -1,0 +1,24 @@
+{
+  "schema": "lci.semantic-location-regressions.v1",
+  "cases": [
+    {
+      "id": "file-at-line",
+      "answer": "`app.Start()` is called in `examples/base/main.go` at line 119 inside the `main` function.",
+      "expected": ["examples/base/main.go:119"],
+      "required_outcome": "accepted",
+      "adjudication_record": "historical-adjudications.json#records/0"
+    },
+    {
+      "id": "negated-location",
+      "answer": "The call is not at examples/base/main.go:119.",
+      "expected": ["examples/base/main.go:119"],
+      "required_outcome": "needs_adjudication"
+    },
+    {
+      "id": "unsupported-extra",
+      "answer": "examples/base/main.go:119 and fake/other.go:7",
+      "expected": ["examples/base/main.go:119"],
+      "required_outcome": "needs_adjudication"
+    }
+  ]
+}

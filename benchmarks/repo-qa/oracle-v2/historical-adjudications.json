@@ -1,0 +1,35 @@
+{
+  "policy": "every-provisional-failure",
+  "promotion_policy": "Regression candidates require deterministic rule implementation plus positive and adversarial tests; LLM verdicts never directly override primary scores.",
+  "records": [
+    {
+      "adjudication": {
+        "asserted_locations": [
+          "examples/base/main.go:119"
+        ],
+        "expected": [
+          "examples/base/main.go:119"
+        ],
+        "heuristic_gap": null,
+        "reason": "The candidate asserts the exact source-of-truth callsite and no unsupported locations.",
+        "unsupported_locations": [],
+        "verdict": "correct"
+      },
+      "adjudicator_model": "opencode-go/glm-5.2",
+      "answer_digest": "sha256:ace2bcae8eef985d999bc68f68a8c4549a5fb63251aafd4c5ec17c89b8a7ced4",
+      "prompt_digest": "sha256:339076fbf9ff6d4d9ee21faa453fa311ff415a2ac6ebea3780eb52464261f8c1",
+      "provider_status": "answered",
+      "regression_candidate": {
+        "answer": "`app.Start()` is called in `examples/base/main.go` at line 119 inside the `main` function.",
+        "expected": [
+          "examples/base/main.go:119"
+        ],
+        "proposed_gap": null,
+        "required_outcome": "accepted"
+      },
+      "run_key": "search-callsite-v2|opencode-go/deepseek-v4-flash|5|fmt_07",
+      "task_id": "Where is PocketBase.Start called in non-test Go source?"
+    }
+  ],
+  "schema": "lci.oracle-adjudications.v1"
+}
