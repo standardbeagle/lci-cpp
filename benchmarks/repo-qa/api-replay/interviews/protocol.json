@@ -1,0 +1,18 @@
+{
+  "schema": "lci.api-replay.interview-protocol.v1",
+  "status": "exploratory-design-research-only",
+  "models": [
+    "opencode/deepseek-v4-flash-free",
+    "opencode-go/glm-5.2"
+  ],
+  "independence": "Each model receives the same prompt and no other model's response.",
+  "excluded_context": [
+    "expected_answers",
+    "oracle output",
+    "recorded final assistant answer",
+    "prior benchmark outcomes",
+    "candidate arm labels"
+  ],
+  "selection_rule": "Retain current production output unless a suggestion is strictly fact-preserving, mechanically invertible, generalizable across tool outputs, and testable without model judgment. Recurring suggestions may generate candidates but are not evidence of superiority.",
+  "reporting": "Preserve raw model events and publish a labeled exploratory synthesis including disagreements and recommendations to make no change. Any selected candidate requires a newly frozen manifest before outcome collection."
+}
