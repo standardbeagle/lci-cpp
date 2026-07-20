@@ -31,6 +31,13 @@ class ToolSurfaceTest(unittest.TestCase):
             for answer in tool["answer"]:
                 self.assertIn(answer, tool["oracle_output"])
 
+    def test_direct_conformance_bank_covers_the_live_surface(self):
+        cases_path = ROOT / "benchmarks/repo-qa/tool-cases/chi.json"
+        cases = json.loads(cases_path.read_text())["cases"]
+        covered = {case["tool"] for case in cases}
+        live = {tool["name"] for tool in self.manifest["tools"]}
+        self.assertEqual(covered, live)
+
     def test_manifest_is_canonical_and_byte_stable(self):
         self.assertEqual(MANIFEST.read_text(), surface.canonical_json(self.manifest))
 

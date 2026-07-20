@@ -29,7 +29,7 @@
       "id": "search-symbol-enrichment",
       "tool": "search",
       "args": {"pattern": "ServeHTTP", "flags": "cs"},
-      "expect": {"contains": ["object_id", "symbol_name"], "min_results": 1}
+      "expect": {"contains": ["\"id\"", "\"sym\""], "min_results": 1}
     },
     {
       "id": "search-no-empty-enrichment",
@@ -85,7 +85,7 @@
       "pre": {
         "tool": "search",
         "args": {"pattern": "func NewRouter", "flags": "cs"},
-        "extract": {"oid": "results.0.object_id"}
+        "extract": {"oid": "results.0.hits.0.id"}
       },
       "args": {"id": "$oid"},
       "expect": {"contains": ["NewRouter"], "max_latency_ms": 800}
@@ -125,6 +125,36 @@
       "tool": "side_effects",
       "args": {"symbol_name": "NewRouter"},
       "expect": {"max_latency_ms": 800}
+    },
+    {
+      "id": "code-insight-overview",
+      "tool": "code_insight",
+      "args": {"mode": "overview", "max_results": 5},
+      "expect": {"contains": ["LCF/1.0", "mode=overview", "== SUMMARY ==", "files="], "max_latency_ms": 1000}
+    },
+    {
+      "id": "debug-info-file",
+      "tool": "debug_info",
+      "args": {"mode": "files", "file_path": "mux.go", "max_results": 5},
+      "expect": {"contains": ["\"file_path\":\"mux.go\"", "\"symbol_count\""], "max_latency_ms": 500}
+    },
+    {
+      "id": "git-analysis-clean-wip",
+      "tool": "git_analysis",
+      "args": {"scope": "wip", "max_findings": 5},
+      "expect": {"contains": ["\"scope\":\"wip\"", "\"files_changed\":0", "No changes to analyze"], "max_latency_ms": 1000}
+    },
+    {
+      "id": "semantic-annotations-empty-control",
+      "tool": "semantic_annotations",
+      "args": {"label": "pure", "max_results": 5},
+      "expect": {"contains": ["\"annotations\":[]", "\"total_count\":0"], "max_latency_ms": 500}
+    },
+    {
+      "id": "context-save-inline",
+      "tool": "context",
+      "args": {"operation": "save", "task": "Inspect NewRouter", "refs": [{"f": "chi.go", "s": "NewRouter", "role": "contract"}], "to_string": true},
+      "expect": {"contains": ["\"file_count\":1", "NewRouter", "contract", "Inspect NewRouter"], "max_latency_ms": 800}
     }
   ]
 }
