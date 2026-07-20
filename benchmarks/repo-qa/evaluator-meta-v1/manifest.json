@@ -52,6 +52,6 @@
     "cases.json": "sha256:b54c6fef9abde90a75fcc097725ddd78bbbb4bef8248a9add5da3167606a8311",
     "queue.json": "sha256:3c7479687b8a7f4fa1b60004bd9469ada6ad2aab55a7c472c42a21f85f427c40"
   },
-  "analysis_revision": "pending preregistration commit",
+  "analysis_revision": "552bce318c322ace9d6a13583aed7f01ca84781f",
   "registered_at": "2026-07-20T00:00:00-05:00"
 }
