@@ -10,6 +10,6 @@ repetitions. Its purpose is to validate transport, task difficulty, negative-pat
 coverage, semantic heuristics, and exhaustive LLM follow-up before committing the
 cost of a sufficiently repeated study.
 
-Provider execution remains locked until `analysis_revision` names a committed
-40-character revision and `provider_execution_allowed` is explicitly set true in a
-later commit. The raw output matrix and dry preflight are frozen inputs.
+The analysis and execution implementation is frozen at revision
+`958c6eca296d48ef1363fea104fe4a7e8b2bcef2`. The raw output matrix and dry
+preflight are frozen inputs. Provider execution was unlocked only after that commit.

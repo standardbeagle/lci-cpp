@@ -36,6 +36,6 @@
     "glm_base_fixture": "sha256:ca963293426f0cb5404506fae5df1d2b8fac1ad7647d79f8dbdb65aee719f808",
     "corpus_commit": "d438c6a96a0252ff9df62c1cfe193480ed9ff15d"
   },
-  "analysis_revision": "pending",
-  "provider_execution_allowed": false
+  "analysis_revision": "958c6eca296d48ef1363fea104fe4a7e8b2bcef2",
+  "provider_execution_allowed": true
 }
