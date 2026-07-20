@@ -1,0 +1,57 @@
+{
+  "schema": "benchmark.preregistration.v1",
+  "benchmark_id": "lci-response-evaluator-meta-v1",
+  "decision": "Decide whether the LLM adjudication stage is discriminating enough to calibrate heuristics from complex continuation failures.",
+  "claim_boundary": "At most, measures verdict discrimination on 16 frozen paired synthetic continuations derived from observed LCI failure modes; it does not establish general grading accuracy.",
+  "experimental_unit": "One stateless judge verdict for one frozen objective, tool output, and candidate continuation.",
+  "population": "Complex post-tool continuations involving grounding, recovery, completion calibration, evidence scope, and mixed supported/unsupported claims.",
+  "arms": [
+    {"id": "judge-a", "treatment": "opencode-go/deepseek-v4-flash judge", "production_faithful": true},
+    {"id": "judge-b", "treatment": "opencode-go/glm-5.2 judge", "production_faithful": true}
+  ],
+  "equivalence": {
+    "invariants": ["identical objective", "identical tool output", "identical candidate response", "identical rubric and output schema"],
+    "known_differences": ["judge model"],
+    "verification": "Both judges consume the same generated queue; queue generation excludes gold_verdict and defect fields."
+  },
+  "hypotheses": [
+    {"id": "h1", "prediction": "Each judge reaches at least 0.875 exact verdict accuracy.", "metric": "accuracy"},
+    {"id": "h2", "prediction": "Each judge falsely accepts at most two of sixteen incorrect continuation judgments.", "metric": "false_accepts"},
+    {"id": "h3", "prediction": "Each judge disagrees with itself on at most one of sixteen identical repetition pairs.", "metric": "repeat_disagreements"}
+  ],
+  "metrics": [
+    {"id": "accuracy", "primary": true, "direction": "higher"},
+    {"id": "false_accepts", "primary": true, "direction": "lower"},
+    {"id": "false_rejects", "primary": false, "direction": "lower"},
+    {"id": "unresolved", "primary": false, "direction": "lower"},
+    {"id": "repeat_disagreements", "primary": false, "direction": "lower"}
+  ],
+  "strata": ["grounded next step", "empty recovery", "error recovery", "fallback interpretation", "evidence scope", "direct versus transitive", "scope calibration", "mixed quality"],
+  "controls": [
+    {"id": "paired-positive", "kind": "positive", "expected": "Each stratum's bounded continuation is correct and its minimally changed overclaim or recovery failure is incorrect."},
+    {"id": "repeat-null", "kind": "null", "expected": "Two stateless identical repetitions receive the same verdict."},
+    {"id": "label-leak", "kind": "leakage", "expected": "Generated judge queue contains neither gold_verdict nor defect."}
+  ],
+  "repetitions": 2,
+  "stopping_rule": "Run exactly 16 fixtures twice through each of two judges (64 cells), preserving malformed attempts; do not add cases or retries based on verdict quality.",
+  "noise_rule": "No population inference; report exact binomial counts and every case-level miss.",
+  "practical_effect_threshold": 0.875,
+  "exclusions": ["Provider and structurally invalid outputs remain unresolved and count against the all-cases-judged gate."],
+  "failure_policy": "Retry structurally malformed answered output at most three times; do not retry a valid semantic verdict or score infrastructure failures as incorrect model judgments.",
+  "oracle": {
+    "source": "Fixture-author labels fixed before judge execution, with paired single-defect mutations.",
+    "independence_argument": "Gold labels and defect names are removed from the generated queue and are not produced by the adjudicator implementation.",
+    "good_case": "A response bounds claims to the observed output and names the required next evidence.",
+    "bad_case": "Its paired mutation adds an unsupported conclusion, invalid recovery, or premature completion and must be rejected."
+  },
+  "prompt_neutrality": "Judges receive no expected verdict, defect category, arm label, benchmark hypothesis, or model comparison.",
+  "leakage_controls": ["queue schema omits gold_verdict", "queue schema omits defect", "each request is stateless"],
+  "analysis_plan": "Score correct/incorrect exact verdict, false accepts, false rejects, unresolved outputs, repetition disagreements, all case rows, and paired strata separately for each judge; prohibit pooled headline accuracy.",
+  "reporting_plan": "Publish fixtures, blinded queue, raw judge attempts, per-case analysis, prediction misses, and claim limitations.",
+  "fixture_digests": {
+    "cases.json": "sha256:b54c6fef9abde90a75fcc097725ddd78bbbb4bef8248a9add5da3167606a8311",
+    "queue.json": "sha256:3c7479687b8a7f4fa1b60004bd9469ada6ad2aab55a7c472c42a21f85f427c40"
+  },
+  "analysis_revision": "pending preregistration commit",
+  "registered_at": "2026-07-20T00:00:00-05:00"
+}

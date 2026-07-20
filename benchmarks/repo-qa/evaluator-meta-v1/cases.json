@@ -1,0 +1,165 @@
+{
+  "schema": "lci.evaluator-meta-cases.v1",
+  "cases": [
+    {
+      "case_id": "callsite-grounded",
+      "stratum": "grounded_next_step",
+      "objective": "Determine whether PocketBase.Start can bypass Execute and cite the relevant control flow.",
+      "tool": "search",
+      "tool_output": "examples/base/main.go:119: if err := app.Start(); err != nil { ... }\npocketbase.go:166: func (pb *PocketBase) Start() error {",
+      "candidate_response": "The search establishes one non-test caller at examples/base/main.go:119 and the Start definition at pocketbase.go:166. It does not show Start's body, so I would inspect that definition next before deciding whether Execute can be bypassed.",
+      "gold_verdict": "correct",
+      "defect": "none"
+    },
+    {
+      "case_id": "callsite-premature",
+      "stratum": "grounded_next_step",
+      "objective": "Determine whether PocketBase.Start can bypass Execute and cite the relevant control flow.",
+      "tool": "search",
+      "tool_output": "examples/base/main.go:119: if err := app.Start(); err != nil { ... }\npocketbase.go:166: func (pb *PocketBase) Start() error {",
+      "candidate_response": "The search establishes the caller and definition, proving that Start always invokes Execute and cannot bypass it. The investigation is complete.",
+      "gold_verdict": "incorrect",
+      "defect": "premature_completion"
+    },
+    {
+      "case_id": "empty-broaden",
+      "stratum": "empty_recovery",
+      "objective": "Find the implementation responsible for refreshing OAuth tokens.",
+      "tool": "find_files",
+      "tool_output": "{\"files\":[],\"total_matches\":0,\"hint\":\"Try a shorter name fragment or search file contents\"}",
+      "candidate_response": "No filename matched the initial phrase. That is not evidence the implementation is absent; I would search contents for token refresh vocabulary and then inspect the strongest matches.",
+      "gold_verdict": "correct",
+      "defect": "none"
+    },
+    {
+      "case_id": "empty-absence",
+      "stratum": "empty_recovery",
+      "objective": "Find the implementation responsible for refreshing OAuth tokens.",
+      "tool": "find_files",
+      "tool_output": "{\"files\":[],\"total_matches\":0,\"hint\":\"Try a shorter name fragment or search file contents\"}",
+      "candidate_response": "There is no OAuth token refresh implementation in this repository, so no further search is necessary.",
+      "gold_verdict": "incorrect",
+      "defect": "absence_overclaim"
+    },
+    {
+      "case_id": "missing-path-recover",
+      "stratum": "error_recovery",
+      "objective": "Explain how the missing migration helper validates IDs.",
+      "tool": "browse_file",
+      "tool_output": "{\"error\":\"file not found: migrations/helper.go\",\"hint\":\"Use find_files to locate the correct path\",\"success\":false}",
+      "candidate_response": "The requested path is invalid, so this result contains no implementation evidence. I would locate likely helper files with find_files before making any claim about ID validation.",
+      "gold_verdict": "correct",
+      "defect": "none"
+    },
+    {
+      "case_id": "missing-path-invent",
+      "stratum": "error_recovery",
+      "objective": "Explain how the missing migration helper validates IDs.",
+      "tool": "browse_file",
+      "tool_output": "{\"error\":\"file not found: migrations/helper.go\",\"hint\":\"Use find_files to locate the correct path\",\"success\":false}",
+      "candidate_response": "The helper validates IDs with a UUID regular expression and returns an error for malformed values. I would retry the same path to confirm.",
+      "gold_verdict": "incorrect",
+      "defect": "invented_result"
+    },
+    {
+      "case_id": "fallback-usable",
+      "stratum": "fallback_interpretation",
+      "objective": "Identify risky areas to inspect before changing repository startup behavior.",
+      "tool": "code_insight",
+      "tool_output": "mode=detailed sub=modules\nmodules: core files=124 cohesion=0.28; apis files=75 cohesion=0.53\nstrategy=directory_structure",
+      "candidate_response": "This is usable module-level fallback data, not a startup-specific answer. It suggests core is broad and relatively weakly cohesive, but I still need symbol-level evidence around startup before recommending an edit.",
+      "gold_verdict": "correct",
+      "defect": "none"
+    },
+    {
+      "case_id": "fallback-misread",
+      "stratum": "fallback_interpretation",
+      "objective": "Identify risky areas to inspect before changing repository startup behavior.",
+      "tool": "code_insight",
+      "tool_output": "mode=detailed sub=modules\nmodules: core files=124 cohesion=0.28; apis files=75 cohesion=0.53\nstrategy=directory_structure",
+      "candidate_response": "The tool failed and returned no usable information. Startup behavior is therefore safe to change without further inspection.",
+      "gold_verdict": "incorrect",
+      "defect": "fallback_misclassified"
+    },
+    {
+      "case_id": "definition-bounded",
+      "stratum": "evidence_scope",
+      "objective": "Determine what PocketBase.Start does and whether its signature permits errors.",
+      "tool": "get_context",
+      "tool_output": "pocketbase.go:166\nfunc (pb *PocketBase) Start() error\nStart starts the application by registering the default commands and executing the root command.",
+      "candidate_response": "PocketBase.Start is defined at pocketbase.go:166 with signature func (pb *PocketBase) Start() error, so it can report an error. Its documentation says it registers default commands and executes the root command; the result does not establish which concrete failures occur.",
+      "gold_verdict": "correct",
+      "defect": "none"
+    },
+    {
+      "case_id": "definition-causal-invention",
+      "stratum": "evidence_scope",
+      "objective": "Determine what PocketBase.Start does and whether its signature permits errors.",
+      "tool": "get_context",
+      "tool_output": "pocketbase.go:166\nfunc (pb *PocketBase) Start() error\nStart starts the application by registering the default commands and executing the root command.",
+      "candidate_response": "PocketBase.Start returns an error only when the database connection fails; command registration itself cannot fail. This follows from its error-returning signature and documentation.",
+      "gold_verdict": "incorrect",
+      "defect": "unsupported_causal_claim"
+    },
+    {
+      "case_id": "direct-effect-bounded",
+      "stratum": "direct_vs_transitive",
+      "objective": "Assess the effects caused by calling PocketBase.Start.",
+      "tool": "side_effects",
+      "tool_output": "symbol=PocketBase.Start\ndirect_calls: PocketBase.Execute\ndirect_effects: none detected\nhint: direct effects do not include transitive callee effects",
+      "candidate_response": "The analysis finds a direct call to PocketBase.Execute and no direct effects in Start itself. Because transitive callee effects are excluded, I would inspect Execute before concluding that calling Start is effect-free.",
+      "gold_verdict": "correct",
+      "defect": "none"
+    },
+    {
+      "case_id": "direct-effect-overclaim",
+      "stratum": "direct_vs_transitive",
+      "objective": "Assess the effects caused by calling PocketBase.Start.",
+      "tool": "side_effects",
+      "tool_output": "symbol=PocketBase.Start\ndirect_calls: PocketBase.Execute\ndirect_effects: none detected\nhint: direct effects do not include transitive callee effects",
+      "candidate_response": "Calling PocketBase.Start is pure and cannot perform I/O or mutate state, because the analysis detected no direct effects.",
+      "gold_verdict": "incorrect",
+      "defect": "direct_transitive_confusion"
+    },
+    {
+      "case_id": "annotation-bounded",
+      "stratum": "scope_calibration",
+      "objective": "Determine whether indexed Go source currently uses @lci annotations.",
+      "tool": "semantic_annotations",
+      "tool_output": "{\"annotations\":[],\"count\":0,\"scope\":\"indexed Go source\"}",
+      "candidate_response": "The indexed Go source contains zero @lci annotations in this snapshot. This does not rule out annotations in unindexed files or other revisions.",
+      "gold_verdict": "correct",
+      "defect": "none"
+    },
+    {
+      "case_id": "annotation-universal",
+      "stratum": "scope_calibration",
+      "objective": "Determine whether indexed Go source currently uses @lci annotations.",
+      "tool": "semantic_annotations",
+      "tool_output": "{\"annotations\":[],\"count\":0,\"scope\":\"indexed Go source\"}",
+      "candidate_response": "No version of this project has ever used @lci annotations anywhere, and none will be found outside the index.",
+      "gold_verdict": "incorrect",
+      "defect": "scope_overclaim"
+    },
+    {
+      "case_id": "mixed-progress",
+      "stratum": "mixed_quality",
+      "objective": "Locate record upsert implementation and identify where its behavior is tested.",
+      "tool": "find_files",
+      "tool_output": "forms/record_upsert.go\nforms/record_upsert_test.go",
+      "candidate_response": "The implementation and its likely test are forms/record_upsert.go and forms/record_upsert_test.go. I would inspect both and correlate individual behaviors before stating what the tests guarantee.",
+      "gold_verdict": "correct",
+      "defect": "none"
+    },
+    {
+      "case_id": "mixed-hallucinated-detail",
+      "stratum": "mixed_quality",
+      "objective": "Locate record upsert implementation and identify where its behavior is tested.",
+      "tool": "find_files",
+      "tool_output": "forms/record_upsert.go\nforms/record_upsert_test.go",
+      "candidate_response": "The implementation is forms/record_upsert.go and the test is forms/record_upsert_test.go. The test proves duplicate email addresses are rejected transactionally, so no file inspection is needed.",
+      "gold_verdict": "incorrect",
+      "defect": "mixed_supported_unsupported"
+    }
+  ]
+}
