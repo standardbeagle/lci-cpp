@@ -1,0 +1,18 @@
+{
+  "capture_request_digest": "sha256:54c0d56086f25e6fbff3838d18adf73a3cdcbed3791e83b30e972bbc13990034",
+  "capture_response_digest": "sha256:a96c7fc92b223c82e616d368030d6bcd8cc9f5cec7d7e2784e4998329da833cb",
+  "capture_status": 200,
+  "headers": {
+    "accept": "*/*",
+    "content-type": "application/json",
+    "user-agent": "ai-sdk/openai-compatible/2.0.37 ai-sdk/provider-utils/4.0.21 runtime/bun/1.3.11",
+    "x-opencode-client": "cli",
+    "x-opencode-project": "9ce02a75021f635e627b0d17d19c7e7677306dfe",
+    "x-opencode-request": "msg_f7fa8f077001W5rT2dXpVg7SBJ",
+    "x-opencode-session": "ses_080571037ffege4P2oW4UdO2YW"
+  },
+  "model": "opencode-go/deepseek-v4-flash",
+  "provider_origin": "https://opencode.ai/zen/go",
+  "runtime_secret_headers": ["authorization"],
+  "schema": "lci.api-replay.safe-header-profile.v1"
+}

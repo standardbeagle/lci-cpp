@@ -1,0 +1,17 @@
+{
+  "schema": "lci.api-replay.safe-header-contract.v1",
+  "status": "awaiting-new-v2-captures",
+  "purpose": "Define the only persisted representation of provider headers allowed for v2 replay.",
+  "required_profiles": ["opencode-go/deepseek-v4-flash", "opencode-go/glm-5.2"],
+  "allowed_persisted_header_names": ["accept", "content-type", "user-agent", "x-opencode-client", "x-opencode-project", "x-opencode-request", "x-opencode-session"],
+  "forbidden_persisted_header_names": ["authorization", "cookie", "proxy-authorization", "set-cookie", "x-api-key"],
+  "secret_injection": {"source": "runtime auth file or environment supplied to the provider adapter", "persist_value": false, "digest_secret_value": false},
+  "profile_requirements": [
+    "Derived from the request headers of a successful new v2 provider capture",
+    "Contains normalized lowercase header names and only non-secret values",
+    "Records capture digest, provider endpoint origin, model id, and capture success status",
+    "Uses a literal runtime-secret placeholder for required secret-bearing headers without recording their values",
+    "Fails closed on any header outside the allowlist or any credential-like persisted value"
+  ],
+  "profiles": {}
+}

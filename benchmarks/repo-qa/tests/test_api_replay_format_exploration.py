@@ -7,7 +7,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = ROOT / "benchmarks/repo-qa/scripts/api_replay_format_exploration.py"
-FIXTURE = ROOT / "benchmarks/repo-qa/api-replay/fixtures/live-search-callsite.json"
+FIXTURE = ROOT / "benchmarks/repo-qa/api-replay/format-exploration/fixture-glm-search.json"
 MANIFEST = ROOT / "benchmarks/repo-qa/api-replay/format-exploration/manifest.json"
 SCHEDULE = ROOT / "benchmarks/repo-qa/api-replay/format-exploration/schedule.json"
 spec = importlib.util.spec_from_file_location("api_replay_format_exploration", SCRIPT)
@@ -17,14 +17,19 @@ spec.loader.exec_module(replay)
 
 class FakeProvider:
     def __init__(self): self.calls = []
-    def complete(self, request, model):
-        self.calls.append((request, model))
+    def complete(self, request, model, request_headers):
+        self.calls.append((request, model, request_headers))
         return {"status": "answered", "final_answer": "examples/base/main.go:119"}
 
 
 class FormatExplorationTest(unittest.TestCase):
     def setUp(self):
         self.fixture = json.loads(FIXTURE.read_text())
+        self.fixture["request_headers"] = {
+            "accept":"*/*", "content-type":"application/json", "user-agent":"captured-agent",
+            "x-opencode-client":"cli", "x-opencode-project":"project",
+            "x-opencode-request":"request", "x-opencode-session":"session",
+        }
         self.manifest = json.loads(MANIFEST.read_text())
         self.schedule = json.loads(SCHEDULE.read_text())
 
@@ -88,6 +93,19 @@ class FormatExplorationTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "immutable"):
                 replay.execute_cell(provider, self.fixture, model, replay.ARMS[0], 1, 1, out, allow_provider=True)
             self.assertEqual(len(provider.calls), 1)
+            self.assertEqual(provider.calls[0][2], self.fixture["request_headers"])
+
+    def test_fixture_headers_are_explicit_safe_and_arm_invariant(self):
+        expected = {"accept", "content-type", "user-agent", "x-opencode-client",
+                    "x-opencode-project", "x-opencode-request", "x-opencode-session"}
+        self.assertEqual(set(replay.fixture_request_headers(self.fixture)), expected)
+        for arm in replay.ARMS:
+            self.assertEqual(replay.fixture_request_headers(self.fixture), self.fixture["request_headers"])
+            replay.build_request(self.fixture, arm)
+        for forbidden in ("authorization", "cookie", "proxy-authorization", "x-api-key"):
+            broken = copy.deepcopy(self.fixture); broken["request_headers"][forbidden] = "secret"
+            with self.assertRaisesRegex(ValueError, "non-allowlisted"):
+                replay.validate_fixture(broken)
 
     def test_codec_failure_cannot_reach_provider(self):
         broken = copy.deepcopy(self.fixture)
@@ -105,7 +123,7 @@ class FormatExplorationTest(unittest.TestCase):
                 {"status": "provider_5xx", "failure": "HTTP 503", "raw_provider_stream": "one"},
                 {"status": "answered", "final_answer": "ok", "raw_provider_stream": "two"},
             ))
-            def complete(self, request, model): return next(self.responses)
+            def complete(self, request, model, request_headers): return next(self.responses)
         provider = SequenceProvider(); model = self.fixture["recorded_model"]
         with tempfile.TemporaryDirectory() as directory:
             out = Path(directory)
@@ -128,7 +146,7 @@ class FormatExplorationTest(unittest.TestCase):
         jobs = [(self.fixture, model, replay.ARMS[index], 1, index + 1) for index in range(4)]
         class Provider:
             def __init__(self): self.calls = []; self.counts = {}
-            def complete(self, request, model):
+            def complete(self, request, model, request_headers):
                 _, content = replay.tool_content_pointer(request, self_fixture["tool_call_id"])
                 arm = next(arm for arm in replay.ARMS if replay.build_request(self_fixture, arm)["messages"][3]["content"] == content)
                 self.calls.append(arm); self.counts[arm] = self.counts.get(arm, 0) + 1

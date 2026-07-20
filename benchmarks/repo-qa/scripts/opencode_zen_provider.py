@@ -19,6 +19,10 @@ ENDPOINTS = {
 }
 AUTH_REQUIRED = set(ENDPOINTS)
 SAFE_RESPONSE_HEADERS = {"content-type", "retry-after", "x-request-id", "request-id", "cf-ray"}
+SAFE_REQUEST_HEADERS = {
+    "accept", "content-type", "user-agent", "x-opencode-client",
+    "x-opencode-project", "x-opencode-request", "x-opencode-session",
+}
 
 
 def endpoint_for_model(model: str) -> str:
@@ -136,6 +140,20 @@ def _safe_headers(headers: object) -> dict[str, str]:
             if str(key).lower() in SAFE_RESPONSE_HEADERS}
 
 
+def replay_request_headers(headers: object) -> dict[str, str]:
+    if not isinstance(headers, dict):
+        raise ValueError("replay request headers must be an object")
+    output: dict[str, str] = {}
+    for key, value in headers.items():
+        lowered = str(key).casefold()
+        if lowered not in SAFE_REQUEST_HEADERS:
+            raise ValueError(f"replay request header is not allowlisted: {lowered}")
+        if lowered in output or not isinstance(value, str) or "\r" in value or "\n" in value:
+            raise ValueError(f"invalid replay request header: {lowered}")
+        output[lowered] = value
+    return output
+
+
 class OpenCodeZenProvider:
     def __init__(self, auth_path: Path, timeout: float, *, opener: Callable = urllib.request.urlopen,
                  clock: Callable[[], float] = time.monotonic):
@@ -146,13 +164,13 @@ class OpenCodeZenProvider:
         self.opener = opener
         self.clock = clock
 
-    def complete(self, request: dict, model: str) -> dict:
+    def complete(self, request: dict, model: str, request_headers: dict[str, str] | None = None) -> dict:
         endpoint = endpoint_for_model(model)
         token = load_auth(model, self.auth_path)
         body = json.dumps(request, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8")
-        request_headers = {"Content-Type": "application/json", "Accept": "text/event-stream"}
+        request_headers = replay_request_headers(request_headers or {})
         if token is not None:
-            request_headers["Authorization"] = f"Bearer {token}"
+            request_headers["authorization"] = f"Bearer {token}"
         outgoing = urllib.request.Request(endpoint, data=body, method="POST", headers=request_headers)
         started = self.clock()
         status_code = None

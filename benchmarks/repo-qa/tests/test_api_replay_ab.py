@@ -51,7 +51,9 @@ class ApiReplayABTest(unittest.TestCase):
         request = copy.deepcopy(source["request"])
         request["messages"][2]["tool_calls"][0]["function"]["name"] = "lci_search"
         capture = {"schema":"lci.opencode-provider-capture.v1","failure":None,
-            "request":{"body":request,"body_digest":"sha256:req"},
+            "request":{"body":request,"body_digest":"sha256:req","headers":{
+                "Accept":"*/*", "User-Agent":"captured-agent", "Authorization":"<redacted>",
+                "Cookie":"<redacted>", "X-Unrelated":"drop-me"}},
             "response":{"status":200,"body_digest":"sha256:resp"}}
         spec = {"provider_api":"openai-compatible-chat-completions","recorded_model":"provider/model",
             "opencode_version":"1.4.3","corpus":"pocketbase","corpus_commit":"abc","tool":"search",
@@ -59,8 +61,14 @@ class ApiReplayABTest(unittest.TestCase):
             "null_control":False,"renderer":source["renderer"]}
         fixture = replay.fixture_from_capture(capture,spec)
         self.assertEqual(fixture["capture_kind"],"sanitized_live_proxy")
+        self.assertEqual(fixture["request_headers"], {"accept":"*/*", "user-agent":"captured-agent"})
+        self.assertNotIn("redacted", json.dumps(fixture).casefold())
         capture["response"]["status"]=404
         with self.assertRaisesRegex(ValueError,"successful"): replay.fixture_from_capture(capture,spec)
+
+    def test_capture_header_allowlist_rejects_invalid_safe_values(self):
+        with self.assertRaisesRegex(ValueError, "invalid safe"):
+            replay.captured_request_headers({"User-Agent": "ok\r\nAuthorization: secret"})
 
 
 if __name__ == "__main__": unittest.main()

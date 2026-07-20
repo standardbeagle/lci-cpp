@@ -1,0 +1,85 @@
+{
+  "cells": 64,
+  "fixtures": [
+    {
+      "arms": {
+        "fmt_07": {
+          "content_digest": "sha256:c886d6a4a5b4a9f1dc67483f636f3286250222567a03a098509fc88386084d5a",
+          "diff_pointers": [],
+          "request_digest": "sha256:4554d3b14b50369109fdaaebe71a55728498f97412c9f37623d1afb55217a8f3"
+        },
+        "fmt_19": {
+          "content_digest": "sha256:eb559dfa2a42c5efdcba5d848d6224826fd49b6c2b9c2eabd91e086c865b4c75",
+          "diff_pointers": [
+            "/messages/3/content"
+          ],
+          "request_digest": "sha256:c0f903f5ba04cd87eed23edbb2c06ec31a3ee3322c24a6ba302935c30a2e532f"
+        },
+        "fmt_31": {
+          "content_digest": "sha256:5a04d26d2c82239b9355ebefd8a9e03f7bf6f0ec6ecc765e3480563acee5fbdb",
+          "diff_pointers": [
+            "/messages/3/content"
+          ],
+          "request_digest": "sha256:5bcb185e472f58559467ef44c7ff54d3f5f7df20acb1061d97f43da350372776"
+        },
+        "fmt_43": {
+          "content_digest": "sha256:51773ed7df8a7cc57a6751f59671dff8c11b2fb5daa097d26f78daa08c4113af",
+          "diff_pointers": [
+            "/messages/3/content"
+          ],
+          "request_digest": "sha256:aac485a200dbe06f7cdf54ff050a2141717fdd15dfba68bc12dfb39a20b48171"
+        }
+      },
+      "fixture_digest": "sha256:c0d49e5baab2e0e9650e5a76ff2c43f4886e0486863763be8fb749fb89d55d40",
+      "recorded_model": "opencode-go/deepseek-v4-flash",
+      "task_id": "search-callsite-v2"
+    },
+    {
+      "arms": {
+        "fmt_07": {
+          "content_digest": "sha256:c886d6a4a5b4a9f1dc67483f636f3286250222567a03a098509fc88386084d5a",
+          "diff_pointers": [],
+          "request_digest": "sha256:bfbace681b9ad7a67d285080469cc97b99ca5a9c0ef8eaf0133086616076542a"
+        },
+        "fmt_19": {
+          "content_digest": "sha256:eb559dfa2a42c5efdcba5d848d6224826fd49b6c2b9c2eabd91e086c865b4c75",
+          "diff_pointers": [
+            "/messages/3/content"
+          ],
+          "request_digest": "sha256:f16d0090dda75d998bae6ba49c059473c40ae5b44fac9b9a5ab01b5bfa312487"
+        },
+        "fmt_31": {
+          "content_digest": "sha256:5a04d26d2c82239b9355ebefd8a9e03f7bf6f0ec6ecc765e3480563acee5fbdb",
+          "diff_pointers": [
+            "/messages/3/content"
+          ],
+          "request_digest": "sha256:6e732106814d8982a06bf031829cce48a44bcbdb93b04f374f9cdb34486abe9b"
+        },
+        "fmt_43": {
+          "content_digest": "sha256:51773ed7df8a7cc57a6751f59671dff8c11b2fb5daa097d26f78daa08c4113af",
+          "diff_pointers": [
+            "/messages/3/content"
+          ],
+          "request_digest": "sha256:3012ff2c6d36e5e4ba9fb9ab83582274a3868086beb2d11fd7024856b3f20f0d"
+        }
+      },
+      "fixture_digest": "sha256:d423e1fb5887171fb0fa2a2802163ae1b6ae5b3aa82c49676b372479baea601e",
+      "recorded_model": "opencode-go/glm-5.2",
+      "task_id": "search-callsite-v2"
+    }
+  ],
+  "provider_executed": false,
+  "safe_header_profiles": [
+    {
+      "capture_request_digest": "sha256:54c0d56086f25e6fbff3838d18adf73a3cdcbed3791e83b30e972bbc13990034",
+      "headers_digest": "sha256:133648fcd84b53f7c3c3b98c514d6b080e02d98906e2a148b05f200fb3139dd8",
+      "model": "opencode-go/deepseek-v4-flash"
+    },
+    {
+      "capture_request_digest": "sha256:98aa9d6796ca4e08fd58102cef7175d996233c25a885e5b394c2364fe29dbb19",
+      "headers_digest": "sha256:0daf71c1a7d932edd9c495b35ca819bfbb2f44f8d826ebeff5a2c15ba78705d8",
+      "model": "opencode-go/glm-5.2"
+    }
+  ],
+  "schema": "lci.api-replay.format-plan.v1"
+}

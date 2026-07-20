@@ -176,7 +176,14 @@ def validate_preflight(preflight: dict, manifest: dict, oracles: dict) -> dict:
                 raise AnalysisError(f"preflight request-isolation failure for {arm}")
             if not isinstance(details.get("request_digest"), str) or not isinstance(details.get("content_digest"), str):
                 raise AnalysisError("preflight is missing request/content digests")
-    return {"passed": True, "fixture_digests": {item["recorded_model"]: item["fixture_digest"] for item in fixtures}}
+    profiles = preflight.get("safe_header_profiles", [])
+    if manifest.get("safe_header_profile_digests"):
+        if not isinstance(profiles, list) or {item.get("model") for item in profiles} != models:
+            raise AnalysisError("preflight safe-header profiles do not match declared models")
+        if any(not isinstance(item.get("headers_digest"), str) for item in profiles):
+            raise AnalysisError("preflight safe-header profile is missing its digest")
+    return {"passed": True, "fixture_digests": {item["recorded_model"]: item["fixture_digest"] for item in fixtures},
+            "safe_header_profiles": profiles}
 
 
 def resolve_attempts(cells: list[dict], expected: dict) -> tuple[dict, dict]:

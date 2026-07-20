@@ -11,6 +11,33 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 BASE = ROOT / "benchmarks/repo-qa/api-replay"
 ARMS = ("trace_17", "trace_42")
+SAFE_REQUEST_HEADERS = {
+    "accept",
+    "content-type",
+    "user-agent",
+    "x-opencode-client",
+    "x-opencode-project",
+    "x-opencode-request",
+    "x-opencode-session",
+}
+
+
+def captured_request_headers(headers: object) -> dict[str, str]:
+    """Extract only replay-safe headers from a sanitized capture.
+
+    Capture artifacts may contain redacted placeholders for credentials.  Those
+    placeholders must never become fixture data or outgoing provider headers.
+    """
+    if not isinstance(headers, dict):
+        raise ValueError("capture request headers must be an object")
+    output: dict[str, str] = {}
+    for key, value in headers.items():
+        lowered = str(key).casefold()
+        if lowered in SAFE_REQUEST_HEADERS:
+            if not isinstance(value, str) or "\r" in value or "\n" in value:
+                raise ValueError(f"invalid safe capture request header: {lowered}")
+            output[lowered] = value
+    return dict(sorted(output.items()))
 
 
 def canonical(value: object) -> str:
@@ -139,6 +166,7 @@ def fixture_from_capture(capture: dict, specification: dict) -> dict:
         "expected_answers": specification["expected_answers"],
         "tool_call_id": tool_call_id,
         "request": request,
+        "request_headers": captured_request_headers(capture.get("request", {}).get("headers")),
         "null_control": specification["null_control"],
         "renderer": specification["renderer"],
         "capture_request_digest": capture["request"]["body_digest"],

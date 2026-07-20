@@ -62,7 +62,11 @@ class ZenProviderTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             auth = Path(directory) / "auth.json"; auth.write_text('{"opencode":{"key":"secret"}}')
             ticks = iter((10.0, 10.25))
-            result = zen.OpenCodeZenProvider(auth, 9, opener=opener, clock=lambda: next(ticks)).complete({"model":"x"}, "opencode/x")
+            captured = {"Accept":"*/*", "Content-Type":"application/json", "User-Agent":"exact-agent",
+                        "X-OpenCode-Client":"cli", "X-OpenCode-Project":"project",
+                        "X-OpenCode-Request":"request", "X-OpenCode-Session":"session"}
+            result = zen.OpenCodeZenProvider(auth, 9, opener=opener, clock=lambda: next(ticks)).complete(
+                {"model":"x"}, "opencode/x", captured)
         self.assertEqual(result["status"], "answered"); self.assertEqual(result["latency_seconds"], .25)
         self.assertIn('data: {"choices"', result["raw_provider_stream"])
         self.assertEqual(base64.b64decode(result["raw_provider_stream_base64"]),
@@ -71,6 +75,19 @@ class ZenProviderTest(unittest.TestCase):
         self.assertEqual(result["response_headers"], {"content-type": "text/event-stream", "x-request-id": "req"})
         serialized = json.dumps(result); self.assertNotIn("secret", serialized); self.assertNotIn("authorization", serialized.lower())
         self.assertEqual(seen["request"].get_header("Authorization"), "Bearer secret")
+        outgoing_headers = {key.casefold(): value for key, value in seen["request"].header_items()}
+        for key, value in captured.items():
+            self.assertEqual(outgoing_headers[key.casefold()], value)
+
+    def test_fixture_cannot_forward_secrets_or_unlisted_headers(self):
+        with tempfile.TemporaryDirectory() as directory:
+            auth = Path(directory) / "auth.json"; auth.write_text('{"opencode":{"key":"real-secret"}}')
+            provider = zen.OpenCodeZenProvider(auth, 1, opener=lambda *_a, **_k: None)
+            for key in ("Authorization", "Cookie", "Proxy-Authorization", "X-Api-Key", "X-Other"):
+                with self.assertRaisesRegex(ValueError, "not allowlisted"):
+                    provider.complete({}, "opencode/x", {key: "fixture-secret"})
+            with self.assertRaisesRegex(ValueError, "invalid replay"):
+                provider.complete({}, "opencode/x", {"User-Agent": "ok\nCookie: secret"})
 
     def test_timeout_transport_quota_5xx_and_other_http(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -78,7 +95,7 @@ class ZenProviderTest(unittest.TestCase):
             def run(error):
                 ticks = iter((1.0, 2.0))
                 def opener(*_args, **_kwargs): raise error
-                return zen.OpenCodeZenProvider(auth, 1, opener=opener, clock=lambda: next(ticks)).complete({}, "opencode/x")
+                return zen.OpenCodeZenProvider(auth, 1, opener=opener, clock=lambda: next(ticks)).complete({}, "opencode/x", {})
             self.assertEqual(run(TimeoutError())["status"], "provider_timeout")
             self.assertEqual(run(urllib.error.URLError("down"))["status"], "transport_error")
             for code, expected in ((429, "provider_quota"), (503, "provider_5xx"), (401, "provider_error")):

@@ -33,6 +33,25 @@ ARM_CODECS = {
     "fmt_43": "tagged_blocks_v1.py",
 }
 ARMS = tuple(ARM_CODECS)
+SAFE_REQUEST_HEADERS = {
+    "accept", "content-type", "user-agent", "x-opencode-client",
+    "x-opencode-project", "x-opencode-request", "x-opencode-session",
+}
+
+
+def fixture_request_headers(fixture: dict) -> dict[str, str]:
+    headers = fixture.get("request_headers")
+    if not isinstance(headers, dict):
+        raise ValueError("fixture must contain explicit request_headers")
+    normalized: dict[str, str] = {}
+    for key, value in headers.items():
+        lowered = str(key).casefold()
+        if lowered not in SAFE_REQUEST_HEADERS:
+            raise ValueError(f"fixture contains non-allowlisted request header: {lowered}")
+        if lowered in normalized or not isinstance(value, str) or "\r" in value or "\n" in value:
+            raise ValueError(f"fixture contains invalid request header: {lowered}")
+        normalized[lowered] = value
+    return dict(sorted(normalized.items()))
 
 
 def canonical(value: object) -> str:
@@ -114,6 +133,7 @@ def validate_fixture(fixture: dict) -> dict:
         raise ValueError("fixture must name its recorded model")
     if fixture.get("capture_kind") != "sanitized_live_proxy":
         raise ValueError("fixture must originate from a sanitized live provider capture")
+    fixture_request_headers(fixture)
     native_model = fixture.get("request", {}).get("model")
     if native_model != fixture["recorded_model"].split("/", 1)[-1]:
         raise ValueError("captured request model does not match recorded_model")
@@ -167,11 +187,36 @@ def validate_protocol(manifest: dict, schedule: dict) -> None:
 
 
 def validate_frozen_files(manifest: dict, manifest_path: Path = DEFAULT_MANIFEST) -> None:
-    for relative, expected in manifest.get("fixture_digests", {}).items():
+    frozen = {**manifest.get("fixture_digests", {}), **manifest.get("safe_header_profile_digests", {})}
+    for relative, expected in frozen.items():
         path = (manifest_path.parent / relative).resolve()
         actual = "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
         if actual != expected:
             raise ValueError(f"frozen file digest mismatch: {relative}")
+
+
+def validate_header_profiles(manifest: dict, fixtures: list[dict], manifest_path: Path) -> list[dict]:
+    declared = manifest.get("safe_header_profile_digests", {})
+    if not declared:
+        return []
+    profiles = [json.loads((manifest_path.parent / relative).read_text()) for relative in sorted(declared)]
+    by_model = {fixture["recorded_model"]: fixture for fixture in fixtures}
+    if {profile.get("model") for profile in profiles} != set(by_model):
+        raise ValueError("safe-header profiles do not match fixture models")
+    summaries = []
+    for profile in profiles:
+        fixture = by_model[profile["model"]]
+        if profile.get("schema") != "lci.api-replay.safe-header-profile.v1":
+            raise ValueError("wrong safe-header profile schema")
+        if profile.get("capture_status") != 200 or profile.get("runtime_secret_headers") != ["authorization"]:
+            raise ValueError("safe-header profile is not from a successful authorized capture")
+        if profile.get("capture_request_digest") != fixture.get("capture_request_digest"):
+            raise ValueError("safe-header profile capture digest does not match fixture")
+        if fixture_request_headers({"request_headers": profile.get("headers")}) != fixture_request_headers(fixture):
+            raise ValueError("safe-header profile does not match fixture headers")
+        summaries.append({"model": profile["model"], "capture_request_digest": profile["capture_request_digest"],
+                          "headers_digest": digest(fixture_request_headers(fixture))})
+    return summaries
 
 
 def planned_grid(fixtures: list[dict], manifest: dict, schedule: dict) -> list[tuple[dict, str, str, int, int]]:
@@ -225,7 +270,7 @@ def write_immutable(path: Path, record: dict) -> None:
 
 
 class Provider(Protocol):
-    def complete(self, request: dict, model: str) -> dict: ...
+    def complete(self, request: dict, model: str, request_headers: dict[str, str]) -> dict: ...
 
 
 RETRYABLE_STATUSES = {"provider_timeout", "provider_quota", "provider_5xx", "transport_error"}
@@ -325,7 +370,7 @@ def execute_cell(provider: Provider | None, fixture: dict, model: str, arm: str,
     if len(attempts) >= MAX_ATTEMPTS:
         raise RuntimeError("provider attempt limit reached")
     attempt_number = len(attempts) + 1
-    response = provider.complete(build_request(fixture, arm), model)
+    response = provider.complete(build_request(fixture, arm), model, fixture_request_headers(fixture))
     status = response.get("status")
     if status not in {"answered", "provider_timeout", "provider_quota", "provider_5xx", "transport_error", "provider_error", "malformed_provider_stream", "empty_answer"}:
         raise ValueError(f"provider returned unknown status: {status!r}")
@@ -364,15 +409,18 @@ def main() -> int:
     schedule = json.loads(args.schedule.read_text(encoding="utf-8"))
     validate_frozen_files(manifest, args.manifest)
     jobs = planned_grid(fixtures, manifest, schedule)
+    header_profiles = validate_header_profiles(manifest, fixtures, args.manifest)
     if args.run_provider:
         require_frozen_analysis_revision(manifest)
         from opencode_zen_provider import OpenCodeZenProvider
         provider = OpenCodeZenProvider(args.auth_file, args.timeout)
         records, counts = run_provider_grid(provider, jobs, args.out)
         report = {"schema": "lci.api-replay.format-plan.v1", "provider_executed": True, "cells": len(jobs),
-                  "recorded": len(records), **counts, "fixtures": [validate_fixture(f) for f in fixtures]}
+                  "recorded": len(records), **counts, "fixtures": [validate_fixture(f) for f in fixtures],
+                  "safe_header_profiles": header_profiles}
     else:
-        report = {"schema": "lci.api-replay.format-plan.v1", "provider_executed": False, "cells": len(jobs), "fixtures": [validate_fixture(f) for f in fixtures]}
+        report = {"schema": "lci.api-replay.format-plan.v1", "provider_executed": False, "cells": len(jobs),
+                  "fixtures": [validate_fixture(f) for f in fixtures], "safe_header_profiles": header_profiles}
     rendered = json.dumps(report, indent=2, sort_keys=True) + "\n"
     if args.plan_out:
         args.plan_out.parent.mkdir(parents=True, exist_ok=True)

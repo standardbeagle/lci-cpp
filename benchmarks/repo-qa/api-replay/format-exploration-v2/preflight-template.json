@@ -1,0 +1,36 @@
+{
+  "schema": "lci.api-replay.format-preflight.v2",
+  "benchmark_id": "lci-live-search-format-exploration-v2",
+  "provider_execution_allowed": false,
+  "generated_from_outcomes": false,
+  "gates": {
+    "new_successful_capture_per_model": false,
+    "fixture_digests_frozen_and_matching": false,
+    "safe_header_profiles_frozen_and_matching": false,
+    "safe_header_allowlist_validated": false,
+    "runtime_secrets_absent_from_artifacts": false,
+    "authenticated_probe_per_model_succeeded": false,
+    "analysis_revision_is_new_frozen_commit": false,
+    "manifest_and_schedule_committed": false,
+    "roundtrip_and_malformed_input_tests_pass": false,
+    "one_pointer_request_diffs_pass": false,
+    "oracle_discrimination_passes": false,
+    "no_v2_outcomes_observed_before_freeze": true
+  },
+  "fixtures": [],
+  "safe_header_profiles": [],
+  "authenticated_probes": [],
+  "analysis_revision": null,
+  "blocking_reasons": [
+    "Awaiting new successful v2 capture for each model",
+    "Awaiting frozen v2 fixture and safe-header-profile digests",
+    "Awaiting successful authenticated probes",
+    "Awaiting new frozen v2 analysis revision"
+  ],
+  "v1_evidence_policy": {
+    "classification": "infrastructure-only",
+    "usable_model_outcomes": 0,
+    "may_satisfy_v2_gate": false,
+    "may_enter_v2_analysis": false
+  }
+}
