@@ -1,4 +1,5 @@
 import importlib.util
+import copy
 import json
 import unittest
 from pathlib import Path
@@ -44,6 +45,22 @@ class ApiReplayABTest(unittest.TestCase):
         self.assertTrue(replay.grade_answers(expected, expected)["exact"])
         self.assertFalse(replay.grade_answers(["pocketbase.go:166"], expected)["exact"])
         self.assertEqual(replay.grade_answers([], expected)["recall"], 0.0)
+
+    def test_capture_promotion_requires_matching_real_tool_exchange(self):
+        source = next(value for value in self.fixtures() if not value["null_control"])
+        request = copy.deepcopy(source["request"])
+        request["messages"][2]["tool_calls"][0]["function"]["name"] = "lci_search"
+        capture = {"schema":"lci.opencode-provider-capture.v1","failure":None,
+            "request":{"body":request,"body_digest":"sha256:req"},
+            "response":{"status":200,"body_digest":"sha256:resp"}}
+        spec = {"provider_api":"openai-compatible-chat-completions","recorded_model":"provider/model",
+            "opencode_version":"1.4.3","corpus":"pocketbase","corpus_commit":"abc","tool":"search",
+            "task_id":source["task_id"],"question":source["question"],"expected_answers":source["expected_answers"],
+            "null_control":False,"renderer":source["renderer"]}
+        fixture = replay.fixture_from_capture(capture,spec)
+        self.assertEqual(fixture["capture_kind"],"sanitized_live_proxy")
+        capture["response"]["status"]=404
+        with self.assertRaisesRegex(ValueError,"successful"): replay.fixture_from_capture(capture,spec)
 
 
 if __name__ == "__main__": unittest.main()

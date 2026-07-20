@@ -47,9 +47,12 @@
   "analysis_plan": "Validate unique cells and exact request diffs, analyze paired trace_42-minus-trace_17 effects per tool and model without cross-tier pooling, report unusable cells and null behavior, and reject a general recommendation when effects disagree materially across tools.",
   "reporting_plan": "Publish sanitized captured requests, renderer and request digests, raw provider streams, machine-readable paired analysis, human report, failures, prediction misses, nulls, and production-faithfulness boundaries.",
   "fixture_digests": {
+    "fixtures/live-search-callsite.json": "sha256:2b883cc6db095e76a89ea8afe003d41a97cc49a71c697c3318983be3aca58336",
     "fixtures/protocol-null.json": "sha256:d856f58745db13c4f18564a2faa4ec33cc5ebd9920ad2d77503ef3c780458464",
     "fixtures/protocol-search.json": "sha256:7d1e7f5a1cdde4c6b2ccb0cc093920bdf89b2a8307cff465780e85899fed694b"
   },
-  "analysis_revision": "sha256:0e2f4294b4310531ce9b8d4daf8b050bd12ea9fd40cca289d4bb7dd7cda0cd9b",
-  "registered_at": "2026-07-20T08:09:43Z"
+  "analysis_revision": "sha256:1b7d5c510d92b10e8aa5337a18fdbc7e355055227924c44d4aff3018f061ddaf",
+  "registered_at": "2026-07-20T08:09:43Z",
+  "revised_at": "2026-07-20T08:23:00Z",
+  "revision_note": "Added the first successful sanitized live OpenCode post-tool provider capture; no paired replay outcomes have been collected."
 }

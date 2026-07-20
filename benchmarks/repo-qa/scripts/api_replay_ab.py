@@ -108,12 +108,63 @@ def grade_answers(extracted: list[str], expected: list[str]) -> dict:
     }
 
 
+def fixture_from_capture(capture: dict, specification: dict) -> dict:
+    if capture.get("schema") != "lci.opencode-provider-capture.v1":
+        raise ValueError("wrong capture schema")
+    if capture.get("failure") is not None or capture.get("response", {}).get("status") != 200:
+        raise ValueError("capture must be a successful provider exchange")
+    request = capture.get("request", {}).get("body")
+    if not isinstance(request, dict):
+        raise ValueError("capture request body must be JSON")
+    tool_messages = [message for message in request.get("messages", []) if message.get("role") == "tool"]
+    if len(tool_messages) != 1:
+        raise ValueError("capture must contain exactly one tool result")
+    tool_call_id = tool_messages[0].get("tool_call_id")
+    calls = [call for message in request["messages"] if message.get("role") == "assistant" for call in message.get("tool_calls", [])]
+    matching = [call for call in calls if call.get("id") == tool_call_id]
+    if len(matching) != 1 or matching[0].get("function", {}).get("name") != "lci_" + specification["tool"]:
+        raise ValueError("assistant tool call does not match the selected LCI tool result")
+    fixture = {
+        "schema": "lci.api-replay.fixture.v1",
+        "capture_kind": "sanitized_live_proxy",
+        "capture_note": "Captured from a genuine OpenCode provider continuation after an LCI tool call.",
+        "provider_api": specification["provider_api"],
+        "recorded_model": specification["recorded_model"],
+        "opencode_version": specification["opencode_version"],
+        "corpus": specification["corpus"],
+        "corpus_commit": specification["corpus_commit"],
+        "tool": specification["tool"],
+        "task_id": specification["task_id"],
+        "question": specification["question"],
+        "expected_answers": specification["expected_answers"],
+        "tool_call_id": tool_call_id,
+        "request": request,
+        "null_control": specification["null_control"],
+        "renderer": specification["renderer"],
+        "capture_request_digest": capture["request"]["body_digest"],
+        "capture_response_digest": capture["response"]["body_digest"],
+    }
+    validate_fixture(fixture)
+    return fixture
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--fixtures", type=Path, default=BASE / "fixtures")
     parser.add_argument("--out", type=Path)
     parser.add_argument("--check", action="store_true")
+    parser.add_argument("--promote-capture", type=Path)
+    parser.add_argument("--capture-spec", type=Path)
+    parser.add_argument("--promote-out", type=Path)
     args = parser.parse_args()
+    if args.promote_capture:
+        if not args.capture_spec or not args.promote_out:
+            parser.error("--promote-capture requires --capture-spec and --promote-out")
+        fixture = fixture_from_capture(json.loads(args.promote_capture.read_text()), json.loads(args.capture_spec.read_text()))
+        args.promote_out.parent.mkdir(parents=True, exist_ok=True)
+        args.promote_out.write_text(json.dumps(fixture, indent=2, sort_keys=True, ensure_ascii=False) + "\n")
+        print(json.dumps({"promoted": str(args.promote_out), "valid": True}, sort_keys=True))
+        return 0
     fixtures = [json.loads(path.read_text()) for path in sorted(args.fixtures.glob("*.json"))]
     report = {"schema": "lci.api-replay.validation.v1", "fixtures": [validate_fixture(value) for value in fixtures]}
     if args.out:

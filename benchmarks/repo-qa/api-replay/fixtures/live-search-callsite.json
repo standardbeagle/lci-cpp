@@ -1,0 +1,129 @@
+{
+  "capture_kind": "sanitized_live_proxy",
+  "capture_note": "Captured from a genuine OpenCode provider continuation after an LCI tool call.",
+  "capture_request_digest": "sha256:8a04e6d24b888e31a7142f8be98e806742492ae16d9d3ceef0aa26057eadc742",
+  "capture_response_digest": "sha256:2e94a538bd37e70ce6e3e4a97130bd2dbc35c27a18ab7a713c1ec140350d2b3d",
+  "corpus": "pocketbase",
+  "corpus_commit": "d438c6a96a0252ff9df62c1cfe193480ed9ff15d",
+  "expected_answers": [
+    "examples/base/main.go:119"
+  ],
+  "null_control": false,
+  "opencode_version": "1.4.3",
+  "provider_api": "openai-compatible-chat-completions",
+  "question": "Where is PocketBase.Start called in non-test Go source?",
+  "recorded_model": "opencode-go/glm-5.2",
+  "renderer": "result-envelope-v1",
+  "request": {
+    "max_tokens": 32000,
+    "messages": [
+      {
+        "content": "You are opencode, an interactive CLI tool that helps users with software engineering tasks. Use the instructions below and the tools available to you to assist the user.\n\nIMPORTANT: You must NEVER generate or guess URLs for the user unless you are confident that the URLs are for helping the user with programming. You may use URLs provided by the user in their messages or local files.\n\nIf the user asks for help or wants to give feedback inform them of the following:\n- /help: Get help with using opencode\n- To give feedback, users should report the issue at https://github.com/anomalyco/opencode/issues\n\nWhen the user directly asks about opencode (eg 'can opencode do...', 'does opencode have...') or asks in second person (eg 'are you able...', 'can you do...'), first use the WebFetch tool to gather information to answer the question from opencode docs at https://opencode.ai\n\n# Tone and style\nYou should be concise, direct, and to the point. When you run a non-trivial bash command, you should explain what the command does and why you are running it, to make sure the user understands what you are doing (this is especially important when you are running a command that will make changes to the user's system).\nRemember that your output will be displayed on a command line interface. Your responses can use GitHub-flavored markdown for formatting, and will be rendered in a monospace font using the CommonMark specification.\nOutput text to communicate with the user; all text you output outside of tool use is displayed to the user. Only use tools to complete tasks. Never use tools like Bash or code comments as means to communicate with the user during the session.\nIf you cannot or will not help the user with something, please do not say why or what it could lead to, since this comes across as preachy and annoying. Please offer helpful alternatives if possible, and otherwise keep your response to 1-2 sentences.\nOnly use emojis if the user explicitly requests it. Avoid using emojis in all communication unless asked.\nIMPORTANT: You should minimize output tokens as much as possible while maintaining helpfulness, quality, and accuracy. Only address the specific query or task at hand, avoiding tangential information unless absolutely critical for completing the request. If you can answer in 1-3 sentences or a short paragraph, please do.\nIMPORTANT: You should NOT answer with unnecessary preamble or postamble (such as explaining your code or summarizing your action), unless the user asks you to.\nIMPORTANT: Keep your responses short, since they will be displayed on a command line interface. You MUST answer concisely with fewer than 4 lines (not including tool use or code generation), unless user asks for detail. Answer the user's question directly, without elaboration, explanation, or details. One word answers are best. Avoid introductions, conclusions, and explanations. You MUST avoid text before/after your response, such as \"The answer is <answer>.\", \"Here is the content of the file...\" or \"Based on the information provided, the answer is...\" or \"Here is what I will do next...\". Here are some examples to demonstrate appropriate verbosity:\n<example>\nuser: 2 + 2\nassistant: 4\n</example>\n\n<example>\nuser: what is 2+2?\nassistant: 4\n</example>\n\n<example>\nuser: is 11 a prime number?\nassistant: Yes\n</example>\n\n<example>\nuser: what command should I run to list files in the current directory?\nassistant: ls\n</example>\n\n<example>\nuser: what command should I run to watch files in the current directory?\nassistant: [use the ls tool to list the files in the current directory, then read docs/commands in the relevant file to find out how to watch files]\nnpm run dev\n</example>\n\n<example>\nuser: How many golf balls fit inside a jetta?\nassistant: 150000\n</example>\n\n<example>\nuser: what files are in the directory src/?\nassistant: [runs ls and sees foo.c, bar.c, baz.c]\nuser: which file contains the implementation of foo?\nassistant: src/foo.c\n</example>\n\n<example>\nuser: write tests for new feature\nassistant: [uses grep and glob search tools to find where similar tests are defined, uses concurrent read file tool use blocks in one tool call to read relevant files at the same time, uses edit file tool to write new tests]\n</example>\n\n# Proactiveness\nYou are allowed to be proactive, but only when the user asks you to do something. You should strive to strike a balance between:\n1. Doing the right thing when asked, including taking actions and follow-up actions\n2. Not surprising the user with actions you take without asking\nFor example, if the user asks you how to approach something, you should do your best to answer their question first, and not immediately jump into taking actions.\n3. Do not add additional code explanation summary unless requested by the user. After working on a file, just stop, rather than providing an explanation of what you did.\n\n# Following conventions\nWhen making changes to files, first understand the file's code conventions. Mimic code style, use existing libraries and utilities, and follow existing patterns.\n- NEVER assume that a given library is available, even if it is well known. Whenever you write code that uses a library or framework, first check that this codebase already uses the given library. For example, you might look at neighboring files, or check the package.json (or cargo.toml, and so on depending on the language).\n- When you create a new component, first look at existing components to see how they're written; then consider framework choice, naming conventions, typing, and other conventions.\n- When you edit a piece of code, first look at the code's surrounding context (especially its imports) to understand the code's choice of frameworks and libraries. Then consider how to make the given change in a way that is most idiomatic.\n- Always follow security best practices. Never introduce code that exposes or logs secrets and keys. Never commit secrets or keys to the repository.\n\n# Code style\n- IMPORTANT: DO NOT ADD ***ANY*** COMMENTS unless asked\n\n# Doing tasks\nThe user will primarily request you perform software engineering tasks. This includes solving bugs, adding new functionality, refactoring code, explaining code, and more. For these tasks the following steps are recommended:\n- Use the available search tools to understand the codebase and the user's query. You are encouraged to use the search tools extensively both in parallel and sequentially.\n- Implement the solution using all tools available to you\n- Verify the solution if possible with tests. NEVER assume specific test framework or test script. Check the README or search codebase to determine the testing approach.\n- VERY IMPORTANT: When you have completed a task, you MUST run the lint and typecheck commands (e.g. npm run lint, npm run typecheck, ruff, etc.) with Bash if they were provided to you to ensure your code is correct. If you are unable to find the correct command, ask the user for the command to run and if they supply it, proactively suggest writing it to AGENTS.md so that you will know to run it next time.\nNEVER commit changes unless the user explicitly asks you to. It is VERY IMPORTANT to only commit when explicitly asked, otherwise the user will feel that you are being too proactive.\n\n- Tool results and user messages may include <system-reminder> tags. <system-reminder> tags contain useful information and reminders. They are NOT part of the user's provided input or the tool result.\n\n# Tool usage policy\n- When doing file search, prefer to use the Task tool in order to reduce context usage.\n- You have the capability to call multiple tools in a single response. When multiple independent pieces of information are requested, batch your tool calls together for optimal performance. When making multiple bash tool calls, you MUST send a single message with multiple tools calls to run the calls in parallel. For example, if you need to run \"git status\" and \"git diff\", send a single message with two tool calls to run the calls in parallel.\n\nYou MUST answer concisely with fewer than 4 lines of text (not including tool use or code generation), unless user asks for detail.\n\nIMPORTANT: Before you begin work, think about what the code you're editing is supposed to do based on the filenames directory structure.\n\n# Code References\n\nWhen referencing specific functions or pieces of code include the pattern `file_path:line_number` to allow the user to easily navigate to the source code location.\n\n<example>\nuser: Where are errors from the client handled?\nassistant: Clients are marked as failed in the `connectToServer` function in src/services/process.ts:712.\n</example>\n\nYou are powered by the model named glm-5.2. The exact model ID is opencode-go/glm-5.2\nHere is some useful information about the environment you are running in:\n<env>\n  Working directory: /home/beagle/work/core/lci-cpp/real_projects/go/pocketbase\n  Workspace root folder: /home/beagle/work/core/lci-cpp/real_projects/go/pocketbase\n  Is directory a git repo: yes\n  Platform: linux\n  Today's date: Mon Jul 20 2026\n</env>\n<directories>\n  \n</directories>\nInstructions from: /home/beagle/.claude/CLAUDE.md\n@~/.config/agents/AGENTS.md",
+        "role": "system"
+      },
+      {
+        "content": "\"Use lci_search exactly once with pattern app.Start() and filter -test, then answer: Where is PocketBase.Start called in non-test Go source?\"\n",
+        "role": "user"
+      },
+      {
+        "content": "",
+        "reasoning_content": "The user wants me to use lci_search exactly once with pattern app.Start() and filter -test, then answer where PocketBase.Start is called in non-test Gosource.",
+        "role": "assistant",
+        "tool_calls": [
+          {
+            "function": {
+              "arguments": "{\"pattern\":\"app.Start()\",\"symbol_types\":\"function\"}",
+              "name": "lci_search"
+            },
+            "id": "call_995b",
+            "type": "function"
+          }
+        ]
+      },
+      {
+        "content": "{\"match\":\"app.Start()\",\"results\":[{\"file\":\"examples/base/main.go\",\"hits\":[{\"id\":\"BaP\",\"line\":119,\"sym\":\"main\",\"text\":\"if err := app.Start(); err != nil {\",\"type\":\"function\"}]}],\"showing\":1,\"total_matches\":1}",
+        "role": "tool",
+        "tool_call_id": "call_995b"
+      }
+    ],
+    "model": "glm-5.2",
+    "stream": true,
+    "stream_options": {
+      "include_usage": true
+    },
+    "tool_choice": "auto",
+    "tools": [
+      {
+        "function": {
+          "description": "Sub-millisecond in-memory semantic code search. Use instead of grep, rg, find. Results are grouped per file (root-relative paths) with per-hit line numbers; symbol hits carry sym/type/id (id feeds get_context) and callers (incoming-reference count). The returned lines are source evidence: answer from them without reading the file unless you need lines outside the result. total_matches is the TRUE match count; truncated:true + dirs histogram appear when the cap bit — narrow with path=. Note: JSON parameters, not CLI flags. See 'info search' for details.",
+          "name": "lci_search",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {
+              "filter": {
+                "description": "Include ONLY matching files: comma-separated languages, extensions or globs, e.g. 'go', 'md,*.yml', 'src/**/*.py'",
+                "type": "string"
+              },
+              "flags": {
+                "description": "Comma-separated: cs (case-sensitive), rx (regex), wb (word-boundary), nt (skip tests), nc (skip comments), iv (invert)",
+                "type": "string"
+              },
+              "include": {
+                "description": "Result add-ons, comma-separated. ONLY: object_ids, breadcrumbs, refs, safety, deps. NOT a file filter (use 'filter').",
+                "type": "string"
+              },
+              "languages": {
+                "description": "Filter by programming languages (e.g., [\"go\"], [\"typescript\", \"javascript\"], [\"csharp\"]). Case-insensitive with aliases (e.g., 'ts' for TypeScript, 'cs' for C#).",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "max": {
+                "description": "Maximum results (default: 15, max: 100)",
+                "type": "integer"
+              },
+              "max_per_file": {
+                "description": "Max per file",
+                "type": "integer"
+              },
+              "output": {
+                "description": "Output format: 'line' (default), 'ctx:N' (N context lines), 'full', 'files', 'count'",
+                "type": "string"
+              },
+              "path": {
+                "description": "Root-relative scope: directory prefix ('src/http') or glob ('**/*.kt') applied to file paths",
+                "type": "string"
+              },
+              "pattern": {
+                "description": "Search pattern",
+                "type": "string"
+              },
+              "patterns": {
+                "description": "Multiple patterns",
+                "type": "string"
+              },
+              "semantic": {
+                "description": "Enable semantic",
+                "type": "boolean"
+              },
+              "symbol_types": {
+                "description": "Symbol types to filter results (comma-separated). Valid types: function, class, method, variable, constant, interface, type, struct, module, namespace, property, event, delegate, enum, record, operator, indexer, object, companion, extension, annotation, field, enum_member. Aliases: func->function, var->variable, const->constant, cls->class, meth->method, iface->interface, def->function (Python), fn->function (Rust), trait->interface (Rust). Prefix and fuzzy matching supported with warnings.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "pattern"
+            ],
+            "type": "object"
+          }
+        },
+        "type": "function"
+      }
+    ]
+  },
+  "schema": "lci.api-replay.fixture.v1",
+  "task_id": "search-callsite",
+  "tool": "search",
+  "tool_call_id": "call_995b"
+}
