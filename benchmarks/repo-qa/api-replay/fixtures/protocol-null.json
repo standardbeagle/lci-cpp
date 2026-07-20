@@ -1,0 +1,24 @@
+{
+  "schema": "lci.api-replay.fixture.v1",
+  "capture_kind": "hermetic_protocol_fixture",
+  "capture_note": "Null control with byte-identical tool content in both opaque arms.",
+  "provider_api": "openai-compatible-chat-completions",
+  "tool": "index_stats",
+  "task_id": "null-ready",
+  "question": "Is the index ready?",
+  "expected_answers": ["ready"],
+  "tool_call_id": "call_stats_001",
+  "request": {
+    "model": "glm-5.2",
+    "stream": true,
+    "temperature": 0,
+    "messages": [
+      {"role": "system", "content": "You are an agent working in a source repository. Use tool evidence and answer the user directly."},
+      {"role": "user", "content": "Is the index ready?"},
+      {"role": "assistant", "content": null, "tool_calls": [{"id": "call_stats_001", "type": "function", "function": {"name": "index_stats", "arguments": "{}"}}]},
+      {"role": "tool", "tool_call_id": "call_stats_001", "content": "{\"status\":\"ready\",\"files\":447}"}
+    ]
+  },
+  "null_control": true,
+  "renderer": "identity-v1"
+}

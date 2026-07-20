@@ -1,0 +1,55 @@
+{
+  "schema": "benchmark.preregistration.v1",
+  "benchmark_id": "lci-opencode-provider-replay-pilot-v1",
+  "decision": "Decide whether an invertible response envelope merits live implementation work for individual LCI tool outputs.",
+  "claim_boundary": "On sanitized provider requests captured from genuine OpenCode tool-call continuations, the tested models respond differently when only the recorded tool-result content is replaced by a fact-equivalent, invertible rendering.",
+  "experimental_unit": "One direct provider continuation from one frozen OpenCode request, opaque arm, model, task, and repetition.",
+  "population": "Pilot protocol validation uses search plus an index_stats null control. Confirmatory execution requires sanitized live captures for all 14 LCI tools and the two frozen models opencode/deepseek-v4-flash-free and opencode-go/glm-5.2.",
+  "arms": [
+    {"id": "trace_17", "treatment": "Recorded production tool-result content", "production_faithful": true},
+    {"id": "trace_42", "treatment": "Mechanically invertible result-envelope rendering of the same tool-result content", "production_faithful": false}
+  ],
+  "equivalence": {
+    "invariants": ["same provider endpoint", "same model and parameters", "same system and user messages", "same assistant tool call and tool_call_id", "same canonical tool-result facts", "same timeout and grader"],
+    "known_differences": ["Only the selected tool-role message content may differ; null-control requests are byte-identical"],
+    "verification": "Deep structural diff must equal the single selected /messages/N/content pointer, and the candidate renderer must invert to canonical JSON equal to the recorded production output."
+  },
+  "hypotheses": [
+    {"id": "h1", "prediction": "No general envelope benefit; per-tool effects will be parity or favor trace_17", "metric": "exact_rate"},
+    {"id": "h2", "prediction": "The byte-identical null control will show parity", "metric": "exact_rate"}
+  ],
+  "metrics": [
+    {"id": "exact_rate", "primary": true, "direction": "higher"},
+    {"id": "answer_precision", "primary": false, "direction": "higher"},
+    {"id": "answer_recall", "primary": false, "direction": "higher"},
+    {"id": "completion_rate", "primary": false, "direction": "higher"},
+    {"id": "latency_seconds", "primary": false, "direction": "diagnostic"},
+    {"id": "output_tokens", "primary": false, "direction": "diagnostic"}
+  ],
+  "strata": ["tool", "model capability tier"],
+  "controls": [
+    {"id": "null-ready", "kind": "null", "expected": "Byte-identical requests produce no arm effect beyond repeated-run noise"}
+  ],
+  "repetitions": 2,
+  "stopping_rule": "After live captures replace protocol fixtures and all validation gates pass, run the complete counterbalanced grid; do not stop on preferred results.",
+  "noise_rule": "Per tool and model, use within-arm repetition residuals; call parity when absolute paired exact-rate delta is <= max(0.05, pooled within-arm residual RMS).",
+  "practical_effect_threshold": 0.05,
+  "exclusions": ["Malformed provider streams, empty completions, timeouts, quota failures, corrupt captures, non-invertible renderings, and request pairs with any undeclared structural difference remain unscored"],
+  "failure_policy": "Classify and preserve every attempt. Retry only provider timeout, quota, or transport errors; never score infrastructure failures as wrong and never overwrite an answered attempt.",
+  "oracle": {
+    "source": "Corpus-native commands and language servers frozen independently of LCI output rendering",
+    "independence_argument": "Expected answers are restricted to facts present in both replay arms and are derived without LCI's response renderer or model output.",
+    "good_case": "An answer containing every frozen atomic answer and no additions must score exact with precision and recall 1.",
+    "bad_case": "A plausible definition location substituted for the requested call site, an omission, or an invented location must fail exact scoring."
+  },
+  "prompt_neutrality": "Replay the captured OpenCode request verbatim with opaque arm IDs outside the provider body; do not describe either format or the experiment to the model.",
+  "leakage_controls": ["Capture artifacts redact authorization and cookies", "Oracle commands and expected answers never enter provider messages", "Direct replay exposes no repository or tools beyond the captured interaction"],
+  "analysis_plan": "Validate unique cells and exact request diffs, analyze paired trace_42-minus-trace_17 effects per tool and model without cross-tier pooling, report unusable cells and null behavior, and reject a general recommendation when effects disagree materially across tools.",
+  "reporting_plan": "Publish sanitized captured requests, renderer and request digests, raw provider streams, machine-readable paired analysis, human report, failures, prediction misses, nulls, and production-faithfulness boundaries.",
+  "fixture_digests": {
+    "fixtures/protocol-null.json": "sha256:d856f58745db13c4f18564a2faa4ec33cc5ebd9920ad2d77503ef3c780458464",
+    "fixtures/protocol-search.json": "sha256:7d1e7f5a1cdde4c6b2ccb0cc093920bdf89b2a8307cff465780e85899fed694b"
+  },
+  "analysis_revision": "sha256:0e2f4294b4310531ce9b8d4daf8b050bd12ea9fd40cca289d4bb7dd7cda0cd9b",
+  "registered_at": "2026-07-20T08:09:43Z"
+}
