@@ -208,8 +208,11 @@ class ClaimValidationModeTest(unittest.TestCase):
             forge_fixture(root)
             cases = (
                 (ToolCall("Read", {"file_path": "annotations/key.json"}), "sealed_path"),
-                (ToolCall("Read", {"file_path": "oracle.json"}), "sealed_path"),
-                (ToolCall("Read", {"file_path": "trap-manifest.json"}), "sealed_path"),
+                (ToolCall("Read", {"file_path": "answer-keys/claim-one.json"}),
+                 "sealed_path"),
+                (ToolCall("Read", {"file_path":
+                                   "benchmarks/repo-qa/exploration/tasks/nx-a.json"}),
+                 "sealed_path"),
                 (ToolCall("Write", {"file_path": "apis/base.go", "content": "x"}),
                  "tool_not_allowed"),
             )
@@ -231,6 +234,43 @@ class ClaimValidationModeTest(unittest.TestCase):
             parsed, error = run._parse_claim_answer(raw)
             self.assertIsNone(parsed)
             self.assertEqual(error, "malformed_claim_answer: citation")
+
+
+class SealedArtifactInventoryTest(unittest.TestCase):
+    """Sealed material is identified by the location the harness owns, never by
+    words in a filename: a corpus is free to ship files called `manifest`,
+    `oracle` or `trap`, and two of the claim tasks depend on exactly such a
+    file being readable and citable."""
+
+    LEGITIMATE = (
+        "packages/next/src/server/load-manifest.external.ts",
+        "packages/next/src/build/manifests/write.ts",
+        "packages/next/src/server/lib/trace/tracer.ts",
+        "src/traps/trapdoor.py",
+        "docs/annotations/README.md",
+        "app/oracle_client.py",
+        "manifest.json",
+    )
+    SEALED = (
+        "annotations/key.json",
+        "annotations",
+        "annotations/nested/deep.json",
+        "./annotations/key.json",
+        "annotations\\key.json",
+        "answer-keys/claim-one.json",
+        "benchmarks/repo-qa/exploration/tasks/nx-a.json",
+        "benchmarks/repo-qa/exploration/annotations/nx-a.ann-b.json",
+    )
+
+    def test_legitimate_corpus_paths_are_not_sealed(self):
+        for path in self.LEGITIMATE:
+            with self.subTest(path=path):
+                self.assertFalse(gate._is_sealed_path(path))
+
+    def test_harness_sealed_artifacts_are_still_sealed(self):
+        for path in self.SEALED:
+            with self.subTest(path=path):
+                self.assertTrue(gate._is_sealed_path(path))
 
 
 class ConfigParityTest(unittest.TestCase):
