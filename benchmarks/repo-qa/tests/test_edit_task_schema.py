@@ -80,6 +80,7 @@ class Fixture:
         self.commit = _pinned_commit()
 
         tree = os.path.join(self.corpus_root, CORPUS_ID, f"seed-{SEED}", "tree")
+        self.tree_dir = tree
         _write(os.path.join(tree, FILE_REL), FILE_BODY)
         manifest = {
             "schema": "exploration_corpus_manifest_v1",
@@ -92,6 +93,7 @@ class Fixture:
             "tree_hash": "0" * 64,
             "status": "ready",
         }
+        self.manifest = manifest
         _write(
             os.path.join(
                 self.corpus_root, CORPUS_ID, f"seed-{SEED}", "manifest.json"
@@ -299,6 +301,33 @@ class ValidatorTest(unittest.TestCase):
         self.assertTrue(
             any("does not match the" in p for p in self.fx.run())
         )
+
+    def test_non_positive_start_bound_fails(self):
+        # Bank validation and the RUNTIME gate must agree on what a valid bound
+        # is. conformance_gate rejects `start < 1` (ANCHOR_BOUND_STALE); the
+        # validator only checked inversion and overrun, so a `[0, N]` anchor
+        # passed the bank and then failed mid-drain -- a divergence that hides an
+        # authoring defect until the expensive run. Checked at the verify level
+        # so it holds for every caller, not only the schema-guarded one.
+        import re
+        for bound in ([0, 3], [0], [-1, 3]):
+            with self.subTest(lines=bound):
+                anchor = {
+                    "path": FILE_REL,
+                    "lines": bound,
+                    "claim": "x",
+                    "target_identifiers": ["NewBaseApp"],
+                }
+                problems = list(
+                    vedt.verify_exemplar_live(
+                        anchor, re.compile(CONFORMS, re.M),
+                        self.fx.manifest, self.fx.tree_dir,
+                    )
+                )
+                self.assertTrue(
+                    any("line bound" in p for p in problems),
+                    f"non-positive start {bound} accepted: {problems}",
+                )
 
     def test_stale_line_bound_fails(self):
         self.fx.task["exemplars"][0]["lines"] = [7, 999]
