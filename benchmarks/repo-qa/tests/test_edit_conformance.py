@@ -351,6 +351,59 @@ class FailClosedTest(GateTestBase):
         self.assertFalse(out["passed"])
         self.assertIn(gate.Reason.MANIFEST_ABSENT, out["diagnostic"])
 
+    def test_malformed_anchor_fails_closed(self):
+        # The module header promises fail-closed on EVERY abnormal input, but a
+        # malformed anchor used to raise KeyError/IndexError/TypeError straight
+        # out of evaluate_task -- an exception, not a deterministic verdict. Each
+        # shape below must resolve to ANCHOR_MALFORMED.
+        c = self._log_corpus()
+        good = _anchor("pkg/log.ts", [2], ["Log"])
+        malformed = {
+            "missing_path": {k: v for k, v in good.items() if k != "path"},
+            "missing_lines": {k: v for k, v in good.items() if k != "lines"},
+            "empty_lines": dict(good, lines=[]),
+            "non_integer_lines": dict(good, lines=["2"]),
+            "non_list_lines": dict(good, lines=2),
+            "non_string_path": dict(good, path=7),
+            "not_a_mapping": "pkg/log.ts:2",
+            "non_list_identifiers": dict(good, target_identifiers="Log"),
+        }
+        for label, anchor in sorted(malformed.items()):
+            with self.subTest(shape=label):
+                out = gate.evaluate_task(
+                    _task("ts-central-log-namespace", [anchor]),
+                    c.manifest, c.tree_dir,
+                )
+                self.assertFalse(out["passed"])
+                self.assertEqual(self.reasons(out), [gate.Reason.ANCHOR_MALFORMED])
+                # still byte-stable, and still schema-shaped
+                self.assertEqual(
+                    gate.to_json(out),
+                    gate.to_json(
+                        gate.evaluate_task(
+                            _task("ts-central-log-namespace", [anchor]),
+                            c.manifest, c.tree_dir,
+                        )
+                    ),
+                )
+
+    def test_malformed_anchor_does_not_hide_a_conforming_sibling(self):
+        # A malformed anchor fails the TASK, but the well-formed sibling is still
+        # evaluated on its own merits -- no short-circuit that loses evidence.
+        c = self._log_corpus()
+        out = gate.evaluate_task(
+            _task("ts-central-log-namespace", [
+                _anchor("pkg/log.ts", [2], ["Log"]),
+                {"claim": "no path, no lines"},
+            ]),
+            c.manifest, c.tree_dir,
+        )
+        self.assertFalse(out["passed"])
+        self.assertEqual(
+            sorted(self.reasons(out)),
+            sorted([gate.Reason.ANCHOR_MALFORMED, gate.Reason.CONFORMS]),
+        )
+
     def test_tool_failure_fails_closed(self):
         c = self._log_corpus()
         rule_id = "ts-central-log-namespace"
