@@ -27,3 +27,6 @@ real_projects/zig/
 
 # worktrack loop state (per-clone, may contain private email in lease_holder)
 .worktrack/
+
+# worktrack MCP local database (per-clone, 7MB+)
+worktrack-mcp.db
