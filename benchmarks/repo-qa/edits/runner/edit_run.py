@@ -15,7 +15,9 @@ source corpus is never mutated. The behaviour + blast-radius gate (Stage-3
 ``oracle_gate``) and the convention gate (Stage-3 ``conformance_gate``) are CALLED,
 never reimplemented, and always after the agent patch is captured -- and the
 agent never sees any oracle material (its prompt is the goal prompt only; its
-tree is the pristine corpus).
+tree is the pristine corpus). BOTH gates are fed the pristine tree plus the
+captured patch, so both judge what the AGENT wrote rather than the state its
+checkout happens to be in.
 
 The adapter is injected, so the same primitive serves the fake-agent unit
 tests/smoke and the live CLI.
@@ -100,7 +102,7 @@ def _base_record(task, arm, base, seed, key):
         "task_schema": task.get("schema"),
         "gate_versions": {
             "oracle": oracle_gate.AGGREGATE_SCHEMA,
-            "conformance": conformance_gate.OUTCOME_SCHEMA,
+            "conformance": conformance_gate.RUN_OUTCOME_SCHEMA,
         },
         # model + arm/tool allowlist
         "model": base.model,
@@ -248,7 +250,14 @@ def run_edit_task(
             timeout=gate_timeout,
             workspace_root=workspace_root,
         )
-        conformance_outcome = conformance_gate.evaluate_task(task, manifest, checkout)
+        # The convention verdict is about the AGENT'S PATCH, so it is handed the
+        # pristine tree plus the captured patch -- not the post-edit checkout.
+        # Reading the checkout alone only ever re-verified the task's own
+        # exemplar anchors, which conform before and after regardless of what the
+        # agent did, so any patch passed convention for free.
+        conformance_outcome = conformance_gate.evaluate_run(
+            task, manifest, tree_dir, patch
+        )
         gates = {"oracle": oracle_outcome, "conformance": conformance_outcome}
 
         passed = oracle_outcome["passed"] and conformance_outcome["passed"]

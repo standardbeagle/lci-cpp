@@ -1,25 +1,28 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://lci/benchmarks/repo-qa/conformance-outcome.schema.json",
-  "title": "Stage-3 mechanical convention-conformance gate outcome",
-  "description": "The versioned machine-readable verdict emitted by conformance_gate.evaluate_task for one edit task. Deterministic and byte-stable: anchors are ordered by (path, lines) and reason codes are drawn from a stable enum. FAILS CLOSED -- any abnormal condition (missing/decoy/non-live anchor, stale bound, absent identifier, ambiguous or absent structural match, malformed/unsupported rule, tool failure) yields passed=false with the exact reason code.",
-  "type": "object",
-  "additionalProperties": false,
-  "required": ["schema", "task_id", "rule_id", "kind", "passed", "diagnostic", "anchors"],
-  "properties": {
-    "schema": {"const": "conformance_gate_v1"},
-    "task_id": {"type": ["string", "null"], "description": "The edit task id evaluated."},
-    "rule_id": {"type": ["string", "null"], "description": "The convention rule id; null when the rule was malformed."},
-    "kind": {"type": ["string", "null"], "description": "The structural handler family that judged the rule; null when unsupported/malformed."},
-    "passed": {"type": "boolean", "description": "True only when every anchor conforms."},
-    "diagnostic": {"type": "string", "minLength": 1, "description": "Human-readable summary; leads with the first failing reason code."},
-    "anchors": {
-      "type": "array",
-      "description": "Per-anchor outcomes, sorted by (path, lines).",
-      "items": {"$ref": "#/$defs/anchor_outcome"}
-    }
-  },
+  "title": "Stage-3 mechanical convention-conformance gate outcome (bank health)",
+  "description": "The versioned machine-readable verdict emitted by conformance_gate.evaluate_task for one edit task: do the task's AUTHORED exemplar anchors still conform in the forged tree? This measures the BANK's material, not an agent's work -- the runtime convention verdict is conformance_gate_v2 (see $defs.run_outcome), which carries this as its bank_health field alongside the agent-patch verdict. Deterministic and byte-stable: anchors are ordered by (path, lines) and reason codes are drawn from a stable enum. FAILS CLOSED -- any abnormal condition (malformed/missing/decoy/non-live anchor, stale bound, absent identifier, ambiguous or absent structural match, malformed/unsupported rule, tool failure) yields passed=false with the exact reason code.",
+  "$ref": "#/$defs/bank_health_outcome",
   "$defs": {
+    "bank_health_outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "task_id", "rule_id", "kind", "passed", "diagnostic", "anchors"],
+      "properties": {
+        "schema": {"const": "conformance_gate_v1"},
+        "task_id": {"type": ["string", "null"], "description": "The edit task id evaluated."},
+        "rule_id": {"type": ["string", "null"], "description": "The convention rule id; null when the rule was malformed."},
+        "kind": {"type": ["string", "null"], "description": "The structural handler family that judged the rule; null when unsupported/malformed."},
+        "passed": {"type": "boolean", "description": "True only when every anchor conforms."},
+        "diagnostic": {"type": "string", "minLength": 1, "description": "Human-readable summary; leads with the first failing reason code."},
+        "anchors": {
+          "type": "array",
+          "description": "Per-anchor outcomes, sorted by (path, lines).",
+          "items": {"$ref": "#/$defs/anchor_outcome"}
+        }
+      }
+    },
     "reason": {
       "type": "string",
       "enum": [
@@ -35,9 +38,46 @@
         "ANCHOR_IDENTIFIER_ABSENT",
         "MATCH_ABSENT",
         "MATCH_AMBIGUOUS",
-        "TOOL_FAILURE"
+        "TOOL_FAILURE",
+        "PATCH_CONFORMS",
+        "PATCH_NONCONFORMING",
+        "PATCH_UNGOVERNED",
+        "PATCH_ABSENT"
       ],
-      "description": "Stable reason-code enum. CONFORMS is the only passing code; every other code is a fail-closed condition."
+      "description": "Stable reason-code enum shared by the bank-health and agent-patch verdicts. CONFORMS and PATCH_CONFORMS are the only passing codes; every other code is a fail-closed condition."
+    },
+    "run_outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "conformance_gate_v2 -- the RUNTIME convention verdict for one edit attempt, emitted by conformance_gate.evaluate_run. Two components, neither merged into the other: agent_patch answers the question the headline metric asks (did the AGENT's changed regions honour the rule?), bank_health answers whether the material that judgement rests on is sound. passed requires both, so a verdict measured with defective exemplars fails closed while keeping ANCHOR_*/RULE_* reason codes that charge the failure to the harness rather than the agent.",
+      "required": ["schema", "task_id", "rule_id", "kind", "passed", "diagnostic", "agent_patch", "bank_health"],
+      "properties": {
+        "schema": {"const": "conformance_gate_v2"},
+        "task_id": {"type": ["string", "null"]},
+        "rule_id": {"type": ["string", "null"]},
+        "kind": {"type": ["string", "null"]},
+        "passed": {"type": "boolean", "description": "agent_patch.passed AND bank_health.passed."},
+        "diagnostic": {"type": "string", "minLength": 1},
+        "agent_patch": {"$ref": "#/$defs/agent_patch_outcome"},
+        "bank_health": {"$ref": "#/$defs/bank_health_outcome"}
+      }
+    },
+    "agent_patch_outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "conformance_agent_patch_v1 -- the verdict on the AGENT's changed regions. Candidate constructs are detected structurally over the patched text and judged when their own span intersects a line the agent changed, so an unrelated edit yields PATCH_UNGOVERNED (fail closed, the convention claim is unproven) rather than a free pass. Never compiles the task's authored conforms_pattern.",
+      "required": ["schema", "passed", "reason", "diagnostic", "regions"],
+      "properties": {
+        "schema": {"const": "conformance_agent_patch_v1"},
+        "passed": {"type": "boolean", "description": "True only when at least one governed construct was touched and every touched construct conforms."},
+        "reason": {"$ref": "#/$defs/reason"},
+        "diagnostic": {"type": "string", "minLength": 1},
+        "regions": {
+          "type": "array",
+          "description": "One entry per TOUCHED governed construct, in (path, offset) order.",
+          "items": {"$ref": "#/$defs/anchor_outcome"}
+        }
+      }
     },
     "anchor_outcome": {
       "type": "object",

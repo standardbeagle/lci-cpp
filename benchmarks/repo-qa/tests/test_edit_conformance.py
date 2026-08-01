@@ -599,6 +599,28 @@ class AgentPatchTest(GateTestBase):
             out["agent_patch"]["reason"], gate.Reason.PATCH_NONCONFORMING
         )
 
+    def test_verdict_validates_against_the_published_schema(self):
+        import jsonschema
+        with open(
+            os.path.join(CONFORMANCE, "conformance-outcome.schema.json"),
+            encoding="utf-8",
+        ) as handle:
+            schema = json.load(handle)
+        validator = jsonschema.Draft202012Validator(
+            {"$ref": "#/$defs/run_outcome", "$defs": schema["$defs"]}
+        )
+        c = self._corpus()
+        for label, patch in (
+            ("conforming", {"core/new.go": "package core\n\nfunc NewThing() *Thing {\n\treturn &Thing{}\n}\n"}),
+            ("broken", {"core/new.go": "package core\n\nfunc NewThing() Thing {\n\treturn Thing{}\n}\n"}),
+            ("ungoverned", {"GREEN": "ok\n"}),
+            ("absent", {}),
+        ):
+            with self.subTest(patch=label):
+                validator.validate(
+                    gate.evaluate_run(self._task(), c.manifest, c.tree_dir, patch)
+                )
+
     def test_verdict_is_byte_stable_and_versioned(self):
         c = self._corpus()
         patch = {"core/new.go": "package core\n\nfunc NewThing() *Thing {\n\treturn &Thing{}\n}\n"}

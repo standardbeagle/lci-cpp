@@ -220,7 +220,7 @@ class ProvenanceRecordTest(unittest.TestCase):
             self.assertEqual(rec["task_digest"], task_digest(task))
             self.assertEqual(rec["task_schema"], "edit_task_v1")
             self.assertEqual(rec["gate_versions"]["oracle"], "oracle_gate_v1")
-            self.assertEqual(rec["gate_versions"]["conformance"], "conformance_gate_v1")
+            self.assertEqual(rec["gate_versions"]["conformance"], "conformance_gate_v2")
             # model + seed + arm/allowlist
             self.assertEqual(rec["model"], "claude-test-model")
             self.assertEqual(rec["seed"], 7)
@@ -232,13 +232,20 @@ class ProvenanceRecordTest(unittest.TestCase):
             self.assertIn("Write", rec["effective_allowlist"])
             # patch hash + touched files
             self.assertTrue(rec["patch_hash"].startswith("sha256:"))
-            self.assertEqual(rec["patch_files"], ["GREEN"])
+            self.assertEqual(rec["patch_files"], ["GREEN", "apis/widget.go"])
             # each gate outcome present
             self.assertTrue(rec["gates"]["oracle"]["passed"])
             self.assertTrue(rec["gates"]["conformance"]["passed"])
             self.assertEqual(rec["gates"]["oracle"]["schema"], "oracle_gate_v1")
             self.assertEqual(
-                rec["gates"]["conformance"]["schema"], "conformance_gate_v1"
+                rec["gates"]["conformance"]["schema"], "conformance_gate_v2"
+            )
+            # the convention verdict is about the AGENT's patch, with bank
+            # health kept as its own field rather than merged away.
+            self.assertTrue(rec["gates"]["conformance"]["agent_patch"]["passed"])
+            self.assertEqual(
+                rec["gates"]["conformance"]["bank_health"]["schema"],
+                "conformance_gate_v1",
             )
             for field in ("started_at", "ended_at"):
                 self.assertTrue(rec[field])
@@ -441,7 +448,7 @@ class DeterminismAndResumeTest(unittest.TestCase):
 def _agent_for(kind):
     """A fake agent that drives `run_edit_task` to a specific terminal class."""
     if kind == edit_record.STATUS_PASSED:
-        return _apply_and_answer({"GREEN": "ok\n"})
+        return run_pass_agent()
     if kind == edit_record.STATUS_GATE_FAILED:
         # edits an allowed file but never turns the behaviour green -> the
         # behaviour discrimination fails (both trees red).
