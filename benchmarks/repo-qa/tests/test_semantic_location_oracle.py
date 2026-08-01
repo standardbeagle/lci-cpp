@@ -51,7 +51,7 @@ class SemanticLocationOracleTest(unittest.TestCase):
         self.assertEqual(empty["status"], "accepted")
         self.assertEqual(empty["precision"], 1.0)
         self.assertEqual(empty["recall"], 1.0)
-        invented = oracle.evaluate("See pocketbase.go:12", [])
+        invented = oracle.evaluate("See forms/record_upsert.go:12", [])
         self.assertFalse(invented["exact"])
         self.assertEqual(invented["precision"], 0.0)
         self.assertEqual(invented["recall"], 0.0)
