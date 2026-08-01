@@ -279,6 +279,16 @@ class ApiImpactTest(unittest.TestCase):
         self.assertFalse(out["passed"])
         self.assertEqual(out["reason"], gate.Reason.TOOL_FAILURE)
 
+    def test_takes_no_dead_timeout_parameter(self):
+        # check_api_impact never used its `timeout` argument -- the per-call
+        # budget belongs to the LciRefs adapter, which owns the subprocess. A
+        # parameter that looks like it bounds something but bounds nothing is a
+        # lie about the gate's fail-closed guarantees.
+        import inspect
+        self.assertNotIn(
+            "timeout", inspect.signature(gate.check_api_impact).parameters
+        )
+
 
 # ---------------------------------------------------------------------------
 # aggregate gate + worktree hygiene + determinism (criteria 2, 4)
@@ -399,6 +409,66 @@ class AggregateGateTest(unittest.TestCase):
         self.assertEqual(os.listdir(self.workspace), [])
         self.assertEqual(_dir_fingerprint(self.source), before)
         self.assertFalse(os.path.exists(os.path.join(self.source, "..", "escape.go")))
+
+    def test_traversal_patch_is_charged_to_the_patch_not_the_harness(self):
+        # A path escape is something the PATCH did -- it is the agent writing
+        # outside its worktree, not our tooling breaking. Bucketing it as
+        # TOOL_FAILURE told the scorer "we are wrong" (harness_failure) about the
+        # one failure mode that is unambiguously the patch's fault, so a
+        # traversal-happy agent's escapes never reached patch_rejected.
+        out = gate.evaluate_oracle(
+            _edit_task(), self.source,
+            {"../escape.go": "evil\n"},
+            existing_suite_command=_GREEN_SUITE,
+            workspace_root=self.workspace,
+        )
+        self.assertFalse(out["passed"])
+        for sub in ("discrimination", "existing_suite", "api_impact",
+                    "changed_path"):
+            with self.subTest(sub=sub):
+                self.assertEqual(
+                    out[sub]["reason"], gate.Reason.PATCH_PATH_ESCAPE,
+                    msg=out[sub]["detail"],
+                )
+        self.assertIn("../escape.go", out["diagnostic"])
+        jsonschema.Draft202012Validator(_load_schema()).validate(out)
+
+    def test_missing_oracle_patch_is_not_reported_as_an_absent_corpus(self):
+        # A present manifest plus a None patch is a CALLER error. Reporting it as
+        # "forged corpus not found (never vendored)" is simply false, and sends
+        # whoever reads the record hunting for a corpus that is sitting right
+        # there.
+        corpus_root = os.path.join(self._tmp.name, "corpora")
+        seed_dir = os.path.join(corpus_root, "pocketbase", "seed-7")
+        os.makedirs(os.path.join(seed_dir, "tree"))
+        with open(os.path.join(seed_dir, "manifest.json"), "w") as fh:
+            json.dump(
+                {
+                    "schema": "exploration_corpus_manifest_v1",
+                    "corpus_id": "pocketbase",
+                    "seed": 7,
+                    "path_map": {},
+                    "decoys": [],
+                    "status": "ready",
+                },
+                fh,
+            )
+
+        present = gate.evaluate_task_in_corpus(_edit_task(), corpus_root)
+        self.assertFalse(present["passed"])
+        self.assertEqual(
+            present["changed_path"]["reason"], gate.Reason.ORACLE_PATCH_ABSENT
+        )
+        self.assertNotIn("never vendored", present["diagnostic"])
+        jsonschema.Draft202012Validator(_load_schema()).validate(present)
+
+        # ... while a genuinely absent corpus still reports MANIFEST_ABSENT.
+        with tempfile.TemporaryDirectory() as empty_root:
+            absent = gate.evaluate_task_in_corpus(_edit_task(), empty_root)
+        self.assertEqual(
+            absent["changed_path"]["reason"], gate.Reason.MANIFEST_ABSENT
+        )
+        self.assertIn("never vendored", absent["diagnostic"])
 
     def test_outcome_is_byte_stable_and_schema_valid(self):
         schema = _load_schema()
