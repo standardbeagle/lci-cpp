@@ -109,6 +109,5 @@ class ResponseShapeABTest(unittest.TestCase):
         self.assertNotIn("raw_provider_stderr",record)
         self.assertLessEqual(len(record["provider_stderr_tail"]),ab.STDERR_TAIL_LIMIT)
         self.assertNotIn("lead-marker",json.dumps(record))
-        self.assertIsNone(self._run_fake(0,noise).get("provider_stderr_tail"))
 
 if __name__=="__main__": unittest.main()

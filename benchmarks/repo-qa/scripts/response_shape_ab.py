@@ -21,6 +21,8 @@ PROMPT = """Answer the QUESTION using only the selected tool response. Do not us
 Return strict JSON only: {{\"answers\":[\"atomic answer\"],\"evidence\":[\"identifier\"],\"claims\":[\"atomic factual claim\"]}}.
 QUESTION:\n{question}\nSELECTED TOOL: {tool}\nTOOL RESPONSE:\n{response}\n"""
 FINAL_STATUSES = {"answered", "malformed_answer"}
+# Provider stderr is diagnostic only: keep a bounded tail, never the full stream.
+STDERR_TAIL_LIMIT = 512
 
 def canonical(value):
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
@@ -137,9 +139,13 @@ class OpenCodeProvider:
                 answer,metadata=parse_events(raw_stdout.splitlines())
                 failure_text=json.dumps(metadata.get("provider_error"))+"\n"+raw_stderr
                 classified=classify_failure(failure_text)
+                # Same ladder as comprehension_ab.run_model: rc 124 is the wrapper
+                # timeout, any other nonzero rc keeps its code instead of collapsing.
                 if metadata.get("malformed_event"): status="malformed_provider_stream"
                 elif classified: status=classified
-                elif metadata.get("provider_error") or proc.returncode: status="provider_error"
+                elif metadata.get("provider_error"): status="provider_error"
+                elif proc.returncode == 124: status="provider_timeout"
+                elif proc.returncode != 0: status=f"exit_{proc.returncode}"
                 elif not answer.strip(): status="empty_answer"
                 else: status="answered"
             except subprocess.TimeoutExpired as exc:
@@ -149,7 +155,8 @@ class OpenCodeProvider:
                 status="provider_timeout"
             finally:
                 shutil.rmtree(workspace,ignore_errors=True)
-        return {"status":status,"answer":answer,"raw_provider_stdout":raw_stdout,"raw_provider_stderr":raw_stderr,
+        return {"status":status,"answer":answer,"raw_provider_stdout":raw_stdout,
+            "provider_stderr_tail":None if status=="answered" else raw_stderr[-STDERR_TAIL_LIMIT:],
             "wall_seconds":round(time.monotonic()-started,3),"failure_reason":None if status=="answered" else status,**metadata}
 
 def cell_identity(manifest, task, arm, model, repetition):
