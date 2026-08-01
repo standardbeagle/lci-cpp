@@ -254,24 +254,65 @@ class ValidatorTest(unittest.TestCase):
             any("('dead')" in p for p in self.fx.run())
         )
 
-    def test_misleading_forge_trap_misclassified_as_authoritative_fails(self):
-        tree_path = os.path.join(
-            self.fx.corpus_root, CORPUS_ID, f"seed-{SEED}", "tree", FILE_REL
-        )
+    def _seed_misleading_trap(self, line, comment):
+        """Record an injected misleading comment the way the forge does: the
+        classification evidence is the sealed manifest record, the agent-visible
+        source carries only the naturalistic comment text."""
+        seed_dir = os.path.join(self.fx.corpus_root, CORPUS_ID, f"seed-{SEED}")
         lines = FILE_BODY.splitlines()
-        lines[2] = "// FORGE TRAP: App is obsolete and never used."
-        _write(tree_path, "\n".join(lines) + "\n")
+        lines[line - 1] = comment
+        _write(os.path.join(seed_dir, "tree", FILE_REL), "\n".join(lines) + "\n")
+        manifest_path = os.path.join(seed_dir, "manifest.json")
+        manifest = vet._load_json(manifest_path)
+        manifest["traps"] = [{
+            "trap_id": "misleading-comment-c0ffee",
+            "category": "misleading_comment",
+            "injected_location": {"path": FILE_REL, "line": line},
+            "misleading_or_dead_anchors": [{"path": FILE_REL, "line": line}],
+        }]
+        _write(manifest_path, manifest)
         self.fx.task["evidence"][0] = {
             "path": FILE_REL,
-            "lines": [3],
+            "lines": [line],
             "claim": "a misleading injected statement",
             "target_identifiers": ["App"],
         }
         self.fx._annotation("ann-a")
         self.fx._annotation("ann-b")
         self.fx._flush_task()
+
+    def test_misleading_forge_trap_misclassified_as_authoritative_fails(self):
+        self._seed_misleading_trap(3, "// App is obsolete and never used.")
         self.assertTrue(
             any("('misleading')" in p for p in self.fx.run())
+        )
+
+    def test_classification_survives_a_trap_with_no_marker_in_the_source(self):
+        """Discrimination test for oracle independence: the forge no longer
+        labels its own injections in agent-visible text, so a classifier keyed
+        on that text would silently downgrade every trap to authoritative."""
+        for comment in (
+            "// Deprecated: App was superseded and is dead code.",
+            "// FORGE TRAP misleading-comment-c0ffee: App is obsolete.",
+        ):
+            with self.subTest(comment=comment):
+                self.setUp()
+                self._seed_misleading_trap(3, comment)
+                self.assertTrue(any("('misleading')" in p for p in self.fx.run()))
+
+    def test_marker_text_without_a_sealed_record_is_not_a_trap(self):
+        """The source text is not the oracle: only the forge's sealed record
+        classifies, so corpus prose can never masquerade as an injection."""
+        seed_dir = os.path.join(self.fx.corpus_root, CORPUS_ID, f"seed-{SEED}")
+        lines = FILE_BODY.splitlines()
+        lines[2] = "// FORGE TRAP: App is obsolete and never used."
+        _write(os.path.join(seed_dir, "tree", FILE_REL), "\n".join(lines) + "\n")
+        self.assertEqual(
+            vet.classify_anchor_live(
+                {"path": FILE_REL, "lines": [3]},
+                vet._load_json(os.path.join(seed_dir, "manifest.json")),
+            ),
+            "authoritative-live",
         )
 
     def test_fewer_than_two_anchors_fails(self):

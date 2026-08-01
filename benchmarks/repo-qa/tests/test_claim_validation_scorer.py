@@ -1,5 +1,6 @@
 """Hermetic contract tests for deterministic claim-validation scoring."""
 
+import json
 import os
 import sys
 import unittest
@@ -10,6 +11,7 @@ ROOT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
 sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(os.path.dirname(ROOT), "scripts"))
 
+from runner import run  # noqa: E402
 from scoring import (IncompatibleRuns, aggregate_claim_scores, parse_claim_answer,
                      score_claim_run)  # noqa: E402
 
@@ -48,6 +50,55 @@ class ParseTests(unittest.TestCase):
                {"verdict": "true", "evidence": [{"path": "../x.py", "line": 1}], "rationale": "x"},
                {"verdict": "true", "evidence": [{"path": "x.py", "line": True}], "rationale": "x"}]
         self.assertTrue(all(parse_claim_answer(value) is None for value in bad))
+
+
+class RunnerScorerParserParityTest(unittest.TestCase):
+    """The runner gates an answer and the scorer scores it; if the two parsers
+    disagree, a run is either rejected in flight but scoreable after the fact or
+    accepted in flight and silently unscoreable. One parser, one verdict."""
+
+    ACCEPTED = (
+        {"verdict": "true", "evidence": [{"path": "src/live.py", "line": 3}],
+         "rationale": "bounded"},
+        {"verdict": "unsupported",
+         "evidence": [{"path": "./packages/next/src/server/load-manifest.external.ts",
+                       "line": 12}],
+         "rationale": "the manifest reader is the anchor"},
+    )
+    REJECTED = (
+        "not json at all",
+        {"verdict": "yes", "evidence": [{"path": "a.py", "line": 1}], "rationale": "x"},
+        {"verdict": "true", "evidence": [], "rationale": "x"},
+        {"verdict": "true", "evidence": [{"path": "a.py", "line": 1}], "rationale": " "},
+        {"verdict": "true", "evidence": [{"path": "../x.py", "line": 1}], "rationale": "x"},
+        # Backslash-escaped traversal: rejected by the scorer, historically
+        # accepted by the runner because os.path.isabs/split are POSIX-only.
+        {"verdict": "true", "evidence": [{"path": "..\\secret/x.json", "line": 1}],
+         "rationale": "x"},
+        # Sealed citation: rejected by the runner, historically scored by the scorer.
+        {"verdict": "true", "evidence": [{"path": "annotations/key.json", "line": 1}],
+         "rationale": "x"},
+        {"verdict": "true", "evidence": [{"path": "/etc/passwd", "line": 1}],
+         "rationale": "x"},
+        {"verdict": "true", "evidence": [{"path": "a.py", "line": True}], "rationale": "x"},
+        {"verdict": "true", "evidence": [{"path": "a.py", "line": 0}], "rationale": "x"},
+    )
+
+    def _both(self, payload):
+        raw = payload if isinstance(payload, str) else json.dumps(payload)
+        runner_answer, runner_error = run._parse_claim_answer(raw)
+        return (runner_answer is not None and runner_error is None,
+                parse_claim_answer(raw) is not None)
+
+    def test_runner_and_scorer_accept_the_same_payloads(self):
+        for payload in self.ACCEPTED:
+            with self.subTest(payload=payload):
+                self.assertEqual(self._both(payload), (True, True))
+
+    def test_runner_and_scorer_reject_the_same_payloads(self):
+        for payload in self.REJECTED:
+            with self.subTest(payload=payload):
+                self.assertEqual(self._both(payload), (False, False))
 
 
 class ScoringTests(unittest.TestCase):

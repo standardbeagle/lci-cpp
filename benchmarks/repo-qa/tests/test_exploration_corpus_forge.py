@@ -402,11 +402,39 @@ class TestAdversarialTrapInjections(ForgeTestCase):
         comments = [t for t in manifest["traps"] if t["category"] == "misleading_comment"]
         self.assertEqual(len(comments), 2)
         for trap in comments:
-            location = trap["injected_location"]
-            with open(os.path.join(self.out("s7"), "tree", location["path"])) as f:
-                line = f.readlines()[location["line"] - 1]
-            self.assertIn("FORGE TRAP", line)
+            line = self._injected_line("s7", trap)
+            symbol = trap["authoritative_live_anchors"][0]["symbol"]
+            self.assertIn(symbol, line)
             self.assertIn("contradicts", trap["reachability_rationale"])
+
+    def _injected_line(self, out_name, trap):
+        location = trap["injected_location"]
+        with open(os.path.join(self.out(out_name), "tree", location["path"])) as f:
+            return f.readlines()[location["line"] - 1]
+
+    def test_injected_comment_never_identifies_itself_to_the_agent(self):
+        """An agent that can read "FORGE TRAP" off the line is not exploring,
+        it is reading the answer key -- and a validator keyed on the same text
+        is not an independent oracle. Agent-visible text carries no marker."""
+        manifest = self.forge(seed=7)
+        for trap in manifest["traps"]:
+            if trap["category"] != "misleading_comment":
+                continue
+            line = self._injected_line("s7", trap)
+            self.assertNotIn("TRAP", line.upper())
+            self.assertNotIn("FORGE", line.upper())
+            self.assertNotIn(trap["trap_id"], line)
+
+    def test_injected_comment_wording_is_seed_deterministic(self):
+        first = self.forge(seed=7)
+        lines = {t["trap_id"]: self._injected_line("s7", t) for t in first["traps"]
+                 if t["category"] == "misleading_comment"}
+        second = self.forge(seed=7)
+        self.assertEqual(
+            {t["trap_id"]: self._injected_line("s7", t) for t in second["traps"]
+             if t["category"] == "misleading_comment"},
+            lines,
+        )
 
     def test_dead_twins_are_recorded_as_unreachable(self):
         manifest = self.forge(seed=7)

@@ -6,8 +6,10 @@ corpus coordinates in the task bank.
 """
 
 import json
+import posixpath
 import statistics
 
+import sealed_artifacts
 from scoring.citations import normalize_path
 from scoring.scorer import IncompatibleRuns, _distribution
 
@@ -22,33 +24,60 @@ _COMPAT_FIELDS = (
 )
 
 
-def parse_claim_answer(value):
-    """Return a canonical answer or ``None`` for any malformed ambiguity."""
+def _unsafe_citation_path(path):
+    """A citation path must be a plain relative location inside the checkout.
+
+    Traversal and absolute forms are checked on the backslash-normalised path so
+    a Windows-style separator cannot smuggle `..` past a POSIX-only split, and
+    sealed harness locations are refused here too -- an answer the runner gates
+    away must not be scoreable after the fact."""
+    normal = path.replace("\\", "/")
+    return (path.startswith(("/", "\\")) or posixpath.isabs(normal)
+            or ".." in normal.split("/")
+            or sealed_artifacts.is_sealed_path(path))
+
+
+def parse_claim_answer_result(value):
+    """Return ``(answer, canonical, reason)`` for one claim answer.
+
+    Single source of truth for the claim-answer schema: the runner gates a run
+    on `reason` while the scorer scores `canonical`, so both see one verdict on
+    every payload. `answer` is the raw decoded object the runner persists;
+    `canonical` carries deduped, normalised citations. On rejection both are
+    ``None`` and `reason` names the failing check."""
     if isinstance(value, str):
         try:
             value = json.loads(value)
         except (TypeError, json.JSONDecodeError):
-            return None
+            return None, None, "invalid_json"
     if not isinstance(value, dict) or set(value) != {"verdict", "evidence", "rationale"}:
-        return None
-    verdict = value.get("verdict")
-    evidence = value.get("evidence")
-    rationale = value.get("rationale")
-    if verdict not in _VERDICTS or not isinstance(rationale, str) or not rationale.strip():
-        return None
+        return None, None, "fields"
+    verdict = value["verdict"]
+    evidence = value["evidence"]
+    rationale = value["rationale"]
+    if verdict not in _VERDICTS:
+        return None, None, "verdict"
+    if not isinstance(rationale, str) or not rationale.strip():
+        return None, None, "rationale"
     if not isinstance(evidence, list) or not evidence:
-        return None
+        return None, None, "evidence"
     citations = set()
     for citation in evidence:
         if not isinstance(citation, dict) or set(citation) != {"path", "line"}:
-            return None
+            return None, None, "citation"
         path, line = citation["path"], citation["line"]
-        if (not isinstance(path, str) or not path or path.startswith(("/", "\\"))
-                or ".." in path.replace("\\", "/").split("/")
+        if (not isinstance(path, str) or not path or _unsafe_citation_path(path)
                 or not isinstance(line, int) or isinstance(line, bool) or line < 1):
-            return None
+            return None, None, "citation"
         citations.add((normalize_path(path), line, line))
-    return {"verdict": verdict, "evidence": sorted(citations), "rationale": rationale.strip()}
+    canonical = {"verdict": verdict, "evidence": sorted(citations),
+                 "rationale": rationale.strip()}
+    return value, canonical, None
+
+
+def parse_claim_answer(value):
+    """Return a canonical answer or ``None`` for any malformed ambiguity."""
+    return parse_claim_answer_result(value)[1]
 
 
 def _within(cited, anchor):
