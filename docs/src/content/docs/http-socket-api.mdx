@@ -1,13 +1,14 @@
 ---
 title: HTTP & Socket API
-description: The lci server's transport and JSON endpoints — how a per-project index daemon is reached and queried.
+description: Reference for the lci index server's HTTP/JSON API — Unix socket on Linux/macOS, loopback TCP on Windows, and the 17 POST/GET endpoints it exposes directly.
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
 `lci server` starts a long-running, per-project index daemon (`IndexServer`)
-that speaks HTTP/JSON. `lci` CLI subcommands and the MCP server talk to it as
-a client; you can also reach it directly.
+that speaks HTTP/JSON. [`lci` CLI subcommands](/lci-cpp/cli-usage/) and the
+[MCP server](/lci-cpp/mcp-server/) talk to it as a client; you can also
+reach it directly.
 
 ## Transport
 
