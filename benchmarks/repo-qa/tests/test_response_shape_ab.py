@@ -84,4 +84,31 @@ class ResponseShapeABTest(unittest.TestCase):
             self.assertEqual(len(records),48); self.assertTrue(all(x["score"]["correct"] for x in records))
             self.assertEqual({x["model"] for x in records},{x["id"] for x in self.manifest["models"]})
 
+    def _fake_opencode(self, directory, exit_code, stderr_text):
+        script=Path(directory)/"fake-opencode"
+        script.write_text("#!/usr/bin/env python3\nimport sys\n"
+                          f"sys.stderr.write({stderr_text!r})\nraise SystemExit({exit_code})\n")
+        script.chmod(0o755)
+        return script
+
+    def _run_fake(self, exit_code, stderr_text):
+        task=self.tasks[0]; manifest=dict(self.manifest,timeout_seconds=60)
+        with tempfile.TemporaryDirectory() as d:
+            provider=ab.OpenCodeProvider(str(self._fake_opencode(d,exit_code,stderr_text)))
+            return provider.run(prompt="p",task=task,arm="shape_17",model="provider/model",
+                                timeout=manifest["timeout_seconds"])
+
+    def test_nonzero_exit_taxonomy_matches_comprehension_ab(self):
+        self.assertEqual(self._run_fake(124,"")["status"],"provider_timeout")
+        self.assertEqual(self._run_fake(3,"")["status"],"exit_3")
+        self.assertEqual(self._run_fake(0,"")["status"],"empty_answer")
+
+    def test_raw_provider_stderr_is_not_persisted_verbatim(self):
+        noise="lead-marker\n"+"x"*4000
+        record=self._run_fake(3,noise)
+        self.assertNotIn("raw_provider_stderr",record)
+        self.assertLessEqual(len(record["provider_stderr_tail"]),ab.STDERR_TAIL_LIMIT)
+        self.assertNotIn("lead-marker",json.dumps(record))
+        self.assertIsNone(self._run_fake(0,noise).get("provider_stderr_tail"))
+
 if __name__=="__main__": unittest.main()
