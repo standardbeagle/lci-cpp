@@ -84,6 +84,13 @@ def validate_fixture(fixture: dict) -> dict:
 
 
 def grade_answers(extracted: list[str], expected: list[str]) -> dict:
+    """Score extracted answers against the oracle under the harness-wide IR convention.
+
+    Standard information-retrieval convention, shared with
+    api_replay_analysis.quality so the two never disagree on the same cell:
+    an empty side scores 1.0 only when the other side is empty too, so neither
+    silence nor fabrication can outscore a correct answer.
+    """
     norm = lambda values: {" ".join(value.casefold().split()) for value in values}
     predicted, truth = norm(extracted), norm(expected)
     tp = len(predicted & truth)

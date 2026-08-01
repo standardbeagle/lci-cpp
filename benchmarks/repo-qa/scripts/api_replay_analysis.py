@@ -63,12 +63,23 @@ def extract(answer: str) -> list[str]:
 
 
 def quality(predicted: list[str], expected: list[str]) -> dict:
+    """Score a prediction against the oracle under the harness-wide IR convention.
+
+    Standard information-retrieval convention, shared with
+    api_replay_ab.grade_answers so the two never disagree on the same cell:
+      - empty predicted and empty truth -> precision 1.0, recall 1.0
+        (nothing to find, nothing wrongly claimed)
+      - empty predicted, nonempty truth -> precision is undefined; defined here
+        as 0.0 so silence cannot score better than an attempt
+      - nonempty predicted, empty truth -> recall likewise defined as 0.0, so a
+        fabricated answer cannot score better than correctly saying nothing
+    """
     predicted_set, expected_set = set(predicted), set(expected)
     true_positive = len(predicted_set & expected_set)
     return {
         "exact": predicted_set == expected_set,
-        "precision": true_positive / len(predicted_set) if predicted_set else 0.0,
-        "recall": true_positive / len(expected_set),
+        "precision": true_positive / len(predicted_set) if predicted_set else (1.0 if not expected_set else 0.0),
+        "recall": true_positive / len(expected_set) if expected_set else (1.0 if not predicted_set else 0.0),
         "false_positives": sorted(predicted_set - expected_set),
         "false_negatives": sorted(expected_set - predicted_set),
     }
