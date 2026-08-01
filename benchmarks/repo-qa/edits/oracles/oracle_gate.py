@@ -22,11 +22,19 @@ versioned sub-outcomes:
 
 FAIL CLOSED (criterion 3)
 -------------------------
-A timeout, a missing command, a tool exception, an absent forged corpus, a
-patch that escapes the blast radius, and a non-discriminating / wrong-direction
-test all resolve to a deterministic FAIL with a stable reason code from
-:class:`Reason`. Captured stdout/stderr is BOUNDED to ``_MAX_TAIL`` bytes. There
-is no silent pass and no unbounded capture.
+A timeout, a missing command, a tool exception, an absent forged corpus, an
+absent oracle patch, a patch that escapes the blast radius or the worktree, and
+a non-discriminating / wrong-direction test all resolve to a deterministic FAIL
+with a stable reason code from :class:`Reason`. Captured stdout/stderr is
+BOUNDED to ``_MAX_TAIL`` bytes. There is no silent pass and no unbounded
+capture.
+
+Reason codes name the ACTUAL fault and its owner, because the scorer buckets
+failures by provenance: MANIFEST_ABSENT (corpus never vendored) is distinct
+from ORACLE_PATCH_ABSENT (caller supplied no patch), and PATCH_PATH_ESCAPE (the
+patch named a destination outside its worktree) is charged to the patch rather
+than swept into TOOL_FAILURE, which would blame our tooling for the agent's
+traversal.
 
 WORKTREE HYGIENE (criterion 4)
 ------------------------------
@@ -107,8 +115,25 @@ class Reason:
     COMMAND_NOT_FOUND = "COMMAND_NOT_FOUND"
     COMMAND_ABSENT = "COMMAND_ABSENT"
     TOOL_FAILURE = "TOOL_FAILURE"
-    # corpus location
+    # the patch itself is unusable -- charged to the PATCH, not to the harness
+    PATCH_PATH_ESCAPE = "PATCH_PATH_ESCAPE"
+    # corpus location / caller contract
     MANIFEST_ABSENT = "MANIFEST_ABSENT"
+    ORACLE_PATCH_ABSENT = "ORACLE_PATCH_ABSENT"
+
+
+class PatchPathEscape(ValueError):
+    """A patch entry resolves outside the worktree it is applied to.
+
+    A ValueError subclass so existing ``except ValueError`` callers are
+    unaffected, but a distinct type so :func:`evaluate_oracle` can charge it to
+    the PATCH (Reason.PATCH_PATH_ESCAPE) instead of burying it in the generic
+    orchestration-fault path, where it read as our tooling breaking.
+    """
+
+    def __init__(self, rel):
+        self.rel = rel
+        super().__init__(f"patch path escapes the worktree: {rel!r}")
 
 
 # ---------------------------------------------------------------------------
@@ -318,7 +343,7 @@ def apply_patch(tree_dir, oracle_patch):
     for rel, content in oracle_patch.items():
         dest = os.path.abspath(os.path.join(root, rel))
         if dest != root and not dest.startswith(root + os.sep):
-            raise ValueError(f"oracle patch path escapes the worktree: {rel!r}")
+            raise PatchPathEscape(rel)
         if content is None:
             if os.path.isfile(dest):
                 os.remove(dest)
@@ -485,13 +510,18 @@ def _api_impact_outcome(passed, reason, symbols, escaped_refs, detail):
     }
 
 
-def check_api_impact(impacted_symbols, blast_allow, lci, tree_dir, timeout=DEFAULT_TIMEOUT):
+def check_api_impact(impacted_symbols, blast_allow, lci, tree_dir):
     """Detect public-API / call-hierarchy breakage outside the declared scope.
 
     For each symbol the patch changes, LCI resolves references; any reference in
     a file that matches no ``blast_radius.allow`` glob is an ESCAPE -- the edit
     ripples beyond its declared blast radius. Fails closed when LCI is
     unavailable or errors. Deterministic: symbols and escaped refs are sorted.
+
+    There is deliberately no ``timeout`` parameter: the per-call wall-clock
+    budget belongs to the injected ``lci`` adapter, which owns the subprocess
+    (see :class:`LciRefs`). A second, unenforced timeout here would advertise a
+    bound this function does not apply.
     """
     symbols = sorted(set(impacted_symbols))
     if not symbols:
@@ -616,8 +646,30 @@ def evaluate_oracle(
                 existing_suite_command, tree, timeout
             )
             api_impact = check_api_impact(
-                impacted_symbols, blast_allow, lci, tree, timeout
+                impacted_symbols, blast_allow, lci, tree
             )
+    except PatchPathEscape as escape:
+        # Charged to the PATCH, not to us: the patch named a destination outside
+        # its own worktree. Every sub-outcome carries the same code (nothing
+        # downstream of the failed apply could be evaluated), and changed_path is
+        # OVERRIDDEN because a traversal is a scope violation by construction --
+        # even when the declared allow globs happen to match the literal string.
+        detail = f"patch path escapes the worktree: {escape.rel!r}"
+        run = _command_run([], None, Reason.PATCH_PATH_ESCAPE, "", detail)
+        discrimination = _discrimination_outcome(
+            False, Reason.PATCH_PATH_ESCAPE, run, run, detail
+        )
+        existing_suite = _existing_suite_outcome(
+            False, Reason.PATCH_PATH_ESCAPE, run, detail
+        )
+        api_impact = _api_impact_outcome(
+            False, Reason.PATCH_PATH_ESCAPE, impacted_symbols, [], detail
+        )
+        changed_path = _changed_path_outcome(
+            False, Reason.PATCH_PATH_ESCAPE,
+            patch_changed_paths(oracle_patch), [escape.rel],
+            blast_allow or [], max_files, detail,
+        )
     except Exception as err:  # noqa: BLE001 -- fail closed on any orchestration fault
         run = _tool_failure_run(f"oracle orchestration raised: {err}")
         discrimination = _discrimination_outcome(
@@ -638,24 +690,40 @@ def evaluate_oracle(
     )
 
 
-def _manifest_absent_aggregate(task, corpus_id, seed):
+def _unevaluable_aggregate(task, reason, detail):
+    """Fail closed across all four sub-gates with ONE reason and ONE detail.
+
+    Used for the conditions that stop the gate before any command can run. The
+    reason must name the ACTUAL condition: a missing forged corpus and a missing
+    oracle patch are different faults with different owners, and collapsing them
+    made every caller error read as an unvendored corpus.
+    """
     blast_allow, max_files = _blast_radius_of(task)
-    detail = (
-        f"forged corpus for {corpus_id!r} seed {seed!r} not found "
-        f"(never vendored)"
-    )
-    run = _command_run([], None, Reason.MANIFEST_ABSENT, "", detail)
+    run = _command_run([], None, reason, "", detail)
     return _aggregate(
         task.get("id"),
-        _existing_suite_outcome(False, Reason.MANIFEST_ABSENT, run, detail),
-        _discrimination_outcome(
-            False, Reason.MANIFEST_ABSENT, run, run, detail
-        ),
+        _existing_suite_outcome(False, reason, run, detail),
+        _discrimination_outcome(False, reason, run, run, detail),
         _changed_path_outcome(
-            False, Reason.MANIFEST_ABSENT, [], [], blast_allow or [], max_files,
-            detail,
+            False, reason, [], [], blast_allow or [], max_files, detail
         ),
-        _api_impact_outcome(False, Reason.MANIFEST_ABSENT, [], [], detail),
+        _api_impact_outcome(False, reason, [], [], detail),
+    )
+
+
+def _manifest_absent_aggregate(task, corpus_id, seed):
+    return _unevaluable_aggregate(
+        task, Reason.MANIFEST_ABSENT,
+        f"forged corpus for {corpus_id!r} seed {seed!r} not found "
+        f"(never vendored)",
+    )
+
+
+def _oracle_patch_absent_aggregate(task, corpus_id, seed):
+    return _unevaluable_aggregate(
+        task, Reason.ORACLE_PATCH_ABSENT,
+        f"forged corpus for {corpus_id!r} seed {seed!r} is present but no "
+        f"oracle patch was supplied; nothing to evaluate",
     )
 
 
@@ -665,16 +733,19 @@ def evaluate_task_in_corpus(
     """Locate the forged manifest/tree for ``task`` and evaluate its oracle.
 
     Fails closed with MANIFEST_ABSENT when the never-vendored forged corpus is
-    absent (the CI case) or when no oracle patch is supplied -- the gate is a
-    judgement, not a linter. When both are present it delegates to
-    :func:`evaluate_oracle` against the forged tree.
+    absent (the CI case), and with ORACLE_PATCH_ABSENT when the corpus IS there
+    but the caller supplied no patch -- the gate is a judgement, not a linter,
+    and the two faults have different owners. When both are present it delegates
+    to :func:`evaluate_oracle` against the forged tree.
     """
     ref = task.get("manifest_ref", {})
     corpus_id = task.get("corpus")
     seed = ref.get("seed")
     manifest, tree_dir = vet.locate_manifest(corpus_root, corpus_id, seed)
-    if manifest is None or oracle_patch is None:
+    if manifest is None:
         return _manifest_absent_aggregate(task, corpus_id, seed)
+    if oracle_patch is None:
+        return _oracle_patch_absent_aggregate(task, corpus_id, seed)
     return evaluate_oracle(task, tree_dir, oracle_patch, **kwargs)
 
 

@@ -38,7 +38,9 @@
         "COMMAND_NOT_FOUND",
         "COMMAND_ABSENT",
         "TOOL_FAILURE",
-        "MANIFEST_ABSENT"
+        "PATCH_PATH_ESCAPE",
+        "MANIFEST_ABSENT",
+        "ORACLE_PATCH_ABSENT"
       ],
       "description": "Stable reason-code enum shared across all sub-gates. The per-gate passing codes are SUITE_GREEN, DISCRIMINATES, WITHIN_SCOPE and NO_ESCAPE; every other code is a fail-closed condition."
     },

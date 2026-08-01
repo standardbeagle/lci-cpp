@@ -128,6 +128,7 @@ _HARNESS_REASONS = frozenset(
         "COMMAND_ABSENT",
         "TOOL_FAILURE",
         "MANIFEST_ABSENT",
+        "ORACLE_PATCH_ABSENT",
         "LCI_ABSENT",
         "BLAST_RADIUS_MALFORMED",
         "RULE_MALFORMED",
@@ -162,6 +163,7 @@ _PATCH_REASONS = frozenset(
         "TOO_MANY_FILES",
         "NO_CHANGES",
         "API_IMPACT_ESCAPE",
+        "PATCH_PATH_ESCAPE",
         "MATCH_ABSENT",
     }
 )
