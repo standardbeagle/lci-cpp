@@ -30,3 +30,8 @@ real_projects/zig/
 
 # worktrack MCP local database (per-clone, 7MB+)
 worktrack-mcp.db
+
+# Docs site (Astro Starlight) build output + deps
+docs/node_modules/
+docs/dist/
+docs/.astro/

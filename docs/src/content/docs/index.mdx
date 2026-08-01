@@ -1,0 +1,92 @@
+---
+title: lci
+description: Lightning Code Index — sub-millisecond semantic code search over large corpora. 13 languages, CLI + HTTP + Unix socket + MCP server for AI assistants.
+template: splash
+head:
+  - tag: meta
+    attrs:
+      name: keywords
+      content: code search, code indexing, MCP, Model Context Protocol, tree-sitter, semantic search, lci
+  - tag: meta
+    attrs:
+      property: og:image:alt
+      content: lci — Lightning Code Index
+  - tag: link
+    attrs:
+      rel: canonical
+      href: https://dev.standardbeagle.com/lci-cpp/
+hero:
+  tagline: Sub-millisecond semantic code search. Built for AI assistants.
+  actions:
+    - text: Get Started
+      link: /lci-cpp/getting-started/
+      icon: right-arrow
+      variant: primary
+    - text: View on GitHub
+      link: https://github.com/standardbeagle/lci-cpp
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+## What is lci?
+
+**Lightning Code Index (lci)** is the C++ implementation of lci — sub-millisecond
+semantic code search over large corpora, with ~80% context reduction versus Grep.
+It parses 13 languages with tree-sitter and exposes the index through a CLI, an
+MCP server for AI assistants, and an HTTP server over a Unix domain socket.
+
+<CardGrid>
+  <Card title="Sub-millisecond search" icon="rocket">
+    Literal match, optional synonym expansion, and regex fallback — over an
+    in-memory trigram index. Results carry the enclosing symbol's metadata.
+  </Card>
+  <Card title="13 languages" icon="document">
+    Go, Python, JavaScript, TypeScript (incl. TSX), Rust, C, C++, Java, C#, PHP,
+    Kotlin, Zig, and Ruby via vendored tree-sitter grammars.
+  </Card>
+  <Card title="MCP-native" icon="magnifier">
+    `lci mcp` exposes 14 tools to AI assistants over stdio — search, symbol
+    lookup, code insight, git analysis, and more.
+  </Card>
+  <Card title="Four surfaces" icon="laptop">
+    CLI for interactive use, `lci server` over a Unix socket / HTTP, and `lci
+    mcp` for agent integration — one engine, four ways in.
+  </Card>
+</CardGrid>
+
+## See it in action
+
+```sh
+lci search "myFunction"
+lci def MasterIndex
+lci tree run_search
+lci git-analyze
+```
+
+## What it does
+
+| Surface | Use |
+|---------|-----|
+| `lci search PATTERN` | substring + symbol-aware ranked search across the corpus |
+| `lci grep PATTERN` | literal text search over the corpus, grep-style output |
+| `lci tree SYMBOL` | function call hierarchy with annotations |
+| `lci def SYMBOL` / `lci refs SYMBOL` | definition + reference lookup |
+| `lci git-analyze` | analyze working-set changes for duplicates, naming, complexity |
+| `lci mcp` | MCP server over stdio for AI assistants |
+| `lci server` | long-running HTTP server over a Unix socket; per-corpus daemon |
+| `lci status`, `lci stats` | index health + runtime metrics |
+
+<CardGrid>
+  <Card title="Indexer pipeline" icon="setting">
+    scanner → parser pool (tree-sitter) → trigram bucketer (256-way sharded) →
+    merger → search engine.
+  </Card>
+  <Card title="Lock-free hot path" icon="approve-check-circle">
+    RCU-style atomic snapshot for reads; mutex only on the write/indexing
+    path. Per-language parser pools, no global lock.
+  </Card>
+</CardGrid>
+
+Full CLI reference: `lci --help` or `lci <command> --help`.

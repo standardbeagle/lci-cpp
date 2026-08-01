@@ -1,0 +1,98 @@
+---
+title: CLI Usage
+description: lci's command-line surface — search, grep, symbol lookup, git analysis, and the persistent server.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Every command supports `--help`. Global flags (`-c/--config`, `-r/--root`,
+`--include`, `--exclude`, `-d/--daemon`) apply across subcommands and can be
+set via `.lci.kdl`.
+
+```sh
+lci --help
+lci <command> --help
+```
+
+## Search
+
+```sh
+lci search PATTERN [paths...]
+```
+
+Substring + symbol-aware ranked search across the corpus. The pattern is a
+literal substring by default (whitespace is part of the pattern, not a word
+separator); pass `-E, --regex` for RE2 regex.
+
+Notable flags: `-i/--case-insensitive`, `-j/--json`, `-E/--regex`,
+`-w/--word-regexp`, `-l/--files-with-matches`, `--count`, `--max-count`,
+`--rank-by relevance|recency|file-type`, `--comments-only`, `--code-only`,
+`--strings-only`, `--context-filter function|class|top-level`.
+
+```sh
+lci search "myFunction"
+lci s "myFunction" src/          # alias: s
+```
+
+## Grep
+
+```sh
+lci grep PATTERN [paths...]      # alias: g
+```
+
+Ultra-fast text search, grep-style output. Shares most of `search`'s flags
+(`-i`, `-E`, `-v`/invert-match, `-c`/count, `-l`/files-only).
+
+## Symbol lookup
+
+```sh
+lci def SYMBOL      # alias: d — find symbol definition
+lci refs SYMBOL      # find symbol references
+lci tree SYMBOL       # function call hierarchy with annotations
+```
+
+## Git analysis
+
+```sh
+lci git-analyze
+```
+
+Analyzes working-set changes for duplicates, naming, and complexity.
+
+## Index server
+
+```sh
+lci server [-d/--daemon] [--foreground]   # alias: srv — start the persistent index server
+lci status [-j/--json] [-v/--verbose]     # alias: st — show index server status
+lci stats                                  # runtime metrics
+lci shutdown [-f/--force]                  # alias: stop
+```
+
+`lci server` starts a long-running, per-project daemon that serves the HTTP
+API described in [HTTP & Socket API](/lci-cpp/http-socket-api/). It listens
+on a Unix domain socket on Linux/macOS, or a loopback TCP port on Windows.
+CLI subcommands that need index state (`search`, `def`, `refs`, `tree`, …)
+transparently start or reuse this server.
+
+## MCP server
+
+```sh
+lci mcp
+```
+
+Starts the Model Context Protocol server over stdio, for AI assistant
+integration. See [MCP Server](/lci-cpp/mcp-server/).
+
+## Self-update
+
+```sh
+lci update                    # self-update to the latest release
+lci update --check            # report current vs latest without installing
+lci update --version 0.6.0    # install a specific release
+lci update --force            # reinstall even when already up to date
+```
+
+<Aside type="tip">
+  Full per-flag detail for every subcommand is in `lci <command> --help` —
+  this page covers the surface, not every flag.
+</Aside>
