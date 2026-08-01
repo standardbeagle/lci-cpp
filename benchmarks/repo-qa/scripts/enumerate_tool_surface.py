@@ -6,7 +6,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import queue
 import subprocess
+import threading
+import time
 from pathlib import Path
 
 
@@ -88,14 +91,24 @@ CASES = {
 }
 
 
+DEFAULT_RPC_READ_TIMEOUT = 120.0
+
+
 class McpSession:
-    def __init__(self, executable: Path, corpus: Path):
+    def __init__(self, executable: Path, corpus: Path,
+                 read_timeout: float = DEFAULT_RPC_READ_TIMEOUT):
+        self.read_timeout = read_timeout
         self.proc = subprocess.Popen(
             [str(executable), "mcp"], cwd=corpus, text=True,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
         )
         self.next_id = 1
+        # A dedicated reader keeps the timeout honest: selectors on a buffered
+        # text stream can miss a line that is already sitting in the buffer.
+        self._lines: queue.Queue[str | None] = queue.Queue()
+        self._reader = threading.Thread(target=self._pump_stdout, daemon=True)
+        self._reader.start()
         self.rpc("initialize", {
             "protocolVersion": "2025-06-18", "capabilities": {},
             "clientInfo": {"name": "surface-enumerator", "version": "1"},
@@ -117,19 +130,45 @@ class McpSession:
         if params is not None:
             request["params"] = params
         self.send(request)
-        assert self.proc.stdout is not None
-        for line in self.proc.stdout:
+        deadline = time.monotonic() + self.read_timeout
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                self.kill()
+                raise RuntimeError(
+                    f"LCI MCP did not respond to {method} within {self.read_timeout}s"
+                )
+            try:
+                line = self._lines.get(timeout=remaining)
+            except queue.Empty:
+                continue
+            if line is None:
+                self.kill()
+                raise RuntimeError(f"LCI MCP exited during {method}")
             response = json.loads(line)
             if response.get("id") == request_id:
                 if "error" in response:
                     raise RuntimeError(response["error"])
                 return response["result"]
-        raise RuntimeError(f"LCI MCP exited during {method}")
 
-    def close(self) -> None:
+    def _pump_stdout(self) -> None:
+        assert self.proc.stdout is not None
+        for line in self.proc.stdout:
+            self._lines.put(line)
+        self._lines.put(None)
+
+    def kill(self) -> None:
+        self.proc.kill()
+        self.proc.wait()
+
+    def close(self, wait_timeout: float = 15.0) -> None:
         if self.proc.stdin:
             self.proc.stdin.close()
-        self.proc.wait(timeout=15)
+        try:
+            self.proc.wait(timeout=wait_timeout)
+        except subprocess.TimeoutExpired:
+            # A child that ignores stdin close would otherwise outlive the run.
+            self.kill()
 
 
 def build_manifest(tools: list[dict], corpus: Path) -> dict:
