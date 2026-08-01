@@ -27,6 +27,7 @@
         "RULE_MALFORMED",
         "RULE_UNSUPPORTED",
         "MANIFEST_ABSENT",
+        "ANCHOR_MALFORMED",
         "ANCHOR_DECOY",
         "ANCHOR_NOT_LIVE",
         "ANCHOR_MISSING",
@@ -44,7 +45,7 @@
       "required": ["path", "lines", "passed", "reason", "evidence", "detail"],
       "properties": {
         "path": {"type": "string", "description": "The anchor's mutated relative path."},
-        "lines": {"type": "array", "items": {"type": "integer", "minimum": 1}, "minItems": 1, "maxItems": 2},
+        "lines": {"type": "array", "items": {"type": "integer"}, "minItems": 0, "maxItems": 2, "description": "The anchor's line bound as authored. Echoed back verbatim so a fail-closed verdict names the exact defective bound; only ANCHOR_MALFORMED / ANCHOR_BOUND_STALE outcomes may carry an empty or non-positive bound."},
         "passed": {"type": "boolean"},
         "reason": {"$ref": "#/$defs/reason"},
         "evidence": {"type": "string", "description": "The matched conforming construct, or '' when none matched."},

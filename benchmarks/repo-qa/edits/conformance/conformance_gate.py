@@ -24,12 +24,16 @@ proven in ``tests/test_edit_conformance.py``
 
 FAIL CLOSED (criterion 3)
 -------------------------
-Every abnormal input -- a missing anchor file, a decoy (dead/deprecated)
-twin, an anchor outside the live path map, an out-of-range line bound, an
-absent target identifier, an ambiguous (>1) structural match, a malformed
-rule, a rule kind with no handler, or any tool exception -- resolves to a
-deterministic FAIL with a stable reason code from :class:`Reason`. There is
-no silent pass and no fallthrough.
+Every abnormal input -- a MALFORMED anchor (absent/non-string path, absent or
+non-integer line bounds, non-list identifiers, or an anchor that is not an
+object at all), a missing anchor file, a decoy (dead/deprecated) twin, an
+anchor outside the live path map, an out-of-range line bound, an absent target
+identifier, an ambiguous (>1) structural match, a malformed rule, a rule kind
+with no handler, or any tool exception -- resolves to a deterministic FAIL with
+a stable reason code from :class:`Reason`. There is no silent pass, no
+fallthrough, and NO EXCEPTION ESCAPES: every anchor field is shape-checked by
+:func:`_anchor_shape_problem` before it is dereferenced, so a defective bank
+entry scores one cell red instead of aborting the whole bank drain.
 
 HERMETIC + DETERMINISTIC (criterion 4)
 --------------------------------------
@@ -66,6 +70,7 @@ class Reason:
     MANIFEST_ABSENT = "MANIFEST_ABSENT"
     ANCHOR_DECOY = "ANCHOR_DECOY"
     ANCHOR_NOT_LIVE = "ANCHOR_NOT_LIVE"
+    ANCHOR_MALFORMED = "ANCHOR_MALFORMED"
     ANCHOR_MISSING = "ANCHOR_MISSING"
     ANCHOR_BOUND_STALE = "ANCHOR_BOUND_STALE"
     ANCHOR_IDENTIFIER_ABSENT = "ANCHOR_IDENTIFIER_ABSENT"
@@ -206,10 +211,52 @@ def _anchor_outcome(path, lines, reason, evidence="", detail=""):
     }
 
 
+def _anchor_shape_problem(anchor):
+    """Validate an anchor's SHAPE before any field is dereferenced.
+
+    Returns ``(path, lines, problem)``. ``problem`` is None when the anchor is
+    well formed; otherwise it describes the defect and ``path``/``lines`` are
+    the best-effort renderable values for the outcome. Nothing downstream may
+    index into ``lines`` or subscript ``anchor`` until this returns None --
+    that unguarded access was the fail-open hole this closes.
+    """
+    if not isinstance(anchor, dict):
+        return "", [], f"anchor is {type(anchor).__name__}, not an object"
+
+    path = anchor.get("path")
+    lines = anchor.get("lines")
+    safe_lines = list(lines) if isinstance(lines, list) else []
+    safe_path = path if isinstance(path, str) else ""
+
+    if not isinstance(path, str) or not path:
+        return safe_path, safe_lines, "anchor.path is missing or not a string"
+    if not isinstance(lines, list) or not lines:
+        return safe_path, safe_lines, "anchor.lines is missing or not a non-empty list"
+    if not all(isinstance(n, int) and not isinstance(n, bool) for n in lines):
+        return safe_path, safe_lines, f"anchor.lines {lines!r} holds a non-integer bound"
+
+    identifiers = anchor.get("target_identifiers", [])
+    if not isinstance(identifiers, list):
+        return safe_path, safe_lines, "anchor.target_identifiers is not a list"
+    if not all(isinstance(i, str) for i in identifiers):
+        return safe_path, safe_lines, "anchor.target_identifiers holds a non-string"
+    return safe_path, safe_lines, None
+
+
+def _anchor_sort_key(anchor):
+    """Total, malformed-tolerant sort key. Malformed anchors sort last (their
+    lines degrade to ()), so their presence cannot reorder well-formed ones."""
+    path, lines, problem = _anchor_shape_problem(anchor)
+    return (problem is not None, path, tuple(lines))
+
+
 def _evaluate_anchor(anchor, handler, manifest, tree_dir):
     """Evaluate one anchor. Fails closed on every abnormal condition."""
-    path = anchor["path"]
-    lines = anchor["lines"]
+    path, lines, problem = _anchor_shape_problem(anchor)
+    if problem is not None:
+        return _anchor_outcome(
+            path, lines, Reason.ANCHOR_MALFORMED, detail=problem,
+        )
 
     if path in vedt.decoy_paths(manifest):
         return _anchor_outcome(
@@ -340,9 +387,7 @@ def evaluate_task(task, manifest, tree_dir):
 
     anchors = [
         _evaluate_anchor(anchor, handler, manifest, tree_dir)
-        for anchor in sorted(
-            exemplars, key=lambda a: (a.get("path", ""), tuple(a.get("lines", [])))
-        )
+        for anchor in sorted(exemplars, key=_anchor_sort_key)
     ]
 
     passed = all(anchor["passed"] for anchor in anchors)

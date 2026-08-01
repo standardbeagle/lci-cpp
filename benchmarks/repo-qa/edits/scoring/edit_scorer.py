@@ -143,6 +143,7 @@ _ORACLE_REASONS = frozenset(
     {
         "NON_DISCRIMINATING",
         "WRONG_DIRECTION",
+        "ANCHOR_MALFORMED",
         "ANCHOR_DECOY",
         "ANCHOR_NOT_LIVE",
         "ANCHOR_MISSING",
