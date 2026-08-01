@@ -209,6 +209,12 @@ def verify_exemplar_live(anchor, convention_re, manifest, tree_dir):
     if end < start:
         yield f"{path}: line bound {lines} is inverted"
         return
+    # Same bound test the RUNTIME gate applies (conformance_gate._evaluate_anchor,
+    # ANCHOR_BOUND_STALE). Kept identical on purpose: a bound the gate will reject
+    # must never survive bank validation.
+    if start < 1:
+        yield f"{path}: line bound {lines} starts before line 1"
+        return
     total = vet._line_count(abs_path)
     if end > total:
         yield f"{path}: line bound {lines} exceeds file length {total}"

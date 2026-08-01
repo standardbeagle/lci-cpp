@@ -13,7 +13,12 @@ consuming all four oracle sub-outcomes (none may be silently dropped):
                  (the task's red->green proof, plus the repo's existing suite as
                  a regression guard -- a green task test must not mask a red
                  suite)
-    convention = conformance.passed
+    convention = conformance.agent_patch AND conformance.bank_health
+                 (did the AGENT's changed regions honour the house rule, judged
+                 structurally against the captured patch -- plus the bank's own
+                 exemplar anchors as a material-health guard. Re-verifying the
+                 anchors ALONE was vacuous: they conform before and after the
+                 run whatever the agent wrote)
     blast      = oracle.changed_path AND oracle.api_impact
                  (the declared path scope, plus the call-hierarchy ripple -- an
                  in-scope diff that escapes the declared API is still a
@@ -92,6 +97,11 @@ _ORACLE_SUBGATES = {
 
 REASON_GATE_ABSENT = "GATE_ABSENT"
 
+# The runtime convention verdict's schema (conformance_gate.RUN_OUTCOME_SCHEMA).
+# Named here rather than imported so the scorer can read an archived record whose
+# gate module has since moved on.
+CONFORMANCE_RUN_SCHEMA = "conformance_gate_v2"
+
 # --- failure buckets (criterion 4: never collapsed) ---
 FAILURE_AGENT = "agent_failure"
 FAILURE_INVALID_PATCH = "invalid_patch"
@@ -117,6 +127,7 @@ _STATUS_FAILURE = {
     edit_record.STATUS_TOOL_VIOLATION: FAILURE_AGENT,
     edit_record.STATUS_INVALID_PATCH: FAILURE_INVALID_PATCH,
     edit_record.STATUS_CONFIG_ERROR: FAILURE_HARNESS,
+    edit_record.STATUS_HARNESS_FAILURE: FAILURE_HARNESS,
 }
 
 # Our tooling or environment broke -- says nothing about the agent's patch.
@@ -128,10 +139,12 @@ _HARNESS_REASONS = frozenset(
         "COMMAND_ABSENT",
         "TOOL_FAILURE",
         "MANIFEST_ABSENT",
+        "ORACLE_PATCH_ABSENT",
         "LCI_ABSENT",
         "BLAST_RADIUS_MALFORMED",
         "RULE_MALFORMED",
         "RULE_UNSUPPORTED",
+        "PATCH_ABSENT",
         REASON_GATE_ABSENT,
         "REASON_UNCLASSIFIED",
     }
@@ -143,6 +156,7 @@ _ORACLE_REASONS = frozenset(
     {
         "NON_DISCRIMINATING",
         "WRONG_DIRECTION",
+        "ANCHOR_MALFORMED",
         "ANCHOR_DECOY",
         "ANCHOR_NOT_LIVE",
         "ANCHOR_MISSING",
@@ -161,12 +175,22 @@ _PATCH_REASONS = frozenset(
         "TOO_MANY_FILES",
         "NO_CHANGES",
         "API_IMPACT_ESCAPE",
+        "PATCH_PATH_ESCAPE",
+        "PATCH_NONCONFORMING",
+        "PATCH_UNGOVERNED",
         "MATCH_ABSENT",
     }
 )
 
 _PASSING_REASONS = frozenset(
-    {"SUITE_GREEN", "DISCRIMINATES", "WITHIN_SCOPE", "NO_ESCAPE", "CONFORMS"}
+    {
+        "SUITE_GREEN",
+        "DISCRIMINATES",
+        "WITHIN_SCOPE",
+        "NO_ESCAPE",
+        "CONFORMS",
+        "PATCH_CONFORMS",
+    }
 )
 
 # A code we cannot place means OUR mapping is stale, so it classifies as a
@@ -241,21 +265,51 @@ def _reason_from_diagnostic(diagnostic):
     return head if head in _KNOWN_REASONS else REASON_UNCLASSIFIED
 
 
+def _failing_reasons(outcomes, diagnostic):
+    """Reason codes of the failing entries, falling back to the diagnostic's
+    leading token when a failure is rule-level and emits no entries."""
+    reasons = {
+        entry.get("reason")
+        for entry in (outcomes or [])
+        if not entry.get("passed") and entry.get("reason")
+    }
+    return reasons or {_reason_from_diagnostic(diagnostic)}
+
+
 def _derive_conformance(outcome):
-    """The convention gate. Unlike the oracle's sub-outcomes, a conformance
-    verdict carries its reason codes per-anchor, with rule-level failures
-    falling back to the diagnostic."""
+    """The convention gate.
+
+    Two named shapes, dispatched explicitly on the schema field -- never guessed
+    at, and never silently defaulted:
+
+      * ``conformance_gate_v2`` (what the runner writes) carries the AGENT-PATCH
+        verdict plus a separate bank-health verdict. Both contribute reasons, so
+        a defective bank surfaces as its own ANCHOR_*/RULE_* code and lands in
+        the oracle/harness bucket instead of being charged to the patch.
+      * ``conformance_gate_v1`` is the bank-health outcome on its own, and
+        carries its reason codes per anchor.
+    """
     if outcome is None:
         return _absent_gate()
-    if outcome.get("passed"):
+    passed = bool(outcome.get("passed"))
+    if passed:
         return {"passed": True, "judged": True, "reasons": []}
-    reasons = {
-        anchor.get("reason")
-        for anchor in (outcome.get("anchors") or [])
-        if not anchor.get("passed") and anchor.get("reason")
-    }
-    if not reasons:
-        reasons = {_reason_from_diagnostic(outcome.get("diagnostic"))}
+
+    if outcome.get("schema") == CONFORMANCE_RUN_SCHEMA:
+        reasons = set()
+        for part in ("agent_patch", "bank_health"):
+            component = outcome.get(part)
+            if component is None:
+                reasons.add(REASON_GATE_ABSENT)
+            elif not component.get("passed"):
+                reasons |= _failing_reasons(
+                    component.get("regions") or component.get("anchors"),
+                    component.get("diagnostic"),
+                )
+    else:
+        reasons = _failing_reasons(
+            outcome.get("anchors"), outcome.get("diagnostic")
+        )
     return {"passed": False, "judged": True, "reasons": sorted(reasons)}
 
 

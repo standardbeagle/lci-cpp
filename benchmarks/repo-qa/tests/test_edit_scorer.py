@@ -723,6 +723,118 @@ def real_rule_level_outcome(reason):
 RULE_LEVEL_REASONS = ("RULE_MALFORMED", "RULE_UNSUPPORTED", "MANIFEST_ABSENT")
 
 
+class RuntimeConventionVerdict(unittest.TestCase):
+    """The convention gate scores the AGENT-PATCH verdict (conformance_gate_v2).
+
+    Scoring `conformance.passed` when that only meant "the bank's exemplars still
+    conform" made a third of the headline metric independent of the agent. These
+    pin that the scorer reads the v2 shape, and -- critically -- that the two
+    components keep their separate provenance: a patch we rejected is
+    patch_rejected, a bank WE authored wrong is not.
+    """
+
+    @staticmethod
+    def _v2(agent_passed, agent_reason, bank_passed=True, bank_reason="CONFORMS"):
+        return {
+            "schema": "conformance_gate_v2",
+            "task_id": "t1",
+            "rule_id": "rule-1",
+            "kind": "structural",
+            "passed": agent_passed and bank_passed,
+            "diagnostic": "synthetic",
+            "agent_patch": {
+                "schema": "conformance_agent_patch_v1",
+                "passed": agent_passed,
+                "reason": agent_reason,
+                "diagnostic": f"{agent_reason}: synthetic",
+                "regions": [
+                    {
+                        "path": "src/a.ts", "lines": [4, 9],
+                        "passed": agent_passed, "reason": agent_reason,
+                        "evidence": "f", "detail": "",
+                    }
+                ],
+            },
+            "bank_health": conformance_outcome(
+                passed=bank_passed, reason=bank_reason
+            ),
+        }
+
+    def test_conforming_patch_scores_the_convention_gate_green(self):
+        derived = edit_scorer._gates_of(
+            record(gate_outcomes=gates(
+                conformance=self._v2(True, "PATCH_CONFORMS")
+            ))
+        )
+        self.assertTrue(derived[edit_scorer.GATE_CONVENTION]["passed"])
+        self.assertTrue(derived[edit_scorer.GATE_CONVENTION]["judged"])
+
+    def test_non_conforming_patch_is_charged_to_the_agent(self):
+        rec = record(
+            status=edit_record.STATUS_GATE_FAILED,
+            gate_outcomes=gates(
+                conformance=self._v2(False, "PATCH_NONCONFORMING")
+            ),
+        )
+        score = edit_scorer.score_run(rec)
+        self.assertFalse(score["gates"][edit_scorer.GATE_CONVENTION]["passed"])
+        self.assertEqual(
+            score["gates"][edit_scorer.GATE_CONVENTION]["reasons"],
+            ["PATCH_NONCONFORMING"],
+        )
+        self.assertEqual(score["failure_class"], edit_scorer.FAILURE_PATCH_REJECTED)
+
+    def test_ungoverned_patch_is_charged_to_the_agent(self):
+        score = edit_scorer.score_run(record(
+            status=edit_record.STATUS_GATE_FAILED,
+            gate_outcomes=gates(conformance=self._v2(False, "PATCH_UNGOVERNED")),
+        ))
+        self.assertEqual(score["failure_class"], edit_scorer.FAILURE_PATCH_REJECTED)
+
+    def test_defective_bank_is_never_charged_to_the_agent(self):
+        # The patch conformed; OUR exemplars are broken. That must not read as
+        # evidence the model was wrong.
+        score = edit_scorer.score_run(record(
+            status=edit_record.STATUS_GATE_FAILED,
+            gate_outcomes=gates(conformance=self._v2(
+                True, "PATCH_CONFORMS",
+                bank_passed=False, bank_reason="ANCHOR_MALFORMED",
+            )),
+        ))
+        self.assertFalse(score["gates"][edit_scorer.GATE_CONVENTION]["passed"])
+        self.assertEqual(
+            score["gates"][edit_scorer.GATE_CONVENTION]["reasons"],
+            ["ANCHOR_MALFORMED"],
+        )
+        self.assertEqual(score["failure_class"], edit_scorer.FAILURE_ORACLE)
+
+    def test_absent_component_fails_closed(self):
+        outcome = self._v2(False, "PATCH_NONCONFORMING")
+        del outcome["agent_patch"]
+        score = edit_scorer.score_run(record(
+            status=edit_record.STATUS_GATE_FAILED,
+            gate_outcomes=gates(conformance=outcome),
+        ))
+        self.assertIn(
+            edit_scorer.REASON_GATE_ABSENT,
+            score["gates"][edit_scorer.GATE_CONVENTION]["reasons"],
+        )
+        self.assertEqual(score["failure_class"], edit_scorer.FAILURE_HARNESS)
+
+    def test_legacy_v1_outcome_is_still_scored_by_its_anchors(self):
+        # Archived records predate v2; dispatch is on the schema field, so they
+        # keep scoring exactly as before rather than silently reading as absent.
+        score = edit_scorer.score_run(record(
+            status=edit_record.STATUS_GATE_FAILED,
+            gate_outcomes=gates(
+                conformance=conformance_outcome(passed=False, reason="MATCH_ABSENT")
+            ),
+        ))
+        self.assertEqual(
+            score["gates"][edit_scorer.GATE_CONVENTION]["reasons"], ["MATCH_ABSENT"]
+        )
+
+
 class RuleLevelConformance(unittest.TestCase):
     """The anchors:[] path -- a rule WE broke must never read as a bad patch.
 

@@ -172,9 +172,29 @@ def _apply_and_answer(writes, tool_calls=(), status="ok", answer="done"):
     return FakeAgent(_run)
 
 
+# A conforming Go constructor: the agent's own edit must satisfy the task's
+# convention rule (go-constructor-new-pointer), not merely leave the bank's
+# pre-authored exemplars intact.
+CONFORMING_EDIT = (
+    "package apis\n\n"
+    "type Widget struct{}\n\n"
+    "func NewWidget() *Widget { return &Widget{} }\n"
+)
+# Same construct, returning a VALUE -- the rule's exact violation.
+NON_CONFORMING_EDIT = (
+    "package apis\n\n"
+    "type Widget struct{}\n\n"
+    "func NewWidget() Widget { return Widget{} }\n"
+)
+
+
 def run_pass_agent():
-    # writes the GREEN marker (behaviour red->green) inside blast radius
-    return _apply_and_answer({"GREEN": "ok\n"})
+    # Turns behaviour red->green (the GREEN marker) AND makes a convention-
+    # conforming edit, both inside the declared blast radius. Passing all three
+    # gates requires both: the marker alone proves nothing about conventions.
+    return _apply_and_answer(
+        {"GREEN": "ok\n", "apis/widget.go": CONFORMING_EDIT}
+    )
 
 
 class ProvenanceRecordTest(unittest.TestCase):
@@ -200,7 +220,7 @@ class ProvenanceRecordTest(unittest.TestCase):
             self.assertEqual(rec["task_digest"], task_digest(task))
             self.assertEqual(rec["task_schema"], "edit_task_v1")
             self.assertEqual(rec["gate_versions"]["oracle"], "oracle_gate_v1")
-            self.assertEqual(rec["gate_versions"]["conformance"], "conformance_gate_v1")
+            self.assertEqual(rec["gate_versions"]["conformance"], "conformance_gate_v2")
             # model + seed + arm/allowlist
             self.assertEqual(rec["model"], "claude-test-model")
             self.assertEqual(rec["seed"], 7)
@@ -212,13 +232,20 @@ class ProvenanceRecordTest(unittest.TestCase):
             self.assertIn("Write", rec["effective_allowlist"])
             # patch hash + touched files
             self.assertTrue(rec["patch_hash"].startswith("sha256:"))
-            self.assertEqual(rec["patch_files"], ["GREEN"])
+            self.assertEqual(rec["patch_files"], ["GREEN", "apis/widget.go"])
             # each gate outcome present
             self.assertTrue(rec["gates"]["oracle"]["passed"])
             self.assertTrue(rec["gates"]["conformance"]["passed"])
             self.assertEqual(rec["gates"]["oracle"]["schema"], "oracle_gate_v1")
             self.assertEqual(
-                rec["gates"]["conformance"]["schema"], "conformance_gate_v1"
+                rec["gates"]["conformance"]["schema"], "conformance_gate_v2"
+            )
+            # the convention verdict is about the AGENT's patch, with bank
+            # health kept as its own field rather than merged away.
+            self.assertTrue(rec["gates"]["conformance"]["agent_patch"]["passed"])
+            self.assertEqual(
+                rec["gates"]["conformance"]["bank_health"]["schema"],
+                "conformance_gate_v1",
             )
             for field in ("started_at", "ended_at"):
                 self.assertTrue(rec[field])
@@ -421,7 +448,7 @@ class DeterminismAndResumeTest(unittest.TestCase):
 def _agent_for(kind):
     """A fake agent that drives `run_edit_task` to a specific terminal class."""
     if kind == edit_record.STATUS_PASSED:
-        return _apply_and_answer({"GREEN": "ok\n"})
+        return run_pass_agent()
     if kind == edit_record.STATUS_GATE_FAILED:
         # edits an allowed file but never turns the behaviour green -> the
         # behaviour discrimination fails (both trees red).
@@ -484,6 +511,131 @@ class FakeAgentSmokeTest(unittest.TestCase):
                             rec.get("reason") or rec.get("error"),
                             "terminal outcome must carry a reason/error",
                         )
+
+    def test_unexpected_exception_is_recorded_before_it_propagates(self):
+        # run_edit_task promises to append EXACTLY ONE provenance-complete record
+        # per cell. Any unexpected exception raised after prepare_checkout used
+        # to skip _finish entirely: the bank drain aborted with NOTHING written,
+        # so the cell was invisible in the log -- indistinguishable from a cell
+        # that was never planned, and silently absent from the scorer's
+        # denominator story. Fail fast, but RECORD FIRST.
+        class Boom(RuntimeError):
+            pass
+
+        def _explode(_request):
+            raise Boom("adapter died mid-run")
+
+        with TemporaryDirectory() as root:
+            forge_fixture(root)
+            records = os.path.join(root, "records.jsonl")
+            work = os.path.join(root, "work")
+            with self.assertRaises(Boom):
+                edit_run.run_edit_task(
+                    edit_task(), edit_toolsets.TREATMENT, FakeAgent(_explode),
+                    base_config(), corpus_root=root, records_path=records,
+                    work_root=work, behavior_command=BEHAVIOR_CMD,
+                    existing_suite_command=SUITE_CMD,
+                )
+            persisted = edit_record.load_records(records)
+            self.assertEqual(len(persisted), 1)
+            rec = persisted[0]
+            self.assertEqual(rec["status"], edit_record.STATUS_HARNESS_FAILURE)
+            self.assertEqual(rec["reason"], edit_run.REASON_HARNESS_ERROR)
+            # the exception class AND message are both in the recorded detail
+            self.assertIn("Boom", rec["error"])
+            self.assertIn("adapter died mid-run", rec["error"])
+            # provenance is complete despite the crash
+            self.assertEqual(rec["task_id"], "pb-module-1")
+            self.assertEqual(rec["arm"], edit_toolsets.TREATMENT)
+            self.assertEqual(rec["seed"], 7)
+            self.assertEqual(rec["source_commit"], FAKE_COMMIT)
+            self.assertEqual(rec["run_key"], "pb-module-1::treatment::seed-7")
+            # a harness crash is NOT terminal: resume must retry the cell
+            self.assertIn(
+                edit_record.STATUS_HARNESS_FAILURE, edit_record.RETRYABLE_STATUSES
+            )
+            # and the throwaway checkout is still cleaned up
+            checkouts = os.path.join(work, "checkouts")
+            self.assertEqual(
+                os.listdir(checkouts) if os.path.isdir(checkouts) else [], []
+            )
+
+    def test_gate_exception_is_recorded_before_it_propagates(self):
+        # Same contract for a fault raised by the GATES rather than the adapter.
+        import conformance_gate
+
+        original = conformance_gate.evaluate_task
+
+        def _explode(*_a, **_kw):
+            raise ValueError("gate wiring is wrong")
+
+        with TemporaryDirectory() as root:
+            forge_fixture(root)
+            records = os.path.join(root, "records.jsonl")
+            conformance_gate.evaluate_task = _explode
+            try:
+                with self.assertRaises(ValueError):
+                    edit_run.run_edit_task(
+                        edit_task(), edit_toolsets.BASELINE, run_pass_agent(),
+                        base_config(), corpus_root=root, records_path=records,
+                        work_root=os.path.join(root, "work"),
+                        behavior_command=BEHAVIOR_CMD,
+                        existing_suite_command=SUITE_CMD,
+                    )
+            finally:
+                conformance_gate.evaluate_task = original
+            persisted = edit_record.load_records(records)
+            self.assertEqual(len(persisted), 1)
+            self.assertEqual(
+                persisted[0]["status"], edit_record.STATUS_HARNESS_FAILURE
+            )
+            self.assertIn("gate wiring is wrong", persisted[0]["error"])
+
+    def test_convention_gate_judges_the_agents_patch_not_the_bank(self):
+        # Three agents, identical except for what they wrote. The convention
+        # verdict must separate them. Before this, all three passed convention:
+        # the gate re-verified the task's own exemplar anchors, which conform in
+        # the pristine tree and still conform afterwards regardless of the agent.
+        cases = {
+            # behaviour green, convention UNPROVEN (touched nothing governed)
+            "marker_only": ({"GREEN": "ok\n"}, False),
+            # behaviour green + a conforming constructor
+            "conforming": (
+                {"GREEN": "ok\n", "apis/widget.go": CONFORMING_EDIT}, True
+            ),
+            # behaviour green + a New* constructor returning a value
+            "non_conforming": (
+                {"GREEN": "ok\n", "apis/widget.go": NON_CONFORMING_EDIT}, False
+            ),
+        }
+        for label, (writes, expected) in sorted(cases.items()):
+            with self.subTest(agent=label):
+                with TemporaryDirectory() as root:
+                    forge_fixture(root)
+                    rec = edit_run.run_edit_task(
+                        edit_task(), edit_toolsets.TREATMENT,
+                        _apply_and_answer(writes), base_config(),
+                        corpus_root=root,
+                        records_path=os.path.join(root, "r.jsonl"),
+                        work_root=os.path.join(root, "work"),
+                        behavior_command=BEHAVIOR_CMD,
+                        existing_suite_command=SUITE_CMD,
+                    )
+                    conformance = rec["gates"]["conformance"]
+                    # behaviour is green in all three -- only convention differs
+                    self.assertTrue(rec["gates"]["oracle"]["passed"],
+                                    msg=rec["gates"]["oracle"]["diagnostic"])
+                    self.assertEqual(
+                        conformance["passed"], expected, msg=conformance["diagnostic"]
+                    )
+                    # the bank's exemplars are healthy in EVERY case, so they
+                    # cannot be what the verdict is tracking.
+                    self.assertTrue(conformance["bank_health"]["passed"])
+                    self.assertEqual(
+                        rec["status"],
+                        edit_record.STATUS_PASSED if expected
+                        else edit_record.STATUS_GATE_FAILED,
+                    )
 
     def test_blast_radius_escape_is_a_gate_failure(self):
         # A patch that turns behaviour green but ALSO writes outside the declared
