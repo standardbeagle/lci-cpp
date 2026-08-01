@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from replay_common import issuing_assistant  # noqa: E402  (path bootstrap must precede the import)
 
 
 def tool_exchange(fixture: dict) -> tuple[dict, dict, dict]:
@@ -14,7 +18,7 @@ def tool_exchange(fixture: dict) -> tuple[dict, dict, dict]:
         index for index, message in enumerate(messages)
         if message.get("role") == "tool" and message.get("tool_call_id") == tool_id
     )
-    assistant = messages[tool_index - 1]
+    assistant = issuing_assistant(messages, tool_index)
     user = next(message for message in reversed(messages[:tool_index]) if message.get("role") == "user")
     return user, assistant, messages[tool_index]
 

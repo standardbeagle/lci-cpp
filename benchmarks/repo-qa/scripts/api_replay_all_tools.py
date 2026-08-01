@@ -36,7 +36,7 @@ def derive_fixture(base: dict, case: dict, surface_case: dict) -> dict:
     fixture["expected_answers"] = surface_case["answer"] if case["scenario"] == "success" else []
     messages = fixture["request"]["messages"]
     tool_index, _ = tool_content_pointer(fixture["request"], fixture["tool_call_id"])
-    assistant = messages[tool_index - 1]
+    assistant = issuing_assistant(messages, tool_index)
     user_index = max(i for i in range(tool_index) if messages[i].get("role") == "user")
     arguments = canonical(case["arguments"])
     question = task_question(case, surface_case)
