@@ -15,13 +15,13 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from runner import corpus, gate, record, toolsets
+from scoring.claim_validation import parse_claim_answer_result
 from task_digest import task_digest
 
 EXPLORATION_MODE = "exploration"
 CLAIM_VALIDATION_MODE = "claim-validation"
 EXPLORATION_SCHEMA = "exploration_answer_v1"
 CLAIM_VALIDATION_SCHEMA = "claim_validation_answer_v1"
-_VERDICTS = frozenset({"true", "false", "unsupported"})
 
 
 @dataclass(frozen=True)
@@ -252,25 +252,12 @@ def run_task_both_arms(task, adapter_factory, base, *, corpus_root, records_path
 
 
 def _parse_claim_answer(raw):
-    try:
-        answer = json.loads(raw)
-    except (json.JSONDecodeError, TypeError):
-        return None, "malformed_claim_answer: invalid_json"
-    if not isinstance(answer, dict) or set(answer) != {"verdict", "evidence", "rationale"}:
-        return None, "malformed_claim_answer: fields"
-    if answer["verdict"] not in _VERDICTS:
-        return None, "malformed_claim_answer: verdict"
-    if not isinstance(answer["rationale"], str) or not answer["rationale"].strip():
-        return None, "malformed_claim_answer: rationale"
-    evidence = answer["evidence"]
-    if not isinstance(evidence, list) or not evidence:
-        return None, "malformed_claim_answer: evidence"
-    for citation in evidence:
-        if (not isinstance(citation, dict) or set(citation) != {"path", "line"}
-                or not isinstance(citation["path"], str) or not citation["path"]
-                or os.path.isabs(citation["path"]) or ".." in citation["path"].split("/")
-                or not isinstance(citation["line"], int)
-                or isinstance(citation["line"], bool) or citation["line"] < 1
-                or gate._is_sealed_path(citation["path"])):
-            return None, "malformed_claim_answer: citation"
+    """Gate one claim answer through the shared schema parser.
+
+    The scorer owns the parser: a payload the runner accepts must be exactly a
+    payload the scorer can score, so the two never drift into a state where a
+    run is gated in flight but scoreable afterwards (or the reverse)."""
+    answer, _canonical, reason = parse_claim_answer_result(raw)
+    if reason is not None:
+        return None, f"malformed_claim_answer: {reason}"
     return answer, None
