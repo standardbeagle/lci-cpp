@@ -14,6 +14,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import api_replay_format_exploration as replay
+from replay_common import canonical, diff_pointers, digest, issuing_assistant, tool_content_pointer
 
 
 def task_question(case: dict, surface_case: dict) -> str:
@@ -34,10 +35,10 @@ def derive_fixture(base: dict, case: dict, surface_case: dict) -> dict:
     fixture["tool_content_kind"] = "json" if case["output"].lstrip().startswith(("{", "[")) else "text_protocol"
     fixture["expected_answers"] = surface_case["answer"] if case["scenario"] == "success" else []
     messages = fixture["request"]["messages"]
-    tool_index, _ = replay.tool_content_pointer(fixture["request"], fixture["tool_call_id"])
+    tool_index, _ = tool_content_pointer(fixture["request"], fixture["tool_call_id"])
     assistant = messages[tool_index - 1]
     user_index = max(i for i in range(tool_index) if messages[i].get("role") == "user")
-    arguments = replay.canonical(case["arguments"])
+    arguments = canonical(case["arguments"])
     question = task_question(case, surface_case)
     messages[user_index]["content"] = (f'"Call lci_{case["tool"]} exactly once with only {arguments}. '
                                        f'Do not retry or call any other tool. Then answer: {question}"\n')
@@ -81,20 +82,20 @@ def preflight(fixtures: list[dict], planned: list[tuple]) -> dict:
     checks = []
     for fixture in fixtures:
         identity = replay.build_request(fixture, replay.ARMS[0])
-        index, source = replay.tool_content_pointer(identity, fixture["tool_call_id"])
+        index, source = tool_content_pointer(identity, fixture["tool_call_id"])
         for arm in replay.ARMS:
             request = replay.build_request(fixture, arm)
-            _, rendered = replay.tool_content_pointer(request, fixture["tool_call_id"])
+            _, rendered = tool_content_pointer(request, fixture["tool_call_id"])
             recovered = replay.transform(
                 source, arm, allow_text=fixture.get("tool_content_kind") == "text_protocol")[1]
             expected = [] if arm == replay.ARMS[0] else [f"/messages/{index}/content"]
-            actual = replay.diff_pointers(identity, request)
+            actual = diff_pointers(identity, request)
             if actual != expected:
                 raise ValueError(f"request isolation failure: {fixture['task_id']} {arm}")
             checks.append({"task_id": fixture["task_id"], "model": fixture["recorded_model"],
                            "arm": arm, "diff_pointers": actual,
-                           "canonical_digest": replay.digest(recovered),
-                           "content_digest": replay.digest(rendered)})
+                           "canonical_digest": digest(recovered),
+                           "content_digest": digest(rendered)})
     return {"schema": "lci.api-replay.all-tools-preflight.v1", "provider_executed": False,
             "fixture_count": len(fixtures), "planned_cells": len(planned),
             "all_equivalent": True, "checks": checks}

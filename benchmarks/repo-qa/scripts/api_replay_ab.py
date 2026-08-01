@@ -4,22 +4,22 @@ from __future__ import annotations
 
 import argparse
 import copy
-import hashlib
 import json
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from replay_common import (  # noqa: E402  (path bootstrap must precede the import)
+    SAFE_REQUEST_HEADERS,
+    canonical,
+    diff_pointers,
+    digest,
+    tool_content_pointer,
+)
 
 ROOT = Path(__file__).resolve().parents[3]
 BASE = ROOT / "benchmarks/repo-qa/api-replay"
 ARMS = ("trace_17", "trace_42")
-SAFE_REQUEST_HEADERS = {
-    "accept",
-    "content-type",
-    "user-agent",
-    "x-opencode-client",
-    "x-opencode-project",
-    "x-opencode-request",
-    "x-opencode-session",
-}
 
 
 def captured_request_headers(headers: object) -> dict[str, str]:
@@ -38,26 +38,6 @@ def captured_request_headers(headers: object) -> dict[str, str]:
                 raise ValueError(f"invalid safe capture request header: {lowered}")
             output[lowered] = value
     return dict(sorted(output.items()))
-
-
-def canonical(value: object) -> str:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-
-
-def digest(value: object) -> str:
-    text = value if isinstance(value, str) else canonical(value)
-    return "sha256:" + hashlib.sha256(text.encode()).hexdigest()
-
-
-def tool_content_pointer(request: dict, tool_call_id: str) -> tuple[int, str]:
-    matches = [
-        (index, message["content"])
-        for index, message in enumerate(request.get("messages", []))
-        if message.get("role") == "tool" and message.get("tool_call_id") == tool_call_id
-    ]
-    if len(matches) != 1 or not isinstance(matches[0][1], str):
-        raise ValueError("request must contain exactly one string tool result for tool_call_id")
-    return matches[0]
 
 
 def render_candidate(source: str, renderer: str) -> str:
@@ -85,25 +65,6 @@ def build_request(fixture: dict, arm: str) -> dict:
     if arm == "trace_42":
         request["messages"][index]["content"] = render_candidate(source, fixture["renderer"])
     return request
-
-
-def diff_pointers(left: object, right: object, path: str = "") -> list[str]:
-    if type(left) is not type(right):
-        return [path or "/"]
-    if isinstance(left, dict):
-        pointers = []
-        for key in sorted(set(left) | set(right)):
-            child = f"{path}/{key}"
-            if key not in left or key not in right:
-                pointers.append(child)
-            else:
-                pointers.extend(diff_pointers(left[key], right[key], child))
-        return pointers
-    if isinstance(left, list):
-        if len(left) != len(right):
-            return [path or "/"]
-        return [pointer for index, pair in enumerate(zip(left, right)) for pointer in diff_pointers(*pair, f"{path}/{index}")]
-    return [] if left == right else [path or "/"]
 
 
 def validate_fixture(fixture: dict) -> dict:

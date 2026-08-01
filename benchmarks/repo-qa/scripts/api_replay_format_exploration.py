@@ -13,9 +13,19 @@ import importlib.util
 import json
 import os
 import re
+import sys
 from pathlib import Path
 from types import ModuleType
 from typing import Protocol
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from replay_common import (  # noqa: E402  (path bootstrap must precede the import)
+    SAFE_REQUEST_HEADERS,
+    canonical,
+    diff_pointers,
+    digest,
+    tool_content_pointer,
+)
 
 ROOT = Path(__file__).resolve().parents[3]
 BASE = ROOT / "benchmarks/repo-qa/api-replay"
@@ -33,10 +43,6 @@ ARM_CODECS = {
     "fmt_43": "tagged_blocks_v1.py",
 }
 ARMS = tuple(ARM_CODECS)
-SAFE_REQUEST_HEADERS = {
-    "accept", "content-type", "user-agent", "x-opencode-client",
-    "x-opencode-project", "x-opencode-request", "x-opencode-session",
-}
 
 
 def fixture_request_headers(fixture: dict) -> dict[str, str]:
@@ -54,15 +60,6 @@ def fixture_request_headers(fixture: dict) -> dict[str, str]:
     return dict(sorted(normalized.items()))
 
 
-def canonical(value: object) -> str:
-    return json.dumps(value, ensure_ascii=True, allow_nan=False, sort_keys=True, separators=(",", ":"))
-
-
-def digest(value: object) -> str:
-    text = value if isinstance(value, str) else canonical(value)
-    return "sha256:" + hashlib.sha256(text.encode("utf-8", errors="surrogatepass")).hexdigest()
-
-
 def _load_codec(filename: str) -> ModuleType:
     path = CANDIDATES / filename
     spec = importlib.util.spec_from_file_location("lci_format_" + path.stem, path)
@@ -73,33 +70,6 @@ def _load_codec(filename: str) -> ModuleType:
     if not callable(getattr(module, "encode", None)) or not callable(getattr(module, "decode", None)):
         raise ValueError(f"invalid codec interface: {path}")
     return module
-
-
-def tool_content_pointer(request: dict, tool_call_id: str) -> tuple[int, str]:
-    found = [
-        (index, message.get("content"))
-        for index, message in enumerate(request.get("messages", []))
-        if message.get("role") == "tool" and message.get("tool_call_id") == tool_call_id
-    ]
-    if len(found) != 1 or not isinstance(found[0][1], str):
-        raise ValueError("request must contain exactly one string result for the selected tool call")
-    return found[0]
-
-
-def diff_pointers(left: object, right: object, path: str = "") -> list[str]:
-    if type(left) is not type(right):
-        return [path or "/"]
-    if isinstance(left, dict):
-        result: list[str] = []
-        for key in sorted(set(left) | set(right)):
-            child = f"{path}/{str(key).replace('~', '~0').replace('/', '~1')}"
-            result.extend([child] if key not in left or key not in right else diff_pointers(left[key], right[key], child))
-        return result
-    if isinstance(left, list):
-        if len(left) != len(right):
-            return [path or "/"]
-        return [item for index, pair in enumerate(zip(left, right)) for item in diff_pointers(*pair, f"{path}/{index}")]
-    return [] if left == right else [path or "/"]
 
 
 def transform(source: str, arm: str, *, allow_text: bool = False) -> tuple[str, object]:
