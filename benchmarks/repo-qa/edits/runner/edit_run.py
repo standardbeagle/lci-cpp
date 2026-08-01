@@ -6,7 +6,10 @@
 ``run_edit_task`` is the single primitive and mirrors the exploration
 ``run_task``: resume-idempotent, fails loud on a drifted/absent corpus (recorded
 as ``config_error``, agent never invoked), enforces tool isolation on the emitted
-calls, and appends exactly one provenance-complete record. The isolated checkout
+calls, and appends exactly one provenance-complete record -- INCLUDING when an
+unexpected fault escapes: the record is written as ``harness_failure`` (with the
+exception class and message) and only then re-raised, so a crashed cell is
+visible in the log rather than silently absent. The isolated checkout
 is a throwaway copy of the pinned tree, cleaned on BOTH success and failure; the
 source corpus is never mutated. The behaviour + blast-radius gate (Stage-3
 ``oracle_gate``) and the convention gate (Stage-3 ``conformance_gate``) are CALLED,
@@ -49,6 +52,7 @@ REASON_EMPTY_ANSWER = "EMPTY_ANSWER"
 REASON_TOOL_ISOLATION = "TOOL_ISOLATION"
 REASON_GATE_FAILED = "GATE_FAILED"
 REASON_ALL_GREEN = "ALL_GREEN"
+REASON_HARNESS_ERROR = "HARNESS_ERROR"
 
 
 def _now():
@@ -263,6 +267,20 @@ def run_edit_task(
             reason=REASON_GATE_FAILED, error=detail, patch_hash=patch_hash,
             patch_files=patch_files, gates=gates, **common,
         )
+    except Exception as error:
+        # RECORD FIRST, then fail fast. Every branch above returns through
+        # _finish; an unexpected fault (adapter, gate, or I/O) used to skip it
+        # entirely and abort the drain with no record at all, leaving the cell
+        # indistinguishable from one that was never planned. The record is
+        # retryable, carries the exception class AND message, and the re-raise
+        # preserves the original traceback so fail-fast semantics are unchanged.
+        _finish(
+            records_path, rec,
+            status=edit_record.STATUS_HARNESS_FAILURE,
+            reason=REASON_HARNESS_ERROR,
+            error=f"{type(error).__name__}: {error}",
+        )
+        raise
     finally:
         # Isolated throwaway worktree: removed on success AND failure.
         shutil.rmtree(checkout, ignore_errors=True)

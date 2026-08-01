@@ -117,6 +117,7 @@ _STATUS_FAILURE = {
     edit_record.STATUS_TOOL_VIOLATION: FAILURE_AGENT,
     edit_record.STATUS_INVALID_PATCH: FAILURE_INVALID_PATCH,
     edit_record.STATUS_CONFIG_ERROR: FAILURE_HARNESS,
+    edit_record.STATUS_HARNESS_FAILURE: FAILURE_HARNESS,
 }
 
 # Our tooling or environment broke -- says nothing about the agent's patch.

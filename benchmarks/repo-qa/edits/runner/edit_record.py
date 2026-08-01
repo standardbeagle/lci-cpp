@@ -23,9 +23,14 @@ STATUS_INVALID_PATCH = "edit_invalid_patch"  # empty / unappliable patch
 STATUS_TIMEOUT = "edit_timeout"              # adapter hit the wall-clock deadline
 STATUS_AGENT_FAILURE = "edit_agent_failure"  # provider/CLI failure or empty answer
 STATUS_CONFIG_ERROR = "edit_config_error"    # corpus missing / drift / bad arm
+# An UNEXPECTED fault in our own harness (adapter, gate, or I/O) -- recorded so
+# the cell is never silently absent, then re-raised. Retryable by construction:
+# it says nothing about the agent or its patch.
+STATUS_HARNESS_FAILURE = "edit_harness_failure"
 
 ALL_STATUSES = frozenset(
     {
+        STATUS_HARNESS_FAILURE,
         STATUS_PASSED,
         STATUS_GATE_FAILED,
         STATUS_TOOL_VIOLATION,
