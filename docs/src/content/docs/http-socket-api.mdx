@@ -68,8 +68,10 @@ On Windows, the same request goes over the loopback TCP port instead of
 
 - `lci server` / `lci server --daemon` starts the daemon; `--foreground`
   forces it to stay attached to the terminal (for debugging).
-- `lci status` / `lci stats` query a running server without going through
-  the CLI's own indexing path.
+- `lci status` (`-v/--verbose` for runtime metrics) queries a running
+  server without going through the CLI's own indexing path. `POST /stats`
+  exposes the same runtime metrics directly over HTTP; there is no separate
+  `lci stats` subcommand.
 - `lci shutdown [--force]` stops it; `/shutdown` does the same over HTTP.
 - CLI subcommands that need index state (`search`, `def`, `refs`, `tree`,
   …) start the server on demand if one isn't already running for that
