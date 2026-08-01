@@ -54,6 +54,12 @@ class ApiReplayAnalysisTest(unittest.TestCase):
         extra = scored(GOOD + " and fake/other.go:7")
         self.assertEqual((extra["exact"], extra["precision"], extra["recall"]), (False, 0.5, 1.0))
 
+    def test_quality_uses_the_standard_ir_empty_convention(self):
+        both_empty = analysis.quality([], [])
+        self.assertEqual((both_empty["precision"], both_empty["recall"]), (1.0, 1.0))
+        empty_prediction = analysis.quality([], [GOOD])
+        self.assertEqual((empty_prediction["precision"], empty_prediction["recall"]), (0.0, 0.0))
+
     def test_oracle_accepts_semantically_equivalent_file_at_line_wording(self):
         raw = dict(complete_grid()[0],
                    final_answer="Called in `examples/base/main.go` at line 119 inside main.")

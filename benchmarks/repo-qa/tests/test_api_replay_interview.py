@@ -42,5 +42,33 @@ class InterviewPromptTest(unittest.TestCase):
         self.assertIn("{\\\"x\\\":1}", prompt)
 
 
+    def test_parallel_tool_calls_resolve_the_issuing_assistant(self):
+        fixture = {
+            "tool_call_id": "call_2",
+            "request": {"messages": [
+                {"role": "user", "content": "question"},
+                {"role": "assistant", "content": "",
+                 "tool_calls": [{"id": "call_1"}, {"id": "call_2"}]},
+                {"role": "tool", "tool_call_id": "call_1", "content": "{\"a\":1}"},
+                {"role": "tool", "tool_call_id": "call_2", "content": "{\"b\":2}"},
+            ]},
+        }
+        user, assistant, tool = MODULE.tool_exchange(fixture)
+        self.assertEqual(user["content"], "question")
+        self.assertEqual([call["id"] for call in assistant["tool_calls"]], ["call_1", "call_2"])
+        self.assertEqual(tool["content"], "{\"b\":2}")
+
+    def test_missing_issuing_assistant_fails_fast(self):
+        fixture = {
+            "tool_call_id": "call_1",
+            "request": {"messages": [
+                {"role": "user", "content": "question"},
+                {"role": "tool", "tool_call_id": "call_1", "content": "{}"},
+            ]},
+        }
+        with self.assertRaisesRegex(ValueError, "assistant"):
+            MODULE.tool_exchange(fixture)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -66,6 +66,20 @@ class ApiReplayABTest(unittest.TestCase):
         capture["response"]["status"]=404
         with self.assertRaisesRegex(ValueError,"successful"): replay.fixture_from_capture(capture,spec)
 
+    def test_digest_survives_lone_surrogate_content(self):
+        self.assertTrue(replay.digest({"content": "lone \ud800 surrogate"}).startswith("sha256:"))
+        self.assertTrue(replay.digest("lone \ud800 surrogate").startswith("sha256:"))
+
+    def test_diff_pointers_escape_json_pointer_reserved_characters(self):
+        self.assertEqual(replay.diff_pointers({"a/b": 1}, {"a/b": 2}), ["/a~1b"])
+        self.assertEqual(replay.diff_pointers({"a~b": 1}, {"a~b": 2}), ["/a~0b"])
+        self.assertEqual(replay.diff_pointers({}, {"m/n": 1}), ["/m~1n"])
+
+    def test_grade_answers_uses_the_standard_ir_empty_convention(self):
+        both_empty = replay.grade_answers([], [])
+        self.assertEqual((both_empty["precision"], both_empty["recall"]), (1.0, 1.0))
+        self.assertEqual(replay.grade_answers([], ["x"])["precision"], 0.0)
+
     def test_capture_header_allowlist_rejects_invalid_safe_values(self):
         with self.assertRaisesRegex(ValueError, "invalid safe"):
             replay.captured_request_headers({"User-Agent": "ok\r\nAuthorization: secret"})

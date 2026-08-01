@@ -40,6 +40,29 @@ class ApiReplayAllToolsTest(unittest.TestCase):
         counts = {arm: sum(job[2] == arm for job in planned) for arm in module.replay.ARMS}
         self.assertEqual(set(counts.values()), {112})
 
+    def test_derivation_resolves_the_issuing_assistant_under_parallel_tool_calls(self):
+        base = json.loads((BASE / "fixture-deepseek-search.json").read_text())
+        messages = base["request"]["messages"]
+        issuing = messages[2]
+        issuing["tool_calls"] = [dict(issuing["tool_calls"][0], id="call_sibling"),
+                                 issuing["tool_calls"][0]]
+        messages.insert(3, {"role": "tool", "tool_call_id": "call_sibling", "content": "{}"})
+        case = {"tool": "find_files", "scenario": "negative", "arguments": {"pattern": "missing"},
+                "output": '{"results":[]}'}
+        fixture = module.derive_fixture(base, case, {"question": "q", "answer": ["a"]})
+        derived = fixture["request"]["messages"]
+        self.assertEqual(derived[2]["tool_calls"][0]["function"]["name"], "lci_find_files")
+        self.assertEqual(derived[3]["role"], "tool")
+        self.assertEqual(derived[-1]["content"], '{"results":[]}')
+
+    def test_derivation_fails_fast_without_an_issuing_assistant(self):
+        base = json.loads((BASE / "fixture-deepseek-search.json").read_text())
+        base["request"]["messages"].pop(2)
+        case = {"tool": "find_files", "scenario": "negative", "arguments": {"pattern": "missing"},
+                "output": '{"results":[]}'}
+        with self.assertRaisesRegex(ValueError, "assistant"):
+            module.derive_fixture(base, case, {"question": "q", "answer": ["a"]})
+
     def test_text_protocol_roundtrips_through_every_arm(self):
         source = "LCF/1.0 mode=overview\nfiles=447"
         for arm in module.replay.ARMS:
