@@ -1,0 +1,79 @@
+---
+title: HTTP & Socket API
+description: The lci server's transport and JSON endpoints — how a per-project index daemon is reached and queried.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+`lci server` starts a long-running, per-project index daemon (`IndexServer`)
+that speaks HTTP/JSON. `lci` CLI subcommands and the MCP server talk to it as
+a client; you can also reach it directly.
+
+## Transport
+
+<Aside type="note">
+  The listener is per-user and per-project — two users, or the same user
+  against two different project roots, get distinct sockets/ports so they
+  never collide.
+</Aside>
+
+- **Linux / macOS**: a Unix domain socket at
+  `<tmp>/lci-<uid>.sock` (no project root given) or
+  `<tmp>/lci-<uid>-<hash>.sock` (hash of the absolute project root).
+- **Windows**: no Unix sockets, so the server binds a loopback TCP port —
+  `127.0.0.1:<port>` — derived deterministically from the user id (and
+  project-root hash, when set) so repeated runs land on the same port.
+
+## Endpoints
+
+All endpoints accept `POST` with a JSON body; `ping`, `status`, and `stats`
+additionally accept `GET` with no body. Responses are `application/json`.
+
+| Endpoint | Purpose |
+|----------|---------|
+| `POST /ping` | Liveness check |
+| `POST /status` | Server status |
+| `POST /search` | Content search (same engine as `lci search`) |
+| `POST /symbol` | Symbol lookup |
+| `POST /fileinfo` | File info |
+| `POST /shutdown` | Shut the server down |
+| `POST /reindex` | Trigger a re-index of the project root |
+| `POST /stats` | Runtime metrics |
+| `POST /definition` | Symbol definition (`lci def`) |
+| `POST /references` | Symbol references (`lci refs`) |
+| `POST /tree` | Function call hierarchy (`lci tree`) |
+| `POST /git-analyze` | Git change analysis (`lci git-analyze`) |
+| `POST /list-symbols` | Enumerate + filter symbols |
+| `POST /inspect-symbol` | Deep inspect one symbol |
+| `POST /browse-file` | Symbol outline for a file |
+| `GET /ping` | Liveness check, no body |
+| `GET /status` | Server status, no body |
+| `GET /stats` | Runtime metrics, no body |
+
+## Talking to it directly
+
+Over a Unix socket, with `curl`'s `--unix-socket` flag:
+
+```sh
+curl --unix-socket /tmp/lci-$(id -u).sock \
+  -X POST http://localhost/search \
+  -H 'Content-Type: application/json' \
+  -d '{"pattern": "myFunction"}'
+```
+
+On Windows, the same request goes over the loopback TCP port instead of
+`--unix-socket`.
+
+## Lifecycle
+
+- `lci server` / `lci server --daemon` starts the daemon; `--foreground`
+  forces it to stay attached to the terminal (for debugging).
+- `lci status` / `lci stats` query a running server without going through
+  the CLI's own indexing path.
+- `lci shutdown [--force]` stops it; `/shutdown` does the same over HTTP.
+- CLI subcommands that need index state (`search`, `def`, `refs`, `tree`,
+  …) start the server on demand if one isn't already running for that
+  project root, then reuse it for subsequent calls.
+
+Indexing is in-memory only — there is no disk persistence today, so the
+index is rebuilt on every server start (or via `POST /reindex`).

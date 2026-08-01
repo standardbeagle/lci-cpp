@@ -1,0 +1,120 @@
+---
+title: Getting Started
+description: Install lci and run your first search — one-line install, package managers, or build from source.
+---
+
+import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
+
+<Aside type="note" title="Platform availability">
+  Prebuilt releases ship for **Linux x86_64** (`.tar.gz`, `.deb`, `.rpm`),
+  **Windows x86_64** (`.tar.gz`), and **macOS arm64 / Apple Silicon**
+  (`.tar.gz`). Intel (x86_64) Macs are not yet served by a prebuilt binary —
+  build from source on those. The installers fail fast with a clear message
+  on any unsupported platform/arch.
+</Aside>
+
+## Installation
+
+<Tabs>
+  <TabItem label="One-line install">
+    ```sh
+    # Linux / macOS
+    curl -fsSL https://raw.githubusercontent.com/standardbeagle/lci-cpp/main/install.sh | sh
+    ```
+
+    ```powershell
+    # Windows (PowerShell)
+    irm https://raw.githubusercontent.com/standardbeagle/lci-cpp/main/install.ps1 | iex
+    ```
+
+    Both detect your OS/arch, download the matching release binary, and
+    install it (`/usr/local/bin` or `~/.local/bin` on Unix;
+    `%LOCALAPPDATA%\Programs\lci` on Windows). Override with `LCI_PREFIX`;
+    pin a version with `LCI_VERSION=0.6.0`.
+  </TabItem>
+  <TabItem label="npm">
+    ```sh
+    npm install -g @standardbeagle/lci
+    lci --version
+    ```
+
+    Downloads the prebuilt binary for your platform — no compiler required.
+  </TabItem>
+  <TabItem label="uv / pip">
+    ```sh
+    uv tool install lci-cli      # or: pipx install lci-cli
+    lci --version
+    ```
+
+    Downloads the prebuilt binary for your platform — no compiler required.
+  </TabItem>
+  <TabItem label="Release artifact">
+    ```sh
+    # Linux: tarball or Debian package
+    curl -fLO https://github.com/standardbeagle/lci-cpp/releases/download/v0.6.0/lci-0.6.0-Linux.tar.gz
+    tar -xzf lci-0.6.0-Linux.tar.gz
+    sudo install lci-0.6.0-Linux/bin/lci /usr/local/bin/
+
+    # or
+    sudo dpkg -i lci-0.6.0-Linux.deb
+
+    lci --version   # 0.6.0
+    lci search "myFunction"
+    ```
+  </TabItem>
+</Tabs>
+
+## Updating
+
+```sh
+lci update            # self-update to the latest release
+lci update --check    # report current vs latest without installing
+lci update --version 0.6.0   # install a specific release
+```
+
+`lci update` works regardless of how lci was installed. Package-manager
+users can also run `npm update -g @standardbeagle/lci` or `uv tool upgrade
+lci-cli`.
+
+## Building from source
+
+Toolchain: GCC 13+ or Clang 17+, CMake 3.25+, [vcpkg](https://github.com/microsoft/vcpkg), Ninja.
+
+```sh
+cmake --preset release \
+  -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake
+cmake --build build/release --parallel
+./build/release/src/lci --version
+```
+
+Install and package the build:
+
+```sh
+cd build/release
+sudo cmake --install .
+cpack -G TGZ    # produces lci-0.6.0-Linux.tar.gz
+cpack -G DEB    # produces lci-0.6.0-Linux.deb
+```
+
+The CPack output contains only `bin/lci` (~28 MB stripped). Tree-sitter
+grammars are statically linked; runtime dependencies are libc + libstdc++ +
+libssl + brotli (all standard on modern Linux).
+
+### Running the test suite
+
+```sh
+cmake --build build/release --parallel
+ctest --preset release --parallel $(nproc)
+```
+
+The preset excludes the separately gated benchmark target. Run
+`./build/release/tests/lci_benchmarks` explicitly for performance checks.
+
+## Your first search
+
+```sh
+lci search "myFunction"
+```
+
+Full CLI reference: `lci --help` or `lci <command> --help`, or see
+[CLI Usage](/lci-cpp/cli-usage/).

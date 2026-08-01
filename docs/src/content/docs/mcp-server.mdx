@@ -1,0 +1,96 @@
+---
+title: MCP Server
+description: Connect lci to an AI assistant over the Model Context Protocol — 14 tools over stdio.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+`lci mcp` runs a [Model Context Protocol](https://modelcontextprotocol.io)
+server over stdio. It exposes **14 tools** to AI assistants for searching and
+understanding a codebase without loading whole files into context.
+
+## Starting the server
+
+```sh
+lci mcp
+```
+
+Point your MCP client's config at the `lci` binary with the `mcp` subcommand,
+for example in a Claude Code / Claude Desktop-style config:
+
+```json
+{
+  "mcpServers": {
+    "lci": {
+      "command": "lci",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+## Tool index
+
+| Tool | Output | Purpose |
+|------|--------|---------|
+| `info` | JSON | Per-tool help + server version |
+| `search` | JSON | Semantic + literal + regex content search |
+| `find_files` | JSON | File-path search (fuzzy / glob) |
+| `get_context` | JSON | Detailed context for object IDs or names, with call hierarchy + purity |
+| `context` | JSON | Save / load code-context manifests for agent handoff |
+| `list_symbols` | JSON | Enumerate + filter symbols (the "ls" for code) |
+| `inspect_symbol` | JSON | Deep inspect one symbol |
+| `browse_file` | JSON | Symbol outline for a file |
+| `index_stats` | JSON | Index status + health |
+| `debug_info` | JSON | Deep diagnostics |
+| `semantic_annotations` | JSON | Query `@lci:` labels / categories |
+| `side_effects` | JSON | Function purity + side-effect analysis |
+| `code_insight` | LCF | Codebase intelligence (overview / stats / structure / git) |
+| `git_analysis` | JSON | Git change analysis (duplicates / naming / metrics) |
+
+`code_insight` is the session-startup workhorse: repository map, health
+dashboard, entry points, complexity/coupling/cohesion statistics, module and
+feature breakdowns, naming vocabulary, and git change/hotspot analysis.
+
+## Conventions
+
+- **Invocation**: standard MCP `tools/call` with a `name` and an `arguments`
+  object. Every tool returns its payload as the text of a single `content[]`
+  entry.
+- **Output formats**: most tools emit **JSON**. The analysis tools
+  (`code_insight`) emit **LCF** (LCI Compact Format) — a token-dense,
+  section-based text format (`LCF/1.0\nmode=...\ntier=...\ntokens=...\n---\n`
+  followed by `== SECTION ==` blocks).
+- **Object IDs**: `search`, `list_symbols`, `inspect_symbol`, `code_insight`,
+  etc. emit short encoded `object_id` strings (e.g. `VE`, `tG`). Feed them to
+  `get_context {"id": "..."}` (comma-separated for several) to drill in.
+- **Errors**: failures return a structured error result `{"operation":
+  "<tool>", "message": "...", "success": false}` with the result flagged as
+  an error. Tools **fail fast** — no fake/zeroed payloads.
+- **Determinism**: all list output is sorted with total-order tiebreakers (no
+  hash-iteration order in user-visible output).
+
+## `search` example
+
+```json
+{
+  "name": "search",
+  "arguments": {
+    "pattern": "myFunction",
+    "output": "ctx",
+    "max": 20
+  }
+}
+```
+
+`search` is sub-millisecond in-memory content search (not file paths):
+literal match → optional synonym expansion → regex fallback (`flags=rx`).
+Results carry the enclosing symbol's metadata (`object_id`, `symbol_name`,
+`symbol_type`, `is_exported`).
+
+<Aside type="tip">
+  The full per-tool reference — every parameter, mode, output shape, and
+  error case — lives in
+  [`docs/TOOLS.md`](https://github.com/standardbeagle/lci-cpp/blob/main/docs/TOOLS.md)
+  in the repository.
+</Aside>

@@ -27,3 +27,8 @@ real_projects/zig/
 
 # worktrack loop state (per-clone, may contain private email in lease_holder)
 .worktrack/
+
+# Docs site (Astro Starlight) build output + deps
+docs/node_modules/
+docs/dist/
+docs/.astro/
