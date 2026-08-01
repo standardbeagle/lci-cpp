@@ -213,15 +213,22 @@ def verify_anchor_live(anchor, manifest, tree_dir):
             )
 
 
-def classify_anchor_live(anchor, manifest, tree_dir):
-    """Classify an anchor from independent forged-corpus evidence."""
+def classify_anchor_live(anchor, manifest):
+    """Classify an anchor from the forge's sealed record of what it injected.
+
+    Classification reads the manifest only, never the agent-visible source: the
+    forge deliberately leaves no marker in injected text, and a classifier that
+    matched such a marker would share its mechanism with the injector and be
+    blind to exactly the injections that mutator can get wrong
+    (.claude/rules/bench-harness-oracle-independence.md rule 1)."""
     path = anchor["path"]
     if path in {decoy["path"] for decoy in manifest.get("decoys", [])}:
         return "dead"
     start, end = anchor["lines"][0], anchor["lines"][-1]
-    segment = _read_range(os.path.join(tree_dir, path), start, end)
-    if "FORGE TRAP" in segment:
-        return "misleading"
+    for trap in manifest.get("traps", []):
+        for injected in trap.get("misleading_or_dead_anchors", []):
+            if injected["path"] == path and start <= injected["line"] <= end:
+                return "misleading"
     return "authoritative-live"
 
 
@@ -440,7 +447,7 @@ def validate_task(
                 valid_live_anchors.append(anchor)
         for anchor in valid_live_anchors:
             index = evidence.index(anchor)
-            expected = classify_anchor_live(anchor, manifest, tree_dir)
+            expected = classify_anchor_live(anchor, manifest)
             adjudicated = task["author"]["anchor_classification"][index]
             if adjudicated != expected:
                 problems.append(

@@ -803,6 +803,27 @@ def _assert_decoys_unreachable(tree, spec, decoys, path_map):
                     )
 
 
+# Wording an ordinary contributor might leave behind. The injection carries NO
+# marker naming the forge or the trap: a labelled comment hands a reading agent
+# the answer key, and any validator keyed on that label shares its mechanism
+# with this mutator (see .claude/rules/bench-harness-oracle-independence.md).
+# The manifest's trap record is the only classification evidence.
+_MISLEADING_COMMENT_TEMPLATES = (
+    "{symbol} is obsolete and is no longer used anywhere.",
+    "Deprecated: {symbol} was superseded and is dead code.",
+    "Nothing calls {symbol} any more; kept only for reference.",
+    "TODO: drop {symbol}, unreachable since the module split.",
+)
+
+
+def misleading_comment_text(trap_id, symbol):
+    """Pick a template deterministically from the (seeded) trap id, so the same
+    seed always produces byte-identical corpora."""
+    digest = hashlib.sha256(trap_id.encode()).digest()
+    template = _MISLEADING_COMMENT_TEMPLATES[digest[0] % len(_MISLEADING_COMMENT_TEMPLATES)]
+    return template.format(symbol=symbol)
+
+
 def _inject_misleading_comments(tree, spec, rng, ops, to_original, seed):
     """Place explicit contradictions immediately above live declarations."""
     count = spec["mutations"].get("misleading_comments", 0)
@@ -837,9 +858,7 @@ def _inject_misleading_comments(tree, spec, rng, ops, to_original, seed):
         lines = _read_text(path).splitlines(keepends=True)
         marker = "#" if spec["language"] == "python" else "//"
         trap_id = f"misleading-comment-{_token(rng)}"
-        comment = (
-            f"{marker} FORGE TRAP {trap_id}: {symbol} is obsolete and never used.\n"
-        )
+        comment = f"{marker} {misleading_comment_text(trap_id, symbol)}\n"
         lines.insert(line - 1, comment)
         _write_text(path, "".join(lines))
         original = to_original[rel]
