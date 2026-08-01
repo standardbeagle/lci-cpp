@@ -121,6 +121,15 @@ class ComprehensionAbTest(unittest.TestCase):
         second = ab.hashlib.sha256(ab.canonical({"grading_schema": "precision-recall-fp.v1", "question": "q", "blob": "b", "expected": ["changed"], "production_faithful": True}).encode()).hexdigest()
         self.assertNotEqual(first, second)
 
+    def test_model_list_is_stripped_so_tiers_key_correctly(self):
+        models = ab.parse_model_list("opencode/deepseek-v4-flash-free, opencode-go/glm-5.2 ,")
+        self.assertEqual(models, ["opencode/deepseek-v4-flash-free", "opencode-go/glm-5.2"])
+        self.assertTrue(all(ab.MODEL_TIERS.get(m, "unclassified") != "unclassified" for m in models))
+        with self.assertRaisesRegex(ValueError, "full provider/model ids"):
+            ab.parse_model_list("glm-5.2")
+        with self.assertRaisesRegex(ValueError, "at least one model"):
+            ab.parse_model_list(" , ")
+
 
 if __name__ == "__main__":
     unittest.main()
