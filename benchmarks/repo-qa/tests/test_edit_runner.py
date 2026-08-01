@@ -485,6 +485,85 @@ class FakeAgentSmokeTest(unittest.TestCase):
                             "terminal outcome must carry a reason/error",
                         )
 
+    def test_unexpected_exception_is_recorded_before_it_propagates(self):
+        # run_edit_task promises to append EXACTLY ONE provenance-complete record
+        # per cell. Any unexpected exception raised after prepare_checkout used
+        # to skip _finish entirely: the bank drain aborted with NOTHING written,
+        # so the cell was invisible in the log -- indistinguishable from a cell
+        # that was never planned, and silently absent from the scorer's
+        # denominator story. Fail fast, but RECORD FIRST.
+        class Boom(RuntimeError):
+            pass
+
+        def _explode(_request):
+            raise Boom("adapter died mid-run")
+
+        with TemporaryDirectory() as root:
+            forge_fixture(root)
+            records = os.path.join(root, "records.jsonl")
+            work = os.path.join(root, "work")
+            with self.assertRaises(Boom):
+                edit_run.run_edit_task(
+                    edit_task(), edit_toolsets.TREATMENT, FakeAgent(_explode),
+                    base_config(), corpus_root=root, records_path=records,
+                    work_root=work, behavior_command=BEHAVIOR_CMD,
+                    existing_suite_command=SUITE_CMD,
+                )
+            persisted = edit_record.load_records(records)
+            self.assertEqual(len(persisted), 1)
+            rec = persisted[0]
+            self.assertEqual(rec["status"], edit_record.STATUS_HARNESS_FAILURE)
+            self.assertEqual(rec["reason"], edit_run.REASON_HARNESS_ERROR)
+            # the exception class AND message are both in the recorded detail
+            self.assertIn("Boom", rec["error"])
+            self.assertIn("adapter died mid-run", rec["error"])
+            # provenance is complete despite the crash
+            self.assertEqual(rec["task_id"], "pb-module-1")
+            self.assertEqual(rec["arm"], edit_toolsets.TREATMENT)
+            self.assertEqual(rec["seed"], 7)
+            self.assertEqual(rec["source_commit"], FAKE_COMMIT)
+            self.assertEqual(rec["run_key"], "pb-module-1::treatment::seed-7")
+            # a harness crash is NOT terminal: resume must retry the cell
+            self.assertIn(
+                edit_record.STATUS_HARNESS_FAILURE, edit_record.RETRYABLE_STATUSES
+            )
+            # and the throwaway checkout is still cleaned up
+            checkouts = os.path.join(work, "checkouts")
+            self.assertEqual(
+                os.listdir(checkouts) if os.path.isdir(checkouts) else [], []
+            )
+
+    def test_gate_exception_is_recorded_before_it_propagates(self):
+        # Same contract for a fault raised by the GATES rather than the adapter.
+        import conformance_gate
+
+        original = conformance_gate.evaluate_task
+
+        def _explode(*_a, **_kw):
+            raise ValueError("gate wiring is wrong")
+
+        with TemporaryDirectory() as root:
+            forge_fixture(root)
+            records = os.path.join(root, "records.jsonl")
+            conformance_gate.evaluate_task = _explode
+            try:
+                with self.assertRaises(ValueError):
+                    edit_run.run_edit_task(
+                        edit_task(), edit_toolsets.BASELINE, run_pass_agent(),
+                        base_config(), corpus_root=root, records_path=records,
+                        work_root=os.path.join(root, "work"),
+                        behavior_command=BEHAVIOR_CMD,
+                        existing_suite_command=SUITE_CMD,
+                    )
+            finally:
+                conformance_gate.evaluate_task = original
+            persisted = edit_record.load_records(records)
+            self.assertEqual(len(persisted), 1)
+            self.assertEqual(
+                persisted[0]["status"], edit_record.STATUS_HARNESS_FAILURE
+            )
+            self.assertIn("gate wiring is wrong", persisted[0]["error"])
+
     def test_blast_radius_escape_is_a_gate_failure(self):
         # A patch that turns behaviour green but ALSO writes outside the declared
         # blast radius is rejected by the changed-path gate (criterion 4).
