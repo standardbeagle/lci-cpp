@@ -1,6 +1,6 @@
 ---
 title: Getting Started
-description: Install lci (Lightning Code Index) via one-line script, npm, pip, or from source, then run your first sub-millisecond code search across your codebase.
+description: Install lci and run your first search — one-line install, package managers, or build from source.
 ---
 
 import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
@@ -30,7 +30,7 @@ import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
     Both detect your OS/arch, download the matching release binary, and
     install it (`/usr/local/bin` or `~/.local/bin` on Unix;
     `%LOCALAPPDATA%\Programs\lci` on Windows). Override with `LCI_PREFIX`;
-    pin a version with `LCI_VERSION=0.7.0`.
+    pin a version with `LCI_VERSION=0.6.0`.
   </TabItem>
   <TabItem label="npm">
     ```sh
@@ -51,14 +51,14 @@ import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
   <TabItem label="Release artifact">
     ```sh
     # Linux: tarball or Debian package
-    curl -fLO https://github.com/standardbeagle/lci-cpp/releases/download/v0.7.0/lci-0.7.0-Linux.tar.gz
-    tar -xzf lci-0.7.0-Linux.tar.gz
-    sudo install lci-0.7.0-Linux/bin/lci /usr/local/bin/
+    curl -fLO https://github.com/standardbeagle/lci-cpp/releases/download/v0.6.0/lci-0.6.0-Linux.tar.gz
+    tar -xzf lci-0.6.0-Linux.tar.gz
+    sudo install lci-0.6.0-Linux/bin/lci /usr/local/bin/
 
     # or
-    sudo dpkg -i lci-0.7.0-Linux.deb
+    sudo dpkg -i lci-0.6.0-Linux.deb
 
-    lci --version   # 0.7.0
+    lci --version   # 0.6.0
     lci search "myFunction"
     ```
   </TabItem>
@@ -92,13 +92,13 @@ Install and package the build:
 ```sh
 cd build/release
 sudo cmake --install .
-cpack -G TGZ    # produces lci-0.7.0-Linux.tar.gz
-cpack -G DEB    # produces lci-0.7.0-Linux.deb
+cpack -G TGZ    # produces lci-0.6.0-Linux.tar.gz
+cpack -G DEB    # produces lci-0.6.0-Linux.deb
 ```
 
-The CPack output contains only `bin/lci` (~30 MB). Tree-sitter grammars,
-RE2, and TLS are statically linked; the only shared runtime dependencies are
-libc, libstdc++, libgcc_s, and libm (all standard on modern Linux).
+The CPack output contains only `bin/lci` (~28 MB stripped). Tree-sitter
+grammars are statically linked; runtime dependencies are libc + libstdc++ +
+libssl + brotli (all standard on modern Linux).
 
 ### Running the test suite
 

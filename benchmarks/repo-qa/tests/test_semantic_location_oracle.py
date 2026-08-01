@@ -44,6 +44,19 @@ class SemanticLocationOracleTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "contradicts"):
             oracle.validate_adjudication(bad, EXPECTED)
 
+    def test_empty_truth_stratum_scores_without_dividing_by_zero(self):
+        # The `semantic_annotations` control stratum has an empty answer key.
+        empty = oracle.evaluate("No Go source line carries an @lci annotation.", [])
+        self.assertTrue(empty["exact"])
+        self.assertEqual(empty["status"], "accepted")
+        self.assertEqual(empty["precision"], 1.0)
+        self.assertEqual(empty["recall"], 1.0)
+        invented = oracle.evaluate("See pocketbase.go:12", [])
+        self.assertFalse(invented["exact"])
+        self.assertEqual(invented["precision"], 0.0)
+        self.assertEqual(invented["recall"], 0.0)
+        self.assertEqual(oracle.evaluate("nothing here", EXPECTED)["precision"], 0.0)
+
     def test_versioned_regression_bank(self):
         bank = json.loads((ROOT / "benchmarks/repo-qa/oracle-v2/regressions.json").read_text())
         for case in bank["cases"]:

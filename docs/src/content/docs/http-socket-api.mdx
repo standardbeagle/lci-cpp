@@ -1,14 +1,13 @@
 ---
 title: HTTP & Socket API
-description: Reference for the lci index server's HTTP/JSON API — Unix socket on Linux/macOS, loopback TCP on Windows, and the 17 POST/GET endpoints it exposes directly.
+description: The lci server's transport and JSON endpoints — how a per-project index daemon is reached and queried.
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
 `lci server` starts a long-running, per-project index daemon (`IndexServer`)
-that speaks HTTP/JSON. [`lci` CLI subcommands](/lci-cpp/cli-usage/) and the
-[MCP server](/lci-cpp/mcp-server/) talk to it as a client; you can also
-reach it directly.
+that speaks HTTP/JSON. `lci` CLI subcommands and the MCP server talk to it as
+a client; you can also reach it directly.
 
 ## Transport
 
@@ -69,10 +68,8 @@ On Windows, the same request goes over the loopback TCP port instead of
 
 - `lci server` / `lci server --daemon` starts the daemon; `--foreground`
   forces it to stay attached to the terminal (for debugging).
-- `lci status` (`-v/--verbose` for runtime metrics) queries a running
-  server without going through the CLI's own indexing path. `POST /stats`
-  exposes the same runtime metrics directly over HTTP; there is no separate
-  `lci stats` subcommand.
+- `lci status` / `lci stats` query a running server without going through
+  the CLI's own indexing path.
 - `lci shutdown [--force]` stops it; `/shutdown` does the same over HTTP.
 - CLI subcommands that need index state (`search`, `def`, `refs`, `tree`,
   …) start the server on demand if one isn't already running for that
