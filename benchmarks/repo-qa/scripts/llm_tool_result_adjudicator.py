@@ -53,6 +53,17 @@ def parse(text: str) -> dict:
     return validate(json.loads(stripped))
 
 
+def load_header_profile(path: Path) -> dict:
+    """Header profiles are committed with a `headers` key; anything else is a bug."""
+    document = json.loads(path.read_text())
+    headers = document.get("headers")
+    if not isinstance(headers, dict):
+        raise SystemExit(
+            f"{path}: header profile must carry a 'headers' object, found keys {sorted(document)}"
+        )
+    return headers
+
+
 def write_checkpoint(path: Path, records: list[dict], *, judge_id: str = "unspecified") -> None:
     result = {"schema": "lci.all-tools-adjudications.v2", "policy": "every queued failure",
               "judge_id": judge_id,
@@ -109,7 +120,7 @@ def main() -> int:
     queue = queue_doc.get("adjudication_queue", queue_doc)
     if args.origin_model:
         queue = [item for item in queue if item.get("origin_model") == args.origin_model]
-    headers = json.loads(args.header_profile.read_text())["headers"]
+    headers = load_header_profile(args.header_profile)
     provider = OpenCodeZenProvider(args.auth_file, args.timeout)
     records = []
     if args.out.exists():

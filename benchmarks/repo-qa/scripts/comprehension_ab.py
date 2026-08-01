@@ -148,6 +148,17 @@ def cell_key(tool: str, variant: str, model: str, repetition: int) -> str:
     return f"{tool}__{variant}__{model_key}-{model_digest}__r{repetition}"
 
 
+def parse_model_list(value: str) -> list[str]:
+    """Split --models, tolerating spaces so ids still key MODEL_TIERS exactly."""
+    models = [model.strip() for model in value.split(",")]
+    models = [model for model in models if model]
+    if not models:
+        raise ValueError("--models must name at least one model")
+    if any("/" not in model for model in models):
+        raise ValueError("models must be full provider/model ids, not aliases")
+    return models
+
+
 def classify_failure(message: str) -> str | None:
     lowered = message.casefold()
     if any(marker in lowered for marker in ("quota", "rate limit", "rate_limit", "too many requests", "429")):
@@ -298,9 +309,10 @@ def main() -> int:
     parser.add_argument("--tool", action="append", help="restrict to a tool (repeatable)")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
-    models = args.models.split(",")
-    if any("/" not in model for model in models):
-        parser.error("models must be full provider/model ids, not aliases")
+    try:
+        models = parse_model_list(args.models)
+    except ValueError as error:
+        parser.error(str(error))
     if args.timeout < 300:
         parser.error("--timeout must be at least 300 seconds")
     cells = [cell for cell in load_bank() if not args.tool or cell["tool"] in args.tool]

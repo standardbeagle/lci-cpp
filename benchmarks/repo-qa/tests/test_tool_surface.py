@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -63,6 +64,36 @@ class ToolSurfaceTest(unittest.TestCase):
         self.assertEqual(surface.run_oracle("exit 1", ROOT, {0, 1}), "")
         with self.assertRaises(RuntimeError):
             surface.run_oracle("exit 127", ROOT, {0, 1})
+
+
+class McpSessionLivenessTest(unittest.TestCase):
+    HANG = "#!/usr/bin/env python3\nimport sys, time\nsys.stdin.readline()\ntime.sleep(600)\n"
+
+    def _hanging_binary(self, directory):
+        path = Path(directory) / "hanging-lci"
+        path.write_text(self.HANG)
+        path.chmod(0o755)
+        return path
+
+    def test_rpc_fails_fast_and_kills_a_silent_child(self):
+        with tempfile.TemporaryDirectory() as directory:
+            binary = self._hanging_binary(directory)
+            with self.assertRaisesRegex(RuntimeError, "did not respond"):
+                surface.McpSession(binary, Path(directory), read_timeout=1.0)
+
+    def test_close_kills_a_child_that_ignores_stdin_close(self):
+        with tempfile.TemporaryDirectory() as directory:
+            binary = self._hanging_binary(directory)
+            session = surface.McpSession.__new__(surface.McpSession)
+            session.proc = surface.subprocess.Popen(
+                [str(binary)], cwd=directory, text=True,
+                stdin=surface.subprocess.PIPE, stdout=surface.subprocess.PIPE,
+                stderr=surface.subprocess.DEVNULL,
+            )
+            session.next_id = 1
+            session.read_timeout = 1.0
+            session.close(wait_timeout=1.0)
+            self.assertIsNotNone(session.proc.poll())
 
 
 if __name__ == "__main__":

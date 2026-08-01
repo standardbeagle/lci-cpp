@@ -52,8 +52,11 @@ def evaluate(answer: str, expected: list[str]) -> dict:
         "exact": exact,
         "extracted": sorted(predicted),
         "expected": sorted(truth),
-        "precision": tp / len(predicted) if predicted else 0.0,
-        "recall": tp / len(truth),
+        # Empty-set convention, identical to comprehension_ab.grade: a vacuous
+        # side scores 1.0 only when the other side is also empty, so an invented
+        # location against an empty answer key still scores 0.0.
+        "precision": tp / len(predicted) if predicted else (1.0 if not truth else 0.0),
+        "recall": tp / len(truth) if truth else (1.0 if not predicted else 0.0),
         "false_positives": sorted(predicted - truth),
         "false_negatives": sorted(truth - predicted),
         "evidence": extracted["evidence"],

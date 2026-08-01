@@ -107,6 +107,7 @@ class CaptureHandler(http.server.BaseHTTPRequestHandler):
         response_status = 502
         response_headers = {}
         failure = None
+        headers_sent = False
         try:
             try:
                 upstream = urllib.request.urlopen(request, timeout=660)
@@ -120,6 +121,7 @@ class CaptureHandler(http.server.BaseHTTPRequestHandler):
                     self.send_header(key, value)
             self.send_header("Connection", "close")
             self.end_headers()
+            headers_sent = True
             while True:
                 chunk = upstream.read(65536)
                 if not chunk: break
@@ -128,7 +130,16 @@ class CaptureHandler(http.server.BaseHTTPRequestHandler):
             upstream.close()
         except BaseException as exc:
             failure = f"{type(exc).__name__}: {exc}"
-            if not self.wfile.closed:
+            # Once a response head is on the wire a second one would be parsed as
+            # body: signal the failure by dropping the connection instead. The
+            # capture record is the durable diagnosis either way.
+            if headers_sent:
+                try:
+                    self.wfile.flush()
+                except OSError:
+                    pass
+                self.connection.close()
+            elif not self.wfile.closed:
                 try:
                     self.send_error(502, "provider forwarding failed")
                 except OSError:

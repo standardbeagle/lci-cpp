@@ -57,5 +57,15 @@ class LlmToolResultAdjudicatorTest(unittest.TestCase):
         self.assertEqual(result["judgment"]["verdict"], "incorrect")
 
 
+    def test_header_profile_requires_the_committed_headers_key(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "profile.json"
+            path.write_text(json.dumps({"headers": {"x-a": "b"}}))
+            self.assertEqual(module.load_header_profile(path), {"x-a": "b"})
+            path.write_text(json.dumps({"request_headers": {"x-a": "b"}}))
+            with self.assertRaisesRegex(SystemExit, "must carry a 'headers' object"):
+                module.load_header_profile(path)
+
+
 if __name__ == "__main__":
     unittest.main()

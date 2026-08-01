@@ -45,8 +45,26 @@ def validate(data: object) -> list[str]:
 
 
 def self_test() -> int:
-    assert "manifest must be a JSON object" in validate([])
-    assert any("repetitions" in e for e in validate({"schema": "benchmark.preregistration.v1", "repetitions": 1}))
+    """Assertion-free so the checks still run under `python -O`."""
+    minimal = {"schema": "benchmark.preregistration.v1", "repetitions": 1}
+    cases = [
+        ("a non-object manifest is rejected", [], "manifest must be a JSON object"),
+        ("a bad repetition count is rejected", minimal, "repetitions must be an integer >= 2"),
+        ("a wrong schema is rejected", {"schema": "other"}, "schema must be benchmark.preregistration.v1"),
+        ("fewer than two arms is rejected", minimal, "arms must contain at least two entries"),
+        ("a missing primary metric is rejected", minimal, "metrics must declare at least one primary metric"),
+        ("a missing null control is rejected", minimal, "controls must declare at least one null control"),
+        ("a missing oracle independence argument is rejected", minimal,
+         "oracle.independence_argument is required"),
+        ("a missing required field is reported", minimal, "missing required field: analysis_plan"),
+    ]
+    failures = [f"{label}: expected {expected!r} in {sorted(validate(data))}"
+                for label, data, expected in cases if expected not in validate(data)]
+    if validate([]) and len(validate([])) != 1:
+        failures.append("a non-object manifest must report exactly one error")
+    if failures:
+        raise SystemExit("validate_manifest self-test failed:\n" + "\n".join(failures))
+    print(f"validate_manifest self-test: {len(cases) + 1} checks passed")
     return 0
 
 
