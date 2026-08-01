@@ -172,9 +172,29 @@ def _apply_and_answer(writes, tool_calls=(), status="ok", answer="done"):
     return FakeAgent(_run)
 
 
+# A conforming Go constructor: the agent's own edit must satisfy the task's
+# convention rule (go-constructor-new-pointer), not merely leave the bank's
+# pre-authored exemplars intact.
+CONFORMING_EDIT = (
+    "package apis\n\n"
+    "type Widget struct{}\n\n"
+    "func NewWidget() *Widget { return &Widget{} }\n"
+)
+# Same construct, returning a VALUE -- the rule's exact violation.
+NON_CONFORMING_EDIT = (
+    "package apis\n\n"
+    "type Widget struct{}\n\n"
+    "func NewWidget() Widget { return Widget{} }\n"
+)
+
+
 def run_pass_agent():
-    # writes the GREEN marker (behaviour red->green) inside blast radius
-    return _apply_and_answer({"GREEN": "ok\n"})
+    # Turns behaviour red->green (the GREEN marker) AND makes a convention-
+    # conforming edit, both inside the declared blast radius. Passing all three
+    # gates requires both: the marker alone proves nothing about conventions.
+    return _apply_and_answer(
+        {"GREEN": "ok\n", "apis/widget.go": CONFORMING_EDIT}
+    )
 
 
 class ProvenanceRecordTest(unittest.TestCase):
@@ -563,6 +583,52 @@ class FakeAgentSmokeTest(unittest.TestCase):
                 persisted[0]["status"], edit_record.STATUS_HARNESS_FAILURE
             )
             self.assertIn("gate wiring is wrong", persisted[0]["error"])
+
+    def test_convention_gate_judges_the_agents_patch_not_the_bank(self):
+        # Three agents, identical except for what they wrote. The convention
+        # verdict must separate them. Before this, all three passed convention:
+        # the gate re-verified the task's own exemplar anchors, which conform in
+        # the pristine tree and still conform afterwards regardless of the agent.
+        cases = {
+            # behaviour green, convention UNPROVEN (touched nothing governed)
+            "marker_only": ({"GREEN": "ok\n"}, False),
+            # behaviour green + a conforming constructor
+            "conforming": (
+                {"GREEN": "ok\n", "apis/widget.go": CONFORMING_EDIT}, True
+            ),
+            # behaviour green + a New* constructor returning a value
+            "non_conforming": (
+                {"GREEN": "ok\n", "apis/widget.go": NON_CONFORMING_EDIT}, False
+            ),
+        }
+        for label, (writes, expected) in sorted(cases.items()):
+            with self.subTest(agent=label):
+                with TemporaryDirectory() as root:
+                    forge_fixture(root)
+                    rec = edit_run.run_edit_task(
+                        edit_task(), edit_toolsets.TREATMENT,
+                        _apply_and_answer(writes), base_config(),
+                        corpus_root=root,
+                        records_path=os.path.join(root, "r.jsonl"),
+                        work_root=os.path.join(root, "work"),
+                        behavior_command=BEHAVIOR_CMD,
+                        existing_suite_command=SUITE_CMD,
+                    )
+                    conformance = rec["gates"]["conformance"]
+                    # behaviour is green in all three -- only convention differs
+                    self.assertTrue(rec["gates"]["oracle"]["passed"],
+                                    msg=rec["gates"]["oracle"]["diagnostic"])
+                    self.assertEqual(
+                        conformance["passed"], expected, msg=conformance["diagnostic"]
+                    )
+                    # the bank's exemplars are healthy in EVERY case, so they
+                    # cannot be what the verdict is tracking.
+                    self.assertTrue(conformance["bank_health"]["passed"])
+                    self.assertEqual(
+                        rec["status"],
+                        edit_record.STATUS_PASSED if expected
+                        else edit_record.STATUS_GATE_FAILED,
+                    )
 
     def test_blast_radius_escape_is_a_gate_failure(self):
         # A patch that turns behaviour green but ALSO writes outside the declared
