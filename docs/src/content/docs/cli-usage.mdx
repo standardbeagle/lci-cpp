@@ -1,13 +1,15 @@
 ---
 title: CLI Usage
-description: lci's command-line surface — search, grep, symbol lookup, git analysis, and the persistent server.
+description: Full lci CLI reference — search, grep, symbol lookup (def/refs), call-hierarchy trees, git-change analysis, the persistent index server, and self-update.
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
-Every command supports `--help`. Global flags (`-c/--config`, `-r/--root`,
-`--include`, `--exclude`, `-d/--daemon`) apply across subcommands and can be
-set via `.lci.kdl`.
+This page covers the `lci` subcommands you'll use day to day: search, grep,
+symbol lookup, git analysis, and the persistent index server. Every command
+supports `--help`. Global flags (`-c/--config`, `-r/--root`, `--include`,
+`--exclude`, `-d/--daemon`) apply across subcommands and can be set via
+`.lci.kdl`.
 
 ```sh
 lci --help
@@ -63,8 +65,7 @@ Analyzes working-set changes for duplicates, naming, and complexity.
 
 ```sh
 lci server [-d/--daemon] [--foreground]   # alias: srv — start the persistent index server
-lci status [-j/--json] [-v/--verbose]     # alias: st — show index server status
-lci stats                                  # runtime metrics
+lci status [-j/--json] [-v/--verbose]     # alias: st — show index server status + runtime metrics
 lci shutdown [-f/--force]                  # alias: stop
 ```
 

@@ -1,13 +1,16 @@
 ---
 title: MCP Server
-description: Connect lci to an AI assistant over the Model Context Protocol — 14 tools over stdio.
+description: Connect lci to Claude Code, Claude Desktop, or any MCP client over stdio — 14 tools for semantic code search, symbol lookup, and codebase intelligence.
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
 `lci mcp` runs a [Model Context Protocol](https://modelcontextprotocol.io)
 server over stdio. It exposes **14 tools** to AI assistants for searching and
-understanding a codebase without loading whole files into context.
+understanding a codebase without loading whole files into context — the same
+engine as [`lci search`](/lci-cpp/cli-usage/) and the
+[HTTP & Socket API](/lci-cpp/http-socket-api/), reached over the MCP
+transport instead.
 
 ## Starting the server
 
