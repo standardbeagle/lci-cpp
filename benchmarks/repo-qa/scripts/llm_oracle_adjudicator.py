@@ -5,22 +5,17 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 import sys
-import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from adjudicator_common import load_header_profile, request_body as build_request_body, strip_code_fence, write_checkpoint as write_checkpoint_document
 from opencode_zen_provider import OpenCodeZenProvider
 from semantic_location_oracle import adjudication_prompt, evaluate, validate_adjudication
 
 
 def parse_json_answer(answer: str) -> dict:
-    text = answer.strip()
-    if text.startswith("```"):
-        lines = text.splitlines()
-        text = "\n".join(lines[1:-1])
-    value = json.loads(text)
+    value = json.loads(strip_code_fence(answer))
     if not isinstance(value, dict):
         raise ValueError("adjudicator output is not an object")
     return value
@@ -41,20 +36,7 @@ def provisional_failures(cells: list[dict], expected_by_model: dict[str, list[st
 
 
 def request_body(model: str, prompt: str) -> dict:
-    return {"model": model.split("/", 1)[1], "temperature": 0, "stream": False,
-            "messages": [{"role": "system", "content": "You are a strict, blinded benchmark adjudicator."},
-                         {"role": "user", "content": prompt}]}
-
-
-def load_header_profile(path: Path) -> dict:
-    """Header profiles are committed with a `headers` key; anything else is a bug."""
-    document = json.loads(path.read_text())
-    headers = document.get("headers")
-    if not isinstance(headers, dict):
-        raise SystemExit(
-            f"{path}: header profile must carry a 'headers' object, found keys {sorted(document)}"
-        )
-    return headers
+    return build_request_body(model, prompt, system="You are a strict, blinded benchmark adjudicator.")
 
 
 def item_key(item: dict) -> str:
@@ -72,20 +54,10 @@ def item_key(item: dict) -> str:
 
 
 def write_checkpoint(path: Path, records: list[dict]) -> None:
-    output = {"schema": "lci.oracle-adjudications.v1", "policy": "every-provisional-failure",
-              "records": records,
-              "promotion_policy": "Regression candidates require deterministic rule implementation plus positive and adversarial tests; LLM verdicts never directly override primary scores."}
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temporary = tempfile.mkstemp(prefix=path.name, suffix=".tmp", dir=path.parent)
-    try:
-        with os.fdopen(fd, "w") as handle:
-            json.dump(output, handle, indent=2, sort_keys=True)
-            handle.write("\n")
-        os.replace(temporary, path)
-    except BaseException:
-        try: os.unlink(temporary)
-        except FileNotFoundError: pass
-        raise
+    write_checkpoint_document(path, {
+        "schema": "lci.oracle-adjudications.v1", "policy": "every-provisional-failure",
+        "records": records,
+        "promotion_policy": "Regression candidates require deterministic rule implementation plus positive and adversarial tests; LLM verdicts never directly override primary scores."})
 
 
 def adjudicate_item(item: dict, complete, *, model: str, headers: dict,
