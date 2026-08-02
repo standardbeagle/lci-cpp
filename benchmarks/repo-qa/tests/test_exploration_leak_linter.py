@@ -140,6 +140,31 @@ class LeakCategoryTests(unittest.TestCase):
         categories = self._cats(linter.find_metadata_leaks(task))
         self.assertEqual(categories, {"author-metadata"})
 
+    def test_metadata_match_respects_token_boundaries(self):
+        """The old separator-free concatenation matched 'true' INSIDE
+        'construed'; a label leak is a token sequence, not a substring."""
+        task = _task("neutral", [])
+        task.update({
+            "claim": "The parser may be construed as lenient in this checkout.",
+            "request": "Decide whether that reading holds.",
+            "author": {"verdict": "true", "category": "misdirection",
+                       "trap_id": "trap-zz-77"},
+        })
+        self.assertEqual(linter.find_metadata_leaks(task), [])
+
+    def test_metadata_token_sequence_still_leaks(self):
+        task = _task("neutral", [])
+        task.update({
+            "claim": "It is true that the module retries.",
+            "request": "Check the misdirection around trapZz77.",
+            "author": {"verdict": "true", "category": "misdirection",
+                       "trap_id": "trap-zz-77"},
+        })
+        leaks = linter.find_metadata_leaks(task)
+        self.assertEqual(self._cats(leaks), {"author-metadata"})
+        # verdict token, category token, and the squashed trap id all hit
+        self.assertEqual(len(leaks), 3)
+
 
 class NoFalsePositiveTests(unittest.TestCase):
     def test_generic_architecture_words_not_flagged(self):
