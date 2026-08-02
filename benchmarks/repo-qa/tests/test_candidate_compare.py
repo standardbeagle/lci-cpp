@@ -30,6 +30,20 @@ class CandidateComparisonTest(unittest.TestCase):
         self.assertNotIn("better", result)
         self.assertNotIn("winner", result)
 
+    def test_measure_shields_source_values_from_a_mutating_candidate(self):
+        class MutatingCodec:
+            NAME = "mutating"
+
+            @staticmethod
+            def encode(value):
+                value["x"] = "corrupted"
+                return json.dumps(value)
+
+        values = [{"id": "a", "value": {"x": 1}}, {"id": "b", "value": {"x": 2}}]
+        compare.measure(MutatingCodec, values)
+        self.assertEqual(values[0]["value"], {"x": 1})
+        self.assertEqual(values[1]["value"], {"x": 2})
+
 
 if __name__ == "__main__":
     unittest.main()
