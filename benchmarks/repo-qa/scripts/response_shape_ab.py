@@ -2,8 +2,11 @@
 """Run the preregistered, canned tool-response-shape experiment."""
 from __future__ import annotations
 
-import argparse, hashlib, importlib.util, json, os, shutil, subprocess, tempfile, time
+import argparse, hashlib, importlib.util, json, os, shutil, subprocess, sys, tempfile, time
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import replay_common
 
 _COMPREHENSION_PATH=Path(__file__).with_name("comprehension_ab.py")
 _COMPREHENSION_SPEC=importlib.util.spec_from_file_location("response_shape_comprehension_helpers",_COMPREHENSION_PATH)
@@ -168,14 +171,7 @@ def cell_identity(manifest, task, arm, model, repetition):
     return identity,prompt
 
 def write_atomic(path, value):
-    path.parent.mkdir(parents=True,exist_ok=True); fd,tmp=tempfile.mkstemp(prefix=path.name,suffix=".tmp",dir=path.parent)
-    try:
-        with os.fdopen(fd,"w") as h: json.dump(value,h,sort_keys=True); h.write("\n")
-        os.replace(tmp,path)
-    except BaseException:
-        try: os.unlink(tmp)
-        except FileNotFoundError: pass
-        raise
+    replay_common.write_atomic(Path(path), json.dumps(value, sort_keys=True) + "\n")
 
 def reusable(path, identity):
     if not path.exists(): return False

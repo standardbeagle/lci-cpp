@@ -6,13 +6,15 @@ import argparse
 import hashlib
 import http.server
 import json
-import os
-import tempfile
+import sys
 import threading
 import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import replay_common
 
 SECRET_HEADERS = {"authorization", "cookie", "proxy-authorization", "x-api-key", "api-key"}
 HOP_HEADERS = {"connection", "host", "content-length", "transfer-encoding", "accept-encoding"}
@@ -42,17 +44,7 @@ def decode_body(data: bytes):
 
 
 def atomic_json(path: Path, value: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temporary = tempfile.mkstemp(prefix=path.name, suffix=".tmp", dir=path.parent)
-    try:
-        with os.fdopen(fd, "w") as handle:
-            json.dump(value, handle, indent=2, sort_keys=True, ensure_ascii=False)
-            handle.write("\n")
-        os.replace(temporary, path)
-    except BaseException:
-        try: os.unlink(temporary)
-        except FileNotFoundError: pass
-        raise
+    replay_common.write_atomic(path, json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False) + "\n")
 
 
 def build_capture(started: int, path: str, request_headers, request_body: bytes,

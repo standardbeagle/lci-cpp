@@ -25,6 +25,7 @@ from replay_common import (  # noqa: E402  (path bootstrap must precede the impo
     diff_pointers,
     digest,
     tool_content_pointer,
+    write_immutable as _write_immutable_text,
 )
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -258,16 +259,7 @@ def cell_identity(fixture: dict, model: str, arm: str, repetition: int, order: i
 
 
 def write_immutable(path: Path, record: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    data = (json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode()
-    try:
-        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
-    except FileExistsError as error:
-        raise RuntimeError(f"refusing to replace immutable cell record: {path}") from error
-    with os.fdopen(descriptor, "wb") as output:
-        output.write(data)
-        output.flush()
-        os.fsync(output.fileno())
+    _write_immutable_text(path, json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
 
 
 class Provider(Protocol):

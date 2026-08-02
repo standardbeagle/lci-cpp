@@ -10,9 +10,13 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import replay_common
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -204,15 +208,7 @@ def run_model(opencode: str, workspace: Path, model: str, prompt: str, timeout: 
 
 
 def write_atomic(path: Path, value: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temp_name = tempfile.mkstemp(prefix=path.name, suffix=".tmp", dir=path.parent)
-    try:
-        with os.fdopen(fd, "w") as handle:
-            handle.write(canonical(value))
-        os.replace(temp_name, path)
-    except BaseException:
-        os.unlink(temp_name)
-        raise
+    replay_common.write_atomic(path, canonical(value))
 
 
 def load_bank() -> list[dict]:

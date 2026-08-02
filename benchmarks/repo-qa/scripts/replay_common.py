@@ -14,6 +14,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import tempfile
+from pathlib import Path
 
 # Request headers that may be persisted into fixtures and replayed verbatim.
 # Credential-bearing headers are never in this set; they are injected at runtime
@@ -49,6 +52,44 @@ def digest(value: object) -> str:
     """
     text = value if isinstance(value, str) else canonical(value)
     return "sha256:" + hashlib.sha256(text.encode("utf-8", errors="surrogatepass")).hexdigest()
+
+
+def write_atomic(path: Path, text: str) -> None:
+    """Replace `path` with `text` atomically.
+
+    Serialization stays at the call site (each artifact family has its own
+    frozen byte form); this owns only the durability contract: write to a
+    same-directory temp file, fsync, rename over the target, and unlink the
+    temp file on any failure so an interrupted run leaves no debris — and
+    never masks the original exception with an unlink error.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix=path.name, suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    except BaseException:
+        try:
+            os.unlink(temporary)
+        except OSError:
+            pass
+        raise
+
+
+def write_immutable(path: Path, text: str) -> None:
+    """Create `path` exactly once; refuse to overwrite an existing record."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+    except FileExistsError as error:
+        raise RuntimeError(f"refusing to replace immutable record: {path}") from error
+    with os.fdopen(descriptor, "wb") as handle:
+        handle.write(text.encode())
+        handle.flush()
+        os.fsync(handle.fileno())
 
 
 def _escape_pointer_token(key: object) -> str:
