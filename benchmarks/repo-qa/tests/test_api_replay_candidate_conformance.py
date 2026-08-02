@@ -90,6 +90,16 @@ class CandidateConformanceTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "decode"):
             self.candidate("def encode(value): return ''\n")
 
+    def test_loader_module_identity_ignores_path_spelling(self):
+        import os
+
+        absolute = CANDIDATES / "tagged_blocks_v1.py"
+        relative = Path(os.path.relpath(absolute, Path.cwd()))
+        self.assertEqual(
+            conformance.load_candidate(absolute).__name__,
+            conformance.load_candidate(relative).__name__,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
