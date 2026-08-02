@@ -986,5 +986,21 @@ class TestRealCorporaConfig(unittest.TestCase):
             self.assertTrue(os.path.isabs(spec["source_path"]))
 
 
+class TestForgeVersionCompat(unittest.TestCase):
+    def test_forge_version_is_2_after_trap_injection_and_manifest_v2(self):
+        """Trap injection and the v2 manifest changed forge output for the same
+        (spec, seed); a corpus forged before that is NOT reproducible by this
+        forge, so the compat knob every gate compares against must say so."""
+        self.assertEqual(forge.FORGE_VERSION, "2")
+
+    def test_load_corpora_rejects_a_stale_forge_version_config(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = os.path.join(root, "corpora.json")
+            with open(path, "w", encoding="utf-8") as handle:
+                json.dump({"forge_version": "1", "corpora": []}, handle)
+            with self.assertRaisesRegex(forge.ForgeError, "forge_version"):
+                forge.load_corpora(path)
+
+
 if __name__ == "__main__":
     unittest.main()

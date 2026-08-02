@@ -6,7 +6,7 @@
     "corpus_id": "pocketbase",
     "source_commit": "d438c6a96a0252ff9df62c1cfe193480ed9ff15d",
     "seed": 7,
-    "forge_version": "1"
+    "forge_version": "2"
   },
   "prompt": "So it does not hammer storage on every diagnostic line, this backend accumulates emitted records and flushes them in groups on a size or time trigger. Where is the record type that carries one emitted entry's fields, and where is the accumulate-and-flush machinery that batches them before they are persisted?",
   "rubric": {

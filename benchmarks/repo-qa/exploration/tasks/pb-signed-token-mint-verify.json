@@ -6,7 +6,7 @@
     "corpus_id": "pocketbase",
     "source_commit": "d438c6a96a0252ff9df62c1cfe193480ed9ff15d",
     "seed": 7,
-    "forge_version": "1"
+    "forge_version": "2"
   },
   "prompt": "This backend hands out compact signed credentials to authenticated callers and later checks them on incoming requests. Where does it mint one of these signed credentials with a payload and an expiry, and where does it crack a credential open to read its claims without yet trusting the signature?",
   "rubric": {

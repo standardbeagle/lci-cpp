@@ -41,7 +41,11 @@ import sys
 import tarfile
 import tempfile
 
-FORGE_VERSION = "1"
+# "2": trap injection + the v2 manifest changed forge output for the same
+# (spec, seed); corpora and banks pinned to "1" are not comparable and every
+# compat gate (load_corpora, prepare_checkout, task validators, scoring)
+# must reject them.
+FORGE_VERSION = "2"
 MANIFEST_SCHEMA = "exploration_corpus_manifest_v2"
 READABLE_MANIFEST_SCHEMAS = {
     "exploration_corpus_manifest_v1",

@@ -30,6 +30,10 @@ class TreeHashMismatch(CorpusError):
     """The forged tree's content no longer matches the manifest's pinned hash."""
 
 
+class ForgeVersionMismatch(CorpusError):
+    """The forged corpus was produced by an incompatible forge version."""
+
+
 class EscapingSymlink(CorpusError):
     """A forged tree symlink resolves outside the corpus tree."""
 
@@ -93,6 +97,18 @@ def prepare_checkout(corpus_root, manifest_ref, dest):
     manifest, tree_dir = locate_forged_corpus(
         corpus_root, manifest_ref["corpus_id"], manifest_ref["seed"]
     )
+    # A stale corpus from an older forge is self-consistent (its tree matches
+    # its own manifest hash), so only this version gate can reject it.
+    if manifest.get("forge_version") != forge.FORGE_VERSION:
+        raise ForgeVersionMismatch(
+            f"forged manifest forge_version {manifest.get('forge_version')!r} != "
+            f"current forge {forge.FORGE_VERSION!r}; re-forge the corpus"
+        )
+    if manifest.get("forge_version") != manifest_ref["forge_version"]:
+        raise ForgeVersionMismatch(
+            f"forged manifest forge_version {manifest.get('forge_version')!r} != "
+            f"task manifest_ref.forge_version {manifest_ref['forge_version']!r}"
+        )
     if manifest.get("source_commit") != manifest_ref["source_commit"]:
         raise TreeHashMismatch(
             f"forged manifest source_commit {manifest.get('source_commit')} != "

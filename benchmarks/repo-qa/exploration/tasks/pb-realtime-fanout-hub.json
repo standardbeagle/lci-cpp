@@ -6,7 +6,7 @@
     "corpus_id": "pocketbase",
     "source_commit": "d438c6a96a0252ff9df62c1cfe193480ed9ff15d",
     "seed": 7,
-    "forge_version": "1"
+    "forge_version": "2"
   },
   "prompt": "The realtime feature keeps a set of connected clients and pushes events out to whichever of them are interested. Where is the hub type that owns that set of live client connections, and where is its constructor that stands up an empty hub ready to register clients?",
   "rubric": {

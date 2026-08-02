@@ -191,6 +191,33 @@ class ValidatorTest(unittest.TestCase):
     def test_valid_fixture_passes(self):
         self.assertEqual(self.fx.run(), [])
 
+    def test_duplicate_anchor_misclassification_is_not_masked_by_first_index(self):
+        """evidence.index(anchor) maps every duplicate anchor dict to the FIRST
+        occurrence, so a contradicting classification on the second duplicate
+        was checked against the first's slot and slipped through."""
+        first = self.fx.task["evidence"][0]
+        self.fx.task["evidence"] = [copy.deepcopy(first), copy.deepcopy(first)]
+        self.fx.task["author"]["anchor_classification"] = [
+            "authoritative-live", "dead",
+        ]
+        self.fx._annotation("ann-a")
+        self.fx._annotation("ann-b")
+        self.fx._flush_task()
+        problems = self.fx.run()
+        self.assertTrue(
+            any("anchor classification 'dead'" in p and "[ann" not in p
+                for p in problems),
+            msg="\n".join(problems),
+        )
+
+    def test_stale_forge_version_manifest_ref_fails(self):
+        """Trap injection + manifest v2 changed forge output for the same
+        (spec, seed): a task still pinning the old forge version references a
+        corpus the current forge can no longer reproduce, so it must fail."""
+        self.fx.task["manifest_ref"]["forge_version"] = "1"
+        self.fx._flush_task()
+        self.assertTrue(any("forge_version" in p for p in self.fx.run()))
+
     def test_missing_second_annotation_fails(self):
         os.remove(
             os.path.join(self.fx.annotations_dir, "pb-app-bootstrap.ann-b.json")

@@ -1,6 +1,6 @@
 {
   "schema": "exploration_corpora_v1",
-  "forge_version": "1",
+  "forge_version": "2",
   "comment": [
     "Stage-1 exploration corpora. Each entry names a LOCAL source checkout and the",
     "commit it is pinned to; the forge exports that commit with `git archive` and",

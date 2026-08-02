@@ -7,7 +7,7 @@
     "corpus_id": "pocketbase",
     "source_commit": "d438c6a96a0252ff9df62c1cfe193480ed9ff15d",
     "seed": 7,
-    "forge_version": "1"
+    "forge_version": "2"
   },
   "prompt": "A type in this package is being assembled inline by callers instead of through the constructor idiom its siblings expose; add and route through the missing constructor.",
   "rubric": {

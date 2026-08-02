@@ -17,6 +17,7 @@ one paired aggregate unless the caller explicitly opts in via `group_by`.
 import statistics
 
 from scoring.citations import normalize_path, parse_citations
+from scoring.pairing import IncompatibleRuns, collect_latest, pair_cells
 
 SCORE_SCHEMA = "exploration_score_v1"
 AGGREGATE_SCHEMA = "exploration_aggregate_v1"
@@ -27,11 +28,6 @@ _ANSWERED = "answered"
 # source commit vary legitimately across a multi-corpus bank, so they are NOT
 # here; forge_version is the forge-manifest compatibility knob.
 _COMPAT_FIELDS = ("model", "forge_version", "task_bank_version")
-
-
-class IncompatibleRuns(Exception):
-    """Records that disagree on a compatibility field were aggregated together
-    without the caller explicitly grouping by it -- fail loud."""
 
 
 # ---------------------------------------------------------------------------
@@ -153,7 +149,7 @@ def score_run(task, record):
 # ---------------------------------------------------------------------------
 
 
-def _distribution(values):
+def distribution(values):
     """min / median / mean / max / total over a numeric sample, or None."""
     nums = [v for v in values if v is not None]
     if not nums:
@@ -190,12 +186,12 @@ def _arm_summary(scores):
         "answered": answered,
         "success_rate": answered / count if count else 0.0,
         "evidence": _macro_evidence(scores),
-        "tool_calls": _distribution([s["process"]["tool_calls"] for s in scores]),
-        "input_tokens": _distribution([s["process"]["input_tokens"] for s in scores]),
-        "output_tokens": _distribution(
+        "tool_calls": distribution([s["process"]["tool_calls"] for s in scores]),
+        "input_tokens": distribution([s["process"]["input_tokens"] for s in scores]),
+        "output_tokens": distribution(
             [s["process"]["output_tokens"] for s in scores]
         ),
-        "wall_clock_seconds": _distribution(
+        "wall_clock_seconds": distribution(
             [s["process"]["wall_clock_seconds"] for s in scores]
         ),
     }
@@ -254,51 +250,20 @@ def _deltas(arms):
     }
 
 
-def _latest_by_run_key(scores):
-    """Keep the last score for each run key, matching append-log semantics."""
-    latest = {}
-    for score in scores:
-        key = score.get("run_key")
-        if key is None:
-            raise IncompatibleRuns("score record is missing required run_key")
-        latest[key] = score
-    return list(latest.values())
+# Back-compat private aliases (edits/scoring still imports these names); new
+# code imports `distribution` here and the pairing core from scoring.pairing.
+_distribution = distribution
 
 
 def _pair_scores(scores):
-    """Return exact task/seed pairs and a forensic list of unmatched cells."""
-    cells = {}
-    for score in scores:
-        cell = (score.get("task_id"), score.get("seed"))
-        arm = score.get("arm")
-        arms = cells.setdefault(cell, {})
-        if arm in arms:
-            previous = arms[arm]
-            raise IncompatibleRuns(
-                "multiple run keys claim the same task/seed/arm cell: "
-                f"{previous.get('run_key')!r} and {score.get('run_key')!r}"
-            )
-        arms[arm] = score
+    """Back-compat shim for edits/scoring: its status vocabulary is judged by
+    the edit gates before pairing, so cells pair on presence alone."""
+    return pair_cells(scores, completed_statuses=None)
 
-    paired = []
-    unpaired = []
-    for (task_id, seed), arms in sorted(
-        cells.items(), key=lambda item: (str(item[0][0]), str(item[0][1]))
-    ):
-        treatment = arms.get("treatment")
-        baseline = arms.get("baseline")
-        if treatment is not None and baseline is not None:
-            paired.extend((treatment, baseline))
-        for arm, score in sorted(arms.items(), key=lambda item: str(item[0])):
-            if treatment is None or baseline is None:
-                unpaired.append({
-                    "task_id": task_id,
-                    "seed": seed,
-                    "arm": arm,
-                    "run_key": score.get("run_key"),
-                    "status": score.get("status"),
-                })
-    return paired, unpaired
+
+def _latest_by_run_key(scores):
+    """Back-compat shim: the surviving record per run_key (scoring.pairing)."""
+    return collect_latest(scores)[0]
 
 
 def aggregate(score_records, *, group_by=()):
@@ -307,7 +272,7 @@ def aggregate(score_records, *, group_by=()):
     Refuses (raises IncompatibleRuns) if the records disagree on model, forge
     version, or task-bank version unless that field is named in `group_by`.
     """
-    scores = _latest_by_run_key(list(score_records))
+    scores, _attempts = collect_latest(list(score_records))
     if not scores:
         raise IncompatibleRuns("no score records to aggregate")
 
@@ -319,7 +284,7 @@ def aggregate(score_records, *, group_by=()):
     arms = {arm: _arm_summary(sorted(by_arm[arm], key=lambda s: s["run_key"]))
             for arm in sorted(by_arm)}
 
-    paired_scores, unpaired = _pair_scores(scores)
+    paired_scores, unpaired = pair_cells(scores)
     paired_by_arm = {}
     for score in paired_scores:
         paired_by_arm.setdefault(score["arm"], []).append(score)

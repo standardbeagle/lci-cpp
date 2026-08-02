@@ -6,7 +6,7 @@
     "corpus_id": "next.js",
     "source_commit": "97532172c065ca2b49dd79d1fa44c3a0b864065b",
     "seed": 7,
-    "forge_version": "1"
+    "forge_version": "2"
   },
   "prompt": "Before user code sees an incoming request's parameters, the framework removes its own private, framework-only keys so they never leak into application logic. Where does it strip those private keys from a parsed parameter bag, and where does it do the same directly on a URL's search parameters?",
   "rubric": {

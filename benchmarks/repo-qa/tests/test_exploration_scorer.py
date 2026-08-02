@@ -313,6 +313,26 @@ class AggregateTests(unittest.TestCase):
             {("treatment", 8), ("baseline", 9)},
         )
 
+    def test_retryable_failure_cell_stays_unpaired(self):
+        """Shared pairing convention (scoring.pairing): a retryable failure
+        (timeout / provider_error / config_error) leaves its cell unpaired --
+        it can still be retried -- while completed cells pair even when the
+        completion is a terminal failure."""
+        task = answer_key()
+        scores = [
+            score_run(task, make_record(task, arm="treatment",
+                                        final_answer=f"{CORPUS_FILE}:3")),
+            score_run(task, make_record(task, arm="baseline", status="timeout",
+                                        final_answer=None)),
+        ]
+        agg = aggregate(scores)
+        self.assertEqual(agg["pairing"]["paired_count"], 0)
+        self.assertEqual(agg["pairing"]["unpaired_count"], 2)
+
+    def test_distribution_is_public(self):
+        from scoring.scorer import distribution
+        self.assertEqual(distribution([1, 3])["median"], 2)
+
     def test_rejects_distinct_run_keys_claiming_same_cell(self):
         task = answer_key()
         first = score_run(task, make_record(task, arm="treatment"))

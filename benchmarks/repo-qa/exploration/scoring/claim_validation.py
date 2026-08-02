@@ -11,7 +11,8 @@ import statistics
 
 import sealed_artifacts
 from scoring.citations import normalize_path
-from scoring.scorer import IncompatibleRuns, _distribution
+from scoring.pairing import IncompatibleRuns, collect_latest, pair_cells
+from scoring.scorer import distribution
 
 CLAIM_SCORE_SCHEMA = "claim_validation_score_v1"
 CLAIM_AGGREGATE_SCHEMA = "claim_validation_aggregate_v1"
@@ -194,43 +195,22 @@ def _arm_summary(scores):
         "false_premise_rate": _rate([s for s in scores if s["expected_verdict"] == "false"], "success"),
         "unsupported_rate": _rate([s for s in scores if s["expected_verdict"] == "unsupported"], "success"),
         "categories": categories,
-        "tool_calls": _distribution([s["process"]["tool_calls"] for s in scores]),
+        "tool_calls": distribution([s["process"]["tool_calls"] for s in scores]),
     }
 
 
+def _attempt_view(score):
+    attempt = {field: score.get(field) for field in
+               ("status", "valid_answer", "predicted_verdict", "success", "process")}
+    return score.get("attempts") or [attempt]
+
+
 def _latest_and_pair(scores):
-    latest = {}
-    attempts = {}
-    for score in scores:
-        key = score.get("run_key")
-        if key is None:
-            raise IncompatibleRuns("score record is missing required run_key")
-        attempt = {field: score.get(field) for field in
-                   ("status", "valid_answer", "predicted_verdict", "success", "process")}
-        attempts.setdefault(key, []).extend(score.get("attempts") or [attempt])
-        # Append logs may contain retries.  Once a run key has a completed
-        # answer, a later timeout/provider failure must not erase it.  Among
-        # completed retries the latest answer still wins.
-        previous = latest.get(key)
-        if previous is None or score.get("status") == "answered" or previous.get("status") != "answered":
-            latest[key] = score
-    cells = {}
-    for score in latest.values():
-        key = (score.get("task_id"), score.get("seed"))
-        arm = score.get("arm")
-        if arm in cells.setdefault(key, {}):
-            raise IncompatibleRuns("multiple run keys claim the same task/seed/arm cell")
-        cells[key][arm] = score
-    paired, unpaired = [], []
-    for key, arms in sorted(cells.items()):
-        complete = {arm for arm, score in arms.items() if score.get("status") == "answered"}
-        if complete >= {"treatment", "baseline"}:
-            paired.extend((arms["treatment"], arms["baseline"]))
-        else:
-            unpaired.extend({"task_id": key[0], "seed": key[1], "arm": arm,
-                             "run_key": score["run_key"], "status": score["status"]}
-                            for arm, score in arms.items())
-    return list(latest.values()), paired, unpaired, attempts
+    # Latest-wins with the completion guard and completed-cells-pair convention
+    # both live in scoring.pairing -- one implementation for every scorer.
+    latest, attempts = collect_latest(scores, _attempt_view)
+    paired, unpaired = pair_cells(latest)
+    return latest, paired, unpaired, attempts
 
 
 def aggregate_claim_scores(score_records):

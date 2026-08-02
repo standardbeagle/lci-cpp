@@ -6,7 +6,7 @@
     "corpus_id": "pocketbase",
     "source_commit": "d438c6a96a0252ff9df62c1cfe193480ed9ff15d",
     "seed": 7,
-    "forge_version": "1"
+    "forge_version": "2"
   },
   "prompt": "This codebase has a small kit of type-generic helpers for working with simple sequences of values. Where is the helper that answers whether a given value is already present in such a sequence, and where is the one that returns only the non-empty, de-duplicated values from it?",
   "rubric": {

@@ -181,9 +181,15 @@ def find_metadata_leaks(task):
     forbidden.extend(a.get("path") for a in task.get("evidence", []))
     for anchor in task.get("evidence", []):
         forbidden.extend(anchor.get("target_identifiers", []))
-    normalized_public = "".join(normalize_tokens(public))
+    # Token-sequence matching, same matcher as find_leaks: a joined-substring
+    # check has no boundaries ("true" fires inside "construed").
+    public_tokens = normalize_tokens(public)
     for raw in forbidden:
-        if raw and "".join(normalize_tokens(str(raw))) in normalized_public:
+        if not raw:
+            continue
+        needle = normalize_tokens(str(raw))
+        if needle and (_contiguous(needle, public_tokens)
+                       or _squash_hit(needle, public_tokens)):
             leaks.append((task.get("id"), "author-metadata", redact(str(raw))))
     return sorted(set(leaks))
 

@@ -439,14 +439,15 @@ def validate_task(
                 f"manifest_ref.seed {ref['seed']}"
             )
         valid_live_anchors = []
-        for anchor in evidence:
+        # Carry the enumerate position: list.index() would resolve duplicate
+        # anchor dicts to their FIRST occurrence and check the wrong slot.
+        for index, anchor in enumerate(evidence):
             anchor_problems = list(verify_anchor_live(anchor, manifest, tree_dir))
             for message in anchor_problems:
                 problems.append(f"{task_id}: {message}")
             if not anchor_problems:
-                valid_live_anchors.append(anchor)
-        for anchor in valid_live_anchors:
-            index = evidence.index(anchor)
+                valid_live_anchors.append((index, anchor))
+        for index, anchor in valid_live_anchors:
             expected = classify_anchor_live(anchor, manifest)
             adjudicated = task["author"]["anchor_classification"][index]
             if adjudicated != expected:

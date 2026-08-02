@@ -7,7 +7,7 @@
     "corpus_id": "pocketbase",
     "source_commit": "d438c6a96a0252ff9df62c1cfe193480ed9ff15d",
     "seed": 7,
-    "forge_version": "1"
+    "forge_version": "2"
   },
   "prompt": "One routine in the backend swallows the underlying cause when it reports a failure upward; make it report failures the same way the rest of this package does, so callers can still unwrap the original.",
   "rubric": {
