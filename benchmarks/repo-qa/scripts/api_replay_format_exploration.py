@@ -103,12 +103,18 @@ def build_request(fixture: dict, arm: str) -> dict:
     return request
 
 
+# Every admissible fixture provenance. `derived_from_sanitized_live_proxy` is a
+# sanitized live capture whose user/tool turns were rewritten by
+# api_replay_all_tools.derive_fixture; validation applies to it unchanged.
+ACCEPTED_CAPTURE_KINDS = {"sanitized_live_proxy", "derived_from_sanitized_live_proxy"}
+
+
 def validate_fixture(fixture: dict) -> dict:
     if fixture.get("schema") != "lci.api-replay.fixture.v1":
         raise ValueError("wrong fixture schema")
     if not isinstance(fixture.get("recorded_model"), str) or not fixture["recorded_model"]:
         raise ValueError("fixture must name its recorded model")
-    if fixture.get("capture_kind") != "sanitized_live_proxy":
+    if fixture.get("capture_kind") not in ACCEPTED_CAPTURE_KINDS:
         raise ValueError("fixture must originate from a sanitized live provider capture")
     fixture_request_headers(fixture)
     native_model = fixture.get("request", {}).get("model")

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import copy
-import importlib.util
 import json
 import hashlib
 import re
@@ -81,6 +80,9 @@ def jobs(fixtures: list[dict], repetitions: int = 2) -> list[tuple]:
 def preflight(fixtures: list[dict], planned: list[tuple]) -> dict:
     checks = []
     for fixture in fixtures:
+        # Derived fixtures must satisfy the same validation contract as live
+        # captures; validate_fixture accepts the derived capture_kind explicitly.
+        replay.validate_fixture(fixture)
         identity = replay.build_request(fixture, replay.ARMS[0])
         index, source = tool_content_pointer(identity, fixture["tool_call_id"])
         for arm in replay.ARMS:

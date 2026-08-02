@@ -63,6 +63,15 @@ class ApiReplayAllToolsTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "assistant"):
             module.derive_fixture(base, case, {"question": "q", "answer": ["a"]})
 
+    def test_derived_fixtures_satisfy_the_shared_validation_contract(self):
+        """derive_fixture's capture_kind must be accepted by validate_fixture."""
+        base = json.loads((BASE / "fixture-deepseek-search.json").read_text())
+        case = {"tool": "find_files", "scenario": "negative", "arguments": {"pattern": "missing"},
+                "output": '{"results":[]}'}
+        fixture = module.derive_fixture(base, case, {"question": "q", "answer": ["a"]})
+        self.assertEqual(fixture["capture_kind"], "derived_from_sanitized_live_proxy")
+        module.replay.validate_fixture(fixture)
+
     def test_text_protocol_roundtrips_through_every_arm(self):
         source = "LCF/1.0 mode=overview\nfiles=447"
         for arm in module.replay.ARMS:
