@@ -9,12 +9,17 @@ def mean(items, getter): return statistics.fmean(getter(x) for x in items) if it
 def metrics(items):
     usable=[x for x in items if x.get("status")=="answered" and isinstance(x.get("score"),dict)]
     token=lambda x:x.get("tokens") or {}
+    # omission_count is a COUNT; 1-answer_recall is a RATE. Mixing units in one
+    # mean is meaningless, so average only records carrying the count and report
+    # how many usable records were excluded for lacking it.
+    with_omissions=[x for x in usable if "omission_count" in x["score"]]
     return {"planned":len(items),"usable":len(usable),"failures":len(items)-len(usable),
         "completion":len(usable)/len(items) if items else None,
         "correctness":mean(usable,lambda x:x["score"]["correct"]),
         "evidence_use":mean(usable,lambda x:x["score"]["evidence_recall"]),
         "hallucination":mean(usable,lambda x:x["score"]["hallucinated"]),
-        "omissions":mean(usable,lambda x:x["score"].get("omission_count",1-x["score"]["answer_recall"])),
+        "omissions":mean(with_omissions,lambda x:x["score"]["omission_count"]),
+        "omissions_excluded_missing_field":len(usable)-len(with_omissions),
         "latency_seconds":mean(usable,lambda x:float(x.get("wall_seconds",0))),
         "input_tokens":mean(usable,lambda x:float(token(x).get("input",0))),
         "output_tokens":mean(usable,lambda x:float(token(x).get("output",0)))}

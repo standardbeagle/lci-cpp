@@ -16,4 +16,11 @@ class AnalysisTest(unittest.TestCase):
    analysis.write_model_scorecards(Path(d),result); self.assertEqual(len(list(Path(d).glob("*.json"))),2)
   self.assertFalse(analysis.analyze(manifest,tasks,records[:-1])["complete"])
   with self.assertRaisesRegex(ValueError,"duplicate"): analysis.analyze(manifest,tasks,records+[records[0]])
+ def test_omissions_mean_uses_only_counts_and_notes_dropped_records(self):
+  with_count={"status":"answered","score":{"correct":True,"hallucinated":False,"evidence_recall":1.0,"answer_recall":1.0,"omission_count":2},"tokens":{},"wall_seconds":0.1}
+  without_count={"status":"answered","score":{"correct":True,"hallucinated":False,"evidence_recall":1.0,"answer_recall":0.5},"tokens":{},"wall_seconds":0.1}
+  m=analysis.metrics([with_count,without_count])
+  self.assertEqual(m["omissions"],2.0)  # never blended with the 0.5 recall RATE
+  self.assertEqual(m["omissions_excluded_missing_field"],1)
+  empty=analysis.metrics([without_count]); self.assertIsNone(empty["omissions"])
 if __name__=="__main__": unittest.main()
