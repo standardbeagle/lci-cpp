@@ -164,6 +164,20 @@ class ClaimValidationModeTest(unittest.TestCase):
             )
             self.assertIn('"verdict":"true|false|unsupported"', left.prompt)
 
+    def test_record_captures_run_settings_for_the_scoring_compat_gate(self):
+        """The claim scorer's run_settings compat gate reads record['settings'];
+        a runner that never writes it leaves that gate vacuously green, so
+        unlike runs (different timeout, different system prompt) would fold
+        into one paired aggregate."""
+        with TemporaryDirectory() as root:
+            forge_fixture(root)
+            rec = self._run(root, FakeAgent(claim_result()))
+        base = base_config()
+        self.assertEqual(rec["settings"], {
+            "timeout_seconds": base.timeout_seconds,
+            "system_prompt": base.system_prompt,
+        })
+
     def test_structured_answer_and_sealed_record_metadata(self):
         with TemporaryDirectory() as root:
             forge_fixture(root)
