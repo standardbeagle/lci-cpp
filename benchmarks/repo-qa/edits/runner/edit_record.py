@@ -56,7 +56,6 @@ RETRYABLE_STATUSES = ALL_STATUSES - COMPLETED_STATUSES
 run_key = base_record.run_key
 append_record = base_record.append_record
 load_records = base_record.load_records
-completed_keys_of = base_record.completed_keys  # exploration's; not edit-aware
 CorruptRecords = base_record.CorruptRecords
 
 

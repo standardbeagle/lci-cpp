@@ -169,16 +169,18 @@ def run_edit_task(
 
     # Verified, throwaway checkout of the PINNED tree. A drifted/absent corpus is
     # rejected loud, recorded as config_error, and the agent is never invoked.
+    checkout_dest = os.path.join(work_root, "checkouts", _safe_name(key))
     try:
         manifest, tree_dir = corpus.locate_forged_corpus(
             corpus_root, task["manifest_ref"]["corpus_id"], seed
         )
         _, checkout = corpus.prepare_checkout(
-            corpus_root,
-            task["manifest_ref"],
-            os.path.join(work_root, "checkouts", _safe_name(key)),
+            corpus_root, task["manifest_ref"], checkout_dest
         )
     except corpus.CorpusError as error:
+        # prepare_checkout may have created a partial copy before rejecting the
+        # tree -- remove it so a failed cell leaves no half-materialized residue.
+        shutil.rmtree(checkout_dest, ignore_errors=True)
         return _finish(
             records_path, rec,
             status=edit_record.STATUS_CONFIG_ERROR,
@@ -283,12 +285,26 @@ def run_edit_task(
         # indistinguishable from one that was never planned. The record is
         # retryable, carries the exception class AND message, and the re-raise
         # preserves the original traceback so fail-fast semantics are unchanged.
-        _finish(
-            records_path, rec,
-            status=edit_record.STATUS_HARNESS_FAILURE,
-            reason=REASON_HARNESS_ERROR,
-            error=f"{type(error).__name__}: {error}",
-        )
+        # The record write itself may fail (disk full, bad path); that secondary
+        # fault must never REPLACE the original exception, so it is logged and
+        # chained instead of propagating on its own.
+        try:
+            _finish(
+                records_path, rec,
+                status=edit_record.STATUS_HARNESS_FAILURE,
+                reason=REASON_HARNESS_ERROR,
+                error=f"{type(error).__name__}: {error}",
+            )
+        except Exception as record_error:  # noqa: BLE001
+            import sys
+            import traceback
+
+            print(
+                f"edit_run: failed to append harness_failure record for "
+                f"{key}: {type(record_error).__name__}: {record_error}",
+                file=sys.stderr,
+            )
+            traceback.print_exc(file=sys.stderr)
         raise
     finally:
         # Isolated throwaway worktree: removed on success AND failure.
