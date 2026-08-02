@@ -27,11 +27,13 @@ FINAL_STATUSES = {"answered", "malformed_answer"}
 # Provider stderr is diagnostic only: keep a bounded tail, never the full stream.
 STDERR_TAIL_LIMIT = 512
 
-def canonical(value):
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-
-def digest(value):
-    return "sha256:" + hashlib.sha256((value if isinstance(value, str) else canonical(value)).encode()).hexdigest()
+# The authoritative canonical/digest pair (replay_common) uses ensure_ascii=True;
+# the retired local copy used ensure_ascii=False, so digests of values containing
+# non-ASCII text change. The committed manifest/tasks are pure ASCII, so no
+# committed artifact embeds a divergent digest; runtime cell records from older
+# runs of non-ASCII cells would simply re-execute on resume.
+canonical = replay_common.canonical
+digest = replay_common.digest
 
 def load_inputs(manifest_path=MANIFEST, tasks_path=TASKS):
     manifest, bank = json.loads(Path(manifest_path).read_text()), json.loads(Path(tasks_path).read_text())

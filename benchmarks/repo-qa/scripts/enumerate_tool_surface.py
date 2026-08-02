@@ -8,9 +8,13 @@ import json
 import os
 import queue
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import replay_common
 
 
 CASES = {
@@ -236,8 +240,7 @@ def run_oracle(
     return normalized.rstrip("\n")
 
 
-def canonical_json(value: dict) -> str:
-    return json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+canonical_json = replay_common.pretty  # byte-identical to the previous local copy
 
 
 def main() -> int:

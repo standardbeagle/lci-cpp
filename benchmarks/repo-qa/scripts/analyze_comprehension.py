@@ -7,17 +7,18 @@ import argparse
 import glob
 import json
 import statistics
+import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import replay_common
 
 ROOT = Path(__file__).resolve().parents[3]
 PREDICTIONS = ROOT / "benchmarks/repo-qa/comprehension/predictions.json"
 VARIANTS = ROOT / "benchmarks/repo-qa/comprehension/formats/variants.json"
 
-
-def canonical(value: object) -> str:
-    return json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+canonical = replay_common.pretty  # byte-identical to the previous local copy
 
 
 def metric(values: list[float]) -> dict:

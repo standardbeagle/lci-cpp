@@ -39,8 +39,7 @@ TOOL OUTPUT:
 """
 
 
-def canonical(value: object) -> str:
-    return json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+canonical = replay_common.pretty  # byte-identical to the previous local copy
 
 
 def parse_events(lines: list[str]) -> tuple[str, dict]:

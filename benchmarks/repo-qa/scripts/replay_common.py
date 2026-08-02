@@ -42,6 +42,16 @@ def canonical(value: object) -> str:
     return json.dumps(value, ensure_ascii=True, allow_nan=False, sort_keys=True, separators=(",", ":"))
 
 
+def pretty(value: object) -> str:
+    """The harness's single human-readable JSON artifact form.
+
+    Committed artifacts (variants, surfaces, captures, raw cells) all use this
+    byte form; keeping one implementation stops the copies from drifting into
+    silently different artifact encodings.
+    """
+    return json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+
+
 def digest(value: object) -> str:
     """Content digest of a value or an already-canonical string.
 
