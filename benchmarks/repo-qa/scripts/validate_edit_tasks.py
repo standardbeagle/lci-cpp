@@ -154,9 +154,6 @@ def _exemplar_signature(anchor):
 # ---------------------------------------------------------------------------
 
 
-_WILDCARD_ONLY = re.compile(r"[*/.\s]+$")
-
-
 def _blast_glob_matches_everything(glob):
     """A glob made only of wildcards/separators bounds nothing."""
     stripped = re.sub(r"[*/.\s]", "", glob)
@@ -464,6 +461,15 @@ def validate_bank(
         per_corpus[task.get("corpus")] = per_corpus.get(task.get("corpus"), 0) + 1
         per_category[task.get("category")] = (
             per_category.get(task.get("category"), 0) + 1
+        )
+
+    # Category coverage, mirroring the exploration validator's bank gates: a
+    # bank that skips (or invents) a convention family measures only the
+    # families it happens to contain.
+    if task_files and set(per_category) != REQUIRED_CATEGORIES:
+        problems.append(
+            "bank must cover every convention category "
+            f"{sorted(REQUIRED_CATEGORIES)}; got {sorted(per_category, key=str)}"
         )
 
     summary = {
