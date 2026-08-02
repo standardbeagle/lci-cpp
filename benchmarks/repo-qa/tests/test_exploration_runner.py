@@ -260,17 +260,42 @@ class SealedArtifactInventoryTest(unittest.TestCase):
         "answer-keys/claim-one.json",
         "benchmarks/repo-qa/exploration/tasks/nx-a.json",
         "benchmarks/repo-qa/exploration/annotations/nx-a.ann-b.json",
+        # The gate also serves the edit-mode arms; the edit bank's oracle
+        # material is sealed inventory exactly like the exploration bank's.
+        "benchmarks/repo-qa/edits/tasks/nx-retry-1.json",
+        "benchmarks/repo-qa/edits/annotations/nx-retry-1.ann-hyde.json",
+        "benchmarks/repo-qa/edits/schema/edit-task.schema.json",
+        "benchmarks/repo-qa/edits/oracles/oracle_gate.py",
     )
 
     def test_legitimate_corpus_paths_are_not_sealed(self):
-        for path in self.LEGITIMATE:
-            with self.subTest(path=path):
-                self.assertFalse(gate._is_sealed_path(path))
+        with TemporaryDirectory() as checkout:
+            for path in self.LEGITIMATE:
+                with self.subTest(path=path):
+                    self.assertFalse(gate._is_sealed_path(path, checkout))
 
     def test_harness_sealed_artifacts_are_still_sealed(self):
-        for path in self.SEALED:
-            with self.subTest(path=path):
-                self.assertTrue(gate._is_sealed_path(path))
+        with TemporaryDirectory() as checkout:
+            for path in self.SEALED:
+                with self.subTest(path=path):
+                    self.assertTrue(gate._is_sealed_path(path, checkout))
+
+    def test_absolute_in_checkout_spelling_is_sealed_like_the_relative_one(self):
+        """An in-checkout ABSOLUTE path to sealed material must not bypass the
+        check that flags the relative spelling of the very same file."""
+        with TemporaryDirectory() as checkout:
+            for rel in ("annotations/key.json",
+                        "benchmarks/repo-qa/edits/tasks/nx-retry-1.json"):
+                spellings = (rel, os.path.join(checkout, rel))
+                for spelling in spellings:
+                    with self.subTest(spelling=spelling):
+                        violations = gate.enforce(
+                            [ToolCall("Read", {"file_path": spelling})],
+                            ["Read"], checkout,
+                        )
+                        self.assertEqual(
+                            [v["reason"] for v in violations], ["sealed_path"]
+                        )
 
 
 class ConfigParityTest(unittest.TestCase):
