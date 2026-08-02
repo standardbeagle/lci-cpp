@@ -101,25 +101,19 @@ def parse_answers(answer: str) -> list[str]:
     return answers
 
 
-def normalize_answer(value: str) -> str:
-    return " ".join(value.casefold().split())
+normalize_answer = replay_common.normalize_term
 
 
 def grade(extracted: list[str], expected: list[str]) -> dict:
-    predicted = {normalize_answer(item) for item in extracted}
-    truth = {normalize_answer(item) for item in expected}
-    true_positive = len(predicted & truth)
-    false_positive = sorted(predicted - truth)
-    false_negative = sorted(truth - predicted)
-    precision = true_positive / len(predicted) if predicted else (1.0 if not truth else 0.0)
-    recall = true_positive / len(truth) if truth else (1.0 if not predicted else 0.0)
+    scored = replay_common.grade_sets({normalize_answer(item) for item in extracted},
+                                      {normalize_answer(item) for item in expected})
     return {
-        "precision": precision,
-        "recall": recall,
-        "false_positive_count": len(false_positive),
-        "false_positives": false_positive,
-        "false_negatives": false_negative,
-        "exact": not false_positive and not false_negative,
+        "precision": scored["precision"],
+        "recall": scored["recall"],
+        "false_positive_count": len(scored["false_positives"]),
+        "false_positives": scored["false_positives"],
+        "false_negatives": scored["false_negatives"],
+        "exact": scored["exact"],
     }
 
 

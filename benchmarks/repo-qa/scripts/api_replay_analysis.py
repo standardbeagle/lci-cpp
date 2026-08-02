@@ -72,15 +72,7 @@ def quality(predicted: list[str], expected: list[str]) -> dict:
       - nonempty predicted, empty truth -> recall likewise defined as 0.0, so a
         fabricated answer cannot score better than correctly saying nothing
     """
-    predicted_set, expected_set = set(predicted), set(expected)
-    true_positive = len(predicted_set & expected_set)
-    return {
-        "exact": predicted_set == expected_set,
-        "precision": true_positive / len(predicted_set) if predicted_set else (1.0 if not expected_set else 0.0),
-        "recall": true_positive / len(expected_set) if expected_set else (1.0 if not predicted_set else 0.0),
-        "false_positives": sorted(predicted_set - expected_set),
-        "false_negatives": sorted(expected_set - predicted_set),
-    }
+    return replay_common.grade_sets(set(predicted), set(expected))
 
 
 def score_cell(cell: dict, oracles: dict[str, dict]) -> dict:

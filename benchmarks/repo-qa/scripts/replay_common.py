@@ -64,6 +64,38 @@ def digest(value: object) -> str:
     return "sha256:" + hashlib.sha256(text.encode("utf-8", errors="surrogatepass")).hexdigest()
 
 
+def normalize_term(value: str) -> str:
+    """Whitespace/case-insensitive comparison form for graded answer terms."""
+    return " ".join(value.casefold().split())
+
+
+def set_precision_recall(predicted: set, truth: set) -> tuple[float, float]:
+    """Harness-wide IR convention for scoring a predicted set against truth.
+
+    - both empty -> precision 1.0, recall 1.0 (nothing to find, nothing claimed)
+    - empty predicted, nonempty truth -> precision defined as 0.0 so silence
+      cannot score better than an attempt
+    - nonempty predicted, empty truth -> recall defined as 0.0 so fabrication
+      cannot score better than correctly saying nothing
+    """
+    true_positive = len(predicted & truth)
+    precision = true_positive / len(predicted) if predicted else (1.0 if not truth else 0.0)
+    recall = true_positive / len(truth) if truth else (1.0 if not predicted else 0.0)
+    return precision, recall
+
+
+def grade_sets(predicted: set, truth: set) -> dict:
+    """Full IR scorecard under the shared convention, ready to embed in records."""
+    precision, recall = set_precision_recall(predicted, truth)
+    return {
+        "exact": predicted == truth,
+        "precision": precision,
+        "recall": recall,
+        "false_positives": sorted(predicted - truth),
+        "false_negatives": sorted(truth - predicted),
+    }
+
+
 def write_atomic(path: Path, text: str) -> None:
     """Replace `path` with `text` atomically.
 

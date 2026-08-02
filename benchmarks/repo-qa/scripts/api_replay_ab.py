@@ -14,6 +14,8 @@ from replay_common import (  # noqa: E402  (path bootstrap must precede the impo
     canonical,
     diff_pointers,
     digest,
+    grade_sets,
+    normalize_term,
     tool_content_pointer,
 )
 
@@ -91,16 +93,8 @@ def grade_answers(extracted: list[str], expected: list[str]) -> dict:
     an empty side scores 1.0 only when the other side is empty too, so neither
     silence nor fabrication can outscore a correct answer.
     """
-    norm = lambda values: {" ".join(value.casefold().split()) for value in values}
-    predicted, truth = norm(extracted), norm(expected)
-    tp = len(predicted & truth)
-    return {
-        "exact": predicted == truth,
-        "precision": tp / len(predicted) if predicted else (1.0 if not truth else 0.0),
-        "recall": tp / len(truth) if truth else (1.0 if not predicted else 0.0),
-        "false_positives": sorted(predicted - truth),
-        "false_negatives": sorted(truth - predicted),
-    }
+    return grade_sets({normalize_term(value) for value in extracted},
+                      {normalize_term(value) for value in expected})
 
 
 def fixture_from_capture(capture: dict, specification: dict) -> dict:

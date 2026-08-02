@@ -85,19 +85,20 @@ def parse_answer(text):
     if any(not isinstance(value[k],list) or any(not isinstance(x,str) for x in value[k]) for k in value): raise ValueError("answer fields must be string lists")
     return value
 
-def _norm(xs): return {" ".join(x.casefold().split()) for x in xs}
+def _norm(xs): return {replay_common.normalize_term(x) for x in xs}
 
 def score_answer(task, answer):
     predicted, expected=_norm(answer["answers"]),_norm(task["expected_answers"])
     evidence, required=_norm(answer["evidence"]),_norm(task["required_evidence"])
     supported=_norm(task["facts"] + task["expected_answers"] + task["required_evidence"])
     claims=_norm(answer["claims"]); unsupported=sorted(claims-supported)
-    tp=len(predicted&expected); ep=len(evidence&required)
+    answer_precision, answer_recall = replay_common.set_precision_recall(predicted, expected)
+    evidence_precision, evidence_recall = replay_common.set_precision_recall(evidence, required)
     omissions=sorted(expected-predicted)
-    return {"correct": predicted==expected, "answer_precision": tp/len(predicted) if predicted else (1.0 if not expected else 0.0),
-            "answer_recall": tp/len(expected) if expected else (1.0 if not predicted else 0.0),
-            "evidence_precision": ep/len(evidence) if evidence else (1.0 if not required else 0.0),
-            "evidence_recall": ep/len(required) if required else (1.0 if not evidence else 0.0),
+    return {"correct": predicted==expected, "answer_precision": answer_precision,
+            "answer_recall": answer_recall,
+            "evidence_precision": evidence_precision,
+            "evidence_recall": evidence_recall,
             "hallucinated": bool(unsupported), "unsupported_claim_count": len(unsupported), "unsupported_claims": unsupported,
             "omission_count":len(omissions), "omissions":omissions}
 
