@@ -591,7 +591,7 @@ class RecordShapeTest(unittest.TestCase):
             self.assertEqual(rec["task_id"], task["id"])
             self.assertEqual(rec["corpus_id"], "pocketbase")
             self.assertEqual(rec["manifest_id"], manifest["tree_hash"])
-            self.assertEqual(rec["task_digest"], task_digest(task))
+            self.assertEqual(rec["task_digest"], run.exploration_task_digest(task))
             self.assertEqual(rec["arm"], toolsets.BASELINE)
             self.assertEqual(rec["model"], "claude-test-model")
             self.assertEqual(rec["seed"], 7)
@@ -757,8 +757,32 @@ class ResumeTest(unittest.TestCase):
             )
             self.assertNotIn("skipped", rec)
             self.assertEqual(len(second.calls), 1)
-            self.assertEqual(rec["task_digest"], task_digest(changed))
+            self.assertEqual(rec["task_digest"], run.exploration_task_digest(changed))
             self.assertEqual(len(record.load_records(records_path)), 2)
+
+    def test_pre_prompt_format_records_do_not_resume_skip(self):
+        """The exploration prompt changed shape (Claim:/Request: assembly)
+        while run_key and task_digest stayed derived from the task alone, so
+        records from the old prompt era resume-skipped as identical runs.
+        The effective prompt material must participate in the digest."""
+        with TemporaryDirectory() as root:
+            forge_fixture(root)
+            task = fake_task()
+            records_path = os.path.join(root, "records.jsonl")
+            legacy = {
+                "run_key": record.run_key(task["id"], toolsets.BASELINE, 7),
+                "task_digest": task_digest(task),  # pre-format-change digest
+                "status": record.STATUS_ANSWERED,
+            }
+            record.append_record(records_path, legacy)
+            agent = FakeAgent(answered_result([]))
+            rec = run.run_task(
+                task, toolsets.BASELINE, agent, base_config(),
+                corpus_root=root, records_path=records_path,
+                work_root=os.path.join(root, "work"),
+            )
+            self.assertNotIn("skipped", rec)
+            self.assertEqual(len(agent.calls), 1)
 
     def test_retryable_failure_is_rerun(self):
         with TemporaryDirectory() as root:
