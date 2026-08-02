@@ -2,6 +2,7 @@ import importlib.util
 import json
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 
@@ -65,6 +66,17 @@ class ToolSurfaceTest(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             surface.run_oracle("exit 127", ROOT, {0, 1})
 
+    def test_oracle_shell_is_not_a_login_shell(self):
+        """A login profile could rewrite PATH/aliases and skew oracle output."""
+        recorded = {}
+        real_run = surface.subprocess.run
+        def spy(argv, **kwargs):
+            recorded["argv"] = argv
+            return real_run(argv, **kwargs)
+        with unittest.mock.patch.object(surface.subprocess, "run", side_effect=spy):
+            surface.run_oracle("true", ROOT)
+        self.assertEqual(recorded["argv"][:2], ["bash", "-c"])
+
 
 class McpSessionLivenessTest(unittest.TestCase):
     HANG = "#!/usr/bin/env python3\nimport sys, time\nsys.stdin.readline()\ntime.sleep(600)\n"
@@ -80,6 +92,16 @@ class McpSessionLivenessTest(unittest.TestCase):
             binary = self._hanging_binary(directory)
             with self.assertRaisesRegex(RuntimeError, "did not respond"):
                 surface.McpSession(binary, Path(directory), read_timeout=1.0)
+
+    def test_rpc_kills_the_child_before_raising_on_garbage_stdout(self):
+        with tempfile.TemporaryDirectory() as directory:
+            garbage = Path(directory) / "garbage-lci"
+            garbage.write_text("#!/usr/bin/env python3\nimport sys, time\n"
+                               "sys.stdin.readline()\nprint('not json', flush=True)\n"
+                               "time.sleep(600)\n")
+            garbage.chmod(0o755)
+            with self.assertRaisesRegex(RuntimeError, "non-JSON"):
+                surface.McpSession(garbage, Path(directory), read_timeout=5.0)
 
     def test_close_kills_a_child_that_ignores_stdin_close(self):
         with tempfile.TemporaryDirectory() as directory:
