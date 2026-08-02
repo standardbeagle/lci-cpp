@@ -17,6 +17,7 @@
 #include <chrono>
 #include <cctype>
 #include <csignal>
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -449,6 +450,11 @@ bool CleanupOwnedProcesses(std::string_view token) {
                     poll_result > 0 &&
                     (descriptor.revents & (POLLIN | POLLHUP)) != 0;
                 if (!exit_confirmed) {
+                    std::fprintf(stderr,
+                                 "spec_runner: pidfd poll never confirmed exit "
+                                 "of force-killed owned process (revents=%d); "
+                                 "skipping socket cleanup\n",
+                                 static_cast<int>(descriptor.revents));
                     all_exits_confirmed = false;
                     ::close(process.fd);
                     process.fd = -1;
@@ -463,6 +469,12 @@ bool CleanupOwnedProcesses(std::string_view token) {
                 } while (poll_result < 0 && errno == EINTR);
                 if (poll_result <= 0 ||
                     (descriptor.revents & (POLLIN | POLLHUP)) == 0) {
+                    std::fprintf(stderr,
+                                 "spec_runner: SIGKILL via pidfd failed and no "
+                                 "natural exit was observed (poll=%d "
+                                 "revents=%d); skipping socket cleanup\n",
+                                 poll_result,
+                                 static_cast<int>(descriptor.revents));
                     all_exits_confirmed = false;
                 }
             }
@@ -484,7 +496,16 @@ bool IsNonConnectableUnixSocket(const fs::path& path) {
 
     const std::string pathname = path.string();
     sockaddr_un address{};
-    if (pathname.size() >= sizeof(address.sun_path)) return false;
+    if (pathname.size() >= sizeof(address.sun_path)) {
+        // Conservatively treated as "not stale" (never unlinked), but say so:
+        // a silently skipped over-long pathname would otherwise look like a
+        // cleanup that ran and found nothing.
+        std::fprintf(stderr,
+                     "spec_runner: socket path exceeds sun_path, cannot probe "
+                     "staleness, leaving in place: %s\n",
+                     pathname.c_str());
+        return false;
+    }
     address.sun_family = AF_UNIX;
     std::memcpy(address.sun_path, pathname.c_str(), pathname.size() + 1);
 
