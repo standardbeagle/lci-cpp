@@ -191,6 +191,14 @@ class ValidatorTest(unittest.TestCase):
     def test_valid_fixture_passes(self):
         self.assertEqual(self.fx.run(), [])
 
+    def test_stale_forge_version_manifest_ref_fails(self):
+        """Trap injection + manifest v2 changed forge output for the same
+        (spec, seed): a task still pinning the old forge version references a
+        corpus the current forge can no longer reproduce, so it must fail."""
+        self.fx.task["manifest_ref"]["forge_version"] = "1"
+        self.fx._flush_task()
+        self.assertTrue(any("forge_version" in p for p in self.fx.run()))
+
     def test_missing_second_annotation_fails(self):
         os.remove(
             os.path.join(self.fx.annotations_dir, "pb-app-bootstrap.ann-b.json")

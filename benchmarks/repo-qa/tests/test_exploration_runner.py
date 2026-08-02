@@ -298,6 +298,24 @@ class SealedArtifactInventoryTest(unittest.TestCase):
                         )
 
 
+class StaleForgeVersionCorpusTest(unittest.TestCase):
+    """A stale corpus forged by an older forge is self-consistent (its tree
+    matches its own manifest hash), so the tree-hash gate alone cannot reject
+    it; the forge_version compat gate must."""
+
+    def test_prepare_checkout_rejects_a_stale_forge_version_corpus(self):
+        with TemporaryDirectory() as root:
+            corpus_dir, tree, manifest = forge_fixture(root)
+            stale = dict(manifest, forge_version="1")
+            forge._write_json_atomic(
+                os.path.join(corpus_dir, "manifest.json"), stale
+            )
+            with self.assertRaisesRegex(corpus.CorpusError, "forge_version"):
+                corpus.prepare_checkout(
+                    root, fake_task()["manifest_ref"], os.path.join(root, "co")
+                )
+
+
 class ConfigParityTest(unittest.TestCase):
     def test_agent_visible_task_contains_only_claim_and_request(self):
         task = fake_task()
