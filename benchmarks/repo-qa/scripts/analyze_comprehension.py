@@ -154,8 +154,10 @@ def analyze(rows: list[dict], predictions: dict, variants: dict,
             ),
             "historical_calls": frequencies[tool],
             "control_investigation": (
-                "Invalid null control: the current info blob paraphrases the oracle answer, while the annotated blob states the exact grading phrase. The measured gap tests answer wording, not neutral formatting; exclude it from production evidence."
-                if tool == "info" and control_suspect else None
+                f"Control violated the null expectation (winner={actual_winner}, delta={delta:+.3f}): "
+                "a control arm that beats parity indicates the blobs differ in graded content, not "
+                "neutral formatting. Exclude this tool from production evidence pending investigation."
+                if control_suspect else None
             ),
         }
         findings.append(finding)
@@ -176,19 +178,44 @@ def analyze(rows: list[dict], predictions: dict, variants: dict,
         } for f in findings if f["winner"] == "annotated" and not f["control"]),
         key=lambda item: (-item["priority_score"], item["tool"]),
     )
+    # Report prose is derived from THIS grid, never frozen from one historical run.
+    annotated_wins = sum(f["winner"] == "annotated" for f in findings)
+    parity_count = sum(f["winner"] == "parity" for f in findings)
+    faithful_winners = sorted(f["tool"] for f in findings
+                              if f["winner"] == "annotated" and not f["control"] and f["production_faithful"])
+    idealized_winners = sorted(f["tool"] for f in findings
+                               if f["winner"] == "annotated" and not f["control"] and not f["production_faithful"])
+    generality = (
+        f"Annotation won {annotated_wins} of {len(tools)} tools and reached parity on {parity_count}. "
+        f"Production-faithful winners: {', '.join(faithful_winners) if faithful_winners else 'none'}; "
+        f"idealized-arm winners (require capability work): "
+        f"{', '.join(idealized_winners) if idealized_winners else 'none'}."
+    )
+    reps_per_arm = len(expected_keys) // (len(tools) * 2 * 2)  # variants x tiers
+    short_arms = sorted(
+        f"{tool}/{arm}/{tier}"
+        for tool in tools for tier in ("weak", "strong") for arm in ("current", "annotated")
+        if len(grouped[(tool, tier, arm)]) < reps_per_arm
+    )
+    variance_caveat = (
+        f"Arms with fewer than {reps_per_arm} scored repetitions (unscored responses reduce power): "
+        f"{', '.join(short_arms)}." if short_arms
+        else f"All arms have {reps_per_arm} scored repetitions."
+    )
     return {
         "schema": "lci.comprehension.analysis.v1",
-        "grid": {"expected": 112, "observed": len(rows), "statuses": dict(sorted(statuses.items()))},
+        "grid": {"expected": len(expected_keys), "observed": len(rows), "statuses": dict(sorted(statuses.items()))},
         "history_frequency_source": {"result_files_scanned": history_files, "method": "count lci_* tool_trace events from local repo-qa historical results"},
         "findings": findings, "prediction_misses": misses,
         "recommendations": recommendations,
         "surface_verdict": {
-            "annotated_wins": sum(f["winner"] == "annotated" for f in findings),
+            "annotated_wins": annotated_wins,
             "current_wins": sum(f["winner"] == "current" for f in findings),
-            "parity": sum(f["winner"] == "parity" for f in findings),
+            "parity": parity_count,
             "controls_suspect": [f["tool"] for f in findings if f["control_suspect"]],
-            "generality": "The fileblob.Close pattern did not generalize across the surface: annotation won 4 of 14 tools, reached parity on 10, and only browse_file was both a measured winner and production-faithful. Three other wins used idealized arms.",
-            "variance_caveat": "code_insight/current/strong has one scored repetition because the other response was malformed and remained unscored; all other arms have two scored repetitions.",
+            "generality": generality,
+            "arms_with_unscored_repetitions": short_arms,
+            "variance_caveat": variance_caveat,
         },
     }
 

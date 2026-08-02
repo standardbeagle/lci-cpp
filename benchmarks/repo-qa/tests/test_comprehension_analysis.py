@@ -43,5 +43,62 @@ class ComprehensionAnalysisTest(unittest.TestCase):
             analysis.analyze([], predictions, variants, Counter(), 0)
 
 
+MODELS = {"opencode/deepseek-v4-flash-free": "weak", "opencode-go/glm-5.2": "strong"}
+
+
+def _grid(exact_by_variant, drop=None):
+    rows = []
+    for variant, exact in exact_by_variant.items():
+        for model, tier in MODELS.items():
+            for rep in (1, 2):
+                row = {"tool": "only", "variant": variant, "model": model, "repetition": rep,
+                       "capability_tier": tier, "status": "answered",
+                       "score": {"exact": exact, "precision": 1.0, "recall": 1.0,
+                                 "false_positive_count": 0}}
+                if drop == (variant, model, rep):
+                    row["status"] = "provider_error"
+                    row["score"] = None
+                rows.append(row)
+    return rows
+
+
+PREDICTIONS = {"predictions": [{"tool": "only", "winner": "annotated", "tier_sensitivity": "none"}]}
+VARIANTS = {"tools": [{"name": "only", "variants": [{"id": "annotated", "production_faithful": True}]}]}
+
+
+class DerivedNarrativeTest(unittest.TestCase):
+    """Report prose must be computed from the analyzed grid, not frozen from one run."""
+
+    def test_generality_and_caveat_are_derived_from_this_grid(self):
+        report = analysis.analyze(_grid({"current": 0.0, "annotated": 1.0}),
+                                  PREDICTIONS, VARIANTS, Counter(), 0)
+        verdict = report["surface_verdict"]
+        self.assertIn("1 of 1", verdict["generality"])
+        self.assertIn("only", verdict["generality"])
+        for stale in ("fileblob", "browse_file", "4 of 14"):
+            self.assertNotIn(stale, verdict["generality"])
+        self.assertNotIn("code_insight", verdict["variance_caveat"])
+        self.assertEqual(verdict["arms_with_unscored_repetitions"], [])
+
+    def test_unscored_repetitions_are_reported_from_the_data(self):
+        report = analysis.analyze(
+            _grid({"current": 0.0, "annotated": 1.0},
+                  drop=("annotated", "opencode-go/glm-5.2", 2)),
+            PREDICTIONS, VARIANTS, Counter(), 0)
+        verdict = report["surface_verdict"]
+        self.assertEqual(verdict["arms_with_unscored_repetitions"], ["only/annotated/strong"])
+        self.assertIn("only/annotated/strong", verdict["variance_caveat"])
+
+    def test_control_investigation_is_not_pinned_to_one_tool(self):
+        variants = {"tools": [{"name": "only", "control": True,
+                               "variants": [{"id": "annotated", "production_faithful": True}]}]}
+        report = analysis.analyze(_grid({"current": 0.0, "annotated": 1.0}),
+                                  PREDICTIONS, variants, Counter(), 0)
+        finding = report["findings"][0]
+        self.assertTrue(finding["control_suspect"])
+        self.assertIsNotNone(finding["control_investigation"])
+        self.assertNotIn("info blob", finding["control_investigation"])
+
+
 if __name__ == "__main__":
     unittest.main()
