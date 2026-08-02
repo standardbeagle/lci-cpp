@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -42,9 +43,14 @@ class ComprehensionAbTest(unittest.TestCase):
         self.assertEqual((flat["precision"], flat["recall"], flat["false_positive_count"]), (0.75, 1.0, 2))
 
     def test_provider_failures_are_unscored(self):
-        with mock.patch.object(ab.subprocess, "run", side_effect=ab.subprocess.TimeoutExpired("opencode", 300)):
+        timeout_result = {"status": "provider_timeout", "answer": "", "raw_stdout": "",
+                          "raw_stderr": "", "wall_seconds": 300.0,
+                          "tokens": {"input": 0, "output": 0, "reasoning": 0},
+                          "provider_error": None, "malformed_event": False}
+        with mock.patch.object(ab.runner, "run_opencode", return_value=timeout_result):
             result = ab.run_model("opencode", ROOT, "provider/model", "prompt", 300)
         self.assertEqual(result["status"], "provider_timeout")
+        self.assertNotIn("raw_stdout", result)
 
     def test_empty_git_workspace_has_commit_and_no_corpus(self):
         with tempfile.TemporaryDirectory() as parent:
@@ -53,7 +59,7 @@ class ComprehensionAbTest(unittest.TestCase):
             config = json.loads((workspace / "opencode.json").read_text())
             self.assertEqual(config["tools"], {"*": False})
             self.assertEqual(config["permission"], {"*": "deny"})
-            files = ab.subprocess.run(["git", "ls-files"], cwd=workspace, text=True, capture_output=True, check=True).stdout.splitlines()
+            files = subprocess.run(["git", "ls-files"], cwd=workspace, text=True, capture_output=True, check=True).stdout.splitlines()
             self.assertEqual(files, [".gitignore", "opencode.json"])
 
     def test_full_ids_required_and_grid_has_both_capability_tiers(self):

@@ -2,19 +2,16 @@
 """Run the preregistered, canned tool-response-shape experiment."""
 from __future__ import annotations
 
-import argparse, hashlib, importlib.util, json, os, shutil, subprocess, sys, tempfile, time
+import argparse, hashlib, json, os, sys, tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import replay_common
 
-_COMPREHENSION_PATH=Path(__file__).with_name("comprehension_ab.py")
-_COMPREHENSION_SPEC=importlib.util.spec_from_file_location("response_shape_comprehension_helpers",_COMPREHENSION_PATH)
-if _COMPREHENSION_SPEC is None or _COMPREHENSION_SPEC.loader is None: raise ImportError(f"cannot load {_COMPREHENSION_PATH}")
-_COMPREHENSION=importlib.util.module_from_spec(_COMPREHENSION_SPEC); _COMPREHENSION_SPEC.loader.exec_module(_COMPREHENSION)
-classify_failure=_COMPREHENSION.classify_failure
-empty_git_workspace=_COMPREHENSION.empty_git_workspace
-parse_events=_COMPREHENSION.parse_events
+import opencode_runner as runner
+classify_failure=runner.classify_failure
+empty_git_workspace=runner.empty_git_workspace
+parse_events=runner.parse_events
 
 ROOT = Path(__file__).resolve().parents[3]
 BASE = ROOT / "benchmarks/repo-qa/response-shape"
@@ -117,53 +114,27 @@ class DeterministicModelProvider:
         return {"status":"answered","answer":canonical(answer),"tokens":{"input":len(task["facts"]),"output":len(answer["answers"])+len(answer["evidence"])},"wall_seconds":0.001}
 
 class OpenCodeProvider:
-    """Run one isolated, tool-disabled OpenCode session per experimental cell."""
+    """Run isolated, tool-disabled OpenCode cells in one per-run workspace.
+
+    The workspace (and its single copy of the shared auth/model state, made by
+    the runner's isolated_environment) is created once per run, not once per
+    cell: credentials are copied into the 0700 tempdir exactly once and the
+    token value is never read or printed by the harness.
+    """
     def __init__(self, executable="opencode"):
         self.executable=executable
+        self._parent=tempfile.TemporaryDirectory(prefix="response-shape-parent-")
+        self.workspace=empty_git_workspace(Path(self._parent.name))
 
     def run(self, *, prompt, task, arm, model, timeout):
         del task, arm
-        started=time.monotonic()
-        with tempfile.TemporaryDirectory(prefix="response-shape-parent-") as parent:
-            workspace=empty_git_workspace(Path(parent))
-            environment=os.environ.copy()
-            environment["OPENCODE_CONFIG"]=str(workspace/"opencode.json")
-            environment["XDG_CONFIG_HOME"]=str(workspace/".xdg-config")
-            environment["XDG_STATE_HOME"]=str(workspace/".xdg-state")
-            environment["XDG_DATA_HOME"]=str(workspace/".xdg-data")
-            environment["XDG_CACHE_HOME"]=str(workspace/".xdg-cache")
-            shared_cache=Path(os.environ.get("XDG_CACHE_HOME",Path.home()/".cache"))/"opencode"/"models.json"
-            shared_auth=Path(os.environ.get("XDG_DATA_HOME",Path.home()/".local/share"))/"opencode"/"auth.json"
-            isolated_cache=workspace/".xdg-cache/opencode"; isolated_cache.mkdir(parents=True,exist_ok=True)
-            isolated_data=workspace/".xdg-data/opencode"; isolated_data.mkdir(parents=True,exist_ok=True)
-            if shared_cache.exists(): shutil.copy2(shared_cache,isolated_cache/"models.json")
-            if shared_auth.exists(): shutil.copy2(shared_auth,isolated_data/"auth.json")
-            try:
-                proc=subprocess.run([self.executable,"run","--format","json","-m",model,prompt],cwd=workspace,
-                    env=environment,text=True,capture_output=True,timeout=timeout)
-                raw_stdout=proc.stdout; raw_stderr=proc.stderr
-                answer,metadata=parse_events(raw_stdout.splitlines())
-                failure_text=json.dumps(metadata.get("provider_error"))+"\n"+raw_stderr
-                classified=classify_failure(failure_text)
-                # Same ladder as comprehension_ab.run_model: rc 124 is the wrapper
-                # timeout, any other nonzero rc keeps its code instead of collapsing.
-                if metadata.get("malformed_event"): status="malformed_provider_stream"
-                elif classified: status=classified
-                elif metadata.get("provider_error"): status="provider_error"
-                elif proc.returncode == 124: status="provider_timeout"
-                elif proc.returncode != 0: status=f"exit_{proc.returncode}"
-                elif not answer.strip(): status="empty_answer"
-                else: status="answered"
-            except subprocess.TimeoutExpired as exc:
-                raw_stdout=exc.stdout if isinstance(exc.stdout,str) else ""
-                raw_stderr=exc.stderr if isinstance(exc.stderr,str) else ""
-                answer,metadata=parse_events(raw_stdout.splitlines())
-                status="provider_timeout"
-            finally:
-                shutil.rmtree(workspace,ignore_errors=True)
-        return {"status":status,"answer":answer,"raw_provider_stdout":raw_stdout,
-            "provider_stderr_tail":None if status=="answered" else raw_stderr[-STDERR_TAIL_LIMIT:],
-            "wall_seconds":round(time.monotonic()-started,3),"failure_reason":None if status=="answered" else status,**metadata}
+        result=runner.run_opencode(self.executable,self.workspace,model,prompt,timeout)
+        status=result["status"]
+        return {"status":status,"answer":result["answer"],"raw_provider_stdout":result["raw_stdout"],
+            "provider_stderr_tail":None if status=="answered" else result["raw_stderr"][-STDERR_TAIL_LIMIT:],
+            "wall_seconds":result["wall_seconds"],"failure_reason":None if status=="answered" else status,
+            "tokens":result["tokens"],"provider_error":result["provider_error"],
+            "malformed_event":result["malformed_event"]}
 
 def cell_identity(manifest, task, arm, model, repetition):
     prompt=PROMPT.format(question=task["question"],tool=task["tool"],response=task["arms"][arm])
