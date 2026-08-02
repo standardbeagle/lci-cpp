@@ -72,6 +72,11 @@ def _base_record(task, arm, base, seed, key, mode, schema_version):
         "seed": seed,
         "arm": arm,
         "model": base.model,
+        # The scoring compat gates refuse to pair records whose run
+        # configuration differs; everything configurable beyond the model
+        # (already its own compat field) is recorded here.
+        "settings": {"timeout_seconds": base.timeout_seconds,
+                     "system_prompt": base.system_prompt},
         "effective_allowlist": list(toolsets.arm_allowlist(arm)),
         "mode": mode,
         "schema_version": schema_version,
