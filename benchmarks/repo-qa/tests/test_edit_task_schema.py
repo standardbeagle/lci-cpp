@@ -197,6 +197,19 @@ class Fixture:
         )
 
     def run(self, require_live=True):
+        # Per-task gates, like the exploration fixture: bank-level coverage
+        # gates are exercised separately (a one-task bank cannot cover all
+        # four convention categories).
+        return vedt.validate_task(
+            self.task,
+            vedt.load_schema(),
+            vedt.vet.load_corpora(vedt.DEFAULT_CORPORA_PATH),
+            self.annotations_dir,
+            self.corpus_root,
+            require_live,
+        )
+
+    def run_bank(self, require_live=True):
         return vedt.validate_bank(
             tasks_dir=self.tasks_dir,
             annotations_dir=self.annotations_dir,
@@ -355,6 +368,26 @@ class ValidatorTest(unittest.TestCase):
         self.fx._flush_task()
         self.assertTrue(
             any("not found" in p for p in self.fx.run(require_live=True))
+        )
+
+
+class BankCoverageTest(unittest.TestCase):
+    """The category-coverage gate, mirroring the exploration validator's bank
+    gates: a bank missing any of the four convention families measures only
+    the families it happens to contain."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.fx = Fixture(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_bank_missing_required_categories_fails(self):
+        problems = self.fx.run_bank(require_live=False)
+        self.assertTrue(
+            any("must cover" in p and "categor" in p for p in problems),
+            msg="\n".join(problems),
         )
 
 
