@@ -610,6 +610,65 @@ class FailureClasses(unittest.TestCase):
             edit_scorer.FAILURE_ORACLE,
         )
 
+    def test_bank_health_match_absent_is_an_oracle_failure_not_the_agents(self):
+        # MATCH_ABSENT only ever arises from BANK exemplar anchors (the
+        # agent-patch verdict speaks PATCH_*): a pristine-tree anchor whose
+        # evidence no longer matches is OUR defective material, exactly like
+        # MATCH_AMBIGUOUS, and must never be charged to the agent.
+        self.assertEqual(
+            self._bucket(
+                status=edit_record.STATUS_GATE_FAILED,
+                reason="GATE_FAILED",
+                gate_outcomes=gates(
+                    conformance=conformance_outcome(False, "MATCH_ABSENT")
+                ),
+            ),
+            edit_scorer.FAILURE_ORACLE,
+        )
+
+    def test_an_unevaluated_api_impact_half_is_a_harness_failure(self):
+        # No impacted symbols declared -> the gate honestly reports it never
+        # evaluated the API half. That is OUR harness's gap, never the patch's.
+        self.assertEqual(
+            self._bucket(
+                status=edit_record.STATUS_GATE_FAILED,
+                reason="GATE_FAILED",
+                gate_outcomes=gates(
+                    oracle=oracle_outcome(
+                        api_impact=(False, "API_IMPACT_NOT_EVALUATED")
+                    )
+                ),
+            ),
+            edit_scorer.FAILURE_HARNESS,
+        )
+
+    def test_a_reasonless_failure_defaults_to_harness_never_the_agent(self):
+        # An empty reason set on a failing attempt is a gap in OUR reporting;
+        # the fail-closed default must charge us, not the patch.
+        derived = {
+            "behavior": {"passed": False, "judged": True, "reasons": []},
+            "convention": {"passed": True, "judged": True, "reasons": []},
+            "blast": {"passed": True, "judged": True, "reasons": []},
+        }
+        self.assertEqual(
+            edit_scorer._classify_failure({"status": "edit_gate_failed"}, derived),
+            edit_scorer.FAILURE_HARNESS,
+        )
+
+    def test_passing_codes_are_stripped_from_a_failing_gates_reasons_too(self):
+        # SUITE_RED + a green discrimination: the failing gate's story must name
+        # only the fault, not dilute it with the passing sibling's code.
+        score = edit_scorer.score_run(
+            record(
+                status=edit_record.STATUS_GATE_FAILED,
+                reason="GATE_FAILED",
+                gate_outcomes=gates(
+                    oracle=oracle_outcome(existing_suite=(False, "SUITE_RED"))
+                ),
+            )
+        )
+        self.assertEqual(score["gates"]["behavior"]["reasons"], ["SUITE_RED"])
+
     def test_a_genuinely_wrong_patch_is_the_only_bucket_blaming_the_agent(self):
         self.assertEqual(
             self._bucket(

@@ -141,6 +141,10 @@ _HARNESS_REASONS = frozenset(
         "MANIFEST_ABSENT",
         "ORACLE_PATCH_ABSENT",
         "LCI_ABSENT",
+        # Nothing derives impacted symbols yet, so an undeclared set means OUR
+        # harness never evaluated the API half of the blast gate -- not that the
+        # agent's patch escaped.
+        "API_IMPACT_NOT_EVALUATED",
         "BLAST_RADIUS_MALFORMED",
         "RULE_MALFORMED",
         "RULE_UNSUPPORTED",
@@ -162,6 +166,10 @@ _ORACLE_REASONS = frozenset(
         "ANCHOR_MISSING",
         "ANCHOR_BOUND_STALE",
         "ANCHOR_IDENTIFIER_ABSENT",
+        # Both MATCH_* codes only ever arise from BANK-HEALTH anchors (the
+        # agent-patch verdict speaks PATCH_*): an exemplar anchor whose evidence
+        # no longer matches is defective bank material, never the agent's fault.
+        "MATCH_ABSENT",
         "MATCH_AMBIGUOUS",
     }
 )
@@ -178,7 +186,6 @@ _PATCH_REASONS = frozenset(
         "PATCH_PATH_ESCAPE",
         "PATCH_NONCONFORMING",
         "PATCH_UNGOVERNED",
-        "MATCH_ABSENT",
     }
 )
 
@@ -243,9 +250,9 @@ def _derive_gate(subs):
         return _absent_gate()
     passed = all(bool(sub.get("passed")) for sub in subs)
     reasons = {sub.get("reason") for sub in subs if sub.get("reason")}
-    if passed:
-        # Keep the passing codes out of the failure story; they carry no signal.
-        reasons -= _PASSING_REASONS
+    # Passing codes carry no signal about the failure and only dilute the
+    # story -- strip them on BOTH branches, not just the all-green one.
+    reasons -= _PASSING_REASONS
     return {
         "passed": passed,
         "judged": True,
@@ -347,6 +354,10 @@ def _classify_failure(record, derived):
         return _STATUS_FAILURE[status]
 
     reasons = {r for gate in derived.values() for r in gate["reasons"]}
+    if not reasons:
+        # A failing attempt with no reason at all is a gap in OUR reporting;
+        # fail-closed defaults charge us, never the agent.
+        return FAILURE_HARNESS
     if (reasons & _HARNESS_REASONS) or (reasons - _KNOWN_REASONS):
         return FAILURE_HARNESS
     if reasons & _ORACLE_REASONS:

@@ -1,5 +1,5 @@
 {
-  "description": "Hermetic golden for the Stage-3 three-gate edit scorer. Eight synthetic run records covering one fully-correct patch per arm, a BEHAVIOUR-ONLY patch (passes the tests, breaks the convention and the blast radius), a blast-radius escape, a convention miss, an agent failure with no gates, and a defective (non-discriminating) oracle. Every expected value below is hand-computed from the records, NOT captured from the scorer -- a golden regenerated from the code under test cannot catch that code being wrong.",
+  "description": "Hermetic golden for the Stage-3 three-gate edit scorer. Eight synthetic run records covering one fully-correct patch per arm, a BEHAVIOUR-ONLY patch (passes the tests, breaks the convention and the blast radius), a blast-radius escape, a convention miss (a bank exemplar whose evidence no longer matches -- MATCH_ABSENT, bucketed as oracle_failure because defective bank material is OUR fault, not the agent's), an agent failure with no gates, and a defective (non-discriminating) oracle. Every expected value below is hand-computed from the records, NOT captured from the scorer -- a golden regenerated from the code under test cannot catch that code being wrong.",
   "expected": {
     "_behaviour_only_trap": {
       "cell": {
@@ -32,16 +32,16 @@
         "harness_failure": 0,
         "invalid_patch": 0,
         "missing_cell": 0,
-        "oracle_failure": 1,
-        "patch_rejected": 2
+        "oracle_failure": 2,
+        "patch_rejected": 1
       },
       "treatment": {
         "agent_failure": 0,
         "harness_failure": 0,
         "invalid_patch": 0,
         "missing_cell": 0,
-        "oracle_failure": 0,
-        "patch_rejected": 1
+        "oracle_failure": 1,
+        "patch_rejected": 0
       }
     },
     "gate_rates": {
