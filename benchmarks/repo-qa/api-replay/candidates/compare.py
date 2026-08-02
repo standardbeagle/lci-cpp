@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 from pathlib import Path
 
@@ -25,7 +26,9 @@ def measure(module, values: list[dict]) -> dict:
     rows = []
     for item in values:
         source = conformance.canonical(item["value"])
-        rendered = module.encode(item["value"])
+        # Match conformance.evaluate_case: never hand a candidate the shared
+        # value, or one mutating encode corrupts every later measurement row.
+        rendered = module.encode(copy.deepcopy(item["value"]))
         rows.append({
             "id": item["id"],
             "source_utf8_bytes": len(source.encode("utf-8")),

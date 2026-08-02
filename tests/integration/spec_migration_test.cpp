@@ -10,16 +10,33 @@
 #include <csignal>
 #include <cstdlib>
 #include <cstring>
+#include <fcntl.h>
 #include <filesystem>
+#include <poll.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
+// glibc exposes argv[0] before main() runs; declared in <errno.h> only under
+// _GNU_SOURCE, so declare it directly for this Linux-only test binary.
+extern "C" char* program_invocation_name;
+
 namespace lci::integration {
 namespace {
 
+constexpr const char* kListenerHelperArgv0 =
+    "lci_integration_tests-listener-helper";
+
 int RunDetachedListenerHelperIfRequested() {
+    // Gate on the argv[0] marker passed by SpawnDetachedUnixListener, not on
+    // environment alone: leaked env vars from an aborted run would otherwise
+    // pause() the whole test binary before main().
+    const char* invocation = program_invocation_name;
+    if (!invocation ||
+        std::string_view(invocation) != kListenerHelperArgv0) {
+        return 0;
+    }
     const char* pathname = ::getenv("LCI_TEST_LISTENER_PATH");
     const char* ready_fd_text = ::getenv("LCI_TEST_LISTENER_READY_FD");
     if (!pathname || !ready_fd_text) return 0;
@@ -41,6 +58,44 @@ int RunDetachedListenerHelperIfRequested() {
 
 [[maybe_unused]] const int kDetachedListenerHelper =
     RunDetachedListenerHelperIfRequested();
+
+TEST(SpecRunnerProcessOwnership, ListenerHelperIgnoresLeakedEnvWithoutArgvMarker) {
+    // Leaked listener env vars from an aborted run must NOT pause() a normal
+    // invocation of this binary before main(): the helper hook requires the
+    // explicit argv[0] marker, not environment alone.
+    const pid_t child = ::fork();
+    ASSERT_GE(child, 0);
+    if (child == 0) {
+        ::setenv("LCI_TEST_LISTENER_PATH", "/tmp/lci-leaked-env-listener.sock",
+                 1);
+        ::setenv("LCI_TEST_LISTENER_READY_FD", "1", 1);
+        const int null_fd = ::open("/dev/null", O_WRONLY);
+        if (null_fd >= 0) {
+            ::dup2(null_fd, STDOUT_FILENO);
+            ::dup2(null_fd, STDERR_FILENO);
+        }
+        ::execl("/proc/self/exe", "lci_integration_tests",
+                "--gtest_list_tests", static_cast<char*>(nullptr));
+        ::_exit(127);
+    }
+    int status = 0;
+    pid_t reaped = 0;
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(15);
+    do {
+        reaped = ::waitpid(child, &status, WNOHANG);
+        if (reaped != 0) break;
+        ::usleep(50000);
+    } while (std::chrono::steady_clock::now() < deadline);
+    if (reaped == 0) {
+        ::kill(child, SIGKILL);
+        ::waitpid(child, nullptr, 0);
+        FAIL() << "test binary hung before main() on leaked listener env vars";
+    }
+    ASSERT_EQ(reaped, child);
+    ASSERT_TRUE(WIFEXITED(status));
+    EXPECT_EQ(WEXITSTATUS(status), 0);
+}
 
 TEST(SpecRunnerProcessOwnership, RequiresExactInheritedToken) {
     const std::string token = "runner-42";
@@ -144,17 +199,61 @@ pid_t SpawnDetachedUnixListener(const std::filesystem::path& path,
         const std::string ready_fd = std::to_string(ready[1]);
         ::setenv("LCI_TEST_LISTENER_PATH", pathname.c_str(), 1);
         ::setenv("LCI_TEST_LISTENER_READY_FD", ready_fd.c_str(), 1);
-        ::execl("/proc/self/exe", "lci_integration_tests-listener-helper",
+        ::execl("/proc/self/exe", kListenerHelperArgv0,
                 static_cast<char*>(nullptr));
         ::_exit(5);
     }
     ::close(ready[1]);
+    // A helper that never signals readiness (bad exec, early _exit) must fail
+    // the test, not hang the whole binary on a blocking read.
+    pollfd readiness{ready[0], POLLIN, 0};
+    int poll_result = -1;
+    do {
+        poll_result = ::poll(&readiness, 1, /*timeout_ms=*/10000);
+    } while (poll_result < 0 && errno == EINTR);
+    if (poll_result <= 0 || (readiness.revents & POLLIN) == 0) {
+        ADD_FAILURE() << "detached listener helper never became ready";
+        ::close(ready[0]);
+        ::kill(-child, SIGKILL);
+        ::kill(child, SIGKILL);
+        ::waitpid(child, nullptr, 0);
+        return -1;
+    }
     char marker = 0;
     EXPECT_EQ(::read(ready[0], &marker, 1), 1);
     EXPECT_EQ(marker, 'R');
     ::close(ready[0]);
     return child;
 }
+
+// Guarantees the detached helper (its own session/pgid after setsid) and the
+// bound socket never outlive the test, even when a mid-test ASSERT bails out
+// before the explicit cleanup calls run.
+class DetachedListenerGuard {
+  public:
+    DetachedListenerGuard(pid_t pid, std::filesystem::path socket_path)
+        : pid_(pid), socket_path_(std::move(socket_path)) {}
+    DetachedListenerGuard(const DetachedListenerGuard&) = delete;
+    DetachedListenerGuard& operator=(const DetachedListenerGuard&) = delete;
+
+    ~DetachedListenerGuard() {
+        if (pid_ > 0) {
+            ::kill(-pid_, SIGKILL);
+            ::kill(pid_, SIGKILL);
+            ::waitpid(pid_, nullptr, 0);
+        }
+        std::error_code ec;
+        std::filesystem::remove(socket_path_, ec);
+    }
+
+    // The test observed the helper's exit itself; never signal or reap a
+    // possibly recycled pid afterwards.
+    void MarkReaped() { pid_ = -1; }
+
+  private:
+    pid_t pid_;
+    std::filesystem::path socket_path_;
+};
 
 bool CanConnectUnixSocket(const std::filesystem::path& path) {
     const int fd = ::socket(AF_UNIX, SOCK_STREAM, 0);
@@ -191,6 +290,7 @@ TEST(SpecRunnerProcessOwnership,
     ASSERT_FALSE(candidates.empty());
     const auto socket_path = candidates.front();
     const pid_t listener = SpawnDetachedUnixListener(socket_path, token);
+    DetachedListenerGuard guard(listener, socket_path);
     ASSERT_GT(listener, 0);
     ASSERT_TRUE(CanConnectUnixSocket(socket_path));
 
@@ -198,6 +298,7 @@ TEST(SpecRunnerProcessOwnership,
 
     int status = 0;
     ASSERT_EQ(::waitpid(listener, &status, 0), listener);
+    guard.MarkReaped();
     EXPECT_TRUE(WIFSIGNALED(status));
     EXPECT_FALSE(std::filesystem::exists(socket_path));
     std::error_code ec;
@@ -217,6 +318,7 @@ TEST(SpecRunnerProcessOwnership,
     ASSERT_FALSE(candidates.empty());
     const auto socket_path = candidates.front();
     const pid_t listener = SpawnDetachedUnixListener(socket_path, nullptr);
+    DetachedListenerGuard guard(listener, socket_path);
     ASSERT_GT(listener, 0);
     ASSERT_TRUE(CanConnectUnixSocket(socket_path));
 
@@ -230,6 +332,7 @@ TEST(SpecRunnerProcessOwnership,
     if (::kill(listener, SIGKILL) == 0) {
         EXPECT_EQ(::waitpid(listener, nullptr, 0), listener);
     }
+    guard.MarkReaped();
     std::error_code ec;
     std::filesystem::remove(socket_path, ec);
     std::filesystem::remove_all(corpus, ec);

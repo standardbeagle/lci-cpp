@@ -41,7 +41,15 @@ def score(data: object) -> tuple[str, list[str]]:
     if len(set(ids)) != len(ids) or None in ids:
         errors.append("gate ids must be present and unique")
     if errors:
-        return "inconclusive", errors
+        # Fail-closed: a hard gate that declares status "fail" must fail the
+        # audit even when other fields are invalid — a validation error (e.g.
+        # severity "none" on a failing gate) must never downgrade a known hard
+        # failure to inconclusive.
+        hard_failure = any(
+            isinstance(g, dict) and g.get("hard") is True and g.get("status") == "fail"
+            for g in gates
+        )
+        return ("fail" if hard_failure else "inconclusive"), errors
     hard = [gate for gate in gates if gate.get("hard") is True]
     if any(gate["status"] == "fail" for gate in hard):
         return "fail", []
@@ -68,8 +76,10 @@ def self_test() -> int:
     hard_pass = gate("H", hard=True, status="pass", severity="none")
     cases = [
         ("hard pass alone is a pass", [hard_pass], "pass"),
-        ("a failed hard gate fails at any severity",
-         [gate("H", hard=True, status="fail", severity="none")], "inconclusive"),
+        ("a failed hard gate fails even with an invalid severity of none",
+         [gate("H", hard=True, status="fail", severity="none")], "fail"),
+        ("a failed hard gate fails even with an unknown severity",
+         [gate("H", hard=True, status="fail", severity="bogus")], "fail"),
         ("a failed hard gate outranks passing soft gates",
          [gate("H2", hard=True, status="fail", severity="minor"), hard_pass], "fail"),
         ("an inconclusive hard gate is inconclusive",

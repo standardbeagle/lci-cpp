@@ -59,6 +59,30 @@ class SemiStructuredCandidateTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             codec.decode_tagged_blocks(rendered.replace("ARRAY 0", "ARRAY 1"))
 
+    def test_decoders_reject_non_ascii_and_non_canonical_integer_frames(self):
+        # str.isdigit() accepts non-ASCII digits and leading zeros; framing
+        # integers must be canonical ASCII so every text has one valid spelling.
+        rendered_path = codec.encode_path_records({"a": [None]})
+        for mutated in (
+            rendered_path.replace("R2:", "R٢:", 1),   # Arabic-Indic digit
+            rendered_path.replace("R2:", "R02:", 1),        # leading zero frame
+            rendered_path.replace("A1:1", "A2:01", 1),      # leading-zero size
+            rendered_path.replace("A1:1", "A1:١", 1),  # non-ASCII size
+        ):
+            self.assertNotEqual(mutated, rendered_path)
+            with self.assertRaises(ValueError):
+                codec.decode_path_records(mutated)
+        rendered_blocks = codec.encode_tagged_blocks({"a": [None]})
+        for mutated in (
+            rendered_blocks.replace("ARRAY 1", "ARRAY 01", 1),
+            rendered_blocks.replace("ARRAY 1", "ARRAY ١", 1),
+            rendered_blocks.replace("KEY 3:", "KEY 03:", 1),
+            rendered_blocks.replace("KEY 3:", "KEY ٣:", 1),
+        ):
+            self.assertNotEqual(mutated, rendered_blocks)
+            with self.assertRaises(ValueError):
+                codec.decode_tagged_blocks(mutated)
+
     def test_rejects_values_outside_json_domain(self):
         for encode in (codec.encode_path_records, codec.encode_tagged_blocks):
             with self.subTest(codec=encode.__name__):

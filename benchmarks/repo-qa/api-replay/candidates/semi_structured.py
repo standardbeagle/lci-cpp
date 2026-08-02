@@ -33,6 +33,16 @@ def _check(value: Any) -> None:
     raise TypeError(f"unsupported JSON value: {type(value).__name__}")
 
 
+def _canonical_int(text: str) -> bool:
+    # Frame/count fields must be canonical ASCII decimal: str.isdigit() alone
+    # would admit non-ASCII digits and leading zeros that int() still parses.
+    return (
+        text.isascii()
+        and text.isdigit()
+        and (text == "0" or text[0] != "0")
+    )
+
+
 PATH_HEADER = "LCI-PATH-RECORDS/1\n"
 
 
@@ -79,7 +89,7 @@ def decode_path_records(text: str) -> Any:
             raise ValueError(f"expected {prefix!r} at offset {offset}")
         offset += len(prefix)
         colon = text.find(":", offset)
-        if colon < 0 or not text[offset:colon].isdigit():
+        if colon < 0 or not _canonical_int(text[offset:colon]):
             raise ValueError("invalid frame length")
         length = int(text[offset:colon])
         offset = colon + 1
@@ -115,6 +125,11 @@ def decode_path_records(text: str) -> Any:
     if () not in records:
         raise ValueError("missing root record")
     consumed: set[tuple[Any, ...]] = set()
+    # One O(n) pass instead of rescanning every record per container node.
+    children_index: dict[tuple[Any, ...], list[tuple[Any, tuple[Any, ...]]]] = {}
+    for p in records:
+        if p:
+            children_index.setdefault(p[:-1], []).append((p[-1], p))
 
     def build(path: tuple[Any, ...]) -> Any:
         if path not in records:
@@ -122,10 +137,10 @@ def decode_path_records(text: str) -> Any:
         consumed.add(path)
         tag, payload = records[path]
         if tag in "OA":
-            if not payload.isdigit():
+            if not _canonical_int(payload):
                 raise ValueError("container size is not an integer")
             size = int(payload)
-            children = [(p[-1], p) for p in records if len(p) == len(path) + 1 and p[:-1] == path]
+            children = children_index.get(path, [])
             if len(children) != size:
                 raise ValueError("container child count mismatch")
             if tag == "A":
@@ -139,7 +154,7 @@ def decode_path_records(text: str) -> Any:
             if any(not isinstance(part, str) for part, _ in children):
                 raise ValueError("object paths must use string keys")
             return {part: build(child) for part, child in sorted(children)}
-        if any(p[:-1] == path for p in records if p):
+        if path in children_index:
             raise ValueError("scalar record has children")
         if tag == "Z":
             if payload:
@@ -212,7 +227,7 @@ def decode_tagged_blocks(text: str) -> Any:
         if not current.startswith(prefix):
             raise ValueError(f"expected {prefix.strip()}")
         length_text, separator, payload = current[len(prefix):].partition(":")
-        if separator != ":" or not length_text.isdigit() or len(payload) != int(length_text):
+        if separator != ":" or not _canonical_int(length_text) or len(payload) != int(length_text):
             raise ValueError("invalid atom frame")
         try:
             return json.loads(payload)
@@ -221,7 +236,7 @@ def decode_tagged_blocks(text: str) -> Any:
 
     def count(current: str, prefix: str) -> int:
         raw = current[len(prefix):] if current.startswith(prefix) else ""
-        if not raw.isdigit():
+        if not _canonical_int(raw):
             raise ValueError(f"invalid {prefix.strip()} count")
         return int(raw)
 

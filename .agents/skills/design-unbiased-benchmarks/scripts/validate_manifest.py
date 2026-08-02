@@ -27,8 +27,17 @@ def validate(data: object) -> list[str]:
     arms = data.get("arms")
     if not isinstance(arms, list) or len(arms) < 2:
         errors.append("arms must contain at least two entries")
-    elif len({arm.get("id") for arm in arms if isinstance(arm, dict)}) != len(arms):
-        errors.append("arm ids must be present and unique")
+    else:
+        seen_arm_ids = set()
+        for index, arm in enumerate(arms):
+            if not isinstance(arm, dict):
+                errors.append(f"arms[{index}] must be an object")
+            elif not isinstance(arm.get("id"), str) or not arm["id"]:
+                errors.append(f"arms[{index}] is missing a non-empty string id")
+            elif arm["id"] in seen_arm_ids:
+                errors.append(f"arms[{index}] duplicates arm id: {arm['id']}")
+            else:
+                seen_arm_ids.add(arm["id"])
     if not isinstance(data.get("repetitions"), int) or data.get("repetitions", 0) < 2:
         errors.append("repetitions must be an integer >= 2")
     metrics = data.get("metrics")
@@ -38,9 +47,14 @@ def validate(data: object) -> list[str]:
     if not isinstance(controls, list) or not any(isinstance(c, dict) and c.get("kind") == "null" for c in controls):
         errors.append("controls must declare at least one null control")
     oracle = data.get("oracle")
-    for key in ("source", "independence_argument", "good_case", "bad_case"):
-        if not isinstance(oracle, dict) or not oracle.get(key):
-            errors.append(f"oracle.{key} is required")
+    if isinstance(oracle, dict):
+        for key in ("source", "independence_argument", "good_case", "bad_case"):
+            if not oracle.get(key):
+                errors.append(f"oracle.{key} is required")
+    elif "oracle" in data:
+        # One shape error, not four stacked oracle.* errors; a wholly absent
+        # oracle is already reported as a missing required field.
+        errors.append("oracle must be an object")
     return errors
 
 
@@ -54,17 +68,33 @@ def self_test() -> int:
         ("fewer than two arms is rejected", minimal, "arms must contain at least two entries"),
         ("a missing primary metric is rejected", minimal, "metrics must declare at least one primary metric"),
         ("a missing null control is rejected", minimal, "controls must declare at least one null control"),
-        ("a missing oracle independence argument is rejected", minimal,
+        ("a missing oracle independence argument is rejected",
+         {**minimal, "oracle": {"source": "s", "good_case": "g", "bad_case": "b"}},
          "oracle.independence_argument is required"),
+        ("a non-object oracle is one shape error", {**minimal, "oracle": "external"},
+         "oracle must be an object"),
+        ("a non-object arm is rejected", {**minimal, "arms": [{"id": "a"}, "b"]},
+         "arms[1] must be an object"),
+        ("an arm without an id is rejected", {**minimal, "arms": [{"id": "a"}, {}]},
+         "arms[1] is missing a non-empty string id"),
+        ("a duplicate arm id is rejected",
+         {**minimal, "arms": [{"id": "a"}, {"id": "a"}]},
+         "arms[1] duplicates arm id: a"),
         ("a missing required field is reported", minimal, "missing required field: analysis_plan"),
     ]
     failures = [f"{label}: expected {expected!r} in {sorted(validate(data))}"
                 for label, data, expected in cases if expected not in validate(data)]
-    if validate([]) and len(validate([])) != 1:
-        failures.append("a non-object manifest must report exactly one error")
+    non_object = validate([])
+    if non_object != ["manifest must be a JSON object"]:
+        failures.append(
+            f"a non-object manifest must report exactly one shape error, got {non_object}")
+    non_object_oracle = [e for e in validate({**minimal, "oracle": "external"}) if "oracle" in e]
+    if non_object_oracle != ["oracle must be an object"]:
+        failures.append(
+            f"a non-object oracle must yield one shape error, got {non_object_oracle}")
     if failures:
         raise SystemExit("validate_manifest self-test failed:\n" + "\n".join(failures))
-    print(f"validate_manifest self-test: {len(cases) + 1} checks passed")
+    print(f"validate_manifest self-test: {len(cases) + 2} checks passed")
     return 0
 
 
