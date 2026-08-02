@@ -19,6 +19,10 @@ from scoring.claim_validation import parse_claim_answer_result
 from task_digest import task_digest
 
 EXPLORATION_MODE = "exploration"
+# Participates in the exploration resume digest: the effective prompt is
+# assembled from claim/request ("Claim: ...\n\nRequest: ..."), so a change to
+# that assembly must invalidate old records instead of resume-skipping them.
+EXPLORATION_PROMPT_FORMAT = "claim-request-v1"
 CLAIM_VALIDATION_MODE = "claim-validation"
 EXPLORATION_SCHEMA = "exploration_answer_v1"
 CLAIM_VALIDATION_SCHEMA = "claim_validation_answer_v1"
@@ -62,6 +66,11 @@ def _claim_digest(task, schema_version):
     return "sha256:" + hashlib.sha256(encoded).hexdigest()
 
 
+def exploration_task_digest(task):
+    """Stable identity of task content PLUS the effective prompt material."""
+    return task_digest({"prompt_format": EXPLORATION_PROMPT_FORMAT, "task": task})
+
+
 def _base_record(task, arm, base, seed, key, mode, schema_version):
     ref = task["manifest_ref"]
     rec = {
@@ -88,7 +97,7 @@ def _base_record(task, arm, base, seed, key, mode, schema_version):
         # Preserve the original exploration record contract. Claim validation
         # deliberately keeps author-bearing task identity out of public fields.
         rec["task_id"] = task["id"]
-        rec["task_digest"] = task_digest(task)
+        rec["task_digest"] = exploration_task_digest(task)
     return rec
 
 
@@ -116,7 +125,7 @@ def run_task(task, arm, adapter, base, *, corpus_root, records_path, work_root,
     digest_field = ("claim_task_digest" if mode == CLAIM_VALIDATION_MODE
                     else "task_digest")
     digest = (_claim_digest(task, schema_version) if mode == CLAIM_VALIDATION_MODE
-              else task_digest(task))
+              else exploration_task_digest(task))
     existing = _find_record(records_path, key, digest, digest_field)
     if existing:
         existing["skipped"] = True
