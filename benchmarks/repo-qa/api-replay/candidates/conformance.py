@@ -50,7 +50,9 @@ def load_bank(path: Path = DEFAULT_BANK) -> dict:
 
 def load_candidate(path: Path) -> ModuleType:
     spec = importlib.util.spec_from_file_location(
-        "lci_api_replay_candidate_" + hashlib.sha256(str(path).encode()).hexdigest(), path
+        "lci_api_replay_candidate_"
+        + hashlib.sha256(str(path.resolve()).encode()).hexdigest(),
+        path,
     )
     if spec is None or spec.loader is None:
         raise ValueError(f"cannot load candidate module: {path}")
