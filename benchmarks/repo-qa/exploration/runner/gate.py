@@ -155,12 +155,22 @@ def _escapes(candidate, checkout_dir):
     return resolved != root and not resolved.startswith(root + os.sep)
 
 
-def _is_sealed_path(candidate):
+def _checkout_relative(candidate, checkout_dir):
+    """The checkout-relative resolution of a path argument, mirroring how
+    `_escapes` resolves it (absolute kept, relative joined onto the root)."""
+    root = os.path.realpath(checkout_dir)
+    target = candidate if os.path.isabs(candidate) else os.path.join(root, candidate)
+    return os.path.relpath(os.path.realpath(target), root)
+
+
+def _is_sealed_path(candidate, checkout_dir):
     """Reject author/oracle material even if it is accidentally copied in-tree.
 
     The inventory of sealed locations is explicit (`sealed_artifacts`); corpus
-    files are never sealed by virtue of what they are named."""
-    return sealed_artifacts.is_sealed_path(candidate)
+    files are never sealed by virtue of what they are named. The check runs on
+    the CHECKOUT-RELATIVE resolution of the argument, so an in-checkout
+    absolute spelling is judged exactly like its relative spelling."""
+    return sealed_artifacts.is_sealed_path(_checkout_relative(candidate, checkout_dir))
 
 
 def enforce(tool_calls, allowed_tools, checkout_dir):
@@ -239,7 +249,7 @@ def enforce(tool_calls, allowed_tools, checkout_dir):
                         "detail": f"{key}={value!r} resolves outside the checkout",
                     }
                 )
-            elif _is_sealed_path(value):
+            elif _is_sealed_path(value, checkout_dir):
                 violations.append(
                     {
                         "index": index,

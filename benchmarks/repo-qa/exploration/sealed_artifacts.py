@@ -29,6 +29,13 @@ SEALED_LOCATIONS = (
     "benchmarks/repo-qa/exploration/annotations",
     "benchmarks/repo-qa/exploration/tasks",
     "benchmarks/repo-qa/exploration/schema",
+    # The gate also serves the EDIT-mode arms (edits/runner): the edit bank's
+    # tasks, dual annotations, schema, and oracle harness are answer-key
+    # material of exactly the same class. (The edits tree has no goldens dir.)
+    "benchmarks/repo-qa/edits/tasks",
+    "benchmarks/repo-qa/edits/annotations",
+    "benchmarks/repo-qa/edits/schema",
+    "benchmarks/repo-qa/edits/oracles",
 )
 
 
