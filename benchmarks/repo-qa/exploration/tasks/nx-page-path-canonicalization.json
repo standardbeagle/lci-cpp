@@ -6,7 +6,7 @@
     "corpus_id": "next.js",
     "source_commit": "97532172c065ca2b49dd79d1fa44c3a0b864065b",
     "seed": 7,
-    "forge_version": "1"
+    "forge_version": "2"
   },
   "prompt": "The framework moves between a public-looking address and the internal file-style identifier for the same page, canonicalizing along the way. Where does it convert an address into that internal canonical identifier, and where does it perform the reverse conversion back toward the public form?",
   "rubric": {

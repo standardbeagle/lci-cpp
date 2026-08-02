@@ -6,7 +6,7 @@
     "corpus_id": "next.js",
     "source_commit": "97532172c065ca2b49dd79d1fa44c3a0b864065b",
     "seed": 7,
-    "forge_version": "1"
+    "forge_version": "2"
   },
   "prompt": "On the client side the framework has to work out, from the configured forwarding rules, which real address a requested one should map to, and part of that involves turning a fixed template value into a concrete string with no capture placeholders. Where is the client-side resolution of a requested address against the rules, and where is a non-capturing template compiled to its literal value?",
   "rubric": {

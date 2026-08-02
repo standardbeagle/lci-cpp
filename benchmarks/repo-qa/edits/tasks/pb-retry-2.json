@@ -7,7 +7,7 @@
     "corpus_id": "pocketbase",
     "source_commit": "d438c6a96a0252ff9df62c1cfe193480ed9ff15d",
     "seed": 7,
-    "forge_version": "1"
+    "forge_version": "2"
   },
   "prompt": "A failure path here loses the original cause when it bubbles up; bring it in line with how neighbouring routines forward their causes so unwrapping keeps working.",
   "rubric": {

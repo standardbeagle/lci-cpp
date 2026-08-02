@@ -7,7 +7,7 @@
     "corpus_id": "pocketbase",
     "source_commit": "d438c6a96a0252ff9df62c1cfe193480ed9ff15d",
     "seed": 7,
-    "forge_version": "1"
+    "forge_version": "2"
   },
   "prompt": "A diagnostic in the backend is emitted in an ad-hoc way instead of through the shared structured channel the rest of the package uses; align it.",
   "rubric": {

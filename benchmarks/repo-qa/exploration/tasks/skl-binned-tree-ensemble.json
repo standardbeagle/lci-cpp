@@ -6,7 +6,7 @@
     "corpus_id": "scikit-learn",
     "source_commit": "0885712e436b07cd04d60e955101aaf6a8cbb709",
     "seed": 7,
-    "forge_version": "1"
+    "forge_version": "2"
   },
   "prompt": "There is a much faster sequential-tree predictor in this codebase that first squeezes each feature's continuous values into a small fixed set of buckets before training on them. Where is its class-label producing variant defined, and what shared parent holds the bucketed fitting loop they all reuse?",
   "rubric": {

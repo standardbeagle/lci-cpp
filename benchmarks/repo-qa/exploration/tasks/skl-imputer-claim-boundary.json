@@ -6,7 +6,7 @@
     "corpus_id": "scikit-learn",
     "source_commit": "0885712e436b07cd04d60e955101aaf6a8cbb709",
     "seed": 7,
-    "forge_version": "1"
+    "forge_version": "2"
   },
   "prompt": "When a table has holes in it, this library can fill each empty cell with a simple per-column summary such as the average or the most frequent value. Where does the estimator that performs that straightforward fill live, and what shared parent class gives every filler its notion of an indicator for where values were originally absent?",
   "rubric": {

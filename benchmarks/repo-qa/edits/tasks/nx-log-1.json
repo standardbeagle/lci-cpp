@@ -7,7 +7,7 @@
     "corpus_id": "next.js",
     "source_commit": "97532172c065ca2b49dd79d1fa44c3a0b864065b",
     "seed": 7,
-    "forge_version": "1"
+    "forge_version": "2"
   },
   "prompt": "A build diagnostic is emitted via a raw console call rather than the shared log namespace the rest of the build uses; align it.",
   "rubric": {

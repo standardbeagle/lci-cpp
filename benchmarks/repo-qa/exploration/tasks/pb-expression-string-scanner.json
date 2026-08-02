@@ -6,7 +6,7 @@
     "corpus_id": "pocketbase",
     "source_commit": "d438c6a96a0252ff9df62c1cfe193480ed9ff15d",
     "seed": 7,
-    "forge_version": "1"
+    "forge_version": "2"
   },
   "prompt": "Parsing the client query language needs to walk an input string and hand back one meaningful chunk at a time, respecting quotes and grouping. Where is the constructor that wraps a plain string into such a stepping reader, and where is the method that returns the next chunk from it?",
   "rubric": {

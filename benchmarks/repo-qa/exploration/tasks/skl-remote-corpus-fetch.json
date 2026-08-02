@@ -6,7 +6,7 @@
     "corpus_id": "scikit-learn",
     "source_commit": "0885712e436b07cd04d60e955101aaf6a8cbb709",
     "seed": 7,
-    "forge_version": "1"
+    "forge_version": "2"
   },
   "prompt": "One of the bundled dataset loaders pulls a large text-categorization collection down from a remote mirror on first use and caches it locally. Where is that download-and-cache entry point, and where are the remote file names and checksums it relies on declared?",
   "rubric": {
