@@ -33,6 +33,7 @@
         "BLAST_RADIUS_MALFORMED",
         "NO_ESCAPE",
         "API_IMPACT_ESCAPE",
+        "API_IMPACT_NOT_EVALUATED",
         "LCI_ABSENT",
         "TIMEOUT",
         "COMMAND_NOT_FOUND",

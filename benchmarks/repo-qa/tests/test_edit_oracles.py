@@ -243,10 +243,15 @@ class FakeLci:
 
 
 class ApiImpactTest(unittest.TestCase):
-    def test_no_symbols_passes_vacuously(self):
+    def test_no_symbols_is_honestly_not_evaluated_never_a_free_pass(self):
+        # Nothing derives impacted symbols from the patch, so an empty set means
+        # this half of the blast gate NEVER RAN. Reporting NO_ESCAPE there was a
+        # permanently-green stub; the honest outcome is a distinct fail-closed
+        # code that cannot be mistaken for a verified clean blast radius.
         out = gate.check_api_impact([], ["apis/**"], FakeLci({}), "/t")
-        self.assertTrue(out["passed"])
-        self.assertEqual(out["reason"], gate.Reason.NO_ESCAPE)
+        self.assertFalse(out["passed"])
+        self.assertEqual(out["reason"], gate.Reason.API_IMPACT_NOT_EVALUATED)
+        self.assertNotEqual(out["reason"], gate.Reason.NO_ESCAPE)
 
     def test_refs_within_scope_pass(self):
         lci = FakeLci({"backupsList": ["apis/backup.go", "apis/router.go"]})
@@ -278,6 +283,43 @@ class ApiImpactTest(unittest.TestCase):
         )
         self.assertFalse(out["passed"])
         self.assertEqual(out["reason"], gate.Reason.TOOL_FAILURE)
+
+    def test_unparseable_refs_line_is_a_tool_failure_not_an_escape(self):
+        # A banner/warning line whose pre-":" token names no path in the tree
+        # must not be treated as a reference path (and then reported as an
+        # agent escape); unparseable output is OUR tool failing.
+        with tempfile.TemporaryDirectory() as tree:
+            os.makedirs(os.path.join(tree, "apis"))
+            open(os.path.join(tree, "apis", "backup.go"), "w").close()
+            fake = os.path.join(tree, "fake-lci")
+            with open(fake, "w") as fh:
+                fh.write(
+                    "#!/bin/sh\n"
+                    "echo 'warning: index is stale'\n"
+                    "echo 'apis/backup.go:12: backupsList'\n"
+                )
+            os.chmod(fake, 0o755)
+            adapter = gate.LciRefsAdapter(fake)
+            with self.assertRaises(RuntimeError):
+                adapter.refs("backupsList", tree)
+            out = gate.check_api_impact(
+                ["backupsList"], ["apis/**"], adapter, tree
+            )
+            self.assertFalse(out["passed"])
+            self.assertEqual(out["reason"], gate.Reason.TOOL_FAILURE)
+
+    def test_path_shaped_refs_lines_parse(self):
+        with tempfile.TemporaryDirectory() as tree:
+            os.makedirs(os.path.join(tree, "apis"))
+            open(os.path.join(tree, "apis", "backup.go"), "w").close()
+            fake = os.path.join(tree, "fake-lci")
+            with open(fake, "w") as fh:
+                fh.write("#!/bin/sh\necho 'apis/backup.go:12: backupsList'\n")
+            os.chmod(fake, 0o755)
+            self.assertEqual(
+                gate.LciRefsAdapter(fake).refs("backupsList", tree),
+                ["apis/backup.go"],
+            )
 
     def test_takes_no_dead_timeout_parameter(self):
         # check_api_impact never used its `timeout` argument -- the per-call
@@ -353,6 +395,8 @@ class AggregateGateTest(unittest.TestCase):
             _edit_task(), self.source,
             {"apis/handler.go": "NEW handler body\n"},
             existing_suite_command=_GREEN_SUITE,
+            impacted_symbols=["handler"],
+            lci=FakeLci({"handler": ["apis/handler.go"]}),
             workspace_root=self.workspace,
         )
         self.assertTrue(out["passed"], msg=out["diagnostic"])
@@ -365,6 +409,54 @@ class AggregateGateTest(unittest.TestCase):
         self.assertEqual(out["changed_path"]["schema"], "changed_path_v1")
         self.assertEqual(out["existing_suite"]["schema"], "existing_suite_v1")
         self.assertEqual(out["api_impact"]["schema"], "api_impact_v1")
+
+    def test_undeclared_impacted_symbols_fail_the_aggregate_honestly(self):
+        # No impacted symbols supplied -> the api_impact half was never run, so
+        # the aggregate must NOT claim all four sub-gates green.
+        out = gate.evaluate_oracle(
+            _edit_task(), self.source,
+            {"apis/handler.go": "NEW handler body\n"},
+            existing_suite_command=_GREEN_SUITE,
+            workspace_root=self.workspace,
+        )
+        self.assertFalse(out["passed"])
+        self.assertEqual(
+            out["api_impact"]["reason"], gate.Reason.API_IMPACT_NOT_EVALUATED
+        )
+        # the three sub-gates that DID run keep their own verdicts
+        self.assertEqual(out["discrimination"]["reason"], gate.Reason.DISCRIMINATES)
+        self.assertEqual(out["changed_path"]["reason"], gate.Reason.WITHIN_SCOPE)
+        self.assertEqual(out["existing_suite"]["reason"], gate.Reason.SUITE_GREEN)
+
+    def test_deleting_an_absent_file_fails_fast_not_silently(self):
+        # A deletion entry naming a path that is not a file used to no-op: the
+        # oracle patch was silently narrower than declared. It must fail loud.
+        out = gate.evaluate_oracle(
+            _edit_task(), self.source,
+            {"apis/handler.go": None, "apis/ghost.go": None},
+            existing_suite_command=_GREEN_SUITE,
+            workspace_root=self.workspace,
+        )
+        self.assertFalse(out["passed"])
+        self.assertEqual(
+            out["discrimination"]["reason"], gate.Reason.TOOL_FAILURE
+        )
+        self.assertIn("apis/ghost.go", out["diagnostic"])
+
+    def test_first_reported_escape_is_deterministic_across_dict_orders(self):
+        # Two escaping entries inserted in opposite orders must report the same
+        # (sorted-first) path, not whichever dict insertion order surfaced.
+        for patch in (
+            {"../zz.go": "x\n", "../aa.go": "x\n"},
+            {"../aa.go": "x\n", "../zz.go": "x\n"},
+        ):
+            out = gate.evaluate_oracle(
+                _edit_task(), self.source, patch,
+                existing_suite_command=_GREEN_SUITE,
+                workspace_root=self.workspace,
+            )
+            self.assertIn("../aa.go", out["diagnostic"])
+            self.assertNotIn("../zz.go", out["diagnostic"])
 
     def test_out_of_scope_patch_fails_aggregate(self):
         out = gate.evaluate_oracle(

@@ -16,9 +16,12 @@ versioned sub-outcomes:
     passes pristine is REJECTED -- it discriminates nothing.
   * ``changed_path`` (``changed_path_v1``) -- every file the oracle patch touches
     must match a declared ``blast_radius.allow`` glob and respect ``max_files``.
-  * ``api_impact`` (``api_impact_v1``) -- for each symbol the patch changes, LCI
+  * ``api_impact`` (``api_impact_v1``) -- for each DECLARED impacted symbol, LCI
     resolves references; any reference outside the declared allow scope is an
     escape (the public-API / call-hierarchy blast radius rippled past scope).
+    Nothing derives impacted symbols from the patch yet: when the caller
+    declares none, the sub-outcome is the honest fail-closed code
+    API_IMPACT_NOT_EVALUATED -- never a fabricated NO_ESCAPE pass.
 
 FAIL CLOSED (criterion 3)
 -------------------------
@@ -26,7 +29,7 @@ A timeout, a missing command, a tool exception, an absent forged corpus, an
 absent oracle patch, a patch that escapes the blast radius or the worktree, and
 a non-discriminating / wrong-direction test all resolve to a deterministic FAIL
 with a stable reason code from :class:`Reason`. Captured stdout/stderr is
-BOUNDED to ``_MAX_TAIL`` bytes. There is no silent pass and no unbounded
+BOUNDED to ``_MAX_TAIL`` characters. There is no silent pass and no unbounded
 capture.
 
 Reason codes name the ACTUAL fault and its owner, because the scorer buckets
@@ -51,6 +54,7 @@ outcome.
 """
 
 import contextlib
+import functools
 import json
 import os
 import re
@@ -78,8 +82,9 @@ DISCRIMINATION_SCHEMA = "discrimination_v1"
 CHANGED_PATH_SCHEMA = "changed_path_v1"
 API_IMPACT_SCHEMA = "api_impact_v1"
 
-# Bound on captured stdout/stderr (criterion 3). Kept as a tail so the tail of a
-# failing run's log survives while an unbounded flood cannot.
+# Bound on captured stdout/stderr (criterion 3), in CHARACTERS -- _tail slices
+# the decoded text, deterministically. Kept as a tail so the tail of a failing
+# run's log survives while an unbounded flood cannot.
 _MAX_TAIL = 4000
 
 # Default per-command wall-clock budget. A command that outlives it fails closed
@@ -109,6 +114,7 @@ class Reason:
     # api impact
     NO_ESCAPE = "NO_ESCAPE"
     API_IMPACT_ESCAPE = "API_IMPACT_ESCAPE"
+    API_IMPACT_NOT_EVALUATED = "API_IMPACT_NOT_EVALUATED"
     LCI_ABSENT = "LCI_ABSENT"
     # shared command-run failures
     TIMEOUT = "TIMEOUT"
@@ -145,6 +151,7 @@ class PatchPathEscape(ValueError):
 # ---------------------------------------------------------------------------
 
 
+@functools.lru_cache(maxsize=None)
 def _glob_to_regex(glob):
     out = ["^"]
     i = 0
@@ -251,7 +258,7 @@ def _changed_path_outcome(passed, reason, changed, out_of_scope, allow, max_file
 
 
 def _tail(text):
-    """Keep the last _MAX_TAIL bytes so a flood cannot blow the outcome up."""
+    """Keep the last _MAX_TAIL characters so a flood cannot blow the outcome up."""
     if text is None:
         return ""
     if len(text) <= _MAX_TAIL:
@@ -340,13 +347,23 @@ def apply_patch(tree_dir, oracle_patch):
     never written. Returns the sorted set of touched paths.
     """
     root = os.path.abspath(tree_dir)
-    for rel, content in oracle_patch.items():
+    # Sorted iteration: the first fault hit (and thus the reported escape) is a
+    # deterministic property of the patch, not of dict insertion order.
+    for rel in sorted(oracle_patch):
+        content = oracle_patch[rel]
         dest = os.path.abspath(os.path.join(root, rel))
         if dest != root and not dest.startswith(root + os.sep):
             raise PatchPathEscape(rel)
         if content is None:
-            if os.path.isfile(dest):
-                os.remove(dest)
+            if os.path.isdir(dest):
+                raise ValueError(
+                    f"patch deletes a directory, not a file: {rel!r}"
+                )
+            if not os.path.isfile(dest):
+                raise ValueError(
+                    f"patch deletes a file absent from the tree: {rel!r}"
+                )
+            os.remove(dest)
             continue
         os.makedirs(os.path.dirname(dest), exist_ok=True)
         with open(dest, "w", encoding="utf-8") as handle:
@@ -493,9 +510,24 @@ class LciRefsAdapter:
             )
         paths = []
         for line in proc.stdout.splitlines():
-            token = line.strip().split(":", 1)[0].strip()
-            if token:
-                paths.append(os.path.relpath(token, tree_dir) if os.path.isabs(token) else token)
+            stripped = line.strip()
+            if not stripped:
+                continue
+            token = stripped.split(":", 1)[0].strip()
+            rel = (
+                os.path.relpath(token, tree_dir)
+                if os.path.isabs(token)
+                else token
+            )
+            # Only a line whose pre-":" token names a real path in the tree is a
+            # reference. Anything else (banner, warning, prose) makes the output
+            # unparseable -- a TOOL failure, never an agent escape.
+            if not token or not os.path.exists(os.path.join(tree_dir, rel)):
+                raise RuntimeError(
+                    f"unparseable lci refs output line (leading token is not a "
+                    f"path in the tree): {line!r}"
+                )
+            paths.append(rel)
         return paths
 
 
@@ -513,21 +545,28 @@ def _api_impact_outcome(passed, reason, symbols, escaped_refs, detail):
 def check_api_impact(impacted_symbols, blast_allow, lci, tree_dir):
     """Detect public-API / call-hierarchy breakage outside the declared scope.
 
-    For each symbol the patch changes, LCI resolves references; any reference in
+    For each DECLARED impacted symbol, LCI resolves references; any reference in
     a file that matches no ``blast_radius.allow`` glob is an ESCAPE -- the edit
     ripples beyond its declared blast radius. Fails closed when LCI is
-    unavailable or errors. Deterministic: symbols and escaped refs are sorted.
+    unavailable or errors, and -- because nothing derives impacted symbols from
+    the patch -- fails closed with API_IMPACT_NOT_EVALUATED when the caller
+    declares none: an unchecked blast radius is not a clean one.
+    Deterministic: symbols and escaped refs are sorted.
 
     There is deliberately no ``timeout`` parameter: the per-call wall-clock
     budget belongs to the injected ``lci`` adapter, which owns the subprocess
-    (see :class:`LciRefs`). A second, unenforced timeout here would advertise a
+    (see :class:`LciRefsAdapter`). A second, unenforced timeout here would advertise a
     bound this function does not apply.
     """
     symbols = sorted(set(impacted_symbols))
     if not symbols:
+        # HONEST fail-closed: nothing was checked, so nothing may read as
+        # checked. Deriving impacted symbols from the patch is future work;
+        # until then this half of the blast gate reports itself unevaluated.
         return _api_impact_outcome(
-            True, Reason.NO_ESCAPE, [], [],
-            "no impacted symbols declared; no API blast radius to check",
+            False, Reason.API_IMPACT_NOT_EVALUATED, [], [],
+            "no impacted symbols declared or derivable; the public-API blast "
+            "radius was NOT evaluated",
         )
     if blast_allow is None:
         return _api_impact_outcome(

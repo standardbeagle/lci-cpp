@@ -53,6 +53,23 @@ BEHAVIOR_CMD = [
 SUITE_CMD = [sys.executable, "-c", "import sys; sys.exit(0)"]
 
 
+class _StaticLci:
+    """Hermetic refs adapter: every declared symbol resolves inside the blast
+    radius, so the api_impact half is genuinely EVALUATED (the gate no longer
+    hands out a free NO_ESCAPE when no symbols are declared)."""
+
+    def available(self):
+        return True
+
+    def refs(self, _symbol, _tree_dir):
+        return ["apis/base.go"]
+
+
+# Threaded into every run so the oracle gate's api_impact half is evaluated
+# rather than honestly failing API_IMPACT_NOT_EVALUATED on every cell.
+GATE_KWARGS = dict(impacted_symbols=("NewStore",), lci=_StaticLci())
+
+
 def forge_fixture(root, corpus_id="pocketbase", seed=7):
     """Synthesise a forged corpus with two LIVE Go constructor exemplars that
     conform to the go-constructor-new-pointer rule (so the convention gate can
@@ -207,7 +224,7 @@ class ProvenanceRecordTest(unittest.TestCase):
             rec = edit_run.run_edit_task(
                 task, edit_toolsets.TREATMENT, run_pass_agent(), base_config(),
                 corpus_root=root, records_path=records, work_root=work,
-                behavior_command=BEHAVIOR_CMD, existing_suite_command=SUITE_CMD,
+                behavior_command=BEHAVIOR_CMD, existing_suite_command=SUITE_CMD, **GATE_KWARGS,
             )
             self.assertEqual(rec["status"], edit_record.STATUS_PASSED)
             # pinned source commit + tree hash
@@ -261,7 +278,7 @@ class ProvenanceRecordTest(unittest.TestCase):
                 task, edit_toolsets.TREATMENT, run_pass_agent(), base_config(),
                 corpus_root=root, records_path=os.path.join(root, "r.jsonl"),
                 work_root=work, behavior_command=BEHAVIOR_CMD,
-                existing_suite_command=SUITE_CMD,
+                existing_suite_command=SUITE_CMD, **GATE_KWARGS,
             )
             # source corpus tree untouched
             self.assertEqual(forge.tree_hash(tree), pre_hash)
@@ -323,7 +340,7 @@ class OracleIsolationTest(unittest.TestCase):
                 task, edit_toolsets.BASELINE, FakeAgent(_snoop), base_config(),
                 corpus_root=root, records_path=os.path.join(root, "r.jsonl"),
                 work_root=os.path.join(root, "work"),
-                behavior_command=BEHAVIOR_CMD, existing_suite_command=SUITE_CMD,
+                behavior_command=BEHAVIOR_CMD, existing_suite_command=SUITE_CMD, **GATE_KWARGS,
             )
             self.assertEqual(
                 captured["files"], edit_patch.agent_visible_files(tree)
@@ -355,7 +372,7 @@ class DeterminismAndResumeTest(unittest.TestCase):
                     corpus_root=root,
                     records_path=os.path.join(root, "r.jsonl"),
                     work_root=work, behavior_command=BEHAVIOR_CMD,
-                    existing_suite_command=SUITE_CMD,
+                    existing_suite_command=SUITE_CMD, **GATE_KWARGS,
                 )
             ]
             self.assertEqual(
@@ -377,13 +394,13 @@ class DeterminismAndResumeTest(unittest.TestCase):
             edit_run.run_edit_task(
                 task, edit_toolsets.TREATMENT, run_pass_agent(), base_config(),
                 corpus_root=root, records_path=records, work_root=work,
-                behavior_command=BEHAVIOR_CMD, existing_suite_command=SUITE_CMD,
+                behavior_command=BEHAVIOR_CMD, existing_suite_command=SUITE_CMD, **GATE_KWARGS,
             )
             second = _apply_and_answer({"GREEN": "ok\n"})
             rec = edit_run.run_edit_task(
                 task, edit_toolsets.TREATMENT, second, base_config(),
                 corpus_root=root, records_path=records, work_root=work,
-                behavior_command=BEHAVIOR_CMD, existing_suite_command=SUITE_CMD,
+                behavior_command=BEHAVIOR_CMD, existing_suite_command=SUITE_CMD, **GATE_KWARGS,
             )
             self.assertTrue(rec["skipped"])
             self.assertEqual(second.calls, [])  # adapter never touched on resume
@@ -402,7 +419,7 @@ class DeterminismAndResumeTest(unittest.TestCase):
             edit_run.run_edit_task(
                 task, edit_toolsets.TREATMENT, run_pass_agent(), base_config(),
                 corpus_root=root, records_path=records, work_root=work,
-                behavior_command=BEHAVIOR_CMD, existing_suite_command=SUITE_CMD,
+                behavior_command=BEHAVIOR_CMD, existing_suite_command=SUITE_CMD, **GATE_KWARGS,
             )
             changed = dict(task)
             changed["prompt"] = task["prompt"] + " Also keep the receiver name."
@@ -410,7 +427,7 @@ class DeterminismAndResumeTest(unittest.TestCase):
             rec = edit_run.run_edit_task(
                 changed, edit_toolsets.TREATMENT, second, base_config(),
                 corpus_root=root, records_path=records, work_root=work,
-                behavior_command=BEHAVIOR_CMD, existing_suite_command=SUITE_CMD,
+                behavior_command=BEHAVIOR_CMD, existing_suite_command=SUITE_CMD, **GATE_KWARGS,
             )
             self.assertNotIn("skipped", rec)
             self.assertEqual(len(second.calls), 1)
@@ -426,14 +443,14 @@ class DeterminismAndResumeTest(unittest.TestCase):
             first = edit_run.run_edit_task(
                 task, edit_toolsets.TREATMENT, failed, base_config(),
                 corpus_root=root, records_path=records, work_root=work,
-                behavior_command=BEHAVIOR_CMD, existing_suite_command=SUITE_CMD,
+                behavior_command=BEHAVIOR_CMD, existing_suite_command=SUITE_CMD, **GATE_KWARGS,
             )
             self.assertEqual(first["status"], edit_record.STATUS_AGENT_FAILURE)
             retry = run_pass_agent()
             rec = edit_run.run_edit_task(
                 task, edit_toolsets.TREATMENT, retry, base_config(),
                 corpus_root=root, records_path=records, work_root=work,
-                behavior_command=BEHAVIOR_CMD, existing_suite_command=SUITE_CMD,
+                behavior_command=BEHAVIOR_CMD, existing_suite_command=SUITE_CMD, **GATE_KWARGS,
             )
             self.assertFalse(rec.get("skipped"))
             self.assertEqual(rec["status"], edit_record.STATUS_PASSED)
@@ -493,7 +510,7 @@ class FakeAgentSmokeTest(unittest.TestCase):
                                 edit_task(), arm, agent, base_config(),
                                 corpus_root=root, records_path=records,
                                 work_root=work, behavior_command=BEHAVIOR_CMD,
-                                existing_suite_command=SUITE_CMD,
+                                existing_suite_command=SUITE_CMD, **GATE_KWARGS,
                             )
                             self.assertEqual(agent.calls, [])
                         else:
@@ -502,7 +519,7 @@ class FakeAgentSmokeTest(unittest.TestCase):
                                 edit_task(), arm, _agent_for(kind), base_config(),
                                 corpus_root=root, records_path=records,
                                 work_root=work, behavior_command=BEHAVIOR_CMD,
-                                existing_suite_command=SUITE_CMD,
+                                existing_suite_command=SUITE_CMD, **GATE_KWARGS,
                             )
                         self.assertEqual(rec["status"], kind)
                         # every terminal outcome is explicit + machine-readable
@@ -534,7 +551,7 @@ class FakeAgentSmokeTest(unittest.TestCase):
                     edit_task(), edit_toolsets.TREATMENT, FakeAgent(_explode),
                     base_config(), corpus_root=root, records_path=records,
                     work_root=work, behavior_command=BEHAVIOR_CMD,
-                    existing_suite_command=SUITE_CMD,
+                    existing_suite_command=SUITE_CMD, **GATE_KWARGS,
                 )
             persisted = edit_record.load_records(records)
             self.assertEqual(len(persisted), 1)
@@ -560,6 +577,71 @@ class FakeAgentSmokeTest(unittest.TestCase):
                 os.listdir(checkouts) if os.path.isdir(checkouts) else [], []
             )
 
+    def test_record_write_failure_does_not_replace_the_original_exception(self):
+        # If appending the harness_failure record itself fails, the ORIGINAL
+        # fault must still propagate -- a disk error in our logging must never
+        # masquerade as the cause of the crash.
+        class Boom(RuntimeError):
+            pass
+
+        def _explode(_request):
+            raise Boom("adapter died mid-run")
+
+        with TemporaryDirectory() as root:
+            forge_fixture(root)
+            original_append = edit_record.append_record
+
+            def _bad_append(_path, _rec):
+                raise OSError("records disk is full")
+
+            edit_record.append_record = _bad_append
+            try:
+                with self.assertRaises(Boom):
+                    edit_run.run_edit_task(
+                        edit_task(), edit_toolsets.TREATMENT, FakeAgent(_explode),
+                        base_config(), corpus_root=root,
+                        records_path=os.path.join(root, "r.jsonl"),
+                        work_root=os.path.join(root, "work"),
+                        behavior_command=BEHAVIOR_CMD,
+                        existing_suite_command=SUITE_CMD, **GATE_KWARGS,
+                    )
+            finally:
+                edit_record.append_record = original_append
+
+    def test_partial_checkout_is_removed_when_prepare_checkout_raises(self):
+        # A CorpusError raised AFTER the destination copy started must not leave
+        # a half-materialized checkout behind for the next resume to trip on.
+        from runner import corpus as corpus_mod
+
+        with TemporaryDirectory() as root:
+            forge_fixture(root)
+            records = os.path.join(root, "r.jsonl")
+            work = os.path.join(root, "work")
+            original = corpus_mod.prepare_checkout
+
+            def _partial(_root, _ref, dest):
+                os.makedirs(dest, exist_ok=True)
+                with open(os.path.join(dest, "partial.go"), "w") as fh:
+                    fh.write("half-copied\n")
+                raise corpus_mod.TreeHashMismatch("drift detected mid-copy")
+
+            corpus_mod.prepare_checkout = _partial
+            try:
+                rec = edit_run.run_edit_task(
+                    edit_task(), edit_toolsets.TREATMENT,
+                    FakeAgent(AgentResult("ok", "x", (), 0, 0, {})),
+                    base_config(), corpus_root=root, records_path=records,
+                    work_root=work, behavior_command=BEHAVIOR_CMD,
+                    existing_suite_command=SUITE_CMD, **GATE_KWARGS,
+                )
+            finally:
+                corpus_mod.prepare_checkout = original
+            self.assertEqual(rec["status"], edit_record.STATUS_CONFIG_ERROR)
+            checkouts = os.path.join(work, "checkouts")
+            self.assertEqual(
+                os.listdir(checkouts) if os.path.isdir(checkouts) else [], []
+            )
+
     def test_gate_exception_is_recorded_before_it_propagates(self):
         # Same contract for a fault raised by the GATES rather than the adapter.
         import conformance_gate
@@ -580,7 +662,7 @@ class FakeAgentSmokeTest(unittest.TestCase):
                         base_config(), corpus_root=root, records_path=records,
                         work_root=os.path.join(root, "work"),
                         behavior_command=BEHAVIOR_CMD,
-                        existing_suite_command=SUITE_CMD,
+                        existing_suite_command=SUITE_CMD, **GATE_KWARGS,
                     )
             finally:
                 conformance_gate.evaluate_task = original
@@ -619,7 +701,7 @@ class FakeAgentSmokeTest(unittest.TestCase):
                         records_path=os.path.join(root, "r.jsonl"),
                         work_root=os.path.join(root, "work"),
                         behavior_command=BEHAVIOR_CMD,
-                        existing_suite_command=SUITE_CMD,
+                        existing_suite_command=SUITE_CMD, **GATE_KWARGS,
                     )
                     conformance = rec["gates"]["conformance"]
                     # behaviour is green in all three -- only convention differs
@@ -637,6 +719,25 @@ class FakeAgentSmokeTest(unittest.TestCase):
                         else edit_record.STATUS_GATE_FAILED,
                     )
 
+    def test_undeclared_impacted_symbols_never_pass_the_oracle_gate(self):
+        # With no impacted symbols declared (the runner's default) the api_impact
+        # half of the blast gate is NOT evaluated -- and an unevaluated gate must
+        # read as a failure with its honest code, never as a silent NO_ESCAPE.
+        with TemporaryDirectory() as root:
+            forge_fixture(root)
+            rec = edit_run.run_edit_task(
+                edit_task(), edit_toolsets.TREATMENT, run_pass_agent(),
+                base_config(), corpus_root=root,
+                records_path=os.path.join(root, "r.jsonl"),
+                work_root=os.path.join(root, "work"),
+                behavior_command=BEHAVIOR_CMD,
+                existing_suite_command=SUITE_CMD,
+            )
+            self.assertEqual(rec["status"], edit_record.STATUS_GATE_FAILED)
+            api_impact = rec["gates"]["oracle"]["api_impact"]
+            self.assertFalse(api_impact["passed"])
+            self.assertEqual(api_impact["reason"], "API_IMPACT_NOT_EVALUATED")
+
     def test_blast_radius_escape_is_a_gate_failure(self):
         # A patch that turns behaviour green but ALSO writes outside the declared
         # blast radius is rejected by the changed-path gate (criterion 4).
@@ -647,7 +748,7 @@ class FakeAgentSmokeTest(unittest.TestCase):
                 edit_task(), edit_toolsets.TREATMENT, agent, base_config(),
                 corpus_root=root, records_path=os.path.join(root, "r.jsonl"),
                 work_root=os.path.join(root, "work"),
-                behavior_command=BEHAVIOR_CMD, existing_suite_command=SUITE_CMD,
+                behavior_command=BEHAVIOR_CMD, existing_suite_command=SUITE_CMD, **GATE_KWARGS,
             )
             self.assertEqual(rec["status"], edit_record.STATUS_GATE_FAILED)
             self.assertFalse(rec["gates"]["oracle"]["changed_path"]["passed"])
