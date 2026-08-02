@@ -45,6 +45,68 @@ class TruncatingUpstream(http.server.BaseHTTPRequestHandler):
         self.close_connection = True
 
 
+def _raw_exchange(directory, request_bytes):
+    """Send raw bytes at a proxy with no reachable upstream; return status + captures."""
+    server = proxy.CaptureServer(("127.0.0.1", 0), "http://127.0.0.1:1", Path(directory), max_requests=1)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        with socket.create_connection(("127.0.0.1", server.server_port), timeout=30) as client:
+            client.sendall(request_bytes)
+            client.settimeout(30)
+            received = bytearray()
+            while True:
+                try:
+                    chunk = client.recv(65536)
+                except OSError:
+                    break
+                if not chunk:
+                    break
+                received.extend(chunk)
+    finally:
+        server.server_close()
+    status = int(bytes(received).split(b" ", 2)[1])
+    captures = [json.loads(path.read_text()) for path in Path(directory).glob("capture-*.json")]
+    return status, captures
+
+
+class RequestBoundaryTest(unittest.TestCase):
+    def test_non_numeric_content_length_is_a_recorded_400(self):
+        with tempfile.TemporaryDirectory() as directory:
+            status, captures = _raw_exchange(
+                directory,
+                b"POST /v1/x HTTP/1.1\r\nHost: x\r\nContent-Length: banana\r\n\r\n")
+            self.assertEqual(status, 400)
+            self.assertEqual(len(captures), 1)
+            self.assertIn("Content-Length", captures[0]["failure"])
+
+    def test_missing_content_length_is_a_recorded_400(self):
+        with tempfile.TemporaryDirectory() as directory:
+            status, captures = _raw_exchange(
+                directory, b"POST /v1/x HTTP/1.1\r\nHost: x\r\n\r\n")
+            self.assertEqual(status, 400)
+            self.assertEqual(len(captures), 1)
+
+    def test_oversized_body_is_a_recorded_413(self):
+        with tempfile.TemporaryDirectory() as directory:
+            declared = proxy.MAX_REQUEST_BODY + 1
+            status, captures = _raw_exchange(
+                directory,
+                f"POST /v1/x HTTP/1.1\r\nHost: x\r\nContent-Length: {declared}\r\n\r\n".encode())
+            self.assertEqual(status, 413)
+            self.assertEqual(len(captures), 1)
+            self.assertIsNotNone(captures[0]["failure"])
+
+    def test_chunked_request_body_is_a_recorded_501_not_a_silent_empty_forward(self):
+        with tempfile.TemporaryDirectory() as directory:
+            status, captures = _raw_exchange(
+                directory,
+                b"POST /v1/x HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\n"
+                b"0\r\n\r\n")
+            self.assertEqual(status, 501)
+            self.assertEqual(len(captures), 1)
+            self.assertIn("chunked", captures[0]["failure"])
+
+
 class MidStreamFailureTest(unittest.TestCase):
     def test_no_second_response_head_after_headers_are_sent(self):
         upstream = http.server.ThreadingHTTPServer(("127.0.0.1", 0), TruncatingUpstream)
@@ -60,14 +122,20 @@ class MidStreamFailureTest(unittest.TestCase):
                                + f"Content-Length: {len(body)}\r\n\r\n".encode() + body)
                 client.settimeout(30)
                 received = bytearray()
+                reset = False
                 while True:
-                    chunk = client.recv(65536)
+                    try:
+                        chunk = client.recv(65536)
+                    except ConnectionResetError:
+                        reset = True
+                        break
                     if not chunk: break
                     received.extend(chunk)
             server.server_close()
             captures = list(Path(directory).glob("capture-*.json"))
             upstream.shutdown(); upstream.server_close()
             self.assertEqual(bytes(received).count(b"HTTP/1."), 1, bytes(received))
+            self.assertTrue(reset, "a truncated close-delimited body must abort hard, not clean-close")
             self.assertEqual(len(captures), 1)
             self.assertIsNotNone(json.loads(captures[0].read_text())["failure"])
 
