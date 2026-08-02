@@ -6,6 +6,8 @@ import argparse
 import hashlib
 import http.server
 import json
+import socket
+import struct
 import sys
 import threading
 import time
@@ -19,6 +21,9 @@ import replay_common
 SECRET_HEADERS = {"authorization", "cookie", "proxy-authorization", "x-api-key", "api-key"}
 HOP_HEADERS = {"connection", "host", "content-length", "transfer-encoding", "accept-encoding"}
 SAFE_RESPONSE_HEADERS = {"content-type", "cache-control", "x-request-id", "request-id"}
+# Provider chat requests are small JSON; anything past this bound is not a
+# legitimate capture subject and must fail loudly rather than buffer unbounded.
+MAX_REQUEST_BODY = 16 * 1024 * 1024
 
 
 def sanitized_headers(headers) -> dict[str, str]:
@@ -86,9 +91,34 @@ class CaptureHandler(http.server.BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         return
 
+    def _finish_capture(self, capture: dict) -> None:
+        atomic_json(self.server.output / f"capture-{capture['captured_at_unix_ns']}.json", capture)
+        self.server.completed += 1
+        if self.server.max_requests and self.server.completed >= self.server.max_requests:
+            threading.Thread(target=self.server.shutdown, daemon=True).start()
+        self.close_connection = True
+
+    def _reject(self, started: int, status: int, failure: str) -> None:
+        """Refuse a request at the trust boundary: record it, then answer with `status`."""
+        self._finish_capture(build_capture(started, self.path, self.headers, b"",
+                                           status, {}, b"", failure))
+        try:
+            self.send_error(status, explain=failure)
+        except OSError:
+            pass
+
     def do_POST(self):
         started = time.time_ns()
-        length = int(self.headers.get("Content-Length", "0"))
+        if "chunked" in (self.headers.get("Transfer-Encoding") or "").casefold():
+            # A chunked body would previously be forwarded as empty; that is a
+            # silent corruption of the capture, so fail loudly instead.
+            return self._reject(started, 501, "chunked request bodies are not supported")
+        raw_length = self.headers.get("Content-Length")
+        if raw_length is None or not raw_length.strip().isdigit():
+            return self._reject(started, 400, "missing or non-numeric Content-Length")
+        length = int(raw_length)
+        if length > MAX_REQUEST_BODY:
+            return self._reject(started, 413, f"request body exceeds the {MAX_REQUEST_BODY}-byte cap")
         request_body = self.rfile.read(length)
         upstream_url = self.server.upstream + self.path
         request = urllib.request.Request(
@@ -123,11 +153,15 @@ class CaptureHandler(http.server.BaseHTTPRequestHandler):
         except BaseException as exc:
             failure = f"{type(exc).__name__}: {exc}"
             # Once a response head is on the wire a second one would be parsed as
-            # body: signal the failure by dropping the connection instead. The
+            # body: signal the failure by aborting the connection instead. The
+            # relayed body is close-delimited (no Content-Length reaches the
+            # client), so a clean FIN would make a truncated body look complete;
+            # SO_LINGER(0) forces an RST the client must treat as failure. The
             # capture record is the durable diagnosis either way.
             if headers_sent:
                 try:
-                    self.wfile.flush()
+                    self.connection.setsockopt(
+                        socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
                 except OSError:
                     pass
                 self.connection.close()
@@ -137,13 +171,9 @@ class CaptureHandler(http.server.BaseHTTPRequestHandler):
                 except OSError:
                     pass
         finally:
-            capture = build_capture(started, self.path, self.headers, request_body,
-                                    response_status, response_headers, bytes(response_body), failure)
-            atomic_json(self.server.output / f"capture-{started}.json", capture)
-            self.server.completed += 1
-            if self.server.max_requests and self.server.completed >= self.server.max_requests:
-                threading.Thread(target=self.server.shutdown, daemon=True).start()
-            self.close_connection = True
+            self._finish_capture(build_capture(started, self.path, self.headers, request_body,
+                                               response_status, response_headers,
+                                               bytes(response_body), failure))
 
 
 def main() -> int:
