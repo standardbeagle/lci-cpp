@@ -226,6 +226,14 @@ add_test(NAME tail_bundle_isolation_contract
 set_tests_properties(tail_bundle_isolation_contract PROPERTIES
     LABELS "infrastructure")
 
+# Discrimination fixtures for the contract above: proves the gate rejects the
+# cross-call false pass and tolerates both CTest quoting forms.
+add_test(NAME tail_bundle_isolation_selftest
+    COMMAND ${CMAKE_COMMAND}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/helpers/tail_isolation_selftest.cmake)
+set_tests_properties(tail_bundle_isolation_selftest PROPERTIES
+    LABELS "infrastructure")
+
 endif() # NOT WIN32 AND NOT APPLE
 
 # ---------------------------------------------------------------------------
