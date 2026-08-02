@@ -121,6 +121,24 @@ def adjudicate_item(item: dict, complete, *, model: str, headers: dict,
     return record
 
 
+def drain(items: list[dict], records: list[dict], adjudicate, checkpoint) -> list[dict]:
+    """Adjudicate every item not yet carrying a real verdict.
+
+    A checkpointed record whose adjudication is null is a provider or format
+    failure, not a completed judgment: it must be replaced on resume, never
+    skipped, or a transient outage silently shrinks the adjudicated set.
+    """
+    completed = {item_key(record) for record in records if record.get("adjudication") is not None}
+    for item in items:
+        key = item_key(item)
+        if key in completed:
+            continue
+        records = [record for record in records if item_key(record) != key]
+        records.append(adjudicate(item))
+        checkpoint(records)
+    return records
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--failures", type=Path, required=True,
@@ -143,13 +161,11 @@ def main() -> int:
         if any(record.get("adjudicator_model") != args.model for record in prior.get("records", [])):
             raise SystemExit("refusing to resume a run adjudicated by a different model")
         records = prior.get("records", [])
-    completed = {item_key(record) for record in records}
-    for item in failures:  # Deliberately exhaustive: no sampling of failures.
-        if item_key(item) in completed:
-            continue
-        records.append(adjudicate_item(item, provider.complete, model=args.model, headers=headers,
-                                       max_format_attempts=args.max_format_attempts))
-        write_checkpoint(args.out, records)
+    records = drain(  # Deliberately exhaustive: no sampling of failures.
+        failures, records,
+        lambda item: adjudicate_item(item, provider.complete, model=args.model, headers=headers,
+                                     max_format_attempts=args.max_format_attempts),
+        lambda current: write_checkpoint(args.out, current))
     write_checkpoint(args.out, records)
     return 0
 

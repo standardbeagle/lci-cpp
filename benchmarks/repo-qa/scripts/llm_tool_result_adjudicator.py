@@ -104,6 +104,23 @@ def adjudicate_item(item: dict, complete, *, model: str, headers: dict,
             "judgment": judgment, "attempts": attempts}
 
 
+def drain(queue: list[dict], records: list[dict], adjudicate, checkpoint) -> list[dict]:
+    """Adjudicate every queued item not yet carrying a real judgment.
+
+    A checkpointed record with judgment null is a provider or format failure,
+    not a completed verdict: replace it on resume instead of skipping it, or a
+    transient outage permanently drops the item from the adjudicated set.
+    """
+    completed = {record["cell_key"] for record in records if record.get("judgment") is not None}
+    for item in queue:
+        if item["cell_key"] in completed:
+            continue
+        records = [record for record in records if record["cell_key"] != item["cell_key"]]
+        records.append(adjudicate(item))
+        checkpoint(records)
+    return records
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--queue", type=Path, required=True)
@@ -128,13 +145,12 @@ def main() -> int:
         if prior.get("judge_id") != args.judge_id:
             raise SystemExit("refusing to resume a different judge-id")
         records = prior.get("records", [])
-    completed = {item["cell_key"] for item in records}
-    for item in queue:
-        if item["cell_key"] in completed:
-            continue
-        records.append(adjudicate_item(item, provider.complete, model=args.model, headers=headers,
-                                       max_format_attempts=args.max_format_attempts))
-        write_checkpoint(args.out, records, judge_id=args.judge_id)
+    records = drain(
+        queue, records,
+        lambda item: adjudicate_item(item, provider.complete, model=args.model, headers=headers,
+                                     max_format_attempts=args.max_format_attempts),
+        lambda current: write_checkpoint(args.out, current, judge_id=args.judge_id))
+    write_checkpoint(args.out, records, judge_id=args.judge_id)
     return 0
 
 
