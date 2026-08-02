@@ -6,7 +6,6 @@ import argparse
 import hashlib
 import importlib.util
 import json
-import os
 from pathlib import Path
 
 
@@ -23,6 +22,7 @@ def _module(name: str, path: Path):
 
 
 runner = _module("api_replay_probe_runner", HERE / "api_replay_format_exploration.py")
+replay_common = _module("api_replay_probe_replay_common", HERE / "replay_common.py")
 
 
 def run_probes(provider, fixtures: list[dict]) -> dict:
@@ -56,13 +56,7 @@ def run_probes(provider, fixtures: list[dict]) -> dict:
 
 
 def write_new(path: Path, value: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    data = (json.dumps(value, indent=2, sort_keys=True) + "\n").encode()
-    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
-    with os.fdopen(descriptor, "wb") as handle:
-        handle.write(data)
-        handle.flush()
-        os.fsync(handle.fileno())
+    replay_common.write_immutable(path, json.dumps(value, indent=2, sort_keys=True) + "\n")
 
 
 def main() -> int:

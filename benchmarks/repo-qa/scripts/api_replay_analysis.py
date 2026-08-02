@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import math
 import re
@@ -13,6 +12,7 @@ from collections import defaultdict
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import replay_common
 from semantic_location_oracle import evaluate as evaluate_location_answer
 
 
@@ -31,10 +31,7 @@ def normalize(value: str) -> str:
     return " ".join(value.casefold().split())
 
 
-def canonical_digest(value: object) -> str:
-    encoded = json.dumps(value, ensure_ascii=True, allow_nan=False, sort_keys=True,
-                         separators=(",", ":")).encode()
-    return "sha256:" + hashlib.sha256(encoded).hexdigest()
+canonical_digest = replay_common.digest  # byte-identical to the previous local copy
 
 
 def load_oracles(fixtures_dir: Path, task_id: str = "search-callsite-v2") -> dict[str, dict]:
@@ -74,15 +71,7 @@ def quality(predicted: list[str], expected: list[str]) -> dict:
       - nonempty predicted, empty truth -> recall likewise defined as 0.0, so a
         fabricated answer cannot score better than correctly saying nothing
     """
-    predicted_set, expected_set = set(predicted), set(expected)
-    true_positive = len(predicted_set & expected_set)
-    return {
-        "exact": predicted_set == expected_set,
-        "precision": true_positive / len(predicted_set) if predicted_set else (1.0 if not expected_set else 0.0),
-        "recall": true_positive / len(expected_set) if expected_set else (1.0 if not predicted_set else 0.0),
-        "false_positives": sorted(predicted_set - expected_set),
-        "false_negatives": sorted(expected_set - predicted_set),
-    }
+    return replay_common.grade_sets(set(predicted), set(expected))
 
 
 def score_cell(cell: dict, oracles: dict[str, dict]) -> dict:

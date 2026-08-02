@@ -7,7 +7,11 @@ import argparse
 import importlib.util
 import json
 import re
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+import replay_common
 
 
 ARGS = {
@@ -30,8 +34,7 @@ ARGS = {
 VOLATILE_KEYS = {"analyzed_at", "analysis_time_ms", "index_time_ms", "timestamp", "timestamp_ms"}
 
 
-def canonical(value: object) -> str:
-    return json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+canonical = replay_common.pretty  # byte-identical to the previous local copy
 
 
 def normalize_text(text: str, corpus: Path) -> str:

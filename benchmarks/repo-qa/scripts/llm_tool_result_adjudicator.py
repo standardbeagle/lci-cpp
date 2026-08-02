@@ -6,11 +6,10 @@ import argparse
 import hashlib
 import json
 import sys
-import os
-import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from adjudicator_common import load_header_profile, request_body, strip_code_fence, write_checkpoint as write_checkpoint_document
 from opencode_zen_provider import OpenCodeZenProvider
 
 
@@ -47,34 +46,15 @@ def validate(value: object) -> dict:
 
 
 def parse(text: str) -> dict:
-    stripped = text.strip()
-    if stripped.startswith("```"):
-        stripped = "\n".join(stripped.splitlines()[1:-1])
-    return validate(json.loads(stripped))
-
-
-def load_header_profile(path: Path) -> dict:
-    """Header profiles are committed with a `headers` key; anything else is a bug."""
-    document = json.loads(path.read_text())
-    headers = document.get("headers")
-    if not isinstance(headers, dict):
-        raise SystemExit(
-            f"{path}: header profile must carry a 'headers' object, found keys {sorted(document)}"
-        )
-    return headers
+    return validate(json.loads(strip_code_fence(text)))
 
 
 def write_checkpoint(path: Path, records: list[dict], *, judge_id: str = "unspecified") -> None:
-    result = {"schema": "lci.all-tools-adjudications.v2", "policy": "every queued failure",
-              "judge_id": judge_id,
-              "records": records,
-              "promotion_policy": "Judgments never change scores directly; only two-judge consensus may nominate a regression, which still requires a deterministic test and full reanalysis."}
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temporary = tempfile.mkstemp(prefix=path.name, suffix=".tmp", dir=path.parent)
-    with os.fdopen(fd, "w") as handle:
-        json.dump(result, handle, indent=2, sort_keys=True)
-        handle.write("\n")
-    os.replace(temporary, path)
+    write_checkpoint_document(path, {
+        "schema": "lci.all-tools-adjudications.v2", "policy": "every queued failure",
+        "judge_id": judge_id,
+        "records": records,
+        "promotion_policy": "Judgments never change scores directly; only two-judge consensus may nominate a regression, which still requires a deterministic test and full reanalysis."})
 
 
 def adjudicate_item(item: dict, complete, *, model: str, headers: dict,
@@ -84,9 +64,7 @@ def adjudicate_item(item: dict, complete, *, model: str, headers: dict,
     attempts = []
     judgment = None
     for number in range(1, max_format_attempts + 1):
-        body = {"model": model.split("/", 1)[-1], "temperature": 0, "stream": False,
-                "messages": [{"role": "system", "content": "You are a blinded benchmark adjudicator."},
-                             {"role": "user", "content": text}]}
+        body = request_body(model, text, system="You are a blinded benchmark adjudicator.")
         response = complete(body, model, headers)
         attempt = {"attempt": number, "provider_status": response["status"],
                    "raw_answer": response.get("final_answer", ""), "parse_error": None}
@@ -102,6 +80,23 @@ def adjudicate_item(item: dict, complete, *, model: str, headers: dict,
             "adjudicator_model": model,
             "prompt_digest": "sha256:" + hashlib.sha256(text.encode()).hexdigest(),
             "judgment": judgment, "attempts": attempts}
+
+
+def drain(queue: list[dict], records: list[dict], adjudicate, checkpoint) -> list[dict]:
+    """Adjudicate every queued item not yet carrying a real judgment.
+
+    A checkpointed record with judgment null is a provider or format failure,
+    not a completed verdict: replace it on resume instead of skipping it, or a
+    transient outage permanently drops the item from the adjudicated set.
+    """
+    completed = {record["cell_key"] for record in records if record.get("judgment") is not None}
+    for item in queue:
+        if item["cell_key"] in completed:
+            continue
+        records = [record for record in records if record["cell_key"] != item["cell_key"]]
+        records.append(adjudicate(item))
+        checkpoint(records)
+    return records
 
 
 def main() -> int:
@@ -128,13 +123,12 @@ def main() -> int:
         if prior.get("judge_id") != args.judge_id:
             raise SystemExit("refusing to resume a different judge-id")
         records = prior.get("records", [])
-    completed = {item["cell_key"] for item in records}
-    for item in queue:
-        if item["cell_key"] in completed:
-            continue
-        records.append(adjudicate_item(item, provider.complete, model=args.model, headers=headers,
-                                       max_format_attempts=args.max_format_attempts))
-        write_checkpoint(args.out, records, judge_id=args.judge_id)
+    records = drain(
+        queue, records,
+        lambda item: adjudicate_item(item, provider.complete, model=args.model, headers=headers,
+                                     max_format_attempts=args.max_format_attempts),
+        lambda current: write_checkpoint(args.out, current, judge_id=args.judge_id))
+    write_checkpoint(args.out, records, judge_id=args.judge_id)
     return 0
 
 

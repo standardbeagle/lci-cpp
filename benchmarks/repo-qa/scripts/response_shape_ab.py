@@ -2,16 +2,16 @@
 """Run the preregistered, canned tool-response-shape experiment."""
 from __future__ import annotations
 
-import argparse, hashlib, importlib.util, json, os, shutil, subprocess, tempfile, time
+import argparse, hashlib, json, os, sys, tempfile
 from pathlib import Path
 
-_COMPREHENSION_PATH=Path(__file__).with_name("comprehension_ab.py")
-_COMPREHENSION_SPEC=importlib.util.spec_from_file_location("response_shape_comprehension_helpers",_COMPREHENSION_PATH)
-if _COMPREHENSION_SPEC is None or _COMPREHENSION_SPEC.loader is None: raise ImportError(f"cannot load {_COMPREHENSION_PATH}")
-_COMPREHENSION=importlib.util.module_from_spec(_COMPREHENSION_SPEC); _COMPREHENSION_SPEC.loader.exec_module(_COMPREHENSION)
-classify_failure=_COMPREHENSION.classify_failure
-empty_git_workspace=_COMPREHENSION.empty_git_workspace
-parse_events=_COMPREHENSION.parse_events
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import replay_common
+
+import opencode_runner as runner
+classify_failure=runner.classify_failure
+empty_git_workspace=runner.empty_git_workspace
+parse_events=runner.parse_events
 
 ROOT = Path(__file__).resolve().parents[3]
 BASE = ROOT / "benchmarks/repo-qa/response-shape"
@@ -24,11 +24,13 @@ FINAL_STATUSES = {"answered", "malformed_answer"}
 # Provider stderr is diagnostic only: keep a bounded tail, never the full stream.
 STDERR_TAIL_LIMIT = 512
 
-def canonical(value):
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-
-def digest(value):
-    return "sha256:" + hashlib.sha256((value if isinstance(value, str) else canonical(value)).encode()).hexdigest()
+# The authoritative canonical/digest pair (replay_common) uses ensure_ascii=True;
+# the retired local copy used ensure_ascii=False, so digests of values containing
+# non-ASCII text change. The committed manifest/tasks are pure ASCII, so no
+# committed artifact embeds a divergent digest; runtime cell records from older
+# runs of non-ASCII cells would simply re-execute on resume.
+canonical = replay_common.canonical
+digest = replay_common.digest
 
 def load_inputs(manifest_path=MANIFEST, tasks_path=TASKS):
     manifest, bank = json.loads(Path(manifest_path).read_text()), json.loads(Path(tasks_path).read_text())
@@ -80,19 +82,20 @@ def parse_answer(text):
     if any(not isinstance(value[k],list) or any(not isinstance(x,str) for x in value[k]) for k in value): raise ValueError("answer fields must be string lists")
     return value
 
-def _norm(xs): return {" ".join(x.casefold().split()) for x in xs}
+def _norm(xs): return {replay_common.normalize_term(x) for x in xs}
 
 def score_answer(task, answer):
     predicted, expected=_norm(answer["answers"]),_norm(task["expected_answers"])
     evidence, required=_norm(answer["evidence"]),_norm(task["required_evidence"])
     supported=_norm(task["facts"] + task["expected_answers"] + task["required_evidence"])
     claims=_norm(answer["claims"]); unsupported=sorted(claims-supported)
-    tp=len(predicted&expected); ep=len(evidence&required)
+    answer_precision, answer_recall = replay_common.set_precision_recall(predicted, expected)
+    evidence_precision, evidence_recall = replay_common.set_precision_recall(evidence, required)
     omissions=sorted(expected-predicted)
-    return {"correct": predicted==expected, "answer_precision": tp/len(predicted) if predicted else (1.0 if not expected else 0.0),
-            "answer_recall": tp/len(expected) if expected else (1.0 if not predicted else 0.0),
-            "evidence_precision": ep/len(evidence) if evidence else (1.0 if not required else 0.0),
-            "evidence_recall": ep/len(required) if required else (1.0 if not evidence else 0.0),
+    return {"correct": predicted==expected, "answer_precision": answer_precision,
+            "answer_recall": answer_recall,
+            "evidence_precision": evidence_precision,
+            "evidence_recall": evidence_recall,
             "hallucinated": bool(unsupported), "unsupported_claim_count": len(unsupported), "unsupported_claims": unsupported,
             "omission_count":len(omissions), "omissions":omissions}
 
@@ -111,53 +114,27 @@ class DeterministicModelProvider:
         return {"status":"answered","answer":canonical(answer),"tokens":{"input":len(task["facts"]),"output":len(answer["answers"])+len(answer["evidence"])},"wall_seconds":0.001}
 
 class OpenCodeProvider:
-    """Run one isolated, tool-disabled OpenCode session per experimental cell."""
+    """Run isolated, tool-disabled OpenCode cells in one per-run workspace.
+
+    The workspace (and its single copy of the shared auth/model state, made by
+    the runner's isolated_environment) is created once per run, not once per
+    cell: credentials are copied into the 0700 tempdir exactly once and the
+    token value is never read or printed by the harness.
+    """
     def __init__(self, executable="opencode"):
         self.executable=executable
+        self._parent=tempfile.TemporaryDirectory(prefix="response-shape-parent-")
+        self.workspace=empty_git_workspace(Path(self._parent.name))
 
     def run(self, *, prompt, task, arm, model, timeout):
         del task, arm
-        started=time.monotonic()
-        with tempfile.TemporaryDirectory(prefix="response-shape-parent-") as parent:
-            workspace=empty_git_workspace(Path(parent))
-            environment=os.environ.copy()
-            environment["OPENCODE_CONFIG"]=str(workspace/"opencode.json")
-            environment["XDG_CONFIG_HOME"]=str(workspace/".xdg-config")
-            environment["XDG_STATE_HOME"]=str(workspace/".xdg-state")
-            environment["XDG_DATA_HOME"]=str(workspace/".xdg-data")
-            environment["XDG_CACHE_HOME"]=str(workspace/".xdg-cache")
-            shared_cache=Path(os.environ.get("XDG_CACHE_HOME",Path.home()/".cache"))/"opencode"/"models.json"
-            shared_auth=Path(os.environ.get("XDG_DATA_HOME",Path.home()/".local/share"))/"opencode"/"auth.json"
-            isolated_cache=workspace/".xdg-cache/opencode"; isolated_cache.mkdir(parents=True,exist_ok=True)
-            isolated_data=workspace/".xdg-data/opencode"; isolated_data.mkdir(parents=True,exist_ok=True)
-            if shared_cache.exists(): shutil.copy2(shared_cache,isolated_cache/"models.json")
-            if shared_auth.exists(): shutil.copy2(shared_auth,isolated_data/"auth.json")
-            try:
-                proc=subprocess.run([self.executable,"run","--format","json","-m",model,prompt],cwd=workspace,
-                    env=environment,text=True,capture_output=True,timeout=timeout)
-                raw_stdout=proc.stdout; raw_stderr=proc.stderr
-                answer,metadata=parse_events(raw_stdout.splitlines())
-                failure_text=json.dumps(metadata.get("provider_error"))+"\n"+raw_stderr
-                classified=classify_failure(failure_text)
-                # Same ladder as comprehension_ab.run_model: rc 124 is the wrapper
-                # timeout, any other nonzero rc keeps its code instead of collapsing.
-                if metadata.get("malformed_event"): status="malformed_provider_stream"
-                elif classified: status=classified
-                elif metadata.get("provider_error"): status="provider_error"
-                elif proc.returncode == 124: status="provider_timeout"
-                elif proc.returncode != 0: status=f"exit_{proc.returncode}"
-                elif not answer.strip(): status="empty_answer"
-                else: status="answered"
-            except subprocess.TimeoutExpired as exc:
-                raw_stdout=exc.stdout if isinstance(exc.stdout,str) else ""
-                raw_stderr=exc.stderr if isinstance(exc.stderr,str) else ""
-                answer,metadata=parse_events(raw_stdout.splitlines())
-                status="provider_timeout"
-            finally:
-                shutil.rmtree(workspace,ignore_errors=True)
-        return {"status":status,"answer":answer,"raw_provider_stdout":raw_stdout,
-            "provider_stderr_tail":None if status=="answered" else raw_stderr[-STDERR_TAIL_LIMIT:],
-            "wall_seconds":round(time.monotonic()-started,3),"failure_reason":None if status=="answered" else status,**metadata}
+        result=runner.run_opencode(self.executable,self.workspace,model,prompt,timeout)
+        status=result["status"]
+        return {"status":status,"answer":result["answer"],"raw_provider_stdout":result["raw_stdout"],
+            "provider_stderr_tail":None if status=="answered" else result["raw_stderr"][-STDERR_TAIL_LIMIT:],
+            "wall_seconds":result["wall_seconds"],"failure_reason":None if status=="answered" else status,
+            "tokens":result["tokens"],"provider_error":result["provider_error"],
+            "malformed_event":result["malformed_event"]}
 
 def cell_identity(manifest, task, arm, model, repetition):
     prompt=PROMPT.format(question=task["question"],tool=task["tool"],response=task["arms"][arm])
@@ -168,14 +145,7 @@ def cell_identity(manifest, task, arm, model, repetition):
     return identity,prompt
 
 def write_atomic(path, value):
-    path.parent.mkdir(parents=True,exist_ok=True); fd,tmp=tempfile.mkstemp(prefix=path.name,suffix=".tmp",dir=path.parent)
-    try:
-        with os.fdopen(fd,"w") as h: json.dump(value,h,sort_keys=True); h.write("\n")
-        os.replace(tmp,path)
-    except BaseException:
-        try: os.unlink(tmp)
-        except FileNotFoundError: pass
-        raise
+    replay_common.write_atomic(Path(path), json.dumps(value, sort_keys=True) + "\n")
 
 def reusable(path, identity):
     if not path.exists(): return False

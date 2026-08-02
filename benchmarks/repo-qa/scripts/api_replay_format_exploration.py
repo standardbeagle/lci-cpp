@@ -11,7 +11,6 @@ import copy
 import hashlib
 import importlib.util
 import json
-import os
 import re
 import sys
 from pathlib import Path
@@ -25,6 +24,7 @@ from replay_common import (  # noqa: E402  (path bootstrap must precede the impo
     diff_pointers,
     digest,
     tool_content_pointer,
+    write_immutable as _write_immutable_text,
 )
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -102,12 +102,18 @@ def build_request(fixture: dict, arm: str) -> dict:
     return request
 
 
+# Every admissible fixture provenance. `derived_from_sanitized_live_proxy` is a
+# sanitized live capture whose user/tool turns were rewritten by
+# api_replay_all_tools.derive_fixture; validation applies to it unchanged.
+ACCEPTED_CAPTURE_KINDS = {"sanitized_live_proxy", "derived_from_sanitized_live_proxy"}
+
+
 def validate_fixture(fixture: dict) -> dict:
     if fixture.get("schema") != "lci.api-replay.fixture.v1":
         raise ValueError("wrong fixture schema")
     if not isinstance(fixture.get("recorded_model"), str) or not fixture["recorded_model"]:
         raise ValueError("fixture must name its recorded model")
-    if fixture.get("capture_kind") != "sanitized_live_proxy":
+    if fixture.get("capture_kind") not in ACCEPTED_CAPTURE_KINDS:
         raise ValueError("fixture must originate from a sanitized live provider capture")
     fixture_request_headers(fixture)
     native_model = fixture.get("request", {}).get("model")
@@ -258,16 +264,7 @@ def cell_identity(fixture: dict, model: str, arm: str, repetition: int, order: i
 
 
 def write_immutable(path: Path, record: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    data = (json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode()
-    try:
-        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
-    except FileExistsError as error:
-        raise RuntimeError(f"refusing to replace immutable cell record: {path}") from error
-    with os.fdopen(descriptor, "wb") as output:
-        output.write(data)
-        output.flush()
-        os.fsync(output.fileno())
+    _write_immutable_text(path, json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
 
 
 class Provider(Protocol):

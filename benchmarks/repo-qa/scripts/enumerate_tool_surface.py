@@ -8,9 +8,13 @@ import json
 import os
 import queue
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import replay_common
 
 
 CASES = {
@@ -145,7 +149,15 @@ class McpSession:
             if line is None:
                 self.kill()
                 raise RuntimeError(f"LCI MCP exited during {method}")
-            response = json.loads(line)
+            try:
+                response = json.loads(line)
+            except json.JSONDecodeError as error:
+                # A child emitting garbage on the protocol stream is unusable;
+                # kill it before raising so it cannot outlive the failed run.
+                self.kill()
+                raise RuntimeError(
+                    f"LCI MCP emitted non-JSON on stdout during {method}: {line!r}"
+                ) from error
             if response.get("id") == request_id:
                 if "error" in response:
                     raise RuntimeError(response["error"])
@@ -222,8 +234,10 @@ def run_oracle(
     """Execute one curated independent oracle, failing closed on any error."""
     env = os.environ.copy()
     env["GOCACHE"] = "/tmp/lci-comprehension-gocache"
+    # No -l: a login profile could rewrite PATH/aliases and make the oracle's
+    # output depend on the operator's shell setup instead of the corpus.
     result = subprocess.run(
-        ["bash", "-lc", command], cwd=corpus.resolve(), env=env,
+        ["bash", "-c", command], cwd=corpus.resolve(), env=env,
         text=True, capture_output=True,
     )
     allowed = {0} if allowed_exit_codes is None else allowed_exit_codes
@@ -236,8 +250,7 @@ def run_oracle(
     return normalized.rstrip("\n")
 
 
-def canonical_json(value: dict) -> str:
-    return json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+canonical_json = replay_common.pretty  # byte-identical to the previous local copy
 
 
 def main() -> int:

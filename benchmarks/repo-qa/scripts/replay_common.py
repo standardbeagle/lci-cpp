@@ -14,6 +14,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import tempfile
+from pathlib import Path
 
 # Request headers that may be persisted into fixtures and replayed verbatim.
 # Credential-bearing headers are never in this set; they are injected at runtime
@@ -39,6 +42,16 @@ def canonical(value: object) -> str:
     return json.dumps(value, ensure_ascii=True, allow_nan=False, sort_keys=True, separators=(",", ":"))
 
 
+def pretty(value: object) -> str:
+    """The harness's single human-readable JSON artifact form.
+
+    Committed artifacts (variants, surfaces, captures, raw cells) all use this
+    byte form; keeping one implementation stops the copies from drifting into
+    silently different artifact encodings.
+    """
+    return json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+
+
 def digest(value: object) -> str:
     """Content digest of a value or an already-canonical string.
 
@@ -49,6 +62,76 @@ def digest(value: object) -> str:
     """
     text = value if isinstance(value, str) else canonical(value)
     return "sha256:" + hashlib.sha256(text.encode("utf-8", errors="surrogatepass")).hexdigest()
+
+
+def normalize_term(value: str) -> str:
+    """Whitespace/case-insensitive comparison form for graded answer terms."""
+    return " ".join(value.casefold().split())
+
+
+def set_precision_recall(predicted: set, truth: set) -> tuple[float, float]:
+    """Harness-wide IR convention for scoring a predicted set against truth.
+
+    - both empty -> precision 1.0, recall 1.0 (nothing to find, nothing claimed)
+    - empty predicted, nonempty truth -> precision defined as 0.0 so silence
+      cannot score better than an attempt
+    - nonempty predicted, empty truth -> recall defined as 0.0 so fabrication
+      cannot score better than correctly saying nothing
+    """
+    true_positive = len(predicted & truth)
+    precision = true_positive / len(predicted) if predicted else (1.0 if not truth else 0.0)
+    recall = true_positive / len(truth) if truth else (1.0 if not predicted else 0.0)
+    return precision, recall
+
+
+def grade_sets(predicted: set, truth: set) -> dict:
+    """Full IR scorecard under the shared convention, ready to embed in records."""
+    precision, recall = set_precision_recall(predicted, truth)
+    return {
+        "exact": predicted == truth,
+        "precision": precision,
+        "recall": recall,
+        "false_positives": sorted(predicted - truth),
+        "false_negatives": sorted(truth - predicted),
+    }
+
+
+def write_atomic(path: Path, text: str) -> None:
+    """Replace `path` with `text` atomically.
+
+    Serialization stays at the call site (each artifact family has its own
+    frozen byte form); this owns only the durability contract: write to a
+    same-directory temp file, fsync, rename over the target, and unlink the
+    temp file on any failure so an interrupted run leaves no debris — and
+    never masks the original exception with an unlink error.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix=path.name, suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    except BaseException:
+        try:
+            os.unlink(temporary)
+        except OSError:
+            pass
+        raise
+
+
+def write_immutable(path: Path, text: str) -> None:
+    """Create `path` exactly once; refuse to overwrite an existing record."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+    except FileExistsError as error:
+        raise RuntimeError(f"refusing to replace immutable record: {path}") from error
+    with os.fdopen(descriptor, "wb") as handle:
+        handle.write(text.encode())
+        handle.flush()
+        os.fsync(handle.fileno())
 
 
 def _escape_pointer_token(key: object) -> str:

@@ -6,13 +6,14 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 import re
 import shutil
-import subprocess
-import tempfile
-import time
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import opencode_runner as runner
+import replay_common
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -35,53 +36,10 @@ TOOL OUTPUT:
 """
 
 
-def canonical(value: object) -> str:
-    return json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+canonical = replay_common.pretty  # byte-identical to the previous local copy
 
 
-def parse_events(lines: list[str]) -> tuple[str, dict]:
-    texts: dict[str, list[str]] = {}
-    order: list[str] = []
-    usage = {"input": 0, "output": 0, "reasoning": 0}
-    provider_error = None
-    malformed_event = False
-    for line in lines:
-        try:
-            event = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(event, dict):
-            continue
-        part = event.get("part", event)
-        if not isinstance(part, dict):
-            continue
-        kind = part.get("type")
-        if kind == "text":
-            message = part.get("messageID", "?")
-            text = part.get("text", "")
-            if not isinstance(message, str) or not isinstance(text, str):
-                malformed_event = True
-                continue
-            if message not in texts:
-                texts[message] = []
-                order.append(message)
-            texts[message].append(text)
-        elif kind == "step_finish":
-            tokens = part.get("tokens") or {}
-            if not isinstance(tokens, dict):
-                tokens = {}
-            for key in usage:
-                value = tokens.get(key, 0) or 0
-                if not isinstance(value, (int, float)) or isinstance(value, bool):
-                    malformed_event = True
-                    continue
-                usage[key] += value
-        elif kind == "error":
-            provider_error = event.get("error") or part.get("error") or "provider error"
-    return ("\n".join(texts[order[-1]]) if order else ""), {
-        "tokens": usage, "provider_error": provider_error,
-        "malformed_event": malformed_event,
-    }
+parse_events = runner.parse_events
 
 
 def parse_answers(answer: str) -> list[str]:
@@ -98,48 +56,23 @@ def parse_answers(answer: str) -> list[str]:
     return answers
 
 
-def normalize_answer(value: str) -> str:
-    return " ".join(value.casefold().split())
+normalize_answer = replay_common.normalize_term
 
 
 def grade(extracted: list[str], expected: list[str]) -> dict:
-    predicted = {normalize_answer(item) for item in extracted}
-    truth = {normalize_answer(item) for item in expected}
-    true_positive = len(predicted & truth)
-    false_positive = sorted(predicted - truth)
-    false_negative = sorted(truth - predicted)
-    precision = true_positive / len(predicted) if predicted else (1.0 if not truth else 0.0)
-    recall = true_positive / len(truth) if truth else (1.0 if not predicted else 0.0)
+    scored = replay_common.grade_sets({normalize_answer(item) for item in extracted},
+                                      {normalize_answer(item) for item in expected})
     return {
-        "precision": precision,
-        "recall": recall,
-        "false_positive_count": len(false_positive),
-        "false_positives": false_positive,
-        "false_negatives": false_negative,
-        "exact": not false_positive and not false_negative,
+        "precision": scored["precision"],
+        "recall": scored["recall"],
+        "false_positive_count": len(scored["false_positives"]),
+        "false_positives": scored["false_positives"],
+        "false_negatives": scored["false_negatives"],
+        "exact": scored["exact"],
     }
 
 
-def empty_git_workspace(parent: Path) -> Path:
-    workspace = Path(tempfile.mkdtemp(prefix="comprehension-empty-", dir=parent))
-    try:
-        subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
-        (workspace / ".gitignore").write_text("*\n!.gitignore\n!opencode.json\n")
-        (workspace / "opencode.json").write_text(canonical({
-            "$schema": "https://opencode.ai/config.json",
-            "mcp": {},
-            "tools": {"*": False},
-            "permission": {"*": "deny"},
-        }))
-        subprocess.run(["git", "add", ".gitignore", "opencode.json"], cwd=workspace, check=True)
-        subprocess.run(
-            ["git", "-c", "user.name=Comprehension Harness", "-c", "user.email=harness@invalid", "commit", "-qm", "empty harness workspace"],
-            cwd=workspace, check=True,
-        )
-        return workspace
-    except BaseException:
-        shutil.rmtree(workspace)
-        raise
+empty_git_workspace = runner.empty_git_workspace
 
 
 def cell_key(tool: str, variant: str, model: str, repetition: int) -> str:
@@ -159,60 +92,17 @@ def parse_model_list(value: str) -> list[str]:
     return models
 
 
-def classify_failure(message: str) -> str | None:
-    lowered = message.casefold()
-    if any(marker in lowered for marker in ("quota", "rate limit", "rate_limit", "too many requests", "429")):
-        return "provider_quota"
-    return None
+classify_failure = runner.classify_failure
 
 
 def run_model(opencode: str, workspace: Path, model: str, prompt: str, timeout: int) -> dict:
-    started = time.monotonic()
-    try:
-        environment = os.environ.copy()
-        environment["OPENCODE_CONFIG"] = str(workspace / "opencode.json")
-        environment["XDG_CONFIG_HOME"] = str(workspace / ".xdg-config")
-        proc = subprocess.run(
-            [opencode, "run", "--format", "json", "-m", model, prompt],
-            cwd=workspace, env=environment, text=True, capture_output=True, timeout=timeout,
-        )
-        raw_answer, metadata = parse_events(proc.stdout.splitlines())
-        failure_text = json.dumps(metadata["provider_error"]) + "\n" + proc.stderr
-        classified = classify_failure(failure_text)
-        if metadata["malformed_event"]:
-            status = "malformed_provider_stream"
-        elif classified:
-            status = classified
-        elif metadata["provider_error"]:
-            status = "provider_error"
-        elif proc.returncode == 124:
-            status = "provider_timeout"
-        elif proc.returncode != 0:
-            status = f"exit_{proc.returncode}"
-        elif not raw_answer.strip():
-            status = "empty_answer"
-        else:
-            status = "answered"
-    except subprocess.TimeoutExpired as exc:
-        raw = exc.stdout if isinstance(exc.stdout, str) else ""
-        raw_answer, metadata = parse_events(raw.splitlines())
-        status = "provider_timeout"
-    return {
-        "status": status, "answer": raw_answer,
-        "wall_seconds": round(time.monotonic() - started, 3), **metadata,
-    }
+    result = runner.run_opencode(opencode, Path(workspace), model, prompt, timeout)
+    return {key: result[key] for key in
+            ("status", "answer", "wall_seconds", "tokens", "provider_error", "malformed_event")}
 
 
 def write_atomic(path: Path, value: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temp_name = tempfile.mkstemp(prefix=path.name, suffix=".tmp", dir=path.parent)
-    try:
-        with os.fdopen(fd, "w") as handle:
-            handle.write(canonical(value))
-        os.replace(temp_name, path)
-    except BaseException:
-        os.unlink(temp_name)
-        raise
+    replay_common.write_atomic(path, canonical(value))
 
 
 def load_bank() -> list[dict]:
