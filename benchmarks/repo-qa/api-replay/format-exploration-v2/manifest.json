@@ -70,7 +70,8 @@
   "fixture_digests": {
     "fixture-deepseek-search.json": "sha256:2d7ceb8433fbb1c9643bceafea609a6463f18893260bda890756fc819d098e8a",
     "fixture-glm-search.json": "sha256:ca963293426f0cb5404506fae5df1d2b8fac1ad7647d79f8dbdb65aee719f808",
-    "../candidates/readable_xml_v1.py": "sha256:87f546dd6d06a4bea5ed2d778a3b0015038a0e677c826d509a9b110c7fe9bc07",
+    "../candidates/readable_xml_v1.py": "sha256:2057a96c0e657a5b602adbbe8a429692b9247903a85a7b448befa8850d05b954",
+    "../candidates/xml_core.py": "sha256:297edc7c4f56e7ce4ac98372272326c8c504a9517a495370accdf69b426727b9",
     "../candidates/path_records_v1.py": "sha256:daa4a1690f161b776824e5422400184c1d5de34541dc25174bb57cb6f78a7516",
     "../candidates/tagged_blocks_v1.py": "sha256:c0d86983d5062f612629cbd02a7f38591a881f4e2e52785f9ba00450ff86c00e",
     "../candidates/value-bank.json": "sha256:f56258a17702fc3d10b38be6224f2f2c81e2c0d75f88098a37da9a8aab2580a1",
