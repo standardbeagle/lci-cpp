@@ -115,6 +115,11 @@ def decode_path_records(text: str) -> Any:
     if () not in records:
         raise ValueError("missing root record")
     consumed: set[tuple[Any, ...]] = set()
+    # One O(n) pass instead of rescanning every record per container node.
+    children_index: dict[tuple[Any, ...], list[tuple[Any, tuple[Any, ...]]]] = {}
+    for p in records:
+        if p:
+            children_index.setdefault(p[:-1], []).append((p[-1], p))
 
     def build(path: tuple[Any, ...]) -> Any:
         if path not in records:
@@ -125,7 +130,7 @@ def decode_path_records(text: str) -> Any:
             if not payload.isdigit():
                 raise ValueError("container size is not an integer")
             size = int(payload)
-            children = [(p[-1], p) for p in records if len(p) == len(path) + 1 and p[:-1] == path]
+            children = children_index.get(path, [])
             if len(children) != size:
                 raise ValueError("container child count mismatch")
             if tag == "A":
@@ -139,7 +144,7 @@ def decode_path_records(text: str) -> Any:
             if any(not isinstance(part, str) for part, _ in children):
                 raise ValueError("object paths must use string keys")
             return {part: build(child) for part, child in sorted(children)}
-        if any(p[:-1] == path for p in records if p):
+        if path in children_index:
             raise ValueError("scalar record has children")
         if tag == "Z":
             if payload:
