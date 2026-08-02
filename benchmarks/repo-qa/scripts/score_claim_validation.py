@@ -14,6 +14,7 @@ from runner import record as record_log  # noqa: E402
 from runner.run import CLAIM_VALIDATION_MODE, _claim_digest  # noqa: E402
 from scoring import (CLAIM_SCORE_SET_SCHEMA, IncompatibleRuns,
                      aggregate_claim_scores, score_claim_run)  # noqa: E402
+from scoring.pairing import collect_latest  # noqa: E402
 
 
 def _load_tasks(path):
@@ -40,27 +41,28 @@ def _write(path, value):
     os.replace(tmp, path)
 
 
+def _record_attempt(rec):
+    tokens = rec.get("token_usage") or {}
+    return [{
+        "status": rec.get("status"),
+        "duration_seconds": rec.get("duration_seconds") or 0.0,
+        "tool_calls": len(rec.get("tool_calls") or []),
+        "input_tokens": tokens.get("input"),
+        "output_tokens": tokens.get("output"),
+    }]
+
+
 def score_bank(tasks, records, settings=None):
-    latest = {}
-    attempts = {}
-    for index, rec in enumerate(records):
-        key = rec.get("run_key")
-        if key is None:
-            raise SystemExit(f"error: record {index} is missing run_key")
-        previous = latest.get(key)
-        if previous is None or rec.get("status") == "answered" or previous.get("status") != "answered":
-            latest[key] = rec
-        tokens = rec.get("token_usage") or {}
-        attempts.setdefault(key, []).append({
-            "status": rec.get("status"),
-            "duration_seconds": rec.get("duration_seconds") or 0.0,
-            "tool_calls": len(rec.get("tool_calls") or []),
-            "input_tokens": tokens.get("input"),
-            "output_tokens": tokens.get("output"),
-        })
+    # Latest-wins semantics come from scoring.pairing -- the same convention
+    # the aggregate applies, so the CLI can never keep a record the scorer
+    # would have discarded.
+    try:
+        latest, attempts = collect_latest(records, _record_attempt)
+    except IncompatibleRuns as error:
+        raise SystemExit(f"error: {error}")
     digest = _bank_digest(tasks)
     scores = []
-    for rec in latest.values():
+    for rec in latest:
         if rec.get("mode") != CLAIM_VALIDATION_MODE:
             raise SystemExit("error: non-claim-validation record in claim score input")
         task_id = (rec.get("sealed_metadata") or {}).get("task_id")
