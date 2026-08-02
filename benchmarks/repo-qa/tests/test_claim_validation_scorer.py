@@ -220,6 +220,33 @@ class AggregateTests(unittest.TestCase):
                          ["answered", "provider_error"])
         self.assertEqual(agg["arms"]["treatment"]["grounded_accuracy"], 1.0)
 
+    def test_terminal_failure_counterpart_pairs_as_a_failed_cell(self):
+        """A completed terminal failure (malformed_output / tool_violation) is a
+        real completion of its arm: dropping it from the paired population
+        would inflate a sloppy arm's paired accuracy. One convention, shared
+        with the exploration scorer: completed cells pair, retryable don't."""
+        for failure in ("malformed_output", "tool_violation"):
+            with self.subTest(failure=failure):
+                treatment = self._score("treatment")
+                baseline = self._score("baseline", status=failure,
+                                       structured_answer=None)
+                agg = aggregate_claim_scores([treatment, baseline])
+                self.assertEqual(agg["pairing"]["paired_count"], 1)
+                self.assertEqual(agg["pairing"]["unpaired_count"], 0)
+                self.assertEqual(agg["deltas"]["grounded_accuracy"], 1.0)
+
+    def test_completed_failure_retry_survives_later_retryable_failure(self):
+        """The retry-keep rule protects every terminal completion, not only
+        answered: a later timeout retry must not erase a recorded
+        malformed_output completion."""
+        completed = self._score("treatment", status="malformed_output",
+                                structured_answer=None)
+        late = self._score("treatment", status="timeout", structured_answer=None)
+        agg = aggregate_claim_scores([completed, late])
+        self.assertEqual(agg["arms"]["treatment"]["count"], 1)
+        self.assertEqual(agg["pairing"]["unpaired"][0]["status"],
+                         "malformed_output")
+
     def test_incomplete_counterpart_is_not_used_for_paired_delta(self):
         treatment = self._score("treatment")
         baseline = self._score("baseline", status="provider_error", structured_answer=None)
