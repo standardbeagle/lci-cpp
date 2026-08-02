@@ -633,6 +633,135 @@ class AgentPatchTest(GateTestBase):
         self.assertEqual(regions, sorted(regions))
 
 
+class AgentPatchFalseChargeTest(GateTestBase):
+    """The candidate detectors must neither false-charge prose nor let a
+    governed construct slip governance."""
+
+    def _throw_task(self):
+        return _task(
+            "ts-throw-typed-error", [_anchor("pkg/analysis.ts", [5], ["ParseError"])]
+        )
+
+    def _log_task(self):
+        return _task(
+            "ts-central-log-namespace", [_anchor("pkg/log.ts", [2], ["Log"])]
+        )
+
+    def test_throw_inside_comments_and_strings_is_not_governed(self):
+        # "// we throw here" and "'rethrow'" are prose, not throw statements.
+        # Charging them made an innocent edit read as PATCH_NONCONFORMING.
+        c = self.corpus({"pkg/analysis.ts": TS_THROW})
+        out = gate.evaluate_run(
+            self._throw_task(), c.manifest, c.tree_dir,
+            {"pkg/notes.ts": (
+                "export function f(n) {\n"
+                "  // we throw here when the node is bad\n"
+                "  const plan = 'first rethrow the error, then throw away n'\n"
+                "  return n\n"
+                "}\n"
+            )},
+        )
+        self.assertEqual(
+            out["agent_patch"]["reason"], gate.Reason.PATCH_UNGOVERNED,
+            msg=out["agent_patch"]["diagnostic"],
+        )
+
+    def test_a_real_throw_beside_a_comment_is_still_judged(self):
+        c = self.corpus({"pkg/analysis.ts": TS_THROW})
+        out = gate.evaluate_run(
+            self._throw_task(), c.manifest, c.tree_dir,
+            {"pkg/notes.ts": (
+                "export function f(n) {\n"
+                "  // throw carefully\n"
+                "  throw new ParseError('bad node')\n"
+                "}\n"
+            )},
+        )
+        self.assertEqual(
+            out["agent_patch"]["reason"], gate.Reason.PATCH_CONFORMS,
+            msg=out["agent_patch"]["diagnostic"],
+        )
+        self.assertEqual(len(out["agent_patch"]["regions"]), 1)
+
+    def test_console_behind_a_longer_chain_cannot_escape_governance(self):
+        # window.console.error is exactly the raw console call the convention
+        # displaces; a 3-part chain used to slip past the 2-part matcher.
+        c = self.corpus({"pkg/log.ts": TS_LOG})
+        out = gate.evaluate_run(
+            self._log_task(), c.manifest, c.tree_dir,
+            {"pkg/notes.ts": (
+                "export function f(m) {\n"
+                "  window.console.error(m)\n"
+                "}\n"
+            )},
+        )
+        self.assertEqual(
+            out["agent_patch"]["reason"], gate.Reason.PATCH_NONCONFORMING,
+            msg=out["agent_patch"]["diagnostic"],
+        )
+
+    def test_formfeed_inside_a_line_cannot_skew_changed_spans(self):
+        # splitlines() breaks on \f; _line_span counts "\n" only. The two
+        # coordinate systems disagreeing let a governed edit BELOW a \f line
+        # land outside every recorded span and skip judgement.
+        c = self.corpus({"pkg/log.ts": TS_LOG})
+        before = "const banner = 'x\fy'\nexport function f(m) {\n}\n"
+        after = (
+            "const banner = 'x\fy'\nexport function f(m) {\n"
+            "  console.error(m)\n}\n"
+        )
+        import os as _os
+        with open(
+            _os.path.join(c.tree_dir, "pkg", "notes.ts"), "w", encoding="utf-8"
+        ) as fh:
+            fh.write(before)
+        out = gate.evaluate_agent_patch(
+            self._log_task(), c.tree_dir, {"pkg/notes.ts": after}
+        )
+        self.assertEqual(
+            out["reason"], gate.Reason.PATCH_NONCONFORMING, msg=out["diagnostic"]
+        )
+
+    def test_a_pure_deletion_inside_a_governed_construct_is_still_judged(self):
+        # difflib's delete opcodes have j1 == j2; recording nothing there meant
+        # gutting a governed construct's body escaped judgement entirely.
+        c = self.corpus({"core/base.go": GO_CTOR})
+        gutted = GO_CTOR.replace("\treturn &Store{}\n", "")
+        out = gate.evaluate_agent_patch(
+            _task("go-constructor-new-pointer",
+                  [_anchor("core/base.go", [5], ["NewStore"])]),
+            c.tree_dir, {"core/base.go": gutted},
+        )
+        self.assertNotEqual(out["reason"], gate.Reason.PATCH_UNGOVERNED)
+        self.assertTrue(
+            any(r["evidence"] == "NewStore" for r in out["regions"]),
+            out["regions"],
+        )
+
+    def test_a_pristine_read_fault_fails_closed_as_tool_failure(self):
+        # NO EXCEPTION ESCAPES: a fault while recovering the pristine text or
+        # the changed spans scores one red region, never an aborted verdict.
+        c = self.corpus({"core/base.go": GO_CTOR})
+        original = gate._pristine_text
+
+        def _boom(_tree, _rel):
+            raise OSError("disk went away")
+
+        gate._pristine_text = _boom
+        try:
+            out = gate.evaluate_agent_patch(
+                _task("go-constructor-new-pointer",
+                      [_anchor("core/base.go", [5], ["NewStore"])]),
+                c.tree_dir, {"core/base.go": GO_CTOR},
+            )
+        finally:
+            gate._pristine_text = original
+        self.assertFalse(out["passed"])
+        self.assertEqual(
+            [r["reason"] for r in out["regions"]], [gate.Reason.TOOL_FAILURE]
+        )
+
+
 class AgentPatchPerRuleTest(GateTestBase):
     """Every supported rule family discriminates on the AGENT's patch: a
     conforming edit passes and the matching broken edit fails."""

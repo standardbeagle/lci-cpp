@@ -250,8 +250,51 @@ _GO_FUNC = re.compile(
     r"^func\s+(?:\([^)]*\)\s*)?([A-Za-z0-9_]+)\s*\(([^)]*)\)\s*([^\{]*)\{",
     re.MULTILINE,
 )
-_TS_THROW = re.compile(r"throw\s+([^\n;]+)")
+_TS_THROW = re.compile(r"\bthrow\s+([^\n;]+)")
 _TS_TYPED_THROW = re.compile(r"^new\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(")
+
+
+def _mask_comments_and_strings(text):
+    """Blank out //-comments and string-literal interiors, preserving offsets.
+
+    Line-level and deliberately lightweight: a ``throw`` inside a comment or a
+    string is prose, not a governed construct, and must not be charged to the
+    agent. The mask replaces the masked characters with spaces so every
+    surviving match's offsets still index into the ORIGINAL text.
+    """
+    out = list(text)
+    in_string = None
+    escaped = False
+    i = 0
+    n = len(text)
+    while i < n:
+        char = text[i]
+        if in_string is not None:
+            if char == "\n":
+                in_string = None  # line-level: strings do not span lines here
+            elif escaped:
+                escaped = False
+                out[i] = " "
+            elif char == "\\":
+                escaped = True
+                out[i] = " "
+            elif char == in_string:
+                in_string = None
+            else:
+                out[i] = " "
+            i += 1
+            continue
+        if char in ("'", '"', "`"):
+            in_string = char
+            i += 1
+            continue
+        if char == "/" and text[i : i + 2] == "//":
+            while i < n and text[i] != "\n":
+                out[i] = " "
+                i += 1
+            continue
+        i += 1
+    return "".join(out)
 
 
 def _block_end(text, brace_index):
@@ -274,11 +317,17 @@ def _block_end(text, brace_index):
 
 
 def _throw_candidates(text):
-    """Every ``throw`` statement is governed; only ``throw new <X>Error(``
-    conforms. A bare ``throw 'string'`` is the violation this catches."""
+    """Every ``throw`` STATEMENT is governed; only ``throw new <X>Error(``
+    conforms. A bare ``throw 'string'`` is the violation this catches.
+
+    Matching runs over a comment/string-masked copy of the text (offsets
+    preserved), so ``// we throw here`` and ``"rethrow"`` are never governed;
+    the evidence label is sliced from the ORIGINAL text.
+    """
+    masked = _mask_comments_and_strings(text)
     found = []
-    for match in _TS_THROW.finditer(text):
-        thrown = match.group(1).strip()
+    for match in _TS_THROW.finditer(masked):
+        thrown = text[match.start(1) : match.end(1)].strip()
         typed = _TS_TYPED_THROW.match(thrown)
         conforms = bool(typed) and typed.group(1).endswith("Error")
         found.append((f"throw {thrown}", conforms, match.start(), match.end()))
@@ -287,17 +336,24 @@ def _throw_candidates(text):
 
 def _log_candidates(text):
     """Every diagnostic call is governed -- ``Log.*`` AND the raw ``console.*``
-    the convention exists to displace. Only the shared namespace conforms."""
+    the convention exists to displace. Only the shared namespace conforms.
+
+    ``console`` is recognised anywhere before the trailing method
+    (``window.console.error``, ``globalThis.console.warn``), not only as a
+    two-part chain -- a longer chain was escaping governance entirely.
+    """
     found = []
     for match in _CALL_CHAIN.finditer(text):
         parts = match.group(1).split(".")
-        if len(parts) != 2 or parts[0] not in ("Log", "console"):
+        if len(parts) < 2:
             continue
-        found.append((
-            match.group(1),
-            parts[0] == "Log" and parts[1] in _LOG_METHODS,
-            match.start(), match.end(),
-        ))
+        if parts[-2] == "console":
+            conforms = False
+        elif len(parts) == 2 and parts[0] == "Log":
+            conforms = parts[1] in _LOG_METHODS
+        else:
+            continue
+        found.append((match.group(1), conforms, match.start(), match.end()))
     return found
 
 
@@ -573,18 +629,31 @@ def evaluate_task(task, manifest, tree_dir):
 def _changed_line_spans(before, after):
     """Inclusive 1-based line spans of ``after`` that differ from ``before``.
 
-    Pure text diff, no disk access. Deterministic: difflib's opcodes come back
-    in ascending order and are emitted in that order.
+    Pure text diff, no disk access. Splits on ``"\\n"`` ONLY -- the same
+    coordinate system :func:`_line_span` counts in -- so ``\\f``/``\\v``/U+2028
+    cannot skew a span. A PURE DELETION still records a span at the deletion
+    point (its surviving neighbour lines): removing a governed construct's body
+    must be judged, not silently exempted. Deterministic: difflib's opcodes come
+    back in ascending order and are emitted in that order.
     """
     import difflib
 
+    after_lines = after.split("\n")
     spans = []
     for tag, _i1, _i2, j1, j2 in difflib.SequenceMatcher(
-        a=before.splitlines(), b=after.splitlines(), autojunk=False
+        a=before.split("\n"), b=after_lines, autojunk=False
     ).get_opcodes():
-        if tag == "equal" or j2 <= j1:
+        if tag == "equal":
             continue
-        spans.append((j1 + 1, j2))
+        if j2 > j1:
+            spans.append((j1 + 1, j2))
+            continue
+        # pure deletion (j1 == j2): the deletion point touches the adjacent
+        # surviving line(s), so a mutated governed construct is still judged.
+        start = max(j1, 1)
+        end = min(j1 + 1, len(after_lines))
+        if start <= end:
+            spans.append((start, end))
     return spans
 
 
@@ -604,15 +673,9 @@ def _governed(rel, suffixes):
     return any(rel.endswith(suffix) for suffix in suffixes)
 
 
-def _region_outcome(path, lines, reason, evidence="", detail=""):
-    return {
-        "path": path,
-        "lines": list(lines),
-        "passed": reason in _PASS_REASONS,
-        "reason": reason,
-        "evidence": evidence,
-        "detail": detail,
-    }
+# Region rows carry the exact same shape as anchor rows; one constructor, two
+# call-site names so each path still reads in its own vocabulary.
+_region_outcome = _anchor_outcome
 
 
 def _agent_patch_outcome(passed, reason, diagnostic, regions):
@@ -677,15 +740,17 @@ def evaluate_agent_patch(task, tree_dir, patch):
         # removing the file was allowed at all.
         if content is None or not _governed(rel, suffixes):
             continue
-        changed = _changed_line_spans(_pristine_text(tree_dir, rel), content)
-        if not changed:
-            continue
         try:
+            changed = _changed_line_spans(_pristine_text(tree_dir, rel), content)
+            if not changed:
+                continue
             candidates = detect(content)
-        except Exception as err:  # noqa: BLE001 -- fail closed on ANY fault
+        except Exception as err:  # noqa: BLE001 -- NO EXCEPTION ESCAPES: a
+            # pristine-read or diff fault fails closed exactly like a detector
+            # fault, one red region row instead of an aborted verdict.
             regions.append(_region_outcome(
-                rel, changed[0], Reason.TOOL_FAILURE,
-                detail=f"candidate detector raised: {err}",
+                rel, (0, 0), Reason.TOOL_FAILURE,
+                detail=f"agent-patch evaluation raised: {err}",
             ))
             continue
         for label, conforms, start_offset, end_offset in candidates:
