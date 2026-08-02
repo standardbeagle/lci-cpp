@@ -92,6 +92,29 @@ class OracleAdjudicatorRobustnessTest(unittest.TestCase):
             model="provider/m", headers={})
         self.assertEqual(module.item_key(record), module.item_key(without))
 
+    def test_resume_readjudicates_provider_failed_records(self):
+        """A record with no adjudication (provider failure) must not be treated as done."""
+        failed = {"run_key": "r1", "task_id": "t", "answer_digest": "sha256:x",
+                  "adjudicator_model": "provider/m", "provider_status": "provider_quota",
+                  "adjudication": None, "regression_candidate": None, "failure": "429"}
+        calls = []
+        def adjudicate(item):
+            calls.append(item["run_key"])
+            return {"run_key": item["run_key"], "task_id": item["task_id"],
+                    "adjudication": {"verdict": "incorrect"}, "regression_candidate": None}
+        records = module.drain([ITEM], [failed], adjudicate, lambda records: None)
+        self.assertEqual(calls, ["r1"])
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["adjudication"]["verdict"], "incorrect")
+
+    def test_resume_skips_records_with_a_real_adjudication(self):
+        done = {"run_key": "r1", "task_id": "t",
+                "adjudication": {"verdict": "incorrect"}, "regression_candidate": None}
+        def adjudicate(item):
+            raise AssertionError("completed record must not be re-adjudicated")
+        records = module.drain([ITEM], [done], adjudicate, lambda records: None)
+        self.assertEqual(records, [done])
+
     def test_header_profile_requires_the_committed_headers_key(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "profile.json"

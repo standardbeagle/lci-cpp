@@ -57,6 +57,30 @@ class LlmToolResultAdjudicatorTest(unittest.TestCase):
         self.assertEqual(result["judgment"]["verdict"], "incorrect")
 
 
+    def test_resume_readjudicates_provider_failed_records(self):
+        """judgment null (provider failure) must not count as completed on resume."""
+        failed = {"cell_key": "c1", "task_id": "t", "judgment": None,
+                  "attempts": [{"attempt": 1, "provider_status": "provider_quota",
+                                "raw_answer": "", "parse_error": None}]}
+        calls = []
+        def adjudicate(item):
+            calls.append(item["cell_key"])
+            return {"cell_key": item["cell_key"], "task_id": item.get("task_id"),
+                    "judgment": {"verdict": "incorrect"}, "attempts": []}
+        records = module.drain([{"cell_key": "c1", "task_id": "t"}], [failed],
+                               adjudicate, lambda records: None)
+        self.assertEqual(calls, ["c1"])
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["judgment"]["verdict"], "incorrect")
+
+    def test_resume_skips_records_with_a_real_judgment(self):
+        done = {"cell_key": "c1", "task_id": "t", "judgment": {"verdict": "correct"}, "attempts": []}
+        def adjudicate(item):
+            raise AssertionError("completed record must not be re-adjudicated")
+        records = module.drain([{"cell_key": "c1", "task_id": "t"}], [done],
+                               adjudicate, lambda records: None)
+        self.assertEqual(records, [done])
+
     def test_header_profile_requires_the_committed_headers_key(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "profile.json"
