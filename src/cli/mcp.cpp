@@ -58,16 +58,15 @@ void populate_side_effects_from_ast(MasterIndex& index,
         parser::PooledParser parser_guard(lang);
         if (!parser_guard) continue;
 
-        TSTree* tree = ts_parser_parse_string(
+        parser::UniqueTree tree(ts_parser_parse_string(
             parser_guard.get(), nullptr, content.data(),
-            static_cast<uint32_t>(content.size()));
-        if (tree == nullptr) continue;
+            static_cast<uint32_t>(content.size())));
+        if (!tree) continue;
 
         parser::UnifiedExtractor extractor;
         extractor.init(content, fid, ext, path);
         extractor.set_side_effect_sink(&analyzer);
-        extractor.extract(tree);
-        ts_tree_delete(tree);
+        extractor.extract(tree.get());
     }
 }
 

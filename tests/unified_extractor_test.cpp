@@ -389,36 +389,6 @@ TEST(UnifiedExtractorTest, PythonComplexity) {
 }
 
 // ---------------------------------------------------------------------------
-// Object pool tests
-// ---------------------------------------------------------------------------
-
-TEST(ExtractorPoolTest, AcquireRelease) {
-    auto& pool = thread_extractor_pool();
-
-    auto* ue = pool.acquire("content", 1, ".go", "test.go");
-    ASSERT_NE(ue, nullptr);
-
-    ue->extract(nullptr);  // null tree is safe
-    pool.release(ue);
-
-    // Re-acquire should give back the same (or a recycled) extractor
-    auto* ue2 = pool.acquire("content2", 2, ".py", "test.py");
-    ASSERT_NE(ue2, nullptr);
-    pool.release(ue2);
-}
-
-TEST(ExtractorPoolTest, RecyclesInstances) {
-    auto& pool = thread_extractor_pool();
-
-    auto* ue1 = pool.acquire("a", 1, ".go", "a.go");
-    pool.release(ue1);
-
-    auto* ue2 = pool.acquire("b", 2, ".py", "b.py");
-    EXPECT_EQ(ue1, ue2) << "Pool should recycle the same extractor";
-    pool.release(ue2);
-}
-
-// ---------------------------------------------------------------------------
 // Node type caching test
 // ---------------------------------------------------------------------------
 

@@ -326,23 +326,4 @@ class UnifiedExtractor {
 
 /// Thread-local pool of UnifiedExtractor instances.
 /// Reduces allocation overhead by reusing extractors with pre-allocated buffers.
-class ExtractorPool {
-  public:
-    ExtractorPool() = default;
-
-    /// Gets an extractor from the pool, initializing it for the given file.
-    /// Creates a new extractor if the pool is empty.
-    UnifiedExtractor* acquire(std::string_view content, FileID file_id,
-                              std::string_view ext, std::string_view path);
-
-    /// Returns an extractor to the pool after resetting its state.
-    void release(UnifiedExtractor* extractor);
-
-  private:
-    std::vector<std::unique_ptr<UnifiedExtractor>> pool_;
-};
-
-/// Returns the thread-local extractor pool.
-ExtractorPool& thread_extractor_pool();
-
 }  // namespace lci::parser

@@ -1709,34 +1709,4 @@ void UnifiedExtractor::count_complexity_point(TSNode node,
     }
 }
 
-// ---------------------------------------------------------------------------
-// ExtractorPool
-// ---------------------------------------------------------------------------
-
-UnifiedExtractor* ExtractorPool::acquire(std::string_view content,
-                                         FileID file_id,
-                                         std::string_view ext,
-                                         std::string_view path) {
-    UnifiedExtractor* ue = nullptr;
-    if (!pool_.empty()) {
-        ue = pool_.back().release();
-        pool_.pop_back();
-    } else {
-        ue = new UnifiedExtractor();
-    }
-    ue->init(content, file_id, ext, path);
-    return ue;
-}
-
-void ExtractorPool::release(UnifiedExtractor* extractor) {
-    if (!extractor) return;
-    extractor->reset();
-    pool_.emplace_back(extractor);
-}
-
-ExtractorPool& thread_extractor_pool() {
-    static thread_local ExtractorPool pool;
-    return pool;
-}
-
 }  // namespace lci::parser

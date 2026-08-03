@@ -180,16 +180,15 @@ bool Analyzer::parse_changed_files(const std::vector<ChangedFile>& files,
         parser::PooledParser parser_guard(lang);
         if (!parser_guard) continue;
 
-        TSTree* tree = ts_parser_parse_string(
+        parser::UniqueTree tree(ts_parser_parse_string(
             parser_guard.get(), nullptr, content.data(),
-            static_cast<uint32_t>(content.size()));
-        if (tree == nullptr) continue;
+            static_cast<uint32_t>(content.size())));
+        if (!tree) continue;
 
         parser::UnifiedExtractor extractor;
         extractor.init(content, FileID{1}, ext, file.path);
-        extractor.extract(tree);
+        extractor.extract(tree.get());
         auto extracted = extractor.get_results();
-        ts_tree_delete(tree);
 
         for (const auto& sym : extracted.symbols) {
             auto type = std::string(to_string(sym.type));

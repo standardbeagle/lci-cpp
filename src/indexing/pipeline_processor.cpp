@@ -45,16 +45,15 @@ void run_unified_extraction(ProcessedFile& result,
     parser::PooledParser parser_guard(lang);
     if (!parser_guard) return;
 
-    TSTree* tree = ts_parser_parse_string(
+    parser::UniqueTree tree(ts_parser_parse_string(
         parser_guard.get(), nullptr, content.data(),
-        static_cast<uint32_t>(content.size()));
-    if (tree == nullptr) return;
+        static_cast<uint32_t>(content.size())));
+    if (!tree) return;
 
     parser::UnifiedExtractor extractor;
     extractor.init(content, result.file_id, ext, path);
-    extractor.extract(tree);
+    extractor.extract(tree.get());
     auto extracted = extractor.get_results();
-    ts_tree_delete(tree);
 
     // Build a position-keyed metadata index so the integrator can enrich
     // EnhancedSymbol records (complexity, signature, doc comment) without
@@ -106,8 +105,8 @@ FileProcessor::FileProcessor(
         if (!p) continue;
 
         constexpr const char* kWarmInput = " ";
-        TSTree* tree = ts_parser_parse_string(p.get(), nullptr, kWarmInput, 1);
-        if (tree != nullptr) ts_tree_delete(tree);
+        parser::UniqueTree tree(
+            ts_parser_parse_string(p.get(), nullptr, kWarmInput, 1));
     }
 }
 

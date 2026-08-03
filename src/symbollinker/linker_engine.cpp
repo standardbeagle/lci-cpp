@@ -84,15 +84,15 @@ bool LinkerEngine::index_file(std::string_view path,
         return false;
     }
 
-    TSTree* tree = ts_parser_parse_string(
+    parser::UniqueTree tree(ts_parser_parse_string(
         pooled.get(), nullptr, content.data(),
-        static_cast<uint32_t>(content.size()));
-    if (tree == nullptr) {
+        static_cast<uint32_t>(content.size())));
+    if (!tree) {
         return false;
     }
 
-    SymbolTable table = extractor->extract_symbols(file_id, content, tree);
-    ts_tree_delete(tree);
+    SymbolTable table =
+        extractor->extract_symbols(file_id, content, tree.get());
 
     symbol_tables_[file_id] = std::move(table);
     return true;
