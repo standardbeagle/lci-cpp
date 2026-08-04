@@ -253,6 +253,27 @@ int run_debug_export(const GlobalFlags& flags, const std::string& output,
 /// debug graph subcommand. Returns 0 on success, non-zero on error.
 int run_debug_graph(const GlobalFlags& flags, const std::string& output);
 
+// -- debug memprofile ---------------------------------------------------------
+
+/// A file is flagged when its post-integration RSS delta exceeds BOTH
+/// `flag_floor_mb` (absolute, filters allocator noise) and
+/// `flag_ratio * file_size` (relative, catches amplification).
+struct MemprofileOptions {
+    double flag_ratio = 4.0;
+    int flag_floor_mb = 8;
+    int top = 20;
+};
+
+/// debug memprofile subcommand: indexes the project one file at a time on a
+/// single thread through the real processing path (parse + extract +
+/// integrate), sampling process RSS around each file. Streams flagged files
+/// to stdout as they are found; ends with phase deltas (bulk-window close,
+/// cross-file reference resolution), the top-N offenders, and the total
+/// RSS-growth : corpus-size ratio. Linux-only (reads /proc/self/status).
+/// Returns 0 on success, non-zero on error.
+int run_debug_memprofile(const GlobalFlags& flags,
+                         const MemprofileOptions& opts);
+
 /// update subcommand: self-update the lci binary from the latest GitHub
 /// release. `check_only` reports current vs latest without writing; `force`
 /// reinstalls even when already current; `version` (empty = latest) pins a

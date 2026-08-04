@@ -690,6 +690,29 @@ int main(int argc, char* argv[]) {
         std::exit(run_debug_graph(gflags, debug_graph_output));
     });
 
+    auto* debug_memprofile_cmd =
+        debug_cmd
+            ->add_subcommand("memprofile",
+                             "Index one file at a time, flag files whose "
+                             "RSS delta balloons past size-relative and "
+                             "absolute thresholds")
+            ->alias("mem");
+
+    MemprofileOptions memprofile_opts;
+    debug_memprofile_cmd->add_option(
+        "--ratio", memprofile_opts.flag_ratio,
+        "Flag when rss delta exceeds this multiple of file size");
+    debug_memprofile_cmd->add_option(
+        "--floor-mb", memprofile_opts.flag_floor_mb,
+        "Flag only when rss delta also exceeds this absolute floor (MB)");
+    debug_memprofile_cmd->add_option(
+        "--top", memprofile_opts.top,
+        "How many top offenders to print in the summary");
+
+    debug_memprofile_cmd->callback([&]() {
+        std::exit(run_debug_memprofile(gflags, memprofile_opts));
+    });
+
     // -- Git-analyze subcommand -----------------------------------------------
     auto* ga_cmd =
         app.add_subcommand("git-analyze",

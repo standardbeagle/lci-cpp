@@ -94,6 +94,13 @@ class FileProcessor {
                  BoundedQueue<ProcessedFile>& results,
                  int worker_count = 0);
 
+    /// Processes one task synchronously on the calling thread — the same
+    /// path the worker pool runs. Exists for instrumented callers
+    /// (`lci debug memprofile`) that need exact per-file attribution.
+    ProcessedFile process_single(const FileTask& task) {
+        return process_file(0, task);
+    }
+
   private:
     const Config& config_;
     std::shared_ptr<FileService> file_service_;
