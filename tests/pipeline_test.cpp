@@ -6,6 +6,7 @@
 #include <lci/core/reference_tracker.h>
 #include <lci/core/trigram.h>
 #include <lci/indexing/binary_detector.h>
+#include <lci/indexing/generated_artifacts.h>
 #include <lci/indexing/pipeline.h>
 #include <lci/indexing/pipeline_processor.h>
 #include <lci/indexing/pipeline_progress.h>
@@ -1164,6 +1165,89 @@ TEST(FileProcessorTest, MinifiedBundleSkipsParse) {
     ASSERT_TRUE(result_queue.pop(r));
     EXPECT_TRUE(r.parse_skipped_oversize);
     EXPECT_TRUE(r.symbols.empty());
+}
+
+// ---------------------------------------------------------------------------
+// Generated-artifact awareness: manifest-derived and default excludes
+// ---------------------------------------------------------------------------
+
+TEST(GeneratedArtifactsTest, TsconfigOutDirBecomesExclude) {
+    TempDir dir;
+    dir.write_file("tsconfig.json",
+                   R"({"compilerOptions": {"outDir": "lib-output"}})");
+    auto globs = derive_generated_excludes(dir.path().string());
+    ASSERT_EQ(globs.size(), 1u);
+    EXPECT_EQ(globs[0], "lib-output/**");
+}
+
+TEST(GeneratedArtifactsTest, DefaultCoveredDirsContributeNothing) {
+    TempDir dir;
+    // dist is already in the static default excludes; vendor likewise.
+    dir.write_file("tsconfig.json",
+                   R"({"compilerOptions": {"outDir": "./dist"}})");
+    dir.write_file("composer.json",
+                   R"({"config": {"vendor-dir": "vendor"}})");
+    EXPECT_TRUE(derive_generated_excludes(dir.path().string()).empty());
+}
+
+TEST(GeneratedArtifactsTest, ComposerCustomVendorDirBecomesExclude) {
+    TempDir dir;
+    dir.write_file("composer.json",
+                   R"({"config": {"vendor-dir": "third_party"}})");
+    auto globs = derive_generated_excludes(dir.path().string());
+    ASSERT_EQ(globs.size(), 1u);
+    EXPECT_EQ(globs[0], "third_party/**");
+}
+
+TEST(GeneratedArtifactsTest, CsprojOutputPathBecomesExclude) {
+    TempDir dir;
+    dir.write_file("src/App/App.csproj",
+                   "<Project><PropertyGroup>"
+                   "<OutputPath>artifacts\\release\\</OutputPath>"
+                   "</PropertyGroup></Project>");
+    auto globs = derive_generated_excludes(dir.path().string());
+    ASSERT_EQ(globs.size(), 1u);
+    EXPECT_EQ(globs[0], "src/App/artifacts/release/**");
+}
+
+TEST(GeneratedArtifactsTest, MalformedManifestsAreIgnored) {
+    TempDir dir;
+    dir.write_file("tsconfig.json", "{not json at all");
+    dir.write_file("composer.json", "[]");
+    EXPECT_TRUE(derive_generated_excludes(dir.path().string()).empty());
+}
+
+TEST(FileScannerTest, DefaultExcludesDropLockfilesAndCompiledDirs) {
+    TempDir dir;
+    dir.write_file("main.go", "package main\n");
+    dir.write_file("pnpm-lock.yaml", "lockfileVersion: 9\n");
+    dir.write_file("src/compiled/bundle.js", "var a=1;\n");
+    dir.write_file("app.js.map", "{}\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+
+    auto tasks = FileScanner(cfg).scan().tasks;
+    ASSERT_EQ(tasks.size(), 1u);
+    EXPECT_NE(tasks[0].path.find("main.go"), std::string::npos);
+}
+
+TEST(FileScannerTest, ManifestOutDirIsExcludedFromScan) {
+    TempDir dir;
+    dir.write_file("tsconfig.json",
+                   R"({"compilerOptions": {"outDir": "lib-output"}})");
+    dir.write_file("src/index.ts", "export const x = 1;\n");
+    dir.write_file("lib-output/index.js", "var x = 1;\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+
+    auto tasks = FileScanner(cfg).scan().tasks;
+    // tsconfig.json itself + src/index.ts; lib-output/** excluded.
+    for (const auto& t : tasks) {
+        EXPECT_EQ(t.path.find("lib-output"), std::string::npos) << t.path;
+    }
+    EXPECT_EQ(tasks.size(), 2u);
 }
 
 // ---------------------------------------------------------------------------

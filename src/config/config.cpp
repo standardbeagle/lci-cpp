@@ -591,6 +591,29 @@ Config make_default_config() {
         "**/target/**",
         "**/bin/**",
         "**/obj/**",
+        // Generated artifacts checked into source trees. `compiled/` is the
+        // vendored-bundle convention (next.js ships 100+ MB of minified JS
+        // under src/compiled/ — symbol extraction on one such bundle cost
+        // 4.4 GB RSS). Lockfiles are machine-written dependency pins, not
+        // source; the multi-MB ones (pnpm-lock.yaml) are pure index weight.
+        // Dot-dirs (.next, .turbo, .cache, .venv) are covered by "**/.*/**".
+        "**/compiled/**",
+        "**/coverage/**",
+        "**/__generated__/**",
+        "**/*.generated.*",
+        "**/*.map",
+        "**/*.min.map",
+        "**/package-lock.json",
+        "**/pnpm-lock.yaml",
+        "**/yarn.lock",
+        "**/bun.lockb",
+        "**/composer.lock",
+        "**/Cargo.lock",
+        "**/poetry.lock",
+        "**/uv.lock",
+        "**/Pipfile.lock",
+        "**/Gemfile.lock",
+        "**/go.sum",
         // Test files and test/fixture directories are INDEXED. They are
         // first-party code: grep finds them, so search must too (parity
         // mandate — a default-invisible test corpus produced false-empty
@@ -604,7 +627,6 @@ Config make_default_config() {
         "**/*.min.css",
         "**/*.bundle.js",
         "**/*.chunk.js",
-        "**/*.min.map",
         "**/*.avif",
         "**/*.webp",
         "**/*.wasm",

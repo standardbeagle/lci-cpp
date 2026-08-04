@@ -110,7 +110,10 @@ TEST(DefaultExcludeContract, LocksPatternCount) {
     // first-party content and are INDEXED (grep-parity mandate; filtering
     // tests is a query-time flag, not an index-time hole). Locking the
     // count here catches accidental drops or duplicates.
-    EXPECT_EQ(cfg.exclude.size(), 82u);
+    // 82 -> 98 (2026-08-04): generated-artifact classes — compiled/,
+    // coverage/, __generated__/, *.generated.*, *.map, and ten lockfile
+    // names (see the OOM incident that motivated them).
+    EXPECT_EQ(cfg.exclude.size(), 98u);
 }
 
 TEST(DefaultExcludeContract, IncludesAllVcsAndDotfileDirs) {

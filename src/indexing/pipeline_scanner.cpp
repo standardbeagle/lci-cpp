@@ -1,4 +1,5 @@
 #include <lci/indexing/pipeline_scanner.h>
+#include <lci/indexing/generated_artifacts.h>
 
 #include <lci/language_map.h>
 
@@ -47,6 +48,13 @@ FileScanner::FileScanner(const Config& config)
     : config_(config) {
     exclusions_ = config.exclude;
     inclusions_ = config.include;
+
+    // Project manifests name their own generated-output dirs (tsconfig
+    // outDir, composer vendor-dir, csproj OutputPath) — read them so
+    // non-default layouts are excluded without per-project config.
+    for (auto& glob : derive_generated_excludes(config.project.root)) {
+        exclusions_.push_back(std::move(glob));
+    }
 
     if (config.index.respect_gitignore) {
         gitignore_parser_.load_gitignore(config.project.root);

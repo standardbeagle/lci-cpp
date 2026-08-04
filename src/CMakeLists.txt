@@ -23,6 +23,7 @@ add_library(lci_lib STATIC
     parser/unified_extractor_types.cpp
     config/gitignore.cpp
     indexing/binary_detector.cpp
+    indexing/generated_artifacts.cpp
     indexing/pipeline_scanner.cpp
     indexing/pipeline_processor.cpp
     indexing/pipeline_integrator.cpp
