@@ -10,6 +10,13 @@
 #include <lci/config.h>
 #include <lci/indexing/master_index.h>
 
+#include <unistd.h>
+
+#include <cstdio>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <string>
 #include <string_view>
 
 namespace lci {
@@ -23,12 +30,36 @@ inline Config make_fuzz_config() {
     return cfg;
 }
 
+/// Materializes one corpus file on disk and indexes it, aborting loudly on
+/// failure: MasterIndex::update_file requires the path to exist on the
+/// filesystem, so an unchecked relative-path seed silently no-ops and every
+/// fuzz iteration then runs against an EMPTY index — fuzzing nothing.
+inline void seed_file(MasterIndex& index, const std::filesystem::path& dir,
+                      const char* rel, const std::string& content) {
+    const auto path = dir / rel;
+    std::filesystem::create_directories(path.parent_path());
+    std::ofstream(path) << content;
+    if (!index.update_file(path.string(), content)) {
+        std::fprintf(stderr, "fuzz fixture: failed to seed %s — aborting\n",
+                     path.string().c_str());
+        std::abort();
+    }
+}
+
 /// Seeds an index with a small multi-language corpus: Go (type + method +
 /// calls), Python, and TypeScript. Enough to exercise symbol lookup, call
-/// hierarchy, references, and path matching in the tool handlers.
+/// hierarchy, references, and path matching in the tool handlers. Files are
+/// written to a per-process temp directory because indexing verifies disk
+/// existence; the directory is process-lifetime, like the index it feeds.
 inline void seed_fuzz_corpus(MasterIndex& index) {
-    index.update_file(
-        "router.go",
+    static const std::filesystem::path dir = [] {
+        auto d = std::filesystem::temp_directory_path() /
+                 ("lci-fuzz-" + std::to_string(::getpid()));
+        std::filesystem::create_directories(d);
+        return d;
+    }();
+    seed_file(
+        index, dir, "router.go",
         "package server\n\n"
         "type Router struct{ routes int }\n\n"
         "func NewRouter() *Router { return &Router{} }\n\n"
@@ -39,14 +70,14 @@ inline void seed_fuzz_corpus(MasterIndex& index) {
         "    r := NewRouter()\n"
         "    r.Handle(\"/\")\n"
         "}\n");
-    index.update_file(
-        "util/strings.py",
+    seed_file(
+        index, dir, "util/strings.py",
         "def normalize(s):\n"
         "    return s.strip().lower()\n\n"
         "def tokenize(text):\n"
         "    return [normalize(w) for w in text.split()]\n");
-    index.update_file(
-        "web/app.ts",
+    seed_file(
+        index, dir, "web/app.ts",
         "export class App {\n"
         "  private count = 0;\n"
         "  handle(req: string): number {\n"
