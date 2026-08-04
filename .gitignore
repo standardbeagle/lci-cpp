@@ -35,3 +35,4 @@ worktrack-mcp.db
 docs/node_modules/
 docs/dist/
 docs/.astro/
+.work/
