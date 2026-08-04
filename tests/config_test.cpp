@@ -799,5 +799,122 @@ synonyms {
     EXPECT_FALSE(result.ok());
 }
 
+// ---------------------------------------------------------------------------
+// User-level defaults: $XDG_CONFIG_HOME/lci/config.kdl
+// ---------------------------------------------------------------------------
+
+// Hermeticity for the whole test binary: a developer's real
+// ~/.config/lci/config.kdl must not leak into any test that calls
+// load_config. UserConfigTest overrides per-test and restores this value.
+class HermeticXdgEnv : public ::testing::Environment {
+    void SetUp() override {
+        setenv("XDG_CONFIG_HOME", "/nonexistent/lci-test-xdg", 1);
+    }
+};
+[[maybe_unused]] const auto* const kHermeticXdg =
+    ::testing::AddGlobalTestEnvironment(new HermeticXdgEnv);
+
+class UserConfigTest : public ::testing::Test {
+  protected:
+    fs::path project_dir_;
+    fs::path xdg_dir_;
+    std::string saved_xdg_;
+    bool had_xdg_{};
+
+    void SetUp() override {
+        project_dir_ = lci::test::unique_temp_dir("lci_usercfg_proj_");
+        xdg_dir_ = lci::test::unique_temp_dir("lci_usercfg_xdg_");
+        fs::create_directories(project_dir_);
+        fs::create_directories(xdg_dir_ / "lci");
+        if (const char* prev = std::getenv("XDG_CONFIG_HOME")) {
+            had_xdg_ = true;
+            saved_xdg_ = prev;
+        }
+        setenv("XDG_CONFIG_HOME", xdg_dir_.string().c_str(), 1);
+    }
+
+    void TearDown() override {
+        if (had_xdg_) {
+            setenv("XDG_CONFIG_HOME", saved_xdg_.c_str(), 1);
+        } else {
+            unsetenv("XDG_CONFIG_HOME");
+        }
+        std::error_code ec;
+        fs::remove_all(project_dir_, ec);
+        fs::remove_all(xdg_dir_, ec);
+    }
+
+    void write_user_config(const std::string& content) {
+        std::ofstream f(xdg_dir_ / "lci" / "config.kdl");
+        f << content;
+    }
+
+    void write_project_kdl(const std::string& content) {
+        std::ofstream f(project_dir_ / ".lci.kdl");
+        f << content;
+    }
+};
+
+TEST_F(UserConfigTest, UserDefaultsApplyWithoutProjectFile) {
+    write_user_config(R"(
+index {
+    max_total_size_mb 200
+    overflow_policy "reject"
+}
+)");
+    auto result = load_config(project_dir_.string());
+    ASSERT_TRUE(result.error.empty()) << result.error;
+    EXPECT_EQ(result.config.index.max_total_size_mb, 200);
+    EXPECT_EQ(result.config.index.overflow_policy, "reject");
+    // Untouched fields keep the rich no-file defaults.
+    EXPECT_EQ(result.config.index.max_file_count, 50000);
+    EXPECT_FALSE(result.config.exclude.empty());
+}
+
+TEST_F(UserConfigTest, UserDefaultsSurviveProjectFileThatOmitsThem) {
+    write_user_config(R"(
+index {
+    max_total_size_mb 200
+}
+)");
+    write_project_kdl(R"(
+performance {
+    max_goroutines 2
+}
+)");
+    auto result = load_config(project_dir_.string());
+    ASSERT_TRUE(result.error.empty()) << result.error;
+    EXPECT_EQ(result.config.index.max_total_size_mb, 200);
+    EXPECT_EQ(result.config.performance.max_goroutines, 2);
+}
+
+TEST_F(UserConfigTest, ProjectFileOverridesUserDefaults) {
+    write_user_config(R"(
+index {
+    max_total_size_mb 200
+}
+)");
+    write_project_kdl(R"(
+index {
+    max_total_size_mb 300
+}
+)");
+    auto result = load_config(project_dir_.string());
+    ASSERT_TRUE(result.error.empty()) << result.error;
+    EXPECT_EQ(result.config.index.max_total_size_mb, 300);
+}
+
+TEST_F(UserConfigTest, MalformedUserConfigFailsLoudly) {
+    write_user_config("index { max_total_size_mb ");
+    auto result = load_config(project_dir_.string());
+    EXPECT_FALSE(result.error.empty());
+}
+
+TEST_F(UserConfigTest, NoUserFileMeansPlainDefaults) {
+    auto result = load_config(project_dir_.string());
+    ASSERT_TRUE(result.error.empty()) << result.error;
+    EXPECT_EQ(result.config.index.max_total_size_mb, 500);
+}
+
 }  // namespace
 }  // namespace lci

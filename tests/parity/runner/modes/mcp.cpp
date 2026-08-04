@@ -96,6 +96,9 @@ CapturedOutput run_mcp(const std::string& binary_path,
         close(out_pipe[0]); close(out_pipe[1]);
         close(err_pipe[0]); close(err_pipe[1]);
 
+        // Hermeticity: keep the developer's ~/.config/lci out of goldens
+        // (spec env below still wins).
+        setenv("XDG_CONFIG_HOME", "/nonexistent/lci-test-xdg", 1);
         for (const auto& [k, v] : d.invocation.env) {
             std::string subst_v = substitute(v, corpus_path);
             setenv(k.c_str(), subst_v.c_str(), 1);

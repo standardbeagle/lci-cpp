@@ -60,6 +60,11 @@ CapturedOutput run_cli(const std::string& binary_path,
         close(out_pipe[0]); close(out_pipe[1]);
         close(err_pipe[0]); close(err_pipe[1]);
 
+        // Hermeticity: the developer's real ~/.config/lci/config.kdl must
+        // not leak into golden output. Point XDG at a guaranteed-absent dir;
+        // a spec that wants user-level config sets XDG_CONFIG_HOME itself
+        // via inv.env below (spec env wins — applied after this).
+        setenv("XDG_CONFIG_HOME", "/nonexistent/lci-test-xdg", 1);
         for (const auto& [k, v] : inv.env) {
             std::string subst_v = substitute(v, corpus_path);
             setenv(k.c_str(), subst_v.c_str(), 1);

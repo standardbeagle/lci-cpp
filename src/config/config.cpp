@@ -530,6 +530,79 @@ Config make_kdl_base_config() {
     return cfg;
 }
 
+// Applies parsed KDL nodes onto an existing Config. Fields absent from the
+// document keep whatever `cfg` already holds — this is the shared overlay
+// primitive for both the project file and the user-level defaults file.
+bool apply_kdl_nodes(Config& cfg, const std::vector<KdlNode>& nodes,
+                     std::string& error) {
+    for (const auto& node : nodes) {
+        if (node.name == "project") apply_project(cfg, node);
+        else if (node.name == "index") {
+            if (!apply_index(cfg, node, error)) return false;
+        }
+        else if (node.name == "performance") apply_performance(cfg, node);
+        else if (node.name == "search") apply_search(cfg, node);
+        else if (node.name == "include") cfg.include = collect_strings(node);
+        else if (node.name == "exclude") cfg.exclude = collect_strings(node);
+        else if (node.name == "propagation_config_dir") get_string(node, cfg.propagation_config_dir);
+        else if (node.name == "synonyms") {
+            auto result = apply_synonyms(node);
+            if (!result) {
+                error = result.error().to_string();
+                return false;
+            }
+            cfg.synonyms = std::move(result.value());
+        }
+    }
+    return true;
+}
+
+// Path of the user-level defaults file: $XDG_CONFIG_HOME/lci/config.kdl,
+// falling back to ~/.config/lci/config.kdl. Empty when no home is known.
+fs::path user_config_path() {
+    if (const char* xdg = std::getenv("XDG_CONFIG_HOME");
+        xdg != nullptr && *xdg != '\0') {
+        return fs::path(xdg) / "lci" / "config.kdl";
+    }
+    if (const char* home = std::getenv("HOME");
+        home != nullptr && *home != '\0') {
+        return fs::path(home) / ".config" / "lci" / "config.kdl";
+    }
+    return {};
+}
+
+// Overlays the user-level defaults file onto `cfg` when it exists. A
+// malformed user file is an error (fail fast — silently ignoring it would
+// leave the user believing their defaults apply).
+bool overlay_user_config(Config& cfg, std::string& error) {
+    fs::path path = user_config_path();
+    if (path.empty()) return true;
+    std::error_code ec;
+    if (!fs::exists(path, ec) || ec) return true;
+
+    std::ifstream file(path);
+    if (!file) {
+        error = "failed to read user config: " + path.string();
+        return false;
+    }
+    std::ostringstream ss;
+    ss << file.rdbuf();
+    // Parser holds a string_view — the content must outlive it.
+    const std::string content = ss.str();
+
+    Parser parser(content);
+    auto nodes = parser.parse_document();
+    if (!parser.error().empty()) {
+        error = "failed to parse " + path.string() + ": " + parser.error();
+        return false;
+    }
+    if (!apply_kdl_nodes(cfg, nodes, error)) {
+        error = path.string() + ": " + error;
+        return false;
+    }
+    return true;
+}
+
 // Parses KDL content into a Config. On a malformed document, leaves `cfg`
 // untouched and writes a descriptive message into `error`.
 Config parse_kdl_content(const std::string& content, std::string& error) {
@@ -541,28 +614,20 @@ Config parse_kdl_content(const std::string& content, std::string& error) {
     }
 
     Config cfg = make_kdl_base_config();
+    // User-level defaults sit between the KDL base and the project file:
+    // scalar fields (index budgets, performance caps) survive unless the
+    // project file overrides them. include/exclude are cleared below per
+    // the long-standing project-file contract, so user include/exclude
+    // apply only in the no-project-file path.
+    std::string user_err;
+    if (!overlay_user_config(cfg, user_err)) {
+        error = user_err;
+        return cfg;
+    }
     cfg.include.clear();
     cfg.exclude.clear();
 
-    for (const auto& node : nodes) {
-        if (node.name == "project") apply_project(cfg, node);
-        else if (node.name == "index") {
-            if (!apply_index(cfg, node, error)) return cfg;
-        }
-        else if (node.name == "performance") apply_performance(cfg, node);
-        else if (node.name == "search") apply_search(cfg, node);
-        else if (node.name == "include") cfg.include = collect_strings(node);
-        else if (node.name == "exclude") cfg.exclude = collect_strings(node);
-        else if (node.name == "propagation_config_dir") get_string(node, cfg.propagation_config_dir);
-        else if (node.name == "synonyms") {
-            auto result = apply_synonyms(node);
-            if (!result) {
-                error = result.error().to_string();
-                return cfg;
-            }
-            cfg.synonyms = std::move(result.value());
-        }
-    }
+    if (!apply_kdl_nodes(cfg, nodes, error)) return cfg;
 
     return cfg;
 }
@@ -703,6 +768,12 @@ ConfigResult load_config(const std::string& project_root) {
     std::error_code ec;
     if (!fs::exists(kdl_path, ec)) {
         Config cfg = make_default_config();
+        // No project file: user-level defaults overlay the full rich
+        // defaults, include/exclude included.
+        std::string user_err;
+        if (!overlay_user_config(cfg, user_err)) {
+            return {{}, user_err};
+        }
         cfg.project.root = project_root;
         return {std::move(cfg), {}};
     }

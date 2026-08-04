@@ -72,6 +72,8 @@ pid_t spawn_server(const std::string& binary_path,
             ::dup2(devnull, STDERR_FILENO);
             ::close(devnull);
         }
+        // Hermeticity: keep the developer's ~/.config/lci out of goldens.
+        ::setenv("XDG_CONFIG_HOME", "/nonexistent/lci-test-xdg", 1);
         // Pass the corpus as --root so both binaries compute the
         // same deterministic socket path.
         ::execlp(binary_path.c_str(), binary_path.c_str(),
