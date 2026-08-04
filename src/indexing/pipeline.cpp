@@ -98,13 +98,9 @@ void Pipeline::run() {
         processor.process(task_queue, result_queue, worker_count);
     });
 
-    // Enable async trigram merger so Stage 3's per-file
-    // index_file_with_bucketed_trigrams call doesn't run synchronously on
-    // the integrator thread. Without this, trigram merging blocks symbol
-    // integration and the whole pipeline is bottlenecked by one core's
-    // hash-bucket merge throughput. Merger count mirrors the worker pool
-    // size; TrigramMergerPipeline defaults to 16 when given 0/negative.
-    integrator_.enable_merger_pipeline(worker_count);
+    // The async trigram merger is no longer enabled: workers stopped
+    // producing bucketed trigrams (dead ShardedTrigramStorage feed — see
+    // pipeline_processor.cpp), so there is nothing to merge.
 
     // Stage 3: Integrate results (runs on this thread). Buffer all
     // ProcessedFile outputs from the worker pool, then sort by file_id

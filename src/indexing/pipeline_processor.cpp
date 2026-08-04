@@ -194,39 +194,14 @@ ProcessedFile FileProcessor::process_file(int /*worker_id*/,
     run_unified_extraction(result, content, task.path,
                            config_.index.max_parse_file_size);
 
-    // Bucket trigrams during processing (zero-lock per-file)
-    if (trigram_index_ != nullptr && content.size() >= 3) {
-        auto bucketed = trigram_index_->create_bucketed_result(file_id);
-        int bucket_count = trigram_index_->get_bucket_count();
-
-        int estimated_per_bucket;
-        if (content.size() < 512) {
-            estimated_per_bucket = 4;
-        } else {
-            int est_unique = static_cast<int>(content.size()) / 10;
-            if (est_unique < 100) est_unique = 100;
-            estimated_per_bucket = est_unique / bucket_count + 2;
-            if (estimated_per_bucket < 8) estimated_per_bucket = 8;
-        }
-
-        for (int i = 0; i < bucket_count; ++i) {
-            bucketed.buckets[i].trigrams.reserve(estimated_per_bucket);
-        }
-
-        auto bytes = reinterpret_cast<const uint8_t*>(content.data());
-        for (size_t i = 0; i + 2 < content.size(); ++i) {
-            uint32_t trigram = (uint32_t(bytes[i]) << 16) |
-                               (uint32_t(bytes[i + 1]) << 8) |
-                               uint32_t(bytes[i + 2]);
-            uint16_t bucket_id = trigram_index_->get_bucket_for_trigram(trigram);
-            bucketed.buckets[bucket_id].trigrams[trigram].push_back(
-                static_cast<uint32_t>(i));
-        }
-
-        result.bucketed_trigrams = std::move(bucketed);
-    } else if (trigram_index_ != nullptr) {
-        result.bucketed_trigrams = trigram_index_->create_bucketed_result(file_id);
-    }
+    // Per-occurrence trigram bucketing removed (2026-08-04): its sole
+    // consumer, ShardedTrigramStorage (fed via the merger pipeline), had no
+    // production readers — find_candidates reads the snapshot maps, which the
+    // bulk path never populated. Building it cost ~8 bytes per corpus byte
+    // plus hash overhead and drove servers past 26 GB RSS on large repos.
+    // Bulk-indexed corpora prefilter via PostingsIndex (the path search
+    // already fell back to); a file-granular bulk trigram prefilter is a
+    // tracked follow-up.
 
     // Tokenize for PostingsIndex inline so the per-byte scan + dedup
     // runs in parallel here instead of serially on the integrator
