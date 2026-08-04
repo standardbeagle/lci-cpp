@@ -1,6 +1,7 @@
 #include <lci/indexing/pipeline_processor.h>
 
 #include <lci/core/reference_tracker.h>
+#include <lci/core/trigram.h>
 #include <lci/parser/parser.h>
 #include <lci/parser/parser_pool.h>
 #include <lci/parser/unified_extractor.h>
@@ -38,6 +39,17 @@ void run_unified_extraction(ProcessedFile& result,
     // dropping symbols for the file.
     if (max_parse_bytes > 0 &&
         static_cast<int64_t>(content.size()) > max_parse_bytes) {
+        result.parse_skipped_oversize = true;
+        return;
+    }
+
+    // Minified/generated bundles under the size cutoff are worse than
+    // oversized ones: memprofile pinned a 1.36 MB minified babel bundle at
+    // 4.4 GB of RSS from symbol extraction alone (thousands of symbols and
+    // references on one line, each carried through ProcessedFile and the
+    // reference tracker). Same detector the trigram index uses; symbols in
+    // generated code have no navigation value.
+    if (is_trigram_hostile(content)) {
         result.parse_skipped_oversize = true;
         return;
     }

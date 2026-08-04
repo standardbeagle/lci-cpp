@@ -1131,6 +1131,41 @@ TEST(MatchGlob, AllowsTrailingStarToMatchEmpty) {
     EXPECT_FALSE(FileScanner::match_glob("foo*", "foo/bar"));
 }
 
+TEST(FileProcessorTest, MinifiedBundleSkipsParse) {
+    TempDir dir;
+    // Minified-bundle signature: one >4 KB line in a >64 KB file. A real
+    // 1.36 MB minified babel bundle cost 4.4 GB of RSS through symbol
+    // extraction before this gate existed.
+    std::string minified = "var a=1;";
+    minified.append(128 * 1024, 'x');
+    minified += "\n";
+    dir.write_file("bundle.js", minified);
+
+    Config cfg = make_default_config();
+
+    auto store = std::make_shared<FileContentStore>();
+    auto file_service = std::make_shared<FileService>(store);
+    TrigramIndex trigram_idx;
+
+    BoundedQueue<FileTask> task_queue(10);
+    BoundedQueue<ProcessedFile> result_queue(10);
+
+    FileTask t;
+    t.path = (dir.path() / "bundle.js").string();
+    t.language = "javascript";
+    t.size = static_cast<int64_t>(minified.size());
+    task_queue.push(std::move(t));
+    task_queue.close();
+
+    FileProcessor processor(cfg, file_service, &trigram_idx);
+    processor.process(task_queue, result_queue, 1);
+
+    ProcessedFile r;
+    ASSERT_TRUE(result_queue.pop(r));
+    EXPECT_TRUE(r.parse_skipped_oversize);
+    EXPECT_TRUE(r.symbols.empty());
+}
+
 // ---------------------------------------------------------------------------
 // FileScanner corpus budget (index.max_total_size_mb / max_file_count /
 // overflow_policy)
