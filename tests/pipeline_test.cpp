@@ -369,7 +369,7 @@ TEST(FileScannerTest, ScansDirectoryTree) {
     cfg.project.root = dir.path().string();
 
     FileScanner scanner(cfg);
-    auto tasks = scanner.scan();
+    auto tasks = scanner.scan().tasks;
 
     EXPECT_GE(tasks.size(), 3u);
     bool found_main = false;
@@ -395,7 +395,7 @@ TEST(FileScannerTest, SkipsBinaryFiles) {
     cfg.project.root = dir.path().string();
 
     FileScanner scanner(cfg);
-    auto tasks = scanner.scan();
+    auto tasks = scanner.scan().tasks;
 
     for (const auto& t : tasks) {
         EXPECT_EQ(t.path.find(".png"), std::string::npos);
@@ -415,7 +415,7 @@ TEST(FileScannerTest, RespectsGitignore) {
     cfg.index.respect_gitignore = true;
 
     FileScanner scanner(cfg);
-    auto tasks = scanner.scan();
+    auto tasks = scanner.scan().tasks;
 
     for (const auto& t : tasks) {
         EXPECT_EQ(t.path.find("error.log"), std::string::npos);
@@ -432,7 +432,7 @@ TEST(FileScannerTest, SkipsHiddenDirectories) {
     cfg.project.root = dir.path().string();
 
     FileScanner scanner(cfg);
-    auto tasks = scanner.scan();
+    auto tasks = scanner.scan().tasks;
 
     for (const auto& t : tasks) {
         EXPECT_EQ(t.path.find(".hidden"), std::string::npos);
@@ -449,7 +449,7 @@ TEST(FileScannerTest, RespectsExclusionPatterns) {
     cfg.exclude.push_back("vendor/**");
 
     FileScanner scanner(cfg);
-    auto tasks = scanner.scan();
+    auto tasks = scanner.scan().tasks;
 
     for (const auto& t : tasks) {
         EXPECT_EQ(t.path.find("vendor"), std::string::npos);
@@ -466,7 +466,7 @@ TEST(FileScannerTest, RespectsMaxFileSize) {
     cfg.index.max_file_size = 100;
 
     FileScanner scanner(cfg);
-    auto tasks = scanner.scan();
+    auto tasks = scanner.scan().tasks;
 
     for (const auto& t : tasks) {
         EXPECT_EQ(t.path.find("large.go"), std::string::npos);
@@ -525,7 +525,7 @@ TEST(FileScannerTest, DetectsSymlinkCycles) {
 
     FileScanner scanner(cfg);
     // Must complete without infinite loop
-    auto tasks = scanner.scan();
+    auto tasks = scanner.scan().tasks;
     EXPECT_GE(tasks.size(), 1u);
 }
 
@@ -539,7 +539,7 @@ TEST(FileScannerTest, SortsByPriority) {
     cfg.project.root = dir.path().string();
 
     FileScanner scanner(cfg);
-    auto tasks = scanner.scan();
+    auto tasks = scanner.scan().tasks;
 
     if (tasks.size() >= 2) {
         EXPECT_GE(tasks[0].priority, tasks[1].priority);
@@ -745,7 +745,7 @@ TEST(FileScannerTest, DetectsLanguages) {
     cfg.project.root = dir.path().string();
 
     FileScanner scanner(cfg);
-    auto tasks = scanner.scan();
+    auto tasks = scanner.scan().tasks;
 
     absl::flat_hash_map<std::string, std::string> expected = {
         {"main.go", "go"},          {"app.py", "python"},
@@ -1129,6 +1129,110 @@ TEST(MatchGlob, AllowsTrailingStarToMatchEmpty) {
     EXPECT_TRUE(FileScanner::match_glob("foo*", "foo"));
     EXPECT_TRUE(FileScanner::match_glob("foo*", "foobar"));
     EXPECT_FALSE(FileScanner::match_glob("foo*", "foo/bar"));
+}
+
+// ---------------------------------------------------------------------------
+// FileScanner corpus budget (index.max_total_size_mb / max_file_count /
+// overflow_policy)
+// ---------------------------------------------------------------------------
+
+TEST(FileScannerBudgetTest, WithinBudgetReportsNoSkips) {
+    TempDir dir;
+    dir.write_file("a.go", "package a\n");
+    dir.write_file("b.go", "package b\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+
+    auto result = FileScanner(cfg).scan();
+    EXPECT_TRUE(result.error.empty());
+    EXPECT_EQ(result.skipped_files, 0);
+    EXPECT_EQ(result.tasks.size(), 2u);
+}
+
+TEST(FileScannerBudgetTest, ReducedPolicyTruncatesAtFileCount) {
+    TempDir dir;
+    for (int i = 0; i < 6; ++i) {
+        dir.write_file("f" + std::to_string(i) + ".go", "package f\n");
+    }
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    cfg.index.max_file_count = 4;
+
+    auto result = FileScanner(cfg).scan();
+    EXPECT_TRUE(result.error.empty());
+    EXPECT_EQ(result.tasks.size(), 4u);
+    EXPECT_EQ(result.skipped_files, 2);
+    EXPECT_GT(result.skipped_bytes, 0);
+}
+
+TEST(FileScannerBudgetTest, ReducedPolicySpendsBudgetOnHighPriorityFirst) {
+    TempDir dir;
+    dir.write_file("code.go", "package main\n");   // priority 10
+    dir.write_file("notes.md", "# readme\n");      // priority 5
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    cfg.index.max_file_count = 1;
+
+    auto result = FileScanner(cfg).scan();
+    ASSERT_EQ(result.tasks.size(), 1u);
+    EXPECT_NE(result.tasks[0].path.find("code.go"), std::string::npos);
+    EXPECT_EQ(result.skipped_files, 1);
+}
+
+TEST(FileScannerBudgetTest, RejectPolicyReturnsErrorAndNoTasks) {
+    TempDir dir;
+    for (int i = 0; i < 3; ++i) {
+        dir.write_file("f" + std::to_string(i) + ".go", "package f\n");
+    }
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    cfg.index.max_file_count = 2;
+    cfg.index.overflow_policy = "reject";
+
+    auto result = FileScanner(cfg).scan();
+    EXPECT_FALSE(result.error.empty());
+    EXPECT_TRUE(result.tasks.empty());
+    EXPECT_NE(result.error.find("max_file_count"), std::string::npos);
+}
+
+TEST(FileScannerBudgetTest, ApplyBudgetFalseBypassesLimits) {
+    TempDir dir;
+    for (int i = 0; i < 6; ++i) {
+        dir.write_file("f" + std::to_string(i) + ".go", "package f\n");
+    }
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    cfg.index.max_file_count = 2;
+    cfg.index.overflow_policy = "reject";
+
+    auto result = FileScanner(cfg).scan(/*apply_budget=*/false);
+    EXPECT_TRUE(result.error.empty());
+    EXPECT_EQ(result.tasks.size(), 6u);
+}
+
+TEST(FileScannerBudgetTest, ByteBudgetCutsBeforeOversizeTotal) {
+    TempDir dir;
+    // Two ~1 KB files against a 1 MB minimum-representable budget is not
+    // testable via max_total_size_mb (int MB granularity), so drive the
+    // byte budget with file count parity: 1 MB budget, one file over it.
+    std::string big(600 * 1024, 'x');
+    big += "\n";
+    dir.write_file("a.go", big);
+    dir.write_file("b.go", big);
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    cfg.index.max_total_size_mb = 1;
+
+    auto result = FileScanner(cfg).scan();
+    EXPECT_TRUE(result.error.empty());
+    EXPECT_EQ(result.tasks.size(), 1u);
+    EXPECT_EQ(result.skipped_files, 1);
 }
 
 }  // namespace

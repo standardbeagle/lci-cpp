@@ -18,12 +18,30 @@ namespace lci {
 ///
 /// Respects .gitignore patterns, detects binary files, handles symlink
 /// cycles, and supports glob-based inclusion/exclusion filters.
+/// Outcome of a scan, including how the corpus budget was applied.
+struct ScanResult {
+    std::vector<FileTask> tasks;
+    /// Files dropped by the "reduced" overflow policy (0 when within budget).
+    int skipped_files{};
+    int64_t skipped_bytes{};
+    /// Non-empty when the "reject" overflow policy tripped; tasks is empty.
+    std::string error;
+};
+
 class FileScanner {
   public:
     explicit FileScanner(const Config& config);
 
-    /// Scans the project root and returns all indexable file tasks.
-    std::vector<FileTask> scan();
+    /// Scans the project root and returns indexable file tasks, budgeted by
+    /// index.max_total_size_mb / index.max_file_count in priority order:
+    /// the highest-priority files fill the budget first. Past the budget,
+    /// index.overflow_policy decides: "reduced" truncates and reports the
+    /// skip counts; "reject" returns an error and no tasks.
+    ///
+    /// apply_budget=false skips the budget entirely — for callers that
+    /// stream from disk per file (grep full-scan) where a partial file list
+    /// would silently hide matches and memory is not at stake.
+    ScanResult scan(bool apply_budget = true);
 
     /// Simple glob match supporting `*`, `**`, and `?` patterns.
     ///

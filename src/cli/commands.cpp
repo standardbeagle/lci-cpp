@@ -583,7 +583,18 @@ int run_list(const GlobalFlags& flags, bool verbose) {
     //     mode (parity descriptors only capture stdout, but we keep it for
     //     interactive parity with the Go binary).
     FileScanner scanner(cfg);
-    auto tasks = scanner.scan();
+    auto scan_result = scanner.scan();
+    if (!scan_result.error.empty()) {
+        std::cerr << "Error: " << scan_result.error << "\n";
+        return 1;
+    }
+    if (scan_result.skipped_files > 0) {
+        std::fprintf(stderr,
+                     "Warning: corpus budget reached — %d lower-priority "
+                     "files omitted from this listing\n",
+                     scan_result.skipped_files);
+    }
+    auto tasks = std::move(scan_result.tasks);
 
     // FileScanner returns tasks sorted by indexing priority (desc) then path
     // (asc); the Go list command emits files in lexical scan order
@@ -644,14 +655,15 @@ int run_config_init(const GlobalFlags& /*flags*/, const std::string& format,
 // Minimal configuration with commonly changed settings
 
 index {
-    max_total_size_mb 500          // Total indexed content limit
-    max_file_count 10000           // Maximum number of files
+    max_total_size_mb 500          // Corpus budget, spent in priority order
+    max_file_count 50000           // Corpus budget: max files indexed
+    overflow_policy "reduced"      // Past budget: "reduced" (partial, warned) or "reject"
     smart_size_control true        // Enable intelligent size management
     priority_mode "recent"         // Priority: "recent", "small", "important"
 }
 
 performance {
-    max_memory_mb 500              // Memory limit for entire index
+    max_memory_mb 500              // File-content cache cap (LRU-evicted)
 }
 
 // Add project-specific exclusions
@@ -677,15 +689,16 @@ project {
 
 index {
     max_file_size "10MB"           // Skip files larger than this
-    max_total_size_mb 500          // Total indexed content limit
-    max_file_count 10000           // Maximum number of files to index
+    max_total_size_mb 500          // Corpus budget, spent in priority order
+    max_file_count 50000           // Corpus budget: max files indexed
+    overflow_policy "reduced"      // Past budget: "reduced" (partial, warned) or "reject"
     smart_size_control true        // Enable intelligent size management
     priority_mode "recent"         // Priority: "recent", "small", "important", "balanced"
     follow_symlinks false          // Don't follow symbolic links
 }
 
 performance {
-    max_memory_mb 500              // Memory limit for entire index
+    max_memory_mb 500              // File-content cache cap (LRU-evicted)
     max_goroutines 8               // Parallel processing limit
     debounce_ms 100                // File change debouncing
 }
@@ -838,6 +851,8 @@ int run_config_show(const GlobalFlags& flags, const std::string& format) {
     std::printf("  Max total size:    %lld MB\n",
                 static_cast<long long>(cfg.index.max_total_size_mb));
     std::printf("  Max file count:    %d\n", cfg.index.max_file_count);
+    std::printf("  Overflow policy:   %s\n",
+                cfg.index.overflow_policy.c_str());
     std::printf("  Smart size control: %s\n",
                 cfg.index.smart_size_control ? "true" : "false");
     std::printf("  Priority mode:     %s\n",

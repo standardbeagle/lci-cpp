@@ -440,7 +440,18 @@ int main(int argc, char* argv[]) {
         // Same scanner the indexer pipeline uses, so the list reflects the
         // real include/exclude/root filters — not a parallel implementation.
         lci::FileScanner scanner(cfg);
-        auto tasks = scanner.scan();
+        auto scan_result = scanner.scan();
+        if (!scan_result.error.empty()) {
+            std::fprintf(stderr, "Error: %s\n", scan_result.error.c_str());
+            std::exit(1);
+        }
+        if (scan_result.skipped_files > 0) {
+            std::fprintf(stderr,
+                         "Warning: corpus budget reached — %d lower-priority "
+                         "files would be skipped\n",
+                         scan_result.skipped_files);
+        }
+        auto tasks = std::move(scan_result.tasks);
         // Sort by path for deterministic output (Karpathy rule 4) and to
         // match Go's `filepath.Walk` lexical order.
         std::sort(tasks.begin(), tasks.end(),

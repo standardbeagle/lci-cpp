@@ -22,8 +22,16 @@ struct IndexConfig {
     // almost always generated/minified, where the parse cost (parse is ~58% of
     // index CPU) buys little symbol value. 0 disables the cap.
     int64_t max_parse_file_size = 2 * 1024 * 1024;  // 2 MB
+    // Total-corpus budget, enforced by FileScanner in priority order. Sized
+    // so the vast majority of repos index fully; what happens past the
+    // budget is overflow_policy's call.
     int64_t max_total_size_mb = 500;
-    int max_file_count = 10000;
+    int max_file_count = 50000;
+    // "reduced": index the highest-priority files that fit the budget, skip
+    // the rest (reported, never silent). "reject": refuse to index and say
+    // which limit tripped — for callers that would rather raise the budget
+    // or tighten excludes than run partial.
+    std::string overflow_policy = "reduced";
     bool follow_symlinks = false;
     bool smart_size_control = true;
     std::string priority_mode = "recent";

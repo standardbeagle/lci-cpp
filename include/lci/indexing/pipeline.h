@@ -49,6 +49,10 @@ class Pipeline {
     ProgressTracker& progress_tracker();
     const ProgressTracker& progress_tracker() const;
 
+    /// Non-empty when run() aborted because the scan rejected the corpus
+    /// (index.overflow_policy "reject"). Callers fail the index run on it.
+    const std::string& scan_error() const { return scan_error_; }
+
   private:
     Config config_;
     std::shared_ptr<FileService> file_service_;
@@ -59,6 +63,7 @@ class Pipeline {
     ProgressTracker progress_;
     FileIntegrator integrator_;
     std::atomic<bool> stop_flag_{false};
+    std::string scan_error_;
 };
 
 }  // namespace lci

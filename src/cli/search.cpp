@@ -1422,7 +1422,9 @@ int run_search(const GlobalFlags& flags, const SearchCommandOptions& options) {
     // server entirely.
     if (regex_full_scan) {
         FileScanner scanner(cfg);
-        auto tasks = scanner.scan();
+        // Budget-exempt: this path mmaps files one at a time, so memory is
+        // bounded regardless of corpus size, and grep must see every file.
+        auto tasks = scanner.scan(/*apply_budget=*/false).tasks;
         std::sort(tasks.begin(), tasks.end(),
                   [](const FileTask& a, const FileTask& b) {
                       return a.path < b.path;

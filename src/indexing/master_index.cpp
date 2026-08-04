@@ -125,6 +125,15 @@ bool MasterIndex::index_directory(const std::string& root) {
         active_pipeline_ = nullptr;
     }
 
+    if (!pipeline.scan_error().empty()) {
+        // Reject overflow policy: fail the run with the scanner's message
+        // rather than publishing an empty index that looks like success.
+        std::fprintf(stderr, "lci: %s\n", pipeline.scan_error().c_str());
+        set_bulk_indexing(false);
+        is_indexing_.store(0, std::memory_order_release);
+        return false;
+    }
+
     // Publish the symbol-location index now: the pipeline has fully populated
     // it, and process_all_references reads it (find_symbol_id_at_position) to
     // resolve reference sources/targets. Under the bulk window those writes sat

@@ -53,13 +53,14 @@ FileScanner::FileScanner(const Config& config)
     }
 }
 
-std::vector<FileTask> FileScanner::scan() {
-    std::vector<FileTask> tasks;
+ScanResult FileScanner::scan(bool apply_budget) {
+    ScanResult result;
+    auto& tasks = result.tasks;
     absl::flat_hash_set<uint64_t> visited_inodes;
     std::filesystem::path root(config_.project.root);
 
     std::error_code ec;
-    if (!std::filesystem::exists(root, ec) || ec) return tasks;
+    if (!std::filesystem::exists(root, ec) || ec) return result;
 
     walk_directory(root, visited_inodes, tasks);
 
@@ -72,7 +73,49 @@ std::vector<FileTask> FileScanner::scan() {
                   if (a.priority != b.priority) return a.priority > b.priority;
                   return a.path < b.path;
               });
-    return tasks;
+
+    if (!apply_budget) return result;
+
+    // Corpus budget: the priority sort above means the budget is spent on
+    // the most valuable files first, and the cut point is deterministic.
+    const int64_t byte_budget =
+        config_.index.max_total_size_mb * 1024 * 1024;
+    const size_t file_budget =
+        static_cast<size_t>(config_.index.max_file_count);
+
+    int64_t running_bytes = 0;
+    size_t cut = tasks.size();
+    for (size_t i = 0; i < tasks.size(); ++i) {
+        if (i >= file_budget || running_bytes + tasks[i].size > byte_budget) {
+            cut = i;
+            break;
+        }
+        running_bytes += tasks[i].size;
+    }
+    if (cut == tasks.size()) return result;  // within budget
+
+    int64_t over_bytes = 0;
+    for (size_t i = cut; i < tasks.size(); ++i) over_bytes += tasks[i].size;
+
+    if (config_.index.overflow_policy == "reject") {
+        result.error =
+            "corpus exceeds the indexing budget: " +
+            std::to_string(tasks.size()) + " files / " +
+            std::to_string((running_bytes + over_bytes) / (1024 * 1024)) +
+            " MB vs index.max_file_count=" +
+            std::to_string(config_.index.max_file_count) +
+            ", index.max_total_size_mb=" +
+            std::to_string(config_.index.max_total_size_mb) +
+            " (raise the limits, tighten exclude patterns, or set "
+            "index.overflow_policy \"reduced\")";
+        tasks.clear();
+        return result;
+    }
+
+    result.skipped_files = static_cast<int>(tasks.size() - cut);
+    result.skipped_bytes = over_bytes;
+    tasks.resize(cut);
+    return result;
 }
 
 void FileScanner::walk_directory(

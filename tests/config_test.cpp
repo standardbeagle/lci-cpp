@@ -28,7 +28,7 @@ TEST(DefaultConfigTest, HasExpectedDefaults) {
 
     EXPECT_EQ(cfg.index.max_file_size, 10 * 1024 * 1024);
     EXPECT_EQ(cfg.index.max_total_size_mb, 500);
-    EXPECT_EQ(cfg.index.max_file_count, 10000);
+    EXPECT_EQ(cfg.index.max_file_count, 50000);
     EXPECT_FALSE(cfg.index.follow_symlinks);
     EXPECT_TRUE(cfg.index.smart_size_control);
     EXPECT_EQ(cfg.index.priority_mode, "recent");
@@ -523,7 +523,7 @@ TEST_F(KdlConfigTest, FileWithoutIndexBlockUsesGoZeroValueIndexDefaults) {
     // Fields present in Go's parseKDL literal keep their literal values.
     EXPECT_EQ(result.config.index.max_file_size, 10 * 1024 * 1024);
     EXPECT_EQ(result.config.index.max_total_size_mb, 500);
-    EXPECT_EQ(result.config.index.max_file_count, 10000);
+    EXPECT_EQ(result.config.index.max_file_count, 50000);
     EXPECT_FALSE(result.config.index.follow_symlinks);
     EXPECT_TRUE(result.config.index.smart_size_control);
     EXPECT_EQ(result.config.index.priority_mode, "recent");

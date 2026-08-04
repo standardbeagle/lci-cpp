@@ -410,6 +410,8 @@ bool apply_index(Config& cfg, const KdlNode& node, std::string& error) {
             if (get_int(child, v)) cfg.index.max_total_size_mb = v;
         } else if (child.name == "max_file_count") {
             get_int(child, cfg.index.max_file_count);
+        } else if (child.name == "overflow_policy") {
+            get_string(child, cfg.index.overflow_policy);
         } else if (child.name == "follow_symlinks") {
             get_bool(child, cfg.index.follow_symlinks);
         } else if (child.name == "smart_size_control") {
@@ -503,9 +505,11 @@ Result<SynonymTable> apply_synonyms(const KdlNode& node) {
 // config.go's Load(). Fields NOT set here are left at the C++ struct
 // defaults declared in config.h — those defaults match Go's parseKDL literal
 // for every field the literal does set (max_file_size, max_total_size_mb,
-// max_file_count, follow_symlinks, smart_size_control, priority_mode,
-// max_memory_mb, debounce_ms). Only the omitted fields below differ and must
-// be reset to Go's zero value.
+// follow_symlinks, smart_size_control, priority_mode, max_memory_mb,
+// debounce_ms). Only the omitted fields below differ and must be reset to
+// Go's zero value. Deliberate divergence: max_file_count default is 50000
+// (Go pinned 10000) — the budget became enforced in 2026-08 and 10k files
+// would truncate ordinary large repos; the Go oracle is retired.
 Config make_kdl_base_config() {
     Config cfg = make_default_config();
 
@@ -719,6 +723,10 @@ std::string validate_config(Config& cfg) {
     }
     if (cfg.index.max_total_size_mb <= 0) {
         return "index.max_total_size_mb must be positive";
+    }
+    if (cfg.index.overflow_policy != "reduced" &&
+        cfg.index.overflow_policy != "reject") {
+        return "index.overflow_policy must be \"reduced\" or \"reject\"";
     }
     if (cfg.index.max_file_count <= 0) {
         return "index.max_file_count must be positive";

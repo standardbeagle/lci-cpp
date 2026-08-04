@@ -22,7 +22,24 @@ Pipeline::Pipeline(const Config& config,
 void Pipeline::run() {
     // Stage 1: Scan files.
     FileScanner scanner(config_);
-    auto tasks = scanner.scan();
+    auto scan_result = scanner.scan();
+    if (!scan_result.error.empty()) {
+        scan_error_ = scan_result.error;
+        return;
+    }
+    if (scan_result.skipped_files > 0) {
+        // Reduced overflow policy: partial index, loudly. Silent truncation
+        // would read as "covered everything".
+        std::fprintf(stderr,
+                     "lci: corpus budget reached — indexing %zu files, "
+                     "skipping %d lower-priority files (%.1f MB); raise "
+                     "index.max_total_size_mb / index.max_file_count or "
+                     "tighten excludes for full coverage\n",
+                     scan_result.tasks.size(), scan_result.skipped_files,
+                     static_cast<double>(scan_result.skipped_bytes) /
+                         (1024.0 * 1024.0));
+    }
+    auto tasks = std::move(scan_result.tasks);
 
     if (stop_flag_.load(std::memory_order_acquire)) return;
 

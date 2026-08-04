@@ -95,7 +95,9 @@ int run_debug_memprofile(const GlobalFlags& flags,
     integrator.set_symbol_location_index(&symbol_location_index);
 
     FileScanner scanner(cfg);
-    auto tasks = scanner.scan();
+    // Budget-exempt: the whole point is measuring what unbudgeted indexing
+    // costs, including the files a budgeted run would skip.
+    auto tasks = scanner.scan(/*apply_budget=*/false).tasks;
 
     int64_t corpus_bytes = 0;
     for (const auto& t : tasks) corpus_bytes += t.size;
