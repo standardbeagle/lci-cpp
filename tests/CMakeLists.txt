@@ -138,6 +138,34 @@ set_tests_properties(lci_memory_soak PROPERTIES
     TIMEOUT 900
     RUN_SERIAL TRUE)
 
+# ---------------------------------------------------------------------------
+# Index-size smoke tests (large long-tail repos across languages)
+# ---------------------------------------------------------------------------
+# Indexes real oversized repos (next.js, dotnet/runtime, kubernetes, ...)
+# with default config and asserts RSS growth stays under a hard ceiling —
+# the 26 GB / crashed-host incident class. Pass-by-skip when the corpora
+# are not fetched (scripts/fetch-smoke-corpora.sh); local runs only, like
+# the real-project suites. RUN_SERIAL: RSS is a whole-process measurement.
+add_executable(lci_index_size_smoke
+    soak/index_size_smoke_test.cpp
+)
+target_include_directories(lci_index_size_smoke PRIVATE
+    "${CMAKE_SOURCE_DIR}/include"
+    "${CMAKE_BINARY_DIR}/generated"
+)
+target_compile_definitions(lci_index_size_smoke PRIVATE
+    LCI_PROJECT_ROOT="${CMAKE_SOURCE_DIR}"
+)
+target_link_libraries(lci_index_size_smoke PRIVATE
+    lci_lib
+    GTest::gtest_main
+)
+add_test(NAME lci_index_size_smoke COMMAND lci_index_size_smoke)
+set_tests_properties(lci_index_size_smoke PROPERTIES
+    LABELS "soak"
+    TIMEOUT 3600
+    RUN_SERIAL TRUE)
+
 # The integration + real-project suites and the parity runner spawn child
 # processes via fork/exec (tests/parity/runner/modes/*.cpp, child_guard.h) and
 # only ever run on the Linux CI legs. They are gated to Linux: Windows has no
