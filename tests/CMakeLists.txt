@@ -113,6 +113,31 @@ gtest_discover_tests(lci_helpers_tests
     PROPERTIES LABELS "infrastructure"
 )
 
+# ---------------------------------------------------------------------------
+# Memory soak test
+# ---------------------------------------------------------------------------
+# Drives the in-process MCP engine through repeated reindex+query cycles and
+# asserts RSS plateaus. Complements the sanitizer preset: LSan only sees
+# unreachable memory at exit; this catches reachable unbounded growth — the
+# failure mode that matters for a long-running server. RUN_SERIAL because RSS
+# is a whole-process measurement and sibling tests under -j add noise.
+add_executable(lci_soak_tests
+    soak/soak_memory_test.cpp
+)
+target_include_directories(lci_soak_tests PRIVATE
+    "${CMAKE_SOURCE_DIR}/include"
+    "${CMAKE_BINARY_DIR}/generated"
+)
+target_link_libraries(lci_soak_tests PRIVATE
+    lci_lib
+    GTest::gtest_main
+)
+add_test(NAME lci_memory_soak COMMAND lci_soak_tests)
+set_tests_properties(lci_memory_soak PROPERTIES
+    LABELS "soak"
+    TIMEOUT 900
+    RUN_SERIAL TRUE)
+
 # The integration + real-project suites and the parity runner spawn child
 # processes via fork/exec (tests/parity/runner/modes/*.cpp, child_guard.h) and
 # only ever run on the Linux CI legs. They are gated to Linux: Windows has no
@@ -335,10 +360,14 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND LCI_ENABLE_FUZZING)
             add_test(NAME ${_ft}_smoke
                 COMMAND ${_ft} -runs=5000 -max_total_time=25 -timeout=10
                         -rss_limit_mb=4096 ${_positional})
+            # detect_leaks=1: per-iteration leaks on the untrusted-input
+            # surface are exactly what fuzzing should catch; the harness's
+            # process-lifetime index is reachable via statics, so LSan does
+            # not flag it.
             set_tests_properties(${_ft}_smoke PROPERTIES
                 LABELS "fuzz"
                 TIMEOUT 120
-                ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0")
+                ENVIRONMENT "ASAN_OPTIONS=detect_leaks=1")
         endforeach()
     endif()
 endif()
