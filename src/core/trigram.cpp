@@ -326,6 +326,7 @@ void TrigramIndex::clear() {
         snap.ascii_trigrams.clear();
         snap.unicode_trigrams.clear();
         snap.invalidated_files.clear();
+        snap.unfiltered_files.clear();
     });
     sharded_storage_.clear();
     location_allocator_.reset_stats();
@@ -355,7 +356,40 @@ BucketedTrigramResult TrigramIndex::create_bucketed_result(FileID file_id) const
     return result;
 }
 
+bool is_trigram_hostile(std::string_view content) {
+    // Large high-entropy blobs: per-occurrence trigram storage costs multiples
+    // of the file size and the dense trigram set matches almost any pattern,
+    // so prefiltering buys nothing.
+    constexpr size_t kMaxTrigramFileSize = 2 * 1024 * 1024;
+    if (content.size() > kMaxTrigramFileSize) return true;
+
+    // Minified / generated bundles: a single multi-KB line is the signature.
+    // Only files big enough for the storage cost to matter are exempted.
+    constexpr size_t kMinSizeForLineCheck = 64 * 1024;
+    constexpr size_t kMaxLineLength = 4096;
+    if (content.size() < kMinSizeForLineCheck) return false;
+    size_t line_start = 0;
+    while (line_start < content.size()) {
+        size_t nl = content.find('\n', line_start);
+        if (nl == std::string_view::npos) nl = content.size();
+        if (nl - line_start > kMaxLineLength) return true;
+        line_start = nl + 1;
+    }
+    return false;
+}
+
+void TrigramIndex::mark_unfiltered(FileID file_id) {
+    mutate_snapshot([&](Snapshot& snap) {
+        snap.invalidated_files.erase(file_id);
+        snap.unfiltered_files.insert(file_id);
+    });
+}
+
 void TrigramIndex::index_file(FileID file_id, std::string_view content) {
+    if (is_trigram_hostile(content)) {
+        mark_unfiltered(file_id);
+        return;
+    }
     // Write path: extract into thread-local scratch (reused across files, so
     // no per-file heap allocation and no throwaway hash map) OUTSIDE the write
     // lock, then drain the scratch into the snapshot under it. thread_local is
@@ -432,6 +466,7 @@ void TrigramIndex::index_file_with_bucketed_trigrams(
 
 void TrigramIndex::remove_file(FileID file_id) {
     mutate_snapshot([&](Snapshot& snap) {
+        snap.unfiltered_files.erase(file_id);
         snap.invalidated_files.insert(file_id);
         if (static_cast<int>(snap.invalidated_files.size()) >=
             cleanup_threshold_) {
@@ -603,9 +638,20 @@ std::vector<FileID> TrigramIndex::filter_and_return_candidates(
     }
 
     std::vector<FileID> candidates;
+    candidates.reserve(file_trigram_counts.size() +
+                       snap.unfiltered_files.size());
     for (const auto& [file_id, match_count] : file_trigram_counts) {
         if (match_count >= min_required
             && !snap.invalidated_files.contains(file_id)) {
+            candidates.push_back(file_id);
+        }
+    }
+
+    // Unfiltered (trigram-hostile) files carry no trigram data, so they can
+    // never appear in file_trigram_counts — append them unconditionally so
+    // the prefilter cannot hide them. The verify scan does the real match.
+    for (FileID file_id : snap.unfiltered_files) {
+        if (!snap.invalidated_files.contains(file_id)) {
             candidates.push_back(file_id);
         }
     }

@@ -117,8 +117,16 @@ class TrigramIndex {
     /// Creates a properly-sized bucketed result structure.
     BucketedTrigramResult create_bucketed_result(FileID file_id) const;
 
-    /// Indexes a file directly from raw content.
+    /// Indexes a file directly from raw content. Trigram-hostile content
+    /// (see is_trigram_hostile) is not trigram-indexed; the file is added
+    /// to the unfiltered set instead so candidate search still returns it.
     void index_file(FileID file_id, std::string_view content);
+
+    /// Registers a file as indexed without trigram data. Unfiltered files
+    /// are always candidates — the fallback for content the trigram filter
+    /// handles badly (per-occurrence storage would balloon, and near-random
+    /// trigram sets defeat prefiltering anyway).
+    void mark_unfiltered(FileID file_id);
 
     /// Indexes a file using pre-computed trigram-to-offsets map.
     void index_file_with_trigrams(
@@ -176,6 +184,11 @@ class TrigramIndex {
         absl::flat_hash_map<uint32_t, TrigramEntry> ascii_trigrams;
         absl::flat_hash_map<std::string, TrigramEntry> unicode_trigrams;
         absl::flat_hash_set<FileID> invalidated_files;
+        /// Files indexed WITHOUT trigram data (trigram-hostile content:
+        /// minified bundles, high-entropy data). They are unconditionally
+        /// returned as candidates so the prefilter never hides them; the
+        /// downstream verify scan does the real matching.
+        absl::flat_hash_set<FileID> unfiltered_files;
     };
 
     AtomicSharedPtr<const Snapshot> snapshot_;
@@ -213,6 +226,13 @@ class TrigramIndex {
 
 /// Returns true if all bytes are ASCII (< 128).
 bool is_pure_ascii(std::string_view content);
+
+/// Returns true for content the trigram index handles badly: minified /
+/// generated single-line bundles and large high-entropy data files. Such
+/// files cost per-occurrence storage far out of proportion to their size
+/// and their near-random trigram sets defeat prefiltering. Callers index
+/// them via mark_unfiltered instead.
+bool is_trigram_hostile(std::string_view content);
 
 /// Returns true if a byte is alphanumeric or underscore.
 inline bool is_alpha_num(uint8_t b) {

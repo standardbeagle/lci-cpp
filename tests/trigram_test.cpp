@@ -466,5 +466,53 @@ TEST(TrigramIndexTest, BulkIndexingFlag) {
     EXPECT_FALSE(candidates.empty());
 }
 
+TEST(TrigramHostileTest, NormalCodeIsNotHostile) {
+    EXPECT_FALSE(is_trigram_hostile("package main\nfunc main() {}\n"));
+}
+
+TEST(TrigramHostileTest, MinifiedBundleIsHostile) {
+    // One >4 KB line in a >64 KB file — the minified-bundle signature.
+    std::string minified(128 * 1024, 'a');
+    for (size_t i = 0; i < minified.size(); i += 10000) minified[i] = '\n';
+    EXPECT_TRUE(is_trigram_hostile(minified));
+}
+
+TEST(TrigramHostileTest, SmallSingleLineFileIsNotHostile) {
+    // Long-line rule only applies past the size floor; a small one-liner
+    // (lockfile fragment, embedded data URI) stays trigram-indexed.
+    std::string small(8 * 1024, 'b');
+    EXPECT_FALSE(is_trigram_hostile(small));
+}
+
+TEST(TrigramHostileTest, OversizeFileIsHostileRegardlessOfLines) {
+    std::string big;
+    big.reserve(3 * 1024 * 1024);
+    while (big.size() < 3 * 1024 * 1024) big += "short line\n";
+    EXPECT_TRUE(is_trigram_hostile(big));
+}
+
+TEST(TrigramIndexTest, HostileFileFallsBackToUnfilteredCandidate) {
+    TrigramIndex index;
+    std::string minified(128 * 1024, 'x');
+    for (size_t i = 0; i < minified.size(); i += 10000) minified[i] = '\n';
+    index.index_file(FileID{7}, minified);
+
+    // No trigram data was stored, but the file must still surface as a
+    // candidate for any pattern — the prefilter may not hide it.
+    auto candidates = index.find_candidates("needle");
+    ASSERT_EQ(candidates.size(), 1u);
+    EXPECT_EQ(candidates[0], FileID{7});
+}
+
+TEST(TrigramIndexTest, RemovedUnfilteredFileStopsBeingACandidate) {
+    TrigramIndex index;
+    std::string minified(128 * 1024, 'x');
+    for (size_t i = 0; i < minified.size(); i += 10000) minified[i] = '\n';
+    index.index_file(FileID{7}, minified);
+    index.remove_file(FileID{7});
+
+    EXPECT_TRUE(index.find_candidates("needle").empty());
+}
+
 }  // namespace
 }  // namespace lci
