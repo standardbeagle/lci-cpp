@@ -74,7 +74,11 @@ class Client {
     /// Retrieves index statistics.
     std::optional<StatsResponse> get_stats(std::string& error);
 
-    /// Waits until the index is ready or timeout expires.
+    /// Waits until the index is ready. `timeout` bounds STALL, not total
+    /// wall clock: while the server reports forward progress (progress or
+    /// file_count advancing), the wait continues — big corpora index for
+    /// longer than any fixed guess. Fails once no progress is observed for
+    /// a full timeout window (which also covers an unreachable server).
     bool wait_for_ready(std::chrono::milliseconds timeout,
                         std::string& error);
 

@@ -1,5 +1,7 @@
 #include <lci/server/client.h>
 
+#include <algorithm>
+
 #include <httplib.h>
 
 #include <thread>
@@ -209,18 +211,44 @@ std::optional<StatsResponse> Client::get_stats(std::string& error) {
 
 bool Client::wait_for_ready(std::chrono::milliseconds timeout,
                             std::string& error) {
-    auto deadline = std::chrono::steady_clock::now() + timeout;
+    // `timeout` bounds STALL, not total wall clock: a large corpus
+    // legitimately indexes for longer than any fixed guess (next.js blew a
+    // 120 s cap and the caller abandoned a healthy server mid-index). As
+    // long as the server keeps reporting forward progress, keep waiting;
+    // fail only when progress stops for a full timeout window. A server
+    // that never answers status makes no progress and still times out.
+    auto last_advance = std::chrono::steady_clock::now();
+    double last_progress = -1.0;
+    int last_files = -1;
 
-    while (std::chrono::steady_clock::now() < deadline) {
+    while (true) {
         std::string err;
         auto status = get_status(err);
-        if (status && status->ready) {
-            return true;
+        if (status) {
+            if (status->ready) return true;
+            if (status->progress > last_progress ||
+                status->file_count > last_files) {
+                last_progress = std::max(last_progress, status->progress);
+                last_files = std::max(last_files, status->file_count);
+                last_advance = std::chrono::steady_clock::now();
+            }
+        }
+        if (std::chrono::steady_clock::now() - last_advance > timeout) {
+            break;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds{100});
     }
 
-    error = "timeout waiting for index to be ready";
+    if (last_files >= 0) {
+        error = "index stalled: no progress for " +
+                std::to_string(std::chrono::duration_cast<std::chrono::seconds>(
+                                   timeout)
+                                   .count()) +
+                "s (last: " + std::to_string(last_files) + " files, " +
+                std::to_string(last_progress) + " progress)";
+    } else {
+        error = "timeout waiting for index to be ready";
+    }
     return false;
 }
 
