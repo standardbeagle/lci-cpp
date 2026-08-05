@@ -91,7 +91,7 @@ std::vector<ImportInfo> get_imports(const Snapshot& snap,
                                     const CodeObjectID& oid) {
     absl::flat_hash_map<std::string, ImportInfo> by_module;
     for (const auto& sym : snap.get_file_enhanced_symbols(oid.file_id)) {
-        for (const auto& ref : sym->outgoing_refs) {
+        for (const auto& ref : snap.get_symbol_references(sym->id, "outgoing")) {
             if (ref.type != ReferenceType::Import) continue;
             if (ref.referenced_name.empty()) continue;
             if (by_module.contains(ref.referenced_name)) continue;
@@ -125,7 +125,7 @@ std::vector<ExportInfo> get_exports(const Snapshot& snap,
         info.name = std::string(sym->symbol.name);
         info.type = std::string(to_string(sym->symbol.type));
         info.export_style = "named";
-        for (const auto& ref : sym->incoming_refs) {
+        for (const auto& ref : snap.get_symbol_references(sym->id, "incoming")) {
             if (ref.file_id == oid.file_id) continue;
             info.used_by.push_back("file:" + std::to_string(ref.file_id));
         }
@@ -148,7 +148,7 @@ std::vector<InterfaceInfo> get_interface_implementations(
     auto target = find_target(snap, oid);
     if (target == nullptr) return interfaces;
 
-    for (const auto& ref : target->outgoing_refs) {
+    for (const auto& ref : snap.get_symbol_references(target->id, "outgoing")) {
         if (ref.type != ReferenceType::Inheritance) continue;
         InterfaceInfo info;
         info.interface_id.file_id = ref.file_id;
@@ -170,7 +170,7 @@ std::vector<ObjectReference> get_inheritance_chain(const Snapshot& snap,
     auto target = find_target(snap, oid);
     if (target == nullptr) return chain;
 
-    for (const auto& ref : target->outgoing_refs) {
+    for (const auto& ref : snap.get_symbol_references(target->id, "outgoing")) {
         if (ref.type != ReferenceType::Inheritance) continue;
         ObjectReference parent;
         parent.object_id.file_id = ref.file_id;
@@ -238,7 +238,7 @@ bool has_inheritance_pattern(const Snapshot& snap, const CodeObjectID& oid) {
     if (oid.type != SymbolType::Struct) return false;
     auto target = find_target(snap, oid);
     if (target == nullptr) return false;
-    for (const auto& ref : target->outgoing_refs) {
+    for (const auto& ref : snap.get_symbol_references(target->id, "outgoing")) {
         if (ref.type == ReferenceType::Inheritance) return true;
     }
     return false;

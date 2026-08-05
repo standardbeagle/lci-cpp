@@ -75,7 +75,8 @@ bool CouplingAnalyzer::is_excluded(std::string_view name) const {
 
 CouplingAnalyzer::CouplingResult CouplingAnalyzer::analyze(
     const std::vector<FileSymbolData>& files,
-    std::string_view project_root) const {
+    std::string_view project_root,
+    const std::function<std::vector<SymbolID>(SymbolID)>& targets_of) const {
 
     CouplingMetrics coupling;
     CohesionMetrics cohesion;
@@ -107,8 +108,8 @@ CouplingAnalyzer::CouplingResult CouplingAnalyzer::analyze(
     }
 
     for (const auto& [sym, src_pkg] : sym_to_pkg) {
-        for (const auto& ref : sym->outgoing_refs) {
-            auto it = id_to_pkg.find(ref.target_symbol);
+        for (SymbolID target : targets_of(sym->id)) {
+            auto it = id_to_pkg.find(target);
             if (it != id_to_pkg.end()) {
                 pkg_deps[src_pkg][it->second]++;
             }

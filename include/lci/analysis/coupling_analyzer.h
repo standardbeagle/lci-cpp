@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -31,8 +32,15 @@ class CouplingAnalyzer {
         CohesionMetrics cohesion;
     };
 
-    CouplingResult analyze(const std::vector<FileSymbolData>& files,
-                           std::string_view project_root) const;
+    /// `targets_of` supplies each symbol's resolved outgoing reference
+    /// targets (typically ReferenceTracker::get_outgoing_target_symbols).
+    /// Required, same contract as build_detailed's callees_of: it comes from
+    /// a live index, and defaulting it would silently zero all coupling.
+    CouplingResult analyze(
+        const std::vector<FileSymbolData>& files,
+        std::string_view project_root,
+        const std::function<std::vector<SymbolID>(SymbolID)>& targets_of)
+        const;
 
     /// Sets exclusion patterns for filtering test packages.
     void set_exclude_patterns(std::vector<std::string> patterns);

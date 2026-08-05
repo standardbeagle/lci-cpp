@@ -1204,11 +1204,11 @@ void IndexServer::handle_list_symbols(const httplib::Request& req,
             if (!sym->receiver_type.empty()) {
                 e["receiver_type"] = sym->receiver_type;
             }
-            if (!sym->incoming_refs.empty()) {
-                e["incoming_refs"] = static_cast<int>(sym->incoming_refs.size());
+            if (sym->incoming_ref_count != 0) {
+                e["incoming_refs"] = static_cast<int>(sym->incoming_ref_count);
             }
-            if (!sym->outgoing_refs.empty()) {
-                e["outgoing_refs"] = static_cast<int>(sym->outgoing_refs.size());
+            if (sym->outgoing_ref_count != 0) {
+                e["outgoing_refs"] = static_cast<int>(sym->outgoing_ref_count);
             }
             entries.push_back(e);
         }
@@ -1315,7 +1315,7 @@ void IndexServer::handle_inspect_symbol(const httplib::Request& req,
         }
         e["is_exported"] = sym->is_exported;
         e["complexity"] = sym->complexity;
-        e["outgoing_refs"] = static_cast<int>(sym->outgoing_refs.size());
+        e["outgoing_refs"] = static_cast<int>(sym->outgoing_ref_count);
         if (include_signature && !sym->signature.empty()) {
             e["signature"] = sym->signature;
         }
@@ -1328,8 +1328,8 @@ void IndexServer::handle_inspect_symbol(const httplib::Request& req,
         if (!sym->receiver_type.empty()) {
             e["receiver_type"] = sym->receiver_type;
         }
-        if (!sym->incoming_refs.empty()) {
-            e["incoming_refs"] = static_cast<int>(sym->incoming_refs.size());
+        if (sym->incoming_ref_count != 0) {
+            e["incoming_refs"] = static_cast<int>(sym->incoming_ref_count);
         }
         if (!sym->annotations.empty()) {
             e["annotations"] = sym->annotations;
@@ -1522,11 +1522,11 @@ void IndexServer::handle_browse_file(const httplib::Request& req,
         if (!sym->receiver_type.empty()) {
             e["receiver_type"] = sym->receiver_type;
         }
-        if (!sym->incoming_refs.empty()) {
-            e["incoming_refs"] = static_cast<int>(sym->incoming_refs.size());
+        if (sym->incoming_ref_count != 0) {
+            e["incoming_refs"] = static_cast<int>(sym->incoming_ref_count);
         }
-        if (!sym->outgoing_refs.empty()) {
-            e["outgoing_refs"] = static_cast<int>(sym->outgoing_refs.size());
+        if (sym->outgoing_ref_count != 0) {
+            e["outgoing_refs"] = static_cast<int>(sym->outgoing_ref_count);
         }
         entries.push_back(e);
     }

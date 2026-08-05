@@ -121,7 +121,9 @@ class CodebaseIntelligenceEngine {
         const CodebaseIntelligenceParams& params,
         const std::vector<FileSymbolData>& files,
         std::string_view project_root,
-        double purity_ratio) const;
+        double purity_ratio,
+        const std::function<std::vector<SymbolID>(SymbolID)>& targets_of)
+        const;
 
     /// Builds unified analysis (all tiers combined).
     CodebaseIntelligenceResponse build_unified(

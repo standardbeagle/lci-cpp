@@ -93,8 +93,8 @@ std::vector<VariableInfo> get_global_variables(const Snapshot& snap,
         info.name = std::string(sym->symbol.name);
         info.type = sym->type_info;  // trap 4: real type string.
         info.location = location_of(*sym);
-        info.is_used = !sym->incoming_refs.empty();
-        info.use_count = static_cast<int>(sym->incoming_refs.size());
+        info.is_used = sym->incoming_ref_count != 0;
+        info.use_count = static_cast<int>(sym->incoming_ref_count);
         info.scope = "global";
         info.is_mutable = sym->is_mutable;
         globals.push_back(std::move(info));
@@ -123,7 +123,7 @@ std::vector<VariableInfo> get_used_global_variables(const Snapshot& snap,
     for (const auto& g : all_globals) by_name.emplace(g.name, g);
 
     absl::flat_hash_set<std::string> seen;
-    for (const auto& ref : target->outgoing_refs) {
+    for (const auto& ref : snap.get_symbol_references(target->id, "outgoing")) {
         auto it = by_name.find(ref.referenced_name);
         if (it == by_name.end()) continue;
         if (seen.insert(it->second.name).second) used.push_back(it->second);
@@ -168,8 +168,8 @@ std::vector<VariableInfo> get_class_variables(const Snapshot& snap,
         info.name = std::string(sym->symbol.name);
         info.type = sym->type_info;  // trap 4: real type string.
         info.location = location_of(*sym);
-        info.is_used = !sym->incoming_refs.empty();
-        info.use_count = static_cast<int>(sym->incoming_refs.size());
+        info.is_used = sym->incoming_ref_count != 0;
+        info.use_count = static_cast<int>(sym->incoming_ref_count);
         info.scope = "class";
         info.is_mutable = sym->is_mutable;
         class_vars.push_back(std::move(info));

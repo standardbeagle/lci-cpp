@@ -511,6 +511,17 @@ std::vector<SymbolID> ReferenceTracker::get_callee_symbols(
     return result;
 }
 
+std::vector<SymbolID> ReferenceTracker::get_outgoing_target_symbols(
+    SymbolID symbol_id) const {
+    auto refs = load_snapshot()->get_symbol_references(symbol_id, "outgoing");
+    std::vector<SymbolID> result;
+    result.reserve(refs.size());
+    for (const auto& ref : refs) {
+        if (ref.target_symbol != 0) result.push_back(ref.target_symbol);
+    }
+    return result;
+}
+
 std::vector<SymbolID> ReferenceTracker::get_caller_symbols(
     SymbolID symbol_id) const {
     auto refs = load_snapshot()->get_symbol_references(symbol_id, "incoming");
@@ -924,69 +935,11 @@ void ReferenceTracker::update_reference_stats_for_symbol(Snapshot& s,
         outgoing_ids = it->second;
     }
 
-    // Populate incoming/outgoing ref vectors on the symbol.
-    sym->incoming_refs = s.get_references_by_id(incoming_ids);
-    sym->outgoing_refs = s.get_references_by_id(outgoing_ids);
+    // Counts only — the Reference objects stay in s.references; readers
+    // that need them fetch via get_symbol_references (ID-based, on demand).
+    sym->incoming_ref_count = static_cast<int>(incoming_ids.size());
+    sym->outgoing_ref_count = static_cast<int>(outgoing_ids.size());
 
-    // Build stats on the total RefCount.
-    absl::flat_hash_map<FileID, bool> in_files;
-    absl::flat_hash_map<FileID, bool> out_files;
-    RefStrengthStats in_str{};
-    RefStrengthStats out_str{};
-    int usage_incoming = 0;
-
-    for (uint64_t rid : incoming_ids) {
-        if (auto it = s.references.find(rid); it != s.references.end()) {
-            const auto& r = it->second;
-            in_files[r.file_id] = true;
-            if (r.type != ReferenceType::Import) usage_incoming++;
-            switch (r.strength) {
-                case RefStrength::Tight: in_str.tight++; break;
-                case RefStrength::Loose: in_str.loose++; break;
-                case RefStrength::Transitive: in_str.transitive++; break;
-            }
-        }
-    }
-    for (uint64_t rid : outgoing_ids) {
-        if (auto it = s.references.find(rid); it != s.references.end()) {
-            const auto& r = it->second;
-            out_files[r.file_id] = true;
-            switch (r.strength) {
-                case RefStrength::Tight: out_str.tight++; break;
-                case RefStrength::Loose: out_str.loose++; break;
-                case RefStrength::Transitive: out_str.transitive++; break;
-            }
-        }
-    }
-
-    std::vector<FileID> in_file_list;
-    in_file_list.reserve(in_files.size());
-    for (const auto& [fid, _] : in_files) in_file_list.push_back(fid);
-
-    std::vector<FileID> out_file_list;
-    out_file_list.reserve(out_files.size());
-    for (const auto& [fid, _] : out_files) out_file_list.push_back(fid);
-
-    RefCount total{};
-    total.incoming_count = usage_incoming;
-    total.outgoing_count = static_cast<int>(outgoing_ids.size());
-    total.incoming_files = std::move(in_file_list);
-    total.outgoing_files = std::move(out_file_list);
-    total.strength.tight = in_str.tight + out_str.tight;
-    total.strength.loose = in_str.loose + out_str.loose;
-    total.strength.transitive = in_str.transitive + out_str.transitive;
-
-    // All scope levels get the same aggregate for now.
-    RefStats rs{};
-    rs.folder_level = total;
-    rs.file_level = total;
-    rs.class_level = total;
-    rs.function_level = total;
-    rs.variable_level = total;
-    rs.total = total;
-
-    // RefStats is not stored on EnhancedSymbol in C++ currently;
-    // the incoming_refs/outgoing_refs vectors serve the same purpose.
 }
 
 std::vector<SymbolID> ReferenceTracker::get_symbols_by_ref_type(

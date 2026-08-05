@@ -102,7 +102,7 @@ CodebaseIntelligenceParams CodebaseIntelligenceEngine::apply_defaults(
 
 double CodebaseIntelligenceEngine::calculate_importance_score(
     const EnhancedSymbol& sym) {
-    double score = static_cast<double>(sym.incoming_refs.size());
+    double score = static_cast<double>(sym.incoming_ref_count);
 
     if (sym.is_exported) score *= 1.5;
 
@@ -300,7 +300,8 @@ CodebaseIntelligenceResponse CodebaseIntelligenceEngine::build_detailed(
 CodebaseIntelligenceResponse CodebaseIntelligenceEngine::build_statistics(
     const CodebaseIntelligenceParams& /*params*/,
     const std::vector<FileSymbolData>& files, std::string_view project_root,
-    double purity_ratio) const {
+    double purity_ratio,
+    const std::function<std::vector<SymbolID>(SymbolID)>& targets_of) const {
     CodebaseIntelligenceResponse response;
 
     HealthAnalyzer ha;
@@ -317,7 +318,7 @@ CodebaseIntelligenceResponse CodebaseIntelligenceEngine::build_statistics(
     health->analysis_metadata.files_analyzed = static_cast<int>(files.size());
     response.health_dashboard = health.release();
 
-    auto coupling = CouplingAnalyzer().analyze(files, project_root);
+    auto coupling = CouplingAnalyzer().analyze(files, project_root, targets_of);
 
     StatisticsReport report;
     report.complexity = complexity;
@@ -467,7 +468,7 @@ CodebaseIntelligenceEngine::extract_critical_functions(
         fs.module = c.path;
         fs.signature = c.sym->signature;
         fs.importance_score = c.score;
-        fs.referenced_by = static_cast<int>(c.sym->incoming_refs.size());
+        fs.referenced_by = static_cast<int>(c.sym->incoming_ref_count);
         fs.is_exported = c.sym->is_exported;
         fs.location = c.path + ":" + std::to_string(c.sym->symbol.line);
         result.push_back(std::move(fs));

@@ -302,7 +302,7 @@ double HealthAnalyzer::calculate_tech_debt_ratio_from_files(
         for (const auto* sym : file.symbols) {
             total++;
             if (sym->complexity > ci_thresholds::kComplexityModerate ||
-                static_cast<int>(sym->incoming_refs.size()) >
+                static_cast<int>(sym->incoming_ref_count) >
                     ci_thresholds::kHighReferenceCount) {
                 debt++;
             }
@@ -330,7 +330,7 @@ std::vector<std::string> HealthAnalyzer::identify_debt_components(
         int count = 0;
         for (const auto* sym : file.symbols) {
             if (sym->complexity > ci_thresholds::kComplexityModerate ||
-                static_cast<int>(sym->incoming_refs.size()) >
+                static_cast<int>(sym->incoming_ref_count) >
                     ci_thresholds::kHighReferenceCount) {
                 count++;
             }
@@ -443,7 +443,7 @@ std::vector<CodeSmellEntry> HealthAnalyzer::calculate_detailed_code_smells(
             // opposite of shotgun surgery, which is one-change-many-edits.
             // The C++ port uses the accurate name; parity descriptors
             // normalize the two labels.)
-            int impact = static_cast<int>(sym->incoming_refs.size());
+            int impact = static_cast<int>(sym->incoming_ref_count);
             if (impact > ci_thresholds::kShotgunSurgery) {
                 std::string sev =
                     (impact > ci_thresholds::kShotgunSurgeryHighSev)
@@ -518,11 +518,11 @@ HealthAnalyzer::calculate_symbol_risk_and_tags(const EnhancedSymbol& sym) {
         tags.push_back("LARGE_FUNCTION");
         risk += 2;
     }
-    if (static_cast<int>(sym.incoming_refs.size()) > 15) {
+    if (static_cast<int>(sym.incoming_ref_count) > 15) {
         tags.push_back("HIGH_COUPLING");
         risk += 2;
     }
-    if (static_cast<int>(sym.outgoing_refs.size()) > 15) {
+    if (static_cast<int>(sym.outgoing_ref_count) > 15) {
         tags.push_back("MANY_DEPENDENCIES");
         risk += 2;
     }

@@ -454,8 +454,8 @@ TEST(HealthAnalyzer, SymbolRiskTags) {
     sym.symbol.end_line = 200;
     sym.complexity = 20;
     // Add incoming refs
-    sym.incoming_refs.resize(20);
-    sym.outgoing_refs.resize(20);
+    sym.incoming_ref_count = static_cast<int>(20);
+    sym.outgoing_ref_count = static_cast<int>(20);
 
     auto [tags, risk] = HealthAnalyzer::calculate_symbol_risk_and_tags(sym);
     EXPECT_EQ(risk, 9);  // 3 + 2 + 2 + 2
@@ -470,8 +470,8 @@ TEST(HealthAnalyzer, SymbolRiskMaxIs9) {
     sym.symbol.line = 1;
     sym.symbol.end_line = 300;
     sym.complexity = 30;
-    sym.incoming_refs.resize(30);
-    sym.outgoing_refs.resize(30);
+    sym.incoming_ref_count = static_cast<int>(30);
+    sym.outgoing_ref_count = static_cast<int>(30);
 
     auto [tags, risk] = HealthAnalyzer::calculate_symbol_risk_and_tags(sym);
     EXPECT_EQ(risk, 9);
@@ -884,7 +884,7 @@ TEST(CIEngine, OverviewCriticalFunctions) {
     exported_func.symbol.end_line = 30;
     exported_func.complexity = 10;
     exported_func.is_exported = true;
-    exported_func.incoming_refs.resize(5);
+    exported_func.incoming_ref_count = static_cast<int>(5);
 
     EnhancedSymbol private_func;
     private_func.symbol.name = "helper";
@@ -1241,13 +1241,13 @@ TEST(CIEngine, ImportanceScoreExportedBoost) {
     exported_sym.symbol.name = "Process";
     exported_sym.symbol.type = SymbolType::Function;
     exported_sym.is_exported = true;
-    exported_sym.incoming_refs.resize(10);
+    exported_sym.incoming_ref_count = static_cast<int>(10);
 
     EnhancedSymbol private_sym;
     private_sym.symbol.name = "process";
     private_sym.symbol.type = SymbolType::Function;
     private_sym.is_exported = false;
-    private_sym.incoming_refs.resize(10);
+    private_sym.incoming_ref_count = static_cast<int>(10);
 
     double exported_score =
         CodebaseIntelligenceEngine::calculate_importance_score(exported_sym);
@@ -1260,12 +1260,12 @@ TEST(CIEngine, ImportanceScoreMainBoost) {
     EnhancedSymbol main_sym;
     main_sym.symbol.name = "main";
     main_sym.symbol.type = SymbolType::Function;
-    main_sym.incoming_refs.resize(1);
+    main_sym.incoming_ref_count = static_cast<int>(1);
 
     EnhancedSymbol other_sym;
     other_sym.symbol.name = "helper";
     other_sym.symbol.type = SymbolType::Function;
-    other_sym.incoming_refs.resize(1);
+    other_sym.incoming_ref_count = static_cast<int>(1);
 
     double main_score =
         CodebaseIntelligenceEngine::calculate_importance_score(main_sym);
@@ -1278,12 +1278,12 @@ TEST(CIEngine, ImportanceScoreHandlerBoost) {
     EnhancedSymbol handler_sym;
     handler_sym.symbol.name = "handleRequest";
     handler_sym.symbol.type = SymbolType::Function;
-    handler_sym.incoming_refs.resize(5);
+    handler_sym.incoming_ref_count = static_cast<int>(5);
 
     EnhancedSymbol plain_sym;
     plain_sym.symbol.name = "compute";
     plain_sym.symbol.type = SymbolType::Function;
-    plain_sym.incoming_refs.resize(5);
+    plain_sym.incoming_ref_count = static_cast<int>(5);
 
     double handler_score =
         CodebaseIntelligenceEngine::calculate_importance_score(handler_sym);
@@ -1296,13 +1296,13 @@ TEST(CIEngine, ImportanceScoreComplexityBoost) {
     EnhancedSymbol complex_sym;
     complex_sym.symbol.name = "work";
     complex_sym.symbol.type = SymbolType::Function;
-    complex_sym.incoming_refs.resize(5);
+    complex_sym.incoming_ref_count = static_cast<int>(5);
     complex_sym.complexity = 15;
 
     EnhancedSymbol simple_sym;
     simple_sym.symbol.name = "work2";
     simple_sym.symbol.type = SymbolType::Function;
-    simple_sym.incoming_refs.resize(5);
+    simple_sym.incoming_ref_count = static_cast<int>(5);
     simple_sym.complexity = 0;
 
     double complex_score =

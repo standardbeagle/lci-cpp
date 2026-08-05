@@ -246,7 +246,7 @@ ToolResult handle_debug_info(const nlohmann::json& params,
             auto symbols = rt_snap->get_file_enhanced_symbols(fid);
             for (const auto& sym : symbols) {
                 if (!sym) continue;
-                int inc = static_cast<int>(sym->incoming_refs.size());
+                int inc = static_cast<int>(sym->incoming_ref_count);
                 if (inc > 0) {
                     all_refs.push_back({sym->symbol.name,
                                         std::string(to_string(sym->symbol.type)),
@@ -332,9 +332,9 @@ ToolResult handle_debug_info(const nlohmann::json& params,
                         s["line"] = sym->symbol.line;
                         s["is_exported"] = sym->is_exported;
                         s["incoming_refs"] =
-                            static_cast<int>(sym->incoming_refs.size());
+                            static_cast<int>(sym->incoming_ref_count);
                         s["outgoing_refs"] =
-                            static_cast<int>(sym->outgoing_refs.size());
+                            static_cast<int>(sym->outgoing_ref_count);
                         sym_list.push_back(std::move(s));
                     }
                     fi["symbols"] = std::move(sym_list);

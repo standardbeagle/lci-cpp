@@ -1539,7 +1539,10 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                                   symbol_count);
         d.modules = ModuleAnalyzer().analyze(files_data, project_root);
         d.purity = tally_purity(analyzer);
-        d.coupling = CouplingAnalyzer().analyze(files_data, project_root);
+        d.coupling = CouplingAnalyzer().analyze(
+            files_data, project_root, [&indexer](SymbolID id) {
+                return indexer.ref_tracker().get_outgoing_target_symbols(id);
+            });
         // Replace ModuleAnalyzer's placeholder per-module coupling (a 0.30
         // constant inherited from Go) with the real per-package coupling
         // from CouplingAnalyzer. Both key modules by getPackageName, so the
@@ -1582,8 +1585,11 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
         CodebaseIntelligenceParams sp;
         sp.mode = "statistics";
         double purity_ratio = tally_purity(analyzer).purity_ratio;
-        auto resp = engine.build_statistics(sp, files_data, project_root,
-                                            purity_ratio);
+        auto resp = engine.build_statistics(
+            sp, files_data, project_root, purity_ratio,
+            [&indexer](SymbolID id) {
+                return indexer.ref_tracker().get_outgoing_target_symbols(id);
+            });
         const auto& sr = *resp.statistics_report;
         emit_lcf_header(out, "statistics", 1,
                         lcf_token_count(0, 0, false, 0, true));

@@ -93,7 +93,8 @@ TEST(CouplingAnalyzer, PackageNameEmptyRoot) {
 
 TEST(CouplingAnalyzer, AnalyzeEmpty) {
     CouplingAnalyzer ca;
-    auto result = ca.analyze({}, "/proj");
+    auto result = ca.analyze({}, "/proj",
+                             [](SymbolID) { return std::vector<SymbolID>{}; });
     EXPECT_DOUBLE_EQ(result.coupling.average_coupling, 0.0);
     EXPECT_DOUBLE_EQ(result.cohesion.average_cohesion, 0.0);
 }
@@ -107,15 +108,14 @@ TEST(CouplingAnalyzer, AnalyzeTwoPackages) {
     EnhancedSymbol s2 = make_sym("FuncB", SymbolType::Function, 2);
 
     // s1 references s2 (cross-package)
-    Reference ref;
-    ref.target_symbol = 2;
-    s1.outgoing_refs.push_back(ref);
-
     auto f1 = make_file("/proj/pkg_a/a.go", {&s1});
     auto f2 = make_file("/proj/pkg_b/b.go", {&s2});
 
     CouplingAnalyzer ca;
-    auto result = ca.analyze({f1, f2}, "/proj");
+    auto result = ca.analyze({f1, f2}, "/proj", [&](SymbolID id) {
+        return id == s1.id ? std::vector<SymbolID>{2}
+                           : std::vector<SymbolID>{};
+    });
 
     EXPECT_EQ(result.coupling.efferent_coupling["pkg_a"], 1);
     EXPECT_EQ(result.coupling.afferent_coupling["pkg_b"], 1);
@@ -131,14 +131,13 @@ TEST(CouplingAnalyzer, SelfRefsAreCohesive) {
     EnhancedSymbol s2 = make_sym("FuncB", SymbolType::Function, 2);
 
     // Both in same package, s1 references s2
-    Reference ref;
-    ref.target_symbol = 2;
-    s1.outgoing_refs.push_back(ref);
-
     auto f = make_file("/proj/pkg/a.go", {&s1, &s2});
 
     CouplingAnalyzer ca;
-    auto result = ca.analyze({f}, "/proj");
+    auto result = ca.analyze({f}, "/proj", [&](SymbolID id) {
+        return id == s1.id ? std::vector<SymbolID>{2}
+                           : std::vector<SymbolID>{};
+    });
 
     // Internal reference should boost cohesion
     auto it = result.cohesion.relational_cohesion.find("pkg");
@@ -534,7 +533,7 @@ namespace {
 // A symbol with `fan_in` synthetic incoming references.
 EnhancedSymbol make_ref_sym(std::string name, int fan_in, SymbolID id) {
     EnhancedSymbol es = make_sym(std::move(name), SymbolType::Function, id);
-    es.incoming_refs.resize(static_cast<size_t>(fan_in));
+    es.incoming_ref_count = fan_in;
     return es;
 }
 }  // namespace

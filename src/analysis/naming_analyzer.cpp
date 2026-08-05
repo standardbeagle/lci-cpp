@@ -135,7 +135,7 @@ NamingReport NamingAnalyzer::analyze(const std::vector<FileSymbolData>& files,
     // Pass 2: classify outliers.
     for (const auto& c : cands) {
         const std::string& verb = c.tokens.front();
-        int fan_in = static_cast<int>(c.sym->incoming_refs.size());
+        int fan_in = static_cast<int>(c.sym->incoming_ref_count);
         if (fan_in < 2) continue;  // only important, search-worthy symbols
 
         bool verb_known = !synonyms.synonyms_of(verb).empty() ||

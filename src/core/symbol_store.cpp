@@ -132,7 +132,7 @@ std::vector<SymbolID> SymbolStore::get_top_symbols(int limit) const {
     std::vector<Ranked> ranked;
     ranked.reserve(data_.size());
     for (size_t i = 0; i < data_.size(); ++i) {
-        int refs = static_cast<int>(data_[i].incoming_refs.size());
+        int refs = static_cast<int>(data_[i].incoming_ref_count);
         ranked.push_back({reverse_index_[i], refs});
     }
 

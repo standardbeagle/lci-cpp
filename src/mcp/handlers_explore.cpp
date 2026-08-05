@@ -280,8 +280,8 @@ nlohmann::json build_explore_symbol(const EnhancedSymbol& sym,
     }
 
     if (includes_has(includes, "refs")) {
-        j["incoming_refs"] = static_cast<int>(sym.incoming_refs.size());
-        j["outgoing_refs"] = static_cast<int>(sym.outgoing_refs.size());
+        j["incoming_refs"] = static_cast<int>(sym.incoming_ref_count);
+        j["outgoing_refs"] = static_cast<int>(sym.outgoing_ref_count);
     }
 
     if (includes_has(includes, "callers")) {
@@ -381,8 +381,8 @@ nlohmann::json build_inspect_result(const EnhancedSymbol& sym,
     }
 
     if (includes_has(includes, "refs")) {
-        j["incoming_refs"] = static_cast<int>(sym.incoming_refs.size());
-        j["outgoing_refs"] = static_cast<int>(sym.outgoing_refs.size());
+        j["incoming_refs"] = static_cast<int>(sym.incoming_ref_count);
+        j["outgoing_refs"] = static_cast<int>(sym.outgoing_ref_count);
     }
 
     if (includes_has(includes, "annotations") && !sym.annotations.empty()) {
@@ -486,8 +486,8 @@ void sort_symbols(std::vector<SymbolWithFile>& symbols,
     } else if (low == "refs") {
         std::sort(symbols.begin(), symbols.end(),
                   [&](const SymbolWithFile& a, const SymbolWithFile& b) {
-                      auto ar = a.sym->incoming_refs.size();
-                      auto br = b.sym->incoming_refs.size();
+                      auto ar = a.sym->incoming_ref_count;
+                      auto br = b.sym->incoming_ref_count;
                       if (ar != br) return ar > br;
                       return tiebreak(a, b);
                   });
@@ -541,8 +541,8 @@ void sort_enhanced_symbols(
     } else if (low == "refs") {
         std::sort(symbols.begin(), symbols.end(),
                   [](const EnhancedSymbol* a, const EnhancedSymbol* b) {
-                      return a->incoming_refs.size() >
-                             b->incoming_refs.size();
+                      return a->incoming_ref_count >
+                             b->incoming_ref_count;
                   });
     } else {
         // Default: sort by line

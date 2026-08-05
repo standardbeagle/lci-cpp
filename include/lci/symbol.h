@@ -33,8 +33,15 @@ struct RefStats;
 struct EnhancedSymbol {
     Symbol symbol;
     SymbolID id{};
-    std::vector<Reference> incoming_refs;
-    std::vector<Reference> outgoing_refs;
+    // Reference COUNTS only. The references themselves live once in the
+    // ReferenceTracker snapshot (references map + incoming/outgoing ID
+    // lists); callers that need the actual Reference objects fetch them via
+    // Snapshot::get_symbol_references(id, direction). The previous design
+    // deep-copied every reference into both endpoint symbols — 2-3 copies
+    // of a 168-byte struct with heap strings, the dominant index-memory
+    // term on large corpora (2026-08-04 census).
+    int incoming_ref_count{};
+    int outgoing_ref_count{};
     std::vector<ScopeInfo> scope_chain;
 
     // Enhanced metadata

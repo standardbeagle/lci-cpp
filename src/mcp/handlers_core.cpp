@@ -1167,7 +1167,7 @@ ToolResult handle_search(const nlohmann::json& params,
                 // Incoming-reference count bridges straight to get_context:
                 // "which function is the chokepoint" is answerable from the
                 // search response itself.
-                auto callers = static_cast<int>(sym->incoming_refs.size());
+                auto callers = static_cast<int>(sym->incoming_ref_count);
                 if (callers > 0) h["callers"] = callers;
 
                 if (include_signature && !sym->signature.empty()) {
@@ -1190,7 +1190,7 @@ ToolResult handle_search(const nlohmann::json& params,
                         h["references"] = {
                             {"incoming_count", callers},
                             {"outgoing_count",
-                             static_cast<int>(sym->outgoing_refs.size())}};
+                             static_cast<int>(sym->outgoing_ref_count)}};
                     }
                     if (include_breadcrumbs && !sym->scope_chain.empty()) {
                         h["breadcrumbs"] = scope_chain_to_breadcrumbs(*sym);
@@ -1370,8 +1370,8 @@ void resolve_object_id(std::string_view id, MasterIndex& indexer,
     // Incoming-reference count, matching search's per-hit `callers` field —
     // chokepoint questions answerable without a follow-up call-hierarchy
     // request.
-    if (!sym->incoming_refs.empty()) {
-        ctx["callers"] = static_cast<int>(sym->incoming_refs.size());
+    if (sym->incoming_ref_count != 0) {
+        ctx["callers"] = static_cast<int>(sym->incoming_ref_count);
     }
     ctx["symbol_type"] = std::string(to_string(sym->symbol.type));
     ctx["symbol_name"] = std::string(sym->symbol.name);
@@ -1500,9 +1500,9 @@ ToolResult handle_get_context(const nlohmann::json& params,
             ctx["line"] = sym->symbol.line;
             ctx["object_id"] = encode_symbol_id(sym->id);
             // Caller count parity with search hits — see resolve_object_id.
-            if (!sym->incoming_refs.empty()) {
+            if (sym->incoming_ref_count != 0) {
                 ctx["callers"] =
-                    static_cast<int>(sym->incoming_refs.size());
+                    static_cast<int>(sym->incoming_ref_count);
             }
             ctx["symbol_type"] = std::string(to_string(sym->symbol.type));
             ctx["symbol_name"] = std::string(sym->symbol.name);

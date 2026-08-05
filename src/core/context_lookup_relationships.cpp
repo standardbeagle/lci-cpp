@@ -450,7 +450,7 @@ std::vector<ObjectReference> get_parent_classes(const Snapshot& snap,
     auto target = find_by_file_type(snap, oid);
     if (target == nullptr) return parents;
 
-    for (const auto& ref : target->outgoing_refs) {
+    for (const auto& ref : snap.get_symbol_references(target->id, "outgoing")) {
         if (ref.type != ReferenceType::Inheritance) continue;
 
         ObjectReference parent;
@@ -516,7 +516,7 @@ std::vector<ObjectReference> get_used_types(const Snapshot& snap,
     if (target == nullptr) return used_types;
 
     absl::flat_hash_set<std::string> seen;
-    for (const auto& ref : target->outgoing_refs) {
+    for (const auto& ref : snap.get_symbol_references(target->id, "outgoing")) {
         if (ref.type != ReferenceType::Declaration &&
             ref.type != ReferenceType::Assignment) {
             continue;
@@ -552,7 +552,7 @@ std::vector<ModuleReference> get_imported_modules(const Snapshot& snap,
     std::vector<ModuleReference> modules;
     absl::flat_hash_set<std::string> seen;
     for (const auto& sym : snap.get_file_enhanced_symbols(oid.file_id)) {
-        for (const auto& ref : sym->outgoing_refs) {
+        for (const auto& ref : snap.get_symbol_references(sym->id, "outgoing")) {
             if (ref.type != ReferenceType::Import) continue;
             if (ref.referenced_name.empty()) continue;
             if (!seen.insert(ref.referenced_name).second) continue;

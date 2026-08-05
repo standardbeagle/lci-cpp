@@ -229,11 +229,11 @@ TEST(SymbolStoreTest, GetTopSymbols) {
     SymbolStore store;
 
     auto sym1 = make_symbol(1, "popular", SymbolType::Function, 1, 1, 0, 5, 0);
-    sym1.incoming_refs.resize(10);
+    sym1.incoming_ref_count = static_cast<int>(10);
     store.set(1, sym1);
 
     auto sym2 = make_symbol(2, "medium", SymbolType::Function, 1, 6, 0, 10, 0);
-    sym2.incoming_refs.resize(5);
+    sym2.incoming_ref_count = static_cast<int>(5);
     store.set(2, sym2);
 
     auto sym3 = make_symbol(3, "unpopular", SymbolType::Function, 1, 11, 0, 20, 0);

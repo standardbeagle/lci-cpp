@@ -1496,11 +1496,11 @@ TEST_F(HandlersFixture, GetContextCallersFieldMatchesIncomingRefs) {
     auto json = nlohmann::json::parse(result.text);
     ASSERT_EQ(json["count"].get<int>(), 1);
     const auto& ctx = json["contexts"][0];
-    if (sym->incoming_refs.empty()) {
+    if (sym->incoming_ref_count == 0) {
         EXPECT_FALSE(ctx.contains("callers"));
     } else {
         EXPECT_EQ(ctx["callers"].get<int>(),
-                  static_cast<int>(sym->incoming_refs.size()));
+                  static_cast<int>(sym->incoming_ref_count));
     }
 }
 

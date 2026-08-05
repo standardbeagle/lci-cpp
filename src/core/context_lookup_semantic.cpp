@@ -253,7 +253,7 @@ std::vector<ServiceRef> get_service_dependencies(const Snapshot& snap,
     auto target = find_target(snap, oid);
     if (target == nullptr) return services;
 
-    for (const auto& ref : target->outgoing_refs) {
+    for (const auto& ref : snap.get_symbol_references(target->id, "outgoing")) {
         if (ref.type != ReferenceType::Call) continue;
         const std::string& call_name = ref.referenced_name;
         // trap 6b: hardcoded substring check, independent of any
@@ -375,7 +375,7 @@ bool processes_business_logic(const Snapshot& snap, const CodeObjectID& oid) {
     if (target->complexity > 5) return true;
 
     int call_count = 0;
-    for (const auto& ref : target->outgoing_refs) {
+    for (const auto& ref : snap.get_symbol_references(target->id, "outgoing")) {
         if (ref.type == ReferenceType::Call) ++call_count;
     }
     return call_count > 3;
@@ -485,7 +485,7 @@ bool makes_api_calls(const Snapshot& snap, const CodeObjectID& oid) {
     }
     auto target = find_target(snap, oid);
     if (target == nullptr) return false;
-    for (const auto& ref : target->outgoing_refs) {
+    for (const auto& ref : snap.get_symbol_references(target->id, "outgoing")) {
         if (ref.type != ReferenceType::Call) continue;
         std::string call_name = lower(ref.referenced_name);
         if (call_name.find("http") != std::string::npos ||
@@ -504,7 +504,7 @@ bool accesses_database(const Snapshot& snap, const CodeObjectID& oid) {
     }
     auto target = find_target(snap, oid);
     if (target == nullptr) return false;
-    for (const auto& ref : target->outgoing_refs) {
+    for (const auto& ref : snap.get_symbol_references(target->id, "outgoing")) {
         if (ref.type != ReferenceType::Call) continue;
         std::string call_name = lower(ref.referenced_name);
         if (call_name.find("sql") != std::string::npos ||

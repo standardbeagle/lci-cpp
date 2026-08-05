@@ -281,6 +281,11 @@ class ReferenceTracker {
     std::vector<std::string> get_callee_names(SymbolID symbol_id) const;
     std::vector<std::string> get_caller_names(SymbolID symbol_id) const;
     std::vector<SymbolID> get_callee_symbols(SymbolID symbol_id) const;
+
+    /// Resolved target IDs of ALL outgoing references (every type, duplicates
+    /// preserved — coupling counts one edge per reference). Feeds the
+    /// CouplingAnalyzer's targets_of callback.
+    std::vector<SymbolID> get_outgoing_target_symbols(SymbolID symbol_id) const;
     std::vector<SymbolID> get_caller_symbols(SymbolID symbol_id) const;
     FunctionTreeNode build_function_tree(SymbolID symbol_id,
                                          int max_depth) const;
