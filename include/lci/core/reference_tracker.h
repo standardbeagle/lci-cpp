@@ -339,7 +339,6 @@ class ReferenceTracker {
         absl::flat_hash_map<SymbolID, std::vector<uint64_t>> incoming_refs;
         absl::flat_hash_map<SymbolID, std::vector<uint64_t>> outgoing_refs;
         absl::flat_hash_map<FileID, std::vector<ScopeInfo>> scopes_by_file;
-        absl::flat_hash_map<SymbolID, std::vector<ScopeInfo>> symbol_scopes;
         absl::flat_hash_map<FileID, absl::flat_hash_map<int, std::vector<int>>>
             line_to_symbols_by_file;
         ReferenceStats stats{};

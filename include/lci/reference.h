@@ -69,7 +69,6 @@ struct Reference {
     int line{};
     int column{};
     ReferenceType type{};
-    std::vector<ScopeInfo> scope_context;
     RefStrength strength{};
     std::string referenced_name;
     std::string quality;

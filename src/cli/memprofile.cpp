@@ -185,6 +185,29 @@ int run_debug_memprofile(const GlobalFlags& flags,
                                        static_cast<double>(corpus_bytes)
                                  : 0.0);
 
+    // Structure census: where the resident bytes actually sit. Counts, not
+    // byte estimates — pairing them with the phase deltas above localizes
+    // the dominant per-entry costs without an allocator profiler.
+    {
+        auto snap = ref_tracker.pin();
+        size_t file_scope_entries = 0;
+        for (const auto& [fid, v] : snap->scopes_by_file) {
+            file_scope_entries += v.size();
+        }
+        size_t ref_string_bytes = 0;
+        for (const auto& [rid, r] : snap->references) {
+            ref_string_bytes += r.referenced_name.size() + r.quality.size() +
+                                r.failure_reason.size();
+        }
+        std::printf("\n== structure census ==\n");
+        std::printf("symbols:                 %d\n", snap->symbols.size());
+        std::printf("references:              %zu (sizeof %zu B each, "
+                    "%.1f MB strings)\n",
+                    snap->references.size(), sizeof(Reference),
+                    mb(static_cast<int64_t>(ref_string_bytes)));
+        std::printf("scopes_by_file entries:  %zu\n", file_scope_entries);
+    }
+
     const int top_n =
         std::min<int>(opts.top, static_cast<int>(deltas.size()));
     std::printf("\ntop %d files by rss delta:\n", top_n);

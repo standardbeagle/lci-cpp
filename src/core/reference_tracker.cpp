@@ -231,6 +231,9 @@ std::vector<EnhancedSymbol> ReferenceTracker::process_file(
 
         for (const auto& sym : symbols) {
             SymbolID id = next_symbol_id_++;
+            // scope_chain lives ONLY on the EnhancedSymbol. A parallel
+            // symbol_scopes map used to hold a second deep copy (~9 MB of
+            // strings on packages/next alone) with zero readers.
             auto scope_chain = build_symbol_scope_chain(sym, scopes);
 
             Symbol sm = sym;
@@ -241,11 +244,10 @@ std::vector<EnhancedSymbol> ReferenceTracker::process_file(
             EnhancedSymbol es;
             es.symbol = std::move(sm);
             es.id = id;
-            es.scope_chain = scope_chain;
+            es.scope_chain = std::move(scope_chain);
             es.is_exported = is_exported;
 
             s.symbols.set(id, es);
-            s.symbol_scopes[id] = std::move(scope_chain);
 
             enhanced.push_back(std::move(es));
         }
@@ -368,7 +370,6 @@ void ReferenceTracker::remove_file(FileID file_id) {
             }
 
             s.symbols.remove(sym_id);
-            s.symbol_scopes.erase(sym_id);
         }
 
         s.scopes_by_file.erase(file_id);
