@@ -151,6 +151,12 @@ int run_server(const GlobalFlags& flags, bool daemon, bool foreground) {
     IndexServer server(cfg);
     std::string socket_path = get_socket_path_for_root(cfg.project.root);
     server.set_socket_path(socket_path);
+    // Real (CLI-launched) servers participate in the per-user instance
+    // registry so the least-recently-active ones get evicted past
+    // server.max_instances. Embedded/test servers stay out unless they
+    // opt in with their own directory.
+    server.enable_instance_registry(
+        std::filesystem::temp_directory_path().string());
 
     if (!server.start()) {
         std::cerr << "Error: failed to start server\n";

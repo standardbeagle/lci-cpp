@@ -8,6 +8,7 @@
 
 #include <cctype>
 #include <chrono>
+#include <functional>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -1143,6 +1144,167 @@ TEST_F(ServerTest, GracefulShutdownWithinTimeout) {
                   .count(),
               5000);
     EXPECT_FALSE(server_->is_running());
+}
+
+// -- Lifecycle reaper tests ---------------------------------------------------
+//
+// These pin the fix for the orphaned-server leak class: `lci -r <root> grep`
+// spawns a persistent per-root server, callers deleted the root (or just
+// stopped calling), and the server lived forever. Three policies close it:
+// idle timeout, root-deletion exit, and LRU eviction past a per-user cap.
+
+bool wait_until(const std::function<bool()>& cond,
+                std::chrono::milliseconds limit) {
+    const auto deadline = std::chrono::steady_clock::now() + limit;
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (cond()) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    return cond();
+}
+
+class ReaperServer {
+  public:
+    explicit ReaperServer(int idle_timeout_sec,
+                          const std::string& registry_dir = "",
+                          int max_instances = 0) {
+        config_.project.root = tmp_.path().string();
+        config_.server.idle_timeout_sec = idle_timeout_sec;
+        config_.server.max_instances = max_instances;
+        indexer_ = std::make_unique<MasterIndex>(config_);
+        engine_ = std::make_unique<SearchEngine>(*indexer_);
+        server_ = std::make_unique<IndexServer>(config_, *indexer_,
+                                                engine_.get());
+        address_ = test::next_test_server_address();
+        server_->set_socket_path(address_);
+        if (!registry_dir.empty()) {
+            server_->enable_instance_registry(registry_dir);
+        }
+    }
+
+    ~ReaperServer() {
+        if (server_) server_->shutdown();
+        std::error_code ec;
+        std::filesystem::remove(address_, ec);
+    }
+
+    IndexServer& server() { return *server_; }
+    const std::string& address() const { return address_; }
+    const std::filesystem::path& root() const { return tmp_.path(); }
+
+    nlohmann::json post(const std::string& path) {
+        auto cli = test::make_test_http_client(address_);
+        auto res = cli.Post(path, "{}", "application/json");
+        if (!res) return {{"error", "connection failed"}};
+        return nlohmann::json::parse(res->body);
+    }
+
+  private:
+    TempDir tmp_;
+    Config config_;
+    std::unique_ptr<MasterIndex> indexer_;
+    std::unique_ptr<SearchEngine> engine_;
+    std::unique_ptr<IndexServer> server_;
+    std::string address_;
+};
+
+TEST(ServerReaperTest, IdleTimeoutStopsUnusedServer) {
+    ReaperServer s(/*idle_timeout_sec=*/1);
+    ASSERT_TRUE(s.server().start());
+    EXPECT_TRUE(wait_until([&] { return !s.server().is_running(); },
+                           std::chrono::milliseconds(5000)))
+        << "server must self-stop after 1s without requests";
+}
+
+TEST(ServerReaperTest, PingDoesNotDeferIdleExit) {
+    // /ping is a liveness probe (client discovery, eviction scans); it must
+    // not count as activity or probing would keep every idle server alive.
+    ReaperServer s(/*idle_timeout_sec=*/1);
+    ASSERT_TRUE(s.server().start());
+    EXPECT_TRUE(wait_until(
+        [&] {
+            s.post("/ping");
+            return !s.server().is_running();
+        },
+        std::chrono::milliseconds(5000)))
+        << "pings alone must not keep the server alive";
+}
+
+TEST(ServerReaperTest, RequestsDeferIdleExit) {
+    ReaperServer s(/*idle_timeout_sec=*/1);
+    ASSERT_TRUE(s.server().start());
+    // Keep touching /status (a real request) well past the idle timeout.
+    for (int i = 0; i < 6; ++i) {
+        s.post("/status");
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    }
+    EXPECT_TRUE(s.server().is_running())
+        << "active server must not idle-exit";
+    // Stop the traffic: now it must go.
+    EXPECT_TRUE(wait_until([&] { return !s.server().is_running(); },
+                           std::chrono::milliseconds(5000)));
+}
+
+TEST(ServerReaperTest, RootDeletionStopsServer) {
+    ReaperServer s(/*idle_timeout_sec=*/0);  // isolate the root-gone policy
+    ASSERT_TRUE(s.server().start());
+    std::error_code ec;
+    std::filesystem::remove_all(s.root(), ec);
+    EXPECT_TRUE(wait_until([&] { return !s.server().is_running(); },
+                           std::chrono::milliseconds(5000)))
+        << "server must self-stop once its project root is deleted";
+}
+
+TEST(ServerReaperTest, RegistryEntryPublishedAndRemoved) {
+    TempDir registry;
+    ReaperServer s(/*idle_timeout_sec=*/0, registry.path().string(),
+                   /*max_instances=*/8);
+    ASSERT_TRUE(s.server().start());
+    auto count_entries = [&] {
+        int n = 0;
+        for (const auto& e :
+             std::filesystem::directory_iterator(registry.path())) {
+            if (e.path().extension() == ".json") ++n;
+        }
+        return n;
+    };
+    EXPECT_EQ(count_entries(), 1);
+    s.server().shutdown();
+    EXPECT_EQ(count_entries(), 0);
+}
+
+TEST(ServerReaperTest, NewServerEvictsLeastRecentlyActivePastCap) {
+    TempDir registry;
+    const std::string reg = registry.path().string();
+    ReaperServer a(/*idle_timeout_sec=*/0, reg, /*max_instances=*/2);
+    ASSERT_TRUE(a.server().start());
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    ReaperServer b(/*idle_timeout_sec=*/0, reg, /*max_instances=*/2);
+    ASSERT_TRUE(b.server().start());
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+    // Third server over a cap of 2: the least-recently-active peer (a)
+    // must be asked to shut down; b and c stay.
+    ReaperServer c(/*idle_timeout_sec=*/0, reg, /*max_instances=*/2);
+    ASSERT_TRUE(c.server().start());
+
+    EXPECT_TRUE(wait_until([&] { return !a.server().is_running(); },
+                           std::chrono::milliseconds(5000)))
+        << "oldest server must be evicted past the cap";
+    EXPECT_TRUE(b.server().is_running());
+    EXPECT_TRUE(c.server().is_running());
+}
+
+TEST(ServerReaperTest, ShutdownEndpointStopsServer) {
+    // Pins the fix that /shutdown clears running_: before, a remote
+    // /shutdown left the CLI serve loop (which polls is_running()) alive
+    // forever — the orphan-leak mechanism.
+    ReaperServer s(/*idle_timeout_sec=*/0);
+    ASSERT_TRUE(s.server().start());
+    auto j = s.post("/shutdown");
+    EXPECT_TRUE(j["success"].get<bool>());
+    EXPECT_TRUE(wait_until([&] { return !s.server().is_running(); },
+                           std::chrono::milliseconds(3000)));
 }
 
 }  // namespace

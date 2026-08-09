@@ -287,6 +287,14 @@ class IndexServer {
     /// Sets a build ID override (for testing).
     void set_build_id_override(const std::string& id);
 
+    /// Opts this server into the cross-process instance registry rooted at
+    /// `dir`: on start it publishes a registry file (mtime = last activity)
+    /// and evicts least-recently-active peer servers beyond
+    /// config.server.max_instances. Off by default so embedded/test servers
+    /// never touch — or evict — the user's real servers in the system temp
+    /// dir; the CLI server path enables it with the system temp dir.
+    void enable_instance_registry(const std::string& dir);
+
     /// Starts listening on the Unix socket. Returns false on failure.
     bool start();
 
@@ -363,6 +371,30 @@ class IndexServer {
     std::thread shutdown_trigger_;
 
     std::thread listen_thread_;
+
+    // -- Lifecycle reaper -----------------------------------------------------
+    // One background thread per server enforcing three policies:
+    //   1. idle exit: no non-/ping request for server.idle_timeout_sec;
+    //   2. root-gone exit: the project root existed at start() and has since
+    //      been deleted (the leak class: index a temp dir, delete it, server
+    //      lives forever);
+    //   3. instance eviction (registry enabled only): on startup, dead peer
+    //      registry entries are reaped and least-recently-active live peers
+    //      beyond server.max_instances are asked to /shutdown.
+    // The reaper never calls shutdown_locked() (it is joined there); it exits
+    // the process's serve loop by clearing running_ and signalling
+    // shutdown_cv_, and the owner completes teardown via shutdown().
+    std::thread reaper_thread_;
+    std::atomic<int64_t> last_activity_ns_{0};
+    std::atomic<int64_t> last_registry_touch_ns_{0};
+    std::string registry_dir_;   // empty = registry/eviction disabled
+    std::string registry_path_;  // this server's registry file, once published
+
+    void reaper_loop(bool root_existed_at_start);
+    void touch_activity();
+    void publish_registry_entry();
+    void evict_excess_peers();
+    void request_self_stop(const char* reason);
 
     // Background indexing thread. Owns the in-flight indexing run
     // (initial start-up index or any /reindex request). Tracked by the

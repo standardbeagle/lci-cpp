@@ -19,6 +19,7 @@
 #include <lci/language_map.h>
 #include <lci/search/search_engine.h>
 #include <lci/search/search_options.h>
+#include <lci/server/client.h>
 #include <lci/server/request_decode.h>
 #include <lci/version.h>
 
@@ -303,6 +304,10 @@ void IndexServer::set_build_id_override(const std::string& id) {
     build_id_override_ = id;
 }
 
+void IndexServer::enable_instance_registry(const std::string& dir) {
+    registry_dir_ = dir;
+}
+
 bool IndexServer::is_running() const {
     return running_.load(std::memory_order_acquire);
 }
@@ -437,6 +442,23 @@ bool IndexServer::start() {
         shutdown_locked();
         return false;
     }
+
+    // Lifecycle reaper: idle-exit, root-deletion exit, and (registry
+    // enabled) startup eviction of least-recently-active peers. Root
+    // deletion is only enforced for a root that existed when we started,
+    // so a server deliberately pointed at a not-yet-created path doesn't
+    // kill itself.
+    last_activity_ns_.store(
+        std::chrono::steady_clock::now().time_since_epoch().count(),
+        std::memory_order_release);
+    publish_registry_entry();
+    std::error_code root_ec;
+    const bool root_existed =
+        !config_.project.root.empty() &&
+        std::filesystem::exists(config_.project.root, root_ec);
+    reaper_thread_ = std::thread(
+        [this, root_existed] { reaper_loop(root_existed); });
+
     return true;
 }
 
@@ -465,6 +487,13 @@ bool IndexServer::shutdown_locked() {
         shutdown_trigger_.join();
     }
 
+    // Wake the reaper (its wait predicate observes running_ == false) and
+    // join it before teardown touches members it reads.
+    if (reaper_thread_.joinable()) {
+        shutdown_cv_.notify_all();
+        reaper_thread_.join();
+    }
+
     // Cooperatively cancel any in-flight indexing and join its thread
     // before continuing teardown. Without this, a long-running indexing
     // run could outlive the server (use-after-free on indexer_,
@@ -476,6 +505,12 @@ bool IndexServer::shutdown_locked() {
     std::error_code ec;
     std::filesystem::remove(socket_path(), ec);
 #endif
+
+    if (!registry_path_.empty()) {
+        std::error_code reg_ec;
+        std::filesystem::remove(registry_path_, reg_ec);
+        registry_path_.clear();
+    }
 
     // Signal waiters
     {
@@ -540,9 +575,217 @@ void IndexServer::swap_indexing_thread(std::thread new_thread) {
     indexing_thread_ = std::move(new_thread);
 }
 
+// -- Lifecycle reaper ---------------------------------------------------------
+
+namespace {
+
+constexpr auto kReaperTick = std::chrono::milliseconds(500);
+// Registry-file mtime is the cross-process LRU key for eviction; refreshing
+// it on every request would be an fs write per request, so throttle.
+constexpr int64_t kRegistryTouchIntervalNs = 60'000'000'000;  // 60s
+
+int64_t steady_now_ns() {
+    return std::chrono::steady_clock::now().time_since_epoch().count();
+}
+
+uint32_t current_process_id() {
+#ifdef _WIN32
+    return static_cast<uint32_t>(::GetCurrentProcessId());
+#else
+    return static_cast<uint32_t>(::getpid());
+#endif
+}
+
+}  // namespace
+
+void IndexServer::touch_activity() {
+    const int64_t now_ns = steady_now_ns();
+    last_activity_ns_.store(now_ns, std::memory_order_release);
+
+    if (registry_path_.empty()) {
+        return;
+    }
+    int64_t last = last_registry_touch_ns_.load(std::memory_order_acquire);
+    if (now_ns - last < kRegistryTouchIntervalNs) {
+        return;
+    }
+    // CAS so concurrent handlers don't all hit the filesystem.
+    if (last_registry_touch_ns_.compare_exchange_strong(
+            last, now_ns, std::memory_order_acq_rel)) {
+        std::error_code ec;
+        std::filesystem::last_write_time(
+            registry_path_, std::filesystem::file_time_type::clock::now(), ec);
+    }
+}
+
+void IndexServer::publish_registry_entry() {
+    if (registry_dir_.empty()) {
+        return;
+    }
+    const std::string address = socket_path();
+    char name[64];
+    std::snprintf(name, sizeof(name), "lci-srv-%u-%08x.json",
+                  current_user_id(), hash_project_root(address));
+    const auto path = std::filesystem::path(registry_dir_) / name;
+
+    nlohmann::json entry{{"pid", current_process_id()},
+                         {"address", address},
+                         {"root", config_.project.root}};
+    // Write-then-rename so peers scanning the registry never read a torn
+    // entry.
+    const auto tmp = path.string() + ".tmp";
+    {
+        std::ofstream out(tmp, std::ios::trunc);
+        if (!out) {
+            std::fprintf(stderr,
+                         "Warning: cannot write server registry entry %s\n",
+                         tmp.c_str());
+            return;
+        }
+        out << entry.dump();
+    }
+    std::error_code ec;
+    std::filesystem::rename(tmp, path, ec);
+    if (ec) {
+        std::filesystem::remove(tmp, ec);
+        return;
+    }
+    registry_path_ = path.string();
+    last_registry_touch_ns_.store(steady_now_ns(), std::memory_order_release);
+}
+
+void IndexServer::evict_excess_peers() {
+    const int max_instances = config_.server.max_instances;
+    if (registry_dir_.empty() || max_instances <= 0) {
+        return;
+    }
+
+    char prefix_buf[32];
+    std::snprintf(prefix_buf, sizeof(prefix_buf), "lci-srv-%u-",
+                  current_user_id());
+    const std::string prefix = prefix_buf;
+
+    struct Peer {
+        std::filesystem::file_time_type last_activity;
+        std::string address;
+    };
+    std::vector<Peer> live;
+
+    std::error_code ec;
+    for (const auto& dirent :
+         std::filesystem::directory_iterator(registry_dir_, ec)) {
+        const std::string fname = dirent.path().filename().string();
+        if (fname.rfind(prefix, 0) != 0 || dirent.path() == registry_path_ ||
+            fname.size() < 6 || fname.substr(fname.size() - 5) != ".json") {
+            continue;
+        }
+        std::string address;
+        try {
+            std::ifstream in(dirent.path());
+            address = nlohmann::json::parse(in).value("address", "");
+        } catch (const nlohmann::json::exception&) {
+            // Torn/garbage entry: unreadable means unpingable, drop it.
+        }
+        if (address.empty() || !Client(address).is_server_running()) {
+            // Dead peer (crashed or reaped): its entry is registry litter.
+            std::error_code rm_ec;
+            std::filesystem::remove(dirent.path(), rm_ec);
+            continue;
+        }
+        std::error_code mt_ec;
+        auto mtime = std::filesystem::last_write_time(dirent.path(), mt_ec);
+        if (mt_ec) {
+            continue;
+        }
+        live.push_back({mtime, std::move(address)});
+    }
+
+    // This server counts against the cap too (+1).
+    const int excess =
+        static_cast<int>(live.size()) + 1 - max_instances;
+    if (excess <= 0) {
+        return;
+    }
+    std::sort(live.begin(), live.end(),
+              [](const Peer& a, const Peer& b) {
+                  return a.last_activity < b.last_activity;
+              });
+    for (int i = 0; i < excess && i < static_cast<int>(live.size()); ++i) {
+        std::string err;
+        Client(live[i].address).shutdown(false, err);
+        // The victim removes its own registry entry on shutdown; if it is
+        // hung and ignores us, the next eviction pass reaps its entry once
+        // the ping fails.
+    }
+}
+
+void IndexServer::request_self_stop(const char* reason) {
+    std::fprintf(stderr, "Index server exiting: %s\n", reason);
+    running_.store(false, std::memory_order_release);
+    {
+        std::lock_guard lock(shutdown_mu_);
+        shutdown_requested_ = true;
+    }
+    shutdown_cv_.notify_all();
+}
+
+void IndexServer::reaper_loop(bool root_existed_at_start) {
+    // Startup eviction runs here, off the start() critical path: it pings
+    // every registered peer, which is milliseconds each but unbounded in
+    // count.
+    evict_excess_peers();
+
+    const auto idle_timeout =
+        std::chrono::seconds(config_.server.idle_timeout_sec);
+
+    for (;;) {
+        {
+            std::unique_lock lock(shutdown_mu_);
+            if (shutdown_cv_.wait_for(lock, kReaperTick, [this] {
+                    return shutdown_requested_ ||
+                           !running_.load(std::memory_order_acquire);
+                })) {
+                return;
+            }
+        }
+
+        if (root_existed_at_start) {
+            std::error_code ec;
+            if (!std::filesystem::exists(config_.project.root, ec)) {
+                request_self_stop("project root deleted");
+                return;
+            }
+        }
+
+        // Idle exit is suppressed while indexing: a big initial index (or
+        // /reindex) is work, not idleness.
+        if (idle_timeout > std::chrono::seconds(0) &&
+            !indexing_active_.load(std::memory_order_acquire)) {
+            const auto idle_ns =
+                steady_now_ns() -
+                last_activity_ns_.load(std::memory_order_acquire);
+            if (std::chrono::nanoseconds(idle_ns) >= idle_timeout) {
+                request_self_stop("idle timeout reached");
+                return;
+            }
+        }
+    }
+}
+
 // -- Handler registration -----------------------------------------------------
 
 void IndexServer::register_handlers() {
+    // /ping is excluded from activity stamping so liveness probes (client
+    // discovery, peer eviction scans) don't keep an otherwise-unused server
+    // alive forever.
+    svr_.set_pre_routing_handler(
+        [this](const httplib::Request& req, httplib::Response&) {
+            if (req.path != "/ping") {
+                touch_activity();
+            }
+            return httplib::Server::HandlerResponse::Unhandled;
+        });
+
     svr_.Post("/ping",
               [this](const httplib::Request& r, httplib::Response& s) {
                   handle_ping(r, s);
@@ -810,6 +1053,12 @@ void IndexServer::handle_shutdown(const httplib::Request& /*req*/,
     if (shutdown_triggered_.compare_exchange_strong(expected, true)) {
         shutdown_trigger_ = std::thread([this] {
             std::this_thread::sleep_for(std::chrono::milliseconds{100});
+            // Clear running_ too: the CLI serve loop exits on
+            // !is_running(), and before this /shutdown only flipped
+            // shutdown_requested_ (observed by wait(), which the CLI
+            // does not call) — a remote /shutdown left the process
+            // serving forever. Peer eviction depends on this working.
+            running_.store(false, std::memory_order_release);
             {
                 std::lock_guard lock(shutdown_mu_);
                 shutdown_requested_ = true;
