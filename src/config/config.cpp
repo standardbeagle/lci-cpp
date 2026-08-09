@@ -443,6 +443,16 @@ void apply_performance(Config& cfg, const KdlNode& node) {
     }
 }
 
+void apply_server(Config& cfg, const KdlNode& node) {
+    for (const auto& child : node.children) {
+        if (child.name == "idle_timeout_sec") {
+            get_int(child, cfg.server.idle_timeout_sec);
+        } else if (child.name == "max_instances") {
+            get_int(child, cfg.server.max_instances);
+        }
+    }
+}
+
 void apply_ranking(SearchRankingConfig& ranking, const KdlNode& node) {
     for (const auto& child : node.children) {
         if (child.name == "enabled") get_bool(child, ranking.enabled);
@@ -541,6 +551,7 @@ bool apply_kdl_nodes(Config& cfg, const std::vector<KdlNode>& nodes,
             if (!apply_index(cfg, node, error)) return false;
         }
         else if (node.name == "performance") apply_performance(cfg, node);
+        else if (node.name == "server") apply_server(cfg, node);
         else if (node.name == "search") apply_search(cfg, node);
         else if (node.name == "include") cfg.include = collect_strings(node);
         else if (node.name == "exclude") cfg.exclude = collect_strings(node);
@@ -833,6 +844,13 @@ std::string validate_config(Config& cfg) {
     }
     if (cfg.performance.parallel_file_workers < 0) {
         return "performance.parallel_file_workers cannot be negative";
+    }
+
+    if (cfg.server.idle_timeout_sec < 0) {
+        return "server.idle_timeout_sec cannot be negative";
+    }
+    if (cfg.server.max_instances < 0) {
+        return "server.max_instances cannot be negative";
     }
 
     if (cfg.search.max_context_lines < 0) {

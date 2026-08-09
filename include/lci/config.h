@@ -49,6 +49,18 @@ struct PerformanceConfig {
     int startup_delay_ms = 1500;
 };
 
+struct ServerConfig {
+    // Index server exits after this long with no requests (/ping excluded,
+    // so liveness probes don't keep an unused server alive). 0 disables.
+    // The client respawns on the next command, so idle exit is transparent.
+    int idle_timeout_sec = 1800;
+    // Per-user cap on concurrently resident per-root index servers. A newly
+    // started server shuts down least-recently-active peers beyond the cap
+    // (registry files in the temp dir carry the activity ordering).
+    // 0 disables eviction.
+    int max_instances = 8;
+};
+
 struct SemanticConfig {
     int batch_size = 100;
     int channel_size = 1000;
@@ -115,6 +127,7 @@ struct Config {
     ProjectConfig project;
     IndexConfig index;
     PerformanceConfig performance;
+    ServerConfig server;
     SemanticConfig semantic;
     SemanticScoringConfig semantic_scoring;
     SearchConfig search;

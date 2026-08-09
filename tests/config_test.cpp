@@ -429,6 +429,27 @@ index {
     EXPECT_EQ(result.config.index.watch_debounce_ms, 500);
 }
 
+TEST_F(KdlConfigTest, ParsesServerSection) {
+    write_kdl(R"(
+server {
+    idle_timeout_sec 300
+    max_instances 4
+}
+)");
+    auto result = load_config(temp_dir_.string());
+    ASSERT_TRUE(result.ok());
+    EXPECT_EQ(result.config.server.idle_timeout_sec, 300);
+    EXPECT_EQ(result.config.server.max_instances, 4);
+}
+
+TEST_F(KdlConfigTest, ServerSectionDefaults) {
+    write_kdl("project { name \"x\" }\n");
+    auto result = load_config(temp_dir_.string());
+    ASSERT_TRUE(result.ok());
+    EXPECT_EQ(result.config.server.idle_timeout_sec, 1800);
+    EXPECT_EQ(result.config.server.max_instances, 8);
+}
+
 TEST_F(KdlConfigTest, ParsesPerformanceSection) {
     write_kdl(R"(
 performance {
