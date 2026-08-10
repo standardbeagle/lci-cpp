@@ -48,7 +48,9 @@ inline std::string format_aggregated_names(
         }
     }
     if (counts.size() > shown) {
-        char buf[32];
+        // ", … +" is 7 bytes (the ellipsis is 3-byte UTF-8) plus " more" and a
+        // 20-digit size_t: 33 including the NUL, so 32 could truncate.
+        char buf[40];
         std::snprintf(buf, sizeof(buf), ", … +%zu more",
                       counts.size() - shown);
         out += buf;

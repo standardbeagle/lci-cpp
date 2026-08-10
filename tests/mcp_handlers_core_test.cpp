@@ -1346,7 +1346,7 @@ TEST_F(HandlersFixture, FindFilesReturnsRootRelativePaths) {
 // obvious thing; tier-1 traces showed 8/8 empty find_files calls were
 // agents passing "." or an absolute path and getting a silent 0.
 TEST_F(HandlersFixture, FindFilesDirectoryDotAndAbsoluteNormalized) {
-    for (const std::string dir :
+    for (const std::string& dir :
          {std::string("."), std::string("./"), std::string(""),
           temp_dir_.string()}) {
         nlohmann::json params;
