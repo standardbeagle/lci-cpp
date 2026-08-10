@@ -660,34 +660,53 @@ void IndexServer::evict_excess_peers() {
         return;
     }
 
+    // Least-recently-active first, so the eviction victims are the prefix.
+    auto live = list_server_instances(registry_dir_, registry_path_);
+
+    // This server counts against the cap too (+1).
+    const int excess = static_cast<int>(live.size()) + 1 - max_instances;
+    if (excess <= 0) {
+        return;
+    }
+    for (int i = 0; i < excess && i < static_cast<int>(live.size()); ++i) {
+        std::string err;
+        Client(live[i].address).shutdown(false, err);
+        // The victim removes its own registry entry on shutdown; if it is
+        // hung and ignores us, the next eviction pass reaps its entry once
+        // the ping fails.
+    }
+}
+
+std::vector<ServerInstance> list_server_instances(
+    const std::string& dir, const std::string& exclude_entry) {
     char prefix_buf[32];
     std::snprintf(prefix_buf, sizeof(prefix_buf), "lci-srv-%u-",
                   current_user_id());
     const std::string prefix = prefix_buf;
 
-    struct Peer {
-        std::filesystem::file_time_type last_activity;
-        std::string address;
-    };
-    std::vector<Peer> live;
+    std::vector<ServerInstance> live;
 
     std::error_code ec;
     for (const auto& dirent :
-         std::filesystem::directory_iterator(registry_dir_, ec)) {
+         std::filesystem::directory_iterator(dir, ec)) {
         const std::string fname = dirent.path().filename().string();
-        if (fname.rfind(prefix, 0) != 0 || dirent.path() == registry_path_ ||
+        if (fname.rfind(prefix, 0) != 0 ||
+            (!exclude_entry.empty() && dirent.path() == exclude_entry) ||
             fname.size() < 6 || fname.substr(fname.size() - 5) != ".json") {
             continue;
         }
-        std::string address;
+        ServerInstance inst;
         try {
             std::ifstream in(dirent.path());
-            address = nlohmann::json::parse(in).value("address", "");
+            const auto entry = nlohmann::json::parse(in);
+            inst.address = entry.value("address", "");
+            inst.root = entry.value("root", "");
+            inst.pid = entry.value("pid", uint32_t{0});
         } catch (const nlohmann::json::exception&) {
             // Torn/garbage entry: unreadable means unpingable, drop it.
         }
-        if (address.empty() || !Client(address).is_server_running()) {
-            // Dead peer (crashed or reaped): its entry is registry litter.
+        if (inst.address.empty() || !Client(inst.address).is_server_running()) {
+            // Dead server (crashed or reaped): its entry is registry litter.
             std::error_code rm_ec;
             std::filesystem::remove(dirent.path(), rm_ec);
             continue;
@@ -697,26 +716,19 @@ void IndexServer::evict_excess_peers() {
         if (mt_ec) {
             continue;
         }
-        live.push_back({mtime, std::move(address)});
+        inst.last_activity = mtime;
+        inst.entry_path = dirent.path().string();
+        std::error_code root_ec;
+        inst.root_exists =
+            !inst.root.empty() && std::filesystem::exists(inst.root, root_ec);
+        live.push_back(std::move(inst));
     }
 
-    // This server counts against the cap too (+1).
-    const int excess =
-        static_cast<int>(live.size()) + 1 - max_instances;
-    if (excess <= 0) {
-        return;
-    }
     std::sort(live.begin(), live.end(),
-              [](const Peer& a, const Peer& b) {
+              [](const ServerInstance& a, const ServerInstance& b) {
                   return a.last_activity < b.last_activity;
               });
-    for (int i = 0; i < excess && i < static_cast<int>(live.size()); ++i) {
-        std::string err;
-        Client(live[i].address).shutdown(false, err);
-        // The victim removes its own registry entry on shutdown; if it is
-        // hung and ignores us, the next eviction pass reaps its entry once
-        // the ping fails.
-    }
+    return live;
 }
 
 void IndexServer::request_self_stop(const char* reason) {

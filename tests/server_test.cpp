@@ -1295,6 +1295,88 @@ TEST(ServerReaperTest, NewServerEvictsLeastRecentlyActivePastCap) {
     EXPECT_TRUE(c.server().is_running());
 }
 
+TEST(ServerRegistryTest, ListsLiveServersLeastRecentlyActiveFirst) {
+    TempDir registry;
+    const std::string reg = registry.path().string();
+    ReaperServer a(/*idle_timeout_sec=*/0, reg, /*max_instances=*/8);
+    ASSERT_TRUE(a.server().start());
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    ReaperServer b(/*idle_timeout_sec=*/0, reg, /*max_instances=*/8);
+    ASSERT_TRUE(b.server().start());
+
+    auto live = list_server_instances(reg);
+    ASSERT_EQ(live.size(), 2u);
+    EXPECT_EQ(live[0].address, a.address()) << "oldest entry must sort first";
+    EXPECT_EQ(live[1].address, b.address());
+    EXPECT_EQ(live[0].root, a.root().string());
+    EXPECT_TRUE(live[0].root_exists);
+    EXPECT_GT(live[0].pid, 0u);
+}
+
+TEST(ServerRegistryTest, ExcludeEntryOmitsOneServer) {
+    TempDir registry;
+    const std::string reg = registry.path().string();
+    ReaperServer a(/*idle_timeout_sec=*/0, reg, /*max_instances=*/8);
+    ASSERT_TRUE(a.server().start());
+
+    auto all = list_server_instances(reg);
+    ASSERT_EQ(all.size(), 1u);
+    EXPECT_TRUE(list_server_instances(reg, all[0].entry_path).empty());
+}
+
+TEST(ServerRegistryTest, DeadEntryIsNotReportedAndIsRemoved) {
+    // A registry entry that outlives its process is litter. Enumeration must
+    // drop it, not report a server that cannot be reached — otherwise
+    // `lci servers` invents servers and `shutdown --all` reports failures.
+    TempDir registry;
+    const std::string reg = registry.path().string();
+
+    // Name the file with this user's real prefix (lci-srv-<uid>-) so the
+    // scan considers it at all; take it from a real entry.
+    ReaperServer live(/*idle_timeout_sec=*/0, reg, /*max_instances=*/8);
+    ASSERT_TRUE(live.server().start());
+    auto found = list_server_instances(reg);
+    ASSERT_EQ(found.size(), 1u);
+    const std::string fname =
+        std::filesystem::path(found[0].entry_path).filename().string();
+    const std::string prefix = fname.substr(0, fname.rfind('-') + 1);
+
+    const auto dead = registry.path() / (prefix + "deadbeef.json");
+    {
+        std::ofstream out(dead);
+        out << nlohmann::json{{"pid", 999999},
+                              {"address", (registry.path() / "gone.sock")
+                                              .string()},
+                              {"root", "/nonexistent"}}
+                   .dump();
+    }
+    ASSERT_TRUE(std::filesystem::exists(dead));
+
+    auto still = list_server_instances(reg);
+    EXPECT_EQ(still.size(), 1u) << "unreachable server must not be listed";
+    EXPECT_FALSE(std::filesystem::exists(dead))
+        << "its registry entry must be reaped";
+}
+
+TEST(ServerRegistryTest, ReportsDeletedRootAsGone) {
+    TempDir registry;
+    const std::string reg = registry.path().string();
+    ReaperServer s(/*idle_timeout_sec=*/0, reg, /*max_instances=*/8);
+    ASSERT_TRUE(s.server().start());
+    auto before = list_server_instances(reg);
+    ASSERT_EQ(before.size(), 1u);
+    EXPECT_TRUE(before[0].root_exists);
+
+    // The reaper stops such a server within a tick; enumeration racing it
+    // must still describe the root honestly while the process is up.
+    std::error_code ec;
+    std::filesystem::remove_all(s.root(), ec);
+    auto after = list_server_instances(reg);
+    if (!after.empty()) {
+        EXPECT_FALSE(after[0].root_exists);
+    }
+}
+
 TEST(ServerReaperTest, ShutdownEndpointStopsServer) {
     // Pins the fix that /shutdown clears running_: before, a remote
     // /shutdown left the CLI serve loop (which polls is_running()) alive

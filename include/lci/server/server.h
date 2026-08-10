@@ -4,6 +4,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
+#include <filesystem>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -38,6 +39,29 @@ std::string get_socket_path_for_root(const std::string& root);
 /// Returns the build ID (compile-time timestamp hash).
 /// Used for stale-server detection.
 std::string build_id();
+
+// -- Instance registry --------------------------------------------------------
+
+/// One live server, as published in the per-user instance registry by
+/// IndexServer::enable_instance_registry.
+struct ServerInstance {
+    uint32_t pid{};
+    std::string address;     // socket path (POSIX) or host:port (Windows)
+    std::string root;        // project root this server indexes
+    std::string entry_path;  // registry file backing this entry
+    std::filesystem::file_time_type last_activity{};
+    bool root_exists{};      // false once the indexed root is deleted
+};
+
+/// Enumerates this user's live servers registered under `dir`, ordered
+/// least-recently-active first (the eviction order).
+///
+/// A server that no longer answers /ping is not reported and its registry
+/// entry is removed: an entry outliving its process is litter, not a server.
+/// `exclude_entry`, when non-empty, skips one entry path so a caller can omit
+/// itself.
+std::vector<ServerInstance> list_server_instances(
+    const std::string& dir, const std::string& exclude_entry = {});
 
 // -- JSON request/response types ----------------------------------------------
 
