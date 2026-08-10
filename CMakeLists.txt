@@ -14,7 +14,7 @@ if(NOT DEFINED CMAKE_CXX_COMPILER_LAUNCHER)
 endif()
 
 project(lci
-    VERSION 0.7.0
+    VERSION 0.8.0
     DESCRIPTION "Lightning Code Index - fast semantic code search"
     LANGUAGES C CXX
 )
@@ -137,6 +137,52 @@ include(FetchContent)
 # libefsw.so / libnlohmann_json_schema_validator.so.2. Local builds already
 # cache this OFF; pin it explicitly so CI matches.
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build vendored dependencies static" FORCE)
+
+# CMake 4 removed compatibility with cmake_minimum_required(VERSION <3.5), and
+# vendored dependencies still declare it (xxHash 0.8.2's cmake_unofficial is the
+# first to hard-error). Configure then fails outright on a CMake 4 host while a
+# CMake 3.x host builds fine — the whole failure is invisible until someone
+# builds on a newer box. Give the vendored subprojects the 3.5 policy floor;
+# this project keeps its own 3.25 minimum declared above.
+if(CMAKE_VERSION VERSION_GREATER_EQUAL 4.0)
+    set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING
+        "Policy floor for vendored dependencies that predate CMake 4")
+endif()
+
+# Keep dependency resolution out of conda/mamba prefixes.
+#
+# A conda install on PATH makes CMake search its prefix, and one hit is enough
+# to poison the whole build: find_package(nlohmann_json CONFIG) resolves to
+# $CONDA/share/cmake/nlohmann_json, and that imported target then injects
+# $CONDA/include ahead of every vendored header directory. Conda ships its own
+# GoogleTest there, so the test TUs compile against conda's older
+# MakeAndRegisterTestInfo(const char*, ...) while linking the vendored
+# v1.15.2 archive that exports MakeAndRegisterTestInfo(std::string, ...) —
+# lci_tests fails to link with undefined symbols that are demonstrably present
+# in libgtest.a, which reads as a corrupt toolchain rather than a mismatch.
+# Observed on beagle-ab2, which has two conda installs on PATH.
+#
+# `conda-meta` is the marker every conda prefix carries, so this finds them
+# without hardcoding install locations. Set LCI_ALLOW_CONDA_PREFIXES=ON to opt
+# back in (e.g. a build that deliberately targets a conda environment).
+option(LCI_ALLOW_CONDA_PREFIXES
+       "Allow find_package to resolve dependencies from conda prefixes" OFF)
+if(NOT LCI_ALLOW_CONDA_PREFIXES)
+    string(REPLACE ":" ";" _lci_path_dirs "$ENV{PATH}")
+    foreach(_lci_dir IN LISTS _lci_path_dirs)
+        get_filename_component(_lci_prefix "${_lci_dir}" DIRECTORY)
+        if(_lci_prefix AND IS_DIRECTORY "${_lci_prefix}/conda-meta")
+            list(APPEND CMAKE_IGNORE_PREFIX_PATH "${_lci_prefix}")
+        endif()
+    endforeach()
+    if(CMAKE_IGNORE_PREFIX_PATH)
+        list(REMOVE_DUPLICATES CMAKE_IGNORE_PREFIX_PATH)
+        message(STATUS "Ignoring conda prefixes: ${CMAKE_IGNORE_PREFIX_PATH}")
+    endif()
+    unset(_lci_path_dirs)
+    unset(_lci_dir)
+    unset(_lci_prefix)
+endif()
 
 find_package(nlohmann_json CONFIG QUIET)
 if(NOT nlohmann_json_FOUND)
