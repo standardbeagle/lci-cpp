@@ -383,6 +383,15 @@ int main(int argc, char* argv[]) {
         std::exit(run_server(gflags, server_daemon, server_foreground));
     });
 
+    // -- Servers subcommand ---------------------------------------------------
+    auto* servers_cmd = app.add_subcommand(
+        "servers", "List every running index server for this user");
+
+    bool servers_json = false;
+    servers_cmd->add_flag("-j,--json", servers_json, "Output as JSON");
+
+    servers_cmd->callback([&]() { std::exit(run_servers(servers_json)); });
+
     // -- Shutdown subcommand --------------------------------------------------
     auto* shutdown_cmd =
         app.add_subcommand("shutdown", "Shutdown the persistent index server")
@@ -392,8 +401,14 @@ int main(int argc, char* argv[]) {
     shutdown_cmd->add_flag("-f,--force", shutdown_force,
                            "Force shutdown even if operations are in progress");
 
+    bool shutdown_all = false;
+    shutdown_cmd->add_flag("-a,--all", shutdown_all,
+                           "Shut down every running server for this user, not "
+                           "just the one for the current root");
+
     shutdown_cmd->callback([&]() {
-        std::exit(run_shutdown(gflags, shutdown_force));
+        std::exit(shutdown_all ? run_shutdown_all(shutdown_force)
+                               : run_shutdown(gflags, shutdown_force));
     });
 
     // -- MCP subcommand -------------------------------------------------------

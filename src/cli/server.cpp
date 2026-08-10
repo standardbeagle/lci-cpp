@@ -4,6 +4,8 @@
 #include <lci/server/server.h>
 #include <lci/version.h>
 
+#include <nlohmann/json.hpp>
+
 #include <chrono>
 #include <csignal>
 #include <cstdio>
@@ -25,6 +27,22 @@ namespace {
 std::atomic<bool> g_shutdown_requested{false};
 
 void signal_handler(int /*sig*/) { g_shutdown_requested.store(true); }
+
+/// The registry every CLI-launched server publishes into. Enumeration,
+/// eviction, and publication must agree on this directory or `lci servers`
+/// reports an empty fleet while servers are running.
+std::string instance_registry_dir() {
+    return std::filesystem::temp_directory_path().string();
+}
+
+/// Seconds since a registry entry was last touched. Activity stamping is
+/// throttled to 60s, so this is a coarse "last used", not a precise idle clock.
+long long idle_seconds(const ServerInstance& inst) {
+    const auto now = std::filesystem::file_time_type::clock::now();
+    return std::chrono::duration_cast<std::chrono::seconds>(
+               now - inst.last_activity)
+        .count();
+}
 
 }  // namespace
 
@@ -155,8 +173,7 @@ int run_server(const GlobalFlags& flags, bool daemon, bool foreground) {
     // registry so the least-recently-active ones get evicted past
     // server.max_instances. Embedded/test servers stay out unless they
     // opt in with their own directory.
-    server.enable_instance_registry(
-        std::filesystem::temp_directory_path().string());
+    server.enable_instance_registry(instance_registry_dir());
 
     if (!server.start()) {
         std::cerr << "Error: failed to start server\n";
@@ -227,6 +244,79 @@ int run_shutdown(const GlobalFlags& flags, bool force) {
     }
 
     std::printf("Server shut down successfully\n");
+    return 0;
+}
+
+// -- Fleet-wide listing and shutdown ------------------------------------------
+
+int run_servers(bool json_output) {
+    auto live = list_server_instances(instance_registry_dir());
+
+    if (json_output) {
+        nlohmann::json out = nlohmann::json::array();
+        for (const auto& inst : live) {
+            out.push_back({{"pid", inst.pid},
+                           {"address", inst.address},
+                           {"root", inst.root},
+                           {"root_exists", inst.root_exists},
+                           {"idle_seconds", idle_seconds(inst)}});
+        }
+        std::printf("%s\n", out.dump(2).c_str());
+        return 0;
+    }
+
+    if (live.empty()) {
+        std::printf("No index servers running\n");
+        return 0;
+    }
+
+    std::printf("%-8s %-10s %s\n", "PID", "IDLE", "ROOT");
+    for (const auto& inst : live) {
+        std::printf("%-8u %-10lld %s%s\n", inst.pid, idle_seconds(inst),
+                    inst.root.empty() ? "(unknown)" : inst.root.c_str(),
+                    inst.root_exists ? "" : "  [root deleted]");
+    }
+    std::printf("\n%zu server(s). Use 'lci shutdown --all' to stop them.\n",
+                live.size());
+    return 0;
+}
+
+int run_shutdown_all(bool force) {
+    auto live = list_server_instances(instance_registry_dir());
+    if (live.empty()) {
+        std::printf("No index servers running\n");
+        return 0;
+    }
+
+    int failed = 0;
+    for (const auto& inst : live) {
+        Client client(inst.address);
+        std::string err;
+        if (!client.shutdown(force, err)) {
+            std::fprintf(stderr, "Error: pid %u (%s): %s\n", inst.pid,
+                         inst.root.c_str(), err.c_str());
+            ++failed;
+            continue;
+        }
+        std::printf("Stopped pid %u  %s\n", inst.pid,
+                    inst.root.empty() ? "(unknown root)" : inst.root.c_str());
+    }
+
+    // Shutdown is asynchronous on the server side (the handler answers, then a
+    // trigger thread tears the listener down), so confirm rather than assume.
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    int survivors = 0;
+    for (const auto& inst : live) {
+        if (Client(inst.address).is_server_running()) {
+            std::fprintf(stderr, "Error: pid %u did not shut down\n", inst.pid);
+            ++survivors;
+        }
+    }
+
+    if (failed > 0 || survivors > 0) {
+        return 1;
+    }
+    std::printf("\n%zu server(s) shut down\n", live.size());
     return 0;
 }
 

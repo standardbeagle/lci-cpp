@@ -133,6 +133,17 @@ int run_server(const GlobalFlags& flags, bool daemon, bool foreground);
 /// shutdown subcommand. Returns 0 on success, non-zero on error.
 int run_shutdown(const GlobalFlags& flags, bool force);
 
+/// servers subcommand: lists every index server this user is running, with the
+/// root each one indexes. Without it a stray server is invisible — the socket
+/// name hashes the root, so the filesystem cannot answer "what is this?".
+/// Returns 0 even when no server is running (an empty fleet is not an error).
+int run_servers(bool json_output);
+
+/// shutdown --all: stops every index server this user is running, not only the
+/// one serving the current root. Returns 0 when all of them stopped (including
+/// when there were none), non-zero if any survived.
+int run_shutdown_all(bool force);
+
 /// MCP server subcommand. Returns 0 on success, non-zero on error.
 int run_mcp(const GlobalFlags& flags);
 
