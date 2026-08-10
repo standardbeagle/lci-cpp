@@ -31,7 +31,7 @@
       "result.meta.elapsed_ms",
       "result.meta.server_pid"
     ],
-    "_rationale_ignore": "Standard JSON-RPC envelope noise plus timing residue. The metadata/performance envelope's own timing/index fields are masked inside content[].text by the MCP-mode inner-text normalization the runner already applies (spec_runner.cpp:NormalizeMcpInnerText) rather than by this outer tier map.",
+    "_rationale_ignore": "Standard JSON-RPC envelope noise plus timing residue. The metadata/performance envelope's own timing/index fields are masked inside content[].text by the MCP-mode inner-text normalization the runner already applies (spec_runner.cpp:NormalizeMcpInnerText) rather than by this outer tier map. That same inner mask covers metadata.server_version: the envelope echoes the build's version string, which is release metadata rather than behaviour, so pinning it would fail this golden on every version bump.",
     "sort_arrays": [
       "code_smells",
       "best_practices",

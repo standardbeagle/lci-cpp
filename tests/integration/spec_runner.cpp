@@ -143,6 +143,13 @@ void NormalizeMcpInnerText(nlohmann::json& node,
                             "context.generated_at",
                             "performance.total_time_ms",
                             "performance.component_breakdown",
+                            // The response envelope echoes the build's own
+                            // version string. It is release metadata, not
+                            // behaviour: pinning it makes every version bump
+                            // fail an unrelated golden (0.7.0 -> 0.8.0 broke
+                            // mcp/get_context/semantic_ai). Mask it so goldens
+                            // survive releases.
+                            "metadata.server_version",
                         };
                         inner_opts.sort_array_paths = {"results", "symbols",
                                                        "metrics_issues",
