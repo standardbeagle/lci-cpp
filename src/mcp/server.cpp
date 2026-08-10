@@ -43,6 +43,11 @@ void McpServer::add_tool(ToolDefinition def, ToolHandler handler) {
     registered_tools_.push_back({std::move(def), std::move(handler)});
 }
 
+void McpServer::set_readiness_gate(
+    std::function<bool(std::string& error)> gate) {
+    readiness_gate_ = std::move(gate);
+}
+
 size_t McpServer::tool_count() const { return registered_tools_.size(); }
 
 const ToolDefinition& McpServer::tool_at(size_t index) const {
@@ -176,10 +181,17 @@ nlohmann::json McpServer::handle_request(const nlohmann::json& request) {
             [&](const RegisteredTool& reg) {
                 return reg.definition.name == tool_name;
             });
+        std::string gate_error;
         if (it == registered_tools_.end()) {
             response["error"] = {{"code", -32602},
                                  {"message", "unknown tool \"" + tool_name +
                                                  "\""}};
+        } else if (readiness_gate_ && !readiness_gate_(gate_error)) {
+            // -32603 (internal error): the tool exists and the arguments were
+            // never examined; the index behind it is unusable.
+            response["error"] = {{"code", -32603},
+                                 {"message", "index unavailable: " +
+                                                 gate_error}};
         } else {
             auto arguments =
                 params.value("arguments", nlohmann::json::object());

@@ -8,6 +8,7 @@
 #include <lci/mcp/handlers_index.h>
 #include <lci/mcp/server.h>
 
+#include <atomic>
 #include <set>
 #include <sstream>
 #include <string>
@@ -280,6 +281,92 @@ TEST_F(McpStdioTest, ToolCallDispatchesToHandler) {
     EXPECT_FALSE(content[0]["text"].get<std::string>().empty());
     // Real handler -> not the old stub's not_implemented sentinel.
     EXPECT_EQ(call_resp["result"].value("isError", false), false);
+}
+
+TEST_F(McpStdioTest, HandshakeDoesNotWaitOnTheReadinessGate) {
+    // The bug this pins: run_mcp indexed the whole corpus before the transport
+    // read a byte, so a client that bounds its connect handshake timed out on
+    // a healthy server ("lazy-connect failed for MCP lci: context deadline
+    // exceeded"). initialize and tools/list describe the server, not the
+    // corpus — they must answer without consulting the gate at all.
+    std::atomic<int> gate_calls{0};
+    server_->set_readiness_gate([&](std::string&) {
+        ++gate_calls;
+        return true;
+    });
+
+    auto responses = exchange({
+        make_request("initialize", 1),
+        make_request("tools/list", 2),
+        make_request("ping", 3),
+    });
+
+    ASSERT_EQ(responses.size(), 3u);
+    EXPECT_TRUE(responses[0].contains("result"));
+    EXPECT_TRUE(responses[1]["result"].contains("tools"));
+    EXPECT_TRUE(responses[2].contains("result"));
+    EXPECT_EQ(gate_calls.load(), 0)
+        << "handshake must never block on index readiness";
+}
+
+TEST_F(McpStdioTest, ToolCallWaitsOnTheReadinessGate) {
+    std::atomic<int> gate_calls{0};
+    server_->set_readiness_gate([&](std::string&) {
+        ++gate_calls;
+        return true;
+    });
+
+    auto responses = exchange({
+        make_request("initialize", 1),
+        make_request("tools/call", 2,
+                     {{"name", "info"}, {"arguments", nlohmann::json::object()}}),
+    });
+
+    ASSERT_EQ(responses.size(), 2u);
+    EXPECT_TRUE(responses[1].contains("result"));
+    EXPECT_EQ(gate_calls.load(), 1)
+        << "every tool call runs against a ready index";
+}
+
+TEST_F(McpStdioTest, FailedReadinessGateReportsInsteadOfServingHalfIndex) {
+    server_->set_readiness_gate([](std::string& error) {
+        error = "index build failed";
+        return false;
+    });
+
+    auto responses = exchange({
+        make_request("initialize", 1),
+        make_request("tools/call", 2,
+                     {{"name", "info"}, {"arguments", nlohmann::json::object()}}),
+    });
+
+    ASSERT_EQ(responses.size(), 2u);
+    ASSERT_TRUE(responses[1].contains("error"));
+    EXPECT_EQ(responses[1]["error"]["code"].get<int>(), -32603);
+    EXPECT_NE(responses[1]["error"]["message"].get<std::string>().find(
+                  "index build failed"),
+              std::string::npos);
+}
+
+TEST_F(McpStdioTest, UnknownToolIsRejectedBeforeTheReadinessGate) {
+    // Resolution failure is not an index problem: reporting it must not wait
+    // out a long index build.
+    std::atomic<int> gate_calls{0};
+    server_->set_readiness_gate([&](std::string&) {
+        ++gate_calls;
+        return true;
+    });
+
+    auto responses = exchange({
+        make_request("initialize", 1),
+        make_request("tools/call", 2,
+                     {{"name", "nonexistent"},
+                      {"arguments", nlohmann::json::object()}}),
+    });
+
+    ASSERT_EQ(responses.size(), 2u);
+    EXPECT_EQ(responses[1]["error"]["code"].get<int>(), -32602);
+    EXPECT_EQ(gate_calls.load(), 0);
 }
 
 TEST_F(McpStdioTest, ToolCallUnknownTool) {

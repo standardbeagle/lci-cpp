@@ -19,12 +19,15 @@
 #include <tree_sitter/api.h>
 
 #include <chrono>
+#include <condition_variable>
 #include <csignal>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <mutex>
 #include <sstream>
 #include <string>
+#include <thread>
 
 namespace lci {
 namespace cli {
@@ -70,6 +73,34 @@ void populate_side_effects_from_ast(MasterIndex& index,
     }
 }
 
+/// One-shot readiness latch between the warmup thread and the transport
+/// thread. wait() blocks until finish() has run, then reports the warmup's
+/// outcome; an empty failure string means the index is usable.
+class Warmup {
+  public:
+    void finish(std::string failure) {
+        {
+            std::lock_guard lock(mu_);
+            failure_ = std::move(failure);
+            done_ = true;
+        }
+        cv_.notify_all();
+    }
+
+    bool wait(std::string& error) {
+        std::unique_lock lock(mu_);
+        cv_.wait(lock, [this] { return done_; });
+        error = failure_;
+        return failure_.empty();
+    }
+
+  private:
+    std::mutex mu_;
+    std::condition_variable cv_;
+    bool done_{false};
+    std::string failure_;
+};
+
 }  // namespace
 
 // FIX-D.1 sweep (Dart FZJ6Iip4we3U): all 8 parity-compat stubs removed —
@@ -95,90 +126,114 @@ int run_mcp(const GlobalFlags& flags) {
     }
 
     MasterIndex runtime_index(cfg);
-    if (!runtime_index.index_directory(cfg.project.root)) {
-        std::cerr << "Warning: failed to index project root for MCP runtime\n";
-    }
-
     SearchEngine search_engine(runtime_index, cfg.synonyms);
     SemanticAnnotator annotator;
-    // Walk the live index and extract every file's @lci: annotations into
-    // the annotator. Without this, the semantic_annotations tool only sees
-    // labels seeded externally — which on a typical corpus means zero
-    // direct annotations even when files do contain @lci: markers. Has to
-    // run before GraphPropagator seeding so the propagator can pick up
-    // direct labels as propagation roots.
-    annotator.populate_from_index(runtime_index);
-    {
-        std::string manifest_error;
-        annotator.load_project_manifest(runtime_index, &manifest_error);
-        if (!manifest_error.empty()) {
-            std::cerr << "Warning: " << manifest_error << "\n";
-        }
-    }
     GraphPropagator propagator(&runtime_index.ref_tracker());
     SideEffectAnalyzer side_effect_analyzer("generic");
-    // Phase 1a: AST pass. Re-walk each file's syntax tree and drive the
-    // per-function lifecycle so param/receiver/global writes, throws, and
-    // channel ops are recorded from real AST facts — effects the callee-name
-    // heuristic below cannot see (e.g. `x.field = 1` with no impure callee, or
-    // a bare `raise`/`throw` statement).
-    populate_side_effects_from_ast(runtime_index, side_effect_analyzer);
-
-    // Phase 1b: callee-name heuristic. Augments the AST records with
-    // IO / network / database / throw categories inferred from outgoing callee
-    // names (which a bare call node in the AST can't classify) and fills in
-    // functions the AST walk didn't record, so summary mode can report the
-    // pure / impure split and every query mode has records to serve.
-    side_effect_analyzer.populate_from_index(runtime_index);
-
-    // Phase 2: propagate impurity transitively upstream through the call
-    // graph so a function that (indirectly) reaches an impure callee is itself
-    // marked impure (populates transitive_categories; recomputes is_pure).
-    side_effect_analyzer.propagate_transitive(runtime_index);
-
-    // Seed GraphPropagator with the impure functions so transitive
-    // purity propagates: any caller of an impure function is itself
-    // impure unless its own purity overrides. Decay mode keeps strength
-    // bounded so deep call chains don't blow up.
-    auto rt_snap = runtime_index.ref_tracker().pin();
-    for (const auto& [key, info] : side_effect_analyzer.results()) {
-        if (!info.is_pure) {
-            // Resolve back to SymbolID via ref_tracker.find_symbol_by_name
-            // (file path + line uniquely identifies the symbol since
-            // we keyed on file:line:0 above).
-        for (const auto& es :
-                 rt_snap->find_symbols_by_name(info.function_name)) {
-                if (es && static_cast<int>(es->symbol.line) == info.start_line) {
-                    propagator.seed_label(es->id, "impure", 1.0);
-                }
-            }
-        }
-    }
-    // Seed propagator with direct @lci: labels from the annotator so the
-    // propagator computes transitive labels across the call graph. Without
-    // this seeding, only impurity labels propagate. Strength 1.0 = explicit
-    // annotation (vs propagated values which decay per hop).
-    {
-        // Get the union of all labels by enumerating known symbol IDs via the
-        // ref_tracker. For each AnnotatedSymbol the annotator has, seed the
-        // propagator with each of its labels at its symbol_id.
-        // Iterate the label index in deterministic order (sort label keys).
-        // Cheap pass — annotations are sparse vs symbols.
-        auto ann_rt_snap = runtime_index.ref_tracker().pin();
-        for (FileID fid : runtime_index.get_all_file_ids()) {
-            for (const auto& es : ann_rt_snap->get_file_enhanced_symbols(fid)) {
-                if (!es) continue;
-                const auto* ann = annotator.get_annotation(fid, es->id);
-                if (!ann) continue;
-                for (const auto& lbl : ann->labels) {
-                    propagator.seed_label(es->id, lbl, 1.0);
-                }
-            }
-        }
-    }
-    propagator.propagate();
-
     CodebaseIntelligenceEngine ci_engine;
+
+    // Index and analysis run OFF the transport thread. Every one of these
+    // phases used to run before mcp_server.run() was even called, so stdin was
+    // not read until the whole corpus was indexed — on a large repo that
+    // outlives an MCP client's connect deadline, and the client gives up on a
+    // server that is working fine (observed as "lazy-connect failed for MCP
+    // lci: context deadline exceeded", after which slop-mcp parks lci in an
+    // error state for 30s). The handshake is cheap and must never wait on the
+    // corpus; only tools/call does, via the readiness gate below.
+    Warmup warmup;
+    std::thread warmup_thread([&] {
+        if (!runtime_index.index_directory(cfg.project.root)) {
+            // Not fatal: handlers over an empty index answer honestly, and the
+            // pre-existing behaviour was to warn and serve. Keep that, so a
+            // partially-readable tree still gets a usable server.
+            std::cerr << "Warning: failed to index project root for MCP "
+                         "runtime\n";
+        }
+
+        // Walk the live index and extract every file's @lci: annotations into
+        // the annotator. Without this, the semantic_annotations tool only sees
+        // labels seeded externally — which on a typical corpus means zero
+        // direct annotations even when files do contain @lci: markers. Has to
+        // run before GraphPropagator seeding so the propagator can pick up
+        // direct labels as propagation roots.
+        annotator.populate_from_index(runtime_index);
+        {
+            std::string manifest_error;
+            annotator.load_project_manifest(runtime_index, &manifest_error);
+            if (!manifest_error.empty()) {
+                std::cerr << "Warning: " << manifest_error << "\n";
+            }
+        }
+
+        // Phase 1a: AST pass. Re-walk each file's syntax tree and drive the
+        // per-function lifecycle so param/receiver/global writes, throws, and
+        // channel ops are recorded from real AST facts — effects the
+        // callee-name heuristic below cannot see (e.g. `x.field = 1` with no
+        // impure callee, or a bare `raise`/`throw` statement).
+        populate_side_effects_from_ast(runtime_index, side_effect_analyzer);
+
+        // Phase 1b: callee-name heuristic. Augments the AST records with
+        // IO / network / database / throw categories inferred from outgoing
+        // callee names (which a bare call node in the AST can't classify) and
+        // fills in functions the AST walk didn't record, so summary mode can
+        // report the pure / impure split and every query mode has records to
+        // serve.
+        side_effect_analyzer.populate_from_index(runtime_index);
+
+        // Phase 2: propagate impurity transitively upstream through the call
+        // graph so a function that (indirectly) reaches an impure callee is
+        // itself marked impure (populates transitive_categories; recomputes
+        // is_pure).
+        side_effect_analyzer.propagate_transitive(runtime_index);
+
+        // Seed GraphPropagator with the impure functions so transitive
+        // purity propagates: any caller of an impure function is itself
+        // impure unless its own purity overrides. Decay mode keeps strength
+        // bounded so deep call chains don't blow up.
+        auto rt_snap = runtime_index.ref_tracker().pin();
+        for (const auto& [key, info] : side_effect_analyzer.results()) {
+            if (!info.is_pure) {
+                // Resolve back to SymbolID via ref_tracker.find_symbol_by_name
+                // (file path + line uniquely identifies the symbol since
+                // we keyed on file:line:0 above).
+                for (const auto& es :
+                     rt_snap->find_symbols_by_name(info.function_name)) {
+                    if (es &&
+                        static_cast<int>(es->symbol.line) == info.start_line) {
+                        propagator.seed_label(es->id, "impure", 1.0);
+                    }
+                }
+            }
+        }
+        // Seed propagator with direct @lci: labels from the annotator so the
+        // propagator computes transitive labels across the call graph. Without
+        // this seeding, only impurity labels propagate. Strength 1.0 = explicit
+        // annotation (vs propagated values which decay per hop).
+        {
+            // Get the union of all labels by enumerating known symbol IDs via
+            // the ref_tracker. For each AnnotatedSymbol the annotator has, seed
+            // the propagator with each of its labels at its symbol_id.
+            // Cheap pass — annotations are sparse vs symbols.
+            auto ann_rt_snap = runtime_index.ref_tracker().pin();
+            for (FileID fid : runtime_index.get_all_file_ids()) {
+                for (const auto& es :
+                     ann_rt_snap->get_file_enhanced_symbols(fid)) {
+                    if (!es) continue;
+                    const auto* ann = annotator.get_annotation(fid, es->id);
+                    if (!ann) continue;
+                    for (const auto& lbl : ann->labels) {
+                        propagator.seed_label(es->id, lbl, 1.0);
+                    }
+                }
+            }
+        }
+        propagator.propagate();
+
+        // An unindexable root still yields a serving (empty) index — the
+        // behaviour before warmup moved off the transport thread, kept so a
+        // partially-readable tree is not turned into a dead server.
+        warmup.finish({});
+    });
 
     // Start MCP server with the live in-process index instead of the stub-only
     // registry so parity and stdio users hit the real handlers.
@@ -191,6 +246,12 @@ int run_mcp(const GlobalFlags& flags) {
                                     &side_effect_analyzer, &propagator,
                                     &ci_engine);
     mcp::register_context_handlers(mcp_server, &runtime_index);
+
+    // Serialises every handler behind the warmup: no handler observes the
+    // index while the warmup thread is still writing it, and after the wait
+    // nothing mutates it again.
+    mcp_server.set_readiness_gate(
+        [&warmup](std::string& error) { return warmup.wait(error); });
 
     // Start a shared IndexServer so CLI commands can also connect
     IndexServer index_server(cfg);
@@ -208,6 +269,11 @@ int run_mcp(const GlobalFlags& flags) {
     if (shared_server_started) {
         index_server.shutdown();
     }
+
+    // The warmup writes into objects that live on this frame; it must finish
+    // before they are destroyed, even when the transport exits early (EOF on
+    // stdin during a long first index is the normal way a client gives up).
+    warmup_thread.join();
 
     return exit_code;
 }

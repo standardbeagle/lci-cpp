@@ -109,6 +109,17 @@ class McpServer {
     /// Registers a single tool.
     void add_tool(ToolDefinition def, ToolHandler handler);
 
+    /// Installs a gate consulted before every tools/call, so the transport can
+    /// answer initialize / tools/list / ping while the index is still being
+    /// built. Without it, run_mcp indexed the whole project before the loop
+    /// started reading stdin, and clients that bound the handshake (slop-mcp
+    /// among them) hit "context deadline exceeded" and marked lci failed.
+    ///
+    /// The gate blocks until the index is usable and returns true; on failure
+    /// it fills `error` and returns false, and the call answers with that
+    /// message instead of reaching a handler holding a half-built index.
+    void set_readiness_gate(std::function<bool(std::string& error)> gate);
+
     /// Returns the number of registered tools.
     size_t tool_count() const;
 
@@ -168,6 +179,7 @@ class McpServer {
     SearchEngine* search_engine_{};
 
     std::vector<RegisteredTool> registered_tools_;
+    std::function<bool(std::string& error)> readiness_gate_;
     std::atomic<bool> running_{false};
     bool initialized_{false};
 };
