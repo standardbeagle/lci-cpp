@@ -105,6 +105,8 @@ grammars are statically linked; runtime dependencies are libc + libstdc++
 | `lci git-analyze` | analyze working-set changes for duplicates, naming, complexity |
 | `lci mcp` | MCP (Model Context Protocol) server over stdio for AI assistants |
 | `lci server` | long-running HTTP server over a Unix socket; per-corpus daemon |
+| `lci servers` | list every index server you are running, and the root each serves |
+| `lci shutdown [--all]` | stop the server for this root, or every one of them |
 | `lci status`, `lci stats` | index health + runtime metrics |
 
 Full CLI reference: `lci --help` or `lci <command> --help`.
@@ -124,6 +126,32 @@ analysis.
 
 Full per-tool reference — parameters, modes, output shapes, errors — is in
 [`docs/TOOLS.md`](docs/TOOLS.md).
+
+### Server lifecycle
+
+Any command that needs an index auto-starts a background server for that root
+and leaves it running, because re-indexing per command would dominate every
+query. Left unbounded that leaks: a caller that indexes a temp directory and
+deletes it strands a multi-GB server per root (175 were once found on one
+host). Three policies bound it, all under a `server` block in `.lci.kdl`:
+
+| Setting | Default | Effect |
+|---|---|---|
+| `idle_timeout_sec` | `1800` | exit after this long with no real request (`/ping` doesn't count); the next command respawns |
+| `max_instances` | `8` | a starting server asks the least-recently-active servers beyond this cap to stop |
+| — | always on | exit within ~500 ms of the indexed root being deleted |
+
+`lci servers` shows what is running and which root each one serves — the socket
+name hashes the root, so the filesystem alone cannot tell you. `lci shutdown`
+stops the server for the current root; `lci shutdown --all` stops every one of
+them.
+
+Both read the instance registry, which only standalone servers publish into.
+The index server embedded in `lci mcp` stays out of it deliberately: it belongs
+to the MCP session, and evicting it would break that session while leaving the
+process alive. Stop those by ending the MCP client. Servers from before 0.8.0
+predate the registry entirely — they answer neither command, and must be killed
+by signal.
 
 ## Architecture
 
