@@ -379,6 +379,20 @@ void ReferenceTracker::process_all_references() {
 
         update_reference_stats(s);
     });
+
+    // Both memos are intra-pass: resolve_reference_target (the sole
+    // reference_cache_ user) only runs inside this function, and the
+    // scope-chain memo's reuse window is the bulk enrichment that just
+    // ended. Dropping them here reclaims the memory (the scope memo holds
+    // FULL ScopeInfo vector copies) and closes a staleness hazard --
+    // reference_cache_ had no per-entry validity guard, so a cached
+    // SymbolID could outlive its symbol across passes. Each pass now
+    // starts from truth and rebuilds its own memo.
+    {
+        std::lock_guard<std::mutex> lk(write_mu_);
+        reference_cache_.clear();
+        scope_chain_cache_.clear();
+    }
 }
 
 void ReferenceTracker::remove_file(FileID file_id) {
