@@ -31,6 +31,18 @@
             }
         },
         {
+            "name": "profile",
+            "inherits": "base",
+            "displayName": "Profile (Release + DWARF + frame pointers)",
+            "description": "Release codegen that perf/heaptrack can attribute: -g for DWARF (symbol + inline resolution, zero runtime cost), -fno-omit-frame-pointer for cheap stack unwinding (~1% cost). Build dir build/profile.",
+            "binaryDir": "${sourceDir}/build/profile",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_CXX_FLAGS": "-g -fno-omit-frame-pointer",
+                "CMAKE_C_FLAGS": "-g -fno-omit-frame-pointer"
+            }
+        },
+        {
             "name": "sanitizer",
             "inherits": "base",
             "displayName": "Sanitizer (ASan + UBSan)",
