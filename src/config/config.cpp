@@ -447,7 +447,9 @@ void apply_performance(Config& cfg, const KdlNode& node) {
 
 void apply_server(Config& cfg, const KdlNode& node) {
     for (const auto& child : node.children) {
-        if (child.name == "idle_timeout_sec") {
+        if (child.name == "max_rss_mb") {
+            get_int(child, cfg.server.max_rss_mb);
+        } else if (child.name == "idle_timeout_sec") {
             get_int(child, cfg.server.idle_timeout_sec);
         } else if (child.name == "max_instances") {
             get_int(child, cfg.server.max_instances);
@@ -853,6 +855,9 @@ std::string validate_config(Config& cfg) {
 
     if (cfg.server.idle_timeout_sec < 0) {
         return "server.idle_timeout_sec cannot be negative";
+    }
+    if (cfg.server.max_rss_mb < 0) {
+        return "server.max_rss_mb cannot be negative (0 disables)";
     }
     if (cfg.server.max_instances < 0) {
         return "server.max_instances cannot be negative";

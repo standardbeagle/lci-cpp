@@ -68,6 +68,15 @@ struct ServerConfig {
     // (registry files in the temp dir carry the activity ordering).
     // 0 disables eviction.
     int max_instances = 8;
+    // RSS self-cap. The err-lookup incident: one lci server reached 26 GB
+    // RSS on a 2 GB corpus and took the host down -- an index server must
+    // never be the process that kills the machine. Each reaper tick reads
+    // VmRSS; over the cap it returns freed arena (malloc_trim) and, if
+    // still over, exits LOUDLY. Exit is transparent (the client respawns
+    // on the next command); a corpus that truly exceeds the cap shows up
+    // as repeated exits -- a visible config decision, never silent
+    // degradation or a dead host. 0 disables. Linux-only enforcement.
+    int max_rss_mb = 4096;
 };
 
 struct SemanticConfig {

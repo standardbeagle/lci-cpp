@@ -9,6 +9,10 @@
 #include <functional>
 #include <thread>
 
+#if defined(__GLIBC__)
+#include <malloc.h>
+#endif
+
 #include <lci/core/reference_tracker.h>
 #include <lci/core/text.h>
 #include <lci/file_info.h>
@@ -77,6 +81,24 @@ uint32_t current_user_id() {
     return h;
 #else
     return static_cast<uint32_t>(::getuid());
+#endif
+}
+
+/// Own VmRSS in MB from /proc/self/status; -1 when unavailable (non-Linux
+/// or unreadable). Used by the reaper's RSS self-cap.
+long read_own_rss_mb() {
+#if defined(__linux__)
+    std::FILE* f = std::fopen("/proc/self/status", "r");
+    if (f == nullptr) return -1;
+    long rss_kb = -1;
+    char line[256];
+    while (std::fgets(line, sizeof(line), f) != nullptr) {
+        if (std::sscanf(line, "VmRSS: %ld kB", &rss_kb) == 1) break;
+    }
+    std::fclose(f);
+    return rss_kb < 0 ? -1 : rss_kb / 1024;
+#else
+    return -1;
 #endif
 }
 
@@ -766,6 +788,40 @@ void IndexServer::reaper_loop(bool root_existed_at_start) {
             if (!std::filesystem::exists(config_.project.root, ec)) {
                 request_self_stop("project root deleted");
                 return;
+            }
+        }
+
+        // RSS self-cap (server.max_rss_mb): an index server must never be
+        // the process that OOMs the host (the err-lookup incident: 26 GB
+        // on a 2 GB corpus). The ladder is trim-then-exit, deliberately
+        // NOT content-store shedding: clear() reuses FileIDs (index
+        // corruption) and an emptied store silently un-searches every
+        // file (candidates with no content are skipped, not reloaded) --
+        // both worse than dying. Exit is already transparent here: the
+        // client respawns the server on the next command, and a corpus
+        // that genuinely exceeds the cap becomes a VISIBLE repeated-exit
+        // config decision instead of silent degradation.
+        if (config_.server.max_rss_mb > 0) {
+            const long rss_mb = read_own_rss_mb();
+            if (rss_mb > config_.server.max_rss_mb) {
+#if defined(__GLIBC__)
+                malloc_trim(0);  // freed arena back to the OS first
+#endif
+                const long after_mb = read_own_rss_mb();
+                if (after_mb > config_.server.max_rss_mb) {
+                    std::fprintf(stderr,
+                                 "lci-server: RSS %ld MB exceeds "
+                                 "server.max_rss_mb %d MB after trim -- "
+                                 "exiting rather than risking the host "
+                                 "(raise the cap or shrink the corpus)\n",
+                                 after_mb, config_.server.max_rss_mb);
+                    request_self_stop("rss cap exceeded");
+                    return;
+                }
+                std::fprintf(stderr,
+                             "lci-server: RSS %ld -> %ld MB after trim "
+                             "(cap %d MB)\n",
+                             rss_mb, after_mb, config_.server.max_rss_mb);
             }
         }
 
