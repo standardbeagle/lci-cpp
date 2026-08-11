@@ -37,7 +37,7 @@ namespace {
 /// Mutable twin of Snapshot::find_ref for write-side mutations. Returns
 /// the slot even when tombstoned is false-only (id != 0 checked), same
 /// decode as the read side.
-Reference* find_mutable_ref(ReferenceTracker::Snapshot& s, uint64_t ref_id) {
+StoredRef* find_mutable_ref(ReferenceTracker::Snapshot& s, uint64_t ref_id) {
     const auto file_id = static_cast<FileID>(ref_id >> 32);
     const auto local = static_cast<uint32_t>(ref_id & 0xFFFFFFFFu);
     if (local == 0) return nullptr;
@@ -45,12 +45,12 @@ Reference* find_mutable_ref(ReferenceTracker::Snapshot& s, uint64_t ref_id) {
     if (it == s.refs_by_file.end()) return nullptr;
     auto& vec = it->second;
     if (local > vec.size()) return nullptr;
-    Reference& r = vec[local - 1];
-    return r.id != 0 ? &r : nullptr;
+    StoredRef& r = vec[local - 1];
+    return r.dead ? nullptr : &r;
 }
 }  // namespace
 
-const Reference* ReferenceTracker::Snapshot::find_ref(uint64_t ref_id) const {
+const StoredRef* ReferenceTracker::Snapshot::find_ref(uint64_t ref_id) const {
     const auto file_id = static_cast<FileID>(ref_id >> 32);
     const auto local = static_cast<uint32_t>(ref_id & 0xFFFFFFFFu);
     if (local == 0) return nullptr;
@@ -58,15 +58,34 @@ const Reference* ReferenceTracker::Snapshot::find_ref(uint64_t ref_id) const {
     if (it == refs_by_file.end()) return nullptr;
     const auto& vec = it->second;
     if (local > vec.size()) return nullptr;
-    const Reference& r = vec[local - 1];
-    return r.id != 0 ? &r : nullptr;
+    const StoredRef& r = vec[local - 1];
+    return r.dead ? nullptr : &r;
+}
+
+Reference ReferenceTracker::Snapshot::materialize_ref(
+    FileID file_id, uint32_t local_id, const StoredRef& r) const {
+    Reference out;
+    out.id = (static_cast<uint64_t>(file_id) << 32) |
+             static_cast<uint64_t>(local_id);
+    out.source_symbol = r.source_symbol;
+    out.target_symbol = r.target_symbol;
+    out.file_id = file_id;
+    out.line = r.line;
+    out.column = r.column;
+    out.type = r.type;
+    out.strength = r.strength;
+    out.ambiguous = r.ambiguous;
+    if (r.name_id < ref_names.size()) {
+        out.referenced_name = ref_names[r.name_id];
+    }
+    return out;
 }
 
 size_t ReferenceTracker::Snapshot::live_ref_count() const {
     size_t n = 0;
     for (const auto& [fid, vec] : refs_by_file) {
         for (const auto& r : vec) {
-            if (r.id != 0) ++n;
+            if (!r.dead) ++n;
         }
     }
     return n;
@@ -77,8 +96,10 @@ std::vector<Reference> ReferenceTracker::Snapshot::get_references_by_id(
     std::vector<Reference> result;
     result.reserve(ref_ids.size());
     for (uint64_t id : ref_ids) {
-        if (const Reference* r = find_ref(id)) {
-            result.push_back(*r);
+        if (const StoredRef* r = find_ref(id)) {
+            result.push_back(materialize_ref(
+                static_cast<FileID>(id >> 32),
+                static_cast<uint32_t>(id & 0xFFFFFFFFu), *r));
         }
     }
     return result;
@@ -238,6 +259,12 @@ void ReferenceTracker::clear() {
     std::lock_guard<std::mutex> lk(write_mu_);
     import_data_.clear();
     reference_cache_.clear();
+    // Reset the name intern table WITH the pool (a fresh snapshot has an
+    // empty pool; the table must never point past it). The pass-end memo
+    // clear below deliberately does NOT touch this table -- pool ids stay
+    // valid across passes, and keeping the table is what makes re-indexed
+    // files reuse existing pool entries instead of appending duplicates.
+    ref_name_ids_.clear();
     scope_chain_cache_.clear();
     file_resolution_meta_.clear();
     next_symbol_id_ = 1;
@@ -291,21 +318,27 @@ std::vector<EnhancedSymbol> ReferenceTracker::process_file(
             enhanced.push_back(std::move(es));
         }
 
-        // Store references for later processing. Local id = position + 1,
-        // assigned HERE rather than trusted from the caller: the extractor
-        // does emit dense 1-based ids, but hand-built references (tests,
-        // ad-hoc callers) arrive with id 0, and the slot-addressed store
-        // only works if density is enforced by construction.
+        // Store references for later processing, in the slim storage
+        // shape. Local id = position + 1, assigned by construction (the
+        // caller's ids are untrusted -- tests pass id 0); id and file_id
+        // are never stored, they ARE the slot address. Names intern into
+        // the snapshot pool: every repeat of a name across the corpus
+        // costs 4 bytes.
         {
             auto& vec = s.refs_by_file[file_id];
             vec.clear();
             vec.reserve(references.size());
             for (const auto& ref : references) {
-                Reference r = ref;
-                r.file_id = file_id;
-                r.id = make_global_ref_id(
-                    file_id, static_cast<uint32_t>(vec.size() + 1));
-                vec.push_back(std::move(r));
+                StoredRef r;
+                r.source_symbol = ref.source_symbol;
+                r.target_symbol = ref.target_symbol;
+                r.line = ref.line;
+                r.column = ref.column;
+                r.type = ref.type;
+                r.strength = ref.strength;
+                r.ambiguous = ref.ambiguous;
+                r.name_id = intern_ref_name(s, ref.referenced_name);
+                vec.push_back(r);
             }
         }
     });
@@ -348,31 +381,38 @@ void ReferenceTracker::process_all_references() {
         });
 
         for (auto& [owner_fid, ref_vec] : s.refs_by_file) {
-          for (auto& ref : ref_vec) {
-            if (ref.id == 0) continue;  // tombstone
+          for (uint32_t idx = 0; idx < ref_vec.size(); ++idx) {
+            StoredRef& ref = ref_vec[idx];
+            if (ref.dead) continue;
+            const uint64_t ref_id = make_global_ref_id(owner_fid, idx + 1);
+            const std::string_view name =
+                ref.name_id < s.ref_names.size()
+                    ? std::string_view(s.ref_names[ref.name_id])
+                    : std::string_view{};
             SymbolID source_id = ref.source_symbol;
             SymbolID target_id = ref.target_symbol;
 
             if (source_id == 0) {
-                source_id = find_symbol_at_location(s, ref.file_id, ref.line,
+                source_id = find_symbol_at_location(s, owner_fid, ref.line,
                                                      ref.column);
                 if (source_id != 0) ref.source_symbol = source_id;
             }
             if (target_id == 0) {
-                auto it = symbols_by_file.find(ref.file_id);
+                auto it = symbols_by_file.find(owner_fid);
                 std::span<const SymbolID> file_syms;
                 if (it != symbols_by_file.end()) {
                     file_syms = it->second;
                 }
-                target_id = resolve_reference_target(s, ref, file_syms);
+                target_id = resolve_reference_target(s, ref, owner_fid, name,
+                                                     file_syms);
                 if (target_id != 0) ref.target_symbol = target_id;
             }
 
             if (source_id != 0) {
-                s.outgoing_refs[source_id].push_back(ref.id);
+                s.outgoing_refs[source_id].push_back(ref_id);
             }
             if (target_id != 0) {
-                s.incoming_refs[target_id].push_back(ref.id);
+                s.incoming_refs[target_id].push_back(ref_id);
             }
           }
         }
@@ -406,12 +446,12 @@ void ReferenceTracker::remove_file(FileID file_id) {
             if (auto it = s.outgoing_refs.find(sym_id);
                 it != s.outgoing_refs.end()) {
                 for (uint64_t ref_id : it->second) {
-                    if (Reference* r = find_mutable_ref(s, ref_id)) {
+                    if (StoredRef* r = find_mutable_ref(s, ref_id)) {
                         if (r->target_symbol != 0) {
                             remove_from_incoming_refs(s, r->target_symbol,
                                                       ref_id);
                         }
-                        *r = Reference{};  // tombstone (id = 0)
+                        r->dead = true;
                     }
                 }
                 s.outgoing_refs.erase(it);
@@ -421,7 +461,7 @@ void ReferenceTracker::remove_file(FileID file_id) {
             if (auto it = s.incoming_refs.find(sym_id);
                 it != s.incoming_refs.end()) {
                 for (uint64_t ref_id : it->second) {
-                    if (const Reference* r = find_mutable_ref(s, ref_id)) {
+                    if (const StoredRef* r = find_mutable_ref(s, ref_id)) {
                         if (r->source_symbol != 0) {
                             remove_from_outgoing_refs(s, r->source_symbol,
                                                       ref_id);
@@ -478,7 +518,10 @@ std::vector<Reference> ReferenceTracker::get_all_references() const {
     auto snap = load_snapshot();
     std::vector<Reference> out;
     out.reserve(snap->live_ref_count());
-    snap->for_each_live_ref([&](const Reference& ref) { out.push_back(ref); });
+    snap->for_each_live_ref([&](FileID fid, uint32_t local,
+                                const StoredRef& ref) {
+        out.push_back(snap->materialize_ref(fid, local, ref));
+    });
     return out;
 }
 
@@ -681,6 +724,17 @@ bool ReferenceTracker::compute_is_exported(std::string_view path,
     }
 }
 
+uint32_t ReferenceTracker::intern_ref_name(Snapshot& s,
+                                           std::string_view name) {
+    if (auto it = ref_name_ids_.find(name); it != ref_name_ids_.end()) {
+        return it->second;
+    }
+    const auto id = static_cast<uint32_t>(s.ref_names.size());
+    s.ref_names.emplace_back(name);
+    ref_name_ids_.emplace(std::string(name), id);
+    return id;
+}
+
 ScopeChain ReferenceTracker::build_symbol_scope_chain(
     const Symbol& symbol, std::span<const ScopeInfo> scopes) {
 
@@ -839,14 +893,13 @@ bool is_low_quality_path(std::string_view path) {
 }  // namespace
 
 SymbolID ReferenceTracker::resolve_reference_target(
-    const Snapshot& s, const Reference& ref,
-    std::span<const SymbolID> file_symbol_ids) {
+    const Snapshot& s, const StoredRef& ref, FileID owner_fid,
+    std::string_view full_name, std::span<const SymbolID> file_symbol_ids) {
 
-    const auto& full_name = ref.referenced_name;
     if (full_name.empty()) return 0;
 
     uint64_t name_hash = fnv1a_hash_name(full_name);
-    uint64_t cache_key = (static_cast<uint64_t>(ref.file_id) << 32) |
+    uint64_t cache_key = (static_cast<uint64_t>(owner_fid) << 32) |
                           (name_hash & 0xFFFFFFFF);
 
     if (auto it = reference_cache_.find(cache_key);
@@ -894,7 +947,7 @@ SymbolID ReferenceTracker::resolve_reference_target(
     SymbolID resolved = 0;
     if (!candidates.empty()) {
         LangFamily ref_family = LangFamily::kUnknown;
-        if (auto mit = file_resolution_meta_.find(ref.file_id);
+        if (auto mit = file_resolution_meta_.find(owner_fid);
             mit != file_resolution_meta_.end()) {
             ref_family = mit->second.language_family;
         }
@@ -917,7 +970,7 @@ SymbolID ReferenceTracker::resolve_reference_target(
         }
 
         resolved = import_resolver_.resolve_symbol_reference(
-            ref.file_id, name, filtered,
+            owner_fid, name, filtered,
             [&s](SymbolID id) { return s.symbols.get(id); });
 
         // Ambiguous-name fallback: no import/same-file/export evidence.
@@ -958,8 +1011,9 @@ void ReferenceTracker::update_reference_stats(Snapshot& s) {
     for (const auto& [sym_id, refs] : s.outgoing_refs) {
         sym_refs += static_cast<int>(refs.size());
     }
-    s.for_each_live_ref(
-        [&](const Reference& ref) { files_seen[ref.file_id] = true; });
+    s.for_each_live_ref([&](FileID fid, uint32_t, const StoredRef&) {
+        files_seen[fid] = true;
+    });
 
     s.stats.total_references = static_cast<int>(s.live_ref_count());
     s.stats.total_symbols = s.symbols.size();
@@ -1005,7 +1059,7 @@ std::vector<SymbolID> ReferenceTracker::get_symbols_by_ref_type(
     std::vector<SymbolID> result;
 
     for (uint64_t ref_id : it->second) {
-        const Reference* ref_ptr = snap->find_ref(ref_id);
+        const StoredRef* ref_ptr = snap->find_ref(ref_id);
         if (ref_ptr == nullptr) continue;
         const auto& ref = *ref_ptr;
         if (ref.type != ref_type) continue;

@@ -256,18 +256,18 @@ int run_debug_memprofile(const GlobalFlags& flags,
         for (const auto& [fid, v] : snap->scopes_by_file) {
             file_scope_entries += v.size();
         }
-        size_t ref_string_bytes = 0;
         size_t ref_count = 0;
-        snap->for_each_live_ref([&](const lci::Reference& r) {
-            ref_string_bytes += r.referenced_name.size();
-            ++ref_count;
-        });
+        snap->for_each_live_ref(
+            [&](lci::FileID, uint32_t, const lci::StoredRef&) { ++ref_count; });
+        size_t ref_name_pool_bytes = 0;
+        for (const auto& n : snap->ref_names) ref_name_pool_bytes += n.size();
         std::printf("\n== structure census ==\n");
         std::printf("symbols:                 %d\n", snap->symbols.size());
-        std::printf("references:              %zu (sizeof %zu B each, "
-                    "%.1f MB strings)\n",
-                    ref_count, sizeof(Reference),
-                    mb(static_cast<int64_t>(ref_string_bytes)));
+        std::printf("references:              %zu (sizeof %zu B stored, "
+                    "%.1f MB name pool of %zu)\n",
+                    ref_count, sizeof(lci::StoredRef),
+                    mb(static_cast<int64_t>(ref_name_pool_bytes)),
+                    snap->ref_names.size());
         std::printf("scopes_by_file entries:  %zu\n", file_scope_entries);
         const auto pstats = postings_index.memory_stats();
         std::printf("postings tokens:         %d (%d files, %d partial; "

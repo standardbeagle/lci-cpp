@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -299,6 +300,32 @@ struct ScopeChainCacheEntry {
 };
 
 // ---------------------------------------------------------------------------
+// StoredRef - the reference AS STORED in the tracker snapshot
+// ---------------------------------------------------------------------------
+
+/// Storage twin of Reference. The public Reference is the materialized API
+/// type; this is what the snapshot holds, one per reference on the object
+/// large corpora hold the most of. Omitted relative to Reference:
+///   - id:       derivable from the (file, slot) position in refs_by_file
+///   - file_id:  the refs_by_file key
+///   - referenced_name: a uint32 into the snapshot's append-only name
+///     pool -- names repeat massively (every useState call re-stored
+///     "useState"), 9.3 MB of per-ref strings at next.js scale
+/// `dead` replaces the old id==0 tombstone convention explicitly.
+/// 32 bytes vs Reference's 80 + string heap.
+struct StoredRef {
+    SymbolID source_symbol{};
+    SymbolID target_symbol{};
+    int line{};
+    int column{};
+    uint32_t name_id{};
+    ReferenceType type{};
+    RefStrength strength{};
+    bool ambiguous{};
+    bool dead{};
+};
+
+// ---------------------------------------------------------------------------
 // ReferenceTracker - bidirectional symbol references and scope relationships
 // ---------------------------------------------------------------------------
 
@@ -430,7 +457,12 @@ class ReferenceTracker {
         /// tombstones only live between a symbol removal and its file's
         /// next reindex. Use find_ref()/for_each_live_ref(), which skip
         /// tombstones and bounds-check.
-        absl::flat_hash_map<FileID, std::vector<Reference>> refs_by_file;
+        absl::flat_hash_map<FileID, std::vector<StoredRef>> refs_by_file;
+        /// Append-only interned name pool for StoredRef::name_id. deque:
+        /// element addresses stable under append, copied whole on RCU
+        /// clone (the single writer keeps the tracker-side intern table
+        /// consistent with it). Never shrinks; vocabulary is bounded.
+        std::deque<std::string> ref_names;
         absl::flat_hash_map<SymbolID, std::vector<uint64_t>> incoming_refs;
         absl::flat_hash_map<SymbolID, std::vector<uint64_t>> outgoing_refs;
         absl::flat_hash_map<FileID, std::vector<ScopeInfo>> scopes_by_file;
@@ -438,15 +470,18 @@ class ReferenceTracker {
             line_to_symbols_by_file;
         ReferenceStats stats{};
 
-        /// Resolves a global ref id to its slot; nullptr when the file
-        /// is gone, the index is out of range, or the slot is tombstoned.
-        const Reference* find_ref(uint64_t ref_id) const;
-        /// Visits every live (non-tombstoned) reference.
+        /// Resolves a global ref id to its stored slot; nullptr when the
+        /// file is gone, the index is out of range, or the slot is dead.
+        const StoredRef* find_ref(uint64_t ref_id) const;
+        /// Materializes the public Reference shape from a stored slot.
+        Reference materialize_ref(FileID file_id, uint32_t local_id,
+                                  const StoredRef& r) const;
+        /// Visits every live reference as (owning file, local id, stored).
         template <class Fn>
         void for_each_live_ref(Fn&& fn) const {
             for (const auto& [fid, vec] : refs_by_file) {
-                for (const auto& r : vec) {
-                    if (r.id != 0) fn(r);
+                for (uint32_t i = 0; i < vec.size(); ++i) {
+                    if (!vec[i].dead) fn(fid, i + 1, vec[i]);
                 }
             }
         }
@@ -498,6 +533,8 @@ class ReferenceTracker {
     SymbolLocationIndex* symbol_location_index_{};
 
     absl::flat_hash_map<uint64_t, SymbolID> reference_cache_;
+    /// Writer-side intern table for Snapshot::ref_names (name -> pool id).
+    absl::flat_hash_map<std::string, uint32_t> ref_name_ids_;
     absl::flat_hash_map<uint64_t, ScopeChainCacheEntry> scope_chain_cache_;  // hash-cons table
 
     /// Per-file resolution metadata derived from the path at process_file
@@ -530,9 +567,14 @@ class ReferenceTracker {
 
     SymbolID find_symbol_at_location(const Snapshot& s, FileID file_id,
                                      int line, int col) const;
+    /// Interns a reference name into the snapshot pool (writer-side;
+    /// the tracker-level table maps name -> pool id and is kept in sync
+    /// by the single-writer discipline of write_snapshot).
+    uint32_t intern_ref_name(Snapshot& s, std::string_view name);
+
     SymbolID resolve_reference_target(
-        const Snapshot& s, const Reference& ref,
-        std::span<const SymbolID> file_symbol_ids);
+        const Snapshot& s, const StoredRef& ref, FileID owner_fid,
+        std::string_view name, std::span<const SymbolID> file_symbol_ids);
 
     void update_reference_stats(Snapshot& s);
     void update_reference_stats_for_symbol(Snapshot& s, SymbolID symbol_id);
