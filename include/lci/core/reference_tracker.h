@@ -250,8 +250,15 @@ class PostingsIndex {
     struct Snapshot {
         absl::flat_hash_map<std::string, uint32_t> token_to_id;
         /// Indexed by token id; slot i belongs to the token whose
-        /// token_to_id value is i. Never shrinks (see above).
-        std::vector<absl::flat_hash_map<FileID, int>> postings;
+        /// token_to_id value is i. Never shrinks (see above). Each
+        /// posting list is a plain (file, first-offset) vector -- 8 bytes
+        /// per entry exactly. The previous per-token flat_hash_map cost
+        /// ~200 B of fixed overhead per token plus ~2x slot slack (53k
+        /// maps for 818k entries on the self-census); no read needs
+        /// keyed lookup (find() copies the whole list out), and the
+        /// double-index guard is per-file via reverse_keys, so the hash
+        /// bought nothing.
+        std::vector<std::vector<std::pair<FileID, int>>> postings;
         absl::flat_hash_map<FileID, std::vector<uint32_t>> reverse_keys;
         /// Files indexed with a capped token set. Unioned into every
         /// find() result — see find() for why the superset is mandatory.

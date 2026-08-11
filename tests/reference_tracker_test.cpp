@@ -695,6 +695,24 @@ TEST(PostingsIndexTest, RemoveFileClearsPartialMarker) {
     EXPECT_TRUE(files.empty());
 }
 
+TEST(PostingsIndexTest, ReindexWithoutRemoveDoesNotDuplicate) {
+    // The append-only posting lists rely on a per-file guard instead of a
+    // per-entry contains(): re-indexing a file without removing it first
+    // must clear its old entries, or find() would return the file twice.
+    PostingsIndex pi;
+    pi.index_file(1, "alpha beta");
+    pi.index_file(1, "alpha gamma");
+
+    std::vector<FileID> files;
+    absl::flat_hash_map<FileID, int> offsets;
+    pi.find("alpha", true, files, offsets);
+    EXPECT_EQ(files.size(), 1u);
+    pi.find("beta", true, files, offsets);
+    EXPECT_TRUE(files.empty());  // old token gone with the re-index
+    pi.find("gamma", true, files, offsets);
+    EXPECT_EQ(files.size(), 1u);
+}
+
 TEST(PostingsIndexTest, OverlongTokensAreNotIndexed) {
     // 64 bytes is kept, 65 is dropped -- uniformly, so an overlong query
     // misses postings on every file and the engine scan-all fallback

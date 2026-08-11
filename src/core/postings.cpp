@@ -175,9 +175,26 @@ void PostingsIndex::index_file_pretokenized(FileID file_id,
 
     write_snapshot([&](Snapshot& snap) {
         if (truncated) snap.partial_files.insert(file_id);
+
+        // Double-index guard, per FILE not per entry: a re-index without
+        // a prior remove would append duplicate postings, so clear the
+        // file's old entries first. The normal pipeline removes stale
+        // data before re-integrating, making this a no-op there.
+        if (auto rk = snap.reverse_keys.find(file_id);
+            rk != snap.reverse_keys.end()) {
+            for (uint32_t id : rk->second) {
+                auto& vec = snap.postings[id];
+                for (auto it = vec.begin(); it != vec.end(); ++it) {
+                    if (it->first == file_id) {
+                        vec.erase(it);
+                        break;
+                    }
+                }
+            }
+        }
+
         std::vector<uint32_t> ids;
         ids.reserve(tokens.size());
-
         for (auto& pt : tokens) {
             // Intern: move the string in only on first sight; every later
             // appearance of this token, in any file, costs 4 bytes.
@@ -186,11 +203,10 @@ void PostingsIndex::index_file_pretokenized(FileID file_id,
                 static_cast<uint32_t>(snap.postings.size()));
             if (inserted) snap.postings.emplace_back();
             const uint32_t id = it->second;
-            auto& m = snap.postings[id];
-            if (!m.contains(file_id)) {
-                m[file_id] = pt.offset;
-                ids.push_back(id);
-            }
+            // tokenize dedups per file and the guard above cleared any
+            // prior entries, so a plain append cannot duplicate.
+            snap.postings[id].emplace_back(file_id, pt.offset);
+            ids.push_back(id);
         }
         snap.reverse_keys[file_id] = std::move(ids);
     });
@@ -211,7 +227,13 @@ void PostingsIndex::remove_file(FileID file_id) {
         if (rk_it == snap.reverse_keys.end()) return;
 
         for (uint32_t id : rk_it->second) {
-            snap.postings[id].erase(file_id);
+            auto& vec = snap.postings[id];
+            for (auto it = vec.begin(); it != vec.end(); ++it) {
+                if (it->first == file_id) {
+                    vec.erase(it);
+                    break;
+                }
+            }
             // The id + interned string stay even when postings empty --
             // see the Snapshot comment.
         }
@@ -242,9 +264,9 @@ void PostingsIndex::find(std::string_view token, bool case_insensitive,
     auto snap = load_snapshot();
     auto it = snap->token_to_id.find(tok);
     if (it != snap->token_to_id.end()) {
-        const auto& m = snap->postings[it->second];
-        files_out.reserve(m.size() + snap->partial_files.size());
-        for (const auto& [fid, off] : m) {
+        const auto& vec = snap->postings[it->second];
+        files_out.reserve(vec.size() + snap->partial_files.size());
+        for (const auto& [fid, off] : vec) {
             files_out.push_back(fid);
             offsets_out[fid] = off;
         }
@@ -269,8 +291,8 @@ PostingsIndex::MemoryStats PostingsIndex::memory_stats() const {
     for (const auto& [tok, id] : snap->token_to_id) {
         st.token_string_bytes += tok.size();
     }
-    for (const auto& m : snap->postings) {
-        st.posting_entries += m.size();
+    for (const auto& vec : snap->postings) {
+        st.posting_entries += vec.size();
     }
     for (const auto& [fid, ids] : snap->reverse_keys) {
         st.reverse_key_entries += ids.size();
@@ -287,8 +309,8 @@ int PostingsIndex::token_count() const {
     // file sets have emptied are storage residue, not indexed tokens.
     auto snap = load_snapshot();
     int live = 0;
-    for (const auto& m : snap->postings) {
-        if (!m.empty()) ++live;
+    for (const auto& vec : snap->postings) {
+        if (!vec.empty()) ++live;
     }
     return live;
 }
