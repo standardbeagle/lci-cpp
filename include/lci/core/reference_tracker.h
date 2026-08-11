@@ -150,6 +150,11 @@ inline size_t postings_token_cap(bool is_code_file, bool payload_content,
 
 class PostingsIndex {
   public:
+    /// Longest token retained by the tokenizer. Uniform on index AND
+    /// implied for queries: a longer query misses postings everywhere,
+    /// so the search engine's scan-all fallback answers it exactly.
+    static constexpr size_t kMaxTokenBytes = 64;
+
     PostingsIndex();
 
     /// Indexes a file's content, recording first occurrence of each token.
@@ -199,6 +204,16 @@ class PostingsIndex {
 
     /// Number of files whose token set was capped (recorded PARTIAL).
     int partial_file_count() const;
+
+    /// Byte-census for `lci debug memprofile`: interned token string
+    /// bytes, total (token,file) posting entries, and reverse-key
+    /// entries. Estimates content, not container overhead.
+    struct MemoryStats {
+        size_t token_string_bytes{};
+        size_t posting_entries{};
+        size_t reverse_key_entries{};
+    };
+    MemoryStats memory_stats() const;
 
     /// Returns the number of distinct tokens indexed.
     int token_count() const;

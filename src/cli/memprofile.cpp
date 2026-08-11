@@ -269,9 +269,22 @@ int run_debug_memprofile(const GlobalFlags& flags,
                     ref_count, sizeof(Reference),
                     mb(static_cast<int64_t>(ref_string_bytes)));
         std::printf("scopes_by_file entries:  %zu\n", file_scope_entries);
-        std::printf("postings tokens:         %d (%d files, %d partial)\n",
+        const auto pstats = postings_index.memory_stats();
+        std::printf("postings tokens:         %d (%d files, %d partial; "
+                    "%.1f MB strings, %zu postings, %zu reverse keys)\n",
                     postings_index.token_count(), postings_index.file_count(),
-                    postings_index.partial_file_count());
+                    postings_index.partial_file_count(),
+                    mb(static_cast<int64_t>(pstats.token_string_bytes)),
+                    pstats.posting_entries, pstats.reverse_key_entries);
+        size_t in_ref_ids = 0, out_ref_ids = 0;
+        for (const auto& [sid, v] : snap->incoming_refs) in_ref_ids += v.size();
+        for (const auto& [sid, v] : snap->outgoing_refs) out_ref_ids += v.size();
+        std::printf("ref id lists:            %zu incoming / %zu outgoing "
+                    "(%zu symbols mapped)\n",
+                    in_ref_ids, out_ref_ids,
+                    snap->incoming_refs.size() + snap->outgoing_refs.size());
+        std::printf("content store:           %.1f MB\n",
+                    mb(content_store->get_memory_usage()));
 
         size_t chain_entries = 0, chain_strings = 0, sym_strings = 0,
                annotations = 0;

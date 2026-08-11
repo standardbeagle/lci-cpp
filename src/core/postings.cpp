@@ -93,6 +93,13 @@ void PostingsIndex::add_token(absl::flat_hash_map<std::string, int>& dst,
     }
 
     if (trimmed.size() < 3) return;
+    // Length ceiling: identifiers top out well under 64 bytes; longer
+    // "tokens" are base64/minified runs that averaged 387 B/token and
+    // held 21 MB of the 54k-token self-index census while never being
+    // searched. The rule is uniform, so a >64-byte query misses postings
+    // on every file equally and the engine's scan-all fallback handles
+    // it -- exact results, just unfiltered for absurd queries.
+    if (trimmed.size() > kMaxTokenBytes) return;
 
     // try_emplace does the lookup + insert in one hash op (vs old code's
     // contains() + operator[] = two ops). Materialise the std::string
@@ -254,6 +261,21 @@ void PostingsIndex::find(std::string_view token, bool case_insensitive,
             offsets_out[fid] = -1;
         }
     }
+}
+
+PostingsIndex::MemoryStats PostingsIndex::memory_stats() const {
+    auto snap = load_snapshot();
+    MemoryStats st;
+    for (const auto& [tok, id] : snap->token_to_id) {
+        st.token_string_bytes += tok.size();
+    }
+    for (const auto& m : snap->postings) {
+        st.posting_entries += m.size();
+    }
+    for (const auto& [fid, ids] : snap->reverse_keys) {
+        st.reverse_key_entries += ids.size();
+    }
+    return st;
 }
 
 int PostingsIndex::partial_file_count() const {

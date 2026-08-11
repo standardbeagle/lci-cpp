@@ -695,6 +695,25 @@ TEST(PostingsIndexTest, RemoveFileClearsPartialMarker) {
     EXPECT_TRUE(files.empty());
 }
 
+TEST(PostingsIndexTest, OverlongTokensAreNotIndexed) {
+    // 64 bytes is kept, 65 is dropped -- uniformly, so an overlong query
+    // misses postings on every file and the engine scan-all fallback
+    // answers it. No identifier is 65 bytes; only base64/minified runs
+    // are, and they averaged 387 B/token holding 21 MB of a census.
+    PostingsIndex pi;
+    std::string keep(PostingsIndex::kMaxTokenBytes, 'a');
+    std::string drop(PostingsIndex::kMaxTokenBytes + 1, 'b');
+    pi.index_file(1, keep + " " + drop);
+
+    std::vector<FileID> files;
+    absl::flat_hash_map<FileID, int> offsets;
+    pi.find(keep, true, files, offsets);
+    EXPECT_EQ(files.size(), 1u);
+    pi.find(drop, true, files, offsets);
+    EXPECT_TRUE(files.empty());
+    EXPECT_EQ(pi.token_count(), 1);
+}
+
 TEST(PostingsIndexTest, TokenizeContentReportsTruncation) {
     bool truncated = false;
     auto toks =
