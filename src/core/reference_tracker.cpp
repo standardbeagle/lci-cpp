@@ -681,13 +681,15 @@ bool ReferenceTracker::compute_is_exported(std::string_view path,
     }
 }
 
-std::vector<ScopeInfo> ReferenceTracker::build_symbol_scope_chain(
+ScopeChain ReferenceTracker::build_symbol_scope_chain(
     const Symbol& symbol, std::span<const ScopeInfo> scopes) {
 
     int scope_count = 0;
     uint64_t cache_key = create_scope_chain_cache_key(symbol, scopes,
                                                        scope_count);
 
+    // Hash-cons: a cache hit hands back the SAME shared chain, so every
+    // symbol under the same enclosing scopes points at one heap copy.
     if (auto it = scope_chain_cache_.find(cache_key);
         it != scope_chain_cache_.end()) {
         const auto& entry = it->second;
@@ -698,23 +700,24 @@ std::vector<ScopeInfo> ReferenceTracker::build_symbol_scope_chain(
         }
     }
 
-    std::vector<ScopeInfo> chain;
-    chain.reserve(4);
+    auto chain = std::make_shared<std::vector<ScopeInfo>>();
+    chain->reserve(4);
     for (const auto& scope : scopes) {
         if (scope.start_line <= symbol.line &&
             (scope.end_line == 0 || scope.end_line >= symbol.line)) {
-            chain.push_back(scope);
+            chain->push_back(scope);
         }
     }
 
+    ScopeChain shared{std::move(chain)};
     scope_chain_cache_[cache_key] = ScopeChainCacheEntry{
-        .scope_chain = chain,
+        .scope_chain = shared,
         .symbol_line = symbol.line,
         .symbol_end_line = symbol.end_line,
         .scope_count = scope_count,
     };
 
-    return chain;
+    return shared;
 }
 
 uint64_t ReferenceTracker::create_scope_chain_cache_key(

@@ -289,8 +289,12 @@ class PostingsIndex {
 // ScopeChainCacheEntry - cached scope chain with collision verification
 // ---------------------------------------------------------------------------
 
+/// Hash-cons table entry: the SHARED chain handed to every symbol whose
+/// key + guards match. Sharing is the memory win (chains were the largest
+/// structural census term at next.js scale); the line/count fields guard
+/// against key collisions exactly as before.
 struct ScopeChainCacheEntry {
-    std::vector<ScopeInfo> scope_chain;
+    ScopeChain scope_chain;
     int symbol_line{};
     int symbol_end_line{};
     int scope_count{};
@@ -496,7 +500,7 @@ class ReferenceTracker {
     SymbolLocationIndex* symbol_location_index_{};
 
     absl::flat_hash_map<uint64_t, SymbolID> reference_cache_;
-    absl::flat_hash_map<uint64_t, ScopeChainCacheEntry> scope_chain_cache_;
+    absl::flat_hash_map<uint64_t, ScopeChainCacheEntry> scope_chain_cache_;  // hash-cons table
 
     /// Per-file resolution metadata derived from the path at process_file
     /// time. language_family gates cross-language linking; low_quality
@@ -522,7 +526,7 @@ class ReferenceTracker {
     static bool compute_is_exported(std::string_view path,
                                     std::string_view symbol_name);
 
-    std::vector<ScopeInfo> build_symbol_scope_chain(
+    ScopeChain build_symbol_scope_chain(
         const Symbol& symbol, std::span<const ScopeInfo> scopes);
     uint64_t create_scope_chain_cache_key(
         const Symbol& symbol, std::span<const ScopeInfo> scopes,

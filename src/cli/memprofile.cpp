@@ -286,13 +286,20 @@ int run_debug_memprofile(const GlobalFlags& flags,
         std::printf("content store:           %.1f MB\n",
                     mb(content_store->get_memory_usage()));
 
-        size_t chain_entries = 0, chain_strings = 0, sym_strings = 0,
-               annotations = 0;
+        // Chains are interned (hash-consed): count unique storage once,
+        // and report how many symbol references share it.
+        size_t chain_entries = 0, chain_strings = 0, chain_refs = 0,
+               sym_strings = 0, annotations = 0;
+        std::unordered_set<const void*> chains_seen;
         snap->symbols.range([&](SymbolID, const EnhancedSymbol& es) {
-            chain_entries += es.scope_chain.size();
-            for (const auto& sc : es.scope_chain) {
-                chain_strings +=
-                    sc.name.size() + sc.full_path.size() + sc.language.size();
+            chain_refs += es.scope_chain.size();
+            if (es.scope_chain.storage_key() != nullptr &&
+                chains_seen.insert(es.scope_chain.storage_key()).second) {
+                chain_entries += es.scope_chain.size();
+                for (const auto& sc : es.scope_chain) {
+                    chain_strings += sc.name.size() + sc.full_path.size() +
+                                     sc.language.size();
+                }
             }
             sym_strings += es.symbol.name.size() + es.type_info.size() +
                            es.doc_comment.size() + es.signature.size();
@@ -303,9 +310,10 @@ int run_debug_memprofile(const GlobalFlags& flags,
         for (const auto& [fid, lm] : snap->line_to_symbols_by_file) {
             for (const auto& [line, v] : lm) line_entries += v.size();
         }
-        std::printf("scope_chain entries:     %zu (%.1f MB strings, "
-                    "sizeof(ScopeInfo)=%zu)\n",
-                    chain_entries, mb(static_cast<int64_t>(chain_strings)),
+        std::printf("scope_chain entries:     %zu unique (%zu referenced, "
+                    "%.1f MB strings, sizeof(ScopeInfo)=%zu)\n",
+                    chain_entries, chain_refs,
+                    mb(static_cast<int64_t>(chain_strings)),
                     sizeof(ScopeInfo));
         std::printf("symbol strings:          %.1f MB "
                     "(sizeof(EnhancedSymbol)=%zu, %zu annotations)\n",

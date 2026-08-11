@@ -1,9 +1,11 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
+#include <lci/scope.h>
 #include <lci/types.h>
 
 namespace lci {
@@ -25,8 +27,42 @@ struct Symbol {
 
 /// Forward declarations for types defined in other headers.
 struct Reference;
-struct ScopeInfo;
 struct RefStats;
+
+/// Interned, immutable scope chain. Symbols with identical enclosing
+/// scopes (every member of a class, every function in a module) share one
+/// heap chain via hash-consing at build time; copying a symbol or cloning
+/// a snapshot refcounts instead of deep-copying chain structs + strings.
+/// The next.js-scale census measured 295k chain entries (42.5 MB structs
+/// + 34.9 MB strings) as the largest structural term before interning.
+/// Iteration API mirrors std::vector so read sites are unchanged.
+/// shared_ptr is deliberate despite the no-shared_ptr-in-hot-paths rule:
+/// chains are read on inspect/context paths (not /search), iteration
+/// derefs once with zero refcount traffic, and the refcount is the entire
+/// point at copy sites.
+class ScopeChain {
+  public:
+    ScopeChain() = default;
+    explicit ScopeChain(std::shared_ptr<const std::vector<ScopeInfo>> chain)
+        : chain_(std::move(chain)) {}
+
+    const ScopeInfo* begin() const { return storage().data(); }
+    const ScopeInfo* end() const { return storage().data() + storage().size(); }
+    size_t size() const { return storage().size(); }
+    bool empty() const { return storage().empty(); }
+    const ScopeInfo& operator[](size_t i) const { return storage()[i]; }
+    const ScopeInfo& front() const { return storage().front(); }
+    const ScopeInfo& back() const { return storage().back(); }
+    /// Identity of the shared storage; census/dedup use only.
+    const void* storage_key() const { return chain_.get(); }
+
+  private:
+    const std::vector<ScopeInfo>& storage() const {
+        static const std::vector<ScopeInfo> kEmpty;
+        return chain_ ? *chain_ : kEmpty;
+    }
+    std::shared_ptr<const std::vector<ScopeInfo>> chain_;
+};
 
 /// Extended symbol with relational information and compact metadata.
 /// Matches Go's types.EnhancedSymbol struct.
@@ -42,7 +78,7 @@ struct EnhancedSymbol {
     // term on large corpora (2026-08-04 census).
     int incoming_ref_count{};
     int outgoing_ref_count{};
-    std::vector<ScopeInfo> scope_chain;
+    ScopeChain scope_chain;
 
     // Enhanced metadata
     std::string type_info;
