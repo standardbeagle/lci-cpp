@@ -2,6 +2,8 @@
 
 #include <lci/language_map.h>
 
+#include <malloc.h>
+
 #include <chrono>
 #include <filesystem>
 
@@ -198,6 +200,16 @@ bool MasterIndex::index_directory(const std::string& root) {
                        std::memory_order_release);
 
     set_bulk_indexing(false);
+
+#if defined(__GLIBC__)
+    // Return freed arena to the OS. The parse stage's transient peak
+    // (tree-sitter trees, worker scratch) leaves large freed-but-retained
+    // arena behind -- RSS a long-running server carries forever without
+    // this. glibc releases only whole free trailing/interior regions, so
+    // live index structures are untouched; one syscall-bounded call at
+    // the end of a bulk build, never on a query path.
+    malloc_trim(0);
+#endif
 
     auto elapsed = std::chrono::steady_clock::now() - start;
     indexing_time_ns_.store(
