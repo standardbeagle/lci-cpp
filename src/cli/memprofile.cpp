@@ -4,13 +4,16 @@
 // (mongodb driver) and >10 GB on next.js — 30-50x amplification against a
 // ≤2x budget. This command feeds the SAME processing path the pipeline runs
 // (FileProcessor::process_single + FileIntegrator::integrate_file), one file
-// at a time on one thread, and samples VmRSS around each file so the growth
-// is attributable to individual files and to the post-scan phases.
+// at a time on one thread, so growth is attributable to individual files and
+// to the post-scan phases.
 //
-// RSS is allocator-noisy per file (arena growth lands on whichever file
-// triggered it), so flagging requires both an absolute floor and a
-// size-relative ratio; the aggregate ratio at the end is the load-bearing
-// number.
+// Two rulers, deliberately: VmRSS for whole-run and phase totals (what the
+// host actually pays), and glibc mallinfo2 live-allocated bytes for per-file
+// attribution. RSS cannot do the per-file job — the allocator expands arenas
+// in large chunks, so a file's RSS delta says whether it tripped the next
+// expansion, not what it retained. Flagging still requires both an absolute
+// floor and a size-relative ratio; the aggregate ratio remains the
+// load-bearing number.
 
 #include <lci/cli/commands.h>
 
@@ -18,7 +21,9 @@
 #include <cinttypes>
 #include <cstdint>
 #include <cstdio>
+#include <malloc.h>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include <lci/core/file_content_store.h>
@@ -48,9 +53,34 @@ long read_rss_kb() {
     return rss_kb;
 }
 
+// Live allocated bytes (glibc mallinfo2 uordblks). RSS is the wrong ruler for
+// per-file attribution: the allocator grows its arenas in large chunks, so a
+// file's RSS delta records whether it happened to trigger the next expansion,
+// not what it retained. Two runs over this repo disagreed on the top offender
+// while both reported the same 11.1 MB, which is the signature of that
+// artifact. uordblks moves only when the program actually holds more.
+int64_t read_alloc_bytes() {
+#if defined(__GLIBC__)
+    return static_cast<int64_t>(mallinfo2().uordblks);
+#else
+    return -1;
+#endif
+}
+
 struct FileDelta {
     std::string path;
     int64_t size_bytes{};
+    int64_t delta_bytes{};
+};
+
+/// One-time cost of standing up a language's parser (tree-sitter grammar
+/// tables, query compilation) lands on whichever file of that language the
+/// scan happens to reach first. Attributing it to that file is a lie the
+/// ranking then amplifies: an ordinary 5 KB C++ header showed 11.1 MB and
+/// topped the offender list purely for being first. Bucket it separately.
+struct LanguageInit {
+    std::string language;
+    std::string first_file;
     int64_t delta_bytes{};
 };
 
@@ -112,20 +142,34 @@ int run_debug_memprofile(const GlobalFlags& flags,
                  opts.flag_ratio);
 
     const long rss_start_kb = read_rss_kb();
-    long rss_prev_kb = rss_start_kb;
+    int64_t alloc_prev = read_alloc_bytes();
 
     std::vector<FileDelta> deltas;
     deltas.reserve(tasks.size());
+    std::vector<LanguageInit> lang_inits;
+    std::unordered_set<std::string> languages_seen;
     int flagged = 0;
     size_t processed = 0;
 
     for (const auto& task : tasks) {
+        const bool first_of_language =
+            !task.language.empty() && languages_seen.insert(task.language).second;
+
         ProcessedFile pf = processor.process_single(task);
         if (!pf.has_error) integrator.integrate_file(pf);
 
-        const long rss_kb = read_rss_kb();
-        const int64_t delta = (rss_kb - rss_prev_kb) * 1024;
-        rss_prev_kb = rss_kb;
+        const int64_t alloc_now = read_alloc_bytes();
+        const int64_t delta = alloc_now - alloc_prev;
+        alloc_prev = alloc_now;
+
+        // Charged to the language, not the file, and kept out of the ranking
+        // and the FLAG line so neither points at an innocent file.
+        if (first_of_language) {
+            lang_inits.push_back({task.language, task.path, delta});
+            ++processed;
+            continue;
+        }
+
         deltas.push_back({task.path, task.size, delta});
 
         if (delta > flag_floor &&
@@ -143,8 +187,10 @@ int run_debug_memprofile(const GlobalFlags& flags,
         }
 
         if (++processed % 1000 == 0) {
-            std::fprintf(stderr, "  %zu/%zu files, rss %.1f MB\n", processed,
-                         tasks.size(), mb(rss_kb * 1024));
+            std::fprintf(stderr, "  %zu/%zu files, rss %.1f MB, live alloc "
+                                 "%.1f MB\n",
+                         processed, tasks.size(), mb(read_rss_kb() * 1024),
+                         mb(alloc_now));
         }
     }
 
@@ -184,6 +230,22 @@ int run_debug_memprofile(const GlobalFlags& flags,
                 corpus_bytes > 0 ? static_cast<double>(total_growth) /
                                        static_cast<double>(corpus_bytes)
                                  : 0.0);
+
+    std::sort(lang_inits.begin(), lang_inits.end(),
+              [](const LanguageInit& a, const LanguageInit& b) {
+                  return a.delta_bytes > b.delta_bytes;
+              });
+    int64_t lang_init_total = 0;
+    for (const auto& li : lang_inits) lang_init_total += li.delta_bytes;
+    std::printf("\n== one-time parser init (%zu languages, %.1f MB) ==\n",
+                lang_inits.size(), mb(lang_init_total));
+    std::printf("Charged to the language, not to the first file of it. "
+                "Fixed cost per language, not per corpus size.\n");
+    for (const auto& li : lang_inits) {
+        if (li.delta_bytes <= 0) continue;
+        std::printf("  %8.1f MB  %-12s (first seen: %s)\n", mb(li.delta_bytes),
+                    li.language.c_str(), li.first_file.c_str());
+    }
 
     // Structure census: where the resident bytes actually sit. Counts, not
     // byte estimates — pairing them with the phase deltas above localizes
@@ -236,7 +298,7 @@ int run_debug_memprofile(const GlobalFlags& flags,
 
     const int top_n =
         std::min<int>(opts.top, static_cast<int>(deltas.size()));
-    std::printf("\ntop %d files by rss delta:\n", top_n);
+    std::printf("\ntop %d files by live-allocation delta:\n", top_n);
     for (int i = 0; i < top_n; ++i) {
         const auto& d = deltas[i];
         std::printf("  %8.1f MB (%8" PRId64 " B) %s\n", mb(d.delta_bytes),
