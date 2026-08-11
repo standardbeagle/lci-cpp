@@ -10,6 +10,7 @@
 
 #include <chrono>
 #include <filesystem>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -219,13 +220,22 @@ TEST_F(RealProjectCachingTest, RepeatSearchIsFast) {
                        t2 - t1)
                        .count();
 
-    // Second query (warm)
-    auto t3 = std::chrono::steady_clock::now();
-    ctx.search("ServeHTTP", 10);
-    auto t4 = std::chrono::steady_clock::now();
-    auto warm_us = std::chrono::duration_cast<std::chrono::microseconds>(
-                       t4 - t3)
-                       .count();
+    // Warm queries, best-of-3: a single sample loses to scheduler noise
+    // under the parallel ctest gate (one observed 4 ms failure at -j4),
+    // and the property under test is "repeat search does not regress",
+    // which the MINIMUM measures robustly (contention can only inflate a
+    // sample, never deflate it -- see contention-robust perf test
+    // precedent, fd71c54).
+    int64_t warm_us = std::numeric_limits<int64_t>::max();
+    for (int i = 0; i < 3; ++i) {
+        auto t3 = std::chrono::steady_clock::now();
+        ctx.search("ServeHTTP", 10);
+        auto t4 = std::chrono::steady_clock::now();
+        warm_us = std::min(
+            warm_us, std::chrono::duration_cast<std::chrono::microseconds>(
+                         t4 - t3)
+                         .count());
+    }
 
     // Warm should not be dramatically slower
     EXPECT_LT(warm_us, cold_us * 2)
