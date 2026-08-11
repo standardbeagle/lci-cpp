@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <lci/core/reference_tracker.h>
 #include <lci/core/trigram.h>
 
 #include <algorithm>
@@ -572,6 +573,35 @@ TEST(HighEntropySectionTest, StructuredQuotedHashTableTriggers) {
     f += "};\n";
     f += normal_code(8 * 1024);
     EXPECT_TRUE(has_high_entropy_section(f));
+}
+
+TEST(HighEntropySectionTest, CjkTextDoesNotTrigger) {
+    // UTF-8 CJK text clears 5.5 bits/byte on a raw byte histogram (lead +
+    // continuation bytes spread wide) -- an entropy rule without the ASCII
+    // gate classifies a Chinese README as a compressed payload. Pin the
+    // negative: prose in any script is not a payload.
+    std::string f;
+    while (f.size() < 64 * 1024) {
+        f += "\xe9\x80\x99\xe6\x98\xaf\xe4\xb8\x80\xe6\xae\xb5"
+             "\xe6\xb8\xac\xe8\xa9\xa6\xe6\x96\x87\xe5\xad\x97"
+             "\xef\xbc\x8c\xe7\x94\xa8\xe6\x96\xbc\xe9\xa9\x97"
+             "\xe8\xad\x89\xe5\x81\xb5\xe6\xb8\xac\xe5\x99\xa8"
+             "\xe3\x80\x82\n";
+    }
+    EXPECT_FALSE(has_high_entropy_section(f));
+}
+
+TEST(PostingsTokenCapPolicyTest, CodeGetsWideCeilingDataGetsCap) {
+    // Harm-based policy: classifiers pick the ceiling, the ceiling always
+    // exists. A payload the classifier cannot recognize is still bounded
+    // by 4x on a code extension.
+    EXPECT_EQ(postings_token_cap(/*is_code=*/false, false, 4096), 4096u);
+    EXPECT_EQ(postings_token_cap(/*is_code=*/true, /*payload=*/true, 4096),
+              4096u);
+    EXPECT_EQ(postings_token_cap(/*is_code=*/true, /*payload=*/false, 4096),
+              16384u);
+    EXPECT_EQ(postings_token_cap(true, false, 0), 0u);   // 0 disables
+    EXPECT_EQ(postings_token_cap(false, true, 0), 0u);
 }
 
 TEST(HighEntropySectionTest, SmallPayloadDoesNotTrigger) {

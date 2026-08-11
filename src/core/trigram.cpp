@@ -383,10 +383,15 @@ bool has_high_entropy_section(std::string_view content) {
     // Block classifier, one linear pass, no allocation. Two independent
     // payload signatures per 4 KB block:
     //
-    //  - COMPRESSED/BASE64: Shannon byte entropy >= 5.5 bits/byte. Code and
-    //    prose sit near 4.2-4.8; base64 approaches 6; compressed/binary
-    //    approaches 8. (Binary files are normally rejected upstream by magic
-    //    number -- this catches binary-ish payloads EMBEDDED in text files.)
+    //  - COMPRESSED/BASE64: Shannon byte entropy >= 5.5 bits/byte, on
+    //    mostly-ASCII blocks ONLY. Code and prose sit near 4.2-4.8; base64
+    //    approaches 6. The ASCII gate exists because UTF-8 CJK text -- a
+    //    spread of lead + continuation bytes -- also clears 5.5, and a file
+    //    of Chinese comments or docs is not a payload. Encoded payloads
+    //    (base64/hex) are ASCII by construction; RAW compressed bytes
+    //    embedded in a text file are the one shape this now misses, and
+    //    those are near-always caught upstream by the binary magic-number
+    //    check (and still bounded by the universal postings ceiling).
     //
     //  - HASH/HEX DUMP: NOT high-entropy (hex is a 16-symbol alphabet,
     //    ~4 bits/byte, indistinguishable from code by entropy alone), but
@@ -414,8 +419,10 @@ bool has_high_entropy_section(std::string_view content) {
         size_t token_chars = 0;
         size_t digits = 0;
         size_t whitespace = 0;
+        size_t non_ascii = 0;
         for (unsigned char c : block) {
             ++freq[c];
+            if (c > 0x7F) ++non_ascii;
             if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
                 (c >= '0' && c <= '9') || c == '_' || c == '+' || c == '/' ||
                 c == '=') {
@@ -433,7 +440,9 @@ bool has_high_entropy_section(std::string_view content) {
             entropy -= p * std::log2(p);
         }
 
-        const bool compressed_like = entropy >= kEntropyBitsPerByte;
+        const bool compressed_like =
+            entropy >= kEntropyBitsPerByte &&
+            non_ascii * 10 <= kBlock;  // <= 10% non-ASCII (see above)
         const bool hash_dump_like =
             token_chars * 4 >= kBlock * 3 &&    // >= 75% token bytes
             digits * 5 >= kBlock &&             // >= 20% digits

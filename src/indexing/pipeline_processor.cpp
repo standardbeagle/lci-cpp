@@ -221,21 +221,16 @@ ProcessedFile FileProcessor::process_file(int /*worker_id*/,
     // thread. FileIntegrator::merge_postings consumes the result via
     // index_file_pretokenized — pure merge, no re-walk of content.
     {
-        // Data files (!is_code) get a unique-token cap: their vocabulary is
-        // unbounded (hex ids, word lists) and postings retention runs ~10x
-        // file size. A capped file is marked PARTIAL downstream and always
-        // self-nominates in postings lookups, so search stays exact.
-        // Extension is a claim, not proof: a "code" file carrying a large
-        // compressed/base64/hash payload section (vendored wordlist,
-        // inlined asset, generated table) is a data file in disguise and
-        // gets the same cap.
-        const bool payload_content =
-            !language_info_for_path(task.path).is_code ||
-            has_high_entropy_section(content);
-        const size_t token_cap =
-            payload_content
-                ? static_cast<size_t>(config_.index.data_file_token_cap)
-                : 0;
+        // Unique-token cap policy (see postings_token_cap): data files and
+        // detected payload sections get the configured cap; code files get
+        // a 4x harm ceiling so a payload the classifier cannot recognize
+        // is still bounded by its own measured cost. Capped files are
+        // marked PARTIAL and self-nominate in postings lookups, so search
+        // stays exact either way.
+        const size_t token_cap = postings_token_cap(
+            language_info_for_path(task.path).is_code,
+            has_high_entropy_section(content),
+            config_.index.data_file_token_cap);
         auto pi_tokens = lci::PostingsIndex::tokenize_content(
             content, token_cap, &result.postings_truncated);
         result.postings_tokens.reserve(pi_tokens.size());

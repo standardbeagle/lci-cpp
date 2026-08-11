@@ -8,17 +8,13 @@
 namespace lci {
 
 namespace {
-/// Same cap policy as the pipeline worker (pipeline_processor.cpp): data
-/// files (!is_code) cap their unique postings tokens, and so does any
-/// "code" file whose content carries a large compressed/base64/hash
-/// payload section -- extension is a claim, content is the evidence.
+/// Same cap policy as the pipeline worker (pipeline_processor.cpp);
+/// see postings_token_cap for the ceiling rationale.
 size_t data_cap(const Config& cfg, std::string_view path,
                 std::string_view content) {
-    if (language_info_for_path(path).is_code &&
-        !has_high_entropy_section(content)) {
-        return 0;
-    }
-    return static_cast<size_t>(cfg.index.data_file_token_cap);
+    return postings_token_cap(language_info_for_path(path).is_code,
+                              has_high_entropy_section(content),
+                              cfg.index.data_file_token_cap);
 }
 }  // namespace
 

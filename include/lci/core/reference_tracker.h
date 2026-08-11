@@ -129,6 +129,44 @@ struct PostingsToken {
     int offset{};
 };
 
+/// Unique-postings-token cap policy, shared by the pipeline worker and the
+/// incremental (watcher) path. Harm-based, not prediction-based: the cost a
+/// file imposes on the postings index IS its unique-token count, and the
+/// tokenizer counts it exactly -- so past a ceiling every file is capped,
+/// whatever its bytes look like. Content classifiers only choose WHICH
+/// ceiling:
+///   - data files and detected payload sections: configured_cap
+///   - code files: 4x configured_cap -- no legitimate source file carries
+///     that vocabulary (biggest in this repo: ~8k uniques at the default
+///     16k ceiling), so the wide ceiling is a pure backstop with zero
+///     false-positive surface on normal code
+/// 0 disables capping entirely.
+inline size_t postings_token_cap(bool is_code_file, bool payload_content,
+                                 int configured_cap) {
+    if (configured_cap <= 0) return 0;
+    const auto cap = static_cast<size_t>(configured_cap);
+    return (is_code_file && !payload_content) ? cap * 4 : cap;
+}
+
+/// Unique-postings-token cap policy, shared by the pipeline worker and the
+/// incremental (watcher) path. Harm-based, not prediction-based: the cost a
+/// file imposes on the postings index IS its unique-token count, and the
+/// tokenizer counts it exactly -- so past a ceiling every file is capped,
+/// whatever its bytes look like. Content classifiers only choose WHICH
+/// ceiling:
+///   - data files and detected payload sections: configured_cap
+///   - code files: 4x configured_cap -- no legitimate source file carries
+///     that vocabulary (biggest in this repo: ~8k uniques at the default
+///     16k ceiling), so the wide ceiling is a pure backstop with zero
+///     false-positive surface on normal code
+/// 0 disables capping entirely.
+inline size_t postings_token_cap(bool is_code_file, bool payload_content,
+                                 int configured_cap) {
+    if (configured_cap <= 0) return 0;
+    const auto cap = static_cast<size_t>(configured_cap);
+    return (is_code_file && !payload_content) ? cap * 4 : cap;
+}
+
 class PostingsIndex {
   public:
     PostingsIndex();
