@@ -20,8 +20,9 @@ struct Symbol {
     int column{};
     int end_line{};
     int end_column{};
-    std::vector<ContextAttribute> attributes;
-    std::vector<TypeParameter> type_parameters;
+    // No attributes / type_parameters vectors here: nothing in the tree
+    // ever wrote OR read them -- 48 bytes of empty vector per symbol on
+    // every corpus. Reinstate only with the extractor that populates them.
     SymbolVisibility visibility{};
 };
 
@@ -83,7 +84,6 @@ struct EnhancedSymbol {
     std::string type_info;
     bool is_mutable{};
     bool is_exported{};
-    std::vector<std::string> annotations;
     std::string doc_comment;
     std::string signature;
     int complexity{};
@@ -95,7 +95,14 @@ struct EnhancedSymbol {
     // Function-specific metadata (compact bitfield representation)
     uint8_t parameter_count{};
     uint8_t function_flags{};
+    // NOTE: receiver_type is currently written by NO extractor, yet it is
+    // load-bearing API surface: the /list-symbols receiver filter
+    // (server.cpp, handlers_explore.cpp) compares against it, so with no
+    // writer that filter silently matches nothing -- a half-built feature,
+    // tracked as a finding, not a deletable field.
     std::string receiver_type;
+    // No annotations vector: never written by any extractor or enricher,
+    // and every reader was guarded on !empty() (dead branches, deleted).
 
     // Variable flag accessors
     bool is_const() const { return (variable_flags & variable_flags::kConst) != 0; }

@@ -1648,9 +1648,6 @@ void IndexServer::handle_inspect_symbol(const httplib::Request& req,
         if (sym->incoming_ref_count != 0) {
             e["incoming_refs"] = static_cast<int>(sym->incoming_ref_count);
         }
-        if (!sym->annotations.empty()) {
-            e["annotations"] = sym->annotations;
-        }
 
         // Callers/callees
         auto callers = tracker.get_caller_names(sym->id);

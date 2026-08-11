@@ -275,9 +275,6 @@ nlohmann::json build_explore_symbol(const EnhancedSymbol& sym,
     if (sym.parameter_count > 0) {
         j["parameter_count"] = static_cast<int>(sym.parameter_count);
     }
-    if (!sym.receiver_type.empty()) {
-        j["receiver_type"] = sym.receiver_type;
-    }
 
     if (includes_has(includes, "refs")) {
         j["incoming_refs"] = static_cast<int>(sym.incoming_ref_count);
@@ -319,6 +316,10 @@ nlohmann::json build_inspect_result(const EnhancedSymbol& sym,
     j["is_exported"] = sym.is_exported;
     j["complexity"] = sym.complexity;
     j["parameter_count"] = static_cast<int>(sym.parameter_count);
+
+    if (!sym.receiver_type.empty()) {
+        j["receiver_type"] = sym.receiver_type;
+    }
 
     if (!sym.receiver_type.empty()) {
         j["receiver_type"] = sym.receiver_type;
@@ -385,9 +386,6 @@ nlohmann::json build_inspect_result(const EnhancedSymbol& sym,
         j["outgoing_refs"] = static_cast<int>(sym.outgoing_ref_count);
     }
 
-    if (includes_has(includes, "annotations") && !sym.annotations.empty()) {
-        j["annotations"] = sym.annotations;
-    }
 
     attach_source_excerpt(j, sym, indexer);
 

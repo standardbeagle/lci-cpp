@@ -296,7 +296,12 @@ int run_debug_memprofile(const GlobalFlags& flags,
         // Chains are interned (hash-consed): count unique storage once,
         // and report how many symbol references share it.
         size_t chain_entries = 0, chain_strings = 0, chain_refs = 0,
-               sym_strings = 0, annotations = 0;
+               sym_strings = 0;
+        // Fill rates for EnhancedSymbol's remaining per-instance strings,
+        // paid whether populated or not. These counts decide whether a
+        // side-table / interning slim is worth it. The zero-fill audit of
+        // 2026-08-11 already deleted five never-written containers.
+        size_t fill_type_info = 0, fill_doc = 0, fill_sig = 0;
         std::unordered_set<const void*> chains_seen;
         snap->symbols.range([&](SymbolID, const EnhancedSymbol& es) {
             chain_refs += es.scope_chain.size();
@@ -310,7 +315,9 @@ int run_debug_memprofile(const GlobalFlags& flags,
             }
             sym_strings += es.symbol.name.size() + es.type_info.size() +
                            es.doc_comment.size() + es.signature.size();
-            annotations += es.annotations.size();
+            if (!es.type_info.empty()) ++fill_type_info;
+            if (!es.doc_comment.empty()) ++fill_doc;
+            if (!es.signature.empty()) ++fill_sig;
             return true;
         });
         size_t line_entries = 0;
@@ -322,10 +329,13 @@ int run_debug_memprofile(const GlobalFlags& flags,
                     chain_entries, chain_refs,
                     mb(static_cast<int64_t>(chain_strings)),
                     sizeof(ScopeInfo));
+        std::printf("symbol field fill:       type_info %zu, doc %zu, "
+                    "sig %zu\n",
+                    fill_type_info, fill_doc, fill_sig);
         std::printf("symbol strings:          %.1f MB "
-                    "(sizeof(EnhancedSymbol)=%zu, %zu annotations)\n",
+                    "(sizeof(EnhancedSymbol)=%zu)\n",
                     mb(static_cast<int64_t>(sym_strings)),
-                    sizeof(EnhancedSymbol), annotations);
+                    sizeof(EnhancedSymbol));
         std::printf("line_to_symbols entries: %zu\n", line_entries);
     }
 
