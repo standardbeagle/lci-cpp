@@ -2,6 +2,7 @@
 
 #include <lci/core/reference_tracker.h>
 #include <lci/core/trigram.h>
+#include <lci/language_map.h>
 #include <lci/parser/parser.h>
 #include <lci/parser/parser_pool.h>
 #include <lci/parser/unified_extractor.h>
@@ -220,7 +221,16 @@ ProcessedFile FileProcessor::process_file(int /*worker_id*/,
     // thread. FileIntegrator::merge_postings consumes the result via
     // index_file_pretokenized — pure merge, no re-walk of content.
     {
-        auto pi_tokens = lci::PostingsIndex::tokenize_content(content);
+        // Data files (!is_code) get a unique-token cap: their vocabulary is
+        // unbounded (hex ids, word lists) and postings retention runs ~10x
+        // file size. A capped file is marked PARTIAL downstream and always
+        // self-nominates in postings lookups, so search stays exact.
+        const size_t token_cap =
+            language_info_for_path(task.path).is_code
+                ? 0
+                : static_cast<size_t>(config_.index.data_file_token_cap);
+        auto pi_tokens = lci::PostingsIndex::tokenize_content(
+            content, token_cap, &result.postings_truncated);
         result.postings_tokens.reserve(pi_tokens.size());
         for (auto& pt : pi_tokens) {
             ProcessedToken t;

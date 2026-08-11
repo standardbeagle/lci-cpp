@@ -405,6 +405,8 @@ bool apply_index(Config& cfg, const KdlNode& node, std::string& error) {
                 int v = 0;
                 if (get_int(child, v)) cfg.index.max_parse_file_size = v;
             }
+        } else if (child.name == "data_file_token_cap") {
+            get_int(child, cfg.index.data_file_token_cap);
         } else if (child.name == "max_total_size_mb") {
             int v = 0;
             if (get_int(child, v)) cfg.index.max_total_size_mb = v;
@@ -834,6 +836,9 @@ std::string validate_config(Config& cfg) {
     }
     if (cfg.index.max_file_count <= 0) {
         return "index.max_file_count must be positive";
+    }
+    if (cfg.index.data_file_token_cap < 0) {
+        return "index.data_file_token_cap cannot be negative (0 disables)";
     }
 
     if (cfg.performance.max_memory_mb < 100) {

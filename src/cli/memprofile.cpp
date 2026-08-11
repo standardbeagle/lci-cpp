@@ -298,7 +298,15 @@ int run_debug_memprofile(const GlobalFlags& flags,
 
     const int top_n =
         std::min<int>(opts.top, static_cast<int>(deltas.size()));
-    std::printf("\ntop %d files by live-allocation delta:\n", top_n);
+    // Caveat, proven with a 400-identical-file corpus: a small file with an
+    // outsized delta may just be the file that crossed a global container's
+    // growth threshold (trigram/postings rehash) -- the growth is real but
+    // belongs to the corpus, not the file. Cross-check a suspect by indexing
+    // it in isolation before treating it as a leak.
+    std::printf("\ntop %d files by live-allocation delta "
+                "(includes global container growth charged to the file that "
+                "triggered it -- verify suspects in isolation):\n",
+                top_n);
     for (int i = 0; i < top_n; ++i) {
         const auto& d = deltas[i];
         std::printf("  %8.1f MB (%8" PRId64 " B) %s\n", mb(d.delta_bytes),

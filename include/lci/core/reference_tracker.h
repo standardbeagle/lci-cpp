@@ -11,6 +11,7 @@
 #include <vector>
 
 #include <absl/container/flat_hash_map.h>
+#include <absl/container/flat_hash_set.h>
 
 #include <lci/language_map.h>
 #include <lci/reference.h>
@@ -134,32 +135,51 @@ class PostingsIndex {
 
     /// Indexes a file's content, recording first occurrence of each token.
     /// Tokenizes content inline; suitable for unit tests and single-file
-    /// integration paths.
-    void index_file(FileID file_id, std::string_view content);
+    /// integration paths. max_unique_tokens caps the token set (0 = no
+    /// cap); a capped file is recorded as PARTIAL and self-nominates in
+    /// every find() so the prefilter stays a superset (see find()).
+    void index_file(FileID file_id, std::string_view content,
+                    size_t max_unique_tokens = 0);
 
     /// Indexes pre-tokenized postings produced by the parallel worker
     /// pool. Caller owns tokenization (see tokenize_content); this path
     /// just merges the (token, offset) pairs into tokens_/reverse_keys_
     /// without re-walking content. Single-threaded use only — meant to
-    /// run on the FileIntegrator thread.
+    /// run on the FileIntegrator thread. truncated=true records the file
+    /// as PARTIAL (its token set was capped during tokenization).
     void index_file_pretokenized(FileID file_id,
-                                 std::vector<PostingsToken> tokens);
+                                 std::vector<PostingsToken> tokens,
+                                 bool truncated = false);
 
     /// Stateless tokenizer used by the pipeline worker pool. Extracts
     /// (token, first-offset) pairs from content using the same rules as
     /// index_file's internal scan (ASCII alnum/underscore tokens, ≥3
     /// chars after trim, lowercased, dedup by first occurrence).
+    /// max_unique_tokens: stop collecting NEW tokens past this many
+    /// (0 = unbounded); sets *truncated when the cap bit. Data files
+    /// (word lists, JSON full of hex ids) have unbounded unique-token
+    /// counts that the postings maps would retain at ~10x the file size;
+    /// code files never hit a sane cap.
     static std::vector<PostingsToken> tokenize_content(
-        std::string_view content);
+        std::string_view content, size_t max_unique_tokens = 0,
+        bool* truncated = nullptr);
 
     /// Removes all postings for a file.
     void remove_file(FileID file_id);
 
     /// Finds candidate files for a token.
-    /// Returns file IDs and their first-occurrence offsets.
+    /// Returns file IDs and their first-occurrence offsets. PARTIAL files
+    /// (token set capped at index time) are always included, with offset
+    /// -1: this index is a prefilter, and a prefilter is only correct as
+    /// a SUPERSET of the true match set — a capped file must self-nominate
+    /// for every query or tokens past its cap become silent misses. The
+    /// content scan downstream discards the false positives.
     void find(std::string_view token, bool case_insensitive,
               std::vector<FileID>& files_out,
               absl::flat_hash_map<FileID, int>& offsets_out) const;
+
+    /// Number of files whose token set was capped (recorded PARTIAL).
+    int partial_file_count() const;
 
     /// Returns the number of distinct tokens indexed.
     int token_count() const;
@@ -186,6 +206,9 @@ class PostingsIndex {
         absl::flat_hash_map<std::string, absl::flat_hash_map<FileID, int>>
             tokens;
         absl::flat_hash_map<FileID, std::vector<std::string>> reverse_keys;
+        /// Files indexed with a capped token set. Unioned into every
+        /// find() result — see find() for why the superset is mandatory.
+        absl::flat_hash_set<FileID> partial_files;
     };
 
     AtomicSharedPtr<const Snapshot> snapshot_;
@@ -204,7 +227,8 @@ class PostingsIndex {
     static bool is_token_char(uint8_t b);
     static bool is_all_ascii(std::string_view s);
     static void add_token(absl::flat_hash_map<std::string, int>& dst,
-                          std::string_view raw, int abs_start);
+                          std::string_view raw, int abs_start,
+                          size_t max_unique_tokens, bool* truncated);
 };
 
 // ---------------------------------------------------------------------------

@@ -22,6 +22,15 @@ struct IndexConfig {
     // almost always generated/minified, where the parse cost (parse is ~58% of
     // index CPU) buys little symbol value. 0 disables the cap.
     int64_t max_parse_file_size = 2 * 1024 * 1024;  // 2 MB
+    // Unique-postings-token cap for DATA files (anything language_map marks
+    // !is_code: json/csv/logs/word lists...). Their unique-token count is
+    // unbounded — hex ids, word lists — and the postings maps retain each
+    // token twice plus a per-token file map, ~10x the file's own bytes
+    // (209 KB fixture -> 5.6 MB; the 26 GB err-lookup OOM indexed 543 MB of
+    // ldjson). Capped files are recorded PARTIAL and self-nominate in every
+    // postings lookup, so search stays exact: the filter over-approximates
+    // and the content scan verifies. Code files are never capped. 0 = no cap.
+    int data_file_token_cap = 4096;
     // Total-corpus budget, enforced by FileScanner in priority order. Sized
     // so the vast majority of repos index fully; what happens past the
     // budget is overflow_policy's call.

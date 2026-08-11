@@ -62,7 +62,8 @@ bool PostingsIndex::is_all_ascii(std::string_view s) {
 }
 
 void PostingsIndex::add_token(absl::flat_hash_map<std::string, int>& dst,
-                               std::string_view raw, int abs_start) {
+                               std::string_view raw, int abs_start,
+                               size_t max_unique_tokens, bool* truncated) {
     if (raw.size() < 3) return;
 
     // Reject non-ASCII without allocating — raw is a view into source.
@@ -100,12 +101,20 @@ void PostingsIndex::add_token(absl::flat_hash_map<std::string, int>& dst,
     // duplicate hits.
     auto it = dst.find(trimmed);
     if (it == dst.end()) {
+        // Exact truncation: only an actually-dropped NEW token flips the
+        // flag. Repeats of collected tokens and a file whose unique count
+        // merely equals the cap stay non-partial.
+        if (max_unique_tokens > 0 && dst.size() >= max_unique_tokens) {
+            if (truncated != nullptr) *truncated = true;
+            return;
+        }
         dst.emplace(std::string(trimmed), abs_start);
     }
 }
 
 std::vector<PostingsToken> PostingsIndex::tokenize_content(
-    std::string_view content) {
+    std::string_view content, size_t max_unique_tokens, bool* truncated) {
+    if (truncated != nullptr) *truncated = false;
     std::vector<PostingsToken> result;
     if (content.empty()) return result;
 
@@ -113,8 +122,16 @@ std::vector<PostingsToken> PostingsIndex::tokenize_content(
     // per-call map is the safe default. Reserved heuristically based on
     // a rough 1-token-per-10-bytes density.
     absl::flat_hash_map<std::string, int> tokens_for_file;
-    tokens_for_file.reserve(content.size() / 10 + 8);
+    const size_t reserve_hint = content.size() / 10 + 8;
+    tokens_for_file.reserve(max_unique_tokens > 0
+                                ? std::min(max_unique_tokens, reserve_hint)
+                                : reserve_hint);
 
+    // The cap bounds MEMORY, not the scan: the whole content is still
+    // walked (same linear cost code files pay), but once the map holds
+    // max_unique_tokens, new tokens are dropped and the file is marked
+    // truncated. Repeats of collected tokens never trip the cap, so a
+    // capped file still records its dominant vocabulary exactly.
     int start = -1;
     for (int i = 0; i < static_cast<int>(content.size()); ++i) {
         auto b = static_cast<uint8_t>(content[static_cast<size_t>(i)]);
@@ -126,14 +143,14 @@ std::vector<PostingsToken> PostingsIndex::tokenize_content(
             add_token(tokens_for_file,
                       content.substr(static_cast<size_t>(start),
                                      static_cast<size_t>(i - start)),
-                      start);
+                      start, max_unique_tokens, truncated);
             start = -1;
         }
     }
     if (start >= 0) {
         add_token(tokens_for_file,
                   content.substr(static_cast<size_t>(start)),
-                  start);
+                  start, max_unique_tokens, truncated);
     }
 
     result.reserve(tokens_for_file.size());
@@ -145,10 +162,12 @@ std::vector<PostingsToken> PostingsIndex::tokenize_content(
 }
 
 void PostingsIndex::index_file_pretokenized(FileID file_id,
-                                            std::vector<PostingsToken> tokens) {
-    if (tokens.empty()) return;
+                                            std::vector<PostingsToken> tokens,
+                                            bool truncated) {
+    if (tokens.empty() && !truncated) return;
 
     write_snapshot([&](Snapshot& snap) {
+        if (truncated) snap.partial_files.insert(file_id);
         std::vector<std::string> keys;
         keys.reserve(tokens.size());
         for (const auto& pt : tokens) {
@@ -165,13 +184,17 @@ void PostingsIndex::index_file_pretokenized(FileID file_id,
     });
 }
 
-void PostingsIndex::index_file(FileID file_id, std::string_view content) {
+void PostingsIndex::index_file(FileID file_id, std::string_view content,
+                               size_t max_unique_tokens) {
     if (content.empty()) return;
-    index_file_pretokenized(file_id, tokenize_content(content));
+    bool truncated = false;
+    auto tokens = tokenize_content(content, max_unique_tokens, &truncated);
+    index_file_pretokenized(file_id, std::move(tokens), truncated);
 }
 
 void PostingsIndex::remove_file(FileID file_id) {
     write_snapshot([&](Snapshot& snap) {
+        snap.partial_files.erase(file_id);
         auto rk_it = snap.reverse_keys.find(file_id);
         if (rk_it == snap.reverse_keys.end()) return;
 
@@ -210,13 +233,29 @@ void PostingsIndex::find(std::string_view token, bool case_insensitive,
     // Lock-free read over the immutable snapshot.
     auto snap = load_snapshot();
     auto it = snap->tokens.find(tok);
-    if (it == snap->tokens.end() || it->second.empty()) return;
-
-    files_out.reserve(it->second.size());
-    for (const auto& [fid, off] : it->second) {
-        files_out.push_back(fid);
-        offsets_out[fid] = off;
+    if (it != snap->tokens.end()) {
+        files_out.reserve(it->second.size() + snap->partial_files.size());
+        for (const auto& [fid, off] : it->second) {
+            files_out.push_back(fid);
+            offsets_out[fid] = off;
+        }
     }
+
+    // PARTIAL files self-nominate (offset -1 = "unknown, scan me"): their
+    // token set was capped at index time, so their absence from the token
+    // map proves nothing. Without this union the caller's non-empty result
+    // suppresses its scan-all fallback and capped tokens become silent
+    // misses. See the header comment on find().
+    for (FileID fid : snap->partial_files) {
+        if (!offsets_out.contains(fid)) {
+            files_out.push_back(fid);
+            offsets_out[fid] = -1;
+        }
+    }
+}
+
+int PostingsIndex::partial_file_count() const {
+    return static_cast<int>(load_snapshot()->partial_files.size());
 }
 
 int PostingsIndex::token_count() const {

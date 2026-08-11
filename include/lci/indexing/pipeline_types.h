@@ -60,6 +60,10 @@ struct ProcessedFile {
     std::vector<int> line_offsets;
     std::string language;
     std::string stage;
+    /// Worker hit the data-file unique-token cap during postings
+    /// tokenization; the integrator records the file PARTIAL so it
+    /// self-nominates in postings lookups.
+    bool postings_truncated{};
     std::chrono::nanoseconds duration{};
     Error error{};
     bool has_error{};

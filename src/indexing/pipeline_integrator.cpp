@@ -167,7 +167,7 @@ void FileIntegrator::merge_postings(ProcessedFile& file) {
     // Workers tokenize during process_file; the integrator just merges
     // (token, offset) pairs into the shared maps. Per-byte scan +
     // dedup hash map are off the integrator's serial hot path.
-    if (file.postings_tokens.empty()) {
+    if (file.postings_tokens.empty() && !file.postings_truncated) {
         // Fallback for paths that haven't been migrated to the parallel
         // tokenization yet (e.g. legacy index_file callers).
         if (file_content_store_ == nullptr) return;
@@ -185,7 +185,8 @@ void FileIntegrator::merge_postings(ProcessedFile& file) {
     for (auto& t : file.postings_tokens) {
         tokens.push_back(PostingsToken{std::move(t.token), t.offset});
     }
-    postings_index_->index_file_pretokenized(file.file_id, std::move(tokens));
+    postings_index_->index_file_pretokenized(file.file_id, std::move(tokens),
+                                             file.postings_truncated);
 }
 
 void FileIntegrator::remove_stale_data(FileID file_id) {

@@ -1,9 +1,22 @@
 #include <lci/indexing/master_index.h>
 
+#include <lci/language_map.h>
+
 #include <chrono>
 #include <filesystem>
 
 namespace lci {
+
+namespace {
+/// Same cap policy as the pipeline worker (pipeline_processor.cpp): data
+/// files (!is_code) cap their unique postings tokens; code never does.
+size_t data_cap(const Config& cfg, std::string_view path) {
+    return language_info_for_path(path).is_code
+               ? 0
+               : static_cast<size_t>(cfg.index.data_file_token_cap);
+}
+}  // namespace
+
 
 // -- Construction / Destruction -----------------------------------------------
 
@@ -323,7 +336,8 @@ bool MasterIndex::index_file(const std::string& path) {
     std::lock_guard<std::mutex> snap_lock(snapshot_mu_);
 
     trigram_index_.index_file(file_id, content_sv);
-    postings_index_.index_file(file_id, content_sv);
+    postings_index_.index_file(file_id, content_sv,
+                               data_cap(config_, path));
     update_snapshot_for_file(path, file_id, FileID{0}, false);
 
     processed_files_.fetch_add(1, std::memory_order_relaxed);
@@ -357,7 +371,8 @@ bool MasterIndex::update_file(const std::string& path, std::string_view content)
     if (new_id == FileID{0}) return false;
 
     trigram_index_.index_file(new_id, content);
-    postings_index_.index_file(new_id, content);
+    postings_index_.index_file(new_id, content,
+                               data_cap(config_, path));
 
     update_snapshot_for_file(path, new_id, old_id, existed);
     return true;

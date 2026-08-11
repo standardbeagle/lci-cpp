@@ -658,6 +658,8 @@ index {
     max_total_size_mb 500          // Corpus budget, spent in priority order
     max_file_count 50000           // Corpus budget: max files indexed
     overflow_policy "reduced"      // Past budget: "reduced" (partial, warned) or "reject"
+    data_file_token_cap 4096       // Unique search tokens kept per DATA file (json/csv/txt);
+                                   // capped files still match every search (0 = uncapped)
     smart_size_control true        // Enable intelligent size management
     priority_mode "recent"         // Priority: "recent", "small", "important"
 }
@@ -692,6 +694,8 @@ index {
     max_total_size_mb 500          // Corpus budget, spent in priority order
     max_file_count 50000           // Corpus budget: max files indexed
     overflow_policy "reduced"      // Past budget: "reduced" (partial, warned) or "reject"
+    data_file_token_cap 4096       // Unique search tokens kept per DATA file (json/csv/txt);
+                                   // capped files still match every search (0 = uncapped)
     smart_size_control true        // Enable intelligent size management
     priority_mode "recent"         // Priority: "recent", "small", "important", "balanced"
     follow_symlinks false          // Don't follow symbolic links

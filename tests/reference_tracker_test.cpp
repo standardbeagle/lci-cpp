@@ -607,6 +607,107 @@ TEST(PostingsIndexTest, Clear) {
     EXPECT_EQ(pi.file_count(), 0);
 }
 
+// ---------------------------------------------------------------------------
+// Data-file token cap + PARTIAL self-nomination.
+// The postings index is a PREFILTER: a capped file must appear in every
+// find() result (superset property) or tokens past its cap become silent
+// search misses -- the caller suppresses its scan-all fallback whenever the
+// filter returns anything at all.
+// ---------------------------------------------------------------------------
+
+TEST(PostingsIndexTest, TokenCapMarksPartialAndSelfNominates) {
+    PostingsIndex pi;
+    // 6 unique tokens, cap at 2: aaa bbb collected, ccc..fff dropped.
+    pi.index_file(1, "aaa bbb ccc ddd eee fff", /*max_unique_tokens=*/2);
+    EXPECT_EQ(pi.partial_file_count(), 1);
+
+    std::vector<FileID> files;
+    absl::flat_hash_map<FileID, int> offsets;
+
+    // Collected token: found normally, real offset.
+    pi.find("aaa", true, files, offsets);
+    ASSERT_EQ(files.size(), 1u);
+    EXPECT_EQ(offsets[1], 0);
+
+    // Dropped token: the partial file MUST still nominate itself,
+    // with the scan-me offset sentinel.
+    pi.find("fff", true, files, offsets);
+    ASSERT_EQ(files.size(), 1u);
+    EXPECT_EQ(files[0], 1u);
+    EXPECT_EQ(offsets[1], -1);
+}
+
+TEST(PostingsIndexTest, PartialDoesNotDuplicateRealHit) {
+    PostingsIndex pi;
+    pi.index_file(1, "aaa bbb ccc", /*max_unique_tokens=*/2);
+    std::vector<FileID> files;
+    absl::flat_hash_map<FileID, int> offsets;
+    // "aaa" is both a real hit and a partial self-nomination; the real
+    // offset must win and the file must appear once.
+    pi.find("aaa", true, files, offsets);
+    ASSERT_EQ(files.size(), 1u);
+    EXPECT_EQ(offsets[1], 0);
+}
+
+TEST(PostingsIndexTest, PartialNominatesInOtherFilesQueries) {
+    PostingsIndex pi;
+    pi.index_file(1, "alpha beta", 0);                        // full
+    pi.index_file(2, "gamma delta epsilon zeta", /*cap=*/1);  // partial
+    std::vector<FileID> files;
+    absl::flat_hash_map<FileID, int> offsets;
+    pi.find("alpha", true, files, offsets);
+    // Real hit in file 1 plus the partial file 2 self-nomination.
+    ASSERT_EQ(files.size(), 2u);
+    EXPECT_EQ(offsets[1], 0);
+    EXPECT_EQ(offsets[2], -1);
+}
+
+TEST(PostingsIndexTest, CapZeroIsUnbounded) {
+    PostingsIndex pi;
+    pi.index_file(1, "aaa bbb ccc ddd", 0);
+    EXPECT_EQ(pi.partial_file_count(), 0);
+    EXPECT_EQ(pi.token_count(), 4);
+}
+
+TEST(PostingsIndexTest, CapNotHitIsNotPartial) {
+    PostingsIndex pi;
+    pi.index_file(1, "aaa bbb", /*max_unique_tokens=*/10);
+    EXPECT_EQ(pi.partial_file_count(), 0);
+}
+
+TEST(PostingsIndexTest, RepeatsDoNotConsumeCap) {
+    PostingsIndex pi;
+    // 2 unique tokens repeated many times; cap 2 must NOT trip.
+    pi.index_file(1, "aaa bbb aaa bbb aaa bbb aaa bbb", 2);
+    EXPECT_EQ(pi.partial_file_count(), 0);
+    EXPECT_EQ(pi.token_count(), 2);
+}
+
+TEST(PostingsIndexTest, RemoveFileClearsPartialMarker) {
+    PostingsIndex pi;
+    pi.index_file(1, "aaa bbb ccc", /*max_unique_tokens=*/1);
+    ASSERT_EQ(pi.partial_file_count(), 1);
+    pi.remove_file(1);
+    EXPECT_EQ(pi.partial_file_count(), 0);
+    std::vector<FileID> files;
+    absl::flat_hash_map<FileID, int> offsets;
+    pi.find("aaa", true, files, offsets);
+    EXPECT_TRUE(files.empty());
+}
+
+TEST(PostingsIndexTest, TokenizeContentReportsTruncation) {
+    bool truncated = false;
+    auto toks =
+        PostingsIndex::tokenize_content("aaa bbb ccc ddd", 2, &truncated);
+    EXPECT_TRUE(truncated);
+    EXPECT_EQ(toks.size(), 2u);
+
+    truncated = true;
+    toks = PostingsIndex::tokenize_content("aaa bbb", 0, &truncated);
+    EXPECT_FALSE(truncated);
+    EXPECT_EQ(toks.size(), 2u);
+}
+
 TEST(PostingsIndexTest, FirstOffsetPerFile) {
     PostingsIndex pi;
 
