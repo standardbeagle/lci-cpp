@@ -667,6 +667,11 @@ Config make_default_config() {
         "**/jspm_packages/**",
         "**/dist/**",
         "**/build/**",
+        // Hyphenated build-dir conventions: cmake-build-<cfg> (CLion),
+        // build-<variant> (this repo's build-errlookup indexed 1.2 GB of
+        // its own _deps sources before this line existed).
+        "**/build-*/**",
+        "**/cmake-build-*/**",
         "**/out/**",
         "**/target/**",
         "**/bin/**",

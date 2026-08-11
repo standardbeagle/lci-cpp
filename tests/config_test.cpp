@@ -113,7 +113,10 @@ TEST(DefaultExcludeContract, LocksPatternCount) {
     // 82 -> 98 (2026-08-04): generated-artifact classes — compiled/,
     // coverage/, __generated__/, *.generated.*, *.map, and ten lockfile
     // names (see the OOM incident that motivated them).
-    EXPECT_EQ(cfg.exclude.size(), 98u);
+    // 98 -> 100 (2026-08-11): hyphenated build-dir conventions
+    // (**/build-*/**, **/cmake-build-*/**) — build-errlookup indexed
+    // 1.2 GB of its own _deps before these.
+    EXPECT_EQ(cfg.exclude.size(), 100u);
 }
 
 TEST(DefaultExcludeContract, IncludesAllVcsAndDotfileDirs) {
