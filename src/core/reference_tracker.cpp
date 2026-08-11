@@ -33,13 +33,52 @@ bool TypeRelationships::has_relationships() const {
 // ReferenceTracker::Snapshot - read-side query logic over frozen state
 // ---------------------------------------------------------------------------
 
+namespace {
+/// Mutable twin of Snapshot::find_ref for write-side mutations. Returns
+/// the slot even when tombstoned is false-only (id != 0 checked), same
+/// decode as the read side.
+Reference* find_mutable_ref(ReferenceTracker::Snapshot& s, uint64_t ref_id) {
+    const auto file_id = static_cast<FileID>(ref_id >> 32);
+    const auto local = static_cast<uint32_t>(ref_id & 0xFFFFFFFFu);
+    if (local == 0) return nullptr;
+    auto it = s.refs_by_file.find(file_id);
+    if (it == s.refs_by_file.end()) return nullptr;
+    auto& vec = it->second;
+    if (local > vec.size()) return nullptr;
+    Reference& r = vec[local - 1];
+    return r.id != 0 ? &r : nullptr;
+}
+}  // namespace
+
+const Reference* ReferenceTracker::Snapshot::find_ref(uint64_t ref_id) const {
+    const auto file_id = static_cast<FileID>(ref_id >> 32);
+    const auto local = static_cast<uint32_t>(ref_id & 0xFFFFFFFFu);
+    if (local == 0) return nullptr;
+    auto it = refs_by_file.find(file_id);
+    if (it == refs_by_file.end()) return nullptr;
+    const auto& vec = it->second;
+    if (local > vec.size()) return nullptr;
+    const Reference& r = vec[local - 1];
+    return r.id != 0 ? &r : nullptr;
+}
+
+size_t ReferenceTracker::Snapshot::live_ref_count() const {
+    size_t n = 0;
+    for (const auto& [fid, vec] : refs_by_file) {
+        for (const auto& r : vec) {
+            if (r.id != 0) ++n;
+        }
+    }
+    return n;
+}
+
 std::vector<Reference> ReferenceTracker::Snapshot::get_references_by_id(
     std::span<const uint64_t> ref_ids) const {
     std::vector<Reference> result;
     result.reserve(ref_ids.size());
     for (uint64_t id : ref_ids) {
-        if (auto it = references.find(id); it != references.end()) {
-            result.push_back(it->second);
+        if (const Reference* r = find_ref(id)) {
+            result.push_back(*r);
         }
     }
     return result;
@@ -252,14 +291,22 @@ std::vector<EnhancedSymbol> ReferenceTracker::process_file(
             enhanced.push_back(std::move(es));
         }
 
-        // Store references for later processing.
-        for (const auto& ref : references) {
-            Reference r = ref;
-            r.file_id = file_id;
-            uint64_t global_id =
-                make_global_ref_id(file_id, static_cast<uint32_t>(r.id));
-            r.id = global_id;
-            s.references[r.id] = std::move(r);
+        // Store references for later processing. Local id = position + 1,
+        // assigned HERE rather than trusted from the caller: the extractor
+        // does emit dense 1-based ids, but hand-built references (tests,
+        // ad-hoc callers) arrive with id 0, and the slot-addressed store
+        // only works if density is enforced by construction.
+        {
+            auto& vec = s.refs_by_file[file_id];
+            vec.clear();
+            vec.reserve(references.size());
+            for (const auto& ref : references) {
+                Reference r = ref;
+                r.file_id = file_id;
+                r.id = make_global_ref_id(
+                    file_id, static_cast<uint32_t>(vec.size() + 1));
+                vec.push_back(std::move(r));
+            }
         }
     });
 
@@ -300,7 +347,9 @@ void ReferenceTracker::process_all_references() {
             return true;
         });
 
-        for (auto& [ref_id, ref] : s.references) {
+        for (auto& [owner_fid, ref_vec] : s.refs_by_file) {
+          for (auto& ref : ref_vec) {
+            if (ref.id == 0) continue;  // tombstone
             SymbolID source_id = ref.source_symbol;
             SymbolID target_id = ref.target_symbol;
 
@@ -320,11 +369,12 @@ void ReferenceTracker::process_all_references() {
             }
 
             if (source_id != 0) {
-                s.outgoing_refs[source_id].push_back(ref_id);
+                s.outgoing_refs[source_id].push_back(ref.id);
             }
             if (target_id != 0) {
-                s.incoming_refs[target_id].push_back(ref_id);
+                s.incoming_refs[target_id].push_back(ref.id);
             }
+          }
         }
 
         update_reference_stats(s);
@@ -342,13 +392,12 @@ void ReferenceTracker::remove_file(FileID file_id) {
             if (auto it = s.outgoing_refs.find(sym_id);
                 it != s.outgoing_refs.end()) {
                 for (uint64_t ref_id : it->second) {
-                    auto ref_it = s.references.find(ref_id);
-                    if (ref_it != s.references.end()) {
-                        if (ref_it->second.target_symbol != 0) {
-                            remove_from_incoming_refs(
-                                s, ref_it->second.target_symbol, ref_id);
+                    if (Reference* r = find_mutable_ref(s, ref_id)) {
+                        if (r->target_symbol != 0) {
+                            remove_from_incoming_refs(s, r->target_symbol,
+                                                      ref_id);
                         }
-                        s.references.erase(ref_it);
+                        *r = Reference{};  // tombstone (id = 0)
                     }
                 }
                 s.outgoing_refs.erase(it);
@@ -358,11 +407,10 @@ void ReferenceTracker::remove_file(FileID file_id) {
             if (auto it = s.incoming_refs.find(sym_id);
                 it != s.incoming_refs.end()) {
                 for (uint64_t ref_id : it->second) {
-                    auto ref_it = s.references.find(ref_id);
-                    if (ref_it != s.references.end()) {
-                        if (ref_it->second.source_symbol != 0) {
-                            remove_from_outgoing_refs(
-                                s, ref_it->second.source_symbol, ref_id);
+                    if (const Reference* r = find_mutable_ref(s, ref_id)) {
+                        if (r->source_symbol != 0) {
+                            remove_from_outgoing_refs(s, r->source_symbol,
+                                                      ref_id);
                         }
                     }
                 }
@@ -372,6 +420,10 @@ void ReferenceTracker::remove_file(FileID file_id) {
             s.symbols.remove(sym_id);
         }
 
+        // The file's own reference storage goes wholesale -- this is the
+        // payoff of the per-file store: no per-reference hash erases, and
+        // any tombstones the symbol walk above left in it die with it.
+        s.refs_by_file.erase(file_id);
         s.scopes_by_file.erase(file_id);
         s.line_to_symbols_by_file.erase(file_id);
     });
@@ -411,10 +463,8 @@ std::vector<Reference> ReferenceTracker::get_file_references(
 std::vector<Reference> ReferenceTracker::get_all_references() const {
     auto snap = load_snapshot();
     std::vector<Reference> out;
-    out.reserve(snap->references.size());
-    for (const auto& [id, ref] : snap->references) {
-        out.push_back(ref);
-    }
+    out.reserve(snap->live_ref_count());
+    snap->for_each_live_ref([&](const Reference& ref) { out.push_back(ref); });
     return out;
 }
 
@@ -908,11 +958,10 @@ void ReferenceTracker::update_reference_stats(Snapshot& s) {
     for (const auto& [sym_id, refs] : s.outgoing_refs) {
         sym_refs += static_cast<int>(refs.size());
     }
-    for (const auto& [id, ref] : s.references) {
-        files_seen[ref.file_id] = true;
-    }
+    s.for_each_live_ref(
+        [&](const Reference& ref) { files_seen[ref.file_id] = true; });
 
-    s.stats.total_references = static_cast<int>(s.references.size());
+    s.stats.total_references = static_cast<int>(s.live_ref_count());
     s.stats.total_symbols = s.symbols.size();
     s.stats.files_with_refs = static_cast<int>(files_seen.size());
     s.stats.symbol_refs = sym_refs;
@@ -956,9 +1005,9 @@ std::vector<SymbolID> ReferenceTracker::get_symbols_by_ref_type(
     std::vector<SymbolID> result;
 
     for (uint64_t ref_id : it->second) {
-        auto ref_it = snap->references.find(ref_id);
-        if (ref_it == snap->references.end()) continue;
-        const auto& ref = ref_it->second;
+        const Reference* ref_ptr = snap->find_ref(ref_id);
+        if (ref_ptr == nullptr) continue;
+        const auto& ref = *ref_ptr;
         if (ref.type != ref_type) continue;
 
         SymbolID target = incoming ? ref.source_symbol : ref.target_symbol;

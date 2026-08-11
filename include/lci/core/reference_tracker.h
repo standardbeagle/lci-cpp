@@ -148,25 +148,6 @@ inline size_t postings_token_cap(bool is_code_file, bool payload_content,
     return (is_code_file && !payload_content) ? cap * 4 : cap;
 }
 
-/// Unique-postings-token cap policy, shared by the pipeline worker and the
-/// incremental (watcher) path. Harm-based, not prediction-based: the cost a
-/// file imposes on the postings index IS its unique-token count, and the
-/// tokenizer counts it exactly -- so past a ceiling every file is capped,
-/// whatever its bytes look like. Content classifiers only choose WHICH
-/// ceiling:
-///   - data files and detected payload sections: configured_cap
-///   - code files: 4x configured_cap -- no legitimate source file carries
-///     that vocabulary (biggest in this repo: ~8k uniques at the default
-///     16k ceiling), so the wide ceiling is a pure backstop with zero
-///     false-positive surface on normal code
-/// 0 disables capping entirely.
-inline size_t postings_token_cap(bool is_code_file, bool payload_content,
-                                 int configured_cap) {
-    if (configured_cap <= 0) return 0;
-    const auto cap = static_cast<size_t>(configured_cap);
-    return (is_code_file && !payload_content) ? cap * 4 : cap;
-}
-
 class PostingsIndex {
   public:
     PostingsIndex();
@@ -415,13 +396,38 @@ class ReferenceTracker {
         Snapshot& operator=(const Snapshot&) = default;
 
         SymbolStore symbols{256};
-        absl::flat_hash_map<uint64_t, Reference> references;
+        /// References grouped by owning file, local id = index + 1. The
+        /// global ref id is (file_id << 32 | local_id), so it decomposes
+        /// straight to a (file, index) slot -- no per-reference hash
+        /// entry. The previous flat_hash_map<uint64, Reference> paid ~2x
+        /// live bytes in slot overhead (90 MB slots for 42 MB live on the
+        /// src/mono census). Per-symbol removal tombstones an entry by
+        /// zeroing its id; a file reindex drops the whole vector, so
+        /// tombstones only live between a symbol removal and its file's
+        /// next reindex. Use find_ref()/for_each_live_ref(), which skip
+        /// tombstones and bounds-check.
+        absl::flat_hash_map<FileID, std::vector<Reference>> refs_by_file;
         absl::flat_hash_map<SymbolID, std::vector<uint64_t>> incoming_refs;
         absl::flat_hash_map<SymbolID, std::vector<uint64_t>> outgoing_refs;
         absl::flat_hash_map<FileID, std::vector<ScopeInfo>> scopes_by_file;
         absl::flat_hash_map<FileID, absl::flat_hash_map<int, std::vector<int>>>
             line_to_symbols_by_file;
         ReferenceStats stats{};
+
+        /// Resolves a global ref id to its slot; nullptr when the file
+        /// is gone, the index is out of range, or the slot is tombstoned.
+        const Reference* find_ref(uint64_t ref_id) const;
+        /// Visits every live (non-tombstoned) reference.
+        template <class Fn>
+        void for_each_live_ref(Fn&& fn) const {
+            for (const auto& [fid, vec] : refs_by_file) {
+                for (const auto& r : vec) {
+                    if (r.id != 0) fn(r);
+                }
+            }
+        }
+        /// Count of live references (tombstones excluded).
+        size_t live_ref_count() const;
 
         std::vector<SymbolHandle> find_symbols_by_name(
             std::string_view name) const;

@@ -257,14 +257,16 @@ int run_debug_memprofile(const GlobalFlags& flags,
             file_scope_entries += v.size();
         }
         size_t ref_string_bytes = 0;
-        for (const auto& [rid, r] : snap->references) {
+        size_t ref_count = 0;
+        snap->for_each_live_ref([&](const lci::Reference& r) {
             ref_string_bytes += r.referenced_name.size();
-        }
+            ++ref_count;
+        });
         std::printf("\n== structure census ==\n");
         std::printf("symbols:                 %d\n", snap->symbols.size());
         std::printf("references:              %zu (sizeof %zu B each, "
                     "%.1f MB strings)\n",
-                    snap->references.size(), sizeof(Reference),
+                    ref_count, sizeof(Reference),
                     mb(static_cast<int64_t>(ref_string_bytes)));
         std::printf("scopes_by_file entries:  %zu\n", file_scope_entries);
         std::printf("postings tokens:         %d (%d files, %d partial)\n",
