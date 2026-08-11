@@ -1,6 +1,7 @@
 #include <lci/core/trigram.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <string>
 
@@ -378,6 +379,72 @@ bool is_trigram_hostile(std::string_view content) {
     return false;
 }
 
+bool has_high_entropy_section(std::string_view content) {
+    // Block classifier, one linear pass, no allocation. Two independent
+    // payload signatures per 4 KB block:
+    //
+    //  - COMPRESSED/BASE64: Shannon byte entropy >= 5.5 bits/byte. Code and
+    //    prose sit near 4.2-4.8; base64 approaches 6; compressed/binary
+    //    approaches 8. (Binary files are normally rejected upstream by magic
+    //    number -- this catches binary-ish payloads EMBEDDED in text files.)
+    //
+    //  - HASH/HEX DUMP: NOT high-entropy (hex is a 16-symbol alphabet,
+    //    ~4 bits/byte, indistinguishable from code by entropy alone), but
+    //    digit-saturated like nothing humans write: >= 20% digits with
+    //    >= 75% token bytes and <= 15% whitespace. The load-bearing bound
+    //    is DIGITS -- code and prose both sit under ~5% -- while the loose
+    //    token/whitespace bounds keep STRUCTURED payloads in scope: a
+    //    generated table of quoted hashes ('    "9f2c...",') is only ~80%
+    //    token bytes and ~12% whitespace, and it is exactly the err-lookup
+    //    blob shape this trigger exists for.
+    //
+    // "Large enough": qualifying blocks must total >= 16 KB. A lone inlined
+    // key, digest, or small data URI never trips the special case.
+    constexpr size_t kBlock = 4096;
+    constexpr size_t kMinPayloadBytes = 16 * 1024;
+    constexpr double kEntropyBitsPerByte = 5.5;
+
+    if (content.size() < kMinPayloadBytes) return false;
+
+    size_t payload_bytes = 0;
+    for (size_t pos = 0; pos + kBlock <= content.size(); pos += kBlock) {
+        std::string_view block = content.substr(pos, kBlock);
+
+        uint32_t freq[256] = {};
+        size_t token_chars = 0;
+        size_t digits = 0;
+        size_t whitespace = 0;
+        for (unsigned char c : block) {
+            ++freq[c];
+            if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+                (c >= '0' && c <= '9') || c == '_' || c == '+' || c == '/' ||
+                c == '=') {
+                ++token_chars;  // base64 alphabet counts as token-dense too
+            }
+            if (c >= '0' && c <= '9') ++digits;
+            if (c == ' ' || c == '\t' || c == '\n' || c == '\r') ++whitespace;
+        }
+
+        double entropy = 0.0;
+        const double n = static_cast<double>(kBlock);
+        for (uint32_t f : freq) {
+            if (f == 0) continue;
+            const double p = static_cast<double>(f) / n;
+            entropy -= p * std::log2(p);
+        }
+
+        const bool compressed_like = entropy >= kEntropyBitsPerByte;
+        const bool hash_dump_like =
+            token_chars * 4 >= kBlock * 3 &&    // >= 75% token bytes
+            digits * 5 >= kBlock &&             // >= 20% digits
+            whitespace * 20 <= kBlock * 3;      // <= 15% whitespace
+        if (compressed_like || hash_dump_like) payload_bytes += kBlock;
+
+        if (payload_bytes >= kMinPayloadBytes) return true;
+    }
+    return false;
+}
+
 void TrigramIndex::mark_unfiltered(FileID file_id) {
     mutate_snapshot([&](Snapshot& snap) {
         snap.invalidated_files.erase(file_id);
@@ -386,7 +453,15 @@ void TrigramIndex::mark_unfiltered(FileID file_id) {
 }
 
 void TrigramIndex::index_file(FileID file_id, std::string_view content) {
-    if (is_trigram_hostile(content)) {
+    // Both gates end in mark_unfiltered, the trigram side's superset
+    // mechanism: the file self-nominates as a candidate for every query
+    // instead of storing per-occurrence locations. A payload section
+    // (hash table, base64 blob) costs ~12 bytes per occurrence here --
+    // ~16 MB for a 1.4 MB hex table -- while matching almost any query
+    // anyway, so filtering it buys nothing. Short-line hash tables slip
+    // past is_trigram_hostile's long-line rule; the entropy/digit
+    // classifier is what catches them.
+    if (is_trigram_hostile(content) || has_high_entropy_section(content)) {
         mark_unfiltered(file_id);
         return;
     }

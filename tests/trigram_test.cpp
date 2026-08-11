@@ -491,6 +491,139 @@ TEST(TrigramHostileTest, OversizeFileIsHostileRegardlessOfLines) {
     EXPECT_TRUE(is_trigram_hostile(big));
 }
 
+// ---------------------------------------------------------------------------
+// has_high_entropy_section: payload-in-code detection.
+// Two distinct payload signatures -- compressed/base64 (high byte entropy)
+// and hash/hex dumps (LOW entropy: 16-symbol alphabet, ~4 bits/byte, so a
+// pure entropy trigger misses them; the token-shape rule is what catches
+// them). Both need >= 16 KB of qualifying blocks: a lone key or digest is
+// normal code, not a payload.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// Deterministic pseudo-random bytes (no <random>: fixed LCG, same output
+// everywhere) restricted to a chosen alphabet.
+std::string make_payload(size_t bytes, std::string_view alphabet) {
+    std::string out;
+    out.reserve(bytes);
+    uint64_t state = 0x9E3779B97F4A7C15ull;
+    for (size_t i = 0; i < bytes; ++i) {
+        state = state * 6364136223846793005ull + 1442695040888963407ull;
+        out.push_back(alphabet[(state >> 33) % alphabet.size()]);
+    }
+    return out;
+}
+
+constexpr std::string_view kBase64Alphabet =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+constexpr std::string_view kHexAlphabet = "0123456789abcdef";
+
+std::string normal_code(size_t approx_bytes) {
+    std::string out;
+    while (out.size() < approx_bytes) {
+        out += "int compute_total(const std::vector<int>& xs) {\n"
+               "    int total = 0;\n"
+               "    for (int x : xs) total += x;\n"
+               "    return total;\n"
+               "}\n\n";
+    }
+    return out;
+}
+
+}  // namespace
+
+TEST(HighEntropySectionTest, NormalCodeDoesNotTrigger) {
+    EXPECT_FALSE(has_high_entropy_section(normal_code(64 * 1024)));
+}
+
+TEST(HighEntropySectionTest, Base64PayloadTriggers) {
+    // 32 KB of base64 embedded in code: the compressed/base64 signature.
+    std::string f = normal_code(32 * 1024);
+    f += make_payload(32 * 1024, kBase64Alphabet);
+    f += normal_code(32 * 1024);
+    EXPECT_TRUE(has_high_entropy_section(f));
+}
+
+TEST(HighEntropySectionTest, HexDumpTriggersDespiteLowEntropy) {
+    // 32 KB of hex ids: ~4 bits/byte, entropy alone would MISS this --
+    // the digit-saturation rule is the discriminating signature. This is
+    // the err-lookup blob shape.
+    std::string f = normal_code(32 * 1024);
+    f += make_payload(32 * 1024, kHexAlphabet);
+    f += normal_code(32 * 1024);
+    EXPECT_TRUE(has_high_entropy_section(f));
+}
+
+TEST(HighEntropySectionTest, StructuredQuotedHashTableTriggers) {
+    // The realistic shape: a generated code file of INDENTED, QUOTED hex
+    // literals. Quotes + indent + newline dilute token density to ~80%
+    // and raise whitespace to ~12% -- a strict dense/starved rule misses
+    // it (the first cut of this detector did); digit saturation is what
+    // has to carry the classification.
+    std::string f = normal_code(8 * 1024);
+    f += "const char* kHashes[] = {\n";
+    std::string hex = make_payload(32 * 32 * 1024 / 42, kHexAlphabet);
+    for (size_t i = 0; i + 32 <= hex.size(); i += 32) {
+        f += "    \"";
+        f.append(hex, i, 32);
+        f += "\",\n";
+    }
+    f += "};\n";
+    f += normal_code(8 * 1024);
+    EXPECT_TRUE(has_high_entropy_section(f));
+}
+
+TEST(HighEntropySectionTest, SmallPayloadDoesNotTrigger) {
+    // A single 8 KB blob (inlined key, one digest table) is below the
+    // 16 KB payload floor: ordinary code, not a special case.
+    std::string f = normal_code(64 * 1024);
+    f += make_payload(8 * 1024, kBase64Alphabet);
+    f += normal_code(64 * 1024);
+    EXPECT_FALSE(has_high_entropy_section(f));
+}
+
+TEST(HighEntropySectionTest, SmallFileNeverTriggers) {
+    EXPECT_FALSE(
+        has_high_entropy_section(make_payload(8 * 1024, kBase64Alphabet)));
+}
+
+TEST(HighEntropySectionTest, ScatteredPayloadAccumulates) {
+    // Five 4 KB payload blocks spread through the file: individually small,
+    // 20 KB in total -- past the floor, so the special case fires.
+    std::string f;
+    for (int i = 0; i < 5; ++i) {
+        f += normal_code(12 * 1024);
+        f += make_payload(4 * 1024, kBase64Alphabet);
+    }
+    EXPECT_TRUE(has_high_entropy_section(f));
+}
+
+TEST(TrigramIndexTest, PayloadSectionFileFallsBackToUnfilteredCandidate) {
+    // A quoted-hash table dodges the long-line hostile rule (42-byte
+    // lines) but is per-occurrence poison: ~12 bytes per trigram
+    // occurrence stored for content that matches nearly any query. The
+    // entropy/digit classifier must route it to the same unfiltered
+    // fallback -- stored nowhere, surfaced everywhere.
+    TrigramIndex index;
+    std::string table = "const char* kHashes[] = {\n";
+    uint64_t state = 42;
+    for (int line = 0; line < 1200; ++line) {
+        table += "    \"";
+        for (int i = 0; i < 32; ++i) {
+            state = state * 6364136223846793005ull + 1442695040888963407ull;
+            table += "0123456789abcdef"[(state >> 33) & 0xF];
+        }
+        table += "\",\n";
+    }
+    table += "};\n";
+    index.index_file(FileID{9}, table);
+
+    auto candidates = index.find_candidates("needle");
+    ASSERT_EQ(candidates.size(), 1u);
+    EXPECT_EQ(candidates[0], FileID{9});
+}
+
 TEST(TrigramIndexTest, HostileFileFallsBackToUnfilteredCandidate) {
     TrigramIndex index;
     std::string minified(128 * 1024, 'x');

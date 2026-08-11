@@ -225,10 +225,17 @@ ProcessedFile FileProcessor::process_file(int /*worker_id*/,
         // unbounded (hex ids, word lists) and postings retention runs ~10x
         // file size. A capped file is marked PARTIAL downstream and always
         // self-nominates in postings lookups, so search stays exact.
+        // Extension is a claim, not proof: a "code" file carrying a large
+        // compressed/base64/hash payload section (vendored wordlist,
+        // inlined asset, generated table) is a data file in disguise and
+        // gets the same cap.
+        const bool payload_content =
+            !language_info_for_path(task.path).is_code ||
+            has_high_entropy_section(content);
         const size_t token_cap =
-            language_info_for_path(task.path).is_code
-                ? 0
-                : static_cast<size_t>(config_.index.data_file_token_cap);
+            payload_content
+                ? static_cast<size_t>(config_.index.data_file_token_cap)
+                : 0;
         auto pi_tokens = lci::PostingsIndex::tokenize_content(
             content, token_cap, &result.postings_truncated);
         result.postings_tokens.reserve(pi_tokens.size());

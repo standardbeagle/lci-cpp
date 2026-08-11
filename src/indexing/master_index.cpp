@@ -9,11 +9,16 @@ namespace lci {
 
 namespace {
 /// Same cap policy as the pipeline worker (pipeline_processor.cpp): data
-/// files (!is_code) cap their unique postings tokens; code never does.
-size_t data_cap(const Config& cfg, std::string_view path) {
-    return language_info_for_path(path).is_code
-               ? 0
-               : static_cast<size_t>(cfg.index.data_file_token_cap);
+/// files (!is_code) cap their unique postings tokens, and so does any
+/// "code" file whose content carries a large compressed/base64/hash
+/// payload section -- extension is a claim, content is the evidence.
+size_t data_cap(const Config& cfg, std::string_view path,
+                std::string_view content) {
+    if (language_info_for_path(path).is_code &&
+        !has_high_entropy_section(content)) {
+        return 0;
+    }
+    return static_cast<size_t>(cfg.index.data_file_token_cap);
 }
 }  // namespace
 
@@ -337,7 +342,7 @@ bool MasterIndex::index_file(const std::string& path) {
 
     trigram_index_.index_file(file_id, content_sv);
     postings_index_.index_file(file_id, content_sv,
-                               data_cap(config_, path));
+                               data_cap(config_, path, content_sv));
     update_snapshot_for_file(path, file_id, FileID{0}, false);
 
     processed_files_.fetch_add(1, std::memory_order_relaxed);
@@ -372,7 +377,7 @@ bool MasterIndex::update_file(const std::string& path, std::string_view content)
 
     trigram_index_.index_file(new_id, content);
     postings_index_.index_file(new_id, content,
-                               data_cap(config_, path));
+                               data_cap(config_, path, content));
 
     update_snapshot_for_file(path, new_id, old_id, existed);
     return true;

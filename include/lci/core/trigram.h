@@ -234,6 +234,18 @@ bool is_pure_ascii(std::string_view content);
 /// them via mark_unfiltered instead.
 bool is_trigram_hostile(std::string_view content);
 
+/// True when the file carries a LARGE machine-generated payload section:
+/// compressed/base64 data (high byte entropy, ~6 bits/byte vs ~4.5 for
+/// code) or hash/hex dumps (NOT high-entropy -- hex is a 16-symbol
+/// alphabet at ~4 bits/byte -- but token-dense, digit-heavy, and
+/// whitespace-starved in a way prose and code never are). Classified per
+/// 4 KB block; triggers once qualifying blocks total >= 16 KB, so a lone
+/// embedded key or digest never trips it. Callers use it to apply the
+/// data-file postings token cap to files whose EXTENSION says code but
+/// whose content says payload (generated .ts blobs, vendored wordlists,
+/// inlined assets).
+bool has_high_entropy_section(std::string_view content);
+
 /// Returns true if a byte is alphanumeric or underscore.
 inline bool is_alpha_num(uint8_t b) {
     return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')

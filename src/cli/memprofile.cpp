@@ -267,6 +267,9 @@ int run_debug_memprofile(const GlobalFlags& flags,
                     snap->references.size(), sizeof(Reference),
                     mb(static_cast<int64_t>(ref_string_bytes)));
         std::printf("scopes_by_file entries:  %zu\n", file_scope_entries);
+        std::printf("postings tokens:         %d (%d files, %d partial)\n",
+                    postings_index.token_count(), postings_index.file_count(),
+                    postings_index.partial_file_count());
 
         size_t chain_entries = 0, chain_strings = 0, sym_strings = 0,
                annotations = 0;
