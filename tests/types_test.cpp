@@ -358,19 +358,5 @@ TEST(FunctionPerfDataTest, DefaultConstruction) {
     EXPECT_TRUE(fpd.calls.empty());
 }
 
-// ---------------------------------------------------------------------------
-// RefStats / RefCount
-// ---------------------------------------------------------------------------
-TEST(RefCountTest, DefaultConstruction) {
-    RefCount rc;
-    EXPECT_EQ(rc.incoming_count, 0);
-    EXPECT_EQ(rc.outgoing_count, 0);
-    EXPECT_TRUE(rc.incoming_files.empty());
-    EXPECT_TRUE(rc.outgoing_files.empty());
-    EXPECT_EQ(rc.strength.tight, 0);
-    EXPECT_EQ(rc.strength.loose, 0);
-    EXPECT_EQ(rc.strength.transitive, 0);
-}
-
 }  // namespace
 }  // namespace lci

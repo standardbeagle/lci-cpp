@@ -79,32 +79,6 @@ struct Reference {
     // Reinstate them only alongside the resolver that actually populates them.
 };
 
-/// Breakdown of references by coupling strength.
-struct RefStrengthStats {
-    int tight{};
-    int loose{};
-    int transitive{};
-};
-
-/// Reference count statistics.
-struct RefCount {
-    int incoming_count{};
-    int outgoing_count{};
-    std::vector<FileID> incoming_files;
-    std::vector<FileID> outgoing_files;
-    RefStrengthStats strength;
-};
-
-/// Reference statistics at multiple scope levels.
-struct RefStats {
-    RefCount folder_level;
-    RefCount file_level;
-    RefCount class_level;
-    RefCount function_level;
-    RefCount variable_level;
-    RefCount total;
-};
-
 /// An import statement in a source file.
 struct Import {
     std::string path;

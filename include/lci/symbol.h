@@ -27,7 +27,6 @@ struct Symbol {
 
 /// Forward declarations for types defined in other headers.
 struct Reference;
-struct RefStats;
 
 /// Interned, immutable scope chain. Symbols with identical enclosing
 /// scopes (every member of a class, every function in a module) share one
