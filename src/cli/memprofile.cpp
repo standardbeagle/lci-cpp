@@ -200,13 +200,20 @@ int run_debug_memprofile(const GlobalFlags& flags,
     // publishes the staged snapshots; reference resolution walks the whole
     // symbol table. Either can dominate growth without any single file
     // looking guilty.
+    // Ordering mirrors MasterIndex::index_directory: the symbol-location
+    // index publishes BEFORE resolution (resolution reads it), but the
+    // ref tracker's bulk window stays open THROUGH resolution so it
+    // mutates staging in place. The previous order closed the tracker
+    // first, so resolution's write_snapshot cloned the entire snapshot --
+    // a full-index copy production never pays, misreported here as a
+    // 79-109 MB "reference-res delta" at next.js scale.
     trigram_index.set_bulk_indexing(false);
-    ref_tracker.set_bulk_indexing(false);
     symbol_location_index.set_bulk_indexing(false);
     postings_index.set_bulk_indexing(false);
     const long rss_after_publish_kb = read_rss_kb();
 
     ref_tracker.process_all_references();
+    ref_tracker.set_bulk_indexing(false);
     const long rss_after_refs_kb = read_rss_kb();
 
     std::sort(deltas.begin(), deltas.end(),
