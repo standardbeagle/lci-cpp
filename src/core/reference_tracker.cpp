@@ -684,76 +684,59 @@ bool ReferenceTracker::compute_is_exported(std::string_view path,
 ScopeChain ReferenceTracker::build_symbol_scope_chain(
     const Symbol& symbol, std::span<const ScopeInfo> scopes) {
 
-    int scope_count = 0;
-    uint64_t cache_key = create_scope_chain_cache_key(symbol, scopes,
-                                                       scope_count);
-
-    // Hash-cons: a cache hit hands back the SAME shared chain, so every
-    // symbol under the same enclosing scopes points at one heap copy.
-    if (auto it = scope_chain_cache_.find(cache_key);
-        it != scope_chain_cache_.end()) {
-        const auto& entry = it->second;
-        if (entry.symbol_line == symbol.line &&
-            entry.symbol_end_line == symbol.end_line &&
-            entry.scope_count == scope_count) {
-            return entry.scope_chain;
-        }
-    }
-
-    auto chain = std::make_shared<std::vector<ScopeInfo>>();
-    chain->reserve(4);
+    // Select the enclosing scopes first; the hash-cons key is the CONTENT
+    // of this selection. Keying on the symbol's own line span (the first
+    // cut) made sharing impossible for siblings on different lines --
+    // measured 19% dedup at next.js scale where class members should
+    // share almost fully.
+    thread_local std::vector<const ScopeInfo*> selected;
+    selected.clear();
     for (const auto& scope : scopes) {
         if (scope.start_line <= symbol.line &&
             (scope.end_line == 0 || scope.end_line >= symbol.line)) {
-            chain->push_back(scope);
+            selected.push_back(&scope);
         }
     }
 
-    ScopeChain shared{std::move(chain)};
-    scope_chain_cache_[cache_key] = ScopeChainCacheEntry{
-        .scope_chain = shared,
-        .symbol_line = symbol.line,
-        .symbol_end_line = symbol.end_line,
-        .scope_count = scope_count,
+    uint64_t h = kFnvOffset64;
+    for (const ScopeInfo* sc : selected) {
+        h ^= static_cast<uint64_t>(sc->start_line);
+        h *= kFnvPrime64;
+        h ^= static_cast<uint64_t>(sc->end_line);
+        h *= kFnvPrime64;
+        for (char c : sc->name) {
+            h ^= static_cast<uint64_t>(static_cast<uint8_t>(c));
+            h *= kFnvPrime64;
+        }
+    }
+
+    auto matches = [&](const ScopeChain& chain) {
+        if (chain.size() != selected.size()) return false;
+        for (size_t i = 0; i < selected.size(); ++i) {
+            const ScopeInfo& a = chain[i];
+            const ScopeInfo* b = selected[i];
+            if (a.start_line != b->start_line || a.end_line != b->end_line ||
+                a.name != b->name || a.full_path != b->full_path) {
+                return false;
+            }
+        }
+        return true;
     };
 
+    if (auto it = scope_chain_cache_.find(h);
+        it != scope_chain_cache_.end() && matches(it->second.scope_chain)) {
+        return it->second.scope_chain;
+    }
+
+    auto chain = std::make_shared<std::vector<ScopeInfo>>();
+    chain->reserve(selected.size());
+    for (const ScopeInfo* sc : selected) chain->push_back(*sc);
+
+    ScopeChain shared{std::move(chain)};
+    scope_chain_cache_[h] = ScopeChainCacheEntry{.scope_chain = shared};
     return shared;
 }
 
-uint64_t ReferenceTracker::create_scope_chain_cache_key(
-    const Symbol& symbol, std::span<const ScopeInfo> scopes,
-    int& scope_count_out) const {
-
-    uint64_t h = kFnvOffset64;
-    h ^= static_cast<uint64_t>(symbol.line);
-    h *= kFnvPrime64;
-    h ^= static_cast<uint64_t>(symbol.end_line);
-    h *= kFnvPrime64;
-
-    int count = 0;
-    for (const auto& scope : scopes) {
-        if (count >= 3) {
-            if (scope.start_line <= symbol.line &&
-                (scope.end_line == 0 || scope.end_line >= symbol.line)) {
-                h ^= static_cast<uint64_t>(scope.start_line);
-                h *= kFnvPrime64;
-                h ^= static_cast<uint64_t>(scope.end_line);
-                h *= kFnvPrime64;
-                count++;
-                break;
-            }
-        } else {
-            h ^= static_cast<uint64_t>(scope.start_line);
-            h *= kFnvPrime64;
-            h ^= static_cast<uint64_t>(scope.end_line);
-            h *= kFnvPrime64;
-            count++;
-        }
-    }
-
-    scope_count_out = count;
-    return h;
-}
 
 SymbolID ReferenceTracker::find_symbol_at_location(
     const Snapshot& s, FileID file_id, int line, int col) const {

@@ -289,15 +289,13 @@ class PostingsIndex {
 // ScopeChainCacheEntry - cached scope chain with collision verification
 // ---------------------------------------------------------------------------
 
-/// Hash-cons table entry: the SHARED chain handed to every symbol whose
-/// key + guards match. Sharing is the memory win (chains were the largest
-/// structural census term at next.js scale); the line/count fields guard
-/// against key collisions exactly as before.
+/// Hash-cons table entry, keyed by chain CONTENT. The first cut keyed on
+/// the symbol's own line span, which made sharing structurally impossible
+/// for siblings on different lines -- measured 19% dedup at next.js scale
+/// where class members should share almost fully. Collisions are guarded
+/// by full content comparison against the cached chain, not line fields.
 struct ScopeChainCacheEntry {
     ScopeChain scope_chain;
-    int symbol_line{};
-    int symbol_end_line{};
-    int scope_count{};
 };
 
 // ---------------------------------------------------------------------------
@@ -528,9 +526,7 @@ class ReferenceTracker {
 
     ScopeChain build_symbol_scope_chain(
         const Symbol& symbol, std::span<const ScopeInfo> scopes);
-    uint64_t create_scope_chain_cache_key(
-        const Symbol& symbol, std::span<const ScopeInfo> scopes,
-        int& scope_count_out) const;
+
 
     SymbolID find_symbol_at_location(const Snapshot& s, FileID file_id,
                                      int line, int col) const;
