@@ -71,10 +71,12 @@ struct Reference {
     ReferenceType type{};
     RefStrength strength{};
     std::string referenced_name;
-    std::string quality;
     bool ambiguous{};
-    std::vector<std::string> candidates;
-    std::string failure_reason;
+    // No `quality`, `candidates`, or `failure_reason` here. They were carried
+    // for every reference on every corpus and never written by any resolver,
+    // never serialized, and never read -- 88 bytes of the struct plus their
+    // allocator overhead, on the one object large corpora hold the most of.
+    // Reinstate them only alongside the resolver that actually populates them.
 };
 
 /// Breakdown of references by coupling strength.

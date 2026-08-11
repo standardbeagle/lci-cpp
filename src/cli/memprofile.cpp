@@ -196,8 +196,7 @@ int run_debug_memprofile(const GlobalFlags& flags,
         }
         size_t ref_string_bytes = 0;
         for (const auto& [rid, r] : snap->references) {
-            ref_string_bytes += r.referenced_name.size() + r.quality.size() +
-                                r.failure_reason.size();
+            ref_string_bytes += r.referenced_name.size();
         }
         std::printf("\n== structure census ==\n");
         std::printf("symbols:                 %d\n", snap->symbols.size());
