@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cstdio>
 #include <string>
+#include <string_view>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -14,18 +16,25 @@ namespace lci::cli {
 /// estimator's `fit`); raw dumping made inspect output unreadable.
 inline std::string format_aggregated_names(
     const std::vector<std::string>& names, size_t max_shown = 25) {
-    std::vector<std::pair<std::string, int>> counts;  // first-seen order
+    // Counts in first-seen order. The views borrow `names`, which outlives
+    // every use below, so tallying costs no string copies. `seen` keeps the
+    // tally O(n): a linear scan of `counts` per name was quadratic on exactly
+    // the input this function exists for -- hot symbols whose caller lists run
+    // to hundreds of repeats of the same name.
+    std::vector<std::pair<std::string_view, int>> counts;  // first-seen order
+    std::unordered_map<std::string_view, size_t> seen;     // name -> index
+    counts.reserve(names.size());
+    seen.reserve(names.size());
     for (const auto& n : names) {
-        auto it = std::find_if(counts.begin(), counts.end(),
-                               [&](const auto& p) { return p.first == n; });
-        if (it == counts.end()) {
-            counts.emplace_back(n, 1);
+        auto [it, inserted] = seen.emplace(std::string_view(n), counts.size());
+        if (inserted) {
+            counts.emplace_back(std::string_view(n), 1);
         } else {
-            ++it->second;
+            ++counts[it->second].second;
         }
     }
 
-    auto is_test_name = [](const std::string& n) {
+    auto is_test_name = [](std::string_view n) {
         return n.rfind("test_", 0) == 0;
     };
     std::stable_sort(counts.begin(), counts.end(),
