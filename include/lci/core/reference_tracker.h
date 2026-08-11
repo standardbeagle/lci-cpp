@@ -202,10 +202,23 @@ class PostingsIndex {
     /// locks; writers clone-mutate-publish under write_mu_ (or, during a
     /// bulk window, mutate staging_ in place and publish once). Mirrors
     /// FileContentStore's snapshot model.
+    /// Tokens are interned behind a dense uint32 id. The previous shape
+    /// stored each token string once as the map key PLUS once per
+    /// containing file in reverse_keys — "function" in 3000 files was
+    /// 3001 string copies; reverse_keys was most of the index's bytes.
+    /// Now the string lives once in token_to_id and every other
+    /// appearance is 4 bytes. Ids are values, so RCU snapshot cloning
+    /// stays a plain copy (a pointer/string_view scheme would dangle
+    /// across clones). remove_file erases a token's file entries but
+    /// keeps the id + string even when its postings empty: vocabulary is
+    /// bounded and churn-stable, and reclaiming ids would need an
+    /// id->string back-reference that reintroduces the second copy.
     struct Snapshot {
-        absl::flat_hash_map<std::string, absl::flat_hash_map<FileID, int>>
-            tokens;
-        absl::flat_hash_map<FileID, std::vector<std::string>> reverse_keys;
+        absl::flat_hash_map<std::string, uint32_t> token_to_id;
+        /// Indexed by token id; slot i belongs to the token whose
+        /// token_to_id value is i. Never shrinks (see above).
+        std::vector<absl::flat_hash_map<FileID, int>> postings;
+        absl::flat_hash_map<FileID, std::vector<uint32_t>> reverse_keys;
         /// Files indexed with a capped token set. Unioned into every
         /// find() result — see find() for why the superset is mandatory.
         absl::flat_hash_set<FileID> partial_files;

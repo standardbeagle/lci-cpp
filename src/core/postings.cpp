@@ -168,19 +168,24 @@ void PostingsIndex::index_file_pretokenized(FileID file_id,
 
     write_snapshot([&](Snapshot& snap) {
         if (truncated) snap.partial_files.insert(file_id);
-        std::vector<std::string> keys;
-        keys.reserve(tokens.size());
-        for (const auto& pt : tokens) {
-            keys.push_back(pt.token);
-        }
-        snap.reverse_keys[file_id] = std::move(keys);
+        std::vector<uint32_t> ids;
+        ids.reserve(tokens.size());
 
         for (auto& pt : tokens) {
-            auto& m = snap.tokens[pt.token];
+            // Intern: move the string in only on first sight; every later
+            // appearance of this token, in any file, costs 4 bytes.
+            auto [it, inserted] = snap.token_to_id.try_emplace(
+                std::move(pt.token),
+                static_cast<uint32_t>(snap.postings.size()));
+            if (inserted) snap.postings.emplace_back();
+            const uint32_t id = it->second;
+            auto& m = snap.postings[id];
             if (!m.contains(file_id)) {
                 m[file_id] = pt.offset;
+                ids.push_back(id);
             }
         }
+        snap.reverse_keys[file_id] = std::move(ids);
     });
 }
 
@@ -198,14 +203,10 @@ void PostingsIndex::remove_file(FileID file_id) {
         auto rk_it = snap.reverse_keys.find(file_id);
         if (rk_it == snap.reverse_keys.end()) return;
 
-        for (const auto& tok : rk_it->second) {
-            auto tok_it = snap.tokens.find(tok);
-            if (tok_it != snap.tokens.end()) {
-                tok_it->second.erase(file_id);
-                if (tok_it->second.empty()) {
-                    snap.tokens.erase(tok_it);
-                }
-            }
+        for (uint32_t id : rk_it->second) {
+            snap.postings[id].erase(file_id);
+            // The id + interned string stay even when postings empty --
+            // see the Snapshot comment.
         }
         snap.reverse_keys.erase(rk_it);
     });
@@ -232,10 +233,11 @@ void PostingsIndex::find(std::string_view token, bool case_insensitive,
 
     // Lock-free read over the immutable snapshot.
     auto snap = load_snapshot();
-    auto it = snap->tokens.find(tok);
-    if (it != snap->tokens.end()) {
-        files_out.reserve(it->second.size() + snap->partial_files.size());
-        for (const auto& [fid, off] : it->second) {
+    auto it = snap->token_to_id.find(tok);
+    if (it != snap->token_to_id.end()) {
+        const auto& m = snap->postings[it->second];
+        files_out.reserve(m.size() + snap->partial_files.size());
+        for (const auto& [fid, off] : m) {
             files_out.push_back(fid);
             offsets_out[fid] = off;
         }
@@ -259,7 +261,14 @@ int PostingsIndex::partial_file_count() const {
 }
 
 int PostingsIndex::token_count() const {
-    return static_cast<int>(load_snapshot()->tokens.size());
+    // Counts tokens with at least one live posting: interned ids whose
+    // file sets have emptied are storage residue, not indexed tokens.
+    auto snap = load_snapshot();
+    int live = 0;
+    for (const auto& m : snap->postings) {
+        if (!m.empty()) ++live;
+    }
+    return live;
 }
 
 int PostingsIndex::file_count() const {
@@ -268,8 +277,10 @@ int PostingsIndex::file_count() const {
 
 void PostingsIndex::clear() {
     write_snapshot([](Snapshot& snap) {
-        snap.tokens.clear();
+        snap.token_to_id.clear();
+        snap.postings.clear();
         snap.reverse_keys.clear();
+        snap.partial_files.clear();
     });
 }
 
