@@ -202,7 +202,9 @@ TEST(IndexPerformanceRequirements, FileAccessUnder50Microseconds) {
         ASSERT_NE(fc, nullptr) << "file_content_store missing FileID " << fid;
         // Mirrors Go's `assert.NotEmpty(t, fileInfo.Content)` so the
         // optimizer can't elide the lookup.
-        ASSERT_FALSE(fc->content.empty())
+        // view(), not the content vector: mapped entries hold their bytes
+        // in the retained mmap and the vector is legitimately empty.
+        ASSERT_FALSE(fc->view().empty())
             << "FileContent for FileID " << fid << " unexpectedly empty";
     });
 

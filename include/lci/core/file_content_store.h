@@ -14,6 +14,7 @@
 
 #include <lci/core/atomic_shared_ptr.h>
 #include <lci/string_ref.h>
+#include <lci/core/mmap.h>
 #include <lci/types.h>
 
 namespace lci {
@@ -22,7 +23,18 @@ namespace lci {
 /// Immutable once constructed; updates create new instances.
 struct FileContent {
     FileID file_id{};
+    /// Exactly one of `content` / `mapping` holds the bytes. Disk loads
+    /// RETAIN the read-time mmap instead of copying to the heap: the
+    /// page cache backs the bytes (file-backed, kernel-evictable), not
+    /// anonymous heap -- the content store was the largest single index
+    /// term (~1x corpus) as heap copies. The mapping pins the inode:
+    /// rename-replace saves leave pinned readers on the old bytes; an
+    /// in-place overwrite may tear a concurrent view for at most the
+    /// watcher debounce window before the reload swaps a fresh entry --
+    /// the same freshness contract the watcher already defines. The copy
+    /// path remains for byte-push callers (update_file, tests).
     std::vector<uint8_t> content;
+    MappedFile mapping;
     std::vector<uint32_t> line_offsets;
     uint64_t fast_hash{};
     mutable std::mutex content_hash_mu;
@@ -33,8 +45,9 @@ struct FileContent {
     FileContent(const FileContent&) = delete;
     FileContent& operator=(const FileContent&) = delete;
 
-    /// Returns the content as a string_view.
+    /// Returns the content as a string_view (mapped or owned).
     std::string_view view() const {
+        if (mapping.is_open()) return mapping.view();
         return {reinterpret_cast<const char*>(content.data()), content.size()};
     }
 };
@@ -198,6 +211,15 @@ class FileContentStore {
     /// Loads a file into the store and returns its ID.
     FileID load_file(const std::string& path, std::string_view content);
 
+    /// Disk-load variant that RETAINS the mmap instead of copying its
+    /// bytes to the heap (see FileContent::mapping). The store takes
+    /// ownership of the mapping.
+    FileID load_file_mapped(const std::string& path, MappedFile mapping);
+
+    /// Batch form of load_file_mapped: one snapshot clone for the batch.
+    std::vector<FileID> batch_load_files_mapped(
+        std::vector<std::pair<std::string, MappedFile>> files);
+
     /// Loads multiple files in a single batch.
     std::vector<FileID> batch_load_files(
         const std::vector<std::pair<std::string, std::string_view>>& files);
@@ -236,6 +258,8 @@ class FileContentStore {
 
     /// Creates a new FileContent from raw data.
     std::shared_ptr<FileContent> make_file_content(FileID id, std::string_view data) const;
+    std::shared_ptr<FileContent> make_file_content_mapped(
+        FileID id, MappedFile mapping) const;
 
     /// Computes the estimated memory footprint of a FileContent.
     static int64_t estimate_memory(const FileContent& fc);

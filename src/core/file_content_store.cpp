@@ -208,9 +208,25 @@ std::shared_ptr<FileContent> FileContentStore::make_file_content(FileID id,
     return fc;
 }
 
+std::shared_ptr<FileContent> FileContentStore::make_file_content_mapped(
+    FileID id, MappedFile mapping) const {
+    auto fc = std::make_shared<FileContent>();
+    fc->file_id = id;
+    fc->mapping = std::move(mapping);
+    auto data = fc->mapping.view();
+    fc->line_offsets = compute_line_offsets(data);
+    fc->fast_hash = XXH64(data.data(), data.size(), 0);
+    fc->ref_count.store(1, std::memory_order_relaxed);
+    return fc;
+}
+
 int64_t FileContentStore::estimate_memory(const FileContent& fc) {
-    return static_cast<int64_t>(fc.content.size()) +
-           static_cast<int64_t>(fc.line_offsets.size()) * 4 + 64;
+    // Mapped bytes are file-backed and kernel-evictable -- they are not
+    // heap, so they do not count against the heap cap (max_memory_mb).
+    // line_offsets and bookkeeping are heap either way.
+    const int64_t owned =
+        fc.mapping.is_open() ? 0 : static_cast<int64_t>(fc.content.size());
+    return owned + static_cast<int64_t>(fc.line_offsets.size()) * 4 + 64;
 }
 
 void FileContentStore::enforce_memory_limit(std::shared_ptr<FileContentSnapshot>& snap) {
@@ -315,13 +331,14 @@ StringRef FileContentStore::get_line(FileID file_id, int line_num) const {
     uint32_t start = offsets[static_cast<size_t>(line_num)];
     uint32_t end;
 
+    const std::string_view bytes = fc->view();  // mapped or owned
     if (line_num + 1 < static_cast<int>(offsets.size())) {
         end = offsets[static_cast<size_t>(line_num + 1)];
-        if (end > start && fc->content[end - 1] == '\n') {
+        if (end > start && bytes[end - 1] == '\n') {
             --end;
         }
     } else {
-        end = static_cast<uint32_t>(fc->content.size());
+        end = static_cast<uint32_t>(bytes.size());
     }
 
     uint32_t length = end - start;
@@ -385,9 +402,7 @@ std::array<uint8_t, 32> FileContentStore::get_content_hash(FileID file_id) const
     if (fc->content_hash == kZeroHash) {
         // Cache under the same FileContent. The mutex keeps concurrent
         // first-readers from racing while preserving lazy computation.
-        fc->content_hash = compute_sha256(
-            std::string_view(reinterpret_cast<const char*>(fc->content.data()),
-                             fc->content.size()));
+        fc->content_hash = compute_sha256(fc->view());  // mapped or owned
     }
     return fc->content_hash;
 }
@@ -481,6 +496,133 @@ FileID FileContentStore::load_file(const std::string& path, std::string_view con
     enforce_memory_limit(snap);
     snapshot_.store(std::move(snap), std::memory_order_release);
     return file_id;
+}
+
+FileID FileContentStore::load_file_mapped(const std::string& path,
+                                          MappedFile mapping) {
+    std::lock_guard<std::mutex> write_lock(write_mu_);
+
+    auto snap = std::make_shared<FileContentSnapshot>(*load_snapshot());
+    auto data = mapping.view();
+    uint64_t new_hash = XXH64(data.data(), data.size(), 0);
+
+    FileID existing_id = snap->path_to_id(path);
+    if (existing_id != 0) {
+        const auto& existing_fc = snap->find_by_id(existing_id);
+        if (existing_fc && existing_fc->fast_hash == new_hash) {
+            return existing_id;
+        }
+    }
+
+    FileID file_id;
+    if (existing_id != 0) {
+        file_id = existing_id;
+        auto map_it = snap->id_index.find(file_id);
+        if (map_it != snap->id_index.end()) {
+            const auto& old_entry = snap->entries[map_it->second];
+            current_memory_.fetch_sub(estimate_memory(*old_entry->content),
+                                      std::memory_order_relaxed);
+            auto fc = make_file_content_mapped(file_id, std::move(mapping));
+            current_memory_.fetch_add(estimate_memory(*fc),
+                                      std::memory_order_relaxed);
+            auto fresh = std::make_shared<FileContentSnapshot::Entry>(
+                FileContentSnapshot::Entry{file_id, path, std::move(fc)});
+            snap->path_index.erase(std::string_view(old_entry->path));
+            snap->path_index[std::string_view(fresh->path)] = map_it->second;
+            snap->entries[map_it->second] = std::move(fresh);
+        }
+        snap->access_order.erase(
+            std::remove(snap->access_order.begin(), snap->access_order.end(),
+                        file_id),
+            snap->access_order.end());
+    } else {
+        file_id = static_cast<FileID>(
+            next_id_.fetch_add(1, std::memory_order_relaxed) + 1);
+        auto fc = make_file_content_mapped(file_id, std::move(mapping));
+        current_memory_.fetch_add(estimate_memory(*fc),
+                                  std::memory_order_relaxed);
+        size_t new_pos = snap->entries.size();
+        auto entry = std::make_shared<FileContentSnapshot::Entry>(
+            FileContentSnapshot::Entry{file_id, path, std::move(fc)});
+        snap->path_index[std::string_view(entry->path)] = new_pos;
+        snap->entries.push_back(std::move(entry));
+        snap->id_index[file_id] = new_pos;
+    }
+
+    snap->access_order.push_back(file_id);
+    enforce_memory_limit(snap);
+    snapshot_.store(std::move(snap), std::memory_order_release);
+    return file_id;
+}
+
+std::vector<FileID> FileContentStore::batch_load_files_mapped(
+    std::vector<std::pair<std::string, MappedFile>> files) {
+    if (files.empty()) return {};
+
+    std::lock_guard<std::mutex> write_lock(write_mu_);
+
+    auto snap = std::make_shared<FileContentSnapshot>(*load_snapshot());
+    std::vector<FileID> ids;
+    ids.reserve(files.size());
+    int64_t total_delta = 0;
+
+    for (auto& [path, mapping] : files) {
+        auto data = mapping.view();
+        uint64_t new_hash = XXH64(data.data(), data.size(), 0);
+
+        FileID existing_id = snap->path_to_id(path);
+        if (existing_id != 0) {
+            const auto& existing_fc = snap->find_by_id(existing_id);
+            if (existing_fc && existing_fc->fast_hash == new_hash) {
+                ids.push_back(existing_id);
+                continue;
+            }
+        }
+
+        FileID file_id;
+        if (existing_id != 0) {
+            file_id = existing_id;
+            auto map_it = snap->id_index.find(file_id);
+            if (map_it != snap->id_index.end()) {
+                const auto& old_entry = snap->entries[map_it->second];
+                total_delta -= estimate_memory(*old_entry->content);
+                auto fc = make_file_content_mapped(file_id, std::move(mapping));
+                total_delta += estimate_memory(*fc);
+                auto fresh = std::make_shared<FileContentSnapshot::Entry>(
+                    FileContentSnapshot::Entry{file_id, path, std::move(fc)});
+                snap->path_index.erase(std::string_view(old_entry->path));
+                snap->path_index[std::string_view(fresh->path)] =
+                    map_it->second;
+                snap->entries[map_it->second] = std::move(fresh);
+            }
+            snap->access_order.erase(
+                std::remove(snap->access_order.begin(),
+                            snap->access_order.end(), file_id),
+                snap->access_order.end());
+        } else {
+            file_id = static_cast<FileID>(
+                next_id_.fetch_add(1, std::memory_order_relaxed) + 1);
+            auto fc = make_file_content_mapped(file_id, std::move(mapping));
+            total_delta += estimate_memory(*fc);
+            size_t new_pos = snap->entries.size();
+            auto entry = std::make_shared<FileContentSnapshot::Entry>(
+                FileContentSnapshot::Entry{file_id, path, std::move(fc)});
+            snap->path_index[std::string_view(entry->path)] = new_pos;
+            snap->entries.push_back(std::move(entry));
+            snap->id_index[file_id] = new_pos;
+        }
+
+        snap->access_order.push_back(file_id);
+        ids.push_back(file_id);
+    }
+
+    if (total_delta != 0) {
+        current_memory_.fetch_add(total_delta, std::memory_order_relaxed);
+    }
+
+    enforce_memory_limit(snap);
+    snapshot_.store(std::move(snap), std::memory_order_release);
+    return ids;
 }
 
 std::vector<FileID> FileContentStore::batch_load_files(

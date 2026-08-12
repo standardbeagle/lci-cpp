@@ -42,7 +42,9 @@ Result<FileID> FileService::load_file_from_disk(const std::string& path) {
         return e;
     }
 
-    return store_->load_file(path, view);
+    // Hand the mapping itself to the store -- page-cache-backed bytes
+    // instead of a heap copy (see FileContent::mapping).
+    return store_->load_file_mapped(path, std::move(mapped));
 }
 
 std::vector<FileID> FileService::batch_load_from_disk(
@@ -53,22 +55,24 @@ std::vector<FileID> FileService::batch_load_from_disk(
     // string_views into mapped.view() stay valid until MappedFile is
     // destroyed — keep the MappedFile vector alive across the batch
     // store call.
-    std::vector<MappedFile> mapped(paths.size());
-    std::vector<std::pair<std::string, std::string_view>> batch;
+    std::vector<std::pair<std::string, MappedFile>> batch;
     batch.reserve(paths.size());
     std::vector<size_t> kept_index;
     kept_index.reserve(paths.size());
 
     for (size_t i = 0; i < paths.size(); ++i) {
         std::string err;
-        if (!mapped[i].open(paths[i], &err)) continue;
-        auto view = mapped[i].view();
-        if (static_cast<int64_t>(view.size()) > max_file_size_bytes_) continue;
-        batch.emplace_back(paths[i], view);
+        MappedFile m;
+        if (!m.open(paths[i], &err)) continue;
+        if (static_cast<int64_t>(m.view().size()) > max_file_size_bytes_) {
+            continue;
+        }
+        batch.emplace_back(paths[i], std::move(m));
         kept_index.push_back(i);
     }
 
-    auto ids = store_->batch_load_files(batch);
+    // Mappings move into the store and live as the entries' bytes.
+    auto ids = store_->batch_load_files_mapped(std::move(batch));
 
     std::vector<FileID> result(paths.size(), FileID{0});
     for (size_t k = 0; k < ids.size() && k < kept_index.size(); ++k) {
