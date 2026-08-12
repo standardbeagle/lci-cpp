@@ -1,0 +1,49 @@
+{
+  "has_more": false,
+  "showing": 4,
+  "symbols": [
+    {
+      "complexity": 1,
+      "file": "${CORPUS}/mux.go",
+      "incoming_refs": 1,
+      "is_exported": true,
+      "line": 11,
+      "name": "Register",
+      "outgoing_refs": 5,
+      "receiver_type": "Mux",
+      "type": "method"
+    },
+    {
+      "complexity": 1,
+      "file": "${CORPUS}/mux.go",
+      "incoming_refs": 1,
+      "is_exported": true,
+      "line": 7,
+      "name": "ServeHTTP",
+      "outgoing_refs": 6,
+      "receiver_type": "Mux",
+      "type": "method"
+    },
+    {
+      "file": "${CORPUS}/mux.go",
+      "incoming_refs": 5,
+      "is_exported": false,
+      "line": 4,
+      "name": "routes",
+      "outgoing_refs": 3,
+      "receiver_type": "Mux",
+      "type": "field"
+    },
+    {
+      "file": "${CORPUS}/mux.go",
+      "incoming_refs": 5,
+      "is_exported": true,
+      "line": 3,
+      "name": "Mux",
+      "outgoing_refs": 1,
+      "receiver_type": "Mux",
+      "type": "struct"
+    }
+  ],
+  "total": 4
+}

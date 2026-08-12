@@ -1,0 +1,29 @@
+{
+  "id": "http/list-symbols-receiver",
+  "golden": "goldens/http/list-symbols-receiver.json",
+  "mode": "http",
+  "corpus": "receivers",
+  "go_binary": "${LCI_GO}",
+  "cpp_binary": "${LCI_CPP}",
+  "invocation": {
+    "args": ["/list-symbols"],
+    "stdin": "{\"receiver\":\"Mux\"}",
+    "cwd": "${CORPUS}"
+  },
+  "capture": ["stdout", "exit"],
+  "parse": "json",
+  "_rationale": "Regression guard for the dead receiver filter (eb85054): EnhancedSymbol::receiver_type had readers but no writer, so any receiver-filtered /list-symbols query silently matched nothing. The golden pins that filtering on a Go receiver type returns exactly the Mux methods, each carrying receiver_type -- an empty symbols array here means the writer regressed.",
+  "_rationale_sort_arrays": "Symbol iteration order is map-bucket dependent; compare as a multiset.",
+  "_rationale_object_id_ignore": "object_id is a synthetic SymbolID dependent on file-integration order.",
+  "tiers": {
+    "stable": [],
+    "ignore": [
+      "pid", "start_time", "version", "uptime_ms", "elapsed_ms",
+      "request_id", "timestamp", "schema_version",
+      "symbols[].object_id"
+    ],
+    "sort_arrays": ["symbols"]
+  },
+  "tolerances": {"score_abs": 0.05, "timed_max_ms": 60000},
+  "expect_exit": 200
+}

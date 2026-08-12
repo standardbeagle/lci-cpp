@@ -1,0 +1,22 @@
+{
+  "id": "mcp/list_symbols/receiver-class",
+  "golden": "goldens/mcp/list_symbols/receiver-class.json",
+  "mode": "mcp",
+  "corpus": "receivers",
+  "go_binary": "${LCI_GO}",
+  "cpp_binary": "${LCI_CPP}",
+  "invocation": {
+    "args": ["mcp"],
+    "stdin": "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"list_symbols\",\"arguments\":{\"receiver\":\"Circle\"}}}",
+    "cwd": "${CORPUS}"
+  },
+  "capture": ["stdout", "exit"],
+  "parse": "json",
+  "_rationale": "Class-language leg of the receiver filter (eb85054): for non-Go languages receiver_type derives from the nearest enclosing Class/Struct scope. Golden pins that receiver=Circle returns Circle's methods and not the top-level describe().",
+  "tiers": {
+    "stable": ["result.content[].type", "result.content[].text"],
+    "ignore": ["id", "jsonrpc", "result.meta.elapsed_ms", "result.meta.server_pid"]
+  },
+  "tolerances": {"score_abs": 0.05, "timed_max_ms": 60000},
+  "expect_exit": 0
+}

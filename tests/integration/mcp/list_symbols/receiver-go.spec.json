@@ -1,0 +1,22 @@
+{
+  "id": "mcp/list_symbols/receiver-go",
+  "golden": "goldens/mcp/list_symbols/receiver-go.json",
+  "mode": "mcp",
+  "corpus": "receivers",
+  "go_binary": "${LCI_GO}",
+  "cpp_binary": "${LCI_CPP}",
+  "invocation": {
+    "args": ["mcp"],
+    "stdin": "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"list_symbols\",\"arguments\":{\"receiver\":\"Mux\"}}}",
+    "cwd": "${CORPUS}"
+  },
+  "capture": ["stdout", "exit"],
+  "parse": "json",
+  "_rationale": "Regression guard for the dead receiver filter (eb85054): the filter compared against a never-written receiver_type field and silently matched nothing. Golden pins that receiver=Mux returns the Mux methods (ServeHTTP, Register) and not the top-level NewMux.",
+  "tiers": {
+    "stable": ["result.content[].type", "result.content[].text"],
+    "ignore": ["id", "jsonrpc", "result.meta.elapsed_ms", "result.meta.server_pid"]
+  },
+  "tolerances": {"score_abs": 0.05, "timed_max_ms": 60000},
+  "expect_exit": 0
+}

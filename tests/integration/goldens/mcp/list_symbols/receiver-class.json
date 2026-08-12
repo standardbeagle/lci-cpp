@@ -1,0 +1,10 @@
+{
+  "result": {
+    "content": [
+      {
+        "text": "{\"has_more\":false,\"showing\":3,\"symbols\":[{\"file\":\"shapes.py\",\"is_exported\":true,\"line\":1,\"name\":\"Circle\",\"object_id\":\"G\",\"type\":\"class\"},{\"complexity\":1,\"file\":\"shapes.py\",\"line\":2,\"name\":\"__init__\",\"object_id\":\"H\",\"type\":\"method\"},{\"complexity\":1,\"file\":\"shapes.py\",\"is_exported\":true,\"line\":5,\"name\":\"area\",\"object_id\":\"I\",\"type\":\"method\"}],\"total\":3}",
+        "type": "text"
+      }
+    ]
+  }
+}

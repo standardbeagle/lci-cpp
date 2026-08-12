@@ -1,0 +1,10 @@
+{
+  "result": {
+    "content": [
+      {
+        "text": "{\"has_more\":false,\"showing\":4,\"symbols\":[{\"file\":\"mux.go\",\"is_exported\":true,\"line\":3,\"name\":\"Mux\",\"object_id\":\"B\",\"type\":\"struct\"},{\"complexity\":1,\"file\":\"mux.go\",\"is_exported\":true,\"line\":11,\"name\":\"Register\",\"object_id\":\"E\",\"signature\":\"func (m *Mux) Register(path, handler string)\",\"type\":\"method\"},{\"complexity\":1,\"file\":\"mux.go\",\"is_exported\":true,\"line\":7,\"name\":\"ServeHTTP\",\"object_id\":\"D\",\"signature\":\"func (m *Mux) ServeHTTP(path string) string\",\"type\":\"method\"},{\"file\":\"mux.go\",\"line\":4,\"name\":\"routes\",\"object_id\":\"C\",\"type\":\"field\"}],\"total\":4}",
+        "type": "text"
+      }
+    ]
+  }
+}
