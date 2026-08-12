@@ -1,0 +1,10 @@
+{
+  "result": {
+    "content": [
+      {
+        "text": "{\"pattern\":\"*.go\",\"results\":[{\"file_id\":1,\"match_type\":\"glob\",\"path\":\"real.go\",\"score\":1.0}],\"total_matches\":1}",
+        "type": "text"
+      }
+    ]
+  }
+}

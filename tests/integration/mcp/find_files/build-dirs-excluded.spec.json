@@ -1,0 +1,22 @@
+{
+  "id": "mcp/find_files/build-dirs-excluded",
+  "golden": "goldens/mcp/find_files/build-dirs-excluded.json",
+  "mode": "mcp",
+  "corpus": "excludes",
+  "go_binary": "${LCI_GO}",
+  "cpp_binary": "${LCI_CPP}",
+  "invocation": {
+    "args": ["mcp"],
+    "stdin": "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"find_files\",\"arguments\":{\"pattern\":\"*.go\"}}}",
+    "cwd": "${CORPUS}"
+  },
+  "capture": ["stdout", "exit"],
+  "parse": "json",
+  "_rationale": "Regression guard for the hyphenated build-dir default excludes (1405766): before the fix, self-repo indexing swallowed 1.2 GB of build-errlookup/_deps. The corpus plants *.go files under build-junk/ and cmake-build-debug/; the golden pins that only real.go is indexed.",
+  "tiers": {
+    "stable": ["result.content[].type", "result.content[].text"],
+    "ignore": ["id", "jsonrpc", "result.meta.elapsed_ms", "result.meta.server_pid"]
+  },
+  "tolerances": {"score_abs": 0.05, "timed_max_ms": 60000},
+  "expect_exit": 0
+}
