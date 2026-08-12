@@ -51,28 +51,41 @@ struct FileContent {
 ///     mutation that may invalidate positions (e.g. erase / LRU eviction)
 ///     and update_index_for_*() helpers for in-place edits.
 struct FileContentSnapshot {
+    /// Entries are immutable once constructed and SHARED across snapshot
+    /// generations via shared_ptr: the per-write RCU clone copies a
+    /// vector of pointers and two flat maps -- no path strings, no
+    /// FileContent -- instead of deep-copying every prior file's entry.
+    /// heaptrack measured the old deep clone at 11.9M string allocations
+    /// over one 4.9k-file build (O(files^2): every load recopied every
+    /// earlier entry). "Mutating" an entry means replacing its pointer
+    /// with a freshly built Entry (copy-on-write), never writing through
+    /// a shared one -- readers in older snapshots hold the same objects.
     struct Entry {
         FileID file_id{};
         std::string path;
         std::shared_ptr<FileContent> content;
     };
 
-    std::vector<Entry> entries;
+    std::vector<std::shared_ptr<const Entry>> entries;
     std::vector<FileID> access_order;
 
     /// Position-in-entries indexes for O(1) lookup. Both maps must be
-    /// kept consistent with `entries` after any mutation.
+    /// kept consistent with `entries` after any mutation. path_index
+    /// keys are views into entries[i]->path: Entry objects are
+    /// heap-stable and shared across snapshots, so the views survive
+    /// clones; they die only with the last snapshot referencing the
+    /// entry, which also owns the map holding the view.
     absl::flat_hash_map<FileID, size_t> id_index;
-    absl::flat_hash_map<std::string, size_t> path_index;
+    absl::flat_hash_map<std::string_view, size_t> path_index;
 
     /// Finds a FileContent by file ID. Returns nullptr if not found.
     const std::shared_ptr<FileContent>& find_by_id(FileID id) const;
 
     /// Finds a FileContent by path. Returns nullptr if not found.
-    const std::shared_ptr<FileContent>& find_by_path(const std::string& path) const;
+    const std::shared_ptr<FileContent>& find_by_path(std::string_view path) const;
 
     /// Returns the FileID for a path, or 0 if not found.
-    FileID path_to_id(const std::string& path) const;
+    FileID path_to_id(std::string_view path) const;
 
     /// Returns the number of files in the snapshot.
     size_t file_count() const { return entries.size(); }
