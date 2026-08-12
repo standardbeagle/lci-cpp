@@ -9,6 +9,7 @@
 
 #include <chrono>
 #include <filesystem>
+#include <set>
 #include <fstream>
 #include <string>
 #include <thread>
@@ -266,6 +267,41 @@ TEST_F(ServerLifecycleTest, Endpoint_ListSymbols) {
     EXPECT_GE(j["total"].get<int>(), 0);
 }
 
+// A dead receiver filter (eb85054: field had readers but no writer)
+// matched nothing while still returning 200 -- so the positive matches
+// below are the discriminating assertions, not the shape checks.
+TEST_F(ServerLifecycleTest, Endpoint_ListSymbols_ReceiverFilterGo) {
+    auto j = post("/list-symbols",
+                  {{"receiver", "Calculator"}, {"kind", "method"}});
+    ASSERT_TRUE(j.contains("symbols"));
+    ASSERT_EQ(j["total"].get<int>(), 2);
+    std::set<std::string> names;
+    for (const auto& s : j["symbols"]) {
+        names.insert(s["name"].get<std::string>());
+        EXPECT_EQ(s["receiver_type"], "Calculator");
+    }
+    EXPECT_EQ(names, (std::set<std::string>{"Add", "Reset"}));
+}
+
+TEST_F(ServerLifecycleTest, Endpoint_ListSymbols_ReceiverFilterClass) {
+    auto j = post("/list-symbols", {{"receiver", "StringUtils"}});
+    ASSERT_TRUE(j.contains("symbols"));
+    ASSERT_GE(j["total"].get<int>(), 1);
+    bool saw_upper = false;
+    for (const auto& s : j["symbols"]) {
+        EXPECT_EQ(s["receiver_type"], "StringUtils");
+        if (s["name"] == "upper") saw_upper = true;
+    }
+    EXPECT_TRUE(saw_upper);
+}
+
+TEST_F(ServerLifecycleTest, Endpoint_ListSymbols_ReceiverFilterMiss) {
+    auto j = post("/list-symbols", {{"receiver", "NoSuchType"}});
+    ASSERT_TRUE(j.contains("symbols"));
+    EXPECT_EQ(j["total"].get<int>(), 0);
+    EXPECT_TRUE(j["symbols"].empty());
+}
+
 // -- 11. /inspect-symbol ------------------------------------------------------
 
 TEST_F(ServerLifecycleTest, Endpoint_InspectSymbol) {
@@ -407,6 +443,49 @@ TEST(ServerCancellationTest, ShutdownJoinsInFlightIndexing) {
     server.reset();
     cleanup();
     std::error_code ec;
+    std::filesystem::remove(sock, ec);
+}
+
+// -- Lifecycle: RSS self-cap stops the server instead of OOMing the host ------
+//
+// d71ac3e: server.max_rss_mb > 0 makes the reaper loop compare RssAnon
+// against the cap every tick and self-stop (after a malloc_trim attempt)
+// when exceeded. A 1 MB cap is unreachably small for any live process, so
+// the server must stop itself within a few reaper ticks (500 ms each).
+TEST(ServerRssCapTest, ExceededCapStopsServer) {
+    std::filesystem::path tmp = std::filesystem::temp_directory_path() /
+        ("lci_rss_cap_" + std::to_string(::getpid()));
+    std::filesystem::create_directories(tmp);
+    {
+        std::ofstream f(tmp / "a.go");
+        f << "package a\nfunc A() {}\n";
+    }
+
+    Config cfg;
+    cfg.project.root = tmp.string();
+    cfg.project.name = "rss-cap-test";
+    cfg.server.max_rss_mb = 1;
+
+    auto server = std::make_unique<IndexServer>(cfg);
+    auto sock = (std::filesystem::temp_directory_path() /
+                 ("lci_rss_cap_" + std::to_string(::getpid()) + ".sock"))
+                    .string();
+    server->set_socket_path(sock);
+    ASSERT_TRUE(server->start());
+
+    // The reaper ticks every 500 ms; give it a handful of ticks.
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (server->is_running() &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    EXPECT_FALSE(server->is_running())
+        << "server stayed up past a 1 MB RSS cap";
+
+    server.reset();
+    std::error_code ec;
+    std::filesystem::remove_all(tmp, ec);
     std::filesystem::remove(sock, ec);
 }
 
