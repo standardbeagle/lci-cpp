@@ -309,8 +309,7 @@ int run_debug_memprofile(const GlobalFlags& flags,
                 chains_seen.insert(es.scope_chain.storage_key()).second) {
                 chain_entries += es.scope_chain.size();
                 for (const auto& sc : es.scope_chain) {
-                    chain_strings += sc.name.size() + sc.full_path.size() +
-                                     sc.language.size();
+                    chain_strings += sc.name.size() + sc.full_path.size();
                 }
             }
             sym_strings += es.symbol.name.size() + es.type_info.size() +
@@ -320,10 +319,7 @@ int run_debug_memprofile(const GlobalFlags& flags,
             if (!es.signature.empty()) ++fill_sig;
             return true;
         });
-        size_t line_entries = 0;
-        for (const auto& [fid, lm] : snap->line_to_symbols_by_file) {
-            for (const auto& [line, v] : lm) line_entries += v.size();
-        }
+
         std::printf("scope_chain entries:     %zu unique (%zu referenced, "
                     "%.1f MB strings, sizeof(ScopeInfo)=%zu)\n",
                     chain_entries, chain_refs,
@@ -336,7 +332,6 @@ int run_debug_memprofile(const GlobalFlags& flags,
                     "(sizeof(EnhancedSymbol)=%zu)\n",
                     mb(static_cast<int64_t>(sym_strings)),
                     sizeof(EnhancedSymbol));
-        std::printf("line_to_symbols entries: %zu\n", line_entries);
     }
 
     const int top_n =

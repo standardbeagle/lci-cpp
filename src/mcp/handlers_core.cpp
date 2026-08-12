@@ -108,7 +108,12 @@ nlohmann::json scope_chain_to_breadcrumbs(const EnhancedSymbol& sym) {
                           {"name", s.name},
                           {"start_line", s.start_line},
                           {"end_line", s.end_line},
-                          {"language", s.language},
+                          // Unknown serializes as "" -- the exact bytes
+                          // the old always-present string field emitted
+                          // for non-file scopes.
+                          {"language", s.language_id == LangId::Unknown
+                                           ? std::string_view{}
+                                           : to_string(s.language_id)},
                           {"visibility", std::string(infer_scope_visibility(s))}});
     }
     return crumbs;

@@ -5,6 +5,7 @@
 #include <string_view>
 #include <vector>
 
+#include <lci/language_map.h>
 #include <lci/types.h>
 
 namespace lci {
@@ -98,7 +99,14 @@ struct ScopeInfo {
     int start_line{};
     int end_line{};
     int level{};
-    std::string language;
+    /// Set on FILE-level scopes only (per-file constant); every other
+    /// scope leaves Unknown. Was a std::string -- a 32-byte string object
+    /// per ScopeInfo instance, ~157k instances at next.js scale, nearly
+    /// all holding "". Serialize Unknown as "" (handlers_core breadcrumbs)
+    /// to keep output byte-identical; the parser and language_map name
+    /// tables were verified identical for every shared language before
+    /// this swap.
+    LangId language_id{LangId::Unknown};
     std::vector<ContextAttribute> attributes;
 };
 

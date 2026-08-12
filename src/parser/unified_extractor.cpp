@@ -1,6 +1,8 @@
 #include <lci/parser/parser.h>
 #include <lci/parser/unified_extractor.h>
 
+#include <lci/language_map.h>
+
 #include <lci/analysis/side_effect_analyzer.h>
 
 #include <absl/container/flat_hash_set.h>
@@ -214,7 +216,10 @@ void UnifiedExtractor::extract(TSTree* tree) {
 
     Language lang{};
     if (language_from_extension(ext_, lang)) {
-        file_scope.language = std::string(to_string(lang));
+        // language_map's table, not parser::to_string: verified identical
+        // names for every parser-supported language, and it is the
+        // canonical index-wide naming (see FileScanner::detect_language).
+        file_scope.language_id = language_info(ext_).language;
     }
     scopes_.push_back(std::move(file_scope));
 
