@@ -339,12 +339,22 @@ std::vector<EnhancedSymbol> ReferenceTracker::process_file(
     return enhanced;
 }
 
+namespace {
+std::string derive_receiver_type(const EnhancedSymbol& es);
+}  // namespace
+
 void ReferenceTracker::apply_enrichment(
     std::span<const EnhancedSymbol> enriched) {
     if (enriched.empty()) return;
     write_snapshot([&](Snapshot& s) {
         for (const auto& es : enriched) {
-            s.symbols.set(es.id, es);
+            if (es.receiver_type.empty()) {
+                EnhancedSymbol copy = es;
+                copy.receiver_type = derive_receiver_type(es);
+                s.symbols.set(copy.id, copy);
+            } else {
+                s.symbols.set(es.id, es);
+            }
         }
     });
 }
@@ -831,6 +841,27 @@ std::string_view go_signature_receiver(std::string_view sig) {
     if (auto sp = recv.rfind(' '); sp != std::string_view::npos)
         recv = recv.substr(sp + 1);  // drop the receiver var name
     return bare_type_name(recv);
+}
+
+/// The receiver_type WRITER the field never had: the /list-symbols
+/// receiver filter compares against EnhancedSymbol::receiver_type, and
+/// with no writer it silently matched nothing. Derivation mirrors the
+/// matcher (symbol_matches_receiver_type): Go methods from the signature
+/// receiver, class-language methods from the NEAREST enclosing
+/// Class/Struct scope (chains are ordered outermost-first, so scan from
+/// the back). Top-level symbols stay "" -- absence keeps its meaning.
+std::string derive_receiver_type(const EnhancedSymbol& es) {
+    if (auto recv = go_signature_receiver(es.signature); !recv.empty()) {
+        return std::string(recv);
+    }
+    const auto& chain = es.scope_chain;
+    for (size_t i = chain.size(); i > 0; --i) {
+        const ScopeInfo& sc = chain[i - 1];
+        if (sc.type == ScopeType::Class || sc.type == ScopeType::Struct) {
+            return std::string(bare_type_name(sc.name));
+        }
+    }
+    return {};
 }
 
 // Does this symbol's owning/receiver type equal `recv_type`? Matches Go

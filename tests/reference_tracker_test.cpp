@@ -936,6 +936,70 @@ TEST(ImportResolverTest, NoEvidenceReturnsUndecided) {
 }
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// receiver_type derivation (apply_enrichment)
+// ---------------------------------------------------------------------------
+// The /list-symbols receiver filter compares against
+// EnhancedSymbol::receiver_type, which no extractor ever wrote -- the
+// filter silently matched nothing. Enrichment now derives it: Go methods
+// from the signature receiver, class-language methods from the nearest
+// enclosing Class/Struct scope.
+
+TEST(ReferenceTrackerTest, EnrichmentDerivesGoReceiverFromSignature) {
+    SymbolLocationIndex sli;
+    ReferenceTracker rt(&sli);
+    std::vector<Symbol> syms = {
+        make_sym("ServeHTTP", SymbolType::Method, 1, 10, 20)};
+    auto enhanced = rt.process_file(1, "mux.go", syms, {}, {});
+    ASSERT_EQ(enhanced.size(), 1u);
+
+    enhanced[0].signature = "func (m *Mux) ServeHTTP(w http.ResponseWriter)";
+    rt.apply_enrichment(enhanced);
+
+    auto snap = rt.pin();
+    const auto* es = snap->symbols.get(enhanced[0].id);
+    ASSERT_NE(es, nullptr);
+    EXPECT_EQ(es->receiver_type, "Mux");
+}
+
+TEST(ReferenceTrackerTest, EnrichmentDerivesClassReceiverFromScopeChain) {
+    SymbolLocationIndex sli;
+    ReferenceTracker rt(&sli);
+    ScopeInfo cls;
+    cls.type = ScopeType::Class;
+    cls.name = "Widget";
+    cls.start_line = 1;
+    cls.end_line = 100;
+    std::vector<ScopeInfo> scopes = {cls};
+    std::vector<Symbol> syms = {
+        make_sym("render", SymbolType::Method, 2, 10, 20)};
+    auto enhanced = rt.process_file(2, "widget.py", syms, {}, scopes);
+    ASSERT_EQ(enhanced.size(), 1u);
+
+    enhanced[0].signature = "def render(self):";
+    rt.apply_enrichment(enhanced);
+
+    auto snap = rt.pin();
+    const auto* es = snap->symbols.get(enhanced[0].id);
+    ASSERT_NE(es, nullptr);
+    EXPECT_EQ(es->receiver_type, "Widget");
+}
+
+TEST(ReferenceTrackerTest, EnrichmentLeavesTopLevelReceiverEmpty) {
+    SymbolLocationIndex sli;
+    ReferenceTracker rt(&sli);
+    std::vector<Symbol> syms = {
+        make_sym("helper", SymbolType::Function, 3, 5, 8)};
+    auto enhanced = rt.process_file(3, "util.py", syms, {}, {});
+    enhanced[0].signature = "def helper():";
+    rt.apply_enrichment(enhanced);
+
+    auto snap = rt.pin();
+    const auto* es = snap->symbols.get(enhanced[0].id);
+    ASSERT_NE(es, nullptr);
+    EXPECT_TRUE(es->receiver_type.empty());
+}
+
 // Cross-language and path-quality resolution
 // ---------------------------------------------------------------------------
 
