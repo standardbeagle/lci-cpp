@@ -1,3 +1,6 @@
+#if defined(__linux__)
+#include <malloc.h>  // defines __GLIBC__ (via features.h) + mallopt
+#endif
 #include <lci/cli/commands.h>
 #include <lci/indexing/pipeline_scanner.h>
 #include <lci/version.h>
@@ -13,6 +16,17 @@
 
 int main(int argc, char* argv[]) {
     using namespace lci::cli;
+
+#if defined(__GLIBC__)
+    // Cap glibc malloc arenas. Default is 8 x cores (96 on a 12-core
+    // box); parallel indexing spreads allocations across them and each
+    // arena retains its own free-block slack, so RSS carries dozens of
+    // half-empty arenas long after the parse peak. Four arenas keep
+    // enough write-parallelism for the worker pool while bounding slack;
+    // the lock-free read path does not allocate, so query latency is
+    // unaffected. Measured with the same server-RSS A/B as malloc_trim.
+    mallopt(M_ARENA_MAX, 4);
+#endif
 
     CLI::App app{"Lightning fast code indexing for AI assistants"};
     app.set_version_flag("--version,-V",
