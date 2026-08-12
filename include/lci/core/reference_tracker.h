@@ -404,9 +404,6 @@ class ReferenceTracker {
 
     // -- Line-to-symbol index ------------------------------------------------
 
-    void store_line_to_symbols(
-        FileID file_id,
-        absl::flat_hash_map<int, std::vector<int>> line_to_symbols);
     /// Set to non-zero during bulk indexing to skip locking.
     std::atomic<int32_t> bulk_indexing{0};
 
@@ -439,9 +436,6 @@ class ReferenceTracker {
     /// snapshot and query it directly.
     struct Snapshot : std::enable_shared_from_this<Snapshot> {
         using SymbolHandle = std::shared_ptr<const EnhancedSymbol>;
-        using LineMap = absl::flat_hash_map<int, std::vector<int>>;
-        using LineMapHandle = std::shared_ptr<const LineMap>;
-
         Snapshot() = default;
         Snapshot(const Snapshot&) = default;
         Snapshot& operator=(const Snapshot&) = default;
@@ -466,8 +460,6 @@ class ReferenceTracker {
         absl::flat_hash_map<SymbolID, std::vector<uint64_t>> incoming_refs;
         absl::flat_hash_map<SymbolID, std::vector<uint64_t>> outgoing_refs;
         absl::flat_hash_map<FileID, std::vector<ScopeInfo>> scopes_by_file;
-        absl::flat_hash_map<FileID, absl::flat_hash_map<int, std::vector<int>>>
-            line_to_symbols_by_file;
         ReferenceStats stats{};
 
         /// Resolves a global ref id to its stored slot; nullptr when the
@@ -504,7 +496,6 @@ class ReferenceTracker {
         SymbolHandle find_symbol_by_name(std::string_view name) const;
         SymbolHandle find_symbol_by_file_and_name(
             FileID file_id, std::string_view name) const;
-        LineMapHandle get_file_line_to_symbols(FileID file_id) const;
         // Line lookup deliberately uses only this snapshot. Combining it with
         // the separately-published SymbolLocationIndex can mix generations
         // during a concurrent reindex and resolve a reused ID to the wrong

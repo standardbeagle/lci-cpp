@@ -482,22 +482,6 @@ TEST(ReferenceTrackerTest, ReferenceCacheHit) {
 // Line-to-symbol index
 // ---------------------------------------------------------------------------
 
-TEST(ReferenceTrackerTest, LineToSymbolsIndex) {
-    ReferenceTracker rt;
-
-    absl::flat_hash_map<int, std::vector<int>> line_map;
-    line_map[10] = {0, 1};
-    line_map[20] = {2};
-
-    rt.store_line_to_symbols(1, std::move(line_map));
-
-    auto snapshot = rt.pin();
-    auto result = snapshot->get_file_line_to_symbols(1);
-    ASSERT_NE(result, nullptr);
-    EXPECT_EQ(result->size(), 2u);
-
-    EXPECT_EQ(snapshot->get_file_line_to_symbols(99), nullptr);
-}
 
 // ---------------------------------------------------------------------------
 // PostingsIndex

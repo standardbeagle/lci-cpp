@@ -190,13 +190,6 @@ ReferenceTracker::Snapshot::find_symbol_by_file_and_name(
     return nullptr;
 }
 
-ReferenceTracker::Snapshot::LineMapHandle
-ReferenceTracker::Snapshot::get_file_line_to_symbols(FileID file_id) const {
-    auto it = line_to_symbols_by_file.find(file_id);
-    if (it == line_to_symbols_by_file.end()) return nullptr;
-    return {shared_from_this(), &it->second};
-}
-
 ReferenceTracker::Snapshot::SymbolHandle
 ReferenceTracker::Snapshot::get_symbol_at_line(
     FileID file_id, int line) const {
@@ -479,7 +472,6 @@ void ReferenceTracker::remove_file(FileID file_id) {
         // any tombstones the symbol walk above left in it die with it.
         s.refs_by_file.erase(file_id);
         s.scopes_by_file.erase(file_id);
-        s.line_to_symbols_by_file.erase(file_id);
     });
 
     import_resolver_.remove_file(file_id);
@@ -662,17 +654,6 @@ bool ReferenceTracker::has_relationships() const {
     auto snap = load_snapshot();
     return !snap->incoming_refs.empty() || !snap->outgoing_refs.empty() ||
            snap->stats.total_references > 0;
-}
-
-// -- Line-to-symbol index ----------------------------------------------------
-
-void ReferenceTracker::store_line_to_symbols(
-    FileID file_id,
-    absl::flat_hash_map<int, std::vector<int>> line_to_symbols) {
-    if (line_to_symbols.empty()) return;
-    write_snapshot([&](Snapshot& s) {
-        s.line_to_symbols_by_file[file_id] = std::move(line_to_symbols);
-    });
 }
 
 // -- Internal helpers --------------------------------------------------------
