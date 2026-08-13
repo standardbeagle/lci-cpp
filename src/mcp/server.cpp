@@ -110,8 +110,28 @@ void McpServer::write_message(const nlohmann::json& msg) {
 // -- Request handling ---------------------------------------------------------
 
 nlohmann::json McpServer::handle_request(const nlohmann::json& request) {
-    auto method = request.value("method", "");
+    // Type-guarded read: value("method", "") throws type_error.302 when the
+    // key exists with a non-string value, and an escaped throw here kills
+    // the whole server (found by fuzz_mcp_dispatch). The run loop's catch
+    // is the backstop; this keeps the common malformed shape on the cheap
+    // path.
+    std::string method;
+    bool method_type_confused = false;
+    if (auto it = request.find("method"); it != request.end()) {
+        if (it->is_string()) {
+            method = it->get<std::string>();
+        } else {
+            method_type_confused = true;
+        }
+    }
     auto id = request.contains("id") ? request["id"] : nlohmann::json(nullptr);
+    if (method_type_confused) {
+        return {{"jsonrpc", "2.0"},
+                {"id", id},
+                {"error", {{"code", -32600},
+                           {"message", "invalid request: method must be a "
+                                       "string"}}}};
+    }
 
     // Notifications have no id - no response needed
     if (id.is_null() && request.contains("method") &&
@@ -352,7 +372,11 @@ nlohmann::json McpServer::handle_tools_call(const RegisteredTool& tool,
 }
 
 void McpServer::handle_notification(const nlohmann::json& request) {
-    auto method = request.value("method", "");
+    std::string method;
+    if (auto it = request.find("method");
+        it != request.end() && it->is_string()) {
+        method = it->get<std::string>();
+    }
 
     if (method == "notifications/initialized") {
         // Client acknowledged initialization - nothing to do
@@ -452,7 +476,23 @@ int McpServer::run() {
             break;  // EOF or parse error
         }
 
-        auto response = handle_request(*msg);
+        nlohmann::json response;
+        try {
+            response = handle_request(*msg);
+        } catch (const nlohmann::json::exception& e) {
+            // A type-confused request (string where an object is expected,
+            // number where a string is expected, ...) must yield a JSON-RPC
+            // invalid-request error, never a process abort: this loop is the
+            // trust boundary for every connected client.
+            response = {
+                {"jsonrpc", "2.0"},
+                {"id", msg->contains("id") ? (*msg)["id"]
+                                           : nlohmann::json(nullptr)},
+                {"error",
+                 {{"code", -32600},
+                  {"message",
+                   std::string("invalid request: ") + e.what()}}}};
+        }
         if (!response.is_null()) {
             write_message(response);
         }
