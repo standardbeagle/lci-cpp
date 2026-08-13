@@ -1,0 +1,11 @@
+{
+  "result": {
+    "content": [
+      {
+        "text": "{\"error\":\"invalid operation:  (must be 'save' or 'load')\",\"operation\":\"context\",\"success\":false}",
+        "type": "text"
+      }
+    ],
+    "isError": true
+  }
+}

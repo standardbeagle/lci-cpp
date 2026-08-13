@@ -1,0 +1,10 @@
+{
+  "result": {
+    "content": [
+      {
+        "text": "{\"hint\":\"0 files matched 'zz'. Globs match the root-relative path; try a shorter name fragment (fuzzy matching) or search for content instead.\",\"pattern\":\"zz\",\"results\":[],\"total_matches\":0}",
+        "type": "text"
+      }
+    ]
+  }
+}

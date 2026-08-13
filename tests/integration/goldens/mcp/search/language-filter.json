@@ -1,0 +1,10 @@
+{
+  "result": {
+    "content": [
+      {
+        "text": "{\"match\":\"Add\",\"results\":[{\"file\":\"a.go\",\"hits\":[{\"exported\":true,\"id\":\"B\",\"line\":3,\"sym\":\"Add\",\"text\":\"func Add(a, b int) int { return a + b }\",\"type\":\"function\"}]}],\"showing\":1,\"total_matches\":1}",
+        "type": "text"
+      }
+    ]
+  }
+}

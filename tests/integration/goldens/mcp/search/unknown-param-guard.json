@@ -1,0 +1,11 @@
+{
+  "result": {
+    "content": [
+      {
+        "text": "{\"allowed_params\":[\"pattern\",\"patterns\",\"max\",\"max_per_file\",\"output\",\"path\",\"filter\",\"flags\",\"symbol_types\",\"languages\",\"semantic\",\"include\"],\"error\":{\"count\":1,\"message\":\"Request failed with 1 validation errors\",\"tool\":\"search\",\"type\":\"multiple_validation_errors\"},\"success\":false,\"validation_errors\":[{\"error_code\":\"INVALID_FORMAT\",\"error_message\":\"validation failed for additional property 'bogus_param': instance invalid as per false-schema\",\"field_name\":\"(root)\",\"help_context\":null,\"provided_value\":{\"bogus_param\":1,\"pattern\":\"add\"}}]}",
+        "type": "text"
+      }
+    ],
+    "isError": true
+  }
+}

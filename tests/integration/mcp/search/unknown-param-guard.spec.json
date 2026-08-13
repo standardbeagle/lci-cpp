@@ -1,0 +1,22 @@
+{
+  "id": "mcp/search/unknown-param-guard",
+  "golden": "goldens/mcp/search/unknown-param-guard.json",
+  "mode": "mcp",
+  "corpus": "multi-lang",
+  "go_binary": "${LCI_GO}",
+  "cpp_binary": "${LCI_CPP}",
+  "invocation": {
+    "args": ["mcp"],
+    "stdin": "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"search\",\"arguments\":{\"pattern\":\"add\",\"bogus_param\":1}}}",
+    "cwd": "${CORPUS}"
+  },
+  "capture": ["stdout", "exit"],
+  "parse": "json",
+  "_rationale": "Regression guard for the unknown-parameter validation added in 930e99b: an unrecognized argument must fail loudly with the allowed-params list, never be silently dropped (the pre-fix behavior that masked client typos like 'lang' vs 'languages').",
+  "tiers": {
+    "stable": ["result.content[].type", "result.content[].text"],
+    "ignore": ["id", "jsonrpc", "result.meta.elapsed_ms", "result.meta.server_pid"]
+  },
+  "tolerances": {"score_abs": 0.05, "timed_max_ms": 60000},
+  "expect_exit": 0
+}

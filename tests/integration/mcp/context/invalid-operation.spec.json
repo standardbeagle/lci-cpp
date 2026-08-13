@@ -1,0 +1,22 @@
+{
+  "id": "mcp/context/invalid-operation",
+  "golden": "goldens/mcp/context/invalid-operation.json",
+  "mode": "mcp",
+  "corpus": "multi-lang",
+  "go_binary": "${LCI_GO}",
+  "cpp_binary": "${LCI_CPP}",
+  "invocation": {
+    "args": ["mcp"],
+    "stdin": "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"context\",\"arguments\":{}}}",
+    "cwd": "${CORPUS}"
+  },
+  "capture": ["stdout", "exit"],
+  "parse": "json",
+  "_rationale": "The context tool had no e2e coverage. save/load mutate manifest files, so the deterministic pin is the fail-fast leg: a missing operation must produce isError=true with the explicit 'save' or 'load' message, never a silent default.",
+  "tiers": {
+    "stable": ["result.content[].type", "result.content[].text", "result.isError"],
+    "ignore": ["id", "jsonrpc", "result.meta.elapsed_ms", "result.meta.server_pid"]
+  },
+  "tolerances": {"score_abs": 0.05, "timed_max_ms": 60000},
+  "expect_exit": 0
+}

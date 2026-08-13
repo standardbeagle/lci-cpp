@@ -1,0 +1,11 @@
+{
+  "result": {
+    "content": [
+      {
+        "text": "{\"error\":\"invalid scope: bogus\",\"operation\":\"git_analysis\",\"success\":false}",
+        "type": "text"
+      }
+    ],
+    "isError": true
+  }
+}

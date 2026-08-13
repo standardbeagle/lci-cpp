@@ -1,0 +1,22 @@
+{
+  "id": "mcp/search/language-filter",
+  "golden": "goldens/mcp/search/language-filter.json",
+  "mode": "mcp",
+  "corpus": "multi-lang",
+  "go_binary": "${LCI_GO}",
+  "cpp_binary": "${LCI_CPP}",
+  "invocation": {
+    "args": ["mcp"],
+    "stdin": "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"search\",\"arguments\":{\"pattern\":\"add\",\"languages\":[\"go\"]}}}",
+    "cwd": "${CORPUS}"
+  },
+  "capture": ["stdout", "exit"],
+  "parse": "json",
+  "_rationale": "The languages filter had no e2e coverage. All four corpus files define an add function; the golden pins that languages=[go] narrows the result to a.go's Add only -- a dead filter (the receiver_type failure shape) would return all four.",
+  "tiers": {
+    "stable": ["result.content[].type", "result.content[].text"],
+    "ignore": ["id", "jsonrpc", "result.meta.elapsed_ms", "result.meta.server_pid"]
+  },
+  "tolerances": {"score_abs": 0.05, "timed_max_ms": 60000},
+  "expect_exit": 0
+}

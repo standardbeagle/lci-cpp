@@ -1,0 +1,10 @@
+{
+  "result": {
+    "content": [
+      {
+        "text": "{\"file_count\":4,\"index_time_ms\":10,\"reference_count\":10,\"server_ready\":true,\"status\":\"ready\",\"symbol_count\":4,\"timestamp\":\"2026-08-13T07:58:30.169322441-06:00\",\"total_size_bytes\":188}",
+        "type": "text"
+      }
+    ]
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "result": {
+    "content": [
+      {
+        "text": "{\"mode\":\"overview\",\"overview\":{\"avg_refs_per_symbol\":2.5,\"avg_symbols_per_file\":1.0,\"language_breakdown\":{\"cpp\":1,\"go\":1,\"python\":1,\"rust\":1},\"total_files\":4,\"total_references\":10,\"total_symbols\":4,\"type_breakdown\":{\"function\":4},\"unique_languages\":4},\"timestamp_ms\":1786625909891}",
+        "type": "text"
+      }
+    ]
+  }
+}
