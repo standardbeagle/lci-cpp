@@ -22,11 +22,33 @@
 namespace lci {
 namespace fuzz {
 
+/// Per-process temp directory holding the seeded corpus. Also serves as the
+/// config's project root (see make_fuzz_config).
+inline const std::filesystem::path& fuzz_root() {
+    static const std::filesystem::path dir = [] {
+        auto d = std::filesystem::temp_directory_path() /
+                 ("lci-fuzz-" + std::to_string(::getpid()));
+        std::filesystem::create_directories(d);
+        return d;
+    }();
+    return dir;
+}
+
 /// A default config with a bounded result cap so fuzzed queries can't ask the
 /// engine to materialize huge result sets on every iteration.
+///
+/// project.root is pinned to the seeded temp dir, NOT the inherited CWD.
+/// make_default_config() roots at the working directory, which for a fuzzer
+/// launched from the repo checkout is the multi-GB repo itself: any fuzzed
+/// call reaching a root-scanning path then grows the shared index across
+/// iterations until response serialization alone blows the per-input timeout
+/// (found as a stateful fuzz_mcp_dispatch libFuzzer timeout whose 387-byte
+/// artifact replayed clean in 539 ms), and any root-relative write path
+/// (context manifest save) aims at the checkout.
 inline Config make_fuzz_config() {
     Config cfg = make_default_config();
     cfg.search.max_results = 16;
+    cfg.project.root = fuzz_root().string();
     return cfg;
 }
 
@@ -52,12 +74,7 @@ inline void seed_file(MasterIndex& index, const std::filesystem::path& dir,
 /// written to a per-process temp directory because indexing verifies disk
 /// existence; the directory is process-lifetime, like the index it feeds.
 inline void seed_fuzz_corpus(MasterIndex& index) {
-    static const std::filesystem::path dir = [] {
-        auto d = std::filesystem::temp_directory_path() /
-                 ("lci-fuzz-" + std::to_string(::getpid()));
-        std::filesystem::create_directories(d);
-        return d;
-    }();
+    const std::filesystem::path& dir = fuzz_root();
     seed_file(
         index, dir, "router.go",
         "package server\n\n"
