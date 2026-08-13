@@ -618,8 +618,12 @@ bool overlay_user_config(Config& cfg, std::string& error) {
     return true;
 }
 
+}  // namespace
+
 // Parses KDL content into a Config. On a malformed document, leaves `cfg`
-// untouched and writes a descriptive message into `error`.
+// untouched and writes a descriptive message into `error`. External linkage
+// (declared in lci/config.h): the KDL parse path takes untrusted bytes from
+// cloned repos' .lci.kdl files, and fuzz_config_kdl drives it directly.
 Config parse_kdl_content(const std::string& content, std::string& error) {
     Parser parser(content);
     auto nodes = parser.parse_document();
@@ -646,8 +650,6 @@ Config parse_kdl_content(const std::string& content, std::string& error) {
 
     return cfg;
 }
-
-}  // namespace
 
 // -- Public API ---------------------------------------------------------------
 

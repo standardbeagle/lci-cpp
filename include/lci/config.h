@@ -177,6 +177,12 @@ struct ConfigResult {
 /// Sets result.error on parse failure.
 ConfigResult load_config(const std::string& project_root);
 
+/// Parses raw .lci.kdl content into a Config (the parse path load_config
+/// takes for a project file, minus the filesystem). On a malformed document
+/// returns defaults and sets `error`. Exposed for tests and fuzzing: the
+/// content is untrusted input (cloned repos carry their own .lci.kdl).
+Config parse_kdl_content(const std::string& content, std::string& error);
+
 // -- Config validation --------------------------------------------------------
 
 /// Validates configuration and applies smart defaults.
