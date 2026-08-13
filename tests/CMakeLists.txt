@@ -364,7 +364,9 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND LCI_ENABLE_FUZZING)
         fuzz_symbol_extract
         fuzz_mcp_dispatch
         fuzz_find_files
-        fuzz_get_context)
+        fuzz_get_context
+        fuzz_config_kdl
+        fuzz_query_parser)
     foreach(_ft IN LISTS LCI_FUZZ_TARGETS)
         lci_add_fuzz_target(${_ft})
     endforeach()

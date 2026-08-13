@@ -1,0 +1,6 @@
+// comment
+project { name "x" ; }
+index { max_file_count -9999999999 }
+server { idle_timeout_sec "not-a-number" }
+exclude ""
+weird-node 1 2 3 { nested { deeper "A\n\"" } }

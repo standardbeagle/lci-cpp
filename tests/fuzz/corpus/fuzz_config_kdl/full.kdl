@@ -1,0 +1,20 @@
+project {
+    name "seed-project"
+}
+
+index {
+    max_file_count 5000
+    follow_symlinks true
+    priority_mode "small"
+    watch_debounce_ms 500
+}
+
+server {
+    idle_timeout_sec 300
+    max_instances 4
+    max_rss_mb 512
+}
+
+include "src/**"
+exclude "**/real_projects/**"
+exclude "**/build-*/**"
