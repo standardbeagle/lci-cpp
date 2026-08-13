@@ -218,6 +218,32 @@ TEST_F(McpStdioTest, InitializeFallsBackToLatestOnUnsupportedVersion) {
               kLatestProtocolVersion);
 }
 
+// Found by fuzz_mcp_dispatch: a request whose "method" exists but is not a
+// string made request.value("method", "") throw type_error.302, which
+// escaped run() and terminated the process -- one malformed line from any
+// client killed the server. A type-confused request must get a JSON-RPC
+// error response, and the server must keep serving.
+TEST_F(McpStdioTest, TypeConfusedRequestGetsErrorAndServerSurvives) {
+    nlohmann::json bad_method = {
+        {"jsonrpc", "2.0"}, {"id", 1}, {"method", 2}};
+    nlohmann::json bad_params = {
+        {"jsonrpc", "2.0"}, {"id", 2}, {"method", "initialize"},
+        {"params", 7}};
+    auto responses = exchange({
+        bad_method,
+        bad_params,
+        make_request("initialize", 3),
+    });
+
+    ASSERT_EQ(responses.size(), 3u);
+    EXPECT_TRUE(responses[0].contains("error"));
+    EXPECT_EQ(responses[0]["error"]["code"], -32600);
+    EXPECT_TRUE(responses[1].contains("error"));
+    // The valid request after the malformed ones still gets served.
+    EXPECT_EQ(responses[2]["id"], 3);
+    EXPECT_TRUE(responses[2].contains("result"));
+}
+
 TEST_F(McpStdioTest, ToolsList) {
     auto responses = exchange({
         make_request("initialize", 1),
