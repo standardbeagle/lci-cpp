@@ -223,7 +223,12 @@ void Analyzer::get_existing_symbols(std::vector<SymbolInfo>& out) {
     auto file_ids = index_.get_all_file_ids();
     auto rt_snap = index_.ref_tracker().pin();
     for (auto fid : file_ids) {
-        std::string path = index_.get_file_path(fid);
+        // Repo-relative, like the git diff's changed-file paths: the
+        // duplicate finder's same-location guard compares the two, and an
+        // absolute-vs-relative mismatch made every changed symbol "duplicate"
+        // its own indexed copy (self-match noise findings).
+        std::string path = normalize_rel(index_.get_file_path(fid),
+                                         provider_.repo_root());
         if (path.empty()) continue;
         auto content = index_.file_content_store().get_content(fid);
         auto symbols = rt_snap->get_file_enhanced_symbols(fid);

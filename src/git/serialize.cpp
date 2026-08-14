@@ -11,8 +11,6 @@
 namespace lci {
 namespace git {
 
-namespace {
-
 /// Returns `p` rewritten relative to `project_root` when `p` is absolute and
 /// lives under that root, or `p` (forward-slash normalized) unchanged when it
 /// is already relative or sits outside the root.
@@ -52,6 +50,8 @@ std::string normalize_rel(const std::string& p,
     }
     return path;
 }
+
+namespace {
 
 nlohmann::json symbol_to_json(const SymbolInfo& symbol,
                               const std::string& project_root) {

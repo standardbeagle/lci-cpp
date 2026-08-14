@@ -40,6 +40,13 @@ bool is_analysis_supported_file(std::string_view path);
 nlohmann::json report_to_json(const AnalysisReport& report,
                               const std::string& project_root);
 
+/// Lexically normalizes an absolute path to relative-to-project-root (the
+/// serializer's canonical path form). Relative paths pass through with
+/// separators normalized to '/'. Exposed so the analyzer can compare index
+/// paths (absolute) against git diff paths (repo-relative) in one form.
+std::string normalize_rel(const std::string& p,
+                          const std::string& project_root);
+
 // ============================================================================
 // Analyzer
 // ============================================================================
