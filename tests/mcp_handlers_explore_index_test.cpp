@@ -640,6 +640,143 @@ TEST_F(ExploreIndexTestFixture, GitAnalysisRealRepoReturnsReport) {
     std::filesystem::remove_all(repo);
 }
 
+// Staged scope + duplicate detection — the analyzer's headline feature. This
+// leg can't get an e2e golden (the spec corpora sit inside the live repo, so
+// staged state is developer-dependent); the deterministic home is this
+// throwaway out-of-tree repo. A staged new file re-declares a committed
+// function body verbatim; the report must carry an exact duplicate finding
+// and count the added symbol.
+TEST_F(ExploreIndexTestFixture, GitAnalysisStagedDetectsExactDuplicate) {
+    auto repo = lci::test::unique_temp_dir("lci_git_analysis_staged_test_");
+    std::filesystem::remove_all(repo);
+    std::filesystem::create_directories(repo);
+
+    auto git = [&](const std::string& args) {
+        return test::run_git(repo, args);
+    };
+    ASSERT_TRUE(git("init"));
+    git("config user.email test@test.com");
+    git("config user.name test");
+
+    const std::string add_fn =
+        "func Add(a, b int) int {\n"
+        "\tresult := a + b\n"
+        "\treturn result\n"
+        "}\n";
+    {
+        std::ofstream f(repo / "math.go");
+        f << "package main\n\n" << add_fn;
+    }
+    ASSERT_TRUE(git("add ."));
+    ASSERT_TRUE(git("commit -m baseline"));
+
+    // Staged (not committed) file duplicating the committed body.
+    {
+        std::ofstream f(repo / "copy.go");
+        f << "package main\n\n" << add_fn;
+    }
+    ASSERT_TRUE(git("add copy.go"));
+
+    Config cfg;
+    cfg.project.root = repo.string();
+    MasterIndex idx(cfg);
+    idx.index_directory(repo.string());
+
+    // Empty OBJECT, matching what dispatch passes when the client omits
+    // arguments (a default-constructed json is null and value() throws).
+    auto params = nlohmann::json::object();  // scope defaults to staged
+    auto result = handle_git_analysis(params, idx);
+    ASSERT_FALSE(result.is_error) << result.text;
+
+    auto j = nlohmann::json::parse(result.text);
+    ASSERT_TRUE(j.contains("metadata") && j["metadata"].is_object())
+        << result.text;
+    ASSERT_TRUE(j.contains("summary") && j["summary"].is_object())
+        << result.text;
+    EXPECT_EQ(j["metadata"].value("scope", std::string()), "staged");
+    EXPECT_EQ(j["metadata"].value("target_ref", std::string()), "STAGED");
+    EXPECT_GE(j["summary"].value("files_changed", 0), 1);
+    EXPECT_GE(j["summary"].value("symbols_added", 0), 1);
+    ASSERT_TRUE(j.contains("duplicates")) << result.text;
+    ASSERT_FALSE(j["duplicates"].empty());
+    // The finder may emit additional entries (e.g. the staged copy matching
+    // itself); the load-bearing finding is the staged copy.go duplicating
+    // the committed math.go Add with similarity 1.0.
+    bool found_cross_file_exact = false;
+    for (const auto& dup : j["duplicates"]) {
+        const auto& existing = dup.contains("existing_code")
+                                   ? dup["existing_code"]
+                                   : nlohmann::json(nullptr);
+        if (existing.is_object() &&
+            existing.value("file_path", std::string()) == "math.go" &&
+            existing.value("symbol_name", std::string()) == "Add" &&
+            dup.value("type", std::string()) == "exact" &&
+            dup.value("similarity", 0.0) == 1.0) {
+            found_cross_file_exact = true;
+        }
+    }
+    EXPECT_TRUE(found_cross_file_exact) << result.text;
+
+    std::filesystem::remove_all(repo);
+}
+
+// Commit and range scopes walk ref resolution paths the staged/wip legs never
+// touch (rev-parse of base/target, HEAD~1..HEAD diffs).
+TEST_F(ExploreIndexTestFixture, GitAnalysisCommitAndRangeScopes) {
+    auto repo = lci::test::unique_temp_dir("lci_git_analysis_commit_test_");
+    std::filesystem::remove_all(repo);
+    std::filesystem::create_directories(repo);
+
+    auto git = [&](const std::string& args) {
+        return test::run_git(repo, args);
+    };
+    ASSERT_TRUE(git("init"));
+    git("config user.email test@test.com");
+    git("config user.name test");
+
+    {
+        std::ofstream f(repo / "a.go");
+        f << "package main\n\nfunc One() int { return 1 }\n";
+    }
+    ASSERT_TRUE(git("add ."));
+    ASSERT_TRUE(git("commit -m first"));
+    {
+        std::ofstream f(repo / "b.go");
+        f << "package main\n\nfunc Two() int { return 2 }\n";
+    }
+    ASSERT_TRUE(git("add ."));
+    ASSERT_TRUE(git("commit -m second"));
+
+    Config cfg;
+    cfg.project.root = repo.string();
+    MasterIndex idx(cfg);
+    idx.index_directory(repo.string());
+
+    {
+        nlohmann::json params;
+        params["scope"] = "commit";  // last commit vs its parent
+        auto result = handle_git_analysis(params, idx);
+        ASSERT_FALSE(result.is_error) << result.text;
+        auto j = nlohmann::json::parse(result.text);
+        EXPECT_EQ(j["metadata"].value("scope", std::string()), "commit");
+        EXPECT_GE(j["summary"].value("files_changed", 0), 1);
+        EXPECT_GE(j["summary"].value("symbols_added", 0), 1);
+    }
+    {
+        nlohmann::json params;
+        params["scope"] = "range";
+        params["base_ref"] = "HEAD~1";
+        params["target_ref"] = "HEAD";
+        auto result = handle_git_analysis(params, idx);
+        ASSERT_FALSE(result.is_error) << result.text;
+        auto j = nlohmann::json::parse(result.text);
+        EXPECT_EQ(j["metadata"].value("scope", std::string()), "range");
+        EXPECT_GE(j["summary"].value("files_changed", 0), 1);
+    }
+
+    std::filesystem::remove_all(repo);
+}
+
 // =============================================================================
 // Registration tests
 // =============================================================================
