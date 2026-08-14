@@ -206,17 +206,32 @@ TEST(DebouncedRebuilderTest, DebouncePreventsImmediateFiring) {
     });
 
     // Schedule rapid events
+    const auto scheduled_at = std::chrono::steady_clock::now();
     for (FileID i = 1; i <= 10; ++i) {
         rebuilder.schedule_rebuild(i);
     }
 
-    // Should not have fired yet (debounce is 100ms)
-    EXPECT_EQ(call_count.load(), 0);
+    // Not fired yet -- but only claim so while still inside the debounce
+    // window: under parallel ctest load this thread can be preempted past
+    // 100 ms between scheduling and checking, and then a fire is correct.
+    if (std::chrono::steady_clock::now() - scheduled_at <
+        std::chrono::milliseconds{100}) {
+        EXPECT_EQ(call_count.load(), 0);
+    }
 
-    // Wait for debounce + margin
-    std::this_thread::sleep_for(std::chrono::milliseconds{250});
+    // Deadline-based wait for the single coalesced fire (a fixed 250 ms
+    // sleep was not enough under load).
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds{5};
+    while (call_count.load() == 0 &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds{10});
+    }
+    EXPECT_EQ(call_count.load(), 1);
 
-    // Should have fired exactly once
+    // Settle margin: a second fire would mean the ten events were not
+    // coalesced. Preemption can only delay this check, never fake a pass.
+    std::this_thread::sleep_for(std::chrono::milliseconds{150});
     EXPECT_EQ(call_count.load(), 1);
     rebuilder.shutdown();
 }
