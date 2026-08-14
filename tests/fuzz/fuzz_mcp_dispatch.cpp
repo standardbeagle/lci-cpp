@@ -137,6 +137,49 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
                          frame.c_str());
             std::abort();
         }
+
+        // Pagination arithmetic on any list-shaped tool payload
+        // (lci/pagination.h is the one implementation; these invariants
+        // hold for every fuzzed max/offset combination):
+        //   showing == |symbols|, showing <= total, showing <= cap(500),
+        //   has_more implies a shorter-than-total page.
+        if (has_result && response["result"].is_object() &&
+            response["result"].contains("content")) {
+            for (const auto& item : response["result"]["content"]) {
+                if (!item.is_object() || !item.contains("text") ||
+                    !item["text"].is_string()) {
+                    continue;
+                }
+                nlohmann::json inner;
+                try {
+                    inner = nlohmann::json::parse(
+                        item["text"].get_ref<const std::string&>());
+                } catch (const nlohmann::json::parse_error&) {
+                    continue;  // non-JSON text payloads are fine
+                }
+                if (!inner.is_object() || !inner.contains("total") ||
+                    !inner.contains("showing") ||
+                    !inner.contains("has_more")) {
+                    continue;
+                }
+                const int total = inner.value("total", -1);
+                const int showing = inner.value("showing", -1);
+                const bool more = inner.value("has_more", false);
+                const int listed =
+                    inner.contains("symbols") && inner["symbols"].is_array()
+                        ? static_cast<int>(inner["symbols"].size())
+                        : showing;
+                if (showing < 0 || total < 0 || showing != listed ||
+                    showing > total || showing > 500 ||
+                    (more && showing >= total)) {
+                    std::fprintf(stderr,
+                                 "fuzz_mcp_dispatch: pagination arithmetic "
+                                 "violated: %s\n",
+                                 inner.dump().c_str());
+                    std::abort();
+                }
+            }
+        }
     }
     if (frames > input_lines) {
         std::fprintf(stderr,
