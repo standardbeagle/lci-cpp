@@ -15,6 +15,7 @@
 
 #include <lci/core/reference_tracker.h>
 #include <lci/core/text.h>
+#include <lci/pagination.h>
 #include <lci/file_info.h>
 #include <lci/git/analyzer.h>
 #include <lci/git/provider.h>
@@ -1443,10 +1444,9 @@ void IndexServer::handle_list_symbols(const httplib::Request& req,
     if (body.contains("max_params") && !body["max_params"].is_null()) {
         max_params = body["max_params"].get<int>();
     }
-    int max_results = body.value("max", 50);
-    if (max_results <= 0) max_results = 50;
-    if (max_results > 500) max_results = 500;
-    int offset = body.value("offset", 0);
+    const auto page = normalize_page(body);
+    const int max_results = page.max;
+    const int offset = page.offset;
 
     auto all_file_ids = indexer_->get_all_file_ids();
     // Sort by file_id ascending for deterministic output ordering.
@@ -1543,7 +1543,8 @@ void IndexServer::handle_list_symbols(const httplib::Request& req,
     j["symbols"] = entries;
     j["total"] = total;
     j["showing"] = static_cast<int>(entries.size());
-    j["has_more"] = total > offset + static_cast<int>(entries.size());
+    j["has_more"] =
+        page_has_more(total, offset, static_cast<int>(entries.size()));
     json_response(res, j);
 }
 

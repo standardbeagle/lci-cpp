@@ -6,6 +6,7 @@
 
 #include <lci/core/reference_tracker.h>
 #include <lci/idcodec.h>
+#include <lci/pagination.h>
 #include <lci/indexing/master_index.h>
 #include <lci/language_map.h>
 #include <lci/mcp/handlers_core.h>  // similar_symbol_suggestions
@@ -567,9 +568,9 @@ ToolResult handle_list_symbols(const nlohmann::json& params,
     auto kinds = parse_symbol_kinds(kind_str);
     auto includes = parse_explore_includes(params.value("include", ""));
 
-    int max_results = clamp_int(params.value("max", 50), 1, 500);
-    int offset = params.value("offset", 0);
-    if (offset < 0) offset = 0;
+    const auto page = normalize_page(params);
+    const int max_results = page.max;
+    const int offset = page.offset;
 
     auto file_filter = params.value("file", "");
     auto sort_by = params.value("sort", "name");
@@ -626,7 +627,8 @@ ToolResult handle_list_symbols(const nlohmann::json& params,
     response["symbols"] = std::move(symbols_json);
     response["total"] = total;
     response["showing"] = static_cast<int>(all_symbols.size());
-    response["has_more"] = total > offset + static_cast<int>(all_symbols.size());
+    response["has_more"] =
+        page_has_more(total, offset, static_cast<int>(all_symbols.size()));
 
     return make_json_response(response);
 }
