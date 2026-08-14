@@ -699,16 +699,24 @@ TEST_F(ExploreIndexTestFixture, GitAnalysisStagedDetectsExactDuplicate) {
     EXPECT_GE(j["summary"].value("symbols_added", 0), 1);
     ASSERT_TRUE(j.contains("duplicates")) << result.text;
     ASSERT_FALSE(j["duplicates"].empty());
-    // The finder may emit additional entries (e.g. the staged copy matching
-    // itself); the load-bearing finding is the staged copy.go duplicating
-    // the committed math.go Add with similarity 1.0.
+    // Exactly the one real finding: the staged copy.go duplicating the
+    // committed math.go Add. A symbol matching ITSELF (identical
+    // new_code/existing_code location) is noise the same-location guard
+    // must suppress -- it failed to when index paths were absolute while
+    // diff paths were repo-relative.
     bool found_cross_file_exact = false;
     for (const auto& dup : j["duplicates"]) {
         const auto& existing = dup.contains("existing_code")
                                    ? dup["existing_code"]
                                    : nlohmann::json(nullptr);
-        if (existing.is_object() &&
-            existing.value("file_path", std::string()) == "math.go" &&
+        ASSERT_TRUE(existing.is_object()) << result.text;
+        const auto& fresh = dup["new_code"];
+        EXPECT_FALSE(existing.value("file_path", std::string()) ==
+                         fresh.value("file_path", std::string()) &&
+                     existing.value("start_line", -1) ==
+                         fresh.value("start_line", -2))
+            << "self-match finding: " << dup.dump();
+        if (existing.value("file_path", std::string()) == "math.go" &&
             existing.value("symbol_name", std::string()) == "Add" &&
             dup.value("type", std::string()) == "exact" &&
             dup.value("similarity", 0.0) == 1.0) {
