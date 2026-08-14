@@ -19,6 +19,9 @@
 #include <lci/config.h>
 #include <lci/core/portable.h>
 #include <lci/indexing/master_index.h>
+#include <lci/mcp/handlers_explore.h>
+
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -303,6 +306,76 @@ TEST(IndexPerformanceRequirements, FileAccessScalesSublinearly) {
                              "(O(n) regression suspected): n=50 avg "
                           << avg_small.count() << "ns, n=1000 avg "
                           << avg_large.count() << "ns";
+}
+
+// Random traversal of pagination windows through the real MCP list_symbols
+// handler. Two properties, both contention-robust (best-of-N minimum):
+//   1. absolute: a random page over a ~700-symbol index costs low
+//      single-digit milliseconds at worst (the handler is O(total) per call
+//      -- collect + sort -- so this is the per-request tax a paging client
+//      pays);
+//   2. relative: page cost is offset-INDEPENDENT. A deep window (near the
+//      end) must cost about the same as page one; a super-linear ratio
+//      means someone made the offset walk quadratic.
+TEST(IndexPerformanceRequirements, PaginationRandomTraversalIsFlat) {
+    LargeTestProject project(200);
+    Config cfg = make_test_config(project.root.string());
+    MasterIndex index(cfg);
+    ASSERT_TRUE(index.index_directory(project.root.string()));
+
+    auto page_once = [&](int offset) {
+        nlohmann::json params = {{"max", 25}, {"offset", offset}};
+        auto result = mcp::handle_list_symbols(params, index);
+        EXPECT_FALSE(result.is_error);
+        return result;
+    };
+    auto first = nlohmann::json::parse(page_once(0).text);
+    const int total = first["total"].get<int>();
+    ASSERT_GT(total, 100) << "fixture too small to make deep offsets deep";
+
+    auto bench = [&](auto&& next_offset, int iterations) {
+        auto start = std::chrono::steady_clock::now();
+        for (int i = 0; i < iterations; ++i) {
+            (void)page_once(next_offset(i));
+        }
+        auto dur = std::chrono::steady_clock::now() - start;
+        return std::chrono::duration_cast<std::chrono::nanoseconds>(dur) /
+               iterations;
+    };
+    constexpr int kIterations = 40;
+    auto best_of = [&](auto&& next_offset) {
+        auto best = bench(next_offset, kIterations);
+        for (int rep = 1; rep < 3; ++rep) {
+            best = std::min(best, bench(next_offset, kIterations));
+        }
+        return best;
+    };
+
+    std::mt19937 rng(42);
+    std::uniform_int_distribution<int> anywhere(0, total - 1);
+    auto random_cost = best_of([&](int) { return anywhere(rng); });
+    auto shallow_cost = best_of([](int) { return 0; });
+    auto deep_cost = best_of([&](int) { return total - 10; });
+
+    double ratio = static_cast<double>(deep_cost.count()) /
+                   static_cast<double>(
+                       std::max<int64_t>(shallow_cost.count(), 1));
+    std::printf(
+        "[ PaginationTraversal ] shallow=%lldns deep=%lldns random=%lldns "
+        "ratio=%.2f total=%d\n",
+        static_cast<long long>(shallow_cost.count()),
+        static_cast<long long>(deep_cost.count()),
+        static_cast<long long>(random_cost.count()), ratio, total);
+    std::fflush(stdout);
+
+    EXPECT_LT(ratio, 4.0)
+        << "deep pages cost >> shallow pages: offset handling went "
+           "super-linear";
+    // O(total) collect+sort per call; 20ms leaves an order of magnitude of
+    // headroom over the measured cost on a loaded machine while still
+    // catching an accidental O(total^2) page walk.
+    EXPECT_LT(random_cost.count(), 20'000'000)
+        << "random page window cost regressed past 20ms";
 }
 
 }  // namespace

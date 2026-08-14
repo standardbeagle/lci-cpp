@@ -2,11 +2,17 @@
 
 #include <lci/config.h>
 #include <lci/indexing/master_index.h>
+#include <lci/mcp/handlers_explore.h>
+
+#include <nlohmann/json.hpp>
 
 #include "unique_temp.h"
 
+#include <algorithm>
+#include <atomic>
 #include <filesystem>
 #include <fstream>
+#include <random>
 #include <string>
 #include <thread>
 #include <vector>
@@ -647,6 +653,101 @@ TEST(MasterIndexSearchIntegrationTest, ConcurrentHandlerReadsDuringIndexing) {
            "reindex of an unrelated file";
     EXPECT_EQ(torn.load(), 0)
         << "pinned handler read observed a torn/freed EnhancedSymbol";
+}
+
+// Pagination under index churn: readers walk random page windows through the
+// real MCP handler while a writer keeps invalidating files (update_file adds
+// and removes symbols). Each individual response must stay self-consistent —
+// showing == |symbols|, showing <= total, has_more <-> offset+showing < total
+// against ITS OWN total — even though totals drift between responses. This is
+// the recovery contract: a client that pages while the index rebuilds sees
+// coherent windows, never torn arithmetic.
+TEST(MasterIndexSearchIntegrationTest, PaginationCoherentUnderIndexChurn) {
+    TempDir dir;
+    for (int f = 0; f < 8; ++f) {
+        std::string content = "package main\n";
+        for (int s = 0; s < 6; ++s) {
+            content += "func base" + std::to_string(f) + "_" +
+                       std::to_string(s) + "() { return }\n";
+        }
+        dir.write_file("f" + std::to_string(f) + ".go", content);
+    }
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    constexpr int kReaders = 3;
+    constexpr int kReadsPerThread = 150;
+    std::atomic<bool> stop{false};
+    std::atomic<int> incoherent{0};
+    std::atomic<int> reads_done{0};
+    std::vector<std::thread> readers;
+
+    for (int r = 0; r < kReaders; ++r) {
+        readers.emplace_back([&, r] {
+            std::mt19937 rng(1234u + static_cast<unsigned>(r));
+            std::uniform_int_distribution<int> off_dist(-5, 80);
+            std::uniform_int_distribution<int> max_dist(-1, 12);
+            for (int j = 0; j < kReadsPerThread; ++j) {
+                nlohmann::json params = {{"max", max_dist(rng)},
+                                         {"offset", off_dist(rng)}};
+                auto result = mcp::handle_list_symbols(params, mi);
+                if (result.is_error) {
+                    incoherent.fetch_add(1, std::memory_order_relaxed);
+                    continue;
+                }
+                auto j2 = nlohmann::json::parse(result.text, nullptr,
+                                                /*allow_exceptions=*/false);
+                if (j2.is_discarded() || !j2.contains("total") ||
+                    !j2.contains("showing") || !j2.contains("has_more") ||
+                    !j2["symbols"].is_array()) {
+                    incoherent.fetch_add(1, std::memory_order_relaxed);
+                    continue;
+                }
+                const int total = j2["total"].get<int>();
+                const int showing = j2["showing"].get<int>();
+                const int listed = static_cast<int>(j2["symbols"].size());
+                const int offset = std::max(0, params["offset"].get<int>());
+                const bool more = j2["has_more"].get<bool>();
+                if (showing != listed || showing > total ||
+                    more != (total > offset + showing)) {
+                    incoherent.fetch_add(1, std::memory_order_relaxed);
+                }
+                reads_done.fetch_add(1, std::memory_order_relaxed);
+            }
+        });
+    }
+
+    std::thread writer([&] {
+        int i = 0;
+        while (!stop.load(std::memory_order_acquire)) {
+            // Invalidate a file with a different symbol count each pass so
+            // total keeps moving while readers page.
+            const int f = i % 8;
+            std::string content = "package main\n";
+            const int symbols = 1 + (i % 9);
+            for (int s = 0; s < symbols; ++s) {
+                content += "func churn" + std::to_string(f) + "_" +
+                           std::to_string(i) + "_" + std::to_string(s) +
+                           "() { return }\n";
+            }
+            mi.update_file((dir.path() / ("f" + std::to_string(f) + ".go"))
+                               .string(),
+                           content);
+            ++i;
+        }
+    });
+
+    for (auto& t : readers) t.join();
+    stop.store(true, std::memory_order_release);
+    writer.join();
+
+    EXPECT_EQ(incoherent.load(), 0)
+        << "a paged response contradicted its own total/showing/has_more "
+           "while the index was being invalidated underneath it";
+    EXPECT_EQ(reads_done.load(), kReaders * kReadsPerThread);
 }
 
 // -- Search after single-file indexing ----------------------------------------
