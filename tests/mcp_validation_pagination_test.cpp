@@ -2,6 +2,7 @@
 
 #include <lci/mcp/formatter_compact.h>
 #include <lci/mcp/validation.h>
+#include <lci/pagination.h>
 
 namespace lci {
 namespace mcp {
@@ -296,6 +297,58 @@ TEST(CompactFormatter, SearchContextLines) {
     auto text = f.format_search_response(response);
     EXPECT_NE(text.find("> before line"), std::string::npos);
     EXPECT_NE(text.find("> after line"), std::string::npos);
+}
+
+// =============================================================================
+// Shared pagination semantics (lci/pagination.h) — the one implementation
+// both the MCP list_symbols handler and HTTP /list-symbols must use.
+// =============================================================================
+
+TEST(PageWindow, DefaultsWhenAbsent) {
+    auto w = normalize_page(nlohmann::json::object());
+    EXPECT_EQ(w.max, 50);
+    EXPECT_EQ(w.offset, 0);
+}
+
+TEST(PageWindow, ExplicitValuesPassThrough) {
+    auto w = normalize_page({{"max", 7}, {"offset", 3}});
+    EXPECT_EQ(w.max, 7);
+    EXPECT_EQ(w.offset, 3);
+}
+
+TEST(PageWindow, ZeroAndNegativeMaxMeanDefault) {
+    EXPECT_EQ(normalize_page({{"max", 0}}).max, 50);
+    EXPECT_EQ(normalize_page({{"max", -5}}).max, 50);
+}
+
+TEST(PageWindow, MaxClampsToCap) {
+    EXPECT_EQ(normalize_page({{"max", 501}}).max, 500);
+    EXPECT_EQ(normalize_page({{"max", 9}}, 20, 8).max, 8);
+}
+
+TEST(PageWindow, NegativeOffsetClampsToZero) {
+    EXPECT_EQ(normalize_page({{"offset", -4}}).offset, 0);
+}
+
+TEST(PageWindow, CustomDefaultMax) {
+    EXPECT_EQ(normalize_page(nlohmann::json::object(), 25).max, 25);
+    EXPECT_EQ(normalize_page({{"max", 0}}, 25).max, 25);
+}
+
+TEST(PageHasMore, ExactBoundaryIsFalse) {
+    EXPECT_FALSE(page_has_more(/*total=*/4, /*offset=*/2, /*shown=*/2));
+}
+
+TEST(PageHasMore, RemainderIsTrue) {
+    EXPECT_TRUE(page_has_more(4, 1, 2));
+}
+
+TEST(PageHasMore, EmptyTotalIsFalse) {
+    EXPECT_FALSE(page_has_more(0, 0, 0));
+}
+
+TEST(PageHasMore, OffsetPastTotalIsFalse) {
+    EXPECT_FALSE(page_has_more(4, 10, 0));
 }
 
 }  // namespace

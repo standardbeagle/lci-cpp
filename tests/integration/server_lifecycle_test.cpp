@@ -302,6 +302,27 @@ TEST_F(ServerLifecycleTest, Endpoint_ListSymbols_ReceiverFilterMiss) {
     EXPECT_TRUE(j["symbols"].empty());
 }
 
+// Same pagination semantics as the MCP surface (lci/pagination.h): a
+// negative offset is normalized to 0 -- before the shared helper, HTTP left
+// it unclamped and has_more reported true after showing every result.
+TEST_F(ServerLifecycleTest, Endpoint_ListSymbols_PaginationEdges) {
+    auto all = post("/list-symbols", {{"max", 500}});
+    const int total = all["total"].get<int>();
+    ASSERT_GT(total, 0);
+    EXPECT_FALSE(all["has_more"].get<bool>());
+
+    auto neg = post("/list-symbols", {{"offset", -5}, {"max", 500}});
+    EXPECT_EQ(neg["showing"].get<int>(), total);
+    EXPECT_FALSE(neg["has_more"].get<bool>());
+
+    auto past = post("/list-symbols", {{"offset", total + 3}});
+    EXPECT_EQ(past["showing"].get<int>(), 0);
+    EXPECT_FALSE(past["has_more"].get<bool>());
+
+    auto zero_max = post("/list-symbols", {{"max", 0}});
+    EXPECT_EQ(zero_max["showing"].get<int>(), std::min(total, 50));
+}
+
 // -- 11. /inspect-symbol ------------------------------------------------------
 
 TEST_F(ServerLifecycleTest, Endpoint_InspectSymbol) {

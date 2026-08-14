@@ -106,6 +106,62 @@ TEST_F(ExploreIndexTestFixture, ListSymbolsDefaultsToAllKinds) {
     EXPECT_GT(j["total"].get<int>(), 0);
 }
 
+// Full pagination-edge coverage (shared semantics in lci/pagination.h).
+// Windows must tile the result set exactly: no overlap, no gap, has_more
+// exact at every boundary, and degenerate inputs (max=0, offset past end,
+// negative offset) resolve to the documented normalization.
+TEST_F(ExploreIndexTestFixture, ListSymbolsPaginationEdges) {
+    auto call = [&](nlohmann::json params) {
+        auto result = handle_list_symbols(params, *indexer_);
+        EXPECT_FALSE(result.is_error) << result.text;
+        return nlohmann::json::parse(result.text);
+    };
+
+    const auto all = call({{"max", 500}});
+    const int total = all["total"].get<int>();
+    ASSERT_GT(total, 2) << "fixture must hold enough symbols to paginate";
+    ASSERT_EQ(all["showing"].get<int>(), total);
+    EXPECT_FALSE(all["has_more"].get<bool>());
+
+    // max=0 means "unset" -> default window (50), NOT a one-element page.
+    const auto zero_max = call({{"max", 0}});
+    EXPECT_EQ(zero_max["showing"].get<int>(), std::min(total, 50));
+
+    // Negative offset normalizes to 0 -- identical to the first page.
+    const auto neg_off = call({{"max", 2}, {"offset", -7}});
+    EXPECT_EQ(neg_off["showing"].get<int>(), 2);
+    EXPECT_EQ(neg_off["symbols"][0], all["symbols"][0]);
+    EXPECT_TRUE(neg_off["has_more"].get<bool>());
+
+    // Walk the whole set in windows of 2: exact tiling, has_more flips
+    // false exactly on the window that exhausts the set.
+    std::vector<nlohmann::json> seen;
+    for (int offset = 0; offset < total;) {
+        auto page = call({{"max", 2}, {"offset", offset}});
+        EXPECT_EQ(page["total"].get<int>(), total);
+        const int shown = page["showing"].get<int>();
+        ASSERT_GT(shown, 0);
+        ASSERT_LE(shown, 2);
+        for (const auto& s : page["symbols"]) seen.push_back(s);
+        offset += shown;
+        EXPECT_EQ(page["has_more"].get<bool>(), offset < total)
+            << "offset now " << offset << " of " << total;
+    }
+    ASSERT_EQ(static_cast<int>(seen.size()), total);
+    for (int i = 0; i < total; ++i) {
+        EXPECT_EQ(seen[i], all["symbols"][i]) << "window tiling broke at "
+                                              << i;
+    }
+
+    // Offset exactly at / past the end: empty page, has_more false.
+    for (int offset : {total, total + 5}) {
+        auto page = call({{"max", 2}, {"offset", offset}});
+        EXPECT_EQ(page["showing"].get<int>(), 0);
+        EXPECT_TRUE(page["symbols"].empty());
+        EXPECT_FALSE(page["has_more"].get<bool>());
+    }
+}
+
 TEST_F(ExploreIndexTestFixture, ListSymbolsFunctions) {
     nlohmann::json params = nlohmann::json::object();
     params["kind"] = "func";
