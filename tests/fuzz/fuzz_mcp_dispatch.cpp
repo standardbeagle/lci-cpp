@@ -13,9 +13,13 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <iostream>
 #include <sstream>
 #include <string>
+
+#include <nlohmann/json.hpp>
 
 #include "fuzz_fixture.h"
 
@@ -96,5 +100,50 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
 
     std::cin.rdbuf(old_cin);
     std::cout.rdbuf(old_cout);
+
+    // Correctness invariants, not just crash-freedom: whatever bytes went
+    // in, every frame the server emitted must be a well-formed JSON-RPC 2.0
+    // response. A violation here is a protocol bug a real client would see.
+    std::istringstream out(sink.str());
+    std::string frame;
+    size_t input_lines = 0;
+    for (char c : input) input_lines += (c == '\n');
+    ++input_lines;  // final unterminated line still dispatches
+    size_t frames = 0;
+    while (std::getline(out, frame)) {
+        if (frame.empty()) continue;
+        ++frames;
+        nlohmann::json response;
+        try {
+            response = nlohmann::json::parse(frame);
+        } catch (const nlohmann::json::parse_error&) {
+            std::fprintf(stderr,
+                         "fuzz_mcp_dispatch: emitted frame is not JSON: %s\n",
+                         frame.c_str());
+            std::abort();
+        }
+        if (!response.is_object() || response.value("jsonrpc", "") != "2.0") {
+            std::fprintf(stderr,
+                         "fuzz_mcp_dispatch: frame missing jsonrpc 2.0: %s\n",
+                         frame.c_str());
+            std::abort();
+        }
+        const bool has_result = response.contains("result");
+        const bool has_error = response.contains("error");
+        if (has_result == has_error) {
+            std::fprintf(stderr,
+                         "fuzz_mcp_dispatch: frame must carry exactly one of "
+                         "result/error: %s\n",
+                         frame.c_str());
+            std::abort();
+        }
+    }
+    if (frames > input_lines) {
+        std::fprintf(stderr,
+                     "fuzz_mcp_dispatch: %zu responses for %zu request "
+                     "lines\n",
+                     frames, input_lines);
+        std::abort();
+    }
     return 0;
 }
