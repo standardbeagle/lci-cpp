@@ -1,5 +1,7 @@
 #include <lci/cli/commands.h>
 
+#include <lci/indexing/pipeline_scanner.h>
+
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
@@ -298,20 +300,23 @@ int run_debug_info(const GlobalFlags& flags, bool verbose, bool incremental) {
         if (ec) root = ".";
     }
 
+    // Walk via the project FileScanner, not a raw directory iterator: the
+    // raw walk descended into build trees, .git, and vendored _deps —
+    // everything the index excludes — so counts disagreed with the index
+    // and large checkouts took minutes.
     std::vector<std::filesystem::path> go_files;
-    std::error_code iter_ec;
-    for (std::filesystem::recursive_directory_iterator it(root, iter_ec), end;
-         !iter_ec && it != end; it.increment(iter_ec)) {
-        if (iter_ec) break;
-        if (!it->is_regular_file()) continue;
-        if (is_go_source_file(it->path())) {
-            go_files.push_back(it->path());
+    {
+        FileScanner scanner(cfg);
+        auto scan = scanner.scan(/*apply_budget=*/false);
+        if (!scan.error.empty()) {
+            std::cerr << "Error: failed to walk project files: " << scan.error
+                      << "\n";
+            return 1;
         }
-    }
-    if (iter_ec) {
-        std::cerr << "Error: failed to walk project files: " << iter_ec.message()
-                  << "\n";
-        return 1;
+        for (const auto& task : scan.tasks) {
+            std::filesystem::path p(task.path);
+            if (is_go_source_file(p)) go_files.push_back(std::move(p));
+        }
     }
     std::sort(go_files.begin(), go_files.end());
 
@@ -530,31 +535,39 @@ int run_debug_deps(const GlobalFlags& flags, bool verbose) {
     // ReferenceTracker on the main index path.
     symbollinker::register_all_linkers(engine, root.string());
 
+    // Walk via the project FileScanner so config/gitignore/default excludes
+    // apply. The former raw recursive_directory_iterator descended into
+    // build-*/_deps (vendored abseil/re2/grammars — gigabytes of sources the
+    // index itself excludes) and single-threaded-indexed all of it: `lci
+    // debug deps` on this repo appeared hung for minutes before this.
     std::vector<FileID> indexed_files;
-    std::error_code iter_ec;
-    for (std::filesystem::recursive_directory_iterator it(root, iter_ec), end;
-         !iter_ec && it != end; it.increment(iter_ec)) {
-        if (iter_ec) break;
-        if (!it->is_regular_file()) continue;
-        // Skip files no registered linker can handle (avoids reading binaries);
-        // can_index reuses each extractor's can_handle — single source of truth.
-        if (!engine.can_index(it->path().string())) continue;
-
-        auto rel = std::filesystem::relative(it->path(), root, iter_ec);
-        if (iter_ec) break;
-
-        auto content = read_text_file(it->path());
-        if (content.empty() && std::filesystem::file_size(it->path(), iter_ec) > 0) {
-            continue;
+    {
+        FileScanner scanner(cfg);
+        auto scan = scanner.scan(/*apply_budget=*/false);
+        if (!scan.error.empty()) {
+            std::cerr << "Error: failed to walk project files: " << scan.error
+                      << "\n";
+            return 1;
         }
-        if (!engine.index_file(rel.string(), content)) continue;
-        indexed_files.push_back(engine.get_or_create_file_id(rel.string()));
-    }
+        std::error_code rel_ec;
+        for (const auto& task : scan.tasks) {
+            std::filesystem::path p(task.path);
+            // Skip files no registered linker can handle; can_index reuses
+            // each extractor's can_handle — single source of truth.
+            if (!engine.can_index(p.string())) continue;
 
-    if (iter_ec) {
-        std::cerr << "Error: failed to walk project files: " << iter_ec.message()
-                  << "\n";
-        return 1;
+            auto rel = std::filesystem::relative(p, root, rel_ec);
+            if (rel_ec) continue;
+
+            auto content = read_text_file(p);
+            if (content.empty() &&
+                std::filesystem::file_size(p, rel_ec) > 0) {
+                continue;
+            }
+            if (!engine.index_file(rel.string(), content)) continue;
+            indexed_files.push_back(
+                engine.get_or_create_file_id(rel.string()));
+        }
     }
 
     std::printf("Linking symbols and building dependency graph...\n");
