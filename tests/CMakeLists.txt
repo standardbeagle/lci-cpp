@@ -45,6 +45,7 @@ add_executable(lci_tests
     integrator_test.cpp
     master_index_test.cpp
     master_index_search_test.cpp
+    search_rg_differential_test.cpp
     watcher_test.cpp
     search_engine_test.cpp
     semantic_test.cpp

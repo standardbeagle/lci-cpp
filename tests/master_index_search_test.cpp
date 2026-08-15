@@ -813,5 +813,123 @@ TEST(MasterIndexSearchIntegrationTest, SearchAfterFileRemoval) {
     EXPECT_TRUE(r2.empty());
 }
 
+// -- Bulk-index candidate certification (silent-zero regressions) -------------
+//
+// After index_directory (the bulk pipeline), the trigram snapshot holds no
+// per-file trigram data and PostingsIndex holds whole lowercase tokens only.
+// Any literal pattern that is not an exact lowercase postings token — a phrase
+// containing a space, a mixed-case identifier searched case-sensitively, a
+// substring of a longer identifier — must still be found by the verify scan.
+// A residue candidate set (postings-PARTIAL files that self-nominate on every
+// lookup) must never suppress scanning the rest of the corpus: a non-empty
+// residue set is not a narrowing.
+
+namespace {
+
+/// Writes a .go file whose unique-token count exceeds the code-file postings
+/// cap for the given config, so the bulk pipeline records it PARTIAL and it
+/// self-nominates in every postings lookup. This is the residue shape that
+/// suppressed the scan-all fallback in production (voc.txt et al.).
+void write_partial_residue_file(TempDir& dir, const Config& cfg,
+                                const std::string& rel) {
+    const int code_cap = cfg.index.data_file_token_cap * 4;
+    std::string blob = "package residue\n// ";
+    for (int i = 0; i < code_cap + 50; ++i) {
+        blob += "tokres" + std::to_string(i) + " ";
+    }
+    blob += "\n";
+    dir.write_file(rel, blob);
+}
+
+/// True when some result's path ends with `suffix`.
+bool any_result_in(const std::vector<SearchResult>& results,
+                   const std::string& suffix) {
+    return std::any_of(results.begin(), results.end(),
+                       [&](const SearchResult& r) {
+                           return r.path.size() >= suffix.size() &&
+                                  r.path.compare(r.path.size() - suffix.size(),
+                                                 suffix.size(), suffix) == 0;
+                       });
+}
+
+}  // namespace
+
+TEST(MasterIndexSearchIntegrationTest,
+     BulkPhraseWithSpaceFoundDespitePartialResidue) {
+    TempDir dir;
+    dir.write_file("a.go", "package main\n// the Index server exits here\n");
+
+    Config cfg = make_default_config();
+    cfg.index.data_file_token_cap = 25;
+    write_partial_residue_file(dir, cfg, "residue.go");
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+    ASSERT_GE(mi.postings_index().partial_file_count(), 1)
+        << "residue file must be PARTIAL for this test to reproduce the bug";
+
+    auto results = mi.search_with_options("Index server", SearchOptions{});
+    EXPECT_TRUE(any_result_in(results, "a.go"))
+        << "phrase with a space must be found by the verify scan";
+}
+
+TEST(MasterIndexSearchIntegrationTest,
+     BulkCaseSensitiveMixedCaseTokenFound) {
+    TempDir dir;
+    dir.write_file("a.go", "package main\ntype PageWindow struct{}\n");
+
+    Config cfg = make_default_config();
+    cfg.index.data_file_token_cap = 25;
+    write_partial_residue_file(dir, cfg, "residue.go");
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+    ASSERT_GE(mi.postings_index().partial_file_count(), 1);
+
+    // Postings tokens are stored lowercase; a case-sensitive query for the
+    // mixed-case identifier must still reach the verify scan.
+    auto results = mi.search_with_options("PageWindow", SearchOptions{});
+    EXPECT_TRUE(any_result_in(results, "a.go"));
+}
+
+TEST(MasterIndexSearchIntegrationTest, BulkSubstringOfTokenFound) {
+    TempDir dir;
+    dir.write_file("a.go", "package main\n// repagination counter\n");
+
+    Config cfg = make_default_config();
+    cfg.index.data_file_token_cap = 25;
+    write_partial_residue_file(dir, cfg, "residue.go");
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+    ASSERT_GE(mi.postings_index().partial_file_count(), 1);
+
+    // "pagination" is a strict substring of the stored token "repagination".
+    auto results = mi.search_with_options("pagination", SearchOptions{});
+    EXPECT_TRUE(any_result_in(results, "a.go"));
+}
+
+TEST(MasterIndexSearchIntegrationTest,
+     IncrementalTrigramStateDoesNotHideBulkFiles) {
+    TempDir dir;
+    dir.write_file("a.go", "package main\n// call handle_gadget now\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    // A later watcher-style single-file index populates the trigram snapshot
+    // for THAT file only. Its trigrams overlap the pattern's enough to pass
+    // the min_required threshold, so a coverage-blind trigram prefilter
+    // would narrow to {c.go} and hide the bulk-indexed a.go.
+    dir.write_file("c.go", "package main\n// handle_zebra call\n");
+    ASSERT_TRUE(mi.index_file((dir.path() / "c.go").string()));
+
+    auto results = mi.search_with_options("handle_g", SearchOptions{});
+    EXPECT_TRUE(any_result_in(results, "a.go"))
+        << "trigram data covering only c.go must not certify absence in a.go";
+}
+
 }  // namespace
 }  // namespace lci
