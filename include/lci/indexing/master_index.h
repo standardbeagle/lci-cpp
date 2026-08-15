@@ -190,9 +190,17 @@ class MasterIndex {
         const std::string& pattern,
         const SearchOptions& options) const;
 
-    /// Returns candidate file IDs matching a pattern's trigrams.
+    /// Returns the files a literal-pattern scan must visit: every indexed
+    /// file except those an index with coverage certifies pattern-free
+    /// (trigram narrowing over its covered files; postings token-run
+    /// narrowing — see TrigramIndex::narrow / PostingsIndex::narrow).
+    /// When `informative` is non-null it reports whether ANY certification
+    /// applied; false means the (possibly empty) return simply mirrors the
+    /// full candidate set and the caller cannot treat emptiness as "no
+    /// possible match".
     std::vector<FileID> find_candidate_files(
-        const std::string& pattern, bool case_insensitive) const;
+        const std::string& pattern, bool case_insensitive,
+        bool* informative = nullptr) const;
 
     /// Searches for symbol definitions (declarations only).
     std::vector<SearchResult> search_definitions(

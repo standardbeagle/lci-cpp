@@ -99,6 +99,9 @@ class ShardedTrigramStorage {
 ///   - Search cache with configurable TTL (default 5 minutes)
 ///   - Lazy file invalidation with threshold-based cleanup
 class TrigramIndex {
+  private:
+    struct Snapshot;  // Defined in the private section below.
+
   public:
     TrigramIndex();
 
@@ -146,6 +149,39 @@ class TrigramIndex {
     std::vector<FileID> find_candidates_with_options(
         std::string_view pattern, bool case_insensitive) const;
 
+    /// Certified-absence narrowing scoped to the files this index COVERS.
+    ///
+    /// The snapshot maps are populated only by the incremental index_file
+    /// path (the bulk pipeline stopped producing trigram data, 2026-08-04),
+    /// so at any moment they describe an arbitrary SUBSET of the corpus.
+    /// Narrowing on them is sound only per covered file: a file absent
+    /// from `possible` is certified pattern-free ONLY when `covered_files`
+    /// contains it. Uncovered files (bulk-indexed, unfiltered/hostile)
+    /// must always be scanned.
+    ///
+    /// `informative` is false — nothing is certified — when the pattern is
+    /// shorter than 3 bytes, or the query is case-insensitive (stored
+    /// trigrams keep original case, so a lowercased query would produce
+    /// false absences).
+    ///
+    /// ASCII patterns probe BOTH trigram maps: non-ASCII files index all
+    /// their trigrams (including pure-ASCII windows) in the unicode map
+    /// only, so an ascii-map-only probe would falsely certify absence in
+    /// covered non-ASCII files.
+    class Narrowing {
+      public:
+        bool informative() const { return informative_; }
+        /// True when this index certifies `fid` cannot contain the pattern.
+        bool certifies_absent(FileID fid) const;
+
+      private:
+        friend class TrigramIndex;
+        bool informative_{false};
+        absl::flat_hash_set<FileID> possible_;
+        std::shared_ptr<const Snapshot> snap_;
+    };
+    Narrowing narrow(std::string_view pattern, bool case_insensitive) const;
+
     /// Returns the number of unique files in the index.
     int file_count() const;
 
@@ -189,6 +225,11 @@ class TrigramIndex {
         /// returned as candidates so the prefilter never hides them; the
         /// downstream verify scan does the real matching.
         absl::flat_hash_set<FileID> unfiltered_files;
+        /// Files whose trigram data lives in THESE maps (incremental
+        /// index_file / index_file_with_trigrams). narrow() may certify
+        /// pattern absence only inside this set — bulk-indexed files never
+        /// enter it and must always be scanned.
+        absl::flat_hash_set<FileID> covered_files;
     };
 
     AtomicSharedPtr<const Snapshot> snapshot_;

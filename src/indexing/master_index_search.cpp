@@ -95,8 +95,27 @@ std::vector<SearchResult> MasterIndex::search_with_options(
 }
 
 std::vector<FileID> MasterIndex::find_candidate_files(
-    const std::string& pattern, bool case_insensitive) const {
-    return trigram_index_.find_candidates_with_options(pattern, case_insensitive);
+    const std::string& pattern, bool case_insensitive,
+    bool* informative) const {
+    auto trigram_narrowing = trigram_index_.narrow(pattern, case_insensitive);
+    auto postings_narrowing = postings_index_.narrow(pattern);
+    if (informative != nullptr) {
+        *informative =
+            trigram_narrowing.informative() || postings_narrowing.informative;
+    }
+
+    auto all = get_all_file_ids();
+    std::vector<FileID> scan_set;
+    scan_set.reserve(all.size());
+    for (FileID fid : all) {
+        if (trigram_narrowing.certifies_absent(fid)) continue;
+        if (postings_narrowing.informative &&
+            !postings_narrowing.possible.contains(fid)) {
+            continue;
+        }
+        scan_set.push_back(fid);
+    }
+    return scan_set;
 }
 
 std::vector<SearchResult> MasterIndex::search_definitions(
@@ -309,40 +328,31 @@ std::vector<SearchResult> MasterIndex::execute_search(
         return results;
     }
 
-    // Try trigram candidates first to narrow the file list.
-    auto trigram_candidates = trigram_index_.find_candidates_with_options(
-        pattern, options.case_insensitive);
+    // Candidate selection is CERTIFIED-ABSENCE narrowing: a file is skipped
+    // only when an index that actually covers it proves the pattern cannot
+    // occur there. Anything else — postings-PARTIAL residue, trigram data
+    // covering a different subset of the corpus, a pattern the tokenizer
+    // cannot represent (phrase with a space, substring of an identifier,
+    // mixed-case token searched case-sensitively) — falls through to the
+    // verify scan. The former layering treated any non-empty index result
+    // as a narrowing, so residue candidate sets suppressed the scan-all
+    // fallback and those pattern classes returned empty with no error.
+    auto trigram_narrowing =
+        trigram_index_.narrow(pattern, options.case_insensitive);
+    auto postings_narrowing = postings_index_.narrow(pattern);
 
-    absl::flat_hash_set<FileID> candidate_set(candidates.begin(),
-                                               candidates.end());
     std::vector<FileID> filtered;
-
-    if (!trigram_candidates.empty()) {
-        filtered.reserve(trigram_candidates.size());
-        for (FileID fid : trigram_candidates) {
-            if (candidate_set.contains(fid)) {
-                filtered.push_back(fid);
-            }
+    filtered.reserve(candidates.size());
+    for (FileID fid : candidates) {
+        if (trigram_narrowing.certifies_absent(fid)) continue;
+        if (postings_narrowing.informative &&
+            !postings_narrowing.possible.contains(fid)) {
+            // Postings cover every indexed file: a file with no postings
+            // entry and no PARTIAL mark has no >=3-char token run at all,
+            // so it cannot contain any of the pattern's usable runs.
+            continue;
         }
-    }
-
-    // If trigram filtering yielded nothing, try the postings index.
-    if (filtered.empty()) {
-        std::vector<FileID> postings_files;
-        absl::flat_hash_map<FileID, int> postings_offsets;
-        postings_index_.find(pattern, options.case_insensitive,
-                             postings_files, postings_offsets);
-        for (FileID fid : postings_files) {
-            if (candidate_set.contains(fid)) {
-                filtered.push_back(fid);
-            }
-        }
-    }
-
-    // If neither index narrows candidates, scan all candidates directly.
-    // This handles short patterns and ensures text search always works.
-    if (filtered.empty() && !options.declaration_only && !options.usage_only) {
-        filtered = candidates;
+        filtered.push_back(fid);
     }
 
     // Path-scope filter (CLI trailing-path args). Applied INDEX-SIDE, before
@@ -452,31 +462,20 @@ SearchContext MasterIndex::extract_context(FileID file_id, int match_line,
     std::string_view content_sv = fc->view();
     if (content_sv.empty()) return ctx;
 
-    // Split content into lines. Mirrors Go's reference behavior: each
-    // intermediate line is stored without its trailing '\n' separator,
-    // but the last line of a file that ends with '\n' keeps the
-    // trailing newline. This makes /search and /references context
-    // arrays bit-identical to the Go output.
-    std::vector<std::string_view> lines;
-    size_t start = 0;
-    for (size_t i = 0; i < content_sv.size(); ++i) {
-        if (content_sv[i] == '\n') {
-            lines.emplace_back(content_sv.data() + start, i - start);
-            start = i + 1;
-        }
-    }
-    if (start < content_sv.size()) {
-        lines.emplace_back(content_sv.data() + start,
-                           content_sv.size() - start);
-    } else if (!lines.empty()) {
-        // File ended with '\n'. Re-attach it to the final line so the
-        // last context line is the only one that carries a trailing
-        // newline (Go's encoder behavior).
-        auto& last = lines.back();
-        last = std::string_view(last.data(), last.size() + 1);
-    }
+    // Slice the requested window out of the precomputed line-start offsets
+    // instead of re-splitting the whole file per call: with N matches in one
+    // file the split was O(N × filesize) — the dominant cost of over-collected
+    // result pages (a 1000-row regex seed page took seconds). Line semantics
+    // mirror Go's reference exactly as before: each intermediate line is
+    // stored without its trailing '\n' separator, and the FINAL line of the
+    // file keeps its trailing newline when the file ends with one (the last
+    // offsets entry spans to EOF by construction, so that falls out of the
+    // slicing). This keeps /search and /references context arrays
+    // bit-identical to the Go output.
+    const std::vector<uint32_t>& offsets = fc->line_offsets;
+    if (offsets.empty()) return ctx;
 
-    int total_lines = static_cast<int>(lines.size());
+    const int total_lines = static_cast<int>(offsets.size());
     int line_idx = match_line - 1;  // Convert 1-based to 0-based.
     if (line_idx < 0) line_idx = 0;
     if (line_idx >= total_lines) line_idx = total_lines - 1;
@@ -486,9 +485,14 @@ SearchContext MasterIndex::extract_context(FileID file_id, int match_line,
 
     ctx.start_line = ctx_start + 1;  // Back to 1-based.
     ctx.end_line = ctx_end + 1;
+    ctx.lines.reserve(static_cast<size_t>(ctx_end - ctx_start + 1));
 
     for (int i = ctx_start; i <= ctx_end; ++i) {
-        ctx.lines.emplace_back(lines[static_cast<size_t>(i)]);
+        const size_t begin = offsets[static_cast<size_t>(i)];
+        size_t end = (i + 1 < total_lines)
+                         ? offsets[static_cast<size_t>(i) + 1] - 1  // drop '\n'
+                         : content_sv.size();
+        ctx.lines.emplace_back(content_sv.substr(begin, end - begin));
     }
 
     return ctx;

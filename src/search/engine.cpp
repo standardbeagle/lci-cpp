@@ -402,11 +402,12 @@ std::vector<SearchResult> SearchEngine::search(
     if (options.use_regex) {
         candidates = index_.get_all_file_ids();
     } else {
+        // find_candidate_files returns the certified scan set: every file
+        // except those an index with coverage proves pattern-free. An empty
+        // set with `informative` true means "certified nowhere" — returning
+        // no results is correct, not a reason to scan everything.
         candidates = index_.find_candidate_files(pattern,
                                                   options.case_insensitive);
-        if (candidates.empty()) {
-            candidates = index_.get_all_file_ids();
-        }
     }
     if (candidates.empty()) return {};
 

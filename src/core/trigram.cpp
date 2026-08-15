@@ -458,6 +458,9 @@ void TrigramIndex::mark_unfiltered(FileID file_id) {
     mutate_snapshot([&](Snapshot& snap) {
         snap.invalidated_files.erase(file_id);
         snap.unfiltered_files.insert(file_id);
+        // An unfiltered file carries no trigram data; narrow() must never
+        // certify absence in it (relevant on hostile→re-index transitions).
+        snap.covered_files.erase(file_id);
     });
 }
 
@@ -487,6 +490,8 @@ void TrigramIndex::index_file(FileID file_id, std::string_view content) {
         });
         mutate_snapshot([&](Snapshot& snap) {
             snap.invalidated_files.erase(file_id);
+            snap.unfiltered_files.erase(file_id);
+            snap.covered_files.insert(file_id);
             for (const auto& [offset, trigram_hash] : ascii_scratch) {
                 auto& entry = snap.ascii_trigrams[trigram_hash];
                 entry.locations.push_back(
@@ -505,6 +510,8 @@ void TrigramIndex::index_file(FileID file_id, std::string_view content) {
             });
         mutate_snapshot([&](Snapshot& snap) {
             snap.invalidated_files.erase(file_id);
+            snap.unfiltered_files.erase(file_id);
+            snap.covered_files.insert(file_id);
             for (const auto& [offset, trigram_str] : unicode_scratch) {
                 auto& entry = snap.unicode_trigrams[trigram_str];
                 entry.locations.push_back(
@@ -519,6 +526,8 @@ void TrigramIndex::index_file_with_trigrams(
     const absl::flat_hash_map<uint32_t, std::vector<uint32_t>>& trigrams) {
     mutate_snapshot([&](Snapshot& snap) {
         snap.invalidated_files.erase(file_id);
+        snap.unfiltered_files.erase(file_id);
+        snap.covered_files.insert(file_id);
         for (const auto& [trigram_hash, offsets] : trigrams) {
             if (offsets.empty()) continue;
 
@@ -551,6 +560,7 @@ void TrigramIndex::index_file_with_bucketed_trigrams(
 void TrigramIndex::remove_file(FileID file_id) {
     mutate_snapshot([&](Snapshot& snap) {
         snap.unfiltered_files.erase(file_id);
+        snap.covered_files.erase(file_id);
         snap.invalidated_files.insert(file_id);
         if (static_cast<int>(snap.invalidated_files.size()) >=
             cleanup_threshold_) {
@@ -614,6 +624,87 @@ std::vector<FileID> TrigramIndex::find_candidates_with_options(
 
     return filter_and_return_candidates(
         *snap, file_trigram_counts, total_trigrams);
+}
+
+bool TrigramIndex::Narrowing::certifies_absent(FileID fid) const {
+    return informative_ && snap_ != nullptr &&
+           snap_->covered_files.contains(fid) &&
+           !snap_->invalidated_files.contains(fid) &&
+           !possible_.contains(fid);
+}
+
+TrigramIndex::Narrowing TrigramIndex::narrow(std::string_view pattern,
+                                             bool case_insensitive) const {
+    Narrowing n;
+    // Case-insensitive queries cannot be certified: stored trigrams keep
+    // original case, so probing with a folded pattern would produce false
+    // absences. Patterns under 3 bytes have no trigrams to probe.
+    if (case_insensitive || pattern.size() < 3) return n;
+
+    auto snap = load_snapshot();
+    if (snap->covered_files.empty()) return n;  // Nothing certifiable.
+
+    absl::flat_hash_map<FileID, int> file_trigram_counts;
+    int total_trigrams = 0;
+
+    if (is_pure_ascii(pattern)) {
+        // ASCII patterns probe BOTH maps: a covered non-ASCII file indexes
+        // every trigram (including pure-ASCII windows) in the unicode map
+        // only — an ascii-map-only probe would falsely certify absence
+        // there.
+        for_each_simple_trigram(pattern, [&](int offset, uint32_t trigram) {
+            ++total_trigrams;
+            if (auto it = snap->ascii_trigrams.find(trigram);
+                it != snap->ascii_trigrams.end()) {
+                for (const auto& loc : it->second.locations) {
+                    file_trigram_counts[loc.file_id]++;
+                }
+            }
+            std::string key;
+            key.reserve(3);
+            key.push_back(pattern[static_cast<size_t>(offset)]);
+            key.push_back(pattern[static_cast<size_t>(offset) + 1]);
+            key.push_back(pattern[static_cast<size_t>(offset) + 2]);
+            if (auto it = snap->unicode_trigrams.find(key);
+                it != snap->unicode_trigrams.end()) {
+                for (const auto& loc : it->second.locations) {
+                    file_trigram_counts[loc.file_id]++;
+                }
+            }
+        });
+    } else {
+        auto all_pattern_trigrams = extract_unicode_trigrams(pattern);
+        total_trigrams = static_cast<int>(all_pattern_trigrams.size());
+        for (const auto& [_, trigram_str] : all_pattern_trigrams) {
+            if (auto it = snap->unicode_trigrams.find(trigram_str);
+                it != snap->unicode_trigrams.end()) {
+                for (const auto& loc : it->second.locations) {
+                    file_trigram_counts[loc.file_id]++;
+                }
+            }
+        }
+    }
+
+    if (total_trigrams == 0) return n;
+
+    // Same superset threshold as filter_and_return_candidates: a true match
+    // holds every pattern trigram, so requiring fewer only widens `possible`.
+    int min_required = 1;
+    if (total_trigrams > 6) {
+        min_required = total_trigrams / 2;
+    } else if (total_trigrams > 3) {
+        min_required = 3;
+    }
+
+    n.possible_.reserve(file_trigram_counts.size());
+    for (const auto& [file_id, match_count] : file_trigram_counts) {
+        if (match_count >= min_required) {
+            n.possible_.insert(file_id);
+        }
+    }
+    n.snap_ = std::move(snap);
+    n.informative_ = true;
+    return n;
 }
 
 int TrigramIndex::file_count() const {

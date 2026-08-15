@@ -677,5 +677,65 @@ TEST(TrigramIndexTest, RemovedUnfilteredFileStopsBeingACandidate) {
     EXPECT_TRUE(index.find_candidates("needle").empty());
 }
 
+// -- TrigramIndex::narrow (coverage-scoped certified absence) -----------------
+
+TEST(TrigramIndexNarrowTest, CertifiesAbsenceOnlyInCoveredFiles) {
+    TrigramIndex index;
+    index.index_file(FileID{1}, "func alpha() { return beta; }");
+
+    auto n = index.narrow("gamma", /*case_insensitive=*/false);
+    ASSERT_TRUE(n.informative());
+    // File 1 is covered and holds none of the pattern's trigrams.
+    EXPECT_TRUE(n.certifies_absent(FileID{1}));
+    // File 2 was never trigram-indexed (bulk-indexed files never are) —
+    // absence of data must not read as absence of the pattern.
+    EXPECT_FALSE(n.certifies_absent(FileID{2}));
+}
+
+TEST(TrigramIndexNarrowTest, DoesNotCertifyPresentPattern) {
+    TrigramIndex index;
+    index.index_file(FileID{1}, "call handle_gadget now");
+
+    auto n = index.narrow("handle_g", false);
+    ASSERT_TRUE(n.informative());
+    EXPECT_FALSE(n.certifies_absent(FileID{1}));
+}
+
+TEST(TrigramIndexNarrowTest, CaseInsensitiveQueriesAreUninformative) {
+    // Stored trigrams keep original case; probing with a folded pattern
+    // would fabricate absences, so ci queries certify nothing.
+    TrigramIndex index;
+    index.index_file(FileID{1}, "type PageWindow struct{}");
+
+    EXPECT_FALSE(index.narrow("pagewindow", true).informative());
+}
+
+TEST(TrigramIndexNarrowTest, UnfilteredAndRemovedFilesAreNeverCertified) {
+    TrigramIndex index;
+    std::string minified(128 * 1024, 'x');
+    for (size_t i = 0; i < minified.size(); i += 10000) minified[i] = '\n';
+    index.index_file(FileID{7}, minified);   // Hostile → unfiltered.
+    index.index_file(FileID{1}, "func alpha() {}");
+    index.remove_file(FileID{1});
+
+    auto n = index.narrow("needle", false);
+    if (n.informative()) {
+        EXPECT_FALSE(n.certifies_absent(FileID{7}));
+        EXPECT_FALSE(n.certifies_absent(FileID{1}));
+    }
+}
+
+TEST(TrigramIndexNarrowTest, AsciiPatternProbesUnicodeIndexedFiles) {
+    // A file with any non-ASCII byte indexes ALL its trigrams (including
+    // pure-ASCII windows) in the unicode map. An ASCII pattern probe must
+    // still see them, or covered non-ASCII files get false absences.
+    TrigramIndex index;
+    index.index_file(FileID{1}, "// café utils\nfunc needle() {}\n");
+
+    auto n = index.narrow("needle", false);
+    ASSERT_TRUE(n.informative());
+    EXPECT_FALSE(n.certifies_absent(FileID{1}));
+}
+
 }  // namespace
 }  // namespace lci

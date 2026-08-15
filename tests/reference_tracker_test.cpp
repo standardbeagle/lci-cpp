@@ -697,23 +697,123 @@ TEST(PostingsIndexTest, ReindexWithoutRemoveDoesNotDuplicate) {
     EXPECT_EQ(files.size(), 1u);
 }
 
-TEST(PostingsIndexTest, OverlongTokensAreNotIndexed) {
-    // 64 bytes is kept, 65 is dropped -- uniformly, so an overlong query
-    // misses postings on every file and the engine scan-all fallback
-    // answers it. No identifier is 65 bytes; only base64/minified runs
-    // are, and they averaged 387 B/token holding 21 MB of a census.
+TEST(PostingsIndexTest, OverlongTokenDropMarksFilePartial) {
+    // 64 bytes is kept, 65 is dropped. No identifier is 65 bytes; only
+    // base64/minified runs are, and they averaged 387 B/token holding
+    // 21 MB of a census. Dropping one MUST record the file PARTIAL: the
+    // file's token set is now incomplete, so certified-absence narrowing
+    // (PostingsIndex::narrow) may not skip it — a silently-dropped run
+    // would make its own substrings unfindable. Partial files
+    // self-nominate in every find(), which is what the assertions below
+    // pin (the dropped token still resolves to the file, via the PARTIAL
+    // superset rather than a stored posting).
     PostingsIndex pi;
     std::string keep(PostingsIndex::kMaxTokenBytes, 'a');
     std::string drop(PostingsIndex::kMaxTokenBytes + 1, 'b');
     pi.index_file(1, keep + " " + drop);
+
+    EXPECT_EQ(pi.token_count(), 1);        // Overlong token not stored...
+    EXPECT_EQ(pi.partial_file_count(), 1);  // ...but the file is PARTIAL.
 
     std::vector<FileID> files;
     absl::flat_hash_map<FileID, int> offsets;
     pi.find(keep, true, files, offsets);
     EXPECT_EQ(files.size(), 1u);
     pi.find(drop, true, files, offsets);
-    EXPECT_TRUE(files.empty());
-    EXPECT_EQ(pi.token_count(), 1);
+    ASSERT_EQ(files.size(), 1u);  // Self-nomination, offset -1 = "scan me".
+    EXPECT_EQ(offsets[1], -1);
+}
+
+// -- PostingsIndex::narrow (certified-absence prefilter) ----------------------
+
+TEST(PostingsIndexNarrowTest, InteriorRunRequiresExactToken) {
+    PostingsIndex pi;
+    pi.index_file(1, "the index server exits");
+    pi.index_file(2, "the reindex server exits");
+
+    // "index" is interior (delimited by spaces inside the pattern), so only
+    // an exact stored token qualifies: file 2 stores "reindex", not "index".
+    auto n = pi.narrow(" index server");
+    EXPECT_TRUE(n.informative);
+    EXPECT_TRUE(n.possible.contains(1));
+    EXPECT_FALSE(n.possible.contains(2));
+}
+
+TEST(PostingsIndexNarrowTest, PatternStartRunMatchesTokenSuffix) {
+    PostingsIndex pi;
+    pi.index_file(1, "the reindex server exits");
+
+    // "Index server" can match "...reIndex server..." — the run touching the
+    // pattern start must match stored-token SUFFIXes, case-folded.
+    auto n = pi.narrow("index server");
+    EXPECT_TRUE(n.informative);
+    EXPECT_TRUE(n.possible.contains(1));
+}
+
+TEST(PostingsIndexNarrowTest, PatternEndRunMatchesTokenPrefix) {
+    PostingsIndex pi;
+    pi.index_file(1, "the index serverside code");
+    pi.index_file(2, "the index preserver code");
+
+    auto n = pi.narrow("index server");
+    EXPECT_TRUE(n.possible.contains(1));   // "serverside" prefix-matches
+    EXPECT_FALSE(n.possible.contains(2));  // "preserver" does not
+}
+
+TEST(PostingsIndexNarrowTest, SingleRunMatchesTokenSubstring) {
+    PostingsIndex pi;
+    pi.index_file(1, "func repagination() {}");
+    pi.index_file(2, "func unrelated() {}");
+
+    auto n = pi.narrow("pagination");
+    EXPECT_TRUE(n.informative);
+    EXPECT_TRUE(n.possible.contains(1));
+    EXPECT_FALSE(n.possible.contains(2));
+}
+
+TEST(PostingsIndexNarrowTest, CaseFoldedLookupCoversCaseSensitiveQueries) {
+    PostingsIndex pi;
+    pi.index_file(1, "type PageWindow struct{}");
+
+    // Postings store lowercase; a case-sensitive query is case-folded for
+    // the prefilter (superset) and the verify scan enforces exact case.
+    auto n = pi.narrow("PageWindow");
+    EXPECT_TRUE(n.informative);
+    EXPECT_TRUE(n.possible.contains(1));
+}
+
+TEST(PostingsIndexNarrowTest, MultiRunConstraintsIntersect) {
+    PostingsIndex pi;
+    pi.index_file(1, "alpha beta gamma");
+    pi.index_file(2, "alpha delta gamma");
+
+    auto n = pi.narrow("alpha beta");
+    EXPECT_TRUE(n.possible.contains(1));
+    EXPECT_FALSE(n.possible.contains(2));
+}
+
+TEST(PostingsIndexNarrowTest, PartialFilesAlwaysNominate) {
+    PostingsIndex pi;
+    pi.index_file(1, "alpha beta gamma");
+    pi.index_file(2, "many uniq tokens here", /*max_unique_tokens=*/2);
+
+    auto n = pi.narrow("nowhere");
+    EXPECT_TRUE(n.informative);
+    EXPECT_FALSE(n.possible.contains(1));  // Certified absent.
+    EXPECT_TRUE(n.possible.contains(2));   // PARTIAL: token cap hides data.
+}
+
+TEST(PostingsIndexNarrowTest, UnindexableRunsAreUninformative) {
+    PostingsIndex pi;
+    pi.index_file(1, "alpha beta gamma");
+
+    // Runs under 3 bytes are not indexed and certify nothing.
+    EXPECT_FALSE(pi.narrow("ab cd").informative);
+    // Punctuation-only patterns have no runs at all.
+    EXPECT_FALSE(pi.narrow("->[]").informative);
+    // Overlong runs are not indexed either.
+    std::string overlong(PostingsIndex::kMaxTokenBytes + 5, 'q');
+    EXPECT_FALSE(pi.narrow(overlong).informative);
 }
 
 TEST(PostingsIndexTest, TokenizeContentReportsTruncation) {

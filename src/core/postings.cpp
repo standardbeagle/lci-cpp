@@ -96,10 +96,14 @@ void PostingsIndex::add_token(absl::flat_hash_map<std::string, int>& dst,
     // Length ceiling: identifiers top out well under 64 bytes; longer
     // "tokens" are base64/minified runs that averaged 387 B/token and
     // held 21 MB of the 54k-token self-index census while never being
-    // searched. The rule is uniform, so a >64-byte query misses postings
-    // on every file equally and the engine's scan-all fallback handles
-    // it -- exact results, just unfiltered for absurd queries.
-    if (trimmed.size() > kMaxTokenBytes) return;
+    // searched. Dropping one MUST mark the file PARTIAL: narrow()
+    // certifies absence from any file whose token set is complete, and a
+    // silently-dropped run would turn its own substrings into certified
+    // misses (a 70-byte identifier would become unfindable).
+    if (trimmed.size() > kMaxTokenBytes) {
+        if (truncated != nullptr) *truncated = true;
+        return;
+    }
 
     // try_emplace does the lookup + insert in one hash op (vs old code's
     // contains() + operator[] = two ops). Materialise the std::string
@@ -283,6 +287,112 @@ void PostingsIndex::find(std::string_view token, bool case_insensitive,
             offsets_out[fid] = -1;
         }
     }
+}
+
+PostingsIndex::Narrowing PostingsIndex::narrow(std::string_view pattern) const {
+    Narrowing n;
+    if (pattern.empty()) return n;
+
+    // Split the pattern into token runs, recording which sides touch the
+    // pattern's own boundary (an open side is unconstrained in content).
+    struct QueryRun {
+        std::string text;  // lowercased
+        bool left_open{};
+        bool right_open{};
+    };
+    std::vector<QueryRun> runs;
+    size_t i = 0;
+    const size_t n_bytes = pattern.size();
+    while (i < n_bytes) {
+        if (!is_token_char(static_cast<uint8_t>(pattern[i]))) {
+            ++i;
+            continue;
+        }
+        const size_t start = i;
+        while (i < n_bytes &&
+               is_token_char(static_cast<uint8_t>(pattern[i]))) {
+            ++i;
+        }
+        QueryRun run;
+        run.text.reserve(i - start);
+        for (size_t k = start; k < i; ++k) {
+            run.text.push_back(static_cast<char>(
+                std::tolower(static_cast<unsigned char>(pattern[k]))));
+        }
+        run.left_open = (start == 0);
+        run.right_open = (i == n_bytes);
+        runs.push_back(std::move(run));
+    }
+
+    auto snap = load_snapshot();
+
+    auto add_postings = [&](uint32_t id, absl::flat_hash_set<FileID>& dst) {
+        for (const auto& [fid, off] : snap->postings[id]) {
+            (void)off;
+            dst.insert(fid);
+        }
+    };
+
+    bool first_constraint = true;
+    for (const auto& run : runs) {
+        // Un-indexed run lengths contribute no constraint; dropping a
+        // conjunct keeps `possible` a superset (see header).
+        if (run.text.size() < 3 || run.text.size() > kMaxTokenBytes) {
+            continue;
+        }
+
+        absl::flat_hash_set<FileID> current;
+        if (!run.left_open && !run.right_open) {
+            // Interior run: content must hold it as an exact token.
+            auto it = snap->token_to_id.find(run.text);
+            if (it != snap->token_to_id.end()) {
+                add_postings(it->second, current);
+            }
+        } else {
+            // Edge run: the matching content token may extend past the
+            // open side(s). One linear pass over the interned vocabulary
+            // — bounded by the token census (~50k on the self repo), and
+            // only paid for patterns whose first/last char is a token
+            // char.
+            const std::string& t = run.text;
+            for (const auto& [token, id] : snap->token_to_id) {
+                if (token.size() < t.size()) continue;
+                bool match;
+                if (run.left_open && run.right_open) {
+                    match = token.find(t) != std::string::npos;
+                } else if (run.left_open) {
+                    match = token.compare(token.size() - t.size(),
+                                          t.size(), t) == 0;
+                } else {
+                    match = token.compare(0, t.size(), t) == 0;
+                }
+                if (match) add_postings(id, current);
+            }
+        }
+
+        n.informative = true;
+        if (first_constraint) {
+            n.possible = std::move(current);
+            first_constraint = false;
+        } else {
+            absl::flat_hash_set<FileID> intersect;
+            intersect.reserve(std::min(n.possible.size(), current.size()));
+            for (FileID fid : n.possible) {
+                if (current.contains(fid)) intersect.insert(fid);
+            }
+            n.possible = std::move(intersect);
+        }
+        if (n.possible.empty()) break;  // Conjunction can only shrink.
+    }
+
+    if (!n.informative) return n;
+
+    // PARTIAL files self-nominate: their token set is incomplete, so no
+    // lookup miss certifies absence there (same superset rule as find()).
+    for (FileID fid : snap->partial_files) {
+        n.possible.insert(fid);
+    }
+    return n;
 }
 
 PostingsIndex::MemoryStats PostingsIndex::memory_stats() const {

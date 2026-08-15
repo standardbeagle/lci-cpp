@@ -203,6 +203,33 @@ class PostingsIndex {
               std::vector<FileID>& files_out,
               absl::flat_hash_map<FileID, int>& offsets_out) const;
 
+    /// Certified-absence narrowing for an arbitrary LITERAL pattern.
+    ///
+    /// `possible` is a strict SUPERSET of the files whose content can
+    /// contain `pattern` as a substring, derived from the pattern's token
+    /// runs ([A-Za-z0-9_]+, lowercased — postings store lowercase, so the
+    /// superset holds for case-sensitive and -insensitive queries alike):
+    ///   - a run delimited by non-token chars on both sides WITHIN the
+    ///     pattern must appear as an exact stored token;
+    ///   - a run touching the pattern's start may extend further left in
+    ///     content, so any stored token with that SUFFIX qualifies;
+    ///   - a run touching the pattern's end matches stored-token PREFIXes;
+    ///   - a single-run pattern (both edges open) matches stored tokens
+    ///     CONTAINING the run.
+    /// Per-run file sets are intersected; PARTIAL files are then unioned
+    /// in unconditionally (their token set is incomplete, so their absence
+    /// from any lookup proves nothing).
+    ///
+    /// Runs shorter than 3 bytes or longer than kMaxTokenBytes are not
+    /// indexed and contribute no constraint (dropping a conjunct keeps the
+    /// superset). `informative` is false when NO run contributed — the
+    /// caller must then scan without narrowing; `possible` is meaningless.
+    struct Narrowing {
+        bool informative{false};
+        absl::flat_hash_set<FileID> possible;
+    };
+    Narrowing narrow(std::string_view pattern) const;
+
     /// Number of files whose token set was capped (recorded PARTIAL).
     int partial_file_count() const;
 
