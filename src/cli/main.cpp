@@ -979,6 +979,17 @@ int main(int argc, char* argv[]) {
         });
     }
 
+    // Global options (-r/--root, -c/--config, --include, --exclude) are
+    // accepted AFTER the subcommand too: `lci search foo -r .` is the
+    // documented invocation shape (.claude/rules/test-iteration-discipline.md)
+    // and the natural one to type. Without fallthrough, CLI11 rejects the
+    // trailing global option with "argument was not expected". Options are
+    // never swallowed by greedy positionals (CLI11 does not assign
+    // dash-prefixed tokens to positionals), so this only widens acceptance.
+    for (auto* sub : app.get_subcommands({})) {
+        sub->fallthrough();
+    }
+
     // Manual parse + exit-code remap. CLI11's default `ExtrasError` exit
     // is 109; Go's urfave/cli exits 1 on `flag provided but not defined`
     // (see `lci search --enhanced add` against the Go reference binary).
