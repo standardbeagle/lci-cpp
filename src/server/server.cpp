@@ -1447,6 +1447,7 @@ void IndexServer::handle_list_symbols(const httplib::Request& req,
     const auto page = normalize_page(body);
     const int max_results = page.max;
     const int offset = page.offset;
+    const auto sort_key = body.value("sort", "");
 
     auto all_file_ids = indexer_->get_all_file_ids();
     // Sort by file_id ascending for deterministic output ordering.
@@ -1456,8 +1457,16 @@ void IndexServer::handle_list_symbols(const httplib::Request& req,
     // insertion / file_id order).
     std::sort(all_file_ids.begin(), all_file_ids.end());
 
-    nlohmann::json entries = nlohmann::json::array();
-    int total = 0;
+    // Collect ALL matching symbols before paging. The sort (when requested)
+    // must run over the full filtered set: sorting a pre-capped page turns
+    // "top N by complexity" into "an arbitrary page, reordered" — the same
+    // cap-before-score defect class fixed in find_files (1d00e11).
+    struct Row {
+        ReferenceTracker::Snapshot::SymbolHandle sym;
+        uint32_t path_idx;
+    };
+    std::vector<Row> rows;
+    std::vector<std::string> row_paths;  // One entry per contributing file.
 
     auto rt_snap = indexer_->ref_tracker().pin();
     for (auto fid : all_file_ids) {
@@ -1502,41 +1511,87 @@ void IndexServer::handle_list_symbols(const httplib::Request& req,
                 continue;
             }
 
-            ++total;
-
-            if (total <= offset) continue;
-            if (static_cast<int>(entries.size()) >= max_results) continue;
-
-            // Mirror Go's `json:",omitempty"` semantics: only emit
-            // numeric/string fields when non-zero / non-empty so that
-            // canonicalised JSON matches the Go reference output.
-            // Note: Go's /list-symbols handler intentionally omits the
-            // `signature` field (it's exposed only via /inspect-symbol
-            // in the Go reference). Match that here so summary listings
-            // stay identical and signatures only appear where Go
-            // surfaces them.
-            nlohmann::json e;
-            e["name"] = sym->symbol.name;
-            e["type"] = std::string(to_string(sym->symbol.type));
-            e["file"] = file_path;
-            e["line"] = sym->symbol.line;
-            e["object_id"] = encode_symbol_id(sym->id);
-            e["is_exported"] = sym->is_exported;
-            if (sym->complexity > 0) e["complexity"] = sym->complexity;
-            if (sym->parameter_count > 0) {
-                e["parameter_count"] = static_cast<int>(sym->parameter_count);
+            if (rows.empty() || row_paths.back() != file_path) {
+                row_paths.push_back(file_path);
             }
-            if (!sym->receiver_type.empty()) {
-                e["receiver_type"] = sym->receiver_type;
-            }
-            if (sym->incoming_ref_count != 0) {
-                e["incoming_refs"] = static_cast<int>(sym->incoming_ref_count);
-            }
-            if (sym->outgoing_ref_count != 0) {
-                e["outgoing_refs"] = static_cast<int>(sym->outgoing_ref_count);
-            }
-            entries.push_back(e);
+            rows.push_back(
+                {sym, static_cast<uint32_t>(row_paths.size() - 1)});
         }
+    }
+
+    // Server-side sort mirrors the CLI's sym_sort_symbols keys exactly
+    // (complexity/refs/params descending, line/name ascending, empty =
+    // deterministic file/line collection order). stable_sort over the
+    // deterministic collection order keeps ties reproducible across runs.
+    if (!sort_key.empty()) {
+        auto by = [&](auto key_less) {
+            std::stable_sort(rows.begin(), rows.end(), key_less);
+        };
+        if (sort_key == "complexity") {
+            by([](const Row& a, const Row& b) {
+                return a.sym->complexity > b.sym->complexity;
+            });
+        } else if (sort_key == "refs") {
+            by([](const Row& a, const Row& b) {
+                return a.sym->incoming_ref_count + a.sym->outgoing_ref_count >
+                       b.sym->incoming_ref_count + b.sym->outgoing_ref_count;
+            });
+        } else if (sort_key == "params") {
+            by([](const Row& a, const Row& b) {
+                return a.sym->parameter_count > b.sym->parameter_count;
+            });
+        } else if (sort_key == "line") {
+            by([&](const Row& a, const Row& b) {
+                if (a.path_idx != b.path_idx) {
+                    return row_paths[a.path_idx] < row_paths[b.path_idx];
+                }
+                return a.sym->symbol.line < b.sym->symbol.line;
+            });
+        } else {
+            // Default + unknown -> name (ascending), like the CLI.
+            by([](const Row& a, const Row& b) {
+                return a.sym->symbol.name < b.sym->symbol.name;
+            });
+        }
+    }
+
+    const int total = static_cast<int>(rows.size());
+    nlohmann::json entries = nlohmann::json::array();
+    for (int i = offset;
+         i < total && static_cast<int>(entries.size()) < max_results; ++i) {
+        const auto& sym = rows[static_cast<size_t>(i)].sym;
+        const std::string& file_path =
+            row_paths[rows[static_cast<size_t>(i)].path_idx];
+
+        // Mirror Go's `json:",omitempty"` semantics: only emit
+        // numeric/string fields when non-zero / non-empty so that
+        // canonicalised JSON matches the Go reference output.
+        // Note: Go's /list-symbols handler intentionally omits the
+        // `signature` field (it's exposed only via /inspect-symbol
+        // in the Go reference). Match that here so summary listings
+        // stay identical and signatures only appear where Go
+        // surfaces them.
+        nlohmann::json e;
+        e["name"] = sym->symbol.name;
+        e["type"] = std::string(to_string(sym->symbol.type));
+        e["file"] = file_path;
+        e["line"] = sym->symbol.line;
+        e["object_id"] = encode_symbol_id(sym->id);
+        e["is_exported"] = sym->is_exported;
+        if (sym->complexity > 0) e["complexity"] = sym->complexity;
+        if (sym->parameter_count > 0) {
+            e["parameter_count"] = static_cast<int>(sym->parameter_count);
+        }
+        if (!sym->receiver_type.empty()) {
+            e["receiver_type"] = sym->receiver_type;
+        }
+        if (sym->incoming_ref_count != 0) {
+            e["incoming_refs"] = static_cast<int>(sym->incoming_ref_count);
+        }
+        if (sym->outgoing_ref_count != 0) {
+            e["outgoing_refs"] = static_cast<int>(sym->outgoing_ref_count);
+        }
+        entries.push_back(e);
     }
 
     nlohmann::json j;
