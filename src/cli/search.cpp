@@ -1196,6 +1196,12 @@ nlohmann::json regex_filter_results(nlohmann::json results,
     // round-trip.
     nlohmann::json out = nlohmann::json::array();
     re2::StringPiece submatches[1];
+    // Rows are remapped to whichever context-window line the regex matches,
+    // so two seed rows on neighboring lines can land on the SAME output
+    // line. Dedup by (path, remapped line): without it `grep -E` printed
+    // identical rows back-to-back whenever a context window overlapped the
+    // next seed hit.
+    std::set<std::pair<std::string, int>> seen;
     for (auto& row : results) {
         auto& ctx = row["context"];
         if (!ctx.is_object() || !ctx.contains("lines") ||
@@ -1203,28 +1209,44 @@ nlohmann::json regex_filter_results(nlohmann::json results,
             continue;
         }
         int start_line = ctx.value("start_line", 1);
-        bool kept = false;
-        int idx = 0;
-        for (auto& line_json : ctx["lines"]) {
+        const int own_line = row.value("line", start_line);
+        const int window = static_cast<int>(ctx["lines"].size());
+
+        auto match_at = [&](int idx) -> bool {
+            if (idx < 0 || idx >= window) return false;
+            const auto& line_json = ctx["lines"][static_cast<size_t>(idx)];
             std::string line = line_json.is_string()
                                    ? line_json.get<std::string>()
                                    : "";
             // Strip trailing newline so $ anchors work as expected.
             if (!line.empty() && line.back() == '\n') line.pop_back();
             re2::StringPiece input(line.data(), line.size());
-            if (re.Match(input, 0, line.size(), RE2::UNANCHORED,
-                         submatches, 1)) {
-                auto position = submatches[0].data() - line.data();
-                row["line"] = start_line + idx;
-                row["column"] = static_cast<int>(position) + 1;
-                row["match"] = std::string(submatches[0].data(),
-                                           submatches[0].size());
-                kept = true;
-                break;
+            if (!re.Match(input, 0, line.size(), RE2::UNANCHORED,
+                          submatches, 1)) {
+                return false;
             }
-            ++idx;
+            auto position = submatches[0].data() - line.data();
+            row["line"] = start_line + idx;
+            row["column"] = static_cast<int>(position) + 1;
+            row["match"] = std::string(submatches[0].data(),
+                                       submatches[0].size());
+            return true;
+        };
+
+        // The row's OWN matched line takes priority; only when it doesn't
+        // match does the rest of the window get a chance (context recovery
+        // for regexes whose hit line carried no literal seed).
+        bool kept = match_at(own_line - start_line);
+        for (int idx = 0; !kept && idx < window; ++idx) {
+            if (idx == own_line - start_line) continue;
+            kept = match_at(idx);
         }
-        if (kept) out.push_back(std::move(row));
+        if (!kept) continue;
+        auto key = std::make_pair(row.value("path", std::string{}),
+                                  row.value("line", 0));
+        if (seen.contains(key)) continue;
+        seen.insert(key);
+        out.push_back(std::move(row));
     }
     return out;
 }
@@ -1969,8 +1991,13 @@ int run_grep(const GlobalFlags& flags, const GrepCommandOptions& options) {
     std::string search_err;
     std::optional<nlohmann::json> result;
     if (use_regex) {
-        // Search by literal seed(s), then RE2-filter the row set.
-        result = search_union_patterns(*client, grep_seeds, max_results,
+        // Search by literal seed(s), then RE2-filter the row set. The seed
+        // search must OVER-collect: capping it at the user's -n spends the
+        // whole budget on rows the regex then rejects (a 5-row page of
+        // "handle_" hits rarely contains a "handle_\w+_context" line), so
+        // small -n values returned empty for patterns with common seeds.
+        // Collect the server's max page, filter, then truncate below.
+        result = search_union_patterns(*client, grep_seeds, 1000,
                                        case_insensitive, search_err,
                                        scoped_paths);
     } else if (all_patterns.size() == 1) {
@@ -1998,11 +2025,21 @@ int run_grep(const GlobalFlags& flags, const GrepCommandOptions& options) {
     auto& j = *result;
 
     // RE2 row filter for --regex mode. Runs before any other grep filter
-    // so the downstream pipeline sees the regex-matching set.
+    // so the downstream pipeline sees the regex-matching set. Truncate to
+    // the user's -n only AFTER filtering (the seed search over-collected).
     if (grep_regex_filter) {
         auto raw = j.value("results", nlohmann::json::array());
-        j["results"] = regex_filter_results(std::move(raw),
-                                            *grep_regex_filter);
+        auto filtered_rows = regex_filter_results(std::move(raw),
+                                                  *grep_regex_filter);
+        if (max_results > 0 &&
+            static_cast<int>(filtered_rows.size()) > max_results) {
+            nlohmann::json capped = nlohmann::json::array();
+            for (int i = 0; i < max_results; ++i) {
+                capped.push_back(std::move(filtered_rows[i]));
+            }
+            filtered_rows = std::move(capped);
+        }
+        j["results"] = filtered_rows;
     }
 
     // -- Apply grep filters in a defined order ------------------------------
