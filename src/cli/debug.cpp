@@ -12,6 +12,7 @@
 #include <functional>
 #include <iostream>
 #include <optional>
+#include <set>
 #include <string_view>
 #include <string>
 #include <unordered_map>
@@ -196,6 +197,40 @@ DependencySummary analyze_dependency_graph(
     }
 
     return summary;
+}
+
+/// Scans the corpus via FileScanner (config excludes + gitignore) and
+/// indexes every linker-parseable file into `engine`. Shared by
+/// `debug deps` and `debug graph` so both see the same dependency corpus.
+bool build_linker_dependency_index(const Config& cfg,
+                                   const std::filesystem::path& root,
+                                   symbollinker::LinkerEngine& engine,
+                                   std::vector<FileID>& indexed_files) {
+    FileScanner scanner(cfg);
+    auto scan = scanner.scan(/*apply_budget=*/false);
+    if (!scan.error.empty()) {
+        std::cerr << "Error: failed to walk project files: " << scan.error
+                  << "\n";
+        return false;
+    }
+    std::error_code rel_ec;
+    for (const auto& task : scan.tasks) {
+        std::filesystem::path p(task.path);
+        // Skip files no registered linker can handle; can_index reuses
+        // each extractor's can_handle — single source of truth.
+        if (!engine.can_index(p.string())) continue;
+
+        auto rel = std::filesystem::relative(p, root, rel_ec);
+        if (rel_ec) continue;
+
+        auto content = read_text_file(p);
+        if (content.empty() && std::filesystem::file_size(p, rel_ec) > 0) {
+            continue;
+        }
+        if (!engine.index_file(rel.string(), content)) continue;
+        indexed_files.push_back(engine.get_or_create_file_id(rel.string()));
+    }
+    return true;
 }
 
 // -- incremental snapshot -----------------------------------------------------
@@ -541,33 +576,8 @@ int run_debug_deps(const GlobalFlags& flags, bool verbose) {
     // index itself excludes) and single-threaded-indexed all of it: `lci
     // debug deps` on this repo appeared hung for minutes before this.
     std::vector<FileID> indexed_files;
-    {
-        FileScanner scanner(cfg);
-        auto scan = scanner.scan(/*apply_budget=*/false);
-        if (!scan.error.empty()) {
-            std::cerr << "Error: failed to walk project files: " << scan.error
-                      << "\n";
-            return 1;
-        }
-        std::error_code rel_ec;
-        for (const auto& task : scan.tasks) {
-            std::filesystem::path p(task.path);
-            // Skip files no registered linker can handle; can_index reuses
-            // each extractor's can_handle — single source of truth.
-            if (!engine.can_index(p.string())) continue;
-
-            auto rel = std::filesystem::relative(p, root, rel_ec);
-            if (rel_ec) continue;
-
-            auto content = read_text_file(p);
-            if (content.empty() &&
-                std::filesystem::file_size(p, rel_ec) > 0) {
-                continue;
-            }
-            if (!engine.index_file(rel.string(), content)) continue;
-            indexed_files.push_back(
-                engine.get_or_create_file_id(rel.string()));
-        }
+    if (!build_linker_dependency_index(cfg, root, engine, indexed_files)) {
+        return 1;
     }
 
     std::printf("Linking symbols and building dependency graph...\n");
@@ -721,41 +731,79 @@ int run_debug_graph(const GlobalFlags& flags, const std::string& output) {
         return 1;
     }
 
-    std::string conn_err;
-    auto client = ensure_server_running(cfg, conn_err);
-    if (!client) {
-        std::cerr << "Error: " << conn_err << "\n";
-        return 1;
-    }
-
     std::printf("Exporting Dependency Graph\n");
     std::printf("Root Path: %s\n", cfg.project.root.c_str());
     std::printf("Output File: %s\n", output.c_str());
     std::printf("\n");
 
-    std::string stats_err;
-    auto stats = client->get_stats(stats_err);
-    if (!stats) {
-        std::cerr << "Error: failed to get server stats: " << stats_err
-                  << "\n";
+    // Build the REAL file-dependency graph (same corpus + engine as
+    // `debug deps`). This command used to emit a single decorative info
+    // node — a DOT file with zero edges advertised as "the dependency
+    // graph" (the implemented-but-empty stub shape karpathy rule 6 bans).
+    std::filesystem::path root = cfg.project.root;
+    if (root.empty()) {
+        std::error_code ec;
+        root = std::filesystem::current_path(ec);
+        if (ec) root = ".";
+    }
+    std::printf("Building index...\n");
+    symbollinker::LinkerEngine engine(root.string());
+    symbollinker::register_all_linkers(engine, root.string());
+    std::vector<FileID> indexed_files;
+    if (!build_linker_dependency_index(cfg, root, engine, indexed_files)) {
+        return 1;
+    }
+    if (!engine.link_symbols()) {
+        std::cerr << "Error: failed to link dependency graph\n";
         return 1;
     }
 
-    // Generate DOT graph from available stats
+    auto escape_dot = [](std::string_view sv) {
+        std::string out;
+        out.reserve(sv.size());
+        for (char c : sv) {
+            if (c == '"' || c == '\\') out.push_back('\\');
+            out.push_back(c);
+        }
+        return out;
+    };
+
     std::string dot = "digraph dependencies {\n";
     dot += "    rankdir=LR;\n";
     dot += "    node [shape=box, style=filled, fillcolor=lightblue];\n";
     dot += "    label=\"LCI Dependency Graph\";\n";
     dot += "    labelloc=t;\n";
     dot += "\n";
-    dot += "    // Generated from index with " +
-           std::to_string(stats->file_count) + " files, " +
-           std::to_string(stats->symbol_count) + " symbols\n";
-    dot += "    // Use 'lci inspect <symbol>' or 'lci tree <function>' for "
-           "detailed dependencies\n";
-    dot += "    info [label=\"Files: " + std::to_string(stats->file_count) +
-           "\\nSymbols: " + std::to_string(stats->symbol_count) +
-           "\\nIndex: " + format_bytes(stats->index_size_bytes) + "\"];\n";
+
+    int edge_count = 0;
+    std::set<FileID> connected;
+    for (auto file_id : indexed_files) {
+        for (auto dep : engine.get_file_dependencies(file_id)) {
+            connected.insert(file_id);
+            connected.insert(dep);
+        }
+    }
+    for (auto file_id : connected) {
+        auto path = engine.get_file_path(file_id);
+        dot += "    f" + std::to_string(file_id) + " [label=\"" +
+               escape_dot(path) + "\"];\n";
+    }
+    for (auto file_id : indexed_files) {
+        for (auto dep : engine.get_file_dependencies(file_id)) {
+            dot += "    f" + std::to_string(file_id) + " -> f" +
+                   std::to_string(dep) + ";\n";
+            ++edge_count;
+        }
+    }
+    dot += "\n    // " + std::to_string(indexed_files.size()) +
+           " linkable files, " + std::to_string(connected.size()) +
+           " with dependency edges, " + std::to_string(edge_count) +
+           " edges. Files without edges are omitted.\n";
+    if (edge_count == 0) {
+        dot += "    info [label=\"No cross-file dependency edges found\\n(" +
+               std::to_string(indexed_files.size()) +
+               " linkable files scanned)\"];\n";
+    }
     dot += "}\n";
 
     std::ofstream ofs(output);
