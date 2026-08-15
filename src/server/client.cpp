@@ -363,6 +363,13 @@ std::optional<nlohmann::json> Client::post_json(const std::string& path,
 #endif
     cli.set_connection_timeout(timeout_);
     cli.set_read_timeout(timeout_);
+    // Local IPC: never negotiate compression. httplib advertises "br, gzip"
+    // by default (this build links brotli+zlib), and the server then
+    // brotli-encodes large responses at max quality — measured 1.86s vs
+    // 0.11s uncompressed for a 176 KB /search page over the unix socket.
+    // Compression buys nothing on a local socket; identity keeps the
+    // round-trip at transfer cost.
+    cli.set_default_headers({{"Accept-Encoding", "identity"}});
 
     auto res = cli.Post(path, body.dump(), "application/json");
     if (!res) {
@@ -395,6 +402,8 @@ std::optional<nlohmann::json> Client::get_json(const std::string& path,
 #endif
     cli.set_connection_timeout(timeout_);
     cli.set_read_timeout(timeout_);
+    // See post_json: no compression negotiation over local IPC.
+    cli.set_default_headers({{"Accept-Encoding", "identity"}});
 
     auto res = cli.Get(path);
     if (!res) {
