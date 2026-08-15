@@ -88,6 +88,126 @@ std::string import_module_of(std::string_view line) {
     return std::string(t.substr(0, end));
 }
 
+// -- near-miss suggestions (shared by def / inspect misses) -------------------
+
+namespace {
+
+/// Folds a symbol name for near-miss comparison: ASCII-lowercase with
+/// underscores dropped, so `page_window` and `PageWindow` compare equal and
+/// jaro-winkler measures the remaining real difference. Display always uses
+/// the original candidate.
+std::string fold_symbol_name(std::string_view s) {
+    std::string out;
+    out.reserve(s.size());
+    for (char c : s) {
+        if (c == '_') continue;
+        out.push_back(static_cast<char>(
+            std::tolower(static_cast<unsigned char>(c))));
+    }
+    return out;
+}
+
+/// Prints a `did you mean: ...?` line for `symbol` when the index holds
+/// near-miss names; returns true when at least one suggestion was printed.
+///
+/// The candidate pool is TARGETED, not a truncated global page: the server's
+/// /list-symbols name filter is a case-insensitive substring match, so one
+/// query with the full symbol catches case-only mismatches outright, and one
+/// query per >=3-char identifier token catches renames that keep a word
+/// (`page_window` -> `PageWindow` via "page"/"window"). A general unfiltered
+/// page tops the pool up for pure typos. The previous implementation ranked
+/// only the server's arbitrary first-500 page of ~10k symbols, so most real
+/// near-misses were never even considered.
+bool print_symbol_suggestions(Client& client, const std::string& symbol) {
+    std::vector<std::string> candidates;
+    std::set<std::string> seen_candidates;
+    auto pool_query = [&](const std::string& name_filter, int max) {
+        ListSymbolsRequest req;
+        req.name = name_filter;
+        req.max = max;
+        std::string err;
+        auto listed = client.list_symbols(req, err);
+        if (!listed || !listed->contains("symbols") ||
+            !(*listed)["symbols"].is_array()) {
+            return;
+        }
+        for (const auto& s : (*listed)["symbols"]) {
+            std::string name = s.value("name", "");
+            if (!name.empty() && seen_candidates.insert(name).second) {
+                candidates.push_back(std::move(name));
+            }
+        }
+    };
+
+    pool_query(symbol, 100);  // ci substring of the full query
+    int token_queries = 0;
+    size_t i = 0;
+    while (i < symbol.size() && token_queries < 3) {
+        while (i < symbol.size() &&
+               !is_ident_char(static_cast<unsigned char>(symbol[i]))) {
+            ++i;
+        }
+        size_t start = i;
+        while (i < symbol.size() &&
+               is_ident_char(static_cast<unsigned char>(symbol[i]))) {
+            ++i;
+        }
+        // Skip the full-symbol duplicate; is_ident_char runs only split on
+        // separators like `::` or `.`.
+        std::string token = symbol.substr(start, i - start);
+        if (token.size() >= 3 && token != symbol) {
+            pool_query(token, 100);
+            ++token_queries;
+        }
+    }
+    // Underscore-delimited words of the query as extra token filters.
+    {
+        size_t start = 0;
+        int extra = 0;
+        for (size_t j = 0; j <= symbol.size() && extra < 3; ++j) {
+            if (j == symbol.size() || symbol[j] == '_') {
+                std::string word = symbol.substr(start, j - start);
+                if (word.size() >= 3 && word != symbol) {
+                    pool_query(word, 100);
+                    ++extra;
+                }
+                start = j + 1;
+            }
+        }
+    }
+    pool_query("", 500);  // broad page for pure typos
+
+    // Rank on FOLDED names (case/underscore-insensitive) with the project's
+    // fuzzy default (jaro-winkler, 0.7 — see SemanticScoringConfig).
+    FuzzyMatcher matcher(/*enabled=*/true, /*threshold=*/0.7, "jaro-winkler");
+    const std::string folded_target = fold_symbol_name(symbol);
+    struct Scored {
+        const std::string* name;
+        double similarity;
+    };
+    std::vector<Scored> scored;
+    scored.reserve(candidates.size());
+    for (const auto& c : candidates) {
+        double sim = matcher.similarity(folded_target, fold_symbol_name(c));
+        if (sim >= 0.7) scored.push_back({&c, sim});
+    }
+    if (scored.empty()) return false;
+    std::stable_sort(scored.begin(), scored.end(),
+                     [](const Scored& a, const Scored& b) {
+                         return a.similarity > b.similarity;
+                     });
+
+    constexpr size_t kMaxSuggestions = 5;
+    std::printf("did you mean: ");
+    for (size_t j = 0; j < scored.size() && j < kMaxSuggestions; ++j) {
+        std::printf("%s%s", j == 0 ? "" : ", ", scored[j].name->c_str());
+    }
+    std::printf("?\n");
+    return true;
+}
+
+}  // namespace
+
 // -- def command --------------------------------------------------------------
 
 int run_def(const GlobalFlags& flags, const std::string& symbol) {
@@ -172,37 +292,8 @@ int run_def(const GlobalFlags& flags, const std::string& symbol) {
     }
 
     // (2) No import site found — offer nearest-name matches so a typo is
-    // recoverable. Pull a bounded candidate pool from the index and rank it
-    // with the existing fuzzy matcher (jaro-winkler; 0.7 is the project's
-    // fuzzy_threshold default, see SemanticScoringConfig).
-    ListSymbolsRequest sym_req;
-    sym_req.max = 500;
-    std::string sym_err;
-    if (auto listed = client->list_symbols(sym_req, sym_err)) {
-        std::vector<std::string> candidates;
-        if (listed->contains("symbols") && (*listed)["symbols"].is_array()) {
-            candidates.reserve((*listed)["symbols"].size());
-            for (const auto& s : (*listed)["symbols"]) {
-                std::string name = s.value("name", "");
-                if (!name.empty()) candidates.push_back(std::move(name));
-            }
-        }
-        FuzzyMatcher matcher(/*enabled=*/true, /*threshold=*/0.7, "jaro-winkler");
-        auto matches = matcher.find_matches(symbol, candidates);
-        if (!matches.empty()) {
-            constexpr size_t kMaxSuggestions = 5;
-            std::printf("did you mean: ");
-            std::set<std::string> shown_names;
-            bool first = true;
-            for (const auto& m : matches) {
-                if (shown_names.size() >= kMaxSuggestions) break;
-                if (!shown_names.insert(m.term).second) continue;
-                std::printf("%s%s", first ? "" : ", ", m.term.c_str());
-                first = false;
-            }
-            std::printf("?\n");
-        }
-    }
+    // recoverable.
+    print_symbol_suggestions(*client, symbol);
 
     return 0;
 }
@@ -1429,11 +1520,23 @@ int run_inspect(const GlobalFlags& flags, const std::string& name,
     }
 
     if (json_output) {
+        // JSON shape on a miss is spec-pinned (inspect-missing-json:
+        // count 0, symbols [], exit 0) — no diagnosis lines here.
         std::cout << result->dump(2) << "\n";
         return 0;
     }
 
     // Text output matching Go implementation
+    if (!result->contains("symbols") || !(*result)["symbols"].is_array() ||
+        (*result)["symbols"].empty()) {
+        // A miss used to print NOTHING and exit 0 — indistinguishable from
+        // a crash or an empty pipe. Diagnose like `lci def`: name the miss,
+        // offer near-miss candidates, keep exit 0 ("no result" answers a
+        // valid query; nonzero stays reserved for real failures).
+        std::printf("no symbol in index named %s\n", name.c_str());
+        print_symbol_suggestions(*client, name);
+        return 0;
+    }
     if (result->contains("symbols") && (*result)["symbols"].is_array()) {
         int idx = 0;
         for (const auto& sym : (*result)["symbols"]) {
