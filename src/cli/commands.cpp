@@ -1094,6 +1094,17 @@ int run_git_analyze(const GlobalFlags& flags, const std::string& scope,
     std::printf("Git Change Analysis\n");
     std::printf("==================\n\n");
 
+    // The default scope reads the git INDEX only, so a dirty tree with
+    // nothing staged reports "Files changed: 0" — which reads as "no work
+    // in progress" and sent users away thinking the tool was broken. Name
+    // the scope boundary whenever the staged scope comes back empty.
+    if (scope == "staged" && report.contains("summary") &&
+        report["summary"].value("files_changed", 0) == 0) {
+        std::printf(
+            "note: scope 'staged' analyzes staged (git index) changes only;"
+            " use `-s wip` for uncommitted working-tree changes\n\n");
+    }
+
     if (report.contains("summary")) {
         auto& summary = report["summary"];
         std::printf("Summary\n");
