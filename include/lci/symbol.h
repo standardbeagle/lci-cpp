@@ -24,6 +24,11 @@ struct Symbol {
     // ever wrote OR read them -- 48 bytes of empty vector per symbol on
     // every corpus. Reinstate only with the extractor that populates them.
     SymbolVisibility visibility{};
+    // Declared parameter names for Function/Method symbols (0 otherwise).
+    // Counted by the extractor at parse time; carried into
+    // EnhancedSymbol::parameter_count, which the /list-symbols params
+    // sort/filters read. Fits the struct's existing tail padding.
+    uint8_t parameter_count{};
 };
 
 /// Forward declarations for types defined in other headers.

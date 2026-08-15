@@ -10,6 +10,7 @@
       "line": 11,
       "name": "Register",
       "outgoing_refs": 5,
+      "parameter_count": 2,
       "receiver_type": "Mux",
       "type": "method"
     },
@@ -21,6 +22,7 @@
       "line": 7,
       "name": "ServeHTTP",
       "outgoing_refs": 6,
+      "parameter_count": 1,
       "receiver_type": "Mux",
       "type": "method"
     },

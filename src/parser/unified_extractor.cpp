@@ -918,6 +918,48 @@ void UnifiedExtractor::process_symbol_node(TSNode node,
 // Individual symbol extractors
 // ---------------------------------------------------------------------------
 
+uint8_t UnifiedExtractor::count_parameter_names(TSNode node) {
+    // The "parameters" field name is shared by the Go / JS / TS / Python /
+    // Java / C# / PHP / Rust / Kotlin function-and-method grammars (same
+    // contract register_function_signature relies on); C++ nests it behind
+    // the function_definition -> (nested) declarator chain.
+    auto field = [](TSNode n, const char* name) {
+        return ts_node_child_by_field_name(
+            n, name, static_cast<uint32_t>(std::strlen(name)));
+    };
+    TSNode params = field(node, "parameters");
+    if (ts_node_is_null(params)) {
+        TSNode decl = field(node, "declarator");
+        while (!ts_node_is_null(decl)) {
+            params = field(decl, "parameters");
+            if (!ts_node_is_null(params)) break;
+            decl = field(decl, "declarator");
+        }
+    }
+    if (ts_node_is_null(params)) return 0;
+
+    // One parameter node may declare several names (Go's `a, b int`), so
+    // count `name`-field children per parameter when the grammar provides
+    // them and fall back to one name per non-comment parameter node.
+    int count = 0;
+    uint32_t n = ts_node_named_child_count(params);
+    for (uint32_t i = 0; i < n; ++i) {
+        TSNode p = ts_node_named_child(params, i);
+        if (get_node_type(p) == "comment") continue;
+        int names = 0;
+        TSTreeCursor cursor = ts_tree_cursor_new(p);
+        if (ts_tree_cursor_goto_first_child(&cursor)) {
+            do {
+                const char* f = ts_tree_cursor_current_field_name(&cursor);
+                if (f != nullptr && std::strcmp(f, "name") == 0) ++names;
+            } while (ts_tree_cursor_goto_next_sibling(&cursor));
+        }
+        ts_tree_cursor_delete(&cursor);
+        count += names > 0 ? names : 1;
+    }
+    return static_cast<uint8_t>(std::min(count, 255));
+}
+
 void UnifiedExtractor::extract_function(TSNode node,
                                         std::string_view node_type) {
     TSPoint start = ts_node_start_point(node);
@@ -972,6 +1014,7 @@ void UnifiedExtractor::extract_function(TSNode node,
     sym.column = static_cast<int>(start.column) + 1;
     sym.end_line = static_cast<int>(end.row) + 1;
     sym.end_column = static_cast<int>(end.column) + 1;
+    sym.parameter_count = count_parameter_names(node);
     symbols_.push_back(std::move(sym));
 }
 
@@ -1001,6 +1044,7 @@ void UnifiedExtractor::extract_method(TSNode node,
     sym.column = static_cast<int>(start.column) + 1;
     sym.end_line = static_cast<int>(end.row) + 1;
     sym.end_column = static_cast<int>(end.column) + 1;
+    sym.parameter_count = count_parameter_names(node);
     symbols_.push_back(std::move(sym));
 }
 
@@ -1029,6 +1073,7 @@ void UnifiedExtractor::extract_python_method(TSNode node) {
     sym.column = static_cast<int>(start.column) + 1;
     sym.end_line = static_cast<int>(end.row) + 1;
     sym.end_column = static_cast<int>(end.column) + 1;
+    sym.parameter_count = count_parameter_names(node);
     symbols_.push_back(std::move(sym));
 }
 
@@ -1057,6 +1102,7 @@ void UnifiedExtractor::extract_rust_method(TSNode node) {
     sym.column = static_cast<int>(start.column) + 1;
     sym.end_line = static_cast<int>(end.row) + 1;
     sym.end_column = static_cast<int>(end.column) + 1;
+    sym.parameter_count = count_parameter_names(node);
     symbols_.push_back(std::move(sym));
 }
 
@@ -1087,6 +1133,7 @@ void UnifiedExtractor::extract_arrow_function_dual(TSNode func_node,
     func_sym.column = static_cast<int>(start.column) + 1;
     func_sym.end_line = static_cast<int>(end.row) + 1;
     func_sym.end_column = static_cast<int>(end.column) + 1;
+    func_sym.parameter_count = count_parameter_names(func_node);
     symbols_.push_back(std::move(func_sym));
 
     // Variable symbol (dual nature)

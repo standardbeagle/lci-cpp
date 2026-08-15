@@ -161,6 +161,9 @@ class UnifiedExtractor {
     void extract_python_method(TSNode node);
     void extract_rust_method(TSNode node);
     void extract_arrow_function_dual(TSNode func_node, TSNode decl_node);
+    // Counts declared parameter names of a function/method node (the
+    // Symbol::parameter_count writer). 0 when no parameter list resolves.
+    uint8_t count_parameter_names(TSNode node);
     void extract_class(TSNode node, std::string_view node_type);
     void extract_interface(TSNode node);
     void extract_type_declaration(TSNode node);

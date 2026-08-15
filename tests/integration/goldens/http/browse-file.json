@@ -11,6 +11,7 @@
       "line": 3,
       "name": "Add",
       "outgoing_refs": 2,
+      "parameter_count": 2,
       "type": "function"
     }
   ],

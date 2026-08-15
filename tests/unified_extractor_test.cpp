@@ -116,6 +116,62 @@ TEST(UnifiedExtractorTest, GoFunctions) {
     const Symbol* greet_sym = find_symbol(r, "Greet");
     ASSERT_NE(greet_sym, nullptr);
     EXPECT_EQ(greet_sym->type, SymbolType::Method);
+
+    // Parameter counts: `func add(a, b int)` declares TWO names in one
+    // parameter_declaration; `Greet(name string)` declares one (the
+    // receiver is a separate field and is not a parameter). This field
+    // previously had no writer anywhere, so the /list-symbols params
+    // sort ranked an all-zero column.
+    EXPECT_EQ(add_sym->parameter_count, 2);
+    EXPECT_EQ(greet_sym->parameter_count, 1);
+}
+
+TEST(UnifiedExtractorTest, ParameterCountsAcrossLanguages) {
+    {
+        constexpr std::string_view src =
+            "def solo():\n    pass\n\n"
+            "def trio(a, b, c=1):\n    pass\n";
+        auto tree = parse(Language::Python, src);
+        ASSERT_NE(tree.get(), nullptr);
+        UnifiedExtractor ue;
+        ue.init(src, 1, ".py", "m.py");
+        ue.extract(tree.get());
+        auto r = ue.get_results();
+        ASSERT_NE(find_symbol(r, "solo"), nullptr);
+        EXPECT_EQ(find_symbol(r, "solo")->parameter_count, 0);
+        ASSERT_NE(find_symbol(r, "trio"), nullptr);
+        EXPECT_EQ(find_symbol(r, "trio")->parameter_count, 3);
+    }
+    {
+        constexpr std::string_view src =
+            "int pair(int a, char b) { return a; }\n"
+            "void none() {}\n";
+        auto tree = parse(Language::Cpp, src);
+        ASSERT_NE(tree.get(), nullptr);
+        UnifiedExtractor ue;
+        ue.init(src, 1, ".cpp", "m.cpp");
+        ue.extract(tree.get());
+        auto r = ue.get_results();
+        ASSERT_NE(find_symbol(r, "pair"), nullptr);
+        EXPECT_EQ(find_symbol(r, "pair")->parameter_count, 2);
+        ASSERT_NE(find_symbol(r, "none"), nullptr);
+        EXPECT_EQ(find_symbol(r, "none")->parameter_count, 0);
+    }
+    {
+        constexpr std::string_view src =
+            "function two(x, y) { return x; }\n"
+            "const one = (z) => z;\n";
+        auto tree = parse(Language::JavaScript, src);
+        ASSERT_NE(tree.get(), nullptr);
+        UnifiedExtractor ue;
+        ue.init(src, 1, ".js", "m.js");
+        ue.extract(tree.get());
+        auto r = ue.get_results();
+        ASSERT_NE(find_symbol(r, "two"), nullptr);
+        EXPECT_EQ(find_symbol(r, "two")->parameter_count, 2);
+        ASSERT_NE(find_symbol(r, "one"), nullptr);
+        EXPECT_EQ(find_symbol(r, "one")->parameter_count, 1);
+    }
 }
 
 TEST(UnifiedExtractorTest, GoTypes) {

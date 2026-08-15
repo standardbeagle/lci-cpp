@@ -305,6 +305,10 @@ std::vector<EnhancedSymbol> ReferenceTracker::process_file(
             es.id = id;
             es.scope_chain = std::move(scope_chain);
             es.is_exported = is_exported;
+            // Mirror the extractor's per-symbol parameter count onto the
+            // enhanced field every params sort/filter reads (this field had
+            // no writer at all before — sorts ranked all-zeros).
+            es.parameter_count = es.symbol.parameter_count;
 
             s.symbols.set(id, es);
 

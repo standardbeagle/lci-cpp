@@ -9,6 +9,7 @@
       "line": 3,
       "name": "Add",
       "outgoing_refs": 2,
+      "parameter_count": 2,
       "type": "function"
     },
     {
@@ -19,6 +20,7 @@
       "line": 1,
       "name": "add",
       "outgoing_refs": 8,
+      "parameter_count": 2,
       "type": "function"
     },
     {
@@ -27,6 +29,7 @@
       "is_exported": true,
       "line": 1,
       "name": "add",
+      "parameter_count": 2,
       "type": "function"
     },
     {
@@ -35,6 +38,7 @@
       "is_exported": true,
       "line": 1,
       "name": "add",
+      "parameter_count": 2,
       "type": "function"
     }
   ],

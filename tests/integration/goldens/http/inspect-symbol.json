@@ -9,6 +9,7 @@
       "name": "Add",
       "object_id": "B",
       "outgoing_refs": 2,
+      "parameter_count": 2,
       "scope_chain": [
         "multi-lang",
         "a.go",
