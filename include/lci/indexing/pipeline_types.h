@@ -68,6 +68,11 @@ struct ProcessedFile {
     Error error{};
     bool has_error{};
     bool parse_skipped_oversize{};  // trigram-indexed, tree-sitter skipped
+    /// Per-file trigram bloom, worker-built (null when the content is
+    /// trigram-hostile — then trigram_hostile is set and the integrator
+    /// marks the file unfiltered instead).
+    std::shared_ptr<const TrigramBloom> trigram_bloom;
+    bool trigram_hostile{};
 };
 
 /// Pipeline buffer size constants.

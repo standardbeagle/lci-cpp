@@ -212,9 +212,20 @@ ProcessedFile FileProcessor::process_file(int /*worker_id*/,
     // production readers — find_candidates reads the snapshot maps, which the
     // bulk path never populated. Building it cost ~8 bytes per corpus byte
     // plus hash overhead and drove servers past 26 GB RSS on large repos.
-    // Bulk-indexed corpora prefilter via PostingsIndex (the path search
-    // already fell back to); a file-granular bulk trigram prefilter is a
-    // tracked follow-up.
+    //
+    // The file-granular replacement: a per-file bloom over the DISTINCT
+    // trigram set (~1 byte per distinct trigram corpus-wide), built here in
+    // the parallel worker and installed by the integrator. It certifies
+    // pattern absence per file (TrigramIndex::narrow), which the
+    // per-occurrence store never managed to do in production. Hostile
+    // content (minified/high-entropy) gets no bloom and self-nominates via
+    // the unfiltered set — the same gates the incremental index_file uses.
+    const bool payload_content = has_high_entropy_section(content);
+    if (is_trigram_hostile(content) || payload_content) {
+        result.trigram_hostile = true;
+    } else {
+        result.trigram_bloom = TrigramBloom::build(content);
+    }
 
     // Tokenize for PostingsIndex inline so the per-byte scan + dedup
     // runs in parallel here instead of serially on the integrator
@@ -228,8 +239,7 @@ ProcessedFile FileProcessor::process_file(int /*worker_id*/,
         // marked PARTIAL and self-nominate in postings lookups, so search
         // stays exact either way.
         const size_t token_cap = postings_token_cap(
-            language_info_for_path(task.path).is_code,
-            has_high_entropy_section(content),
+            language_info_for_path(task.path).is_code, payload_content,
             config_.index.data_file_token_cap);
         auto pi_tokens = lci::PostingsIndex::tokenize_content(
             content, token_cap, &result.postings_truncated);

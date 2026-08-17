@@ -98,6 +98,51 @@ class ShardedTrigramStorage {
 ///   - 256 sharded buckets for lock-free parallel merging
 ///   - Search cache with configurable TTL (default 5 minutes)
 ///   - Lazy file invalidation with threshold-based cleanup
+/// Per-file bloom filter over the file's trigram set — the file-granular
+/// bulk trigram prefilter (the tracked follow-up from the 2026-08-04
+/// per-occurrence removal). ~1 byte per DISTINCT trigram instead of ~12
+/// bytes per occurrence, so a whole corpus costs megabytes, not gigabytes.
+///
+/// Contract: a strict superset test. may_contain() can false-positive
+/// (the verify scan discards those) but never false-negatives, so
+/// "some pattern trigram is absent" certifies the file pattern-free.
+/// Build and query sides share the canonical hash + the extraction
+/// window rule (windows with no alnum byte are skipped on BOTH sides).
+class TrigramBloom {
+  public:
+    /// Builds from every trigram window of `content`. Never null; a
+    /// content with zero qualifying windows yields a minimal bloom that
+    /// correctly certifies every probe absent.
+    static std::shared_ptr<const TrigramBloom> build(std::string_view content);
+
+    bool may_contain(uint64_t canonical_hash) const {
+        const uint32_t h1 = static_cast<uint32_t>(canonical_hash);
+        const uint32_t h2 =
+            static_cast<uint32_t>(canonical_hash >> 32) | 1u;
+        for (uint32_t i = 0; i < kProbes; ++i) {
+            const uint32_t bit = (h1 + i * h2) & bit_mask_;
+            if ((bits_[bit >> 6] & (uint64_t{1} << (bit & 63))) == 0) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    size_t byte_size() const { return bits_.size() * sizeof(uint64_t); }
+
+    /// Canonical hash of an ASCII trigram in packed (b0<<16|b1<<8|b2) form.
+    static uint64_t hash_ascii(uint32_t packed);
+    /// Canonical hash of a trigram's UTF-8 bytes. A pure-ASCII 3-byte
+    /// trigram hashes identically to hash_ascii of its packed form, so a
+    /// non-ASCII file's ASCII windows match ASCII pattern probes.
+    static uint64_t hash_bytes(std::string_view trigram);
+
+  private:
+    static constexpr uint32_t kProbes = 4;
+    std::vector<uint64_t> bits_;
+    uint32_t bit_mask_{};  // nbits - 1 (nbits is a power of two)
+};
+
 class TrigramIndex {
   private:
     struct Snapshot;  // Defined in the private section below.
@@ -139,6 +184,15 @@ class TrigramIndex {
     /// Indexes a file using pre-bucketed trigrams.
     void index_file_with_bucketed_trigrams(const BucketedTrigramResult& result);
 
+    /// Installs a file's trigram bloom (bulk-pipeline feed; the worker
+    /// builds it in parallel, the integrator installs it here). Clears any
+    /// invalidated/unfiltered state for the file. Null is ignored.
+    void set_file_bloom(FileID file_id,
+                        std::shared_ptr<const TrigramBloom> bloom);
+
+    /// Total bytes held by per-file blooms (index_size_bytes census).
+    size_t bloom_bytes() const;
+
     /// Marks a file as invalidated (lazy removal).
     void remove_file(FileID file_id);
 
@@ -179,6 +233,9 @@ class TrigramIndex {
         bool informative_{false};
         absl::flat_hash_set<FileID> possible_;
         std::shared_ptr<const Snapshot> snap_;
+        /// Canonical pattern-trigram hashes probed against per-file
+        /// blooms (capped; probing fewer only widens the superset).
+        std::vector<uint64_t> probes_;
     };
     Narrowing narrow(std::string_view pattern, bool case_insensitive) const;
 
@@ -230,10 +287,19 @@ class TrigramIndex {
         /// pattern absence only inside this set — bulk-indexed files never
         /// enter it and must always be scanned.
         absl::flat_hash_set<FileID> covered_files;
+        /// Per-file trigram blooms (bulk pipeline AND incremental path).
+        /// shared_ptr values keep the RCU clone at pointer cost.
+        absl::flat_hash_map<FileID, std::shared_ptr<const TrigramBloom>>
+            blooms;
     };
 
     AtomicSharedPtr<const Snapshot> snapshot_;
     mutable std::mutex write_mu_;
+    /// Non-null only inside a bulk window (guarded by write_mu_): writes
+    /// mutate this staging snapshot in place and one atomic publish
+    /// happens on close, avoiding a per-file snapshot clone across a
+    /// bulk reindex (same shape as PostingsIndex's bulk window).
+    std::shared_ptr<Snapshot> staging_;
 
     SlabAllocator<FileLocation> location_allocator_;
 

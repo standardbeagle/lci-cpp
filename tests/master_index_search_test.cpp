@@ -910,6 +910,42 @@ TEST(MasterIndexSearchIntegrationTest, BulkSubstringOfTokenFound) {
 }
 
 TEST(MasterIndexSearchIntegrationTest,
+     BulkBloomCertifiesAbsenceIncludingPartialResidue) {
+    // The per-file trigram bloom is built by the bulk pipeline workers and
+    // must certify pattern absence even for postings-PARTIAL files — the
+    // residue class postings narrowing can never exclude, which made every
+    // negative query scan the (large) residue files.
+    TempDir dir;
+    dir.write_file("a.go", "package main\n// the Index server exits here\n");
+    Config cfg = make_default_config();
+    cfg.index.data_file_token_cap = 25;
+    write_partial_residue_file(dir, cfg, "residue.go");
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+    ASSERT_GE(mi.postings_index().partial_file_count(), 1);
+
+    auto narrowing =
+        mi.trigram_index().narrow("zqx totally_absent vbn", false);
+    ASSERT_TRUE(narrowing.informative());
+    for (FileID fid : mi.get_all_file_ids()) {
+        EXPECT_TRUE(narrowing.certifies_absent(fid))
+            << "file " << mi.get_file_path(fid)
+            << " should be bloom-certified pattern-free";
+    }
+
+    // And presence is never certified away (superset contract).
+    auto present = mi.trigram_index().narrow("Index server", false);
+    bool a_certified = false;
+    for (FileID fid : mi.get_all_file_ids()) {
+        if (mi.get_file_path(fid).ends_with("a.go")) {
+            a_certified = present.certifies_absent(fid);
+        }
+    }
+    EXPECT_FALSE(a_certified);
+}
+
+TEST(MasterIndexSearchIntegrationTest,
      IncrementalTrigramStateDoesNotHideBulkFiles) {
     TempDir dir;
     dir.write_file("a.go", "package main\n// call handle_gadget now\n");

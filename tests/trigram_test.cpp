@@ -725,6 +725,78 @@ TEST(TrigramIndexNarrowTest, UnfilteredAndRemovedFilesAreNeverCertified) {
     }
 }
 
+// -- TrigramBloom (file-granular bulk prefilter) ------------------------------
+
+TEST(TrigramBloomTest, ContainsEveryInsertedTrigramNeverFalseNegative) {
+    const std::string content = "func handle_gadget(w PageWindow) { return }";
+    auto bloom = TrigramBloom::build(content);
+    ASSERT_NE(bloom, nullptr);
+    // Every window of the content must probe positive (superset contract).
+    for (size_t i = 0; i + 2 < content.size(); ++i) {
+        const std::string w = content.substr(i, 3);
+        bool has_alpha = false;
+        for (char c : w) {
+            if (std::isalnum(static_cast<unsigned char>(c)) || c == '_') {
+                has_alpha = true;
+            }
+        }
+        if (!has_alpha) continue;  // Skipped on both sides.
+        EXPECT_TRUE(bloom->may_contain(TrigramBloom::hash_bytes(w)))
+            << "window [" << w << "]";
+    }
+    // A trigram from a different vocabulary should (whp) probe negative.
+    EXPECT_FALSE(bloom->may_contain(TrigramBloom::hash_bytes("zqx")));
+}
+
+TEST(TrigramBloomTest, AsciiPackedAndByteHashesAgree) {
+    const uint32_t packed = (uint32_t('f') << 16) | (uint32_t('u') << 8) |
+                            uint32_t('n');
+    EXPECT_EQ(TrigramBloom::hash_ascii(packed),
+              TrigramBloom::hash_bytes("fun"));
+}
+
+TEST(TrigramIndexNarrowTest, BloomCertifiesBulkIndexedFiles) {
+    // Bulk shape: bloom installed, NO incremental map data for the file.
+    TrigramIndex index;
+    index.set_file_bloom(FileID{5},
+                         TrigramBloom::build("call handle_gadget now"));
+
+    auto absent = index.narrow("zqxvbn", /*case_insensitive=*/false);
+    ASSERT_TRUE(absent.informative());
+    EXPECT_TRUE(absent.certifies_absent(FileID{5}));
+
+    auto present = index.narrow("handle_g", false);
+    ASSERT_TRUE(present.informative());
+    EXPECT_FALSE(present.certifies_absent(FileID{5}));
+
+    // Phrase windows (spaces included) certify too.
+    auto phrase_present = index.narrow("gadget now", false);
+    EXPECT_FALSE(phrase_present.certifies_absent(FileID{5}));
+    auto phrase_absent = index.narrow("gadget never", false);
+    EXPECT_TRUE(phrase_absent.certifies_absent(FileID{5}));
+
+    // A file with no bloom stays uncertified.
+    EXPECT_FALSE(absent.certifies_absent(FileID{6}));
+}
+
+TEST(TrigramIndexNarrowTest, BloomRemovedWithFile) {
+    TrigramIndex index;
+    index.set_file_bloom(FileID{5}, TrigramBloom::build("alpha beta"));
+    index.remove_file(FileID{5});
+    auto n = index.narrow("zqxvbn", false);
+    EXPECT_FALSE(n.certifies_absent(FileID{5}));
+}
+
+TEST(TrigramIndexNarrowTest, BulkWindowPublishesOnClose) {
+    TrigramIndex index;
+    index.set_bulk_indexing(true);
+    index.set_file_bloom(FileID{7}, TrigramBloom::build("alpha beta"));
+    // Unpublished while the window is open.
+    EXPECT_FALSE(index.narrow("zqxvbn", false).certifies_absent(FileID{7}));
+    index.set_bulk_indexing(false);
+    EXPECT_TRUE(index.narrow("zqxvbn", false).certifies_absent(FileID{7}));
+}
+
 TEST(TrigramIndexNarrowTest, AsciiPatternProbesUnicodeIndexedFiles) {
     // A file with any non-ASCII byte indexes ALL its trigrams (including
     // pure-ASCII windows) in the unicode map. An ASCII pattern probe must

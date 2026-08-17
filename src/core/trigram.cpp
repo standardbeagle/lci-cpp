@@ -210,6 +210,87 @@ absl::flat_hash_map<int, std::string> extract_unicode_trigrams(
     return trigrams;
 }
 
+// -- TrigramBloom --------------------------------------------------------------
+
+namespace {
+
+/// splitmix64 finalizer — canonical mixing for packed ASCII trigrams.
+uint64_t mix64(uint64_t x) {
+    x += 0x9e3779b97f4a7c15ull;
+    x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ull;
+    x = (x ^ (x >> 27)) * 0x94d049bb133111ebull;
+    return x ^ (x >> 31);
+}
+
+/// FNV-1a 64 over raw bytes — multi-byte (non-ASCII) trigrams.
+uint64_t fnv1a64(std::string_view bytes) {
+    uint64_t h = 1469598103934665603ull;
+    for (unsigned char c : bytes) {
+        h ^= c;
+        h *= 1099511628211ull;
+    }
+    return h;
+}
+
+uint32_t next_pow2_u32(uint32_t v) {
+    if (v < 2) return 2;
+    --v;
+    v |= v >> 1; v |= v >> 2; v |= v >> 4; v |= v >> 8; v |= v >> 16;
+    return v + 1;
+}
+
+}  // namespace
+
+uint64_t TrigramBloom::hash_ascii(uint32_t packed) { return mix64(packed); }
+
+uint64_t TrigramBloom::hash_bytes(std::string_view trigram) {
+    if (trigram.size() == 3 && is_pure_ascii(trigram)) {
+        const uint32_t packed =
+            (uint32_t(static_cast<uint8_t>(trigram[0])) << 16) |
+            (uint32_t(static_cast<uint8_t>(trigram[1])) << 8) |
+            uint32_t(static_cast<uint8_t>(trigram[2]));
+        return hash_ascii(packed);
+    }
+    return fnv1a64(trigram);
+}
+
+std::shared_ptr<const TrigramBloom> TrigramBloom::build(
+    std::string_view content) {
+    // Distinct canonical hashes first, so the bit array is sized to the
+    // real element count (~8 bits/element, 4 probes -> ~2.4% FP).
+    thread_local absl::flat_hash_set<uint64_t> distinct;
+    distinct.clear();
+
+    if (is_pure_ascii(content)) {
+        for_each_simple_trigram(content, [&](int, uint32_t trigram) {
+            distinct.insert(hash_ascii(trigram));
+        });
+    } else {
+        thread_local std::vector<uint32_t> code_points;
+        thread_local std::vector<size_t> byte_offsets;
+        for_each_unicode_trigram(
+            content, code_points, byte_offsets,
+            [&](int, std::string trigram_str) {
+                distinct.insert(hash_bytes(trigram_str));
+            });
+    }
+
+    auto bloom = std::make_shared<TrigramBloom>();
+    const uint32_t nbits = next_pow2_u32(
+        static_cast<uint32_t>(std::max<size_t>(distinct.size() * 8, 64)));
+    bloom->bits_.assign(nbits >> 6, 0);
+    bloom->bit_mask_ = nbits - 1;
+    for (uint64_t h : distinct) {
+        const uint32_t h1 = static_cast<uint32_t>(h);
+        const uint32_t h2 = static_cast<uint32_t>(h >> 32) | 1u;
+        for (uint32_t i = 0; i < kProbes; ++i) {
+            const uint32_t bit = (h1 + i * h2) & bloom->bit_mask_;
+            bloom->bits_[bit >> 6] |= uint64_t{1} << (bit & 63);
+        }
+    }
+    return bloom;
+}
+
 // -- ShardedTrigramStorage ----------------------------------------------------
 
 ShardedTrigramStorage::ShardedTrigramStorage(uint16_t bucket_count)
@@ -316,6 +397,12 @@ TrigramIndex::load_snapshot() const {
 template <class Fn>
 void TrigramIndex::mutate_snapshot(Fn&& fn) {
     std::lock_guard<std::mutex> lk(write_mu_);
+    if (staging_) {
+        // Bulk window: mutate the unpublished staging snapshot in place;
+        // one atomic publish happens when the window closes.
+        fn(*staging_);
+        return;
+    }
     auto next = std::make_shared<Snapshot>(
         *snapshot_.load(std::memory_order_acquire));
     fn(*next);
@@ -328,6 +415,8 @@ void TrigramIndex::clear() {
         snap.unicode_trigrams.clear();
         snap.invalidated_files.clear();
         snap.unfiltered_files.clear();
+        snap.covered_files.clear();
+        snap.blooms.clear();
     });
     sharded_storage_.clear();
     location_allocator_.reset_stats();
@@ -461,6 +550,7 @@ void TrigramIndex::mark_unfiltered(FileID file_id) {
         // An unfiltered file carries no trigram data; narrow() must never
         // certify absence in it (relevant on hostile→re-index transitions).
         snap.covered_files.erase(file_id);
+        snap.blooms.erase(file_id);
     });
 }
 
@@ -477,6 +567,9 @@ void TrigramIndex::index_file(FileID file_id, std::string_view content) {
         mark_unfiltered(file_id);
         return;
     }
+    // Per-file bloom, built outside the write lock (same content pass rules
+    // as the maps below); installed alongside them.
+    auto bloom = TrigramBloom::build(content);
     // Write path: extract into thread-local scratch (reused across files, so
     // no per-file heap allocation and no throwaway hash map) OUTSIDE the write
     // lock, then drain the scratch into the snapshot under it. thread_local is
@@ -492,6 +585,7 @@ void TrigramIndex::index_file(FileID file_id, std::string_view content) {
             snap.invalidated_files.erase(file_id);
             snap.unfiltered_files.erase(file_id);
             snap.covered_files.insert(file_id);
+            snap.blooms[file_id] = bloom;
             for (const auto& [offset, trigram_hash] : ascii_scratch) {
                 auto& entry = snap.ascii_trigrams[trigram_hash];
                 entry.locations.push_back(
@@ -512,6 +606,7 @@ void TrigramIndex::index_file(FileID file_id, std::string_view content) {
             snap.invalidated_files.erase(file_id);
             snap.unfiltered_files.erase(file_id);
             snap.covered_files.insert(file_id);
+            snap.blooms[file_id] = bloom;
             for (const auto& [offset, trigram_str] : unicode_scratch) {
                 auto& entry = snap.unicode_trigrams[trigram_str];
                 entry.locations.push_back(
@@ -561,6 +656,7 @@ void TrigramIndex::remove_file(FileID file_id) {
     mutate_snapshot([&](Snapshot& snap) {
         snap.unfiltered_files.erase(file_id);
         snap.covered_files.erase(file_id);
+        snap.blooms.erase(file_id);
         snap.invalidated_files.insert(file_id);
         if (static_cast<int>(snap.invalidated_files.size()) >=
             cleanup_threshold_) {
@@ -627,10 +723,25 @@ std::vector<FileID> TrigramIndex::find_candidates_with_options(
 }
 
 bool TrigramIndex::Narrowing::certifies_absent(FileID fid) const {
-    return informative_ && snap_ != nullptr &&
-           snap_->covered_files.contains(fid) &&
-           !snap_->invalidated_files.contains(fid) &&
-           !possible_.contains(fid);
+    if (!informative_ || snap_ == nullptr ||
+        snap_->invalidated_files.contains(fid)) {
+        return false;
+    }
+    // Bloom certification first: it covers bulk-indexed files (including
+    // postings-PARTIAL ones) that the incremental maps never see. A probe
+    // list exists whenever informative_ is set; any absent probe proves
+    // the pattern cannot occur in the file (blooms never false-negative).
+    if (!probes_.empty()) {
+        if (auto it = snap_->blooms.find(fid); it != snap_->blooms.end()) {
+            const TrigramBloom& bloom = *it->second;
+            for (uint64_t h : probes_) {
+                if (!bloom.may_contain(h)) return true;
+            }
+            return false;  // All probes may be present — must scan.
+        }
+    }
+    // Fall back to the exact per-occurrence maps for files they cover.
+    return snap_->covered_files.contains(fid) && !possible_.contains(fid);
 }
 
 TrigramIndex::Narrowing TrigramIndex::narrow(std::string_view pattern,
@@ -642,7 +753,15 @@ TrigramIndex::Narrowing TrigramIndex::narrow(std::string_view pattern,
     if (case_insensitive || pattern.size() < 3) return n;
 
     auto snap = load_snapshot();
-    if (snap->covered_files.empty()) return n;  // Nothing certifiable.
+    if (snap->covered_files.empty() && snap->blooms.empty()) {
+        return n;  // Nothing certifiable.
+    }
+
+    // Canonical bloom probes for the pattern's trigram windows. Capped:
+    // probing fewer windows only widens the superset. The window rule
+    // (skip no-alnum windows) mirrors extraction — probing a window the
+    // index side never inserts would fabricate absences.
+    constexpr size_t kMaxProbes = 32;
 
     absl::flat_hash_map<FileID, int> file_trigram_counts;
     int total_trigrams = 0;
@@ -654,6 +773,9 @@ TrigramIndex::Narrowing TrigramIndex::narrow(std::string_view pattern,
         // there.
         for_each_simple_trigram(pattern, [&](int offset, uint32_t trigram) {
             ++total_trigrams;
+            if (n.probes_.size() < kMaxProbes) {
+                n.probes_.push_back(TrigramBloom::hash_ascii(trigram));
+            }
             if (auto it = snap->ascii_trigrams.find(trigram);
                 it != snap->ascii_trigrams.end()) {
                 for (const auto& loc : it->second.locations) {
@@ -676,6 +798,9 @@ TrigramIndex::Narrowing TrigramIndex::narrow(std::string_view pattern,
         auto all_pattern_trigrams = extract_unicode_trigrams(pattern);
         total_trigrams = static_cast<int>(all_pattern_trigrams.size());
         for (const auto& [_, trigram_str] : all_pattern_trigrams) {
+            if (n.probes_.size() < kMaxProbes) {
+                n.probes_.push_back(TrigramBloom::hash_bytes(trigram_str));
+            }
             if (auto it = snap->unicode_trigrams.find(trigram_str);
                 it != snap->unicode_trigrams.end()) {
                 for (const auto& loc : it->second.locations) {
@@ -742,12 +867,40 @@ void TrigramIndex::force_cleanup() {
     mutate_snapshot([](Snapshot& snap) { cleanup_snapshot(snap); });
 }
 
-void TrigramIndex::set_bulk_indexing(bool /*enabled*/) {
-    // No-op: TrigramIndex needs no bulk-build window. The read-path maps
-    // (ascii/unicode) are written only by the incremental index_file path
-    // and stay empty during a bulk reindex, which fills sharded_storage_
-    // (outside the snapshot). Kept for interface symmetry with the other
-    // indexes (MasterIndex::set_bulk_indexing fans out to all three).
+void TrigramIndex::set_file_bloom(FileID file_id,
+                                  std::shared_ptr<const TrigramBloom> bloom) {
+    if (bloom == nullptr) return;
+    mutate_snapshot([&](Snapshot& snap) {
+        snap.invalidated_files.erase(file_id);
+        snap.unfiltered_files.erase(file_id);
+        snap.blooms[file_id] = std::move(bloom);
+    });
+}
+
+size_t TrigramIndex::bloom_bytes() const {
+    auto snap = load_snapshot();
+    size_t total = 0;
+    for (const auto& [fid, bloom] : snap->blooms) {
+        (void)fid;
+        if (bloom) total += bloom->byte_size();
+    }
+    return total;
+}
+
+void TrigramIndex::set_bulk_indexing(bool enabled) {
+    // Bulk window for the per-file bloom feed: without it every
+    // set_file_bloom would clone the growing snapshot (O(files^2) pointer
+    // copies across a reindex). Same open/close shape as PostingsIndex.
+    std::lock_guard<std::mutex> lk(write_mu_);
+    if (enabled) {
+        if (!staging_) {
+            staging_ = std::make_shared<Snapshot>(
+                *snapshot_.load(std::memory_order_acquire));
+        }
+    } else if (staging_) {
+        snapshot_.store(std::move(staging_), std::memory_order_release);
+        staging_ = nullptr;
+    }
 }
 
 SlabAllocator<FileLocation>& TrigramIndex::get_allocator() {

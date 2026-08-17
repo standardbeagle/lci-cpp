@@ -484,6 +484,9 @@ size_t MasterIndex::index_size_bytes() const {
                  sizeof(EnhancedSymbol);
     }
 
+    // Per-file trigram blooms (the bulk prefilter).
+    total += trigram_index_.bloom_bytes();
+
     // Content store (mmap-retained content reports its mapped size).
     total += static_cast<size_t>(file_content_store_->get_memory_usage());
 

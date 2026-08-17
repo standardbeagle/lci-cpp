@@ -95,6 +95,16 @@ int FileIntegrator::file_count() const {
 
 void FileIntegrator::merge_trigrams(ProcessedFile& file) {
     if (trigram_index_ == nullptr) return;
+
+    // Per-file bloom feed (the live bulk trigram prefilter). Hostile
+    // content gets no bloom and self-nominates via the unfiltered set.
+    if (file.trigram_bloom != nullptr) {
+        trigram_index_->set_file_bloom(file.file_id,
+                                       std::move(file.trigram_bloom));
+    } else if (file.trigram_hostile) {
+        trigram_index_->mark_unfiltered(file.file_id);
+    }
+
     if (file.bucketed_trigrams.buckets.empty()) return;
 
     if (use_merger_pipeline_ && merger_pipeline_) {
