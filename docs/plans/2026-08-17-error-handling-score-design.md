@@ -116,6 +116,59 @@ set-wise golden comparison.
 - Independent scoring of nested closures — analyzer folds nested effects
   into the enclosing function (`unified_extractor.cpp:305-317`).
 
+## Section spec: `== ERROR HANDLING ==` and `== RESOURCE MANAGEMENT ==`
+
+Both sections join `overview` and `unified` modes (after HEALTH, before
+LOAD BEARING); `detailed&analysis=errors|resources` emits the untruncated
+lists. Both are production-only via D1 attributes, deterministically sorted
+(severity desc, then file, line), locations always `file:line`, symbols carry
+`[o=id]`. Overview tier shows top 5 findings per section; token budget rules
+follow the existing tier machinery.
+
+```
+== ERROR HANDLING ==
+score=7.42 modules: worst=apis(5.1) best=tools/security(9.8)
+throwers=147 handled_ratio=0.63 swallow_sites=12 unchecked_errors=31
+findings:
+  [high] empty-catch: parseConfig (src/config/loader.cpp:88) caught=... [o=Ab]
+  [high] dropped-error: flushLogs (core/logger.go:141) `_ = w.Close()` [o=Cd]
+  [med] broad-catch: handleRequest (src/server.py:207) caught=Exception [o=Ef]
+  [med] log-and-swallow: retryFetch (src/net/fetch.ts:96) [o=Gh]
+  [low] rethrow-no-cause: wrapError (src/api/errors.java:54) [o=Ij]
+exposure:
+  api-reaches-swallow: Send (client.go:88) -> flushLogs swallow depth=2
+next: code_insight {"mode":"detailed","analysis":"errors"}
+```
+
+```
+== RESOURCE MANAGEMENT ==
+score=8.10 acquisitions=64 released_ratio=0.88 guarded_ratio=0.71
+findings:
+  [med] leak-no-release: openCache (core/cache.go:52) acquire=os.Open [o=Kl]
+  [med] leak-on-error-path: connectDB (src/db.rs:118) release at :139 not
+        guarded, throw at :127 [o=Mn]
+  [low] unguarded-release: writeSnapshot (src/snap.cpp:88) close outside
+        finally [o=Op]
+next: code_insight {"mode":"detailed","analysis":"resources"}
+```
+
+Field semantics:
+- `score` — the rollup formula above; both scores also feed `== SUMMARY ==`
+  as one `error_handling=7.42 resources=8.10` line so the overview headline
+  carries them.
+- `handled_ratio` — throwers whose transitive callers include a catch/
+  check before the API boundary (GraphPropagator labels).
+- `guarded_ratio` — releases inside defer/finally/using/with/ensure/RAII
+  scope vs bare releases.
+- `exposure` — top public-API symbols (by incoming_reach) that transitively
+  reach a swallow/leak site; the "so what" line for a reader.
+- Data model: `ErrorHandlingSummary` + `ResourceSummary` in
+  `codebase_intelligence_types.h`, filled by a `tally_*` clone; per-finding
+  structs carry symbol id, signal enum, severity, confidence, evidence line.
+- JSON twin: the same structs serialize into the `side_effects` tool
+  response (`error_handling` / `resources` objects) — err-lookup ingests
+  JSON, never parses LCF.
+
 ## Phasing
 1. Wire dead fields (`record_error_return`, `record_try_finally`) + missing
    throw/rescue/panic grammar branches; RED via per-language fixtures.
