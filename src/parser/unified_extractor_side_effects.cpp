@@ -629,35 +629,50 @@ void UnifiedExtractor::process_go_error_drop(TSNode node,
     TSNode right = field(node, "right");
     if (ts_node_is_null(left) || ts_node_is_null(right)) return;
 
-    // Collect the left-side identifiers; note blank positions.
+    // Go convention: the error is the LAST result. Only a blank in the final
+    // left position discards it — `host, _, err := ...` captures the error,
+    // and `v, _ := x.(T)` / `v, _ := m[k]` discard ok-bools, not errors.
     int total = 0;
     int blanks = 0;
+    bool last_is_blank = false;
     if (get_node_type(left) == "expression_list") {
         uint32_t n = ts_node_named_child_count(left);
         for (uint32_t i = 0; i < n; ++i) {
             TSNode c = ts_node_named_child(left, i);
             ++total;
-            if (node_text(c) == "_") ++blanks;
+            bool blank = node_text(c) == "_";
+            if (blank) ++blanks;
+            if (i + 1 == n) last_is_blank = blank;
         }
     } else {
         total = 1;
-        if (node_text(left) == "_") blanks = 1;
+        last_is_blank = node_text(left) == "_";
+        if (last_is_blank) blanks = 1;
     }
-    if (blanks == 0) return;
+    if (!last_is_blank) return;
 
-    bool right_has_call = false;
+    // The right side must be a CALL producing the discarded result. A
+    // type-assertion or map index in the terminal value position yields an
+    // ok-bool, not an error — never a drop.
+    bool right_is_call = false;
     bool right_is_err_ident = false;
-    walk_subtree(right, [&](TSNode n) {
-        std::string_view t = get_node_type(n);
-        if (t == "call_expression") right_has_call = true;
-        return true;
-    });
     {
-        std::string_view rt = node_text(right);
-        if (rt == "err" || iprefix(rt, "err")) right_is_err_ident = !right_has_call;
+        TSNode value = right;
+        if (get_node_type(value) == "expression_list") {
+            uint32_t n = ts_node_named_child_count(value);
+            if (n > 0) value = ts_node_named_child(value, n - 1);
+        }
+        std::string_view vt = get_node_type(value);
+        if (vt == "call_expression") {
+            right_is_call = true;
+        } else if (vt == "type_assertion_expression" ||
+                   vt == "index_expression") {
+            return;  // ok-bool discard, not an error
+        } else if (is_identifier_type(vt) && iprefix(node_text(value), "err")) {
+            right_is_err_ident = true;  // `_ = err`
+        }
     }
-
-    if (!right_has_call && !right_is_err_ident) return;
+    if (!right_is_call && !right_is_err_ident) return;
 
     int line = line_of(node);
     std::string detail = "`" + std::string(node_text(node)) + "`";

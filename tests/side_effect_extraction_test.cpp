@@ -354,6 +354,47 @@ TEST_F(SideEffectExtraction, GoBlankSecondResultIsDroppedError) {
     EXPECT_EQ(count_findings(info->error_findings, EhSignal::DroppedError), 1);
 }
 
+// `v, _ := x.(T)` discards a type-assertion ok-bool, not an error.
+TEST_F(SideEffectExtraction, GoTypeAssertionBlankIsNotDroppedError) {
+    const auto* info = analyze(Language::Go, ".go",
+                               "package p\n"
+                               "func f(ctx context.Context) {\n"
+                               "\tval, _ := ctx.Value(key).(*Context)\n"
+                               "\tuse(val)\n"
+                               "}\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::DroppedError), 0);
+}
+
+// A middle blank with the error still captured last is not a drop:
+// `host, _, err := net.SplitHostPort(...)`.
+TEST_F(SideEffectExtraction, GoMiddleBlankWithErrCapturedIsNotDropped) {
+    const auto* info = analyze(Language::Go, ".go",
+                               "package p\n"
+                               "func f(addr string) error {\n"
+                               "\thost, _, err := net.SplitHostPort(addr)\n"
+                               "\tuse(host)\n"
+                               "\treturn err\n"
+                               "}\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::DroppedError), 0);
+}
+
+// `v, _ := m[k]` discards a map ok-bool.
+TEST_F(SideEffectExtraction, GoMapReadBlankIsNotDroppedError) {
+    const auto* info = analyze(Language::Go, ".go",
+                               "package p\n"
+                               "func f(m map[string]int) {\n"
+                               "\tv, _ := m[\"k\"]\n"
+                               "\tuse(v)\n"
+                               "}\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::DroppedError), 0);
+}
+
 TEST_F(SideEffectExtraction, GoCheckedErrIsNotDropped) {
     const auto* info = analyze(Language::Go, ".go",
                                "package p\n"
