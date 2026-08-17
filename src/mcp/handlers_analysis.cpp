@@ -1,6 +1,7 @@
 #include <lci/mcp/handlers_analysis.h>
 
 #include <algorithm>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -10,6 +11,7 @@
 #include <lci/language_map.h>
 #include <lci/analysis/codebase_intelligence.h>
 #include <lci/analysis/coupling_analyzer.h>
+#include <lci/analysis/error_handling_analyzer.h>
 #include <lci/analysis/feature_analyzer.h>
 #include <lci/analysis/health_analyzer.h>
 #include <lci/analysis/layer_analyzer.h>
@@ -122,9 +124,78 @@ nlohmann::json side_effect_to_json(const SideEffectInfo& info,
         item["exception_safe"] = info.error_handling.exception_safe;
         if (info.error_handling.defer_count > 0)
             item["defer_count"] = info.error_handling.defer_count;
+        if (info.error_handling.catch_count > 0)
+            item["catch_count"] = info.error_handling.catch_count;
+        if (info.error_handling.returns_error)
+            item["returns_error"] = true;
     }
 
+    auto findings_json = [](const std::vector<EhFinding>& v) {
+        nlohmann::json arr = nlohmann::json::array();
+        for (const auto& f : v) {
+            nlohmann::json j;
+            j["signal"] = std::string(to_string(f.signal));
+            j["severity"] = std::string(to_string(f.severity));
+            j["confidence"] = f.confidence;
+            j["line"] = f.line;
+            if (!f.detail.empty()) j["detail"] = f.detail;
+            arr.push_back(std::move(j));
+        }
+        return arr;
+    };
+    if (!info.error_findings.empty())
+        item["error_findings"] = findings_json(info.error_findings);
+    if (!info.resource_findings.empty())
+        item["resource_findings"] = findings_json(info.resource_findings);
+    if (!info.resource_acquires.empty())
+        item["resource_acquires"] =
+            static_cast<int>(info.resource_acquires.size());
+    if (!info.resource_releases.empty())
+        item["resource_releases"] =
+            static_cast<int>(info.resource_releases.size());
+
     return item;
+}
+
+/// JSON twin of the == ERROR HANDLING == / == RESOURCE MANAGEMENT ==
+/// sections — err-lookup ingests JSON, never parses LCF.
+nlohmann::json eh_findings_json(const std::vector<EhFindingEntry>& v) {
+    nlohmann::json arr = nlohmann::json::array();
+    for (const auto& f : v) {
+        nlohmann::json j;
+        j["severity"] = f.severity;
+        j["signal"] = f.signal;
+        j["symbol"] = f.symbol;
+        j["location"] = f.location;
+        if (!f.object_id.empty()) j["object_id"] = f.object_id;
+        if (!f.detail.empty()) j["detail"] = f.detail;
+        j["confidence"] = f.confidence;
+        arr.push_back(std::move(j));
+    }
+    return arr;
+}
+
+nlohmann::json error_handling_to_json(const ErrorHandlingSummary& s) {
+    nlohmann::json j;
+    j["score"] = s.score;
+    j["functions_scored"] = s.functions_scored;
+    j["throwers"] = s.throwers;
+    j["handled_ratio"] = s.handled_ratio;
+    j["swallow_sites"] = s.swallow_sites;
+    j["unchecked_errors"] = s.unchecked_errors;
+    j["findings"] = eh_findings_json(s.findings);
+    return j;
+}
+
+nlohmann::json resources_to_json(const ResourceSummary& s) {
+    nlohmann::json j;
+    j["score"] = s.score;
+    j["functions_scored"] = s.functions_scored;
+    j["acquisitions"] = s.acquisitions;
+    j["released_ratio"] = s.released_ratio;
+    j["guarded_ratio"] = s.guarded_ratio;
+    j["findings"] = eh_findings_json(s.findings);
+    return j;
 }
 
 /// Collects FileSymbolData from a MasterIndex for CI engine input.
@@ -616,6 +687,15 @@ ToolResult side_effect_summary(SideEffectAnalyzer& analyzer,
     response["total_count"] = total;
     response["mode"] = "summary";
     response["summary"] = std::move(summary);
+
+    // Error-handling + resource rollups (JSON twin of the code_insight
+    // sections; the natural err-lookup ingestion path).
+    if (indexer != nullptr && !analyzer.results().empty()) {
+        auto eh = ErrorHandlingAnalyzer::analyze(
+            analyzer, *indexer, indexer->config().project.root);
+        response["error_handling"] = error_handling_to_json(eh.errors);
+        response["resources"] = resources_to_json(eh.resources);
+    }
     return make_json_response(response);
 }
 
@@ -948,6 +1028,77 @@ void emit_git_hotspots(std::ostringstream& out,
                 << " severity=" << to_string(c.severity) << "\n";
         }
     }
+    out << "---\n";
+}
+
+// Shared finding-line renderer for the two sections below:
+//   [sev] signal: symbol (file:line) detail [o=id]
+void emit_eh_finding_lines(std::ostringstream& out,
+                           const std::vector<EhFindingEntry>& findings,
+                           size_t limit) {
+    size_t lim = std::min(findings.size(), limit);
+    for (size_t i = 0; i < lim; ++i) {
+        const auto& f = findings[i];
+        out << "  [" << f.severity << "] " << f.signal << ": " << f.symbol
+            << " (" << f.location << ")";
+        if (!f.detail.empty()) out << " " << f.detail;
+        if (!f.object_id.empty()) out << " [o=" << f.object_id << "]";
+        out << "\n";
+    }
+    if (findings.size() > lim) {
+        out << "  ... and " << (findings.size() - lim) << " more\n";
+    }
+}
+
+// == ERROR HANDLING == — repo/module error-handling scores + swallowed-error
+// findings (spec: docs/plans/2026-08-17-error-handling-score-design.md).
+// Production-only, deterministically sorted; locations always file:line.
+void emit_error_handling(std::ostringstream& out,
+                         const ErrorHandlingSummary& s, size_t max_findings) {
+    out << "== ERROR HANDLING ==\n";
+    out << "score=" << fmt2(s.score);
+    if (!s.module_scores.empty()) {
+        const auto& worst = s.module_scores.front();
+        const auto& best = s.module_scores.back();
+        out << " modules: worst=" << worst.first << "(" << fmt1(worst.second)
+            << ") best=" << best.first << "(" << fmt1(best.second) << ")";
+    }
+    out << "\n";
+    out << "throwers=" << s.throwers
+        << " handled_ratio=" << fmt2(s.handled_ratio)
+        << " swallow_sites=" << s.swallow_sites
+        << " unchecked_errors=" << s.unchecked_errors << "\n";
+    if (!s.findings.empty()) {
+        out << "findings:\n";
+        emit_eh_finding_lines(out, s.findings, max_findings);
+    }
+    if (!s.exposure.empty()) {
+        out << "exposure:\n";
+        for (const auto& e : s.exposure) {
+            out << "  api-reaches-swallow: " << e.api_symbol << " ("
+                << e.api_location << ") -> " << e.sink_symbol
+                << " swallow depth=" << e.depth << "\n";
+        }
+    }
+    out << "next: code_insight {\"mode\":\"detailed\",\"analysis\":"
+           "\"errors\"}\n";
+    out << "---\n";
+}
+
+// == RESOURCE MANAGEMENT == — acquire/release pairing score + potential-leak
+// findings. Same production/determinism rules as ERROR HANDLING.
+void emit_resource_management(std::ostringstream& out,
+                              const ResourceSummary& s, size_t max_findings) {
+    out << "== RESOURCE MANAGEMENT ==\n";
+    out << "score=" << fmt2(s.score) << " acquisitions=" << s.acquisitions
+        << " released_ratio=" << fmt2(s.released_ratio)
+        << " guarded_ratio=" << fmt2(s.guarded_ratio) << "\n";
+    if (!s.findings.empty()) {
+        out << "findings:\n";
+        emit_eh_finding_lines(out, s.findings, max_findings);
+    }
+    out << "next: code_insight {\"mode\":\"detailed\",\"analysis\":"
+           "\"resources\"}\n";
     out << "---\n";
 }
 
@@ -1307,7 +1458,8 @@ void emit_vocabulary(std::ostringstream& out, const NamingReport& nr) {
 void emit_summary(std::ostringstream& out,
                   const std::vector<FileSymbolData>& files,
                   std::string_view project_root, int file_count,
-                  int symbol_count) {
+                  int symbol_count,
+                  const ErrorHandlingAnalyzer::Result* eh = nullptr) {
     absl::flat_hash_map<std::string, int> lang_files;
     absl::flat_hash_set<std::string> dirs;
     int max_depth = 0;
@@ -1347,6 +1499,10 @@ void emit_summary(std::ostringstream& out,
         out << "langs:";
         for (const auto& [l, n] : langs) out << " " << l << "=" << n;
         out << "\n";
+    }
+    if (eh && eh->errors.functions_scored > 0) {
+        out << "error_handling=" << fmt2(eh->errors.score)
+            << " resources=" << fmt2(eh->resources.score) << "\n";
     }
     out << "---\n";
 }
@@ -1638,12 +1794,25 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
         bool objids = (hd && (!hd->detailed_smells.empty() ||
                               !hd->problematic_symbols.empty())) ||
                       !d.naming.outliers.empty();
+        // Error-handling + resource rollups (after HEALTH, before LOAD
+        // BEARING; also feeds the SUMMARY headline). Skipped when the
+        // side-effect analyzer holds no records — no stubbed zeros.
+        std::optional<ErrorHandlingAnalyzer::Result> eh;
+        if (analyzer && !analyzer->results().empty()) {
+            eh = ErrorHandlingAnalyzer::analyze(*analyzer, indexer,
+                                                project_root);
+        }
         emit_lcf_header(out, "unified", 1,
                         lcf_token_count(n_map, 0, hd != nullptr, 0, true));
-        emit_summary(out, files_data, project_root, file_count, symbol_count);
+        emit_summary(out, files_data, project_root, file_count, symbol_count,
+                     eh ? &*eh : nullptr);
         emit_repository_map(out, d.modules.modules);
         emit_entry_points(out, d.result.response.entry_points, project_root);
         if (hd) emit_health(out, *hd, &d.purity);
+        if (eh) {
+            emit_error_handling(out, eh->errors, 5);
+            emit_resource_management(out, eh->resources, 5);
+        }
         {
             auto sig = compute_graph_signals(indexer, files_data,
                                              project_root, 5, propagator);
@@ -1717,11 +1886,39 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                                                  params.value("detailed_mode", ""));
         if (detailed_mode.empty()) detailed_mode = "modules";
         if (detailed_mode != "modules" && detailed_mode != "layers" &&
-            detailed_mode != "features" && detailed_mode != "terms") {
+            detailed_mode != "features" && detailed_mode != "terms" &&
+            detailed_mode != "errors" && detailed_mode != "resources") {
             return make_error_response(
                 "code_insight",
                 "invalid detailed analysis '" + detailed_mode +
-                "', must be one of: modules, layers, features, terms");
+                "', must be one of: modules, layers, features, terms, "
+                "errors, resources");
+        }
+
+        if (detailed_mode == "errors" || detailed_mode == "resources") {
+            // Untruncated error-handling / resource finding lists. Fail loud
+            // when the side-effect analyzer holds no records (Karpathy #6) —
+            // an empty section would read as "no findings".
+            if (!analyzer || analyzer->results().empty()) {
+                return make_error_response(
+                    "code_insight",
+                    "analysis=" + detailed_mode +
+                        " requires side-effect records; the analyzer is "
+                        "unpopulated for this corpus");
+            }
+            auto eh = ErrorHandlingAnalyzer::analyze(*analyzer, indexer,
+                                                     project_root);
+            out << "LCF/1.0\nmode=detailed\nsub=" << detailed_mode
+                << "\ntier=2\ntokens=100\n---\n";
+            constexpr size_t kAll = static_cast<size_t>(-1);
+            if (detailed_mode == "errors") {
+                emit_error_handling(out, eh.errors, kAll);
+            } else {
+                emit_resource_management(out, eh.resources, kAll);
+            }
+            std::string body = out.str();
+            if (!body.empty() && body.back() == '\n') body.pop_back();
+            return ToolResult{std::move(body), false};
         }
 
         CodebaseIntelligenceParams dp;
@@ -1818,12 +2015,22 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
         bool objids = (hd && (!hd->detailed_smells.empty() ||
                               !hd->problematic_symbols.empty())) ||
                       !d.naming.outliers.empty();
+        std::optional<ErrorHandlingAnalyzer::Result> eh;
+        if (analyzer && !analyzer->results().empty()) {
+            eh = ErrorHandlingAnalyzer::analyze(*analyzer, indexer,
+                                                project_root);
+        }
         emit_lcf_header(out, "overview", 1,
                         lcf_token_count(n_map, 0, hd != nullptr, 0, false));
-        emit_summary(out, files_data, project_root, file_count, symbol_count);
+        emit_summary(out, files_data, project_root, file_count, symbol_count,
+                     eh ? &*eh : nullptr);
         emit_repository_map(out, d.modules.modules);
         emit_entry_points(out, d.result.response.entry_points, project_root);
         if (hd) emit_health(out, *hd, &d.purity);
+        if (eh) {
+            emit_error_handling(out, eh->errors, 5);
+            emit_resource_management(out, eh->resources, 5);
+        }
         {
             auto sig = compute_graph_signals(indexer, files_data,
                                              project_root, 5, propagator);
@@ -1919,7 +2126,10 @@ void register_analysis_handlers(McpServer& server,
          "structure, git_analyze, git_hotspots. See 'info code_insight'.",
          {{"mode", "string", "Analysis mode", ""},
           {"tier", "integer", "Analysis tier", ""},
-          {"analysis", "string", "Type of analysis", ""},
+          {"analysis", "string",
+           "Detailed analysis: modules, layers, features, terms, errors, "
+           "resources",
+           ""},
           {"metrics", "array", "Metrics to include", "string"},
           {"target", "string", "Target to analyze", ""},
           {"focus", "string", "Analysis focus", ""},
