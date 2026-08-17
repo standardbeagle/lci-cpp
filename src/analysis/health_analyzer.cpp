@@ -124,6 +124,7 @@ ComplexityMetrics HealthAnalyzer::calculate_complexity_from_files(
     std::vector<double> complexities;
     absl::flat_hash_map<std::string, int> distribution;
     std::vector<FunctionInfo> high_funcs;
+    double max_cc = 0.0;
 
     for (const auto& file : files) {
         for (const auto* sym : file.symbols) {
@@ -133,6 +134,7 @@ ComplexityMetrics HealthAnalyzer::calculate_complexity_from_files(
             if (cc <= 0) cc = 1;
             double c = static_cast<double>(cc);
             complexities.push_back(c);
+            if (c > max_cc) max_cc = c;
 
             if (cc <= ci_thresholds::kComplexityLow) {
                 distribution["low"]++;
@@ -175,6 +177,7 @@ ComplexityMetrics HealthAnalyzer::calculate_complexity_from_files(
     ComplexityMetrics result;
     result.average_cc = avg;
     result.median_cc = median;
+    result.max_cc = max_cc;
     result.percentiles["p50"] = median;
     result.percentiles["p75"] = avg * 1.2;
     result.percentiles["p90"] = avg * 1.5;
@@ -236,8 +239,13 @@ std::vector<Hotspot> HealthAnalyzer::identify_hotspots_from_files(
 // Overall health score
 // ---------------------------------------------------------------------------
 
+// D3 de-saturation: the score must discriminate. Every defect signal is a
+// deduction; there is no "mostly low complexity" bonus (the old +1.0 bonus
+// clamped every real-world repo to 10.00 while the same report showed cc=70
+// functions and god objects). 10.0 is reachable only with zero penalties.
 double HealthAnalyzer::calculate_overall_health_score(
-    const ComplexityMetrics& complexity, int /*total_files*/) {
+    const ComplexityMetrics& complexity, double tech_debt_ratio,
+    int problematic_symbol_count) {
 
     double score = 10.0;
 
@@ -273,13 +281,30 @@ double HealthAnalyzer::calculate_overall_health_score(
         score -= deduction;
     }
 
-    double low_ratio =
-        static_cast<double>(low) / static_cast<double>(total_functions);
-    if (low_ratio > 0.8) {
-        score += 1.0;
-    } else if (low_ratio > 0.6) {
-        score += 0.5;
+    // Worst-case complexity: a single cc=70 function is a real defect even
+    // when thousands of trivial functions dilute the ratios above.
+    if (complexity.max_cc > static_cast<double>(ci_thresholds::kComplexityHigh)) {
+        double deduction =
+            (complexity.max_cc -
+             static_cast<double>(ci_thresholds::kComplexityHigh)) *
+            0.04;
+        if (deduction > 2.5) deduction = 2.5;
+        score -= deduction;
     }
+
+    // Technical debt ratio (function population, see
+    // calculate_tech_debt_ratio_from_files).
+    if (tech_debt_ratio < 0.0) tech_debt_ratio = 0.0;
+    double debt_deduction = tech_debt_ratio * 4.0;
+    if (debt_deduction > 2.0) debt_deduction = 2.0;
+    score -= debt_deduction;
+
+    // Risk symbols above the cutoff.
+    if (problematic_symbol_count < 0) problematic_symbol_count = 0;
+    double risk_deduction =
+        static_cast<double>(problematic_symbol_count) * 0.2;
+    if (risk_deduction > 1.5) risk_deduction = 1.5;
+    score -= risk_deduction;
 
     if (score < 0.0) score = 0.0;
     if (score > ci_thresholds::kRiskScoreMax)
@@ -298,8 +323,12 @@ double HealthAnalyzer::calculate_tech_debt_ratio_from_files(
     int total = 0;
     int debt = 0;
 
+    // Debt is a function-level metric: counting every symbol (variables,
+    // fields, imports) in the denominator diluted a cc=70 repo to
+    // debt=0.00 (D3).
     for (const auto& file : files) {
         for (const auto* sym : file.symbols) {
+            if (!is_function_or_method(sym->symbol.type)) continue;
             total++;
             if (sym->complexity > ci_thresholds::kComplexityModerate ||
                 static_cast<int>(sym->incoming_ref_count) >
@@ -329,6 +358,7 @@ std::vector<std::string> HealthAnalyzer::identify_debt_components(
     for (const auto& file : files) {
         int count = 0;
         for (const auto* sym : file.symbols) {
+            if (!is_function_or_method(sym->symbol.type)) continue;
             if (sym->complexity > ci_thresholds::kComplexityModerate ||
                 static_cast<int>(sym->incoming_ref_count) >
                     ci_thresholds::kHighReferenceCount) {
@@ -379,11 +409,17 @@ std::vector<CodeSmellEntry> HealthAnalyzer::calculate_detailed_code_smells(
             std::filesystem::path(file.path).filename().string();
 
         for (const auto* sym : file.symbols) {
+            // Empty names are extraction gaps — not actionable, fail fast
+            // by filtering them out of the report.
+            if (sym->symbol.name.empty()) continue;
             if (is_test_helper_function(sym->symbol.name)) continue;
 
-            // Long function
+            bool callable = is_function_or_method(sym->symbol.type);
+
+            // Long function — functions/methods only; a trait/class/type
+            // declaration spanning many lines is not a long function.
             int line_count = sym->symbol.end_line - sym->symbol.line;
-            if (line_count > ci_thresholds::kLongFunction) {
+            if (callable && line_count > ci_thresholds::kLongFunction) {
                 std::string sev = (line_count > ci_thresholds::kLongFunctionHighSev)
                                       ? "high"
                                       : "medium";
@@ -399,10 +435,12 @@ std::vector<CodeSmellEntry> HealthAnalyzer::calculate_detailed_code_smells(
                 smells.push_back(std::move(e));
             }
 
-            // High complexity
-            if (sym->complexity > ci_thresholds::kHighComplexity) {
+            // High complexity — same threshold as the "high" bucket of the
+            // complexity distribution, so smell counts and distribution
+            // never contradict each other (single source of truth).
+            if (callable && sym->complexity > ci_thresholds::kComplexityHigh) {
                 std::string sev =
-                    (sym->complexity > ci_thresholds::kHighComplexityHighSev)
+                    (sym->complexity > 2 * ci_thresholds::kComplexityHigh)
                         ? "high"
                         : "medium";
                 CodeSmellEntry e;
@@ -442,9 +480,12 @@ std::vector<CodeSmellEntry> HealthAnalyzer::calculate_detailed_code_smells(
             // "shotgun-surgery", but the metric is incoming-ref count — the
             // opposite of shotgun surgery, which is one-change-many-edits.
             // The C++ port uses the accurate name; parity descriptors
-            // normalize the two labels.)
+            // normalize the two labels.) Fields, variables, and type
+            // declarations are excluded: heavy reference of data/type
+            // declarations is normal, not a smell.
             int impact = static_cast<int>(sym->incoming_ref_count);
-            if (impact > ci_thresholds::kShotgunSurgery) {
+            if ((callable || is_class_or_struct(sym->symbol.type)) &&
+                impact > ci_thresholds::kShotgunSurgery) {
                 std::string sev =
                     (impact > ci_thresholds::kShotgunSurgeryHighSev)
                         ? "high"
@@ -463,8 +504,11 @@ std::vector<CodeSmellEntry> HealthAnalyzer::calculate_detailed_code_smells(
         }
     }
 
-    return sort_and_limit_smells(std::move(smells),
-                                 ci_thresholds::kMaxDetailedSmells);
+    // Full sorted set — callers truncate for display. Counting a truncated
+    // list produced the "smells: high-complexity=1 vs distribution: high=3"
+    // contradiction (D3).
+    const int all = static_cast<int>(smells.size());
+    return sort_and_limit_smells(std::move(smells), all);
 }
 
 int HealthAnalyzer::count_child_methods(
@@ -543,6 +587,8 @@ std::vector<ProblematicSymbol> HealthAnalyzer::identify_problematic_symbols(
             std::filesystem::path(file.path).filename().string();
 
         for (const auto* sym : file.symbols) {
+            // Empty names are extraction gaps — filter, don't report.
+            if (sym->symbol.name.empty()) continue;
             if (is_test_helper_function(sym->symbol.name)) continue;
 
             auto [tags, risk] = calculate_symbol_risk_and_tags(*sym);

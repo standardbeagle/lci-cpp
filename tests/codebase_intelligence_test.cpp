@@ -101,8 +101,8 @@ TEST(HealthAnalyzer, HealthScoreAllLowComplexity) {
     cm.distribution["medium"] = 0;
     cm.distribution["high"] = 0;
 
-    // score starts at 10, low_ratio=1.0 > 0.8 so +1.0, capped at 10
-    double score = HealthAnalyzer::calculate_overall_health_score(cm, 10);
+    // no penalties -> perfect score (no bonus needed, none applied)
+    double score = HealthAnalyzer::calculate_overall_health_score(cm, 0.0, 0);
     EXPECT_DOUBLE_EQ(score, 10.0);
 }
 
@@ -113,7 +113,7 @@ TEST(HealthAnalyzer, HealthScoreAllHighComplexity) {
     cm.distribution["medium"] = 0;
     cm.distribution["high"] = 100;
 
-    double score = HealthAnalyzer::calculate_overall_health_score(cm, 10);
+    double score = HealthAnalyzer::calculate_overall_health_score(cm, 0.0, 0);
     // 10 - (1.0 * 4.0) - ((25-10)*0.15 = 2.25) = 3.75
     EXPECT_NEAR(score, 3.75, 0.01);
 }
@@ -125,10 +125,9 @@ TEST(HealthAnalyzer, HealthScoreMixedComplexity) {
     cm.distribution["medium"] = 30;
     cm.distribution["high"] = 10;
 
-    double score = HealthAnalyzer::calculate_overall_health_score(cm, 10);
+    double score = HealthAnalyzer::calculate_overall_health_score(cm, 0.0, 0);
     // high_ratio=0.1 => -0.4, med_ratio=0.3 => -0.45
     // avg=8 <= 10 => no deduction
-    // low_ratio=0.6 not strictly > 0.6 => no bonus
     // 10 - 0.4 - 0.45 = 9.15
     EXPECT_NEAR(score, 9.15, 0.01);
 }
@@ -140,7 +139,7 @@ TEST(HealthAnalyzer, HealthScoreClampedToZero) {
     cm.distribution["medium"] = 0;
     cm.distribution["high"] = 100;
 
-    double score = HealthAnalyzer::calculate_overall_health_score(cm, 10);
+    double score = HealthAnalyzer::calculate_overall_health_score(cm, 0.0, 0);
     // 10 - 4.0 - 3.0 (capped) = 3.0
     EXPECT_NEAR(score, 3.0, 0.01);
 }
@@ -148,8 +147,151 @@ TEST(HealthAnalyzer, HealthScoreClampedToZero) {
 TEST(HealthAnalyzer, HealthScoreEmptyDistribution) {
     ComplexityMetrics cm;
     cm.average_cc = 0.0;
-    double score = HealthAnalyzer::calculate_overall_health_score(cm, 0);
+    double score = HealthAnalyzer::calculate_overall_health_score(cm, 0.0, 0);
     EXPECT_DOUBLE_EQ(score, 10.0);
+}
+
+// ===========================================================================
+// Health analyzer - score de-saturation (D3): monotonicity properties and
+// criteria-case regressions on synthetic metrics
+// ===========================================================================
+
+namespace score_props {
+
+ComplexityMetrics healthy_baseline() {
+    ComplexityMetrics cm;
+    cm.average_cc = 3.0;
+    cm.max_cc = 5.0;
+    cm.distribution["low"] = 500;
+    cm.distribution["medium"] = 0;
+    cm.distribution["high"] = 0;
+    return cm;
+}
+
+}  // namespace score_props
+
+TEST(HealthAnalyzer, HealthScoreMonotoneDecreasingInMaxCC) {
+    double prev = 11.0;
+    for (double max_cc : {5.0, 20.0, 30.0, 45.0, 70.0, 90.0}) {
+        auto cm = score_props::healthy_baseline();
+        cm.max_cc = max_cc;
+        double s = HealthAnalyzer::calculate_overall_health_score(cm, 0.0, 0);
+        EXPECT_LE(s, prev) << "max_cc=" << max_cc;
+        prev = s;
+    }
+    // and strictly below perfect once past the high threshold
+    auto cm = score_props::healthy_baseline();
+    cm.max_cc = 70.0;
+    EXPECT_LT(HealthAnalyzer::calculate_overall_health_score(cm, 0.0, 0),
+              10.0);
+}
+
+TEST(HealthAnalyzer, HealthScoreMonotoneDecreasingInDebtRatio) {
+    auto cm = score_props::healthy_baseline();
+    double prev = 11.0;
+    for (double debt : {0.0, 0.05, 0.1, 0.2, 0.4, 0.8}) {
+        double s = HealthAnalyzer::calculate_overall_health_score(cm, debt, 0);
+        EXPECT_LE(s, prev) << "debt=" << debt;
+        prev = s;
+    }
+    EXPECT_LT(HealthAnalyzer::calculate_overall_health_score(cm, 0.2, 0),
+              HealthAnalyzer::calculate_overall_health_score(cm, 0.0, 0));
+}
+
+TEST(HealthAnalyzer, HealthScoreMonotoneDecreasingInProblematicCount) {
+    auto cm = score_props::healthy_baseline();
+    double prev = 11.0;
+    for (int count : {0, 1, 3, 5, 7, 20}) {
+        double s =
+            HealthAnalyzer::calculate_overall_health_score(cm, 0.0, count);
+        EXPECT_LE(s, prev) << "count=" << count;
+        prev = s;
+    }
+    EXPECT_LT(HealthAnalyzer::calculate_overall_health_score(cm, 0.0, 5),
+              HealthAnalyzer::calculate_overall_health_score(cm, 0.0, 0));
+}
+
+TEST(HealthAnalyzer, HealthScoreMonotoneDecreasingInHighComplexityCount) {
+    double prev = 11.0;
+    for (int high : {0, 5, 20, 50, 100}) {
+        auto cm = score_props::healthy_baseline();
+        cm.distribution["high"] = high;
+        double s = HealthAnalyzer::calculate_overall_health_score(cm, 0.0, 0);
+        EXPECT_LE(s, prev) << "high=" << high;
+        prev = s;
+    }
+}
+
+TEST(HealthAnalyzer, HealthScorePerfectOnlyWhenClean) {
+    // 10.0 requires zero penalty signals; any defect input drops it.
+    auto clean = score_props::healthy_baseline();
+    EXPECT_DOUBLE_EQ(
+        HealthAnalyzer::calculate_overall_health_score(clean, 0.0, 0), 10.0);
+
+    auto dirty = clean;
+    dirty.max_cc = 70.0;
+    EXPECT_LT(HealthAnalyzer::calculate_overall_health_score(dirty, 0.05, 5),
+              10.0);
+}
+
+TEST(HealthAnalyzer, HealthScoreDiscriminatesCriteriaRepos) {
+    // chi-like: mostly low, one cc~25 outlier, little debt, 2 risk symbols.
+    ComplexityMetrics chi;
+    chi.average_cc = 3.0;
+    chi.max_cc = 25.0;
+    chi.distribution["low"] = 700;
+    chi.distribution["medium"] = 25;
+    chi.distribution["high"] = 5;
+    double chi_score =
+        HealthAnalyzer::calculate_overall_health_score(chi, 0.02, 2);
+
+    // guzzle-like: cc=70 monster (applyHandlerOptions), 3 high funcs,
+    // 5+ risk symbols, real debt.
+    ComplexityMetrics guzzle;
+    guzzle.average_cc = 4.0;
+    guzzle.max_cc = 70.0;
+    guzzle.distribution["low"] = 900;
+    guzzle.distribution["medium"] = 60;
+    guzzle.distribution["high"] = 3;
+    double guzzle_score =
+        HealthAnalyzer::calculate_overall_health_score(guzzle, 0.06, 5);
+
+    // pocketbase-like: 115-method god object, cc extremes, many risk syms.
+    ComplexityMetrics pb;
+    pb.average_cc = 4.5;
+    pb.max_cc = 60.0;
+    pb.distribution["low"] = 3000;
+    pb.distribution["medium"] = 250;
+    pb.distribution["high"] = 40;
+    double pb_score =
+        HealthAnalyzer::calculate_overall_health_score(pb, 0.09, 8);
+
+    // The old formula scored all three exactly 10.00. The scale must
+    // discriminate: none saturated, ordered by defect load.
+    EXPECT_LT(chi_score, 10.0);
+    EXPECT_GT(chi_score, guzzle_score);
+    EXPECT_GT(guzzle_score, 0.0);
+    EXPECT_GT(chi_score, pb_score);
+    EXPECT_LT(guzzle_score, 8.0);
+    EXPECT_LT(pb_score, 8.0);
+}
+
+TEST(HealthAnalyzer, ComplexityFromFilesTracksMaxCC) {
+    EnhancedSymbol a, b;
+    a.symbol.name = "small";
+    a.symbol.type = SymbolType::Function;
+    a.complexity = 3;
+    b.symbol.name = "applyHandlerOptions";
+    b.symbol.type = SymbolType::Function;
+    b.complexity = 70;
+
+    FileSymbolData fsd;
+    fsd.path = "client.php";
+    fsd.symbols = {&a, &b};
+
+    HealthAnalyzer ha;
+    auto cm = ha.calculate_complexity_from_files({fsd});
+    EXPECT_DOUBLE_EQ(cm.max_cc, 70.0);
 }
 
 // ===========================================================================
@@ -377,7 +519,8 @@ TEST(HealthAnalyzer, CodeSmellHighComplexity) {
     for (const auto& s : smells) {
         if (s.type == "high-complexity") {
             found = true;
-            EXPECT_EQ(s.severity, "high");
+            // 25 > kComplexityHigh (20) but <= 40 -> medium severity
+            EXPECT_EQ(s.severity, "medium");
         }
     }
     EXPECT_TRUE(found);
@@ -437,8 +580,14 @@ TEST(HealthAnalyzer, SmellsLimitedToMax) {
     fsd.symbols = ptrs;
 
     HealthAnalyzer ha;
+    // The analyzer returns the FULL set (20 long-function + 20
+    // high-complexity) so counts stay truthful; display truncation is the
+    // caller's job via sort_and_limit_smells.
     auto smells = ha.calculate_detailed_code_smells({fsd});
-    EXPECT_LE(static_cast<int>(smells.size()),
+    EXPECT_EQ(smells.size(), 40u);
+    auto limited = HealthAnalyzer::sort_and_limit_smells(
+        std::move(smells), ci_thresholds::kMaxDetailedSmells);
+    EXPECT_LE(static_cast<int>(limited.size()),
               ci_thresholds::kMaxDetailedSmells);
 }
 
