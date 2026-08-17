@@ -134,8 +134,10 @@ class CodebaseIntelligenceEngine {
 
     /// Builds structure analysis (directory tree exploration). `file_paths`
     /// is the full set of indexed file paths (relativized against
-    /// `project_root`); `file_count` and `total_functions` populate the
-    /// summary line. Populates structure_analysis. All inputs are required —
+    /// `project_root`). The dir/file census derives from `file_paths` and the
+    /// symbol/function census from `files`, so the counts agree with the
+    /// overview repository map (D4 single source of truth — callers no longer
+    /// inject counts). Populates structure_analysis. All inputs are required —
     /// they come from a live index, so this builder is only reachable through
     /// the index-backed caller (the MCP handler); an empty `file_paths` would
     /// yield an empty tree, so it is not defaulted.
@@ -149,8 +151,7 @@ class CodebaseIntelligenceEngine {
         const std::vector<FileSymbolData>& files,
         const std::vector<std::string>& file_paths,
         const std::vector<PathAttr>& file_attrs,
-        std::string_view project_root, int file_count,
-        int total_functions) const;
+        std::string_view project_root) const;
 
 
   private:

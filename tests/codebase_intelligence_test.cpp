@@ -1408,8 +1408,7 @@ TEST(CIEngine, BuildStructurePopulatedWithFilePaths) {
                                            "/proj/src/util.go",
                                            "/proj/cmd/main.go"};
 
-    auto resp = engine.build_structure(params, {fsd}, file_paths, {}, "/proj",
-                                       /*file_count=*/3, /*total_functions=*/1);
+    auto resp = engine.build_structure(params, {fsd}, file_paths, {}, "/proj");
     // With real file paths the tree is populated, not an empty dirs=0 shell.
     ASSERT_TRUE(resp.structure_analysis.has_value());
     EXPECT_EQ(resp.structure_analysis->file_count, 3);
@@ -1434,8 +1433,7 @@ TEST(CIEngine, BuildStructureCategorizesViaClassifyFile) {
         "/proj/config/settings.json",    // .json extension -> config
     };
 
-    auto resp = engine.build_structure(params, {}, file_paths, {}, "/proj",
-                                       /*file_count=*/4, /*total_functions=*/0);
+    auto resp = engine.build_structure(params, {}, file_paths, {}, "/proj");
     ASSERT_TRUE(resp.structure_analysis.has_value());
     const auto& s = *resp.structure_analysis;
 
@@ -1466,8 +1464,7 @@ TEST(CIEngine, BuildStructureRoutesUnknownToOther) {
         "/proj/src/lib.cpp",        // .cpp -> code
     };
 
-    auto resp = engine.build_structure(params, {}, file_paths, {}, "/proj",
-                                       /*file_count=*/4, /*total_functions=*/0);
+    auto resp = engine.build_structure(params, {}, file_paths, {}, "/proj");
     ASSERT_TRUE(resp.structure_analysis.has_value());
     const auto& s = *resp.structure_analysis;
 
@@ -1477,6 +1474,83 @@ TEST(CIEngine, BuildStructureRoutesUnknownToOther) {
     EXPECT_EQ(s.code, 1);
     // Guard against re-inventing the removed README->docs rule.
     EXPECT_EQ(s.docs, 0);
+}
+
+// ===========================================================================
+// D4 — single count census across modes (repo-qa ANALYSIS-insight-verification)
+// ===========================================================================
+
+// Structure's `dirs=` must be the FULL directory census (root plus every
+// distinct ancestor directory of an indexed file), not just the number of
+// top-level path segments. On real corpora the top-level-only figure
+// understated wildly (chi: 4 vs ~21 real dirs; pocketbase: 12 vs 174).
+TEST(CIEngine, StructureDirCountIsFullDirectoryCensus) {
+    CodebaseIntelligenceEngine engine;
+    CodebaseIntelligenceParams params;
+    params.mode = "structure";
+
+    std::vector<std::string> file_paths = {
+        "/proj/a.go",                 // dir: .
+        "/proj/src/core/x.go",        // dirs: src, src/core
+        "/proj/src/core/db/y.go",     // dir:  src/core/db
+        "/proj/src/util.go",          //       (src already seen)
+        "/proj/cmd/main.go",          // dir:  cmd
+    };
+    auto resp = engine.build_structure(params, {}, file_paths, {}, "/proj");
+    ASSERT_TRUE(resp.structure_analysis.has_value());
+    // Census: ".", "src", "src/core", "src/core/db", "cmd" -> 5 directories.
+    EXPECT_EQ(resp.structure_analysis->dir_count, 5);
+    EXPECT_EQ(resp.structure_analysis->file_count, 5);
+    EXPECT_EQ(resp.structure_analysis->max_depth, 3);
+}
+
+// Structure's `symbols=` and overview's repository-map `total_symbols` must
+// agree: both are the count of ALL symbols in the corpus, derived from the
+// same file/symbol data. The old wiring fed structure a functions-only count
+// (guzzle: structure symbols=16 vs unified symbols=1205) and even that count
+// excluded methods.
+TEST(CIEngine, StructureAndOverviewAgreeOnSymbolCount) {
+    CodebaseIntelligenceEngine engine;
+
+    EnhancedSymbol fn;
+    fn.symbol.name = "Handle";
+    fn.symbol.type = SymbolType::Function;
+    EnhancedSymbol method;
+    method.symbol.name = "Serve";
+    method.symbol.type = SymbolType::Method;
+    EnhancedSymbol cls;
+    cls.symbol.name = "Server";
+    cls.symbol.type = SymbolType::Class;
+    FileSymbolData fsd;
+    fsd.path = "src/server.go";
+    fsd.symbols = {&fn, &method, &cls};
+    std::vector<FileSymbolData> files = {fsd};
+
+    CodebaseIntelligenceParams op;
+    op.mode = "overview";
+    op.include.repository_map = true;
+    auto overview = engine.build_overview(op, files, /*file_count=*/1,
+                                          /*symbol_count=*/0);
+    ASSERT_NE(overview.repository_map, nullptr);
+
+    CodebaseIntelligenceParams sp;
+    sp.mode = "structure";
+    std::vector<std::string> file_paths = {"/proj/src/server.go"};
+    // The handler's old wiring passed a functions-only count here (1: it even
+    // excluded the method). build_structure must not trust it — the symbol
+    // census comes from `files`, the same source overview counts from.
+    auto structure = engine.build_structure(sp, files, file_paths, {}, "/proj");
+    ASSERT_TRUE(structure.structure_analysis.has_value());
+
+    EXPECT_EQ(overview.repository_map->total_symbols, 3);
+    EXPECT_EQ(structure.structure_analysis->symbol_count,
+              overview.repository_map->total_symbols);
+    // The function census stays available, explicitly labeled, and counts
+    // methods as functions (is_function_like), matching overview's
+    // total_functions.
+    EXPECT_EQ(structure.structure_analysis->function_count, 2);
+    EXPECT_EQ(structure.structure_analysis->function_count,
+              overview.repository_map->total_functions);
 }
 
 TEST(CIEngine, GitAnalyzeModeDispatch) {

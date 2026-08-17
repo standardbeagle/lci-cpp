@@ -483,9 +483,14 @@ struct StatisticsReport {
 /// Directory/file-type breakdown for the `structure` mode. `types` is sorted
 /// by extension ascending; `top_dirs` is sorted by file count descending.
 struct StructureAnalysis {
+    // dir_count/file_count/symbol_count are the corpus census — one source of
+    // truth shared with the overview repository map (D4: modes must agree).
+    // dir_count counts the root plus every distinct ancestor directory of an
+    // indexed file, not just top-level segments (those live in top_dirs).
     int dir_count{};
     int file_count{};
-    int symbol_count{};
+    int symbol_count{};   // ALL symbols, same census as RepositoryMap
+    int function_count{}; // function-like (Function|Method) subset, explicit
     int max_depth{};
     std::vector<std::pair<std::string, int>> types;
     int code{};
