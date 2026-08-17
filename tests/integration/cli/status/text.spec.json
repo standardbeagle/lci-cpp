@@ -16,7 +16,7 @@
     "exit"
   ],
   "parse": "text",
-  "_rationale": "QA-discovered divergence from a direct Go-vs-C++ CLI sweep. Both binaries implement `status`, but the human-readable output differs materially: Go reports goroutines and three memory lines; C++ reports threads and RSS only.",
+  "_rationale": "QA-discovered divergence from a direct Go-vs-C++ CLI sweep. Both binaries implement `status`, but the human-readable output differs materially: Go reports goroutines and three memory lines; C++ reports threads and RSS only. Index size is a real, platform-dependent byte census since the index_size_bytes fix \u2014 stripped like the other machine-varying lines.",
   "tiers": {},
   "tolerances": {
     "score_abs": 0.0,
@@ -24,6 +24,12 @@
   },
   "expect_exit": 0,
   "text_normalize": {
-    "strip_lines": ["Uptime:", "Build time:", "Threads:", "RSS:"]
+    "strip_lines": [
+      "Uptime:",
+      "Build time:",
+      "Threads:",
+      "RSS:",
+      "Index size:"
+    ]
   }
 }

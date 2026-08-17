@@ -6,16 +6,28 @@
   "go_binary": "${LCI_GO}",
   "cpp_binary": "${LCI_CPP}",
   "invocation": {
-    "args": ["/stats"],
+    "args": [
+      "/stats"
+    ],
     "cwd": "${CORPUS}"
   },
-  "capture": ["stdout", "exit"],
+  "capture": [
+    "stdout",
+    "exit"
+  ],
   "parse": "json",
   "tiers": {
-    "stable": ["index_size_bytes"],
+    "stable": [
+      "index_size_bytes"
+    ],
     "ignore": [
-      "pid", "start_time", "uptime_ms", "elapsed_ms", "request_id",
-      "timestamp", "schema_version",
+      "pid",
+      "start_time",
+      "uptime_ms",
+      "elapsed_ms",
+      "request_id",
+      "timestamp",
+      "schema_version",
       "uptime_seconds",
       "build_duration_ms",
       "file_count",
@@ -27,9 +39,14 @@
       "num_goroutines",
       "num_threads",
       "search_count",
-      "avg_search_time_ms"
-    ]
+      "avg_search_time_ms",
+      "index_size_bytes"
+    ],
+    "_rationale_index_size_bytes": "Real platform-dependent byte census since the index_size_bytes fix (was hardcoded 0) \u2014 mask rather than pin."
   },
-  "tolerances": {"score_abs": 0.05, "timed_max_ms": 60000},
+  "tolerances": {
+    "score_abs": 0.05,
+    "timed_max_ms": 60000
+  },
   "expect_exit": 200
 }

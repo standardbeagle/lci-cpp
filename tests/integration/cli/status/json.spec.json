@@ -24,8 +24,10 @@
       "uptime_seconds",
       "build_duration_ms",
       "memory_rss_mb",
-      "num_threads"
-    ]
+      "num_threads",
+      "index_size_bytes"
+    ],
+    "_rationale_index_size_bytes": "index_size_bytes is now a real byte census (was hardcoded 0); it sums sizeof(EnhancedSymbol)/StoredRef terms, so the value is platform- and ABI-dependent \u2014 mask rather than pin."
   },
   "tolerances": {
     "score_abs": 0.0,
