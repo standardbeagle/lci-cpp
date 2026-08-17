@@ -2,7 +2,7 @@
   "result": {
     "content": [
       {
-        "text": "{\"mode\":\"summary\",\"results\":null,\"summary\":{\"impure_functions\":0,\"pure_functions\":4,\"purity_ratio\":1.0,\"total_functions\":4},\"total_count\":4}",
+        "text": "{\"error_handling\":{\"findings\":[],\"functions_scored\":4,\"handled_ratio\":0.0,\"score\":10.0,\"swallow_sites\":0,\"throwers\":0,\"unchecked_errors\":0},\"mode\":\"summary\",\"resources\":{\"acquisitions\":0,\"findings\":[],\"functions_scored\":4,\"guarded_ratio\":0.0,\"released_ratio\":0.0,\"score\":10.0},\"results\":null,\"summary\":{\"impure_functions\":0,\"pure_functions\":4,\"purity_ratio\":1.0,\"total_functions\":4},\"total_count\":4}",
         "type": "text"
       }
     ]
