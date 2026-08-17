@@ -9,6 +9,7 @@ namespace lci {
 
 MasterIndex::MasterIndex(const Config& config)
     : config_(config),
+      path_classifier_(config.attributes),
       ref_tracker_(&symbol_location_index_),
       file_content_store_(std::make_shared<FileContentStore>(
           static_cast<int64_t>(config.performance.max_memory_mb) * 1024 * 1024)),
@@ -162,6 +163,10 @@ bool MasterIndex::index_directory(const std::string& root) {
         if (!p.empty()) {
             new_snapshot->file_map[p] = fid;
             new_snapshot->reverse_file_map[fid] = p;
+            PathAttr attr = classify_file_attr(p, fid);
+            if (attr != PathAttr::Production) {
+                new_snapshot->file_attrs[fid] = attr;
+            }
         }
     }
 
@@ -381,6 +386,7 @@ bool MasterIndex::remove_file(const std::string& path) {
     auto new_snap = std::make_shared<FileSnapshot>(*snap);
     new_snap->file_map.erase(path);
     new_snap->reverse_file_map.erase(file_id);
+    new_snap->file_attrs.erase(file_id);
     snapshot_.store(std::move(new_snap), std::memory_order_release);
 
     processed_files_.fetch_sub(1, std::memory_order_relaxed);
@@ -466,7 +472,30 @@ std::shared_ptr<FileContentStore> MasterIndex::file_content_store_ptr() {
 
 const Config& MasterIndex::config() const { return config_; }
 
+PathAttr MasterIndex::get_file_attr(FileID file_id) const {
+    return load_snapshot()->attr_of(file_id);
+}
+
 // -- Private helpers ----------------------------------------------------------
+
+PathAttr MasterIndex::classify_file_attr(const std::string& path,
+                                         FileID file_id) const {
+    // Repo-relative view of the path for the classifier (its builtin rules
+    // key on segments like "vendor/", "_examples/" from the project root).
+    std::string_view rel = path;
+    const std::string& root = config_.project.root;
+    if (!root.empty() && rel.rfind(root, 0) == 0) {
+        rel.remove_prefix(root.size());
+        while (!rel.empty() && rel.front() == '/') rel.remove_prefix(1);
+    }
+    // Content heuristics (minified single-line, generated header) read the
+    // already-stored content — index write path only, never on reads.
+    std::string_view content;
+    if (file_id != 0 && file_content_store_) {
+        content = file_content_store_->get_content(file_id);
+    }
+    return path_classifier_.classify(rel, content);
+}
 
 void MasterIndex::update_snapshot_for_file(const std::string& path,
                                             FileID new_id, FileID old_id,
@@ -477,10 +506,17 @@ void MasterIndex::update_snapshot_for_file(const std::string& path,
     if (existed) {
         new_snap->file_map.erase(path);
         new_snap->reverse_file_map.erase(old_id);
+        new_snap->file_attrs.erase(old_id);
     }
 
     new_snap->file_map[path] = new_id;
     new_snap->reverse_file_map[new_id] = path;
+    PathAttr attr = classify_file_attr(path, new_id);
+    if (attr != PathAttr::Production) {
+        new_snap->file_attrs[new_id] = attr;
+    } else {
+        new_snap->file_attrs.erase(new_id);
+    }
 
     snapshot_.store(std::move(new_snap), std::memory_order_release);
 }
