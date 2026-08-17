@@ -63,12 +63,17 @@ bool iprefix(std::string_view name, std::string_view prefix) {
     return true;
 }
 
-// Log-category callee (bare last segment): the log-and-swallow signal.
+// Log/report-category callee (bare last segment): the log-and-swallow
+// signal. Error-named reporters (checkApiError, handleError, reportError)
+// surface the error to a human — same credit tier as logging.
 bool is_log_callee(std::string_view callee) {
     static constexpr std::string_view log_prefixes[] = {
         "log", "print", "puts", "warn", "debug", "trace", "console"};
     for (auto p : log_prefixes) {
         if (iprefix(callee, p)) return true;
+    }
+    for (size_t i = 0; i + 5 <= callee.size(); ++i) {
+        if (iprefix(callee.substr(i), "error")) return true;
     }
     return false;
 }

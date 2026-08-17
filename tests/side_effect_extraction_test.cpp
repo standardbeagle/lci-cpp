@@ -224,6 +224,21 @@ TEST_F(SideEffectExtraction, JsLogOnlyCatchIsLogAndSwallow) {
     EXPECT_EQ(count_findings(info->error_findings, EhSignal::EmptyCatch), 0);
 }
 
+// pocketbase class: `catch (err) { app.checkApiError(err); }` reports the
+// error — a log/report credit (med), not a blind catch-and-continue (high).
+TEST_F(SideEffectExtraction, JsErrorReporterCalleeIsLogAndSwallow) {
+    const auto* info = analyze(Language::JavaScript, ".js",
+                               "function f() {\n"
+                               "  try { g(); } catch (err) { "
+                               "app.checkApiError(err); }\n"
+                               "}\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::LogAndSwallow), 1);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::CatchAndContinue),
+              0);
+}
+
 TEST_F(SideEffectExtraction, JsCatchWithWorkIsCatchAndContinue) {
     const auto* info = analyze(Language::JavaScript, ".js",
                                "function f() {\n"
