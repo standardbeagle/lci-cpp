@@ -49,6 +49,7 @@ add_executable(lci_tests
     search_engine_test.cpp
     semantic_test.cpp
     side_effect_analyzer_test.cpp
+    side_effect_extraction_test.cpp
     linker_engine_test.cpp
     go_js_linker_test.cpp
     python_csharp_linker_test.cpp

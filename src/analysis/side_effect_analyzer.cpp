@@ -75,6 +75,139 @@ PurityLevel compute_purity_level(uint32_t categories, bool has_unresolved) {
     return PurityLevel::InternallyPure;
 }
 
+namespace {
+// Case-insensitive ASCII prefix match shared by the resource tables.
+bool iprefix(std::string_view name, std::string_view prefix) {
+    if (name.size() < prefix.size()) return false;
+    for (size_t i = 0; i < prefix.size(); ++i) {
+        char a = static_cast<char>(
+            std::tolower(static_cast<unsigned char>(name[i])));
+        if (a != prefix[i]) return false;
+    }
+    return true;
+}
+}  // namespace
+
+ResourceOpKind classify_resource_callee(std::string_view callee) {
+    if (callee.empty()) return ResourceOpKind::None;
+    // Release first: "close" must not be shadowed by any acquire prefix.
+    static constexpr std::string_view release_prefixes[] = {
+        "close",  "fclose",     "unlock",   "release", "free",
+        "munmap", "disconnect", "shutdown", "dispose"};
+    for (auto p : release_prefixes) {
+        if (iprefix(callee, p)) return ResourceOpKind::Release;
+    }
+    static constexpr std::string_view acquire_prefixes[] = {
+        "open",   "fopen",  "connect", "dial",  "lock",
+        "acquire", "malloc", "calloc",  "mmap",  "socket"};
+    for (auto p : acquire_prefixes) {
+        if (iprefix(callee, p)) return ResourceOpKind::Acquire;
+    }
+    return ResourceOpKind::None;
+}
+
+void classify_catch_site(const CatchSiteInfo& site, std::vector<EhFinding>& out) {
+    auto add = [&](EhSignal sig, FindingSeverity sev, double conf) {
+        EhFinding f;
+        f.signal = sig;
+        f.severity = sev;
+        f.confidence = conf;
+        f.line = site.line;
+        if (!site.caught_type.empty()) f.detail = "caught=" + site.caught_type;
+        out.push_back(std::move(f));
+    };
+
+    if (site.body_empty) {
+        add(EhSignal::EmptyCatch, FindingSeverity::High, 0.9);
+    } else if (site.has_rethrow) {
+        if (!site.rethrow_uses_cause)
+            add(EhSignal::RethrowNoCause, FindingSeverity::Low, 0.4);
+    } else if (site.has_return) {
+        // Error may be surfaced through the return value — no swallow claim.
+    } else if (site.has_log_call && !site.has_other_call) {
+        add(EhSignal::LogAndSwallow, FindingSeverity::Med, 0.6);
+    } else {
+        add(EhSignal::CatchAndContinue, FindingSeverity::High, 0.7);
+    }
+
+    if (site.broad_type) {
+        add(EhSignal::BroadCatch, FindingSeverity::Med, 0.6);
+    }
+}
+
+void classify_resource_pairing(const std::vector<ResourceOp>& acquires,
+                               const std::vector<ResourceOp>& releases,
+                               const std::vector<int>& throw_lines,
+                               bool returns_error,
+                               std::vector<EhFinding>& out) {
+    if (acquires.empty()) return;
+    (void)returns_error;
+
+    if (releases.empty()) {
+        for (const auto& a : acquires) {
+            if (a.guarded) continue;  // e.g. Python `with` scope frees it
+            EhFinding f;
+            f.signal = EhSignal::LeakNoRelease;
+            f.severity = FindingSeverity::Med;
+            f.confidence = 0.6;
+            f.line = a.line;
+            f.detail = "acquire=" + a.callee;
+            out.push_back(std::move(f));
+        }
+        std::sort(out.begin(), out.end(),
+                  [](const EhFinding& x, const EhFinding& y) {
+                      return x.line < y.line;
+                  });
+        return;
+    }
+
+    bool all_guarded = true;
+    for (const auto& r : releases) {
+        if (!r.guarded) all_guarded = false;
+    }
+    if (all_guarded) return;
+
+    // Bare (unguarded) releases in a function that can also bail between
+    // acquire and release: line-order heuristic, no CFG (design doc bound).
+    int first_acquire = acquires.front().line;
+    for (const auto& a : acquires) {
+        first_acquire = std::min(first_acquire, a.line);
+    }
+    for (const auto& r : releases) {
+        if (r.guarded) continue;
+        bool throw_in_window = false;
+        int throw_at = 0;
+        for (int tl : throw_lines) {
+            if (tl > first_acquire && tl < r.line) {
+                throw_in_window = true;
+                throw_at = tl;
+                break;
+            }
+        }
+        EhFinding f;
+        f.line = r.line;
+        if (throw_in_window) {
+            f.signal = EhSignal::LeakOnErrorPath;
+            f.severity = FindingSeverity::Med;
+            f.confidence = 0.5;
+            f.detail = "release at :" + std::to_string(r.line) +
+                       " not guarded, throw at :" + std::to_string(throw_at);
+        } else if (!throw_lines.empty()) {
+            f.signal = EhSignal::UnguardedRelease;
+            f.severity = FindingSeverity::Low;
+            f.confidence = 0.4;
+            f.detail = r.callee + " outside finally/defer";
+        } else {
+            continue;  // straight-line function, bare release is fine
+        }
+        out.push_back(std::move(f));
+    }
+    std::sort(out.begin(), out.end(),
+              [](const EhFinding& x, const EhFinding& y) {
+                  return x.line < y.line;
+              });
+}
+
 // ---------------------------------------------------------------------------
 // SideEffectAnalyzer
 // ---------------------------------------------------------------------------
@@ -127,7 +260,31 @@ SideEffectInfo SideEffectAnalyzer::end_function() {
     info.error_handling.defer_count = ctx.defer_count;
     info.error_handling.try_finally_count = ctx.try_finally_count;
     info.error_handling.throw_count = static_cast<int>(ctx.throw_sites.size());
+    info.error_handling.catch_count = static_cast<int>(ctx.catch_sites.size());
+    info.error_handling.error_return_lines = ctx.error_return_lines;
     info.has_error_handling = true;
+
+    // Swallow findings: dropped errors recorded inline + catch-site
+    // classification, sorted by line (karpathy #4: deterministic).
+    info.error_findings = ctx.error_findings;
+    for (const auto& site : ctx.catch_sites) {
+        classify_catch_site(site, info.error_findings);
+    }
+    std::sort(info.error_findings.begin(), info.error_findings.end(),
+              [](const EhFinding& a, const EhFinding& b) {
+                  if (a.line != b.line) return a.line < b.line;
+                  return a.signal < b.signal;
+              });
+
+    // Resource pairing findings.
+    info.resource_acquires = ctx.resource_acquires;
+    info.resource_releases = ctx.resource_releases;
+    std::vector<int> throw_lines;
+    throw_lines.reserve(ctx.throw_sites.size());
+    for (const auto& ts : ctx.throw_sites) throw_lines.push_back(ts.line);
+    classify_resource_pairing(ctx.resource_acquires, ctx.resource_releases,
+                              throw_lines, ctx.returns_error,
+                              info.resource_findings);
 
     // Extract parameter writes
     absl::flat_hash_map<int, bool> param_index_set;
@@ -266,6 +423,45 @@ void SideEffectAnalyzer::record_try_finally() {
 
 void SideEffectAnalyzer::record_error_return() {
     if (current_func_) current_func_->returns_error = true;
+}
+
+void SideEffectAnalyzer::record_error_return(int line) {
+    if (!current_func_) return;
+    current_func_->returns_error = true;
+    current_func_->error_return_lines.push_back(line);
+}
+
+void SideEffectAnalyzer::record_catch(const CatchSiteInfo& site) {
+    if (current_func_) current_func_->catch_sites.push_back(site);
+}
+
+void SideEffectAnalyzer::record_dropped_error(int line, std::string_view detail,
+                                              bool high_confidence) {
+    if (!current_func_) return;
+    EhFinding f;
+    f.signal = EhSignal::DroppedError;
+    f.severity = high_confidence ? FindingSeverity::High : FindingSeverity::Med;
+    f.confidence = high_confidence ? 0.9 : 0.6;
+    f.line = line;
+    f.detail = std::string(detail);
+    current_func_->error_findings.push_back(std::move(f));
+}
+
+void SideEffectAnalyzer::record_call_site_resources(std::string_view callee,
+                                                    int line, bool guarded) {
+    if (!current_func_) return;
+    switch (classify_resource_callee(callee)) {
+        case ResourceOpKind::Acquire:
+            current_func_->resource_acquires.push_back(
+                ResourceOp{std::string(callee), line, guarded});
+            break;
+        case ResourceOpKind::Release:
+            current_func_->resource_releases.push_back(
+                ResourceOp{std::string(callee), line, guarded});
+            break;
+        case ResourceOpKind::None:
+            break;
+    }
 }
 
 void SideEffectAnalyzer::record_channel_op(int line) {

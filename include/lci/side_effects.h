@@ -281,6 +281,78 @@ struct ThrowSiteInfo {
     int column{};
 };
 
+/// Error-handling / resource finding signals (design:
+/// docs/plans/2026-08-17-error-handling-score-design.md). Syntactic + name
+/// heuristics only (no CFG/dataflow) — every finding carries a confidence,
+/// never a verdict.
+enum class EhSignal : uint8_t {
+    EmptyCatch = 0,
+    CatchAndContinue,
+    BroadCatch,
+    LogAndSwallow,
+    DroppedError,
+    RethrowNoCause,
+    LeakNoRelease,
+    LeakOnErrorPath,
+    UnguardedRelease,
+};
+
+constexpr std::string_view to_string(EhSignal s) {
+    switch (s) {
+        case EhSignal::EmptyCatch: return "empty-catch";
+        case EhSignal::CatchAndContinue: return "catch-and-continue";
+        case EhSignal::BroadCatch: return "broad-catch";
+        case EhSignal::LogAndSwallow: return "log-and-swallow";
+        case EhSignal::DroppedError: return "dropped-error";
+        case EhSignal::RethrowNoCause: return "rethrow-no-cause";
+        case EhSignal::LeakNoRelease: return "leak-no-release";
+        case EhSignal::LeakOnErrorPath: return "leak-on-error-path";
+        case EhSignal::UnguardedRelease: return "unguarded-release";
+    }
+    return "unknown";
+}
+
+enum class FindingSeverity : uint8_t { Low = 0, Med = 1, High = 2 };
+
+constexpr std::string_view to_string(FindingSeverity s) {
+    switch (s) {
+        case FindingSeverity::Low: return "low";
+        case FindingSeverity::Med: return "med";
+        case FindingSeverity::High: return "high";
+    }
+    return "unknown";
+}
+
+/// One per-function error-handling or resource finding, with evidence line.
+struct EhFinding {
+    EhSignal signal{};
+    FindingSeverity severity{};
+    double confidence{};  // 0..1
+    int line{};           // evidence line inside the function
+    std::string detail;   // e.g. "caught=Exception", "`_ = w.Close()`"
+};
+
+/// Syntactic facts about one catch/except/rescue site, gathered by the
+/// extractor's subtree walk and classified by SideEffectAnalyzer.
+struct CatchSiteInfo {
+    int line{};
+    std::string caught_type;   // "" when the grammar carries no type
+    bool body_empty{};         // no statements (comments don't count)
+    bool broad_type{};         // Exception / Throwable / bare except / (...)
+    bool has_rethrow{};        // throw/raise inside the body
+    bool rethrow_uses_cause{}; // rethrow references the caught variable
+    bool has_log_call{};       // a log-category callee in the body
+    bool has_other_call{};     // any non-log call in the body
+    bool has_return{};         // returns a value (error may be re-surfaced)
+};
+
+/// One acquire/release call site (syntactic resource pairing).
+struct ResourceOp {
+    std::string callee;  // bare callee name (last segment)
+    int line{};
+    bool guarded{};      // inside defer/errdefer/finally/ensure/using/with
+};
+
 /// Exception safety characteristics of a function.
 struct ErrorHandlingInfo {
     bool can_throw{};
@@ -290,6 +362,7 @@ struct ErrorHandlingInfo {
     int defer_count{};
     int try_finally_count{};
     int throw_count{};
+    int catch_count{};
     std::vector<int> error_return_lines;
 };
 
@@ -341,6 +414,12 @@ struct SideEffectInfo {
     // Error handling analysis
     ErrorHandlingInfo error_handling;
     bool has_error_handling{};
+
+    // Error-handling + resource findings (sorted by line; deterministic).
+    std::vector<EhFinding> error_findings;
+    std::vector<EhFinding> resource_findings;
+    std::vector<ResourceOp> resource_acquires;
+    std::vector<ResourceOp> resource_releases;
 
     // Transitive effects (from callees) - populated by propagation
     uint32_t transitive_categories{};

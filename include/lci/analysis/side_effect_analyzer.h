@@ -46,6 +46,12 @@ struct FunctionAnalysisContext {
     int defer_count{};
     int try_finally_count{};
     bool returns_error{};
+    std::vector<int> error_return_lines;
+
+    std::vector<CatchSiteInfo> catch_sites;
+    std::vector<EhFinding> error_findings;   // dropped-error etc., pre-classified
+    std::vector<ResourceOp> resource_acquires;
+    std::vector<ResourceOp> resource_releases;
 
     std::vector<std::string> impurity_reasons;
 };
@@ -90,7 +96,23 @@ class SideEffectAnalyzer {
     void record_defer();
     void record_try_finally();
     void record_error_return();
+    void record_error_return(int line);
     void record_channel_op(int line);
+
+    /// One catch/except/rescue site with its syntactic facts; classified into
+    /// swallow findings (empty-catch / catch-and-continue / broad-catch /
+    /// log-and-swallow / rethrow-no-cause) at end_function.
+    void record_catch(const CatchSiteInfo& site);
+
+    /// Go dropped-error evidence: `_ = err` / blank-discarded call results.
+    void record_dropped_error(int line, std::string_view detail,
+                              bool high_confidence);
+
+    /// Classifies a call site against the acquire/release tables and records
+    /// a ResourceOp when it matches. `guarded` = inside a defer/errdefer/
+    /// finally/ensure/using/with scope. No-op for unclassified callees.
+    void record_call_site_resources(std::string_view callee, int line,
+                                    bool guarded);
 
     // -- Results --------------------------------------------------------------
 
@@ -163,5 +185,24 @@ AccessPatternType classify_access_sequence(std::string_view seq);
 
 /// Computes PurityLevel from combined side effect categories.
 PurityLevel compute_purity_level(uint32_t categories, bool has_unresolved_calls);
+
+/// Resource acquire/release callee classification (prefix tables, extends the
+/// classify_callee_category mechanism).
+enum class ResourceOpKind : uint8_t { None = 0, Acquire, Release };
+ResourceOpKind classify_resource_callee(std::string_view callee);
+
+/// Classifies one catch site's syntactic facts into swallow findings.
+/// Appends to `out`, deterministic order. Exposed for unit tests.
+void classify_catch_site(const CatchSiteInfo& site, std::vector<EhFinding>& out);
+
+/// Pairs a function's acquires against its release credits and appends
+/// leak-no-release / leak-on-error-path / unguarded-release findings.
+/// `throw_lines` = lines of throw/raise/panic sites; `returns_error` marks Go
+/// style error returns. Exposed for unit tests.
+void classify_resource_pairing(const std::vector<ResourceOp>& acquires,
+                               const std::vector<ResourceOp>& releases,
+                               const std::vector<int>& throw_lines,
+                               bool returns_error,
+                               std::vector<EhFinding>& out);
 
 }  // namespace lci
