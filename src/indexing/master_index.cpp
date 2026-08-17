@@ -459,6 +459,37 @@ int MasterIndex::file_count() const {
     return load_snapshot()->file_count();
 }
 
+size_t MasterIndex::index_size_bytes() const {
+    size_t total = 0;
+
+    // Postings: interned token strings + 8 B per (file, offset) posting +
+    // 4 B per reverse-key id (the actual storage shapes; see the Snapshot
+    // comment in reference_tracker.h).
+    const auto pstats = postings_index_.memory_stats();
+    total += pstats.token_string_bytes;
+    total += pstats.posting_entries * 8;
+    total += pstats.reverse_key_entries * 4;
+
+    // Reference tracker: stored refs + interned name pool + symbols.
+    {
+        auto snap = ref_tracker_.pin();
+        size_t ref_count = 0;
+        for (const auto& [fid, vec] : snap->refs_by_file) {
+            (void)fid;
+            ref_count += vec.size();
+        }
+        total += ref_count * sizeof(StoredRef);
+        for (const auto& name : snap->ref_names) total += name.size();
+        total += static_cast<size_t>(snap->symbols.size()) *
+                 sizeof(EnhancedSymbol);
+    }
+
+    // Content store (mmap-retained content reports its mapped size).
+    total += static_cast<size_t>(file_content_store_->get_memory_usage());
+
+    return total;
+}
+
 bool MasterIndex::is_indexing() const {
     return is_indexing_.load(std::memory_order_acquire) != 0;
 }

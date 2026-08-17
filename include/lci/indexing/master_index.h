@@ -126,6 +126,14 @@ class MasterIndex {
 
     MasterIndexStats get_stats() const;
     int file_count() const;
+
+    /// Estimated bytes held by the index structures: interned postings,
+    /// stored references + name pool, enhanced symbols, and the content
+    /// store (mmap-retained content counts at its mapped size). A content
+    /// census, not container overhead — same convention as
+    /// `lci debug memprofile`. Replaces the /stats field that was
+    /// hardcoded to 0.
+    size_t index_size_bytes() const;
     bool is_indexing() const;
 
     /// Phase of the indexing pipeline as observed by external monitors

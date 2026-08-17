@@ -1226,7 +1226,8 @@ void IndexServer::handle_stats(const httplib::Request& /*req*/,
     nlohmann::json j;
     j["file_count"] = stats.total_files;
     j["symbol_count"] = stats.total_symbols;
-    j["index_size_bytes"] = 0;
+    j["index_size_bytes"] =
+        static_cast<int64_t>(indexer_->index_size_bytes());
     j["build_duration_ms"] = stats.indexing_time_ns / 1'000'000;
     j["memory_rss_mb"] = get_rss_mb();
     j["num_threads"] = static_cast<int>(std::thread::hardware_concurrency());
