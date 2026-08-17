@@ -342,12 +342,27 @@ TEST_F(SideEffectExtraction, GoBlankAssignedErrIsDroppedError) {
     EXPECT_EQ(count_findings(info->error_findings, EhSignal::DroppedError), 1);
 }
 
-TEST_F(SideEffectExtraction, GoBlankSecondResultIsDroppedError) {
+// Without return-type knowledge, a trailing blank in a multi-value assign is
+// as likely an ok-bool (strings.Cut, map reads, chi's FindRoute) as an error —
+// chi spot-checks disproved the medium tier, so only sole-discard forms fire.
+TEST_F(SideEffectExtraction, GoMultiValueTrailingBlankIsNotFlagged) {
     const auto* info = analyze(Language::Go, ".go",
                                "package p\n"
                                "func f() {\n"
                                "\tv, _ := parse()\n"
                                "\tuse(v)\n"
+                               "}\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::DroppedError), 0);
+}
+
+// `_ = f()` — the call's only (conventionally error) result thrown away.
+TEST_F(SideEffectExtraction, GoSoleDiscardedCallResultIsDropped) {
+    const auto* info = analyze(Language::Go, ".go",
+                               "package p\n"
+                               "func f(l *Logger) {\n"
+                               "\t_ = l.Flush()\n"
                                "}\n",
                                "f");
     ASSERT_NE(info, nullptr);

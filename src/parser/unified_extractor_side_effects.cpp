@@ -650,6 +650,11 @@ void UnifiedExtractor::process_go_error_drop(TSNode node,
         if (last_is_blank) blanks = 1;
     }
     if (!last_is_blank) return;
+    // Multi-value assigns with a trailing blank are as likely ok-bool
+    // discards (strings.Cut's found, map reads, multi-result lookups) as
+    // errors — without return types the medium tier was mostly noise on chi.
+    // Only the sole-discard form fires: `_ = err` / `_ = f()`.
+    if (total != 1) return;
 
     // The right side must be a CALL producing the discarded result. A
     // type-assertion or map index in the terminal value position yields an
