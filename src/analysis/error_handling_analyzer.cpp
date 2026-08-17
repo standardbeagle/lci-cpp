@@ -57,7 +57,10 @@ bool ErrorHandlingAnalyzer::is_production_path(std::string_view path) {
     static constexpr std::string_view markers[] = {
         "test",     "spec",       "mock",    "fixture", "__tests__",
         "testdata", "node_modules", "vendor", "example", "sample",
-        "generated", "third_party", "3rdparty"};
+        "generated", "third_party", "3rdparty",
+        // Built/bundled front-end output (pocketbase ui/public/libs class):
+        // minified vendored bundles must never own a module score.
+        ".min.",    "/libs/",     "/public/"};
     for (auto m : markers) {
         if (text::ascii_contains_ci(path, m)) return false;
     }

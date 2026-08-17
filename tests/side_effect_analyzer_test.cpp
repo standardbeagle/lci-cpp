@@ -887,6 +887,13 @@ TEST(ResourcePairingTest, AcquireWithNoReleaseIsLeak) {
     EXPECT_EQ(out[0].line, 3);
 }
 
+TEST(ResourcePairingTest, ValueReturningFactorySuppressesLeakNoRelease) {
+    std::vector<ResourceOp> acq{{"Open", 3, false}};
+    std::vector<EhFinding> out;
+    classify_resource_pairing(acq, {}, {}, /*returns_value=*/true, out);
+    EXPECT_TRUE(out.empty());
+}
+
 TEST(ResourcePairingTest, GuardedReleaseIsClean) {
     std::vector<ResourceOp> acq{{"Open", 3, false}};
     std::vector<ResourceOp> rel{{"Close", 4, true}};

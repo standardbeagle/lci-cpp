@@ -46,6 +46,7 @@ struct FunctionAnalysisContext {
     int defer_count{};
     int try_finally_count{};
     bool returns_error{};
+    bool returns_value{};
     std::vector<int> error_return_lines;
 
     std::vector<CatchSiteInfo> catch_sites;
@@ -98,6 +99,10 @@ class SideEffectAnalyzer {
     void record_error_return();
     void record_error_return(int line);
     void record_channel_op(int line);
+
+    /// A `return <expr>` site — the function hands a value to its caller
+    /// (gates the leak-no-release factory suppression).
+    void record_return_value();
 
     /// One catch/except/rescue site with its syntactic facts; classified into
     /// swallow findings (empty-catch / catch-and-continue / broad-catch /
@@ -197,12 +202,15 @@ void classify_catch_site(const CatchSiteInfo& site, std::vector<EhFinding>& out)
 
 /// Pairs a function's acquires against its release credits and appends
 /// leak-no-release / leak-on-error-path / unguarded-release findings.
-/// `throw_lines` = lines of throw/raise/panic sites; `returns_error` marks Go
-/// style error returns. Exposed for unit tests.
+/// `throw_lines` = lines of throw/raise/panic sites. `returns_value` marks a
+/// function that returns a value: factories/constructors hand the acquired
+/// resource to their caller, so leak-no-release is suppressed there
+/// (pocketbase DefaultDBConnect class — precision over recall, no dataflow).
+/// Exposed for unit tests.
 void classify_resource_pairing(const std::vector<ResourceOp>& acquires,
                                const std::vector<ResourceOp>& releases,
                                const std::vector<int>& throw_lines,
-                               bool returns_error,
+                               bool returns_value,
                                std::vector<EhFinding>& out);
 
 }  // namespace lci

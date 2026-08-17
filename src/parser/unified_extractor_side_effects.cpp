@@ -252,6 +252,15 @@ void UnifiedExtractor::process_side_effect_node(
         }
     }
 
+    // `return <expr>` — the function hands a value to its caller (factory
+    // suppression for leak-no-release).
+    if (ts_node_is_named(node) &&
+        (node_type == "return_statement" || node_type == "return_expression") &&
+        ts_node_named_child_count(node) > 0) {
+        side_effects_->record_return_value();
+        return;
+    }
+
     // Catch/except/rescue sites (swallow detection). Named-node gate: the
     // grammar's anonymous `rescue`/`ensure` keyword tokens carry the same
     // type string as the clause node and must not double-fire.

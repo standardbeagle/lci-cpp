@@ -21,6 +21,18 @@ TEST(EhProductionPathTest, TestAndVendorPathsAreExcluded) {
         ErrorHandlingAnalyzer::is_production_path("src/foo.spec.ts"));
 }
 
+// pocketbase verification: ui/public/libs minified bundles were scoring and
+// even owned the worst-module slot — vendored/minified/built output never
+// scores (insight-verification lesson: vendor contamination).
+TEST(EhProductionPathTest, MinifiedAndBundledAssetsAreExcluded) {
+    EXPECT_FALSE(ErrorHandlingAnalyzer::is_production_path(
+        "ui/public/libs/uplot/uplot.iife.js"));
+    EXPECT_FALSE(
+        ErrorHandlingAnalyzer::is_production_path("dist/app.min.js"));
+    EXPECT_FALSE(
+        ErrorHandlingAnalyzer::is_production_path("ui/public/app.js"));
+}
+
 TEST(EhProductionPathTest, PlainSourcePathsAreIncluded) {
     EXPECT_TRUE(ErrorHandlingAnalyzer::is_production_path("src/server.go"));
     EXPECT_TRUE(ErrorHandlingAnalyzer::is_production_path("core/logger.go"));

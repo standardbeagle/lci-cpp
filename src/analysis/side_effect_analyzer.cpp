@@ -138,12 +138,15 @@ void classify_catch_site(const CatchSiteInfo& site, std::vector<EhFinding>& out)
 void classify_resource_pairing(const std::vector<ResourceOp>& acquires,
                                const std::vector<ResourceOp>& releases,
                                const std::vector<int>& throw_lines,
-                               bool returns_error,
+                               bool returns_value,
                                std::vector<EhFinding>& out) {
     if (acquires.empty()) return;
-    (void)returns_error;
 
     if (releases.empty()) {
+        // A value-returning function is (syntactically) a factory: the
+        // acquired resource may escape via the return. No dataflow layer
+        // (design bound), so precision wins — suppress rather than guess.
+        if (returns_value) return;
         for (const auto& a : acquires) {
             if (a.guarded) continue;  // e.g. Python `with` scope frees it
             EhFinding f;
@@ -283,7 +286,7 @@ SideEffectInfo SideEffectAnalyzer::end_function() {
     throw_lines.reserve(ctx.throw_sites.size());
     for (const auto& ts : ctx.throw_sites) throw_lines.push_back(ts.line);
     classify_resource_pairing(ctx.resource_acquires, ctx.resource_releases,
-                              throw_lines, ctx.returns_error,
+                              throw_lines, ctx.returns_value,
                               info.resource_findings);
 
     // Extract parameter writes
@@ -429,6 +432,10 @@ void SideEffectAnalyzer::record_error_return(int line) {
     if (!current_func_) return;
     current_func_->returns_error = true;
     current_func_->error_return_lines.push_back(line);
+}
+
+void SideEffectAnalyzer::record_return_value() {
+    if (current_func_) current_func_->returns_value = true;
 }
 
 void SideEffectAnalyzer::record_catch(const CatchSiteInfo& site) {

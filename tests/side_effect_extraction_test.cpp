@@ -444,6 +444,23 @@ TEST_F(SideEffectExtraction, GoOpenWithoutCloseIsLeakNoRelease) {
               1);
 }
 
+// Factory/constructor pattern (pocketbase DefaultDBConnect): the acquired
+// resource escapes via the return — not a leak claim.
+TEST_F(SideEffectExtraction, GoConstructorReturnIsNotALeak) {
+    const auto* info = analyze(Language::Go, ".go",
+                               "package p\n"
+                               "func f(p string) (*os.File, error) {\n"
+                               "\th, err := os.Open(p)\n"
+                               "\tif err != nil {\n"
+                               "\t\treturn nil, err\n"
+                               "\t}\n"
+                               "\treturn h, nil\n"
+                               "}\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    EXPECT_TRUE(info->resource_findings.empty());
+}
+
 TEST_F(SideEffectExtraction, GoDeferredCloseIsGuardedAndClean) {
     const auto* info = analyze(Language::Go, ".go",
                                "package p\n"
