@@ -782,18 +782,26 @@ void emit_health(std::ostringstream& out, const HealthDashboard& hd,
 }
 
 // == MODULES == — aggregate cohesion/coupling + top-10 modules by file count.
+// D4: this section's cohesion is ModuleAnalyzer's NAME-PREFIX similarity, a
+// different metric from the reference-graph cohesion STATISTICS reports
+// (guzzle measured 0.12 vs 0.34 under the same label). Emit it as
+// name_cohesion so the two aggregations are never read as one number.
 void emit_modules(std::ostringstream& out, const ModuleAnalysis& ma) {
     if (ma.modules.empty()) return;
+    // basis=symbol_files: module file counts cover symbol-bearing files only
+    // (the analyzer's input), so they can sit below STRUCTURE's full file
+    // census (pocketbase core: 123 vs 134). Declared, not silent.
     out << "== MODULES ==\n"
         << "total=" << ma.metrics.total_modules
-        << " cohesion=" << fmt2(ma.metrics.average_cohesion)
-        << " coupling=" << fmt2(ma.metrics.average_coupling) << "\n";
+        << " name_cohesion=" << fmt2(ma.metrics.average_cohesion)
+        << " coupling=" << fmt2(ma.metrics.average_coupling)
+        << " basis=symbol_files\n";
     size_t lim = std::min(ma.modules.size(), size_t{10});
     for (size_t i = 0; i < lim; ++i) {
         const auto& m = ma.modules[i];
         out << "  " << m.name << ": type=" << m.type
             << " files=" << m.file_count << " funcs=" << m.function_count
-            << " cohesion=" << fmt2(m.cohesion_score) << "\n";
+            << " name_cohesion=" << fmt2(m.cohesion_score) << "\n";
     }
     if (ma.modules.size() > 10) {
         out << "  ... and " << (ma.modules.size() - 10) << " more modules\n";
