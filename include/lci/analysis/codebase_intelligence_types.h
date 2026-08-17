@@ -496,6 +496,12 @@ struct StructureAnalysis {
     // codebase_intelligence_types.go:745). Extension-less files that
     // categorizeFile leaves as the default bucket land here, NOT in code.
     int other{};
+    // Attribute-tagged segments (PathClassifier): files whose stored file
+    // attribute is example/vendored/generated. tests/docs above absorb the
+    // Test/Docs attributes. Zero when the corpus carries no such files.
+    int example{};
+    int vendored{};
+    int generated{};
     std::vector<std::pair<std::string, int>> top_dirs;
 };
 

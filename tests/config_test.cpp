@@ -823,6 +823,54 @@ synonyms {
     EXPECT_FALSE(result.ok());
 }
 
+TEST_F(KdlConfigTest, ParsesAttributesSection) {
+    write_kdl(R"(
+attributes {
+    test "src/legacy_tests/"
+    vendored "*.iife.js" "ui/public/libs/"
+    production "vendor/mycompany/"
+}
+)");
+    auto result = load_config(temp_dir_.string());
+    ASSERT_TRUE(result.ok()) << result.error;
+    ASSERT_EQ(result.config.attributes.size(), 4u);
+    EXPECT_EQ(result.config.attributes[0].attr, PathAttr::Test);
+    EXPECT_EQ(result.config.attributes[0].pattern, "src/legacy_tests/");
+    EXPECT_EQ(result.config.attributes[1].attr, PathAttr::Vendored);
+    EXPECT_EQ(result.config.attributes[1].pattern, "*.iife.js");
+    EXPECT_EQ(result.config.attributes[2].attr, PathAttr::Vendored);
+    EXPECT_EQ(result.config.attributes[2].pattern, "ui/public/libs/");
+    EXPECT_EQ(result.config.attributes[3].attr, PathAttr::Production);
+}
+
+TEST_F(KdlConfigTest, AttributesUnknownTagIsError) {
+    write_kdl(R"(
+attributes {
+    vendered "vendor/"
+}
+)");
+    auto result = load_config(temp_dir_.string());
+    EXPECT_FALSE(result.ok());
+    EXPECT_NE(result.error.find("vendered"), std::string::npos);
+}
+
+TEST_F(KdlConfigTest, AttributesTagWithoutPatternIsError) {
+    write_kdl(R"(
+attributes {
+    test
+}
+)");
+    auto result = load_config(temp_dir_.string());
+    EXPECT_FALSE(result.ok());
+}
+
+TEST_F(KdlConfigTest, AttributesDefaultEmpty) {
+    write_kdl("project {\n}\n");
+    auto result = load_config(temp_dir_.string());
+    ASSERT_TRUE(result.ok());
+    EXPECT_TRUE(result.config.attributes.empty());
+}
+
 // ---------------------------------------------------------------------------
 // User-level defaults: $XDG_CONFIG_HOME/lci/config.kdl
 // ---------------------------------------------------------------------------

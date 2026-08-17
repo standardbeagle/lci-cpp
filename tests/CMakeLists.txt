@@ -55,6 +55,7 @@ add_executable(lci_tests
     python_csharp_linker_test.cpp
     php_integration_linker_test.cpp
     codebase_intelligence_test.cpp
+    path_classifier_test.cpp
     analysis_test.cpp
     call_graph_test.cpp
     server_test.cpp

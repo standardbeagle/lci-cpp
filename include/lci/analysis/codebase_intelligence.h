@@ -10,6 +10,7 @@
 #include <absl/container/flat_hash_map.h>
 
 #include <lci/analysis/codebase_intelligence_types.h>
+#include <lci/path_classifier.h>
 #include <lci/types.h>
 
 namespace lci {
@@ -138,10 +139,16 @@ class CodebaseIntelligenceEngine {
     /// they come from a live index, so this builder is only reachable through
     /// the index-backed caller (the MCP handler); an empty `file_paths` would
     /// yield an empty tree, so it is not defaulted.
+    /// `file_attrs` is parallel to `file_paths` and carries the per-file
+    /// PathClassifier attribute stored at index time; attribute-tagged files
+    /// route to the tests/docs/example/vendored/generated buckets and only
+    /// production files fall through to the classify_file category switch.
+    /// Missing entries (shorter or empty vector) count as Production.
     CodebaseIntelligenceResponse build_structure(
         const CodebaseIntelligenceParams& params,
         const std::vector<FileSymbolData>& files,
         const std::vector<std::string>& file_paths,
+        const std::vector<PathAttr>& file_attrs,
         std::string_view project_root, int file_count,
         int total_functions) const;
 

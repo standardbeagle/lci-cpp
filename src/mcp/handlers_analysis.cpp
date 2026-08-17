@@ -1,6 +1,7 @@
 #include <lci/mcp/handlers_analysis.h>
 
 #include <algorithm>
+#include <array>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -653,23 +654,44 @@ ToolResult handle_side_effects(const nlohmann::json& raw_params,
 
 namespace {
 
-// Gather FileSymbolData from the live index: one entry per file with its
-// enhanced symbol pointers. Skips files with no symbols.
-std::vector<FileSymbolData> gather_file_symbol_data(MasterIndex& indexer) {
-    std::vector<FileSymbolData> result;
+// Gather FileSymbolData from the live index, segmented by file attribute
+// (PathClassifier tags stored per file at index time). Every code_insight
+// section analyzes PRODUCTION files only; test/example/vendored/generated/
+// docs files are counted per attribute and surfaced in == SUMMARY == so the
+// exclusion is labeled, never silent. Skips files with no symbols.
+struct GatheredCorpus {
+    std::vector<FileSymbolData> production;
+    // Files WITH symbols excluded from analysis, keyed by PathAttr index
+    // (Production slot stays 0). Deterministic emission order = enum order.
+    std::array<int, kPathAttrCount> excluded_files{};
+    int excluded_total() const {
+        int n = 0;
+        for (int c : excluded_files) n += c;
+        return n;
+    }
+};
+
+GatheredCorpus gather_file_symbol_data(MasterIndex& indexer) {
+    GatheredCorpus corpus;
     auto& ref = indexer.ref_tracker();
     auto rt_snap = ref.pin();
+    auto file_snap = indexer.read_snapshot();
     for (auto fid : indexer.get_all_file_ids()) {
         auto syms = rt_snap->get_file_enhanced_symbols(fid);
         if (syms.empty()) continue;
+        PathAttr attr = file_snap->attr_of(fid);
+        if (attr != PathAttr::Production) {
+            ++corpus.excluded_files[static_cast<size_t>(attr)];
+            continue;
+        }
         FileSymbolData fsd;
         fsd.path = indexer.get_file_path(fid);
         fsd.owner = rt_snap;
         fsd.symbols.reserve(syms.size());
         for (const auto& sym : syms) fsd.symbols.push_back(sym.get());
-        result.push_back(std::move(fsd));
+        corpus.production.push_back(std::move(fsd));
     }
-    return result;
+    return corpus;
 }
 
 // Render a double with two/one decimals (matches Go's "%.2f"/"%.1f" output).
@@ -1307,7 +1329,8 @@ void emit_vocabulary(std::ostringstream& out, const NamingReport& nr) {
 void emit_summary(std::ostringstream& out,
                   const std::vector<FileSymbolData>& files,
                   std::string_view project_root, int file_count,
-                  int symbol_count) {
+                  int symbol_count,
+                  const std::array<int, kPathAttrCount>* excluded = nullptr) {
     absl::flat_hash_map<std::string, int> lang_files;
     absl::flat_hash_set<std::string> dirs;
     int max_depth = 0;
@@ -1347,6 +1370,25 @@ void emit_summary(std::ostringstream& out,
         out << "langs:";
         for (const auto& [l, n] : langs) out << " " << l << "=" << n;
         out << "\n";
+    }
+    // Attribute-tagged files (PathClassifier) are excluded from every
+    // analysis section; label the exclusion instead of silently shrinking
+    // the corpus. Omitted entirely when nothing was excluded, keeping the
+    // historical SUMMARY shape for untagged corpora.
+    if (excluded != nullptr) {
+        int total = 0;
+        for (int c : *excluded) total += c;
+        if (total > 0) {
+            out << "excluded_from_analysis:";
+            for (int i = 0; i < kPathAttrCount; ++i) {
+                if ((*excluded)[static_cast<size_t>(i)] > 0) {
+                    out << " " << PathClassifier::name(static_cast<PathAttr>(i))
+                        << "=" << (*excluded)[static_cast<size_t>(i)];
+                }
+            }
+            out << " (production-only analysis; tune via .lci.kdl "
+                   "attributes)\n";
+        }
     }
     out << "---\n";
 }
@@ -1499,7 +1541,8 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
     // files_data/symbol_count/project_root feed the engine-backed modes.
     const std::string& project_root = indexer.config().project.root;
     int file_count = indexer.file_count();
-    auto files_data = gather_file_symbol_data(indexer);
+    auto corpus = gather_file_symbol_data(indexer);
+    auto& files_data = corpus.production;
     int symbol_count = 0;
     int total_functions = 0;
     for (const auto& f : files_data) {
@@ -1601,15 +1644,19 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
         // paths and renders LCF. Hardcoded output always emitted dirs=1; on a
         // real corpus the top-level dir distribution is much richer.
         std::vector<std::string> file_paths;
+        std::vector<PathAttr> file_attrs;
+        auto snap = indexer.read_snapshot();
         for (auto fid : indexer.get_all_file_ids()) {
             auto p = indexer.get_file_path(fid);
-            if (!p.empty()) file_paths.emplace_back(p);
+            if (p.empty()) continue;
+            file_paths.emplace_back(std::move(p));
+            file_attrs.push_back(snap->attr_of(fid));
         }
         CodebaseIntelligenceParams sp;
         sp.mode = "structure";
         auto resp = engine.build_structure(sp, files_data, file_paths,
-                                           project_root, file_count,
-                                           total_functions);
+                                           file_attrs, project_root,
+                                           file_count, total_functions);
         const auto& s = *resp.structure_analysis;
         out << "LCF/1.0\nmode=structure\ntier=1\ntokens=20\n---\n"
             << "== STRUCTURE ==\n"
@@ -1621,7 +1668,13 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
         out << "\n"
             << "categories: code=" << s.code << " tests=" << s.tests
             << " config=" << s.config << " docs=" << s.docs
-            << " other=" << s.other << "\n"
+            << " other=" << s.other;
+        // Attribute-tagged segments print only when present so corpora with
+        // no tagged files keep the historical category line.
+        if (s.example > 0) out << " example=" << s.example;
+        if (s.vendored > 0) out << " vendored=" << s.vendored;
+        if (s.generated > 0) out << " generated=" << s.generated;
+        out << "\n"
             << "top_dirs:\n";
         size_t shown = std::min(s.top_dirs.size(), size_t{10});
         for (size_t i = 0; i < shown; ++i)
@@ -1640,7 +1693,8 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                       !d.naming.outliers.empty();
         emit_lcf_header(out, "unified", 1,
                         lcf_token_count(n_map, 0, hd != nullptr, 0, true));
-        emit_summary(out, files_data, project_root, file_count, symbol_count);
+        emit_summary(out, files_data, project_root, file_count, symbol_count,
+                     &corpus.excluded_files);
         emit_repository_map(out, d.modules.modules);
         emit_entry_points(out, d.result.response.entry_points, project_root);
         if (hd) emit_health(out, *hd, &d.purity);
@@ -1820,7 +1874,8 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                       !d.naming.outliers.empty();
         emit_lcf_header(out, "overview", 1,
                         lcf_token_count(n_map, 0, hd != nullptr, 0, false));
-        emit_summary(out, files_data, project_root, file_count, symbol_count);
+        emit_summary(out, files_data, project_root, file_count, symbol_count,
+                     &corpus.excluded_files);
         emit_repository_map(out, d.modules.modules);
         emit_entry_points(out, d.result.response.entry_points, project_root);
         if (hd) emit_health(out, *hd, &d.purity);

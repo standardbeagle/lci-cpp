@@ -583,6 +583,55 @@ TEST_F(CodeInsightTest, UnifiedModeWorks) {
     EXPECT_NE(result.text.find("== STATISTICS =="), std::string::npos);
 }
 
+// D1 enforcement: attribute-tagged files (test/example/vendored/...) are
+// excluded from EVERY code_insight analysis section — entry points, health,
+// load-bearing, modules, vocabulary — and the exclusion is labeled in
+// == SUMMARY ==, never silent. structure mode counts the same classifier's
+// buckets. Fixture mirrors the verified defects: chi's _examples main.go
+// entry points, guzzle's *Test.php production classification.
+class CodeInsightAttrTest : public CodeInsightTest {
+  protected:
+    void SetUp() override {
+        CodeInsightTest::SetUp();
+        write_file(temp_dir_ / "_examples" / "demo" / "main.go",
+                   "package main\n\nfunc main() {}\n\n"
+                   "func ExampleWidget() {}\n");
+        write_file(temp_dir_ / "tests" / "HandlerTest.php",
+                   "<?php\nclass HandlerTest {\n"
+                   "  public function testSend() {}\n}\n");
+        indexer_->index_directory(temp_dir_.string());
+    }
+};
+
+TEST_F(CodeInsightAttrTest, UnifiedExcludesTaggedFilesAndLabelsIt) {
+    nlohmann::json params;
+    params["mode"] = "unified";
+    auto result = handle_code_insight(params, *engine_, *indexer_);
+    ASSERT_FALSE(result.is_error);
+    // No example/test symbols in any section.
+    EXPECT_EQ(result.text.find("_examples"), std::string::npos) << result.text;
+    EXPECT_EQ(result.text.find("HandlerTest"), std::string::npos);
+    EXPECT_EQ(result.text.find("testSend"), std::string::npos);
+    // Production entry point still present.
+    EXPECT_NE(result.text.find("main.go"), std::string::npos);
+    // The exclusion is labeled, not silent.
+    EXPECT_NE(result.text.find("excluded_from_analysis: test=1 example=1"),
+              std::string::npos)
+        << result.text;
+}
+
+TEST_F(CodeInsightAttrTest, StructureCountsViaClassifier) {
+    nlohmann::json params;
+    params["mode"] = "structure";
+    auto result = handle_code_insight(params, *engine_, *indexer_);
+    ASSERT_FALSE(result.is_error);
+    // tests= counts the classifier's Test files (the PHP *Test.php that the
+    // old extension-only categorizer scored as tests=0 on guzzle);
+    // example= surfaces the tagged _examples file.
+    EXPECT_NE(result.text.find("tests=1"), std::string::npos) << result.text;
+    EXPECT_NE(result.text.find("example=1"), std::string::npos);
+}
+
 // The base fixture's temp_dir_ is not a git repo. Both git modes must now
 // FAIL FAST (real git wiring) instead of emitting a fake zero-STATISTICS block.
 TEST_F(CodeInsightTest, GitAnalyzeFailsFastOnNonGitDir) {
