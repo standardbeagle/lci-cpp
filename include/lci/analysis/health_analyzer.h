@@ -25,9 +25,13 @@ class HealthAnalyzer {
     std::vector<Hotspot> identify_hotspots_from_files(
         const std::vector<FileSymbolData>& files) const;
 
-    /// Calculates overall health score (0-10).
+    /// Calculates overall health score (0-10). Strictly monotone
+    /// non-increasing in worst-case complexity (complexity.max_cc), tech
+    /// debt ratio, and problematic-symbol count — a repo with a cc=70
+    /// function cannot score 10.0 (D3 de-saturation).
     static double calculate_overall_health_score(
-        const ComplexityMetrics& complexity, int total_files);
+        const ComplexityMetrics& complexity, double tech_debt_ratio,
+        int problematic_symbol_count);
 
     /// Calculates technical debt ratio from files.
     double calculate_tech_debt_ratio_from_files(
@@ -40,7 +44,10 @@ class HealthAnalyzer {
     std::vector<std::string> identify_debt_components(
         const std::vector<FileSymbolData>& files) const;
 
-    /// Detects code smells with severity levels.
+    /// Detects code smells with severity levels. Returns the FULL
+    /// severity-sorted set so aggregate counts stay consistent with the
+    /// complexity distribution; callers truncate for display via
+    /// sort_and_limit_smells.
     std::vector<CodeSmellEntry> calculate_detailed_code_smells(
         const std::vector<FileSymbolData>& files) const;
 

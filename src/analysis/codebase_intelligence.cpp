@@ -231,20 +231,24 @@ CodebaseIntelligenceResponse CodebaseIntelligenceEngine::build_overview(
         HealthAnalyzer ha;
         health->complexity = ha.calculate_complexity_from_files(files);
         health->hotspots = ha.identify_hotspots_from_files(files);
-        health->overall_score =
-            HealthAnalyzer::calculate_overall_health_score(
-                health->complexity,
-                static_cast<int>(files.size()));
         double debt_ratio = ha.calculate_tech_debt_ratio_from_files(files);
         health->technical_debt.ratio = debt_ratio;
         health->technical_debt.estimate =
             HealthAnalyzer::estimate_debt_remediation_time(debt_ratio);
         health->technical_debt.components =
             ha.identify_debt_components(files);
-        health->detailed_smells = ha.calculate_detailed_code_smells(files);
-        health->smell_counts =
-            HealthAnalyzer::count_smells_by_type(health->detailed_smells);
         health->problematic_symbols = ha.identify_problematic_symbols(files);
+        health->overall_score =
+            HealthAnalyzer::calculate_overall_health_score(
+                health->complexity, debt_ratio,
+                static_cast<int>(health->problematic_symbols.size()));
+        // Count from the FULL smell set, then truncate for display —
+        // counting a truncated list contradicted the distribution (D3).
+        auto all_smells = ha.calculate_detailed_code_smells(files);
+        health->smell_counts =
+            HealthAnalyzer::count_smells_by_type(all_smells);
+        health->detailed_smells = HealthAnalyzer::sort_and_limit_smells(
+            std::move(all_smells), ci_thresholds::kMaxDetailedSmells);
         health->analysis_metadata.analyzed_at =
             std::chrono::system_clock::now();
         health->analysis_metadata.files_analyzed =
@@ -313,7 +317,8 @@ CodebaseIntelligenceResponse CodebaseIntelligenceEngine::build_statistics(
     auto health = std::make_unique<HealthDashboard>();
     health->complexity = complexity;
     health->overall_score = HealthAnalyzer::calculate_overall_health_score(
-        complexity, static_cast<int>(files.size()));
+        complexity, ha.calculate_tech_debt_ratio_from_files(files),
+        static_cast<int>(ha.identify_problematic_symbols(files).size()));
     health->analysis_metadata.analyzed_at = std::chrono::system_clock::now();
     health->analysis_metadata.files_analyzed = static_cast<int>(files.size());
     response.health_dashboard = health.release();

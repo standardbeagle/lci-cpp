@@ -101,8 +101,8 @@ TEST(HealthAnalyzer, HealthScoreAllLowComplexity) {
     cm.distribution["medium"] = 0;
     cm.distribution["high"] = 0;
 
-    // score starts at 10, low_ratio=1.0 > 0.8 so +1.0, capped at 10
-    double score = HealthAnalyzer::calculate_overall_health_score(cm, 10);
+    // no penalties -> perfect score (no bonus needed, none applied)
+    double score = HealthAnalyzer::calculate_overall_health_score(cm, 0.0, 0);
     EXPECT_DOUBLE_EQ(score, 10.0);
 }
 
@@ -113,7 +113,7 @@ TEST(HealthAnalyzer, HealthScoreAllHighComplexity) {
     cm.distribution["medium"] = 0;
     cm.distribution["high"] = 100;
 
-    double score = HealthAnalyzer::calculate_overall_health_score(cm, 10);
+    double score = HealthAnalyzer::calculate_overall_health_score(cm, 0.0, 0);
     // 10 - (1.0 * 4.0) - ((25-10)*0.15 = 2.25) = 3.75
     EXPECT_NEAR(score, 3.75, 0.01);
 }
@@ -125,10 +125,9 @@ TEST(HealthAnalyzer, HealthScoreMixedComplexity) {
     cm.distribution["medium"] = 30;
     cm.distribution["high"] = 10;
 
-    double score = HealthAnalyzer::calculate_overall_health_score(cm, 10);
+    double score = HealthAnalyzer::calculate_overall_health_score(cm, 0.0, 0);
     // high_ratio=0.1 => -0.4, med_ratio=0.3 => -0.45
     // avg=8 <= 10 => no deduction
-    // low_ratio=0.6 not strictly > 0.6 => no bonus
     // 10 - 0.4 - 0.45 = 9.15
     EXPECT_NEAR(score, 9.15, 0.01);
 }
@@ -140,7 +139,7 @@ TEST(HealthAnalyzer, HealthScoreClampedToZero) {
     cm.distribution["medium"] = 0;
     cm.distribution["high"] = 100;
 
-    double score = HealthAnalyzer::calculate_overall_health_score(cm, 10);
+    double score = HealthAnalyzer::calculate_overall_health_score(cm, 0.0, 0);
     // 10 - 4.0 - 3.0 (capped) = 3.0
     EXPECT_NEAR(score, 3.0, 0.01);
 }
@@ -148,8 +147,151 @@ TEST(HealthAnalyzer, HealthScoreClampedToZero) {
 TEST(HealthAnalyzer, HealthScoreEmptyDistribution) {
     ComplexityMetrics cm;
     cm.average_cc = 0.0;
-    double score = HealthAnalyzer::calculate_overall_health_score(cm, 0);
+    double score = HealthAnalyzer::calculate_overall_health_score(cm, 0.0, 0);
     EXPECT_DOUBLE_EQ(score, 10.0);
+}
+
+// ===========================================================================
+// Health analyzer - score de-saturation (D3): monotonicity properties and
+// criteria-case regressions on synthetic metrics
+// ===========================================================================
+
+namespace score_props {
+
+ComplexityMetrics healthy_baseline() {
+    ComplexityMetrics cm;
+    cm.average_cc = 3.0;
+    cm.max_cc = 5.0;
+    cm.distribution["low"] = 500;
+    cm.distribution["medium"] = 0;
+    cm.distribution["high"] = 0;
+    return cm;
+}
+
+}  // namespace score_props
+
+TEST(HealthAnalyzer, HealthScoreMonotoneDecreasingInMaxCC) {
+    double prev = 11.0;
+    for (double max_cc : {5.0, 20.0, 30.0, 45.0, 70.0, 90.0}) {
+        auto cm = score_props::healthy_baseline();
+        cm.max_cc = max_cc;
+        double s = HealthAnalyzer::calculate_overall_health_score(cm, 0.0, 0);
+        EXPECT_LE(s, prev) << "max_cc=" << max_cc;
+        prev = s;
+    }
+    // and strictly below perfect once past the high threshold
+    auto cm = score_props::healthy_baseline();
+    cm.max_cc = 70.0;
+    EXPECT_LT(HealthAnalyzer::calculate_overall_health_score(cm, 0.0, 0),
+              10.0);
+}
+
+TEST(HealthAnalyzer, HealthScoreMonotoneDecreasingInDebtRatio) {
+    auto cm = score_props::healthy_baseline();
+    double prev = 11.0;
+    for (double debt : {0.0, 0.05, 0.1, 0.2, 0.4, 0.8}) {
+        double s = HealthAnalyzer::calculate_overall_health_score(cm, debt, 0);
+        EXPECT_LE(s, prev) << "debt=" << debt;
+        prev = s;
+    }
+    EXPECT_LT(HealthAnalyzer::calculate_overall_health_score(cm, 0.2, 0),
+              HealthAnalyzer::calculate_overall_health_score(cm, 0.0, 0));
+}
+
+TEST(HealthAnalyzer, HealthScoreMonotoneDecreasingInProblematicCount) {
+    auto cm = score_props::healthy_baseline();
+    double prev = 11.0;
+    for (int count : {0, 1, 3, 5, 7, 20}) {
+        double s =
+            HealthAnalyzer::calculate_overall_health_score(cm, 0.0, count);
+        EXPECT_LE(s, prev) << "count=" << count;
+        prev = s;
+    }
+    EXPECT_LT(HealthAnalyzer::calculate_overall_health_score(cm, 0.0, 5),
+              HealthAnalyzer::calculate_overall_health_score(cm, 0.0, 0));
+}
+
+TEST(HealthAnalyzer, HealthScoreMonotoneDecreasingInHighComplexityCount) {
+    double prev = 11.0;
+    for (int high : {0, 5, 20, 50, 100}) {
+        auto cm = score_props::healthy_baseline();
+        cm.distribution["high"] = high;
+        double s = HealthAnalyzer::calculate_overall_health_score(cm, 0.0, 0);
+        EXPECT_LE(s, prev) << "high=" << high;
+        prev = s;
+    }
+}
+
+TEST(HealthAnalyzer, HealthScorePerfectOnlyWhenClean) {
+    // 10.0 requires zero penalty signals; any defect input drops it.
+    auto clean = score_props::healthy_baseline();
+    EXPECT_DOUBLE_EQ(
+        HealthAnalyzer::calculate_overall_health_score(clean, 0.0, 0), 10.0);
+
+    auto dirty = clean;
+    dirty.max_cc = 70.0;
+    EXPECT_LT(HealthAnalyzer::calculate_overall_health_score(dirty, 0.05, 5),
+              10.0);
+}
+
+TEST(HealthAnalyzer, HealthScoreDiscriminatesCriteriaRepos) {
+    // chi-like: mostly low, one cc~25 outlier, little debt, 2 risk symbols.
+    ComplexityMetrics chi;
+    chi.average_cc = 3.0;
+    chi.max_cc = 25.0;
+    chi.distribution["low"] = 700;
+    chi.distribution["medium"] = 25;
+    chi.distribution["high"] = 5;
+    double chi_score =
+        HealthAnalyzer::calculate_overall_health_score(chi, 0.02, 2);
+
+    // guzzle-like: cc=70 monster (applyHandlerOptions), 3 high funcs,
+    // 5+ risk symbols, real debt.
+    ComplexityMetrics guzzle;
+    guzzle.average_cc = 4.0;
+    guzzle.max_cc = 70.0;
+    guzzle.distribution["low"] = 900;
+    guzzle.distribution["medium"] = 60;
+    guzzle.distribution["high"] = 3;
+    double guzzle_score =
+        HealthAnalyzer::calculate_overall_health_score(guzzle, 0.06, 5);
+
+    // pocketbase-like: 115-method god object, cc extremes, many risk syms.
+    ComplexityMetrics pb;
+    pb.average_cc = 4.5;
+    pb.max_cc = 60.0;
+    pb.distribution["low"] = 3000;
+    pb.distribution["medium"] = 250;
+    pb.distribution["high"] = 40;
+    double pb_score =
+        HealthAnalyzer::calculate_overall_health_score(pb, 0.09, 8);
+
+    // The old formula scored all three exactly 10.00. The scale must
+    // discriminate: none saturated, ordered by defect load.
+    EXPECT_LT(chi_score, 10.0);
+    EXPECT_GT(chi_score, guzzle_score);
+    EXPECT_GT(guzzle_score, 0.0);
+    EXPECT_GT(chi_score, pb_score);
+    EXPECT_LT(guzzle_score, 8.0);
+    EXPECT_LT(pb_score, 8.0);
+}
+
+TEST(HealthAnalyzer, ComplexityFromFilesTracksMaxCC) {
+    EnhancedSymbol a, b;
+    a.symbol.name = "small";
+    a.symbol.type = SymbolType::Function;
+    a.complexity = 3;
+    b.symbol.name = "applyHandlerOptions";
+    b.symbol.type = SymbolType::Function;
+    b.complexity = 70;
+
+    FileSymbolData fsd;
+    fsd.path = "client.php";
+    fsd.symbols = {&a, &b};
+
+    HealthAnalyzer ha;
+    auto cm = ha.calculate_complexity_from_files({fsd});
+    EXPECT_DOUBLE_EQ(cm.max_cc, 70.0);
 }
 
 // ===========================================================================
@@ -377,7 +519,8 @@ TEST(HealthAnalyzer, CodeSmellHighComplexity) {
     for (const auto& s : smells) {
         if (s.type == "high-complexity") {
             found = true;
-            EXPECT_EQ(s.severity, "high");
+            // 25 > kComplexityHigh (20) but <= 40 -> medium severity
+            EXPECT_EQ(s.severity, "medium");
         }
     }
     EXPECT_TRUE(found);
@@ -437,9 +580,147 @@ TEST(HealthAnalyzer, SmellsLimitedToMax) {
     fsd.symbols = ptrs;
 
     HealthAnalyzer ha;
+    // The analyzer returns the FULL set (20 long-function + 20
+    // high-complexity) so counts stay truthful; display truncation is the
+    // caller's job via sort_and_limit_smells.
     auto smells = ha.calculate_detailed_code_smells({fsd});
-    EXPECT_LE(static_cast<int>(smells.size()),
+    EXPECT_EQ(smells.size(), 40u);
+    auto limited = HealthAnalyzer::sort_and_limit_smells(
+        std::move(smells), ci_thresholds::kMaxDetailedSmells);
+    EXPECT_LE(static_cast<int>(limited.size()),
               ci_thresholds::kMaxDetailedSmells);
+}
+
+// ===========================================================================
+// Health analyzer - saturation fixes (D3): same-source smell counts,
+// symbol-kind gates, empty-name filtering, function-based debt ratio
+// ===========================================================================
+
+TEST(HealthAnalyzer, SmellCountsAgreeWithComplexityDistribution) {
+    // 8 functions with cc=25: distribution["high"] must equal the
+    // high-complexity smell count — one source of truth, no truncation
+    // and no divergent thresholds between the two.
+    std::vector<EnhancedSymbol> syms(8);
+    std::vector<const EnhancedSymbol*> ptrs;
+    for (int i = 0; i < 8; i++) {
+        syms[i].symbol.name = "func_" + std::to_string(i);
+        syms[i].symbol.type = SymbolType::Function;
+        syms[i].symbol.line = i * 10 + 1;
+        syms[i].symbol.end_line = i * 10 + 5;
+        syms[i].complexity = 25;
+        ptrs.push_back(&syms[i]);
+    }
+    FileSymbolData fsd;
+    fsd.path = "test.go";
+    fsd.symbols = ptrs;
+
+    HealthAnalyzer ha;
+    auto cm = ha.calculate_complexity_from_files({fsd});
+    ASSERT_EQ(cm.distribution["high"], 8);
+
+    auto smells = ha.calculate_detailed_code_smells({fsd});
+    auto counts = HealthAnalyzer::count_smells_by_type(smells);
+    EXPECT_EQ(counts["high-complexity"], cm.distribution["high"]);
+}
+
+TEST(HealthAnalyzer, LongFunctionSmellOnlyForFunctionsAndMethods) {
+    // A trait/class/type declaration spanning many lines is not a long
+    // function — kind gate required (guzzle flagged ClientTrait).
+    EnhancedSymbol trait_sym;
+    trait_sym.symbol.name = "ClientTrait";
+    trait_sym.symbol.type = SymbolType::Trait;
+    trait_sym.symbol.line = 13;
+    trait_sym.symbol.end_line = 400;
+    trait_sym.complexity = 1;
+
+    FileSymbolData fsd;
+    fsd.path = "ClientTrait.php";
+    fsd.symbols.push_back(&trait_sym);
+
+    HealthAnalyzer ha;
+    auto smells = ha.calculate_detailed_code_smells({fsd});
+    for (const auto& s : smells) {
+        EXPECT_NE(s.type, "long-function")
+            << "trait declaration flagged as long-function";
+    }
+}
+
+TEST(HealthAnalyzer, HighFanInSmellNotForFieldsOrTypeDecls) {
+    // A struct field with many incoming references is normal data access,
+    // not a smell candidate (pocketbase flagged struct fields).
+    EnhancedSymbol field_sym;
+    field_sym.symbol.name = "Id";
+    field_sym.symbol.type = SymbolType::Field;
+    field_sym.symbol.line = 5;
+    field_sym.symbol.end_line = 5;
+    field_sym.complexity = 0;
+    field_sym.incoming_ref_count = 50;
+
+    EnhancedSymbol type_sym;
+    type_sym.symbol.name = "RecordId";
+    type_sym.symbol.type = SymbolType::Type;
+    type_sym.symbol.line = 8;
+    type_sym.symbol.end_line = 8;
+    type_sym.incoming_ref_count = 50;
+
+    FileSymbolData fsd;
+    fsd.path = "base.go";
+    fsd.symbols = {&field_sym, &type_sym};
+
+    HealthAnalyzer ha;
+    auto smells = ha.calculate_detailed_code_smells({fsd});
+    for (const auto& s : smells) {
+        EXPECT_NE(s.type, "high-fan-in")
+            << "field/type declaration flagged as high-fan-in: " << s.symbol;
+    }
+}
+
+TEST(HealthAnalyzer, ProblematicSymbolsSkipEmptyNames) {
+    // Extraction gaps produce empty-name symbols; they are not actionable
+    // and must be filtered, not reported (pocketbase had two).
+    EnhancedSymbol anon;
+    anon.symbol.name = "";
+    anon.symbol.type = SymbolType::Function;
+    anon.symbol.line = 1;
+    anon.symbol.end_line = 300;
+    anon.complexity = 70;
+    anon.incoming_ref_count = 30;
+    anon.outgoing_ref_count = 30;
+
+    FileSymbolData fsd;
+    fsd.path = "gen.go";
+    fsd.symbols.push_back(&anon);
+
+    HealthAnalyzer ha;
+    EXPECT_TRUE(ha.identify_problematic_symbols({fsd}).empty());
+    EXPECT_TRUE(ha.calculate_detailed_code_smells({fsd}).empty());
+}
+
+TEST(HealthAnalyzer, DebtRatioMeasuresFunctionsNotAllSymbols) {
+    // cc=70 repo reported debt=0.00 because thousands of non-function
+    // symbols diluted the denominator. Debt is a function-level metric.
+    EnhancedSymbol hot;
+    hot.symbol.name = "applyHandlerOptions";
+    hot.symbol.type = SymbolType::Function;
+    hot.symbol.line = 1;
+    hot.symbol.end_line = 200;
+    hot.complexity = 70;
+
+    std::vector<EnhancedSymbol> vars(10);
+    FileSymbolData fsd;
+    fsd.path = "client.php";
+    fsd.symbols.push_back(&hot);
+    for (int i = 0; i < 10; i++) {
+        vars[i].symbol.name = "v" + std::to_string(i);
+        vars[i].symbol.type = SymbolType::Variable;
+        vars[i].complexity = 0;
+        fsd.symbols.push_back(&vars[i]);
+    }
+
+    HealthAnalyzer ha;
+    // 1 debt-carrying function out of 1 function; variables are not
+    // in the population.
+    EXPECT_DOUBLE_EQ(ha.calculate_tech_debt_ratio_from_files({fsd}), 1.0);
 }
 
 // ===========================================================================

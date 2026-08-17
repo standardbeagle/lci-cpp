@@ -39,8 +39,6 @@ inline constexpr double kMaintainabilityMin = 0.0;
 inline constexpr double kMaintainabilityMax = 100.0;
 inline constexpr int kLongFunction = 50;
 inline constexpr int kLongFunctionHighSev = 100;
-inline constexpr int kHighComplexity = 10;
-inline constexpr int kHighComplexityHighSev = 20;
 inline constexpr int kGodClass = 15;
 inline constexpr int kGodClassHighSev = 25;
 inline constexpr int kShotgunSurgery = 10;
@@ -76,6 +74,9 @@ struct FunctionInfo {
 struct ComplexityMetrics {
     double average_cc{};
     double median_cc{};
+    /// Highest cyclomatic complexity seen across all functions/methods.
+    /// Feeds the health score's worst-case penalty (D3 de-saturation).
+    double max_cc{};
     absl::flat_hash_map<std::string, double> percentiles;
     std::vector<FunctionInfo> high_complexity_funcs;
     absl::flat_hash_map<std::string, int> distribution;
