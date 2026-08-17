@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include <lci/path_classifier.h>
 #include <lci/semantic/synonym_table.h>
 
 namespace lci {
@@ -139,6 +140,10 @@ struct Config {
     /// dev-verb set (SynonymTable::build_default); a `.lci.kdl` `synonyms`
     /// block can add/override/clear groups.
     SynonymTable synonyms{SynonymTable::build_default()};
+    /// File attribute tagging rules from the `.lci.kdl` `attributes` block
+    /// (tag -> path/glob patterns). Checked before the PathClassifier
+    /// builtins; see include/lci/path_classifier.h for pattern semantics.
+    std::vector<PathAttrRule> attributes;
 };
 
 // -- Config loading -----------------------------------------------------------

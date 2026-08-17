@@ -556,6 +556,33 @@ bool apply_kdl_nodes(Config& cfg, const std::vector<KdlNode>& nodes,
         else if (node.name == "include") cfg.include = collect_strings(node);
         else if (node.name == "exclude") cfg.exclude = collect_strings(node);
         else if (node.name == "propagation_config_dir") get_string(node, cfg.propagation_config_dir);
+        else if (node.name == "attributes") {
+            // attributes { test "src/legacy_tests/"; vendored "*.iife.js" }
+            // Child node name = attribute tag, string args = patterns.
+            // Unknown tags fail fast — a typo silently dropping a rule would
+            // leave vendored/test code polluting every analysis section.
+            for (const auto& child : node.children) {
+                PathAttr attr{};
+                if (!PathClassifier::parse(child.name, attr)) {
+                    error = "attributes: unknown tag '" + child.name +
+                            "' (valid: production, test, example, vendored, "
+                            "generated, docs)";
+                    return false;
+                }
+                bool any = false;
+                for (const auto& a : child.args) {
+                    if (a.kind == TokenKind::String && !a.text.empty()) {
+                        cfg.attributes.push_back({attr, a.text});
+                        any = true;
+                    }
+                }
+                if (!any) {
+                    error = "attributes: tag '" + child.name +
+                            "' has no pattern strings";
+                    return false;
+                }
+            }
+        }
         else if (node.name == "synonyms") {
             auto result = apply_synonyms(node);
             if (!result) {
