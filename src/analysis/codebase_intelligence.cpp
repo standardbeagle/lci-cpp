@@ -10,6 +10,8 @@
 #include <lci/reference.h>
 #include <lci/search/search_options.h>  // classify_file / FileCategory
 
+#include <absl/container/flat_hash_set.h>
+
 #include <algorithm>
 #include <cctype>
 #include <chrono>
@@ -356,9 +358,9 @@ CodebaseIntelligenceResponse CodebaseIntelligenceEngine::build_unified(
 
 CodebaseIntelligenceResponse CodebaseIntelligenceEngine::build_structure(
     const CodebaseIntelligenceParams& /*params*/,
-    const std::vector<FileSymbolData>& /*files*/,
-    const std::vector<std::string>& file_paths, std::string_view project_root,
-    int file_count, int total_functions) const {
+    const std::vector<FileSymbolData>& files,
+    const std::vector<std::string>& file_paths,
+    std::string_view project_root) const {
     CodebaseIntelligenceResponse response;
 
     // Set navigation hints so callers know the mode exists.
@@ -367,13 +369,23 @@ CodebaseIntelligenceResponse CodebaseIntelligenceEngine::build_structure(
     response.navigation_hints["focus_area"] =
         "Use mode='structure' with focus='<term>' to filter results";
 
-    // Walk the indexed file paths: count per top-level dir + per extension,
-    // categorize (code/tests/config/docs), and track deepest path depth.
+    // Walk the indexed file paths: full directory census (root + every
+    // ancestor dir), count per top-level dir + per extension, categorize
+    // (code/tests/config/docs), and track deepest path depth.
+    //
+    // D4 single-source-of-truth: dir/file/symbol counts here must agree with
+    // the overview repository map. The old code stored only top-level segment
+    // count as dir_count (chi: 4 vs ~21 real dirs) and copied the handler's
+    // functions-only tally into symbol_count (guzzle: 16 vs 1205 symbols).
+    // The symbol census now derives from `files` — the same data overview
+    // counts — so callers cannot inject a diverging figure.
     absl::flat_hash_map<std::string, int> top_dir_files;
     absl::flat_hash_map<std::string, int> types_count;
+    absl::flat_hash_set<std::string> all_dirs;
     StructureAnalysis s;
-    s.file_count = file_count;
-    s.symbol_count = total_functions;
+    s.file_count = static_cast<int>(file_paths.size());
+    s.symbol_count = count_all_symbols(files);
+    s.function_count = count_functions(files);
     for (const auto& path : file_paths) {
         if (path.empty()) continue;
         std::string rel = path;
@@ -385,6 +397,13 @@ CodebaseIntelligenceResponse CodebaseIntelligenceEngine::build_structure(
         for (char c : rel)
             if (c == '/') ++depth;
         if (depth > s.max_depth) s.max_depth = depth;
+        // Every ancestor directory counts once; the project root itself is
+        // "." (so a flat corpus reports dirs=1, matching `find . -type d`).
+        all_dirs.insert(".");
+        for (size_t pos = rel.find('/'); pos != std::string::npos;
+             pos = rel.find('/', pos + 1)) {
+            all_dirs.insert(rel.substr(0, pos));
+        }
         auto slash = rel.find('/');
         std::string top =
             slash == std::string::npos ? "." : rel.substr(0, slash);
@@ -410,7 +429,7 @@ CodebaseIntelligenceResponse CodebaseIntelligenceEngine::build_structure(
     // (codebase_intelligence_tools.go:780). The count-based C++ shape clamps to
     // the same cap so the emitted category figure matches Go's list length.
     if (s.other > 10) s.other = 10;
-    s.dir_count = static_cast<int>(top_dir_files.size());
+    s.dir_count = static_cast<int>(all_dirs.size());
     s.types.assign(types_count.begin(), types_count.end());
     std::sort(s.types.begin(), s.types.end(),
               [](const auto& a, const auto& b) { return a.first < b.first; });

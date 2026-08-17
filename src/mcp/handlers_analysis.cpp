@@ -1306,6 +1306,7 @@ void emit_vocabulary(std::ostringstream& out, const NamingReport& nr) {
 // session-startup section (no Go counterpart). lang counts by file extension.
 void emit_summary(std::ostringstream& out,
                   const std::vector<FileSymbolData>& files,
+                  const std::vector<std::string>& file_paths,
                   std::string_view project_root, int file_count,
                   int symbol_count) {
     absl::flat_hash_map<std::string, int> lang_files;
@@ -1318,8 +1319,14 @@ void emit_summary(std::ostringstream& out,
         if (id == LangId::Unknown) return {};
         return to_string(id);
     };
-    for (const auto& f : files) {
-        std::string rel = f.path;
+    // D4 census parity: dirs/depth walk the FULL indexed path set (not just
+    // symbol-bearing files) and count root + every ancestor directory — the
+    // same census build_structure reports, so SUMMARY dirs= and STRUCTURE
+    // dirs= agree. The old parent-dir-only count over symbol-bearing files
+    // understated (chi: 18 vs 21).
+    for (const auto& path : file_paths) {
+        if (path.empty()) continue;
+        std::string rel = path;
         if (!project_root.empty() && rel.rfind(project_root, 0) == 0) {
             rel = rel.substr(project_root.size());
             while (!rel.empty() && rel.front() == '/') rel.erase(0, 1);
@@ -1327,9 +1334,13 @@ void emit_summary(std::ostringstream& out,
         int depth = 0;
         for (char c : rel) if (c == '/') ++depth;
         if (depth > max_depth) max_depth = depth;
-        auto slash = rel.rfind('/');
-        dirs.insert(slash == std::string::npos ? std::string(".")
-                                               : rel.substr(0, slash));
+        dirs.insert(".");
+        for (size_t pos = rel.find('/'); pos != std::string::npos;
+             pos = rel.find('/', pos + 1)) {
+            dirs.insert(rel.substr(0, pos));
+        }
+    }
+    for (const auto& f : files) {
         if (std::string_view l = lang_of(f.path); !l.empty())
             lang_files[std::string(l)]++;
     }
@@ -1501,14 +1512,15 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
     int file_count = indexer.file_count();
     auto files_data = gather_file_symbol_data(indexer);
     int symbol_count = 0;
-    int total_functions = 0;
     for (const auto& f : files_data) {
         symbol_count += static_cast<int>(f.symbols.size());
-        for (const auto* sym : f.symbols) {
-            if (sym && sym->symbol.type == SymbolType::Function) {
-                ++total_functions;
-            }
-        }
+    }
+    // Full indexed path set (includes symbol-less files) — the D4 dir/file
+    // census source shared by SUMMARY and the structure builder.
+    std::vector<std::string> file_paths;
+    for (auto fid : indexer.get_all_file_ids()) {
+        auto p = indexer.get_file_path(fid);
+        if (!p.empty()) file_paths.emplace_back(p);
     }
 
     // Shared analysis for the engine-backed modes (overview/unified/
@@ -1597,25 +1609,21 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                         sr.quality, sr.purity_ratio);
     } else if (mode == "structure") {
         // Structure data (dir/type/category breakdown) is computed by the
-        // engine from the indexed file paths; the handler gathers the raw
-        // paths and renders LCF. Hardcoded output always emitted dirs=1; on a
-        // real corpus the top-level dir distribution is much richer.
-        std::vector<std::string> file_paths;
-        for (auto fid : indexer.get_all_file_ids()) {
-            auto p = indexer.get_file_path(fid);
-            if (!p.empty()) file_paths.emplace_back(p);
-        }
+        // engine from the indexed file paths; the handler only renders LCF.
+        // Counts come from the engine's D4 census (dirs = root + every
+        // ancestor dir; symbols = ALL symbols with the function subset
+        // labeled separately) so they agree with SUMMARY/overview.
         CodebaseIntelligenceParams sp;
         sp.mode = "structure";
         auto resp = engine.build_structure(sp, files_data, file_paths,
-                                           project_root, file_count,
-                                           total_functions);
+                                           project_root);
         const auto& s = *resp.structure_analysis;
         out << "LCF/1.0\nmode=structure\ntier=1\ntokens=20\n---\n"
             << "== STRUCTURE ==\n"
             << "dirs=" << s.dir_count << " files=" << s.file_count
-            << " symbols=" << s.symbol_count << " depth=" << s.max_depth
-            << "\n";
+            << " symbols=" << s.symbol_count
+            << " functions=" << s.function_count
+            << " depth=" << s.max_depth << "\n";
         out << "types:";
         for (const auto& [ext, n] : s.types) out << " " << ext << "=" << n;
         out << "\n"
@@ -1640,7 +1648,7 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                       !d.naming.outliers.empty();
         emit_lcf_header(out, "unified", 1,
                         lcf_token_count(n_map, 0, hd != nullptr, 0, true));
-        emit_summary(out, files_data, project_root, file_count, symbol_count);
+        emit_summary(out, files_data, file_paths, project_root, file_count, symbol_count);
         emit_repository_map(out, d.modules.modules);
         emit_entry_points(out, d.result.response.entry_points, project_root);
         if (hd) emit_health(out, *hd, &d.purity);
@@ -1820,7 +1828,7 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                       !d.naming.outliers.empty();
         emit_lcf_header(out, "overview", 1,
                         lcf_token_count(n_map, 0, hd != nullptr, 0, false));
-        emit_summary(out, files_data, project_root, file_count, symbol_count);
+        emit_summary(out, files_data, file_paths, project_root, file_count, symbol_count);
         emit_repository_map(out, d.modules.modules);
         emit_entry_points(out, d.result.response.entry_points, project_root);
         if (hd) emit_health(out, *hd, &d.purity);

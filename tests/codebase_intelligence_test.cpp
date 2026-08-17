@@ -1127,8 +1127,7 @@ TEST(CIEngine, BuildStructurePopulatedWithFilePaths) {
                                            "/proj/src/util.go",
                                            "/proj/cmd/main.go"};
 
-    auto resp = engine.build_structure(params, {fsd}, file_paths, "/proj",
-                                       /*file_count=*/3, /*total_functions=*/1);
+    auto resp = engine.build_structure(params, {fsd}, file_paths, "/proj");
     // With real file paths the tree is populated, not an empty dirs=0 shell.
     ASSERT_TRUE(resp.structure_analysis.has_value());
     EXPECT_EQ(resp.structure_analysis->file_count, 3);
@@ -1153,8 +1152,7 @@ TEST(CIEngine, BuildStructureCategorizesViaClassifyFile) {
         "/proj/config/settings.json",    // .json extension -> config
     };
 
-    auto resp = engine.build_structure(params, {}, file_paths, "/proj",
-                                       /*file_count=*/4, /*total_functions=*/0);
+    auto resp = engine.build_structure(params, {}, file_paths, "/proj");
     ASSERT_TRUE(resp.structure_analysis.has_value());
     const auto& s = *resp.structure_analysis;
 
@@ -1185,8 +1183,7 @@ TEST(CIEngine, BuildStructureRoutesUnknownToOther) {
         "/proj/src/lib.cpp",        // .cpp -> code
     };
 
-    auto resp = engine.build_structure(params, {}, file_paths, "/proj",
-                                       /*file_count=*/4, /*total_functions=*/0);
+    auto resp = engine.build_structure(params, {}, file_paths, "/proj");
     ASSERT_TRUE(resp.structure_analysis.has_value());
     const auto& s = *resp.structure_analysis;
 
@@ -1218,8 +1215,7 @@ TEST(CIEngine, StructureDirCountIsFullDirectoryCensus) {
         "/proj/src/util.go",          //       (src already seen)
         "/proj/cmd/main.go",          // dir:  cmd
     };
-    auto resp = engine.build_structure(params, {}, file_paths, "/proj",
-                                       /*file_count=*/5, /*total_functions=*/0);
+    auto resp = engine.build_structure(params, {}, file_paths, "/proj");
     ASSERT_TRUE(resp.structure_analysis.has_value());
     // Census: ".", "src", "src/core", "src/core/db", "cmd" -> 5 directories.
     EXPECT_EQ(resp.structure_analysis->dir_count, 5);
@@ -1262,9 +1258,7 @@ TEST(CIEngine, StructureAndOverviewAgreeOnSymbolCount) {
     // The handler's old wiring passed a functions-only count here (1: it even
     // excluded the method). build_structure must not trust it — the symbol
     // census comes from `files`, the same source overview counts from.
-    auto structure = engine.build_structure(sp, files, file_paths, "/proj",
-                                            /*file_count=*/1,
-                                            /*total_functions=*/1);
+    auto structure = engine.build_structure(sp, files, file_paths, "/proj");
     ASSERT_TRUE(structure.structure_analysis.has_value());
 
     EXPECT_EQ(overview.repository_map->total_symbols, 3);
