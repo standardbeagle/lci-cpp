@@ -835,6 +835,185 @@ TEST(CodeInsightLabelCoherence, ClustersGetDomainFromPropagatedLabels) {
 }
 
 // =============================================================================
+// Error-handling / resource sections (== ERROR HANDLING == etc.)
+// =============================================================================
+
+// Real corpus + hand-driven analyzer records keyed to the indexed symbols'
+// file:line (the extractor-side detection is covered by
+// side_effect_extraction_test.cpp; these tests lock rollup + emission).
+class ErrorHandlingSectionTest : public ::testing::Test {
+  protected:
+    void SetUp() override {
+        temp_dir_ = lci::test::unique_temp_dir("lci_eh_section_test_");
+        std::filesystem::create_directories(temp_dir_);
+
+        write_file(temp_dir_ / "main.go",
+                   "package main\n"
+                   "\n"
+                   "func swallowIt() {\n"
+                   "}\n"
+                   "\n"
+                   "func leakIt() {\n"
+                   "}\n");
+        // Same finding in a test path: must never score (production-only).
+        write_file(temp_dir_ / "util_test.go",
+                   "package main\n"
+                   "\n"
+                   "func helperSwallow() {\n"
+                   "}\n");
+
+        Config config;
+        config.project.root = temp_dir_.string();
+        indexer_ = std::make_unique<MasterIndex>(config);
+        ASSERT_TRUE(indexer_->index_directory(temp_dir_.string()));
+        engine_ = std::make_unique<CodebaseIntelligenceEngine>();
+
+        analyzer_ = std::make_unique<SideEffectAnalyzer>("go");
+        std::string main_path = (temp_dir_ / "main.go").string();
+        std::string test_path = (temp_dir_ / "util_test.go").string();
+
+        analyzer_->begin_function("swallowIt", main_path, 3, 4);
+        CatchSiteInfo site;
+        site.line = 3;
+        site.body_empty = true;
+        analyzer_->record_catch(site);
+        analyzer_->end_function();
+
+        analyzer_->begin_function("leakIt", main_path, 6, 7);
+        analyzer_->record_call_site_resources("Open", 6, false);
+        analyzer_->end_function();
+
+        analyzer_->begin_function("helperSwallow", test_path, 3, 4);
+        analyzer_->record_catch(site);
+        analyzer_->end_function();
+    }
+
+    void TearDown() override {
+        std::error_code ec;
+        std::filesystem::remove_all(temp_dir_, ec);
+    }
+
+    static void write_file(const std::filesystem::path& path,
+                           const std::string& content) {
+        std::ofstream out(path);
+        out << content;
+    }
+
+    std::filesystem::path temp_dir_;
+    std::unique_ptr<MasterIndex> indexer_;
+    std::unique_ptr<CodebaseIntelligenceEngine> engine_;
+    std::unique_ptr<SideEffectAnalyzer> analyzer_;
+};
+
+TEST_F(ErrorHandlingSectionTest, OverviewEmitsBothSectionsAfterHealth) {
+    nlohmann::json params;
+    auto result = handle_code_insight(params, *engine_, *indexer_,
+                                      analyzer_.get());
+    ASSERT_FALSE(result.is_error) << result.text;
+    auto health = result.text.find("== HEALTH ==");
+    auto eh = result.text.find("== ERROR HANDLING ==");
+    auto res = result.text.find("== RESOURCE MANAGEMENT ==");
+    ASSERT_NE(health, std::string::npos);
+    ASSERT_NE(eh, std::string::npos);
+    ASSERT_NE(res, std::string::npos);
+    EXPECT_LT(health, eh);
+    EXPECT_LT(eh, res);
+    // LOAD BEARING (when present) comes after both.
+    auto lb = result.text.find("== LOAD BEARING ==");
+    if (lb != std::string::npos) EXPECT_LT(res, lb);
+}
+
+TEST_F(ErrorHandlingSectionTest, SummaryLineCarriesBothScores) {
+    nlohmann::json params;
+    auto result = handle_code_insight(params, *engine_, *indexer_,
+                                      analyzer_.get());
+    ASSERT_FALSE(result.is_error);
+    EXPECT_NE(result.text.find("error_handling="), std::string::npos);
+    EXPECT_NE(result.text.find(" resources="), std::string::npos);
+}
+
+TEST_F(ErrorHandlingSectionTest, FindingsCarryFileLineAndSignal) {
+    nlohmann::json params;
+    auto result = handle_code_insight(params, *engine_, *indexer_,
+                                      analyzer_.get());
+    ASSERT_FALSE(result.is_error);
+    EXPECT_NE(result.text.find("empty-catch: swallowIt (main.go:3)"),
+              std::string::npos)
+        << result.text;
+    EXPECT_NE(result.text.find("leak-no-release: leakIt (main.go:6)"),
+              std::string::npos)
+        << result.text;
+}
+
+TEST_F(ErrorHandlingSectionTest, TestPathFindingsNeverScore) {
+    nlohmann::json params;
+    auto result = handle_code_insight(params, *engine_, *indexer_,
+                                      analyzer_.get());
+    ASSERT_FALSE(result.is_error);
+    EXPECT_EQ(result.text.find("helperSwallow"), std::string::npos)
+        << result.text;
+}
+
+TEST_F(ErrorHandlingSectionTest, SectionsSkippedWhenAnalyzerEmpty) {
+    SideEffectAnalyzer empty("go");
+    nlohmann::json params;
+    auto result = handle_code_insight(params, *engine_, *indexer_, &empty);
+    ASSERT_FALSE(result.is_error);
+    EXPECT_EQ(result.text.find("== ERROR HANDLING =="), std::string::npos);
+    EXPECT_EQ(result.text.find("== RESOURCE MANAGEMENT =="),
+              std::string::npos);
+}
+
+TEST_F(ErrorHandlingSectionTest, DetailedErrorsListsAllFindings) {
+    nlohmann::json params;
+    params["mode"] = "detailed";
+    params["analysis"] = "errors";
+    auto result = handle_code_insight(params, *engine_, *indexer_,
+                                      analyzer_.get());
+    ASSERT_FALSE(result.is_error) << result.text;
+    EXPECT_NE(result.text.find("== ERROR HANDLING =="), std::string::npos);
+    EXPECT_NE(result.text.find("empty-catch"), std::string::npos);
+}
+
+TEST_F(ErrorHandlingSectionTest, DetailedResourcesListsAllFindings) {
+    nlohmann::json params;
+    params["mode"] = "detailed";
+    params["analysis"] = "resources";
+    auto result = handle_code_insight(params, *engine_, *indexer_,
+                                      analyzer_.get());
+    ASSERT_FALSE(result.is_error) << result.text;
+    EXPECT_NE(result.text.find("== RESOURCE MANAGEMENT =="),
+              std::string::npos);
+    EXPECT_NE(result.text.find("leak-no-release"), std::string::npos);
+}
+
+TEST_F(ErrorHandlingSectionTest, DetailedErrorsFailsLoudWithoutRecords) {
+    SideEffectAnalyzer empty("go");
+    nlohmann::json params;
+    params["mode"] = "detailed";
+    params["analysis"] = "errors";
+    auto result = handle_code_insight(params, *engine_, *indexer_, &empty);
+    EXPECT_TRUE(result.is_error);
+}
+
+TEST_F(ErrorHandlingSectionTest, SideEffectsSummaryCarriesJsonTwin) {
+    nlohmann::json params;
+    params["mode"] = "summary";
+    auto result = handle_side_effects(params, *analyzer_, indexer_.get());
+    ASSERT_FALSE(result.is_error);
+    auto json = nlohmann::json::parse(result.text);
+    ASSERT_TRUE(json.contains("error_handling")) << result.text;
+    ASSERT_TRUE(json.contains("resources"));
+    EXPECT_EQ(json["error_handling"]["swallow_sites"].get<int>(), 1);
+    EXPECT_GE(json["error_handling"]["findings"].size(), 1u);
+    EXPECT_EQ(json["resources"]["acquisitions"].get<int>(), 1);
+    // Location always carries the file name (D6 lesson).
+    auto loc = json["error_handling"]["findings"][0]["location"]
+                   .get<std::string>();
+    EXPECT_NE(loc.find("main.go:"), std::string::npos);
+}
+
+// =============================================================================
 // Registration test
 // =============================================================================
 

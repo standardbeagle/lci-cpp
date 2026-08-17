@@ -48,6 +48,7 @@ add_executable(lci_tests
     watcher_test.cpp
     search_engine_test.cpp
     semantic_test.cpp
+    error_handling_analyzer_test.cpp
     side_effect_analyzer_test.cpp
     side_effect_extraction_test.cpp
     linker_engine_test.cpp

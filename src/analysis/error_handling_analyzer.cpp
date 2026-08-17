@@ -1,0 +1,366 @@
+#include <lci/analysis/error_handling_analyzer.h>
+
+#include <lci/analysis/call_graph.h>
+#include <lci/analysis/coupling_analyzer.h>
+#include <lci/analysis/side_effect_analyzer.h>
+#include <lci/core/reference_tracker.h>
+#include <lci/core/text.h>
+#include <lci/idcodec.h>
+#include <lci/indexing/master_index.h>
+
+#include <absl/container/flat_hash_map.h>
+#include <absl/container/flat_hash_set.h>
+
+#include <algorithm>
+#include <cmath>
+#include <deque>
+#include <string>
+
+namespace lci {
+
+namespace {
+
+std::string rel_path(std::string_view path, std::string_view root) {
+    if (!root.empty() && path.rfind(root, 0) == 0) {
+        path.remove_prefix(root.size());
+        while (!path.empty() && path.front() == '/') path.remove_prefix(1);
+    }
+    return std::string(path);
+}
+
+int severity_rank(std::string_view sev) {
+    if (sev == "high") return 2;
+    if (sev == "med") return 1;
+    return 0;
+}
+
+bool is_swallow_signal(EhSignal s) {
+    return s == EhSignal::EmptyCatch || s == EhSignal::CatchAndContinue ||
+           s == EhSignal::LogAndSwallow;
+}
+
+void sort_findings(std::vector<EhFindingEntry>& v) {
+    std::sort(v.begin(), v.end(),
+              [](const EhFindingEntry& a, const EhFindingEntry& b) {
+                  int ra = severity_rank(a.severity);
+                  int rb = severity_rank(b.severity);
+                  if (ra != rb) return ra > rb;
+                  if (a.file != b.file) return a.file < b.file;
+                  if (a.line != b.line) return a.line < b.line;
+                  return a.signal < b.signal;
+              });
+}
+
+}  // namespace
+
+bool ErrorHandlingAnalyzer::is_production_path(std::string_view path) {
+    static constexpr std::string_view markers[] = {
+        "test",     "spec",       "mock",    "fixture", "__tests__",
+        "testdata", "node_modules", "vendor", "example", "sample",
+        "generated", "third_party", "3rdparty"};
+    for (auto m : markers) {
+        if (text::ascii_contains_ci(path, m)) return false;
+    }
+    return true;
+}
+
+double ErrorHandlingAnalyzer::finding_deduction(FindingSeverity severity,
+                                                double confidence,
+                                                double norm_fanin) {
+    double base = 0.1;
+    switch (severity) {
+        case FindingSeverity::High: base = 0.4; break;
+        case FindingSeverity::Med: base = 0.25; break;
+        case FindingSeverity::Low: base = 0.1; break;
+    }
+    return base * confidence * (0.5 + 0.5 * norm_fanin);
+}
+
+double ErrorHandlingAnalyzer::function_score(
+    const std::vector<EhFinding>& findings, double norm_fanin) {
+    double score = 1.0;
+    for (const auto& f : findings) {
+        score -= finding_deduction(f.severity, f.confidence, norm_fanin);
+    }
+    return std::max(0.0, score);
+}
+
+ErrorHandlingAnalyzer::Result ErrorHandlingAnalyzer::analyze(
+    const SideEffectAnalyzer& analyzer, const MasterIndex& indexer,
+    std::string_view project_root) {
+    Result result;
+    const auto& ref = indexer.ref_tracker();
+    auto rt_snap = ref.pin();
+
+    // One production, kind-gated scoring unit per callable symbol with a
+    // side-effect record.
+    struct Unit {
+        const SideEffectInfo* info{};
+        SymbolID id{};
+        std::string name;
+        std::string rel;      // root-relative path
+        std::string pkg;      // module (package) name
+        std::string object_id;
+        int line{};
+        int reach{};          // filled after the graph pass
+    };
+    std::vector<Unit> units;
+    std::vector<SymbolID> nodes;
+    absl::flat_hash_map<SymbolID, int> unit_by_symbol;
+
+    const auto& results = analyzer.results();
+    for (FileID fid : indexer.get_all_file_ids()) {
+        std::string file_path = indexer.get_file_path(fid);
+        std::string rel = rel_path(file_path, project_root);
+        bool production = is_production_path(rel);
+        for (const auto& es : rt_snap->get_file_enhanced_symbols(fid)) {
+            if (!es) continue;
+            auto t = es->symbol.type;
+            if (t != SymbolType::Function && t != SymbolType::Method &&
+                t != SymbolType::Constructor)
+                continue;
+            nodes.push_back(es->id);
+            if (!production) continue;
+            std::string key =
+                file_path + ":" + std::to_string(es->symbol.line) + ":0";
+            auto it = results.find(key);
+            if (it == results.end()) continue;
+            Unit u;
+            u.info = &it->second;
+            u.id = es->id;
+            u.name = std::string(es->symbol.name);
+            u.rel = rel;
+            u.pkg = CouplingAnalyzer::get_package_name(file_path, project_root);
+            u.object_id = encode_symbol_id(es->id);
+            u.line = es->symbol.line;
+            unit_by_symbol[es->id] = static_cast<int>(units.size());
+            units.push_back(std::move(u));
+        }
+    }
+
+    // Exact transitive-caller reach over the real call graph (same signal the
+    // LOAD BEARING section uses); normalized fan-in weights findings so a
+    // swallow in a load-bearing function costs more than one in a leaf.
+    analysis::CallGraph graph;
+    graph.build(nodes,
+                [&ref](SymbolID id) { return ref.get_callee_symbols(id); });
+    auto reach = graph.incoming_reach();
+    int max_reach = 1;
+    absl::flat_hash_map<SymbolID, int> reach_by_symbol;
+    reach_by_symbol.reserve(nodes.size());
+    for (int i = 0; i < graph.node_count(); ++i) {
+        reach_by_symbol[graph.id_at(i)] = reach[i];
+        max_reach = std::max(max_reach, reach[i]);
+    }
+    for (auto& u : units) {
+        auto it = reach_by_symbol.find(u.id);
+        u.reach = it != reach_by_symbol.end() ? it->second : 0;
+    }
+
+    // --- Per-function scores + finding entries -------------------------------
+    auto to_entry = [&](const Unit& u, const EhFinding& f) {
+        EhFindingEntry e;
+        e.severity = std::string(to_string(f.severity));
+        e.signal = std::string(to_string(f.signal));
+        e.symbol = u.name;
+        e.file = u.rel;
+        e.line = f.line;
+        e.location = u.rel + ":" + std::to_string(f.line);
+        e.object_id = u.object_id;
+        e.detail = f.detail;
+        e.confidence = f.confidence;
+        return e;
+    };
+
+    absl::flat_hash_map<std::string, std::pair<double, int>> eh_by_module;
+    absl::flat_hash_map<std::string, std::pair<double, int>> res_by_module;
+    double eh_wsum = 0.0, eh_w = 0.0;
+    double res_wsum = 0.0, res_w = 0.0;
+
+    int throwers = 0;
+    int handled = 0;
+    int swallow_sites = 0;
+    int unchecked_errors = 0;
+    int acquisitions = 0;
+    int funcs_with_acquires = 0;
+    int funcs_with_release_credit = 0;
+    int releases_total = 0;
+    int releases_guarded = 0;
+    std::vector<const Unit*> swallow_units;
+
+    for (const auto& u : units) {
+        const auto& info = *u.info;
+        double norm_fanin =
+            static_cast<double>(u.reach) / static_cast<double>(max_reach);
+        double weight = 1.0 + std::log2(1.0 + static_cast<double>(u.reach));
+
+        double eh_score = function_score(info.error_findings, norm_fanin);
+        double res_score = function_score(info.resource_findings, norm_fanin);
+        eh_wsum += weight * eh_score;
+        eh_w += weight;
+        res_wsum += weight * res_score;
+        res_w += weight;
+        eh_by_module[u.pkg].first += eh_score;
+        eh_by_module[u.pkg].second += 1;
+        res_by_module[u.pkg].first += res_score;
+        res_by_module[u.pkg].second += 1;
+
+        for (const auto& f : info.error_findings) {
+            result.errors.findings.push_back(to_entry(u, f));
+            if (f.signal == EhSignal::DroppedError) ++unchecked_errors;
+        }
+        for (const auto& f : info.resource_findings) {
+            result.resources.findings.push_back(to_entry(u, f));
+        }
+
+        bool swallows = false;
+        for (const auto& f : info.error_findings) {
+            if (is_swallow_signal(f.signal)) swallows = true;
+        }
+        if (swallows) {
+            ++swallow_sites;
+            swallow_units.push_back(&u);
+        }
+
+        if (info.error_handling.can_throw) {
+            ++throwers;
+            // Handled = self or a transitive caller (bounded BFS) carries a
+            // catch site.
+            bool ok = info.error_handling.catch_count > 0;
+            if (!ok) {
+                absl::flat_hash_set<SymbolID> seen{u.id};
+                std::deque<std::pair<SymbolID, int>> q{{u.id, 0}};
+                while (!q.empty() && !ok) {
+                    auto [sid, depth] = q.front();
+                    q.pop_front();
+                    if (depth >= 6) continue;
+                    for (SymbolID caller : ref.get_caller_symbols(sid)) {
+                        if (!seen.insert(caller).second) continue;
+                        auto it = unit_by_symbol.find(caller);
+                        if (it != unit_by_symbol.end() &&
+                            units[it->second]
+                                    .info->error_handling.catch_count > 0) {
+                            ok = true;
+                            break;
+                        }
+                        q.emplace_back(caller, depth + 1);
+                    }
+                }
+            }
+            if (ok) ++handled;
+        }
+
+        if (!info.resource_acquires.empty()) {
+            ++funcs_with_acquires;
+            acquisitions += static_cast<int>(info.resource_acquires.size());
+            bool all_guarded_acquires = true;
+            for (const auto& a : info.resource_acquires) {
+                if (!a.guarded) all_guarded_acquires = false;
+            }
+            if (!info.resource_releases.empty() || all_guarded_acquires) {
+                ++funcs_with_release_credit;
+            }
+        }
+        for (const auto& r : info.resource_releases) {
+            ++releases_total;
+            if (r.guarded) ++releases_guarded;
+        }
+    }
+
+    result.errors.functions_scored = static_cast<int>(units.size());
+    result.resources.functions_scored = static_cast<int>(units.size());
+    result.errors.throwers = throwers;
+    result.errors.handled_ratio =
+        throwers > 0 ? static_cast<double>(handled) / throwers : 0.0;
+    result.errors.swallow_sites = swallow_sites;
+    result.errors.unchecked_errors = unchecked_errors;
+    result.resources.acquisitions = acquisitions;
+    result.resources.released_ratio =
+        funcs_with_acquires > 0
+            ? static_cast<double>(funcs_with_release_credit) /
+                  funcs_with_acquires
+            : 0.0;
+    result.resources.guarded_ratio =
+        releases_total > 0
+            ? static_cast<double>(releases_guarded) / releases_total
+            : 0.0;
+
+    // --- Module + repo rollups (D3 shape: monotone, non-saturating) ----------
+    auto roll = [](const absl::flat_hash_map<std::string,
+                                             std::pair<double, int>>& by_mod,
+                   double wsum, double w,
+                   std::vector<std::pair<std::string, double>>& mod_out) {
+        for (const auto& [pkg, acc] : by_mod) {
+            mod_out.emplace_back(pkg, 10.0 * acc.first / acc.second);
+        }
+        std::sort(mod_out.begin(), mod_out.end(),
+                  [](const auto& a, const auto& b) {
+                      if (a.second != b.second) return a.second < b.second;
+                      return a.first < b.first;
+                  });
+        double repo = w > 0 ? 10.0 * wsum / w : 0.0;
+        // An extreme module bounds the repo: the mean cannot average away a
+        // package that swallows everywhere.
+        if (!mod_out.empty()) {
+            repo = std::min(repo, mod_out.front().second + 3.0);
+        }
+        return repo;
+    };
+    result.errors.score =
+        roll(eh_by_module, eh_wsum, eh_w, result.errors.module_scores);
+    std::vector<std::pair<std::string, double>> res_modules;  // bound only
+    result.resources.score = roll(res_by_module, res_wsum, res_w, res_modules);
+
+    sort_findings(result.errors.findings);
+    sort_findings(result.resources.findings);
+
+    // --- Exposure: public API symbols that transitively reach a swallow site.
+    if (!swallow_units.empty()) {
+        // Reverse BFS from every swallow site at once, tracking min depth and
+        // the sink each caller first reached.
+        absl::flat_hash_map<SymbolID, std::pair<int, const Unit*>> depth_sink;
+        std::deque<SymbolID> q;
+        for (const auto* su : swallow_units) {
+            depth_sink[su->id] = {0, su};
+            q.push_back(su->id);
+        }
+        while (!q.empty()) {
+            SymbolID sid = q.front();
+            q.pop_front();
+            auto [d, sink] = depth_sink[sid];
+            if (d >= 6) continue;
+            for (SymbolID caller : ref.get_caller_symbols(sid)) {
+                if (depth_sink.contains(caller)) continue;
+                depth_sink[caller] = {d + 1, sink};
+                q.push_back(caller);
+            }
+        }
+        std::vector<EhExposureEntry> exposure;
+        for (const auto& [sid, ds] : depth_sink) {
+            if (ds.first == 0) continue;  // the swallow site itself
+            auto it = unit_by_symbol.find(sid);
+            if (it == unit_by_symbol.end()) continue;
+            const Unit& u = units[it->second];
+            EhExposureEntry e;
+            e.api_symbol = u.name;
+            e.api_location = u.rel + ":" + std::to_string(u.line);
+            e.sink_symbol = ds.second->name;
+            e.depth = ds.first;
+            e.reach = u.reach;
+            exposure.push_back(std::move(e));
+        }
+        std::sort(exposure.begin(), exposure.end(),
+                  [](const EhExposureEntry& a, const EhExposureEntry& b) {
+                      if (a.reach != b.reach) return a.reach > b.reach;
+                      if (a.api_symbol != b.api_symbol)
+                          return a.api_symbol < b.api_symbol;
+                      return a.api_location < b.api_location;
+                  });
+        if (exposure.size() > 3) exposure.resize(3);
+        result.errors.exposure = std::move(exposure);
+    }
+
+    return result;
+}
+
+}  // namespace lci
