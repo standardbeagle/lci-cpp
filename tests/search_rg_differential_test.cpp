@@ -274,5 +274,69 @@ TEST(SearchRgDifferentialTest, DirectedCornerPatternsMatchNaiveOracle) {
     }
 }
 
+/// Case-insensitive naive oracle: byte-fold both sides.
+HitSet naive_hits_ci(const TempCorpus& corpus, const std::string& pattern) {
+    auto fold = [](std::string s) {
+        for (char& c : s) {
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        }
+        return s;
+    };
+    HitSet hits;
+    const std::string fp = fold(pattern);
+    for (const auto& [rel, content] : corpus.files()) {
+        const std::string fc = fold(content);
+        size_t pos = 0;
+        while ((pos = fc.find(fp, pos)) != std::string::npos) {
+            int line = 1 + static_cast<int>(
+                std::count(fc.begin(), fc.begin() + static_cast<long>(pos),
+                           '\n'));
+            hits.emplace(rel, line);
+            size_t nl = fc.find('\n', pos);
+            if (nl == std::string::npos) break;
+            pos = nl + 1;
+        }
+    }
+    return hits;
+}
+
+TEST(SearchRgDifferentialTest, CaseInsensitivePatternsMatchNaiveOracle) {
+    // Guards the case-FOLDED bloom certification: a ci query must never be
+    // certified away when only case differs, and truly-absent ci patterns
+    // must return empty.
+    TempCorpus corpus;
+    Config cfg = make_default_config();
+    build_corpus(corpus, cfg);
+    cfg.project.root = corpus.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(corpus.path().string()));
+
+    const std::vector<std::string> patterns = {
+        "pagewindow",      // matches only via case-fold
+        "INDEX SERVER",    // folded phrase
+        "Handle_Gadget",   // mixed-case fold of an identifier
+        "rEpAgInAtIoN",    // aggressive fold
+        "zqx absent vbn",  // truly absent
+    };
+    for (const auto& pattern : patterns) {
+        SearchOptions opts;
+        opts.max_results = 1000;
+        opts.case_insensitive = true;
+        HitSet actual;
+        for (const auto& r : mi.search_with_options(pattern, opts)) {
+            std::string rel = r.path;
+            const std::string& root = cfg.project.root;
+            if (rel.rfind(root, 0) == 0 && rel.size() > root.size()) {
+                rel = rel.substr(root.size() + 1);
+            }
+            actual.emplace(rel, r.line);
+        }
+        HitSet expected = naive_hits_ci(corpus, pattern);
+        EXPECT_EQ(expected, actual)
+            << "ci pattern [" << pattern << "]\n  naive: "
+            << describe(expected) << "\n  lci:   " << describe(actual);
+    }
+}
+
 }  // namespace
 }  // namespace lci

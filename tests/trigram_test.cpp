@@ -701,13 +701,27 @@ TEST(TrigramIndexNarrowTest, DoesNotCertifyPresentPattern) {
     EXPECT_FALSE(n.certifies_absent(FileID{1}));
 }
 
-TEST(TrigramIndexNarrowTest, CaseInsensitiveQueriesAreUninformative) {
-    // Stored trigrams keep original case; probing with a folded pattern
-    // would fabricate absences, so ci queries certify nothing.
+TEST(TrigramIndexNarrowTest, CaseInsensitiveQueriesCertifyViaFoldedBlooms) {
+    // Blooms store case-FOLDED trigrams, so they certify ci queries too
+    // (the exact maps still cannot — they keep original case and only
+    // back case-sensitive queries).
     TrigramIndex index;
     index.index_file(FileID{1}, "type PageWindow struct{}");
 
-    EXPECT_FALSE(index.narrow("pagewindow", true).informative());
+    // ci query matching only by case-fold: must NOT be certified absent.
+    auto ci_present = index.narrow("pagewindow", true);
+    ASSERT_TRUE(ci_present.informative());
+    EXPECT_FALSE(ci_present.certifies_absent(FileID{1}));
+
+    // ci query truly absent: certified via the folded bloom.
+    auto ci_absent = index.narrow("zqxvbn", true);
+    ASSERT_TRUE(ci_absent.informative());
+    EXPECT_TRUE(ci_absent.certifies_absent(FileID{1}));
+
+    // Case-sensitive query for the exact identifier: never certified away
+    // (folded bloom is a superset for cs probes).
+    auto cs_present = index.narrow("PageWindow", false);
+    EXPECT_FALSE(cs_present.certifies_absent(FileID{1}));
 }
 
 TEST(TrigramIndexNarrowTest, UnfilteredAndRemovedFilesAreNeverCertified) {
@@ -741,7 +755,11 @@ TEST(TrigramBloomTest, ContainsEveryInsertedTrigramNeverFalseNegative) {
             }
         }
         if (!has_alpha) continue;  // Skipped on both sides.
-        EXPECT_TRUE(bloom->may_contain(TrigramBloom::hash_bytes(w)))
+        std::string folded = w;  // Blooms store case-folded trigrams.
+        for (char& c : folded) {
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        }
+        EXPECT_TRUE(bloom->may_contain(TrigramBloom::hash_bytes(folded)))
             << "window [" << w << "]";
     }
     // A trigram from a different vocabulary should (whp) probe negative.

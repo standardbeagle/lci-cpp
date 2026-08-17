@@ -231,6 +231,10 @@ class TrigramIndex {
       private:
         friend class TrigramIndex;
         bool informative_{false};
+        /// The exact per-occurrence maps certify only case-sensitive
+        /// queries (stored trigrams keep original case); blooms certify
+        /// both (case-folded on build and probe).
+        bool maps_valid_{false};
         absl::flat_hash_set<FileID> possible_;
         std::shared_ptr<const Snapshot> snap_;
         /// Canonical pattern-trigram hashes probed against per-file

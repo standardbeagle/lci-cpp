@@ -232,6 +232,25 @@ uint64_t fnv1a64(std::string_view bytes) {
     return h;
 }
 
+/// ASCII-lowercases each byte of a packed trigram.
+uint32_t fold_packed_ascii(uint32_t packed) {
+    const uint32_t b0 = (packed >> 16) & 0xFF;
+    const uint32_t b1 = (packed >> 8) & 0xFF;
+    const uint32_t b2 = packed & 0xFF;
+    auto lower = [](uint32_t b) {
+        return (b >= 'A' && b <= 'Z') ? b + ('a' - 'A') : b;
+    };
+    return (lower(b0) << 16) | (lower(b1) << 8) | lower(b2);
+}
+
+/// ASCII-lowercases the bytes of a UTF-8 trigram (multi-byte code points
+/// are untouched; only <0x80 bytes change, which is UTF-8-safe).
+std::string fold_ascii_bytes(std::string_view bytes) {
+    std::string out(bytes);
+    for (char& c : out) c = ascii_lower(c);
+    return out;
+}
+
 uint32_t next_pow2_u32(uint32_t v) {
     if (v < 2) return 2;
     --v;
@@ -261,9 +280,15 @@ std::shared_ptr<const TrigramBloom> TrigramBloom::build(
     thread_local absl::flat_hash_set<uint64_t> distinct;
     distinct.clear();
 
+    // Trigrams are ASCII-case-FOLDED before hashing, on both the build and
+    // probe sides: one bloom then serves case-sensitive probes (a
+    // case-sensitive occurrence implies its folded windows are present —
+    // superset holds) and case-insensitive probes (folded-vs-folded is
+    // exactly ci semantics). The exact per-occurrence maps can never do
+    // this — they answer positions, blooms only answer set membership.
     if (is_pure_ascii(content)) {
         for_each_simple_trigram(content, [&](int, uint32_t trigram) {
-            distinct.insert(hash_ascii(trigram));
+            distinct.insert(hash_ascii(fold_packed_ascii(trigram)));
         });
     } else {
         thread_local std::vector<uint32_t> code_points;
@@ -271,7 +296,7 @@ std::shared_ptr<const TrigramBloom> TrigramBloom::build(
         for_each_unicode_trigram(
             content, code_points, byte_offsets,
             [&](int, std::string trigram_str) {
-                distinct.insert(hash_bytes(trigram_str));
+                distinct.insert(hash_bytes(fold_ascii_bytes(trigram_str)));
             });
     }
 
@@ -740,17 +765,16 @@ bool TrigramIndex::Narrowing::certifies_absent(FileID fid) const {
             return false;  // All probes may be present — must scan.
         }
     }
-    // Fall back to the exact per-occurrence maps for files they cover.
-    return snap_->covered_files.contains(fid) && !possible_.contains(fid);
+    // Fall back to the exact per-occurrence maps for files they cover
+    // (case-sensitive queries only — see maps_valid_).
+    return maps_valid_ && snap_->covered_files.contains(fid) &&
+           !possible_.contains(fid);
 }
 
 TrigramIndex::Narrowing TrigramIndex::narrow(std::string_view pattern,
                                              bool case_insensitive) const {
     Narrowing n;
-    // Case-insensitive queries cannot be certified: stored trigrams keep
-    // original case, so probing with a folded pattern would produce false
-    // absences. Patterns under 3 bytes have no trigrams to probe.
-    if (case_insensitive || pattern.size() < 3) return n;
+    if (pattern.size() < 3) return n;  // No trigram windows to probe.
 
     auto snap = load_snapshot();
     if (snap->covered_files.empty() && snap->blooms.empty()) {
@@ -774,7 +798,9 @@ TrigramIndex::Narrowing TrigramIndex::narrow(std::string_view pattern,
         for_each_simple_trigram(pattern, [&](int offset, uint32_t trigram) {
             ++total_trigrams;
             if (n.probes_.size() < kMaxProbes) {
-                n.probes_.push_back(TrigramBloom::hash_ascii(trigram));
+                // Blooms store case-FOLDED trigrams; fold the probe too.
+                n.probes_.push_back(
+                    TrigramBloom::hash_ascii(fold_packed_ascii(trigram)));
             }
             if (auto it = snap->ascii_trigrams.find(trigram);
                 it != snap->ascii_trigrams.end()) {
@@ -799,7 +825,8 @@ TrigramIndex::Narrowing TrigramIndex::narrow(std::string_view pattern,
         total_trigrams = static_cast<int>(all_pattern_trigrams.size());
         for (const auto& [_, trigram_str] : all_pattern_trigrams) {
             if (n.probes_.size() < kMaxProbes) {
-                n.probes_.push_back(TrigramBloom::hash_bytes(trigram_str));
+                n.probes_.push_back(
+                    TrigramBloom::hash_bytes(fold_ascii_bytes(trigram_str)));
             }
             if (auto it = snap->unicode_trigrams.find(trigram_str);
                 it != snap->unicode_trigrams.end()) {
@@ -827,6 +854,9 @@ TrigramIndex::Narrowing TrigramIndex::narrow(std::string_view pattern,
             n.possible_.insert(file_id);
         }
     }
+    // The exact maps keep original case, so a folded pattern's counts would
+    // fabricate absences — maps certify case-sensitive queries only.
+    n.maps_valid_ = !case_insensitive;
     n.snap_ = std::move(snap);
     n.informative_ = true;
     return n;
