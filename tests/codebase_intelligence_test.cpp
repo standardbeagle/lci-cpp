@@ -443,6 +443,138 @@ TEST(HealthAnalyzer, SmellsLimitedToMax) {
 }
 
 // ===========================================================================
+// Health analyzer - saturation fixes (D3): same-source smell counts,
+// symbol-kind gates, empty-name filtering, function-based debt ratio
+// ===========================================================================
+
+TEST(HealthAnalyzer, SmellCountsAgreeWithComplexityDistribution) {
+    // 8 functions with cc=25: distribution["high"] must equal the
+    // high-complexity smell count — one source of truth, no truncation
+    // and no divergent thresholds between the two.
+    std::vector<EnhancedSymbol> syms(8);
+    std::vector<const EnhancedSymbol*> ptrs;
+    for (int i = 0; i < 8; i++) {
+        syms[i].symbol.name = "func_" + std::to_string(i);
+        syms[i].symbol.type = SymbolType::Function;
+        syms[i].symbol.line = i * 10 + 1;
+        syms[i].symbol.end_line = i * 10 + 5;
+        syms[i].complexity = 25;
+        ptrs.push_back(&syms[i]);
+    }
+    FileSymbolData fsd;
+    fsd.path = "test.go";
+    fsd.symbols = ptrs;
+
+    HealthAnalyzer ha;
+    auto cm = ha.calculate_complexity_from_files({fsd});
+    ASSERT_EQ(cm.distribution["high"], 8);
+
+    auto smells = ha.calculate_detailed_code_smells({fsd});
+    auto counts = HealthAnalyzer::count_smells_by_type(smells);
+    EXPECT_EQ(counts["high-complexity"], cm.distribution["high"]);
+}
+
+TEST(HealthAnalyzer, LongFunctionSmellOnlyForFunctionsAndMethods) {
+    // A trait/class/type declaration spanning many lines is not a long
+    // function — kind gate required (guzzle flagged ClientTrait).
+    EnhancedSymbol trait_sym;
+    trait_sym.symbol.name = "ClientTrait";
+    trait_sym.symbol.type = SymbolType::Trait;
+    trait_sym.symbol.line = 13;
+    trait_sym.symbol.end_line = 400;
+    trait_sym.complexity = 1;
+
+    FileSymbolData fsd;
+    fsd.path = "ClientTrait.php";
+    fsd.symbols.push_back(&trait_sym);
+
+    HealthAnalyzer ha;
+    auto smells = ha.calculate_detailed_code_smells({fsd});
+    for (const auto& s : smells) {
+        EXPECT_NE(s.type, "long-function")
+            << "trait declaration flagged as long-function";
+    }
+}
+
+TEST(HealthAnalyzer, HighFanInSmellNotForFieldsOrTypeDecls) {
+    // A struct field with many incoming references is normal data access,
+    // not a smell candidate (pocketbase flagged struct fields).
+    EnhancedSymbol field_sym;
+    field_sym.symbol.name = "Id";
+    field_sym.symbol.type = SymbolType::Field;
+    field_sym.symbol.line = 5;
+    field_sym.symbol.end_line = 5;
+    field_sym.complexity = 0;
+    field_sym.incoming_ref_count = 50;
+
+    EnhancedSymbol type_sym;
+    type_sym.symbol.name = "RecordId";
+    type_sym.symbol.type = SymbolType::Type;
+    type_sym.symbol.line = 8;
+    type_sym.symbol.end_line = 8;
+    type_sym.incoming_ref_count = 50;
+
+    FileSymbolData fsd;
+    fsd.path = "base.go";
+    fsd.symbols = {&field_sym, &type_sym};
+
+    HealthAnalyzer ha;
+    auto smells = ha.calculate_detailed_code_smells({fsd});
+    for (const auto& s : smells) {
+        EXPECT_NE(s.type, "high-fan-in")
+            << "field/type declaration flagged as high-fan-in: " << s.symbol;
+    }
+}
+
+TEST(HealthAnalyzer, ProblematicSymbolsSkipEmptyNames) {
+    // Extraction gaps produce empty-name symbols; they are not actionable
+    // and must be filtered, not reported (pocketbase had two).
+    EnhancedSymbol anon;
+    anon.symbol.name = "";
+    anon.symbol.type = SymbolType::Function;
+    anon.symbol.line = 1;
+    anon.symbol.end_line = 300;
+    anon.complexity = 70;
+    anon.incoming_ref_count = 30;
+    anon.outgoing_ref_count = 30;
+
+    FileSymbolData fsd;
+    fsd.path = "gen.go";
+    fsd.symbols.push_back(&anon);
+
+    HealthAnalyzer ha;
+    EXPECT_TRUE(ha.identify_problematic_symbols({fsd}).empty());
+    EXPECT_TRUE(ha.calculate_detailed_code_smells({fsd}).empty());
+}
+
+TEST(HealthAnalyzer, DebtRatioMeasuresFunctionsNotAllSymbols) {
+    // cc=70 repo reported debt=0.00 because thousands of non-function
+    // symbols diluted the denominator. Debt is a function-level metric.
+    EnhancedSymbol hot;
+    hot.symbol.name = "applyHandlerOptions";
+    hot.symbol.type = SymbolType::Function;
+    hot.symbol.line = 1;
+    hot.symbol.end_line = 200;
+    hot.complexity = 70;
+
+    std::vector<EnhancedSymbol> vars(10);
+    FileSymbolData fsd;
+    fsd.path = "client.php";
+    fsd.symbols.push_back(&hot);
+    for (int i = 0; i < 10; i++) {
+        vars[i].symbol.name = "v" + std::to_string(i);
+        vars[i].symbol.type = SymbolType::Variable;
+        vars[i].complexity = 0;
+        fsd.symbols.push_back(&vars[i]);
+    }
+
+    HealthAnalyzer ha;
+    // 1 debt-carrying function out of 1 function; variables are not
+    // in the population.
+    EXPECT_DOUBLE_EQ(ha.calculate_tech_debt_ratio_from_files({fsd}), 1.0);
+}
+
+// ===========================================================================
 // Health analyzer - symbol risk and tags
 // ===========================================================================
 
