@@ -60,6 +60,19 @@ nlohmann::json apply_exclude_comments(nlohmann::json results);
 /// Pass-through when `context_lines <= 0`.
 nlohmann::json widen_context_blocks(nlohmann::json results, int context_lines);
 
+/// Literal seeds for the regex fast path: EVERY literal run of >=3 chars in
+/// the pattern, deduplicated, in appearance order. The former single
+/// longest-run seed was blind to alternation — for
+/// `\b(?:panic|unreachable|todo|unimplemented)!\s*\(` it seeded only
+/// "unimplemented", so every `panic!` site was silently absent from the
+/// result set (measured: 1 of 1203 real sites on a fixture; the pattern is
+/// err-lookup's production Rust detector). Seeding the union of all runs
+/// keeps every row containing ANY run; the RE2 row filter then decides.
+/// Still heuristic for patterns whose only runs are optional (`x(?:abc)?`),
+/// which can match text containing no run at all — same bound as before,
+/// now over a strictly larger row set.
+std::vector<std::string> regex_literal_seeds(const std::string& pattern);
+
 /// Resolves the trailing `lci grep/search <path>...` positionals to the
 /// ROOT-relative form the index matches against. Each token is interpreted as
 /// absolute or relative to `cwd`, then expressed relative to `root`. Purely

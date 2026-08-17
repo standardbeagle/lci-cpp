@@ -1142,11 +1142,25 @@ namespace {
 // Used as a trigram seed so the engine narrows files before the local
 // regex filter runs. Walks the pattern, skipping escape sequences and
 // metacharacters, and tracks the longest contiguous literal run.
-std::string longest_literal_run(const std::string& re) {
-    std::string best;
+/// Every literal run of >=3 chars in `re`, deduplicated, appearance order —
+/// the seed set for the regex fast path. The former single longest-run seed
+/// was alternation-blind: `(?:panic|unreachable|todo|unimplemented)!` seeded
+/// only "unimplemented", silently dropping every other branch's rows
+/// (measured 1 of 1203 real sites). Rows containing ANY run are a superset
+/// of rows containing the branch that matched; the RE2 row filter decides.
+///
+/// A run's final char is dropped before a `*`/`?`/`{` quantifier — `abc*`
+/// can match "ab", so "abc" would over-narrow; `+` requires its char and
+/// keeps it. Runs inside a wholly-optional group can still over-narrow
+/// (pre-existing bound, unchanged).
+std::vector<std::string> regex_literal_seeds(const std::string& re) {
+    std::vector<std::string> seeds;
     std::string cur;
     auto take = [&]() {
-        if (cur.size() > best.size()) best = cur;
+        if (cur.size() >= 3 &&
+            std::find(seeds.begin(), seeds.end(), cur) == seeds.end()) {
+            seeds.push_back(cur);
+        }
         cur.clear();
     };
     for (size_t i = 0; i < re.size(); ++i) {
@@ -1165,9 +1179,28 @@ std::string longest_literal_run(const std::string& re) {
             continue;
         }
         switch (c) {
-            case '.': case '*': case '+': case '?':
-            case '[': case ']': case '(': case ')':
-            case '{': case '}': case '|':
+            case '*': case '?': case '{':
+                // Quantifier can make the preceding char absent from a
+                // match — drop it from the run before banking.
+                if (!cur.empty()) cur.pop_back();
+                take();
+                if (c == '{') {
+                    while (i + 1 < re.size() && re[i + 1] != '}') ++i;
+                }
+                break;
+            case '(':
+                take();
+                // Group modifiers are syntax, not literals: skip the
+                // "?:" of a non-capturing group (the ':' previously
+                // leaked into the first branch's run — ":panic").
+                if (i + 2 < re.size() && re[i + 1] == '?' &&
+                    re[i + 2] == ':') {
+                    i += 2;
+                }
+                break;
+            case '.': case '+':
+            case '[': case ']': case ')':
+            case '}': case '|':
             case '^': case '$':
                 take();
                 // Skip whole char class for [...].
@@ -1181,8 +1214,18 @@ std::string longest_literal_run(const std::string& re) {
         }
     }
     take();
-    return best;
+    return seeds;
 }
+
+}  // namespace
+
+namespace grep_filters {
+std::vector<std::string> regex_literal_seeds(const std::string& pattern) {
+    return ::lci::cli::regex_literal_seeds(pattern);
+}
+}  // namespace grep_filters
+
+namespace {
 
 // Filter result rows by re-matching their content line against the
 // user-supplied regex. Drops rows whose context block has no line
@@ -1408,8 +1451,9 @@ int run_search(const GlobalFlags& flags, const SearchCommandOptions& options) {
     // row in regex_filter_results.
     std::unique_ptr<RE2> regex_filter;
     bool regex_full_scan = false;
+    std::vector<std::string> regex_seeds;
     if (use_regex) {
-        auto seed = longest_literal_run(effective_pattern);
+        regex_seeds = regex_literal_seeds(effective_pattern);
         RE2::Options regex_opts(RE2::Quiet);
         regex_opts.set_case_sensitive(!case_insensitive);
         regex_opts.set_log_errors(false);
@@ -1423,10 +1467,12 @@ int run_search(const GlobalFlags& flags, const SearchCommandOptions& options) {
             return 1;
         }
         regex_filter = std::move(re);
-        if (seed.size() >= 3) {
-            // Fast path: seed-then-filter via the trigram-indexed
-            // server search.
-            effective_pattern = seed;
+        if (!regex_seeds.empty()) {
+            // Fast path: seed-then-filter via the indexed server search.
+            // ALL literal runs seed (union) — a single longest-run seed
+            // was alternation-blind and silently dropped every branch
+            // that lacked it.
+            effective_pattern = regex_seeds.front();
         } else {
             // Pure-meta regex (no usable trigram seed). Mirror Go's
             // behavior: scan every indexed file directly with RE2.
@@ -1510,7 +1556,11 @@ int run_search(const GlobalFlags& flags, const SearchCommandOptions& options) {
     // Multi-pattern fan-out: same algorithm as `lci grep` so OR semantics
     // are identical between the two commands. See `search_union_patterns`.
     std::vector<std::string> all_patterns;
-    if (!effective_pattern.empty()) all_patterns.push_back(effective_pattern);
+    if (use_regex && !regex_seeds.empty()) {
+        all_patterns = regex_seeds;  // Union of every literal run.
+    } else if (!effective_pattern.empty()) {
+        all_patterns.push_back(effective_pattern);
+    }
     for (const auto& p : extra_patterns) {
         if (!p.empty()) all_patterns.push_back(p);
     }
@@ -1969,8 +2019,12 @@ int run_grep(const GlobalFlags& flags, const GrepCommandOptions& options) {
         for (size_t i = 0; i < all_patterns.size(); ++i) {
             if (i > 0) combined += "|";
             combined += "(" + all_patterns[i] + ")";
-            auto seed = longest_literal_run(all_patterns[i]);
-            if (seed.size() >= 3) grep_seeds.push_back(seed);
+            for (auto& seed : regex_literal_seeds(all_patterns[i])) {
+                if (std::find(grep_seeds.begin(), grep_seeds.end(), seed) ==
+                    grep_seeds.end()) {
+                    grep_seeds.push_back(std::move(seed));
+                }
+            }
         }
         std::string with_multiline = "(?m)" + combined;
         auto re = std::make_unique<RE2>(with_multiline, regex_opts);
@@ -1996,10 +2050,13 @@ int run_grep(const GlobalFlags& flags, const GrepCommandOptions& options) {
         // whole budget on rows the regex then rejects (a 5-row page of
         // "handle_" hits rarely contains a "handle_\w+_context" line), so
         // small -n values returned empty for patterns with common seeds.
-        // Collect the server's max page, filter, then truncate below.
-        result = search_union_patterns(*client, grep_seeds, 1000,
-                                       case_insensitive, search_err,
-                                       scoped_paths);
+        // Page floor 1000; large explicit -n values raise it (bounded by
+        // the server's 100k ceiling) so exhaustive extraction is not
+        // silently truncated to the first page.
+        result = search_union_patterns(
+            *client, grep_seeds,
+            std::min(100000, std::max(1000, max_results)), case_insensitive,
+            search_err, scoped_paths);
     } else if (all_patterns.size() == 1) {
         result = client->search(all_patterns.front(), max_results,
                                 case_insensitive, false, search_err,

@@ -484,6 +484,54 @@ TEST(GrepScopePaths, PathEscapingRootLeftUnchanged) {
     EXPECT_EQ(out.front(), "/etc/passwd");
 }
 
+// -- regex_literal_seeds ------------------------------------------------------
+//
+// The seed set for `grep -E` / `search -E`. The former single longest-run
+// seed was alternation-blind: err-lookup's production Rust detector
+// `\b(?:panic|unreachable|todo|unimplemented)!\s*\(` seeded only
+// "unimplemented" and returned 1 of 1203 real sites.
+
+TEST(RegexLiteralSeeds, AlternationYieldsEveryBranch) {
+    auto seeds = grep_filters::regex_literal_seeds(
+        R"(\b(?:panic|unreachable|todo|unimplemented)!\s*\()");
+    EXPECT_EQ(seeds, (std::vector<std::string>{
+                         "panic", "unreachable", "todo", "unimplemented"}));
+}
+
+TEST(RegexLiteralSeeds, HttpStatusAlternation) {
+    auto seeds = grep_filters::regex_literal_seeds(
+        R"(\b(?:status|sendStatus|writeHead)\s*\(\s*[45]\d\d\b)");
+    EXPECT_EQ(seeds, (std::vector<std::string>{"status", "sendStatus",
+                                               "writeHead"}));
+}
+
+TEST(RegexLiteralSeeds, EscapedDotJoinsRuns) {
+    auto seeds =
+        grep_filters::regex_literal_seeds(R"(\berrors\.New\s*\()");
+    EXPECT_EQ(seeds, (std::vector<std::string>{"errors.New"}));
+}
+
+TEST(RegexLiteralSeeds, QuantifierDropsPrecedingChar) {
+    // `abc*` can match "ab" — the run must not include the quantified char.
+    auto star = grep_filters::regex_literal_seeds("abcd*efg");
+    EXPECT_EQ(star, (std::vector<std::string>{"abc", "efg"}));
+    // `+` requires its char, so the full run stands.
+    auto plus = grep_filters::regex_literal_seeds("abcd+");
+    EXPECT_EQ(plus, (std::vector<std::string>{"abcd"}));
+    auto brace = grep_filters::regex_literal_seeds("abcd{2,3}x");
+    EXPECT_EQ(brace, (std::vector<std::string>{"abc"}));
+}
+
+TEST(RegexLiteralSeeds, ShortRunsAndPureMetaYieldNothing) {
+    EXPECT_TRUE(grep_filters::regex_literal_seeds(R"(\d+)").empty());
+    EXPECT_TRUE(grep_filters::regex_literal_seeds("a|b").empty());
+}
+
+TEST(RegexLiteralSeeds, DuplicateRunsDedup) {
+    auto seeds = grep_filters::regex_literal_seeds("foo.*foo.*bar");
+    EXPECT_EQ(seeds, (std::vector<std::string>{"foo", "bar"}));
+}
+
 TEST(GrepFiltersComment, LineSlashSlashIsComment) {
     EXPECT_TRUE(gf::line_looks_like_comment("// hello"));
     EXPECT_TRUE(gf::line_looks_like_comment("    // indented"));
