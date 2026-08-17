@@ -357,7 +357,8 @@ CodebaseIntelligenceResponse CodebaseIntelligenceEngine::build_unified(
 CodebaseIntelligenceResponse CodebaseIntelligenceEngine::build_structure(
     const CodebaseIntelligenceParams& /*params*/,
     const std::vector<FileSymbolData>& /*files*/,
-    const std::vector<std::string>& file_paths, std::string_view project_root,
+    const std::vector<std::string>& file_paths,
+    const std::vector<PathAttr>& file_attrs, std::string_view project_root,
     int file_count, int total_functions) const {
     CodebaseIntelligenceResponse response;
 
@@ -374,7 +375,8 @@ CodebaseIntelligenceResponse CodebaseIntelligenceEngine::build_structure(
     StructureAnalysis s;
     s.file_count = file_count;
     s.symbol_count = total_functions;
-    for (const auto& path : file_paths) {
+    for (size_t idx = 0; idx < file_paths.size(); ++idx) {
+        const auto& path = file_paths[idx];
         if (path.empty()) continue;
         std::string rel = path;
         if (!project_root.empty() && rel.rfind(project_root, 0) == 0) {
@@ -398,6 +400,19 @@ CodebaseIntelligenceResponse CodebaseIntelligenceEngine::build_structure(
         // (no recognized extension: bare README, LICENSE, Makefile, ...) routes
         // to the "other" bucket, matching Go categorizeFile's default return
         // "other" (codebase_intelligence_tools.go:846) — never to code.
+        // The stored PathClassifier attribute (index-time, config-aware)
+        // decides the tests/docs/example/vendored/generated segments; only
+        // production files fall through to the extension-category switch.
+        PathAttr attr = idx < file_attrs.size() ? file_attrs[idx]
+                                                : PathAttr::Production;
+        switch (attr) {
+            case PathAttr::Test: ++s.tests; continue;
+            case PathAttr::Docs: ++s.docs; continue;
+            case PathAttr::Example: ++s.example; continue;
+            case PathAttr::Vendored: ++s.vendored; continue;
+            case PathAttr::Generated: ++s.generated; continue;
+            case PathAttr::Production: break;
+        }
         switch (classify_file(rel)) {
             case FileCategory::Test: ++s.tests; break;
             case FileCategory::Documentation: ++s.docs; break;

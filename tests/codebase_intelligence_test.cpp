@@ -1127,7 +1127,7 @@ TEST(CIEngine, BuildStructurePopulatedWithFilePaths) {
                                            "/proj/src/util.go",
                                            "/proj/cmd/main.go"};
 
-    auto resp = engine.build_structure(params, {fsd}, file_paths, "/proj",
+    auto resp = engine.build_structure(params, {fsd}, file_paths, {}, "/proj",
                                        /*file_count=*/3, /*total_functions=*/1);
     // With real file paths the tree is populated, not an empty dirs=0 shell.
     ASSERT_TRUE(resp.structure_analysis.has_value());
@@ -1153,7 +1153,7 @@ TEST(CIEngine, BuildStructureCategorizesViaClassifyFile) {
         "/proj/config/settings.json",    // .json extension -> config
     };
 
-    auto resp = engine.build_structure(params, {}, file_paths, "/proj",
+    auto resp = engine.build_structure(params, {}, file_paths, {}, "/proj",
                                        /*file_count=*/4, /*total_functions=*/0);
     ASSERT_TRUE(resp.structure_analysis.has_value());
     const auto& s = *resp.structure_analysis;
@@ -1185,7 +1185,7 @@ TEST(CIEngine, BuildStructureRoutesUnknownToOther) {
         "/proj/src/lib.cpp",        // .cpp -> code
     };
 
-    auto resp = engine.build_structure(params, {}, file_paths, "/proj",
+    auto resp = engine.build_structure(params, {}, file_paths, {}, "/proj",
                                        /*file_count=*/4, /*total_functions=*/0);
     ASSERT_TRUE(resp.structure_analysis.has_value());
     const auto& s = *resp.structure_analysis;
