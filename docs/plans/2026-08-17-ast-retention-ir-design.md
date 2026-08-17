@@ -74,6 +74,26 @@ analyses (error handling, resource management, future dataflow checks)
 post-hoc and re-runnable; on-demand re-parse covers the long tail. No full
 tree retention.
 
+## Budget policy (user directive, 2026-08-17)
+
+Major feature layers do NOT squeeze into the existing index budgets.
+Policy: **keep current budgets unchanged for the current indexes**
+(content/trigram/postings/symbols/refs — the ≤2x corpus target and
+`server.max_rss_mb` semantics stay as-is), and **add a separate, named
+budget for the new analysis indexes** (op-stream IR, error/resource
+summaries, any future retained-analysis layer):
+
+- New config: `index.analysis_memory_mb` (own cap, own census section in
+  `memprofile`, own soak ceiling) — accounted separately from
+  `index.max_memory_mb` so a regression in one layer cannot hide in the
+  other's headroom.
+- Sequencing: **grow the features and capacities first, then back in the
+  memory and technical requirements.** Build the IR and analyses against
+  the fixture corpora, measure the real footprint with the census, and
+  only then set the cap from measurements — do not pre-constrain the
+  design to a guessed number. The prerequisite measurements below feed
+  that sizing, not a go/no-go gate.
+
 ## Prerequisite measurements (before implementation)
 
 1. TSTree resident bytes/source byte and parse-vs-extract wall split —
