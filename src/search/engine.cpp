@@ -747,11 +747,17 @@ std::vector<SearchMatch> find_content_matches(
         offset = found + 1;
     }
 
-    if (options.max_count_per_file > 0 &&
-        static_cast<int>(matches.size()) > options.max_count_per_file) {
-        matches.resize(static_cast<size_t>(options.max_count_per_file));
-    } else if (static_cast<int>(matches.size()) > kMaxMatchesPerFile) {
-        matches.resize(kMaxMatchesPerFile);
+    // kMaxMatchesPerFile applies ONLY when the caller set no explicit
+    // per-file budget. The previous else-if chain re-applied the constant
+    // whenever an explicit larger budget was not yet exceeded, silently
+    // truncating dense files to 100 regardless of the caller's cap.
+    {
+        const int cap = options.max_count_per_file > 0
+                            ? options.max_count_per_file
+                            : kMaxMatchesPerFile;
+        if (static_cast<int>(matches.size()) > cap) {
+            matches.resize(static_cast<size_t>(cap));
+        }
     }
 
     return matches;
@@ -796,7 +802,14 @@ void SearchEngine::process_file(
 
     if (options.exclude_tests && is_test_file(path)) return;
 
-    auto matches = find_matches(content_sv, pattern, options);
+    // Per-file collection bounded by the remaining collection budget, not
+    // the hidden kMaxMatchesPerFile constant (silent 100-per-file cap).
+    SearchOptions scan_options = options;
+    if (scan_options.max_count_per_file <= 0 && effective_cap > 0) {
+        scan_options.max_count_per_file =
+            effective_cap - static_cast<int>(results.size());
+    }
+    auto matches = find_matches(content_sv, pattern, scan_options);
     if (matches.empty()) return;
 
     // Block-aware context is not yet wired; context_extractor falls back to

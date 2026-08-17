@@ -945,6 +945,32 @@ TEST(MasterIndexSearchIntegrationTest,
     EXPECT_FALSE(a_certified);
 }
 
+TEST(MasterIndexSearchIntegrationTest, ManyMatchesInOneFileNotSilentlyCapped) {
+    // err-lookup regression shape: a repo file with hundreds of legitimate
+    // hits (golang/go-style error tables). The hidden kMaxMatchesPerFile=100
+    // cap silently dropped every match past 100 in a file even when the
+    // caller's max_results budget had room — `-n 1000000` returned 101 of
+    // 1201 real sites. Per-file collection must be bounded by the remaining
+    // RESULT budget, not a constant.
+    TempDir dir;
+    std::string content = "package main\n";
+    for (int i = 0; i < 300; ++i) {
+        content += "var e" + std::to_string(i) + " = needle(" +
+                   std::to_string(i) + ")\n";
+    }
+    dir.write_file("many.go", content);
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    SearchOptions opts;
+    opts.max_results = 1000;
+    auto results = mi.search_with_options("needle", opts);
+    EXPECT_EQ(results.size(), 300u);
+}
+
 TEST(MasterIndexSearchIntegrationTest,
      IncrementalTrigramStateDoesNotHideBulkFiles) {
     TempDir dir;

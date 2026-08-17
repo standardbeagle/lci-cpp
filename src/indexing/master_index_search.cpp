@@ -404,7 +404,18 @@ std::vector<SearchResult> MasterIndex::execute_search(
         // Replaces the former bespoke O(content×pattern) tolower double-loop;
         // thread_local lowercase buffers keep the case-insensitive path
         // allocation-free across the candidate scan.
-        auto matches = find_content_matches(content_sv, pattern, options);
+        //
+        // Per-file collection is bounded by the REMAINING result budget, not
+        // the hidden kMaxMatchesPerFile constant: that default silently
+        // returned 100 of N matches for dense files (an error-table file
+        // with 1200 hits yielded 101 results against -n 1000000) — the
+        // silent-cap class this codebase keeps re-fixing.
+        SearchOptions scan_options = options;
+        if (scan_options.max_count_per_file <= 0) {
+            scan_options.max_count_per_file =
+                options.max_results - static_cast<int>(results.size());
+        }
+        auto matches = find_content_matches(content_sv, pattern, scan_options);
         if (matches.empty()) continue;
 
         // Resolve line numbers via binary search over the precomputed

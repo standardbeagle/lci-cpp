@@ -90,7 +90,11 @@ inline std::optional<Search> decode_search(const nlohmann::json& body,
         }
     }
     if (request.max_results <= 0) request.max_results = 100;
-    request.max_results = std::min(request.max_results, 1000);
+    // Ceiling raised 1000 -> 100000: the old clamp silently truncated
+    // exhaustive-extraction callers (err-lookup passes -n 1000000 and
+    // documented being burned by an earlier silent 2000 cap). 100k rows
+    // ~= 50 MB JSON — bounded, and only paid when explicitly requested.
+    request.max_results = std::min(request.max_results, 100000);
     request.max_context_lines = std::clamp(request.max_context_lines, 0, 100);
     return request;
 }
@@ -103,7 +107,7 @@ inline std::optional<LimitedPattern> decode_limited_pattern(
         return std::nullopt;
     }
     if (request.max_results <= 0) request.max_results = 100;
-    request.max_results = std::min(request.max_results, 1000);
+    request.max_results = std::min(request.max_results, 100000);
     return request;
 }
 
