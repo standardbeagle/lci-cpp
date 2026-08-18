@@ -561,6 +561,9 @@ class ReferenceTracker {
     struct FileResolutionMeta {
         LangFamily language_family{LangFamily::kUnknown};
         bool low_quality{false};
+        /// Hash of the parent directory — package-proximity tiebreak for
+        /// ambiguous bare names (Go package = directory).
+        uint64_t dir_hash{0};
     };
     absl::flat_hash_map<FileID, FileResolutionMeta> file_resolution_meta_;
 
