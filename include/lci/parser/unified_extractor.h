@@ -260,6 +260,16 @@ class UnifiedExtractor {
     // Records a write to the base identifier of an lvalue node (descends member
     // / subscript expressions to the leftmost identifier).
     void record_lvalue_write(TSNode lvalue, int line, int column);
+    // True when node_type opens a cleanup-guard scope for the current language
+    // (defer/errdefer/finally/ensure/using/with) — release calls inside count
+    // as guarded release credit; visit_node maintains se_guard_depth_ with it.
+    bool is_se_guard_node(std::string_view node_type) const;
+    // Walks one catch/except/rescue clause's subtree, classifies its body
+    // syntactically, and reports it to the sink as a CatchSiteInfo.
+    void process_catch_site(TSNode node, std::string_view node_type);
+    // Go dropped-error detection over assignment / short-var-declaration
+    // statements (`_ = err`, `v, _ := f()`).
+    void process_go_error_drop(TSNode node, std::string_view node_type);
 
     // Input data
     std::string_view content_;
@@ -295,6 +305,9 @@ class UnifiedExtractor {
     // function context at a time).
     SideEffectAnalyzer* side_effects_{};
     int se_func_depth_{};
+    // Depth of enclosing cleanup-guard scopes (defer/finally/ensure/using/
+    // with); >0 means calls here carry guarded release/acquire credit.
+    int se_guard_depth_{};
 
     // Complexity tracking (stack for nested functions)
     std::vector<int> complexity_stack_;

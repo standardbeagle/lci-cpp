@@ -160,6 +160,7 @@ void UnifiedExtractor::init(std::string_view content, FileID file_id,
     in_class_body_ = false;
     has_current_func_ = false;
     se_func_depth_ = 0;
+    se_guard_depth_ = 0;
     lines_initialized_ = false;
 }
 
@@ -192,6 +193,7 @@ void UnifiedExtractor::reset() {
 
     side_effects_ = nullptr;
     se_func_depth_ = 0;
+    se_guard_depth_ = 0;
 
     handled_nodes_.clear();
     local_var_types_.clear();
@@ -348,6 +350,14 @@ void UnifiedExtractor::visit_node(TSNode node) {
         process_side_effect_node(node, node_type);
     }
 
+    // Cleanup-guard scope (defer/finally/ensure/using/with): calls inside
+    // carry guarded release credit for the side-effect resource pairing.
+    bool se_guard = false;
+    if (side_effects_ && is_se_guard_node(node_type)) {
+        se_guard = true;
+        ++se_guard_depth_;
+    }
+
     // Track import context
     bool was_import = in_import_context_;
     if (node_type == "import_statement") {
@@ -372,6 +382,8 @@ void UnifiedExtractor::visit_node(TSNode node) {
     for (uint32_t i = 0; i < child_count; ++i) {
         visit_node(ts_node_child(node, i));
     }
+
+    if (se_guard) --se_guard_depth_;
 
     // Restore context flags
     if (node_type == "import_statement") {
@@ -476,6 +488,18 @@ std::string_view UnifiedExtractor::extract_function_name(
             return node_text(inner);
         }
         return node_text(decl);
+    }
+
+    // Kotlin: function_declaration has no `name` field — the first
+    // simple_identifier child is the name.
+    if (node_type == "function_declaration") {
+        uint32_t n = ts_node_named_child_count(node);
+        for (uint32_t i = 0; i < n; ++i) {
+            TSNode c = ts_node_named_child(node, i);
+            if (get_node_type(c) == "simple_identifier") {
+                return node_text(c);
+            }
+        }
     }
 
     // Arrow functions assigned to variables

@@ -770,5 +770,166 @@ TEST(TransitivePropagation, ConfidenceDecaysToMinConfidenceFloor) {
     std::filesystem::remove_all(dir, ec);
 }
 
+// ---------------------------------------------------------------------------
+// Error-handling / resource classification (pure logic)
+// ---------------------------------------------------------------------------
+
+TEST(ResourceCalleeTest, AcquirePrefixes) {
+    EXPECT_EQ(classify_resource_callee("Open"), ResourceOpKind::Acquire);
+    EXPECT_EQ(classify_resource_callee("fopen"), ResourceOpKind::Acquire);
+    EXPECT_EQ(classify_resource_callee("connect"), ResourceOpKind::Acquire);
+    EXPECT_EQ(classify_resource_callee("Dial"), ResourceOpKind::Acquire);
+    EXPECT_EQ(classify_resource_callee("Lock"), ResourceOpKind::Acquire);
+    EXPECT_EQ(classify_resource_callee("acquireConn"), ResourceOpKind::Acquire);
+    EXPECT_EQ(classify_resource_callee("malloc"), ResourceOpKind::Acquire);
+}
+
+TEST(ResourceCalleeTest, ReleasePrefixes) {
+    EXPECT_EQ(classify_resource_callee("Close"), ResourceOpKind::Release);
+    EXPECT_EQ(classify_resource_callee("fclose"), ResourceOpKind::Release);
+    EXPECT_EQ(classify_resource_callee("Unlock"), ResourceOpKind::Release);
+    EXPECT_EQ(classify_resource_callee("releaseConn"), ResourceOpKind::Release);
+    EXPECT_EQ(classify_resource_callee("free"), ResourceOpKind::Release);
+    EXPECT_EQ(classify_resource_callee("disconnect"), ResourceOpKind::Release);
+}
+
+TEST(ResourceCalleeTest, UnrelatedCalleesAreNone) {
+    EXPECT_EQ(classify_resource_callee("Println"), ResourceOpKind::None);
+    EXPECT_EQ(classify_resource_callee("compute"), ResourceOpKind::None);
+    // "closed"/"opened" predicates must not count as resource ops.
+    EXPECT_EQ(classify_resource_callee(""), ResourceOpKind::None);
+}
+
+TEST(CatchClassifyTest, EmptyBodyIsEmptyCatch) {
+    CatchSiteInfo site;
+    site.line = 7;
+    site.body_empty = true;
+    std::vector<EhFinding> out;
+    classify_catch_site(site, out);
+    ASSERT_EQ(out.size(), 1u);
+    EXPECT_EQ(out[0].signal, EhSignal::EmptyCatch);
+    EXPECT_EQ(out[0].severity, FindingSeverity::High);
+    EXPECT_EQ(out[0].line, 7);
+}
+
+TEST(CatchClassifyTest, BroadTypeAddsBroadCatch) {
+    CatchSiteInfo site;
+    site.line = 3;
+    site.body_empty = true;
+    site.broad_type = true;
+    site.caught_type = "Exception";
+    std::vector<EhFinding> out;
+    classify_catch_site(site, out);
+    ASSERT_EQ(out.size(), 2u);
+    EXPECT_EQ(out[0].signal, EhSignal::EmptyCatch);
+    EXPECT_EQ(out[1].signal, EhSignal::BroadCatch);
+    EXPECT_EQ(out[1].severity, FindingSeverity::Med);
+}
+
+TEST(CatchClassifyTest, LogOnlyBodyIsLogAndSwallow) {
+    CatchSiteInfo site;
+    site.line = 4;
+    site.has_log_call = true;
+    std::vector<EhFinding> out;
+    classify_catch_site(site, out);
+    ASSERT_EQ(out.size(), 1u);
+    EXPECT_EQ(out[0].signal, EhSignal::LogAndSwallow);
+}
+
+TEST(CatchClassifyTest, WorkWithoutRethrowIsCatchAndContinue) {
+    CatchSiteInfo site;
+    site.line = 4;
+    site.has_other_call = true;
+    std::vector<EhFinding> out;
+    classify_catch_site(site, out);
+    ASSERT_EQ(out.size(), 1u);
+    EXPECT_EQ(out[0].signal, EhSignal::CatchAndContinue);
+}
+
+TEST(CatchClassifyTest, RethrowWithCauseIsClean) {
+    CatchSiteInfo site;
+    site.line = 4;
+    site.has_rethrow = true;
+    site.rethrow_uses_cause = true;
+    std::vector<EhFinding> out;
+    classify_catch_site(site, out);
+    EXPECT_TRUE(out.empty());
+}
+
+TEST(CatchClassifyTest, RethrowWithoutCauseIsFlaggedLow) {
+    CatchSiteInfo site;
+    site.line = 4;
+    site.has_rethrow = true;
+    std::vector<EhFinding> out;
+    classify_catch_site(site, out);
+    ASSERT_EQ(out.size(), 1u);
+    EXPECT_EQ(out[0].signal, EhSignal::RethrowNoCause);
+    EXPECT_EQ(out[0].severity, FindingSeverity::Low);
+}
+
+TEST(CatchClassifyTest, ReturnSurfacesErrorNoSwallowFinding) {
+    CatchSiteInfo site;
+    site.line = 4;
+    site.has_return = true;
+    site.has_other_call = true;
+    std::vector<EhFinding> out;
+    classify_catch_site(site, out);
+    EXPECT_TRUE(out.empty());
+}
+
+TEST(ResourcePairingTest, AcquireWithNoReleaseIsLeak) {
+    std::vector<ResourceOp> acq{{"Open", 3, false}};
+    std::vector<EhFinding> out;
+    classify_resource_pairing(acq, {}, {}, false, out);
+    ASSERT_EQ(out.size(), 1u);
+    EXPECT_EQ(out[0].signal, EhSignal::LeakNoRelease);
+    EXPECT_EQ(out[0].severity, FindingSeverity::Med);
+    EXPECT_EQ(out[0].line, 3);
+}
+
+TEST(ResourcePairingTest, ValueReturningFactorySuppressesLeakNoRelease) {
+    std::vector<ResourceOp> acq{{"Open", 3, false}};
+    std::vector<EhFinding> out;
+    classify_resource_pairing(acq, {}, {}, /*returns_value=*/true, out);
+    EXPECT_TRUE(out.empty());
+}
+
+TEST(ResourcePairingTest, GuardedReleaseIsClean) {
+    std::vector<ResourceOp> acq{{"Open", 3, false}};
+    std::vector<ResourceOp> rel{{"Close", 4, true}};
+    std::vector<EhFinding> out;
+    classify_resource_pairing(acq, rel, {5}, true, out);
+    EXPECT_TRUE(out.empty());
+}
+
+TEST(ResourcePairingTest, ThrowBetweenAcquireAndBareReleaseIsErrorPathLeak) {
+    std::vector<ResourceOp> acq{{"Open", 3, false}};
+    std::vector<ResourceOp> rel{{"Close", 9, false}};
+    std::vector<EhFinding> out;
+    classify_resource_pairing(acq, rel, {5}, false, out);
+    ASSERT_EQ(out.size(), 1u);
+    EXPECT_EQ(out[0].signal, EhSignal::LeakOnErrorPath);
+}
+
+TEST(ResourcePairingTest, BareReleaseInThrowingFunctionIsUnguarded) {
+    std::vector<ResourceOp> acq{{"Open", 3, false}};
+    std::vector<ResourceOp> rel{{"Close", 9, false}};
+    std::vector<EhFinding> out;
+    // Throw after the release: not on the acquire..release window, but the
+    // release itself is unguarded in a throwing function.
+    classify_resource_pairing(acq, rel, {12}, false, out);
+    ASSERT_EQ(out.size(), 1u);
+    EXPECT_EQ(out[0].signal, EhSignal::UnguardedRelease);
+    EXPECT_EQ(out[0].severity, FindingSeverity::Low);
+}
+
+TEST(ResourcePairingTest, BareReleaseNoThrowIsClean) {
+    std::vector<ResourceOp> acq{{"Open", 3, false}};
+    std::vector<ResourceOp> rel{{"Close", 9, false}};
+    std::vector<EhFinding> out;
+    classify_resource_pairing(acq, rel, {}, false, out);
+    EXPECT_TRUE(out.empty());
+}
+
 }  // namespace
 }  // namespace lci

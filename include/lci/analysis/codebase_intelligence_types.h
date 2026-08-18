@@ -136,6 +136,54 @@ struct PuritySummary {
     std::string detailed_query;
 };
 
+/// One error-handling / resource finding, ready for LCF + JSON emission.
+/// (docs/plans/2026-08-17-error-handling-score-design.md)
+struct EhFindingEntry {
+    std::string severity;   ///< "high" / "med" / "low"
+    std::string signal;     ///< e.g. "empty-catch", "leak-no-release"
+    std::string symbol;     ///< function name
+    std::string location;   ///< root-relative file:line (always carries file)
+    std::string object_id;  ///< encode_symbol_id, "" when unresolved
+    std::string detail;     ///< evidence, e.g. "caught=Exception"
+    double confidence{};
+    // Sort keys (severity desc, file, line).
+    std::string file;
+    int line{};
+};
+
+/// A public-API symbol that transitively reaches a swallow/leak site.
+struct EhExposureEntry {
+    std::string api_symbol;
+    std::string api_location;  ///< root-relative file:line
+    std::string sink_symbol;   ///< the swallow/leak function reached
+    int depth{};               ///< call-graph hops
+    int reach{};               ///< api symbol's transitive caller count
+};
+
+/// Repo-level error-handling rollup (== ERROR HANDLING ==).
+struct ErrorHandlingSummary {
+    double score{};  ///< 0..10, monotone non-saturating rollup
+    /// Module scores keyed by package name, sorted ascending by score.
+    std::vector<std::pair<std::string, double>> module_scores;
+    int throwers{};
+    double handled_ratio{};
+    int swallow_sites{};
+    int unchecked_errors{};
+    int functions_scored{};
+    std::vector<EhFindingEntry> findings;  ///< severity desc, file, line
+    std::vector<EhExposureEntry> exposure;
+};
+
+/// Repo-level resource-management rollup (== RESOURCE MANAGEMENT ==).
+struct ResourceSummary {
+    double score{};
+    int acquisitions{};
+    double released_ratio{};
+    double guarded_ratio{};
+    int functions_scored{};
+    std::vector<EhFindingEntry> findings;
+};
+
 /// Performance anti-pattern.
 struct PerformanceAntiPattern {
     std::string type;
