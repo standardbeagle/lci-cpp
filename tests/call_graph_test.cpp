@@ -129,6 +129,19 @@ TEST(CallGraph, BetweennessFindsBroker) {
     EXPECT_GT(bc[3], 0.0);
 }
 
+// Hand-computed betweenness on a directed path a->b->c->d: shortest paths
+// routed through b = (a,c),(a,d) -> raw 2; through c = (a,d),(b,d) -> raw 2.
+// Directed-pair normalization divides by (n-1)(n-2) = 6.
+TEST(CallGraph, BetweennessMatchesHandComputedValues) {
+    auto g = make_graph({1, 2, 3, 4}, {{1, {2}}, {2, {3}}, {3, {4}}});
+    auto bc = g.betweenness();
+    ASSERT_EQ(bc.size(), 4u);
+    EXPECT_DOUBLE_EQ(bc[1], 2.0 / 6.0);
+    EXPECT_DOUBLE_EQ(bc[2], 2.0 / 6.0);
+    EXPECT_DOUBLE_EQ(bc[0], 0.0);
+    EXPECT_DOUBLE_EQ(bc[3], 0.0);
+}
+
 // Determinism: same graph, same labels + modularity across runs.
 TEST(CallGraph, LouvainDeterministic) {
     absl::flat_hash_map<SymbolID, std::vector<SymbolID>> e = {
