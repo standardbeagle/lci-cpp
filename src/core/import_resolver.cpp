@@ -87,15 +87,24 @@ SymbolID ImportResolver::resolve_symbol_reference(
     std::span<const SymbolID> candidates,
     std::function<const EnhancedSymbol*(SymbolID)> symbol_lookup) const {
 
-    // Strategy 1: Check if symbol is imported in this file.
+    // Strategy 1: the name is imported by this file — but an import binding
+    // names a symbol, not a defining file, so with several same-named
+    // candidates it cannot say WHICH one is meant. Only a unique candidate
+    // is evidence; blindly taking the first credited unrelated same-named
+    // symbols (D2: reach inflation).
     if (auto it = import_graph_.find(ref_file_id);
         it != import_graph_.end()) {
         for (const auto& binding : it->second) {
             if (binding.imported_name == referenced_name ||
                 binding.original_name == referenced_name) {
+                SymbolID only = 0;
                 for (SymbolID cid : candidates) {
-                    if (symbol_lookup(cid) != nullptr) return cid;
+                    if (symbol_lookup(cid) == nullptr) continue;
+                    if (only != 0) { only = 0; break; }  // >1 live candidate
+                    only = cid;
                 }
+                if (only != 0) return only;
+                break;  // ambiguous under import evidence: try later tiers
             }
         }
     }
@@ -107,16 +116,24 @@ SymbolID ImportResolver::resolve_symbol_reference(
         }
     }
 
-    // Strategy 3: Prefer exported symbols.
-    for (SymbolID cid : candidates) {
-        if (const auto* sym = symbol_lookup(cid)) {
-            if (sym->is_exported) return cid;
+    // Strategy 3: a UNIQUE exported candidate. Export status ranks a single
+    // library symbol above unexported shadows, but when several exported
+    // symbols share the name (chi: Mux.Get vs an _examples handler Get),
+    // "first exported" is a coin flip that built wrong call edges.
+    {
+        SymbolID only = 0;
+        for (SymbolID cid : candidates) {
+            const auto* sym = symbol_lookup(cid);
+            if (sym == nullptr || !sym->is_exported) continue;
+            if (only != 0) { only = 0; break; }
+            only = cid;
         }
+        if (only != 0) return only;
     }
 
-    // No import, same-file, or export evidence: report "couldn't decide"
-    // and let the caller apply its ranked fallback. Blindly returning the
-    // first candidate here linked Python calls to same-named symbols in
+    // No decisive import, same-file, or export evidence: report "couldn't
+    // decide" and let the caller apply its ranked fallback. Blindly returning
+    // the first candidate here linked Python calls to same-named symbols in
     // vendored C++ and preferred examples/ files over library code.
     return 0;
 }

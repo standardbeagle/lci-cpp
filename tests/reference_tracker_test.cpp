@@ -410,6 +410,142 @@ TEST(ReferenceTrackerTest, ResolvesByReceiverTypeScope) {
 }
 
 // ---------------------------------------------------------------------------
+// Ambiguous bare-name resolution (D2: collision edges poison reach)
+// ---------------------------------------------------------------------------
+
+namespace {
+Reference make_call(uint64_t id, const char* name, int line) {
+    Reference r;
+    r.id = id;
+    r.type = ReferenceType::Call;
+    r.referenced_name = name;
+    r.line = line;
+    r.column = 5;
+    return r;
+}
+}  // namespace
+
+// Two exported same-named functions in different packages, a caller in a
+// third package with no import evidence: no candidate is distinguishable,
+// so NO edge may be built. A wrong edge is worse than a missing one — every
+// bare-name collision edge inflates transitive reach for an unrelated symbol.
+TEST(ReferenceTrackerTest, AmbiguousCrossPackageBareNameDoesNotLink) {
+    ReferenceTracker rt;
+
+    rt.process_file(1, "pkg_a/a.go",
+                    std::vector<Symbol>{
+                        make_sym("Get", SymbolType::Function, 1, 1, 5)},
+                    {}, {});
+    rt.process_file(2, "pkg_b/b.go",
+                    std::vector<Symbol>{
+                        make_sym("Get", SymbolType::Function, 2, 1, 5)},
+                    {}, {});
+    std::vector<Reference> refs = {make_call(1, "Get", 3)};
+    rt.process_file(3, "app/main.go",
+                    std::vector<Symbol>{
+                        make_sym("main", SymbolType::Function, 3, 1, 10)},
+                    refs, {});
+    rt.process_all_references();
+
+    auto snapshot = rt.pin();
+    auto main_sym = snapshot->find_symbol_by_file_and_name(3, "main");
+    ASSERT_NE(main_sym, nullptr);
+    EXPECT_TRUE(rt.get_callee_symbols(main_sym->id).empty())
+        << "ambiguous bare name must not link to an arbitrary candidate";
+}
+
+// Same bare name in two directories, caller shares a directory with one of
+// them (Go package = directory): the same-directory candidate is the target.
+TEST(ReferenceTrackerTest, SameDirectoryCandidateWinsForUnexportedName) {
+    ReferenceTracker rt;
+
+    // Deliberately register the WRONG-package candidate first so insertion
+    // order cannot mask a missing proximity rule.
+    rt.process_file(1, "other/util.go",
+                    std::vector<Symbol>{
+                        make_sym("writer", SymbolType::Function, 1, 1, 5)},
+                    {}, {});
+    rt.process_file(2, "mw/compress.go",
+                    std::vector<Symbol>{
+                        make_sym("writer", SymbolType::Function, 2, 1, 5)},
+                    {}, {});
+    std::vector<Reference> refs = {make_call(1, "writer", 3)};
+    rt.process_file(3, "mw/flush.go",
+                    std::vector<Symbol>{
+                        make_sym("flush", SymbolType::Function, 3, 1, 10)},
+                    refs, {});
+    rt.process_all_references();
+
+    auto snapshot = rt.pin();
+    auto flush_sym = snapshot->find_symbol_by_file_and_name(3, "flush");
+    auto mw_writer = snapshot->find_symbol_by_file_and_name(2, "writer");
+    ASSERT_NE(flush_sym, nullptr);
+    ASSERT_NE(mw_writer, nullptr);
+    auto callees = rt.get_callee_symbols(flush_sym->id);
+    ASSERT_EQ(callees.size(), 1u);
+    EXPECT_EQ(callees[0], mw_writer->id)
+        << "same-directory (same-package) candidate must win";
+}
+
+// Exported name collides between an example tree and production: the example
+// candidate is demoted, the unique production candidate links. Covers Go's
+// `_examples` convention (leading-underscore dir, ignored by the toolchain).
+TEST(ReferenceTrackerTest, ExampleDirLosesToProductionOnAmbiguity) {
+    ReferenceTracker rt;
+
+    rt.process_file(1, "_examples/todos/demo.go",
+                    std::vector<Symbol>{
+                        make_sym("Route", SymbolType::Function, 1, 1, 5)},
+                    {}, {});
+    rt.process_file(2, "router/mux.go",
+                    std::vector<Symbol>{
+                        make_sym("Route", SymbolType::Function, 2, 1, 5)},
+                    {}, {});
+    std::vector<Reference> refs = {make_call(1, "Route", 3)};
+    rt.process_file(3, "app/main.go",
+                    std::vector<Symbol>{
+                        make_sym("main", SymbolType::Function, 3, 1, 10)},
+                    refs, {});
+    rt.process_all_references();
+
+    auto snapshot = rt.pin();
+    auto main_sym = snapshot->find_symbol_by_file_and_name(3, "main");
+    auto prod = snapshot->find_symbol_by_file_and_name(2, "Route");
+    ASSERT_NE(main_sym, nullptr);
+    ASSERT_NE(prod, nullptr);
+    auto callees = rt.get_callee_symbols(main_sym->id);
+    ASSERT_EQ(callees.size(), 1u);
+    EXPECT_EQ(callees[0], prod->id)
+        << "_examples/ candidate must lose to the production one";
+}
+
+// A unique cross-file candidate still links — the narrowing must not break
+// ordinary unambiguous resolution.
+TEST(ReferenceTrackerTest, UniqueCrossFileCandidateStillLinks) {
+    ReferenceTracker rt;
+
+    rt.process_file(1, "pkg/util.go",
+                    std::vector<Symbol>{
+                        make_sym("helper", SymbolType::Function, 1, 1, 5)},
+                    {}, {});
+    std::vector<Reference> refs = {make_call(1, "helper", 3)};
+    rt.process_file(2, "app/main.go",
+                    std::vector<Symbol>{
+                        make_sym("main", SymbolType::Function, 2, 1, 10)},
+                    refs, {});
+    rt.process_all_references();
+
+    auto snapshot = rt.pin();
+    auto main_sym = snapshot->find_symbol_by_file_and_name(2, "main");
+    auto helper = snapshot->find_symbol_by_file_and_name(1, "helper");
+    ASSERT_NE(main_sym, nullptr);
+    ASSERT_NE(helper, nullptr);
+    auto callees = rt.get_callee_symbols(main_sym->id);
+    ASSERT_EQ(callees.size(), 1u);
+    EXPECT_EQ(callees[0], helper->id);
+}
+
+// ---------------------------------------------------------------------------
 // Scope chain caching
 // ---------------------------------------------------------------------------
 

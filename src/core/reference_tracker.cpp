@@ -1,7 +1,7 @@
 #include <lci/core/reference_tracker.h>
 
 #include <absl/container/inlined_vector.h>
-#include <lci/search/search_options.h>  // is_test_file (canonical test rule)
+#include <lci/path_classifier.h>  // canonical test/example/vendored tagging
 
 #include <algorithm>
 #include <cctype>
@@ -14,6 +14,7 @@ namespace lci {
 namespace {
 ReferenceTracker::LangFamily language_family_for_path(std::string_view path);
 bool is_low_quality_path(std::string_view path);
+uint64_t dir_hash_of_path(std::string_view path);
 }  // namespace
 
 // FNV-1a constants for 64-bit hash.
@@ -283,7 +284,8 @@ std::vector<EnhancedSymbol> ReferenceTracker::process_file(
     enhanced.reserve(symbols.size());
 
     file_resolution_meta_[file_id] = FileResolutionMeta{
-        language_family_for_path(path), is_low_quality_path(path)};
+        language_family_for_path(path), is_low_quality_path(path),
+        dir_hash_of_path(path)};
 
     write_snapshot([&](Snapshot& s) {
         s.scopes_by_file[file_id].assign(scopes.begin(), scopes.end());
@@ -887,24 +889,39 @@ ReferenceTracker::LangFamily language_family_for_path(std::string_view path) {
     return language_info_for_path(path).family;
 }
 
-// Test/example/vendored files lose to library code when an ambiguous name
-// has to be resolved without import evidence.
+// Test/example/vendored/generated files lose to library code when an
+// ambiguous name has to be resolved without import evidence. Delegates to
+// PathClassifier (builtin rules) — the single authority for path attributes;
+// it covers what the old ad-hoc list missed: Go `_examples`/`_*` toolchain-
+// ignored dirs, `testdata/`, PHP `*Test.php`, minified bundles, generated
+// code. Runs once per file at process_file time, never on a read path.
+// The benchmarks/fixtures dirs are resolution-specific extras the classifier
+// deliberately does not tag.
 bool is_low_quality_path(std::string_view path) {
     auto has_dir = [&](std::string_view dir) {
         std::string with_slash = std::string(dir) + "/";
         if (path.rfind(with_slash, 0) == 0) return true;  // leading segment
         return path.find("/" + with_slash) != std::string_view::npos;
     };
-    if (has_dir("tests") || has_dir("test") || has_dir("examples") ||
-        has_dir("benchmarks") || has_dir("vendor") ||
-        has_dir("third_party") || has_dir("fixtures"))
-        return true;
-    // Delegate test-basename detection to the canonical classifier instead of
-    // re-implementing a narrower subset (this file previously matched only
-    // `test_` prefix and `_test.`, diverging from classify_file which also
-    // covers `.test.` and `.spec.`). Single source of truth for the rule; the
-    // vendored/examples directory heuristics above remain this function's own.
-    return is_test_file(path);
+    if (has_dir("benchmarks") || has_dir("fixtures")) return true;
+    static const PathClassifier classifier;
+    return classifier.classify(path) != PathAttr::Production;
+}
+
+// Directory identity for package-proximity resolution (Go package = dir; most
+// languages cluster a module per directory). Hash of the parent-directory
+// prefix; files in the repo root share the empty-dir hash.
+uint64_t dir_hash_of_path(std::string_view path) {
+    auto slash = path.rfind('/');
+    std::string_view dir =
+        (slash == std::string_view::npos) ? std::string_view{}
+                                          : path.substr(0, slash);
+    uint64_t h = kFnvOffset64;
+    for (char c : dir) {
+        h ^= static_cast<unsigned char>(c);
+        h *= kFnvPrime64;
+    }
+    return h;
 }
 }  // namespace
 
@@ -963,25 +980,50 @@ SymbolID ReferenceTracker::resolve_reference_target(
     SymbolID resolved = 0;
     if (!candidates.empty()) {
         LangFamily ref_family = LangFamily::kUnknown;
+        bool ref_low_quality = false;
+        uint64_t ref_dir_hash = 0;
         if (auto mit = file_resolution_meta_.find(owner_fid);
             mit != file_resolution_meta_.end()) {
             ref_family = mit->second.language_family;
+            ref_low_quality = mit->second.low_quality;
+            ref_dir_hash = mit->second.dir_hash;
         }
         // Inline capacity covers the overwhelmingly common 1-2 candidate
         // case; this runs per cache-miss on the index-build path, so a
         // throwaway heap allocation here is against the perf mandate.
+        //
+        // Eligibility gates (D2 — a wrong edge inflates reach for an
+        // unrelated symbol, so ineligible candidates are dropped up front):
+        //   - language family: a Python call never links into a vendored
+        //     C++ tree (unknown families stay eligible);
+        //   - quality: a PRODUCTION caller never links into test/example/
+        //     vendored/generated code (guzzle's tests/bootstrap.php
+        //     curl_setopt shim collected every production call). Low-quality
+        //     callers keep all candidates — tests legitimately call helpers.
         absl::InlinedVector<SymbolID, 8> filtered;
+        SymbolID same_dir = 0;
+        int same_dir_count = 0;
         for (SymbolID id : candidates) {
             const auto* sym = s.symbols.get(id);
             if (sym == nullptr) continue;
             LangFamily family = LangFamily::kUnknown;
+            bool low_quality = false;
+            uint64_t dir_hash = 0;
             if (auto it2 = file_resolution_meta_.find(sym->symbol.file_id);
                 it2 != file_resolution_meta_.end()) {
                 family = it2->second.language_family;
+                low_quality = it2->second.low_quality;
+                dir_hash = it2->second.dir_hash;
             }
-            if (ref_family == LangFamily::kUnknown ||
-                family == LangFamily::kUnknown || family == ref_family) {
-                filtered.push_back(id);
+            if (ref_family != LangFamily::kUnknown &&
+                family != LangFamily::kUnknown && family != ref_family) {
+                continue;
+            }
+            if (!ref_low_quality && low_quality) continue;
+            filtered.push_back(id);
+            if (dir_hash == ref_dir_hash) {
+                same_dir = id;
+                ++same_dir_count;
             }
         }
 
@@ -989,22 +1031,18 @@ SymbolID ReferenceTracker::resolve_reference_target(
             owner_fid, name, filtered,
             [&s](SymbolID id) { return s.symbols.get(id); });
 
-        // Ambiguous-name fallback: no import/same-file/export evidence.
-        // Prefer library code over test/example/vendored files; if every
-        // same-family candidate is low-quality, take the first rather than
-        // dropping the link. Cross-family candidates never link.
+        // Ambiguous-name fallback: no decisive import/same-file/export
+        // evidence. Package proximity breaks the tie — a unique candidate in
+        // the caller's own directory is the target (Go package = directory).
+        // Failing that, a unique eligible candidate links. Anything still
+        // ambiguous builds NO edge: reach/depended_on_by computed over
+        // guessed edges is noise, and a missing edge is the cheaper error.
         if (resolved == 0) {
-            for (SymbolID id : filtered) {
-                const auto* sym = s.symbols.get(id);
-                auto it2 = file_resolution_meta_.find(sym->symbol.file_id);
-                bool low_quality = it2 != file_resolution_meta_.end() &&
-                                   it2->second.low_quality;
-                if (!low_quality) {
-                    resolved = id;
-                    break;
-                }
+            if (same_dir_count == 1) {
+                resolved = same_dir;
+            } else if (filtered.size() == 1) {
+                resolved = filtered[0];
             }
-            if (resolved == 0 && !filtered.empty()) resolved = filtered[0];
         }
     }
 
