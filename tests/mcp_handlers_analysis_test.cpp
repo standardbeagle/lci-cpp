@@ -951,7 +951,7 @@ TEST(CodeInsightLayers, MiddlewareChainCallsAreNotViolations) {
 TEST(CodeInsightEntryPoints, LibraryApiLeadsAndBinariesAreSubLine) {
     auto dir = lci::test::unique_temp_dir("lci_entrypoints_test_");
     std::filesystem::remove_all(dir);
-    std::filesystem::create_directories(dir / "cmd" / "demo");
+    std::filesystem::create_directories(dir / "cmd" / "server");
     {
         std::ofstream f(dir / "router.go");
         f << "package chi\n\n"
@@ -959,7 +959,7 @@ TEST(CodeInsightEntryPoints, LibraryApiLeadsAndBinariesAreSubLine) {
              "func Handle() int { return NewRouter() }\n";
     }
     {
-        std::ofstream f(dir / "cmd" / "demo" / "main.go");
+        std::ofstream f(dir / "cmd" / "server" / "main.go");
         f << "package main\n\n"
              "func main() { }\n";
     }
@@ -984,7 +984,7 @@ TEST(CodeInsightEntryPoints, LibraryApiLeadsAndBinariesAreSubLine) {
     // main() no longer occupies an api slot.
     EXPECT_EQ(result.text.find("main: main", epos), std::string::npos)
         << result.text;
-    EXPECT_NE(result.text.find("cmd/demo/main.go", epos), std::string::npos)
+    EXPECT_NE(result.text.find("cmd/server/main.go", epos), std::string::npos)
         << result.text;
 
     std::filesystem::remove_all(dir);
