@@ -1,6 +1,7 @@
 #include <lci/mcp/handlers_analysis.h>
 
 #include <algorithm>
+#include <cctype>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -983,11 +984,19 @@ struct LayerViolation {
     std::string callee, callee_layer;
 };
 
+// One strongly-connected group of the call graph, kept actionable: the first
+// few member names (chain order for display) plus the file the cycle lives in.
+struct CycleGroup {
+    std::vector<std::string> names;  // first <=3 members, sorted
+    int total_size{};                // full SCC size
+    std::string file;                // file of the first member
+};
+
 // Everything derived from one build of the call graph.
 struct GraphSignals {
     std::vector<LoadBearingSym> load_bearing;
     std::vector<BrokerSym> brokers;                // top betweenness, may be empty
-    std::vector<std::vector<std::string>> cycles;  // names per cyclic group
+    std::vector<CycleGroup> cycles;                // cyclic groups with files
     std::vector<ClusterInfo> clusters;             // communities by size desc
     std::vector<LayerViolation> layer_violations;  // upward calls, may be empty
     double modularity{};
@@ -997,6 +1006,33 @@ struct GraphSignals {
 // Canonical top-to-bottom depth of the architectural layers LayerAnalyzer
 // classifies into. Calls should flow downward (shallow -> deep). Utility is
 // cross-cutting and unknown layers are unranked — both exempt (return -1).
+// Middleware/handler chain dispatch is the definitional shape of the pattern
+// (a middleware MUST call the next handler), not an architecture violation —
+// whitelist those call edges before flagging upward calls.
+bool is_middleware_chain_call(std::string_view caller, std::string_view callee) {
+    auto contains_ci = [](std::string_view hay, std::string_view needle) {
+        if (hay.size() < needle.size()) return false;
+        for (size_t i = 0; i <= hay.size() - needle.size(); ++i) {
+            size_t j = 0;
+            while (j < needle.size() &&
+                   std::tolower(static_cast<unsigned char>(hay[i + j])) ==
+                       needle[j])
+                ++j;
+            if (j == needle.size()) return true;
+        }
+        return false;
+    };
+    if (contains_ci(caller, "middleware") || contains_ci(callee, "middleware"))
+        return true;
+    // Calling into a handler (or the `next` link of a chain) is dispatch.
+    if (contains_ci(callee, "handle")) return true;
+    if (callee.size() >= 4) {
+        std::string_view tail = callee.substr(callee.size() - 4);
+        if (contains_ci(tail, "next")) return true;
+    }
+    return false;
+}
+
 int layer_depth(const std::string& layer) {
     if (layer == "Presentation Layer") return 0;
     if (layer == "Application Layer") return 1;
@@ -1080,18 +1116,31 @@ GraphSignals compute_graph_signals(const MasterIndex& indexer,
                       return a.location < b.location;
                   });
         if (brokers.size() > top_n) brokers.resize(top_n);
+        // Rescale to the top broker (relative betweenness): absolute Brandes
+        // scores normalized by (n-1)(n-2) round to 0.00 on any real corpus,
+        // which reads as a dead metric (a zero-value leaderboard is a false
+        // signal). Top row = 1.00, the rest read as fractions of it.
+        if (!brokers.empty() && brokers.front().score > 0.0) {
+            double top = brokers.front().score;
+            for (auto& b : brokers) b.score /= top;
+        }
         sig.brokers = std::move(brokers);
     }
 
-    // Cycles (top few, each capped to 6 names for compactness).
+    // Cycles (top few, each showing up to 3 members + the file it lives in).
     for (auto& cyc : graph.cycles()) {
-        std::vector<std::string> names;
+        CycleGroup g;
+        g.total_size = static_cast<int>(cyc.size());
         for (int idx : cyc) {
-            names.push_back(name_at(idx));
-            if (names.size() >= 6) break;
+            g.names.push_back(name_at(idx));
+            if (g.names.size() >= 3) break;
         }
-        std::sort(names.begin(), names.end());
-        sig.cycles.push_back(std::move(names));
+        std::sort(g.names.begin(), g.names.end());
+        // File of the first member: location is "path:line".
+        const std::string& loc = meta[graph.id_at(cyc.front())].second;
+        auto colon = loc.rfind(':');
+        g.file = colon == std::string::npos ? loc : loc.substr(0, colon);
+        sig.cycles.push_back(std::move(g));
         if (sig.cycles.size() >= 5) break;
     }
 
@@ -1176,6 +1225,8 @@ GraphSignals compute_graph_signals(const MasterIndex& indexer,
             if (lv == layer.end()) continue;
             int dv = layer_depth(lv->second);
             if (dv < 0 || du <= dv) continue;  // exempt or downward/same = ok
+            if (is_middleware_chain_call(meta[u].first, meta[v].first))
+                continue;  // chain dispatch is the pattern, not a violation
             sig.layer_violations.push_back(
                 {meta[u].first, layer[u], meta[v].first, lv->second});
         }
@@ -1216,16 +1267,21 @@ void emit_load_bearing(std::ostringstream& out, const GraphSignals& sig) {
 // == CYCLES == — circular call dependencies (strongly-connected components of
 // the call graph). C++ enrichment; Go has no equivalent.
 void emit_cycles(std::ostringstream& out,
-                 const std::vector<std::vector<std::string>>& cycles) {
+                 const std::vector<CycleGroup>& cycles) {
     if (cycles.empty()) return;
     out << "== CYCLES ==\n";
     out << "count=" << cycles.size() << "\n";
     for (const auto& c : cycles) {
         out << "  ";
-        for (size_t i = 0; i < c.size(); ++i) {
-            if (i) out << " <-> ";
-            out << c[i];
+        for (size_t i = 0; i < c.names.size(); ++i) {
+            if (i) out << " -> ";
+            out << c.names[i];
         }
+        // Close the loop back to the first member so it reads as a cycle.
+        if (!c.names.empty()) out << " -> " << c.names.front();
+        out << " (" << c.file << ")";
+        if (c.total_size > static_cast<int>(c.names.size()))
+            out << " [+" << (c.total_size - c.names.size()) << " more]";
         out << "\n";
     }
     out << "---\n";
@@ -1358,19 +1414,39 @@ void emit_entry_points(std::ostringstream& out, const EntryPointsList* ep,
                        std::string_view project_root) {
     if (!ep || ep->main_functions.empty()) return;
     out << "== ENTRY POINTS ==\n";
-    size_t lim = std::min(ep->main_functions.size(), size_t{12});
-    for (size_t i = 0; i < lim; ++i) {
-        const auto& e = ep->main_functions[i];
-        std::string loc = e.location;
+    auto rel = [&](const std::string& location) {
+        std::string loc = location;
         if (!project_root.empty() && loc.rfind(project_root, 0) == 0) {
             loc = loc.substr(project_root.size());
             while (!loc.empty() && loc.front() == '/') loc.erase(0, 1);
         }
-        out << "  " << e.type << ": " << e.name << " (" << loc << ")\n";
+        return loc;
+    };
+    // The public surface (exported api, library-aware ranked) leads; main()
+    // binaries move to a trailing `binaries:` sub-line so demo/example mains
+    // stop eating the api slots (a library's front door is its exports).
+    std::vector<const EntryPointDef*> apis, mains;
+    for (const auto& e : ep->main_functions) {
+        (e.type == "main" ? mains : apis).push_back(&e);
     }
-    if (ep->main_functions.size() > lim) {
-        out << "  ... and " << (ep->main_functions.size() - lim)
-            << " more exported\n";
+    size_t lim = std::min(apis.size(), size_t{12});
+    for (size_t i = 0; i < lim; ++i) {
+        out << "  api: " << apis[i]->name << " (" << rel(apis[i]->location)
+            << ")\n";
+    }
+    if (apis.size() > lim) {
+        out << "  ... and " << (apis.size() - lim) << " more exported\n";
+    }
+    if (!mains.empty()) {
+        out << "binaries:";
+        size_t blim = std::min(mains.size(), size_t{5});
+        for (size_t i = 0; i < blim; ++i) {
+            out << (i ? ", " : " ") << mains[i]->name << " ("
+                << rel(mains[i]->location) << ")";
+        }
+        if (mains.size() > blim) out << " (+" << (mains.size() - blim)
+                                     << " more)";
+        out << "\n";
     }
     out << "---\n";
 }
