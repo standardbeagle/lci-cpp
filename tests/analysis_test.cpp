@@ -601,6 +601,202 @@ TEST(NamingAnalyzer, CommonWordRecognized) {
     EXPECT_FALSE(NamingAnalyzer::is_common_word("frobnicate"));
 }
 
+namespace {
+// A symbol with synthetic fan-in and explicit exported flag.
+EnhancedSymbol make_ref_sym_exported(std::string name, int fan_in, SymbolID id,
+                                     bool exported) {
+    EnhancedSymbol es = make_ref_sym(std::move(name), fan_in, id);
+    es.is_exported = exported;
+    return es;
+}
+
+const VocabularyOutlier* find_outlier(const NamingReport& rep,
+                                      std::string_view name) {
+    for (const auto& o : rep.outliers) {
+        if (o.name == name) return &o;
+    }
+    return nullptr;
+}
+}  // namespace
+
+// --- Misspelling detection (judge criteria: nullifyMisingField,
+// SupressNotFound, isSeperatorRune, marhshalWithoutEscape) -------------------
+
+TEST(NamingAnalyzer, FlagsMisspellingAgainstCorpusVocabulary) {
+    // "missing" is corpus-frequent (3 distinct symbols); "mising" is a rare
+    // edit-distance-1 lone spelling of it -> misspelling, suggest "missing".
+    auto table = SynonymTable::build_default();
+    auto a = make_ref_sym("checkMissingField", 0, 1);
+    auto b = make_ref_sym("hasMissingValue", 0, 2);
+    auto c = make_ref_sym("missingKeys", 0, 3);
+    auto bad = make_ref_sym("nullifyMisingField", 8, 4);
+    auto f = make_file("core/record_field_resolver_runner.go",
+                       {&a, &b, &c, &bad});
+
+    NamingAnalyzer na;
+    auto rep = na.analyze({f}, table, "");
+    const auto* o = find_outlier(rep, "nullifyMisingField");
+    ASSERT_NE(o, nullptr);
+    EXPECT_EQ(o->reason, "misspelling");
+    EXPECT_EQ(o->odd_term, "mising");
+    ASSERT_FALSE(o->suggested.empty());
+    EXPECT_EQ(o->suggested[0], "missing");
+}
+
+TEST(NamingAnalyzer, FlagsMisspelledExportedSymbolDespiteLowFanIn) {
+    // SupressNotFound: exported but zero fan-in — exported symbols are part of
+    // the API surface, importance gate must admit them.
+    auto table = SynonymTable::build_default();
+    auto bad = make_ref_sym_exported("SupressNotFound", 0, 1, true);
+    auto f = make_file("middleware/supress_notfound.go", {&bad});
+
+    NamingAnalyzer na;
+    auto rep = na.analyze({f}, table, "");
+    const auto* o = find_outlier(rep, "SupressNotFound");
+    ASSERT_NE(o, nullptr);
+    EXPECT_EQ(o->reason, "misspelling");
+    EXPECT_EQ(o->odd_term, "supress");
+    ASSERT_FALSE(o->suggested.empty());
+    EXPECT_EQ(o->suggested[0], "suppress");
+}
+
+TEST(NamingAnalyzer, FlagsSeperatorMisspelling) {
+    auto table = SynonymTable::build_default();
+    auto bad = make_ref_sym("isSeperatorRune", 3, 1);
+    auto f = make_file("tools/tokenizer/tokenizer.go", {&bad});
+
+    NamingAnalyzer na;
+    auto rep = na.analyze({f}, table, "");
+    const auto* o = find_outlier(rep, "isSeperatorRune");
+    ASSERT_NE(o, nullptr);
+    EXPECT_EQ(o->reason, "misspelling");
+    EXPECT_EQ(o->odd_term, "seperator");
+    ASSERT_FALSE(o->suggested.empty());
+    EXPECT_EQ(o->suggested[0], "separator");
+}
+
+TEST(NamingAnalyzer, MarshalMisspellingLabeledMisspellingNotUnknownVerb) {
+    // Previously caught but mislabeled unknown-verb; must classify as a
+    // misspelling of "marshal" with the correction suggested.
+    auto table = SynonymTable::build_default();
+    auto bad = make_ref_sym("marhshalWithoutEscape", 3, 1);
+    auto f = make_file("encoding/json.go", {&bad});
+
+    NamingAnalyzer na;
+    auto rep = na.analyze({f}, table, "");
+    const auto* o = find_outlier(rep, "marhshalWithoutEscape");
+    ASSERT_NE(o, nullptr);
+    EXPECT_EQ(o->reason, "misspelling");
+    EXPECT_EQ(o->odd_term, "marhshal");
+    ASSERT_FALSE(o->suggested.empty());
+    EXPECT_EQ(o->suggested[0], "marshal");
+}
+
+// --- Convention mixing (guzzle add_* family shape) --------------------------
+
+TEST(NamingAnalyzer, ConventionMismatchFlagsMinoritySnakeCase) {
+    auto table = SynonymTable::build_default();
+    std::vector<EnhancedSymbol> camel;
+    const char* camel_names[] = {"createStream",   "resolveHeaders",
+                                 "applyDecoder",   "checkDecode",
+                                 "validateVerify", "invokeStats",
+                                 "buildRequest",   "startTimer"};
+    SymbolID id = 1;
+    for (const char* n : camel_names) {
+        camel.push_back(make_ref_sym_exported(n, 0, id++, true));
+    }
+    auto s1 = make_ref_sym_exported("add_proxy", 0, id++, true);
+    auto s2 = make_ref_sym_exported("add_timeout", 0, id++, true);
+    auto s3 = make_ref_sym_exported("add_headers", 0, id++, true);
+    std::vector<const EnhancedSymbol*> ptrs;
+    for (const auto& s : camel) ptrs.push_back(&s);
+    ptrs.push_back(&s1);
+    ptrs.push_back(&s2);
+    ptrs.push_back(&s3);
+    auto f = make_file("src/Handler/StreamHandler.php", std::move(ptrs));
+
+    NamingAnalyzer na;
+    auto rep = na.analyze({f}, table, "");
+    for (const char* n : {"add_proxy", "add_timeout", "add_headers"}) {
+        const auto* o = find_outlier(rep, n);
+        ASSERT_NE(o, nullptr) << n;
+        EXPECT_EQ(o->reason, "convention-mismatch") << n;
+        EXPECT_EQ(o->odd_term, "snake_case") << n;
+    }
+    // No camelCase member is flagged for convention.
+    for (const char* n : camel_names) {
+        const auto* o = find_outlier(rep, n);
+        EXPECT_TRUE(o == nullptr || o->reason != "convention-mismatch") << n;
+    }
+}
+
+TEST(NamingAnalyzer, NoConventionMismatchInConsistentFile) {
+    auto table = SynonymTable::build_default();
+    std::vector<EnhancedSymbol> syms;
+    const char* names[] = {"add_proxy", "add_timeout", "check_stream",
+                           "build_request", "start_timer", "stop_timer"};
+    SymbolID id = 1;
+    for (const char* n : names) {
+        syms.push_back(make_ref_sym_exported(n, 0, id++, true));
+    }
+    std::vector<const EnhancedSymbol*> ptrs;
+    for (const auto& s : syms) ptrs.push_back(&s);
+    auto f = make_file("src/handler.py", std::move(ptrs));
+
+    NamingAnalyzer na;
+    auto rep = na.analyze({f}, table, "");
+    for (const auto& o : rep.outliers) {
+        EXPECT_NE(o.reason, "convention-mismatch") << o.name;
+    }
+}
+
+// --- Anti-signal regressions (chi Use/Mount/Group/Tee, domain words) --------
+
+TEST(NamingAnalyzer, CoreApiVerbsHighFanInNotFlagged) {
+    auto table = SynonymTable::build_default();
+    auto use = make_ref_sym_exported("Use", 40, 1, true);
+    auto mount = make_ref_sym_exported("Mount", 25, 2, true);
+    auto group = make_ref_sym_exported("Group", 18, 3, true);
+    auto tee = make_ref_sym_exported("Tee", 12, 4, true);
+    auto f = make_file("mux.go", {&use, &mount, &group, &tee});
+
+    NamingAnalyzer na;
+    auto rep = na.analyze({f}, table, "");
+    EXPECT_TRUE(rep.outliers.empty())
+        << (rep.outliers.empty() ? "" : rep.outliers[0].name);
+}
+
+TEST(NamingAnalyzer, CommonEnglishDerivedWordsNotObscure) {
+    auto table = SynonymTable::build_default();
+    auto a = make_ref_sym_exported("seekableStream", 5, 1, true);
+    auto b = make_ref_sym_exported("effectiveURL", 5, 2, true);
+    auto c = make_ref_sym_exported("discardBody", 5, 3, true);
+    auto f = make_file("stream.go", {&a, &b, &c});
+
+    NamingAnalyzer na;
+    auto rep = na.analyze({f}, table, "");
+    EXPECT_TRUE(rep.outliers.empty())
+        << (rep.outliers.empty() ? "" : rep.outliers[0].name);
+}
+
+// --- Location must always carry the filename --------------------------------
+
+TEST(NamingAnalyzer, LocationIncludesFilenameForEveryOutlier) {
+    // Regression: every symbol after the first in a file lost its basename
+    // ("(:220)"), because the per-file basename was moved out on first use.
+    auto table = SynonymTable::build_default();
+    auto o1 = make_ref_sym("frobnicate", 3, 1);
+    auto o2 = make_ref_sym("zorble", 3, 2);
+    auto f = make_file("api/legacy.go", {&o1, &o2});
+
+    NamingAnalyzer na;
+    auto rep = na.analyze({f}, table, "");
+    ASSERT_EQ(rep.outliers.size(), 2u);
+    for (const auto& o : rep.outliers) {
+        EXPECT_EQ(o.location.rfind("legacy.go:", 0), 0u) << o.location;
+    }
+}
+
 TEST(SynonymTable, PrimaryOfReturnsGroupRepresentative) {
     auto table = SynonymTable::build_default();
     EXPECT_EQ(table.primary_of("explode"), "split");
