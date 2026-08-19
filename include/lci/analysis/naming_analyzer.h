@@ -20,8 +20,10 @@ struct VocabularyOutlier {
     std::string location;            ///< basename:line
     int fan_in{};                    ///< incoming references (importance)
     std::string odd_term;            ///< the offending token
-    std::string reason;              ///< "unknown-verb" | "obscure-token"
-    std::vector<std::string> suggested;  ///< common synonyms, if the term maps
+    /// "misspelling" | "convention-mismatch" | "unknown-verb" | "obscure-token"
+    std::string reason;
+    /// Correction (misspelling) or common synonyms, if the term maps.
+    std::vector<std::string> suggested;
 };
 
 /// For one standard concept (synonym group), the member terms that actually
