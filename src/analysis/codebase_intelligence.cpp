@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <limits>
 #include <string>
 
 namespace lci {
@@ -515,11 +516,42 @@ CodebaseIntelligenceEngine::extract_critical_functions(
     return result;
 }
 
+namespace {
+
+// A factory/constructor-shaped name is the canonical front door of a library
+// (chi.NewRouter, HandlerStack::create, pocketbase.New) — boost it so the
+// public surface leads ENTRY POINTS instead of whatever has the most callers.
+bool starts_with_lower(std::string_view name, std::string_view prefix) {
+    if (name.size() < prefix.size()) return false;
+    for (size_t i = 0; i < prefix.size(); ++i) {
+        if (std::tolower(static_cast<unsigned char>(name[i])) != prefix[i])
+            return false;
+    }
+    return true;
+}
+
+bool is_factory_name(std::string_view name) {
+    return starts_with_lower(name, "new") || starts_with_lower(name, "create") ||
+           starts_with_lower(name, "make") || starts_with_lower(name, "build") ||
+           starts_with_lower(name, "from");
+}
+
+}  // namespace
+
 EntryPointsList CodebaseIntelligenceEngine::build_entry_points(
     const std::vector<FileSymbolData>& files) const {
     EntryPointsList result;
 
+    // Track path depth (slash count) per api candidate: root-package exports
+    // are the library's front door; deeply nested ones usually aren't. Depth
+    // is compared relative to the shallowest candidate, so absolute-path
+    // prefixes cancel out.
+    std::vector<int> api_depth;
+    int min_depth = std::numeric_limits<int>::max();
+
     for (const auto& f : files) {
+        int depth = static_cast<int>(
+            std::count(f.path.begin(), f.path.end(), '/'));
         for (const auto* sym : f.symbols) {
             if (!is_function_like(sym->symbol.type)) continue;
 
@@ -535,14 +567,32 @@ EntryPointsList CodebaseIntelligenceEngine::build_entry_points(
             ep.signature = sym->signature;
             ep.is_exported = sym->is_exported;
             ep.importance = calculate_importance_score(*sym);
+            if (is_api) {
+                // Library-aware additive bonuses: exportedness, factory-name
+                // shape. These keep zero-fan-in front doors (callers live in
+                // downstream repos, not this one) above incidental exports.
+                ep.importance += 1.0;                          // exported
+                if (is_factory_name(ep.name)) ep.importance += 2.0;
+                api_depth.push_back(depth);
+                min_depth = std::min(min_depth, depth);
+            }
             result.main_functions.push_back(std::move(ep));
         }
     }
 
-    // Rank: main() first, then exported API by importance (fan-in etc.)
-    // descending, then name. Consumers cap to a top-N for display. (The old
-    // code kept the first 10 exported symbols in scan order, burying the
-    // actual public surface behind whatever was indexed first.)
+    // Root-package bonus, applied once the shallowest depth is known.
+    {
+        size_t k = 0;
+        for (auto& ep : result.main_functions) {
+            if (ep.type != "api") continue;
+            int over = api_depth[k++] - min_depth;
+            ep.importance += std::max(0.0, 1.5 - 0.5 * over);
+        }
+    }
+
+    // Rank: main() first (consumers split them onto a `binaries:` sub-line),
+    // then exported API by adjusted importance (fan-in + exportedness +
+    // factory shape + root proximity) descending, then name.
     // `location` (path:line, unique per symbol) is the final tiebreak so the
     // key is TOTAL — without it, same-name same-importance exports (e.g. a
     // function `add` defined in several files) sort in unspecified order and

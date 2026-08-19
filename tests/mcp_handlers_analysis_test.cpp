@@ -837,6 +837,159 @@ TEST(CodeInsightLayers, FlagsUpwardCall) {
     std::filesystem::remove_all(dir);
 }
 
+// Brokers must never print a degenerate all-0.00 leaderboard: scores are
+// emitted relative to the top broker, so the first row is always 1.00.
+TEST(CodeInsightGraphSignals, BrokerScoresAreRelativeNotDegenerate) {
+    auto dir = lci::test::unique_temp_dir("lci_broker_scale_test_");
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    {
+        std::ofstream f(dir / "g.go");
+        // Two mutually-recursive groups bridged by a2: a2 is the top broker.
+        f << "package main\n\n"
+             "func a1() int { return a2() }\n"
+             "func a2() int { return a1() + b1() }\n"
+             "func b1() int { return b2() }\n"
+             "func b2() int { return b1() }\n"
+             "func main() { _ = a1() }\n";
+    }
+
+    Config config;
+    config.project.root = dir.string();
+    MasterIndex indexer(config);
+    indexer.index_directory(dir.string());
+    CodebaseIntelligenceEngine engine;
+
+    nlohmann::json params;  // overview
+    auto result = handle_code_insight(params, engine, indexer);
+    ASSERT_FALSE(result.is_error) << result.text;
+    auto bpos = result.text.find("brokers:");
+    ASSERT_NE(bpos, std::string::npos) << result.text;
+    // Top row is the reference point: relative score 1.00.
+    EXPECT_NE(result.text.find("betweenness=1.00", bpos), std::string::npos)
+        << result.text;
+    // A leaderboard where every row rounds to zero is a false signal.
+    auto line_end = result.text.find('\n', bpos + 9);
+    auto first_row_end = result.text.find('\n', line_end + 1);
+    std::string first_row =
+        result.text.substr(line_end + 1, first_row_end - line_end - 1);
+    EXPECT_EQ(first_row.find("betweenness=0.00"), std::string::npos)
+        << first_row;
+
+    std::filesystem::remove_all(dir);
+}
+
+// Cycles must be actionable: member chain with an explicit loop-back plus the
+// file the cycle lives in, not a bare name soup.
+TEST(CodeInsightGraphSignals, CyclesEmitMemberChainAndFile) {
+    auto dir = lci::test::unique_temp_dir("lci_cycle_emit_test_");
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    {
+        std::ofstream f(dir / "ring.go");
+        f << "package main\n\n"
+             "func a1() int { return a2() }\n"
+             "func a2() int { return a1() }\n"
+             "func main() { _ = a1() }\n";
+    }
+
+    Config config;
+    config.project.root = dir.string();
+    MasterIndex indexer(config);
+    indexer.index_directory(dir.string());
+    CodebaseIntelligenceEngine engine;
+
+    nlohmann::json params;
+    auto result = handle_code_insight(params, engine, indexer);
+    ASSERT_FALSE(result.is_error) << result.text;
+    auto cpos = result.text.find("== CYCLES ==");
+    ASSERT_NE(cpos, std::string::npos) << result.text;
+    EXPECT_NE(result.text.find("a1 -> a2 -> a1 (ring.go)", cpos),
+              std::string::npos)
+        << result.text;
+
+    std::filesystem::remove_all(dir);
+}
+
+// A middleware calling the next handler in the chain is the definitional shape
+// of the pattern, not an architecture violation — whitelist it.
+TEST(CodeInsightLayers, MiddlewareChainCallsAreNotViolations) {
+    auto dir = lci::test::unique_temp_dir("lci_layers_mw_test_");
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    {
+        std::ofstream f(dir / "mw.go");
+        // saveMiddleware -> Data Layer (save*); renderView -> Presentation.
+        // Upward by layer depth, but the caller is a middleware: exempt.
+        // saveRecord -> renderNext: callee is a next-handler dispatch: exempt.
+        f << "package main\n\n"
+             "func renderView() int { return 1 }\n"
+             "func saveMiddleware() int { return renderView() }\n"
+             "func renderNext() int { return 2 }\n"
+             "func saveRecord() int { return renderNext() }\n"
+             "func main() { _ = saveMiddleware() + saveRecord() }\n";
+    }
+
+    Config config;
+    config.project.root = dir.string();
+    MasterIndex indexer(config);
+    indexer.index_directory(dir.string());
+    CodebaseIntelligenceEngine engine;
+
+    nlohmann::json params;
+    auto result = handle_code_insight(params, engine, indexer);
+    ASSERT_FALSE(result.is_error) << result.text;
+    EXPECT_EQ(result.text.find("== LAYER VIOLATIONS =="), std::string::npos)
+        << result.text;
+
+    std::filesystem::remove_all(dir);
+}
+
+// Library-shaped corpora: the exported public surface (factories first, root
+// package first) leads ENTRY POINTS; main() binaries move to a `binaries:`
+// sub-line and stop eating api slots.
+TEST(CodeInsightEntryPoints, LibraryApiLeadsAndBinariesAreSubLine) {
+    auto dir = lci::test::unique_temp_dir("lci_entrypoints_test_");
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir / "cmd" / "demo");
+    {
+        std::ofstream f(dir / "router.go");
+        f << "package chi\n\n"
+             "func NewRouter() int { return 0 }\n"
+             "func Handle() int { return NewRouter() }\n";
+    }
+    {
+        std::ofstream f(dir / "cmd" / "demo" / "main.go");
+        f << "package main\n\n"
+             "func main() { }\n";
+    }
+
+    Config config;
+    config.project.root = dir.string();
+    MasterIndex indexer(config);
+    indexer.index_directory(dir.string());
+    CodebaseIntelligenceEngine engine;
+
+    nlohmann::json params;
+    auto result = handle_code_insight(params, engine, indexer);
+    ASSERT_FALSE(result.is_error) << result.text;
+    auto epos = result.text.find("== ENTRY POINTS ==");
+    ASSERT_NE(epos, std::string::npos) << result.text;
+    auto api_pos = result.text.find("api: NewRouter", epos);
+    auto bin_pos = result.text.find("binaries:", epos);
+    ASSERT_NE(api_pos, std::string::npos) << result.text;
+    ASSERT_NE(bin_pos, std::string::npos) << result.text;
+    // The public surface leads; binaries are a trailing sub-line.
+    EXPECT_LT(api_pos, bin_pos) << result.text;
+    // main() no longer occupies an api slot.
+    EXPECT_EQ(result.text.find("main: main", epos), std::string::npos)
+        << result.text;
+    EXPECT_NE(result.text.find("cmd/demo/main.go", epos), std::string::npos)
+        << result.text;
+
+    std::filesystem::remove_all(dir);
+}
+
 // Flagship: label-coherent communities. A Louvain community whose members all
 // carry the same propagated @lci: label is reported as a named domain. Crosses
 // graph structure (CallGraph) with propagated semantics (GraphPropagator).
