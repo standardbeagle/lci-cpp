@@ -300,7 +300,21 @@ void ReferenceTracker::process_all_references() {
             return true;
         });
 
-        for (auto& [ref_id, ref] : s.references) {
+        // s.references is an absl::flat_hash_map, whose iteration order is
+        // randomized per process. Walking it directly built incoming_refs /
+        // outgoing_refs in a different order on every run, and that order is
+        // user-visible (structure `used_by`, relationships, imports). Reference
+        // ids are deterministic (file_id << 32 | local_id), so sort them and
+        // process in id order to pin the emitted ordering.
+        std::vector<uint64_t> ordered_ref_ids;
+        ordered_ref_ids.reserve(s.references.size());
+        for (const auto& [ref_id, ref] : s.references) {
+            ordered_ref_ids.push_back(ref_id);
+        }
+        std::sort(ordered_ref_ids.begin(), ordered_ref_ids.end());
+
+        for (uint64_t ref_id : ordered_ref_ids) {
+            Reference& ref = s.references[ref_id];
             SymbolID source_id = ref.source_symbol;
             SymbolID target_id = ref.target_symbol;
 
