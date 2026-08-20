@@ -17,7 +17,9 @@
 #include "unique_temp.h"
 
 #include <atomic>
+#include <chrono>
 #include <filesystem>
+#include <future>
 #include <fstream>
 #include <string>
 #include <thread>
@@ -985,6 +987,56 @@ TEST(PipelineTest, CancellationStopsPipeline) {
     EXPECT_TRUE(pipeline.stop_requested());
 }
 
+TEST(PipelineTest, MidRunStopReturnsPromptly) {
+    // Regression: request_stop() during run() used to deadlock. The
+    // integrator loop breaks on the stop flag without draining, so with
+    // more in-flight files than the bounded result_queue holds, workers
+    // block forever in push() and process_thread.join() never returns.
+    // Worker count is deliberately oversized relative to the result
+    // buffer (max(16*ncpu, files/10)) so blocked pushes are guaranteed.
+    TempDir dir;
+    std::string body = "package f\n";
+    for (int fn = 0; fn < 1000; ++fn) {
+        body += "func F" + std::to_string(fn) + "(a int) int { return a }\n";
+    }
+    for (int i = 0; i < 600; ++i) {
+        dir.write_file("file" + std::to_string(i) + ".go", body);
+    }
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    cfg.performance.parallel_file_workers = 256;
+
+    auto store = std::make_shared<FileContentStore>();
+    auto file_service = std::make_shared<FileService>(store);
+    TrigramIndex trigram_idx;
+    ReferenceTracker ref_tracker;
+    PostingsIndex postings_idx;
+
+    Pipeline pipeline(cfg, file_service, &trigram_idx,
+                      &ref_tracker, &postings_idx);
+
+    auto fut = std::async(std::launch::async, [&] { pipeline.run(); });
+
+    // Stop once the run is well underway: all workers hold a task and the
+    // task queue is full, yet hundreds of files remain — so after the stop
+    // the unpopped results exceed the bounded result buffer.
+    while (pipeline.get_progress().files_processed < 100 &&
+           fut.wait_for(std::chrono::milliseconds(1)) !=
+               std::future_status::ready) {
+    }
+    pipeline.request_stop();
+
+    if (fut.wait_for(std::chrono::seconds(60)) != std::future_status::ready) {
+        // run() is deadlocked; its threads cannot be joined, so abort the
+        // process to fail loudly instead of hanging the suite.
+        ADD_FAILURE() << "pipeline.run() did not return after request_stop";
+        std::abort();
+    }
+    fut.get();
+    EXPECT_TRUE(pipeline.stop_requested());
+}
+
 TEST(PipelineTest, StopRequestedDefaultsFalse) {
     Config cfg = make_default_config();
     auto store = std::make_shared<FileContentStore>();
@@ -1208,6 +1260,30 @@ TEST(GeneratedArtifactsTest, CsprojOutputPathBecomesExclude) {
     auto globs = derive_generated_excludes(dir.path().string());
     ASSERT_EQ(globs.size(), 1u);
     EXPECT_EQ(globs[0], "src/App/artifacts/release/**");
+}
+
+TEST(GeneratedArtifactsTest, FullyVariableOutputPathContributesNothing) {
+    TempDir dir;
+    // A fully-variable OutputPath truncates to the empty string; the empty
+    // remainder must be rejected, not relativized into the project's own
+    // directory (which would silently exclude the whole project).
+    dir.write_file("src/App/App.csproj",
+                   "<Project><PropertyGroup>"
+                   "<OutputPath>$(BaseOutputPath)</OutputPath>"
+                   "<BaseOutputPath>$(Configuration)\\bin\\</BaseOutputPath>"
+                   "</PropertyGroup></Project>");
+    EXPECT_TRUE(derive_generated_excludes(dir.path().string()).empty());
+}
+
+TEST(GeneratedArtifactsTest, VariableSuffixKeepsLiteralPrefix) {
+    TempDir dir;
+    dir.write_file("src/App/App.csproj",
+                   "<Project><PropertyGroup>"
+                   "<OutputPath>artifacts\\$(Configuration)\\</OutputPath>"
+                   "</PropertyGroup></Project>");
+    auto globs = derive_generated_excludes(dir.path().string());
+    ASSERT_EQ(globs.size(), 1u);
+    EXPECT_EQ(globs[0], "src/App/artifacts/**");
 }
 
 TEST(GeneratedArtifactsTest, MalformedManifestsAreIgnored) {
