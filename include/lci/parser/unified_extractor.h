@@ -210,7 +210,6 @@ class UnifiedExtractor {
     // Zig
     void extract_zig_struct(TSNode node);
     // Ruby
-    void extract_ruby_module(TSNode node);
 
     // Import extraction
     void extract_js_import(TSNode node);

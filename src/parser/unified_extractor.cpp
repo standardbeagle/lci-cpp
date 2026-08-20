@@ -803,10 +803,6 @@ void UnifiedExtractor::process_symbol_node(TSNode node,
     } else if (node_type == "object_declaration") {
         extract_kotlin_object(node);
 
-    // === RUBY modules ===
-    } else if (node_type == "module" && ext_ == ".rb") {
-        extract_ruby_module(node);
-
     // === ANNOTATION TYPES (Java) ===
     } else if (node_type == "annotation_type_declaration") {
         extract_annotation_type(node);

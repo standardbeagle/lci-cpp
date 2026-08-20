@@ -588,36 +588,4 @@ void UnifiedExtractor::extract_kotlin_import(TSNode node) {
     imports_.push_back(std::move(imp));
 }
 
-// ---------------------------------------------------------------------------
-// Ruby extraction
-// ---------------------------------------------------------------------------
-
-void UnifiedExtractor::extract_ruby_module(TSNode node) {
-    TSNode name_node = ts_node_child_by_field_name(
-        node, "name", static_cast<uint32_t>(std::strlen("name")));
-    if (ts_node_is_null(name_node)) return;
-    std::string_view name = node_text(name_node);
-    if (name.empty()) return;
-
-    TSPoint start = ts_node_start_point(node);
-    TSPoint end = ts_node_end_point(node);
-
-    BlockBoundary block;
-    block.start = static_cast<int>(start.row);
-    block.end = static_cast<int>(end.row);
-    block.type = BlockType::Module;
-    block.name = std::string(name);
-    blocks_.push_back(std::move(block));
-
-    Symbol sym;
-    sym.name = std::string(name);
-    sym.type = SymbolType::Module;
-    sym.file_id = file_id_;
-    sym.line = static_cast<int>(start.row) + 1;
-    sym.column = static_cast<int>(start.column) + 1;
-    sym.end_line = static_cast<int>(end.row) + 1;
-    sym.end_column = static_cast<int>(end.column) + 1;
-    symbols_.push_back(std::move(sym));
-}
-
 }  // namespace lci::parser

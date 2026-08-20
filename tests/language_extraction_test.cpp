@@ -882,6 +882,24 @@ TEST(LanguageExtractionTest, Ruby) {
     EXPECT_GE(count_symbols(r, SymbolType::Method), 2);
 }
 
+// Pins Ruby `module` extraction, which is served by the shared "module" /
+// "mod_item" branch. A second, later `.rb`-gated branch used to sit behind it
+// calling a byte-identical extract_ruby_module; this test is the guard that the
+// surviving branch really does cover Ruby.
+TEST(LanguageExtractionTest, RubyModuleExtraction) {
+    auto tree = parse(Language::Ruby, kRubySrc);
+    if (!tree) {
+        GTEST_SKIP() << "Ruby parser unavailable";
+    }
+
+    auto r = extract(Language::Ruby, ".rb", kRubySrc, "animals.rb");
+
+    const Symbol* animals = find_symbol(r, "Animals");
+    ASSERT_NE(animals, nullptr) << "module Animals must be extracted";
+    EXPECT_EQ(animals->type, SymbolType::Module);
+    EXPECT_EQ(animals->line, 3);
+}
+
 // ---------------------------------------------------------------------------
 // Fallback / unknown language
 // ---------------------------------------------------------------------------
