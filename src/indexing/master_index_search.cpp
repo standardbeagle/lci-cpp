@@ -460,31 +460,28 @@ SearchContext MasterIndex::extract_context(FileID file_id, int match_line,
     std::string_view content_sv = fc->view();
     if (content_sv.empty()) return ctx;
 
-    // Split content into lines. Mirrors Go's reference behavior: each
-    // intermediate line is stored without its trailing '\n' separator,
-    // but the last line of a file that ends with '\n' keeps the
-    // trailing newline. This makes /search and /references context
-    // arrays bit-identical to the Go output.
-    std::vector<std::string_view> lines;
-    size_t start = 0;
-    for (size_t i = 0; i < content_sv.size(); ++i) {
-        if (content_sv[i] == '\n') {
-            lines.emplace_back(content_sv.data() + start, i - start);
-            start = i + 1;
-        }
-    }
-    if (start < content_sv.size()) {
-        lines.emplace_back(content_sv.data() + start,
-                           content_sv.size() - start);
-    } else if (!lines.empty()) {
-        // File ended with '\n'. Re-attach it to the final line so the
-        // last context line is the only one that carries a trailing
-        // newline (Go's encoder behavior).
-        auto& last = lines.back();
-        last = std::string_view(last.data(), last.size() + 1);
+    // Slice the context window straight out of the precomputed line-start
+    // offsets. This used to re-split the WHOLE file into a lines vector on
+    // every call, which is once per search result — O(results x filesize) of
+    // scanning and one vector allocation each, to read at most
+    // 2*max_context_lines+1 lines.
+    //
+    // The offsets carry the same line decomposition the split produced:
+    // offsets[0] is 0 and each subsequent entry is the byte after a '\n' that
+    // is not the file's last byte, so offsets.size() equals the old
+    // lines.size() and a trailing '\n' never opens a new line.
+    const std::vector<uint32_t>* offsets = &fc->line_offsets;
+    std::vector<uint32_t> computed;
+    if (offsets->empty()) {
+        // Content stored without offsets (non-store callers). Derive them
+        // with the canonical routine rather than a second private splitter.
+        computed = compute_line_offsets(content_sv);
+        offsets = &computed;
     }
 
-    int total_lines = static_cast<int>(lines.size());
+    int total_lines = static_cast<int>(offsets->size());
+    if (total_lines == 0) return ctx;
+
     int line_idx = match_line - 1;  // Convert 1-based to 0-based.
     if (line_idx < 0) line_idx = 0;
     if (line_idx >= total_lines) line_idx = total_lines - 1;
@@ -495,8 +492,19 @@ SearchContext MasterIndex::extract_context(FileID file_id, int match_line,
     ctx.start_line = ctx_start + 1;  // Back to 1-based.
     ctx.end_line = ctx_end + 1;
 
+    // Mirrors Go's reference behavior: each intermediate line is stored
+    // without its trailing '\n' separator, but the last line of a file that
+    // ends with '\n' keeps the trailing newline. This makes /search and
+    // /references context arrays bit-identical to the Go output.
+    ctx.lines.reserve(static_cast<size_t>(ctx_end - ctx_start + 1));
     for (int i = ctx_start; i <= ctx_end; ++i) {
-        ctx.lines.emplace_back(lines[static_cast<size_t>(i)]);
+        size_t begin = (*offsets)[static_cast<size_t>(i)];
+        size_t end = (i + 1 < total_lines)
+                         // Drop the '\n' that opened the next line.
+                         ? (*offsets)[static_cast<size_t>(i + 1)] - 1
+                         // Final line: runs to EOF, trailing '\n' included.
+                         : content_sv.size();
+        ctx.lines.emplace_back(content_sv.substr(begin, end - begin));
     }
 
     return ctx;
