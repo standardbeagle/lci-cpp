@@ -155,14 +155,18 @@ void Pipeline::run() {
         progress_.increment_integrated();
     }
 
-    producer.join();
-    process_thread.join();
-
-    // If stop was requested, close queues to unblock any waiting threads.
+    // On stop the integrator loop above breaks without draining, so
+    // workers can be blocked pushing into the bounded result_queue (and
+    // the producer into task_queue). Close both queues BEFORE joining —
+    // a blocked push then returns false and the threads exit; closing
+    // after the joins (the previous order) deadlocked run() forever.
     if (stop_flag_.load(std::memory_order_acquire)) {
         task_queue.close();
         result_queue.close();
     }
+
+    producer.join();
+    process_thread.join();
 }
 
 void Pipeline::request_stop() {
