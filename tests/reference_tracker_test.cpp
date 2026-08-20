@@ -548,6 +548,21 @@ TEST(PostingsIndexTest, CaseInsensitiveFind) {
     EXPECT_EQ(files.size(), 1u);
 }
 
+TEST(PostingsIndexTest, CaseSensitiveFindLowercasesLookupKey) {
+    // Tokens are stored lowercased at index time, so a case-sensitive
+    // lookup with any uppercase letter must still hit the lowered key —
+    // the prefilter proposes candidates; the caller's verify scan enforces
+    // exact case. Previously "FooBar" missed unconditionally.
+    PostingsIndex pi;
+    pi.index_file(1, "var y = FooBar()");
+
+    std::vector<FileID> files;
+    absl::flat_hash_map<FileID, int> offsets;
+    pi.find("FooBar", false, files, offsets);
+    ASSERT_EQ(files.size(), 1u);
+    EXPECT_EQ(files[0], 1u);
+}
+
 TEST(PostingsIndexTest, MinTokenLength) {
     PostingsIndex pi;
 

@@ -326,14 +326,22 @@ std::vector<SearchResult> MasterIndex::execute_search(
         }
     }
 
-    // If trigram filtering yielded nothing, try the postings index.
-    if (filtered.empty()) {
+    // Postings complement. The trigram index stores original-case content
+    // while a case-insensitive query lowercases the pattern, so trigram
+    // candidates miss files whose only occurrence is cased differently —
+    // and a non-empty trigram set used to mask the postings path entirely.
+    // Postings tokens are stored lowercased, so case-insensitive queries
+    // always union both candidate sets; case-sensitive queries keep
+    // postings as the empty-trigram fallback. The verify scan below
+    // discards any candidate without a real match.
+    if (options.case_insensitive || filtered.empty()) {
         std::vector<FileID> postings_files;
         absl::flat_hash_map<FileID, int> postings_offsets;
         postings_index_.find(pattern, options.case_insensitive,
                              postings_files, postings_offsets);
+        absl::flat_hash_set<FileID> already(filtered.begin(), filtered.end());
         for (FileID fid : postings_files) {
-            if (candidate_set.contains(fid)) {
+            if (candidate_set.contains(fid) && !already.contains(fid)) {
                 filtered.push_back(fid);
             }
         }
