@@ -904,5 +904,49 @@ TEST(ReferenceTrackerTest, LibraryPathBeatsExamplesPathOnFallback) {
     EXPECT_EQ(callees[0], lib[0].id);
 }
 
+// ---------------------------------------------------------------------------
+// Scope-chain cache - file identity
+// ---------------------------------------------------------------------------
+
+// Discrimination test for the scope-chain cache key. Two files hold a symbol
+// with byte-identical line geometry but scopes with DIFFERENT names. The cache
+// key is built from line numbers only; without file identity mixed in, the
+// second file hits the first file's cache entry and its symbol reports the
+// wrong file's scope names.
+TEST(ReferenceTrackerTest, ScopeChainCacheDoesNotShareAcrossFiles) {
+    ReferenceTracker rt;
+
+    auto make_scope = [](const std::string& name, int start, int end) {
+        ScopeInfo sc;
+        sc.type = ScopeType::Class;
+        sc.name = name;
+        sc.full_path = name;
+        sc.start_line = start;
+        sc.end_line = end;
+        sc.level = 1;
+        return sc;
+    };
+
+    std::vector<Symbol> syms_a = {
+        make_sym("handle", SymbolType::Method, 1, 5, 9),
+    };
+    std::vector<ScopeInfo> scopes_a = {make_scope("AlphaClass", 1, 20)};
+
+    std::vector<Symbol> syms_b = {
+        make_sym("handle", SymbolType::Method, 2, 5, 9),
+    };
+    std::vector<ScopeInfo> scopes_b = {make_scope("BetaClass", 1, 20)};
+
+    auto a = rt.process_file(1, "alpha.go", syms_a, {}, scopes_a);
+    auto b = rt.process_file(2, "beta.go", syms_b, {}, scopes_b);
+
+    ASSERT_EQ(a.size(), 1u);
+    ASSERT_EQ(b.size(), 1u);
+    ASSERT_EQ(a[0].scope_chain.size(), 1u);
+    ASSERT_EQ(b[0].scope_chain.size(), 1u);
+    EXPECT_EQ(a[0].scope_chain[0].name, "AlphaClass");
+    EXPECT_EQ(b[0].scope_chain[0].name, "BetaClass");
+}
+
 }  // namespace
 }  // namespace lci

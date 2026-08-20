@@ -641,7 +641,8 @@ std::vector<ScopeInfo> ReferenceTracker::build_symbol_scope_chain(
     if (auto it = scope_chain_cache_.find(cache_key);
         it != scope_chain_cache_.end()) {
         const auto& entry = it->second;
-        if (entry.symbol_line == symbol.line &&
+        if (entry.symbol_file_id == symbol.file_id &&
+            entry.symbol_line == symbol.line &&
             entry.symbol_end_line == symbol.end_line &&
             entry.scope_count == scope_count) {
             return entry.scope_chain;
@@ -659,6 +660,7 @@ std::vector<ScopeInfo> ReferenceTracker::build_symbol_scope_chain(
 
     scope_chain_cache_[cache_key] = ScopeChainCacheEntry{
         .scope_chain = chain,
+        .symbol_file_id = symbol.file_id,
         .symbol_line = symbol.line,
         .symbol_end_line = symbol.end_line,
         .scope_count = scope_count,
@@ -671,7 +673,14 @@ uint64_t ReferenceTracker::create_scope_chain_cache_key(
     const Symbol& symbol, std::span<const ScopeInfo> scopes,
     int& scope_count_out) const {
 
+    // File identity leads the key. The rest of the key is pure line geometry,
+    // and the verification fields on the cache entry are geometry too, so
+    // without file_id two symbols in different files that happen to share a
+    // line span collide — and the hit returns the OTHER file's scope chain,
+    // names included.
     uint64_t h = kFnvOffset64;
+    h ^= static_cast<uint64_t>(symbol.file_id);
+    h *= kFnvPrime64;
     h ^= static_cast<uint64_t>(symbol.line);
     h *= kFnvPrime64;
     h ^= static_cast<uint64_t>(symbol.end_line);
@@ -809,9 +818,8 @@ SymbolID ReferenceTracker::resolve_reference_target(
     const auto& full_name = ref.referenced_name;
     if (full_name.empty()) return 0;
 
-    uint64_t name_hash = fnv1a_hash_name(full_name);
-    uint64_t cache_key = (static_cast<uint64_t>(ref.file_id) << 32) |
-                          (name_hash & 0xFFFFFFFF);
+    std::pair<FileID, uint64_t> cache_key{ref.file_id,
+                                          fnv1a_hash_name(full_name)};
 
     if (auto it = reference_cache_.find(cache_key);
         it != reference_cache_.end()) {

@@ -8,6 +8,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <absl/container/flat_hash_map.h>
@@ -213,6 +214,7 @@ class PostingsIndex {
 
 struct ScopeChainCacheEntry {
     std::vector<ScopeInfo> scope_chain;
+    FileID symbol_file_id{};
     int symbol_line{};
     int symbol_end_line{};
     int scope_count{};
@@ -392,7 +394,13 @@ class ReferenceTracker {
 
     SymbolLocationIndex* symbol_location_index_{};
 
-    absl::flat_hash_map<uint64_t, SymbolID> reference_cache_;
+    // Keyed on (file_id, FULL 64-bit name hash). The 64-bit half must stay
+    // intact: a former key packed file_id into the high 32 bits and truncated
+    // the name hash to the low 32, so two distinct names in one file collided
+    // roughly once per 2^16 names and the loser silently resolved to the
+    // winner's symbol.
+    absl::flat_hash_map<std::pair<FileID, uint64_t>, SymbolID>
+        reference_cache_;
     absl::flat_hash_map<uint64_t, ScopeChainCacheEntry> scope_chain_cache_;
 
     /// Per-file resolution metadata derived from the path at process_file
