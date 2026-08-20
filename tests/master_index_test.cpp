@@ -136,6 +136,43 @@ TEST(MasterIndexTest, IndexDirectorySimple) {
     EXPECT_GT(stats.indexing_time_ns, 0);
 }
 
+// Files that load (consuming a FileID) but fail AFTER the load — here the
+// magic-number binary check — leave gaps between "how many files integrated"
+// and "what the highest assigned FileID is". The published file snapshot must
+// still carry every file that survived, whatever id it drew.
+TEST(MasterIndexTest, IndexDirectoryKeepsFilesWithIdsAbovePostLoadFailures) {
+    TempDir dir;
+
+    // ELF magic passes the extension filter (.go is not a binary extension)
+    // and is only rejected once the content is loaded and inspected.
+    const std::string elf_magic("\x7f\x45\x4c\x46 not really go", 20);
+
+    constexpr int kPairs = 12;
+    std::vector<std::string> text_files;
+    for (int i = 0; i < kPairs; ++i) {
+        // Interleave so the failures consume ids ahead of surviving files.
+        dir.write_file("bin_" + std::to_string(i) + ".go", elf_magic);
+        auto name = "text_" + std::to_string(i) + ".go";
+        dir.write_file(name, "package main\nfunc f" + std::to_string(i) +
+                                 "() {}\n");
+        text_files.push_back(name);
+    }
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    auto snap = mi.read_snapshot();
+    ASSERT_NE(snap, nullptr);
+    for (const auto& name : text_files) {
+        auto full = (dir.path() / name).string();
+        EXPECT_NE(mi.path_to_id(full), FileID{0})
+            << name << " survived indexing but is missing from file_map";
+    }
+}
+
 TEST(MasterIndexTest, IndexDirectoryThenClear) {
     TempDir dir;
     dir.write_file("a.py", "def foo():\n    pass\n");

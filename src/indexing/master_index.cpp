@@ -152,17 +152,18 @@ bool MasterIndex::index_directory(const std::string& root) {
     auto new_snapshot = std::make_shared<FileSnapshot>();
 
     int integrated = progress_tracker.integrated_count();
-    int total_ids = integrator.file_count();
-    int scan_limit = (total_ids > integrated ? total_ids * 2 : integrated);
-    if (scan_limit < 1) scan_limit = 1;
 
-    for (int i = 1; i <= scan_limit; ++i) {
-        FileID fid{static_cast<uint32_t>(i)};
-        const auto& p = integrator.id_to_path(fid);
-        if (!p.empty()) {
-            new_snapshot->file_map[p] = fid;
-            new_snapshot->reverse_file_map[fid] = p;
-        }
+    // Copy the integrator's own map rather than probing FileIDs 1..N. Files
+    // that load and then fail (binary magic, parse bail) consume an id without
+    // ever entering the map, so assigned ids run ahead of any count derived
+    // from integrated files — and every survivor holding an id past that bound
+    // used to disappear from the published snapshot.
+    const auto& integrated_files = integrator.file_map();
+    new_snapshot->file_map.reserve(integrated_files.size());
+    new_snapshot->reverse_file_map.reserve(integrated_files.size());
+    for (const auto& [path, fid] : integrated_files) {
+        new_snapshot->file_map[path] = fid;
+        new_snapshot->reverse_file_map[fid] = path;
     }
 
     auto progress = pipeline.get_progress();

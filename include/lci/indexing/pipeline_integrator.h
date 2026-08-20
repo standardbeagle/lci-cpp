@@ -77,6 +77,14 @@ class FileIntegrator {
     /// Returns the number of integrated files.
     int file_count() const;
 
+    /// Returns the authoritative path -> FileID map of every file that
+    /// survived integration. Prefer this over probing an id range: FileIDs are
+    /// consumed by files that load and then fail (binary magic, parse bail),
+    /// so the assigned ids are sparse and reach higher than the survivor count.
+    const absl::flat_hash_map<std::string, FileID>& file_map() const {
+        return file_map_;
+    }
+
   private:
     TrigramIndex* trigram_index_;
     ReferenceTracker* ref_tracker_;
