@@ -77,6 +77,13 @@ struct IndexStatus {
     int symbol_count{};
     bool indexing_active{};
     double progress{};
+    // Live in-flight counters from the server's indexing_progress block.
+    // file_count/progress stay 0 until the index is ready, so these are the
+    // only fields that advance during a long initial index — stall detection
+    // must key on them.
+    int files_scanned{};
+    int percent_complete{};
+    std::string phase;
     std::string error;
 };
 
@@ -319,6 +326,13 @@ class IndexServer {
     /// dir; the CLI server path enables it with the system temp dir.
     void enable_instance_registry(const std::string& dir);
 
+    /// Publishes (or clears, with nullptr) an externally-built SearchEngine
+    /// on a server constructed with an externally-managed index. Until an
+    /// engine is published the server answers 503 "still indexing"; /status
+    /// reports the external build via indexing_active. The engine must
+    /// outlive the server or be cleared before it is destroyed.
+    void set_search_engine(SearchEngine* engine);
+
     /// Starts listening on the Unix socket. Returns false on failure.
     bool start();
 
@@ -396,6 +410,12 @@ class IndexServer {
 
     std::thread listen_thread_;
 
+    // Inode of the Unix socket this server bound (0 = none/unknown).
+    // Teardown unlinks the socket path only while it still holds this
+    // inode, so a successor server that rebound the same path during a
+    // restart race is never orphaned by our unlink.
+    std::atomic<uint64_t> bound_socket_ino_{0};
+
     // -- Lifecycle reaper -----------------------------------------------------
     // One background thread per server enforcing three policies:
     //   1. idle exit: no non-/ping request for server.idle_timeout_sec;
@@ -417,6 +437,7 @@ class IndexServer {
     void reaper_loop(bool root_existed_at_start);
     void touch_activity();
     void publish_registry_entry();
+    bool write_registry_file();
     void evict_excess_peers();
     void request_self_stop(const char* reason);
 

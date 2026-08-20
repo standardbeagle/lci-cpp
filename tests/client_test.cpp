@@ -243,6 +243,95 @@ TEST_F(ClientTest, WaitForReadyTimeout) {
         250);
 }
 
+// -- WaitForReady stall-signal tests -------------------------------------------
+//
+// During a long initial index the server reports file_count=0 and progress=0.0
+// until ready (handle_status); the only counters that move live in the
+// indexing_progress block. These tests pin the discrimination both ways:
+// an advancing files_scanned is forward progress (no stall abort), and a
+// frozen files_scanned is a stall (abort with a stall error).
+
+class FakeStatusServer {
+  public:
+    // Serves /status; reports ready after `ready_after_polls` polls. While not
+    // ready, files_scanned advances per poll iff `scan_advances`.
+    FakeStatusServer(int ready_after_polls, bool scan_advances)
+        : addr_(test::next_test_server_address()) {
+        svr_.Get("/status", [this, ready_after_polls, scan_advances](
+                                const httplib::Request&,
+                                httplib::Response& res) {
+            const int n = polls_.fetch_add(1) + 1;
+            const bool ready = n > ready_after_polls;
+            nlohmann::json ip{{"phase", ready ? "idle" : "scanning"},
+                              {"files_scanned", scan_advances ? n * 10 : 7},
+                              {"files_total", 0},
+                              {"percent_complete", 0},
+                              {"elapsed_ms", n * 100}};
+            nlohmann::json j{{"ready", ready},
+                             {"file_count", ready ? 42 : 0},
+                             {"symbol_count", 0},
+                             {"indexing_active", !ready},
+                             {"progress", ready ? 1.0 : 0.0},
+                             {"indexing_progress", std::move(ip)}};
+            res.set_content(j.dump(), "application/json");
+        });
+#ifdef _WIN32
+        auto colon = addr_.rfind(':');
+        const int port = std::stoi(addr_.substr(colon + 1));
+        thread_ = std::thread([this, port] {
+            svr_.bind_to_port("127.0.0.1", port);
+            svr_.listen_after_bind();
+        });
+#else
+        svr_.set_address_family(AF_UNIX);
+        thread_ = std::thread([this] {
+            svr_.bind_to_port(addr_, 80);
+            svr_.listen_after_bind();
+        });
+#endif
+        while (!svr_.is_running()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds{5});
+        }
+    }
+
+    ~FakeStatusServer() {
+        svr_.stop();
+        thread_.join();
+        std::error_code ec;
+        std::filesystem::remove(addr_, ec);
+    }
+
+    const std::string& address() const { return addr_; }
+
+  private:
+    std::string addr_;
+    httplib::Server svr_;
+    std::thread thread_;
+    std::atomic<int> polls_{0};
+};
+
+TEST(ClientWaitForReadyStallTest, ScanProgressAloneDefersStallAbort) {
+    // 8 polls at ~100ms each outlive the 300ms stall window; only
+    // files_scanned advances until then. Must NOT be declared a stall.
+    FakeStatusServer server(8, /*scan_advances=*/true);
+    Client cli(server.address());
+    cli.set_timeout(std::chrono::milliseconds{1000});
+
+    std::string err;
+    EXPECT_TRUE(cli.wait_for_ready(std::chrono::milliseconds{300}, err))
+        << err;
+}
+
+TEST(ClientWaitForReadyStallTest, FrozenScanCountIsAStall) {
+    FakeStatusServer server(1000000, /*scan_advances=*/false);
+    Client cli(server.address());
+    cli.set_timeout(std::chrono::milliseconds{1000});
+
+    std::string err;
+    EXPECT_FALSE(cli.wait_for_ready(std::chrono::milliseconds{300}, err));
+    EXPECT_NE(err.find("stalled"), std::string::npos) << err;
+}
+
 // -- Shutdown tests -----------------------------------------------------------
 
 TEST_F(ClientTest, Shutdown) {

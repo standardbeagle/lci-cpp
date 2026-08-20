@@ -39,6 +39,12 @@ std::optional<IndexStatus> Client::get_status(std::string& error) {
     status.symbol_count = j->value("symbol_count", 0);
     status.indexing_active = j->value("indexing_active", false);
     status.progress = j->value("progress", 0.0);
+    if (auto it = j->find("indexing_progress");
+        it != j->end() && it->is_object()) {
+        status.files_scanned = it->value("files_scanned", 0);
+        status.percent_complete = it->value("percent_complete", 0);
+        status.phase = it->value("phase", "");
+    }
     status.error = j->value("error", "");
     return status;
 }
@@ -220,16 +226,26 @@ bool Client::wait_for_ready(std::chrono::milliseconds timeout,
     auto last_advance = std::chrono::steady_clock::now();
     double last_progress = -1.0;
     int last_files = -1;
+    int last_scanned = -1;
+    int last_percent = -1;
 
     while (true) {
         std::string err;
         auto status = get_status(err);
         if (status) {
             if (status->ready) return true;
+            // file_count/progress only move once the index is ready; the
+            // in-flight signal is files_scanned/percent_complete from the
+            // indexing_progress block. Key stall detection on all of them.
             if (status->progress > last_progress ||
-                status->file_count > last_files) {
+                status->file_count > last_files ||
+                status->files_scanned > last_scanned ||
+                status->percent_complete > last_percent) {
                 last_progress = std::max(last_progress, status->progress);
                 last_files = std::max(last_files, status->file_count);
+                last_scanned = std::max(last_scanned, status->files_scanned);
+                last_percent =
+                    std::max(last_percent, status->percent_complete);
                 last_advance = std::chrono::steady_clock::now();
             }
         }
@@ -245,6 +261,7 @@ bool Client::wait_for_ready(std::chrono::milliseconds timeout,
                                    timeout)
                                    .count()) +
                 "s (last: " + std::to_string(last_files) + " files, " +
+                std::to_string(last_scanned) + " scanned, " +
                 std::to_string(last_progress) + " progress)";
     } else {
         error = "timeout waiting for index to be ready";
