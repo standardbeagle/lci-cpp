@@ -1774,8 +1774,9 @@ void emit_summary(std::ostringstream& out,
                 }
                 out << "\n";
             }
-            out << "  (these attributes do not activate \"analysis\"; run with "
-                   "scope, or tune .lci.kdl attributes)\n";
+            out << "  (these attributes do not activate \"analysis\"; add "
+                   "{\"attributes\":\"all\"} or an attribute name, or tune "
+                   ".lci.kdl attributes)\n";
         }
     }
     if (eh && eh->errors.functions_scored > 0) {
