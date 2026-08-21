@@ -8,6 +8,7 @@
 #include <absl/container/flat_hash_set.h>
 
 #include <lci/config.h>
+#include <lci/path_classifier.h>
 #include <lci/config/gitignore.h>
 #include <lci/indexing/binary_detector.h>
 #include <lci/indexing/pipeline_types.h>
@@ -59,6 +60,12 @@ class FileScanner {
     static bool match_glob(std::string_view pattern, std::string_view path);
 
   private:
+    /// The attribute set in force (shipped ruleset + this project's
+    /// `attributes` block). The Index capability decides whether a scanned
+    /// file is offered to the pipeline at all.
+    std::string attr_error_;
+    PathAttrRegistry attr_registry_;
+    PathClassifier attr_classifier_;
     const Config& config_;
     BinaryDetector binary_detector_;
     GitignoreParser gitignore_parser_;

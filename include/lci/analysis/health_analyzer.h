@@ -82,13 +82,7 @@ class HealthAnalyzer {
     static std::vector<CodeSmellEntry> sort_and_limit_smells(
         std::vector<CodeSmellEntry> smells, int max_count);
 
-    /// Sets exclusion patterns for test file filtering.
-    void set_exclude_patterns(std::vector<std::string> patterns);
-
   private:
-    std::vector<std::string> exclude_patterns_;
-
-    bool is_excluded_file(std::string_view path) const;
     static bool is_test_helper_function(std::string_view name);
     static bool is_test_helper_path(std::string_view path);
 };

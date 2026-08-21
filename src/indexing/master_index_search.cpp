@@ -86,7 +86,7 @@ std::vector<SearchResult> MasterIndex::search_with_options(
     err = validate_search_components();
     if (!err.empty()) return {};
 
-    auto candidates = get_all_file_ids();
+    auto candidates = searchable_file_ids();
     if (candidates.empty()) return {};
 
     auto results = execute_search(pattern, candidates, opts);
@@ -104,7 +104,7 @@ std::vector<FileID> MasterIndex::find_candidate_files(
             trigram_narrowing.informative() || postings_narrowing.informative;
     }
 
-    auto all = get_all_file_ids();
+    auto all = searchable_file_ids();
     std::vector<FileID> scan_set;
     scan_set.reserve(all.size());
     for (FileID fid : all) {
@@ -171,6 +171,25 @@ std::vector<FileID> MasterIndex::get_all_file_ids() const {
     std::vector<FileID> ids;
     ids.reserve(snap->file_map.size());
     for (const auto& [path, fid] : snap->file_map) {
+        ids.push_back(fid);
+    }
+    return ids;
+}
+
+// The files search may return: those whose attribute activates Search. Every
+// shipped attribute does, so a default corpus is searched exactly as before;
+// a project that switches it off for a tree (a vendored bundle, generated
+// protobufs) gets those files out of every result while they stay in the
+// index, where refs and file listing still need them.
+std::vector<FileID> MasterIndex::searchable_file_ids() const {
+    auto snap = load_snapshot();
+    const auto& registry = attr_registry();
+    std::vector<FileID> ids;
+    ids.reserve(snap->file_map.size());
+    for (const auto& [path, fid] : snap->file_map) {
+        if (!registry.activates(snap->attr_of(fid), Capability::Search)) {
+            continue;
+        }
         ids.push_back(fid);
     }
     return ids;

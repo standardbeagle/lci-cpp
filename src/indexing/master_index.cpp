@@ -352,6 +352,15 @@ MasterIndex::IndexingProgressSnapshot MasterIndex::get_progress() const {
 bool MasterIndex::index_file(const std::string& path) {
     if (path.empty()) return false;
     if (!std::filesystem::exists(path)) return false;
+    // Attribute gate, path-only: an attribute that does not activate Index
+    // keeps its files out of the index entirely, so they cost nothing to hold
+    // and appear nowhere. Content heuristics cannot run here — there is no
+    // content yet — which is why this reads the path classification alone.
+    if (!attr_registry_.activates(path_classifier_.classify(
+                                      relative_to_project_root(path)),
+                                  Capability::Index)) {
+        return false;
+    }
 
     // Load content through FileService.
     auto result = file_service_->load_file_from_disk(path);
@@ -556,16 +565,21 @@ PathAttrId MasterIndex::get_file_attr(FileID file_id) const {
 
 // -- Private helpers ----------------------------------------------------------
 
+// Repo-relative view of a path for the classifier: its rules key on segments
+// like "vendor/" and "_examples/" measured from the project root.
+std::string_view MasterIndex::relative_to_project_root(
+    std::string_view path) const {
+    const std::string& root = config_.project.root;
+    if (!root.empty() && path.rfind(root, 0) == 0) {
+        path.remove_prefix(root.size());
+        while (!path.empty() && path.front() == '/') path.remove_prefix(1);
+    }
+    return path;
+}
+
 PathAttrId MasterIndex::classify_file_attr(const std::string& path,
                                          FileID file_id) const {
-    // Repo-relative view of the path for the classifier (its builtin rules
-    // key on segments like "vendor/", "_examples/" from the project root).
-    std::string_view rel = path;
-    const std::string& root = config_.project.root;
-    if (!root.empty() && rel.rfind(root, 0) == 0) {
-        rel.remove_prefix(root.size());
-        while (!rel.empty() && rel.front() == '/') rel.remove_prefix(1);
-    }
+    std::string_view rel = relative_to_project_root(path);
     // Content heuristics (minified single-line, generated header) read the
     // already-stored content — index write path only, never on reads.
     std::string_view content;

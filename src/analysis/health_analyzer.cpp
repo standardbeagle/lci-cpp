@@ -1,5 +1,7 @@
 #include <lci/analysis/health_analyzer.h>
 
+#include <lci/path_classifier.h>
+
 #include <lci/idcodec.h>
 #include <lci/reference.h>
 #include <lci/core/text.h>
@@ -41,15 +43,6 @@ bool is_class_or_struct(SymbolType t) {
 // Exclusion helpers
 // ---------------------------------------------------------------------------
 
-bool HealthAnalyzer::is_excluded_file(std::string_view path) const {
-    for (const auto& pattern : exclude_patterns_) {
-        if (contains(path, pattern)) {
-            return true;
-        }
-    }
-    return false;
-}
-
 bool HealthAnalyzer::is_test_helper_function(std::string_view name) {
     if (name.empty()) return false;
 
@@ -89,29 +82,15 @@ bool HealthAnalyzer::is_test_helper_function(std::string_view name) {
     return false;
 }
 
+// Test helpers do not belong in the "worst complexity" list: a 200-line
+// table-driven fixture builder is not technical debt in the product. The
+// directory and basename patterns behind this used to live here as a private
+// list; they are shipped attribute rules now, so a project's own `.lci.kdl`
+// reaches this gate like every other.
 bool HealthAnalyzer::is_test_helper_path(std::string_view path) {
-    std::string lower = text::ascii_lower(path);
-
-    const std::string_view dirs[] = {
-        "testhelpers/", "testhelper/", "testing/", "testutil/", "testutils/",
-        "mocks/", "fakes/", "stubs/", "fixtures/", "testdata/"};
-    for (auto dir : dirs) {
-        if (contains(lower, dir)) return true;
-    }
-
-    std::string base = text::ascii_lower(std::filesystem::path(std::string(path)).filename().string());
-    const std::string_view patterns[] = {
-        "_test_helper", "test_helper", "_testutil", "testutil_",
-        "_mock", "mock_", "_fake", "fake_", "_stub", "stub_"};
-    for (auto pat : patterns) {
-        if (contains(base, pat)) return true;
-    }
-
-    return false;
-}
-
-void HealthAnalyzer::set_exclude_patterns(std::vector<std::string> patterns) {
-    exclude_patterns_ = std::move(patterns);
+    PathClassifier classifier;
+    return !classifier.registry().activates(classifier.classify(path),
+                                            Capability::Analysis);
 }
 
 // ---------------------------------------------------------------------------
@@ -143,7 +122,6 @@ ComplexityMetrics HealthAnalyzer::calculate_complexity_from_files(
             } else {
                 distribution["high"]++;
                 if (static_cast<int>(high_funcs.size()) < 10 &&
-                    !is_excluded_file(file.path) &&
                     !is_test_helper_path(file.path) &&
                     !is_test_helper_function(sym->symbol.name)) {
                     FunctionInfo fi;

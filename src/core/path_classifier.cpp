@@ -52,7 +52,8 @@ attributes {
     test rank=2 {
         activates "index" "search"
         dir "test" "tests" "__tests__" "testdata" "spec" "specs" "fixtures"
-        dir "mock" "mocks"
+        dir "mock" "mocks" "fakes" "stubs"
+        dir "testhelper" "testhelpers" "testutil" "testutils"
         glob "*_test.go" "*_test.py" "*_test.cc" "*_test.cpp" "*_test.rb"
         glob "*_spec.rb" "*_test.exs" "*.test.*" "*.spec.*"
         glob "*Test.php" "*Tests.php" "*TestCase.php"
@@ -287,8 +288,10 @@ bool parse_attributes_block(std::string_view kdl_source,
             AttrDef def;
             def.name = attr.name;
             def.rank = attr.int_prop("rank", 50);
+            bool saw_activates = false;
             for (const auto& child : attr.children) {
                 if (child.name == "activates") {
+                    saw_activates = true;
                     for (const auto& c : child.string_args()) {
                         Capability cap{};
                         if (!parse_capability(c, cap)) {
@@ -324,6 +327,10 @@ bool parse_attributes_block(std::string_view kdl_source,
                     return false;
                 }
             }
+            // Silence means the defaults; an explicit `activates` with
+            // nothing listed means exactly nothing, which is how a project
+            // says "do not index this tree at all".
+            if (!saw_activates) def.capabilities = kDefaultCapabilities;
             defs_out.push_back(std::move(def));
         }
     }
@@ -424,16 +431,12 @@ PathAttrRegistry PathAttrRegistry::with_config(
             // merging would leave shipped patterns in force invisibly.
             AttrDef& target = reg.defs_[existing];
             target.rank = incoming.rank;
-            target.capabilities = incoming.capabilities != 0
-                                      ? incoming.capabilities
-                                      : target.capabilities;
+            target.capabilities = incoming.capabilities;
             target.dirs = incoming.dirs;
             target.globs = incoming.globs;
             target.contents = incoming.contents;
         } else {
-            AttrDef def = incoming;
-            if (def.capabilities == 0) def.capabilities = kDefaultCapabilities;
-            reg.defs_.push_back(std::move(def));
+            reg.defs_.push_back(incoming);
         }
     }
     for (const auto& rule : config_rules) {

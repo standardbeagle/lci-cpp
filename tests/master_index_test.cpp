@@ -167,6 +167,67 @@ TEST(MasterIndexTest, StoresFileAttributesAtIndexTime) {
     EXPECT_EQ(attr_of_path("gen/api.go"), "generated");  // header sniff
 }
 
+// Capability gates. An attribute states which of index/search/refs/analysis
+// apply to its files; these two are the ones a project can use to keep a tree
+// out of the index or out of search results entirely. Every shipped attribute
+// activates both, so a default corpus is unaffected — pinned here so a future
+// ruleset edit cannot quietly drop files.
+TEST(MasterIndexTest, IndexCapabilityKeepsFilesOutOfTheIndex) {
+    TempDir dir;
+    dir.write_file("keep.go", "package main\nfunc Keep() {}\n");
+    dir.write_file("skipme/drop.go", "package skipme\nfunc Drop() {}\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    AttrDef def;
+    def.name = "ignored-tree";
+    def.rank = 6;
+    def.capabilities = 0;  // activates nothing, not even index
+    def.dirs = {"skipme"};
+    cfg.attribute_defs.push_back(def);
+
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    EXPECT_NE(mi.path_to_id((dir.path() / "keep.go").string()), FileID{0});
+    EXPECT_EQ(mi.path_to_id((dir.path() / "skipme" / "drop.go").string()),
+              FileID{0})
+        << "an attribute that does not activate \"index\" must keep its files "
+           "out of the index";
+}
+
+TEST(MasterIndexTest, SearchCapabilityKeepsFilesOutOfResults) {
+    TempDir dir;
+    dir.write_file("keep.go", "package main\nfunc distinctiveNeedle() {}\n");
+    dir.write_file("quiet/also.go",
+                   "package quiet\nfunc distinctiveNeedle() {}\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    AttrDef def;
+    def.name = "unsearchable";
+    def.rank = 6;
+    def.capabilities = 1u << static_cast<uint8_t>(Capability::Index);
+    def.dirs = {"quiet"};
+    cfg.attribute_defs.push_back(def);
+
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    // Indexed — the file map still holds it.
+    EXPECT_NE(mi.path_to_id((dir.path() / "quiet" / "also.go").string()),
+              FileID{0});
+
+    auto results = mi.search("distinctiveNeedle", 0);
+    ASSERT_FALSE(results.empty());
+    for (const auto& r : results) {
+        EXPECT_EQ(r.path.find("quiet/"), std::string::npos)
+            << "an attribute that does not activate \"search\" must not "
+               "appear in results: "
+            << r.path;
+    }
+}
+
 // Files that load (consuming a FileID) but fail AFTER the load — here the
 // magic-number binary check — leave gaps between "how many files integrated"
 // and "what the highest assigned FileID is". The published file snapshot must

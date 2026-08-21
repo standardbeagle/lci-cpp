@@ -266,6 +266,9 @@ class MasterIndex {
     /// heuristics when `file_id` is valid.
     PathAttrId classify_file_attr(const std::string& path, FileID file_id) const;
 
+    /// Repo-relative view of `path` for the classifier.
+    std::string_view relative_to_project_root(std::string_view path) const;
+
     // Sub-indexes (owned)
     TrigramIndex trigram_index_;
     SymbolLocationIndex symbol_location_index_;
@@ -309,6 +312,9 @@ class MasterIndex {
     std::string validate_search_input(const std::string& pattern,
                                        SearchOptions& options) const;
     std::string validate_search_components() const;
+    /// File ids whose attribute activates the Search capability.
+    std::vector<FileID> searchable_file_ids() const;
+
     std::vector<SearchResult> execute_search(
         const std::string& pattern,
         const std::vector<FileID>& candidates,

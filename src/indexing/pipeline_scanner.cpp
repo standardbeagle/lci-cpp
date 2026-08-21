@@ -45,7 +45,11 @@ std::string extension_no_dot(std::string_view path) {
 }  // namespace
 
 FileScanner::FileScanner(const Config& config)
-    : config_(config) {
+    : config_(config),
+      attr_registry_(PathAttrRegistry::with_config(config.attribute_defs,
+                                                   config.attributes,
+                                                   attr_error_)),
+      attr_classifier_(attr_registry_) {
     exclusions_ = config.exclude;
     inclusions_ = config.include;
 
@@ -222,6 +226,15 @@ bool FileScanner::should_process_file(
 
     if (should_exclude(rel_path)) return false;
     if (!should_include(rel_path)) return false;
+
+    // Attribute gate, path-only (there is no content yet): an attribute that
+    // does not activate Index keeps its files out of the index entirely.
+    // Every shipped attribute activates it, so a default corpus is scanned
+    // exactly as before.
+    if (!attr_registry_.activates(attr_classifier_.classify(rel_path),
+                                  Capability::Index)) {
+        return false;
+    }
 
     if (file_size > config_.index.max_file_size) return false;
 
