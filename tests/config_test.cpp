@@ -932,24 +932,70 @@ attributes {
     auto result = load_config(temp_dir_.string());
     ASSERT_TRUE(result.ok()) << result.error;
     ASSERT_EQ(result.config.attributes.size(), 4u);
-    EXPECT_EQ(result.config.attributes[0].attr, PathAttr::Test);
+    EXPECT_EQ(result.config.attributes[0].attr, "test");
     EXPECT_EQ(result.config.attributes[0].pattern, "src/legacy_tests/");
-    EXPECT_EQ(result.config.attributes[1].attr, PathAttr::Vendored);
+    EXPECT_EQ(result.config.attributes[1].attr, "vendored");
     EXPECT_EQ(result.config.attributes[1].pattern, "*.iife.js");
-    EXPECT_EQ(result.config.attributes[2].attr, PathAttr::Vendored);
+    EXPECT_EQ(result.config.attributes[2].attr, "vendored");
     EXPECT_EQ(result.config.attributes[2].pattern, "ui/public/libs/");
-    EXPECT_EQ(result.config.attributes[3].attr, PathAttr::Production);
+    EXPECT_EQ(result.config.attributes[3].attr, "production");
 }
 
-TEST_F(KdlConfigTest, AttributesUnknownTagIsError) {
+// The attribute set is open: a name this build never shipped declares a new
+// attribute rather than failing the load. The cost is that a typo ("vendered"
+// for "vendored") becomes an attribute of its own instead of an error — which
+// `lci config show` surfaces, and which is the price of letting a project name
+// its own trees.
+TEST_F(KdlConfigTest, AttributesUnknownNameDeclaresANewAttribute) {
     write_kdl(R"(
 attributes {
-    vendered "vendor/"
+    fixtures-only "testfixtures/"
+}
+)");
+    auto result = load_config(temp_dir_.string());
+    ASSERT_TRUE(result.ok()) << result.error;
+    ASSERT_EQ(result.config.attributes.size(), 1u);
+    EXPECT_EQ(result.config.attributes[0].attr, "fixtures-only");
+    EXPECT_EQ(result.config.attributes[0].pattern, "testfixtures/");
+}
+
+// The full definition form: capabilities and rules, the same syntax the
+// shipped ruleset is written in.
+TEST_F(KdlConfigTest, AttributesDefinitionBlockIsRead) {
+    write_kdl(R"(
+attributes {
+    internal-tooling rank=6 {
+        activates "index" "search"
+        dir "scripts" "tools"
+        glob "*.tmpl"
+    }
+}
+)");
+    auto result = load_config(temp_dir_.string());
+    ASSERT_TRUE(result.ok()) << result.error;
+    ASSERT_EQ(result.config.attribute_defs.size(), 1u);
+    const auto& def = result.config.attribute_defs[0];
+    EXPECT_EQ(def.name, "internal-tooling");
+    EXPECT_EQ(def.rank, 6);
+    EXPECT_TRUE(def.activates(Capability::Search));
+    EXPECT_FALSE(def.activates(Capability::Analysis));
+    EXPECT_EQ(def.dirs, std::vector<std::string>({"scripts", "tools"}));
+    EXPECT_EQ(def.globs, std::vector<std::string>({"*.tmpl"}));
+}
+
+// A malformed definition still fails the load: the open set is about NAMES,
+// not about accepting nonsense inside a block.
+TEST_F(KdlConfigTest, AttributesUnknownCapabilityIsError) {
+    write_kdl(R"(
+attributes {
+    weird {
+        activates "teleport"
+    }
 }
 )");
     auto result = load_config(temp_dir_.string());
     EXPECT_FALSE(result.ok());
-    EXPECT_NE(result.error.find("vendered"), std::string::npos);
+    EXPECT_NE(result.error.find("teleport"), std::string::npos) << result.error;
 }
 
 TEST_F(KdlConfigTest, AttributesTagWithoutPatternIsError) {

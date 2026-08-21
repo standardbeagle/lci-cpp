@@ -152,19 +152,19 @@ TEST(MasterIndexTest, StoresFileAttributesAtIndexTime) {
     cfg.project.root = dir.path().string();
     // Config rule overlay: tag gen/ generated? builtin content sniff covers
     // it; add a config rule exercising the override path instead.
-    cfg.attributes.push_back({PathAttr::Vendored, "mux.go"});
+    cfg.attributes.push_back({"vendored", "mux.go"});
     MasterIndex mi(cfg);
     ASSERT_TRUE(mi.index_directory(dir.path().string()));
 
     auto attr_of_path = [&](const std::string& rel) {
         FileID id = mi.path_to_id((dir.path() / rel).string());
         EXPECT_NE(id, 0u) << rel;
-        return mi.get_file_attr(id);
+        return std::string(mi.attr_registry().name(mi.get_file_attr(id)));
     };
-    EXPECT_EQ(attr_of_path("mux.go"), PathAttr::Vendored);  // config rule
-    EXPECT_EQ(attr_of_path("mux_test.go"), PathAttr::Test);
-    EXPECT_EQ(attr_of_path("_examples/demo/main.go"), PathAttr::Example);
-    EXPECT_EQ(attr_of_path("gen/api.go"), PathAttr::Generated);  // header sniff
+    EXPECT_EQ(attr_of_path("mux.go"), "vendored");  // config rule
+    EXPECT_EQ(attr_of_path("mux_test.go"), "test");
+    EXPECT_EQ(attr_of_path("_examples/demo/main.go"), "example");
+    EXPECT_EQ(attr_of_path("gen/api.go"), "generated");  // header sniff
 }
 
 // Files that load (consuming a FileID) but fail AFTER the load — here the

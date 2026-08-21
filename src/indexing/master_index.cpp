@@ -18,6 +18,17 @@ size_t data_cap(const Config& cfg, std::string_view path,
                               has_high_entropy_section(content),
                               cfg.index.data_file_token_cap);
 }
+
+// The attribute set this index classifies against: the ruleset lci ships
+// with, extended by the project's `attributes` block. A malformed block is
+// reported by the config loader; here it degrades to the shipped set rather
+// than leaving the index with no attributes at all.
+PathAttrRegistry build_attr_registry(const Config& config) {
+    std::string error;
+    return PathAttrRegistry::with_config(config.attribute_defs,
+                                         config.attributes, error);
+}
+
 }  // namespace
 
 
@@ -25,12 +36,16 @@ size_t data_cap(const Config& cfg, std::string_view path,
 
 MasterIndex::MasterIndex(const Config& config)
     : config_(config),
-      path_classifier_(config.attributes),
+      attr_registry_(build_attr_registry(config)),
+      path_classifier_(attr_registry_),
       ref_tracker_(&symbol_location_index_),
       file_content_store_(std::make_shared<FileContentStore>(
           static_cast<int64_t>(config.performance.max_memory_mb) * 1024 * 1024)),
       file_service_(std::make_shared<FileService>(
           file_content_store_, config.index.max_file_size)) {
+    // Reference resolution reads the same attribute set the classifier does,
+    // so a project's `.lci.kdl` attributes reach the low-quality gate.
+    ref_tracker_.set_attr_registry(&attr_registry_);
     snapshot_.store(std::make_shared<const FileSnapshot>());
 }
 
@@ -181,8 +196,8 @@ bool MasterIndex::index_directory(const std::string& root) {
     for (const auto& [path, fid] : integrated_files) {
         new_snapshot->file_map[path] = fid;
         new_snapshot->reverse_file_map[fid] = path;
-        PathAttr attr = classify_file_attr(path, fid);
-        if (attr != PathAttr::Production) {
+        PathAttrId attr = classify_file_attr(path, fid);
+        if (attr != kFallbackAttr) {
             new_snapshot->file_attrs[fid] = attr;
         }
     }
@@ -535,13 +550,13 @@ std::shared_ptr<FileContentStore> MasterIndex::file_content_store_ptr() {
 
 const Config& MasterIndex::config() const { return config_; }
 
-PathAttr MasterIndex::get_file_attr(FileID file_id) const {
+PathAttrId MasterIndex::get_file_attr(FileID file_id) const {
     return load_snapshot()->attr_of(file_id);
 }
 
 // -- Private helpers ----------------------------------------------------------
 
-PathAttr MasterIndex::classify_file_attr(const std::string& path,
+PathAttrId MasterIndex::classify_file_attr(const std::string& path,
                                          FileID file_id) const {
     // Repo-relative view of the path for the classifier (its builtin rules
     // key on segments like "vendor/", "_examples/" from the project root).
@@ -574,8 +589,8 @@ void MasterIndex::update_snapshot_for_file(const std::string& path,
 
     new_snap->file_map[path] = new_id;
     new_snap->reverse_file_map[new_id] = path;
-    PathAttr attr = classify_file_attr(path, new_id);
-    if (attr != PathAttr::Production) {
+    PathAttrId attr = classify_file_attr(path, new_id);
+    if (attr != kFallbackAttr) {
         new_snap->file_attrs[new_id] = attr;
     } else {
         new_snap->file_attrs.erase(new_id);

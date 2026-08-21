@@ -16,25 +16,45 @@
 namespace lci {
 namespace {
 
+// Attributes are named, not enumerated: assert on the name the registry
+// resolves, so a test still says what it means when a project adds or
+// renames attributes.
+std::string attr_of(const PathClassifier& c, std::string_view path) {
+    return std::string(c.registry().name(c.classify(path)));
+}
+std::string attr_of(const PathClassifier& c, std::string_view path,
+                    std::string_view content) {
+    return std::string(c.registry().name(c.classify(path, content)));
+}
+
+/// A classifier over the shipped ruleset plus one project's attributes block.
+PathAttrRegistry registry_with(std::string_view attributes_kdl) {
+    std::vector<AttrDef> defs;
+    std::vector<PathAttrRule> rules;
+    std::string error;
+    EXPECT_TRUE(parse_attributes_block(attributes_kdl, defs, rules, error))
+        << error;
+    return PathAttrRegistry::with_config(defs, rules, error);
+}
+
 // -- Built-in defaults: Go ----------------------------------------------------
 
 TEST(PathClassifierTest, GoTestFile) {
     PathClassifier c;
-    EXPECT_EQ(c.classify("middleware/logger_test.go"), PathAttr::Test);
-    EXPECT_EQ(c.classify("mux_test.go"), PathAttr::Test);
+    EXPECT_EQ(attr_of(c, "middleware/logger_test.go"), "test");
+    EXPECT_EQ(attr_of(c, "mux_test.go"), "test");
 }
 
 TEST(PathClassifierTest, GoUnderscoreDirIsExample) {
     PathClassifier c;
     // chi D1: 12/12 entry points were _examples/*/main.go.
-    EXPECT_EQ(c.classify("_examples/custom-handler/main.go"),
-              PathAttr::Example);
-    EXPECT_EQ(c.classify("_examples/rest/main.go"), PathAttr::Example);
+    EXPECT_EQ(attr_of(c, "_examples/custom-handler/main.go"), "example");
+    EXPECT_EQ(attr_of(c, "_examples/rest/main.go"), "example");
 }
 
 TEST(PathClassifierTest, GoTestdataDir) {
     PathClassifier c;
-    EXPECT_EQ(c.classify("pkg/parser/testdata/input.go"), PathAttr::Test);
+    EXPECT_EQ(attr_of(c, "pkg/parser/testdata/input.go"), "test");
 }
 
 // -- Built-in defaults: PHP / JS / TS -----------------------------------------
@@ -43,136 +63,295 @@ TEST(PathClassifierTest, PhpTestsDirAndSuffix) {
     PathClassifier c;
     // guzzle D1: tests/Handler classified as API Layer; 4/12 entry points
     // were PHPUnit test methods.
-    EXPECT_EQ(c.classify("tests/Handler/CurlFactoryTest.php"), PathAttr::Test);
-    EXPECT_EQ(c.classify("tests/ClientTest.php"), PathAttr::Test);
-    EXPECT_EQ(c.classify("src/HandlerTest.php"), PathAttr::Test);
+    EXPECT_EQ(attr_of(c, "tests/Handler/CurlFactoryTest.php"), "test");
+    EXPECT_EQ(attr_of(c, "tests/ClientTest.php"), "test");
+    EXPECT_EQ(attr_of(c, "src/HandlerTest.php"), "test");
 }
 
 TEST(PathClassifierTest, JsTsTestPatterns) {
     PathClassifier c;
-    EXPECT_EQ(c.classify("src/__tests__/router.js"), PathAttr::Test);
-    EXPECT_EQ(c.classify("src/router.test.ts"), PathAttr::Test);
-    EXPECT_EQ(c.classify("src/router.spec.tsx"), PathAttr::Test);
-    EXPECT_EQ(c.classify("tests/e2e/login.py"), PathAttr::Test);
-    EXPECT_EQ(c.classify("scripts/test_forge.py"), PathAttr::Test);
-    EXPECT_EQ(c.classify("tests/conftest.py"), PathAttr::Test);
+    EXPECT_EQ(attr_of(c, "src/__tests__/router.js"), "test");
+    EXPECT_EQ(attr_of(c, "src/router.test.ts"), "test");
+    EXPECT_EQ(attr_of(c, "src/router.spec.tsx"), "test");
+    EXPECT_EQ(attr_of(c, "tests/e2e/login.py"), "test");
+    EXPECT_EQ(attr_of(c, "scripts/test_forge.py"), "test");
+    EXPECT_EQ(attr_of(c, "tests/conftest.py"), "test");
 }
 
 // -- Vendored ------------------------------------------------------------------
 
 TEST(PathClassifierTest, VendorDirs) {
     PathClassifier c;
-    EXPECT_EQ(c.classify("vendor/guzzlehttp/psr7/src/Uri.php"),
-              PathAttr::Vendored);
-    EXPECT_EQ(c.classify("node_modules/react/index.js"), PathAttr::Vendored);
-    EXPECT_EQ(c.classify("third_party/zlib/inflate.c"), PathAttr::Vendored);
+    EXPECT_EQ(attr_of(c, "vendor/guzzlehttp/psr7/src/Uri.php"), "vendored");
+    EXPECT_EQ(attr_of(c, "node_modules/react/index.js"), "vendored");
+    EXPECT_EQ(attr_of(c, "third_party/zlib/inflate.c"), "vendored");
 }
 
 TEST(PathClassifierTest, MinifiedBasename) {
     PathClassifier c;
-    EXPECT_EQ(c.classify("ui/public/js/app.min.js"), PathAttr::Vendored);
-    EXPECT_EQ(c.classify("assets/style.min.css"), PathAttr::Vendored);
+    EXPECT_EQ(attr_of(c, "ui/public/js/app.min.js"), "vendored");
+    EXPECT_EQ(attr_of(c, "assets/style.min.css"), "vendored");
 }
 
 TEST(PathClassifierTest, MinifiedContentHeuristic) {
     PathClassifier c;
     // pocketbase D1: ui/public/libs/uplot/uplot.iife.js — one enormous line.
     std::string minified(50000, 'x');
-    EXPECT_EQ(c.classify("ui/public/libs/uplot/uplot.iife.js", minified),
-              PathAttr::Vendored);
+    EXPECT_EQ(attr_of(c, "ui/public/libs/uplot/uplot.iife.js", minified), "vendored");
     // Normal multi-line code stays production.
     std::string code;
     for (int i = 0; i < 500; ++i) code += "const x = 1;\n";
-    EXPECT_EQ(c.classify("ui/src/app.js", code), PathAttr::Production);
+    EXPECT_EQ(attr_of(c, "ui/src/app.js", code), "production");
 }
 
 // -- Generated -----------------------------------------------------------------
 
 TEST(PathClassifierTest, GeneratedPatterns) {
     PathClassifier c;
-    EXPECT_EQ(c.classify("api/service.pb.go"), PathAttr::Generated);
-    EXPECT_EQ(c.classify("proto/service_pb2.py"), PathAttr::Generated);
-    EXPECT_EQ(c.classify("src/schema_generated.ts"), PathAttr::Generated);
-    EXPECT_EQ(c.classify("types/global.d.ts"), PathAttr::Generated);
-    EXPECT_EQ(c.classify("pkg/apis/zz_generated.deepcopy.go"),
-              PathAttr::Generated);
+    EXPECT_EQ(attr_of(c, "api/service.pb.go"), "generated");
+    EXPECT_EQ(attr_of(c, "proto/service_pb2.py"), "generated");
+    EXPECT_EQ(attr_of(c, "src/schema_generated.ts"), "generated");
+    EXPECT_EQ(attr_of(c, "types/global.d.ts"), "generated");
+    EXPECT_EQ(attr_of(c, "pkg/apis/zz_generated.deepcopy.go"), "generated");
 }
 
 TEST(PathClassifierTest, GeneratedHeaderContent) {
     PathClassifier c;
-    EXPECT_EQ(c.classify("internal/types/types.go",
-                         "// Code generated by jsvm. DO NOT EDIT.\n"
-                         "package types\n"),
-              PathAttr::Generated);
-    EXPECT_EQ(c.classify("internal/types/types.go", "package types\n"),
-              PathAttr::Production);
+    EXPECT_EQ(attr_of(c, "internal/types/types.go",
+                      "// Code generated by jsvm. DO NOT EDIT.\n"
+                      "package types\n"),
+              "generated");
+    EXPECT_EQ(attr_of(c, "internal/types/types.go", "package types\n"),
+              "production");
 }
 
 // -- Docs ----------------------------------------------------------------------
 
 TEST(PathClassifierTest, DocsDirAndMarkdown) {
     PathClassifier c;
-    EXPECT_EQ(c.classify("docs/guide/install.js"), PathAttr::Docs);
-    EXPECT_EQ(c.classify("README.md"), PathAttr::Docs);
+    EXPECT_EQ(attr_of(c, "docs/guide/install.js"), "docs");
+    EXPECT_EQ(attr_of(c, "README.md"), "docs");
 }
 
 // -- Production stays production ----------------------------------------------
 
 TEST(PathClassifierTest, ProductionPaths) {
     PathClassifier c;
-    EXPECT_EQ(c.classify("mux.go"), PathAttr::Production);
-    EXPECT_EQ(c.classify("middleware/logger.go"), PathAttr::Production);
-    EXPECT_EQ(c.classify("src/Client.php"), PathAttr::Production);
+    EXPECT_EQ(attr_of(c, "mux.go"), "production");
+    EXPECT_EQ(attr_of(c, "middleware/logger.go"), "production");
+    EXPECT_EQ(attr_of(c, "src/Client.php"), "production");
     // "testing"-adjacent words must not fuzzy-match.
-    EXPECT_EQ(c.classify("src/contest/rank.go"), PathAttr::Production);
-    EXPECT_EQ(c.classify("src/attestation/verify.go"), PathAttr::Production);
+    EXPECT_EQ(attr_of(c, "src/contest/rank.go"), "production");
+    EXPECT_EQ(attr_of(c, "src/attestation/verify.go"), "production");
 }
 
 // -- Precedence ----------------------------------------------------------------
 
 TEST(PathClassifierTest, VendoredBeatsTest) {
     PathClassifier c;
-    EXPECT_EQ(c.classify("vendor/pkg/foo_test.go"), PathAttr::Vendored);
-    EXPECT_EQ(c.classify("node_modules/lib/__tests__/a.js"),
-              PathAttr::Vendored);
+    EXPECT_EQ(attr_of(c, "vendor/pkg/foo_test.go"), "vendored");
+    EXPECT_EQ(attr_of(c, "node_modules/lib/__tests__/a.js"), "vendored");
 }
 
 // -- Config rules override builtins -------------------------------------------
 
 TEST(PathClassifierTest, ConfigRuleAddsTag) {
-    PathClassifier c({{PathAttr::Test, "src/legacy_tests/"}});
-    EXPECT_EQ(c.classify("src/legacy_tests/old.go"), PathAttr::Test);
+    auto reg = registry_with(R"(attributes { test "src/legacy_tests/" })");
+    PathClassifier c(reg);
+    EXPECT_EQ(attr_of(c, "src/legacy_tests/old.go"), "test");
 }
 
 TEST(PathClassifierTest, ConfigProductionOverridesBuiltin) {
-    PathClassifier c({{PathAttr::Production, "vendor/mycompany/"}});
-    EXPECT_EQ(c.classify("vendor/mycompany/core.go"), PathAttr::Production);
-    EXPECT_EQ(c.classify("vendor/other/core.go"), PathAttr::Vendored);
+    auto reg = registry_with(R"(attributes { production "vendor/mycompany/" })");
+    PathClassifier c(reg);
+    EXPECT_EQ(attr_of(c, "vendor/mycompany/core.go"), "production");
+    EXPECT_EQ(attr_of(c, "vendor/other/core.go"), "vendored");
 }
 
 TEST(PathClassifierTest, ConfigBasenameGlob) {
-    PathClassifier c({{PathAttr::Vendored, "*.iife.js"}});
-    EXPECT_EQ(c.classify("ui/public/libs/uplot/uplot.iife.js"),
-              PathAttr::Vendored);
+    auto reg = registry_with(R"(attributes { vendored "*.iife.js" })");
+    PathClassifier c(reg);
+    EXPECT_EQ(attr_of(c, "ui/public/libs/uplot/uplot.iife.js"), "vendored");
 }
 
 TEST(PathClassifierTest, ConfigProductionBeatsContentHeuristic) {
-    PathClassifier c({{PathAttr::Production, "big/blob.js"}});
+    auto reg = registry_with(R"(attributes { production "big/blob.js" })");
+    PathClassifier c(reg);
     std::string minified(50000, 'x');
-    EXPECT_EQ(c.classify("big/blob.js", minified), PathAttr::Production);
+    EXPECT_EQ(attr_of(c, "big/blob.js", minified), "production");
 }
 
-// -- Names ---------------------------------------------------------------------
+// -- Benchmarks ----------------------------------------------------------------
 
-TEST(PathClassifierTest, NameRoundTrip) {
-    for (int i = 0; i < kPathAttrCount; ++i) {
-        auto attr = static_cast<PathAttr>(i);
-        PathAttr parsed{};
-        ASSERT_TRUE(PathClassifier::parse(PathClassifier::name(attr), parsed));
-        EXPECT_EQ(parsed, attr);
+// Benchmark harnesses are not shipping code: they exercise the product, carry
+// their own tooling, and their error handling is deliberately lax (a bench
+// script swallowing an exception is not a defect in the product). Analysis
+// sections default to shipping code, so these must classify out.
+TEST(PathClassifierTest, BenchmarkDirs) {
+    PathClassifier c;
+    EXPECT_EQ(attr_of(c, "benchmarks/repo-qa/scripts/bench.py"), "benchmark");
+    EXPECT_EQ(attr_of(c, "bench/latency_bench.cpp"), "benchmark");
+    EXPECT_EQ(attr_of(c, "src/benchmark/runner.go"), "benchmark");
+}
+
+// Go's own convention: *_bench.go / *_benchmark.go sit beside production code.
+TEST(PathClassifierTest, BenchmarkBasenames) {
+    PathClassifier c;
+    EXPECT_EQ(attr_of(c, "src/index/index_bench.cpp"), "benchmark");
+    EXPECT_EQ(attr_of(c, "pkg/store/store_benchmark.go"), "benchmark");
+}
+
+// A real package named "benchmarking" is production, the same way "testing"
+// is not treated as a test dir.
+TEST(PathClassifierTest, BenchmarkDoesNotSwallowSimilarNames) {
+    PathClassifier c;
+    EXPECT_EQ(attr_of(c, "src/benchmarking/service.go"), "production");
+}
+
+// Precedence: a test file inside a benchmark tree is a test (Test outranks
+// Benchmark), and a vendored dep inside one is vendored.
+TEST(PathClassifierTest, BenchmarkLosesToStrongerAttributes) {
+    PathClassifier c;
+    EXPECT_EQ(attr_of(c, "benchmarks/harness/runner_test.go"), "test");
+    EXPECT_EQ(attr_of(c, "benchmarks/vendor/dep/lib.go"), "vendored");
+}
+
+// -- The shipped ruleset -------------------------------------------------------
+
+// The default attributes and rules ship inside the binary as KDL. A typo in
+// them is a build defect that would otherwise degrade silently to
+// "everything is production", so parse them explicitly here.
+TEST(PathClassifierTest, ShippedRulesetParses) {
+    const auto& reg = PathAttrRegistry::builtin();
+    EXPECT_EQ(reg.name(kFallbackAttr), "production")
+        << "the fallback attribute must be id 0";
+    for (std::string_view expected :
+         {"production", "test", "benchmark", "example", "vendored",
+          "generated", "docs"}) {
+        PathAttrId id{};
+        EXPECT_TRUE(reg.find(expected, id)) << expected;
     }
-    PathAttr out{};
-    EXPECT_FALSE(PathClassifier::parse("bogus", out));
+}
+
+// Capabilities are what "shipping code" means: the analysis gate is the set
+// of attributes that activate it, not a flag named after production.
+TEST(PathClassifierTest, ShippedCapabilities) {
+    const auto& reg = PathAttrRegistry::builtin();
+    auto activates = [&](std::string_view attr, Capability cap) {
+        PathAttrId id{};
+        EXPECT_TRUE(reg.find(attr, id)) << attr;
+        return reg.activates(id, cap);
+    };
+    EXPECT_TRUE(activates("production", Capability::Analysis));
+    for (std::string_view attr :
+         {"test", "benchmark", "example", "vendored", "generated", "docs"}) {
+        EXPECT_FALSE(activates(attr, Capability::Analysis)) << attr;
+    }
+    // Everything is indexed and searchable by default; nothing but production
+    // is a preferred reference-resolution target.
+    for (std::string_view attr :
+         {"production", "test", "benchmark", "vendored", "docs"}) {
+        EXPECT_TRUE(activates(attr, Capability::Index)) << attr;
+        EXPECT_TRUE(activates(attr, Capability::Search)) << attr;
+    }
+    EXPECT_TRUE(activates("production", Capability::Refs));
+    EXPECT_FALSE(activates("test", Capability::Refs));
+}
+
+// -- Open attribute set --------------------------------------------------------
+
+// A project can name an attribute this binary has never heard of. It gets an
+// id, a rank, and capabilities like any other.
+TEST(PathClassifierTest, ConfigDeclaresANewAttribute) {
+    auto reg = registry_with(R"(
+        attributes {
+            internal-tooling rank=6 {
+                activates "index" "search"
+                dir "scripts" "tools"
+                glob "*.tmpl"
+            }
+        }
+    )");
+    PathClassifier c(reg);
+    EXPECT_EQ(attr_of(c, "scripts/release/publish.py"), "internal-tooling");
+    EXPECT_EQ(attr_of(c, "src/templates/page.tmpl"), "internal-tooling");
+    PathAttrId id{};
+    ASSERT_TRUE(reg.find("internal-tooling", id));
+    EXPECT_FALSE(reg.activates(id, Capability::Analysis));
+    EXPECT_TRUE(reg.activates(id, Capability::Search));
+}
+
+// A pattern naming an attribute nobody defined declares it too, so the
+// shorthand form does not need a matching block.
+TEST(PathClassifierTest, ShorthandForAnUnknownAttributeDeclaresIt) {
+    auto reg = registry_with(R"(attributes { fixtures-only "testfixtures/" })");
+    PathClassifier c(reg);
+    EXPECT_EQ(attr_of(c, "testfixtures/data/a.go"), "fixtures-only");
+    PathAttrId id{};
+    ASSERT_TRUE(reg.find("fixtures-only", id));
+    EXPECT_FALSE(reg.activates(id, Capability::Analysis))
+        << "a tagged tree defaults out of analysis";
+}
+
+// Redefining a shipped attribute replaces its patterns: a project that writes
+// the block means it, and leaving shipped patterns in force invisibly is the
+// surprise this avoids.
+TEST(PathClassifierTest, ConfigRedefinesAShippedAttribute) {
+    auto reg = registry_with(R"(
+        attributes {
+            benchmark rank=3 {
+                activates "index" "search" "analysis"
+                dir "perf"
+            }
+        }
+    )");
+    PathClassifier c(reg);
+    EXPECT_EQ(attr_of(c, "perf/latency.go"), "benchmark");
+    EXPECT_EQ(attr_of(c, "benchmarks/repo-qa/bench.py"), "production")
+        << "the shipped benchmark dirs were replaced, not merged";
+    PathAttrId id{};
+    ASSERT_TRUE(reg.find("benchmark", id));
+    EXPECT_TRUE(reg.activates(id, Capability::Analysis))
+        << "a project can opt its benchmarks back into analysis";
+}
+
+// -- Ruleset errors ------------------------------------------------------------
+
+TEST(PathClassifierTest, RejectsUnknownCapability) {
+    std::vector<AttrDef> defs;
+    std::vector<PathAttrRule> rules;
+    std::string error;
+    EXPECT_FALSE(parse_attributes_block(
+        R"(attributes { weird { activates "teleport" } })", defs, rules,
+        error));
+    EXPECT_NE(error.find("teleport"), std::string::npos) << error;
+}
+
+TEST(PathClassifierTest, RejectsUnknownKeyInsideADefinition) {
+    std::vector<AttrDef> defs;
+    std::vector<PathAttrRule> rules;
+    std::string error;
+    EXPECT_FALSE(parse_attributes_block(
+        R"(attributes { weird { directory "x" } })", defs, rules, error));
+    EXPECT_NE(error.find("directory"), std::string::npos) << error;
+}
+
+TEST(PathClassifierTest, RejectsUnknownContentHeuristic) {
+    std::vector<AttrDef> defs;
+    std::vector<PathAttrRule> rules;
+    std::string error;
+    EXPECT_FALSE(parse_attributes_block(
+        R"(attributes { weird { content "vibes" } })", defs, rules, error));
+    EXPECT_NE(error.find("vibes"), std::string::npos) << error;
+}
+
+TEST(PathClassifierTest, RejectsAnAttributeWithNeitherPatternsNorBlock) {
+    std::vector<AttrDef> defs;
+    std::vector<PathAttrRule> rules;
+    std::string error;
+    EXPECT_FALSE(
+        parse_attributes_block(R"(attributes { lonely })", defs, rules, error));
+    EXPECT_NE(error.find("lonely"), std::string::npos) << error;
 }
 
 }  // namespace

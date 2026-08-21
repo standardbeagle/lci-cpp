@@ -13,7 +13,8 @@ namespace lci {
 
 namespace {
 ReferenceTracker::LangFamily language_family_for_path(std::string_view path);
-bool is_low_quality_path(std::string_view path);
+bool is_low_quality_path(const PathAttrRegistry& registry,
+                         std::string_view path);
 uint64_t dir_hash_of_path(std::string_view path);
 }  // namespace
 
@@ -284,7 +285,7 @@ std::vector<EnhancedSymbol> ReferenceTracker::process_file(
     enhanced.reserve(symbols.size());
 
     file_resolution_meta_[file_id] = FileResolutionMeta{
-        language_family_for_path(path), is_low_quality_path(path),
+        language_family_for_path(path), is_low_quality_path(attr_registry(), path),
         dir_hash_of_path(path)};
 
     write_snapshot([&](Snapshot& s) {
@@ -901,23 +902,17 @@ ReferenceTracker::LangFamily language_family_for_path(std::string_view path) {
     return language_info_for_path(path).family;
 }
 
-// Test/example/vendored/generated files lose to library code when an
-// ambiguous name has to be resolved without import evidence. Delegates to
-// PathClassifier (builtin rules) — the single authority for path attributes;
-// it covers what the old ad-hoc list missed: Go `_examples`/`_*` toolchain-
-// ignored dirs, `testdata/`, PHP `*Test.php`, minified bundles, generated
-// code. Runs once per file at process_file time, never on a read path.
-// The benchmarks/fixtures dirs are resolution-specific extras the classifier
-// deliberately does not tag.
-bool is_low_quality_path(std::string_view path) {
-    auto has_dir = [&](std::string_view dir) {
-        std::string with_slash = std::string(dir) + "/";
-        if (path.rfind(with_slash, 0) == 0) return true;  // leading segment
-        return path.find("/" + with_slash) != std::string_view::npos;
-    };
-    if (has_dir("benchmarks") || has_dir("fixtures")) return true;
-    static const PathClassifier classifier;
-    return classifier.classify(path) != PathAttr::Production;
+// A file that does not activate the Refs capability loses to library code
+// when an ambiguous name has to be resolved without import evidence — tests,
+// benchmarks, examples, vendored trees, generated emitters. The attribute
+// registry is the single authority; this used to hold a private list
+// ("benchmarks", "fixtures") on top of a builtin-only classifier, so a
+// project's own `.lci.kdl` attributes never reached reference resolution.
+// Runs once per file at process_file time, never on a read path.
+bool is_low_quality_path(const PathAttrRegistry& registry,
+                         std::string_view path) {
+    PathClassifier classifier(registry);
+    return !registry.activates(classifier.classify(path), Capability::Refs);
 }
 
 // Directory identity for package-proximity resolution (Go package = dir; most

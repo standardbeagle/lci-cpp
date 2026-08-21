@@ -366,7 +366,8 @@ CodebaseIntelligenceResponse CodebaseIntelligenceEngine::build_structure(
     const CodebaseIntelligenceParams& /*params*/,
     const std::vector<FileSymbolData>& files,
     const std::vector<std::string>& file_paths,
-    const std::vector<PathAttr>& file_attrs,
+    const std::vector<PathAttrId>& file_attrs,
+    const PathAttrRegistry& registry,
     std::string_view project_root) const {
     CodebaseIntelligenceResponse response;
 
@@ -428,15 +429,20 @@ CodebaseIntelligenceResponse CodebaseIntelligenceEngine::build_structure(
         // The stored PathClassifier attribute (index-time, config-aware)
         // decides the tests/docs/example/vendored/generated segments; only
         // production files fall through to the extension-category switch.
-        PathAttr attr = idx < file_attrs.size() ? file_attrs[idx]
-                                                : PathAttr::Production;
-        switch (attr) {
-            case PathAttr::Test: ++s.tests; continue;
-            case PathAttr::Docs: ++s.docs; continue;
-            case PathAttr::Example: ++s.example; continue;
-            case PathAttr::Vendored: ++s.vendored; continue;
-            case PathAttr::Generated: ++s.generated; continue;
-            case PathAttr::Production: break;
+        PathAttrId attr =
+            idx < file_attrs.size() ? file_attrs[idx] : kFallbackAttr;
+        if (attr != kFallbackAttr) {
+            // Buckets are keyed by attribute NAME, not by an enum: the set is
+            // open, so an attribute this build never heard of still lands
+            // somewhere visible instead of being counted as production code.
+            std::string_view an = registry.name(attr);
+            if (an == "test") { ++s.tests; continue; }
+            if (an == "docs") { ++s.docs; continue; }
+            if (an == "example") { ++s.example; continue; }
+            if (an == "vendored") { ++s.vendored; continue; }
+            if (an == "generated") { ++s.generated; continue; }
+            ++s.other;
+            continue;
         }
         switch (classify_file(rel)) {
             case FileCategory::Test: ++s.tests; break;

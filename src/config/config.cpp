@@ -1,6 +1,7 @@
 #include <lci/config.h>
 #include <lci/core/portable.h>
 #include <lci/kdl.h>
+#include <lci/path_classifier.h>
 
 #include <algorithm>
 #include <cctype>
@@ -445,6 +446,48 @@ Config make_kdl_base_config() {
     return cfg;
 }
 
+
+// Reads one `attributes { ... }` node through the shared ruleset parser, so
+// config and the shipped ruleset can never disagree about the syntax. The
+// node is re-emitted as KDL text rather than duplicating the walk: the block
+// is small (tens of lines), read once at load, and a second walker is exactly
+// the drift this change exists to remove.
+bool parse_attributes_node(const KdlNode& node, std::vector<AttrDef>& defs,
+                           std::vector<PathAttrRule>& rules,
+                           std::string& error) {
+    std::string text = "attributes {\n";
+    for (const auto& attr : node.children) {
+        text += "  " + attr.name;
+        for (const auto& p : attr.props) {
+            text += " " + p.key + "=";
+            if (p.value.kind == TokenKind::String) {
+                text += "\"" + p.value.text + "\"";
+            } else {
+                text += p.value.text;
+            }
+        }
+        for (const auto& a : attr.args) {
+            if (a.kind == TokenKind::String) text += " \"" + a.text + "\"";
+        }
+        if (!attr.children.empty()) {
+            text += " {\n";
+            for (const auto& child : attr.children) {
+                text += "    " + child.name;
+                for (const auto& a : child.args) {
+                    if (a.kind == TokenKind::String) {
+                        text += " \"" + a.text + "\"";
+                    }
+                }
+                text += "\n";
+            }
+            text += "  }";
+        }
+        text += "\n";
+    }
+    text += "}\n";
+    return parse_attributes_block(text, defs, rules, error);
+}
+
 // Applies parsed KDL nodes onto an existing Config. Fields absent from the
 // document keep whatever `cfg` already holds — this is the shared overlay
 // primitive for both the project file and the user-level defaults file.
@@ -475,30 +518,16 @@ bool apply_kdl_nodes(Config& cfg, const std::vector<KdlNode>& nodes,
                 return false;
         }
         else if (node.name == "attributes") {
-            // attributes { test "src/legacy_tests/"; vendored "*.iife.js" }
-            // Child node name = attribute tag, string args = patterns.
-            // Unknown tags fail fast — a typo silently dropping a rule would
-            // leave vendored/test code polluting every analysis section.
-            for (const auto& child : node.children) {
-                PathAttr attr{};
-                if (!PathClassifier::parse(child.name, attr)) {
-                    error = "attributes: unknown tag '" + child.name +
-                            "' (valid: production, test, example, vendored, "
-                            "generated, docs)";
-                    return false;
-                }
-                bool any = false;
-                for (const auto& a : child.args) {
-                    if (a.kind == TokenKind::String && !a.text.empty()) {
-                        cfg.attributes.push_back({attr, a.text});
-                        any = true;
-                    }
-                }
-                if (!any) {
-                    error = "attributes: tag '" + child.name +
-                            "' has no pattern strings";
-                    return false;
-                }
+            // Same block the shipped ruleset is written in, read by the same
+            // parser (see include/lci/path_classifier.h): shorthand patterns
+            // for an attribute, definition blocks that declare or redefine
+            // one, or both. An attribute name lci has never seen is a NEW
+            // attribute, not an error — the set is open — so the fail-fast
+            // here is reserved for malformed definitions (unknown capability,
+            // unknown key, empty pattern).
+            if (!parse_attributes_node(node, cfg.attribute_defs,
+                                       cfg.attributes, error)) {
+                return false;
             }
         }
         else if (node.name == "synonyms") {

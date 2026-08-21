@@ -609,14 +609,19 @@ TEST_F(CodeInsightAttrTest, UnifiedExcludesTaggedFilesAndLabelsIt) {
     auto result = handle_code_insight(params, *engine_, *indexer_);
     ASSERT_FALSE(result.is_error);
     // No example/test symbols in any section.
-    EXPECT_EQ(result.text.find("_examples"), std::string::npos) << result.text;
+    EXPECT_EQ(result.text.find("ExampleWidget"), std::string::npos)
+        << result.text;
     EXPECT_EQ(result.text.find("HandlerTest"), std::string::npos);
     EXPECT_EQ(result.text.find("testSend"), std::string::npos);
     // Production entry point still present.
     EXPECT_NE(result.text.find("main.go"), std::string::npos);
-    // The exclusion is labeled, not silent.
-    EXPECT_NE(result.text.find("excluded_from_analysis: test=1 example=1"),
-              std::string::npos)
+    // The exclusion is labeled with its attribute AND the directory the files
+    // came from — a bare count says something was left out but not what.
+    EXPECT_NE(result.text.find("excluded_from_analysis:"), std::string::npos)
+        << result.text;
+    EXPECT_NE(result.text.find("test=1 (tests/)"), std::string::npos)
+        << result.text;
+    EXPECT_NE(result.text.find("example=1 (_examples/)"), std::string::npos)
         << result.text;
 }
 

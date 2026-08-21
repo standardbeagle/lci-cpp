@@ -16,6 +16,7 @@
 #include <absl/container/flat_hash_set.h>
 
 #include <lci/language_map.h>
+#include <lci/path_classifier.h>
 #include <lci/reference.h>
 #include <lci/scope.h>
 #include <lci/symbol.h>
@@ -359,6 +360,17 @@ struct StoredRef {
 
 class ReferenceTracker {
   public:
+    /// The attribute set resolution reads (the Refs capability decides which
+    /// files are preferred targets). Defaults to the shipped ruleset; the
+    /// owning MasterIndex points it at the project's registry so `.lci.kdl`
+    /// attributes reach resolution, which a private classifier here never
+    /// allowed.
+    void set_attr_registry(const PathAttrRegistry* registry) {
+        attr_registry_ = registry != nullptr ? registry
+                                             : &PathAttrRegistry::builtin();
+    }
+    const PathAttrRegistry& attr_registry() const { return *attr_registry_; }
+
     /// Language family for cross-language link gating. Now owned by the
     /// foundation extension table (lci::LangFamily in <lci/language_map.h>) so
     /// the map can key on it without a core dependency; aliased here to keep
@@ -561,6 +573,7 @@ class ReferenceTracker {
     /// Writer-side intern table for Snapshot::ref_names (name -> pool id).
     absl::flat_hash_map<std::string, uint32_t> ref_name_ids_;
     absl::flat_hash_map<uint64_t, ScopeChainCacheEntry> scope_chain_cache_;  // hash-cons table
+    const PathAttrRegistry* attr_registry_{&PathAttrRegistry::builtin()};
 
     /// Per-file resolution metadata derived from the path at process_file
     /// time. language_family gates cross-language linking; low_quality

@@ -143,14 +143,17 @@ class CodebaseIntelligenceEngine {
     /// yield an empty tree, so it is not defaulted.
     /// `file_attrs` is parallel to `file_paths` and carries the per-file
     /// PathClassifier attribute stored at index time; attribute-tagged files
-    /// route to the tests/docs/example/vendored/generated buckets and only
-    /// production files fall through to the classify_file category switch.
+    /// route to the bucket matching their attribute NAME (an attribute this
+    /// build does not know counts as "other") and only fallback-attribute
+    /// files reach the classify_file category switch. `registry` resolves
+    /// those ids to names.
     /// Missing entries (shorter or empty vector) count as Production.
     CodebaseIntelligenceResponse build_structure(
         const CodebaseIntelligenceParams& params,
         const std::vector<FileSymbolData>& files,
         const std::vector<std::string>& file_paths,
-        const std::vector<PathAttr>& file_attrs,
+        const std::vector<PathAttrId>& file_attrs,
+        const PathAttrRegistry& registry,
         std::string_view project_root) const;
 
 

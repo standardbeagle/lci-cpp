@@ -1,31 +1,91 @@
 #include <lci/path_classifier.h>
 
+#include <lci/kdl.h>
+
 #include <algorithm>
-#include <array>
 #include <cstring>
 
 namespace lci {
 
 namespace {
 
-// Precedence when several builtin markers match one path: a test file inside
-// vendor/ is vendored, a generated file under tests/ is a test fixture, etc.
-// Lower rank wins.
-int rank(PathAttr a) {
-    switch (a) {
-        case PathAttr::Vendored: return 0;
-        case PathAttr::Generated: return 1;
-        case PathAttr::Test: return 2;
-        case PathAttr::Example: return 3;
-        case PathAttr::Docs: return 4;
-        case PathAttr::Production: return 5;
+// The ruleset lci ships with. Written in the same KDL a project writes, so
+// what a reader sees here is exactly what a `.lci.kdl` can override, extend,
+// or replace.
+//
+// `rank` decides precedence when several attributes match one path: a test
+// file inside vendor/ is vendored, a generated file under tests/ is a test
+// fixture. `activates` is what the attribute turns on — an attribute that
+// does not activate "analysis" is excluded from code_insight's sections and
+// reported as an exclusion instead of silently shrinking the corpus.
+constexpr std::string_view kBuiltinAttributeRuleset = R"KDL(
+attributes {
+    // Third-party trees. Lowest rank: a vendored dependency's own tests are
+    // still vendored code, and none of it is ours to analyze.
+    vendored rank=0 {
+        activates "index" "search"
+        dir "vendor" "vendors" "node_modules" "third_party" "thirdparty"
+        dir "bower_components" ".yarn"
+        glob "*.min.js" "*.min.mjs" "*.min.css" "*.bundle.js"
+        content "minified"
     }
-    return 5;
-}
 
-bool better(PathAttr candidate, PathAttr current) {
-    return rank(candidate) < rank(current);
+    // Machine-written code. References resolve into it (the call sites are
+    // real) but its style, error handling, and naming are an emitter's, not
+    // this codebase's.
+    generated rank=1 {
+        activates "index" "search"
+        dir "generated" "__generated__"
+        glob "*_generated.*" "*.generated.*" "zz_generated*"
+        glob "*.pb.go" "*.pb.cc" "*.pb.h" "*_pb2.py" "*_pb2_grpc.py"
+        glob "*.g.dart" "*.g.cs" "*.d.ts"
+        content "generated-header"
+    }
+
+    // Tests. Deliberately no "testing" directory rule — real packages are
+    // named that.
+    test rank=2 {
+        activates "index" "search"
+        dir "test" "tests" "__tests__" "testdata" "spec" "specs" "fixtures"
+        glob "*_test.go" "*_test.py" "*_test.cc" "*_test.cpp" "*_test.rb"
+        glob "*_spec.rb" "*_test.exs" "*.test.*" "*.spec.*"
+        glob "*Test.php" "*Tests.php" "*TestCase.php"
+        glob "*Test.java" "*Tests.java" "*Test.cs" "*Tests.cs" "*Test.kt"
+        glob "conftest.py" "test_*.py"
+    }
+
+    // Benchmark harnesses and their tooling. Separate from tests because a
+    // benchmark is not a correctness gate: a bench script swallowing an
+    // exception is not a defect in the product, and counting it as one buries
+    // the findings that are. No "benchmarking" rule, for the same reason
+    // "testing" is absent above.
+    benchmark rank=3 {
+        activates "index" "search"
+        dir "bench" "benchmark" "benchmarks"
+        glob "*_bench.go" "*_bench.cc" "*_bench.cpp" "*_bench.rs" "*_bench.py"
+        glob "*_benchmark.go" "*_benchmark.cc" "*_benchmark.cpp"
+        glob "*_benchmark.py"
+    }
+
+    // Examples and demos. A leading-underscore directory is ignored by the Go
+    // toolchain (chi's _examples) — non-importable, never production.
+    example rank=4 {
+        activates "index" "search"
+        dir "example" "examples" "demo" "demos" "sample" "samples" "_*"
+    }
+
+    docs rank=5 {
+        activates "index" "search"
+        dir "doc" "docs"
+        glob "*.md" "*.markdown" "*.rst" "*.adoc"
+    }
+
+    // The fallback: every file no rule claimed. Always attribute id 0.
+    production rank=99 {
+        activates "index" "search" "refs" "analysis"
+    }
 }
+)KDL";
 
 // Simple glob: '*' matches any run (including '/'), '?' any one char.
 // Iterative backtracking — no allocation, no std::regex (karpathy table).
@@ -48,97 +108,17 @@ bool glob_match(std::string_view pat, std::string_view text) {
     return p == pat.size();
 }
 
-bool has_suffix(std::string_view s, std::string_view suf) {
-    return s.size() >= suf.size() &&
-           s.compare(s.size() - suf.size(), suf.size(), suf) == 0;
-}
-
 bool has_prefix(std::string_view s, std::string_view pre) {
     return s.compare(0, std::min(pre.size(), s.size()), pre) == 0 &&
            s.size() >= pre.size();
 }
 
-// Directory-segment tag. `seg` excludes the basename.
-PathAttr dir_segment_attr(std::string_view seg) {
-    // Vendored trees.
-    if (seg == "vendor" || seg == "vendors" || seg == "node_modules" ||
-        seg == "third_party" || seg == "thirdparty" ||
-        seg == "bower_components" || seg == ".yarn") {
-        return PathAttr::Vendored;
-    }
-    // Generated output dirs.
-    if (seg == "generated" || seg == "__generated__") {
-        return PathAttr::Generated;
-    }
-    // Test dirs. Deliberately NOT "testing" (real packages are named that;
-    // pinned by CIEngine.BuildStructureCategorizesViaClassifyFile).
-    if (seg == "test" || seg == "tests" || seg == "__tests__" ||
-        seg == "testdata" || seg == "spec" || seg == "specs") {
-        return PathAttr::Test;
-    }
-    // Example/demo dirs. A leading '_' directory is ignored by the Go
-    // toolchain (chi's _examples) — non-importable, never production.
-    if (seg == "example" || seg == "examples" || seg == "demo" ||
-        seg == "demos" || seg == "sample" || seg == "samples" ||
-        (!seg.empty() && seg.front() == '_')) {
-        return PathAttr::Example;
-    }
-    if (seg == "doc" || seg == "docs") return PathAttr::Docs;
-    return PathAttr::Production;
-}
-
-// Basename tag (extension + naming-convention patterns per ecosystem).
-PathAttr basename_attr(std::string_view base) {
-    // Vendored: minified / bundled assets.
-    for (std::string_view suf :
-         {".min.js", ".min.mjs", ".min.css", ".bundle.js"}) {
-        if (has_suffix(base, suf)) return PathAttr::Vendored;
-    }
-    // Generated code.
-    if (base.find("_generated.") != std::string_view::npos ||
-        base.find(".generated.") != std::string_view::npos ||
-        has_prefix(base, "zz_generated")) {
-        return PathAttr::Generated;
-    }
-    for (std::string_view suf :
-         {".pb.go", ".pb.cc", ".pb.h", "_pb2.py", "_pb2_grpc.py", ".g.dart",
-          ".g.cs", ".d.ts"}) {
-        if (has_suffix(base, suf)) return PathAttr::Generated;
-    }
-    // Tests: Go/C++/Ruby/Python suffixes.
-    for (std::string_view suf :
-         {"_test.go", "_test.py", "_test.cc", "_test.cpp", "_test.rb",
-          "_spec.rb", "_test.exs"}) {
-        if (has_suffix(base, suf)) return PathAttr::Test;
-    }
-    // Tests: JS/TS dotted infixes.
-    for (std::string_view inf : {".test.", ".spec."}) {
-        if (base.find(inf) != std::string_view::npos) return PathAttr::Test;
-    }
-    // Tests: PHP / Java / C# class suffixes (extension-qualified).
-    for (std::string_view suf :
-         {"Test.php", "Tests.php", "TestCase.php", "Test.java", "Tests.java",
-          "Test.cs", "Tests.cs", "Test.kt"}) {
-        if (has_suffix(base, suf)) return PathAttr::Test;
-    }
-    // Tests: Python prefix convention + pytest plumbing.
-    if (base == "conftest.py") return PathAttr::Test;
-    if (has_prefix(base, "test_") && has_suffix(base, ".py")) {
-        return PathAttr::Test;
-    }
-    // Docs formats.
-    for (std::string_view suf : {".md", ".markdown", ".rst", ".adoc"}) {
-        if (has_suffix(base, suf)) return PathAttr::Docs;
-    }
-    return PathAttr::Production;
-}
-
-// True when a config pattern matches. Semantics (see header):
+// True when a config shorthand pattern matches. Semantics (see header):
 //   trailing '/'  -> directory prefix or interior segment sequence
 //   contains '/'  -> glob over the whole relative path
 //   otherwise     -> glob over the basename
-bool rule_matches(std::string_view pattern, std::string_view rel_path,
-                  std::string_view base) {
+bool shorthand_matches(std::string_view pattern, std::string_view rel_path,
+                       std::string_view base) {
     if (pattern.empty()) return false;
     if (pattern.back() == '/') {
         std::string_view dir = pattern.substr(0, pattern.size() - 1);
@@ -163,10 +143,38 @@ bool rule_matches(std::string_view pattern, std::string_view rel_path,
     return glob_match(pattern, base);
 }
 
+// Does any `dir` pattern of `def` match a path SEGMENT? The basename is
+// excluded — that is what `glob` is for.
+bool dirs_match(const AttrDef& def, std::string_view rel_path) {
+    if (def.dirs.empty()) return false;
+    size_t start = 0;
+    while (start < rel_path.size()) {
+        auto end = rel_path.find('/', start);
+        if (end == std::string_view::npos) break;  // basename
+        std::string_view seg = rel_path.substr(start, end - start);
+        for (const auto& pat : def.dirs) {
+            if (glob_match(pat, seg)) return true;
+        }
+        start = end + 1;
+    }
+    return false;
+}
+
+bool globs_match(const AttrDef& def, std::string_view rel_path,
+                 std::string_view base) {
+    for (const auto& pat : def.globs) {
+        std::string_view text =
+            pat.find('/') != std::string::npos ? rel_path : base;
+        if (glob_match(pat, text)) return true;
+    }
+    return false;
+}
+
 // Content sniff: generated-file header convention within the first 512 bytes
 // ("Code generated by X. DO NOT EDIT." — Go; "@generated" — JS/facebook).
 bool has_generated_header(std::string_view content) {
-    std::string_view head = content.substr(0, std::min<size_t>(content.size(), 512));
+    std::string_view head =
+        content.substr(0, std::min<size_t>(content.size(), 512));
     return head.find("Code generated") != std::string_view::npos ||
            head.find("DO NOT EDIT") != std::string_view::npos ||
            head.find("@generated") != std::string_view::npos;
@@ -179,7 +187,8 @@ bool looks_minified(std::string_view content) {
     size_t newlines = 0;
     const char* p = content.data();
     const char* end = p + sample;
-    while ((p = static_cast<const char*>(memchr(p, '\n', static_cast<size_t>(end - p)))) != nullptr) {
+    while ((p = static_cast<const char*>(
+                memchr(p, '\n', static_cast<size_t>(end - p)))) != nullptr) {
         ++newlines;
         ++p;
         if (p >= end) break;
@@ -188,76 +197,309 @@ bool looks_minified(std::string_view content) {
     return sample / (newlines + 1) > 300;
 }
 
+bool content_matches(const AttrDef& def, std::string_view content) {
+    for (const auto& id : def.contents) {
+        if (id == "minified" && looks_minified(content)) return true;
+        if (id == "generated-header" && has_generated_header(content)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+constexpr uint8_t cap_bit(Capability cap) {
+    return static_cast<uint8_t>(1u << static_cast<uint8_t>(cap));
+}
+
+// What an attribute activates when it says nothing. Silence is not "activate
+// nothing" — that would drop the files out of the index entirely. A newly
+// declared, tagged tree is indexed, searchable, and a valid reference target,
+// but out of analysis, matching every shipped non-production attribute.
+constexpr uint8_t kDefaultCapabilities =
+    cap_bit(Capability::Index) | cap_bit(Capability::Search) |
+    cap_bit(Capability::Refs);
+
 }  // namespace
 
-PathClassifier::PathClassifier(std::vector<PathAttrRule> config_rules)
-    : config_rules_(std::move(config_rules)) {}
+// -- Capabilities --------------------------------------------------------------
 
-PathAttr PathClassifier::classify(std::string_view rel_path) const {
-    auto slash = rel_path.rfind('/');
-    std::string_view base = slash == std::string_view::npos
-                                ? rel_path
-                                : rel_path.substr(slash + 1);
-
-    // Config rules first, declaration order, first match wins — including
-    // `production`, which un-tags builtin matches.
-    for (const auto& rule : config_rules_) {
-        if (rule_matches(rule.pattern, rel_path, base)) return rule.attr;
+std::string_view capability_name(Capability cap) {
+    switch (cap) {
+        case Capability::Index: return "index";
+        case Capability::Search: return "search";
+        case Capability::Refs: return "refs";
+        case Capability::Analysis: return "analysis";
     }
-
-    // Builtins: strongest attribute across all directory segments + basename.
-    PathAttr best = PathAttr::Production;
-    size_t start = 0;
-    while (start < rel_path.size()) {
-        auto end = rel_path.find('/', start);
-        if (end == std::string_view::npos) break;  // basename handled below
-        std::string_view seg = rel_path.substr(start, end - start);
-        PathAttr a = dir_segment_attr(seg);
-        if (better(a, best)) best = a;
-        start = end + 1;
-    }
-    PathAttr b = basename_attr(base);
-    if (better(b, best)) best = b;
-    return best;
+    return "index";
 }
 
-PathAttr PathClassifier::classify(std::string_view rel_path,
-                                  std::string_view content) const {
-    auto slash = rel_path.rfind('/');
-    std::string_view base = slash == std::string_view::npos
-                                ? rel_path
-                                : rel_path.substr(slash + 1);
-    // An explicit config match (any tag) is authoritative over content.
-    for (const auto& rule : config_rules_) {
-        if (rule_matches(rule.pattern, rel_path, base)) return rule.attr;
-    }
-    PathAttr attr = classify(rel_path);
-    if (attr != PathAttr::Production || content.empty()) return attr;
-    if (has_generated_header(content)) return PathAttr::Generated;
-    if (looks_minified(content)) return PathAttr::Vendored;
-    return PathAttr::Production;
-}
-
-std::string_view PathClassifier::name(PathAttr attr) {
-    switch (attr) {
-        case PathAttr::Production: return "production";
-        case PathAttr::Test: return "test";
-        case PathAttr::Example: return "example";
-        case PathAttr::Vendored: return "vendored";
-        case PathAttr::Generated: return "generated";
-        case PathAttr::Docs: return "docs";
-    }
-    return "production";
-}
-
-bool PathClassifier::parse(std::string_view n, PathAttr& out) {
-    if (n == "production" || n == "code") { out = PathAttr::Production; return true; }
-    if (n == "test") { out = PathAttr::Test; return true; }
-    if (n == "example") { out = PathAttr::Example; return true; }
-    if (n == "vendored") { out = PathAttr::Vendored; return true; }
-    if (n == "generated") { out = PathAttr::Generated; return true; }
-    if (n == "docs") { out = PathAttr::Docs; return true; }
+bool parse_capability(std::string_view name, Capability& out) {
+    if (name == "index") { out = Capability::Index; return true; }
+    if (name == "search") { out = Capability::Search; return true; }
+    if (name == "refs") { out = Capability::Refs; return true; }
+    if (name == "analysis") { out = Capability::Analysis; return true; }
     return false;
+}
+
+// -- Ruleset parsing -----------------------------------------------------------
+
+bool parse_attributes_block(std::string_view kdl_source,
+                            std::vector<AttrDef>& defs_out,
+                            std::vector<PathAttrRule>& rules_out,
+                            std::string& error) {
+    std::string parse_error;
+    auto nodes = kdl::parse(kdl_source, parse_error);
+    if (!parse_error.empty()) {
+        error = parse_error;
+        return false;
+    }
+    for (const auto& node : nodes) {
+        if (node.name != "attributes") continue;
+        for (const auto& attr : node.children) {
+            // Shorthand — `test "src/legacy/"` — adds patterns to an
+            // attribute without redefining it. This is the historical config
+            // syntax and stays valid.
+            for (const auto& pattern : attr.string_args()) {
+                if (pattern.empty()) {
+                    error = "attributes: attribute '" + attr.name +
+                            "' has an empty pattern";
+                    return false;
+                }
+                rules_out.push_back({attr.name, pattern});
+            }
+            if (attr.children.empty()) {
+                if (attr.string_args().empty()) {
+                    error = "attributes: attribute '" + attr.name +
+                            "' declares neither patterns nor a definition"
+                            " block";
+                    return false;
+                }
+                continue;
+            }
+            // Full form — a definition block.
+            AttrDef def;
+            def.name = attr.name;
+            def.rank = attr.int_prop("rank", 50);
+            for (const auto& child : attr.children) {
+                if (child.name == "activates") {
+                    for (const auto& c : child.string_args()) {
+                        Capability cap{};
+                        if (!parse_capability(c, cap)) {
+                            error = "attributes: attribute '" + attr.name +
+                                    "' activates unknown capability '" + c +
+                                    "' (valid: index, search, refs, analysis)";
+                            return false;
+                        }
+                        def.capabilities |= cap_bit(cap);
+                    }
+                } else if (child.name == "dir") {
+                    for (auto& s : child.string_args()) {
+                        def.dirs.push_back(std::move(s));
+                    }
+                } else if (child.name == "glob") {
+                    for (auto& s : child.string_args()) {
+                        def.globs.push_back(std::move(s));
+                    }
+                } else if (child.name == "content") {
+                    for (auto& s : child.string_args()) {
+                        if (s != "minified" && s != "generated-header") {
+                            error = "attributes: attribute '" + attr.name +
+                                    "' names unknown content heuristic '" + s +
+                                    "' (valid: minified, generated-header)";
+                            return false;
+                        }
+                        def.contents.push_back(std::move(s));
+                    }
+                } else {
+                    error = "attributes: attribute '" + attr.name +
+                            "' has unknown key '" + child.name +
+                            "' (valid: activates, dir, glob, content)";
+                    return false;
+                }
+            }
+            defs_out.push_back(std::move(def));
+        }
+    }
+    return true;
+}
+
+// -- Registry ------------------------------------------------------------------
+
+void PathAttrRegistry::finalize() {
+    by_rank_.clear();
+    by_rank_.reserve(defs_.size());
+    for (size_t i = 0; i < defs_.size(); ++i) {
+        by_rank_.push_back(static_cast<PathAttrId>(i));
+    }
+    // Rank, then name: two attributes at the same rank must still classify
+    // the same way on every machine (karpathy #4).
+    std::sort(by_rank_.begin(), by_rank_.end(),
+              [this](PathAttrId a, PathAttrId b) {
+                  if (defs_[a].rank != defs_[b].rank) {
+                      return defs_[a].rank < defs_[b].rank;
+                  }
+                  return defs_[a].name < defs_[b].name;
+              });
+}
+
+bool PathAttrRegistry::find(std::string_view name, PathAttrId& out) const {
+    for (size_t i = 0; i < defs_.size(); ++i) {
+        if (defs_[i].name == name) {
+            out = static_cast<PathAttrId>(i);
+            return true;
+        }
+    }
+    return false;
+}
+
+std::vector<PathAttrId> PathAttrRegistry::with_capability(
+    Capability cap) const {
+    std::vector<PathAttrId> out;
+    for (size_t i = 0; i < defs_.size(); ++i) {
+        if (defs_[i].activates(cap)) out.push_back(static_cast<PathAttrId>(i));
+    }
+    return out;
+}
+
+const PathAttrRegistry& PathAttrRegistry::builtin() {
+    static const PathAttrRegistry* registry = [] {
+        auto* r = new PathAttrRegistry();
+        std::vector<AttrDef> defs;
+        std::vector<PathAttrRule> rules;
+        std::string error;
+        // A broken shipped ruleset is a build defect, not a runtime
+        // condition. The synthetic fallback below keeps the binary usable
+        // (everything classifies as production) while
+        // PathClassifierTest.ShippedRulesetParses fails loudly in CI.
+        if (parse_attributes_block(kBuiltinAttributeRuleset, defs, rules,
+                                   error)) {
+            // The fallback attribute goes first so it holds id 0.
+            for (auto& d : defs) {
+                if (d.name == "production") r->defs_.push_back(std::move(d));
+            }
+            for (auto& d : defs) {
+                if (!d.name.empty() && d.name != "production") {
+                    r->defs_.push_back(std::move(d));
+                }
+            }
+        }
+        if (r->defs_.empty() || r->defs_[kFallbackAttr].name != "production") {
+            r->defs_.clear();
+            AttrDef fallback;
+            fallback.name = "production";
+            fallback.rank = 99;
+            fallback.capabilities = cap_bit(Capability::Index) |
+                                    cap_bit(Capability::Search) |
+                                    cap_bit(Capability::Refs) |
+                                    cap_bit(Capability::Analysis);
+            r->defs_.push_back(std::move(fallback));
+        }
+        r->finalize();
+        return r;
+    }();
+    return *registry;
+}
+
+PathAttrRegistry PathAttrRegistry::with_config(
+    const std::vector<AttrDef>& config_attrs,
+    const std::vector<PathAttrRule>& config_rules, std::string& error) {
+
+    PathAttrRegistry reg = builtin();  // the shipped ruleset is the base
+    for (const auto& incoming : config_attrs) {
+        if (incoming.name.empty()) {
+            error = "attributes: an attribute needs a name";
+            return builtin();
+        }
+        PathAttrId existing{};
+        if (reg.find(incoming.name, existing)) {
+            // Redefining a shipped attribute REPLACES its patterns and
+            // capabilities. A project that writes the block means it, and
+            // merging would leave shipped patterns in force invisibly.
+            AttrDef& target = reg.defs_[existing];
+            target.rank = incoming.rank;
+            target.capabilities = incoming.capabilities != 0
+                                      ? incoming.capabilities
+                                      : target.capabilities;
+            target.dirs = incoming.dirs;
+            target.globs = incoming.globs;
+            target.contents = incoming.contents;
+        } else {
+            AttrDef def = incoming;
+            if (def.capabilities == 0) def.capabilities = kDefaultCapabilities;
+            reg.defs_.push_back(std::move(def));
+        }
+    }
+    for (const auto& rule : config_rules) {
+        PathAttrId id{};
+        if (!reg.find(rule.attr, id)) {
+            // A pattern naming an attribute nobody defined declares it, with
+            // the same defaults an undecorated definition block would get.
+            AttrDef def;
+            def.name = rule.attr;
+            def.capabilities = kDefaultCapabilities;
+            reg.defs_.push_back(std::move(def));
+            id = static_cast<PathAttrId>(reg.defs_.size() - 1);
+        }
+        reg.config_rules_.emplace_back(id, rule.pattern);
+    }
+    reg.finalize();
+    return reg;
+}
+
+// -- Classifier ----------------------------------------------------------------
+
+PathClassifier::PathClassifier() : registry_(&PathAttrRegistry::builtin()) {}
+
+PathClassifier::PathClassifier(const PathAttrRegistry& registry)
+    : registry_(&registry) {}
+
+PathAttrId PathClassifier::classify_path(std::string_view rel_path,
+                                        bool& from_config) const {
+    from_config = false;
+    auto slash = rel_path.rfind('/');
+    std::string_view base = slash == std::string_view::npos
+                                ? rel_path
+                                : rel_path.substr(slash + 1);
+
+    // Config patterns first, declaration order, first match wins — including
+    // one naming the fallback attribute, which un-tags a shipped match.
+    for (const auto& [id, pattern] : registry_->config_rules()) {
+        if (shorthand_matches(pattern, rel_path, base)) {
+            from_config = true;
+            return id;
+        }
+    }
+
+    // Shipped patterns, lowest rank first.
+    for (PathAttrId id : registry_->by_rank()) {
+        const AttrDef& def = registry_->def(id);
+        if (dirs_match(def, rel_path) || globs_match(def, rel_path, base)) {
+            return id;
+        }
+    }
+    return kFallbackAttr;
+}
+
+PathAttrId PathClassifier::classify(std::string_view rel_path) const {
+    bool from_config = false;
+    return classify_path(rel_path, from_config);
+}
+
+PathAttrId PathClassifier::classify(std::string_view rel_path,
+                                    std::string_view content) const {
+    bool from_config = false;
+    PathAttrId attr = classify_path(rel_path, from_config);
+    // An explicit config pattern is authoritative over any content sniff —
+    // `production "big/blob.js"` is how a project says "yes, it is minified,
+    // and it is still ours". Otherwise heuristics only promote a file that no
+    // pattern claimed.
+    if (from_config || attr != kFallbackAttr || content.empty()) return attr;
+    // Rank order, so "minified" (vendored, rank 0) wins over a later
+    // heuristic on the same content.
+    for (PathAttrId id : registry_->by_rank()) {
+        if (content_matches(registry_->def(id), content)) return id;
+    }
+    return attr;
 }
 
 }  // namespace lci

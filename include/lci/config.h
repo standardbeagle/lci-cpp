@@ -158,9 +158,11 @@ struct Config {
     /// dev-verb set (SynonymTable::build_default); a `.lci.kdl` `synonyms`
     /// block can add/override/clear groups.
     SynonymTable synonyms{SynonymTable::build_default()};
-    /// File attribute tagging rules from the `.lci.kdl` `attributes` block
-    /// (tag -> path/glob patterns). Checked before the PathClassifier
-    /// builtins; see include/lci/path_classifier.h for pattern semantics.
+    /// Attribute definitions from the `.lci.kdl` `attributes` block — a
+    /// project declaring its own attributes, or redefining a shipped one.
+    std::vector<AttrDef> attribute_defs;
+    /// Shorthand attribute patterns from the same block (`test "legacy/"`).
+    /// Checked before the shipped patterns; see include/lci/path_classifier.h.
     std::vector<PathAttrRule> attributes;
 };
 

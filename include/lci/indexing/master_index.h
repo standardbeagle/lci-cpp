@@ -32,11 +32,11 @@ struct FileSnapshot {
     /// Per-file attribute tag (PathAttr), computed ONCE on the indexing
     /// write path by the config-aware PathClassifier. Files absent from the
     /// map are Production. Lock-free O(1) read; readers never re-run globs.
-    absl::flat_hash_map<FileID, PathAttr> file_attrs;
+    absl::flat_hash_map<FileID, PathAttrId> file_attrs;
 
-    PathAttr attr_of(FileID id) const {
+    PathAttrId attr_of(FileID id) const {
         auto it = file_attrs.find(id);
-        return it != file_attrs.end() ? it->second : PathAttr::Production;
+        return it != file_attrs.end() ? it->second : kFallbackAttr;
     }
 
     int file_count() const {
@@ -237,7 +237,10 @@ class MasterIndex {
     /// vendored/generated/docs). Computed once at index time; see
     /// FileSnapshot::file_attrs. For many lookups, prefer
     /// read_snapshot()->attr_of(id).
-    PathAttr get_file_attr(FileID file_id) const;
+    PathAttrId get_file_attr(FileID file_id) const;
+
+    /// The attribute set in force for this index (shipped ruleset + config).
+    const PathAttrRegistry& attr_registry() const { return attr_registry_; }
 
     /// Returns the subset of `scopes` (root-relative file or directory-prefix
     /// tokens, the `lci grep/search <path>...` positional) that match NO
@@ -255,12 +258,13 @@ class MasterIndex {
 
     /// File attribute classifier (builtins + `.lci.kdl` attributes rules).
     /// Runs only on the indexing write path.
+    PathAttrRegistry attr_registry_;
     PathClassifier path_classifier_;
 
     /// Classifies `path` (absolute or root-relative) against the project
     /// root, consulting indexed content for the minified/generated-header
     /// heuristics when `file_id` is valid.
-    PathAttr classify_file_attr(const std::string& path, FileID file_id) const;
+    PathAttrId classify_file_attr(const std::string& path, FileID file_id) const;
 
     // Sub-indexes (owned)
     TrigramIndex trigram_index_;

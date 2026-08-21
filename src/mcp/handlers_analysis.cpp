@@ -736,41 +736,69 @@ ToolResult handle_side_effects(const nlohmann::json& raw_params,
 namespace {
 
 // Gather FileSymbolData from the live index, segmented by file attribute
-// (PathClassifier tags stored per file at index time). Every code_insight
-// section analyzes PRODUCTION files only; test/example/vendored/generated/
-// docs files are counted per attribute and surfaced in == SUMMARY == so the
-// exclusion is labeled, never silent. Skips files with no symbols.
+// (PathClassifier tags stored per file at index time). code_insight's
+// sections analyze the files whose attribute activates the Analysis
+// capability — production by default, plus whatever a project opts in via
+// `.lci.kdl`. Everything else is counted per attribute, WITH the directories
+// it came from, and surfaced in == SUMMARY == so the exclusion is labeled,
+// never silent. Skips files with no symbols.
+struct ExcludedAttr {
+    int files{};
+    // Top-level directory -> file count, so the summary can name where the
+    // excluded code lives instead of only how much of it there is.
+    absl::flat_hash_map<std::string, int> dirs;
+};
+
 struct GatheredCorpus {
-    std::vector<FileSymbolData> production;
-    // Files WITH symbols excluded from analysis, keyed by PathAttr index
-    // (Production slot stays 0). Deterministic emission order = enum order.
-    std::array<int, kPathAttrCount> excluded_files{};
+    std::vector<FileSymbolData> analyzed;
+    // Files WITH symbols excluded from analysis, indexed by PathAttrId.
+    std::vector<ExcludedAttr> excluded;
     int excluded_total() const {
         int n = 0;
-        for (int c : excluded_files) n += c;
+        for (const auto& e : excluded) n += e.files;
         return n;
     }
 };
 
+// First path segment of a repo-relative path — the directory a reader would
+// name ("benchmarks", "tests"). Root-level files report "." so they are never
+// silently dropped from the enumeration.
+std::string top_dir_of(std::string_view path, std::string_view root) {
+    std::string_view rel = path;
+    if (!root.empty() && rel.rfind(root, 0) == 0) {
+        rel.remove_prefix(root.size());
+        while (!rel.empty() && rel.front() == '/') rel.remove_prefix(1);
+    }
+    auto slash = rel.find('/');
+    if (slash == std::string_view::npos) return ".";
+    return std::string(rel.substr(0, slash));
+}
+
 GatheredCorpus gather_file_symbol_data(MasterIndex& indexer) {
     GatheredCorpus corpus;
+    const auto& registry = indexer.attr_registry();
+    corpus.excluded.resize(static_cast<size_t>(registry.size()));
+    const std::string& root = indexer.config().project.root;
     auto& ref = indexer.ref_tracker();
     auto rt_snap = ref.pin();
     auto file_snap = indexer.read_snapshot();
     for (auto fid : indexer.get_all_file_ids()) {
         auto syms = rt_snap->get_file_enhanced_symbols(fid);
         if (syms.empty()) continue;
-        PathAttr attr = file_snap->attr_of(fid);
-        if (attr != PathAttr::Production) {
-            ++corpus.excluded_files[static_cast<size_t>(attr)];
+        PathAttrId attr = file_snap->attr_of(fid);
+        std::string path = indexer.get_file_path(fid);
+        if (!registry.activates(attr, Capability::Analysis)) {
+            auto& bucket = corpus.excluded[static_cast<size_t>(attr)];
+            ++bucket.files;
+            ++bucket.dirs[top_dir_of(path, root)];
             continue;
         }
         FileSymbolData fsd;
-        fsd.path = indexer.get_file_path(fid);
+        fsd.path = std::move(path);
         fsd.owner = rt_snap;
         fsd.symbols.reserve(syms.size());
         for (const auto& sym : syms) fsd.symbols.push_back(sym.get());
-        corpus.production.push_back(std::move(fsd));
+        corpus.analyzed.push_back(std::move(fsd));
     }
     return corpus;
 }
@@ -1546,7 +1574,8 @@ void emit_summary(std::ostringstream& out,
                   const std::vector<std::string>& file_paths,
                   std::string_view project_root, int file_count,
                   int symbol_count,
-                  const std::array<int, kPathAttrCount>* excluded = nullptr,
+                  const std::vector<ExcludedAttr>* excluded = nullptr,
+                  const PathAttrRegistry* registry = nullptr,
                   const ErrorHandlingAnalyzer::Result* eh = nullptr) {
     absl::flat_hash_map<std::string, int> lang_files;
     absl::flat_hash_set<std::string> dirs;
@@ -1598,23 +1627,45 @@ void emit_summary(std::ostringstream& out,
         for (const auto& [l, n] : langs) out << " " << l << "=" << n;
         out << "\n";
     }
-    // Attribute-tagged files (PathClassifier) are excluded from every
-    // analysis section; label the exclusion instead of silently shrinking
-    // the corpus. Omitted entirely when nothing was excluded, keeping the
-    // historical SUMMARY shape for untagged corpora.
-    if (excluded != nullptr) {
+    // Files whose attribute does not activate Analysis sat out every section
+    // above. Name the attribute, the count, AND the directories the files
+    // came from: a count alone tells a reader that something was left out but
+    // not what, and "is my benchmark harness in these numbers?" is the first
+    // question any score raises. Omitted entirely when nothing was excluded,
+    // keeping the historical SUMMARY shape for untagged corpora.
+    if (excluded != nullptr && registry != nullptr) {
         int total = 0;
-        for (int c : *excluded) total += c;
+        for (const auto& e : *excluded) total += e.files;
         if (total > 0) {
-            out << "excluded_from_analysis:";
-            for (int i = 0; i < kPathAttrCount; ++i) {
-                if ((*excluded)[static_cast<size_t>(i)] > 0) {
-                    out << " " << PathClassifier::name(static_cast<PathAttr>(i))
-                        << "=" << (*excluded)[static_cast<size_t>(i)];
+            out << "excluded_from_analysis:\n";
+            for (size_t i = 0; i < excluded->size(); ++i) {
+                const auto& bucket = (*excluded)[i];
+                if (bucket.files == 0) continue;
+                std::vector<std::pair<std::string, int>> dirs(
+                    bucket.dirs.begin(), bucket.dirs.end());
+                std::sort(dirs.begin(), dirs.end(),
+                          [](const auto& a, const auto& b) {
+                              if (a.second != b.second) return a.second > b.second;
+                              return a.first < b.first;  // determinism
+                          });
+                out << "  " << registry->name(static_cast<PathAttrId>(i)) << "="
+                    << bucket.files;
+                constexpr size_t kMaxDirs = 3;
+                if (!dirs.empty()) {
+                    out << " (";
+                    for (size_t d = 0; d < dirs.size() && d < kMaxDirs; ++d) {
+                        if (d > 0) out << " ";
+                        out << dirs[d].first << "/";
+                    }
+                    if (dirs.size() > kMaxDirs) {
+                        out << " +" << (dirs.size() - kMaxDirs) << " more";
+                    }
+                    out << ")";
                 }
+                out << "\n";
             }
-            out << " (production-only analysis; tune via .lci.kdl "
-                   "attributes)\n";
+            out << "  (these attributes do not activate \"analysis\"; run with "
+                   "scope, or tune .lci.kdl attributes)\n";
         }
     }
     if (eh && eh->errors.functions_scored > 0) {
@@ -1793,7 +1844,7 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
     const std::string& project_root = indexer.config().project.root;
     int file_count = indexer.file_count();
     auto corpus = gather_file_symbol_data(indexer);
-    auto& files_data = corpus.production;
+    auto& files_data = corpus.analyzed;
     int symbol_count = 0;
     for (const auto& f : files_data) {
         symbol_count += static_cast<int>(f.symbols.size());
@@ -1803,7 +1854,7 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
     // is parallel to file_paths and carries the index-time PathClassifier
     // attribute (D1) for the structure category buckets.
     std::vector<std::string> file_paths;
-    std::vector<PathAttr> file_attrs;
+    std::vector<PathAttrId> file_attrs;
     {
         auto snap = indexer.read_snapshot();
         for (auto fid : indexer.get_all_file_ids()) {
@@ -1909,7 +1960,8 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
         CodebaseIntelligenceParams sp;
         sp.mode = "structure";
         auto resp = engine.build_structure(sp, files_data, file_paths,
-                                           file_attrs, project_root);
+                                           file_attrs, indexer.attr_registry(),
+                                           project_root);
         const auto& s = *resp.structure_analysis;
         out << "LCF/1.0\nmode=structure\ntier=1\ntokens=20\n---\n"
             << "== STRUCTURE ==\n"
@@ -1956,7 +2008,7 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
         emit_lcf_header(out, "unified", 1,
                         lcf_token_count(n_map, 0, hd != nullptr, 0, true));
         emit_summary(out, files_data, file_paths, project_root, file_count,
-                     symbol_count, &corpus.excluded_files,
+                     symbol_count, &corpus.excluded, &indexer.attr_registry(),
                      eh ? &*eh : nullptr);
         emit_repository_map(out, d.modules.modules);
         emit_entry_points(out, d.result.response.entry_points.get(),
@@ -2176,7 +2228,7 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
         emit_lcf_header(out, "overview", 1,
                         lcf_token_count(n_map, 0, hd != nullptr, 0, false));
         emit_summary(out, files_data, file_paths, project_root, file_count,
-                     symbol_count, &corpus.excluded_files,
+                     symbol_count, &corpus.excluded, &indexer.attr_registry(),
                      eh ? &*eh : nullptr);
         emit_repository_map(out, d.modules.modules);
         emit_entry_points(out, d.result.response.entry_points.get(),
