@@ -1722,8 +1722,14 @@ void emit_summary(std::ostringstream& out,
         if (std::string_view l = lang_of(f.path); !l.empty())
             lang_files[std::string(l)]++;
     }
+    // Two populations meet on this line and the reader has to be able to tell
+    // them apart: files/dirs/depth describe the whole indexed corpus, while
+    // analyzed/symbols/langs describe only what the current attribute set
+    // covers. Printing "files=208 ... langs: javascript=6" with no denominator
+    // reads as 202 missing files (express, verified).
     out << "== SUMMARY ==\n"
-        << "files=" << file_count << " symbols=" << symbol_count
+        << "files=" << file_count << " analyzed=" << static_cast<int>(files.size())
+        << " symbols=" << symbol_count
         << " dirs=" << dirs.size() << " depth=" << max_depth << "\n";
     if (!lang_files.empty()) {
         std::vector<std::pair<std::string, int>> langs(lang_files.begin(),

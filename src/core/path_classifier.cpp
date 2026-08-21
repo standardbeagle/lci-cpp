@@ -60,6 +60,11 @@ attributes {
         glob "*Test.java" "*Tests.java" "*Test.cs" "*Tests.cs" "*Test.kt"
         glob "conftest.py" "test_*.py"
         glob "*_mock.go" "mock_*.go" "*.mock.*"
+        // Script-style test entry points: JS/TS has no leading-prefix
+        // convention the way Python does, so a `test-resolution.ts` build
+        // check reads as product code. zod's worst error-handling module was
+        // exactly this file.
+        glob "test-*.ts" "test-*.js" "test-*.mjs" "test_*.ts" "test_*.js"
     }
 
     // Benchmark harnesses and their tooling. Separate from tests because a
@@ -80,6 +85,10 @@ attributes {
     example rank=4 {
         activates "index" "search"
         dir "example" "examples" "demo" "demos" "sample" "samples" "_*"
+        // Dev playgrounds: not shipped, not tested, and conventionally the
+        // laxest code in a repo. axios's worst error-handling module was its
+        // sandbox/ server.
+        dir "sandbox" "sandboxes" "playground" "playgrounds" "scratch"
     }
 
     docs rank=5 {

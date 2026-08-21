@@ -216,6 +216,31 @@ TEST(PathClassifierTest, BenchmarkLosesToStrongerAttributes) {
     EXPECT_EQ(attr_of(c, "benchmarks/vendor/dep/lib.go"), "vendored");
 }
 
+// -- Ambiguous trees found on real corpora -------------------------------------
+
+// zod's `packages/resolution/test-resolution.ts` is a build-verification
+// script that owned zod's worst error-handling module: JS/TS has no
+// leading-prefix test convention the way Python does, so nothing claimed it.
+TEST(PathClassifierTest, ScriptStyleTestEntryPointsAreTests) {
+    PathClassifier c;
+    EXPECT_EQ(attr_of(c, "packages/resolution/test-resolution.ts"), "test");
+    EXPECT_EQ(attr_of(c, "scripts/test-build.js"), "test");
+    EXPECT_EQ(attr_of(c, "tools/test_helpers.ts"), "test");
+    // Not every file that merely starts with the letters "test".
+    EXPECT_EQ(attr_of(c, "src/testimonials.ts"), "production");
+    EXPECT_EQ(attr_of(c, "src/testable-api.ts"), "production");
+}
+
+// axios's sandbox/server.js owned its worst module. A dev playground is not
+// shipped and is conventionally the laxest code in a repo.
+TEST(PathClassifierTest, DevPlaygroundsAreExamples) {
+    PathClassifier c;
+    EXPECT_EQ(attr_of(c, "sandbox/server.js"), "example");
+    EXPECT_EQ(attr_of(c, "playground/app/main.ts"), "example");
+    EXPECT_EQ(attr_of(c, "src/sandboxing/limits.go"), "production")
+        << "a real package named for sandboxing is not a playground";
+}
+
 // -- The shipped ruleset -------------------------------------------------------
 
 // The default attributes and rules ship inside the binary as KDL. A typo in
