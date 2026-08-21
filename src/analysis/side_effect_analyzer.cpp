@@ -609,7 +609,15 @@ AccessPattern SideEffectAnalyzer::analyze_access_pattern(
     bool has_interleaved = false;
     bool has_write_then_read = false;
 
-    for (auto& [target, target_accesses] : by_target) {
+    // Deterministic violation order (Karpathy rule 4): by_target is an absl
+    // hash map, so the emitted violations came out in per-process hash order.
+    std::vector<std::string> targets;
+    targets.reserve(by_target.size());
+    for (const auto& [target, _] : by_target) targets.push_back(target);
+    std::sort(targets.begin(), targets.end());
+
+    for (const auto& target : targets) {
+        auto& target_accesses = by_target[target];
         auto tap = analyze_target_accesses(target, target_accesses);
 
         if (tap.write_count > 0) has_write = true;

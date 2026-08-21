@@ -168,10 +168,20 @@ LayerAnalysis LayerAnalyzer::analyze(
         }
     }
 
+    // Deterministic layer order (Karpathy rule 4). layer_map is an absl hash
+    // map, so without this both the emitted order AND the `depth` each layer
+    // is assigned come out of a per-process hash seed.
+    std::vector<std::string> layer_names;
+    layer_names.reserve(layer_map.size());
+    for (const auto& [name, _] : layer_map) layer_names.push_back(name);
+    std::sort(layer_names.begin(), layer_names.end());
+
     // Build ArchitecturalLayer entries.
     std::vector<ArchitecturalLayer> layers;
+    layers.reserve(layer_names.size());
     int depth = 1;
-    for (auto& [name, syms] : layer_map) {
+    for (const auto& name : layer_names) {
+        auto& syms = layer_map[name];
         if (syms.empty()) continue;
 
         std::vector<std::string> module_names;

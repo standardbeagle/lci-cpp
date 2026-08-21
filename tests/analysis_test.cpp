@@ -7,6 +7,7 @@
 
 #include <lci/analysis/coupling_analyzer.h>
 #include <lci/analysis/feature_analyzer.h>
+#include <lci/analysis/ci_vocabulary_analyzer.h>
 #include <lci/analysis/layer_analyzer.h>
 #include <lci/analysis/module_analyzer.h>
 #include <lci/analysis/naming_analyzer.h>
@@ -299,6 +300,52 @@ TEST(FeatureAnalyzer, Deterministic) {
         EXPECT_EQ(r1.features[i].name, r2.features[i].name);
         EXPECT_EQ(r1.features[i].components.size(),
                   r2.features[i].components.size());
+    }
+}
+
+// ===========================================================================
+// Determinism (Karpathy rule 4): analyzers that walk a hash map must sort
+// before they emit, or both the order AND any depth/rank derived from that
+// order come out of a per-process hash seed.
+// ===========================================================================
+
+TEST(LayerAnalyzer, LayersEmitInSortedOrderWithMatchingDepth) {
+    auto s1 = make_sym("UserRepository", SymbolType::Class, 1);
+    auto s2 = make_sym("renderPage", SymbolType::Function, 2);
+    auto s3 = make_sym("OrderService", SymbolType::Class, 3);
+    auto s4 = make_sym("validateInput", SymbolType::Function, 4);
+    auto s5 = make_sym("stringUtil", SymbolType::Function, 5);
+    auto f = make_file("app.go", {&s1, &s2, &s3, &s4, &s5});
+
+    auto result = LayerAnalyzer().analyze({f});
+    ASSERT_GE(result.layers.size(), 2u);
+
+    for (size_t i = 1; i < result.layers.size(); ++i) {
+        EXPECT_LT(result.layers[i - 1].name, result.layers[i].name);
+    }
+    for (size_t i = 0; i < result.layers.size(); ++i) {
+        EXPECT_EQ(static_cast<int>(i) + 1, result.layers[i].depth);
+    }
+}
+
+TEST(CIVocabularyAnalyzer, DomainsAndTermsEmitSorted) {
+    auto s1 = make_sym("UserRepository", SymbolType::Class, 1);
+    auto s2 = make_sym("OrderRepository", SymbolType::Class, 2);
+    auto s3 = make_sym("AccountRepository", SymbolType::Class, 3);
+    auto s4 = make_sym("PaymentService", SymbolType::Class, 4);
+    auto s5 = make_sym("BillingService", SymbolType::Class, 5);
+    auto f = make_file("app.go", {&s1, &s2, &s3, &s4, &s5});
+
+    auto terms = CIVocabularyAnalyzer().extract_domain_terms_from_files({f});
+    ASSERT_FALSE(terms.empty());
+
+    for (size_t i = 1; i < terms.size(); ++i) {
+        EXPECT_LT(terms[i - 1].domain, terms[i].domain);
+    }
+    for (const auto& dt : terms) {
+        for (size_t i = 1; i < dt.terms.size(); ++i) {
+            EXPECT_LT(dt.terms[i - 1], dt.terms[i]) << "domain " << dt.domain;
+        }
     }
 }
 

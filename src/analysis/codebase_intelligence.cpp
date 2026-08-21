@@ -415,8 +415,13 @@ CodebaseIntelligenceResponse CodebaseIntelligenceEngine::build_structure(
     std::sort(s.types.begin(), s.types.end(),
               [](const auto& a, const auto& b) { return a.first < b.first; });
     s.top_dirs.assign(top_dir_files.begin(), top_dir_files.end());
+    // Directory name breaks file-count ties: top_dir_files is a hash map, so
+    // equal-count directories otherwise land in per-process order.
     std::sort(s.top_dirs.begin(), s.top_dirs.end(),
-              [](const auto& a, const auto& b) { return a.second > b.second; });
+              [](const auto& a, const auto& b) {
+                  if (a.second != b.second) return a.second > b.second;
+                  return a.first < b.first;
+              });
     response.structure_analysis = std::move(s);
 
     return response;
@@ -450,9 +455,17 @@ CodebaseIntelligenceEngine::extract_critical_functions(
         }
     }
 
+    // Total order before the max_results truncation below: importance scores
+    // collide readily across a corpus, and std::sort is not stable, so the
+    // surviving head was unstable run to run (Karpathy rule 4).
     std::sort(candidates.begin(), candidates.end(),
               [](const Scored& a, const Scored& b) {
-                  return a.score > b.score;
+                  if (a.score != b.score) return a.score > b.score;
+                  if (a.path != b.path) return a.path < b.path;
+                  if (a.sym->symbol.name != b.sym->symbol.name) {
+                      return a.sym->symbol.name < b.sym->symbol.name;
+                  }
+                  return a.sym->symbol.line < b.sym->symbol.line;
               });
 
     if (max_results > 0 &&
