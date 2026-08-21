@@ -30,6 +30,7 @@ add_executable(lci_tests
     portable_test.cpp
     subprocess_test.cpp
     config_test.cpp
+    kdl_test.cpp
     gitignore_test.cpp
     error_string_pool_test.cpp
     slab_allocator_test.cpp

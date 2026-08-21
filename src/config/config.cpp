@@ -1,5 +1,6 @@
 #include <lci/config.h>
 #include <lci/core/portable.h>
+#include <lci/kdl.h>
 
 #include <algorithm>
 #include <cctype>
@@ -18,272 +19,10 @@ namespace {
 
 namespace fs = std::filesystem;
 
-// -- Minimal KDL token types --------------------------------------------------
-
-enum class TokenKind { Ident, String, Number, Bool, LBrace, RBrace, Eof, Error };
-
-struct Token {
-    TokenKind kind{};
-    std::string text;
-    double num_val{};
-    bool bool_val{};
-    int line{1};
-};
-
-// -- KDL lexer ----------------------------------------------------------------
-
-class Lexer {
-  public:
-    explicit Lexer(std::string_view src) : src_(src), pos_(0) {}
-
-    Token next() {
-        skip_ws_and_comments();
-        if (!pending_error_.empty()) {
-            std::string error = std::move(pending_error_);
-            pending_error_.clear();
-            return stamp({TokenKind::Error, std::move(error), 0, false});
-        }
-        if (pos_ >= src_.size()) return stamp({TokenKind::Eof, {}, 0, false});
-
-        char c = src_[pos_];
-
-        if (c == '{') { ++pos_; return stamp({TokenKind::LBrace, "{", 0, false}); }
-        if (c == '}') { ++pos_; return stamp({TokenKind::RBrace, "}", 0, false}); }
-
-        if (c == '"') return stamp(lex_string());
-
-        if (c == '-' || c == '+' || (c >= '0' && c <= '9')) {
-            return stamp(lex_number_or_ident());
-        }
-
-        return stamp(lex_ident_or_bool());
-    }
-
-  private:
-    std::string_view src_;
-    size_t pos_;
-    int line_{1};
-    std::string pending_error_;
-
-    // Stamps the token with the line where it began. Called after the lexer
-    // has already advanced past the token, so re-derive the start line by
-    // not counting newlines consumed inside the token body — instead the
-    // line counter is advanced only in skip_ws_and_comments, which runs
-    // before each token, so line_ already points at the token's start line.
-    Token stamp(Token t) {
-        t.line = line_;
-        return t;
-    }
-
-    void skip_ws_and_comments() {
-        while (pos_ < src_.size()) {
-            char c = src_[pos_];
-            if (c == ' ' || c == '\t' || c == '\r' || c == ';') {
-                ++pos_;
-                continue;
-            }
-            if (c == '\n') {
-                ++pos_;
-                ++line_;
-                continue;
-            }
-            if (c == '/' && pos_ + 1 < src_.size()) {
-                if (src_[pos_ + 1] == '/') {
-                    pos_ += 2;
-                    while (pos_ < src_.size() && src_[pos_] != '\n') ++pos_;
-                    continue;
-                }
-                if (src_[pos_ + 1] == '*') {
-                    const int start_line = line_;
-                    pos_ += 2;
-                    while (pos_ + 1 < src_.size() &&
-                           !(src_[pos_] == '*' && src_[pos_ + 1] == '/')) {
-                        if (src_[pos_] == '\n') ++line_;
-                        ++pos_;
-                    }
-                    if (pos_ + 1 < src_.size()) {
-                        pos_ += 2;
-                    } else {
-                        pos_ = src_.size();
-                        pending_error_ =
-                            "unterminated block comment starting on line " +
-                            std::to_string(start_line);
-                    }
-                    continue;
-                }
-            }
-            break;
-        }
-    }
-
-    Token lex_string() {
-        const int start_line = line_;
-        ++pos_;  // skip opening quote
-        std::string val;
-        while (pos_ < src_.size() && src_[pos_] != '"') {
-            if (src_[pos_] == '\\' && pos_ + 1 < src_.size()) {
-                ++pos_;
-                switch (src_[pos_]) {
-                    case 'n': val += '\n'; break;
-                    case 't': val += '\t'; break;
-                    case '\\': val += '\\'; break;
-                    case '"': val += '"'; break;
-                    default: val += src_[pos_]; break;
-                }
-            } else {
-                if (src_[pos_] == '\n') ++line_;
-                val += src_[pos_];
-            }
-            ++pos_;
-        }
-        if (pos_ >= src_.size()) {
-            return {TokenKind::Error,
-                    "unterminated string starting on line " +
-                        std::to_string(start_line),
-                    0, false};
-        }
-        ++pos_;  // skip closing quote
-        return {TokenKind::String, std::move(val), 0, false};
-    }
-
-    Token lex_number_or_ident() {
-        size_t start = pos_;
-        if (src_[pos_] == '-' || src_[pos_] == '+') ++pos_;
-
-        while (pos_ < src_.size() &&
-               (std::isdigit(static_cast<unsigned char>(src_[pos_])) || src_[pos_] == '.')) {
-            ++pos_;
-        }
-
-        // If followed by an identifier char, treat as ident
-        if (pos_ < src_.size() && (std::isalpha(static_cast<unsigned char>(src_[pos_])) ||
-                                   src_[pos_] == '_')) {
-            while (pos_ < src_.size() && is_ident_char(src_[pos_])) ++pos_;
-            std::string text(src_.substr(start, pos_ - start));
-            return {TokenKind::Ident, std::move(text), 0, false};
-        }
-
-        std::string text(src_.substr(start, pos_ - start));
-        double val = 0;
-        // portable::parse_double, not std::from_chars: libc++ (macOS) leaves
-        // the floating-point from_chars overload deleted.
-        if (!portable::parse_double(text, val)) val = 0;
-        return {TokenKind::Number, std::move(text), val, false};
-    }
-
-    Token lex_ident_or_bool() {
-        size_t start = pos_;
-        while (pos_ < src_.size() && is_ident_char(src_[pos_])) ++pos_;
-
-        // No ident char consumed: an unrecognized character (e.g. the KDL-v2
-        // '#' bool prefix '#true'/'#false', or a stray symbol). Emit an Error
-        // token describing the offending run and ALWAYS advance past at least
-        // one char so the parser cannot loop forever on the same position.
-        if (pos_ == start) {
-            char bad = src_[pos_];
-            ++pos_;
-            // Absorb a trailing ident run so '#true' is reported as one token.
-            size_t run_start = pos_;
-            while (pos_ < src_.size() && is_ident_char(src_[pos_])) ++pos_;
-            std::string token(1, bad);
-            token.append(src_.substr(run_start, pos_ - run_start));
-            return {TokenKind::Error, std::move(token), 0, false};
-        }
-
-        std::string text(src_.substr(start, pos_ - start));
-        if (text == "true") return {TokenKind::Bool, text, 0, true};
-        if (text == "false") return {TokenKind::Bool, text, 0, false};
-        return {TokenKind::Ident, std::move(text), 0, false};
-    }
-
-    static bool is_ident_char(char c) {
-        return std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '-' ||
-               c == '.' || c == '/' || c == '*';
-    }
-};
-
-// -- KDL node representation --------------------------------------------------
-
-struct KdlNode {
-    std::string name;
-    std::vector<Token> args;
-    std::vector<KdlNode> children;
-};
-
-// -- KDL parser ---------------------------------------------------------------
-
-class Parser {
-  public:
-    explicit Parser(std::string_view src) : lex_(src) { advance(); }
-
-    std::vector<KdlNode> parse_document() {
-        std::vector<KdlNode> nodes;
-        while (cur_.kind != TokenKind::Eof && cur_.kind != TokenKind::RBrace) {
-            if (cur_.kind == TokenKind::Error) {
-                set_error();
-                return nodes;
-            }
-            if (cur_.kind == TokenKind::Ident) {
-                nodes.push_back(parse_node());
-                if (!error_.empty()) return nodes;
-            } else {
-                advance();  // skip unexpected tokens
-            }
-        }
-        return nodes;
-    }
-
-    // Empty on success; descriptive parse error otherwise (file, line, token).
-    const std::string& error() const { return error_; }
-
-  private:
-    Lexer lex_;
-    Token cur_;
-    std::string error_;
-
-    void advance() { cur_ = lex_.next(); }
-
-    void set_error() {
-        if (!error_.empty()) return;  // keep first error
-        error_ = "line " + std::to_string(cur_.line) +
-                 ": unrecognized token '" + cur_.text +
-                 "' (note: KDL-v2 '#'-prefixed values like #true/#false are "
-                 "not supported; use bare true/false)";
-    }
-
-    KdlNode parse_node() {
-        KdlNode node;
-        node.name = cur_.text;
-        advance();
-
-        // Collect arguments until we see { or a new node name at the same level
-        while (cur_.kind == TokenKind::String || cur_.kind == TokenKind::Number ||
-               cur_.kind == TokenKind::Bool) {
-            node.args.push_back(cur_);
-            advance();
-        }
-
-        if (cur_.kind == TokenKind::Error) {
-            set_error();
-            return node;
-        }
-
-        if (cur_.kind == TokenKind::LBrace) {
-            const int opening_line = cur_.line;
-            advance();
-            node.children = parse_document();
-            if (!error_.empty()) return node;
-            if (cur_.kind != TokenKind::RBrace) {
-                error_ = "line " + std::to_string(opening_line) +
-                         ": unclosed block";
-                return node;
-            }
-            advance();
-        }
-
-        return node;
-    }
-};
+// The KDL grammar lives in <lci/kdl.h> — one parser for the project file, the
+// user defaults file, and the shipped attribute ruleset.
+using kdl::KdlNode;
+using kdl::TokenKind;
 
 // -- Helpers to extract values from KDL nodes ---------------------------------
 
@@ -811,10 +550,10 @@ bool overlay_user_config(Config& cfg, std::string& error,
     // Parser holds a string_view — the content must outlive it.
     const std::string content = ss.str();
 
-    Parser parser(content);
-    auto nodes = parser.parse_document();
-    if (!parser.error().empty()) {
-        error = "failed to parse " + path.string() + ": " + parser.error();
+    std::string parse_error;
+    auto nodes = kdl::parse(content, parse_error);
+    if (!parse_error.empty()) {
+        error = "failed to parse " + path.string() + ": " + parse_error;
         return false;
     }
     if (!apply_kdl_nodes(cfg, nodes, error, warnings)) {
@@ -832,10 +571,10 @@ bool overlay_user_config(Config& cfg, std::string& error,
 // cloned repos' .lci.kdl files, and fuzz_config_kdl drives it directly.
 Config parse_kdl_content(const std::string& content, std::string& error,
                          std::vector<std::string>* warnings) {
-    Parser parser(content);
-    auto nodes = parser.parse_document();
-    if (!parser.error().empty()) {
-        error = parser.error();
+    std::string parse_error;
+    auto nodes = kdl::parse(content, parse_error);
+    if (!parse_error.empty()) {
+        error = parse_error;
         return make_default_config();
     }
 
