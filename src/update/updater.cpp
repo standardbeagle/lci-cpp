@@ -5,6 +5,8 @@
 
 #include <cctype>
 #include <filesystem>
+#include <random>
+#include <vector>
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -235,6 +237,38 @@ bool replace_self(const fs::path& self, const fs::path& new_bin) {
 
 }  // namespace
 
+// Create a private work directory. The name must be unpredictable and the
+// directory must be owned by us with mode 0700: a fixed "lci-update-<pid>"
+// in shared /tmp is guessable, and remove_all + create_directories neither
+// proves ownership nor closes the window in which another local user can
+// pre-create the path (or swap files under it) between the checksum
+// verification and the install. Returns an empty path on failure — the
+// caller must abort, never fall back to a predictable name.
+fs::path make_private_workdir() {
+    std::error_code ec;
+    fs::path base = fs::temp_directory_path(ec);
+    if (ec) return {};
+
+#if defined(_WIN32)
+    // No mkdtemp: build a random name and demand exclusive creation, which
+    // fails if anything already holds the path.
+    for (int attempt = 0; attempt < 32; ++attempt) {
+        fs::path candidate =
+            base / ("lci-update-" + std::to_string(portable::process_id()) +
+                    "-" + std::to_string(std::random_device{}()));
+        if (fs::create_directory(candidate, ec) && !ec) return candidate;
+    }
+    return {};
+#else
+    std::string tmpl = (base / "lci-update-XXXXXX").string();
+    std::vector<char> buf(tmpl.begin(), tmpl.end());
+    buf.push_back('\0');
+    if (::mkdtemp(buf.data()) == nullptr) return {};  // mkdtemp creates 0700
+    return fs::path(buf.data());
+#endif
+}
+
+
 Platform detect_platform() {
     Platform p{};
 #if defined(_WIN32)
@@ -292,7 +326,11 @@ std::optional<Asset> select_asset(const std::vector<Asset>& assets,
 bool is_safe_download_url(const std::string& url) {
     const std::string scheme = "https://";
     if (url.compare(0, scheme.size(), scheme) != 0) return false;
-    // Reject anything that could break out of the double-quoted shell argument.
+    // The real guard is the scheme + host pinning below: this URL comes from
+    // a GitHub API response and must point back at GitHub. curl is exec'd
+    // with an argv, never through a shell, so the charset check below is
+    // defense-in-depth against a URL that would confuse curl or the
+    // filesystem — NOT protection from shell quoting, which does not apply.
     for (char c : url) {
         if (c == '$' || c == '`' || c == '"' || c == '\\' || c == ' ' ||
             c == '\t' || c == '\n' || c == '\r') {
@@ -449,13 +487,10 @@ int run_update(const UpdateConfig& cfg) {
     }
 
     std::error_code ec;
-    fs::path work = fs::temp_directory_path(ec) /
-                    ("lci-update-" + std::to_string(portable::process_id()));
-    fs::remove_all(work, ec);
-    fs::create_directories(work, ec);
-    if (ec) {
-        std::cerr << "Error: could not create temp directory " << work << ": "
-                  << ec.message() << "\n";
+    fs::path work = make_private_workdir();
+    if (work.empty()) {
+        std::cerr << "Error: could not create a private temp directory for "
+                     "the update.\n";
         return 1;
     }
 
@@ -469,6 +504,7 @@ int run_update(const UpdateConfig& cfg) {
     }
 
     // Verify integrity against the release SHA256SUMS when present.
+    std::string verified_hash;
     std::string sums_url;
     for (const auto& a : assets) {
         if (a.name == "SHA256SUMS") {
@@ -511,6 +547,7 @@ int run_update(const UpdateConfig& cfg) {
             fs::remove_all(work, ec);
             return 1;
         }
+        verified_hash = actual;
         std::cout << "Verified checksum.\n";
     } else {
         // No SHA256SUMS asset: refuse rather than overwrite the running
@@ -534,6 +571,17 @@ int run_update(const UpdateConfig& cfg) {
     if (new_bin.empty()) {
         std::cerr << "Error: extracted archive did not contain the lci "
                      "binary.\n";
+        fs::remove_all(work, ec);
+        return 1;
+    }
+
+    // Re-hash the tarball immediately before the install. Verification and
+    // replace_self are separated by an extraction and a directory walk; a
+    // second read here closes that window cheaply (one hash of a file already
+    // in page cache) instead of trusting the earlier result to still hold.
+    if (!verified_hash.empty() && sha256_of_file(tarball) != verified_hash) {
+        std::cerr << "Error: the downloaded archive changed after "
+                     "verification; refusing to install.\n";
         fs::remove_all(work, ec);
         return 1;
     }
