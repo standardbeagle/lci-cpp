@@ -19,6 +19,7 @@
 #include "../src/cli/rank_options.h"
 #include "../src/cli/symbol_filters.h"
 #include "../src/cli/tree_formatter.h"
+#include "unique_temp.h"
 
 namespace lci {
 namespace cli {
@@ -292,6 +293,61 @@ TEST(CliMcpDetectTest, EnvVariableOverride) {
     }
 }
 
+// -- -c/--config threading ----------------------------------------------------
+
+TEST(CliConfigFlagTest, NamedConfigFileIsActuallyLoaded) {
+    // The flag was parsed and then discarded: every command read
+    // <root>/.lci.kdl no matter what the user named.
+    auto dir = lci::test::unique_temp_dir("lci_cli_config_flag_");
+    std::filesystem::create_directories(dir);
+
+    {
+        std::ofstream f(dir / ".lci.kdl");
+        f << "search {\n  max_results 11\n}\n";
+    }
+    {
+        std::ofstream f(dir / "alt.kdl");
+        f << "search {\n  max_results 77\n}\n";
+    }
+
+    GlobalFlags flags;
+    flags.root = dir.string();
+    flags.config_path = (dir / "alt.kdl").string();
+
+    Config cfg;
+    std::string err = load_config_with_overrides(flags, cfg);
+    EXPECT_TRUE(err.empty()) << err;
+    EXPECT_EQ(cfg.search.max_results, 77);
+
+    // Discrimination partner: the default path still reads .lci.kdl.
+    GlobalFlags defaults;
+    defaults.root = dir.string();
+    Config default_cfg;
+    err = load_config_with_overrides(defaults, default_cfg);
+    EXPECT_TRUE(err.empty()) << err;
+    EXPECT_EQ(default_cfg.search.max_results, 11);
+
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+}
+
+TEST(CliConfigFlagTest, MissingNamedConfigFileFailsFast) {
+    auto dir = lci::test::unique_temp_dir("lci_cli_config_missing_");
+    std::filesystem::create_directories(dir);
+
+    GlobalFlags flags;
+    flags.root = dir.string();
+    flags.config_path = (dir / "nope.kdl").string();
+
+    Config cfg;
+    std::string err = load_config_with_overrides(flags, cfg);
+    EXPECT_FALSE(err.empty());
+    EXPECT_NE(err.find("nope.kdl"), std::string::npos) << err;
+
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+}
+
 // -- config init command tests (no server needed) -----------------------------
 
 TEST(CliConfigInitTest, KdlFormatCreatesFile) {
@@ -333,6 +389,24 @@ TEST(CliConfigInitTest, MinimalKdlCreatesFile) {
     std::remove(test_file.c_str());
 }
 
+TEST(CliConfigInitTest, YamlFormatIsRejected) {
+    // `-f yaml` used to default its output name to ".lci.kdl" and write YAML
+    // into it, so the next `lci` run failed to parse the config it had just
+    // generated. The KDL loader is the only loader that exists.
+    std::string test_file =
+        (std::filesystem::temp_directory_path() / "lci_test_config_init.yaml")
+            .string();
+    std::remove(test_file.c_str());
+
+    GlobalFlags flags;
+    EXPECT_EQ(run_config_init(flags, "yaml", test_file, false, false), 1);
+    EXPECT_FALSE(std::filesystem::exists(test_file));
+
+    // Refused before any default filename is chosen, so no ".lci.kdl" is
+    // clobbered either.
+    EXPECT_EQ(run_config_init(flags, "yaml", "", false, false), 1);
+}
+
 TEST(CliConfigInitTest, JsonFormatCreatesValidJson) {
     std::string test_file =
         (std::filesystem::temp_directory_path() / "lci_test_config_init.json")
@@ -349,24 +423,6 @@ TEST(CliConfigInitTest, JsonFormatCreatesValidJson) {
     EXPECT_NO_THROW(ifs >> j);
     EXPECT_TRUE(j.contains("project"));
     EXPECT_TRUE(j.contains("index"));
-    std::remove(test_file.c_str());
-}
-
-TEST(CliConfigInitTest, YamlFormatCreatesFile) {
-    std::string test_file =
-        (std::filesystem::temp_directory_path() / "lci_test_config_init.yaml")
-            .string();
-    std::remove(test_file.c_str());
-
-    GlobalFlags flags;
-    int rc = run_config_init(flags, "yaml", test_file, false, false);
-    EXPECT_EQ(rc, 0);
-
-    std::ifstream ifs(test_file);
-    ASSERT_TRUE(ifs.good());
-    std::string content((std::istreambuf_iterator<char>(ifs)),
-                        std::istreambuf_iterator<char>());
-    EXPECT_NE(content.find("version: 1"), std::string::npos);
     std::remove(test_file.c_str());
 }
 

@@ -1,6 +1,7 @@
 #include <lci/cli/commands.h>
 
 #include <cctype>
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -25,18 +26,33 @@ namespace fs = std::filesystem;
 // -- Config loading -----------------------------------------------------------
 
 std::string load_config_with_overrides(const GlobalFlags& flags, Config& out) {
-    std::string config_path = flags.config_path;
-
-    if (!flags.root.empty() && config_path == ".lci.kdl") {
-        config_path = (fs::path(flags.root) / ".lci.kdl").string();
-    }
-
     std::string root_dir = flags.root.empty() ? fs::current_path().string()
                                               : flags.root;
-    auto result = load_config(root_dir);
+
+    // -c/--config used to be parsed and then thrown away: every command read
+    // <root>/.lci.kdl regardless of the file the user named. A named file is
+    // now actually loaded, and a missing one fails fast rather than silently
+    // running on defaults.
+    const bool named_config =
+        !flags.config_path.empty() && flags.config_path != ".lci.kdl";
+
+    std::string config_path = flags.config_path;
+    if (config_path.empty()) config_path = ".lci.kdl";
+    if (fs::path(config_path).is_relative()) {
+        config_path = (fs::path(root_dir) / config_path).string();
+    }
+
+    auto result = named_config ? load_config_file(config_path, root_dir)
+                               : load_config(root_dir);
     if (!result.ok()) {
         return "failed to load config from " + config_path + ": " +
                result.error;
+    }
+    // Unrecognized keys are ignored, not fatal — but the user still needs to
+    // hear that the setting they wrote is doing nothing.
+    for (const auto& warning : result.warnings) {
+        std::fprintf(stderr, "warning: %s: %s\n", config_path.c_str(),
+                     warning.c_str());
     }
     out = std::move(result.config);
 
