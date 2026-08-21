@@ -145,10 +145,10 @@ class SearchEngine {
         std::string_view pattern,
         const SearchOptions& options) const;
 
-    /// Scores a result for ranking.
+    /// Scores a result for ranking. File-type boost plus pattern complexity
+    /// over a fixed base; no symbol dimension (see kNonSymbolPenalty).
     double score_result(const SearchResult& result,
-                        std::string_view pattern,
-                        bool has_symbol) const;
+                        std::string_view pattern) const;
 
     /// Processes a single file for matches and produces results. `snap` is the
     /// query's pinned file snapshot, used to resolve the path once (no per-match

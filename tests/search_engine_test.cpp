@@ -583,5 +583,49 @@ TEST(SearchEngineIntegrationTest, MultipleMatchesResolveExactLinesAndColumns) {
     EXPECT_EQ(12, results[2].column);
 }
 
+// -- Pattern validation -------------------------------------------------------
+
+TEST(SearchEngineIntegrationTest, OverlongPatternReportsAnError) {
+    TempDir dir;
+    dir.write_file("a.go", "package main\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    SearchEngine engine(mi);
+    SearchOptions opts;
+    SearchStats stats;
+    std::string pattern(kMaxSearchPatternBytes + 1, 'x');
+    auto results = engine.search(pattern, opts, &stats);
+
+    EXPECT_TRUE(results.empty());
+    EXPECT_FALSE(stats.error.empty());
+
+    // A valid query that simply has no hits must stay distinguishable.
+    SearchStats no_hits;
+    auto none = engine.search("absentToken", opts, &no_hits);
+    EXPECT_TRUE(none.empty());
+    EXPECT_TRUE(no_hits.error.empty());
+}
+
+TEST(SearchEngineIntegrationTest, EmptyPatternReportsAnError) {
+    TempDir dir;
+    dir.write_file("a.go", "package main\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    SearchEngine engine(mi);
+    SearchOptions opts;
+    SearchStats stats;
+    auto results = engine.search("", opts, &stats);
+    EXPECT_TRUE(results.empty());
+    EXPECT_FALSE(stats.error.empty());
+}
+
 }  // namespace
 }  // namespace lci

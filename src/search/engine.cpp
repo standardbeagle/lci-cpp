@@ -387,7 +387,18 @@ std::vector<SearchResult> SearchEngine::search(
     const std::string& pattern, const SearchOptions& options,
     SearchStats* stats) const {
 
-    if (pattern.empty() || pattern.size() > 1000) return {};
+    if (pattern.empty() || pattern.size() > kMaxSearchPatternBytes) {
+        // Fail fast with a distinguishable signal. An empty result vector on
+        // its own is indistinguishable from "valid query, no matches", so the
+        // rejection reason rides out on SearchStats.
+        if (stats != nullptr) {
+            stats->error = pattern.empty()
+                ? "search pattern cannot be empty"
+                : "search pattern too long (max " +
+                      std::to_string(kMaxSearchPatternBytes) + " bytes)";
+        }
+        return {};
+    }
 
     // Karpathy rule 2: build path-filter regexes once per call, not per file.
     auto path_filter = make_path_filter(options);
@@ -504,7 +515,7 @@ std::vector<SearchResult> SearchEngine::search(
 
     // Score and rank results.
     for (auto& r : results) {
-        r.score = score_result(r, pattern, false);
+        r.score = score_result(r, pattern);
     }
 
     SearchCoordinator::rank(results);
@@ -594,10 +605,14 @@ std::vector<SearchResult> SearchEngine::search(
         SearchStats sub_stats;
         auto rs = search(patterns[i], p_opts,
                          stats != nullptr ? &sub_stats : nullptr);
-        if (stats != nullptr &&
-            (sub_stats.hit_collection_cap ||
-             sub_stats.total_found > static_cast<int>(rs.size()))) {
-            any_sub_hit_cap = true;
+        if (stats != nullptr) {
+            if (sub_stats.hit_collection_cap ||
+                sub_stats.total_found > static_cast<int>(rs.size())) {
+                any_sub_hit_cap = true;
+            }
+            if (stats->error.empty() && !sub_stats.error.empty()) {
+                stats->error = sub_stats.error;
+            }
         }
         for (auto& r : rs) {
             ResultKey k{r.file_id, r.line, r.match_text};
@@ -785,15 +800,12 @@ std::vector<SearchMatch> SearchEngine::find_matches(
 }
 
 double SearchEngine::score_result(const SearchResult& result,
-                                   std::string_view pattern,
-                                   bool has_symbol) const {
-    double score = kBaseMatchScore;
+                                   std::string_view pattern) const {
+    // kNonSymbolPenalty is unconditional: see its declaration. Search never
+    // resolves a match to a symbol here, so the `has_symbol` parameter this
+    // used to take was always false and the branch was dead.
+    double score = kBaseMatchScore + kNonSymbolPenalty;
     score += score_file_type(result.path);
-
-    if (!has_symbol) {
-        score += kNonSymbolPenalty;
-    }
-
     score += static_cast<double>(calculate_pattern_complexity(pattern)) * 0.5;
     return score;
 }

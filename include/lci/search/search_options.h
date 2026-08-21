@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -20,10 +21,22 @@ inline constexpr int kTokensPerContextLine = 20;
 /// Maximum matches per file before truncation.
 inline constexpr int kMaxMatchesPerFile = 100;
 
+/// Longest accepted search pattern, in bytes. Longer patterns are rejected
+/// with an explicit SearchStats::error rather than silently returning no
+/// matches (Karpathy rule 6: fail fast, surface signal).
+inline constexpr std::size_t kMaxSearchPatternBytes = 1000;
+
 /// Scoring constants for search ranking.
 inline constexpr double kCodeFileBoost = 50.0;
 inline constexpr double kDocFilePenalty = -20.0;
 inline constexpr double kConfigFileBoost = 10.0;
+/// Flat offset applied to EVERY SearchEngine::score_result score. It is named
+/// for a symbol-awareness dimension the search path never had: nothing on the
+/// scoring path resolves a match to a symbol, so this was applied
+/// unconditionally from the start and the `has_symbol` parameter that gated it
+/// was dead. The parameter is gone; the constant stays because it is baked
+/// into emitted scores (the MCP handler's refs-enrichment cut is a raw score
+/// of 50, and a doc-file match lands exactly on it).
 inline constexpr double kNonSymbolPenalty = -30.0;
 inline constexpr double kRequireSymbolPenalty = -1000.0;
 inline constexpr double kWordBoundaryBonus = 50.0;
@@ -152,6 +165,13 @@ struct SearchStats {
     /// pre-truncation set, sorted by count desc then name. "." holds
     /// root-level files.
     std::vector<std::pair<std::string, int>> dir_counts;
+
+    /// Non-empty when the query was rejected before any file was scanned
+    /// (empty or over-long pattern). Distinguishes "invalid query" from
+    /// "valid query, no matches" -- both return an empty result vector, so
+    /// without this the caller cannot tell them apart. Callers that pass a
+    /// SearchStats must surface it; callers that pass nullptr opt out.
+    std::string error;
 };
 
 // -- Search result types ------------------------------------------------------
