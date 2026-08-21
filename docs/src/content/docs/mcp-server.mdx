@@ -69,6 +69,61 @@ feature breakdowns, naming vocabulary, and git change/hotspot analysis.
   an error. Tools **fail fast** — no fake/zeroed payloads.
 - **Determinism**: all list output is sorted with total-order tiebreakers (no
   hash-iteration order in user-visible output).
+- **File attributes**: every indexed file carries one attribute — `production`,
+  `test`, `benchmark`, `example`, `vendored`, `generated`, `docs`, or one a
+  project defines itself. Each attribute states which capabilities it
+  activates: `index`, `search`, `refs`, `analysis`.
+
+## Analysis covers shipping code by default
+
+`code_insight` analyzes the files whose attribute activates `analysis` —
+`production` alone, until a project says otherwise. Its LCF header states the
+set (`attributes=shipping`), and `== SUMMARY ==` names what was left out and
+where it lives:
+
+```
+excluded_from_analysis:
+  test=195 (tests/ benchmarks/)
+  benchmark=68 (benchmarks/)
+  docs=1 (docs/)
+```
+
+Point it at the other trees with the `attributes` argument — `"all"`, one
+attribute name, or a list:
+
+```json
+{
+  "name": "code_insight",
+  "arguments": {
+    "mode": "unified",
+    "attributes": ["test", "benchmark"]
+  }
+}
+```
+
+A name the project does not have is an error listing the names it does have.
+
+### Defining attributes
+
+lci ships a default ruleset; `.lci.kdl` extends it, redefines a shipped
+attribute (patterns and capabilities are replaced, not merged), or declares
+attributes of your own. Lowest `rank` wins when several match one path.
+
+```kdl
+attributes {
+    test "src/legacy_tests/"        // extra pattern for a shipped attribute
+    production "vendor/mycompany/"  // un-tag a builtin match
+
+    internal-tooling rank=6 {       // an attribute of your own
+        activates "index" "search"  // omit the line for the defaults;
+        dir "scripts" "tools"       // list it empty to activate nothing
+        glob "*.tmpl"
+    }
+}
+```
+
+An attribute that does not activate `index` keeps its files out of the index
+entirely; without `search` they stay indexed but never appear in results.
 
 ## `search` example
 
