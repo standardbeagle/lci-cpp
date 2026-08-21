@@ -39,7 +39,6 @@ add_library(lci_lib STATIC
     search/engine.cpp
     search/search_coordinator.cpp
     search/engine_context.cpp
-    search/requirements_analyzer.cpp
     search/semantic_filter.cpp
     semantic/score_types.cpp
     semantic/name_splitter.cpp

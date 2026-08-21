@@ -86,9 +86,19 @@ SearchContext ContextExtractor::extract_line_context(
 
     auto lines = split_lines(content);
     int total = static_cast<int>(lines.size());
-    int half = num_lines / 2;
-    int start = std::max(0, match_line - 1 - half);
-    int end = std::min(total, match_line + half);
+
+    // num_lines is the TOTAL size of the window, match line included. The
+    // window used to be built as half lines either side of the match plus the
+    // match itself, which is right for an odd num_lines but hands back
+    // num_lines + 1 lines for an even one -- including the default of 50 and
+    // the doubled 100 that extract_block_context falls back to. Split the
+    // remainder explicitly and give the extra line to the trailing side, which
+    // leaves every odd num_lines emitting exactly the same window as before.
+    if (num_lines < 1) num_lines = 1;
+    int before = (num_lines - 1) / 2;
+    int after = num_lines - 1 - before;
+    int start = std::max(0, match_line - 1 - before);
+    int end = std::min(total, match_line + after);
 
     ctx.start_line = start + 1;
     ctx.end_line = end;
@@ -203,6 +213,12 @@ SearchContext ContextExtractor::extract_function_context(
                 window_start = std::max(0, func_length - 100);
             }
             start = start + window_start;
+            // Unclamped on purpose, and safe: `end` came in as
+            // min(func->end + 1, total) and func_length = end - start, so
+            // start + window_start + 100 never exceeds the function's own
+            // end. When window_start + 100 < func_length the window stops
+            // short of it; otherwise window_start was just reset to
+            // func_length - 100, which lands exactly on it.
             end = start + 100;
             ctx.is_complete = false;
         } else {

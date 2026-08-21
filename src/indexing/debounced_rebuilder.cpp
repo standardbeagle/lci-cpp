@@ -1,5 +1,7 @@
 #include <lci/indexing/debounced_rebuilder.h>
 
+#include <algorithm>
+
 namespace lci {
 
 DebouncedRebuilder::DebouncedRebuilder(std::chrono::milliseconds debounce)
@@ -72,8 +74,13 @@ void DebouncedRebuilder::timer_thread_func() {
         }
 
         // Deadline reached -- collect pending files and fire callback.
+        // pending_ is a hash set: its iteration order is randomized per
+        // process, and the callback's file order reaches user-visible rebuild
+        // output. Sort so a given pending batch always rebuilds in file-id
+        // order.
         has_pending_ = false;
         std::vector<FileID> files(pending_.begin(), pending_.end());
+        std::sort(files.begin(), files.end());
         pending_.clear();
 
         auto cb = callback_;
@@ -93,6 +100,7 @@ void DebouncedRebuilder::flush_pending() {
     {
         std::lock_guard lock(mu_);
         files.assign(pending_.begin(), pending_.end());
+        std::sort(files.begin(), files.end());
         pending_.clear();
         has_pending_ = false;
         cb = callback_;

@@ -139,6 +139,13 @@ int run_shutdown(const GlobalFlags& flags, bool force);
 /// Returns 0 even when no server is running (an empty fleet is not an error).
 int run_servers(bool json_output);
 
+/// The per-user instance registry directory every long-lived server (CLI
+/// `lci server` and the MCP-embedded shared server) publishes into, and that
+/// `lci servers` / `lci shutdown --all` enumerate. A private 0700 directory —
+/// never the shared system temp dir, whose world-writable entries any local
+/// user could forge to drive this user's shutdown/eviction machinery.
+std::string instance_registry_dir();
+
 /// shutdown --all: stops every index server this user is running, not only the
 /// one serving the current root. Returns 0 when all of them stopped (including
 /// when there were none), non-zero if any survived.

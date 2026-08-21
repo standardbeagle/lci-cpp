@@ -122,6 +122,14 @@ uint32_t hash_project_root(const std::string& abs_root) {
     return h;
 }
 
+uint32_t current_process_id() {
+#ifdef _WIN32
+    return static_cast<uint32_t>(::GetCurrentProcessId());
+#else
+    return static_cast<uint32_t>(::getpid());
+#endif
+}
+
 }  // namespace
 
 std::string get_socket_path() {
@@ -339,6 +347,16 @@ void IndexServer::enable_instance_registry(const std::string& dir) {
     registry_dir_ = dir;
 }
 
+void IndexServer::set_search_engine(SearchEngine* engine) {
+    {
+        std::unique_lock lock(mu_);
+        search_engine_ = engine;
+    }
+    // Publishing a live engine means the external index build finished;
+    // clearing one means a rebuild is in flight again.
+    indexing_active_.store(engine == nullptr, std::memory_order_release);
+}
+
 bool IndexServer::is_running() const {
     return running_.load(std::memory_order_acquire);
 }
@@ -358,6 +376,22 @@ bool IndexServer::start() {
     shutdown_triggered_.store(false, std::memory_order_release);
 
     auto sock = socket_path();
+
+    // A live listener on this address means another server already owns this
+    // root. Unlinking/rebinding would silently orphan it (its socket file
+    // vanishes while the process keeps serving an unreachable inode), so
+    // refuse instead of stealing the address.
+    {
+        Client probe(sock);
+        probe.set_timeout(std::chrono::milliseconds{500});
+        if (probe.is_server_running()) {
+            std::fprintf(stderr,
+                         "Error: another index server is already serving %s\n",
+                         sock.c_str());
+            running_.store(false, std::memory_order_release);
+            return false;
+        }
+    }
 
 #ifndef _WIN32
     // Remove stale socket file (Unix domain socket only)
@@ -402,7 +436,24 @@ bool IndexServer::start() {
             }
             indexing_active_.store(false, std::memory_order_release);
         }));
+    } else if (search_engine_ == nullptr) {
+        // Externally-owned index with no engine yet: the owner is building
+        // the index and will publish via set_search_engine(). Report the
+        // build as active so /status is truthful and the idle reaper does
+        // not count the build as idleness.
+        indexing_active_.store(true, std::memory_order_release);
     }
+
+    // Publish the registry entry BEFORE the listener starts accepting:
+    // every non-/ping request runs touch_activity, which reads
+    // registry_path_, so assigning it after requests are already being
+    // served is a data race on a plain std::string (UB). Publishing first
+    // means handler threads only ever observe the final value. A failed
+    // start removes the entry again in shutdown_locked().
+    last_activity_ns_.store(
+        std::chrono::steady_clock::now().time_since_epoch().count(),
+        std::memory_order_release);
+    publish_registry_entry();
 
 #ifdef _WIN32
     // On Windows, use loopback TCP. Parse "127.0.0.1:<port>" from sock.
@@ -453,7 +504,28 @@ bool IndexServer::start() {
             return;
         }
 
-        chmod(sock.c_str(), 0600);
+        // The socket mode is the only guard keeping other local users off
+        // this server (the socket lives in a world-writable temp dir). If it
+        // cannot be restricted, refuse to serve rather than silently serving
+        // a user-readable socket.
+        if (chmod(sock.c_str(), 0600) != 0) {
+            std::fprintf(stderr,
+                         "Error: cannot restrict socket permissions on %s\n",
+                         sock.c_str());
+            running_.store(false, std::memory_order_release);
+            return;
+        }
+
+        // Record which inode we bound so shutdown only unlinks OUR socket:
+        // a restart race can put a successor server's freshly bound socket
+        // at the same path before this server's teardown reaches the
+        // unlink.
+        struct stat st{};
+        if (::stat(sock.c_str(), &st) == 0) {
+            bound_socket_ino_.store(static_cast<uint64_t>(st.st_ino),
+                                    std::memory_order_release);
+        }
+
         svr_.listen_after_bind();
     });
 
@@ -479,10 +551,6 @@ bool IndexServer::start() {
     // deletion is only enforced for a root that existed when we started,
     // so a server deliberately pointed at a not-yet-created path doesn't
     // kill itself.
-    last_activity_ns_.store(
-        std::chrono::steady_clock::now().time_since_epoch().count(),
-        std::memory_order_release);
-    publish_registry_entry();
     std::error_code root_ec;
     const bool root_existed =
         !config_.project.root.empty() &&
@@ -532,14 +600,40 @@ bool IndexServer::shutdown_locked() {
     cancel_indexing_thread();
 
 #ifndef _WIN32
-    // Remove socket file (Unix domain socket only)
-    std::error_code ec;
-    std::filesystem::remove(socket_path(), ec);
+    // Remove the socket file (Unix domain socket only) — but only if the
+    // path still holds the inode this server bound. During a stale-server
+    // restart a successor can bind the same path before this teardown runs;
+    // unlinking blindly would orphan the successor (running but
+    // unreachable).
+    {
+        const std::string sock = socket_path();
+        struct stat st{};
+        const uint64_t bound = bound_socket_ino_.load(std::memory_order_acquire);
+        if (::stat(sock.c_str(), &st) == 0 &&
+            (bound == 0 || static_cast<uint64_t>(st.st_ino) == bound)) {
+            std::error_code ec;
+            std::filesystem::remove(sock, ec);
+        }
+        bound_socket_ino_.store(0, std::memory_order_release);
+    }
 #endif
 
     if (!registry_path_.empty()) {
-        std::error_code reg_ec;
-        std::filesystem::remove(registry_path_, reg_ec);
+        // Same successor race as the socket: the registry filename is
+        // derived from the address, so a successor republishes the same
+        // path. Only remove the entry if it still names this process.
+        bool ours = true;
+        try {
+            std::ifstream in(registry_path_);
+            const auto entry = nlohmann::json::parse(in);
+            ours = entry.value("pid", uint32_t{0}) == current_process_id();
+        } catch (const nlohmann::json::exception&) {
+            // Unreadable entry is litter regardless of owner.
+        }
+        if (ours) {
+            std::error_code reg_ec;
+            std::filesystem::remove(registry_path_, reg_ec);
+        }
         registry_path_.clear();
     }
 
@@ -619,14 +713,6 @@ int64_t steady_now_ns() {
     return std::chrono::steady_clock::now().time_since_epoch().count();
 }
 
-uint32_t current_process_id() {
-#ifdef _WIN32
-    return static_cast<uint32_t>(::GetCurrentProcessId());
-#else
-    return static_cast<uint32_t>(::getpid());
-#endif
-}
-
 }  // namespace
 
 void IndexServer::touch_activity() {
@@ -646,6 +732,13 @@ void IndexServer::touch_activity() {
         std::error_code ec;
         std::filesystem::last_write_time(
             registry_path_, std::filesystem::file_time_type::clock::now(), ec);
+        if (ec) {
+            // The entry was reaped (e.g. one missed /ping during a peer scan
+            // delisted us). Republish so a live server never stays a ghost;
+            // write_registry_file leaves registry_path_ untouched, so this is
+            // safe from concurrent handler threads.
+            write_registry_file();
+        }
     }
 }
 
@@ -657,32 +750,42 @@ void IndexServer::publish_registry_entry() {
     char name[64];
     std::snprintf(name, sizeof(name), "lci-srv-%u-%08x.json",
                   current_user_id(), hash_project_root(address));
-    const auto path = std::filesystem::path(registry_dir_) / name;
+    registry_path_ =
+        (std::filesystem::path(registry_dir_) / name).string();
+    if (!write_registry_file()) {
+        registry_path_.clear();
+        return;
+    }
+    last_registry_touch_ns_.store(steady_now_ns(), std::memory_order_release);
+}
 
+bool IndexServer::write_registry_file() {
+    if (registry_path_.empty()) {
+        return false;
+    }
     nlohmann::json entry{{"pid", current_process_id()},
-                         {"address", address},
+                         {"address", socket_path()},
                          {"root", config_.project.root}};
     // Write-then-rename so peers scanning the registry never read a torn
     // entry.
-    const auto tmp = path.string() + ".tmp";
+    const auto tmp = registry_path_ + ".tmp";
     {
         std::ofstream out(tmp, std::ios::trunc);
         if (!out) {
             std::fprintf(stderr,
                          "Warning: cannot write server registry entry %s\n",
                          tmp.c_str());
-            return;
+            return false;
         }
         out << entry.dump();
     }
     std::error_code ec;
-    std::filesystem::rename(tmp, path, ec);
+    std::filesystem::rename(tmp, registry_path_, ec);
     if (ec) {
         std::filesystem::remove(tmp, ec);
-        return;
+        return false;
     }
-    registry_path_ = path.string();
-    last_registry_touch_ns_.store(steady_now_ns(), std::memory_order_release);
+    return true;
 }
 
 void IndexServer::evict_excess_peers() {
@@ -702,9 +805,10 @@ void IndexServer::evict_excess_peers() {
     for (int i = 0; i < excess && i < static_cast<int>(live.size()); ++i) {
         std::string err;
         Client(live[i].address).shutdown(false, err);
-        // The victim removes its own registry entry on shutdown; if it is
-        // hung and ignores us, the next eviction pass reaps its entry once
-        // the ping fails.
+        // The victim removes its own registry entry on shutdown. Eviction
+        // runs only at server startup (reaper_loop's first act), so a victim
+        // that ignores the request keeps its slot until some FUTURE server
+        // start scans the registry and reaps the entry on ping failure.
     }
 }
 
@@ -726,6 +830,19 @@ std::vector<ServerInstance> list_server_instances(
             fname.size() < 6 || fname.substr(fname.size() - 5) != ".json") {
             continue;
         }
+#ifndef _WIN32
+        // Trust only entries this user wrote. The registry should live in a
+        // 0700 per-user dir, but enumeration may be pointed at a shared dir;
+        // a foreign-owned entry there is at best litter and at worst a
+        // forged address steering our shutdown/eviction machinery.
+        {
+            struct stat entry_st{};
+            if (::stat(dirent.path().c_str(), &entry_st) != 0 ||
+                entry_st.st_uid != ::getuid()) {
+                continue;
+            }
+        }
+#endif
         ServerInstance inst;
         try {
             std::ifstream in(dirent.path());
@@ -765,6 +882,12 @@ std::vector<ServerInstance> list_server_instances(
 void IndexServer::request_self_stop(const char* reason) {
     std::fprintf(stderr, "Index server exiting: %s\n", reason);
     running_.store(false, std::memory_order_release);
+    // Stop accepting immediately: an owner that never polls is_running()
+    // (the embedded MCP server) must not keep serving as a half-dead
+    // zombie after deciding to exit. Full teardown still happens in the
+    // owner's shutdown(); httplib's stop() is safe from this thread and
+    // idempotent with the one in shutdown_locked().
+    svr_.stop();
     {
         std::lock_guard lock(shutdown_mu_);
         shutdown_requested_ = true;
@@ -1115,8 +1238,16 @@ void IndexServer::handle_fileinfo(const httplib::Request& req,
 
 // -- Endpoint: /shutdown ------------------------------------------------------
 
-void IndexServer::handle_shutdown(const httplib::Request& /*req*/,
+void IndexServer::handle_shutdown(const httplib::Request& req,
                                    httplib::Response& res) {
+    bool force = false;
+    try {
+        auto body = nlohmann::json::parse(req.body);
+        force = body.value("force", false);
+    } catch (const nlohmann::json::exception&) {
+        // Empty/absent body means a plain graceful shutdown.
+    }
+
     nlohmann::json j;
     j["success"] = true;
     j["message"] = "Server shutting down";
@@ -1128,7 +1259,7 @@ void IndexServer::handle_shutdown(const httplib::Request& /*req*/,
     // requests (a second request must not overwrite a joinable thread).
     bool expected = false;
     if (shutdown_triggered_.compare_exchange_strong(expected, true)) {
-        shutdown_trigger_ = std::thread([this] {
+        shutdown_trigger_ = std::thread([this, force] {
             std::this_thread::sleep_for(std::chrono::milliseconds{100});
             // Clear running_ too: the CLI serve loop exits on
             // !is_running(), and before this /shutdown only flipped
@@ -1136,11 +1267,28 @@ void IndexServer::handle_shutdown(const httplib::Request& /*req*/,
             // does not call) — a remote /shutdown left the process
             // serving forever. Peer eviction depends on this working.
             running_.store(false, std::memory_order_release);
+            // Stop accepting now, whether or not any owner polls
+            // is_running() — an embedded server with no watching owner
+            // must not keep serving after promising to shut down.
+            svr_.stop();
             {
                 std::lock_guard lock(shutdown_mu_);
                 shutdown_requested_ = true;
             }
             shutdown_cv_.notify_all();
+            if (force) {
+                // force means "guarantee this process dies": arm a watchdog
+                // that exits hard after a grace window. A healthy server
+                // tears down and exits normally well within it; only a hung
+                // teardown reaches the _Exit. Detaching is safe here — the
+                // watchdog captures nothing and touches no members, so it
+                // cannot use-after-free (unlike the trigger thread itself,
+                // which is owned and joined for exactly that reason).
+                std::thread([] {
+                    std::this_thread::sleep_for(std::chrono::seconds{5});
+                    std::_Exit(0);
+                }).detach();
+            }
         });
     }
 }
@@ -1149,6 +1297,16 @@ void IndexServer::handle_shutdown(const httplib::Request& /*req*/,
 
 void IndexServer::handle_reindex(const httplib::Request& req,
                                   httplib::Response& res) {
+    // A server that has decided to stop (self-stop, /shutdown in flight)
+    // must refuse: the swap below would cancel-and-join the new run
+    // immediately AFTER the lambda already cleared the engine and the
+    // index, leaving a permanently bricked server (engine null,
+    // indexing_active_ stuck true, every endpoint 503).
+    if (!running_.load(std::memory_order_acquire)) {
+        error_response(res, 503, "server is shutting down");
+        return;
+    }
+
     nlohmann::json body;
     try {
         body = nlohmann::json::parse(req.body);

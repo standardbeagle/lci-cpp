@@ -99,10 +99,17 @@ void collect_msbuild_outputs(const fs::path& proj_file, const fs::path& root,
         std::string dir = (*it)[2].str();
         // MSBuild vars ($(Configuration) etc.): keep the literal prefix
         // before the first variable; a fully-variable path contributes
-        // nothing.
+        // nothing. Without the empty/separator guard below, a value like
+        // "$(BaseOutputPath)" truncates to "" and root-relativizing ""
+        // against the project dir yields the project dir itself — silently
+        // excluding the whole project from the index.
         if (auto dollar = dir.find('$'); dollar != std::string::npos) {
             dir = dir.substr(0, dollar);
         }
+        while (!dir.empty() && (dir.back() == '/' || dir.back() == '\\')) {
+            dir.pop_back();
+        }
+        if (dir.empty()) continue;
         // Root-relativize against the project file's directory.
         std::error_code ec;
         auto rel = fs::relative(proj_file.parent_path() / dir, root, ec);

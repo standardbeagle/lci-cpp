@@ -2,10 +2,16 @@
 
 #include <lci/update/updater.h>
 
+#include <lci/core/portable.h>
+
+#include <filesystem>
+#include <system_error>
+
 using lci::update::Arch;
 using lci::update::Asset;
 using lci::update::Os;
 using lci::update::Platform;
+using lci::update::make_private_workdir;
 using lci::update::select_asset;
 
 namespace {
@@ -170,6 +176,39 @@ TEST(UpdaterSafeName, RejectsPathsAndMetachars) {
     EXPECT_FALSE(is_safe_asset_name("../etc/passwd"));
     EXPECT_FALSE(is_safe_asset_name("a b.tar.gz"));
     EXPECT_FALSE(is_safe_asset_name("$(id).tar.gz"));
+}
+
+// --- Work directory ---------------------------------------------------------
+//
+// The staging directory holds the tarball and the extracted binary between
+// checksum verification and install, so on a multi-user host its name must
+// not be guessable and its mode must exclude everyone else.
+
+TEST(UpdaterWorkdir, IsPrivateUniqueAndOwned) {
+    namespace fs = std::filesystem;
+
+    auto a = make_private_workdir();
+    auto b = make_private_workdir();
+    ASSERT_FALSE(a.empty());
+    ASSERT_FALSE(b.empty());
+    EXPECT_NE(a, b) << "workdir name is predictable across calls";
+    EXPECT_TRUE(fs::is_directory(a));
+    EXPECT_TRUE(fs::is_directory(b));
+
+    // The old name was "lci-update-<pid>": derivable by any local process.
+    EXPECT_NE(a.filename().string(),
+              "lci-update-" + std::to_string(lci::portable::process_id()));
+
+#if !defined(_WIN32)
+    auto perms = fs::status(a).permissions();
+    EXPECT_EQ(perms & fs::perms::group_all, fs::perms::none);
+    EXPECT_EQ(perms & fs::perms::others_all, fs::perms::none);
+    EXPECT_NE(perms & fs::perms::owner_all, fs::perms::none);
+#endif
+
+    std::error_code ec;
+    fs::remove_all(a, ec);
+    fs::remove_all(b, ec);
 }
 
 TEST(UpdaterDetect, DetectPlatformIsConsistent) {

@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <string>
+#include <string_view>
 
 #include <CLI/CLI.hpp>
 
@@ -940,15 +941,29 @@ int main(int argc, char* argv[]) {
     // Fails FAST (non-zero exit, clear error) when gperftools is missing —
     // per Karpathy rule 6, no silent no-op for a flag the user explicitly
     // set.
+    // Both spellings CLI11 itself accepts have to be recognized here:
+    // scanning only for the space-separated form meant `--profile-cpu=PATH`
+    // parsed cleanly and then silently never profiled.
     std::string cpu_profile_path_arg;
     std::string mem_profile_path_arg;
-    for (int i = 1; i < argc - 1; ++i) {
-        std::string a = argv[i];
-        if (a == "--profile-cpu") {
-            cpu_profile_path_arg = argv[i + 1];
-        } else if (a == "--profile-memory") {
-            mem_profile_path_arg = argv[i + 1];
+    for (int i = 1; i < argc; ++i) {
+        std::string_view a = argv[i];
+        std::string* dst = nullptr;
+        if (a.starts_with("--profile-cpu")) {
+            dst = &cpu_profile_path_arg;
+            a.remove_prefix(std::string_view("--profile-cpu").size());
+        } else if (a.starts_with("--profile-memory")) {
+            dst = &mem_profile_path_arg;
+            a.remove_prefix(std::string_view("--profile-memory").size());
         }
+        if (dst == nullptr) continue;
+
+        if (a.empty()) {
+            if (i + 1 < argc) *dst = argv[i + 1];  // --profile-cpu PATH
+        } else if (a.front() == '=') {
+            *dst = std::string(a.substr(1));       // --profile-cpu=PATH
+        }
+        // Anything else is a different flag that merely shares the prefix.
     }
     // Static storage so guard destructors run via atexit — every subcommand
     // callback below ends with std::exit(), which DOES invoke atexit handlers

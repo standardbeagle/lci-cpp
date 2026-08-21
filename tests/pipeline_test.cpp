@@ -17,7 +17,9 @@
 #include "unique_temp.h"
 
 #include <atomic>
+#include <chrono>
 #include <filesystem>
+#include <future>
 #include <fstream>
 #include <string>
 #include <thread>
@@ -985,6 +987,68 @@ TEST(PipelineTest, CancellationStopsPipeline) {
     EXPECT_TRUE(pipeline.stop_requested());
 }
 
+TEST(PipelineTest, MidRunStopReturnsPromptly) {
+    // Regression: request_stop() during run() used to deadlock. The
+    // integrator loop breaks on the stop flag without draining, so with
+    // more in-flight files than the bounded result_queue holds, workers
+    // block forever in push() and process_thread.join() never returns.
+    // Worker count is deliberately oversized relative to the result
+    // buffer (max(16*ncpu, files/10)) so blocked pushes are guaranteed.
+    // Sizing: the deadlock needs (files still in flight after the stop) >
+    // result buffer (max(ncpu*k, files/10)); the stop fires after 100 files
+    // are popped, so 1200 files leaves ~1100 in flight against a buffer of
+    // ~120 — guaranteed regardless of core count. Per-file body is kept
+    // small: everything popped before the stop is still integrated
+    // serially and everything already queued is still parsed, so body size
+    // is the test's wall-clock, not its discrimination (1000 funcs/file took
+    // 20-30s and blew the budget under load).
+    constexpr int kFiles = 1200;
+    TempDir dir;
+    std::string body = "package f\n";
+    for (int fn = 0; fn < 150; ++fn) {
+        body += "func F" + std::to_string(fn) + "(a int) int { return a }\n";
+    }
+    for (int i = 0; i < kFiles; ++i) {
+        dir.write_file("file" + std::to_string(i) + ".go", body);
+    }
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    cfg.performance.parallel_file_workers = 256;
+
+    auto store = std::make_shared<FileContentStore>();
+    auto file_service = std::make_shared<FileService>(store);
+    TrigramIndex trigram_idx;
+    ReferenceTracker ref_tracker;
+    PostingsIndex postings_idx;
+
+    Pipeline pipeline(cfg, file_service, &trigram_idx,
+                      &ref_tracker, &postings_idx);
+
+    auto fut = std::async(std::launch::async, [&] { pipeline.run(); });
+
+    // Stop once the run is well underway: all workers hold a task and the
+    // task queue is full, yet hundreds of files remain — so after the stop
+    // the unpopped results exceed the bounded result buffer.
+    while (pipeline.get_progress().files_processed < 100 &&
+           fut.wait_for(std::chrono::milliseconds(1)) !=
+               std::future_status::ready) {
+    }
+    pipeline.request_stop();
+    // The stop must land mid-run or the test proves nothing: a run that
+    // finished before the stop exercises no blocked push.
+    EXPECT_LT(pipeline.get_progress().files_processed, kFiles);
+
+    if (fut.wait_for(std::chrono::seconds(60)) != std::future_status::ready) {
+        // run() is deadlocked; its threads cannot be joined, so abort the
+        // process to fail loudly instead of hanging the suite.
+        ADD_FAILURE() << "pipeline.run() did not return after request_stop";
+        std::abort();
+    }
+    fut.get();
+    EXPECT_TRUE(pipeline.stop_requested());
+}
+
 TEST(PipelineTest, StopRequestedDefaultsFalse) {
     Config cfg = make_default_config();
     auto store = std::make_shared<FileContentStore>();
@@ -1163,8 +1227,99 @@ TEST(FileProcessorTest, MinifiedBundleSkipsParse) {
 
     ProcessedFile r;
     ASSERT_TRUE(result_queue.pop(r));
-    EXPECT_TRUE(r.parse_skipped_oversize);
+    // Distinct from Oversize: this file is small. Labelling it oversized sent
+    // anyone reading the diagnostics to the wrong knob.
+    EXPECT_EQ(r.parse_skip_reason, ParseSkipReason::MinifiedBundle);
     EXPECT_TRUE(r.symbols.empty());
+}
+
+TEST(FileProcessorTest, OversizeSkipIsDistinctFromMinified) {
+    TempDir dir;
+    // Ordinary, non-minified source, just over the parse cap.
+    std::string big;
+    while (big.size() < 200 * 1024) big += "function f() { return 1; }\n";
+    dir.write_file("big.js", big);
+
+    Config cfg = make_default_config();
+    cfg.index.max_parse_file_size = 64 * 1024;
+
+    auto store = std::make_shared<FileContentStore>();
+    auto file_service = std::make_shared<FileService>(store);
+    TrigramIndex trigram_idx;
+
+    BoundedQueue<FileTask> task_queue(10);
+    BoundedQueue<ProcessedFile> result_queue(10);
+
+    FileTask t;
+    t.path = (dir.path() / "big.js").string();
+    t.language = "javascript";
+    t.size = static_cast<int64_t>(big.size());
+    task_queue.push(std::move(t));
+    task_queue.close();
+
+    FileProcessor processor(cfg, file_service, &trigram_idx);
+    processor.process(task_queue, result_queue, 1);
+
+    ProcessedFile r;
+    ASSERT_TRUE(result_queue.pop(r));
+    EXPECT_EQ(r.parse_skip_reason, ParseSkipReason::Oversize);
+    EXPECT_TRUE(r.symbols.empty());
+}
+
+TEST(FileProcessorTest, UnsupportedGrammarIsRecordedNotSilent) {
+    TempDir dir;
+    dir.write_file("notes.xyzzy", "just some text\n");
+
+    Config cfg = make_default_config();
+    auto store = std::make_shared<FileContentStore>();
+    auto file_service = std::make_shared<FileService>(store);
+    TrigramIndex trigram_idx;
+
+    BoundedQueue<FileTask> task_queue(10);
+    BoundedQueue<ProcessedFile> result_queue(10);
+
+    FileTask t;
+    t.path = (dir.path() / "notes.xyzzy").string();
+    t.size = 15;
+    task_queue.push(std::move(t));
+    task_queue.close();
+
+    FileProcessor processor(cfg, file_service, &trigram_idx);
+    processor.process(task_queue, result_queue, 1);
+
+    ProcessedFile r;
+    ASSERT_TRUE(result_queue.pop(r));
+    // Was indistinguishable from a successful extraction that found nothing.
+    EXPECT_EQ(r.parse_skip_reason, ParseSkipReason::UnsupportedGrammar);
+    EXPECT_FALSE(r.has_error);
+}
+
+TEST(FileProcessorTest, SuccessfulExtractionRecordsNoSkip) {
+    TempDir dir;
+    dir.write_file("ok.js", "function hello() { return 1; }\n");
+
+    Config cfg = make_default_config();
+    auto store = std::make_shared<FileContentStore>();
+    auto file_service = std::make_shared<FileService>(store);
+    TrigramIndex trigram_idx;
+
+    BoundedQueue<FileTask> task_queue(10);
+    BoundedQueue<ProcessedFile> result_queue(10);
+
+    FileTask t;
+    t.path = (dir.path() / "ok.js").string();
+    t.language = "javascript";
+    t.size = 31;
+    task_queue.push(std::move(t));
+    task_queue.close();
+
+    FileProcessor processor(cfg, file_service, &trigram_idx);
+    processor.process(task_queue, result_queue, 1);
+
+    ProcessedFile r;
+    ASSERT_TRUE(result_queue.pop(r));
+    EXPECT_EQ(r.parse_skip_reason, ParseSkipReason::None);
+    EXPECT_FALSE(r.symbols.empty());
 }
 
 // ---------------------------------------------------------------------------
@@ -1208,6 +1363,30 @@ TEST(GeneratedArtifactsTest, CsprojOutputPathBecomesExclude) {
     auto globs = derive_generated_excludes(dir.path().string());
     ASSERT_EQ(globs.size(), 1u);
     EXPECT_EQ(globs[0], "src/App/artifacts/release/**");
+}
+
+TEST(GeneratedArtifactsTest, FullyVariableOutputPathContributesNothing) {
+    TempDir dir;
+    // A fully-variable OutputPath truncates to the empty string; the empty
+    // remainder must be rejected, not relativized into the project's own
+    // directory (which would silently exclude the whole project).
+    dir.write_file("src/App/App.csproj",
+                   "<Project><PropertyGroup>"
+                   "<OutputPath>$(BaseOutputPath)</OutputPath>"
+                   "<BaseOutputPath>$(Configuration)\\bin\\</BaseOutputPath>"
+                   "</PropertyGroup></Project>");
+    EXPECT_TRUE(derive_generated_excludes(dir.path().string()).empty());
+}
+
+TEST(GeneratedArtifactsTest, VariableSuffixKeepsLiteralPrefix) {
+    TempDir dir;
+    dir.write_file("src/App/App.csproj",
+                   "<Project><PropertyGroup>"
+                   "<OutputPath>artifacts\\$(Configuration)\\</OutputPath>"
+                   "</PropertyGroup></Project>");
+    auto globs = derive_generated_excludes(dir.path().string());
+    ASSERT_EQ(globs.size(), 1u);
+    EXPECT_EQ(globs[0], "src/App/artifacts/**");
 }
 
 TEST(GeneratedArtifactsTest, MalformedManifestsAreIgnored) {

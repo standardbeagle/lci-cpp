@@ -6,6 +6,8 @@
 
 #include "unique_temp.h"
 
+#include <algorithm>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -282,6 +284,70 @@ TEST(ContextExtractorTest, ExtractLineContext) {
     EXPECT_GE(ctx.end_line, ctx.start_line);
 }
 
+// The window size is a TOTAL, match line included: an even num_lines used to
+// return num_lines + 1 lines (including the default 50 and the 100 that
+// extract_block_context falls back to).
+TEST(ContextExtractorTest, WindowHoldsExactlyNumLines) {
+    Config cfg = make_default_config();
+    MasterIndex mi(cfg);
+
+    TempDir dir;
+    std::string body;
+    for (int i = 1; i <= 40; ++i) {
+        body += "line" + std::to_string(i) + "\n";
+    }
+    dir.write_file("wide.txt", body);
+    ASSERT_TRUE(mi.index_file((dir.path() / "wide.txt").string()));
+
+    ContextExtractor extractor(mi.file_content_store(), 50);
+    std::vector<BlockBoundary> blocks;
+
+    for (int n = 1; n <= 8; ++n) {
+        auto ctx = extractor.extract(FileID{1}, blocks, 20, n);
+        EXPECT_EQ(static_cast<size_t>(n), ctx.lines.size())
+            << "num_lines=" << n;
+        EXPECT_EQ(ctx.end_line - ctx.start_line + 1,
+                  static_cast<int>(ctx.lines.size()))
+            << "num_lines=" << n;
+        // The match line is always inside the window.
+        EXPECT_LE(ctx.start_line, 20);
+        EXPECT_GE(ctx.end_line, 20);
+    }
+}
+
+// The 100-line window of the long-function branch is built unclamped
+// (start + 100). Pins that it still cannot run past the end of the file for a
+// match on a long function's last statement.
+TEST(ContextExtractorTest, LongFunctionWindowStaysInsideTheFile) {
+    Config cfg = make_default_config();
+    MasterIndex mi(cfg);
+
+    TempDir dir;
+    std::string body = "func big() {\n";
+    for (int i = 1; i <= 150; ++i) {
+        body += "    step" + std::to_string(i) + "()\n";
+    }
+    body += "}\n";
+    dir.write_file("big.go", body);
+    ASSERT_TRUE(mi.index_file((dir.path() / "big.go").string()));
+
+    // Whole file is one 152-line function (0-based block bounds).
+    std::vector<BlockBoundary> blocks;
+    BlockBoundary fn;
+    fn.type = BlockType::Function;
+    fn.name = "big";
+    fn.start = 0;
+    fn.end = 151;
+    blocks.push_back(fn);
+
+    // Match on the last statement: the 100-line window runs off the end.
+    ContextExtractor extractor(mi.file_content_store(), 50);
+    auto ctx = extractor.extract_function_context(FileID{1}, blocks, 151, 5);
+    EXPECT_LE(ctx.end_line, 152);
+    EXPECT_EQ(ctx.end_line - ctx.start_line + 1,
+              static_cast<int>(ctx.lines.size()));
+}
+
 // -- SearchEngine integration tests -------------------------------------------
 
 TEST(SearchEngineIntegrationTest, BasicSearch) {
@@ -462,6 +528,170 @@ TEST(SearchEngineIntegrationTest, WordBoundarySearch) {
         if (r.match_text == "foo") found_exact = true;
     }
     EXPECT_TRUE(found_exact);
+}
+
+// -- Trigram prefilter reality check ------------------------------------------
+
+// Pins the candidate contract on the BULK path. The read-side trigram
+// postings are filled only by the incremental TrigramIndex::index_file path;
+// bulk indexing (index_directory -> Pipeline) routes trigrams into
+// ShardedTrigramStorage, which the search path never reads. Under
+// certified-absence narrowing that is not a problem and needs no
+// get_all_file_ids fallback: an index with no coverage certifies nothing, so
+// the file stays in the candidate set and the verify scan finds the match.
+TEST(SearchEngineIntegrationTest, BulkIndexKeepsUncertifiedFilesAsCandidates) {
+    TempDir dir;
+    dir.write_file("alpha.go",
+        "package main\n"
+        "func distinctiveNeedle() int { return 7 }\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    // No index covering this corpus can prove the pattern absent, so the
+    // containing file must survive candidate selection.
+    auto candidates = mi.find_candidate_files("distinctiveNeedle", false);
+    FileID id = mi.path_to_id((dir.path() / "alpha.go").string());
+    ASSERT_NE(id, FileID{0});
+    EXPECT_NE(std::find(candidates.begin(), candidates.end(), id),
+              candidates.end())
+        << "a file no index certifies pattern-free was dropped from the "
+           "candidate set";
+
+    SearchEngine engine(mi);
+    SearchOptions opts;
+    auto results = engine.search("distinctiveNeedle", opts);
+    EXPECT_FALSE(results.empty());
+}
+
+// -- Determinism --------------------------------------------------------------
+
+// Candidate FileIDs must be scanned in sorted order: both candidate sources
+// are built by walking an absl hash map, whose iteration order is randomized
+// per process, and that order picks WHICH matches survive the collection cap.
+TEST(SearchEngineIntegrationTest, CappedCollectionTakesLowestFileIds) {
+    TempDir dir;
+    constexpr int kFiles = 40;
+    for (int i = 0; i < kFiles; ++i) {
+        char name[32];
+        std::snprintf(name, sizeof(name), "f%02d.go", i);
+        dir.write_file(name,
+            "package main\n"
+            "func f() { needleToken() }\n");
+    }
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    // max_results=3 => collection cap 24, so 16 of the 40 files are dropped.
+    SearchEngine engine(mi);
+    SearchOptions opts;
+    opts.max_results = 3;
+    auto results = engine.search("needleToken", opts);
+    ASSERT_FALSE(results.empty());
+
+    // Collection visits the 24 lowest FileIDs; all 40 files score equally, so
+    // rank() breaks the tie on path and the output cap keeps the three
+    // lexicographically smallest of those 24. Any other trio means the scan
+    // followed hash order.
+    auto ids = mi.get_all_file_ids();
+    ASSERT_EQ(static_cast<size_t>(kFiles), ids.size());
+    std::sort(ids.begin(), ids.end());
+    std::vector<std::string> collected;
+    for (size_t i = 0; i < 24 && i < ids.size(); ++i) {
+        collected.push_back(mi.get_file_path(ids[i]));
+    }
+    std::sort(collected.begin(), collected.end());
+
+    ASSERT_EQ(3u, results.size());
+    for (size_t i = 0; i < results.size(); ++i) {
+        EXPECT_EQ(collected[i], results[i].path);
+    }
+}
+
+// -- Line/column resolution ---------------------------------------------------
+
+// process_file resolves lines with an incremental cursor instead of rescanning
+// from byte 0 per match. Pins the exact line/column of every match in a file
+// with many hits so the optimisation cannot drift the emitted values.
+TEST(SearchEngineIntegrationTest, MultipleMatchesResolveExactLinesAndColumns) {
+    TempDir dir;
+    dir.write_file("multi.go",
+        "package main\n"        // line 1
+        "\n"                    // line 2
+        "var a = tok\n"         // line 3, col 8
+        "var bb = tok\n"        // line 4, col 9
+        "\n"                    // line 5
+        "  var ccc = tok\n");   // line 6, col 12
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    SearchEngine engine(mi);
+    SearchOptions opts;
+    auto results = engine.search("tok", opts);
+    ASSERT_EQ(3u, results.size());
+
+    std::sort(results.begin(), results.end(),
+              [](const SearchResult& a, const SearchResult& b) {
+                  return a.line < b.line;
+              });
+    EXPECT_EQ(3, results[0].line);
+    EXPECT_EQ(8, results[0].column);
+    EXPECT_EQ(4, results[1].line);
+    EXPECT_EQ(9, results[1].column);
+    EXPECT_EQ(6, results[2].line);
+    EXPECT_EQ(12, results[2].column);
+}
+
+// -- Pattern validation -------------------------------------------------------
+
+TEST(SearchEngineIntegrationTest, OverlongPatternReportsAnError) {
+    TempDir dir;
+    dir.write_file("a.go", "package main\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    SearchEngine engine(mi);
+    SearchOptions opts;
+    SearchStats stats;
+    std::string pattern(kMaxSearchPatternBytes + 1, 'x');
+    auto results = engine.search(pattern, opts, &stats);
+
+    EXPECT_TRUE(results.empty());
+    EXPECT_FALSE(stats.error.empty());
+
+    // A valid query that simply has no hits must stay distinguishable.
+    SearchStats no_hits;
+    auto none = engine.search("absentToken", opts, &no_hits);
+    EXPECT_TRUE(none.empty());
+    EXPECT_TRUE(no_hits.error.empty());
+}
+
+TEST(SearchEngineIntegrationTest, EmptyPatternReportsAnError) {
+    TempDir dir;
+    dir.write_file("a.go", "package main\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    SearchEngine engine(mi);
+    SearchOptions opts;
+    SearchStats stats;
+    auto results = engine.search("", opts, &stats);
+    EXPECT_TRUE(results.empty());
+    EXPECT_FALSE(stats.error.empty());
 }
 
 }  // namespace

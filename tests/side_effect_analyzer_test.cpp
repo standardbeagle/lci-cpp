@@ -157,6 +157,44 @@ TEST(SideEffectAnalyzerTest, GlobalWriteDetected) {
     EXPECT_EQ(info.purity_level, PurityLevel::ModuleGlobal);
 }
 
+// SideEffectInfo::global_writes was populated nowhere, so
+// purity_classification.mutated_globals came back empty however many globals
+// a function wrote.
+TEST(SideEffectAnalyzerTest, GlobalWritesArePopulatedAndDeduped) {
+    SideEffectAnalyzer sa("go");
+    sa.begin_function("init", "pkg.go", 1, 8);
+    sa.record_access("zebraGlobal", {}, AccessType::Write, 2, 3);
+    sa.record_access("alphaGlobal", {}, AccessType::Write, 3, 3);
+    sa.record_access("zebraGlobal", {}, AccessType::Write, 4, 3);
+    sa.record_access("alphaGlobal", {}, AccessType::Read, 5, 3);
+    auto info = sa.end_function();
+
+    ASSERT_EQ(3u, info.global_writes.size());
+    EXPECT_EQ("zebraGlobal", info.global_writes[0].global_name);
+    EXPECT_EQ(2, info.global_writes[0].line);
+
+    const auto& mutated = info.purity_classification.mutated_globals;
+    ASSERT_EQ(2u, mutated.size());
+    EXPECT_EQ("alphaGlobal", mutated[0]);
+    EXPECT_EQ("zebraGlobal", mutated[1]);
+}
+
+// A parameter write whose base identifier never matched the signature used to
+// be recorded as index 0, blaming the first parameter.
+TEST(SideEffectAnalyzerTest, UnmatchedParameterWriteHasUnknownIndex) {
+    SideEffectAnalyzer sa("go");
+    sa.begin_function("mutate", "util.go", 1, 6);
+    sa.add_parameter("dst", 0);
+    sa.add_parameter("src", 1);
+    sa.record_access("src", {"field"}, AccessType::Write, 3, 3);
+    auto info = sa.end_function();
+
+    ASSERT_EQ(1u, info.parameter_writes.size());
+    EXPECT_EQ(1, info.parameter_writes[0].parameter_index);
+    EXPECT_EQ(std::vector<int>{1},
+              info.purity_classification.mutated_parameters);
+}
+
 TEST(SideEffectAnalyzerTest, ClosureWriteDetected) {
     // Simulate: outer function has "count" as local at line 2.
     // An inner scope (closure) writes to "count".

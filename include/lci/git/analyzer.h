@@ -67,9 +67,12 @@ class Analyzer {
     FuzzyMatcher fuzzy_matcher_;
     NameSplitter name_splitter_;
 
+    /// Extracts symbols from every readable changed file. `skipped_out`
+    /// receives the count of files whose content could not be read.
     bool parse_changed_files(const std::vector<ChangedFile>& files,
                              const AnalysisParams& params,
-                             std::vector<SymbolInfo>& out);
+                             std::vector<SymbolInfo>& out,
+                             int& skipped_out);
 
     void get_existing_symbols(std::vector<SymbolInfo>& out);
 
@@ -104,7 +107,8 @@ class Analyzer {
                       std::vector<NamingFinding>& naming_issues,
                       std::vector<MetricsFinding>& metrics_issues,
                       const AnalysisParams& params,
-                      int64_t elapsed_ms, AnalysisReport& out);
+                      int64_t elapsed_ms, int skipped_unreadable,
+                      AnalysisReport& out);
 
     void empty_report(const AnalysisParams& params, int64_t elapsed_ms,
                       AnalysisReport& out);

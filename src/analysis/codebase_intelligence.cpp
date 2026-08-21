@@ -226,7 +226,7 @@ CodebaseIntelligenceResponse CodebaseIntelligenceEngine::build_overview(
 
         map->note =
             "Use EntityIDs with get_object_context for full navigation.";
-        response.repository_map = map.release();
+        response.repository_map = std::move(map);
     }
 
     if (params.include.health_dashboard) {
@@ -256,13 +256,13 @@ CodebaseIntelligenceResponse CodebaseIntelligenceEngine::build_overview(
             std::chrono::system_clock::now();
         health->analysis_metadata.files_analyzed =
             static_cast<int>(files.size());
-        response.health_dashboard = health.release();
+        response.health_dashboard = std::move(health);
     }
 
     if (params.include.entry_points) {
         auto ep = std::make_unique<EntryPointsList>();
         *ep = build_entry_points(files);
-        response.entry_points = ep.release();
+        response.entry_points = std::move(ep);
     }
 
     return response;
@@ -324,7 +324,7 @@ CodebaseIntelligenceResponse CodebaseIntelligenceEngine::build_statistics(
         static_cast<int>(ha.identify_problematic_symbols(files).size()));
     health->analysis_metadata.analyzed_at = std::chrono::system_clock::now();
     health->analysis_metadata.files_analyzed = static_cast<int>(files.size());
-    response.health_dashboard = health.release();
+    response.health_dashboard = std::move(health);
 
     auto coupling = CouplingAnalyzer().analyze(files, project_root, targets_of);
 
@@ -455,8 +455,13 @@ CodebaseIntelligenceResponse CodebaseIntelligenceEngine::build_structure(
     std::sort(s.types.begin(), s.types.end(),
               [](const auto& a, const auto& b) { return a.first < b.first; });
     s.top_dirs.assign(top_dir_files.begin(), top_dir_files.end());
+    // Directory name breaks file-count ties: top_dir_files is a hash map, so
+    // equal-count directories otherwise land in per-process order.
     std::sort(s.top_dirs.begin(), s.top_dirs.end(),
-              [](const auto& a, const auto& b) { return a.second > b.second; });
+              [](const auto& a, const auto& b) {
+                  if (a.second != b.second) return a.second > b.second;
+                  return a.first < b.first;
+              });
     response.structure_analysis = std::move(s);
 
     return response;
@@ -490,9 +495,17 @@ CodebaseIntelligenceEngine::extract_critical_functions(
         }
     }
 
+    // Total order before the max_results truncation below: importance scores
+    // collide readily across a corpus, and std::sort is not stable, so the
+    // surviving head was unstable run to run (Karpathy rule 4).
     std::sort(candidates.begin(), candidates.end(),
               [](const Scored& a, const Scored& b) {
-                  return a.score > b.score;
+                  if (a.score != b.score) return a.score > b.score;
+                  if (a.path != b.path) return a.path < b.path;
+                  if (a.sym->symbol.name != b.sym->symbol.name) {
+                      return a.sym->symbol.name < b.sym->symbol.name;
+                  }
+                  return a.sym->symbol.line < b.sym->symbol.line;
               });
 
     if (max_results > 0 &&

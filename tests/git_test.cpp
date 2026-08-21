@@ -493,6 +493,102 @@ TEST(GitProvider, CreateInGitRepo) {
     }
 }
 
+// ============================================================================
+// name-status (-z) parsing + ref hardening
+// ============================================================================
+
+TEST(GitProviderParse, NameStatusZKeepsPathsWithSpaces) {
+    // The whitespace split truncated this path at the first space, so the
+    // file vanished from the analysis entirely.
+    std::string out_z = std::string("M") + '\0' + "src/my file.go" + '\0';
+    std::vector<ChangedFile> files;
+    ASSERT_TRUE(parse_name_status(out_z, files));
+    ASSERT_EQ(files.size(), 1u);
+    EXPECT_EQ(files[0].path, "src/my file.go");
+    EXPECT_EQ(files[0].status, FileChangeStatus::Modified);
+}
+
+TEST(GitProviderParse, NameStatusZKeepsNonAsciiPathsRaw) {
+    // -z emits raw bytes, so core.quotePath escaping never appears and needs
+    // no unquoting. A quoted name would have been kept verbatim before.
+    std::string out_z = std::string("A") + '\0' + "src/caf\xc3\xa9.go" + '\0';
+    std::vector<ChangedFile> files;
+    ASSERT_TRUE(parse_name_status(out_z, files));
+    ASSERT_EQ(files.size(), 1u);
+    EXPECT_EQ(files[0].path, "src/caf\xc3\xa9.go");
+    EXPECT_EQ(files[0].status, FileChangeStatus::Added);
+}
+
+TEST(GitProviderParse, NameStatusZRenameCarriesBothPaths) {
+    std::string out_z = std::string("R100") + '\0' + "old name.go" + '\0' +
+                        "new name.go" + '\0' + "M" + '\0' + "other.go" + '\0';
+    std::vector<ChangedFile> files;
+    ASSERT_TRUE(parse_name_status(out_z, files));
+    ASSERT_EQ(files.size(), 2u);
+    EXPECT_EQ(files[0].status, FileChangeStatus::Renamed);
+    EXPECT_EQ(files[0].old_path, "old name.go");
+    EXPECT_EQ(files[0].path, "new name.go");
+    EXPECT_EQ(files[1].path, "other.go");
+}
+
+TEST(GitProviderParse, NameStatusZEmptyInput) {
+    std::vector<ChangedFile> files;
+    ASSERT_TRUE(parse_name_status("", files));
+    EXPECT_TRUE(files.empty());
+}
+
+TEST(GitProviderParse, RefsBeginningWithDashAreRejected) {
+    // Refs reach git as positional argv; without this screen a base_ref of
+    // "--output=/tmp/x" is honoured as a flag by the subcommand.
+    EXPECT_FALSE(is_safe_ref("--output=/tmp/pwned"));
+    EXPECT_FALSE(is_safe_ref("-n"));
+    EXPECT_FALSE(is_safe_ref(""));
+    EXPECT_TRUE(is_safe_ref("HEAD"));
+    EXPECT_TRUE(is_safe_ref("v1.2.3"));
+    EXPECT_TRUE(is_safe_ref("feature/my-branch"));
+}
+
+TEST(GitProvider, GetChangedFilesRejectsOptionLikeRefs) {
+    Provider p;
+    if (!Provider::create(".", p)) GTEST_SKIP() << "not a git repo";
+
+    AnalysisParams params = AnalysisParams::defaults();
+    params.scope = AnalysisScope::Commit;
+    params.base_ref = "--output=/tmp/lci-should-not-exist";
+    std::vector<ChangedFile> files;
+    EXPECT_FALSE(p.get_changed_files(params, files));
+
+    params.scope = AnalysisScope::Range;
+    params.base_ref = "--upload-pack=/bin/false";
+    params.target_ref = "HEAD";
+    files.clear();
+    EXPECT_FALSE(p.get_changed_files(params, files));
+}
+
+TEST(GitProvider, GetCommitHashRejectsUnknownRef) {
+    Provider p;
+    if (!Provider::create(".", p)) GTEST_SKIP() << "not a git repo";
+    std::string hash;
+    EXPECT_FALSE(p.get_commit_hash("no-such-ref-xyzzy-1234", hash));
+    EXPECT_TRUE(p.get_commit_hash("HEAD", hash));
+    EXPECT_EQ(hash.size(), 40u);
+}
+
+TEST(GitProvider, BaseRefOfUnknownCommitIsAnErrorNotTheEmptyTree) {
+    // get_parent_commit used to read ANY rev-parse failure as "first commit"
+    // and substitute the empty-tree hash, so a bad ref produced a plausible
+    // report in which the whole repository looked newly added.
+    Provider p;
+    if (!Provider::create(".", p)) GTEST_SKIP() << "not a git repo";
+
+    AnalysisParams params = AnalysisParams::defaults();
+    params.scope = AnalysisScope::Commit;
+    params.base_ref = "no-such-ref-xyzzy-1234";
+    std::string base;
+    EXPECT_FALSE(p.get_base_ref(params, base));
+    EXPECT_NE(base, "4b825dc642cb6eb9a060e54bf8d69288fbee4904");
+}
+
 TEST(GitProvider, GetTargetRef) {
     Provider p;
     // Provider doesn't need to be connected to a repo for get_target_ref
@@ -727,10 +823,99 @@ TEST(ChurnFilter, CustomExcludePatterns) {
     EXPECT_FALSE(should_exclude_from_churn("main.go", {}, {"test_*"}, false));
 }
 
+TEST(ChurnFilter, MonorepoPackagesNotExcluded) {
+    // "packages/" is the first-party layout of every pnpm/yarn/lerna
+    // monorepo. Excluding it by default hid the churn of the code the
+    // report exists to rank.
+    EXPECT_FALSE(should_exclude_from_churn("packages/core/src/index.ts"));
+    EXPECT_FALSE(should_exclude_from_churn("packages/ui/button.tsx"));
+    // Third-party trees nested inside it are still excluded.
+    EXPECT_TRUE(
+        should_exclude_from_churn("packages/core/node_modules/dep/index.js"));
+}
+
+TEST(ChurnFilter, DoubleStarPrefixPatterns) {
+    // "**/<x>" never matched under the old hand-rolled matcher.
+    EXPECT_TRUE(should_exclude_from_churn("a/b/gen.go", {}, {"**/gen.go"},
+                                          /*skip_defaults=*/true));
+    EXPECT_TRUE(should_exclude_from_churn("gen.go", {}, {"**/gen.go"}, true));
+    EXPECT_FALSE(should_exclude_from_churn("a/b/keep.go", {}, {"**/gen.go"},
+                                           true));
+}
+
+TEST(ChurnFilter, QuestionMarkAndCharClassPatterns) {
+    // '?' and '[]' were treated as literals and matched nothing.
+    EXPECT_TRUE(should_exclude_from_churn("a.c", {}, {"*.[ch]"}, true));
+    EXPECT_TRUE(should_exclude_from_churn("a.h", {}, {"*.[ch]"}, true));
+    EXPECT_FALSE(should_exclude_from_churn("a.o", {}, {"*.[ch]"}, true));
+
+    EXPECT_TRUE(should_exclude_from_churn("v1.go", {}, {"v?.go"}, true));
+    EXPECT_FALSE(should_exclude_from_churn("v12.go", {}, {"v?.go"}, true));
+}
+
 TEST(ChurnFilter, SkipDefaults) {
     // With skip_defaults, normally excluded files are included.
     EXPECT_FALSE(should_exclude_from_churn("CHANGELOG.md", {}, {}, true));
     EXPECT_FALSE(should_exclude_from_churn("docs/readme.md", {}, {}, true));
+}
+
+// ============================================================================
+// Commit history parsing
+// ============================================================================
+
+namespace {
+
+// Two commits, each with one numstat line, in the exact shape
+// `git log --format=%H|%an|%ae|%at|%s --numstat` emits.
+constexpr const char* kTwoCommitLog =
+    "1111111111111111111111111111111111111111|Ann|ann@example.com|1700000000|first\n"
+    "10\t2\tsrc/a.go\n"
+    "\n"
+    "2222222222222222222222222222222222222222|Bob|bob@example.com|1700000100|second\n"
+    "3\t4\tsrc/b.go\n";
+
+}  // namespace
+
+TEST(CommitHistoryParse, HeaderCountEqualsCommitCount) {
+    // Regression: the parser re-pushed the previous commit on every new
+    // header, so N commits yielded 2N-1 entries. Every churn statistic was
+    // inflated and the moved-from husks became phantom empty-name authors.
+    std::vector<CommitInfo> commits;
+    ASSERT_TRUE(parse_commit_history(kTwoCommitLog, commits));
+    ASSERT_EQ(commits.size(), 2u);
+
+    EXPECT_EQ(commits[0].author_name, "Ann");
+    EXPECT_EQ(commits[0].message, "first");
+    EXPECT_EQ(commits[0].timestamp_epoch, 1700000000);
+    ASSERT_EQ(commits[0].file_changes.size(), 1u);
+    EXPECT_EQ(commits[0].file_changes[0].path, "src/a.go");
+    EXPECT_EQ(commits[0].file_changes[0].lines_added, 10);
+
+    EXPECT_EQ(commits[1].author_name, "Bob");
+    EXPECT_EQ(commits[1].message, "second");
+    ASSERT_EQ(commits[1].file_changes.size(), 1u);
+    EXPECT_EQ(commits[1].file_changes[0].path, "src/b.go");
+
+    // No phantom contributor with an empty name.
+    for (const auto& c : commits) {
+        EXPECT_FALSE(c.author_name.empty());
+        EXPECT_FALSE(c.hash.empty());
+    }
+}
+
+TEST(CommitHistoryParse, SingleCommitYieldsOne) {
+    std::vector<CommitInfo> commits;
+    ASSERT_TRUE(parse_commit_history(
+        "3333333333333333333333333333333333333333|Cy|cy@example.com|1700000200|only\n"
+        "1\t1\tx.go\n",
+        commits));
+    EXPECT_EQ(commits.size(), 1u);
+}
+
+TEST(CommitHistoryParse, EmptyOutputYieldsNoCommits) {
+    std::vector<CommitInfo> commits;
+    ASSERT_TRUE(parse_commit_history("", commits));
+    EXPECT_TRUE(commits.empty());
 }
 
 // ============================================================================

@@ -315,6 +315,60 @@ bool get_bool(const KdlNode& n, bool& out) {
     return false;
 }
 
+// A known key whose argument has the wrong type used to be a silent no-op:
+// `max_results "100"` left the default in place with no diagnostic, so the
+// user's setting simply never took effect and nothing said so. These setters
+// make the mismatch an error, matching the parse_size_string precedent above.
+
+bool set_string(const KdlNode& n, std::string_view path, std::string& dst,
+                std::string& error) {
+    if (get_string(n, dst)) return true;
+    error = std::string(path) + ": expected a quoted string argument";
+    return false;
+}
+
+bool set_int(const KdlNode& n, std::string_view path, int& dst,
+             std::string& error) {
+    if (get_int(n, dst)) return true;
+    error = std::string(path) + ": expected an integer argument";
+    return false;
+}
+
+bool set_int64(const KdlNode& n, std::string_view path, int64_t& dst,
+               std::string& error) {
+    int v = 0;
+    if (get_int(n, v)) {
+        dst = v;
+        return true;
+    }
+    error = std::string(path) + ": expected an integer argument";
+    return false;
+}
+
+bool set_double(const KdlNode& n, std::string_view path, double& dst,
+                std::string& error) {
+    if (get_double(n, dst)) return true;
+    error = std::string(path) + ": expected a number argument";
+    return false;
+}
+
+bool set_bool(const KdlNode& n, std::string_view path, bool& dst,
+              std::string& error) {
+    if (get_bool(n, dst)) return true;
+    error = std::string(path) + ": expected true or false";
+    return false;
+}
+
+// An unrecognized node name is a warning, not an error: a typo'd key is
+// almost always a mistake the user wants to hear about, but rejecting the
+// whole file would break forward compatibility with newer keys.
+void warn_unknown(std::vector<std::string>* warnings, std::string_view scope,
+                  const std::string& name) {
+    if (!warnings) return;
+    warnings->push_back("unknown config key '" + std::string(scope) +
+                        (scope.empty() ? "" : ".") + name + "' (ignored)");
+}
+
 std::vector<std::string> collect_strings(const KdlNode& n) {
     std::vector<std::string> result;
     for (const auto& a : n.args) {
@@ -374,14 +428,24 @@ bool parse_size_string(const std::string& s, int64_t& out) {
 
 // -- Apply KDL nodes to Config ------------------------------------------------
 
-void apply_project(Config& cfg, const KdlNode& node) {
+bool apply_project(Config& cfg, const KdlNode& node, std::string& error,
+                   std::vector<std::string>* warnings) {
     for (const auto& child : node.children) {
-        if (child.name == "root") get_string(child, cfg.project.root);
-        else if (child.name == "name") get_string(child, cfg.project.name);
+        if (child.name == "root") {
+            if (!set_string(child, "project.root", cfg.project.root, error))
+                return false;
+        } else if (child.name == "name") {
+            if (!set_string(child, "project.name", cfg.project.name, error))
+                return false;
+        } else {
+            warn_unknown(warnings, "project", child.name);
+        }
     }
+    return true;
 }
 
-bool apply_index(Config& cfg, const KdlNode& node, std::string& error) {
+bool apply_index(Config& cfg, const KdlNode& node, std::string& error,
+                 std::vector<std::string>* warnings) {
     for (const auto& child : node.children) {
         if (child.name == "max_file_size") {
             std::string sz;
@@ -390,9 +454,9 @@ bool apply_index(Config& cfg, const KdlNode& node, std::string& error) {
                     error = "index.max_file_size: invalid size value \"" + sz + "\"";
                     return false;
                 }
-            } else {
-                int v = 0;
-                if (get_int(child, v)) cfg.index.max_file_size = v;
+            } else if (!set_int64(child, "index.max_file_size",
+                                  cfg.index.max_file_size, error)) {
+                return false;
             }
         } else if (child.name == "max_parse_file_size") {
             std::string sz;
@@ -401,91 +465,172 @@ bool apply_index(Config& cfg, const KdlNode& node, std::string& error) {
                     error = "index.max_parse_file_size: invalid size value \"" + sz + "\"";
                     return false;
                 }
-            } else {
-                int v = 0;
-                if (get_int(child, v)) cfg.index.max_parse_file_size = v;
+            } else if (!set_int64(child, "index.max_parse_file_size",
+                                  cfg.index.max_parse_file_size, error)) {
+                return false;
             }
         } else if (child.name == "data_file_token_cap") {
             get_int(child, cfg.index.data_file_token_cap);
         } else if (child.name == "max_total_size_mb") {
-            int v = 0;
-            if (get_int(child, v)) cfg.index.max_total_size_mb = v;
+            if (!set_int64(child, "index.max_total_size_mb",
+                           cfg.index.max_total_size_mb, error))
+                return false;
         } else if (child.name == "max_file_count") {
-            get_int(child, cfg.index.max_file_count);
+            if (!set_int(child, "index.max_file_count",
+                         cfg.index.max_file_count, error))
+                return false;
         } else if (child.name == "overflow_policy") {
-            get_string(child, cfg.index.overflow_policy);
+            if (!set_string(child, "index.overflow_policy",
+                            cfg.index.overflow_policy, error))
+                return false;
         } else if (child.name == "follow_symlinks") {
-            get_bool(child, cfg.index.follow_symlinks);
+            if (!set_bool(child, "index.follow_symlinks",
+                          cfg.index.follow_symlinks, error))
+                return false;
         } else if (child.name == "smart_size_control") {
-            get_bool(child, cfg.index.smart_size_control);
+            if (!set_bool(child, "index.smart_size_control",
+                          cfg.index.smart_size_control, error))
+                return false;
         } else if (child.name == "priority_mode") {
-            get_string(child, cfg.index.priority_mode);
+            if (!set_string(child, "index.priority_mode",
+                            cfg.index.priority_mode, error))
+                return false;
         } else if (child.name == "respect_gitignore") {
-            get_bool(child, cfg.index.respect_gitignore);
+            if (!set_bool(child, "index.respect_gitignore",
+                          cfg.index.respect_gitignore, error))
+                return false;
         } else if (child.name == "watch_mode") {
-            get_bool(child, cfg.index.watch_mode);
+            if (!set_bool(child, "index.watch_mode", cfg.index.watch_mode,
+                          error))
+                return false;
         } else if (child.name == "watch_debounce_ms") {
-            get_int(child, cfg.index.watch_debounce_ms);
+            if (!set_int(child, "index.watch_debounce_ms",
+                         cfg.index.watch_debounce_ms, error))
+                return false;
+        } else {
+            warn_unknown(warnings, "index", child.name);
         }
     }
     return true;
 }
 
-void apply_performance(Config& cfg, const KdlNode& node) {
+bool apply_performance(Config& cfg, const KdlNode& node, std::string& error,
+                       std::vector<std::string>* warnings) {
     for (const auto& child : node.children) {
         if (child.name == "max_memory_mb") {
-            get_int(child, cfg.performance.max_memory_mb);
+            if (!set_int(child, "performance.max_memory_mb",
+                         cfg.performance.max_memory_mb, error))
+                return false;
         } else if (child.name == "max_goroutines") {
-            get_int(child, cfg.performance.max_goroutines);
+            if (!set_int(child, "performance.max_goroutines",
+                         cfg.performance.max_goroutines, error))
+                return false;
         } else if (child.name == "debounce_ms") {
-            get_int(child, cfg.performance.debounce_ms);
+            if (!set_int(child, "performance.debounce_ms",
+                         cfg.performance.debounce_ms, error))
+                return false;
         } else if (child.name == "startup_delay_ms") {
-            get_int(child, cfg.performance.startup_delay_ms);
+            if (!set_int(child, "performance.startup_delay_ms",
+                         cfg.performance.startup_delay_ms, error))
+                return false;
+        } else {
+            warn_unknown(warnings, "performance", child.name);
         }
     }
+    return true;
 }
 
-void apply_server(Config& cfg, const KdlNode& node) {
+bool apply_server(Config& cfg, const KdlNode& node, std::string& error,
+                  std::vector<std::string>* warnings) {
     for (const auto& child : node.children) {
         if (child.name == "max_rss_mb") {
-            get_int(child, cfg.server.max_rss_mb);
+            if (!set_int(child, "server.max_rss_mb", cfg.server.max_rss_mb,
+                         error))
+                return false;
         } else if (child.name == "idle_timeout_sec") {
-            get_int(child, cfg.server.idle_timeout_sec);
+            if (!set_int(child, "server.idle_timeout_sec",
+                         cfg.server.idle_timeout_sec, error))
+                return false;
         } else if (child.name == "max_instances") {
-            get_int(child, cfg.server.max_instances);
+            if (!set_int(child, "server.max_instances",
+                         cfg.server.max_instances, error))
+                return false;
+        } else {
+            warn_unknown(warnings, "server", child.name);
         }
     }
+    return true;
 }
 
-void apply_ranking(SearchRankingConfig& ranking, const KdlNode& node) {
+bool apply_ranking(SearchRankingConfig& ranking, const KdlNode& node,
+                   std::string& error, std::vector<std::string>* warnings) {
     for (const auto& child : node.children) {
-        if (child.name == "enabled") get_bool(child, ranking.enabled);
-        else if (child.name == "code_file_boost") get_double(child, ranking.code_file_boost);
-        else if (child.name == "doc_file_penalty") get_double(child, ranking.doc_file_penalty);
-        else if (child.name == "config_file_boost") get_double(child, ranking.config_file_boost);
-        else if (child.name == "require_symbol") get_bool(child, ranking.require_symbol);
-        else if (child.name == "non_symbol_penalty") get_double(child, ranking.non_symbol_penalty);
+        if (child.name == "enabled") {
+            if (!set_bool(child, "search.ranking.enabled", ranking.enabled,
+                          error))
+                return false;
+        } else if (child.name == "code_file_boost") {
+            if (!set_double(child, "search.ranking.code_file_boost",
+                            ranking.code_file_boost, error))
+                return false;
+        } else if (child.name == "doc_file_penalty") {
+            if (!set_double(child, "search.ranking.doc_file_penalty",
+                            ranking.doc_file_penalty, error))
+                return false;
+        } else if (child.name == "config_file_boost") {
+            if (!set_double(child, "search.ranking.config_file_boost",
+                            ranking.config_file_boost, error))
+                return false;
+        } else if (child.name == "require_symbol") {
+            if (!set_bool(child, "search.ranking.require_symbol",
+                          ranking.require_symbol, error))
+                return false;
+        } else if (child.name == "non_symbol_penalty") {
+            if (!set_double(child, "search.ranking.non_symbol_penalty",
+                            ranking.non_symbol_penalty, error))
+                return false;
+        } else {
+            warn_unknown(warnings, "search.ranking", child.name);
+        }
     }
+    return true;
 }
 
-void apply_search(Config& cfg, const KdlNode& node) {
+bool apply_search(Config& cfg, const KdlNode& node, std::string& error,
+                  std::vector<std::string>* warnings) {
     for (const auto& child : node.children) {
         if (child.name == "max_results") {
-            get_int(child, cfg.search.max_results);
+            if (!set_int(child, "search.max_results", cfg.search.max_results,
+                         error))
+                return false;
         } else if (child.name == "max_context_lines") {
-            get_int(child, cfg.search.max_context_lines);
+            if (!set_int(child, "search.max_context_lines",
+                         cfg.search.max_context_lines, error))
+                return false;
         } else if (child.name == "enable_fuzzy") {
-            get_bool(child, cfg.search.enable_fuzzy);
+            if (!set_bool(child, "search.enable_fuzzy",
+                          cfg.search.enable_fuzzy, error))
+                return false;
         } else if (child.name == "merge_file_results") {
-            get_bool(child, cfg.search.merge_file_results);
+            if (!set_bool(child, "search.merge_file_results",
+                          cfg.search.merge_file_results, error))
+                return false;
         } else if (child.name == "ensure_complete_stmt") {
-            get_bool(child, cfg.search.ensure_complete_stmt);
+            if (!set_bool(child, "search.ensure_complete_stmt",
+                          cfg.search.ensure_complete_stmt, error))
+                return false;
         } else if (child.name == "include_leading_comments") {
-            get_bool(child, cfg.search.include_leading_comments);
+            if (!set_bool(child, "search.include_leading_comments",
+                          cfg.search.include_leading_comments, error))
+                return false;
         } else if (child.name == "ranking") {
-            apply_ranking(cfg.search.ranking, child);
+            if (!apply_ranking(cfg.search.ranking, child, error, warnings))
+                return false;
+        } else {
+            warn_unknown(warnings, "search", child.name);
         }
     }
+    return true;
 }
 
 // Folds a `synonyms` KDL block into a frozen SynonymTable. Children are
@@ -509,6 +654,23 @@ Result<SynonymTable> apply_synonyms(const KdlNode& node) {
         }
     }
     return SynonymTable::build_from_ops(ops);
+}
+
+// Expands a leading `~/` (or a bare `~`) against $HOME. Without this,
+// `root "~/proj"` produced the literal path <project_root>/~/proj — a
+// directory that does not exist, so the index silently covered nothing.
+std::string expand_tilde(const std::string& path) {
+    if (path.empty() || path[0] != '~') return path;
+    if (path.size() > 1 && path[1] != '/' && path[1] != '\\') {
+        return path;  // "~user/..." is not something we resolve.
+    }
+    const char* home = std::getenv("HOME");
+#ifdef _WIN32
+    if (home == nullptr || *home == '\0') home = std::getenv("USERPROFILE");
+#endif
+    if (home == nullptr || *home == '\0') return path;
+    if (path.size() == 1) return std::string(home);
+    return (fs::path(home) / path.substr(2)).string();
 }
 
 // Base config used when a .lci.kdl file IS loaded. This intentionally
@@ -548,18 +710,31 @@ Config make_kdl_base_config() {
 // document keep whatever `cfg` already holds — this is the shared overlay
 // primitive for both the project file and the user-level defaults file.
 bool apply_kdl_nodes(Config& cfg, const std::vector<KdlNode>& nodes,
-                     std::string& error) {
+                     std::string& error,
+                     std::vector<std::string>* warnings) {
     for (const auto& node : nodes) {
-        if (node.name == "project") apply_project(cfg, node);
-        else if (node.name == "index") {
-            if (!apply_index(cfg, node, error)) return false;
+        if (node.name == "project") {
+            if (!apply_project(cfg, node, error, warnings)) return false;
         }
-        else if (node.name == "performance") apply_performance(cfg, node);
-        else if (node.name == "server") apply_server(cfg, node);
-        else if (node.name == "search") apply_search(cfg, node);
+        else if (node.name == "index") {
+            if (!apply_index(cfg, node, error, warnings)) return false;
+        }
+        else if (node.name == "performance") {
+            if (!apply_performance(cfg, node, error, warnings)) return false;
+        }
+        else if (node.name == "server") {
+            if (!apply_server(cfg, node, error, warnings)) return false;
+        }
+        else if (node.name == "search") {
+            if (!apply_search(cfg, node, error, warnings)) return false;
+        }
         else if (node.name == "include") cfg.include = collect_strings(node);
         else if (node.name == "exclude") cfg.exclude = collect_strings(node);
-        else if (node.name == "propagation_config_dir") get_string(node, cfg.propagation_config_dir);
+        else if (node.name == "propagation_config_dir") {
+            if (!set_string(node, "propagation_config_dir",
+                            cfg.propagation_config_dir, error))
+                return false;
+        }
         else if (node.name == "attributes") {
             // attributes { test "src/legacy_tests/"; vendored "*.iife.js" }
             // Child node name = attribute tag, string args = patterns.
@@ -595,6 +770,9 @@ bool apply_kdl_nodes(Config& cfg, const std::vector<KdlNode>& nodes,
             }
             cfg.synonyms = std::move(result.value());
         }
+        else {
+            warn_unknown(warnings, "", node.name);
+        }
     }
     return true;
 }
@@ -616,7 +794,8 @@ fs::path user_config_path() {
 // Overlays the user-level defaults file onto `cfg` when it exists. A
 // malformed user file is an error (fail fast — silently ignoring it would
 // leave the user believing their defaults apply).
-bool overlay_user_config(Config& cfg, std::string& error) {
+bool overlay_user_config(Config& cfg, std::string& error,
+                         std::vector<std::string>* warnings = nullptr) {
     fs::path path = user_config_path();
     if (path.empty()) return true;
     std::error_code ec;
@@ -638,7 +817,7 @@ bool overlay_user_config(Config& cfg, std::string& error) {
         error = "failed to parse " + path.string() + ": " + parser.error();
         return false;
     }
-    if (!apply_kdl_nodes(cfg, nodes, error)) {
+    if (!apply_kdl_nodes(cfg, nodes, error, warnings)) {
         error = path.string() + ": " + error;
         return false;
     }
@@ -651,7 +830,8 @@ bool overlay_user_config(Config& cfg, std::string& error) {
 // untouched and writes a descriptive message into `error`. External linkage
 // (declared in lci/config.h): the KDL parse path takes untrusted bytes from
 // cloned repos' .lci.kdl files, and fuzz_config_kdl drives it directly.
-Config parse_kdl_content(const std::string& content, std::string& error) {
+Config parse_kdl_content(const std::string& content, std::string& error,
+                         std::vector<std::string>* warnings) {
     Parser parser(content);
     auto nodes = parser.parse_document();
     if (!parser.error().empty()) {
@@ -666,14 +846,14 @@ Config parse_kdl_content(const std::string& content, std::string& error) {
     // the long-standing project-file contract, so user include/exclude
     // apply only in the no-project-file path.
     std::string user_err;
-    if (!overlay_user_config(cfg, user_err)) {
+    if (!overlay_user_config(cfg, user_err, warnings)) {
         error = user_err;
         return cfg;
     }
     cfg.include.clear();
     cfg.exclude.clear();
 
-    if (!apply_kdl_nodes(cfg, nodes, error)) return cfg;
+    if (!apply_kdl_nodes(cfg, nodes, error, warnings)) return cfg;
 
     return cfg;
 }
@@ -811,25 +991,39 @@ Config make_default_config() {
     return cfg;
 }
 
-ConfigResult load_config(const std::string& project_root) {
-    fs::path kdl_path = fs::path(project_root) / ".lci.kdl";
+namespace {
+
+// Shared body of load_config / load_config_file. `must_exist` distinguishes
+// the implicit <root>/.lci.kdl (absent means "use defaults") from a file the
+// user named on the command line (absent means the flag did nothing, which
+// must be an error rather than a silent fallback).
+ConfigResult load_config_from(const fs::path& kdl_path,
+                              const std::string& project_root,
+                              bool must_exist) {
+    std::vector<std::string> warnings;
 
     std::error_code ec;
     if (!fs::exists(kdl_path, ec)) {
+        if (must_exist) {
+            return {{}, "config file not found: " + kdl_path.string(), {}};
+        }
         Config cfg = make_default_config();
         // No project file: user-level defaults overlay the full rich
         // defaults, include/exclude included.
         std::string user_err;
-        if (!overlay_user_config(cfg, user_err)) {
-            return {{}, user_err};
+        if (!overlay_user_config(cfg, user_err, &warnings)) {
+            return {{}, user_err, {}};
         }
         cfg.project.root = project_root;
-        return {std::move(cfg), {}};
+        if (auto verr = validate_config(cfg); !verr.empty()) {
+            return {{}, verr, std::move(warnings)};
+        }
+        return {std::move(cfg), {}, std::move(warnings)};
     }
 
     std::ifstream file(kdl_path);
     if (!file) {
-        return {{}, "failed to read .lci.kdl: " + kdl_path.string()};
+        return {{}, "failed to read config: " + kdl_path.string(), {}};
     }
 
     std::ostringstream ss;
@@ -837,19 +1031,46 @@ ConfigResult load_config(const std::string& project_root) {
     std::string content = ss.str();
 
     std::string parse_error;
-    Config cfg = parse_kdl_content(content, parse_error);
+    Config cfg = parse_kdl_content(content, parse_error, &warnings);
     if (!parse_error.empty()) {
-        return {{}, "failed to parse " + kdl_path.string() + ": " + parse_error};
+        return {{},
+                "failed to parse " + kdl_path.string() + ": " + parse_error,
+                std::move(warnings)};
     }
 
     // Resolve project root path
     if (cfg.project.root.empty()) {
         cfg.project.root = project_root;
-    } else if (!fs::path(cfg.project.root).is_absolute()) {
-        cfg.project.root = fs::weakly_canonical(fs::path(project_root) / cfg.project.root).string();
+    } else {
+        cfg.project.root = expand_tilde(cfg.project.root);
+        if (!fs::path(cfg.project.root).is_absolute()) {
+            cfg.project.root =
+                fs::weakly_canonical(fs::path(project_root) / cfg.project.root)
+                    .string();
+        }
     }
 
-    return {std::move(cfg), {}};
+    // Validate here, not only in `lci config show`. Every other command used
+    // the config unvalidated, so an out-of-range value (or a 0 meaning
+    // "auto") reached the indexer as-is and misbehaved far from its cause.
+    if (auto verr = validate_config(cfg); !verr.empty()) {
+        return {{}, kdl_path.string() + ": " + verr, std::move(warnings)};
+    }
+
+    return {std::move(cfg), {}, std::move(warnings)};
+}
+
+}  // namespace
+
+ConfigResult load_config(const std::string& project_root) {
+    return load_config_from(fs::path(project_root) / ".lci.kdl", project_root,
+                            /*must_exist=*/false);
+}
+
+ConfigResult load_config_file(const std::string& config_path,
+                              const std::string& project_root) {
+    return load_config_from(fs::path(config_path), project_root,
+                            /*must_exist=*/true);
 }
 
 std::string validate_config(Config& cfg) {

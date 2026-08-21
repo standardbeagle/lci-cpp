@@ -668,6 +668,21 @@ TEST(PostingsIndexTest, CaseInsensitiveFind) {
     EXPECT_EQ(files.size(), 1u);
 }
 
+TEST(PostingsIndexTest, CaseSensitiveFindLowercasesLookupKey) {
+    // Tokens are stored lowercased at index time, so a case-sensitive
+    // lookup with any uppercase letter must still hit the lowered key —
+    // the prefilter proposes candidates; the caller's verify scan enforces
+    // exact case. Previously "FooBar" missed unconditionally.
+    PostingsIndex pi;
+    pi.index_file(1, "var y = FooBar()");
+
+    std::vector<FileID> files;
+    absl::flat_hash_map<FileID, int> offsets;
+    pi.find("FooBar", false, files, offsets);
+    ASSERT_EQ(files.size(), 1u);
+    EXPECT_EQ(files[0], 1u);
+}
+
 TEST(PostingsIndexTest, MinTokenLength) {
     PostingsIndex pi;
 
@@ -1309,6 +1324,50 @@ TEST(ReferenceTrackerTest, LibraryPathBeatsExamplesPathOnFallback) {
     auto callees = rt.get_callee_symbols(caller[0].id);
     ASSERT_EQ(callees.size(), 1u);
     EXPECT_EQ(callees[0], lib[0].id);
+}
+
+// ---------------------------------------------------------------------------
+// Scope-chain cache - file identity
+// ---------------------------------------------------------------------------
+
+// Discrimination test for the scope-chain cache key. Two files hold a symbol
+// with byte-identical line geometry but scopes with DIFFERENT names. The cache
+// key is built from line numbers only; without file identity mixed in, the
+// second file hits the first file's cache entry and its symbol reports the
+// wrong file's scope names.
+TEST(ReferenceTrackerTest, ScopeChainCacheDoesNotShareAcrossFiles) {
+    ReferenceTracker rt;
+
+    auto make_scope = [](const std::string& name, int start, int end) {
+        ScopeInfo sc;
+        sc.type = ScopeType::Class;
+        sc.name = name;
+        sc.full_path = name;
+        sc.start_line = start;
+        sc.end_line = end;
+        sc.level = 1;
+        return sc;
+    };
+
+    std::vector<Symbol> syms_a = {
+        make_sym("handle", SymbolType::Method, 1, 5, 9),
+    };
+    std::vector<ScopeInfo> scopes_a = {make_scope("AlphaClass", 1, 20)};
+
+    std::vector<Symbol> syms_b = {
+        make_sym("handle", SymbolType::Method, 2, 5, 9),
+    };
+    std::vector<ScopeInfo> scopes_b = {make_scope("BetaClass", 1, 20)};
+
+    auto a = rt.process_file(1, "alpha.go", syms_a, {}, scopes_a);
+    auto b = rt.process_file(2, "beta.go", syms_b, {}, scopes_b);
+
+    ASSERT_EQ(a.size(), 1u);
+    ASSERT_EQ(b.size(), 1u);
+    ASSERT_EQ(a[0].scope_chain.size(), 1u);
+    ASSERT_EQ(b[0].scope_chain.size(), 1u);
+    EXPECT_EQ(a[0].scope_chain[0].name, "AlphaClass");
+    EXPECT_EQ(b[0].scope_chain[0].name, "BetaClass");
 }
 
 }  // namespace

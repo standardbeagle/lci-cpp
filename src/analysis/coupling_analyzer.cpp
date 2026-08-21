@@ -107,11 +107,17 @@ CouplingAnalyzer::CouplingResult CouplingAnalyzer::analyze(
         id_to_pkg[sym->id] = pkg;
     }
 
+    // Afferent (incoming) counts are accumulated in the same pass that builds
+    // the dependency edges. The per-package loop below used to re-scan every
+    // package's dep map to find its incoming edges -- O(packages x edges) for
+    // a number that each edge already carries.
+    absl::flat_hash_map<std::string, int> afferent_count;
     for (const auto& [sym, src_pkg] : sym_to_pkg) {
         for (SymbolID target : targets_of(sym->id)) {
             auto it = id_to_pkg.find(target);
             if (it != id_to_pkg.end()) {
                 pkg_deps[src_pkg][it->second]++;
+                if (it->second != src_pkg) ++afferent_count[it->second];
             }
         }
     }
@@ -140,14 +146,10 @@ CouplingAnalyzer::CouplingResult CouplingAnalyzer::analyze(
             if (target != pkg) efferent += count;
         }
 
-        // Afferent (incoming from other packages)
+        // Afferent (incoming from other packages), counted above.
         int afferent = 0;
-        for (const auto& [src, src_deps] : pkg_deps) {
-            if (src != pkg) {
-                if (auto it = src_deps.find(pkg); it != src_deps.end()) {
-                    afferent += it->second;
-                }
-            }
+        if (auto it = afferent_count.find(pkg); it != afferent_count.end()) {
+            afferent = it->second;
         }
 
         coupling.afferent_coupling[pkg] = afferent;
@@ -195,10 +197,15 @@ CouplingAnalyzer::CouplingResult CouplingAnalyzer::analyze(
     cohesion.min_cohesion = min_cohesion;
 
     // Sort low cohesion by value and limit to 5
+    // Package name breaks cohesion ties: low_cohesion_pkgs was collected by
+    // walking a hash map and is truncated to 5, so without a total order the
+    // reported worst-five varied run to run (Karpathy rule 4).
     std::sort(low_cohesion_pkgs.begin(), low_cohesion_pkgs.end(),
               [&cohesion](const std::string& a, const std::string& b) {
-                  return cohesion.relational_cohesion[a] <
-                         cohesion.relational_cohesion[b];
+                  double ca = cohesion.relational_cohesion[a];
+                  double cb = cohesion.relational_cohesion[b];
+                  if (ca != cb) return ca < cb;
+                  return a < b;
               });
     if (low_cohesion_pkgs.size() > 5) {
         low_cohesion_pkgs.resize(5);

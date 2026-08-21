@@ -366,6 +366,10 @@ struct ReportMetadata {
     std::chrono::system_clock::time_point analyzed_at;
     int64_t analysis_time_ms{};
     bool truncated{};
+    /// Changed files whose content could not be read at the target ref. They
+    /// contribute no symbols, so without this count the report looks complete
+    /// while silently covering less than it claims.
+    int files_skipped_unreadable{};
     int total_duplicates{};
     int total_naming_issues{};
     int total_metrics_issues{};

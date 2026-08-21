@@ -16,8 +16,11 @@
 #include <vector>
 
 #ifndef _WIN32
+#include <sys/stat.h>
 #include <unistd.h>
 #endif
+
+#include <cstdlib>
 
 namespace lci {
 namespace cli {
@@ -27,13 +30,6 @@ namespace {
 std::atomic<bool> g_shutdown_requested{false};
 
 void signal_handler(int /*sig*/) { g_shutdown_requested.store(true); }
-
-/// The registry every CLI-launched server publishes into. Enumeration,
-/// eviction, and publication must agree on this directory or `lci servers`
-/// reports an empty fleet while servers are running.
-std::string instance_registry_dir() {
-    return std::filesystem::temp_directory_path().string();
-}
 
 /// Seconds since a registry entry was last touched. Activity stamping is
 /// throttled to 60s, so this is a coarse "last used", not a precise idle clock.
@@ -45,6 +41,36 @@ long long idle_seconds(const ServerInstance& inst) {
 }
 
 }  // namespace
+
+// -- Instance registry directory ------------------------------------------------
+
+std::string instance_registry_dir() {
+    namespace fs = std::filesystem;
+    fs::path dir;
+#ifndef _WIN32
+    // Prefer the kernel-managed per-user runtime dir; fall back to a
+    // uid-suffixed private dir under temp. Either way the directory is
+    // 0700: registry entries drive shutdown/eviction, so they must not be
+    // forgeable by other local users (the old location — the shared system
+    // temp dir itself — allowed exactly that).
+    if (const char* xdg = std::getenv("XDG_RUNTIME_DIR");
+        xdg != nullptr && *xdg != '\0') {
+        dir = fs::path(xdg) / "lci";
+    } else {
+        dir = fs::temp_directory_path() /
+              ("lci-registry-" + std::to_string(::getuid()));
+    }
+#else
+    // %TEMP% is already per-user on Windows.
+    dir = fs::temp_directory_path() / "lci-registry";
+#endif
+    std::error_code ec;
+    fs::create_directories(dir, ec);
+#ifndef _WIN32
+    ::chmod(dir.c_str(), 0700);
+#endif
+    return dir.string();
+}
 
 // -- ensure_server_running ----------------------------------------------------
 

@@ -564,12 +564,16 @@ struct StructureAnalysis {
 
 /// Unified codebase intelligence response.
 struct CodebaseIntelligenceResponse {
-    RepositoryMap* repository_map{};
-    HealthDashboard* health_dashboard{};
-    EntryPointsList* entry_points{};
-    SemanticVocabulary* semantic_vocabulary{};
-    // Tier 2/3 analysis payloads. Value-owned (optional) so the response frees
-    // them itself — unlike the raw-pointer sub-objects above. Populated by the
+    // Tier 1 sub-objects. Owned: the response frees them. They stay pointers
+    // (rather than std::optional like the tier 2/3 fields below) because
+    // "absent" is meaningful here — each is emitted only when the caller
+    // asked for it via CodebaseIntelligenceInclude — and consumers test them
+    // for null.
+    std::unique_ptr<RepositoryMap> repository_map;
+    std::unique_ptr<HealthDashboard> health_dashboard;
+    std::unique_ptr<EntryPointsList> entry_points;
+    std::unique_ptr<SemanticVocabulary> semantic_vocabulary;
+    // Tier 2/3 analysis payloads. Value-owned (optional). Populated by the
     // engine's detailed/statistics/structure builders; the MCP handler renders
     // LCF from these rather than recomputing the analysis inline.
     std::optional<ModuleAnalysis> module_analysis;

@@ -289,19 +289,40 @@ SideEffectInfo SideEffectAnalyzer::end_function() {
                               throw_lines, ctx.returns_value,
                               info.resource_findings);
 
-    // Extract parameter writes
+    // Extract parameter writes. A base identifier that is not in
+    // ctx.parameters has no known position -- that happens when the write
+    // reaches the parameter through an alias or a construct the extractor
+    // did not tie back to the signature. It used to fall through as index 0,
+    // which reads as a confident claim that the FIRST parameter was mutated.
+    // kUnknownParameterIndex says "unknown" instead, and such a write is
+    // deliberately kept out of mutated_parameters below (the mutation is
+    // real, its position is not known).
     absl::flat_hash_map<int, bool> param_index_set;
     for (const auto& access : ctx.accesses) {
         if (access.type == AccessType::Write &&
             access.target_type == AccessTarget::Parameter) {
-            int idx = 0;
+            int idx = kUnknownParameterIndex;
             auto it = ctx.parameters.find(access.base_identifier);
             if (it != ctx.parameters.end()) idx = it->second;
 
             info.parameter_writes.push_back(ParameterWriteInfo{
                 access.base_identifier, idx, access.line, access.column,
                 access.field_path, false});
-            param_index_set[idx] = true;
+            if (idx != kUnknownParameterIndex) param_index_set[idx] = true;
+        }
+    }
+
+    // Extract global writes. Mirrors the closure handling in
+    // populate_purity_classification: nothing else fills this vector, so
+    // purity_classification.mutated_globals was always empty however many
+    // globals a function wrote. is_package stays false -- the extractor does
+    // not distinguish package-level from file-level globals.
+    for (const auto& access : ctx.accesses) {
+        if (access.type == AccessType::Write &&
+            access.target_type == AccessTarget::Global) {
+            info.global_writes.push_back(GlobalWriteInfo{
+                access.base_identifier, access.line, access.column,
+                access.field_path, false});
         }
     }
 
@@ -383,11 +404,6 @@ void SideEffectAnalyzer::record_function_call(
     std::string_view func_name, std::string_view qualifier,
     bool is_method, int line, int column) {
     if (!current_func_) return;
-
-    std::string qualified = std::string(func_name);
-    if (!qualifier.empty()) {
-        qualified = std::string(qualifier) + "." + std::string(func_name);
-    }
 
     // Unknown function - record for Phase 2 resolution
     current_func_->unresolved_calls.push_back(UnresolvedCallInfo{
@@ -812,7 +828,15 @@ AccessPattern SideEffectAnalyzer::analyze_access_pattern(
     bool has_interleaved = false;
     bool has_write_then_read = false;
 
-    for (auto& [target, target_accesses] : by_target) {
+    // Deterministic violation order (Karpathy rule 4): by_target is an absl
+    // hash map, so the emitted violations came out in per-process hash order.
+    std::vector<std::string> targets;
+    targets.reserve(by_target.size());
+    for (const auto& [target, _] : by_target) targets.push_back(target);
+    std::sort(targets.begin(), targets.end());
+
+    for (const auto& target : targets) {
+        auto& target_accesses = by_target[target];
         auto tap = analyze_target_accesses(target, target_accesses);
 
         if (tap.write_count > 0) has_write = true;

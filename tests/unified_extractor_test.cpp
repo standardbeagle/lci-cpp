@@ -509,5 +509,51 @@ TEST(UnifiedExtractorTest, ResetClearsState) {
     EXPECT_TRUE(r2.scopes.empty());
 }
 
+// ---------------------------------------------------------------------------
+// TSX extraction tests
+// ---------------------------------------------------------------------------
+
+TEST(UnifiedExtractorTest, TsxRoutesToTsxGrammar) {
+    Language lang{};
+    ASSERT_TRUE(language_from_extension(".tsx", lang));
+    EXPECT_EQ(lang, Language::Tsx);
+    // .ts stays on the plain TypeScript grammar.
+    ASSERT_TRUE(language_from_extension(".ts", lang));
+    EXPECT_EQ(lang, Language::TypeScript);
+}
+
+TEST(UnifiedExtractorTest, TsxJsxSymbolsExtracted) {
+    // JSX is invalid under the plain TypeScript grammar (the `<div>` reads
+    // as a type assertion and the parse degrades to ERROR nodes); the TSX
+    // grammar parses it cleanly and symbol extraction sees every function.
+    constexpr std::string_view src = R"(
+function App(): JSX.Element {
+    return <div className="app"><span>hello</span></div>;
+}
+
+const Button = (props: { label: string }) => <button>{props.label}</button>;
+
+function helper(x: number): number {
+    return x * 2;
+}
+)";
+    Language lang{};
+    ASSERT_TRUE(language_from_extension(".tsx", lang));
+    auto tree = parse(lang, src);
+    ASSERT_NE(tree.get(), nullptr);
+    EXPECT_FALSE(ts_node_has_error(ts_tree_root_node(tree.get())));
+
+    UnifiedExtractor ue;
+    ue.init(src, 1, ".tsx", "app.tsx");
+    ue.extract(tree.get());
+    auto r = ue.get_results();
+
+    const Symbol* app = find_symbol(r, "App");
+    ASSERT_NE(app, nullptr);
+    EXPECT_EQ(app->type, SymbolType::Function);
+    EXPECT_NE(find_symbol(r, "Button"), nullptr);
+    EXPECT_NE(find_symbol(r, "helper"), nullptr);
+}
+
 }  // namespace
 }  // namespace lci::parser

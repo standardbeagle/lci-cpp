@@ -9,6 +9,7 @@
 // dependency. The release JSON is parsed natively with nlohmann (no text
 // scraping). See docs/superpowers/specs/2026-06-07-install-update-distribution-design.md.
 
+#include <filesystem>
 #include <optional>
 #include <string>
 #include <vector>
@@ -40,11 +41,20 @@ Platform detect_platform();
 // Returns nullopt when the platform is unsupported or no asset matches.
 std::optional<Asset> select_asset(const std::vector<Asset>& assets, Platform p);
 
-// Pure security guards: a download URL/asset name from the API response is
-// passed to curl/tar via a shell, so reject anything that is not an https
-// GitHub URL free of shell-breaking characters, or a plain filename.
+// Pure security guards for the URL and asset name in a GitHub API response.
+// curl and tar are exec'd with an argv, never through a shell, so there is no
+// quoting to break out of; the real invariant is that the URL must be https
+// and must resolve to a pinned GitHub host, and the asset name must be a
+// plain filename with no directory component. The charset restrictions are
+// defense-in-depth against values that would confuse curl or the filesystem.
 bool is_safe_download_url(const std::string& url);
 bool is_safe_asset_name(const std::string& name);
+
+// Creates a private, unpredictably-named work directory (mode 0700, owned by
+// this process) under the system temp dir, and returns its path. Empty on
+// failure — callers MUST abort rather than fall back to a predictable name,
+// which is what makes the download safe to stage on a multi-user host.
+std::filesystem::path make_private_workdir();
 
 // Pure: find the expected lowercase-hex SHA-256 for `asset_name` in a
 // SHA256SUMS body ("<hash>  <filename>" per line). Empty if absent or the

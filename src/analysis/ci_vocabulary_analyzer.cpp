@@ -173,9 +173,20 @@ std::vector<DomainTerm> CIVocabularyAnalyzer::extract_domain_terms_from_files(
 
     int total_terms = static_cast<int>(term_frequency.size());
     std::vector<DomainTerm> result;
+    result.reserve(domain_info.size());
 
-    for (const auto& [domain, info] : domain_info) {
+    // Deterministic emit order (Karpathy rule 4): both domain_info and the
+    // term_frequency map feeding info.terms are absl hash maps, so the domain
+    // order and each domain's term list were per-process hash order.
+    std::vector<std::string> domains;
+    domains.reserve(domain_info.size());
+    for (const auto& [domain, _] : domain_info) domains.push_back(domain);
+    std::sort(domains.begin(), domains.end());
+
+    for (const auto& domain : domains) {
+        auto& info = domain_info[domain];
         if (!info.terms.empty()) {
+            std::sort(info.terms.begin(), info.terms.end());
             double avg = info.avg_strength /
                          static_cast<double>(info.strength_count);
             double confidence = calculate_domain_confidence(
@@ -184,9 +195,9 @@ std::vector<DomainTerm> CIVocabularyAnalyzer::extract_domain_terms_from_files(
 
             DomainTerm dt;
             dt.domain = domain;
-            dt.terms = info.terms;
-            dt.confidence = confidence;
             dt.count = static_cast<int>(info.terms.size());
+            dt.terms = std::move(info.terms);
+            dt.confidence = confidence;
             result.push_back(std::move(dt));
         }
     }

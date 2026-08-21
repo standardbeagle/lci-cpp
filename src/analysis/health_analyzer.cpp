@@ -160,6 +160,8 @@ ComplexityMetrics HealthAnalyzer::calculate_complexity_from_files(
 
     double avg = 0.0;
     double median = 0.0;
+    double p75 = 0.0;
+    double p90 = 0.0;
     if (!complexities.empty()) {
         for (double v : complexities) avg += v;
         avg /= static_cast<double>(complexities.size());
@@ -172,6 +174,12 @@ ComplexityMetrics HealthAnalyzer::calculate_complexity_from_files(
         } else {
             median = sorted[mid];
         }
+        // Real order statistics off the vector already sorted for the median.
+        // p75/p90 used to be average*1.2 and average*1.5 -- numbers with no
+        // relationship to the distribution, which on the usual long tail of
+        // complexity understate both badly.
+        p75 = sorted[sorted.size() * 3 / 4];
+        p90 = sorted[sorted.size() * 9 / 10];
     }
 
     ComplexityMetrics result;
@@ -179,8 +187,8 @@ ComplexityMetrics HealthAnalyzer::calculate_complexity_from_files(
     result.median_cc = median;
     result.max_cc = max_cc;
     result.percentiles["p50"] = median;
-    result.percentiles["p75"] = avg * 1.2;
-    result.percentiles["p90"] = avg * 1.5;
+    result.percentiles["p75"] = p75;
+    result.percentiles["p90"] = p90;
     result.high_complexity_funcs = std::move(high_funcs);
     result.distribution = std::move(distribution);
     return result;
@@ -227,9 +235,14 @@ std::vector<Hotspot> HealthAnalyzer::identify_hotspots_from_files(
         }
     }
 
+    // std::sort is not stable, so equal risk scores must be separated
+    // explicitly or the truncated head varies run to run (Karpathy rule 4).
     std::sort(hotspots.begin(), hotspots.end(),
               [](const Hotspot& a, const Hotspot& b) {
-                  return a.risk_score > b.risk_score;
+                  if (a.risk_score != b.risk_score) {
+                      return a.risk_score > b.risk_score;
+                  }
+                  return a.location < b.location;
               });
 
     return hotspots;
@@ -533,10 +546,17 @@ int HealthAnalyzer::severity_rank(std::string_view sev) {
 
 std::vector<CodeSmellEntry> HealthAnalyzer::sort_and_limit_smells(
     std::vector<CodeSmellEntry> smells, int max_count) {
+    // Severity alone leaves most entries tied, and this list is truncated to
+    // max_count -- without a total order WHICH smells survive varies run to
+    // run (Karpathy rule 4).
     std::sort(smells.begin(), smells.end(),
               [](const CodeSmellEntry& a, const CodeSmellEntry& b) {
-                  return severity_rank(a.severity) >
-                         severity_rank(b.severity);
+                  int ra = severity_rank(a.severity);
+                  int rb = severity_rank(b.severity);
+                  if (ra != rb) return ra > rb;
+                  if (a.type != b.type) return a.type < b.type;
+                  if (a.location != b.location) return a.location < b.location;
+                  return a.symbol < b.symbol;
               });
     if (static_cast<int>(smells.size()) > max_count) {
         smells.resize(static_cast<size_t>(max_count));
@@ -605,9 +625,15 @@ std::vector<ProblematicSymbol> HealthAnalyzer::identify_problematic_symbols(
         }
     }
 
+    // Total order before the truncation below (Karpathy rule 4): risk_score
+    // is a small integer, so ties are the common case.
     std::sort(result.begin(), result.end(),
               [](const ProblematicSymbol& a, const ProblematicSymbol& b) {
-                  return a.risk_score > b.risk_score;
+                  if (a.risk_score != b.risk_score) {
+                      return a.risk_score > b.risk_score;
+                  }
+                  if (a.location != b.location) return a.location < b.location;
+                  return a.name < b.name;
               });
 
     if (static_cast<int>(result.size()) > ci_thresholds::kMaxProblematicSymbols) {

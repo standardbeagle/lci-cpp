@@ -982,6 +982,14 @@ ToolResult handle_search(const nlohmann::json& params,
         }
     }
 
+    // Query rejected before any file was scanned (empty / over-long
+    // pattern). The engine returns an empty vector for that, same as a valid
+    // query with no hits, so report the reason instead of a bare 0-match
+    // payload.
+    if (have_stats && !stats.error.empty()) {
+        return make_error_response("search", stats.error);
+    }
+
     // True totals: prefer engine stats (pre-truncation universe) over the
     // truncated row count so total==max cap-saturation never lies to the
     // caller about the result universe.

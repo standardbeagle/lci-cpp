@@ -232,9 +232,18 @@ std::vector<SearchResult> SearchCoordinator::deduplicate(
         }
     }
 
+    // Collect the winning indices and emit in input order. `best` is an absl
+    // hash map, so iterating it directly returned the survivors in
+    // per-process hash order -- which leaked into rank()'s output whenever
+    // two survivors tied on every sort key (Karpathy rule 4).
+    std::vector<size_t> keep;
+    keep.reserve(best.size());
+    for (const auto& [key, idx] : best) keep.push_back(idx);
+    std::sort(keep.begin(), keep.end());
+
     std::vector<SearchResult> deduped;
-    deduped.reserve(best.size());
-    for (auto& [key, idx] : best) {
+    deduped.reserve(keep.size());
+    for (size_t idx : keep) {
         deduped.push_back(std::move(results[idx]));
     }
     return deduped;
@@ -252,11 +261,17 @@ std::vector<SearchResult> SearchCoordinator::merge(
 }
 
 void SearchCoordinator::rank(std::vector<SearchResult>& results) {
+    // Total order. score+path+line alone leaves two hits on the same line
+    // tied, and std::sort is not stable, so their relative order came from
+    // whatever order the caller happened to collect them in -- which for the
+    // multi-pattern path is hash order (Karpathy rule 4).
     std::sort(results.begin(), results.end(),
               [](const SearchResult& a, const SearchResult& b) {
                   if (a.score != b.score) return a.score > b.score;
                   if (a.path != b.path) return a.path < b.path;
-                  return a.line < b.line;
+                  if (a.line != b.line) return a.line < b.line;
+                  if (a.column != b.column) return a.column < b.column;
+                  return a.match_text < b.match_text;
               });
 }
 

@@ -32,6 +32,12 @@ bool language_from_extension(std::string_view ext, Language& out) {
     // bodies best-effort and the unified extractor recovers cpdef/cdef
     // signatures the grammar cannot. C/C++ headers use the C++ grammar
     // superset (the table classifies .h/.hpp/.hxx/.hh as Cpp).
+    // .tsx needs the TSX grammar: the plain TypeScript grammar cannot parse
+    // JSX, and the centralized table folds .tsx into LangId::TypeScript.
+    if (ext == ".tsx") {
+        out = Language::Tsx;
+        return true;
+    }
     switch (language_info(ext).language) {
         case LangId::Go: out = Language::Go; return true;
         case LangId::Python: out = Language::Python; return true;
@@ -69,6 +75,7 @@ const TSLanguage* get_ts_language(Language lang) {
         case Language::Kotlin: return tree_sitter_kotlin();
         case Language::Zig: return tree_sitter_zig();
         case Language::Ruby: return tree_sitter_ruby();
+        case Language::Tsx: return tree_sitter_tsx();
     }
     return nullptr;
 }

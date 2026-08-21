@@ -70,7 +70,7 @@ TEST(ParserTest, LanguageFromExtension) {
         {".js", Language::JavaScript},
         {".jsx", Language::JavaScript},
         {".ts", Language::TypeScript},
-        {".tsx", Language::TypeScript},
+        {".tsx", Language::Tsx},
         {".rs", Language::Rust},
         {".c", Language::C},
         {".cpp", Language::Cpp},

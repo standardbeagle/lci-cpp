@@ -141,6 +141,26 @@ void Pipeline::run() {
                 continue;
             }
             if (result.file_id == 0) continue;
+
+            // Surface a symbol-extraction skip as a recoverable warning on
+            // the same channel as hard errors. UnsupportedGrammar is left
+            // out deliberately: it is the expected outcome for every non-
+            // source file in the corpus, and reporting it would bury the
+            // four reasons that indicate something actually went wrong.
+            if (result.parse_skip_reason != ParseSkipReason::None &&
+                result.parse_skip_reason !=
+                    ParseSkipReason::UnsupportedGrammar) {
+                Error warn;
+                warn.type = ErrorType::Parse;
+                warn.file_path = result.path;
+                warn.operation = "symbol_extraction";
+                warn.recoverable = true;
+                warn.message =
+                    "indexed as text only, no symbols extracted: " +
+                    std::string(to_string(result.parse_skip_reason));
+                progress_.add_error(std::move(warn));
+            }
+
             buffered.push_back(std::move(result));
         }
     }
@@ -155,14 +175,18 @@ void Pipeline::run() {
         progress_.increment_integrated();
     }
 
-    producer.join();
-    process_thread.join();
-
-    // If stop was requested, close queues to unblock any waiting threads.
+    // On stop the integrator loop above breaks without draining, so
+    // workers can be blocked pushing into the bounded result_queue (and
+    // the producer into task_queue). Close both queues BEFORE joining —
+    // a blocked push then returns false and the threads exit; closing
+    // after the joins (the previous order) deadlocked run() forever.
     if (stop_flag_.load(std::memory_order_acquire)) {
         task_queue.close();
         result_queue.close();
     }
+
+    producer.join();
+    process_thread.join();
 }
 
 void Pipeline::request_stop() {

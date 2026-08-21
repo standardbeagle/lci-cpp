@@ -94,6 +94,21 @@ class Warmup {
         return failure_.empty();
     }
 
+    enum class Outcome { Ready, Failed, StillBuilding };
+
+    /// Bounded wait: the transport thread must not park forever on the
+    /// first tools/call — while it is parked, every subsequent stdin frame
+    /// (JSON-RPC pings included) goes unread, and a client that pings for
+    /// liveness declares the server dead mid-index.
+    Outcome wait_for(std::chrono::milliseconds timeout, std::string& error) {
+        std::unique_lock lock(mu_);
+        if (!cv_.wait_for(lock, timeout, [this] { return done_; })) {
+            return Outcome::StillBuilding;
+        }
+        error = failure_;
+        return failure_.empty() ? Outcome::Ready : Outcome::Failed;
+    }
+
   private:
     std::mutex mu_;
     std::condition_variable cv_;
@@ -131,6 +146,31 @@ int run_mcp(const GlobalFlags& flags) {
     GraphPropagator propagator(&runtime_index.ref_tracker());
     SideEffectAnalyzer side_effect_analyzer("generic");
     CodebaseIntelligenceEngine ci_engine;
+
+    // Shared IndexServer so CLI commands can also connect. It SHARES
+    // runtime_index instead of owning a second MasterIndex: the owning
+    // constructor used to index the same root a second time, concurrently
+    // with the warmup below — double CPU/IO and double resident memory for
+    // the whole MCP session. With no engine yet it answers 503 "still
+    // indexing" (and reports live progress through the shared index) until
+    // the warmup publishes the engine.
+    //
+    // Its lifetime is the MCP session: idle exit is disabled because the MCP
+    // client owns this process — an idle-reaped listener would only make the
+    // next CLI command spawn a duplicate standalone server for the same root.
+    Config server_cfg = cfg;
+    server_cfg.server.idle_timeout_sec = 0;
+    IndexServer index_server(server_cfg, runtime_index, nullptr);
+    index_server.set_socket_path(get_socket_path_for_root(cfg.project.root));
+    // Register with the per-user fleet so `lci servers` / `lci shutdown
+    // --all` see MCP-hosted servers too, not only CLI-launched ones.
+    index_server.enable_instance_registry(instance_registry_dir());
+
+    bool shared_server_started = index_server.start();
+    if (!shared_server_started) {
+        std::cerr << "Warning: failed to start shared index server; "
+                     "CLI commands won't be able to connect\n";
+    }
 
     // Index and analysis run OFF the transport thread. Every one of these
     // phases used to run before mcp_server.run() was even called, so stdin was
@@ -229,6 +269,10 @@ int run_mcp(const GlobalFlags& flags) {
         }
         propagator.propagate();
 
+        // Flip the shared HTTP server ready now that the shared index is
+        // fully built: CLI clients waiting in wait_for_ready unblock here.
+        index_server.set_search_engine(&search_engine);
+
         // An unindexable root still yields a serving (empty) index — the
         // behaviour before warmup moved off the transport thread, kept so a
         // partially-readable tree is not turned into a dead server.
@@ -249,20 +293,23 @@ int run_mcp(const GlobalFlags& flags) {
 
     // Serialises every handler behind the warmup: no handler observes the
     // index while the warmup thread is still writing it, and after the wait
-    // nothing mutates it again.
-    mcp_server.set_readiness_gate(
-        [&warmup](std::string& error) { return warmup.wait(error); });
-
-    // Start a shared IndexServer so CLI commands can also connect
-    IndexServer index_server(cfg);
-    std::string socket_path = get_socket_path_for_root(cfg.project.root);
-    index_server.set_socket_path(socket_path);
-
-    bool shared_server_started = index_server.start();
-    if (!shared_server_started) {
-        std::cerr << "Warning: failed to start shared index server; "
-                     "CLI commands won't be able to connect\n";
-    }
+    // nothing mutates it again. The wait is BOUNDED: an unbounded wait here
+    // parks the single transport thread, leaving the client's liveness
+    // pings unanswered until indexing completes — the client then kills a
+    // healthy server mid-index. On timeout the tool call errors with a
+    // retryable message and the loop resumes draining stdin.
+    mcp_server.set_readiness_gate([&warmup](std::string& error) {
+        switch (warmup.wait_for(std::chrono::seconds{20}, error)) {
+            case Warmup::Outcome::Ready:
+                return true;
+            case Warmup::Outcome::Failed:
+                return false;
+            case Warmup::Outcome::StillBuilding:
+            default:
+                error = "index is still building; retry shortly";
+                return false;
+        }
+    });
 
     int exit_code = mcp_server.run();
 
@@ -270,9 +317,10 @@ int run_mcp(const GlobalFlags& flags) {
         index_server.shutdown();
     }
 
-    // The warmup writes into objects that live on this frame; it must finish
-    // before they are destroyed, even when the transport exits early (EOF on
-    // stdin during a long first index is the normal way a client gives up).
+    // The warmup writes into objects that live on this frame (including
+    // index_server via set_search_engine); it must finish before they are
+    // destroyed, even when the transport exits early (EOF on stdin during a
+    // long first index is the normal way a client gives up).
     warmup_thread.join();
 
     return exit_code;

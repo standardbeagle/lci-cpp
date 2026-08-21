@@ -716,11 +716,20 @@ int run_list(const GlobalFlags& flags, bool verbose) {
 
 int run_config_init(const GlobalFlags& /*flags*/, const std::string& format,
                     const std::string& output_arg, bool force, bool minimal) {
+    // YAML is write-only: nothing in this binary can read it back. The old
+    // code wrote a YAML document into ".lci.kdl", so the very next `lci` run
+    // failed to parse the config it had just been told to generate. Refuse
+    // instead of producing a file that cannot work.
+    if (format == "yaml") {
+        std::cerr << "Error: yaml config is not supported — lci only reads "
+                     "KDL. Use -f kdl (or -f json for a machine-readable "
+                     "dump).\n";
+        return 1;
+    }
+
     std::string output = output_arg;
     if (output.empty()) {
         if (format == "kdl") {
-            output = ".lci.kdl";
-        } else if (format == "yaml") {
             output = ".lci.kdl";
         } else if (format == "json") {
             output = ".lci.kdl.json";
@@ -839,38 +848,6 @@ exclude {
         cfg["include"] = {"*.go", "*.js", "*.jsx", "*.ts", "*.tsx", "*.py"};
         cfg["exclude"] = {"**/.*/**", "**/node_modules/**", "**/vendor/**"};
         content = cfg.dump(2) + "\n";
-    } else if (format == "yaml") {
-        content = R"(version: 1
-project:
-  root: "."
-  name: "my-project"
-index:
-  max_file_size: 10485760  # 10MB
-  max_total_size_mb: 500
-  max_file_count: 10000
-  follow_symlinks: false
-  smart_size_control: true
-  priority_mode: "recent"
-performance:
-  max_memory_mb: 500
-  max_goroutines: 8
-  debounce_ms: 100
-search:
-  max_results: 100
-  max_context_lines: 50
-  enable_fuzzy: true
-include:
-  - "*.go"
-  - "*.js"
-  - "*.jsx"
-  - "*.ts"
-  - "*.tsx"
-  - "*.py"
-exclude:
-  - "**/.*/**"
-  - "**/node_modules/**"
-  - "**/vendor/**"
-)";
     } else {
         std::cerr << "Error: unsupported format: " << format << "\n";
         return 1;

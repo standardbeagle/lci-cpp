@@ -253,15 +253,16 @@ void PostingsIndex::find(std::string_view token, bool case_insensitive,
 
     if (token.size() < 3) return;
 
+    // Tokens are stored lowercased at index time, so the lookup key must be
+    // lowercased unconditionally — a case-sensitive query with any uppercase
+    // letter would otherwise never hit and the prefilter would degrade to a
+    // full scan. The postings index is a candidate prefilter; the verify
+    // scan over file content enforces the caller's case sensitivity.
     std::string tok;
-    if (case_insensitive) {
-        tok.reserve(token.size());
-        for (char c : token) {
-            tok.push_back(static_cast<char>(
-                std::tolower(static_cast<unsigned char>(c))));
-        }
-    } else {
-        tok = std::string(token);
+    tok.reserve(token.size());
+    for (char c : token) {
+        tok.push_back(static_cast<char>(
+            std::tolower(static_cast<unsigned char>(c))));
     }
 
     // Lock-free read over the immutable snapshot.

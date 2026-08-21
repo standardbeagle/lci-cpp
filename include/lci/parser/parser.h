@@ -26,10 +26,14 @@ enum class Language : uint8_t {
     Kotlin,
     Zig,
     Ruby,
+    // TSX is TypeScript's JSX dialect: same LangId/naming as TypeScript,
+    // but a distinct tree-sitter grammar (plain TypeScript cannot parse
+    // JSX). Only the parser layer distinguishes it.
+    Tsx,
 };
 
 /// Total number of supported languages.
-inline constexpr int kLanguageCount = 13;
+inline constexpr int kLanguageCount = 14;
 
 /// Returns the string name for a Language value.
 constexpr std::string_view to_string(Language lang) {
@@ -47,6 +51,9 @@ constexpr std::string_view to_string(Language lang) {
         case Language::Kotlin: return "kotlin";
         case Language::Zig: return "zig";
         case Language::Ruby: return "ruby";
+        // Deliberately "typescript": naming parity with the centralized
+        // language table (LangId::TypeScript covers .tsx).
+        case Language::Tsx: return "typescript";
     }
     return "unknown";
 }

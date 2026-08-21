@@ -269,15 +269,10 @@ ExtractionResults UnifiedExtractor::get_results() const {
 
 std::pair<std::string_view, std::string_view>
 UnifiedExtractor::lookup_declaration(int line, int column) const {
-    // Convert 1-based to 0-based for lookup key
-    std::string key =
-        std::to_string(line - 1) + ":" + std::to_string(column - 1);
-    for (const auto& [k, info] : declarations_) {
-        if (k == key) {
-            return {info.signature, info.doc_comment};
-        }
-    }
-    return {{}, {}};
+    // Declarations are stored 0-based; callers pass 1-based coordinates.
+    auto it = declarations_.find(PositionKey{line - 1, column - 1});
+    if (it == declarations_.end()) return {{}, {}};
+    return {it->second.signature, it->second.doc_comment};
 }
 
 // ---------------------------------------------------------------------------
@@ -831,10 +826,6 @@ void UnifiedExtractor::process_symbol_node(TSNode node,
     // === OBJECTS (Kotlin) ===
     } else if (node_type == "object_declaration") {
         extract_kotlin_object(node);
-
-    // === RUBY modules ===
-    } else if (node_type == "module" && ext_ == ".rb") {
-        extract_ruby_module(node);
 
     // === ANNOTATION TYPES (Java) ===
     } else if (node_type == "annotation_type_declaration") {
@@ -1682,13 +1673,14 @@ void UnifiedExtractor::process_declaration_node(TSNode node,
     std::string doc_comment = extract_doc_comment(node);
 
     TSPoint start = ts_node_start_point(node);
-    std::string key =
-        std::to_string(start.row) + ":" + std::to_string(start.column);
+    PositionKey key{static_cast<int>(start.row),
+                    static_cast<int>(start.column)};
 
     DeclarationInfo info;
     info.signature = std::move(signature);
     info.doc_comment = std::move(doc_comment);
-    declarations_.emplace_back(std::move(key), std::move(info));
+    // try_emplace keeps first-wins, matching the old front-to-back scan.
+    declarations_.try_emplace(key, std::move(info));
 }
 
 std::string UnifiedExtractor::extract_signature(TSNode node,

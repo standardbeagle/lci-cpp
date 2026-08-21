@@ -210,6 +210,9 @@ struct ChangeFrequencyMetadata {
     std::string commit_range;
     int64_t compute_time_ms{};
     bool from_cache{};
+    /// Set when the analysis completed but produced nothing for a reason the
+    /// caller should see (e.g. a file_pattern that matched no tracked files).
+    std::string notice;
 };
 
 struct ChangeFrequencyReport {
@@ -299,6 +302,12 @@ class FrequencyCache {
 // ============================================================================
 
 /// Parses git's rename notation into new and old paths.
+/// Parses `git log --format=%H|%an|%ae|%at|%s --numstat` output into one
+/// CommitInfo per header line. Free (not a HistoryProvider member) so the
+/// parse can be unit-tested without a git repository.
+bool parse_commit_history(std::string_view output,
+                          std::vector<CommitInfo>& out);
+
 void parse_rename_path(std::string_view path,
                        std::string& new_path, std::string& old_path);
 
@@ -333,15 +342,19 @@ class HistoryProvider {
     bool get_file_history(std::string_view file_path, int64_t since_epoch,
                           std::vector<CommitInfo>& out);
 
-    /// Returns aggregate history for the entire repository.
+    /// Returns aggregate history for the repository, restricted to the files
+    /// matching `pattern` when one is given.
+    ///
+    /// Returns false if the pattern could not be expanded — it does NOT fall
+    /// back to whole-repo history, which would answer a different question
+    /// than the caller asked. A pattern that matches nothing yields an empty
+    /// history plus an explanation in `notice` (when supplied).
     bool get_repo_history(int64_t since_epoch, std::string_view pattern,
-                          std::vector<CommitInfo>& out);
+                          std::vector<CommitInfo>& out,
+                          std::string* notice = nullptr);
 
   private:
     Provider& provider_;
-
-    bool parse_commit_history(std::string_view output,
-                              std::vector<CommitInfo>& out);
 };
 
 // ============================================================================

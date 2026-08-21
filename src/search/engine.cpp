@@ -387,7 +387,18 @@ std::vector<SearchResult> SearchEngine::search(
     const std::string& pattern, const SearchOptions& options,
     SearchStats* stats) const {
 
-    if (pattern.empty() || pattern.size() > 1000) return {};
+    if (pattern.empty() || pattern.size() > kMaxSearchPatternBytes) {
+        // Fail fast with a distinguishable signal. An empty result vector on
+        // its own is indistinguishable from "valid query, no matches", so the
+        // rejection reason rides out on SearchStats.
+        if (stats != nullptr) {
+            stats->error = pattern.empty()
+                ? "search pattern cannot be empty"
+                : "search pattern too long (max " +
+                      std::to_string(kMaxSearchPatternBytes) + " bytes)";
+        }
+        return {};
+    }
 
     // Karpathy rule 2: build path-filter regexes once per call, not per file.
     auto path_filter = make_path_filter(options);
@@ -410,6 +421,14 @@ std::vector<SearchResult> SearchEngine::search(
                                                   options.case_insensitive);
     }
     if (candidates.empty()) return {};
+
+    // Deterministic scan order (Karpathy rule 4). Both sources above are
+    // built by walking an absl hash map (TrigramIndex's per-file counts,
+    // MasterIndex::file_map), whose iteration order is randomized per
+    // process. That order decides WHICH matches survive the collection cap
+    // below, so without this sort the ranked top-N of a capped query differs
+    // between runs on an identical corpus.
+    std::sort(candidates.begin(), candidates.end());
 
     // Output cap (what the caller asked for) vs collection cap (how many raw
     // matches we gather before scoring). They must differ: if we stop
@@ -484,7 +503,7 @@ std::vector<SearchResult> SearchEngine::search(
 
     // Score and rank results.
     for (auto& r : results) {
-        r.score = score_result(r, pattern, false);
+        r.score = score_result(r, pattern);
     }
 
     SearchCoordinator::rank(results);
@@ -574,10 +593,14 @@ std::vector<SearchResult> SearchEngine::search(
         SearchStats sub_stats;
         auto rs = search(patterns[i], p_opts,
                          stats != nullptr ? &sub_stats : nullptr);
-        if (stats != nullptr &&
-            (sub_stats.hit_collection_cap ||
-             sub_stats.total_found > static_cast<int>(rs.size()))) {
-            any_sub_hit_cap = true;
+        if (stats != nullptr) {
+            if (sub_stats.hit_collection_cap ||
+                sub_stats.total_found > static_cast<int>(rs.size())) {
+                any_sub_hit_cap = true;
+            }
+            if (stats->error.empty() && !sub_stats.error.empty()) {
+                stats->error = sub_stats.error;
+            }
         }
         for (auto& r : rs) {
             ResultKey k{r.file_id, r.line, r.match_text};
@@ -771,15 +794,12 @@ std::vector<SearchMatch> SearchEngine::find_matches(
 }
 
 double SearchEngine::score_result(const SearchResult& result,
-                                   std::string_view pattern,
-                                   bool has_symbol) const {
-    double score = kBaseMatchScore;
+                                   std::string_view pattern) const {
+    // kNonSymbolPenalty is unconditional: see its declaration. Search never
+    // resolves a match to a symbol here, so the `has_symbol` parameter this
+    // used to take was always false and the branch was dead.
+    double score = kBaseMatchScore + kNonSymbolPenalty;
     score += score_file_type(result.path);
-
-    if (!has_symbol) {
-        score += kNonSymbolPenalty;
-    }
-
     score += static_cast<double>(calculate_pattern_complexity(pattern)) * 0.5;
     return score;
 }
@@ -821,18 +841,41 @@ void SearchEngine::process_file(
     // Deduplicate by line within this file.
     absl::flat_hash_set<int> seen_lines;
 
+    // Incremental line cursor. find_matches emits matches with strictly
+    // ascending start offsets, so the line number and line start of the next
+    // match are always at or after the previous one. Resolving each match
+    // with search_line_number + search_line_start restarted the scan at byte
+    // 0 twice per match -- O(file_size x matches) per file, which on a file
+    // with many hits dominated the whole query. Walking forward once makes it
+    // O(file_size) per file. Emitted line/column values are unchanged: both
+    // helpers define line as 1 + newlines strictly before the offset and line
+    // start as the byte after the last preceding newline, which is exactly
+    // what the cursor accumulates.
+    int cursor = 0;
+    int cursor_line = 1;
+    int cursor_line_start = 0;
+    const int content_len = static_cast<int>(content_sv.size());
+
     for (const auto& match : matches) {
         if (effective_cap > 0 &&
             static_cast<int>(results.size()) >= effective_cap) {
             break;
         }
 
-        int line = search_line_number(content_sv, match.start);
+        int match_start = match.start < 0 ? 0 : match.start;
+        if (match_start > content_len) match_start = content_len;
+        for (; cursor < match_start; ++cursor) {
+            if (content_sv[static_cast<size_t>(cursor)] == '\n') {
+                ++cursor_line;
+                cursor_line_start = cursor + 1;
+            }
+        }
+        int line = cursor_line;
 
         if (seen_lines.contains(line)) continue;
         seen_lines.insert(line);
 
-        int col = match.start - search_line_start(content_sv, match.start);
+        int col = match_start - cursor_line_start;
 
         std::string match_text;
         if (match.end > match.start &&

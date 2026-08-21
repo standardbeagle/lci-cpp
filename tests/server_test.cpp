@@ -321,6 +321,76 @@ TEST(ServerLifecycleFailureTest, MalformedPortReturnsFalse) {
 }
 #endif
 
+TEST(ServerLifecycleTest, DeferredEngineGatesReadinessUntilPublished) {
+    // Externally-owned index whose engine arrives later (the MCP-embedded
+    // shape): the server must answer 503 / ready=false while the external
+    // build is in flight, and flip ready once set_search_engine publishes.
+    TempDir tmp;
+    tmp.write_file("main.go", "package main\nfunc Add(a, b int) int { return a + b }\n");
+    Config config;
+    config.project.root = tmp.path().string();
+    MasterIndex indexer(config);
+    IndexServer server(config, indexer, nullptr);
+    server.set_socket_path(test::next_test_server_address());
+    ASSERT_TRUE(server.start());
+
+    auto cli = test::make_test_http_client(server.socket_path());
+    auto status = cli.Get("/status");
+    ASSERT_TRUE(status);
+    auto sj = nlohmann::json::parse(status->body);
+    EXPECT_FALSE(sj["ready"].get<bool>());
+    EXPECT_TRUE(sj["indexing_active"].get<bool>());
+
+    auto blocked = cli.Post("/search", R"({"pattern":"Add"})",
+                            "application/json");
+    ASSERT_TRUE(blocked);
+    EXPECT_EQ(blocked->status, 503);
+
+    indexer.index_directory(config.project.root);
+    SearchEngine engine(indexer);
+    server.set_search_engine(&engine);
+
+    status = cli.Get("/status");
+    ASSERT_TRUE(status);
+    sj = nlohmann::json::parse(status->body);
+    EXPECT_TRUE(sj["ready"].get<bool>());
+    EXPECT_FALSE(sj["indexing_active"].get<bool>());
+
+    auto ok = cli.Post("/search", R"({"pattern":"Add"})", "application/json");
+    ASSERT_TRUE(ok);
+    EXPECT_EQ(ok->status, 200);
+
+    server.set_search_engine(nullptr);
+    EXPECT_TRUE(server.shutdown());
+}
+
+TEST(ServerLifecycleTest, StartRefusesToStealALiveListener) {
+    TempDir tmp;
+    tmp.write_file("a.go", "package main\n");
+    Config config;
+    config.project.root = tmp.path().string();
+    MasterIndex indexer(config);
+    SearchEngine engine(indexer);
+
+    IndexServer first(config, indexer, &engine);
+    const auto addr = test::next_test_server_address();
+    first.set_socket_path(addr);
+    ASSERT_TRUE(first.start());
+
+    IndexServer second(config, indexer, &engine);
+    second.set_socket_path(addr);
+    EXPECT_FALSE(second.start());
+
+    // The refusal must not have disturbed the live listener.
+    auto cli = test::make_test_http_client(addr);
+    auto ping = cli.Get("/ping");
+    ASSERT_TRUE(ping);
+    EXPECT_EQ(ping->status, 200);
+
+    EXPECT_TRUE(first.shutdown());
+    EXPECT_TRUE(second.shutdown());
+}
+
 // -- Build ID tests -----------------------------------------------------------
 
 TEST(BuildIDTest, ReturnsNonEmpty) {

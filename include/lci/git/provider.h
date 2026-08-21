@@ -9,6 +9,23 @@
 namespace lci {
 namespace git {
 
+// ============================================================================
+// Free utility functions (testable)
+// ============================================================================
+
+/// Rejects a user-supplied ref or pathspec that git would read as an option.
+/// Refs reach git as positional argv, so a value beginning with '-' would be
+/// honoured as a flag by whichever subcommand received it.
+bool is_safe_ref(std::string_view ref);
+
+/// Maps the leading letter of a `--name-status` status field.
+FileChangeStatus parse_status(std::string_view status);
+
+/// Parses `git diff --name-status -z` output (NUL-terminated fields, raw
+/// bytes, no core.quotePath escaping) into ChangedFile records. Appends to
+/// `out`. Free so the parse is testable without a git repository.
+bool parse_name_status(std::string_view output, std::vector<ChangedFile>& out);
+
 /// Wraps git CLI commands to extract file states at different refs.
 /// Ported from Go: internal/git/provider.go
 class Provider {
@@ -66,9 +83,6 @@ class Provider {
     bool get_range_files(std::string_view base_ref, std::string_view target_ref,
                          std::vector<ChangedFile>& out) const;
 
-    bool parse_name_status(std::string_view output,
-                           std::vector<ChangedFile>& out) const;
-    FileChangeStatus parse_status(std::string_view status) const;
     bool parse_numstat(std::string_view output, DiffStats& out) const;
     bool get_parent_commit(std::string_view commit, std::string& out) const;
     bool get_staged_content(std::string_view path, std::string& out) const;

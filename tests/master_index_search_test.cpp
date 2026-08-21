@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <fstream>
 #include <random>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -291,6 +292,47 @@ TEST(MasterIndexSearchIntegrationTest, IndexAndSearchCaseInsensitive) {
     opts.case_insensitive = true;
     auto results = mi.search_with_options("helloworld", opts);
     EXPECT_GE(results.size(), 1u);
+}
+
+TEST(MasterIndexSearchIntegrationTest,
+     CaseInsensitiveFindsDifferentlyCasedFiles) {
+    // Discrimination pair: the trigram index stores original-case content,
+    // so a lowered pattern's trigrams only hit a.go. The non-empty trigram
+    // candidate set used to suppress the postings union, silently dropping
+    // b.go (whose only occurrence is "FooBar").
+    TempDir dir;
+    dir.write_file("a.go", "package main\nvar x = \"foobar\"\n");
+    dir.write_file("b.go", "package main\nvar y = \"FooBar\"\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    // Incremental single-file indexing populates the trigram snapshot with
+    // original-case content (the bulk pipeline path leaves it empty), which
+    // is exactly the state where the lowered pattern's trigram candidates
+    // exclude b.go.
+    ASSERT_TRUE(mi.index_file((dir.path() / "a.go").string()));
+    ASSERT_TRUE(mi.index_file((dir.path() / "b.go").string()));
+
+    SearchOptions opts;
+    opts.case_insensitive = true;
+    auto results = mi.search_with_options("foobar", opts);
+
+    std::set<std::string> hit_files;
+    for (const auto& r : results) {
+        hit_files.insert(std::filesystem::path(r.path).filename().string());
+    }
+    EXPECT_TRUE(hit_files.contains("a.go"));
+    EXPECT_TRUE(hit_files.contains("b.go"));
+
+    // Case-sensitive queries with uppercase letters must still prefilter
+    // through the (lowercased) postings tokens and land on the exact match.
+    SearchOptions exact;
+    exact.case_insensitive = false;
+    auto upper = mi.search_with_options("FooBar", exact);
+    ASSERT_EQ(upper.size(), 1u);
+    EXPECT_EQ(std::filesystem::path(upper[0].path).filename().string(),
+              "b.go");
 }
 
 TEST(MasterIndexSearchIntegrationTest, FindCandidateFiles) {

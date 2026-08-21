@@ -292,11 +292,7 @@ void UnifiedExtractor::record_go_local_var(TSNode decl) {
 void UnifiedExtractor::process_go_reference(TSNode node,
                                             std::string_view node_type) {
     auto is_handled = [&](TSNode n) {
-        uintptr_t id = reinterpret_cast<uintptr_t>(n.id);
-        for (const auto& h : handled_nodes_) {
-            if (h.id == id) return true;
-        }
-        return false;
+        return handled_nodes_.contains(reinterpret_cast<uintptr_t>(n.id));
     };
 
     // Maintain the local type env (SCIP base case). func_literal (closures)
@@ -336,8 +332,8 @@ void UnifiedExtractor::process_go_reference(TSNode node,
             TSNode field = ts_node_child_by_field_name(
                 func, "field", static_cast<uint32_t>(std::strlen("field")));
             if (!ts_node_is_null(field)) {
-                handled_nodes_.push_back(
-                    {reinterpret_cast<uintptr_t>(field.id)});
+                handled_nodes_.insert(
+                    reinterpret_cast<uintptr_t>(field.id));
                 Reference cref =
                     create_reference(field, ReferenceType::Call,
                                      RefStrength::Tight);
@@ -385,11 +381,7 @@ void UnifiedExtractor::process_js_reference(TSNode node,
                                             std::string_view node_type) {
     uintptr_t node_id = reinterpret_cast<uintptr_t>(node.id);
     auto is_handled = [&](TSNode n) {
-        uintptr_t id = reinterpret_cast<uintptr_t>(n.id);
-        for (const auto& h : handled_nodes_) {
-            if (h.id == id) return true;
-        }
-        return false;
+        return handled_nodes_.contains(reinterpret_cast<uintptr_t>(n.id));
     };
 
     // Local type env (SCIP base case). this -> enclosing class; TS-annotated
@@ -466,7 +458,7 @@ void UnifiedExtractor::process_js_reference(TSNode node,
             TSNode prop = ts_node_child_by_field_name(
                 func, "property", static_cast<uint32_t>(std::strlen("property")));
             if (!ts_node_is_null(prop)) {
-                handled_nodes_.push_back({reinterpret_cast<uintptr_t>(prop.id)});
+                handled_nodes_.insert(reinterpret_cast<uintptr_t>(prop.id));
                 Reference cref = create_reference(prop, ReferenceType::Call,
                                                   RefStrength::Tight);
                 TSNode obj = ts_node_child_by_field_name(
@@ -482,7 +474,7 @@ void UnifiedExtractor::process_js_reference(TSNode node,
                 return;
             }
         }
-        handled_nodes_.push_back({reinterpret_cast<uintptr_t>(func.id)});
+        handled_nodes_.insert(reinterpret_cast<uintptr_t>(func.id));
         references_.push_back(
             create_reference(func, ReferenceType::Call, RefStrength::Tight));
     } else if (node_type == "member_expression") {
@@ -490,8 +482,8 @@ void UnifiedExtractor::process_js_reference(TSNode node,
             node, "property",
             static_cast<uint32_t>(std::strlen("property")));
         if (!ts_node_is_null(prop) && !is_handled(prop)) {
-            handled_nodes_.push_back(
-                {reinterpret_cast<uintptr_t>(prop.id)});
+            handled_nodes_.insert(
+                reinterpret_cast<uintptr_t>(prop.id));
             references_.push_back(
                 create_reference(prop, ReferenceType::Usage, RefStrength::Loose));
         }
@@ -505,9 +497,7 @@ void UnifiedExtractor::process_js_reference(TSNode node,
         }
     } else if (node_type == "identifier") {
         // Skip if already handled or in import context
-        for (const auto& h : handled_nodes_) {
-            if (h.id == node_id) return;
-        }
+        if (handled_nodes_.contains(node_id)) return;
         if (in_import_context_) return;
         references_.push_back(
             create_reference(node, ReferenceType::Usage, RefStrength::Loose));
@@ -517,11 +507,7 @@ void UnifiedExtractor::process_js_reference(TSNode node,
 void UnifiedExtractor::process_python_reference(TSNode node,
                                                 std::string_view node_type) {
     auto is_handled = [&](TSNode n) {
-        uintptr_t id = reinterpret_cast<uintptr_t>(n.id);
-        for (const auto& h : handled_nodes_) {
-            if (h.id == id) return true;
-        }
-        return false;
+        return handled_nodes_.contains(reinterpret_cast<uintptr_t>(n.id));
     };
 
     // Local type env (SCIP base case). Python uses only UNAMBIGUOUS type
@@ -584,7 +570,7 @@ void UnifiedExtractor::process_python_reference(TSNode node,
             TSNode attr = ts_node_child_by_field_name(
                 func, "attribute", static_cast<uint32_t>(std::strlen("attribute")));
             if (!ts_node_is_null(attr)) {
-                handled_nodes_.push_back({reinterpret_cast<uintptr_t>(attr.id)});
+                handled_nodes_.insert(reinterpret_cast<uintptr_t>(attr.id));
                 Reference cref = create_reference(attr, ReferenceType::Call,
                                                   RefStrength::Tight);
                 TSNode obj = ts_node_child_by_field_name(

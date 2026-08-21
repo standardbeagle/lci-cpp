@@ -389,7 +389,19 @@ void ReferenceTracker::process_all_references() {
             return true;
         });
 
-        for (auto& [owner_fid, ref_vec] : s.refs_by_file) {
+        // refs_by_file is a flat_hash_map, whose iteration order is randomized
+        // per process. That order is user-visible (structure `used_by`,
+        // relationships, imports), so walk the owning files in sorted id order;
+        // within a file the slots are already in deterministic order.
+        std::vector<FileID> ordered_ref_files;
+        ordered_ref_files.reserve(s.refs_by_file.size());
+        for (const auto& [owner_fid, ref_vec] : s.refs_by_file) {
+            ordered_ref_files.push_back(owner_fid);
+        }
+        std::sort(ordered_ref_files.begin(), ordered_ref_files.end());
+
+        for (FileID owner_fid : ordered_ref_files) {
+          auto& ref_vec = s.refs_by_file[owner_fid];
           for (uint32_t idx = 0; idx < ref_vec.size(); ++idx) {
             StoredRef& ref = ref_vec[idx];
             if (ref.dead) continue;
@@ -931,9 +943,11 @@ SymbolID ReferenceTracker::resolve_reference_target(
 
     if (full_name.empty()) return 0;
 
-    uint64_t name_hash = fnv1a_hash_name(full_name);
-    uint64_t cache_key = (static_cast<uint64_t>(owner_fid) << 32) |
-                          (name_hash & 0xFFFFFFFF);
+    // (file_id, FULL 64-bit name hash). Truncating the hash to 32 bits (the
+    // former key) collided two names in one file at birthday odds, and the
+    // loser silently resolved to the winner's symbol.
+    std::pair<FileID, uint64_t> cache_key{owner_fid,
+                                          fnv1a_hash_name(full_name)};
 
     if (auto it = reference_cache_.find(cache_key);
         it != reference_cache_.end()) {

@@ -7,6 +7,7 @@
 #include <vector>
 
 #include <absl/container/flat_hash_map.h>
+#include <absl/container/flat_hash_set.h>
 
 #include <lci/reference.h>
 #include <lci/scope.h>
@@ -68,7 +69,10 @@ struct ExtractionResults {
     std::vector<Import> imports;
     std::vector<ScopeInfo> scopes;
     std::vector<Reference> references;
-    std::vector<std::pair<std::string, DeclarationInfo>> declarations;
+    // Position-keyed (0-based row/column of the declaration node). A vector
+    // here meant lookup_declaration scanned it once per symbol.
+    absl::flat_hash_map<PositionKey, DeclarationInfo, PositionKeyHash>
+        declarations;
     std::vector<std::pair<PositionKey, int>> complexity;
 };
 
@@ -212,7 +216,6 @@ class UnifiedExtractor {
     // Zig
     void extract_zig_struct(TSNode node);
     // Ruby
-    void extract_ruby_module(TSNode node);
 
     // Import extraction
     void extract_js_import(TSNode node);
@@ -283,7 +286,8 @@ class UnifiedExtractor {
     std::vector<Import> imports_;
     std::vector<ScopeInfo> scopes_;
     std::vector<Reference> references_;
-    std::vector<std::pair<std::string, DeclarationInfo>> declarations_;
+    absl::flat_hash_map<PositionKey, DeclarationInfo, PositionKeyHash>
+        declarations_;
     std::vector<std::pair<PositionKey, int>> complexity_;
 
     // Cached content lines (lazily initialized)
@@ -319,11 +323,11 @@ class UnifiedExtractor {
     // ts_node_type returns into tree-sitter's interned static table —
     // no caching needed.
 
-    // Handled nodes set (for JS context-aware extraction)
-    struct HandledEntry {
-        uintptr_t id{};
-    };
-    std::vector<HandledEntry> handled_nodes_;
+    // Handled nodes set (for context-aware reference extraction).
+    // Membership is probed once per candidate node in every per-language
+    // reference walk, so a linear vector scan made the walk O(refs^2) per
+    // file; a hash set keeps each probe O(1). Cleared per file in init().
+    absl::flat_hash_set<uintptr_t> handled_nodes_;
 
     // Scope-based type resolution (SCIP base case): per-function map of local
     // identifier -> type name, built syntactically (receiver, typed params,

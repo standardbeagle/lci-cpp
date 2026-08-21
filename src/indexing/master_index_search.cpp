@@ -473,20 +473,28 @@ SearchContext MasterIndex::extract_context(FileID file_id, int match_line,
     std::string_view content_sv = fc->view();
     if (content_sv.empty()) return ctx;
 
-    // Slice the requested window out of the precomputed line-start offsets
-    // instead of re-splitting the whole file per call: with N matches in one
-    // file the split was O(N × filesize) — the dominant cost of over-collected
-    // result pages (a 1000-row regex seed page took seconds). Line semantics
-    // mirror Go's reference exactly as before: each intermediate line is
-    // stored without its trailing '\n' separator, and the FINAL line of the
-    // file keeps its trailing newline when the file ends with one (the last
-    // offsets entry spans to EOF by construction, so that falls out of the
-    // slicing). This keeps /search and /references context arrays
-    // bit-identical to the Go output.
-    const std::vector<uint32_t>& offsets = fc->line_offsets;
-    if (offsets.empty()) return ctx;
+    // Slice the context window straight out of the precomputed line-start
+    // offsets. This used to re-split the WHOLE file into a lines vector on
+    // every call, which is once per search result — O(results x filesize) of
+    // scanning and one vector allocation each, to read at most
+    // 2*max_context_lines+1 lines.
+    //
+    // The offsets carry the same line decomposition the split produced:
+    // offsets[0] is 0 and each subsequent entry is the byte after a '\n' that
+    // is not the file's last byte, so offsets.size() equals the old
+    // lines.size() and a trailing '\n' never opens a new line.
+    const std::vector<uint32_t>* offsets = &fc->line_offsets;
+    std::vector<uint32_t> computed;
+    if (offsets->empty()) {
+        // Content stored without offsets (non-store callers). Derive them
+        // with the canonical routine rather than a second private splitter.
+        computed = compute_line_offsets(content_sv);
+        offsets = &computed;
+    }
 
-    const int total_lines = static_cast<int>(offsets.size());
+    int total_lines = static_cast<int>(offsets->size());
+    if (total_lines == 0) return ctx;
+
     int line_idx = match_line - 1;  // Convert 1-based to 0-based.
     if (line_idx < 0) line_idx = 0;
     if (line_idx >= total_lines) line_idx = total_lines - 1;
@@ -496,12 +504,18 @@ SearchContext MasterIndex::extract_context(FileID file_id, int match_line,
 
     ctx.start_line = ctx_start + 1;  // Back to 1-based.
     ctx.end_line = ctx_end + 1;
-    ctx.lines.reserve(static_cast<size_t>(ctx_end - ctx_start + 1));
 
+    // Mirrors Go's reference behavior: each intermediate line is stored
+    // without its trailing '\n' separator, but the last line of a file that
+    // ends with '\n' keeps the trailing newline. This makes /search and
+    // /references context arrays bit-identical to the Go output.
+    ctx.lines.reserve(static_cast<size_t>(ctx_end - ctx_start + 1));
     for (int i = ctx_start; i <= ctx_end; ++i) {
-        const size_t begin = offsets[static_cast<size_t>(i)];
+        size_t begin = (*offsets)[static_cast<size_t>(i)];
         size_t end = (i + 1 < total_lines)
-                         ? offsets[static_cast<size_t>(i) + 1] - 1  // drop '\n'
+                         // Drop the '\n' that opened the next line.
+                         ? (*offsets)[static_cast<size_t>(i + 1)] - 1
+                         // Final line: runs to EOF, trailing '\n' included.
                          : content_sv.size();
         ctx.lines.emplace_back(content_sv.substr(begin, end - begin));
     }

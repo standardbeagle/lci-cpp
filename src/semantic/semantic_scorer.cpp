@@ -830,13 +830,19 @@ std::vector<ScoredSymbol> SemanticScorer::score_multiple(
         }
     }
 
-    // Sort by score descending, confidence as tiebreaker.
+    // Sort by score descending, confidence then symbol name as tiebreakers.
+    // std::sort is not stable and the list is truncated to max_results below,
+    // so score+confidence ties -- common, since both are derived from the same
+    // match type -- otherwise decided membership arbitrarily.
     std::sort(scored.begin(), scored.end(),
               [](const ScoredSymbol& a, const ScoredSymbol& b) {
                   if (a.score.score != b.score.score) {
                       return a.score.score > b.score.score;
                   }
-                  return a.score.confidence > b.score.confidence;
+                  if (a.score.confidence != b.score.confidence) {
+                      return a.score.confidence > b.score.confidence;
+                  }
+                  return a.symbol < b.symbol;
               });
 
     // Limit results.
