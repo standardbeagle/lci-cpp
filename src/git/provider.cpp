@@ -39,10 +39,17 @@ void split_fields(std::string_view line, std::vector<std::string_view>& fields) 
 
 }  // namespace
 
+bool is_safe_ref(std::string_view ref) {
+    return !ref.empty() && ref.front() != '-';
+}
+
 bool Provider::run_git(const std::vector<std::string>& args,
                        std::string& out) const {
     // No shell: args go to git verbatim (subprocess::run_capture), so
-    // `--format=%H|%an|%at` needs no quoting and cannot be injected.
+    // `--format=%H|%an|%at` needs no quoting and cannot be injected. Values
+    // that came from the caller still have to be screened with is_safe_ref
+    // and terminated with `--` at each call site — argv exec stops SHELL
+    // injection, not GIT option injection.
     std::vector<std::string> argv;
     argv.reserve(args.size() + 1);
     argv.emplace_back("git");
@@ -90,7 +97,9 @@ bool Provider::get_changed_files(const AnalysisParams& params,
 
 bool Provider::get_staged_files(std::vector<ChangedFile>& out) const {
     std::string output;
-    if (!run_git({"diff", "--cached", "--name-status", "--no-renames"}, output)) {
+    if (!run_git({"diff", "--cached", "--name-status", "--no-renames", "-z",
+                  "--"},
+                 output)) {
         return false;
     }
     return parse_name_status(output, out);
@@ -98,7 +107,8 @@ bool Provider::get_staged_files(std::vector<ChangedFile>& out) const {
 
 bool Provider::get_wip_files(std::vector<ChangedFile>& out) const {
     std::string output;
-    if (!run_git({"diff", "HEAD", "--name-status", "--no-renames"}, output)) {
+    if (!run_git({"diff", "HEAD", "--name-status", "--no-renames", "-z", "--"},
+                 output)) {
         // If HEAD doesn't exist (new repo), fall back to staged
         return get_staged_files(out);
     }
@@ -109,9 +119,12 @@ bool Provider::get_commit_files(std::string_view commit_ref,
                                 std::vector<ChangedFile>& out) const {
     std::string ref(commit_ref);
     if (ref.empty()) ref = "HEAD";
+    if (!is_safe_ref(ref)) return false;
 
     std::string output;
-    if (!run_git({"diff-tree", "--no-commit-id", "--name-status", "-r", ref}, output)) {
+    if (!run_git({"diff-tree", "--no-commit-id", "--name-status", "-z", "-r",
+                  ref, "--"},
+                 output)) {
         return false;
     }
     return parse_name_status(output, out);
@@ -122,37 +135,53 @@ bool Provider::get_range_files(std::string_view base_ref, std::string_view targe
     if (base_ref.empty()) return false;
     std::string target(target_ref);
     if (target.empty()) target = "HEAD";
+    if (!is_safe_ref(base_ref) || !is_safe_ref(target)) return false;
 
     std::string range_spec = std::string(base_ref) + ".." + target;
     std::string output;
-    if (!run_git({"diff", "--name-status", "--no-renames", range_spec}, output)) {
+    if (!run_git({"diff", "--name-status", "--no-renames", "-z", range_spec,
+                  "--"},
+                 output)) {
         return false;
     }
     return parse_name_status(output, out);
 }
 
-bool Provider::parse_name_status(std::string_view output,
-                                 std::vector<ChangedFile>& out) const {
-    std::vector<std::string_view> lines;
-    split_lines(output, lines);
+bool parse_name_status(std::string_view output,
+                       std::vector<ChangedFile>& out) {
+    // Consumes `--name-status -z`: every field is its own NUL-terminated
+    // record, so a path is taken verbatim however it is spelled. The previous
+    // line-and-whitespace split truncated "src/my file.go" at the space, and
+    // never unquoted the C-style quoting git applies to non-ASCII names under
+    // the default core.quotePath — both of which dropped real changed files
+    // from the analysis. `-z` sidesteps quoting entirely: git emits raw bytes.
+    size_t pos = 0;
+    auto next_field = [&](std::string_view& field) {
+        if (pos >= output.size()) return false;
+        size_t end = output.find('\0', pos);
+        if (end == std::string_view::npos) end = output.size();
+        field = output.substr(pos, end - pos);
+        pos = end + 1;
+        return true;
+    };
 
-    for (const auto& line : lines) {
-        std::vector<std::string_view> parts;
-        split_fields(line, parts);
-        if (parts.size() < 2) continue;
+    std::string_view status;
+    while (next_field(status)) {
+        if (status.empty()) continue;
 
-        auto status = parts[0];
-        auto path = parts[1];
-        std::string old_path;
-
-        if (parts.size() >= 3 && (status[0] == 'R' || status[0] == 'C')) {
-            old_path = std::string(parts[1]);
-            path = parts[2];
-        }
+        std::string_view path;
+        if (!next_field(path)) break;
 
         ChangedFile file;
-        file.path = std::string(path);
-        file.old_path = std::move(old_path);
+        if (status[0] == 'R' || status[0] == 'C') {
+            // Rename/copy emits source and destination as two more fields.
+            std::string_view dest;
+            if (!next_field(dest)) break;
+            file.old_path = std::string(path);
+            file.path = std::string(dest);
+        } else {
+            file.path = std::string(path);
+        }
         file.status = parse_status(status);
         out.push_back(std::move(file));
     }
@@ -160,7 +189,7 @@ bool Provider::parse_name_status(std::string_view output,
     return true;
 }
 
-FileChangeStatus Provider::parse_status(std::string_view status) const {
+FileChangeStatus parse_status(std::string_view status) {
     if (status.empty()) return FileChangeStatus::Modified;
     switch (status[0]) {
         case 'A': return FileChangeStatus::Added;
@@ -188,13 +217,14 @@ bool Provider::get_file_content(std::string_view ref, std::string_view path,
         return get_staged_content(path, out);
     }
 
+    if (!is_safe_ref(ref)) return false;
     std::string spec = std::string(ref) + ":" + std::string(path);
-    return run_git({"show", spec}, out);
+    return run_git({"show", spec, "--"}, out);
 }
 
 bool Provider::get_staged_content(std::string_view path, std::string& out) const {
     std::string spec = ":" + std::string(path);
-    return run_git({"show", spec}, out);
+    return run_git({"show", spec, "--"}, out);
 }
 
 bool Provider::get_diff_stats(const AnalysisParams& params, DiffStats& out) const {
@@ -202,23 +232,26 @@ bool Provider::get_diff_stats(const AnalysisParams& params, DiffStats& out) cons
 
     switch (params.scope) {
         case AnalysisScope::Staged:
-            args = {"diff", "--cached", "--numstat"};
+            args = {"diff", "--cached", "--numstat", "--"};
             break;
         case AnalysisScope::WIP:
-            args = {"diff", "HEAD", "--numstat"};
+            args = {"diff", "HEAD", "--numstat", "--"};
             break;
         case AnalysisScope::Commit: {
             std::string ref = params.base_ref;
             if (ref.empty()) ref = "HEAD";
-            args = {"diff-tree", "--no-commit-id", "--numstat", "-r", ref};
+            if (!is_safe_ref(ref)) return false;
+            args = {"diff-tree", "--no-commit-id", "--numstat", "-r", ref, "--"};
             break;
         }
         case AnalysisScope::Range: {
             if (params.base_ref.empty()) return false;
             std::string target = params.target_ref;
             if (target.empty()) target = "HEAD";
+            if (!is_safe_ref(params.base_ref) || !is_safe_ref(target))
+                return false;
             std::string range_spec = params.base_ref + ".." + target;
-            args = {"diff", "--numstat", range_spec};
+            args = {"diff", "--numstat", range_spec, "--"};
             break;
         }
     }
@@ -286,13 +319,32 @@ bool Provider::get_base_ref(const AnalysisParams& params, std::string& out) cons
 }
 
 bool Provider::get_parent_commit(std::string_view commit, std::string& out) const {
-    std::string ref = std::string(commit) + "^";
-    if (!run_git({"rev-parse", ref}, out)) {
-        // No parent (first commit), return empty tree hash
+    if (!is_safe_ref(commit)) return false;
+
+    // Verify the commit itself resolves BEFORE reading a failure on
+    // "<commit>^" as "this is the first commit". Treating any rev-parse
+    // failure as a root commit meant a typo'd ref, an unreadable object
+    // store, or a missing git binary all silently diffed against the empty
+    // tree — so the entire repository looked like it had just been added,
+    // and the caller got a plausible report instead of an error.
+    std::string resolved;
+    if (!run_git({"rev-parse", "--verify", "--quiet",
+                  std::string(commit) + "^{commit}"},
+                 resolved)) {
+        return false;
+    }
+
+    std::string parent;
+    if (!run_git({"rev-parse", "--verify", "--quiet",
+                  std::string(commit) + "^^{commit}"},
+                 parent)) {
+        // The commit resolves but has no parent: a genuine root commit.
+        // Diff against the empty tree.
         out = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
         return true;
     }
-    // Trim trailing whitespace
+
+    out = std::move(parent);
     while (!out.empty() && (out.back() == '\n' || out.back() == '\r')) {
         out.pop_back();
     }
@@ -313,7 +365,7 @@ std::string Provider::get_target_ref(const AnalysisParams& params) const {
 
 bool Provider::list_all_files(std::vector<std::string>& out) const {
     std::string output;
-    if (!run_git({"ls-files"}, output)) return false;
+    if (!run_git({"ls-files", "--"}, output)) return false;
 
     std::vector<std::string_view> lines;
     split_lines(output, lines);
@@ -333,7 +385,9 @@ bool Provider::get_current_branch(std::string& out) const {
 }
 
 bool Provider::get_commit_hash(std::string_view ref, std::string& out) const {
-    if (!run_git({"rev-parse", std::string(ref)}, out)) return false;
+    if (!is_safe_ref(ref)) return false;
+    if (!run_git({"rev-parse", "--verify", "--quiet", std::string(ref)}, out))
+        return false;
     while (!out.empty() && (out.back() == '\n' || out.back() == '\r')) {
         out.pop_back();
     }
