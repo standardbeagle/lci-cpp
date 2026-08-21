@@ -196,6 +196,12 @@ nlohmann::json report_to_json(const AnalysisReport& report,
         {"analysis_time_ms", report.metadata.analysis_time_ms},
         {"analyzed_at", format_analyzed_at(report.metadata.analyzed_at)},
     };
+    // Emitted only when non-zero: a clean run keeps the Go-parity metadata
+    // shape byte-for-byte, while a lossy run cannot look like a clean one.
+    if (report.metadata.files_skipped_unreadable > 0) {
+        report_j["metadata"]["files_skipped_unreadable"] =
+            report.metadata.files_skipped_unreadable;
+    }
 
     return report_j;
 }

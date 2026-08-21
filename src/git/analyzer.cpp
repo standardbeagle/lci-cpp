@@ -2,8 +2,11 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdio>
 #include <filesystem>
 #include <string>
+#include <string_view>
+#include <vector>
 
 #include <absl/container/flat_hash_map.h>
 #include <absl/container/flat_hash_set.h>
@@ -128,7 +131,9 @@ bool Analyzer::analyze(const AnalysisParams& params, AnalysisReport& out) {
     }
 
     std::vector<SymbolInfo> new_symbols;
-    if (!parse_changed_files(files, params, new_symbols)) return false;
+    int skipped_unreadable = 0;
+    if (!parse_changed_files(files, params, new_symbols, skipped_unreadable))
+        return false;
 
     std::vector<SymbolInfo> existing_symbols;
     get_existing_symbols(existing_symbols);
@@ -151,7 +156,7 @@ bool Analyzer::analyze(const AnalysisParams& params, AnalysisReport& out) {
                         std::chrono::steady_clock::now() - start)
                         .count();
     build_report(files, new_symbols, duplicates, naming_issues, metrics_issues,
-                 params, elapsed, out);
+                 params, elapsed, skipped_unreadable, out);
     return true;
 }
 
@@ -161,8 +166,10 @@ bool Analyzer::analyze(const AnalysisParams& params, AnalysisReport& out) {
 
 bool Analyzer::parse_changed_files(const std::vector<ChangedFile>& files,
                                    const AnalysisParams& params,
-                                   std::vector<SymbolInfo>& out) {
+                                   std::vector<SymbolInfo>& out,
+                                   int& skipped_out) {
     std::string target_ref = provider_.get_target_ref(params);
+    skipped_out = 0;
 
     for (const auto& file : files) {
         if (file.status == FileChangeStatus::Deleted) continue;
@@ -170,6 +177,15 @@ bool Analyzer::parse_changed_files(const std::vector<ChangedFile>& files,
 
         std::string content;
         if (!provider_.get_file_content(target_ref, file.path, content)) {
+            // A supported source file that cannot be read contributes no
+            // symbols, so every finding for it silently disappears. Count and
+            // announce it rather than letting the report claim coverage it
+            // does not have (Karpathy rule 6).
+            ++skipped_out;
+            std::fprintf(stderr,
+                         "warning: git analysis skipped %s: content "
+                         "unreadable at ref %s\n",
+                         file.path.c_str(), target_ref.c_str());
             continue;
         }
 
@@ -300,12 +316,22 @@ void Analyzer::find_duplicates(const std::vector<SymbolInfo>& new_symbols,
     double threshold = params.similarity_threshold;
     if (threshold <= 0.0) threshold = 0.8;
 
-    // Build hash map of existing content for exact match.
-    absl::flat_hash_map<std::string, std::vector<const SymbolInfo*>> existing_hashes;
+    // Normalize each existing symbol EXACTLY ONCE. The structural-duplicate
+    // loop below re-normalized es.content for every (new x existing) pair —
+    // an O(new * existing * bytes) rescan of content this map had already
+    // normalized. Keys are views into `existing_norm`, which is reserved up
+    // front so no emplace_back can reallocate it.
+    std::vector<std::string> existing_norm;
+    existing_norm.reserve(existing_symbols.size());
+    absl::flat_hash_map<std::string_view, std::vector<const SymbolInfo*>>
+        existing_hashes;
+    existing_hashes.reserve(existing_symbols.size());
     for (const auto& sym : existing_symbols) {
+        existing_norm.push_back(sym.content.empty()
+                                    ? std::string()
+                                    : normalize_code_content(sym.content));
         if (sym.content.empty()) continue;
-        auto hash = normalize_code_content(sym.content);
-        existing_hashes[hash].push_back(&sym);
+        existing_hashes[existing_norm.back()].push_back(&sym);
     }
 
     for (const auto& ns : new_symbols) {
@@ -332,10 +358,11 @@ void Analyzer::find_duplicates(const std::vector<SymbolInfo>& new_symbols,
         }
 
         // Structural duplicates.
-        for (const auto& es : existing_symbols) {
+        for (size_t ei = 0; ei < existing_symbols.size(); ++ei) {
+            const auto& es = existing_symbols[ei];
             if (es.content.empty()) continue;
             if (es.file_path == ns.file_path && es.line == ns.line) continue;
-            if (normalize_code_content(es.content) == new_hash) continue;
+            if (existing_norm[ei] == new_hash) continue;
 
             double sim = code_structural_similarity(ns.content, es.content);
             if (sim >= threshold) {
@@ -754,7 +781,7 @@ void Analyzer::build_report(const std::vector<ChangedFile>& files,
                             std::vector<NamingFinding>& naming_issues,
                             std::vector<MetricsFinding>& metrics_issues,
                             const AnalysisParams& params,
-                            int64_t elapsed_ms,
+                            int64_t elapsed_ms, int skipped_unreadable,
                             AnalysisReport& out) {
     int symbols_added = 0;
     for (const auto& file : files) {
@@ -791,6 +818,7 @@ void Analyzer::build_report(const std::vector<ChangedFile>& files,
     out.metadata.scope = params.scope;
     out.metadata.analyzed_at = std::chrono::system_clock::now();
     out.metadata.analysis_time_ms = elapsed_ms;
+    out.metadata.files_skipped_unreadable = skipped_unreadable;
 }
 
 void Analyzer::empty_report(const AnalysisParams& params, int64_t elapsed_ms,
