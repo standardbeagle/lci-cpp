@@ -223,7 +223,7 @@ CodebaseIntelligenceResponse CodebaseIntelligenceEngine::build_overview(
 
         map->note =
             "Use EntityIDs with get_object_context for full navigation.";
-        response.repository_map = map.release();
+        response.repository_map = std::move(map);
     }
 
     if (params.include.health_dashboard) {
@@ -249,13 +249,13 @@ CodebaseIntelligenceResponse CodebaseIntelligenceEngine::build_overview(
             std::chrono::system_clock::now();
         health->analysis_metadata.files_analyzed =
             static_cast<int>(files.size());
-        response.health_dashboard = health.release();
+        response.health_dashboard = std::move(health);
     }
 
     if (params.include.entry_points) {
         auto ep = std::make_unique<EntryPointsList>();
         *ep = build_entry_points(files);
-        response.entry_points = ep.release();
+        response.entry_points = std::move(ep);
     }
 
     return response;
@@ -316,7 +316,7 @@ CodebaseIntelligenceResponse CodebaseIntelligenceEngine::build_statistics(
         complexity, static_cast<int>(files.size()));
     health->analysis_metadata.analyzed_at = std::chrono::system_clock::now();
     health->analysis_metadata.files_analyzed = static_cast<int>(files.size());
-    response.health_dashboard = health.release();
+    response.health_dashboard = std::move(health);
 
     auto coupling = CouplingAnalyzer().analyze(files, project_root, targets_of);
 

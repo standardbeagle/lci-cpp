@@ -1633,7 +1633,7 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
         if (!d.result.ok()) {
             return make_error_response("code_insight", d.result.error);
         }
-        const auto* hd = d.result.response.health_dashboard;
+        const auto* hd = d.result.response.health_dashboard.get();
         int n_map = std::min(static_cast<int>(d.modules.modules.size()), 15);
         bool objids = (hd && (!hd->detailed_smells.empty() ||
                               !hd->problematic_symbols.empty())) ||
@@ -1642,7 +1642,8 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                         lcf_token_count(n_map, 0, hd != nullptr, 0, true));
         emit_summary(out, files_data, project_root, file_count, symbol_count);
         emit_repository_map(out, d.modules.modules);
-        emit_entry_points(out, d.result.response.entry_points, project_root);
+        emit_entry_points(out, d.result.response.entry_points.get(),
+                          project_root);
         if (hd) emit_health(out, *hd, &d.purity);
         {
             auto sig = compute_graph_signals(indexer, files_data,
@@ -1813,7 +1814,7 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
         if (!d.result.ok()) {
             return make_error_response("code_insight", d.result.error);
         }
-        const auto* hd = d.result.response.health_dashboard;
+        const auto* hd = d.result.response.health_dashboard.get();
         int n_map = std::min(static_cast<int>(d.modules.modules.size()), 15);
         bool objids = (hd && (!hd->detailed_smells.empty() ||
                               !hd->problematic_symbols.empty())) ||
@@ -1822,7 +1823,8 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                         lcf_token_count(n_map, 0, hd != nullptr, 0, false));
         emit_summary(out, files_data, project_root, file_count, symbol_count);
         emit_repository_map(out, d.modules.modules);
-        emit_entry_points(out, d.result.response.entry_points, project_root);
+        emit_entry_points(out, d.result.response.entry_points.get(),
+                          project_root);
         if (hd) emit_health(out, *hd, &d.purity);
         {
             auto sig = compute_graph_signals(indexer, files_data,

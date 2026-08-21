@@ -635,12 +635,11 @@ TEST(TokenBudgetManager, EstimateEmptyResponse) {
 }
 
 TEST(TokenBudgetManager, EstimateWithRepositoryMap) {
-    RepositoryMap map;
+    CodebaseIntelligenceResponse response;
+    response.repository_map = std::make_unique<RepositoryMap>();
+    RepositoryMap& map = *response.repository_map;
     map.critical_functions.resize(10);
     map.module_boundaries.resize(5);
-
-    CodebaseIntelligenceResponse response;
-    response.repository_map = &map;
 
     int tokens = TokenBudgetManager::estimate_response_tokens(response);
     // 50 + 10*100 + 5*80 + 0 + 0 + 200 = 1650
@@ -648,11 +647,9 @@ TEST(TokenBudgetManager, EstimateWithRepositoryMap) {
 }
 
 TEST(TokenBudgetManager, EstimateWithHealthDashboard) {
-    HealthDashboard health;
-    health.hotspots.resize(5);
-
     CodebaseIntelligenceResponse response;
-    response.health_dashboard = &health;
+    response.health_dashboard = std::make_unique<HealthDashboard>();
+    response.health_dashboard->hotspots.resize(5);
 
     int tokens = TokenBudgetManager::estimate_response_tokens(response);
     // 100 + 200 + 5*100 + 200 = 1000
@@ -666,11 +663,10 @@ TEST(TokenBudgetManager, EnforceUnderBudget) {
 }
 
 TEST(TokenBudgetManager, TruncateReducesHotspots) {
-    HealthDashboard health;
-    health.hotspots.resize(50);
-
     CodebaseIntelligenceResponse response;
-    response.health_dashboard = &health;
+    response.health_dashboard = std::make_unique<HealthDashboard>();
+    HealthDashboard& health = *response.health_dashboard;
+    health.hotspots.resize(50);
 
     // Force truncation to small budget
     TokenBudgetManager::truncate_to_budget(response, 500);
@@ -678,18 +674,16 @@ TEST(TokenBudgetManager, TruncateReducesHotspots) {
 }
 
 TEST(TokenBudgetManager, EmergencyTruncation) {
-    RepositoryMap map;
+    CodebaseIntelligenceResponse response;
+    response.repository_map = std::make_unique<RepositoryMap>();
+    response.health_dashboard = std::make_unique<HealthDashboard>();
+    RepositoryMap& map = *response.repository_map;
+    HealthDashboard& health = *response.health_dashboard;
     map.critical_functions.resize(100);
     map.module_boundaries.resize(50);
     map.domain_terms.resize(30);
     map.entry_points.resize(20);
-
-    HealthDashboard health;
     health.hotspots.resize(50);
-
-    CodebaseIntelligenceResponse response;
-    response.repository_map = &map;
-    response.health_dashboard = &health;
 
     TokenBudgetManager::truncate_to_budget(response, 100);
 
@@ -929,7 +923,7 @@ TEST(CIEngine, OverviewHealthDashboard) {
     auto result = engine.analyze(params, {fsd}, 1, 1);
     EXPECT_TRUE(result.ok());
 
-    auto* health = result.response.health_dashboard;
+    auto* health = result.response.health_dashboard.get();
     EXPECT_NE(health, nullptr);
     EXPECT_GT(health->complexity.average_cc, 0.0);
     EXPECT_FALSE(health->hotspots.empty());
@@ -966,7 +960,7 @@ TEST(CIEngine, OverviewEntryPoints) {
     auto result = engine.analyze(params, {fsd}, 1, 2);
     EXPECT_TRUE(result.ok());
 
-    auto* ep = result.response.entry_points;
+    auto* ep = result.response.entry_points.get();
     EXPECT_NE(ep, nullptr);
     EXPECT_GE(ep->main_functions.size(), 1u);
 
@@ -1354,7 +1348,7 @@ TEST(CIEngine, AnalyzeEnforcesBudget) {
     auto result = engine.analyze(params, {fsd}, 1, 100);
     EXPECT_TRUE(result.ok());
     // Budget enforcement should have limited the response
-    auto* health = result.response.health_dashboard;
+    auto* health = result.response.health_dashboard.get();
     EXPECT_NE(health, nullptr);
 }
 
