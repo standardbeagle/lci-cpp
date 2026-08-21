@@ -183,6 +183,31 @@ TEST(HealthAnalyzer, ComplexityFromFilesSingleFunction) {
     EXPECT_EQ(cm.distribution["low"], 1);
 }
 
+// p75/p90 used to be average*1.2 and average*1.5, which is not a percentile
+// of anything. A long-tailed distribution makes the difference obvious.
+TEST(HealthAnalyzer, PercentilesComeFromTheDistribution) {
+    std::vector<EnhancedSymbol> syms(10);
+    const int cc[10] = {1, 1, 1, 1, 1, 1, 1, 2, 3, 80};
+    FileSymbolData fsd;
+    fsd.path = "test.go";
+    for (int i = 0; i < 10; ++i) {
+        syms[static_cast<size_t>(i)].symbol.name = "f" + std::to_string(i);
+        syms[static_cast<size_t>(i)].symbol.type = SymbolType::Function;
+        syms[static_cast<size_t>(i)].complexity = cc[i];
+        fsd.symbols.push_back(&syms[static_cast<size_t>(i)]);
+    }
+
+    HealthAnalyzer ha;
+    auto cm = ha.calculate_complexity_from_files({fsd});
+    EXPECT_DOUBLE_EQ(9.2, cm.average_cc);
+    EXPECT_DOUBLE_EQ(1.0, cm.median_cc);
+    EXPECT_DOUBLE_EQ(1.0, cm.percentiles["p50"]);
+    // sorted[10*3/4] == sorted[7] == 2, not average*1.2 == 11.04.
+    EXPECT_DOUBLE_EQ(2.0, cm.percentiles["p75"]);
+    // sorted[10*9/10] == sorted[9] == 80, not average*1.5 == 13.8.
+    EXPECT_DOUBLE_EQ(80.0, cm.percentiles["p90"]);
+}
+
 TEST(HealthAnalyzer, ComplexityDistributionCategories) {
     EnhancedSymbol low_sym;
     low_sym.symbol.name = "low_func";

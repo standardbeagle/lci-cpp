@@ -158,6 +158,8 @@ ComplexityMetrics HealthAnalyzer::calculate_complexity_from_files(
 
     double avg = 0.0;
     double median = 0.0;
+    double p75 = 0.0;
+    double p90 = 0.0;
     if (!complexities.empty()) {
         for (double v : complexities) avg += v;
         avg /= static_cast<double>(complexities.size());
@@ -170,14 +172,20 @@ ComplexityMetrics HealthAnalyzer::calculate_complexity_from_files(
         } else {
             median = sorted[mid];
         }
+        // Real order statistics off the vector already sorted for the median.
+        // p75/p90 used to be average*1.2 and average*1.5 -- numbers with no
+        // relationship to the distribution, which on the usual long tail of
+        // complexity understate both badly.
+        p75 = sorted[sorted.size() * 3 / 4];
+        p90 = sorted[sorted.size() * 9 / 10];
     }
 
     ComplexityMetrics result;
     result.average_cc = avg;
     result.median_cc = median;
     result.percentiles["p50"] = median;
-    result.percentiles["p75"] = avg * 1.2;
-    result.percentiles["p90"] = avg * 1.5;
+    result.percentiles["p75"] = p75;
+    result.percentiles["p90"] = p90;
     result.high_complexity_funcs = std::move(high_funcs);
     result.distribution = std::move(distribution);
     return result;
