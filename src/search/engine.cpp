@@ -404,11 +404,32 @@ std::vector<SearchResult> SearchEngine::search(
     } else {
         candidates = index_.find_candidate_files(pattern,
                                                   options.case_insensitive);
+        // The fallback is load-bearing, NOT a defensive extra: an empty
+        // trigram candidate set is not proof of absence. TrigramIndex's
+        // read-side postings (Snapshot::ascii_trigrams / unicode_trigrams)
+        // are written only by the incremental TrigramIndex::index_file path.
+        // Bulk indexing -- the production path, MasterIndex::index_directory
+        // -> Pipeline -> FileIntegrator::merge_trigrams -- routes every file
+        // into ShardedTrigramStorage instead, which the search path never
+        // reads (see the Snapshot comment in include/lci/core/trigram.h). So
+        // on any pipeline-indexed corpus this returns empty for EVERY
+        // pattern and the full-file-set scan below is the only thing that
+        // finds anything. Removing it returns zero results for every query.
+        // Pinned by SearchEngineIntegrationTest.
+        // BulkIndexLeavesTrigramCandidatesEmpty.
         if (candidates.empty()) {
             candidates = index_.get_all_file_ids();
         }
     }
     if (candidates.empty()) return {};
+
+    // Deterministic scan order (Karpathy rule 4). Both sources above are
+    // built by walking an absl hash map (TrigramIndex's per-file counts,
+    // MasterIndex::file_map), whose iteration order is randomized per
+    // process. That order decides WHICH matches survive the collection cap
+    // below, so without this sort the ranked top-N of a capped query differs
+    // between runs on an identical corpus.
+    std::sort(candidates.begin(), candidates.end());
 
     // Output cap (what the caller asked for) vs collection cap (how many raw
     // matches we gather before scoring). They must differ: if we stop

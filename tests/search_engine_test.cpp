@@ -6,6 +6,8 @@
 
 #include "unique_temp.h"
 
+#include <algorithm>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -462,6 +464,86 @@ TEST(SearchEngineIntegrationTest, WordBoundarySearch) {
         if (r.match_text == "foo") found_exact = true;
     }
     EXPECT_TRUE(found_exact);
+}
+
+// -- Trigram prefilter reality check ------------------------------------------
+
+// Pins WHY SearchEngine::search falls back to get_all_file_ids() when the
+// trigram candidate set comes back empty. The read-side trigram postings are
+// filled only by the incremental TrigramIndex::index_file path; bulk indexing
+// (index_directory -> Pipeline) routes trigrams into ShardedTrigramStorage,
+// which the search path never reads. So on a pipeline-indexed corpus an empty
+// candidate set is NOT proof of absence, and dropping the fallback would make
+// every search return nothing.
+TEST(SearchEngineIntegrationTest, BulkIndexLeavesTrigramCandidatesEmpty) {
+    TempDir dir;
+    dir.write_file("alpha.go",
+        "package main\n"
+        "func distinctiveNeedle() int { return 7 }\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    // The pattern yields plenty of trigrams and does occur in the corpus...
+    auto candidates = mi.find_candidate_files("distinctiveNeedle", false);
+    EXPECT_TRUE(candidates.empty())
+        << "trigram postings are now populated on the bulk path; revisit the "
+           "get_all_file_ids fallback in SearchEngine::search";
+
+    // ...yet the search still finds it, purely via the fallback scan.
+    SearchEngine engine(mi);
+    SearchOptions opts;
+    auto results = engine.search("distinctiveNeedle", opts);
+    EXPECT_FALSE(results.empty());
+}
+
+// -- Determinism --------------------------------------------------------------
+
+// Candidate FileIDs must be scanned in sorted order: both candidate sources
+// are built by walking an absl hash map, whose iteration order is randomized
+// per process, and that order picks WHICH matches survive the collection cap.
+TEST(SearchEngineIntegrationTest, CappedCollectionTakesLowestFileIds) {
+    TempDir dir;
+    constexpr int kFiles = 40;
+    for (int i = 0; i < kFiles; ++i) {
+        char name[32];
+        std::snprintf(name, sizeof(name), "f%02d.go", i);
+        dir.write_file(name,
+            "package main\n"
+            "func f() { needleToken() }\n");
+    }
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    // max_results=3 => collection cap 24, so 16 of the 40 files are dropped.
+    SearchEngine engine(mi);
+    SearchOptions opts;
+    opts.max_results = 3;
+    auto results = engine.search("needleToken", opts);
+    ASSERT_FALSE(results.empty());
+
+    // Collection visits the 24 lowest FileIDs; all 40 files score equally, so
+    // rank() breaks the tie on path and the output cap keeps the three
+    // lexicographically smallest of those 24. Any other trio means the scan
+    // followed hash order.
+    auto ids = mi.get_all_file_ids();
+    ASSERT_EQ(static_cast<size_t>(kFiles), ids.size());
+    std::sort(ids.begin(), ids.end());
+    std::vector<std::string> collected;
+    for (size_t i = 0; i < 24 && i < ids.size(); ++i) {
+        collected.push_back(mi.get_file_path(ids[i]));
+    }
+    std::sort(collected.begin(), collected.end());
+
+    ASSERT_EQ(3u, results.size());
+    for (size_t i = 0; i < results.size(); ++i) {
+        EXPECT_EQ(collected[i], results[i].path);
+    }
 }
 
 }  // namespace
