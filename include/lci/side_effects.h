@@ -236,9 +236,15 @@ struct AccessPattern {
 };
 
 /// Details a write to a function parameter.
+/// parameter_index value meaning "this write mutates a parameter, but which
+/// one is not known" -- the written identifier was never tied back to the
+/// signature. Consumers must render it as unknown rather than as a position;
+/// it is excluded from PurityClassification::mutated_parameters.
+inline constexpr int kUnknownParameterIndex = -1;
+
 struct ParameterWriteInfo {
     std::string parameter_name;
-    int parameter_index{};
+    int parameter_index{kUnknownParameterIndex};
     int line{};
     int column{};
     std::vector<std::string> field_path;
