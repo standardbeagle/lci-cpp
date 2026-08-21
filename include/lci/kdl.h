@@ -6,8 +6,8 @@
 // classifier needed the same grammar; a second copy would have drifted the
 // moment either side gained a token.
 //
-// Supported subset: nodes with string/number/bool arguments, child blocks,
-// `//` and `/* */` comments, `;` separators.
+// Supported subset: nodes with string/number/bool arguments, `key=value`
+// properties, child blocks, `//` and `/* */` comments, `;` separators.
 // Deliberately NOT supported: KDL-v2 `#true`/`#false` (the lexer reports them
 // as an error naming the offending token), type annotations, slashdash.
 
@@ -23,6 +23,7 @@ enum class TokenKind {
     String,
     Number,
     Bool,
+    Equals,
     LBrace,
     RBrace,
     Eof,
@@ -37,15 +38,27 @@ struct Token {
     int line{1};
 };
 
+/// One `key=value` property on a node. Value keeps its token kind so a
+/// consumer can tell `rank=0` from `rank="0"`.
+struct Property {
+    std::string key;
+    Token value;
+};
+
 struct Node {
     std::string name;
     std::vector<Token> args;
+    std::vector<Property> props;
     std::vector<Node> children;
 
     /// First string argument, or empty when the node has none.
     std::string_view first_string() const;
     /// Every string argument, in order.
     std::vector<std::string> string_args() const;
+    /// Property lookup. Returns nullptr when absent.
+    const Token* prop(std::string_view key) const;
+    /// Integer property with a fallback for absent/non-numeric values.
+    int int_prop(std::string_view key, int fallback) const;
     /// Child node by name, or nullptr.
     const Node* child(std::string_view name) const;
 };

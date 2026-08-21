@@ -27,6 +27,7 @@ class Lexer {
 
         char c = src_[pos_];
 
+        if (c == '=') { ++pos_; return stamp({TokenKind::Equals, "=", 0, false}); }
         if (c == '{') { ++pos_; return stamp({TokenKind::LBrace, "{", 0, false}); }
         if (c == '}') { ++pos_; return stamp({TokenKind::RBrace, "}", 0, false}); }
 
@@ -37,6 +38,21 @@ class Lexer {
         }
 
         return stamp(lex_ident_or_bool());
+    }
+
+    /// True when the next significant character is '=' — the one lookahead
+    /// the parser needs to tell a property (`rank=0`) from a child node named
+    /// `rank`. Non-consuming: whitespace/comment skipping is undone.
+    bool peek_is_equals() {
+        size_t save_pos = pos_;
+        int save_line = line_;
+        std::string save_err = pending_error_;
+        skip_ws_and_comments();
+        bool eq = pos_ < src_.size() && src_[pos_] == '=';
+        pos_ = save_pos;
+        line_ = save_line;
+        pending_error_ = std::move(save_err);
+        return eq;
     }
 
   private:
@@ -228,11 +244,38 @@ class Parser {
         node.name = cur_.text;
         advance();
 
-        // Collect arguments until we see { or a new node name at the same level
-        while (cur_.kind == TokenKind::String || cur_.kind == TokenKind::Number ||
-               cur_.kind == TokenKind::Bool) {
-            node.args.push_back(cur_);
-            advance();
+        // Collect arguments and `key=value` properties until a child block or
+        // the next node name at this level. A property is an identifier the
+        // lexer already consumed followed by '=', which is why the ident case
+        // has to peek: `rank=0` and a bare child node `rank` differ only by
+        // the token after the name.
+        while (true) {
+            if (cur_.kind == TokenKind::String ||
+                cur_.kind == TokenKind::Number ||
+                cur_.kind == TokenKind::Bool) {
+                node.args.push_back(cur_);
+                advance();
+                continue;
+            }
+            if (cur_.kind == TokenKind::Ident && lex_.peek_is_equals()) {
+                Property p;
+                p.key = cur_.text;
+                advance();  // past the key
+                advance();  // past '='
+                if (cur_.kind != TokenKind::String &&
+                    cur_.kind != TokenKind::Number &&
+                    cur_.kind != TokenKind::Bool) {
+                    error_ = "line " + std::to_string(cur_.line) +
+                             ": property '" + p.key +
+                             "' needs a string, number, or bool value";
+                    return node;
+                }
+                p.value = cur_;
+                node.props.push_back(std::move(p));
+                advance();
+                continue;
+            }
+            break;
         }
 
         if (cur_.kind == TokenKind::Error) {
@@ -272,6 +315,19 @@ std::vector<std::string> Node::string_args() const {
         if (a.kind == TokenKind::String) out.push_back(a.text);
     }
     return out;
+}
+
+const Token* Node::prop(std::string_view key) const {
+    for (const auto& p : props) {
+        if (p.key == key) return &p.value;
+    }
+    return nullptr;
+}
+
+int Node::int_prop(std::string_view key, int fallback) const {
+    const Token* t = prop(key);
+    if (t == nullptr || t->kind != TokenKind::Number) return fallback;
+    return static_cast<int>(t->num_val);
 }
 
 const Node* Node::child(std::string_view name) const {
