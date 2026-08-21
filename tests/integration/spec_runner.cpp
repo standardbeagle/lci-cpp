@@ -104,6 +104,9 @@ void NormalizeMcpInnerText(nlohmann::json& node,
                             "timestamp_ms",
                             "metadata.analyzed_at",
                             "metadata.analysis_time_ms",
+                            // Release noise: a version bump must not break
+                            // every MCP golden that echoes the envelope.
+                            "metadata.server_version",
                             "analysis_metadata.analysis_time_ms",
                             "overview",
                             "summary",
