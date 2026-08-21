@@ -151,13 +151,26 @@ Config make_default_config();
 struct ConfigResult {
     Config config;
     std::string error;
+    /// Non-fatal diagnostics: unrecognized keys, which are ignored rather
+    /// than rejected so a newer config file still loads on an older binary.
+    /// Callers that face a human should print these.
+    std::vector<std::string> warnings;
     bool ok() const { return error.empty(); }
 };
 
 /// Loads configuration from a .lci.kdl file in the given directory.
 /// If no .lci.kdl file exists, returns defaults for that directory.
-/// Sets result.error on parse failure.
+/// Sets result.error on parse failure OR validation failure — validation and
+/// the 0-means-auto smart defaults run here, so every caller gets a config
+/// that has been range-checked, not just `lci config show`.
 ConfigResult load_config(const std::string& project_root);
+
+/// Loads configuration from a specific file, resolving relative paths inside
+/// it against `project_root`. Unlike load_config, a missing file is an ERROR:
+/// the caller named this file explicitly, so falling back to defaults would
+/// apply settings they never wrote.
+ConfigResult load_config_file(const std::string& config_path,
+                              const std::string& project_root);
 
 // -- Config validation --------------------------------------------------------
 

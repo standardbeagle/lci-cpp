@@ -661,6 +661,104 @@ TEST_F(KdlConfigTest, AcceptsWellFormedSuffixedSizes) {
 }
 
 // ---------------------------------------------------------------------------
+// Wrong-typed values, unknown keys, tilde expansion, load-time validation
+// ---------------------------------------------------------------------------
+TEST_F(KdlConfigTest, WrongTypedKnownKeyIsAnError) {
+    // `max_results "100"` used to leave the default in place with no
+    // diagnostic: the user's setting silently never took effect.
+    write_kdl("search {\n  max_results \"100\"\n}\n");
+    auto result = load_config(temp_dir_.string());
+    ASSERT_FALSE(result.ok());
+    EXPECT_NE(result.error.find("search.max_results"), std::string::npos)
+        << result.error;
+}
+
+TEST_F(KdlConfigTest, WrongTypedBoolIsAnError) {
+    write_kdl("search {\n  enable_fuzzy \"yes\"\n}\n");
+    auto result = load_config(temp_dir_.string());
+    ASSERT_FALSE(result.ok());
+    EXPECT_NE(result.error.find("search.enable_fuzzy"), std::string::npos)
+        << result.error;
+}
+
+TEST_F(KdlConfigTest, WrongTypedStringIsAnError) {
+    write_kdl("index {\n  priority_mode 7\n}\n");
+    auto result = load_config(temp_dir_.string());
+    ASSERT_FALSE(result.ok());
+    EXPECT_NE(result.error.find("index.priority_mode"), std::string::npos)
+        << result.error;
+}
+
+TEST_F(KdlConfigTest, CorrectlyTypedValueStillApplies) {
+    // Discrimination partner: the same keys, spelled right, must still load.
+    write_kdl(
+        "search {\n  max_results 42\n  enable_fuzzy false\n}\n"
+        "index {\n  priority_mode \"size\"\n}\n");
+    auto result = load_config(temp_dir_.string());
+    ASSERT_TRUE(result.ok()) << result.error;
+    EXPECT_EQ(result.config.search.max_results, 42);
+    EXPECT_FALSE(result.config.search.enable_fuzzy);
+    EXPECT_EQ(result.config.index.priority_mode, "size");
+}
+
+TEST_F(KdlConfigTest, UnknownKeyWarnsButLoads) {
+    write_kdl("search {\n  max_reuslts 42\n}\n");
+    auto result = load_config(temp_dir_.string());
+    ASSERT_TRUE(result.ok()) << result.error;
+    ASSERT_EQ(result.warnings.size(), 1u);
+    EXPECT_NE(result.warnings[0].find("search.max_reuslts"),
+              std::string::npos)
+        << result.warnings[0];
+}
+
+TEST_F(KdlConfigTest, UnknownTopLevelNodeWarns) {
+    write_kdl("serch {\n  max_results 42\n}\n");
+    auto result = load_config(temp_dir_.string());
+    ASSERT_TRUE(result.ok()) << result.error;
+    ASSERT_EQ(result.warnings.size(), 1u);
+    EXPECT_NE(result.warnings[0].find("serch"), std::string::npos)
+        << result.warnings[0];
+}
+
+TEST_F(KdlConfigTest, KnownKeysProduceNoWarnings) {
+    write_kdl("search {\n  max_results 42\n}\nindex {\n  watch_mode true\n}\n");
+    auto result = load_config(temp_dir_.string());
+    ASSERT_TRUE(result.ok()) << result.error;
+    EXPECT_TRUE(result.warnings.empty()) << result.warnings.front();
+}
+
+TEST_F(KdlConfigTest, TildeInProjectRootExpandsAgainstHome) {
+    const char* home = std::getenv("HOME");
+    if (home == nullptr || *home == '\0') GTEST_SKIP() << "no HOME";
+
+    write_kdl("project {\n  root \"~/lci-tilde-probe\"\n}\n");
+    auto result = load_config(temp_dir_.string());
+    ASSERT_TRUE(result.ok()) << result.error;
+    EXPECT_EQ(result.config.project.root,
+              (fs::path(home) / "lci-tilde-probe").string());
+    // The old behaviour appended the literal "~" as a path component.
+    EXPECT_EQ(result.config.project.root.find('~'), std::string::npos);
+}
+
+TEST_F(KdlConfigTest, LoadConfigValidatesRanges) {
+    // validate_config used to run only for `lci config show`, so an
+    // out-of-range value reached the indexer unchecked.
+    write_kdl("performance {\n  max_memory_mb 10\n}\n");
+    auto result = load_config(temp_dir_.string());
+    ASSERT_FALSE(result.ok());
+    EXPECT_NE(result.error.find("max_memory_mb"), std::string::npos)
+        << result.error;
+}
+
+TEST_F(KdlConfigTest, LoadConfigAppliesSmartDefaults) {
+    write_kdl("performance {\n  max_goroutines 0\n}\n");
+    auto result = load_config(temp_dir_.string());
+    ASSERT_TRUE(result.ok()) << result.error;
+    EXPECT_GT(result.config.performance.max_goroutines, 0);
+    EXPECT_GT(result.config.performance.parallel_file_workers, 0);
+}
+
+// ---------------------------------------------------------------------------
 // Validation
 // ---------------------------------------------------------------------------
 TEST(ValidateConfigTest, AcceptsValidDefaults) {
