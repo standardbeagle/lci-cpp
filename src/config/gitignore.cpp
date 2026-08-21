@@ -132,10 +132,24 @@ bool GitignoreParser::matches_pattern(const GitignorePattern& pat,
         if (is_dir) {
             if (fast_match(pat, path)) return true;
         }
-        // Check if file is inside a matching directory
-        std::string dir_prefix = pat.pattern + "/";
-        if (path.find(dir_prefix) != std::string_view::npos) return true;
-        if (path.substr(0, dir_prefix.size()) == dir_prefix) return true;
+        // Check if the file lives inside a matching directory. The pattern
+        // must cover a WHOLE path component: a plain substring search lets
+        // `build/` swallow `prebuild/foo.go` and `rebuild/foo.go`, silently
+        // dropping first-party sources from the index. Walk component starts
+        // instead — allocation-free, unlike building a `pattern + "/"` key.
+        const std::string_view needle = pat.pattern;
+        if (!needle.empty()) {
+            size_t pos = 0;
+            while (pos + needle.size() < path.size()) {
+                if (path.compare(pos, needle.size(), needle) == 0 &&
+                    path[pos + needle.size()] == '/') {
+                    return true;
+                }
+                auto slash = path.find('/', pos);
+                if (slash == std::string_view::npos) break;
+                pos = slash + 1;
+            }
+        }
         return fast_match(pat, path);
     }
 
@@ -178,6 +192,45 @@ namespace {
 //   `?` matches any single non-`/` char
 //   `*` matches zero or more non-`/` chars
 //   `**` matches zero or more chars across boundaries
+//   `[abc]` / `[a-z]` / `[!abc]` match a single non-`/` char class
+//
+// The class support is not optional polish: analyze_pattern() already
+// classifies any `[` as PatternType::Wildcard, so without it `*.p[yc]`
+// reached this matcher and compared `[` as a literal byte — the pattern
+// could never match anything.
+
+/// Matches one character class starting at `pattern[px] == '['` against `ch`.
+/// Returns false if the class is unterminated (caller treats `[` literally);
+/// otherwise sets `matched` and points `px_out` past the closing `]`.
+bool match_char_class(std::string_view pattern, size_t px, char ch,
+                      bool& matched, size_t& px_out) {
+    size_t i = px + 1;
+    bool negate = false;
+    if (i < pattern.size() && (pattern[i] == '!' || pattern[i] == '^')) {
+        negate = true;
+        ++i;
+    }
+    bool found = false;
+    bool first = true;
+    for (; i < pattern.size(); ++i) {
+        char c = pattern[i];
+        if (c == ']' && !first) break;
+        first = false;
+        // Range `a-z`; a trailing `-` before `]` is a literal.
+        if (i + 2 < pattern.size() && pattern[i + 1] == '-' &&
+            pattern[i + 2] != ']') {
+            if (ch >= c && ch <= pattern[i + 2]) found = true;
+            i += 2;
+            continue;
+        }
+        if (c == ch) found = true;
+    }
+    if (i >= pattern.size()) return false;  // Unterminated: literal '['.
+    matched = (found != negate);
+    px_out = i + 1;
+    return true;
+}
+
 bool gitignore_match_at(std::string_view pattern, size_t px,
                         std::string_view text, size_t tx) {
     while (px < pattern.size()) {
@@ -215,6 +268,19 @@ bool gitignore_match_at(std::string_view pattern, size_t px,
             ++px; ++tx;
             continue;
         }
+        if (c == '[') {
+            bool cls_matched = false;
+            size_t next_px = 0;
+            char ch = tx < text.size() ? text[tx] : '\0';
+            if (match_char_class(pattern, px, ch, cls_matched, next_px)) {
+                if (tx >= text.size() || text[tx] == '/' || !cls_matched)
+                    return false;
+                px = next_px;
+                ++tx;
+                continue;
+            }
+            // Unterminated class: fall through and match '[' literally.
+        }
         if (tx >= text.size() || c != text[tx]) return false;
         ++px; ++tx;
     }
@@ -222,6 +288,10 @@ bool gitignore_match_at(std::string_view pattern, size_t px,
 }
 
 }  // namespace
+
+bool glob_match(std::string_view pattern, std::string_view text) {
+    return gitignore_match_at(pattern, 0, text, 0);
+}
 
 bool GitignoreParser::match_glob(std::string_view pattern,
                                  std::string_view text) const {

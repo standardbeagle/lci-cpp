@@ -255,5 +255,60 @@ TEST(GitignoreParser, HotPathManyCallsStable) {
     EXPECT_EQ(ignored_count, 5000u);
 }
 
+// --- Directory-pattern component boundary -----------------------------------
+//
+// Discrimination pair for the substring-match defect: `build/` must exclude
+// files under `build/` and must NOT exclude files under a directory that
+// merely ends with "build".
+
+TEST(GitignoreParser, DirectoryPatternRequiresComponentBoundary) {
+    auto p = parser_from_patterns({"build/"});
+    EXPECT_TRUE(p.should_ignore("build/x.go", /*is_dir=*/false));
+    EXPECT_TRUE(p.should_ignore("pkg/build/x.go", /*is_dir=*/false));
+    EXPECT_FALSE(p.should_ignore("prebuild/x.go", /*is_dir=*/false));
+    EXPECT_FALSE(p.should_ignore("rebuild/x.go", /*is_dir=*/false));
+    EXPECT_FALSE(p.should_ignore("pkg/prebuild/x.go", /*is_dir=*/false));
+}
+
+// --- Character classes ------------------------------------------------------
+
+TEST(GitignoreParser, CharacterClassMatchesMembers) {
+    auto p = parser_from_patterns({"*.p[yc]"});
+    EXPECT_TRUE(p.should_ignore("mod.py", /*is_dir=*/false));
+    EXPECT_TRUE(p.should_ignore("mod.pc", /*is_dir=*/false));
+    EXPECT_FALSE(p.should_ignore("mod.px", /*is_dir=*/false));
+    EXPECT_FALSE(p.should_ignore("mod.p", /*is_dir=*/false));
+}
+
+TEST(GitignoreParser, CharacterClassRange) {
+    auto p = parser_from_patterns({"log[0-9].txt"});
+    EXPECT_TRUE(p.should_ignore("log0.txt", /*is_dir=*/false));
+    EXPECT_TRUE(p.should_ignore("log7.txt", /*is_dir=*/false));
+    EXPECT_FALSE(p.should_ignore("loga.txt", /*is_dir=*/false));
+}
+
+TEST(GitignoreParser, CharacterClassNegated) {
+    auto p = parser_from_patterns({"tmp[!0-9]"});
+    EXPECT_TRUE(p.should_ignore("tmpa", /*is_dir=*/false));
+    EXPECT_FALSE(p.should_ignore("tmp1", /*is_dir=*/false));
+}
+
+TEST(GitignoreParser, UnterminatedCharacterClassIsLiteral) {
+    auto p = parser_from_patterns({"a[bc*"});
+    EXPECT_TRUE(p.should_ignore("a[bcd", /*is_dir=*/false));
+    EXPECT_FALSE(p.should_ignore("ab", /*is_dir=*/false));
+}
+
+// --- Shared glob entry point ------------------------------------------------
+
+TEST(GlobMatch, SharedDialect) {
+    EXPECT_TRUE(glob_match("*.md", "readme.md"));
+    EXPECT_FALSE(glob_match("*.md", "docs/readme.md"));
+    EXPECT_TRUE(glob_match("**/readme.md", "docs/a/readme.md"));
+    EXPECT_TRUE(glob_match("src/?.go", "src/a.go"));
+    EXPECT_TRUE(glob_match("*.[ch]", "main.c"));
+    EXPECT_FALSE(glob_match("*.[ch]", "main.o"));
+}
+
 }  // namespace
 }  // namespace lci

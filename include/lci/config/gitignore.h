@@ -26,6 +26,15 @@ struct GitignorePattern {
     std::string suffix;
 };
 
+/// Matches `text` against a gitignore-style glob `pattern`:
+///   `?`      one non-`/` char
+///   `*`      zero or more non-`/` chars
+///   `**`     zero or more chars, crossing `/`
+///   `[a-z]`  one non-`/` char from a class (`[!...]` / `[^...]` negates)
+/// Exposed so other glob consumers (the git churn filter) share one dialect
+/// instead of hand-rolling a second, weaker one.
+bool glob_match(std::string_view pattern, std::string_view text);
+
 /// Parses .gitignore files and matches paths against their patterns.
 /// Supports negation (!), directory-only (/), and wildcard (* / **) patterns.
 class GitignoreParser {
