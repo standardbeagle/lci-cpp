@@ -994,12 +994,21 @@ TEST(PipelineTest, MidRunStopReturnsPromptly) {
     // block forever in push() and process_thread.join() never returns.
     // Worker count is deliberately oversized relative to the result
     // buffer (max(16*ncpu, files/10)) so blocked pushes are guaranteed.
+    // Sizing: the deadlock needs (files still in flight after the stop) >
+    // result buffer (max(ncpu*k, files/10)); the stop fires after 100 files
+    // are popped, so 1200 files leaves ~1100 in flight against a buffer of
+    // ~120 — guaranteed regardless of core count. Per-file body is kept
+    // small: everything popped before the stop is still integrated
+    // serially and everything already queued is still parsed, so body size
+    // is the test's wall-clock, not its discrimination (1000 funcs/file took
+    // 20-30s and blew the budget under load).
+    constexpr int kFiles = 1200;
     TempDir dir;
     std::string body = "package f\n";
-    for (int fn = 0; fn < 1000; ++fn) {
+    for (int fn = 0; fn < 150; ++fn) {
         body += "func F" + std::to_string(fn) + "(a int) int { return a }\n";
     }
-    for (int i = 0; i < 600; ++i) {
+    for (int i = 0; i < kFiles; ++i) {
         dir.write_file("file" + std::to_string(i) + ".go", body);
     }
 
@@ -1026,6 +1035,9 @@ TEST(PipelineTest, MidRunStopReturnsPromptly) {
                std::future_status::ready) {
     }
     pipeline.request_stop();
+    // The stop must land mid-run or the test proves nothing: a run that
+    // finished before the stop exercises no blocked push.
+    EXPECT_LT(pipeline.get_progress().files_processed, kFiles);
 
     if (fut.wait_for(std::chrono::seconds(60)) != std::future_status::ready) {
         // run() is deadlocked; its threads cannot be joined, so abort the
