@@ -1,5 +1,7 @@
 #include <lci/indexing/pipeline_processor.h>
 
+#include <absl/container/flat_hash_map.h>
+
 #include <lci/core/reference_tracker.h>
 #include <lci/core/trigram.h>
 #include <lci/parser/parser.h>
@@ -71,16 +73,26 @@ void run_unified_extraction(ProcessedFile& result,
     // EnhancedSymbol records (complexity, signature, doc comment) without
     // changing the ReferenceTracker API. Symbol coordinates and the
     // declaration / complexity keys all use 1-based lines and columns.
+    // Index the complexity table by position once per FILE. Scanning it per
+    // symbol made enrichment O(symbols x complexity_points); a symbol-dense
+    // file paid that on the indexing hot path. First-wins matches the old
+    // front-to-back scan.
+    absl::flat_hash_map<uint64_t, int> complexity_by_position;
+    complexity_by_position.reserve(extracted.complexity.size());
+    for (const auto& [pk, cx] : extracted.complexity) {
+        complexity_by_position.try_emplace(pack_position(pk.line, pk.column),
+                                           cx);
+    }
+
     result.symbol_metadata.reserve(extracted.symbols.size());
     for (const auto& sym : extracted.symbols) {
         ProcessedSymbolMetadata meta;
         meta.line = sym.line;
         meta.column = sym.column;
-        for (const auto& [pk, cx] : extracted.complexity) {
-            if (pk.line == sym.line && pk.column == sym.column) {
-                meta.complexity = cx;
-                break;
-            }
+        auto cx_it =
+            complexity_by_position.find(pack_position(sym.line, sym.column));
+        if (cx_it != complexity_by_position.end()) {
+            meta.complexity = cx_it->second;
         }
         auto [signature, doc_comment] =
             extractor.lookup_declaration(sym.line, sym.column);

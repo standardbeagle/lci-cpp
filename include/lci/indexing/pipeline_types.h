@@ -38,6 +38,14 @@ struct ProcessedSymbolMetadata {
     std::string doc_comment;
 };
 
+/// Packs a 1-based (line, column) pair into one key, so per-file position
+/// tables can be hashed instead of scanned. Both the processor (complexity,
+/// declarations) and the integrator (symbol metadata) key on this.
+constexpr uint64_t pack_position(int line, int column) {
+    return (static_cast<uint64_t>(static_cast<uint32_t>(line)) << 32) |
+           static_cast<uint32_t>(column);
+}
+
 /// Result of processing a single file through the pipeline.
 /// Token + first-occurrence-offset pair extracted by the worker pool.
 /// Moved out of FileIntegrator::merge_postings so per-byte tokenization

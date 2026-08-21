@@ -69,7 +69,10 @@ struct ExtractionResults {
     std::vector<Import> imports;
     std::vector<ScopeInfo> scopes;
     std::vector<Reference> references;
-    std::vector<std::pair<std::string, DeclarationInfo>> declarations;
+    // Position-keyed (0-based row/column of the declaration node). A vector
+    // here meant lookup_declaration scanned it once per symbol.
+    absl::flat_hash_map<PositionKey, DeclarationInfo, PositionKeyHash>
+        declarations;
     std::vector<std::pair<PositionKey, int>> complexity;
 };
 
@@ -270,7 +273,8 @@ class UnifiedExtractor {
     std::vector<Import> imports_;
     std::vector<ScopeInfo> scopes_;
     std::vector<Reference> references_;
-    std::vector<std::pair<std::string, DeclarationInfo>> declarations_;
+    absl::flat_hash_map<PositionKey, DeclarationInfo, PositionKeyHash>
+        declarations_;
     std::vector<std::pair<PositionKey, int>> complexity_;
 
     // Cached content lines (lazily initialized)

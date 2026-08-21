@@ -131,20 +131,27 @@ void FileIntegrator::merge_symbols(ProcessedFile& file) {
         // write back via the symbol_store update path.
         if (!enhanced.empty() && !file.symbol_metadata.empty()) {
             bool enriched_any = false;
+            // Index the metadata by position once per file. Pairing it with a
+            // nested scan made this O(symbols^2) on the serial integrator
+            // thread — the one place in indexing where nothing else can run.
+            absl::flat_hash_map<uint64_t, const ProcessedSymbolMetadata*>
+                meta_by_position;
+            meta_by_position.reserve(file.symbol_metadata.size());
+            for (const auto& meta : file.symbol_metadata) {
+                meta_by_position.try_emplace(
+                    pack_position(meta.line, meta.column), &meta);
+            }
             for (auto& es : enhanced) {
-                for (const auto& meta : file.symbol_metadata) {
-                    if (meta.line != es.symbol.line ||
-                        meta.column != es.symbol.column) {
-                        continue;
-                    }
-                    if (meta.complexity > 0) es.complexity = meta.complexity;
-                    if (!meta.signature.empty()) es.signature = meta.signature;
-                    if (!meta.doc_comment.empty()) {
-                        es.doc_comment = meta.doc_comment;
-                    }
-                    enriched_any = true;
-                    break;
+                auto it = meta_by_position.find(
+                    pack_position(es.symbol.line, es.symbol.column));
+                if (it == meta_by_position.end()) continue;
+                const auto& meta = *it->second;
+                if (meta.complexity > 0) es.complexity = meta.complexity;
+                if (!meta.signature.empty()) es.signature = meta.signature;
+                if (!meta.doc_comment.empty()) {
+                    es.doc_comment = meta.doc_comment;
                 }
+                enriched_any = true;
             }
             // Single RCU write: re-publish the enriched symbols (mutates the
             // bulk staging snapshot in place during index_directory).
