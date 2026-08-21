@@ -1227,8 +1227,99 @@ TEST(FileProcessorTest, MinifiedBundleSkipsParse) {
 
     ProcessedFile r;
     ASSERT_TRUE(result_queue.pop(r));
-    EXPECT_TRUE(r.parse_skipped_oversize);
+    // Distinct from Oversize: this file is small. Labelling it oversized sent
+    // anyone reading the diagnostics to the wrong knob.
+    EXPECT_EQ(r.parse_skip_reason, ParseSkipReason::MinifiedBundle);
     EXPECT_TRUE(r.symbols.empty());
+}
+
+TEST(FileProcessorTest, OversizeSkipIsDistinctFromMinified) {
+    TempDir dir;
+    // Ordinary, non-minified source, just over the parse cap.
+    std::string big;
+    while (big.size() < 200 * 1024) big += "function f() { return 1; }\n";
+    dir.write_file("big.js", big);
+
+    Config cfg = make_default_config();
+    cfg.index.max_parse_file_size = 64 * 1024;
+
+    auto store = std::make_shared<FileContentStore>();
+    auto file_service = std::make_shared<FileService>(store);
+    TrigramIndex trigram_idx;
+
+    BoundedQueue<FileTask> task_queue(10);
+    BoundedQueue<ProcessedFile> result_queue(10);
+
+    FileTask t;
+    t.path = (dir.path() / "big.js").string();
+    t.language = "javascript";
+    t.size = static_cast<int64_t>(big.size());
+    task_queue.push(std::move(t));
+    task_queue.close();
+
+    FileProcessor processor(cfg, file_service, &trigram_idx);
+    processor.process(task_queue, result_queue, 1);
+
+    ProcessedFile r;
+    ASSERT_TRUE(result_queue.pop(r));
+    EXPECT_EQ(r.parse_skip_reason, ParseSkipReason::Oversize);
+    EXPECT_TRUE(r.symbols.empty());
+}
+
+TEST(FileProcessorTest, UnsupportedGrammarIsRecordedNotSilent) {
+    TempDir dir;
+    dir.write_file("notes.xyzzy", "just some text\n");
+
+    Config cfg = make_default_config();
+    auto store = std::make_shared<FileContentStore>();
+    auto file_service = std::make_shared<FileService>(store);
+    TrigramIndex trigram_idx;
+
+    BoundedQueue<FileTask> task_queue(10);
+    BoundedQueue<ProcessedFile> result_queue(10);
+
+    FileTask t;
+    t.path = (dir.path() / "notes.xyzzy").string();
+    t.size = 15;
+    task_queue.push(std::move(t));
+    task_queue.close();
+
+    FileProcessor processor(cfg, file_service, &trigram_idx);
+    processor.process(task_queue, result_queue, 1);
+
+    ProcessedFile r;
+    ASSERT_TRUE(result_queue.pop(r));
+    // Was indistinguishable from a successful extraction that found nothing.
+    EXPECT_EQ(r.parse_skip_reason, ParseSkipReason::UnsupportedGrammar);
+    EXPECT_FALSE(r.has_error);
+}
+
+TEST(FileProcessorTest, SuccessfulExtractionRecordsNoSkip) {
+    TempDir dir;
+    dir.write_file("ok.js", "function hello() { return 1; }\n");
+
+    Config cfg = make_default_config();
+    auto store = std::make_shared<FileContentStore>();
+    auto file_service = std::make_shared<FileService>(store);
+    TrigramIndex trigram_idx;
+
+    BoundedQueue<FileTask> task_queue(10);
+    BoundedQueue<ProcessedFile> result_queue(10);
+
+    FileTask t;
+    t.path = (dir.path() / "ok.js").string();
+    t.language = "javascript";
+    t.size = 31;
+    task_queue.push(std::move(t));
+    task_queue.close();
+
+    FileProcessor processor(cfg, file_service, &trigram_idx);
+    processor.process(task_queue, result_queue, 1);
+
+    ProcessedFile r;
+    ASSERT_TRUE(result_queue.pop(r));
+    EXPECT_EQ(r.parse_skip_reason, ParseSkipReason::None);
+    EXPECT_FALSE(r.symbols.empty());
 }
 
 // ---------------------------------------------------------------------------

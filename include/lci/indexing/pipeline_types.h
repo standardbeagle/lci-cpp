@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <lci/core/trigram.h>
@@ -55,6 +56,34 @@ struct ProcessedToken {
     int offset{};
 };
 
+/// Why tree-sitter symbol extraction produced nothing for a file.
+///
+/// "Zero symbols" used to be indistinguishable from "extraction never ran",
+/// so an unsupported grammar, an exhausted parser pool and a parse failure
+/// all reported success with an empty symbol list — the file was searchable
+/// as text and invisible to every symbol endpoint, with no diagnostic.
+enum class ParseSkipReason : uint8_t {
+    None = 0,           // Extraction ran.
+    UnsupportedGrammar, // No tree-sitter grammar for this extension.
+    Oversize,           // Larger than index.max_parse_file_size.
+    MinifiedBundle,     // Trigram-hostile generated/minified source.
+    ParserUnavailable,  // Parser pool exhausted or grammar init failed.
+    ParseFailed,        // tree-sitter returned no tree.
+};
+
+/// Human-readable name for a ParseSkipReason.
+constexpr std::string_view to_string(ParseSkipReason r) {
+    switch (r) {
+        case ParseSkipReason::None: return "none";
+        case ParseSkipReason::UnsupportedGrammar: return "unsupported_grammar";
+        case ParseSkipReason::Oversize: return "oversize";
+        case ParseSkipReason::MinifiedBundle: return "minified_bundle";
+        case ParseSkipReason::ParserUnavailable: return "parser_unavailable";
+        case ParseSkipReason::ParseFailed: return "parse_failed";
+    }
+    return "unknown";
+}
+
 struct ProcessedFile {
     std::string path;
     FileID file_id{};
@@ -71,7 +100,11 @@ struct ProcessedFile {
     std::chrono::nanoseconds duration{};
     Error error{};
     bool has_error{};
-    bool parse_skipped_oversize{};  // trigram-indexed, tree-sitter skipped
+    /// Set when the file is trigram-indexed but carries no symbols. Replaces
+    /// the old parse_skipped_oversize bool, which lumped minified-bundle
+    /// skips in with genuine oversize ones and had no value at all for the
+    /// three failure paths that returned silently.
+    ParseSkipReason parse_skip_reason{ParseSkipReason::None};
 };
 
 /// Pipeline buffer size constants.

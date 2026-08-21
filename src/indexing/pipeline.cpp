@@ -141,6 +141,26 @@ void Pipeline::run() {
                 continue;
             }
             if (result.file_id == 0) continue;
+
+            // Surface a symbol-extraction skip as a recoverable warning on
+            // the same channel as hard errors. UnsupportedGrammar is left
+            // out deliberately: it is the expected outcome for every non-
+            // source file in the corpus, and reporting it would bury the
+            // four reasons that indicate something actually went wrong.
+            if (result.parse_skip_reason != ParseSkipReason::None &&
+                result.parse_skip_reason !=
+                    ParseSkipReason::UnsupportedGrammar) {
+                Error warn;
+                warn.type = ErrorType::Parse;
+                warn.file_path = result.path;
+                warn.operation = "symbol_extraction";
+                warn.recoverable = true;
+                warn.message =
+                    "indexed as text only, no symbols extracted: " +
+                    std::string(to_string(result.parse_skip_reason));
+                progress_.add_error(std::move(warn));
+            }
+
             buffered.push_back(std::move(result));
         }
     }
