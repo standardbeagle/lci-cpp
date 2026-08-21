@@ -75,7 +75,7 @@ double ErrorHandlingAnalyzer::function_score(
 
 ErrorHandlingAnalyzer::Result ErrorHandlingAnalyzer::analyze(
     const SideEffectAnalyzer& analyzer, const MasterIndex& indexer,
-    std::string_view project_root) {
+    std::string_view project_root, const std::vector<bool>& allowed_attrs) {
     Result result;
     const auto& ref = indexer.ref_tracker();
     auto rt_snap = ref.pin();
@@ -107,8 +107,12 @@ ErrorHandlingAnalyzer::Result ErrorHandlingAnalyzer::analyze(
         // ("test", "mock", "/libs/", ...) that knew nothing about the shipped
         // ruleset or a project's `.lci.kdl`, so a benchmark harness scored as
         // product code and a configured attribute never reached this gate.
+        PathAttrId attr = file_snap->attr_of(fid);
         bool production =
-            registry.activates(file_snap->attr_of(fid), Capability::Analysis);
+            allowed_attrs.empty()
+                ? registry.activates(attr, Capability::Analysis)
+                : (static_cast<size_t>(attr) < allowed_attrs.size() &&
+                   allowed_attrs[static_cast<size_t>(attr)]);
         for (const auto& es : rt_snap->get_file_enhanced_symbols(fid)) {
             if (!es) continue;
             auto t = es->symbol.type;

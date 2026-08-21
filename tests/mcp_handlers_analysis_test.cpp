@@ -625,6 +625,56 @@ TEST_F(CodeInsightAttrTest, UnifiedExcludesTaggedFilesAndLabelsIt) {
         << result.text;
 }
 
+// The attributes parameter: the default covers shipping code, and a caller can
+// ask for the excluded trees explicitly instead of being told a number they
+// cannot re-aim. The header always says which set the numbers cover.
+TEST_F(CodeInsightAttrTest, DefaultIsShippingAndIsStatedInTheHeader) {
+    nlohmann::json params;
+    params["mode"] = "unified";
+    auto result = handle_code_insight(params, *engine_, *indexer_);
+    ASSERT_FALSE(result.is_error);
+    EXPECT_NE(result.text.find("attributes=shipping"), std::string::npos)
+        << result.text;
+}
+
+TEST_F(CodeInsightAttrTest, AttributesAllAnalyzesTheExcludedTreesToo) {
+    nlohmann::json params;
+    params["mode"] = "unified";
+    params["attributes"] = "all";
+    auto result = handle_code_insight(params, *engine_, *indexer_);
+    ASSERT_FALSE(result.is_error);
+    EXPECT_NE(result.text.find("attributes=all"), std::string::npos) << result.text;
+    // Nothing is excluded any more, so the exclusion block is gone.
+    EXPECT_EQ(result.text.find("excluded_from_analysis:"), std::string::npos)
+        << result.text;
+}
+
+TEST_F(CodeInsightAttrTest, AttributesTakesAListOfNames) {
+    nlohmann::json params;
+    params["mode"] = "unified";
+    params["attributes"] = nlohmann::json::array({"test", "example"});
+    auto result = handle_code_insight(params, *engine_, *indexer_);
+    ASSERT_FALSE(result.is_error);
+    EXPECT_NE(result.text.find("attributes=test,example"), std::string::npos)
+        << result.text;
+    // Production is now the excluded set.
+    EXPECT_NE(result.text.find("production="), std::string::npos)
+        << result.text;
+}
+
+// An attribute name this project does not have is an error, not a silent
+// empty analysis: analyzing a different set than the caller asked for is the
+// worse failure.
+TEST_F(CodeInsightAttrTest, UnknownAttributeNameIsAnError) {
+    nlohmann::json params;
+    params["mode"] = "unified";
+    params["attributes"] = "benchmarks";  // the attribute is "benchmark"
+    auto result = handle_code_insight(params, *engine_, *indexer_);
+    EXPECT_TRUE(result.is_error);
+    EXPECT_NE(result.text.find("benchmarks"), std::string::npos) << result.text;
+    EXPECT_NE(result.text.find("benchmark"), std::string::npos) << result.text;
+}
+
 TEST_F(CodeInsightAttrTest, StructureCountsViaClassifier) {
     nlohmann::json params;
     params["mode"] = "structure";

@@ -27,9 +27,13 @@ class ErrorHandlingAnalyzer {
         ResourceSummary resources;
     };
 
+    /// `allowed_attrs` is indexed by PathAttrId: true means files with that
+    /// attribute are scored. Empty means the default — every attribute that
+    /// activates the Analysis capability, i.e. shipping code.
     static Result analyze(const SideEffectAnalyzer& analyzer,
                           const MasterIndex& indexer,
-                          std::string_view project_root);
+                          std::string_view project_root,
+                          const std::vector<bool>& allowed_attrs = {});
 
     /// Per-finding score deduction: severity base × confidence ×
     /// (0.5 + 0.5 × normalized fan-in). Exposed for unit tests.

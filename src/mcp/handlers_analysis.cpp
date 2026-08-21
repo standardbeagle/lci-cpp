@@ -774,7 +774,103 @@ std::string top_dir_of(std::string_view path, std::string_view root) {
     return std::string(rel.substr(0, slash));
 }
 
-GatheredCorpus gather_file_symbol_data(MasterIndex& indexer) {
+// Which attributes an analysis run covers. The default is the shipping
+// answer: every attribute that activates Analysis. The `attributes` parameter
+// overrides it — "all" for the whole corpus, or an explicit list of attribute
+// names when a question really is about the tests or the benchmark harness.
+// (Not "scope": git_analyze already owns that parameter name for
+// staged/unstaged, and one word must mean one thing.)
+struct AnalysisScope {
+    std::string label;        // echoed in the LCF header
+    std::vector<bool> allowed;  // indexed by PathAttrId
+
+    bool allows(PathAttrId id) const {
+        size_t i = static_cast<size_t>(id);
+        return i < allowed.size() && allowed[i];
+    }
+};
+
+// Parses the `attributes` parameter. Returns false and fills `error` when a named
+// attribute does not exist in this project's registry — silently analyzing a
+// different set than the caller asked for is worse than refusing.
+bool parse_analysis_scope(const nlohmann::json& params,
+                          const PathAttrRegistry& registry,
+                          AnalysisScope& out, std::string& error) {
+    out.allowed.assign(static_cast<size_t>(registry.size()), false);
+
+    auto allow_named = [&](const std::string& name) {
+        PathAttrId id{};
+        if (!registry.find(name, id)) {
+            std::string known;
+            for (int i = 0; i < registry.size(); ++i) {
+                if (!known.empty()) known += ", ";
+                known += std::string(registry.name(static_cast<PathAttrId>(i)));
+            }
+            error = "unknown attribute '" + name + "' (this project has: " +
+                    known + ")";
+            return false;
+        }
+        out.allowed[static_cast<size_t>(id)] = true;
+        return true;
+    };
+
+    auto it = params.find("attributes");
+    if (it == params.end() || it->is_null()) {
+        for (PathAttrId id : registry.with_capability(Capability::Analysis)) {
+            out.allowed[static_cast<size_t>(id)] = true;
+        }
+        out.label = "shipping";
+        return true;
+    }
+    if (it->is_string()) {
+        std::string value = it->get<std::string>();
+        if (value == "shipping") {
+            for (PathAttrId id :
+                 registry.with_capability(Capability::Analysis)) {
+                out.allowed[static_cast<size_t>(id)] = true;
+            }
+            out.label = "shipping";
+            return true;
+        }
+        if (value == "all") {
+            out.allowed.assign(out.allowed.size(), true);
+            out.label = "all";
+            return true;
+        }
+        if (!allow_named(value)) return false;
+        out.label = value;
+        return true;
+    }
+    if (it->is_array()) {
+        std::vector<std::string> names;
+        for (const auto& entry : *it) {
+            if (!entry.is_string()) {
+                error = "attributes list entries must be attribute names";
+                return false;
+            }
+            names.push_back(entry.get<std::string>());
+        }
+        if (names.empty()) {
+            error = "attributes list is empty; omit it for shipping code";
+            return false;
+        }
+        for (const auto& n : names) {
+            if (!allow_named(n)) return false;
+        }
+        out.label.clear();
+        for (const auto& n : names) {
+            if (!out.label.empty()) out.label += ",";
+            out.label += n;
+        }
+        return true;
+    }
+    error = "attributes must be \"shipping\", \"all\", an attribute name, or "
+            "a list of attribute names";
+    return false;
+}
+
+GatheredCorpus gather_file_symbol_data(MasterIndex& indexer,
+                                       const AnalysisScope& scope) {
     GatheredCorpus corpus;
     const auto& registry = indexer.attr_registry();
     corpus.excluded.resize(static_cast<size_t>(registry.size()));
@@ -787,7 +883,7 @@ GatheredCorpus gather_file_symbol_data(MasterIndex& indexer) {
         if (syms.empty()) continue;
         PathAttrId attr = file_snap->attr_of(fid);
         std::string path = indexer.get_file_path(fid);
-        if (!registry.activates(attr, Capability::Analysis)) {
+        if (!scope.allows(attr)) {
             auto& bucket = corpus.excluded[static_cast<size_t>(attr)];
             ++bucket.files;
             ++bucket.dirs[top_dir_of(path, root)];
@@ -828,9 +924,23 @@ int lcf_token_count(int n_modules, int n_dep_edges, bool has_health,
 }
 
 void emit_lcf_header(std::ostringstream& out, std::string_view mode, int tier,
-                     int tokens) {
+                     int tokens, std::string_view scope = {}) {
     out << "LCF/1.0\nmode=" << mode << "\ntier=" << tier << "\ntokens="
-        << tokens << "\n---\n";
+        << tokens;
+    // Which attributes the numbers below cover. Always emitted for the
+    // analysis modes: a score whose corpus is unstated invites the reader to
+    // assume it covered everything, which is exactly the mistake that put a
+    // benchmark harness into this repo's error-handling score.
+    if (!scope.empty()) out << "\nattributes=" << scope;
+    out << "\n---\n";
+}
+
+// Forwarder: the analysis modes all pass a scope, the git modes never do.
+inline void emit_lcf_header_scoped(std::ostringstream& out,
+                                   std::string_view scope,
+                                   std::string_view mode, int tier,
+                                   int tokens) {
+    emit_lcf_header(out, mode, tier, tokens, scope);
 }
 
 // == REPOSITORY MAP == — one line per module, capped to 15 (Go truncates to
@@ -1839,11 +1949,18 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
             "statistics, unified, structure, git_analyze, git_hotspots");
     }
 
+    AnalysisScope scope;
+    std::string scope_error;
+    if (!parse_analysis_scope(params, indexer.attr_registry(), scope,
+                              scope_error)) {
+        return make_error_response("code_insight", scope_error);
+    }
+
     // Corpus data gathered once. file_count drives the structure summary;
     // files_data/symbol_count/project_root feed the engine-backed modes.
     const std::string& project_root = indexer.config().project.root;
     int file_count = indexer.file_count();
-    auto corpus = gather_file_symbol_data(indexer);
+    auto corpus = gather_file_symbol_data(indexer, scope);
     auto& files_data = corpus.analyzed;
     int symbol_count = 0;
     for (const auto& f : files_data) {
@@ -1945,7 +2062,7 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                 return indexer.ref_tracker().get_outgoing_target_symbols(id);
             });
         const auto& sr = *resp.statistics_report;
-        emit_lcf_header(out, "statistics", 1,
+        emit_lcf_header_scoped(out, scope.label, "statistics", 1,
                         lcf_token_count(0, 0, false, 0, true));
         emit_statistics(out, sr.complexity, sr.coupling, sr.cohesion,
                         sr.quality, sr.purity_ratio);
@@ -1963,7 +2080,8 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                                            file_attrs, indexer.attr_registry(),
                                            project_root);
         const auto& s = *resp.structure_analysis;
-        out << "LCF/1.0\nmode=structure\ntier=1\ntokens=20\n---\n"
+        out << "LCF/1.0\nmode=structure\ntier=1\ntokens=20\nattributes="
+            << scope.label << "\n---\n"
             << "== STRUCTURE ==\n"
             << "dirs=" << s.dir_count << " files=" << s.file_count
             << " symbols=" << s.symbol_count
@@ -2003,9 +2121,9 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
         std::optional<ErrorHandlingAnalyzer::Result> eh;
         if (analyzer && !analyzer->results().empty()) {
             eh = ErrorHandlingAnalyzer::analyze(*analyzer, indexer,
-                                                project_root);
+                                                project_root, scope.allowed);
         }
-        emit_lcf_header(out, "unified", 1,
+        emit_lcf_header_scoped(out, scope.label, "unified", 1,
                         lcf_token_count(n_map, 0, hd != nullptr, 0, true));
         emit_summary(out, files_data, file_paths, project_root, file_count,
                      symbol_count, &corpus.excluded, &indexer.attr_registry(),
@@ -2112,8 +2230,10 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                         "unpopulated for this corpus");
             }
             auto eh = ErrorHandlingAnalyzer::analyze(*analyzer, indexer,
-                                                     project_root);
-            out << "LCF/1.0\nmode=detailed\nsub=" << detailed_mode
+                                                     project_root,
+                                                     scope.allowed);
+            out << "LCF/1.0\nmode=detailed\nattributes=" << scope.label
+                << "\nsub=" << detailed_mode
                 << "\ntier=2\ntokens=100\n---\n";
             constexpr size_t kAll = static_cast<size_t>(-1);
             if (detailed_mode == "errors") {
@@ -2134,7 +2254,8 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
             dp, files_data, project_root,
             [&ref](SymbolID id) { return ref.get_callee_symbols(id); });
 
-        out << "LCF/1.0\nmode=detailed\nsub=" << detailed_mode
+        out << "LCF/1.0\nmode=detailed\nattributes=" << scope.label
+            << "\nsub=" << detailed_mode
             << "\ntier=2\ntokens=100\n---\n";
         if (detailed_mode == "modules") {
             const auto& r = *resp.module_analysis;
@@ -2223,9 +2344,9 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
         std::optional<ErrorHandlingAnalyzer::Result> eh;
         if (analyzer && !analyzer->results().empty()) {
             eh = ErrorHandlingAnalyzer::analyze(*analyzer, indexer,
-                                                project_root);
+                                                project_root, scope.allowed);
         }
-        emit_lcf_header(out, "overview", 1,
+        emit_lcf_header_scoped(out, scope.label, "overview", 1,
                         lcf_token_count(n_map, 0, hd != nullptr, 0, false));
         emit_summary(out, files_data, file_paths, project_root, file_count,
                      symbol_count, &corpus.excluded, &indexer.attr_registry(),
@@ -2332,6 +2453,11 @@ void register_analysis_handlers(McpServer& server,
          "analysis. Modes: overview, detailed, statistics, unified, "
          "structure, git_analyze, git_hotspots. See 'info code_insight'.",
          {{"mode", "string", "Analysis mode", ""},
+          {"attributes", "string",
+           "Which files to analyze, by file attribute: \"shipping\" (default "
+           "— every attribute that activates analysis), \"all\", one "
+           "attribute name, or a list (e.g. [\"test\",\"benchmark\"])",
+           ""},
           {"tier", "integer", "Analysis tier", ""},
           {"analysis", "string",
            "Detailed analysis: modules, layers, features, terms, errors, "
