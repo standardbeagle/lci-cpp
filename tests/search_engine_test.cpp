@@ -284,6 +284,70 @@ TEST(ContextExtractorTest, ExtractLineContext) {
     EXPECT_GE(ctx.end_line, ctx.start_line);
 }
 
+// The window size is a TOTAL, match line included: an even num_lines used to
+// return num_lines + 1 lines (including the default 50 and the 100 that
+// extract_block_context falls back to).
+TEST(ContextExtractorTest, WindowHoldsExactlyNumLines) {
+    Config cfg = make_default_config();
+    MasterIndex mi(cfg);
+
+    TempDir dir;
+    std::string body;
+    for (int i = 1; i <= 40; ++i) {
+        body += "line" + std::to_string(i) + "\n";
+    }
+    dir.write_file("wide.txt", body);
+    ASSERT_TRUE(mi.index_file((dir.path() / "wide.txt").string()));
+
+    ContextExtractor extractor(mi.file_content_store(), 50);
+    std::vector<BlockBoundary> blocks;
+
+    for (int n = 1; n <= 8; ++n) {
+        auto ctx = extractor.extract(FileID{1}, blocks, 20, n);
+        EXPECT_EQ(static_cast<size_t>(n), ctx.lines.size())
+            << "num_lines=" << n;
+        EXPECT_EQ(ctx.end_line - ctx.start_line + 1,
+                  static_cast<int>(ctx.lines.size()))
+            << "num_lines=" << n;
+        // The match line is always inside the window.
+        EXPECT_LE(ctx.start_line, 20);
+        EXPECT_GE(ctx.end_line, 20);
+    }
+}
+
+// The 100-line window of the long-function branch is built unclamped
+// (start + 100). Pins that it still cannot run past the end of the file for a
+// match on a long function's last statement.
+TEST(ContextExtractorTest, LongFunctionWindowStaysInsideTheFile) {
+    Config cfg = make_default_config();
+    MasterIndex mi(cfg);
+
+    TempDir dir;
+    std::string body = "func big() {\n";
+    for (int i = 1; i <= 150; ++i) {
+        body += "    step" + std::to_string(i) + "()\n";
+    }
+    body += "}\n";
+    dir.write_file("big.go", body);
+    ASSERT_TRUE(mi.index_file((dir.path() / "big.go").string()));
+
+    // Whole file is one 152-line function (0-based block bounds).
+    std::vector<BlockBoundary> blocks;
+    BlockBoundary fn;
+    fn.type = BlockType::Function;
+    fn.name = "big";
+    fn.start = 0;
+    fn.end = 151;
+    blocks.push_back(fn);
+
+    // Match on the last statement: the 100-line window runs off the end.
+    ContextExtractor extractor(mi.file_content_store(), 50);
+    auto ctx = extractor.extract_function_context(FileID{1}, blocks, 151, 5);
+    EXPECT_LE(ctx.end_line, 152);
+    EXPECT_EQ(ctx.end_line - ctx.start_line + 1,
+              static_cast<int>(ctx.lines.size()));
+}
+
 // -- SearchEngine integration tests -------------------------------------------
 
 TEST(SearchEngineIntegrationTest, BasicSearch) {
