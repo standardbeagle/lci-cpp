@@ -26,7 +26,12 @@ attributes {
         activates "index" "search"
         dir "vendor" "vendors" "node_modules" "third_party" "thirdparty"
         dir "bower_components" ".yarn"
+        // Built/bundled front-end output. pocketbase's ui/public/libs
+        // minified bundles used to own the worst-module error-handling score,
+        // which says nothing about the code its authors wrote.
+        dir "libs" "public"
         glob "*.min.js" "*.min.mjs" "*.min.css" "*.bundle.js"
+        glob "*.iife.js" "*.umd.js"
         content "minified"
     }
 
@@ -47,11 +52,13 @@ attributes {
     test rank=2 {
         activates "index" "search"
         dir "test" "tests" "__tests__" "testdata" "spec" "specs" "fixtures"
+        dir "mock" "mocks"
         glob "*_test.go" "*_test.py" "*_test.cc" "*_test.cpp" "*_test.rb"
         glob "*_spec.rb" "*_test.exs" "*.test.*" "*.spec.*"
         glob "*Test.php" "*Tests.php" "*TestCase.php"
         glob "*Test.java" "*Tests.java" "*Test.cs" "*Tests.cs" "*Test.kt"
         glob "conftest.py" "test_*.py"
+        glob "*_mock.go" "mock_*.go" "*.mock.*"
     }
 
     // Benchmark harnesses and their tooling. Separate from tests because a

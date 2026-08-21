@@ -31,10 +31,6 @@ class ErrorHandlingAnalyzer {
                           const MasterIndex& indexer,
                           std::string_view project_root);
 
-    /// Production-path gate: false for test / spec / mock / fixture /
-    /// vendored / example / generated paths (root-relative or absolute).
-    static bool is_production_path(std::string_view path);
-
     /// Per-finding score deduction: severity base × confidence ×
     /// (0.5 + 0.5 × normalized fan-in). Exposed for unit tests.
     static double finding_deduction(FindingSeverity severity, double confidence,

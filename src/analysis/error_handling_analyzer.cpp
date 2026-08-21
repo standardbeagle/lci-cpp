@@ -4,7 +4,6 @@
 #include <lci/analysis/coupling_analyzer.h>
 #include <lci/analysis/side_effect_analyzer.h>
 #include <lci/core/reference_tracker.h>
-#include <lci/core/text.h>
 #include <lci/idcodec.h>
 #include <lci/indexing/master_index.h>
 
@@ -53,20 +52,6 @@ void sort_findings(std::vector<EhFindingEntry>& v) {
 
 }  // namespace
 
-bool ErrorHandlingAnalyzer::is_production_path(std::string_view path) {
-    static constexpr std::string_view markers[] = {
-        "test",     "spec",       "mock",    "fixture", "__tests__",
-        "testdata", "node_modules", "vendor", "example", "sample",
-        "generated", "third_party", "3rdparty",
-        // Built/bundled front-end output (pocketbase ui/public/libs class):
-        // minified vendored bundles must never own a module score.
-        ".min.",    "/libs/",     "/public/"};
-    for (auto m : markers) {
-        if (text::ascii_contains_ci(path, m)) return false;
-    }
-    return true;
-}
-
 double ErrorHandlingAnalyzer::finding_deduction(FindingSeverity severity,
                                                 double confidence,
                                                 double norm_fanin) {
@@ -94,6 +79,8 @@ ErrorHandlingAnalyzer::Result ErrorHandlingAnalyzer::analyze(
     Result result;
     const auto& ref = indexer.ref_tracker();
     auto rt_snap = ref.pin();
+    const auto& registry = indexer.attr_registry();
+    auto file_snap = indexer.read_snapshot();
 
     // One production, kind-gated scoring unit per callable symbol with a
     // side-effect record.
@@ -115,7 +102,13 @@ ErrorHandlingAnalyzer::Result ErrorHandlingAnalyzer::analyze(
     for (FileID fid : indexer.get_all_file_ids()) {
         std::string file_path = indexer.get_file_path(fid);
         std::string rel = rel_path(file_path, project_root);
-        bool production = is_production_path(rel);
+        // The file's stored attribute decides, through the same registry
+        // every other tool reads. This used to be a private substring list
+        // ("test", "mock", "/libs/", ...) that knew nothing about the shipped
+        // ruleset or a project's `.lci.kdl`, so a benchmark harness scored as
+        // product code and a configured attribute never reached this gate.
+        bool production =
+            registry.activates(file_snap->attr_of(fid), Capability::Analysis);
         for (const auto& es : rt_snap->get_file_enhanced_symbols(fid)) {
             if (!es) continue;
             auto t = es->symbol.type;
