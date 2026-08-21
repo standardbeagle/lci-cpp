@@ -828,18 +828,41 @@ void SearchEngine::process_file(
     // Deduplicate by line within this file.
     absl::flat_hash_set<int> seen_lines;
 
+    // Incremental line cursor. find_matches emits matches with strictly
+    // ascending start offsets, so the line number and line start of the next
+    // match are always at or after the previous one. Resolving each match
+    // with search_line_number + search_line_start restarted the scan at byte
+    // 0 twice per match -- O(file_size x matches) per file, which on a file
+    // with many hits dominated the whole query. Walking forward once makes it
+    // O(file_size) per file. Emitted line/column values are unchanged: both
+    // helpers define line as 1 + newlines strictly before the offset and line
+    // start as the byte after the last preceding newline, which is exactly
+    // what the cursor accumulates.
+    int cursor = 0;
+    int cursor_line = 1;
+    int cursor_line_start = 0;
+    const int content_len = static_cast<int>(content_sv.size());
+
     for (const auto& match : matches) {
         if (effective_cap > 0 &&
             static_cast<int>(results.size()) >= effective_cap) {
             break;
         }
 
-        int line = search_line_number(content_sv, match.start);
+        int match_start = match.start < 0 ? 0 : match.start;
+        if (match_start > content_len) match_start = content_len;
+        for (; cursor < match_start; ++cursor) {
+            if (content_sv[static_cast<size_t>(cursor)] == '\n') {
+                ++cursor_line;
+                cursor_line_start = cursor + 1;
+            }
+        }
+        int line = cursor_line;
 
         if (seen_lines.contains(line)) continue;
         seen_lines.insert(line);
 
-        int col = match.start - search_line_start(content_sv, match.start);
+        int col = match_start - cursor_line_start;
 
         std::string match_text;
         if (match.end > match.start &&

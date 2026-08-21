@@ -546,5 +546,42 @@ TEST(SearchEngineIntegrationTest, CappedCollectionTakesLowestFileIds) {
     }
 }
 
+// -- Line/column resolution ---------------------------------------------------
+
+// process_file resolves lines with an incremental cursor instead of rescanning
+// from byte 0 per match. Pins the exact line/column of every match in a file
+// with many hits so the optimisation cannot drift the emitted values.
+TEST(SearchEngineIntegrationTest, MultipleMatchesResolveExactLinesAndColumns) {
+    TempDir dir;
+    dir.write_file("multi.go",
+        "package main\n"        // line 1
+        "\n"                    // line 2
+        "var a = tok\n"         // line 3, col 8
+        "var bb = tok\n"        // line 4, col 9
+        "\n"                    // line 5
+        "  var ccc = tok\n");   // line 6, col 12
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    SearchEngine engine(mi);
+    SearchOptions opts;
+    auto results = engine.search("tok", opts);
+    ASSERT_EQ(3u, results.size());
+
+    std::sort(results.begin(), results.end(),
+              [](const SearchResult& a, const SearchResult& b) {
+                  return a.line < b.line;
+              });
+    EXPECT_EQ(3, results[0].line);
+    EXPECT_EQ(8, results[0].column);
+    EXPECT_EQ(4, results[1].line);
+    EXPECT_EQ(9, results[1].column);
+    EXPECT_EQ(6, results[2].line);
+    EXPECT_EQ(12, results[2].column);
+}
+
 }  // namespace
 }  // namespace lci
