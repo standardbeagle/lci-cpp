@@ -727,10 +727,99 @@ TEST(ChurnFilter, CustomExcludePatterns) {
     EXPECT_FALSE(should_exclude_from_churn("main.go", {}, {"test_*"}, false));
 }
 
+TEST(ChurnFilter, MonorepoPackagesNotExcluded) {
+    // "packages/" is the first-party layout of every pnpm/yarn/lerna
+    // monorepo. Excluding it by default hid the churn of the code the
+    // report exists to rank.
+    EXPECT_FALSE(should_exclude_from_churn("packages/core/src/index.ts"));
+    EXPECT_FALSE(should_exclude_from_churn("packages/ui/button.tsx"));
+    // Third-party trees nested inside it are still excluded.
+    EXPECT_TRUE(
+        should_exclude_from_churn("packages/core/node_modules/dep/index.js"));
+}
+
+TEST(ChurnFilter, DoubleStarPrefixPatterns) {
+    // "**/<x>" never matched under the old hand-rolled matcher.
+    EXPECT_TRUE(should_exclude_from_churn("a/b/gen.go", {}, {"**/gen.go"},
+                                          /*skip_defaults=*/true));
+    EXPECT_TRUE(should_exclude_from_churn("gen.go", {}, {"**/gen.go"}, true));
+    EXPECT_FALSE(should_exclude_from_churn("a/b/keep.go", {}, {"**/gen.go"},
+                                           true));
+}
+
+TEST(ChurnFilter, QuestionMarkAndCharClassPatterns) {
+    // '?' and '[]' were treated as literals and matched nothing.
+    EXPECT_TRUE(should_exclude_from_churn("a.c", {}, {"*.[ch]"}, true));
+    EXPECT_TRUE(should_exclude_from_churn("a.h", {}, {"*.[ch]"}, true));
+    EXPECT_FALSE(should_exclude_from_churn("a.o", {}, {"*.[ch]"}, true));
+
+    EXPECT_TRUE(should_exclude_from_churn("v1.go", {}, {"v?.go"}, true));
+    EXPECT_FALSE(should_exclude_from_churn("v12.go", {}, {"v?.go"}, true));
+}
+
 TEST(ChurnFilter, SkipDefaults) {
     // With skip_defaults, normally excluded files are included.
     EXPECT_FALSE(should_exclude_from_churn("CHANGELOG.md", {}, {}, true));
     EXPECT_FALSE(should_exclude_from_churn("docs/readme.md", {}, {}, true));
+}
+
+// ============================================================================
+// Commit history parsing
+// ============================================================================
+
+namespace {
+
+// Two commits, each with one numstat line, in the exact shape
+// `git log --format=%H|%an|%ae|%at|%s --numstat` emits.
+constexpr const char* kTwoCommitLog =
+    "1111111111111111111111111111111111111111|Ann|ann@example.com|1700000000|first\n"
+    "10\t2\tsrc/a.go\n"
+    "\n"
+    "2222222222222222222222222222222222222222|Bob|bob@example.com|1700000100|second\n"
+    "3\t4\tsrc/b.go\n";
+
+}  // namespace
+
+TEST(CommitHistoryParse, HeaderCountEqualsCommitCount) {
+    // Regression: the parser re-pushed the previous commit on every new
+    // header, so N commits yielded 2N-1 entries. Every churn statistic was
+    // inflated and the moved-from husks became phantom empty-name authors.
+    std::vector<CommitInfo> commits;
+    ASSERT_TRUE(parse_commit_history(kTwoCommitLog, commits));
+    ASSERT_EQ(commits.size(), 2u);
+
+    EXPECT_EQ(commits[0].author_name, "Ann");
+    EXPECT_EQ(commits[0].message, "first");
+    EXPECT_EQ(commits[0].timestamp_epoch, 1700000000);
+    ASSERT_EQ(commits[0].file_changes.size(), 1u);
+    EXPECT_EQ(commits[0].file_changes[0].path, "src/a.go");
+    EXPECT_EQ(commits[0].file_changes[0].lines_added, 10);
+
+    EXPECT_EQ(commits[1].author_name, "Bob");
+    EXPECT_EQ(commits[1].message, "second");
+    ASSERT_EQ(commits[1].file_changes.size(), 1u);
+    EXPECT_EQ(commits[1].file_changes[0].path, "src/b.go");
+
+    // No phantom contributor with an empty name.
+    for (const auto& c : commits) {
+        EXPECT_FALSE(c.author_name.empty());
+        EXPECT_FALSE(c.hash.empty());
+    }
+}
+
+TEST(CommitHistoryParse, SingleCommitYieldsOne) {
+    std::vector<CommitInfo> commits;
+    ASSERT_TRUE(parse_commit_history(
+        "3333333333333333333333333333333333333333|Cy|cy@example.com|1700000200|only\n"
+        "1\t1\tx.go\n",
+        commits));
+    EXPECT_EQ(commits.size(), 1u);
+}
+
+TEST(CommitHistoryParse, EmptyOutputYieldsNoCommits) {
+    std::vector<CommitInfo> commits;
+    ASSERT_TRUE(parse_commit_history("", commits));
+    EXPECT_TRUE(commits.empty());
 }
 
 // ============================================================================

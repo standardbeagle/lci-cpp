@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <string>
 
+#include <lci/config/gitignore.h>
 #include <lci/core/portable.h>
 
 namespace lci {
@@ -29,53 +30,63 @@ void ascii_lower(std::string& s) {
     }
 }
 
-/// Simple glob match (supports * and **). Case-insensitive.
+/// Glob match for churn include/exclude patterns. Case-insensitive; the
+/// pattern is tried against the full path and against the base name.
+///
+/// Wildcard semantics are delegated to lci::glob_match (the gitignore
+/// matcher) so this file does not carry a second, weaker dialect. The
+/// hand-rolled predecessor silently never matched two whole pattern classes:
+/// anything starting with "**/" (its prefix check required a non-empty
+/// prefix before the stars) and anything using '?' or '[]' (it only ever
+/// looked at '*').
 bool matches_glob(std::string_view lower_path, std::string_view lower_base,
                   std::string_view pattern) {
-    if (pattern.find('*') != std::string_view::npos) {
-        // Directory prefix patterns like "vendor/*".
-        if (pattern.ends_with("/*")) {
-            auto prefix = pattern.substr(0, pattern.size() - 2);
-            if (lower_path.starts_with(std::string(prefix) + "/")) return true;
-            if (lower_path.find("/" + std::string(prefix) + "/") != std::string_view::npos) {
+    if (pattern.empty()) return false;
+
+    // "vendor/*" style directory prefixes exclude the WHOLE subtree at any
+    // depth, which `*` alone does not express (it stops at '/').
+    if (pattern.ends_with("/*")) {
+        auto prefix = pattern.substr(0, pattern.size() - 2);
+        if (!prefix.empty()) {
+            if (lower_path.size() > prefix.size() &&
+                lower_path.compare(0, prefix.size(), prefix) == 0 &&
+                lower_path[prefix.size()] == '/') {
                 return true;
             }
-        }
-        // Double-star patterns like "docs/**".
-        if (pattern.find("**") != std::string_view::npos) {
-            auto star_pos = pattern.find("**");
-            auto prefix = pattern.substr(0, star_pos);
-            if (!prefix.empty() && lower_path.starts_with(prefix)) return true;
-        }
-        // Simple single-star patterns (no directory component).
-        if (pattern.find('/') == std::string_view::npos &&
-            pattern.find("**") == std::string_view::npos) {
-            auto star_pos = pattern.find('*');
-            auto prefix = pattern.substr(0, star_pos);
-            auto suffix = pattern.substr(star_pos + 1);
-
-            // Check for multiple wildcards: "*.generated.*"
-            if (suffix.find('*') != std::string_view::npos) {
-                auto s2 = suffix.find('*');
-                auto mid = suffix.substr(0, s2);
-                auto end = suffix.substr(s2 + 1);
-                if (lower_base.find(mid) != std::string_view::npos &&
-                    lower_base.ends_with(end)) {
+            size_t pos = 0;
+            while ((pos = lower_path.find(prefix, pos)) !=
+                   std::string_view::npos) {
+                size_t after = pos + prefix.size();
+                if (pos > 0 && lower_path[pos - 1] == '/' &&
+                    after < lower_path.size() && lower_path[after] == '/') {
                     return true;
                 }
-            } else {
-                // Single wildcard: "*.md", "test_*", "CHANGELOG*", "*.min.js"
-                bool prefix_ok = prefix.empty() || lower_base.starts_with(prefix);
-                bool suffix_ok = suffix.empty() || lower_base.ends_with(suffix);
-                if (prefix_ok && suffix_ok &&
-                    lower_base.size() >= prefix.size() + suffix.size()) {
-                    return true;
-                }
+                ++pos;
             }
         }
-    } else {
-        // Exact match.
-        if (lower_base == pattern || lower_path == pattern) return true;
+    }
+
+    // "**/" anchors nothing: strip it and match the remainder anywhere.
+    if (pattern.starts_with("**/")) {
+        return matches_glob(lower_path, lower_base, pattern.substr(3));
+    }
+
+    // "docs/**" style subtree patterns.
+    if (auto star = pattern.find("**"); star != std::string_view::npos) {
+        auto prefix = pattern.substr(0, star);
+        if (!prefix.empty() && lower_path.starts_with(prefix)) return true;
+    }
+
+    if (lci::glob_match(pattern, lower_base)) return true;
+    if (lci::glob_match(pattern, lower_path)) return true;
+
+    // A pattern without a directory component matches at any depth.
+    if (pattern.find('/') == std::string_view::npos) return false;
+    for (size_t i = 0; i + 1 < lower_path.size(); ++i) {
+        if (lower_path[i] == '/' &&
+            lci::glob_match(pattern, lower_path.substr(i + 1))) {
+            return true;
+        }
     }
     return false;
 }
@@ -100,7 +111,11 @@ const std::string_view kExcludedPatterns[] = {
     "*.woff", "*.woff2", "*.ttf", "*.otf", "*.eot",
     "*.zip", "*.tar", "*.gz", "*.tgz", "*.bz2", "*.xz", "*.7z", "*.rar",
     "*.nupkg", "*.gem", "*.egg", "*.whl",
-    "vendor/*", "node_modules/*", "third_party/*", "packages/*",
+    // "packages/*" is NOT excluded: it is the standard first-party layout
+    // for pnpm/yarn/lerna monorepos, so blanket-excluding it hid the churn
+    // of the very code the report exists to rank. Genuinely third-party
+    // trees are already covered by node_modules / vendor / bower_components.
+    "vendor/*", "node_modules/*", "third_party/*",
     "bower_components/*",
     ".idea/*", ".vscode/*", "*.iml", "*.suo", "*.user",
     ".github/*", ".gitlab-ci.yml", ".travis.yml", "Jenkinsfile",
@@ -458,16 +473,22 @@ bool HistoryProvider::get_file_history(std::string_view file_path,
 
 bool HistoryProvider::get_repo_history(int64_t since_epoch,
                                        std::string_view pattern,
-                                       std::vector<CommitInfo>& out) {
+                                       std::vector<CommitInfo>& out,
+                                       std::string* notice) {
     if (pattern.empty()) {
         return get_commit_history(since_epoch, out);
     }
 
-    // Expand glob pattern to matching files. run_git shell-quotes the pattern
-    // so git (not the shell) does the globbing.
+    // Expand the pattern to matching files. run_git execs argv directly, so
+    // git (not a shell) does the globbing.
     std::string output;
-    if (!provider_.run_git({"ls-files", std::string(pattern)}, output))
-        return get_commit_history(since_epoch, out);
+    if (!provider_.run_git({"ls-files", "--", std::string(pattern)}, output)) {
+        // A failed ls-files used to fall back to FULL-repo history, which is
+        // the opposite of what the caller asked for: a hotspot report scoped
+        // to one pattern silently became a whole-repo report, with no way to
+        // tell the two apart. Fail instead (Karpathy rule 6).
+        return false;
+    }
 
     std::vector<std::string> files;
     size_t start = 0;
@@ -479,12 +500,21 @@ bool HistoryProvider::get_repo_history(int64_t since_epoch,
         start = nl + 1;
     }
 
-    if (files.empty()) return get_commit_history(since_epoch, out);
+    if (files.empty()) {
+        // Zero matches is a legitimate answer, not a reason to widen the
+        // scope. Return an empty history and say why.
+        out.clear();
+        if (notice) {
+            *notice = "file_pattern \"" + std::string(pattern) +
+                      "\" matched no tracked files";
+        }
+        return true;
+    }
     return get_commit_history(since_epoch, out, files);
 }
 
-bool HistoryProvider::parse_commit_history(std::string_view output,
-                                           std::vector<CommitInfo>& out) {
+bool parse_commit_history(std::string_view output,
+                          std::vector<CommitInfo>& out) {
     CommitInfo* current = nullptr;
 
     size_t pos = 0;
@@ -508,9 +538,12 @@ bool HistoryProvider::parse_commit_history(std::string_view output,
                 auto p1 = line.find('|');
                 auto hash = line.substr(0, p1);
                 if (hash.size() >= 40) {
-                    // Save previous commit.
-                    if (current) out.push_back(std::move(*current));
-
+                    // NOTE: do not "save the previous commit" here. `current`
+                    // already points AT the previous commit inside `out` — it
+                    // was pushed when its own header was parsed. Re-pushing it
+                    // appended a moved-from husk, so N commits produced 2N-1
+                    // entries: every churn statistic was inflated and each
+                    // husk's empty author became a phantom contributor.
                     CommitInfo ci;
                     ci.hash = std::string(hash);
 
@@ -653,7 +686,8 @@ bool FrequencyAnalyzer::analyze(const ChangeFrequencyParams& params,
     if (!params.file_path.empty()) {
         ok = history_.get_file_history(params.file_path, since, commits);
     } else if (!params.file_pattern.empty()) {
-        ok = history_.get_repo_history(since, params.file_pattern, commits);
+        ok = history_.get_repo_history(since, params.file_pattern, commits,
+                                       &out.metadata.notice);
     } else {
         ok = history_.get_repo_history(since, "", commits);
     }
