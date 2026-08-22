@@ -35,6 +35,12 @@ class ErrorHandlingAnalyzer {
                           std::string_view project_root,
                           const std::vector<bool>& allowed_attrs = {});
 
+    /// True for the signals that mean "the failure stopped here" — the set
+    /// that feeds swallow_sites and the api-reaches-swallow exposure paths.
+    /// Deliberately narrower than "is a finding": a lossy propagation or a
+    /// torn write is a defect, but the error did not stop.
+    static bool is_swallow_signal(EhSignal s);
+
     /// How much more a swallow costs inside an exported function. A library's
     /// contract is to bubble up or transform; deleting a failure its callers
     /// cannot otherwise observe is a breach of that contract, not a style

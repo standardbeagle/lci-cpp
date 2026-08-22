@@ -843,7 +843,7 @@ TEST(CatchClassifyTest, EmptyBodyIsEmptyCatch) {
     site.line = 7;
     site.body_empty = true;
     std::vector<EhFinding> out;
-    classify_catch_site(site, out);
+    classify_catch_site(site, "doWork", out);
     ASSERT_EQ(out.size(), 1u);
     EXPECT_EQ(out[0].signal, EhSignal::EmptyCatch);
     EXPECT_EQ(out[0].severity, FindingSeverity::High);
@@ -857,7 +857,7 @@ TEST(CatchClassifyTest, BroadTypeAddsBroadCatch) {
     site.broad_type = true;
     site.caught_type = "Exception";
     std::vector<EhFinding> out;
-    classify_catch_site(site, out);
+    classify_catch_site(site, "doWork", out);
     ASSERT_EQ(out.size(), 2u);
     EXPECT_EQ(out[0].signal, EhSignal::EmptyCatch);
     EXPECT_EQ(out[1].signal, EhSignal::BroadCatch);
@@ -869,7 +869,7 @@ TEST(CatchClassifyTest, LogOnlyBodyIsLogAndSwallow) {
     site.line = 4;
     site.has_log_call = true;
     std::vector<EhFinding> out;
-    classify_catch_site(site, out);
+    classify_catch_site(site, "doWork", out);
     ASSERT_EQ(out.size(), 1u);
     EXPECT_EQ(out[0].signal, EhSignal::LogAndSwallow);
 }
@@ -879,7 +879,7 @@ TEST(CatchClassifyTest, WorkWithoutRethrowIsCatchAndContinue) {
     site.line = 4;
     site.has_other_call = true;
     std::vector<EhFinding> out;
-    classify_catch_site(site, out);
+    classify_catch_site(site, "doWork", out);
     ASSERT_EQ(out.size(), 1u);
     EXPECT_EQ(out[0].signal, EhSignal::CatchAndContinue);
 }
@@ -890,7 +890,7 @@ TEST(CatchClassifyTest, RethrowWithCauseIsClean) {
     site.has_rethrow = true;
     site.rethrow_uses_cause = true;
     std::vector<EhFinding> out;
-    classify_catch_site(site, out);
+    classify_catch_site(site, "doWork", out);
     EXPECT_TRUE(out.empty());
 }
 
@@ -899,7 +899,7 @@ TEST(CatchClassifyTest, RethrowWithoutCauseIsFlaggedLow) {
     site.line = 4;
     site.has_rethrow = true;
     std::vector<EhFinding> out;
-    classify_catch_site(site, out);
+    classify_catch_site(site, "doWork", out);
     ASSERT_EQ(out.size(), 1u);
     EXPECT_EQ(out[0].signal, EhSignal::RethrowNoCause);
     EXPECT_EQ(out[0].severity, FindingSeverity::Low);
@@ -911,7 +911,7 @@ TEST(CatchClassifyTest, ReturnSurfacesErrorNoSwallowFinding) {
     site.has_return = true;
     site.has_other_call = true;
     std::vector<EhFinding> out;
-    classify_catch_site(site, out);
+    classify_catch_site(site, "doWork", out);
     EXPECT_TRUE(out.empty());
 }
 

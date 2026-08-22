@@ -342,6 +342,15 @@ enum class EhSignal : uint8_t {
     /// Several distinct state changes with a fallible point between them and
     /// no compensation anywhere. The classic torn write: some of it landed.
     PartialWriteRisk,
+    /// A `finally`/`ensure` block returns or throws, which DISCARDS whatever
+    /// exception was propagating through it. Nothing catches it, nothing logs
+    /// it: the failure is deleted by control flow, and no catch site exists
+    /// for a reader to notice.
+    FinallyHijacksControlFlow,
+    /// A catch turned the failure into a sentinel value — `return null`,
+    /// `return false`, `return {}`. The caller sees "no result" and has no
+    /// way to learn that anything went wrong.
+    ErrorToSentinel,
     /// Irreversible external work runs BEFORE work that can still fail —
     /// the charge goes out, then validation throws. Ordering, not a defect:
     /// doing the fallible part first would leave nothing to undo.
@@ -365,6 +374,9 @@ constexpr std::string_view to_string(EhSignal s) {
         case EhSignal::PartialWriteRisk: return "partial-write-risk";
         case EhSignal::IrreversibleBeforeFallible:
             return "irreversible-before-fallible";
+        case EhSignal::ErrorToSentinel: return "error-to-sentinel";
+        case EhSignal::FinallyHijacksControlFlow:
+            return "finally-discards-exception";
     }
     return "unknown";
 }
@@ -401,6 +413,12 @@ struct CatchSiteInfo {
     bool has_log_call{};       // a log-category callee in the body
     bool has_other_call{};     // any non-log call in the body
     bool has_return{};         // returns a value (error may be re-surfaced)
+    /// The catch returns a SENTINEL — null, false, 0, "", [], {} — rather
+    /// than anything derived from the error. The failure became "no result",
+    /// and the caller cannot tell an empty answer from a broken one. This is
+    /// the most common swallow in modern code and the reason has_return
+    /// cannot by itself mean "the error was surfaced".
+    bool returns_sentinel{};
     /// The caught variable reaches a non-log call — `callback(err)`,
     /// `Promise.reject(error)`, `self.handle(e)`. The error leaves the catch
     /// block by a route other than `throw`, which is the normal shape in

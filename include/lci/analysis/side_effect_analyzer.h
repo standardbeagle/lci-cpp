@@ -112,6 +112,10 @@ class SideEffectAnalyzer {
     /// log-and-swallow / rethrow-no-cause) at end_function.
     void record_catch(const CatchSiteInfo& site);
 
+    /// A finally/ensure block that returns or throws, discarding any
+    /// in-flight exception. `verb` is "return" or "throw" for the message.
+    void record_finally_hijack(int line, std::string_view verb);
+
     /// Go dropped-error evidence: `_ = err` / blank-discarded call results.
     void record_dropped_error(int line, std::string_view detail,
                               bool high_confidence);
@@ -202,7 +206,11 @@ ResourceOpKind classify_resource_callee(std::string_view callee);
 
 /// Classifies one catch site's syntactic facts into swallow findings.
 /// Appends to `out`, deterministic order. Exposed for unit tests.
-void classify_catch_site(const CatchSiteInfo& site, std::vector<EhFinding>& out);
+/// Classifies one catch site into findings. `fn_name` is the enclosing
+/// function's name: a name that promises a sentinel on failure (isValid*,
+/// try*) makes a sentinel return the answer rather than a swallow.
+void classify_catch_site(const CatchSiteInfo& site, std::string_view fn_name,
+                         std::vector<EhFinding>& out);
 
 /// Pairs a function's acquires against its release credits and appends
 /// leak-no-release / leak-on-error-path / unguarded-release findings.

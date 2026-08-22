@@ -602,6 +602,171 @@ TEST_F(SideEffectExtraction, ReadOnlyCodeHasNoUndoCost) {
     }
 }
 
+// -- Error becomes a sentinel --------------------------------------------------
+//
+// `catch (e) { return null; }` is the most common swallow in modern code and
+// used to score PERFECT: has_return alone was read as "the error may be
+// surfaced through the return value". What is returned decides that — a
+// sentinel surfaces nothing, and the caller cannot tell an empty answer from
+// a broken one.
+
+TEST_F(SideEffectExtraction, CatchReturningNullIsASwallow) {
+    for (const char* sentinel : {"null", "undefined", "false", "0", "{}", "[]"}) {
+        std::string src = std::string("function f() {\n"
+                                      "  try { return g(); } catch (e) { "
+                                      "return ") + sentinel + "; }\n}\n";
+        const auto* info = analyze(Language::JavaScript, ".js", src, "f");
+        ASSERT_NE(info, nullptr) << sentinel;
+        EXPECT_EQ(count_findings(info->error_findings,
+                                 EhSignal::ErrorToSentinel),
+                  1)
+            << "return " << sentinel << " surfaces nothing";
+    }
+}
+
+TEST_F(SideEffectExtraction, PythonCatchReturningNoneIsASwallow) {
+    const auto* info = analyze(Language::Python, ".py",
+                               "def find(uid):\n"
+                               "    try:\n"
+                               "        return db.query(uid)\n"
+                               "    except Exception:\n"
+                               "        return None\n",
+                               "find");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::ErrorToSentinel),
+              1);
+}
+
+// Returning something DERIVED from the error is real handling and must stay
+// clean — otherwise the rule would condemn every Result-style API.
+// A name that PROMISES a sentinel makes the sentinel the answer, not a
+// swallow. Every real-world hit of the sentinel rule across the corpus was
+// this: express's tryStat and four zod validators, all correct code.
+TEST_F(SideEffectExtraction, PredicateAndTryNamesMayReturnSentinels) {
+    for (const char* fn : {"isValidIPv6", "tryStat", "hasAccess", "canRetry",
+                           "is_valid_token", "try_parse",
+                           // Suffix form: axios's stringifySafely, and the
+                           // Kotlin/Rust getOrNull family.
+                           "stringifySafely", "getOrNull", "parseOrDefault"}) {
+        std::string src = std::string("function ") + fn +
+                          "(x) {\n  try { return g(x); } catch (e) { return "
+                          "false; }\n}\n";
+        const auto* info = analyze(Language::JavaScript, ".js", src, fn);
+        ASSERT_NE(info, nullptr) << fn;
+        EXPECT_EQ(count_findings(info->error_findings,
+                                 EhSignal::ErrorToSentinel),
+                  0)
+            << fn << ": the sentinel is the documented answer";
+    }
+}
+
+// The prefix must be followed by a word boundary — `issue()` and `canvas()`
+// are not predicates.
+TEST_F(SideEffectExtraction, PrefixLookalikesAreStillSwallows) {
+    for (const char* fn : {"issue", "canvas", "testify"}) {
+        std::string src = std::string("function ") + fn +
+                          "(x) {\n  try { return g(x); } catch (e) { return "
+                          "null; }\n}\n";
+        const auto* info = analyze(Language::JavaScript, ".js", src, fn);
+        ASSERT_NE(info, nullptr) << fn;
+        EXPECT_EQ(count_findings(info->error_findings,
+                                 EhSignal::ErrorToSentinel),
+                  1)
+            << fn << " is not a predicate";
+    }
+}
+
+TEST_F(SideEffectExtraction, CatchReturningAnErrorValueIsClean) {
+    const auto* info = analyze(Language::JavaScript, ".js",
+                               "function f() {\n"
+                               "  try { return g(); } catch (e) { return "
+                               "wrapError(e); }\n"
+                               "}\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::ErrorToSentinel),
+              0);
+}
+
+// A sentinel return IS a swallow for the exposure paths: it must feed
+// swallow_sites, not just the finding list.
+TEST_F(SideEffectExtraction, SentinelReturnCountsAsASwallowSignal) {
+    EXPECT_TRUE(
+        ErrorHandlingAnalyzer::is_swallow_signal(EhSignal::ErrorToSentinel));
+    EXPECT_TRUE(ErrorHandlingAnalyzer::is_swallow_signal(
+        EhSignal::FinallyHijacksControlFlow));
+    // Narrower than "is a finding": these are defects, but the error did not
+    // stop here.
+    EXPECT_FALSE(
+        ErrorHandlingAnalyzer::is_swallow_signal(EhSignal::LossyPropagation));
+    EXPECT_FALSE(
+        ErrorHandlingAnalyzer::is_swallow_signal(EhSignal::PartialWriteRisk));
+}
+
+// -- finally hijacks control flow ----------------------------------------------
+//
+// A `return` inside finally DISCARDS whatever exception was propagating —
+// in JS, Java, C#, Python and Ruby alike. It is the one error-handling defect
+// with no catch site for a reader to notice.
+
+TEST_F(SideEffectExtraction, ReturnInsideFinallyDiscardsTheException) {
+    const auto* info = analyze(Language::JavaScript, ".js",
+                               "function f(x) {\n"
+                               "  try { return work(x); } finally { return "
+                               "cleanup(); }\n"
+                               "}\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings,
+                             EhSignal::FinallyHijacksControlFlow),
+              1);
+}
+
+TEST_F(SideEffectExtraction, PythonReturnInsideFinallyIsFlagged) {
+    const auto* info = analyze(Language::Python, ".py",
+                               "def f(x):\n"
+                               "    try:\n"
+                               "        return work(x)\n"
+                               "    finally:\n"
+                               "        return cleanup()\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings,
+                             EhSignal::FinallyHijacksControlFlow),
+              1);
+}
+
+// A finally that only cleans up is the whole point of finally.
+TEST_F(SideEffectExtraction, FinallyThatOnlyCleansUpIsClean) {
+    const auto* info = analyze(Language::JavaScript, ".js",
+                               "function f(x) {\n"
+                               "  try { return work(x); } finally { "
+                               "cleanup(); }\n"
+                               "}\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings,
+                             EhSignal::FinallyHijacksControlFlow),
+              0);
+}
+
+// A return inside a callback DEFINED in the finally returns from that
+// callback, not through the finally, so it discards nothing.
+TEST_F(SideEffectExtraction, ReturnInANestedFunctionInFinallyIsClean) {
+    const auto* info = analyze(Language::JavaScript, ".js",
+                               "function f(x) {\n"
+                               "  try { return work(x); } finally {\n"
+                               "    items.forEach(function (i) { return "
+                               "log(i); });\n"
+                               "  }\n"
+                               "}\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings,
+                             EhSignal::FinallyHijacksControlFlow),
+              0);
+}
+
 // -- Cause fidelity ------------------------------------------------------------
 //
 // Forwarding the error is not the same as forwarding a sentence about it.

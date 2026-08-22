@@ -275,6 +275,9 @@ class UnifiedExtractor {
     bool is_se_guard_node(std::string_view node_type) const;
     /// One arm of a mutually exclusive choice (switch case, else arm).
     bool is_se_branch_node(std::string_view node_type) const;
+    /// Records a finding when a finally/ensure block returns or throws,
+    /// discarding any exception propagating through it.
+    void check_finally_hijack(TSNode node);
     // Walks one catch/except/rescue clause's subtree, classifies its body
     // syntactically, and reports it to the sink as a CatchSiteInfo.
     void process_catch_site(TSNode node, std::string_view node_type);

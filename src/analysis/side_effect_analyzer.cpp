@@ -343,7 +343,51 @@ void classify_work_pairing(const std::vector<WorkOp>& ops,
     }
 }
 
-void classify_catch_site(const CatchSiteInfo& site, std::vector<EhFinding>& out) {
+// Functions whose NAME promises a sentinel on failure. `isValidIPv6` returning
+// false is not a swallow — false is the answer, and the exception was the
+// mechanism for computing it. `tryStat` returning undefined is the documented
+// contract of every try-prefixed API since TryParse.
+//
+// Verified against the corpus: express's tryStat (catch -> undefined around
+// fs.statSync) and four zod validators (isValidIPv6, isValidBase64,
+// isValidJWT — catch -> false around a URL/JSON parse) were the entire
+// real-world yield of the sentinel rule, and every one of them was correct
+// code doing exactly what its name says.
+bool name_promises_a_sentinel(std::string_view fn) {
+    if (fn.empty()) return false;
+    for (std::string_view p :
+         {"is", "has", "can", "should", "was", "were", "are", "try",
+          "maybe", "opt", "check", "test", "supports", "contains",
+          "matches", "looks"}) {
+        if (!iprefix(fn, p)) continue;
+        // Require a capital or underscore after the prefix so `issue()` and
+        // `canvas()` are not mistaken for predicates.
+        if (fn.size() == p.size()) return true;
+        char next = fn[p.size()];
+        if (next == '_' || (next >= 'A' && next <= 'Z')) return true;
+    }
+    // Snake case: is_valid, has_key, try_parse.
+    for (std::string_view p :
+         {"is_", "has_", "can_", "should_", "try_", "check_", "test_"}) {
+        if (iprefix(fn, p)) return true;
+    }
+    // Suffixes that promise a sentinel just as loudly as a prefix does:
+    // axios's `stringifySafely` returns '' on failure, and Kotlin/Rust-style
+    // `getOrNull` / `parseOrDefault` say it outright.
+    for (std::string_view suf :
+         {"safe", "safely", "quietly", "ornull", "ornil", "ornone",
+          "ordefault", "orelse", "orempty", "orzero", "_safe", "noexcept"}) {
+        if (fn.size() >= suf.size() &&
+            iprefix(fn.substr(fn.size() - suf.size()), suf)) {
+            return true;
+        }
+    }
+    return fn.find("valid") != std::string_view::npos ||
+           fn.find("Valid") != std::string_view::npos;
+}
+
+void classify_catch_site(const CatchSiteInfo& site, std::string_view fn_name,
+                         std::vector<EhFinding>& out) {
     auto add = [&](EhSignal sig, FindingSeverity sev, double conf) {
         EhFinding f;
         f.signal = sig;
@@ -372,8 +416,15 @@ void classify_catch_site(const CatchSiteInfo& site, std::vector<EhFinding>& out)
     } else if (site.has_rethrow) {
         if (!site.rethrow_uses_cause)
             add(EhSignal::RethrowNoCause, FindingSeverity::Low, 0.4);
-    } else if (site.has_return) {
+    } else if (site.has_return && !site.returns_sentinel) {
         // Error may be surfaced through the return value — no swallow claim.
+    } else if (site.returns_sentinel && !name_promises_a_sentinel(fn_name)) {
+        // `catch (e) { return null; }`. The failure did not propagate; it was
+        // renamed "no result", and the caller cannot tell an empty answer
+        // from a broken one. Med rather than High: returning a sentinel is a
+        // deliberate contract in lookup-style APIs, and the caller at least
+        // sees SOMETHING is absent — unlike a bare continue.
+        add(EhSignal::ErrorToSentinel, FindingSeverity::Med, 0.7);
     } else if (site.propagates_cause) {
         // The caught error is handed to a call — a callback, a promise
         // rejection, a handler. It left the block; the route just was not
@@ -539,7 +590,7 @@ SideEffectInfo SideEffectAnalyzer::end_function() {
     // classification, sorted by line (karpathy #4: deterministic).
     info.error_findings = ctx.error_findings;
     for (const auto& site : ctx.catch_sites) {
-        classify_catch_site(site, info.error_findings);
+        classify_catch_site(site, info.function_name, info.error_findings);
     }
     // NOTE: the sort lives after classify_work_pairing below — undo-cost
     // findings land in this same vector and must share the ordering
@@ -773,6 +824,22 @@ void SideEffectAnalyzer::record_call_site_resources(std::string_view callee,
         case ResourceOpKind::None:
             break;
     }
+}
+
+void SideEffectAnalyzer::record_finally_hijack(int line,
+                                               std::string_view verb) {
+    if (!current_func_) return;
+    EhFinding f;
+    f.signal = EhSignal::FinallyHijacksControlFlow;
+    // High and near-certain: unlike most signals here this is not a judgment
+    // about intent. A return in a finally DOES discard the exception, in
+    // every language that has the construct, and it is invisible at the call
+    // site — there is no catch for a reader to find.
+    f.severity = FindingSeverity::High;
+    f.confidence = 0.85;
+    f.line = line;
+    f.detail = std::string(verb) + " in finally discards any in-flight error";
+    current_func_->error_findings.push_back(std::move(f));
 }
 
 void SideEffectAnalyzer::record_channel_op(int line) {

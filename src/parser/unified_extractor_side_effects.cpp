@@ -485,6 +485,29 @@ bool is_comment_node(std::string_view t) {
     return t == "comment" || t == "line_comment" || t == "block_comment";
 }
 
+// A returned expression that carries NO information about the failure: the
+// error became "no result". Text-based on purpose — the spellings are few and
+// identical across grammars, and matching node types would need a table per
+// language for no extra precision.
+bool is_sentinel_expression(std::string_view text) {
+    // Trim whitespace so `return  null ;` matches.
+    while (!text.empty() && std::isspace(static_cast<unsigned char>(text.front())))
+        text.remove_prefix(1);
+    while (!text.empty() && std::isspace(static_cast<unsigned char>(text.back())))
+        text.remove_suffix(1);
+    if (!text.empty() && text.back() == ';') text.remove_suffix(1);
+    while (!text.empty() && std::isspace(static_cast<unsigned char>(text.back())))
+        text.remove_suffix(1);
+
+    for (std::string_view s :
+         {"null", "nullptr", "None", "nil", "undefined", "false", "0", "-1",
+          "\"\"", "''", "[]", "{}", "()", "list()", "dict()", "set()",
+          "Optional.empty()", "None,", "empty"}) {
+        if (text == s) return true;
+    }
+    return false;
+}
+
 // The member/method names that keep an error's full diagnostic payload. A
 // projection NOT in this list, taken on a language whose errors carry more
 // than a message, is lossy.
@@ -539,6 +562,37 @@ bool errors_are_message_only(std::string_view ext) {
 // argument region looking for the caught identifier, then asks what was taken
 // FROM it: the bare binding is the whole error, `e.stack` keeps the payload,
 // `e.message` keeps a sentence.
+// A `return` (or `throw`) inside finally/ensure DISCARDS whatever exception
+// was propagating through it — in JS, Java, C#, Python and Ruby alike. There
+// is no catch site, so nothing in the source marks the deletion; this is the
+// one error-handling defect with no visible handler to read.
+//
+// Only the finally's OWN control flow counts: a return inside a nested
+// function literal in the block returns from that function, not through the
+// finally, so nested function bodies are not descended into.
+void UnifiedExtractor::check_finally_hijack(TSNode node) {
+    if (side_effects_ == nullptr) return;
+    bool found = false;
+    walk_subtree(node, [&](TSNode n) {
+        if (found) return false;
+        std::string_view t = get_node_type(n);
+        if (!ts_node_eq(n, node) && is_function_node(t)) {
+            return false;  // a nested function's return is its own
+        }
+        if (t == "return_statement" || t == "return_expression") {
+            side_effects_->record_finally_hijack(line_of(n), "return");
+            found = true;
+            return false;
+        }
+        if (is_throw_node(t)) {
+            side_effects_->record_finally_hijack(line_of(n), "throw");
+            found = true;
+            return false;
+        }
+        return true;
+    });
+}
+
 CauseFidelity UnifiedExtractor::cause_fidelity(TSNode args,
                                               std::string_view caught_var) {
     CauseFidelity best = CauseFidelity::None;
@@ -748,7 +802,16 @@ void UnifiedExtractor::process_catch_site(TSNode node,
                 }
             }
             if (t == "return_statement" || t == "return_expression") {
-                if (ts_node_named_child_count(n) > 0) site.has_return = true;
+                if (ts_node_named_child_count(n) > 0) {
+                    site.has_return = true;
+                    // WHAT it returns decides whether the error survived.
+                    // `return null` is not surfacing the failure, it is
+                    // renaming it "no result".
+                    TSNode v = ts_node_named_child(n, 0);
+                    if (is_sentinel_expression(node_text(v))) {
+                        site.returns_sentinel = true;
+                    }
+                }
                 return true;
             }
             if (is_call_node(t)) {

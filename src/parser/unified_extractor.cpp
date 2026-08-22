@@ -353,6 +353,11 @@ void UnifiedExtractor::visit_node(TSNode node) {
     if (side_effects_ && is_se_guard_node(node_type)) {
         se_guard = true;
         ++se_guard_depth_;
+        // A finally that returns or throws deletes the in-flight exception.
+        if (node_type == "finally_clause" || node_type == "finally_block" ||
+            node_type == "ensure") {
+            check_finally_hijack(node);
+        }
     }
 
     // Alternative-branch scope: state changes in sibling arms are choices, not

@@ -33,11 +33,6 @@ int severity_rank(std::string_view sev) {
     return 0;
 }
 
-bool is_swallow_signal(EhSignal s) {
-    return s == EhSignal::EmptyCatch || s == EhSignal::CatchAndContinue ||
-           s == EhSignal::LogAndSwallow;
-}
-
 void sort_findings(std::vector<EhFindingEntry>& v) {
     std::sort(v.begin(), v.end(),
               [](const EhFindingEntry& a, const EhFindingEntry& b) {
@@ -51,6 +46,15 @@ void sort_findings(std::vector<EhFindingEntry>& v) {
 }
 
 }  // namespace
+
+bool ErrorHandlingAnalyzer::is_swallow_signal(EhSignal s) {
+    // A sentinel return is a swallow: the failure stopped here and the caller
+    // was handed "no result" instead. A finally that returns is too — the
+    // exception is discarded by control flow with no catch site at all.
+    return s == EhSignal::EmptyCatch || s == EhSignal::CatchAndContinue ||
+           s == EhSignal::LogAndSwallow || s == EhSignal::ErrorToSentinel ||
+           s == EhSignal::FinallyHijacksControlFlow;
+}
 
 double ErrorHandlingAnalyzer::finding_deduction(FindingSeverity severity,
                                                 double confidence,
