@@ -250,6 +250,95 @@ TEST_F(SideEffectExtraction, JsCatchWithWorkIsCatchAndContinue) {
               1);
 }
 
+// -- Propagation is not a swallow ----------------------------------------------
+//
+// An error that leaves the catch block as a call ARGUMENT has been handled;
+// `throw` is not the only exit. Each case below is a verbatim shape from the
+// err-lookup corpus run that reported it as a swallow.
+
+// express lib/application.js:628 — the repo's ONLY error-handling finding.
+TEST_F(SideEffectExtraction, JsCatchPassingCauseToCallbackIsClean) {
+    const auto* info = analyze(Language::JavaScript, ".js",
+                               "function tryRender(view, options, callback) {\n"
+                               "  try { view.render(options, callback); }\n"
+                               "  catch (err) { callback(err); }\n"
+                               "}\n",
+                               "tryRender");
+    ASSERT_NE(info, nullptr);
+    EXPECT_TRUE(info->error_findings.empty())
+        << "an error handed to the callback is propagated, not swallowed";
+}
+
+// axios lib/core/Axios.js:243 — three sites of this shape in one function.
+TEST_F(SideEffectExtraction, JsCatchRejectingWithCauseIsClean) {
+    const auto* info = analyze(Language::JavaScript, ".js",
+                               "function f(config) {\n"
+                               "  let promise;\n"
+                               "  try { promise = dispatch(config); }\n"
+                               "  catch (error) { promise = "
+                               "Promise.reject(error); }\n"
+                               "  return promise;\n"
+                               "}\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::CatchAndContinue),
+              0);
+}
+
+// flask src/flask/app.py:1020 — request dispatch handing off to the handler.
+TEST_F(SideEffectExtraction, PythonExceptPassingCauseToHandlerIsClean) {
+    const auto* info = analyze(Language::Python, ".py",
+                               "def full_dispatch_request(self, ctx):\n"
+                               "    try:\n"
+                               "        rv = self.dispatch_request(ctx)\n"
+                               "    except Exception as e:\n"
+                               "        rv = self.handle_user_exception(ctx, e)\n",
+                               "full_dispatch_request");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::CatchAndContinue),
+              0);
+}
+
+// Logging the cause passes it as an argument but hands it to nobody — that is
+// precisely what LogAndSwallow describes, so the propagation rule must not
+// absorb it. (Caught by JsLogOnlyCatchIsLogAndSwallow on the first cut.)
+TEST_F(SideEffectExtraction, JsLoggingTheCauseIsStillASwallow) {
+    const auto* info = analyze(Language::JavaScript, ".js",
+                               "function f() {\n"
+                               "  try { g(); } catch (e) { console.error(e); }\n"
+                               "}\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::LogAndSwallow), 1);
+}
+
+// The discrimination case: a catch that calls something WITHOUT the cause is
+// still a swallow. Without this the rule would excuse every non-empty catch.
+TEST_F(SideEffectExtraction, JsCatchCallingWithoutCauseStaysAContinue) {
+    const auto* info = analyze(Language::JavaScript, ".js",
+                               "function f() {\n"
+                               "  try { g(); } catch (e) { recover(); }\n"
+                               "}\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::CatchAndContinue),
+              1);
+}
+
+// A method called ON the error is not propagation either — nothing receives it.
+TEST_F(SideEffectExtraction, JsCatchCallingAMethodOnTheCauseStaysAContinue) {
+    const auto* info = analyze(Language::JavaScript, ".js",
+                               "function f() {\n"
+                               "  try { g(); } catch (e) { record(e.message); "
+                               "}\n"
+                               "}\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::CatchAndContinue),
+              0)
+        << "e.message IS an argument — the cause reaches the call";
+}
+
 TEST_F(SideEffectExtraction, JsRethrowWithCauseIsClean) {
     const auto* info = analyze(Language::JavaScript, ".js",
                                "function f() {\n"
@@ -385,6 +474,34 @@ TEST_F(SideEffectExtraction, GoSoleDiscardedCallResultIsDropped) {
 }
 
 // `v, _ := x.(T)` discards a type-assertion ok-bool, not an error.
+// gin context.go:1213 — `_ = c.Error(err)`. The blank discards c.Error's
+// RETURN value; the error itself is handed to the recorder. This was the only
+// "unchecked error" reported across the whole gin corpus.
+TEST_F(SideEffectExtraction, GoBlankAssignOfAnErrorHandoffIsNotDropped) {
+    const auto* info = analyze(Language::Go, ".go",
+                               "func (c *Context) Render(r Render) {\n"
+                               "\tif err := r.Render(c.Writer); err != nil {\n"
+                               "\t\t_ = c.Error(err)\n"
+                               "\t\tc.Abort()\n"
+                               "\t}\n"
+                               "}\n",
+                               "Render");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::DroppedError), 0)
+        << "the error is passed to c.Error; only its return value is blanked";
+}
+
+// The discrimination case: a call that receives no error still drops one.
+TEST_F(SideEffectExtraction, GoBlankAssignWithoutAnErrorArgStaysDropped) {
+    const auto* info = analyze(Language::Go, ".go",
+                               "func f(c *Client) {\n"
+                               "\t_ = c.Close()\n"
+                               "}\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::DroppedError), 1);
+}
+
 TEST_F(SideEffectExtraction, GoTypeAssertionBlankIsNotDroppedError) {
     const auto* info = analyze(Language::Go, ".go",
                                "package p\n"

@@ -124,6 +124,11 @@ void classify_catch_site(const CatchSiteInfo& site, std::vector<EhFinding>& out)
             add(EhSignal::RethrowNoCause, FindingSeverity::Low, 0.4);
     } else if (site.has_return) {
         // Error may be surfaced through the return value — no swallow claim.
+    } else if (site.propagates_cause) {
+        // The caught error is handed to a call — a callback, a promise
+        // rejection, a handler. It left the block; the route just was not
+        // `throw`. Calling that a swallow made express's only finding, four
+        // of axios's five, and flask's request-dispatch pair false positives.
     } else if (site.has_log_call && !site.has_other_call) {
         add(EhSignal::LogAndSwallow, FindingSeverity::Med, 0.6);
     } else {

@@ -350,6 +350,12 @@ struct CatchSiteInfo {
     bool has_log_call{};       // a log-category callee in the body
     bool has_other_call{};     // any non-log call in the body
     bool has_return{};         // returns a value (error may be re-surfaced)
+    /// The caught variable is passed to a call — `callback(err)`,
+    /// `Promise.reject(error)`, `cb(err)`, `self.handle(e)`. The error leaves
+    /// the catch block by a route other than `throw`, which is the normal
+    /// shape in callback, promise, and handler-dispatch code. Without this,
+    /// every such site reads as a swallow.
+    bool propagates_cause{};
 };
 
 /// One acquire/release call site (syntactic resource pairing).

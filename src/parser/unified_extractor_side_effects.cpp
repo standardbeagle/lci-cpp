@@ -623,6 +623,27 @@ void UnifiedExtractor::process_catch_site(TSNode node,
                     site.has_log_call = true;
                 } else {
                     site.has_other_call = true;
+                    // Does the caught variable travel INTO this call? That is
+                    // propagation, not a swallow: `callback(err)`,
+                    // `Promise.reject(error)`, `handle_user_exception(ctx, e)`.
+                    // Logging is deliberately excluded — `console.error(e)`
+                    // reports the error, it does not hand it to anyone, which
+                    // is exactly what LogAndSwallow means.
+                    if (!caught_var.empty() && !site.propagates_cause) {
+                        TSNode args = field(n, "arguments");
+                        if (ts_node_is_null(args)) {
+                            args = field(n, "argument_list");
+                        }
+                        if (!ts_node_is_null(args)) {
+                            walk_subtree(args, [&](TSNode a) {
+                                if (is_identifier_type(get_node_type(a)) &&
+                                    node_text(a) == caught_var) {
+                                    site.propagates_cause = true;
+                                }
+                                return !site.propagates_cause;
+                            });
+                        }
+                    }
                 }
             }
             return true;
@@ -692,6 +713,31 @@ void UnifiedExtractor::process_go_error_drop(TSNode node,
         }
     }
     if (!right_is_call && !right_is_err_ident) return;
+
+    // `_ = c.Error(err)` hands the error to a recorder and discards THAT
+    // call's return value — the error is kept, not dropped. gin's
+    // context.go:1213 is the canonical case, and it was this repo's only
+    // "unchecked error" on the whole gin corpus. An err-like identifier in
+    // the argument list is the signal.
+    if (right_is_call) {
+        TSNode value = right;
+        if (get_node_type(value) == "expression_list") {
+            uint32_t n = ts_node_named_child_count(value);
+            if (n > 0) value = ts_node_named_child(value, n - 1);
+        }
+        TSNode args = field(value, "arguments");
+        if (!ts_node_is_null(args)) {
+            bool hands_off_error = false;
+            walk_subtree(args, [&](TSNode a) {
+                if (is_identifier_type(get_node_type(a)) &&
+                    iprefix(node_text(a), "err")) {
+                    hands_off_error = true;
+                }
+                return !hands_off_error;
+            });
+            if (hands_off_error) return;
+        }
+    }
 
     int line = line_of(node);
     std::string detail = "`" + std::string(node_text(node)) + "`";
