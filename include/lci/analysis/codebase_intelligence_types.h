@@ -169,6 +169,13 @@ struct ErrorHandlingSummary {
     double handled_ratio{};
     int swallow_sites{};
     int unchecked_errors{};
+    /// Undo cost: functions where an error leaves work half-applied.
+    /// `uncompensated` counts transactions committed with no rollback path
+    /// plus torn multi-write sequences; `irreversible_first` counts the
+    /// ordering that creates the problem. Separate from swallow_sites — a
+    /// function can report an error perfectly and still lose the data.
+    int uncompensated{};
+    int irreversible_first{};
     int functions_scored{};
     std::vector<EhFindingEntry> findings;  ///< severity desc, file, line
     std::vector<EhExposureEntry> exposure;

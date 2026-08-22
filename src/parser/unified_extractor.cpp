@@ -161,6 +161,7 @@ void UnifiedExtractor::init(std::string_view content, FileID file_id,
     has_current_func_ = false;
     se_func_depth_ = 0;
     se_guard_depth_ = 0;
+    se_branch_id_ = 0;
     lines_initialized_ = false;
 }
 
@@ -194,6 +195,7 @@ void UnifiedExtractor::reset() {
     side_effects_ = nullptr;
     se_func_depth_ = 0;
     se_guard_depth_ = 0;
+    se_branch_id_ = 0;
 
     handled_nodes_.clear();
     local_var_types_.clear();
@@ -353,6 +355,13 @@ void UnifiedExtractor::visit_node(TSNode node) {
         ++se_guard_depth_;
     }
 
+    // Alternative-branch scope: state changes in sibling arms are choices, not
+    // a sequence, so an error cannot leave one arm half-applied by the other.
+    uint32_t prev_branch = se_branch_id_;
+    if (side_effects_ && is_se_branch_node(node_type)) {
+        se_branch_id_ = ts_node_start_byte(node);
+    }
+
     // Track import context
     bool was_import = in_import_context_;
     if (node_type == "import_statement") {
@@ -379,6 +388,7 @@ void UnifiedExtractor::visit_node(TSNode node) {
     }
 
     if (se_guard) --se_guard_depth_;
+    se_branch_id_ = prev_branch;
 
     // Restore context flags
     if (node_type == "import_statement") {

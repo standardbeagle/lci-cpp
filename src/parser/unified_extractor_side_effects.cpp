@@ -402,7 +402,8 @@ void UnifiedExtractor::process_side_effect_node(
         // Resource acquire/release pairing: classify the bare callee; a call
         // under a defer/finally/ensure/using/with scope carries guard credit.
         side_effects_->record_call_site_resources(bare, line,
-                                                  se_guard_depth_ > 0);
+                                                  se_guard_depth_ > 0,
+                                                  se_branch_id_);
         return;
     }
 }
@@ -422,6 +423,33 @@ bool UnifiedExtractor::is_se_guard_node(std::string_view node_type) const {
     if (node_type == "errdefer" || node_type == "errdefer_statement")
         return true;                                     // Zig
     return false;
+}
+
+// True for a node that is ONE ARM of a multi-way choice. Two state changes in
+// different arms never both execute, so they cannot leave each other
+// half-applied — the undo-cost rules group ops by arm because of this.
+//
+// A plain `if` consequence is deliberately absent: `if (x) { save(a); }
+// save(b);` really is a sequence. Only constructs whose arms are mutually
+// exclusive by construction count.
+bool UnifiedExtractor::is_se_branch_node(std::string_view node_type) const {
+    return node_type == "switch_case" ||          // JS/TS/Java/C#/PHP
+           node_type == "switch_default" ||
+           node_type == "case_clause" ||
+           node_type == "expression_case" ||      // Go
+           node_type == "default_case" ||
+           node_type == "communication_case" ||   // Go select
+           node_type == "type_case" ||            // Go type switch
+           node_type == "case_statement" ||       // C/C++/Ruby
+           node_type == "when_entry" ||           // Kotlin
+           node_type == "when_clause" ||          // Ruby
+           node_type == "match_arm" ||            // Rust
+           node_type == "case" ||                 // Python match
+           node_type == "case_clause_body" ||
+           node_type == "else_clause" ||          // if/else arms
+           node_type == "elif_clause" ||
+           node_type == "else_if_clause" ||
+           node_type == "alternative";            // Python/Ruby else
 }
 
 // ---------------------------------------------------------------------------

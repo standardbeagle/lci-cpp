@@ -335,6 +335,17 @@ enum class EhSignal : uint8_t {
     /// the cause chain stop here. Partial credit — the failure is reported,
     /// it just cannot be diagnosed from the report.
     LossyPropagation,
+    /// A transaction was opened and committed with no rollback on any error
+    /// path. An error between the two leaves the unit of work half-applied
+    /// and nothing undoes it.
+    UncompensatedTransaction,
+    /// Several distinct state changes with a fallible point between them and
+    /// no compensation anywhere. The classic torn write: some of it landed.
+    PartialWriteRisk,
+    /// Irreversible external work runs BEFORE work that can still fail —
+    /// the charge goes out, then validation throws. Ordering, not a defect:
+    /// doing the fallible part first would leave nothing to undo.
+    IrreversibleBeforeFallible,
 };
 
 constexpr std::string_view to_string(EhSignal s) {
@@ -349,6 +360,11 @@ constexpr std::string_view to_string(EhSignal s) {
         case EhSignal::LeakOnErrorPath: return "leak-on-error-path";
         case EhSignal::UnguardedRelease: return "unguarded-release";
         case EhSignal::LossyPropagation: return "message-only-propagation";
+        case EhSignal::UncompensatedTransaction:
+            return "uncompensated-transaction";
+        case EhSignal::PartialWriteRisk: return "partial-write-risk";
+        case EhSignal::IrreversibleBeforeFallible:
+            return "irreversible-before-fallible";
     }
     return "unknown";
 }
@@ -403,6 +419,56 @@ struct ResourceOp {
     std::string callee;  // bare callee name (last segment)
     int line{};
     bool guarded{};      // inside defer/errdefer/finally/ensure/using/with
+};
+
+/// What one call does to state that an error might have to undo. Ordered by
+/// how expensive the undo is.
+enum class WorkKind : uint8_t {
+    None = 0,
+    /// Opens a unit of work that can be abandoned wholesale: begin, BeginTx,
+    /// start_transaction. Cheap to undo IF the rollback exists.
+    TxBegin,
+    /// Makes the unit permanent: commit, SaveChanges, flush.
+    TxCommit,
+    /// Undoes it: rollback, abort, discard.
+    TxRollback,
+    /// Changes durable or shared state: save, insert, update, delete, write.
+    /// Undoing means writing a compensating change — there is no free undo.
+    Mutation,
+    /// Leaves the process and cannot be recalled: charge, publish, send,
+    /// email, upload. No compensation exists, only apology.
+    Irreversible,
+    /// Explicitly compensates: undo, revert, compensate, refund, cancel.
+    Compensate,
+};
+
+constexpr std::string_view to_string(WorkKind k) {
+    switch (k) {
+        case WorkKind::None: return "none";
+        case WorkKind::TxBegin: return "tx-begin";
+        case WorkKind::TxCommit: return "tx-commit";
+        case WorkKind::TxRollback: return "tx-rollback";
+        case WorkKind::Mutation: return "mutation";
+        case WorkKind::Irreversible: return "irreversible";
+        case WorkKind::Compensate: return "compensate";
+    }
+    return "none";
+}
+
+/// One state-changing call site, in source order. The cost of an error is a
+/// function of what already happened when it fired, so ORDER is the payload
+/// here — `line` is compared against throw sites and against other ops.
+struct WorkOp {
+    std::string callee;
+    int line{};
+    WorkKind kind{};
+    bool guarded{};  // inside defer/errdefer/finally/ensure/using/with
+    /// Start byte of the nearest enclosing ALTERNATIVE branch — a switch case,
+    /// an else arm — or 0 at statement level. Ops carrying different markers
+    /// may never both run, so they are not a sequence and cannot tear.
+    /// gin's SetMode stores four modes in four switch cases; without this it
+    /// read as four sequential writes around a panic.
+    uint32_t branch_id{};
 };
 
 /// Exception safety characteristics of a function.
@@ -472,6 +538,11 @@ struct SideEffectInfo {
     std::vector<EhFinding> resource_findings;
     std::vector<ResourceOp> resource_acquires;
     std::vector<ResourceOp> resource_releases;
+
+    /// What an error here would have to undo. Findings live in
+    /// `error_findings`; the ops are kept so a reader can see the work at
+    /// risk, in source order.
+    std::vector<WorkOp> work_ops;
 
     // Transitive effects (from callees) - populated by propagation
     uint32_t transitive_categories{};

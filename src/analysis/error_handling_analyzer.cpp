@@ -185,6 +185,8 @@ ErrorHandlingAnalyzer::Result ErrorHandlingAnalyzer::analyze(
     int handled = 0;
     int swallow_sites = 0;
     int unchecked_errors = 0;
+    int uncompensated = 0;
+    int irreversible_first = 0;
     int acquisitions = 0;
     int funcs_with_acquires = 0;
     int funcs_with_release_credit = 0;
@@ -223,6 +225,13 @@ ErrorHandlingAnalyzer::Result ErrorHandlingAnalyzer::analyze(
         for (const auto& f : info.error_findings) {
             result.errors.findings.push_back(to_entry(u, f));
             if (f.signal == EhSignal::DroppedError) ++unchecked_errors;
+            if (f.signal == EhSignal::UncompensatedTransaction ||
+                f.signal == EhSignal::PartialWriteRisk) {
+                ++uncompensated;
+            }
+            if (f.signal == EhSignal::IrreversibleBeforeFallible) {
+                ++irreversible_first;
+            }
         }
         for (const auto& f : info.resource_findings) {
             result.resources.findings.push_back(to_entry(u, f));
@@ -289,6 +298,8 @@ ErrorHandlingAnalyzer::Result ErrorHandlingAnalyzer::analyze(
         throwers > 0 ? static_cast<double>(handled) / throwers : 0.0;
     result.errors.swallow_sites = swallow_sites;
     result.errors.unchecked_errors = unchecked_errors;
+    result.errors.uncompensated = uncompensated;
+    result.errors.irreversible_first = irreversible_first;
     result.resources.acquisitions = acquisitions;
     result.resources.released_ratio =
         funcs_with_acquires > 0

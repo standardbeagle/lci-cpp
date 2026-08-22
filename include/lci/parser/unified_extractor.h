@@ -273,6 +273,8 @@ class UnifiedExtractor {
     // (defer/errdefer/finally/ensure/using/with) — release calls inside count
     // as guarded release credit; visit_node maintains se_guard_depth_ with it.
     bool is_se_guard_node(std::string_view node_type) const;
+    /// One arm of a mutually exclusive choice (switch case, else arm).
+    bool is_se_branch_node(std::string_view node_type) const;
     // Walks one catch/except/rescue clause's subtree, classifies its body
     // syntactically, and reports it to the sink as a CatchSiteInfo.
     void process_catch_site(TSNode node, std::string_view node_type);
@@ -318,6 +320,9 @@ class UnifiedExtractor {
     // Depth of enclosing cleanup-guard scopes (defer/finally/ensure/using/
     // with); >0 means calls here carry guarded release/acquire credit.
     int se_guard_depth_{};
+    /// Nearest enclosing alternative-branch node's start byte; see
+    /// WorkOp::branch_id. 0 at statement level.
+    uint32_t se_branch_id_{};
 
     // Complexity tracking (stack for nested functions)
     std::vector<int> complexity_stack_;

@@ -106,6 +106,243 @@ ResourceOpKind classify_resource_callee(std::string_view callee) {
     return ResourceOpKind::None;
 }
 
+// A word standing ALONE, with no domain noun attached. Bare, these are as
+// likely a local collection call or a builder as they are durable work:
+// `history.insert(0, r)` is a list operation, and zod's `z.email()` builds a
+// validator rather than sending mail. Compounded — `insertChild`,
+// `updateInventory`, `sendEmail`, `publishEvent` — they name something that
+// lives past the call, which is what an error would have to undo.
+bool is_bare_ambiguous_verb(std::string_view callee) {
+    for (std::string_view v :
+         // Collection and assignment verbs.
+         {"update", "add", "insert", "put", "post", "set", "remove", "delete",
+          "append", "push", "pop", "create", "write", "store", "save",
+          // Words that are as often a noun or a builder as an action.
+          "email", "notify", "emit", "dispatch", "transfer", "publish",
+          "settle", "send", "upload", "register", "reserve", "grant"}) {
+        if (callee.size() == v.size() && iprefix(callee, v)) return true;
+    }
+    return false;
+}
+
+WorkKind classify_work_callee(std::string_view callee) {
+    if (callee.empty()) return WorkKind::None;
+
+    // Compensation first — "rollback" must not be shadowed by any other
+    // prefix, and an explicit undo is the thing that makes everything else
+    // safe.
+    static constexpr std::string_view rollback_prefixes[] = {
+        "rollback", "roll_back", "abort", "discard"};
+    for (auto p : rollback_prefixes) {
+        if (iprefix(callee, p)) return WorkKind::TxRollback;
+    }
+    static constexpr std::string_view compensate_prefixes[] = {
+        "undo", "revert", "compensate", "refund", "reverse", "restore",
+        "cancel", "unwind", "rescind"};
+    for (auto p : compensate_prefixes) {
+        if (iprefix(callee, p)) return WorkKind::Compensate;
+    }
+
+    // Transaction boundaries. "begintx"/"begintransaction" also match the
+    // bare "begin" prefix, which is intended.
+    static constexpr std::string_view begin_prefixes[] = {
+        "begintransaction", "begintx", "begin", "starttransaction",
+        "start_transaction", "transaction"};
+    for (auto p : begin_prefixes) {
+        if (iprefix(callee, p)) return WorkKind::TxBegin;
+    }
+    static constexpr std::string_view commit_prefixes[] = {
+        "commit", "savechanges", "save_changes", "flush"};
+    for (auto p : commit_prefixes) {
+        if (iprefix(callee, p)) return WorkKind::TxCommit;
+    }
+
+    // Irreversible: it has left the process. No compensating write exists,
+    // only a second message saying sorry.
+    static constexpr std::string_view irreversible_prefixes[] = {
+        "charge", "capturepayment", "capturecharge", "capturefunds",
+        "settle", "payout", "transfer", "withdraw",
+        "publish", "broadcast", "emit", "notify", "sendmail", "sendemail",
+        "send_mail", "send_email", "email", "sms", "upload", "dispatch"};
+    for (auto p : irreversible_prefixes) {
+        if (iprefix(callee, p)) return WorkKind::Irreversible;
+    }
+
+    // Durable or shared state changes. Undoing one means writing another.
+    static constexpr std::string_view mutation_prefixes[] = {
+        "save", "insert", "update", "delete", "remove", "destroy", "create",
+        "put", "post", "persist", "store", "writefile", "write_file",
+        "enqueue", "increment", "decrement", "add_", "register", "provision",
+        "allocate", "reserve", "grant", "revoke_"};
+    for (auto p : mutation_prefixes) {
+        if (iprefix(callee, p)) return WorkKind::Mutation;
+    }
+    return WorkKind::None;
+}
+
+// -- Undo cost ----------------------------------------------------------------
+//
+// The question these rules ask is not "was the error reported" but "what did
+// it cost". Three shapes, cheapest first to detect:
+//
+//   1. A transaction opened and committed with no rollback anywhere: an error
+//      in between leaves the unit half-applied and nothing undoes it.
+//   2. Several state changes with a fallible point among them and no
+//      compensation: the torn write, and the one that happens in code with no
+//      transaction at all.
+//   3. Irreversible work before fallible work: the ordering that CREATES the
+//      undo problem. Advice, so it scores low.
+//
+// Precision-first, matching classify_resource_pairing: a guarded rollback (in
+// defer/finally/except) or any compensating call clears the function, because
+// without dataflow we cannot prove the guard does not cover the ops.
+void classify_work_pairing(const std::vector<WorkOp>& ops,
+                           const std::vector<int>& throw_lines,
+                           bool has_catch, uint32_t effects,
+                           std::vector<EhFinding>& out) {
+    if (ops.empty()) return;
+
+    // Work only needs undoing if it OUTLIVES the call, and a verb match alone
+    // does not establish that. The discriminator is whether the verb stands
+    // ALONE: `values.update(...)`, `history.insert(0, r)`, `rows.pop()` are
+    // collection operations on locals, while `updateInventory(...)` and
+    // `insertChild(...)` name something that lives somewhere. Both match the
+    // same prefix; only the compound form can be torn.
+    //
+    // A first cut let a bare verb count when the function showed any durable
+    // effect elsewhere. That was too loose in exactly the way this analysis
+    // cannot afford: requests' Session.send does real network I/O AND calls
+    // history.insert/history.pop on a local list, and flask's routes_command
+    // prints with click.echo AND calls rows.insert — both were reported as
+    // torn writes. A verb's own shape is the only local evidence, so a bare
+    // one never counts.
+    //
+    // Known false negative, accepted deliberately: `db.save(obj)` and
+    // `db.insert(row)` spell a genuine durable write with a bare verb and are
+    // missed. Precision wins here, matching classify_resource_pairing's bound
+    // — a wrong torn-write claim sends someone hunting for data loss that
+    // never happened.
+    (void)effects;
+    auto is_durable_work = [](const WorkOp& op) {
+        if (op.kind != WorkKind::Mutation &&
+            op.kind != WorkKind::Irreversible) {
+            return false;
+        }
+        return !is_bare_ambiguous_verb(op.callee);
+    };
+
+    bool has_rollback = false;
+    bool has_compensate = false;
+    bool has_guarded_undo = false;
+    int begin_line = 0;
+    int commit_line = 0;
+    for (const auto& op : ops) {
+        switch (op.kind) {
+            case WorkKind::TxRollback:
+                has_rollback = true;
+                if (op.guarded) has_guarded_undo = true;
+                break;
+            case WorkKind::Compensate:
+                has_compensate = true;
+                if (op.guarded) has_guarded_undo = true;
+                break;
+            case WorkKind::TxBegin:
+                if (begin_line == 0) begin_line = op.line;
+                break;
+            case WorkKind::TxCommit:
+                commit_line = op.line;
+                break;
+            default:
+                break;
+        }
+    }
+    const bool compensated = has_rollback || has_compensate;
+
+    // (1) Transaction with no undo path.
+    if (begin_line != 0 && commit_line > begin_line && !compensated) {
+        EhFinding f;
+        f.signal = EhSignal::UncompensatedTransaction;
+        f.severity = FindingSeverity::High;
+        f.confidence = 0.8;
+        f.line = begin_line;
+        f.detail = "commit at line " + std::to_string(commit_line) +
+                   ", no rollback on any path";
+        out.push_back(std::move(f));
+    }
+
+    // (2) Torn write. Needs a fallible point BETWEEN state changes: work
+    // before it landed, work after it never ran. A throw site is the explicit
+    // form; a catch in the function means the fallible point is the try body
+    // itself.
+    if (!compensated) {
+        // Group by alternative arm before counting. Ops in sibling switch
+        // cases or else-arms never both run, so they are not a sequence and
+        // cannot leave each other half-applied — gin's SetMode stores four
+        // modes in four cases around a panic, which read as a torn write
+        // until the arms were separated. Conservative by design: a change at
+        // statement level plus one inside an arm is not paired, matching the
+        // analyzer's precision-first bound.
+        absl::flat_hash_map<uint32_t, std::vector<const WorkOp*>> by_arm;
+        for (const auto& op : ops) {
+            if (is_durable_work(op)) by_arm[op.branch_id].push_back(&op);
+        }
+        // Deterministic: report the earliest-starting arm (karpathy #4).
+        const std::vector<const WorkOp*>* worst = nullptr;
+        for (const auto& [arm, changes] : by_arm) {
+            if (changes.size() < 2) continue;
+            bool fallible_between = has_catch;
+            for (int t : throw_lines) {
+                if (t > changes.front()->line && t < changes.back()->line) {
+                    fallible_between = true;
+                }
+            }
+            if (!fallible_between) continue;
+            if (worst == nullptr ||
+                changes.front()->line < (*worst).front()->line) {
+                worst = &changes;
+            }
+        }
+        if (worst != nullptr) {
+            EhFinding f;
+            f.signal = EhSignal::PartialWriteRisk;
+            f.severity = FindingSeverity::High;
+            f.confidence = 0.6;
+            f.line = worst->front()->line;
+            f.detail = std::to_string(worst->size()) +
+                       " state changes through line " +
+                       std::to_string(worst->back()->line) +
+                       ", no compensation";
+            out.push_back(std::move(f));
+        }
+    }
+
+    // (3) Irreversible before fallible. A guarded undo does not excuse this —
+    // there is no undo for a sent email — but an explicit compensating call
+    // means the author already thought about it.
+    if (!has_compensate) {
+        for (const auto& op : ops) {
+            if (op.kind != WorkKind::Irreversible || op.guarded) continue;
+            if (!is_durable_work(op)) continue;
+            int fallible_after = 0;
+            for (int t : throw_lines) {
+                if (t > op.line && (fallible_after == 0 || t < fallible_after)) {
+                    fallible_after = t;
+                }
+            }
+            if (fallible_after == 0) continue;
+            EhFinding f;
+            f.signal = EhSignal::IrreversibleBeforeFallible;
+            f.severity = FindingSeverity::Low;
+            f.confidence = 0.5;
+            f.line = op.line;
+            f.detail = op.callee + " cannot be recalled; line " +
+                       std::to_string(fallible_after) + " can still fail";
+            out.push_back(std::move(f));
+            break;  // one per function: the ordering is the finding
+        }
+    }
+}
+
 void classify_catch_site(const CatchSiteInfo& site, std::vector<EhFinding>& out) {
     auto add = [&](EhSignal sig, FindingSeverity sev, double conf) {
         EhFinding f;
@@ -304,11 +541,9 @@ SideEffectInfo SideEffectAnalyzer::end_function() {
     for (const auto& site : ctx.catch_sites) {
         classify_catch_site(site, info.error_findings);
     }
-    std::sort(info.error_findings.begin(), info.error_findings.end(),
-              [](const EhFinding& a, const EhFinding& b) {
-                  if (a.line != b.line) return a.line < b.line;
-                  return a.signal < b.signal;
-              });
+    // NOTE: the sort lives after classify_work_pairing below — undo-cost
+    // findings land in this same vector and must share the ordering
+    // (karpathy #4: sort before emit).
 
     // Resource pairing findings.
     info.resource_acquires = ctx.resource_acquires;
@@ -319,6 +554,20 @@ SideEffectInfo SideEffectAnalyzer::end_function() {
     classify_resource_pairing(ctx.resource_acquires, ctx.resource_releases,
                               throw_lines, ctx.returns_value,
                               info.resource_findings);
+
+    // Undo cost: what an error here would leave half-done. Emitted into
+    // error_findings (they are error-handling defects, not leaks) and sorted
+    // with the rest below.
+    info.work_ops = ctx.work_ops;
+    classify_work_pairing(ctx.work_ops, throw_lines, !ctx.catch_sites.empty(),
+                          ctx.side_effects, info.error_findings);
+
+    // Every error-handling finding is in now; one total order over the lot.
+    std::sort(info.error_findings.begin(), info.error_findings.end(),
+              [](const EhFinding& a, const EhFinding& b) {
+                  if (a.line != b.line) return a.line < b.line;
+                  return a.signal < b.signal;
+              });
 
     // Extract parameter writes. A base identifier that is not in
     // ctx.parameters has no known position -- that happens when the write
@@ -502,8 +751,16 @@ void SideEffectAnalyzer::record_dropped_error(int line, std::string_view detail,
 }
 
 void SideEffectAnalyzer::record_call_site_resources(std::string_view callee,
-                                                    int line, bool guarded) {
+                                                    int line, bool guarded,
+                                                    uint32_t branch_id) {
     if (!current_func_) return;
+    // Undo-cost model: what state this call changed, in source order. Kept
+    // beside the resource pairing because both answer "what is outstanding
+    // when an error fires", one for handles and one for state.
+    if (WorkKind wk = classify_work_callee(callee); wk != WorkKind::None) {
+        current_func_->work_ops.push_back(
+            WorkOp{std::string(callee), line, wk, guarded, branch_id});
+    }
     switch (classify_resource_callee(callee)) {
         case ResourceOpKind::Acquire:
             current_func_->resource_acquires.push_back(

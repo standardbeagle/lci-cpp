@@ -185,6 +185,8 @@ nlohmann::json error_handling_to_json(const ErrorHandlingSummary& s) {
     j["handled_ratio"] = s.handled_ratio;
     j["swallow_sites"] = s.swallow_sites;
     j["unchecked_errors"] = s.unchecked_errors;
+    j["uncompensated"] = s.uncompensated;
+    j["irreversible_first"] = s.irreversible_first;
     j["findings"] = eh_findings_json(s.findings);
     return j;
 }
@@ -1237,6 +1239,13 @@ void emit_error_handling(std::ostringstream& out,
         << " handled_ratio=" << fmt2(s.handled_ratio)
         << " swallow_sites=" << s.swallow_sites
         << " unchecked_errors=" << s.unchecked_errors << "\n";
+    // Undo cost — what an error would leave half-done. Emitted only when
+    // there is some, so a codebase that changes no state keeps the historical
+    // two-line shape.
+    if (s.uncompensated > 0 || s.irreversible_first > 0) {
+        out << "undo_cost: uncompensated=" << s.uncompensated
+            << " irreversible_first=" << s.irreversible_first << "\n";
+    }
     if (!s.findings.empty()) {
         out << "findings:\n";
         emit_eh_finding_lines(out, s.findings, max_findings);

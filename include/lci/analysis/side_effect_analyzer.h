@@ -51,6 +51,9 @@ struct FunctionAnalysisContext {
 
     std::vector<CatchSiteInfo> catch_sites;
     std::vector<EhFinding> error_findings;   // dropped-error etc., pre-classified
+    /// State-changing calls in source order — the undo-cost model. See
+    /// classify_work_pairing.
+    std::vector<WorkOp> work_ops;
     std::vector<ResourceOp> resource_acquires;
     std::vector<ResourceOp> resource_releases;
 
@@ -116,8 +119,9 @@ class SideEffectAnalyzer {
     /// Classifies a call site against the acquire/release tables and records
     /// a ResourceOp when it matches. `guarded` = inside a defer/errdefer/
     /// finally/ensure/using/with scope. No-op for unclassified callees.
+    /// `branch_id` is the enclosing alternative arm (WorkOp::branch_id).
     void record_call_site_resources(std::string_view callee, int line,
-                                    bool guarded);
+                                    bool guarded, uint32_t branch_id = 0);
 
     // -- Results --------------------------------------------------------------
 

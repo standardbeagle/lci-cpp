@@ -314,6 +314,294 @@ TEST_F(SideEffectExtraction, JsLoggingTheCauseIsStillASwallow) {
     EXPECT_EQ(count_findings(info->error_findings, EhSignal::LogAndSwallow), 1);
 }
 
+// -- Undo cost -----------------------------------------------------------------
+//
+// What an error COSTS, not just whether it was reported: work that must be
+// undone, and work that never gets undone.
+
+// A transaction opened and committed with no rollback anywhere. An error
+// between the two leaves the unit half-applied and nothing reverses it.
+TEST_F(SideEffectExtraction, TxWithoutRollbackIsUncompensated) {
+    const auto* info = analyze(Language::JavaScript, ".js",
+                               "function transfer(a, b, amt) {\n"
+                               "  begin();\n"
+                               "  updateBalance(a, -amt);\n"
+                               "  updateBalance(b, amt);\n"
+                               "  commit();\n"
+                               "}\n",
+                               "transfer");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings,
+                             EhSignal::UncompensatedTransaction),
+              1);
+}
+
+// The same function with a rollback is clean — that is the whole point.
+TEST_F(SideEffectExtraction, TxWithRollbackIsClean) {
+    const auto* info = analyze(Language::JavaScript, ".js",
+                               "function transfer(a, b, amt) {\n"
+                               "  begin();\n"
+                               "  try {\n"
+                               "    updateBalance(a, -amt);\n"
+                               "    updateBalance(b, amt);\n"
+                               "    commit();\n"
+                               "  } catch (e) { rollback(); throw e; }\n"
+                               "}\n",
+                               "transfer");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings,
+                             EhSignal::UncompensatedTransaction),
+              0);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::PartialWriteRisk),
+              0);
+}
+
+// The case with no transaction at all — the one that actually loses data.
+// Three writes, a fallible point among them, nothing compensates.
+TEST_F(SideEffectExtraction, MultipleWritesAroundAThrowIsPartialWriteRisk) {
+    const auto* info = analyze(Language::JavaScript, ".js",
+                               "function place(order) {\n"
+                               "  saveOrder(order);\n"
+                               "  if (!order.ok) { throw new Error('bad'); }\n"
+                               "  updateInventory(order);\n"
+                               "  createShipment(order);\n"
+                               "}\n",
+                               "place");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::PartialWriteRisk),
+              1);
+}
+
+// One write cannot be torn: there is no earlier work left half-applied.
+TEST_F(SideEffectExtraction, ASingleWriteIsNotAPartialWriteRisk) {
+    const auto* info = analyze(Language::JavaScript, ".js",
+                               "function place(order) {\n"
+                               "  if (!order.ok) { throw new Error('bad'); }\n"
+                               "  saveOrder(order);\n"
+                               "}\n",
+                               "place");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::PartialWriteRisk),
+              0);
+}
+
+// Writes with no fallible point between them are just writes.
+TEST_F(SideEffectExtraction, WritesWithNoFalliblePointAreClean) {
+    const auto* info = analyze(Language::JavaScript, ".js",
+                               "function seed() {\n"
+                               "  insertA();\n"
+                               "  insertB();\n"
+                               "  insertC();\n"
+                               "}\n",
+                               "seed");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::PartialWriteRisk),
+              0);
+}
+
+// An explicit compensating call clears it — the author handled the undo.
+TEST_F(SideEffectExtraction, CompensatingCallClearsPartialWriteRisk) {
+    const auto* info = analyze(Language::JavaScript, ".js",
+                               "function place(order) {\n"
+                               "  saveOrder(order);\n"
+                               "  try {\n"
+                               "    updateInventory(order);\n"
+                               "    createShipment(order);\n"
+                               "  } catch (e) { undoOrder(order); throw e; }\n"
+                               "}\n",
+                               "place");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::PartialWriteRisk),
+              0);
+}
+
+// A bare collection verb on a local is not durable work. flask's url_for
+// calls `values.update(...)` twice around a raise; nothing outside the frame
+// ever saw that dict, so no error can leave it torn.
+TEST_F(SideEffectExtraction, BareCollectionVerbsAreNotDurableWork) {
+    const auto* info = analyze(Language::Python, ".py",
+                               "def url_for(endpoint, values):\n"
+                               "    values.update(a=1)\n"
+                               "    if endpoint is None:\n"
+                               "        raise RuntimeError('no endpoint')\n"
+                               "    values.update(b=2)\n"
+                               "    return endpoint\n",
+                               "url_for");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::PartialWriteRisk),
+              0)
+        << "a local dict cannot be left half-written";
+}
+
+// The same holds when the function DOES do real I/O elsewhere. requests'
+// Session.send makes network calls and also runs history.insert/history.pop
+// on a local list; the list is still local. A first cut let any durable
+// effect in the function license every bare verb, and reported both this and
+// flask's rows.insert (beside a click.echo) as torn writes.
+TEST_F(SideEffectExtraction, DurableIoElsewhereDoesNotMakeLocalListsDurable) {
+    const auto* info = analyze(Language::Python, ".py",
+                               "def send(self, request):\n"
+                               "    r = self.adapter.send(request)\n"
+                               "    history = []\n"
+                               "    if not r.ok:\n"
+                               "        raise ConnectionError('failed')\n"
+                               "    history.insert(0, r)\n"
+                               "    r = history.pop()\n"
+                               "    return r\n",
+                               "send");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::PartialWriteRisk),
+              0);
+}
+
+// The same verb compounded with a domain noun IS durable work: it names
+// something that lives past the call.
+TEST_F(SideEffectExtraction, CompoundDomainVerbsAreDurableWork) {
+    const auto* info = analyze(Language::Python, ".py",
+                               "def sync(order):\n"
+                               "    updateInventory(order)\n"
+                               "    if not order.ok:\n"
+                               "        raise ValueError('bad')\n"
+                               "    updateLedger(order)\n",
+                               "sync");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::PartialWriteRisk),
+              1);
+}
+
+// Ops in sibling switch arms never both run, so they are not a sequence.
+// gin's SetMode stores four modes in four cases around a panic.
+TEST_F(SideEffectExtraction, SiblingSwitchArmsAreNotASequence) {
+    const auto* info = analyze(Language::Go, ".go",
+                               "func SetMode(value string) {\n"
+                               "\tswitch value {\n"
+                               "\tcase DebugMode:\n"
+                               "\t\tstoreMode(debugCode)\n"
+                               "\tcase ReleaseMode:\n"
+                               "\t\tstoreMode(releaseCode)\n"
+                               "\tcase TestMode:\n"
+                               "\t\tstoreMode(testCode)\n"
+                               "\tdefault:\n"
+                               "\t\tpanic(\"unknown mode\")\n"
+                               "\t}\n"
+                               "}\n",
+                               "SetMode");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::PartialWriteRisk),
+              0)
+        << "only one arm executes; they cannot tear each other";
+}
+
+// A bare word can be a builder rather than an action: zod's `z.email()`
+// constructs a validator, it does not send mail.
+TEST_F(SideEffectExtraction, BareIrreversibleNounsAreNotActions) {
+    const auto* info = analyze(Language::JavaScript, ".js",
+                               "function convert(schema) {\n"
+                               "  if (schema.format === 'email') {\n"
+                               "    s = s.check(email());\n"
+                               "  }\n"
+                               "  if (!s) { throw new Error('bad'); }\n"
+                               "  return s;\n"
+                               "}\n",
+                               "convert");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings,
+                             EhSignal::IrreversibleBeforeFallible),
+              0);
+}
+
+// Ordering: the charge leaves the process, THEN validation can still throw.
+// Doing the fallible part first would leave nothing to undo.
+TEST_F(SideEffectExtraction, IrreversibleWorkBeforeAThrowIsFlagged) {
+    const auto* info = analyze(Language::Python, ".py",
+                               "def checkout(order):\n"
+                               "    charge_card(order)\n"
+                               "    if not order.valid:\n"
+                               "        raise ValueError('bad order')\n",
+                               "checkout");
+    ASSERT_NE(info, nullptr);
+    ASSERT_EQ(count_findings(info->error_findings,
+                             EhSignal::IrreversibleBeforeFallible),
+              1);
+    // Advice, not a defect: it must cost less than a swallow.
+    for (const auto& f : info->error_findings) {
+        if (f.signal != EhSignal::IrreversibleBeforeFallible) continue;
+        EXPECT_LT(ErrorHandlingAnalyzer::finding_deduction(f.severity,
+                                                           f.confidence, 1.0),
+                  ErrorHandlingAnalyzer::finding_deduction(
+                      FindingSeverity::High, 0.7, 1.0));
+    }
+}
+
+// Validate first, then charge: nothing to undo, nothing to report.
+TEST_F(SideEffectExtraction, FallibleWorkBeforeIrreversibleIsClean) {
+    const auto* info = analyze(Language::Python, ".py",
+                               "def checkout(order):\n"
+                               "    if not order.valid:\n"
+                               "        raise ValueError('bad order')\n"
+                               "    charge_card(order)\n",
+                               "checkout");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings,
+                             EhSignal::IrreversibleBeforeFallible),
+              0);
+}
+
+// Go: a deferred rollback is the idiom, and it covers every return path.
+TEST_F(SideEffectExtraction, GoDeferredRollbackIsCompensated) {
+    const auto* info = analyze(Language::Go, ".go",
+                               "func transfer(db *DB) error {\n"
+                               "\ttx := db.Begin()\n"
+                               "\tdefer tx.Rollback()\n"
+                               "\tif err := tx.Insert(a); err != nil {\n"
+                               "\t\treturn err\n"
+                               "\t}\n"
+                               "\ttx.Insert(b)\n"
+                               "\treturn tx.Commit()\n"
+                               "}\n",
+                               "transfer");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings,
+                             EhSignal::UncompensatedTransaction),
+              0);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::PartialWriteRisk),
+              0);
+
+    // Discrimination: the SAME function without the defer must fire, so the
+    // zeros above are a verdict rather than an absence of Go analysis.
+    const auto* undeferred = analyze(Language::Go, ".go",
+                                     "func transfer2(db *DB) error {\n"
+                                     "\ttx := db.Begin()\n"
+                                     "\ttx.Insert(a)\n"
+                                     "\ttx.Insert(b)\n"
+                                     "\treturn tx.Commit()\n"
+                                     "}\n",
+                                     "transfer2");
+    ASSERT_NE(undeferred, nullptr);
+    EXPECT_EQ(count_findings(undeferred->error_findings,
+                             EhSignal::UncompensatedTransaction),
+              1)
+        << "no rollback on any path";
+}
+
+// A pure function has no undo cost — none of these may fire on read-only code.
+TEST_F(SideEffectExtraction, ReadOnlyCodeHasNoUndoCost) {
+    const auto* info = analyze(Language::JavaScript, ".js",
+                               "function total(items) {\n"
+                               "  let sum = 0;\n"
+                               "  for (const i of items) { sum += i.price; }\n"
+                               "  if (sum < 0) { throw new Error('neg'); }\n"
+                               "  return sum;\n"
+                               "}\n",
+                               "total");
+    ASSERT_NE(info, nullptr);
+    for (const auto& f : info->error_findings) {
+        EXPECT_NE(f.signal, EhSignal::PartialWriteRisk);
+        EXPECT_NE(f.signal, EhSignal::UncompensatedTransaction);
+        EXPECT_NE(f.signal, EhSignal::IrreversibleBeforeFallible);
+    }
+}
+
 // -- Cause fidelity ------------------------------------------------------------
 //
 // Forwarding the error is not the same as forwarding a sentence about it.
