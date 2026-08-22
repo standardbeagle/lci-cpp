@@ -789,13 +789,17 @@ void SideEffectAnalyzer::record_catch(const CatchSiteInfo& site) {
     if (current_func_) current_func_->catch_sites.push_back(site);
 }
 
-void SideEffectAnalyzer::record_dropped_error(int line, std::string_view detail,
-                                              bool high_confidence) {
+void SideEffectAnalyzer::record_dropped_error(int line,
+                                              std::string_view detail) {
     if (!current_func_) return;
     EhFinding f;
     f.signal = EhSignal::DroppedError;
-    f.severity = high_confidence ? FindingSeverity::High : FindingSeverity::Med;
-    f.confidence = high_confidence ? 0.9 : 0.6;
+    // One tier only. The medium tier existed for `v, _ := f()`, which
+    // process_go_error_drop stopped emitting: a trailing blank in a
+    // multi-value assign is as often an ok-bool as an error. Its caller now
+    // fires only on a sole discarded result, so the flag was always true.
+    f.severity = FindingSeverity::High;
+    f.confidence = 0.9;
     f.line = line;
     f.detail = std::string(detail);
     current_func_->error_findings.push_back(std::move(f));

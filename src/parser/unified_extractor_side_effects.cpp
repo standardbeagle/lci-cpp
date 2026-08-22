@@ -877,27 +877,25 @@ void UnifiedExtractor::process_go_error_drop(TSNode node,
     // left position discards it — `host, _, err := ...` captures the error,
     // and `v, _ := x.(T)` / `v, _ := m[k]` discard ok-bools, not errors.
     int total = 0;
-    int blanks = 0;
     bool last_is_blank = false;
     if (get_node_type(left) == "expression_list") {
         uint32_t n = ts_node_named_child_count(left);
         for (uint32_t i = 0; i < n; ++i) {
             TSNode c = ts_node_named_child(left, i);
             ++total;
-            bool blank = node_text(c) == "_";
-            if (blank) ++blanks;
-            if (i + 1 == n) last_is_blank = blank;
+            if (i + 1 == n) last_is_blank = node_text(c) == "_";
         }
     } else {
         total = 1;
         last_is_blank = node_text(left) == "_";
-        if (last_is_blank) blanks = 1;
     }
     if (!last_is_blank) return;
     // Multi-value assigns with a trailing blank are as likely ok-bool
     // discards (strings.Cut's found, map reads, multi-result lookups) as
-    // errors — without return types the medium tier was mostly noise on chi.
-    // Only the sole-discard form fires: `_ = err` / `_ = f()`.
+    // errors, and without return types telling them apart is guesswork that
+    // was mostly noise on chi. Only the sole-discard form fires:
+    // `_ = err` / `_ = f()`. That is also why record_dropped_error has one
+    // severity tier — everything reaching it is unambiguous.
     if (total != 1) return;
 
     // The right side must be a CALL producing the discarded result. A
@@ -954,11 +952,7 @@ void UnifiedExtractor::process_go_error_drop(TSNode node,
         detail.resize(57);
         detail += "...`";
     }
-    // `_ = err` / `_ = f()` with the sole result discarded: high confidence.
-    // `v, _ := f()` blank-dropping one of several results (conventionally the
-    // error): medium.
-    bool high = (total == blanks);
-    side_effects_->record_dropped_error(line, detail, high);
+    side_effects_->record_dropped_error(line, detail);
 }
 
 }  // namespace lci::parser

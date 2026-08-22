@@ -116,9 +116,10 @@ class SideEffectAnalyzer {
     /// in-flight exception. `verb` is "return" or "throw" for the message.
     void record_finally_hijack(int line, std::string_view verb);
 
-    /// Go dropped-error evidence: `_ = err` / blank-discarded call results.
-    void record_dropped_error(int line, std::string_view detail,
-                              bool high_confidence);
+    /// Go dropped-error evidence: `_ = err` / `_ = f()`. Always high
+    /// severity — the caller reaches this only for a SOLE discarded result,
+    /// which is unambiguously an error being thrown away.
+    void record_dropped_error(int line, std::string_view detail);
 
     /// Classifies a call site against the acquire/release tables and records
     /// a ResourceOp when it matches. `guarded` = inside a defer/errdefer/
