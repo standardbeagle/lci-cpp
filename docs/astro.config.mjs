@@ -46,6 +46,7 @@ export default defineConfig({
           items: [
             { label: 'CLI Usage', slug: 'cli-usage' },
             { label: 'MCP Server', slug: 'mcp-server' },
+            { label: 'Error-Handling Score', slug: 'error-handling-score' },
             { label: 'HTTP & Socket API', slug: 'http-socket-api' },
           ],
         },

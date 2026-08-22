@@ -1,0 +1,265 @@
+---
+title: Error-Handling Score
+description: How lci scores error handling: the signals, the deduction formula, and the limits of what a syntactic analysis will claim.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Ask `code_insight` for the error-handling section and you get a number, the
+modules at either end of it, and the evidence behind it:
+
+```
+== ERROR HANDLING ==
+score=7.30 modules: worst=(root)(7.3) best=(root)(7.3)
+throwers=0 handled_ratio=0.00 swallow_sites=1 unchecked_errors=0
+findings:
+  [high] empty-catch: handle (svc.js:2) [o=B]
+```
+
+That run analyzed one file:
+
+```js
+export function handle(req) {
+  try { return work(req); } catch (e) { }
+}
+```
+
+This page explains where 7.30 came from, what each signal means, and which
+claims the analysis refuses to make.
+
+## The arithmetic, once
+
+Every finding subtracts from a function's score, which starts at 1.0:
+
+```
+deduction = severity_base × confidence × (0.5 + 0.5 × normalized_fan_in)
+            × contract_weight
+
+function_score = max(0, 1.0 − Σ deductions)
+```
+
+Severity bases are `high = 0.4`, `med = 0.25`, `low = 0.1`. For the example
+above: `empty-catch` is high severity at 0.9 confidence, `handle` is the only
+function so its fan-in is 0, and it is exported, which applies the 1.5x
+contract weight.
+
+```
+0.4 × 0.9 × (0.5 + 0.5 × 0) = 0.18
+0.18 × 1.5                  = 0.27
+1.0 − 0.27                  = 0.73  →  7.30
+```
+
+Two multipliers shape that number, and both encode a judgment worth stating
+outright.
+
+**Fan-in.** The `(0.5 + 0.5 × normalized_fan_in)` term means a swallow in a
+leaf function costs half what the same swallow costs in the most-called
+function in the codebase. Fan-in comes from the real call graph, the same
+transitive reach the `LOAD BEARING` section reports, normalized against the
+highest reach in the corpus.
+
+**Library contract.** A function on the public surface owes its callers one of
+two things about a failure: bubble it up, or transform it into this library's
+own error and hand that up. Swallowing deletes a failure the caller has no
+other way to observe, and no amount of caller-side diligence recovers it. So
+exported functions carry `kExportedSwallowMultiplier = 1.5`. It scales the
+deduction rather than adding a second finding, and a clean exported function
+scores exactly as well as a clean private one.
+
+## Rolling up to the repo
+
+Function scores aggregate by call-graph weight, so heavily-called code moves
+the number more than a leaf does:
+
+```
+weight = 1 + log₂(1 + reach)
+repo   = 10 × Σ(weight × function_score) / Σ weight
+repo   = min(repo, worst_module_score + 3.0)
+```
+
+That last line stops a mean from averaging away a package that swallows
+everywhere. A repo with one terrible module and a hundred clean ones is capped
+at three points above the terrible one.
+
+## Signals
+
+Each signal carries a fixed severity and confidence. Both feed the formula
+above, so the table is the whole weighting model.
+
+### The failure stopped here
+
+| Signal | Severity | Confidence |
+|---|---|---|
+| `empty-catch` | high | 0.9 |
+| `finally-discards-exception` | high | 0.85 |
+| `catch-and-continue` | high | 0.7 |
+| `error-to-sentinel` | med | 0.7 |
+| `log-and-swallow` | med | 0.75 message-only, 0.5 full error |
+
+These five make up `swallow_sites`, and they are the set that feeds the
+`exposure:` paths, meaning public API symbols that transitively reach a
+swallow, found by reverse BFS bounded at 6 hops.
+
+`finally-discards-exception` is the one signal that reports what the code does
+rather than what its author probably meant. A `return` inside `finally`
+discards whatever exception was propagating through it, in every language that
+has the construct, and there is no catch site for a reader to notice. Hence the
+0.85.
+
+`error-to-sentinel` covers `catch (e) { return null; }`. The failure became
+"no result", and the caller cannot tell an empty answer from a broken one. It
+sits at med rather than high because returning a sentinel is a real contract in
+lookup-style APIs.
+
+### The failure moved on, damaged
+
+| Signal | Severity | Confidence |
+|---|---|---|
+| `message-only-propagation` | med | 0.5 |
+| `rethrow-no-cause` | low | 0.4 |
+| `broad-catch` | med | 0.6 |
+
+`message-only-propagation` fires when the error leaves the block but only its
+message does: `callback(e.message)` forwards a sentence and drops the stack and
+the cause chain. Partial credit: forwarding beats swallowing, and the
+deduction is well under `catch-and-continue`'s.
+
+Whether a projection is lossy depends on the language rather than the spelling:
+
+- `err.Error()` in Go and `e.what()` in C++ return everything those error types
+  carry. Nothing exists to lose, so they count as full fidelity.
+- `.message`, `.Message`, `getMessage()` in JavaScript, Python, Java and C#
+  discard a stack and a cause chain that do exist.
+- `ex.ToString()` in .NET renders the message, the stack, and every
+  `InnerException`. `e.toString()` in JavaScript is `"Error: msg"`. Same
+  spelling, opposite verdicts.
+
+### The failure cost something
+
+| Signal | Severity | Confidence |
+|---|---|---|
+| `uncompensated-transaction` | high | 0.8 |
+| `partial-write-risk` | high | 0.6 |
+| `dropped-error` | high | 0.9 |
+| `irreversible-before-fallible` | low | 0.5 |
+
+Reported on their own line, and counted apart from `swallow_sites` because a
+function can report an error perfectly and still lose the data:
+
+```
+undo_cost: uncompensated=2 irreversible_first=1
+```
+
+`dropped-error` is Go-specific: `_ = doWork()` discards the sole result of a
+call. Only that form fires. A blank in a multi-value assign (`v, _ := f()`) is
+as often an ok-bool as an error, and reporting it was mostly noise.
+
+`uncompensated-transaction` fires on a `begin` and a `commit` with no rollback
+on any path. `partial-write-risk` needs two or more durable state changes with
+a fallible point among them and no compensation. That is the torn write,
+including the common case where no transaction exists at all.
+
+`irreversible-before-fallible` is ordering rather than a defect: work that
+cannot be recalled running before work that can still throw. Charging a card
+and then validating the order leaves something to undo; validating first leaves
+nothing. It scores low because it is advice.
+
+### Resources
+
+| Signal | Severity | Confidence |
+|---|---|---|
+| `leak-no-release` | med | 0.6 |
+| `leak-on-error-path` | med | 0.5 |
+| `unguarded-release` | low | 0.4 |
+
+These roll up into a separate `== RESOURCE MANAGEMENT ==` score under the same
+formula.
+
+## What the analysis will not claim
+
+There is no dataflow or CFG layer. Detection is syntactic, name-aware, and
+propagated over the call graph, which bounds what any finding can mean: lci can
+say "no release is syntactically visible on any path", never "this cannot
+leak". Calibrating against express, axios, zod, flask, requests, gin and
+Next.js turned that bound into a set of specific refusals.
+
+**An error passed to a call has been handled.** `catch (err) { callback(err) }`
+and `catch (error) { promise = Promise.reject(error) }` are propagation.
+Treating them as swallows made express's only finding and four of axios's five
+false. Logging is excluded from that rule: `console.error(e)` passes the cause
+as an argument but hands it to nobody, which is what `log-and-swallow`
+describes.
+
+**A name that promises a sentinel makes the sentinel the answer.**
+`isValidIPv6` returning `false` is correct: `false` is the answer, and the
+exception was the mechanism for computing it. `tryStat` returning `undefined`
+is the documented contract of every try-prefixed API. The `is`, `has`, `can`, `try` and `check` prefixes are recognized when
+followed by a word boundary, so
+`issue()` and `canvas()` remain ordinary functions, along with the
+`*Safely` / `*OrNull` / `*OrDefault` suffix family.
+
+**Mutually exclusive branches are not a sequence.** gin's `SetMode` stores four
+modes in four switch cases around a `panic`. Only one arm runs, so they cannot
+leave each other half-applied. State changes are grouped by their enclosing arm
+before anything is counted.
+
+**A bare verb is not durable work.** `history.insert(0, r)`,
+`rows.insert(0, headers)` and `values.update(...)` are collection calls on
+locals, and zod's `z.email()` builds a validator rather than sending mail. Only
+a compound domain verb — `insertChild`, `updateInventory`, `sendEmail` — names
+something that outlives the call. This one carries a deliberate false negative:
+`db.save(obj)` spells a genuine durable write with a bare verb and is missed. A
+wrong torn-write claim sends someone hunting for data loss that never happened,
+which costs more than the miss.
+
+**The compensating action is checked for existence, not correctness.** A
+`rollback()` in a `catch` clears the finding whether or not it covers the
+writes that actually happened, and a rollback that itself throws is invisible.
+Proving otherwise needs dataflow.
+
+## Choosing what gets scored
+
+Analysis covers files whose attribute activates the `analysis` capability,
+which means `production` alone until a project says otherwise. The header states the set,
+and `== SUMMARY ==` names what was left out:
+
+```
+excluded_from_analysis:
+  test=195 (tests/ benchmarks/)
+  benchmark=68 (benchmarks/)
+  docs=1 (docs/)
+```
+
+Point it elsewhere with the `attributes` argument:
+
+```json
+{
+  "name": "code_insight",
+  "arguments": { "mode": "unified", "attributes": ["test", "benchmark"] }
+}
+```
+
+<Aside type="tip">
+A benchmark harness swallowing an exception is not a defect in the product.
+Scoring one alongside shipped code buries the findings that matter, which is
+why the default excludes it and the exclusion is printed rather than silent.
+</Aside>
+
+See [MCP Server](/mcp-server/) for the `attributes` block that defines these
+tags per project.
+
+## Reading a report
+
+Three numbers answer different questions, and a good report needs all three:
+
+- `swallow_sites` — how many places delete a failure.
+- `undo_cost` — how much work an error leaves half-applied. Independent of the
+  above; the probe corpus scores 8.86 with `swallow_sites=0`.
+- `handled_ratio` — of the functions that can throw, how many have a catch
+  site in themselves or in a transitive caller within 6 hops.
+
+Drill into any finding with the object id it carries:
+
+```json
+{ "name": "get_context", "arguments": { "id": "o=B" } }
+```
