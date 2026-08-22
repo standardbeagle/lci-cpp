@@ -1239,53 +1239,56 @@ void UnifiedExtractor::extract_interface(TSNode node) {
 }
 
 void UnifiedExtractor::extract_type_declaration(TSNode node) {
-    TSPoint start = ts_node_start_point(node);
-    TSPoint end = ts_node_end_point(node);
-
-    std::string name;
-    SymbolType sym_type = SymbolType::Type;
-    BlockType blk_type = BlockType::Other;
-
+    // `type ( ... )` declares several types at once. The scan used to stop at
+    // the first type_spec, so every member after it vanished, and the one it
+    // kept was stamped with the DECLARATION's span — pointing a reader at
+    // `type (` for a type well below it. Each spec is its own symbol with its
+    // own span; a single-line `type Foo struct{}` has exactly one and is
+    // unaffected.
     uint32_t count = ts_node_child_count(node);
     for (uint32_t i = 0; i < count; ++i) {
-        TSNode child = ts_node_child(node, i);
-        if (get_node_type(child) == "type_spec") {
-            uint32_t spec_count = ts_node_child_count(child);
-            for (uint32_t j = 0; j < spec_count; ++j) {
-                TSNode sc = ts_node_child(child, j);
-                std::string_view sct = get_node_type(sc);
-                if (sct == "type_identifier") {
-                    name = std::string(node_text(sc));
-                } else if (sct == "struct_type") {
-                    sym_type = SymbolType::Struct;
-                    blk_type = BlockType::Struct;
-                } else if (sct == "interface_type") {
-                    sym_type = SymbolType::Interface;
-                    blk_type = BlockType::Interface;
-                }
+        TSNode spec = ts_node_child(node, i);
+        if (get_node_type(spec) != "type_spec") continue;
+
+        std::string name;
+        SymbolType sym_type = SymbolType::Type;
+        BlockType blk_type = BlockType::Other;
+        uint32_t spec_count = ts_node_child_count(spec);
+        for (uint32_t j = 0; j < spec_count; ++j) {
+            TSNode sc = ts_node_child(spec, j);
+            std::string_view sct = get_node_type(sc);
+            if (sct == "type_identifier") {
+                name = std::string(node_text(sc));
+            } else if (sct == "struct_type") {
+                sym_type = SymbolType::Struct;
+                blk_type = BlockType::Struct;
+            } else if (sct == "interface_type") {
+                sym_type = SymbolType::Interface;
+                blk_type = BlockType::Interface;
             }
-            break;
         }
+        if (name.empty()) continue;
+
+        TSPoint start = ts_node_start_point(spec);
+        TSPoint end = ts_node_end_point(spec);
+
+        BlockBoundary block;
+        block.start = static_cast<int>(start.row);
+        block.end = static_cast<int>(end.row);
+        block.type = blk_type;
+        block.name = name;
+        blocks_.push_back(std::move(block));
+
+        Symbol sym;
+        sym.name = std::move(name);
+        sym.type = sym_type;
+        sym.file_id = file_id_;
+        sym.line = static_cast<int>(start.row) + 1;
+        sym.column = static_cast<int>(start.column) + 1;
+        sym.end_line = static_cast<int>(end.row) + 1;
+        sym.end_column = static_cast<int>(end.column) + 1;
+        symbols_.push_back(std::move(sym));
     }
-
-    if (name.empty()) return;
-
-    BlockBoundary block;
-    block.start = static_cast<int>(start.row);
-    block.end = static_cast<int>(end.row);
-    block.type = blk_type;
-    block.name = name;
-    blocks_.push_back(std::move(block));
-
-    Symbol sym;
-    sym.name = std::move(name);
-    sym.type = sym_type;
-    sym.file_id = file_id_;
-    sym.line = static_cast<int>(start.row) + 1;
-    sym.column = static_cast<int>(start.column) + 1;
-    sym.end_line = static_cast<int>(end.row) + 1;
-    sym.end_column = static_cast<int>(end.column) + 1;
-    symbols_.push_back(std::move(sym));
 }
 
 void UnifiedExtractor::extract_type_alias(TSNode node) {
@@ -1513,34 +1516,61 @@ void UnifiedExtractor::extract_variable(TSNode node) {
 
 void UnifiedExtractor::extract_go_variable(TSNode node,
                                            std::string_view node_type) {
-    TSPoint start = ts_node_start_point(node);
-    TSPoint end = ts_node_end_point(node);
+    const bool is_const = node_type == "const_declaration";
+    const std::string_view spec_type = is_const ? "const_spec" : "var_spec";
+    const SymbolType st =
+        is_const ? SymbolType::Constant : SymbolType::Variable;
 
-    std::string_view spec_type = "var_spec";
-    if (node_type == "const_declaration") spec_type = "const_spec";
-
-    uint32_t count = ts_node_child_count(node);
-    for (uint32_t i = 0; i < count; ++i) {
-        TSNode child = ts_node_child(node, i);
-        if (get_node_type(child) == spec_type) {
-            uint32_t spec_count = ts_node_child_count(child);
-            for (uint32_t j = 0; j < spec_count; ++j) {
-                TSNode sc = ts_node_child(child, j);
-                if (get_node_type(sc) == "identifier") {
-                    SymbolType st = (node_type == "const_declaration")
-                                        ? SymbolType::Constant
-                                        : SymbolType::Variable;
-                    Symbol sym;
-                    sym.name = std::string(node_text(sc));
-                    sym.type = st;
-                    sym.file_id = file_id_;
-                    sym.line = static_cast<int>(start.row) + 1;
-                    sym.column = static_cast<int>(start.column) + 1;
-                    sym.end_line = static_cast<int>(end.row) + 1;
-                    sym.end_column = static_cast<int>(end.column) + 1;
-                    symbols_.push_back(std::move(sym));
-                }
+    // A grouped declaration — `var ( ... )` — nests its specs inside a list
+    // node, so they are NOT direct children the way a single-line `var x = 1`
+    // spec is. Scanning only depth 1 dropped every grouped name: gin's
+    // binding/form_mapping.go indexed nothing before line 32, losing the
+    // three package-level errors above it, while references to them still
+    // resolved. Descend instead of matching the wrapper by name, which keeps
+    // this working if the grammar renames or re-nests the list.
+    std::vector<TSNode> stack{node};
+    std::vector<TSNode> specs;
+    while (!stack.empty()) {
+        TSNode n = stack.back();
+        stack.pop_back();
+        uint32_t count = ts_node_child_count(n);
+        for (uint32_t i = 0; i < count; ++i) {
+            TSNode child = ts_node_child(n, i);
+            std::string_view ct = get_node_type(child);
+            if (ct == spec_type) {
+                specs.push_back(child);
+            } else if (!ts_node_is_named(child) || ct.find("list") !=
+                                                       std::string_view::npos) {
+                // Punctuation and the spec-list wrapper; nothing else can
+                // hold a spec, so the walk stays shallow.
+                stack.push_back(child);
             }
+        }
+    }
+    // Source order: the stack walk visits children back to front.
+    std::sort(specs.begin(), specs.end(), [](TSNode a, TSNode b) {
+        return ts_node_start_byte(a) < ts_node_start_byte(b);
+    });
+
+    for (TSNode spec : specs) {
+        // Each name carries its OWN span. The declaration's span covers the
+        // whole block, which would point a reader at `var (` for a symbol
+        // well below it.
+        TSPoint start = ts_node_start_point(spec);
+        TSPoint end = ts_node_end_point(spec);
+        uint32_t spec_count = ts_node_child_count(spec);
+        for (uint32_t j = 0; j < spec_count; ++j) {
+            TSNode sc = ts_node_child(spec, j);
+            if (get_node_type(sc) != "identifier") continue;
+            Symbol sym;
+            sym.name = std::string(node_text(sc));
+            sym.type = st;
+            sym.file_id = file_id_;
+            sym.line = static_cast<int>(start.row) + 1;
+            sym.column = static_cast<int>(start.column) + 1;
+            sym.end_line = static_cast<int>(end.row) + 1;
+            sym.end_column = static_cast<int>(end.column) + 1;
+            symbols_.push_back(std::move(sym));
         }
     }
 }

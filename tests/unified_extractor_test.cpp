@@ -212,6 +212,114 @@ TEST(UnifiedExtractorTest, GoVariablesAndConstants) {
     EXPECT_EQ(pi->type, SymbolType::Constant);
 }
 
+// Go groups declarations in `var ( ... )` / `const ( ... )` blocks, which
+// nest their specs one level deeper than a single-line declaration. The
+// extractor only inspected DIRECT children of the declaration, so every
+// grouped name was dropped: `lci browse binding/form_mapping.go` on gin
+// listed its first symbol at line 32 and skipped the three package errors
+// above it, while `lci refs ErrConvertMapStringSlice` still resolved both
+// the declaration and its use. The index knew the references and not the
+// declaration.
+TEST(UnifiedExtractorTest, GoGroupedVarAndConstBlocks) {
+    constexpr std::string_view kSource = R"(package main
+
+import "errors"
+
+var (
+	errUnknownType = errors.New("unknown type")
+
+	// ErrConvertMapStringSlice can not convert to map[string][]string
+	ErrConvertMapStringSlice = errors.New("can not convert")
+)
+
+const (
+	StatusOK   = 200
+	StatusFail = 500
+)
+)";
+    auto tree = parse(Language::Go, kSource);
+    ASSERT_NE(tree.get(), nullptr);
+
+    UnifiedExtractor ue;
+    ue.init(kSource, 1, ".go", "main.go");
+    ue.extract(tree.get());
+    auto r = ue.get_results();
+
+    const Symbol* first = find_symbol(r, "errUnknownType");
+    ASSERT_NE(first, nullptr) << "grouped var members must be indexed";
+    EXPECT_EQ(first->type, SymbolType::Variable);
+
+    const Symbol* exported = find_symbol(r, "ErrConvertMapStringSlice");
+    ASSERT_NE(exported, nullptr);
+    EXPECT_EQ(exported->type, SymbolType::Variable);
+
+    const Symbol* ok = find_symbol(r, "StatusOK");
+    ASSERT_NE(ok, nullptr) << "grouped const members must be indexed";
+    EXPECT_EQ(ok->type, SymbolType::Constant);
+    const Symbol* fail = find_symbol(r, "StatusFail");
+    ASSERT_NE(fail, nullptr);
+    EXPECT_EQ(fail->type, SymbolType::Constant);
+}
+
+// Each name reports its OWN line. The declaration's span covers the whole
+// block, so stamping every member with it would point a reader at `var (`
+// for a symbol thirty lines down.
+TEST(UnifiedExtractorTest, GoGroupedMembersCarryTheirOwnLines) {
+    constexpr std::string_view kSource = R"(package main
+
+var (
+	alpha = 1
+
+	beta = 2
+)
+)";
+    auto tree = parse(Language::Go, kSource);
+    ASSERT_NE(tree.get(), nullptr);
+
+    UnifiedExtractor ue;
+    ue.init(kSource, 1, ".go", "main.go");
+    ue.extract(tree.get());
+    auto r = ue.get_results();
+
+    const Symbol* alpha = find_symbol(r, "alpha");
+    const Symbol* beta = find_symbol(r, "beta");
+    ASSERT_NE(alpha, nullptr);
+    ASSERT_NE(beta, nullptr);
+    EXPECT_EQ(alpha->line, 4);
+    EXPECT_EQ(beta->line, 6);
+}
+
+// Grouped `type ( ... )` blocks lost every member after the first: the scan
+// stopped at the first type_spec, and the one it kept was stamped with the
+// declaration's line rather than its own.
+TEST(UnifiedExtractorTest, GoGroupedTypeBlock) {
+    constexpr std::string_view kSource = R"(package main
+
+type (
+	Alpha struct{ N int }
+
+	Beta interface{ Do() }
+)
+)";
+    auto tree = parse(Language::Go, kSource);
+    ASSERT_NE(tree.get(), nullptr);
+
+    UnifiedExtractor ue;
+    ue.init(kSource, 1, ".go", "main.go");
+    ue.extract(tree.get());
+    auto r = ue.get_results();
+
+    const Symbol* alpha = find_symbol(r, "Alpha");
+    ASSERT_NE(alpha, nullptr);
+    EXPECT_EQ(alpha->type, SymbolType::Struct);
+    EXPECT_EQ(alpha->line, 4) << "its own line, not the `type (` line";
+
+    const Symbol* beta = find_symbol(r, "Beta");
+    ASSERT_NE(beta, nullptr) << "members after the first must survive";
+    EXPECT_EQ(beta->type, SymbolType::Interface);
+    EXPECT_EQ(beta->line, 6);
+}
+
 TEST(UnifiedExtractorTest, GoImports) {
     auto tree = parse(Language::Go, kGoSource);
     ASSERT_NE(tree.get(), nullptr);
