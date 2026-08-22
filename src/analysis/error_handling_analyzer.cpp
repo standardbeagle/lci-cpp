@@ -65,10 +65,12 @@ double ErrorHandlingAnalyzer::finding_deduction(FindingSeverity severity,
 }
 
 double ErrorHandlingAnalyzer::function_score(
-    const std::vector<EhFinding>& findings, double norm_fanin) {
+    const std::vector<EhFinding>& findings, double norm_fanin,
+    double contract_weight) {
     double score = 1.0;
     for (const auto& f : findings) {
-        score -= finding_deduction(f.severity, f.confidence, norm_fanin);
+        score -= contract_weight *
+                 finding_deduction(f.severity, f.confidence, norm_fanin);
     }
     return std::max(0.0, score);
 }
@@ -93,6 +95,7 @@ ErrorHandlingAnalyzer::Result ErrorHandlingAnalyzer::analyze(
         std::string object_id;
         int line{};
         int reach{};          // filled after the graph pass
+        bool exported{};      // part of the package's public surface
     };
     std::vector<Unit> units;
     std::vector<SymbolID> nodes;
@@ -133,6 +136,7 @@ ErrorHandlingAnalyzer::Result ErrorHandlingAnalyzer::analyze(
             u.pkg = CouplingAnalyzer::get_package_name(file_path, project_root);
             u.object_id = encode_symbol_id(es->id);
             u.line = es->symbol.line;
+            u.exported = es->is_exported;
             unit_by_symbol[es->id] = static_cast<int>(units.size());
             units.push_back(std::move(u));
         }
@@ -194,8 +198,19 @@ ErrorHandlingAnalyzer::Result ErrorHandlingAnalyzer::analyze(
             static_cast<double>(u.reach) / static_cast<double>(max_reach);
         double weight = 1.0 + std::log2(1.0 + static_cast<double>(u.reach));
 
-        double eh_score = function_score(info.error_findings, norm_fanin);
-        double res_score = function_score(info.resource_findings, norm_fanin);
+        // Library contract. A function on the public surface owes its
+        // callers one of two things about a failure: bubble it up, or
+        // transform it into this library's own error and hand THAT up. A
+        // swallow inside an exported function is not a local style choice —
+        // it deletes a failure the caller has no other way to learn about,
+        // and no amount of caller-side diligence recovers it. Same evidence,
+        // costlier verdict: the deduction is scaled, not duplicated as a
+        // second finding.
+        double contract_weight = u.exported ? kExportedSwallowMultiplier : 1.0;
+        double eh_score =
+            function_score(info.error_findings, norm_fanin, contract_weight);
+        double res_score = function_score(info.resource_findings, norm_fanin,
+                                          contract_weight);
         eh_wsum += weight * eh_score;
         eh_w += weight;
         res_wsum += weight * res_score;

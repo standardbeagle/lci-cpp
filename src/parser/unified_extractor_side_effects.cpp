@@ -457,7 +457,128 @@ bool is_comment_node(std::string_view t) {
     return t == "comment" || t == "line_comment" || t == "block_comment";
 }
 
+// The member/method names that keep an error's full diagnostic payload. A
+// projection NOT in this list, taken on a language whose errors carry more
+// than a message, is lossy.
+bool is_full_fidelity_accessor(std::string_view name, std::string_view ext) {
+    // Stack and cause chains, every language that has them.
+    for (std::string_view full :
+         {"stack", "stacktrace", "getstacktrace", "printstacktrace",
+          "cause", "getcause", "innerexception", "getsuppressed",
+          "__traceback__", "with_traceback", "format_exc", "print_exc",
+          "format_exception", "tb_frame", "backtrace", "full_message"}) {
+        if (name == full) return true;
+    }
+    // .NET's ToString() renders message + stack + every InnerException, so it
+    // loses nothing. JS's toString() is "Error: msg" — same spelling, lossy,
+    // so it falls through to is_message_accessor below.
+    if (name == "tostring" &&
+        (ext == ".cs" || ext == ".fs" || ext == ".vb")) {
+        return true;
+    }
+    // Python's traceback module renders the chain; Ruby's full_message too.
+    return false;
+}
+
+// Projections that reduce an error to its message. Only meaningful where the
+// language's error type carries more than that.
+bool is_message_accessor(std::string_view name) {
+    for (std::string_view msg :
+         {"message", "msg", "getmessage", "getlocalizedmessage", "what",
+          "tostring", "str", "string", "description", "reason", "detail",
+          "error", "geterrormessage", "localizeddescription"}) {
+        if (name == msg) return true;
+    }
+    return false;
+}
+
+// True when this language's caught error carries NOTHING beyond its message,
+// so a message projection loses nothing that ever existed.
+//
+// Go's `error` is an interface whose whole contract is `Error() string` — no
+// stack, no cause, unless the code wrapped with %w. C++'s std::exception is
+// `what()` and nothing else. Calling those lossy would demand data the
+// language never produced.
+bool errors_are_message_only(std::string_view ext) {
+    return ext == ".go" || ext == ".c" || ext == ".cc" || ext == ".cpp" ||
+           ext == ".cxx" || ext == ".h" || ext == ".hpp" || ext == ".zig";
+}
+
 }  // namespace
+
+
+// How much of the caught error reaches this call's arguments. Walks the
+// argument region looking for the caught identifier, then asks what was taken
+// FROM it: the bare binding is the whole error, `e.stack` keeps the payload,
+// `e.message` keeps a sentence.
+CauseFidelity UnifiedExtractor::cause_fidelity(TSNode args,
+                                              std::string_view caught_var) {
+    CauseFidelity best = CauseFidelity::None;
+    walk_subtree(args, [&](TSNode a) {
+        if (!is_identifier_type(get_node_type(a)) ||
+            node_text(a) != caught_var) {
+            return true;
+        }
+        // What encloses the identifier decides the verdict. A bare argument
+        // has no accessor above it, so nothing was projected away.
+        CauseFidelity here = CauseFidelity::Full;
+        TSNode parent = ts_node_parent(a);
+        if (!ts_node_is_null(parent)) {
+            std::string_view pt = get_node_type(parent);
+            bool is_access = pt == "member_expression" ||
+                             pt == "field_expression" ||
+                             pt == "attribute" || pt == "selector_expression" ||
+                             pt == "navigation_expression" ||
+                             pt == "member_access_expression" ||
+                             pt == "scoped_identifier" ||
+                             pt == "call" || pt == "method_invocation" ||
+                             pt == "call_expression";
+            if (is_access) {
+                // The accessor name is the text after the caught variable.
+                std::string_view whole = node_text(parent);
+                std::string accessor;
+                if (auto dot = whole.rfind('.'); dot != std::string_view::npos) {
+                    accessor = std::string(whole.substr(dot + 1));
+                }
+                // A conversion wrapping the error — str(e), String(e) — reads
+                // as the callee name instead.
+                if (accessor.empty() &&
+                    (pt == "call" || pt == "call_expression")) {
+                    TSNode fn = field(parent, "function");
+                    if (ts_node_is_null(fn)) fn = ts_node_named_child(parent, 0);
+                    if (!ts_node_is_null(fn) && node_text(fn) != caught_var) {
+                        accessor = std::string(node_text(fn));
+                    }
+                }
+                // Trim a trailing "()" and lowercase for the tables.
+                if (auto paren = accessor.find('('); paren != std::string::npos) {
+                    accessor.resize(paren);
+                }
+                for (auto& c : accessor) {
+                    c = static_cast<char>(
+                        std::tolower(static_cast<unsigned char>(c)));
+                }
+                if (!accessor.empty()) {
+                    if (is_full_fidelity_accessor(accessor, ext_)) {
+                        here = CauseFidelity::Full;
+                    } else if (is_message_accessor(accessor)) {
+                        // Where the error type IS its message, taking the
+                        // message loses nothing that ever existed.
+                        here = errors_are_message_only(ext_)
+                                   ? CauseFidelity::Full
+                                   : CauseFidelity::Lossy;
+                    }
+                    // An unrecognized accessor (e.g. a domain field) is not
+                    // claimed either way; treat it as the whole error rather
+                    // than inventing a loss.
+                }
+            }
+        }
+        if (here > best) best = here;
+        return best != CauseFidelity::Full;  // cannot improve on Full
+    });
+    return best;
+}
 
 void UnifiedExtractor::process_catch_site(TSNode node,
                                           std::string_view node_type) {
@@ -619,29 +740,26 @@ void UnifiedExtractor::process_catch_site(TSNode node,
                            (dot != std::string_view::npos &&
                             is_log_callee(callee.substr(0, dot)));
                 if (ext_ == ".rb" && bare == "raise") return true;  // handled
+                // How much of the caught error travels into this call?
+                // Logging and propagation are tracked apart: `console.error(e)`
+                // reports the error, it does not hand it to anyone, which is
+                // what LogAndSwallow means — but the fidelity question ("did
+                // the stack survive?") applies to both.
+                CauseFidelity fid = CauseFidelity::None;
+                if (!caught_var.empty()) {
+                    TSNode args = field(n, "arguments");
+                    if (ts_node_is_null(args)) args = field(n, "argument_list");
+                    if (!ts_node_is_null(args)) fid = cause_fidelity(args, caught_var);
+                }
                 if (log) {
                     site.has_log_call = true;
+                    if (fid > site.logged_fidelity) site.logged_fidelity = fid;
                 } else {
                     site.has_other_call = true;
-                    // Does the caught variable travel INTO this call? That is
-                    // propagation, not a swallow: `callback(err)`,
-                    // `Promise.reject(error)`, `handle_user_exception(ctx, e)`.
-                    // Logging is deliberately excluded — `console.error(e)`
-                    // reports the error, it does not hand it to anyone, which
-                    // is exactly what LogAndSwallow means.
-                    if (!caught_var.empty() && !site.propagates_cause) {
-                        TSNode args = field(n, "arguments");
-                        if (ts_node_is_null(args)) {
-                            args = field(n, "argument_list");
-                        }
-                        if (!ts_node_is_null(args)) {
-                            walk_subtree(args, [&](TSNode a) {
-                                if (is_identifier_type(get_node_type(a)) &&
-                                    node_text(a) == caught_var) {
-                                    site.propagates_cause = true;
-                                }
-                                return !site.propagates_cause;
-                            });
+                    if (fid != CauseFidelity::None) {
+                        site.propagates_cause = true;
+                        if (fid > site.propagated_fidelity) {
+                            site.propagated_fidelity = fid;
                         }
                     }
                 }

@@ -35,14 +35,23 @@ class ErrorHandlingAnalyzer {
                           std::string_view project_root,
                           const std::vector<bool>& allowed_attrs = {});
 
+    /// How much more a swallow costs inside an exported function. A library's
+    /// contract is to bubble up or transform; deleting a failure its callers
+    /// cannot otherwise observe is a breach of that contract, not a style
+    /// preference.
+    static constexpr double kExportedSwallowMultiplier = 1.5;
+
     /// Per-finding score deduction: severity base × confidence ×
     /// (0.5 + 0.5 × normalized fan-in). Exposed for unit tests.
     static double finding_deduction(FindingSeverity severity, double confidence,
                                     double norm_fanin);
 
     /// Per-function score: 1.0 minus the summed deductions, floored at 0.
+    /// `contract_weight` scales them — kExportedSwallowMultiplier for a
+    /// function on the public surface, 1.0 for internal code.
     static double function_score(const std::vector<EhFinding>& findings,
-                                 double norm_fanin);
+                                 double norm_fanin,
+                                 double contract_weight = 1.0);
 };
 
 }  // namespace lci

@@ -52,6 +52,57 @@ TEST(EhAnalysisGateTest, PlainSourcePathsAreIncluded) {
     EXPECT_TRUE(scores_as_product_code("core/logger.go"));
 }
 
+// -- Library contract ----------------------------------------------------------
+
+// A function on the public surface owes its callers a bubble-up or a
+// transform. A swallow there deletes a failure the caller has no other way to
+// observe, so the same evidence costs more than it would inside the package.
+TEST(EhContractTest, ExportedSwallowsCostMoreThanInternalOnes) {
+    std::vector<EhFinding> findings(1);
+    findings[0].signal = EhSignal::CatchAndContinue;
+    findings[0].severity = FindingSeverity::High;
+    findings[0].confidence = 0.7;
+
+    double internal = ErrorHandlingAnalyzer::function_score(findings, 1.0);
+    double exported = ErrorHandlingAnalyzer::function_score(
+        findings, 1.0, ErrorHandlingAnalyzer::kExportedSwallowMultiplier);
+
+    EXPECT_LT(exported, internal);
+    EXPECT_GT(ErrorHandlingAnalyzer::kExportedSwallowMultiplier, 1.0);
+    // The multiplier scales the deduction, it does not invent a second one.
+    EXPECT_NEAR(1.0 - exported,
+                (1.0 - internal) *
+                    ErrorHandlingAnalyzer::kExportedSwallowMultiplier,
+                1e-9);
+}
+
+// A clean exported function is not penalized for being exported.
+TEST(EhContractTest, ExportedWithNoFindingsStillScoresPerfect) {
+    std::vector<EhFinding> none;
+    EXPECT_DOUBLE_EQ(
+        ErrorHandlingAnalyzer::function_score(
+            none, 1.0, ErrorHandlingAnalyzer::kExportedSwallowMultiplier),
+        1.0);
+}
+
+// Partial credit survives the escalation: forwarding the message from an
+// exported function still beats swallowing outright from one.
+TEST(EhContractTest, ExportedLossyPropagationStillBeatsExportedSwallow) {
+    std::vector<EhFinding> lossy(1);
+    lossy[0].signal = EhSignal::LossyPropagation;
+    lossy[0].severity = FindingSeverity::Med;
+    lossy[0].confidence = 0.5;
+
+    std::vector<EhFinding> swallow(1);
+    swallow[0].signal = EhSignal::CatchAndContinue;
+    swallow[0].severity = FindingSeverity::High;
+    swallow[0].confidence = 0.7;
+
+    const double m = ErrorHandlingAnalyzer::kExportedSwallowMultiplier;
+    EXPECT_GT(ErrorHandlingAnalyzer::function_score(lossy, 1.0, m),
+              ErrorHandlingAnalyzer::function_score(swallow, 1.0, m));
+}
+
 TEST(EhScoringTest, DeductionScalesWithSeverityConfidenceFanin) {
     // Leaf function (fan-in 0): half weight.
     double leaf_high =

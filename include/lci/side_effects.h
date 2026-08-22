@@ -291,6 +291,36 @@ struct ThrowSiteInfo {
 /// docs/plans/2026-08-17-error-handling-score-design.md). Syntactic + name
 /// heuristics only (no CFG/dataflow) — every finding carries a confidence,
 /// never a verdict.
+/// How much of the caught error survives where it goes next.
+///
+/// The distinction the message-only projection loses is the whole diagnostic
+/// payload: the stack trace, and the cause chain (.NET InnerException, Java
+/// getCause, Python __cause__, JS Error.cause). `record(e.message)` reads as
+/// handling and produces a log line nobody can act on.
+///
+/// Whether a projection is lossy depends on the LANGUAGE, not the spelling:
+///   - `err.Error()` in Go and `e.what()` in C++ return everything those error
+///     types carry — no stack, no inner chain exists to lose. Full.
+///   - `.message` / `.Message` / `getMessage()` in JS, Python, Java, C# throw
+///     away a stack and a cause chain that do exist. Lossy.
+///   - `ex.ToString()` in .NET includes the stack AND every inner exception,
+///     while `e.toString()` in JS is "Error: msg" and nothing more. Same
+///     spelling, opposite verdicts.
+enum class CauseFidelity : uint8_t {
+    None = 0,  ///< the caught error reaches nothing
+    Lossy,     ///< only a message-shaped projection of it travels
+    Full,      ///< the error object itself, or a stack/cause-preserving view
+};
+
+constexpr std::string_view to_string(CauseFidelity f) {
+    switch (f) {
+        case CauseFidelity::None: return "none";
+        case CauseFidelity::Lossy: return "message-only";
+        case CauseFidelity::Full: return "full";
+    }
+    return "none";
+}
+
 enum class EhSignal : uint8_t {
     EmptyCatch = 0,
     CatchAndContinue,
@@ -301,6 +331,10 @@ enum class EhSignal : uint8_t {
     LeakNoRelease,
     LeakOnErrorPath,
     UnguardedRelease,
+    /// The error leaves the block, but only its message does: the stack and
+    /// the cause chain stop here. Partial credit — the failure is reported,
+    /// it just cannot be diagnosed from the report.
+    LossyPropagation,
 };
 
 constexpr std::string_view to_string(EhSignal s) {
@@ -314,6 +348,7 @@ constexpr std::string_view to_string(EhSignal s) {
         case EhSignal::LeakNoRelease: return "leak-no-release";
         case EhSignal::LeakOnErrorPath: return "leak-on-error-path";
         case EhSignal::UnguardedRelease: return "unguarded-release";
+        case EhSignal::LossyPropagation: return "message-only-propagation";
     }
     return "unknown";
 }
@@ -350,12 +385,17 @@ struct CatchSiteInfo {
     bool has_log_call{};       // a log-category callee in the body
     bool has_other_call{};     // any non-log call in the body
     bool has_return{};         // returns a value (error may be re-surfaced)
-    /// The caught variable is passed to a call — `callback(err)`,
-    /// `Promise.reject(error)`, `cb(err)`, `self.handle(e)`. The error leaves
-    /// the catch block by a route other than `throw`, which is the normal
-    /// shape in callback, promise, and handler-dispatch code. Without this,
-    /// every such site reads as a swallow.
+    /// The caught variable reaches a non-log call — `callback(err)`,
+    /// `Promise.reject(error)`, `self.handle(e)`. The error leaves the catch
+    /// block by a route other than `throw`, which is the normal shape in
+    /// callback, promise, and handler-dispatch code. Without this, every such
+    /// site reads as a swallow.
     bool propagates_cause{};
+    /// Best fidelity seen among the non-log calls the cause reached.
+    CauseFidelity propagated_fidelity{CauseFidelity::None};
+    /// Best fidelity seen among the LOG calls the cause reached. Logging the
+    /// bare error prints a stack; logging `e.message` prints one line.
+    CauseFidelity logged_fidelity{CauseFidelity::None};
 };
 
 /// One acquire/release call site (syntactic resource pairing).

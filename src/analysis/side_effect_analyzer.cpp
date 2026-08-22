@@ -117,6 +117,19 @@ void classify_catch_site(const CatchSiteInfo& site, std::vector<EhFinding>& out)
         out.push_back(std::move(f));
     };
 
+    // Two questions, scored separately: did the error LEAVE this block, and
+    // how much of it survived the trip. A handler that forwards `e.message`
+    // has answered the first and failed the second — the failure is reported,
+    // and nobody can act on the report.
+    auto note_fidelity = [&](CauseFidelity f) {
+        if (f == CauseFidelity::Lossy && !out.empty()) {
+            auto& last = out.back();
+            last.detail = last.detail.empty()
+                              ? "message only"
+                              : last.detail + ", message only";
+        }
+    };
+
     if (site.body_empty) {
         add(EhSignal::EmptyCatch, FindingSeverity::High, 0.9);
     } else if (site.has_rethrow) {
@@ -129,8 +142,21 @@ void classify_catch_site(const CatchSiteInfo& site, std::vector<EhFinding>& out)
         // rejection, a handler. It left the block; the route just was not
         // `throw`. Calling that a swallow made express's only finding, four
         // of axios's five, and flask's request-dispatch pair false positives.
+        if (site.propagated_fidelity == CauseFidelity::Lossy) {
+            // PARTIAL credit: forwarding beats swallowing, so the deduction is
+            // well under CatchAndContinue's, but the stack and the cause chain
+            // (InnerException, getCause, __cause__) stopped here and the
+            // receiver cannot reconstruct them.
+            add(EhSignal::LossyPropagation, FindingSeverity::Med, 0.5);
+            out.back().detail = "message only, stack and cause chain lost";
+        }
     } else if (site.has_log_call && !site.has_other_call) {
-        add(EhSignal::LogAndSwallow, FindingSeverity::Med, 0.6);
+        // Logging the bare error prints a stack; logging `e.message` prints a
+        // sentence. Same swallow, materially different diagnosability, so the
+        // confidence (and thus the deduction) splits.
+        bool lossy = site.logged_fidelity == CauseFidelity::Lossy;
+        add(EhSignal::LogAndSwallow, FindingSeverity::Med, lossy ? 0.75 : 0.5);
+        note_fidelity(site.logged_fidelity);
     } else {
         add(EhSignal::CatchAndContinue, FindingSeverity::High, 0.7);
     }

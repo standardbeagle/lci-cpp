@@ -148,6 +148,12 @@ class UnifiedExtractor {
     // Extracts text from a node as a string_view into content_.
     std::string_view node_text(TSNode node) const;
 
+    /// How much of `caught_var` survives into the call-argument region
+    /// `args`: Full for the bare error (or a stack/cause-preserving view),
+    /// Lossy for a message-shaped projection, None when it is absent.
+    /// Language-aware — see CauseFidelity in <lci/side_effects.h>.
+    CauseFidelity cause_fidelity(TSNode args, std::string_view caught_var);
+
     // --- Scope extraction ---
     // Returns a ScopeStackEntry if this node creates a new scope.
     // Returns has_value=true if a scope was pushed.

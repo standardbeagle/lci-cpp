@@ -15,6 +15,8 @@
 #include <lci/parser/unified_extractor.h>
 
 #include <gtest/gtest.h>
+
+#include <lci/analysis/error_handling_analyzer.h>
 #include <tree_sitter/api.h>
 
 #include <string>
@@ -310,6 +312,174 @@ TEST_F(SideEffectExtraction, JsLoggingTheCauseIsStillASwallow) {
                                "f");
     ASSERT_NE(info, nullptr);
     EXPECT_EQ(count_findings(info->error_findings, EhSignal::LogAndSwallow), 1);
+}
+
+// -- Cause fidelity ------------------------------------------------------------
+//
+// Forwarding the error is not the same as forwarding a sentence about it.
+// `record(e.message)` throws away the stack and the cause chain — .NET's
+// InnerException, Java's getCause, Python's __cause__ — leaving a report
+// nobody can act on. Partial credit, not a pass.
+
+TEST_F(SideEffectExtraction, JsForwardingOnlyTheMessageIsPartialCredit) {
+    const auto* info = analyze(Language::JavaScript, ".js",
+                               "function f() {\n"
+                               "  try { g(); } catch (e) { record(e.message); "
+                               "}\n"
+                               "}\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    ASSERT_EQ(count_findings(info->error_findings, EhSignal::LossyPropagation),
+              1);
+    // Strictly cheaper than swallowing outright.
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::CatchAndContinue),
+              0);
+    for (const auto& fi : info->error_findings) {
+        if (fi.signal != EhSignal::LossyPropagation) continue;
+        EXPECT_LT(ErrorHandlingAnalyzer::finding_deduction(fi.severity,
+                                                           fi.confidence, 1.0),
+                  ErrorHandlingAnalyzer::finding_deduction(
+                      FindingSeverity::High, 0.7, 1.0))
+            << "forwarding the message must cost less than swallowing";
+        EXPECT_NE(fi.detail.find("message only"), std::string::npos);
+    }
+}
+
+TEST_F(SideEffectExtraction, JsForwardingTheWholeErrorIsClean) {
+    const auto* info = analyze(Language::JavaScript, ".js",
+                               "function f() {\n"
+                               "  try { g(); } catch (e) { record(e); }\n"
+                               "}\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    EXPECT_TRUE(info->error_findings.empty());
+}
+
+// A stack- or cause-preserving projection is not lossy.
+TEST_F(SideEffectExtraction, JsForwardingTheStackIsClean) {
+    for (const char* body : {"record(e.stack);", "record(e.cause);"}) {
+        std::string src = std::string("function f() {\n  try { g(); } catch "
+                                      "(e) { ") + body + " }\n}\n";
+        const auto* info = analyze(Language::JavaScript, ".js", src, "f");
+        ASSERT_NE(info, nullptr) << body;
+        EXPECT_TRUE(info->error_findings.empty()) << body;
+    }
+}
+
+// Same spelling, opposite verdicts. .NET's ToString() renders the message,
+// the stack, AND every InnerException; JS's toString() is "Error: msg".
+TEST_F(SideEffectExtraction, ToStringIsFullInDotNetAndLossyInJs) {
+    const auto* cs = analyze(Language::CSharp, ".cs",
+                             "class C {\n"
+                             "  void F() {\n"
+                             "    try { G(); } catch (Exception ex) { "
+                             "Record(ex.ToString()); }\n"
+                             "  }\n"
+                             "}\n",
+                             "F");
+    ASSERT_NE(cs, nullptr);
+    EXPECT_EQ(count_findings(cs->error_findings, EhSignal::LossyPropagation), 0)
+        << ".NET ToString() carries stack + InnerException";
+
+    const auto* js = analyze(Language::JavaScript, ".js",
+                             "function f() {\n"
+                             "  try { g(); } catch (e) { record(e.toString()); "
+                             "}\n"
+                             "}\n",
+                             "f");
+    ASSERT_NE(js, nullptr);
+    EXPECT_EQ(count_findings(js->error_findings, EhSignal::LossyPropagation), 1)
+        << "JS toString() is the message and nothing else";
+}
+
+// Java/Python message accessors are lossy — those errors carry a stack and a
+// cause chain that the projection discards.
+TEST_F(SideEffectExtraction, JavaGetMessageIsLossy) {
+    const auto* info = analyze(Language::Java, ".java",
+                               "class C {\n"
+                               "  void f() {\n"
+                               "    try { g(); } catch (Exception e) { "
+                               "record(e.getMessage()); }\n"
+                               "  }\n"
+                               "}\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::LossyPropagation),
+              1);
+}
+
+// "Unless that's all the useful data": Go's `error` interface IS
+// `Error() string` — no stack, no cause unless the code wrapped with %w. C++'s
+// std::exception is `what()`. Demanding more would demand data the language
+// never produced.
+TEST_F(SideEffectExtraction, GoErrorStringIsFullFidelity) {
+    const auto* info = analyze(Language::Go, ".go",
+                               "func f() {\n"
+                               "\tif err := g(); err != nil {\n"
+                               "\t\trecord(err.Error())\n"
+                               "\t}\n"
+                               "}\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::LossyPropagation),
+              0)
+        << "a Go error carries nothing beyond its message";
+
+    // Discrimination: prove the pipeline reaches Go at all, so the zero above
+    // is a verdict rather than an absence of analysis.
+    const auto* swallowed = analyze(Language::Go, ".go",
+                                    "func g2() {\n"
+                                    "\t_ = doWork()\n"
+                                    "}\n",
+                                    "g2");
+    ASSERT_NE(swallowed, nullptr);
+    EXPECT_EQ(count_findings(swallowed->error_findings, EhSignal::DroppedError),
+              1);
+}
+
+TEST_F(SideEffectExtraction, CppWhatIsFullFidelity) {
+    const auto* info = analyze(Language::Cpp, ".cpp",
+                               "void f() {\n"
+                               "  try { g(); } catch (const std::exception& e) "
+                               "{ record(e.what()); }\n"
+                               "}\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::LossyPropagation),
+              0)
+        << "std::exception is what(); there is no stack to lose";
+
+    // Discrimination: an empty catch in the same language still fires, so the
+    // zero above is a verdict rather than an absence of analysis.
+    const auto* empty = analyze(Language::Cpp, ".cpp",
+                                "void g2() {\n"
+                                "  try { h(); } catch (const std::exception& "
+                                "e) { }\n"
+                                "}\n",
+                                "g2");
+    ASSERT_NE(empty, nullptr);
+    EXPECT_EQ(count_findings(empty->error_findings, EhSignal::EmptyCatch), 1);
+}
+
+// Logging is graded the same way: the bare error prints a stack, the message
+// prints a sentence. Both swallow; one is diagnosable.
+TEST_F(SideEffectExtraction, LoggingTheMessageCostsMoreThanLoggingTheError) {
+    auto deduction_for = [&](const char* body) {
+        std::string src = std::string("function f() {\n  try { g(); } catch "
+                                      "(e) { ") + body + " }\n}\n";
+        const auto* info = analyze(Language::JavaScript, ".js", src, "f");
+        EXPECT_NE(info, nullptr) << body;
+        double total = 0;
+        if (info) {
+            for (const auto& fi : info->error_findings) {
+                total += ErrorHandlingAnalyzer::finding_deduction(
+                    fi.severity, fi.confidence, 1.0);
+            }
+        }
+        return total;
+    };
+    EXPECT_GT(deduction_for("console.error(e.message);"),
+              deduction_for("console.error(e);"));
 }
 
 // The discrimination case: a catch that calls something WITHOUT the cause is
