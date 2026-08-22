@@ -181,18 +181,12 @@ std::vector<FileID> MasterIndex::get_all_file_ids() const {
 // a project that switches it off for a tree (a vendored bundle, generated
 // protobufs) gets those files out of every result while they stay in the
 // index, where refs and file listing still need them.
+//
+// The set is precomputed at snapshot publish. Deriving it here cost ~10ms per
+// search on the fastapi corpus — a file_attrs probe per file, paid twice
+// because search() and find_candidate_files() each derived it.
 std::vector<FileID> MasterIndex::searchable_file_ids() const {
-    auto snap = load_snapshot();
-    const auto& registry = attr_registry();
-    std::vector<FileID> ids;
-    ids.reserve(snap->file_map.size());
-    for (const auto& [path, fid] : snap->file_map) {
-        if (!registry.activates(snap->attr_of(fid), Capability::Search)) {
-            continue;
-        }
-        ids.push_back(fid);
-    }
-    return ids;
+    return load_snapshot()->searchable_ids;
 }
 
 // -- Validation helpers -------------------------------------------------------

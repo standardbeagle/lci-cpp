@@ -214,7 +214,7 @@ bool MasterIndex::index_directory(const std::string& root) {
     // ever wired to write concurrently, this whole bulk clear→publish span must
     // become mutually exclusive with the snapshot_mu_ writers (not just this
     // store); a lock here alone would leave the sub-index/ID divergence unfixed.
-    snapshot_.store(std::move(new_snapshot), std::memory_order_release);
+    publish_snapshot(std::move(new_snapshot));
     processed_files_.store(static_cast<int64_t>(integrated),
                            std::memory_order_release);
     total_files_.store(static_cast<int64_t>(progress.total_files),
@@ -440,7 +440,7 @@ bool MasterIndex::remove_file(const std::string& path) {
     new_snap->file_map.erase(path);
     new_snap->reverse_file_map.erase(file_id);
     new_snap->file_attrs.erase(file_id);
-    snapshot_.store(std::move(new_snap), std::memory_order_release);
+    publish_snapshot(std::move(new_snap));
 
     processed_files_.fetch_sub(1, std::memory_order_relaxed);
     return true;
@@ -589,6 +589,21 @@ PathAttrId MasterIndex::classify_file_attr(const std::string& path,
     return path_classifier_.classify(rel, content);
 }
 
+void MasterIndex::publish_snapshot(std::shared_ptr<FileSnapshot> snap) {
+    // Derived view, computed ONCE per snapshot. Sorted so the read path
+    // inherits a deterministic scan order (karpathy #4) instead of the
+    // hash-map order the file_map walk would give it.
+    snap->searchable_ids.clear();
+    snap->searchable_ids.reserve(snap->file_map.size());
+    for (const auto& [path_unused, fid] : snap->file_map) {
+        if (attr_registry_.activates(snap->attr_of(fid), Capability::Search)) {
+            snap->searchable_ids.push_back(fid);
+        }
+    }
+    std::sort(snap->searchable_ids.begin(), snap->searchable_ids.end());
+    snapshot_.store(std::move(snap), std::memory_order_release);
+}
+
 void MasterIndex::update_snapshot_for_file(const std::string& path,
                                             FileID new_id, FileID old_id,
                                             bool existed) {
@@ -610,7 +625,7 @@ void MasterIndex::update_snapshot_for_file(const std::string& path,
         new_snap->file_attrs.erase(new_id);
     }
 
-    snapshot_.store(std::move(new_snap), std::memory_order_release);
+    publish_snapshot(std::move(new_snap));
 }
 
 void MasterIndex::remove_file_from_indexes(FileID file_id,

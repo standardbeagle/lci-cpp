@@ -34,6 +34,13 @@ struct FileSnapshot {
     /// map are Production. Lock-free O(1) read; readers never re-run globs.
     absl::flat_hash_map<FileID, PathAttrId> file_attrs;
 
+    /// File ids whose attribute activates Capability::Search, sorted.
+    /// Precomputed at publish because it is read on EVERY query and changes
+    /// only when the index does. Deriving it per search cost ~10ms on the
+    /// fastapi corpus: each file needed a file_attrs probe, and both
+    /// search() and find_candidate_files() paid it independently.
+    std::vector<FileID> searchable_ids;
+
     PathAttrId attr_of(FileID id) const {
         auto it = file_attrs.find(id);
         return it != file_attrs.end() ? it->second : kFallbackAttr;
@@ -312,8 +319,13 @@ class MasterIndex {
     std::string validate_search_input(const std::string& pattern,
                                        SearchOptions& options) const;
     std::string validate_search_components() const;
-    /// File ids whose attribute activates the Search capability.
+    /// File ids whose attribute activates the Search capability. O(1) —
+    /// returns the snapshot's precomputed set.
     std::vector<FileID> searchable_file_ids() const;
+
+    /// Computes the snapshot's derived views and publishes it. Every
+    /// snapshot store goes through here so no publish path can forget one.
+    void publish_snapshot(std::shared_ptr<FileSnapshot> snap);
 
     std::vector<SearchResult> execute_search(
         const std::string& pattern,
