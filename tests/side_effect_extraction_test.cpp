@@ -1975,5 +1975,179 @@ TEST_F(SideEffectExtraction, KotlinIfElseArmsAreNotASequence) {
     EXPECT_EQ(count_findings(info->error_findings, EhSignal::PartialWriteRisk), 0);
 }
 
+// ---------------------------------------------------------------------------
+// Self-hosted round (lci-cpp itself, 2026-08-23): C++ and CLI-builder shapes.
+// ---------------------------------------------------------------------------
+
+// `catch (const nlohmann::json::exception&) { error_response(res, 400, ..);
+// return; }` — a typed catch with no capital letter in the type. Typed means
+// "names a type other than the variable", not "has an uppercase word".
+TEST_F(SideEffectExtraction, CppLowercaseQualifiedTypeIsATypedCatch) {
+    const auto* info = analyze(Language::Cpp, ".cpp",
+                               "void f(Req& req, Res& res) {\n"
+                               "  try { parse(req.body); }\n"
+                               "  catch (const nlohmann::json::exception&) {\n"
+                               "    error_response(res, 400, \"invalid JSON body\");\n"
+                               "    return;\n"
+                               "  }\n"
+                               "}\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    ASSERT_EQ(count_findings(info->error_findings, EhSignal::CatchAndContinue), 1);
+    EXPECT_EQ(info->error_findings[0].severity, FindingSeverity::Med);
+    EXPECT_EQ(info->error_findings[0].detail,
+              "caught=nlohmann::json::exception, typed recovery");
+}
+
+// `std::cerr << "..." << e.what()` is how C++ logs. Not a call node.
+TEST_F(SideEffectExtraction, CppStreamInsertionToCerrIsALog) {
+    const auto* info = analyze(Language::Cpp, ".cpp",
+                               "void f() {\n"
+                               "  try { parse(); }\n"
+                               "  catch (const std::exception& e) {\n"
+                               "    std::cerr << \"dropping: \" << e.what() << '\\n';\n"
+                               "  }\n"
+                               "}\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::LogAndSwallow), 1);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::CatchAndContinue), 0);
+}
+
+// `line.begin()` is an iterator and `std::cout.flush()` drains a stream;
+// neither is a transaction. The bare verbs count only on a receiver that
+// looks like a store (db, tx, session, repo, ...).
+TEST_F(SideEffectExtraction, CppIteratorBeginAndStreamFlushAreNotATransaction) {
+    const auto* info = analyze(Language::Cpp, ".cpp",
+                               "void f(std::string line) {\n"
+                               "  auto it = line.begin();\n"
+                               "  std::cout << *it;\n"
+                               "  std::cout.flush();\n"
+                               "}\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings,
+                             EhSignal::UncompensatedTransaction), 0);
+}
+
+TEST_F(SideEffectExtraction, JsTxBeginCommitOnADbReceiverStillCounts) {
+    const auto* info = analyze(Language::JavaScript, ".js",
+                               "function f(db) {\n"
+                               "  db.begin();\n"
+                               "  db.updateBalance(1);\n"
+                               "  db.commit();\n"
+                               "}\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings,
+                             EhSignal::UncompensatedTransaction), 1);
+}
+
+// `app.add_option(...)` x45 in main() is a CLI11 builder; `crypto.createHash`
+// is a factory on a library namespace. A receiver decides, and neither of
+// these looks like a store.
+TEST_F(SideEffectExtraction, JsCreateOnALibraryNamespaceIsNotDurable) {
+    const auto* info = analyze(Language::JavaScript, ".js",
+                               "function f(data, tarball) {\n"
+                               "  const h = crypto.createHash('sha256').update(data);\n"
+                               "  if (!h) { throw new Error('x'); }\n"
+                               "  fs.writeFileSync(tarball, data);\n"
+                               "}\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::PartialWriteRisk), 0);
+}
+
+TEST_F(SideEffectExtraction, CppCliBuilderAddOptionIsNotDurable) {
+    const auto* info = analyze(Language::Cpp, ".cpp",
+                               "int main() {\n"
+                               "  CLI::App app;\n"
+                               "  app.add_option(\"-r\", root);\n"
+                               "  app.add_flag(\"-v\", verbose);\n"
+                               "  try { app.parse(argc, argv); } catch (const CLI::ParseError& e) { return app.exit(e); }\n"
+                               "  app.add_subcommand(\"x\");\n"
+                               "}\n",
+                               "main");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::PartialWriteRisk), 0);
+}
+
+TEST_F(SideEffectExtraction, JsRepoCreateCallsStillTear) {
+    const auto* info = analyze(Language::JavaScript, ".js",
+                               "function place(repo, order) {\n"
+                               "  repo.createOrder(order);\n"
+                               "  if (!order.ok) { throw new Error('bad'); }\n"
+                               "  repo.createShipment(order);\n"
+                               "}\n",
+                               "place");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::PartialWriteRisk), 1);
+}
+
+// `shutdown_locked`, `handle_shutdown`, `onClose`: cleanup by any spelling.
+TEST_F(SideEffectExtraction, CppShutdownHelperIsACleanupMethod) {
+    const auto* info = analyze(Language::Cpp, ".cpp",
+                               "void IndexServer::shutdown_locked() {\n"
+                               "  try { watcher_->stop(); } catch (...) { }\n"
+                               "}\n",
+                               "IndexServer::shutdown_locked");
+    ASSERT_NE(info, nullptr);
+    ASSERT_FALSE(info->error_findings.empty());
+    for (const auto& f : info->error_findings) {
+        EXPECT_EQ(f.severity, FindingSeverity::Low) << to_string(f.signal);
+    }
+}
+
+TEST_F(SideEffectExtraction, CppArrowCallSplitsOnTheReceiver) {
+    const auto* info = analyze(Language::Cpp, ".cpp",
+                               "int main() {\n"
+                               "  auto* update_cmd = app.add_subcommand(\"update\");\n"
+                               "  update_cmd->add_flag(\"--check\", check);\n"
+                               "  update_cmd->add_flag(\"--force\", force);\n"
+                               "  try { app.parse(argc, argv); } catch (const CLI::ParseError& e) { return app.exit(e); }\n"
+                               "  update_cmd->add_option(\"--to\", to);\n"
+                               "}\n",
+                               "main");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::PartialWriteRisk), 0);
+}
+
+// A typed empty catch named the failure it ignores: med, like typed
+// recovery. The untyped forms stay high.
+TEST_F(SideEffectExtraction, TypedEmptyCatchIsMedUntypedStaysHigh) {
+    const auto* typed = analyze(Language::Cpp, ".cpp",
+                                "void f() {\n"
+                                "  try { g(); } catch (const nlohmann::json::exception&) { }\n"
+                                "}\n",
+                                "f");
+    ASSERT_NE(typed, nullptr);
+    ASSERT_EQ(count_findings(typed->error_findings, EhSignal::EmptyCatch), 1);
+    EXPECT_EQ(typed->error_findings[0].severity, FindingSeverity::Med);
+    const auto* untyped = analyze(Language::Cpp, ".cpp",
+                                  "void f() {\n"
+                                  "  try { g(); } catch (...) { }\n"
+                                  "}\n",
+                                  "f");
+    ASSERT_NE(untyped, nullptr);
+    ASSERT_EQ(count_findings(untyped->error_findings, EhSignal::EmptyCatch), 1);
+    EXPECT_EQ(untyped->error_findings[0].severity, FindingSeverity::High);
+}
+
+// guzzle CurlMultiHandler: `$entry['deferred']->reject($e); continue;` — the
+// error goes to the promise. PHP's method call is a member_call_expression.
+TEST_F(SideEffectExtraction, PhpMethodCallHandoffIsPropagation) {
+    const auto* info = analyze(Language::PHP, ".php",
+                               "<?php\n"
+                               "function tick($entry) {\n"
+                               "  try { $r = finish($entry); } catch (\\Throwable $e) {\n"
+                               "    $entry['deferred']->reject($e);\n"
+                               "    return;\n"
+                               "  }\n"
+                               "}\n",
+                               "tick");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::CatchAndContinue), 0);
+}
+
 }  // namespace
 }  // namespace lci
