@@ -117,6 +117,9 @@ bool is_bare_ambiguous_verb(std::string_view callee) {
          // Collection and assignment verbs.
          {"update", "add", "insert", "put", "post", "set", "remove", "delete",
           "append", "push", "pop", "create", "write", "store", "save",
+          // A stream controller's enqueue and a DI container's register are
+          // in-memory (trpc's SSE producer: five enqueues around a throw).
+          "enqueue", "register",
           // Words that are as often a noun or a builder as an action.
           "email", "notify", "emit", "dispatch", "transfer", "publish",
           "settle", "send", "upload", "register", "reserve", "grant"}) {
@@ -228,7 +231,13 @@ void classify_work_pairing(const std::vector<WorkOp>& ops,
             op.kind != WorkKind::Irreversible) {
             return false;
         }
-        return !is_bare_ambiguous_verb(op.callee);
+        if (is_bare_ambiguous_verb(op.callee)) return false;
+        // `createLazyLoader(...)`, `createHooks(...)`: an unqualified create*
+        // is a factory far more often than a durable write in JS/TS (trpc's
+        // router and hook builders read as ten-way torn writes). A receiver
+        // — `db.createOrder` — is what says the thing outlives the call.
+        if (!op.qualified && iprefix(op.callee, "create")) return false;
+        return true;
     };
 
     bool has_rollback = false;
@@ -411,11 +420,36 @@ void classify_catch_site(const CatchSiteInfo& site, std::string_view fn_name,
         }
     };
 
+    // A catch for the normal end of a protocol — TimeoutError driving a
+    // keepalive, EndOfStream, WebSocketDisconnect — handles a condition, not
+    // a failure. Nothing below applies; fastapi's SSE keepalive loop and
+    // websocket tutorial were two high findings each on this shape alone.
+    if (site.normal_condition) return;
+
+    const bool kept_cause_on_rethrow = site.has_rethrow && site.rethrow_uses_cause;
+
     if (site.body_empty) {
         add(EhSignal::EmptyCatch, FindingSeverity::High, 0.9);
     } else if (site.has_rethrow) {
         if (!site.rethrow_uses_cause)
             add(EhSignal::RethrowNoCause, FindingSeverity::Low, 0.4);
+    } else if (site.propagates_cause) {
+        // The caught error is handed to a call, a constructor, a store, or
+        // a yield — a callback, a promise rejection, a wrapper assigned out,
+        // an error collected for the caller. It left the block; the route
+        // just was not `throw`. Calling that a swallow made express's only
+        // finding, four of axios's five, and flask's request-dispatch pair
+        // false positives. Checked BEFORE the sentinel return: trpc's ws
+        // adapter wraps the cause, responds with it, then `return []` — the
+        // sentinel is the value of a handled failure, not a renamed one.
+        if (site.propagated_fidelity == CauseFidelity::Lossy) {
+            // PARTIAL credit: forwarding beats swallowing, so the deduction is
+            // well under CatchAndContinue's, but the stack and the cause chain
+            // (InnerException, getCause, __cause__) stopped here and the
+            // receiver cannot reconstruct them.
+            add(EhSignal::LossyPropagation, FindingSeverity::Med, 0.5);
+            out.back().detail = "message only, stack and cause chain lost";
+        }
     } else if (site.has_return && !site.returns_sentinel) {
         // Error may be surfaced through the return value — no swallow claim.
     } else if (site.returns_sentinel && !name_promises_a_sentinel(fn_name)) {
@@ -425,19 +459,8 @@ void classify_catch_site(const CatchSiteInfo& site, std::string_view fn_name,
         // deliberate contract in lookup-style APIs, and the caller at least
         // sees SOMETHING is absent — unlike a bare continue.
         add(EhSignal::ErrorToSentinel, FindingSeverity::Med, 0.7);
-    } else if (site.propagates_cause) {
-        // The caught error is handed to a call — a callback, a promise
-        // rejection, a handler. It left the block; the route just was not
-        // `throw`. Calling that a swallow made express's only finding, four
-        // of axios's five, and flask's request-dispatch pair false positives.
-        if (site.propagated_fidelity == CauseFidelity::Lossy) {
-            // PARTIAL credit: forwarding beats swallowing, so the deduction is
-            // well under CatchAndContinue's, but the stack and the cause chain
-            // (InnerException, getCause, __cause__) stopped here and the
-            // receiver cannot reconstruct them.
-            add(EhSignal::LossyPropagation, FindingSeverity::Med, 0.5);
-            out.back().detail = "message only, stack and cause chain lost";
-        }
+    } else if (site.returns_sentinel) {
+        // The name promised the sentinel (tryX, isX, getOrNull): the contract.
     } else if (site.has_log_call && !site.has_other_call) {
         // Logging the bare error prints a stack; logging `e.message` prints a
         // sentence. Same swallow, materially different diagnosability, so the
@@ -445,11 +468,26 @@ void classify_catch_site(const CatchSiteInfo& site, std::string_view fn_name,
         bool lossy = site.logged_fidelity == CauseFidelity::Lossy;
         add(EhSignal::LogAndSwallow, FindingSeverity::Med, lossy ? 0.75 : 0.5);
         note_fidelity(site.logged_fidelity);
+    } else if (site.specific_type) {
+        // `except NameError: signature = fallback(call)`. The author named
+        // the failure they expected and wrote the recovery for it; the
+        // cause is still gone, but this is the anticipated-failure shape,
+        // not a blind catch. Med, and under log-and-swallow's confidence.
+        add(EhSignal::CatchAndContinue, FindingSeverity::Med, 0.5);
+        out.back().detail = out.back().detail.empty()
+                                ? "typed recovery"
+                                : out.back().detail + ", typed recovery";
     } else {
         add(EhSignal::CatchAndContinue, FindingSeverity::High, 0.7);
     }
 
-    if (site.broad_type) {
+    // Breadth is only a defect when something is lost by it. `except
+    // Exception as e: raise HTTPException(...) from e` translates anything
+    // into the API's error and keeps the chain — the breadth is the point.
+    // fastapi charged six of these, every one a chained re-raise. Handing
+    // the error to a call does NOT clear it: `except Exception as e:
+    // recover(e)` still catches SystemExit and KeyboardInterrupt on the way.
+    if (site.broad_type && !kept_cause_on_rethrow) {
         add(EhSignal::BroadCatch, FindingSeverity::Med, 0.6);
     }
 }
@@ -807,14 +845,16 @@ void SideEffectAnalyzer::record_dropped_error(int line,
 
 void SideEffectAnalyzer::record_call_site_resources(std::string_view callee,
                                                     int line, bool guarded,
-                                                    uint32_t branch_id) {
+                                                    uint32_t branch_id,
+                                                    bool qualified) {
     if (!current_func_) return;
     // Undo-cost model: what state this call changed, in source order. Kept
     // beside the resource pairing because both answer "what is outstanding
     // when an error fires", one for handles and one for state.
     if (WorkKind wk = classify_work_callee(callee); wk != WorkKind::None) {
         current_func_->work_ops.push_back(
-            WorkOp{std::string(callee), line, wk, guarded, branch_id});
+            WorkOp{std::string(callee), line, wk, guarded, branch_id,
+                   qualified});
     }
     switch (classify_resource_callee(callee)) {
         case ResourceOpKind::Acquire:

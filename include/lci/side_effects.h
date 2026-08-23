@@ -408,6 +408,13 @@ struct CatchSiteInfo {
     std::string caught_type;   // "" when the grammar carries no type
     bool body_empty{};         // no statements (comments don't count)
     bool broad_type{};         // Exception / Throwable / bare except / (...)
+    /// The caught type names the normal end of a protocol (TimeoutError as
+    /// a keepalive trigger, EndOfStream, WebSocketDisconnect, Cancelled).
+    /// The handler is the protocol; no swallow signal applies.
+    bool normal_condition{};
+    /// The header names a specific exception type (`except NameError`,
+    /// `catch (IOException e)`) rather than catching everything.
+    bool specific_type{};
     bool has_rethrow{};        // throw/raise inside the body
     bool rethrow_uses_cause{}; // rethrow references the caught variable
     bool has_log_call{};       // a log-category callee in the body
@@ -487,6 +494,8 @@ struct WorkOp {
     /// gin's SetMode stores four modes in four switch cases; without this it
     /// read as four sequential writes around a panic.
     uint32_t branch_id{};
+    /// Called through a receiver (`db.createOrder`) rather than bare.
+    bool qualified{};
 };
 
 /// Exception safety characteristics of a function.

@@ -1446,6 +1446,48 @@ TEST_F(SideEffectExtraction, PyTypedIoErrorSwallowStillCounts) {
     EXPECT_EQ(count_findings(info->error_findings, EhSignal::CatchAndContinue), 1);
 }
 
+// A typed catch with a recovery is the anticipated-failure shape: still a
+// finding (the cause is gone), but med — the author named what they expected.
+TEST_F(SideEffectExtraction, PyTypedRecoveryIsMedNotHigh) {
+    const auto* info = analyze(Language::Python, ".py",
+                               "def f(call):\n"
+                               "    try:\n"
+                               "        sig = signature(call)\n"
+                               "    except NameError:\n"
+                               "        sig = fallback_signature(call)\n"
+                               "    return sig\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    ASSERT_EQ(count_findings(info->error_findings, EhSignal::CatchAndContinue), 1);
+    EXPECT_EQ(info->error_findings[0].severity, FindingSeverity::Med);
+    EXPECT_EQ(info->error_findings[0].detail, "caught=NameError, typed recovery");
+}
+
+TEST_F(SideEffectExtraction, JsUntypedCatchAndContinueStaysHigh) {
+    const auto* info = analyze(Language::JavaScript, ".js",
+                               "function f() {\n"
+                               "  try { g(); } catch (e) { recover(); }\n"
+                               "}\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    ASSERT_EQ(count_findings(info->error_findings, EhSignal::CatchAndContinue), 1);
+    EXPECT_EQ(info->error_findings[0].severity, FindingSeverity::High);
+}
+
+// trpc SSE producer: five `controller.enqueue(...)` around a throw. A stream
+// controller's queue is memory; nothing outlives the call to tear.
+TEST_F(SideEffectExtraction, JsStreamEnqueueIsNotDurableWork) {
+    const auto* info = analyze(Language::JavaScript, ".js",
+                               "function write(controller, chunk) {\n"
+                               "  controller.enqueue('a');\n"
+                               "  if (!chunk) { throw new Error('bad'); }\n"
+                               "  controller.enqueue('b');\n"
+                               "}\n",
+                               "write");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::PartialWriteRisk), 0);
+}
+
 // -- broad-catch that keeps the cause -----------------------------------------
 //
 // fastapi: `except Exception as e: raise HTTPException(...) from e`. The

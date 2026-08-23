@@ -64,16 +64,72 @@ bool iprefix(std::string_view name, std::string_view prefix) {
 }
 
 // Log/report-category callee (bare last segment): the log-and-swallow
-// signal. Error-named reporters (checkApiError, handleError, reportError)
-// surface the error to a human — same credit tier as logging.
+// signal. Two shapes qualify: a logging verb (log, print, warn, ...) or a
+// logger's level method (`log.error`, `logger.fatal`), and a REPORTER — a
+// handling verb compounded with "error"/"exception" (checkApiError,
+// handleError, reportError, captureException) — which surfaces the error
+// to a human, same credit tier as logging.
+//
+// An "error" substring on its own does NOT qualify. getTRPCErrorFromUnknown
+// wraps, isAbortError tests, errors.push collects, opts.onError forwards;
+// reading each as a log made every one of them a swallow (trpc calibration).
 bool is_log_callee(std::string_view callee) {
     static constexpr std::string_view log_prefixes[] = {
         "log", "print", "puts", "warn", "debug", "trace", "console"};
     for (auto p : log_prefixes) {
         if (iprefix(callee, p)) return true;
     }
-    for (size_t i = 0; i + 5 <= callee.size(); ++i) {
-        if (iprefix(callee.substr(i), "error")) return true;
+    static constexpr std::string_view level_methods[] = {
+        "error", "err", "fatal", "critical", "exception", "info"};
+    for (auto m : level_methods) {
+        if (callee.size() == m.size() && iprefix(callee, m)) return true;
+    }
+    bool names_error = false;
+    for (size_t i = 0; i + 5 <= callee.size() && !names_error; ++i) {
+        if (iprefix(callee.substr(i), "error") ||
+            iprefix(callee.substr(i), "exception")) {
+            names_error = true;
+        }
+    }
+    if (!names_error) return false;
+    static constexpr std::string_view reporter_verbs[] = {
+        "report", "handle", "check", "capture", "notify", "record", "track",
+        "show", "display", "alert", "present"};
+    for (auto v : reporter_verbs) {
+        if (iprefix(callee, v)) return true;
+    }
+    return false;
+}
+
+// A qualifier that makes the whole call a log regardless of the method name:
+// `console.x`, `log.x`, `logger.x`. An `errors.push(e)` qualifier is a
+// collection, not a logger, so the reporter rule above is not consulted here.
+bool is_log_qualifier(std::string_view qualifier) {
+    auto dot = qualifier.rfind('.');
+    std::string_view last = dot == std::string_view::npos
+                                ? qualifier
+                                : qualifier.substr(dot + 1);
+    static constexpr std::string_view q[] = {"log", "console", "print",
+                                             "warn", "debug", "trace"};
+    for (auto p : q) {
+        if (iprefix(last, p)) return true;
+    }
+    return false;
+}
+
+// A caught type naming the NORMAL end of a protocol rather than a failure:
+// a read timing out where the timeout is the keepalive trigger, a stream
+// ending, a peer disconnecting, a task being cancelled. The handler IS the
+// protocol, so none of the swallow signals apply. Substring on purpose —
+// `anyio.EndOfStream`, `asyncio.TimeoutError`, `WebSocketDisconnect`,
+// `ThreadInterruptedException` all spell the condition inside a longer name.
+bool header_names_a_normal_condition(std::string_view header) {
+    static constexpr std::string_view conditions[] = {
+        "Timeout", "Disconnect", "EndOfStream", "EOFError", "StopIteration",
+        "StopAsyncIteration", "GeneratorExit", "Cancel", "Abort",
+        "Interrupt", "BrokenPipe", "ClosedResource"};
+    for (auto c : conditions) {
+        if (header.find(c) != std::string_view::npos) return true;
     }
     return false;
 }
@@ -86,7 +142,20 @@ bool is_throw_node(std::string_view t) {
 
 bool is_call_node(std::string_view t) {
     return t == "call_expression" || t == "call" || t == "method_invocation" ||
-           t == "invocation_expression" || t == "function_call_expression";
+           t == "invocation_expression" || t == "function_call_expression" ||
+           // `new TRPCError({ cause })` hands the error to a constructor.
+           t == "new_expression" || t == "object_creation_expression";
+}
+
+// A store or a yield whose right-hand side is the caught error: the error
+// leaves the block through a binding (`failure = e`, `result = [wrap(e)]`)
+// or a generator (`yield format(e)`). Same exit as a callback, spelled
+// differently.
+bool is_assignment_node(std::string_view t) {
+    return t == "assignment_expression" || t == "assignment" ||
+           t == "augmented_assignment_expression" ||
+           t == "variable_declarator" || t == "yield_expression" ||
+           t == "yield";
 }
 
 }  // namespace
@@ -401,9 +470,9 @@ void UnifiedExtractor::process_side_effect_node(
 
         // Resource acquire/release pairing: classify the bare callee; a call
         // under a defer/finally/ensure/using/with scope carries guard credit.
-        side_effects_->record_call_site_resources(bare, line,
-                                                  se_guard_depth_ > 0,
-                                                  se_branch_id_);
+        side_effects_->record_call_site_resources(
+            bare, line, se_guard_depth_ > 0, se_branch_id_,
+            /*qualified=*/bare.data() != callee.data());
         return;
     }
 }
@@ -731,6 +800,23 @@ void UnifiedExtractor::process_catch_site(TSNode node,
                ts_node_named_child_count(node) <= 1) {
         site.broad_type = true;  // bare `except:`
         site.caught_type = "bare except";
+    } else if (header_names_a_normal_condition(header)) {
+        site.normal_condition = true;
+    } else {
+        // A capitalized word in the header is a type name: `except
+        // NameError`, `catch (IOException e)`, `rescue Foo => e`. JS's
+        // `catch (e)` and Python's bare `except:` have none.
+        for (size_t i = 0; i < header.size(); ++i) {
+            bool word_start = i == 0 || !std::isalnum(static_cast<unsigned char>(header[i - 1]));
+            if (word_start && header[i] >= 'A' && header[i] <= 'Z') {
+                site.specific_type = true;
+                // Keep the name for the finding's detail.
+                size_t j = i;
+                while (j < header.size() && (std::isalnum(static_cast<unsigned char>(header[j])) || header[j] == '_' || header[j] == '.')) ++j;
+                site.caught_type = std::string(header.substr(i, j - i));
+                break;
+            }
+        }
     }
 
     // Caught variable name (for rethrow-uses-cause): field-based per grammar.
@@ -801,6 +887,22 @@ void UnifiedExtractor::process_catch_site(TSNode node,
                     return true;
                 }
             }
+            if (is_assignment_node(t) && !caught_var.empty()) {
+                // Only the value side counts: `e = null` stores nothing.
+                TSNode rhs = field(n, "right");
+                if (ts_node_is_null(rhs)) rhs = field(n, "value");
+                if (ts_node_is_null(rhs) && (t == "yield_expression" || t == "yield"))
+                    rhs = n;
+                if (!ts_node_is_null(rhs)) {
+                    CauseFidelity fid = cause_fidelity(rhs, caught_var);
+                    if (fid != CauseFidelity::None) {
+                        site.propagates_cause = true;
+                        if (fid > site.propagated_fidelity)
+                            site.propagated_fidelity = fid;
+                    }
+                }
+                return true;  // calls inside the RHS were just credited
+            }
             if (t == "return_statement" || t == "return_expression") {
                 if (ts_node_named_child_count(n) > 0) {
                     site.has_return = true;
@@ -829,7 +931,7 @@ void UnifiedExtractor::process_catch_site(TSNode node,
                 // `console.log` qualifies via its qualifier as well.
                 bool log = is_log_callee(bare) ||
                            (dot != std::string_view::npos &&
-                            is_log_callee(callee.substr(0, dot)));
+                            is_log_qualifier(callee.substr(0, dot)));
                 if (ext_ == ".rb" && bare == "raise") return true;  // handled
                 // How much of the caught error travels into this call?
                 // Logging and propagation are tracked apart: `console.error(e)`

@@ -77,6 +77,7 @@ class SideEffectAnalyzer {
                         int start_line, int end_line);
     SideEffectInfo end_function();
 
+
     // -- Registration ---------------------------------------------------------
 
     void add_parameter(std::string_view name, int index);
@@ -126,7 +127,8 @@ class SideEffectAnalyzer {
     /// finally/ensure/using/with scope. No-op for unclassified callees.
     /// `branch_id` is the enclosing alternative arm (WorkOp::branch_id).
     void record_call_site_resources(std::string_view callee, int line,
-                                    bool guarded, uint32_t branch_id = 0);
+                                    bool guarded, uint32_t branch_id = 0,
+                                    bool qualified = false);
 
     // -- Results --------------------------------------------------------------
 
