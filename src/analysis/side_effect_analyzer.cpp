@@ -154,6 +154,26 @@ bool looks_like_persistence_receiver(std::string_view q) {
     return false;
 }
 
+// A receiver that names a helper bag rather than a place state lives:
+// `app.utils.deleteByPath(...)` mutates an in-memory object. The inverse of
+// looks_like_persistence_receiver, and it outranks the verb entirely.
+bool looks_like_utility_receiver(std::string_view q) {
+    if (q.empty()) return false;
+    std::string low(q);
+    for (auto& c : low) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    for (std::string_view n :
+         {"utils", "util", "helpers", "helper", "lodash", "_", "commonhelper",
+          "object", "array", "string", "strings", "path", "url", "math",
+          "json", "reflect", "assert"}) {
+        if (low == n) return true;
+        if (low.size() > n.size() &&
+            low.compare(low.size() - n.size(), n.size(), n) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // Verbs that are durable only on a persistence receiver. Elsewhere they are
 // iterators, streams, factories and builders.
 bool verb_needs_a_store(std::string_view callee) {
@@ -276,6 +296,7 @@ void classify_work_pairing(const std::vector<WorkOp>& ops,
             !looks_like_persistence_receiver(op.qualifier)) {
             return false;
         }
+        if (looks_like_utility_receiver(op.qualifier)) return false;
         return true;
     };
 

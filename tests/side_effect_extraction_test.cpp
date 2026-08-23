@@ -2164,5 +2164,33 @@ TEST_F(SideEffectExtraction, SuppressedFindingsAreCounted) {
     EXPECT_EQ(count_findings(info->error_findings, EhSignal::EmptyCatch), 1);
 }
 
+// pocketbase ui: `app.utils.deleteByPath(app.store.errors, "fields")` — a
+// utility namespace mutates an in-memory object. A receiver that names a
+// helper bag is the opposite signal of a store, whatever the verb.
+TEST_F(SideEffectExtraction, JsUtilityNamespaceMutationIsNotDurable) {
+    const auto* info = analyze(Language::JavaScript, ".js",
+                               "function reset(app) {\n"
+                               "  app.utils.deleteByPath(app.store.errors, 'fields');\n"
+                               "  if (!app.ok) { throw new Error('x'); }\n"
+                               "  app.utils.setByPath(app.store.errors, 'fields', {});\n"
+                               "}\n",
+                               "reset");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::PartialWriteRisk), 0);
+}
+
+// The same verbs on a bare call or a store receiver still count.
+TEST_F(SideEffectExtraction, JsBareCompoundDeleteStillCounts) {
+    const auto* info = analyze(Language::JavaScript, ".js",
+                               "function purge(order) {\n"
+                               "  deleteOrderRecord(order);\n"
+                               "  if (!order.ok) { throw new Error('x'); }\n"
+                               "  deleteShipmentRecord(order);\n"
+                               "}\n",
+                               "purge");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::PartialWriteRisk), 1);
+}
+
 }  // namespace
 }  // namespace lci
