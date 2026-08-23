@@ -1647,5 +1647,212 @@ TEST_F(SideEffectExtraction, BlockCommentDirectiveIsRecognized) {
     EXPECT_EQ(count_findings(info->error_findings, EhSignal::PartialWriteRisk), 0);
 }
 
+// ---------------------------------------------------------------------------
+// Third calibration round (gson / okhttp / serilog / guzzle / sinatra /
+// pocketbase, 2026-08-23).
+// ---------------------------------------------------------------------------
+
+// -- The caught variable's name is the developer's verdict --------------------
+//
+// `catch (NumberFormatException ignored)` (gson), `catch (_: Exception)`
+// (okhttp). IntelliJ, detekt and checkstyle all read these names as the
+// explicit "I know" marker; so does lci.
+
+TEST_F(SideEffectExtraction, JavaIgnoredVariableIsAnExplicitDiscard) {
+    const auto* info = analyze(Language::Java, ".java",
+                               "class C {\n"
+                               "  long next(String s) {\n"
+                               "    try { return Long.parseLong(s); }\n"
+                               "    catch (NumberFormatException ignored) {\n"
+                               "      // Fall back to parse as a double below.\n"
+                               "    }\n"
+                               "    return 0;\n"
+                               "  }\n"
+                               "}\n",
+                               "next");
+    ASSERT_NE(info, nullptr);
+    EXPECT_TRUE(info->error_findings.empty());
+}
+
+TEST_F(SideEffectExtraction, KotlinUnderscoreVariableIsAnExplicitDiscard) {
+    const auto* info = analyze(Language::Kotlin, ".kt",
+                               "fun f(s: Socket) {\n"
+                               "  try { s.close() } catch (_: Exception) { }\n"
+                               "}\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    EXPECT_TRUE(info->error_findings.empty());
+}
+
+// A plain `e` keeps the finding — the name says nothing.
+TEST_F(SideEffectExtraction, JavaPlainVariableEmptyCatchStillCounts) {
+    const auto* info = analyze(Language::Java, ".java",
+                               "class C {\n"
+                               "  void f() {\n"
+                               "    try { g(); } catch (NumberFormatException e) { }\n"
+                               "  }\n"
+                               "}\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::EmptyCatch), 1);
+}
+
+// -- The function's name is the contract --------------------------------------
+//
+// okhttp: closeQuietly, ignoreIoExceptions, toHttpUrlOrNull, buildIfSupported.
+// The name promises that failures are absorbed; the catch is the promise
+// being kept. The sentinel rule already read these names for `return null`
+// inside the catch; the same names now clear the site whatever its body.
+
+TEST_F(SideEffectExtraction, KotlinQuietlyNamedFunctionAbsorbsByContract) {
+    const auto* info = analyze(Language::Kotlin, ".kt",
+                               "fun Closeable.closeQuietly() {\n"
+                               "  try { close() } catch (e: RuntimeException) { throw e }\n"
+                               "  catch (e: Exception) { }\n"
+                               "}\n",
+                               "closeQuietly");
+    ASSERT_NE(info, nullptr);
+    EXPECT_TRUE(info->error_findings.empty());
+}
+
+TEST_F(SideEffectExtraction, KotlinOrNullFunctionWithSentinelOutsideCatchIsClean) {
+    const auto* info = analyze(Language::Kotlin, ".kt",
+                               "fun String.toHttpUrlOrNull(): HttpUrl? {\n"
+                               "  try { return toHttpUrl() } catch (_: IllegalArgumentException) { }\n"
+                               "  return null\n"
+                               "}\n",
+                               "toHttpUrlOrNull");
+    ASSERT_NE(info, nullptr);
+    EXPECT_TRUE(info->error_findings.empty());
+}
+
+TEST_F(SideEffectExtraction, KotlinIgnorePrefixedFunctionAbsorbsByContract) {
+    const auto* info = analyze(Language::Kotlin, ".kt",
+                               "inline fun ignoreIoExceptions(block: () -> Unit) {\n"
+                               "  try { block() } catch (e: IOException) { }\n"
+                               "}\n",
+                               "ignoreIoExceptions");
+    ASSERT_NE(info, nullptr);
+    EXPECT_TRUE(info->error_findings.empty());
+}
+
+// -- Cleanup methods may not throw ---------------------------------------------
+//
+// .NET's Dispose guideline, PHP's __destruct, Java's close(): a throw from
+// teardown masks the original failure or crashes the finalizer. serilog's
+// sinks catch-log-continue in Dispose on purpose. Reported, but capped at
+// low: the swallow is the documented behavior of the method.
+
+TEST_F(SideEffectExtraction, CSharpDisposeSwallowIsCappedAtLow) {
+    const auto* info = analyze(Language::CSharp, ".cs",
+                               "class S {\n"
+                               "  public void Dispose() {\n"
+                               "    try { _inner.Dispose(); }\n"
+                               "    catch (Exception ex) { SelfLog.WriteLine(\"x\", ex); }\n"
+                               "  }\n"
+                               "}\n",
+                               "Dispose");
+    ASSERT_NE(info, nullptr);
+    ASSERT_FALSE(info->error_findings.empty());
+    for (const auto& f : info->error_findings) {
+        EXPECT_EQ(f.severity, FindingSeverity::Low) << to_string(f.signal);
+    }
+}
+
+TEST_F(SideEffectExtraction, PhpDestructorSwallowIsCappedAtLow) {
+    const auto* info = analyze(Language::PHP, ".php",
+                               "<?php\n"
+                               "class H {\n"
+                               "  public function __destruct() {\n"
+                               "    try { $this->close(); } catch (\\Throwable $e) { }\n"
+                               "  }\n"
+                               "}\n",
+                               "__destruct");
+    ASSERT_NE(info, nullptr);
+    ASSERT_FALSE(info->error_findings.empty());
+    for (const auto& f : info->error_findings) {
+        EXPECT_EQ(f.severity, FindingSeverity::Low) << to_string(f.signal);
+    }
+}
+
+// -- Grammar gaps surfaced by the corpora -------------------------------------
+
+// sinatra dispatch!: `rescue ::Exception => e; invoke { handle_exception!(e) }`
+// was catch-and-continue — the error is handed to a handler inside a block.
+TEST_F(SideEffectExtraction, RubyRescueHandingTheErrorToABlockCallIsPropagation) {
+    const auto* info = analyze(Language::Ruby, ".rb",
+                               "def dispatch!\n"
+                               "  route!\n"
+                               "rescue ::Exception => e\n"
+                               "  invoke { handle_exception!(e) }\n"
+                               "end\n",
+                               "dispatch!");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::CatchAndContinue), 0);
+}
+
+// sinatra last_modified: `rescue ArgumentError` followed by `end` is an empty
+// rescue; it read as catch-and-continue because the body was not found.
+TEST_F(SideEffectExtraction, RubyEmptyRescueIsAnEmptyCatch) {
+    const auto* info = analyze(Language::Ruby, ".rb",
+                               "def last_modified(time)\n"
+                               "  since = Time.httpdate(time).to_i\n"
+                               "rescue ArgumentError\n"
+                               "end\n",
+                               "last_modified");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::EmptyCatch), 1);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::CatchAndContinue), 0);
+}
+
+// guzzle createHeaderFn: `$easy->createResponseException = $e; return -1;`
+// stores the error for the caller. PHP's caught variable is a variable_name
+// node, which the header scan did not recognize.
+TEST_F(SideEffectExtraction, PhpStoringTheCaughtErrorIsPropagation) {
+    const auto* info = analyze(Language::PHP, ".php",
+                               "<?php\n"
+                               "function run($easy) {\n"
+                               "  try { $easy->createResponse(); } catch (\\Throwable $e) {\n"
+                               "    $easy->createResponseException = $e;\n"
+                               "    return -1;\n"
+                               "  }\n"
+                               "}\n",
+                               "run");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::ErrorToSentinel), 0);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::BroadCatch), 1);
+}
+
+// -- Go: an explicit discard is errcheck's default exclusion --------------------
+//
+// `_ = w.Close()` is the developer writing "I know". errcheck, the Go
+// community's own tool, does not report it unless asked (-blank). pocketbase
+// had 29 of these, every one a cleanup or best-effort call. Reported at low;
+// inside a defer it is the cleanup idiom and not reported at all.
+
+TEST_F(SideEffectExtraction, GoExplicitDiscardIsLow) {
+    const auto* info = analyze(Language::Go, ".go",
+                               "package p\n"
+                               "func f(w io.Closer) {\n"
+                               "\t_ = w.Close()\n"
+                               "}\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    ASSERT_EQ(count_findings(info->error_findings, EhSignal::DroppedError), 1);
+    EXPECT_EQ(info->error_findings[0].severity, FindingSeverity::Low);
+}
+
+TEST_F(SideEffectExtraction, GoDeferredExplicitDiscardIsNotReported) {
+    const auto* info = analyze(Language::Go, ".go",
+                               "package p\n"
+                               "func f(w io.Closer) {\n"
+                               "\tdefer func() { _ = w.Close() }()\n"
+                               "\twork()\n"
+                               "}\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::DroppedError), 0);
+}
+
 }  // namespace
 }  // namespace lci
