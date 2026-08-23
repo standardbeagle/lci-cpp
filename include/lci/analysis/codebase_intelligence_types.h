@@ -176,6 +176,9 @@ struct ErrorHandlingSummary {
     /// function can report an error perfectly and still lose the data.
     int uncompensated{};
     int irreversible_first{};
+    /// Findings silenced by `lci-disable*` directives. Printed when non-zero
+    /// so a clean report and a silenced one do not look the same.
+    int suppressed{};
     int functions_scored{};
     std::vector<EhFindingEntry> findings;  ///< severity desc, file, line
     std::vector<EhExposureEntry> exposure;

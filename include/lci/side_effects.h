@@ -566,6 +566,9 @@ struct SideEffectInfo {
 
     // Error-handling + resource findings (sorted by line; deterministic).
     std::vector<EhFinding> error_findings;
+    /// Findings a `lci-disable*` directive removed from the two lists above.
+    /// Counted so the report can say how many were silenced.
+    int suppressed_findings{};
     std::vector<EhFinding> resource_findings;
     std::vector<ResourceOp> resource_acquires;
     std::vector<ResourceOp> resource_releases;

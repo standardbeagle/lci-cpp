@@ -770,9 +770,10 @@ SideEffectInfo SideEffectAnalyzer::end_function() {
     // report printed, so it is matched against the finished findings.
     if (!suppressions_.empty()) {
         auto drop = [&](std::vector<EhFinding>& v) {
-            std::erase_if(v, [&](const EhFinding& f) {
-                return suppressions_.suppresses(f.line, to_string(f.signal));
-            });
+            info.suppressed_findings += static_cast<int>(
+                std::erase_if(v, [&](const EhFinding& f) {
+                    return suppressions_.suppresses(f.line, to_string(f.signal));
+                }));
         };
         drop(info.error_findings);
         drop(info.resource_findings);

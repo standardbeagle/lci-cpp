@@ -342,9 +342,11 @@ full list). Separate several with commas or spaces. A directive with no rule
 list disables every rule on its range. An unknown rule name is inert, so a
 directive written for a newer lci does not break an older one.
 
-A suppressed finding is gone from the count, the score and the `exposure:`
-paths; nothing marks the gap. Comment the reason next to the directive the way
-you would for any other linter.
+A suppressed finding is gone from the findings list, the score and the
+`exposure:` paths. The header line says how many were silenced
+(`suppressed=3`, omitted when zero), so a silenced report never reads as a
+clean one. Comment the reason next to the directive the way you would for any
+other linter.
 
 ## Choosing what gets scored
 

@@ -2149,5 +2149,20 @@ TEST_F(SideEffectExtraction, PhpMethodCallHandoffIsPropagation) {
     EXPECT_EQ(count_findings(info->error_findings, EhSignal::CatchAndContinue), 0);
 }
 
+// A silenced finding is counted, so the report can print `suppressed=N`
+// and a silenced report never looks like a clean one.
+TEST_F(SideEffectExtraction, SuppressedFindingsAreCounted) {
+    const auto* info = analyze(Language::JavaScript, ".js",
+                               "function f() {\n"
+                               "  // lci-disable-next-line empty-catch\n"
+                               "  try { g(); } catch (e) { }\n"
+                               "  try { h(); } catch (e) { }\n"
+                               "}\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(info->suppressed_findings, 1);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::EmptyCatch), 1);
+}
+
 }  // namespace
 }  // namespace lci

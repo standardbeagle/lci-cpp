@@ -189,6 +189,7 @@ ErrorHandlingAnalyzer::Result ErrorHandlingAnalyzer::analyze(
     int handled = 0;
     int swallow_sites = 0;
     int unchecked_errors = 0;
+    int suppressed = 0;
     int uncompensated = 0;
     int irreversible_first = 0;
     int acquisitions = 0;
@@ -226,6 +227,7 @@ ErrorHandlingAnalyzer::Result ErrorHandlingAnalyzer::analyze(
         res_by_module[u.pkg].first += res_score;
         res_by_module[u.pkg].second += 1;
 
+        suppressed += info.suppressed_findings;
         for (const auto& f : info.error_findings) {
             result.errors.findings.push_back(to_entry(u, f));
             if (f.signal == EhSignal::DroppedError) ++unchecked_errors;
@@ -302,6 +304,7 @@ ErrorHandlingAnalyzer::Result ErrorHandlingAnalyzer::analyze(
         throwers > 0 ? static_cast<double>(handled) / throwers : 0.0;
     result.errors.swallow_sites = swallow_sites;
     result.errors.unchecked_errors = unchecked_errors;
+    result.errors.suppressed = suppressed;
     result.errors.uncompensated = uncompensated;
     result.errors.irreversible_first = irreversible_first;
     result.resources.acquisitions = acquisitions;

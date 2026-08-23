@@ -184,6 +184,7 @@ nlohmann::json error_handling_to_json(const ErrorHandlingSummary& s) {
     j["throwers"] = s.throwers;
     j["handled_ratio"] = s.handled_ratio;
     j["swallow_sites"] = s.swallow_sites;
+    if (s.suppressed > 0) j["suppressed"] = s.suppressed;
     j["unchecked_errors"] = s.unchecked_errors;
     j["uncompensated"] = s.uncompensated;
     j["irreversible_first"] = s.irreversible_first;
@@ -1238,7 +1239,10 @@ void emit_error_handling(std::ostringstream& out,
     out << "throwers=" << s.throwers
         << " handled_ratio=" << fmt2(s.handled_ratio)
         << " swallow_sites=" << s.swallow_sites
-        << " unchecked_errors=" << s.unchecked_errors << "\n";
+        << " unchecked_errors=" << s.unchecked_errors;
+    // A silenced report must not look like a clean one.
+    if (s.suppressed > 0) out << " suppressed=" << s.suppressed;
+    out << "\n";
     // Undo cost — what an error would leave half-done. Emitted only when
     // there is some, so a codebase that changes no state keeps the historical
     // two-line shape.
