@@ -1271,5 +1271,339 @@ TEST_F(SideEffectExtraction, PythonFinallyCloseIsGuardedRelease) {
     EXPECT_TRUE(info->resource_findings.empty());
 }
 
+// ---------------------------------------------------------------------------
+// Second calibration round (trpc / fastapi hand-read, 2026-08-23). Each case
+// is a verbatim shape that reported as a swallow and was not one.
+// ---------------------------------------------------------------------------
+
+// `result = [getTRPCErrorFromUnknown(cause), undefined]` — trpc
+// resolveResponse. A callee whose NAME contains "error" is not a logger; the
+// error is wrapped and assigned out of the block. The old rule read any
+// "error" substring as a reporter, which also caught isAbortError(cause),
+// errors.push(cause) (via the `errors` qualifier) and opts.onError(...).
+TEST_F(SideEffectExtraction, JsErrorNamedWrapperIsPropagationNotLog) {
+    const auto* info = analyze(Language::JavaScript, ".js",
+                               "function f(cb) {\n"
+                               "  let result;\n"
+                               "  try { g(); } catch (cause) {\n"
+                               "    result = [getTRPCErrorFromUnknown(cause), undefined];\n"
+                               "  }\n"
+                               "  return result;\n"
+                               "}\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    EXPECT_TRUE(info->error_findings.empty());
+}
+
+TEST_F(SideEffectExtraction, JsPushingTheCauseIntoACollectionIsPropagation) {
+    const auto* info = analyze(Language::JavaScript, ".js",
+                               "function f(errors) {\n"
+                               "  try { g(); } catch (cause) { errors.push(cause); }\n"
+                               "}\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    EXPECT_TRUE(info->error_findings.empty());
+}
+
+TEST_F(SideEffectExtraction, JsErrorCallbackOnOptsIsPropagation) {
+    const auto* info = analyze(Language::JavaScript, ".js",
+                               "function f(opts) {\n"
+                               "  try { g(); } catch (cause) { opts.onError?.({ error: cause }); }\n"
+                               "}\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    EXPECT_TRUE(info->error_findings.empty());
+}
+
+// Real loggers keep their credit: log.error(e), logger.warn(e), console.error.
+TEST_F(SideEffectExtraction, JsLogDotErrorIsStillALog) {
+    const auto* info = analyze(Language::JavaScript, ".js",
+                               "function f() {\n"
+                               "  try { g(); } catch (e) { log.error('x', e); }\n"
+                               "}\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::LogAndSwallow), 1);
+}
+
+// Assigning the caught error to an outer binding hands it to whoever reads
+// that binding — the same exit as a callback, spelled as a store.
+TEST_F(SideEffectExtraction, JsAssigningTheCauseOutIsPropagation) {
+    const auto* info = analyze(Language::JavaScript, ".js",
+                               "function f() {\n"
+                               "  let failure = null;\n"
+                               "  try { g(); } catch (e) { failure = e; }\n"
+                               "  return failure;\n"
+                               "}\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    EXPECT_TRUE(info->error_findings.empty());
+}
+
+// trpc ws adapter: `new TRPCError({ cause })` + respond(...) + `return []`.
+// The error was wrapped and reported before the sentinel; the sentinel is
+// the value of a handled failure, not a renamed one.
+TEST_F(SideEffectExtraction, JsSentinelAfterPropagationIsNotASwallow) {
+    const auto* info = analyze(Language::JavaScript, ".js",
+                               "function parse(data, respond) {\n"
+                               "  try { return decode(data); } catch (cause) {\n"
+                               "    const error = new TRPCError({ code: 'PARSE_ERROR', cause });\n"
+                               "    respond({ id: null, error });\n"
+                               "    return [];\n"
+                               "  }\n"
+                               "}\n",
+                               "parse");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::ErrorToSentinel), 0);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::CatchAndContinue), 0);
+}
+
+// A guard that returns on one recognized condition and forwards every other
+// error has not swallowed anything (trpc sseStreamProducer).
+TEST_F(SideEffectExtraction, JsIgnoreOneConditionForwardTheRestIsClean) {
+    const auto* info = analyze(Language::JavaScript, ".js",
+                               "function* f(opts) {\n"
+                               "  try { g(); } catch (cause) {\n"
+                               "    if (isAbortError(cause)) { return; }\n"
+                               "    const error = getTRPCErrorFromUnknown(cause);\n"
+                               "    yield opts.formatError({ error });\n"
+                               "  }\n"
+                               "}\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::CatchAndContinue), 0);
+}
+
+// Python: `errors.append(get_missing_field_error(loc))` collects a validation
+// error for the caller; it is neither a log nor a swallow.
+TEST_F(SideEffectExtraction, PyCollectingAnErrorIsPropagation) {
+    const auto* info = analyze(Language::Python, ".py",
+                               "def f(body, errors):\n"
+                               "    try:\n"
+                               "        v = body.get('x')\n"
+                               "    except AttributeError as e:\n"
+                               "        errors.append(get_missing_field_error(e))\n"
+                               "        return\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::LogAndSwallow), 0);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::CatchAndContinue), 0);
+}
+
+// -- Typed catches of normal conditions ---------------------------------------
+//
+// `except TimeoutError: send keepalive`, `except EndOfStream: pass`,
+// `except WebSocketDisconnect: cleanup()` (fastapi). The exception type names
+// the normal end of a protocol, not a failure; the handler is the protocol.
+
+TEST_F(SideEffectExtraction, PyTimeoutAsKeepaliveTriggerIsNotASwallow) {
+    const auto* info = analyze(Language::Python, ".py",
+                               "async def f(stream, send):\n"
+                               "    try:\n"
+                               "        data = await stream.receive()\n"
+                               "    except TimeoutError:\n"
+                               "        await send(KEEPALIVE)\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    EXPECT_TRUE(info->error_findings.empty());
+}
+
+TEST_F(SideEffectExtraction, PyEndOfStreamPassIsNotAnEmptyCatch) {
+    const auto* info = analyze(Language::Python, ".py",
+                               "async def f(stream):\n"
+                               "    try:\n"
+                               "        await stream.receive()\n"
+                               "    except anyio.EndOfStream:\n"
+                               "        pass\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    EXPECT_TRUE(info->error_findings.empty());
+}
+
+TEST_F(SideEffectExtraction, PyWebSocketDisconnectHandlerIsNotASwallow) {
+    const auto* info = analyze(Language::Python, ".py",
+                               "async def f(ws, manager):\n"
+                               "    try:\n"
+                               "        while True:\n"
+                               "            await ws.receive_text()\n"
+                               "    except WebSocketDisconnect:\n"
+                               "        manager.disconnect(ws)\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    EXPECT_TRUE(info->error_findings.empty());
+}
+
+// A specific type that is NOT a normal condition still counts.
+TEST_F(SideEffectExtraction, PyTypedIoErrorSwallowStillCounts) {
+    const auto* info = analyze(Language::Python, ".py",
+                               "def f(path):\n"
+                               "    try:\n"
+                               "        return open(path).read()\n"
+                               "    except IOError:\n"
+                               "        retry()\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::CatchAndContinue), 1);
+}
+
+// -- broad-catch that keeps the cause -----------------------------------------
+//
+// fastapi: `except Exception as e: raise HTTPException(...) from e`. The
+// breadth is the point (translate anything into the API's error) and the
+// cause chain survives. Nothing is lost, so nothing is reported.
+
+TEST_F(SideEffectExtraction, PyBroadCatchRethrownWithCauseIsClean) {
+    const auto* info = analyze(Language::Python, ".py",
+                               "def f():\n"
+                               "    try:\n"
+                               "        g()\n"
+                               "    except Exception as e:\n"
+                               "        raise HTTPException(400) from e\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    EXPECT_TRUE(info->error_findings.empty());
+}
+
+TEST_F(SideEffectExtraction, PyBroadCatchThatSwallowsStillReports) {
+    const auto* info = analyze(Language::Python, ".py",
+                               "def f():\n"
+                               "    try:\n"
+                               "        g()\n"
+                               "    except Exception:\n"
+                               "        ctx = None\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::BroadCatch), 1);
+}
+
+// -- try*-named sentinel return, TS `catch {}` without a binding -------------
+//
+// trpc tryImportRouter: `catch { return null; }` with a leading comment. The
+// try prefix exempts the sentinel; the comment must not turn it into a
+// catch-and-continue.
+TEST_F(SideEffectExtraction, TsTryPrefixedSentinelWithCommentIsClean) {
+    const auto* info = analyze(Language::TypeScript, ".ts",
+                               "async function tryImportRouter(p: string): Promise<Router | null> {\n"
+                               "  try {\n"
+                               "    const mod = await import(p);\n"
+                               "    return findRouterExport(mod);\n"
+                               "  } catch {\n"
+                               "    // Dynamic import not available — fall back.\n"
+                               "    return null;\n"
+                               "  }\n"
+                               "}\n",
+                               "tryImportRouter");
+    ASSERT_NE(info, nullptr);
+    EXPECT_TRUE(info->error_findings.empty());
+}
+
+// -- partial-write-risk on object factories -----------------------------------
+//
+// trpc createRouterFactory: ten `createLazyLoader(...)` calls assigning into a
+// local record. A bare `create*` call is a factory far more often than a
+// durable write in JS/TS; only a receiver (`db.createUser`) says otherwise.
+TEST_F(SideEffectExtraction, JsBareCreateFactoriesAreNotAPartialWrite) {
+    const auto* info = analyze(Language::JavaScript, ".js",
+                               "function build(keys) {\n"
+                               "  const out = {};\n"
+                               "  out.a = createLazyLoader(keys[0]);\n"
+                               "  out.b = createLazyLoader(keys[1]);\n"
+                               "  try { check(out); } catch (e) { throw e; }\n"
+                               "  out.c = createLazyLoader(keys[2]);\n"
+                               "  return out;\n"
+                               "}\n",
+                               "build");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::PartialWriteRisk), 0);
+}
+
+TEST_F(SideEffectExtraction, JsQualifiedCreateCallsStillTear) {
+    const auto* info = analyze(Language::JavaScript, ".js",
+                               "function place(db, order) {\n"
+                               "  db.createOrder(order);\n"
+                               "  if (!order.ok) { throw new Error('bad'); }\n"
+                               "  db.createShipment(order);\n"
+                               "}\n",
+                               "place");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::PartialWriteRisk), 1);
+}
+
+// -- Suppression directives ---------------------------------------------------
+//
+// The eslint / clang-tidy shape: `lci-disable-next-line <rule>`,
+// `lci-disable-line <rule>`, and a `lci-disable <rule>` ... `lci-enable`
+// block, in any comment. A rule list is optional; bare disables everything.
+
+TEST_F(SideEffectExtraction, DisableNextLineSuppressesThatRule) {
+    const auto* info = analyze(Language::JavaScript, ".js",
+                               "function f() {\n"
+                               "  // lci-disable-next-line empty-catch\n"
+                               "  try { g(); } catch (e) { }\n"
+                               "}\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    EXPECT_TRUE(info->error_findings.empty());
+}
+
+TEST_F(SideEffectExtraction, DisableNextLineForAnotherRuleDoesNotSuppress) {
+    const auto* info = analyze(Language::JavaScript, ".js",
+                               "function f() {\n"
+                               "  // lci-disable-next-line broad-catch\n"
+                               "  try { g(); } catch (e) { }\n"
+                               "}\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::EmptyCatch), 1);
+}
+
+TEST_F(SideEffectExtraction, DisableLineTrailingCommentSuppresses) {
+    const auto* info = analyze(Language::JavaScript, ".js",
+                               "function f() {\n"
+                               "  try { g(); } catch (e) { } // lci-disable-line\n"
+                               "}\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    EXPECT_TRUE(info->error_findings.empty());
+}
+
+TEST_F(SideEffectExtraction, DisableBlockSuppressesUntilEnable) {
+    const auto* info = analyze(Language::Python, ".py",
+                               "# lci-disable empty-catch, catch-and-continue\n"
+                               "def f():\n"
+                               "    try:\n"
+                               "        g()\n"
+                               "    except IOError:\n"
+                               "        pass\n"
+                               "# lci-enable\n"
+                               "def h():\n"
+                               "    try:\n"
+                               "        g()\n"
+                               "    except IOError:\n"
+                               "        pass\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    EXPECT_TRUE(info->error_findings.empty());
+    const SideEffectInfo* after = nullptr;
+    for (const auto& [key, i] : analyzer_->results()) {
+        if (i.function_name == "h") after = &i;
+    }
+    ASSERT_NE(after, nullptr);
+    EXPECT_EQ(count_findings(after->error_findings, EhSignal::EmptyCatch), 1);
+}
+
+TEST_F(SideEffectExtraction, BlockCommentDirectiveIsRecognized) {
+    const auto* info = analyze(Language::JavaScript, ".js",
+                               "/* lci-disable partial-write-risk */\n"
+                               "function place(db, order) {\n"
+                               "  db.createOrder(order);\n"
+                               "  if (!order.ok) { throw new Error('bad'); }\n"
+                               "  db.createShipment(order);\n"
+                               "}\n",
+                               "place");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::PartialWriteRisk), 0);
+}
+
 }  // namespace
 }  // namespace lci
