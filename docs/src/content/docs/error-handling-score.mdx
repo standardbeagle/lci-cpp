@@ -92,8 +92,8 @@ above, so the table is the whole weighting model.
 |---|---|---|
 | `empty-catch` | high | 0.9 |
 | `finally-discards-exception` | high | 0.85 |
-| `catch-and-continue` | high | 0.7 |
-| `error-to-sentinel` | med | 0.7 |
+| `catch-and-continue` | high | 0.7 (med 0.5 on a typed catch) |
+| `error-to-sentinel` | med | 0.7 (0.5 on a typed catch) |
 | `log-and-swallow` | med | 0.75 message-only, 0.5 full error |
 
 These five make up `swallow_sites`, and they are the set that feeds the
@@ -140,7 +140,7 @@ Whether a projection is lossy depends on the language rather than the spelling:
 |---|---|---|
 | `uncompensated-transaction` | high | 0.8 |
 | `partial-write-risk` | high | 0.6 |
-| `dropped-error` | high | 0.9 |
+| `dropped-error` | low | 0.5 |
 | `irreversible-before-fallible` | low | 0.5 |
 
 Reported on their own line, and counted apart from `swallow_sites` because a
@@ -151,8 +151,14 @@ undo_cost: uncompensated=2 irreversible_first=1
 ```
 
 `dropped-error` is Go-specific: `_ = doWork()` discards the sole result of a
-call. Only that form fires. A blank in a multi-value assign (`v, _ := f()`) is
-as often an ok-bool as an error, and reporting it was mostly noise.
+call. Only that form fires, and at low: the explicit blank is the developer
+writing "I know", which is why errcheck, the Go community's own tool, excludes
+it unless asked (`-blank`). pocketbase's 29 were all cleanup or best-effort
+calls. Inside a `defer` it is the cleanup idiom and not reported. A blank in a
+multi-value assign (`v, _ := f()`) is as often an ok-bool as an error and
+never fires. The form errcheck does report by default, a bare `f()` statement
+whose error return is never bound, needs return types this analysis does not
+have; that is a known gap, not a refusal.
 
 `uncompensated-transaction` fires on a `begin` and a `commit` with no rollback
 on any path. `partial-write-risk` needs two or more durable state changes with
@@ -236,6 +242,37 @@ torn write. In JS and TS an unqualified `createX(...)` constructs far more
 often than it persists. A receiver (`db.createOrder`) is what says the thing
 outlives the call, and only the qualified form counts toward
 `partial-write-risk`.
+
+**The caught variable's name is the developer's verdict.** `catch
+(NumberFormatException ignored)` in gson, `catch (_: Exception)` in okhttp.
+IntelliJ, detekt and checkstyle all read `ignored`, `_`, `unused` and
+`expected` as the explicit discard marker, and so does lci: no swallow signal
+fires on that site.
+
+**The function's name is its contract.** okhttp's `closeQuietly`,
+`ignoreIoExceptions`, `toHttpUrlOrNull` and `buildIfSupported` promise that
+failures are absorbed; the catch inside is the promise being kept. The sentinel
+rule has read the `is`/`try`/`*OrNull` family since express and zod; the same
+names, plus `ignore*`, `*Quietly`, `*Silently` and `*IfSupported`, now clear
+every swallow signal in the function, whatever the catch body looks like.
+
+**Teardown may not throw.** .NET's `Dispose` guideline, PHP's `__destruct`,
+Java's `close()`: a throw from cleanup masks the original failure or kills a
+finalizer, so catch-and-continue there is the documented behavior of the
+method. serilog's sinks and guzzle's curl handler both do it on purpose.
+Findings inside `Dispose`, `__destruct`, `close`, `finalize`, `shutdown`,
+`teardown` and `cleanup` are reported, capped at low.
+
+**A typed catch that recovers is the anticipated-failure shape.** `except
+NameError: signature = fallback(call)` or `catch (NumberFormatException e) {
+return -1; }` names the failure the author expected and writes what happens
+then. The cause is still gone, so `catch-and-continue` and `error-to-sentinel`
+still fire, at med and with the confidence cut to 0.5 (detail `typed
+recovery` / `typed`). A bare `catch (e) { recover(); }` stays high.
+
+**A handler that logs and then recovers has reported the error.** Logging
+beside other work used to read as a blind `catch-and-continue` at high. The
+error was reported, then handled: that is `log-and-swallow`.
 
 **Mutually exclusive branches are not a sequence.** gin's `SetMode` stores four
 modes in four switch cases around a `panic`. Only one arm runs, so they cannot
