@@ -497,8 +497,9 @@ struct WorkOp {
     /// gin's SetMode stores four modes in four switch cases; without this it
     /// read as four sequential writes around a panic.
     uint32_t branch_id{};
-    /// Called through a receiver (`db.createOrder`) rather than bare.
-    bool qualified{};
+    /// The receiver's last segment (`db` in `db.createOrder`), empty when
+    /// the call is bare. Decides whether an ambiguous verb is durable.
+    std::string qualifier;
 };
 
 /// Exception safety characteristics of a function.

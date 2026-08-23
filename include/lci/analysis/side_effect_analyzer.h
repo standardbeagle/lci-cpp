@@ -134,7 +134,7 @@ class SideEffectAnalyzer {
     /// `branch_id` is the enclosing alternative arm (WorkOp::branch_id).
     void record_call_site_resources(std::string_view callee, int line,
                                     bool guarded, uint32_t branch_id = 0,
-                                    bool qualified = false);
+                                    std::string_view qualifier = {});
 
     // -- Results --------------------------------------------------------------
 

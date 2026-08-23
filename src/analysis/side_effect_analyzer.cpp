@@ -128,6 +128,41 @@ bool is_bare_ambiguous_verb(std::string_view callee) {
     return false;
 }
 
+// A receiver that names something state lives in. `db.begin()`,
+// `session.flush()`, `repo.createOrder()` are durable; `line.begin()` is an
+// iterator, `std::cout.flush()` drains a stream, `crypto.createHash()` is a
+// factory, `app.add_option()` is a builder. The verb is the same; only the
+// receiver tells them apart, so the ambiguous verbs require one.
+bool looks_like_persistence_receiver(std::string_view q) {
+    if (q.empty()) return false;
+    std::string low(q);
+    for (auto& c : low) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    for (std::string_view n :
+         {"db", "database", "repo", "repository", "store", "dao", "orm",
+          "prisma", "knex", "sequelize", "mongo", "sql", "session", "tx",
+          "txn", "transaction", "conn", "connection", "client", "api",
+          "service", "collection", "table", "model", "entity", "entities",
+          "em", "unitofwork", "uow", "queue", "cache", "bucket", "storage"}) {
+        if (low == n) return true;
+        // `userRepo`, `orderService`, `dbConn`: the noun at either end.
+        if (low.size() > n.size() &&
+            (low.compare(low.size() - n.size(), n.size(), n) == 0 ||
+             low.compare(0, n.size(), n) == 0)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Verbs that are durable only on a persistence receiver. Elsewhere they are
+// iterators, streams, factories and builders.
+bool verb_needs_a_store(std::string_view callee) {
+    for (std::string_view v : {"flush", "create", "add_", "register"}) {
+        if (iprefix(callee, v)) return true;
+    }
+    return false;
+}
+
 WorkKind classify_work_callee(std::string_view callee) {
     if (callee.empty()) return WorkKind::None;
 
@@ -232,11 +267,15 @@ void classify_work_pairing(const std::vector<WorkOp>& ops,
             return false;
         }
         if (is_bare_ambiguous_verb(op.callee)) return false;
-        // `createLazyLoader(...)`, `createHooks(...)`: an unqualified create*
-        // is a factory far more often than a durable write in JS/TS (trpc's
-        // router and hook builders read as ten-way torn writes). A receiver
-        // — `db.createOrder` — is what says the thing outlives the call.
-        if (!op.qualified && iprefix(op.callee, "create")) return false;
+        // `createLazyLoader(...)`, `crypto.createHash(...)`,
+        // `app.add_option(...)`: create/add_/register are factories and
+        // builders unless the receiver is a store (trpc's router builders,
+        // lci's own CLI11 main() with 45 add_option calls, an npm
+        // postinstall's createHash all read as torn writes).
+        if (verb_needs_a_store(op.callee) &&
+            !looks_like_persistence_receiver(op.qualifier)) {
+            return false;
+        }
         return true;
     };
 
@@ -256,9 +295,18 @@ void classify_work_pairing(const std::vector<WorkOp>& ops,
                 if (op.guarded) has_guarded_undo = true;
                 break;
             case WorkKind::TxBegin:
+                // `line.begin()` is an iterator, but the finding needs a
+                // commit as well, and `commit` is unambiguous: the pair is
+                // what disambiguates begin, so begin itself is not gated.
                 if (begin_line == 0) begin_line = op.line;
                 break;
             case WorkKind::TxCommit:
+                // `std::cout.flush()` drains a stream; `session.flush()`
+                // commits. Bare flush needs a store; commit never does.
+                if (iprefix(op.callee, "flush") && op.callee.size() == 5 &&
+                    !looks_like_persistence_receiver(op.qualifier)) {
+                    break;
+                }
                 commit_line = op.line;
                 break;
             default:
@@ -402,11 +450,34 @@ bool name_promises_a_sentinel(std::string_view fn) {
 // behavior of the method. serilog's sinks catch-log-continue in Dispose on
 // purpose; guzzle's CurlMultiHandler::__destruct swallows Throwable.
 bool is_cleanup_method(std::string_view fn) {
+    // Strip a C++ qualifier: `IndexServer::shutdown_locked`.
+    if (auto q = fn.rfind("::"); q != std::string_view::npos) fn = fn.substr(q + 2);
     for (std::string_view n :
-         {"dispose", "disposeasync", "__destruct", "close", "closeasync",
-          "finalize", "shutdown", "teardown", "cleanup", "destroy",
-          "release", "stop"}) {
-        if (fn.size() == n.size() && iprefix(fn, n)) return true;
+         {"dispose", "__destruct", "close", "finalize", "shutdown",
+          "teardown", "cleanup", "destroy", "release"}) {
+        // As a whole word in snake or camel case: shutdown_locked,
+        // handle_shutdown, onClose, closeQuietly — not "closest".
+        for (size_t at = 0; (at = fn.find(n, at)) != std::string_view::npos; ++at) {
+            // Case-insensitive find is not available; check both spellings.
+            bool start_ok = at == 0 || fn[at - 1] == '_' ||
+                            !std::isalpha(static_cast<unsigned char>(fn[at - 1])) ||
+                            std::islower(static_cast<unsigned char>(fn[at - 1]));
+            size_t end = at + n.size();
+            bool end_ok = end == fn.size() || fn[end] == '_' ||
+                          std::isupper(static_cast<unsigned char>(fn[end])) ||
+                          !std::isalpha(static_cast<unsigned char>(fn[end]));
+            if (start_ok && end_ok) return true;
+        }
+        // Capitalized spelling (Dispose, Close, onClose).
+        std::string cap(n);
+        cap[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(cap[0])));
+        for (size_t at = 0; (at = fn.find(cap, at)) != std::string_view::npos; ++at) {
+            size_t end = at + n.size();
+            bool end_ok = end == fn.size() || fn[end] == '_' ||
+                          std::isupper(static_cast<unsigned char>(fn[end])) ||
+                          !std::isalpha(static_cast<unsigned char>(fn[end]));
+            if (end_ok) return true;
+        }
     }
     return false;
 }
@@ -454,7 +525,15 @@ void classify_catch_site(const CatchSiteInfo& site, std::string_view fn_name,
     const bool kept_cause_on_rethrow = site.has_rethrow && site.rethrow_uses_cause;
 
     if (site.body_empty) {
-        add(EhSignal::EmptyCatch, FindingSeverity::High, 0.9);
+        // `catch (const json::exception&) { /* litter */ }` names the
+        // failure it ignores; `catch (...) {}` and `except: pass` name
+        // nothing. Same split as typed recovery.
+        if (site.specific_type) {
+            add(EhSignal::EmptyCatch, FindingSeverity::Med, 0.7);
+            out.back().detail += ", typed";
+        } else {
+            add(EhSignal::EmptyCatch, FindingSeverity::High, 0.9);
+        }
     } else if (site.has_rethrow) {
         if (!site.rethrow_uses_cause)
             add(EhSignal::RethrowNoCause, FindingSeverity::Low, 0.4);
@@ -896,7 +975,7 @@ void SideEffectAnalyzer::record_dropped_error(int line,
 void SideEffectAnalyzer::record_call_site_resources(std::string_view callee,
                                                     int line, bool guarded,
                                                     uint32_t branch_id,
-                                                    bool qualified) {
+                                                    std::string_view qualifier) {
     if (!current_func_) return;
     // Undo-cost model: what state this call changed, in source order. Kept
     // beside the resource pairing because both answer "what is outstanding
@@ -904,7 +983,7 @@ void SideEffectAnalyzer::record_call_site_resources(std::string_view callee,
     if (WorkKind wk = classify_work_callee(callee); wk != WorkKind::None) {
         current_func_->work_ops.push_back(
             WorkOp{std::string(callee), line, wk, guarded, branch_id,
-                   qualified});
+                   std::string(qualifier)});
     }
     switch (classify_resource_callee(callee)) {
         case ResourceOpKind::Acquire:

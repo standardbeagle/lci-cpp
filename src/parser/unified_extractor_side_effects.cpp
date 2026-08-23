@@ -137,6 +137,35 @@ bool header_names_a_normal_condition(std::string_view header) {
     return false;
 }
 
+// Splits `recv.method`, `ptr->method`, `ns::fn` into receiver and bare name.
+// The receiver is its LAST segment (`db` in `ctx.db.save`). Distinct from the
+// resolver's '.'-only split: C++'s `update_cmd->add_flag` otherwise reads as
+// a single callee beginning with "update".
+struct CalleeParts {
+    std::string_view qualifier;
+    std::string_view bare;
+};
+CalleeParts split_callee(std::string_view callee) {
+    size_t cut = std::string_view::npos;
+    size_t sep_len = 0;
+    for (auto [sep, len] : {std::pair{std::string_view("."), size_t{1}},
+                            std::pair{std::string_view("->"), size_t{2}},
+                            std::pair{std::string_view("::"), size_t{2}}}) {
+        size_t at = callee.rfind(sep);
+        if (at != std::string_view::npos &&
+            (cut == std::string_view::npos || at > cut)) {
+            cut = at;
+            sep_len = len;
+        }
+    }
+    if (cut == std::string_view::npos || cut + sep_len >= callee.size()) {
+        return {{}, callee};
+    }
+    std::string_view qualifier = callee.substr(0, cut);
+    auto q = split_callee(qualifier);
+    return {q.bare, callee.substr(cut + sep_len)};
+}
+
 // Throw-shaped node inside a catch body, across the grammars we classify.
 bool is_throw_node(std::string_view t) {
     return t == "throw_statement" || t == "throw_expression" ||
@@ -147,7 +176,10 @@ bool is_call_node(std::string_view t) {
     return t == "call_expression" || t == "call" || t == "method_invocation" ||
            t == "invocation_expression" || t == "function_call_expression" ||
            // `new TRPCError({ cause })` hands the error to a constructor.
-           t == "new_expression" || t == "object_creation_expression";
+           t == "new_expression" || t == "object_creation_expression" ||
+           // PHP: `$deferred->reject($e)`, `Foo::bar($e)`, `$x?->f($e)`.
+           t == "member_call_expression" || t == "scoped_call_expression" ||
+           t == "nullsafe_member_call_expression";
 }
 
 // A store or a yield whose right-hand side is the caught error: the error
@@ -473,9 +505,10 @@ void UnifiedExtractor::process_side_effect_node(
 
         // Resource acquire/release pairing: classify the bare callee; a call
         // under a defer/finally/ensure/using/with scope carries guard credit.
+        auto parts = split_callee(callee);
         side_effects_->record_call_site_resources(
-            bare, line, se_guard_depth_ > 0, se_branch_id_,
-            /*qualified=*/bare.data() != callee.data());
+            parts.bare, line, se_guard_depth_ > 0, se_branch_id_,
+            parts.qualifier);
         return;
     }
 }
@@ -823,29 +856,7 @@ void UnifiedExtractor::process_catch_site(TSNode node,
         site.caught_type = "bare except";
     } else if (header_names_a_normal_condition(header)) {
         site.normal_condition = true;
-    } else {
-        // A capitalized word in the header is a type name: `except
-        // NameError`, `catch (IOException e)`, `rescue Foo => e`. JS's
-        // `catch (e)` and Python's bare `except:` have none.
-        for (size_t i = 0; i < header.size(); ++i) {
-            bool word_start = i == 0 || !std::isalnum(static_cast<unsigned char>(header[i - 1]));
-            if (word_start && header[i] >= 'A' && header[i] <= 'Z') {
-                site.specific_type = true;
-                // Keep the name for the finding's detail.
-                size_t j = i;
-                while (j < header.size() &&
-                       (std::isalnum(static_cast<unsigned char>(header[j])) ||
-                        header[j] == '_' || header[j] == '.' ||
-                        // Ruby's URI::InvalidURIError, not Python's `except E:`.
-                        (header[j] == ':' && j + 1 < header.size() &&
-                         header[j + 1] == ':')))
-                    j += header[j] == ':' ? 2 : 1;
-                site.caught_type = std::string(header.substr(i, j - i));
-                break;
-            }
-        }
     }
-
     // Caught variable name (for rethrow-uses-cause): field-based per grammar.
     std::string_view caught_var;
     {
@@ -874,6 +885,55 @@ void UnifiedExtractor::process_catch_site(TSNode node,
                 }
                 return true;
             });
+        }
+    }
+    // The header's non-keyword words. One word is a type with no variable
+    // (`except NameError:`, `catch (Exception)`); the fallback scan above
+    // would have taken it as the variable. Two are type and variable.
+    {
+        std::vector<std::string_view> words;
+        size_t i = 0;
+        while (i < header.size()) {
+            if (!(std::isalnum(static_cast<unsigned char>(header[i])) ||
+                  header[i] == '_' || header[i] == '$')) {
+                ++i;
+                continue;
+            }
+            size_t j = i;
+            while (j < header.size() &&
+                   (std::isalnum(static_cast<unsigned char>(header[j])) ||
+                    header[j] == '_' || header[j] == '.' || header[j] == '$' ||
+                    (header[j] == ':' && j + 1 < header.size() &&
+                     header[j + 1] == ':'))) {
+                j += header[j] == ':' ? 2 : 1;
+            }
+            std::string_view word = header.substr(i, j - i);
+            i = j;
+            bool keyword = false;
+            for (std::string_view k : {"catch", "except", "rescue", "as",
+                                       "const", "final", "var", "val",
+                                       "when", "in", "if", "_"}) {
+                if (word == k) keyword = true;
+            }
+            if (!keyword) words.push_back(word);
+        }
+        // JS/TS bind the variable through a grammar field and carry no
+        // type, so a lone word there IS the variable.
+        bool var_from_field = false;
+        {
+            TSNode p = field(node, "parameter");
+            var_from_field = !ts_node_is_null(p);
+        }
+        if (words.size() == 1 && !var_from_field && words[0] == caught_var) {
+            caught_var = {};
+        }
+        if (!site.broad_type && !site.normal_condition) {
+            for (auto w : words) {
+                if (w == caught_var || w.size() == 1) continue;
+                site.specific_type = true;
+                site.caught_type = std::string(w);
+                break;
+            }
         }
     }
     // `catch (NumberFormatException ignored)`, `catch (_: Exception)`: the
@@ -998,6 +1058,26 @@ void UnifiedExtractor::process_catch_site(TSNode node,
                 }
                 return true;
             }
+            // C++ logs through a stream: `std::cerr << "..." << e.what()`.
+            if (t == "binary_expression" && ext_ != ".py") {
+                std::string_view text = node_text(n);
+                if (text.find("<<") != std::string_view::npos &&
+                    (text.compare(0, 9, "std::cerr") == 0 ||
+                     text.compare(0, 9, "std::cout") == 0 ||
+                     text.compare(0, 9, "std::clog") == 0 ||
+                     text.compare(0, 4, "cerr") == 0 ||
+                     text.compare(0, 4, "cout") == 0 ||
+                     text.compare(0, 4, "clog") == 0 ||
+                     text.compare(0, 3, "LOG") == 0 ||
+                     text.compare(0, 3, "log") == 0)) {
+                    site.has_log_call = true;
+                    if (!caught_var.empty()) {
+                        CauseFidelity fid = cause_fidelity(n, caught_var);
+                        if (fid > site.logged_fidelity) site.logged_fidelity = fid;
+                    }
+                    return false;  // the nested << chain is this one log
+                }
+            }
             if (is_call_node(t)) {
                 TSNode func = field(n, "function");
                 if (ts_node_is_null(func)) func = field(n, "name");
@@ -1005,15 +1085,11 @@ void UnifiedExtractor::process_catch_site(TSNode node,
                 if (ts_node_is_null(func)) func = ts_node_named_child(n, 0);
                 std::string_view callee =
                     ts_node_is_null(func) ? std::string_view{} : node_text(func);
-                auto dot = callee.rfind('.');
-                std::string_view bare =
-                    (dot != std::string_view::npos && dot + 1 < callee.size())
-                        ? callee.substr(dot + 1)
-                        : callee;
+                auto parts = split_callee(callee);
+                std::string_view bare = parts.bare;
                 // `console.log` qualifies via its qualifier as well.
                 bool log = is_log_callee(bare) ||
-                           (dot != std::string_view::npos &&
-                            is_log_qualifier(callee.substr(0, dot)));
+                           is_log_qualifier(parts.qualifier);
                 if (ext_ == ".rb" && bare == "raise") return true;  // handled
                 // How much of the caught error travels into this call?
                 // Logging and propagation are tracked apart: `console.error(e)`
