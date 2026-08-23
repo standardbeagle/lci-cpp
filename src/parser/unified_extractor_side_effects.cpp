@@ -759,8 +759,22 @@ void UnifiedExtractor::process_catch_site(TSNode node,
             // (`exceptions`, `exception_variable`); an empty rescue has
             // nothing else, and the header is not a body.
             if (!is_comment_node(lt) && !is_identifier_type(lt) &&
-                lt != "exceptions" && lt != "exception_variable") {
+                lt != "exceptions" && lt != "exception_variable" &&
+                lt != "user_type") {
                 body = last;
+            }
+        }
+        // Kotlin: a catch whose only content is the anonymous `null` token
+        // (`catch (e: E) { null }`) has no statements node at all. The
+        // block's value is the sentinel; it is not an empty catch.
+        if (ts_node_is_null(body) && ext_ == ".kt") {
+            uint32_t nc = ts_node_child_count(node);
+            for (uint32_t i = 0; i < nc; ++i) {
+                TSNode c = ts_node_child(node, i);
+                if (!ts_node_is_named(c) && is_sentinel_expression(node_text(c))) {
+                    site.has_return = true;
+                    site.returns_sentinel = true;
+                }
             }
         }
     }
@@ -874,7 +888,7 @@ void UnifiedExtractor::process_catch_site(TSNode node,
 
     // Body classification.
     if (ts_node_is_null(body)) {
-        site.body_empty = true;
+        site.body_empty = !site.returns_sentinel;
     } else {
         int stmts = 0;
         uint32_t nkids = ts_node_named_child_count(body);
@@ -889,17 +903,40 @@ void UnifiedExtractor::process_catch_site(TSNode node,
         // Ruby's implicit return: the rescue body's last expression is the
         // method's value. `rescue Exception; @log` surfaces a value and
         // `rescue E; nil` a sentinel, and neither is a return node.
-        if (ext_ == ".rb" && nkids > 0) {
-            TSNode last = ts_node_named_child(body, nkids - 1);
-            std::string_view lt = get_node_type(last);
-            if (lt == "instance_variable" || lt == "identifier" ||
-                lt == "constant" || lt == "nil" || lt == "false" ||
-                lt == "true" || lt == "integer" || lt == "string" ||
-                lt == "array" || lt == "hash") {
-                site.has_return = true;
-                if (is_sentinel_expression(node_text(last)))
-                    site.returns_sentinel = true;
+        // Kotlin's try is an expression too: `catch (e: E) { null }`.
+        // Kotlin's `null` is an anonymous token, so the last child of any
+        // kind is inspected by text.
+        if ((ext_ == ".rb" || ext_ == ".kt") && ts_node_child_count(body) > 0) {
+            TSNode last = ts_node_child(body, ts_node_child_count(body) - 1);
+            // Skip the closing brace / trailing comments.
+            for (uint32_t i = ts_node_child_count(body); i > 0; --i) {
+                TSNode c = ts_node_child(body, i - 1);
+                std::string_view ct = get_node_type(c);
+                if (ct == "}" || is_comment_node(ct)) continue;
+                last = c;
+                break;
             }
+            std::string_view lt = get_node_type(last);
+            // Kotlin wraps the block's statements.
+            if (lt == "statements" && ts_node_named_child_count(last) > 0) {
+                last = ts_node_named_child(
+                    last, ts_node_named_child_count(last) - 1);
+                lt = get_node_type(last);
+            }
+            std::string_view text = node_text(last);
+            if (is_sentinel_expression(text)) {
+                site.has_return = true;
+                site.returns_sentinel = true;
+            } else if (lt == "instance_variable" || lt == "identifier" ||
+                       lt == "simple_identifier" || lt == "constant" ||
+                       lt == "true" || lt == "integer" || lt == "string" ||
+                       lt == "array" || lt == "hash" ||
+                       lt == "boolean_literal" || lt == "integer_literal" ||
+                       lt == "string_literal") {
+                site.has_return = true;
+            }
+            // An anonymous `null` is a value, not an empty body.
+            if (site.has_return) site.body_empty = false;
         }
 
         walk_subtree(body, [&](TSNode n) {
@@ -987,6 +1024,17 @@ void UnifiedExtractor::process_catch_site(TSNode node,
                 if (!caught_var.empty()) {
                     TSNode args = field(n, "arguments");
                     if (ts_node_is_null(args)) args = field(n, "argument_list");
+                    // Kotlin keeps them in call_suffix > value_arguments.
+                    if (ts_node_is_null(args)) {
+                        uint32_t nc = ts_node_named_child_count(n);
+                        for (uint32_t i = 0; i < nc; ++i) {
+                            TSNode c = ts_node_named_child(n, i);
+                            if (get_node_type(c) == "call_suffix") {
+                                args = c;
+                                break;
+                            }
+                        }
+                    }
                     if (!ts_node_is_null(args)) fid = cause_fidelity(args, caught_var);
                 }
                 if (log) {

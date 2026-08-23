@@ -372,6 +372,26 @@ void UnifiedExtractor::visit_node(TSNode node) {
     uint32_t prev_branch = se_branch_id_;
     if (side_effects_ && is_se_branch_node(node_type)) {
         se_branch_id_ = ts_node_start_byte(node);
+    } else if (side_effects_ && node_type == "control_structure_body") {
+        // Kotlin spells the else arm as a control_structure_body under the
+        // `alternative` field, not as an else_clause node (okhttp's
+        // CallServerInterceptor: one write per if/else arm read as torn).
+        TSNode parent = ts_node_parent(node);
+        if (!ts_node_is_null(parent) &&
+            get_node_type(parent) == "if_expression") {
+            // The second body of an if_expression is the else arm.
+            uint32_t nc = ts_node_named_child_count(parent);
+            bool seen_body = false;
+            for (uint32_t i = 0; i < nc; ++i) {
+                TSNode c = ts_node_named_child(parent, i);
+                if (get_node_type(c) != "control_structure_body") continue;
+                if (ts_node_eq(c, node)) {
+                    if (seen_body) se_branch_id_ = ts_node_start_byte(node);
+                    break;
+                }
+                seen_body = true;
+            }
+        }
     }
 
     // Track import context
