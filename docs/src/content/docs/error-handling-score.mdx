@@ -198,6 +198,45 @@ followed by a word boundary, so
 `issue()` and `canvas()` remain ordinary functions, along with the
 `*Safely` / `*OrNull` / `*OrDefault` suffix family.
 
+**An error that leaves the block any way at all has left.** `failure = e`,
+`result = [wrap(cause), undefined]`, `errors.push(cause)`, `yield
+format(cause)`, `new TRPCError({ cause })`: a store, a collection, a
+generator, a constructor. Each hands the error to whoever reads the binding.
+The first calibration round covered only call arguments; trpc's
+`resolveResponse`, `jsonl` producer and `mergeAsyncIterables` were all reported
+as swallows for storing the error instead of throwing it. This also settles
+the order of the sentinel rule: a `return []` after the error was wrapped and
+reported is the value of a handled failure, not a renamed one.
+
+**A callee named `error` is not a logger.** `getTRPCErrorFromUnknown(cause)`
+wraps, `isAbortError(cause)` tests, `errors.append(...)` collects,
+`opts.onError(...)` forwards. The log credit goes to logging verbs, to a
+logger's level methods (`log.error`, `logger.fatal`), and to reporters that
+compound a handling verb with the word (`checkApiError`, `handleError`,
+`captureException`). Nothing else.
+
+**A typed catch of a normal condition is the protocol, not a swallow.**
+fastapi's keepalive loop is `except TimeoutError: send(KEEPALIVE)`; its stream
+reader ends on `except EndOfStream: pass`; the websocket tutorial cleans up on
+`except WebSocketDisconnect`. The exception type names the expected end of
+something, and the handler is what happens then. Catch headers naming
+`Timeout`, `Disconnect`, `EndOfStream`, `EOFError`, `StopIteration`,
+`Cancel`, `Abort`, `Interrupt` or `BrokenPipe` produce no swallow signal. A
+typed catch of an actual failure (`except IOError: retry()`) still does.
+
+**Breadth is a defect only when it loses something.** `except Exception as e:
+raise HTTPException(400) from e` is deliberately broad, and the cause chain
+survives. `broad-catch` is charged only when the block neither re-raises with
+the cause nor forwards the whole error. fastapi had six of these; every one
+was a chained re-raise.
+
+**A bare `create*` call is a factory.** trpc's router builder makes ten
+`createLazyLoader(...)` calls into a local record, which read as a ten-way
+torn write. In JS and TS an unqualified `createX(...)` constructs far more
+often than it persists. A receiver (`db.createOrder`) is what says the thing
+outlives the call, and only the qualified form counts toward
+`partial-write-risk`.
+
 **Mutually exclusive branches are not a sequence.** gin's `SetMode` stores four
 modes in four switch cases around a `panic`. Only one arm runs, so they cannot
 leave each other half-applied. State changes are grouped by their enclosing arm
@@ -216,6 +255,44 @@ which costs more than the miss.
 `rollback()` in a `catch` clears the finding whether or not it covers the
 writes that actually happened, and a rollback that itself throws is invisible.
 Proving otherwise needs dataflow.
+
+## Telling it to stop
+
+Some false positives are unavoidable in a syntactic analysis, and a reader who
+has checked a site should not have to see it again. The directive vocabulary
+is the one every linter shares; it works inside any comment syntax:
+
+```js
+// lci-disable-next-line empty-catch
+try { close(); } catch { }
+
+try { close(); } catch { }   // lci-disable-line
+
+/* lci-disable partial-write-risk, broad-catch */
+function migrate() { ... }
+/* lci-enable */
+```
+
+```python
+# lci-disable-next-line catch-and-continue
+except NameError:
+    signature = fallback_signature(call)
+```
+
+- `lci-disable-next-line <rules>` covers the following line.
+- `lci-disable-line <rules>` covers its own line.
+- `lci-disable <rules>` covers every line until the next `lci-enable`, or to
+  the end of the file.
+
+Rule names are the signal names printed in `findings:` (`empty-catch`,
+`log-and-swallow`, `partial-write-risk`, and so on; the tables above are the
+full list). Separate several with commas or spaces. A directive with no rule
+list disables every rule on its range. An unknown rule name is inert, so a
+directive written for a newer lci does not break an older one.
+
+A suppressed finding is gone from the count, the score and the `exposure:`
+paths; nothing marks the gap. Comment the reason next to the directive the way
+you would for any other linter.
 
 ## Choosing what gets scored
 
