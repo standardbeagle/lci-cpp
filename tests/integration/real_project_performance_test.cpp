@@ -9,6 +9,7 @@
 #include <lci/indexing/master_index.h>
 
 #include <chrono>
+#include <iostream>
 #include <filesystem>
 #include <limits>
 #include <string>
@@ -104,6 +105,9 @@ TEST_F(RealProjectSearchLatencyTest, FastapiSearchUnder5ms) {
     // The FastAPI fixture is much larger than Chi and this suite runs against
     // the debug preset; keep the regression guard tight without making it
     // depend on sub-5ms debug-build timing on loaded hosts.
+    RecordProperty("search_best_of_5_us", static_cast<int>(elapsed_us));
+    std::cerr << "[ latency  ] fastapi search best-of-5: " << elapsed_us
+              << "us\n";
     EXPECT_LT(elapsed_us, 10000)
         << "Search took " << elapsed_us << "us (should be < 10ms)";
 }
