@@ -90,7 +90,7 @@ above, so the table is the whole weighting model.
 
 | Signal | Severity | Confidence |
 |---|---|---|
-| `empty-catch` | high | 0.9 |
+| `empty-catch` | high | 0.9 (med 0.7 on a typed catch) |
 | `finally-discards-exception` | high | 0.85 |
 | `catch-and-continue` | high | 0.7 (med 0.5 on a typed catch) |
 | `error-to-sentinel` | med | 0.7 (0.5 on a typed catch) |
@@ -263,12 +263,27 @@ method. serilog's sinks and guzzle's curl handler both do it on purpose.
 Findings inside `Dispose`, `__destruct`, `close`, `finalize`, `shutdown`,
 `teardown` and `cleanup` are reported, capped at low.
 
-**A typed catch that recovers is the anticipated-failure shape.** `except
-NameError: signature = fallback(call)` or `catch (NumberFormatException e) {
-return -1; }` names the failure the author expected and writes what happens
-then. The cause is still gone, so `catch-and-continue` and `error-to-sentinel`
-still fire, at med and with the confidence cut to 0.5 (detail `typed
-recovery` / `typed`). A bare `catch (e) { recover(); }` stays high.
+**A typed catch is the anticipated-failure shape.** `except NameError:
+signature = fallback(call)`, `catch (NumberFormatException e) { return -1; }`,
+`catch (const json::exception&) { /* litter */ }` each name the failure the
+author expected and write what happens then. The cause is still gone, so
+`catch-and-continue`, `error-to-sentinel` and `empty-catch` still fire, at med
+and with the confidence cut (detail `typed recovery` / `typed`). A bare
+`catch (e) { recover(); }`, `catch (...) { }` or `except: pass` stays high.
+Typed means the header names a type, not that the name is capitalized:
+`nlohmann::json::exception` counts.
+
+**C++ logs through a stream.** `std::cerr << "dropping: " << e.what()` is a
+log call for the purposes of `log-and-swallow`, with `what()` at full
+fidelity.
+
+**A verb needs a receiver that looks like a store.** `line.begin()` is an
+iterator, `std::cout.flush()` drains a stream, `crypto.createHash()` is a
+factory, `app.add_option()` is a CLI builder (lci's own `main()` read as 45
+torn writes). `flush`, `create*`, `add_*` and `register*` count as durable
+only on a receiver named like one: `db`, `repo`, `session`, `tx`, `store`,
+`client`, `service`, `collection`, `queue` and their compounds. `commit` and
+`beginTransaction` never needed one.
 
 **A handler that logs and then recovers has reported the error.** Logging
 beside other work used to read as a blind `catch-and-continue` at high. The
