@@ -6,6 +6,7 @@
 
 #include <absl/container/flat_hash_map.h>
 
+#include <lci/analysis/finding_suppressions.h>
 #include <lci/side_effects.h>
 #include <lci/types.h>
 
@@ -77,6 +78,11 @@ class SideEffectAnalyzer {
                         int start_line, int end_line);
     SideEffectInfo end_function();
 
+    /// Per-file suppression directives (see finding_suppressions.h). Set by
+    /// the extractor before the file's functions are walked; applied to
+    /// error and resource findings when each function ends. Reset to empty
+    /// for a file without directives.
+    void set_suppressions(FindingSuppressions s) { suppressions_ = std::move(s); }
 
     // -- Registration ---------------------------------------------------------
 
@@ -191,6 +197,7 @@ class SideEffectAnalyzer {
 
     std::string language_;
     FunctionAnalysisContext* current_func_{};
+    FindingSuppressions suppressions_;
     FunctionAnalysisContext current_func_storage_;
     absl::flat_hash_map<std::string, SideEffectInfo> results_;
     SideEffectAnalyzerConfig config_;

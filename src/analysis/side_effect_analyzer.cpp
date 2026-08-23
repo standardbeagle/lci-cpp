@@ -651,6 +651,18 @@ SideEffectInfo SideEffectAnalyzer::end_function() {
     classify_work_pairing(ctx.work_ops, throw_lines, !ctx.catch_sites.empty(),
                           ctx.side_effects, info.error_findings);
 
+    // Developer overrides last: a directive names the rule and the line the
+    // report printed, so it is matched against the finished findings.
+    if (!suppressions_.empty()) {
+        auto drop = [&](std::vector<EhFinding>& v) {
+            std::erase_if(v, [&](const EhFinding& f) {
+                return suppressions_.suppresses(f.line, to_string(f.signal));
+            });
+        };
+        drop(info.error_findings);
+        drop(info.resource_findings);
+    }
+
     // Every error-handling finding is in now; one total order over the lot.
     std::sort(info.error_findings.begin(), info.error_findings.end(),
               [](const EhFinding& a, const EhFinding& b) {

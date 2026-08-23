@@ -1,5 +1,6 @@
 #include <lci/parser/parser.h>
 #include <lci/parser/unified_extractor.h>
+#include <lci/analysis/finding_suppressions.h>
 
 #include <lci/language_map.h>
 
@@ -206,6 +207,12 @@ void UnifiedExtractor::extract(TSTree* tree) {
 
     TSNode root = ts_tree_root_node(tree);
     if (ts_node_is_null(root)) return;
+
+    // Suppression directives are per file; only the analysis pass pays for
+    // the scan (the hot indexing path has no sink attached).
+    if (side_effects_) {
+        side_effects_->set_suppressions(parse_finding_suppressions(content_));
+    }
 
     // Add file-level scope
     std::filesystem::path file_path(path_);
