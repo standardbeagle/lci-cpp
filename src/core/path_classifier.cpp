@@ -93,7 +93,10 @@ attributes {
 
     docs rank=5 {
         activates "index" "search"
-        dir "doc" "docs"
+        // docs_src: the MkDocs convention for runnable documentation
+        // snippets (fastapi ships ~1000 tutorial files there; they were
+        // its worst error-handling module).
+        dir "doc" "docs" "docs_src" "doc_src"
         glob "*.md" "*.markdown" "*.rst" "*.adoc"
     }
 

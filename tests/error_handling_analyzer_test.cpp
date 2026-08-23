@@ -28,6 +28,7 @@ TEST(EhAnalysisGateTest, TestAndVendorPathsAreExcluded) {
     EXPECT_FALSE(scores_as_product_code("examples/demo.rs"));
     EXPECT_FALSE(scores_as_product_code("src/foo.spec.ts"));
     EXPECT_FALSE(scores_as_product_code("internal/mocks/store.go"));
+    EXPECT_FALSE(scores_as_product_code("docs_src/websockets/tutorial003.py"));
 }
 
 // pocketbase verification: ui/public/libs minified bundles were scoring and
