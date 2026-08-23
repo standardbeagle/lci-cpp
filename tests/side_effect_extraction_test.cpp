@@ -1899,5 +1899,81 @@ TEST_F(SideEffectExtraction, JavaTypedSentinelHasReducedConfidence) {
     EXPECT_DOUBLE_EQ(info->error_findings[0].confidence, 0.5);
 }
 
+// -- Kotlin: arguments live under call_suffix, and a catch is an expression --
+//
+// okhttp DnsOverHttps: `catch (e: Exception) { synchronized(failures) {
+// failures.add(e) } }` collects the error; RealWebSocket: `failWebSocket(e =
+// e)` hands it on. Both read as catch-and-continue because the Kotlin
+// grammar keeps arguments in call_suffix > value_arguments, not an
+// `arguments` field.
+TEST_F(SideEffectExtraction, KotlinCollectingTheErrorInsideSynchronizedIsPropagation) {
+    const auto* info = analyze(Language::Kotlin, ".kt",
+                               "fun f() {\n"
+                               "  try { g() } catch (e: Exception) {\n"
+                               "    synchronized(failures) { failures.add(e) }\n"
+                               "  }\n"
+                               "}\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::CatchAndContinue), 0);
+}
+
+TEST_F(SideEffectExtraction, KotlinNamedArgumentHandoffIsPropagation) {
+    const auto* info = analyze(Language::Kotlin, ".kt",
+                               "fun f() {\n"
+                               "  try { g() } catch (e: IOException) { failWebSocket(e = e) }\n"
+                               "}\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    EXPECT_TRUE(info->error_findings.empty());
+}
+
+// Jdk9Platform: `catch (e: UnsupportedOperationException) { null }` — the
+// try is an expression and the catch's last expression is its value.
+TEST_F(SideEffectExtraction, KotlinCatchExpressionValueNullIsATypedSentinel) {
+    const auto* info = analyze(Language::Kotlin, ".kt",
+                               "fun proto(s: SSLSocket): String? =\n"
+                               "  try {\n"
+                               "    s.applicationProtocol\n"
+                               "  } catch (e: UnsupportedOperationException) {\n"
+                               "    null\n"
+                               "  }\n",
+                               "proto");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::EmptyCatch), 0);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::CatchAndContinue), 0);
+    ASSERT_EQ(count_findings(info->error_findings, EhSignal::ErrorToSentinel), 1);
+    EXPECT_DOUBLE_EQ(info->error_findings[0].confidence, 0.5);
+}
+
+// FastFallbackExchangeFinder: `catch (e: Throwable) { FailedPlan(e) }` —
+// the error is wrapped into the expression's value.
+TEST_F(SideEffectExtraction, KotlinCatchExpressionWrappingTheErrorIsPropagation) {
+    const auto* info = analyze(Language::Kotlin, ".kt",
+                               "fun plan(): Plan =\n"
+                               "  try { routePlanner.plan() } catch (e: Throwable) { FailedPlan(e) }\n",
+                               "plan");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::CatchAndContinue), 0);
+}
+
+// okhttp CallServerInterceptor: one durable call in the if arm, one in the
+// else arm. Kotlin's else is a control_structure_body under `alternative`,
+// not an else_clause node, so the arms were not separated.
+TEST_F(SideEffectExtraction, KotlinIfElseArmsAreNotASequence) {
+    const auto* info = analyze(Language::Kotlin, ".kt",
+                               "fun send(duplex: Boolean) {\n"
+                               "  if (duplex) {\n"
+                               "    exchange.createRequestBody(request, true)\n"
+                               "  } else {\n"
+                               "    exchange.createRequestBody(request, false)\n"
+                               "  }\n"
+                               "  try { finish() } catch (e: IOException) { throw e }\n"
+                               "}\n",
+                               "send");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::PartialWriteRisk), 0);
+}
+
 }  // namespace
 }  // namespace lci
