@@ -1854,5 +1854,50 @@ TEST_F(SideEffectExtraction, GoDeferredExplicitDiscardIsNotReported) {
     EXPECT_EQ(count_findings(info->error_findings, EhSignal::DroppedError), 0);
 }
 
+// sinatra runner.rb: `rescue Exception; @log; end` — Ruby's implicit return.
+// The rescue body's last expression IS the value; it is not a return node.
+TEST_F(SideEffectExtraction, RubyImplicitReturnInRescueSurfacesAValue) {
+    const auto* info = analyze(Language::Ruby, ".rb",
+                               "def log\n"
+                               "  loop { @log << pipe.read_nonblock(1) }\n"
+                               "rescue Exception\n"
+                               "  @log\n"
+                               "end\n",
+                               "log");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::CatchAndContinue), 0);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::BroadCatch), 1);
+}
+
+TEST_F(SideEffectExtraction, RubyImplicitNilInRescueIsASentinel) {
+    const auto* info = analyze(Language::Ruby, ".rb",
+                               "def host(ref)\n"
+                               "  URI.parse(ref).host\n"
+                               "rescue URI::InvalidURIError\n"
+                               "  nil\n"
+                               "end\n",
+                               "host");
+    ASSERT_NE(info, nullptr);
+    ASSERT_EQ(count_findings(info->error_findings, EhSignal::ErrorToSentinel), 1);
+    EXPECT_EQ(info->error_findings[0].detail, "caught=URI::InvalidURIError, typed");
+}
+
+// gson JavaVersion: `catch (NumberFormatException e) { return -1; }`. A
+// sentinel for a NAMED failure is the anticipated-failure shape; same
+// confidence cut as typed recovery, same severity.
+TEST_F(SideEffectExtraction, JavaTypedSentinelHasReducedConfidence) {
+    const auto* info = analyze(Language::Java, ".java",
+                               "class C {\n"
+                               "  int parse(String s) {\n"
+                               "    try { return Integer.parseInt(s); }\n"
+                               "    catch (NumberFormatException e) { return -1; }\n"
+                               "  }\n"
+                               "}\n",
+                               "parse");
+    ASSERT_NE(info, nullptr);
+    ASSERT_EQ(count_findings(info->error_findings, EhSignal::ErrorToSentinel), 1);
+    EXPECT_DOUBLE_EQ(info->error_findings[0].confidence, 0.5);
+}
+
 }  // namespace
 }  // namespace lci

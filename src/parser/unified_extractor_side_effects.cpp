@@ -92,8 +92,11 @@ bool is_log_callee(std::string_view callee) {
         }
     }
     if (!names_error) return false;
+    // Not "handle": handleError / handle_exception!(e) DISPATCH the error
+    // (sinatra's dispatch! hands it to the app's error blocks); that is
+    // propagation and the fidelity walk credits it as such.
     static constexpr std::string_view reporter_verbs[] = {
-        "report", "handle", "check", "capture", "notify", "record", "track",
+        "report", "check", "capture", "notify", "record", "track",
         "show", "display", "alert", "present"};
     for (auto v : reporter_verbs) {
         if (iprefix(callee, v)) return true;
@@ -751,8 +754,12 @@ void UnifiedExtractor::process_catch_site(TSNode node,
         }
         if (ts_node_is_null(body) && n > 0) {
             TSNode last = ts_node_named_child(node, n - 1);
-            if (!is_comment_node(get_node_type(last)) &&
-                !is_identifier_type(get_node_type(last))) {
+            std::string_view lt = get_node_type(last);
+            // Ruby's rescue carries its header as named children
+            // (`exceptions`, `exception_variable`); an empty rescue has
+            // nothing else, and the header is not a body.
+            if (!is_comment_node(lt) && !is_identifier_type(lt) &&
+                lt != "exceptions" && lt != "exception_variable") {
                 body = last;
             }
         }
@@ -812,7 +819,13 @@ void UnifiedExtractor::process_catch_site(TSNode node,
                 site.specific_type = true;
                 // Keep the name for the finding's detail.
                 size_t j = i;
-                while (j < header.size() && (std::isalnum(static_cast<unsigned char>(header[j])) || header[j] == '_' || header[j] == '.')) ++j;
+                while (j < header.size() &&
+                       (std::isalnum(static_cast<unsigned char>(header[j])) ||
+                        header[j] == '_' || header[j] == '.' ||
+                        // Ruby's URI::InvalidURIError, not Python's `except E:`.
+                        (header[j] == ':' && j + 1 < header.size() &&
+                         header[j + 1] == ':')))
+                    j += header[j] == ':' ? 2 : 1;
                 site.caught_type = std::string(header.substr(i, j - i));
                 break;
             }
@@ -824,6 +837,11 @@ void UnifiedExtractor::process_catch_site(TSNode node,
     {
         TSNode p = field(node, "parameter");  // JS/TS
         if (ts_node_is_null(p)) p = field(node, "variable");  // Ruby =>
+        // Ruby wraps the variable: `exception_variable > identifier`.
+        if (!ts_node_is_null(p) && get_node_type(p) == "exception_variable" &&
+            ts_node_named_child_count(p) > 0) {
+            p = ts_node_named_child(p, 0);
+        }
         if (!ts_node_is_null(p) && is_identifier_type(get_node_type(p))) {
             caught_var = node_text(p);
         } else {
@@ -834,12 +852,23 @@ void UnifiedExtractor::process_catch_site(TSNode node,
                     ts_node_start_byte(n) >= ts_node_start_byte(body))
                     return false;
                 std::string_view t = get_node_type(n);
-                if ((t == "identifier" || t == "simple_identifier") &&
-                    ts_node_named_child_count(n) == 0) {
+                // PHP's `$e` is a variable_name.
+                if (((t == "identifier" || t == "simple_identifier") &&
+                     ts_node_named_child_count(n) == 0) ||
+                    t == "variable_name") {
                     caught_var = node_text(n);
                 }
                 return true;
             });
+        }
+    }
+    // `catch (NumberFormatException ignored)`, `catch (_: Exception)`: the
+    // variable's name is the developer's own verdict, and the convention
+    // IntelliJ, detekt and checkstyle all honor.
+    for (std::string_view name : {"_", "ignored", "ignore", "unused",
+                                  "expected", "ignoreexception"}) {
+        if (caught_var.size() == name.size() && iprefix(caught_var, name)) {
+            site.explicit_discard = true;
         }
     }
 
@@ -856,6 +885,22 @@ void UnifiedExtractor::process_catch_site(TSNode node,
             ++stmts;
         }
         site.body_empty = stmts == 0;
+
+        // Ruby's implicit return: the rescue body's last expression is the
+        // method's value. `rescue Exception; @log` surfaces a value and
+        // `rescue E; nil` a sentinel, and neither is a return node.
+        if (ext_ == ".rb" && nkids > 0) {
+            TSNode last = ts_node_named_child(body, nkids - 1);
+            std::string_view lt = get_node_type(last);
+            if (lt == "instance_variable" || lt == "identifier" ||
+                lt == "constant" || lt == "nil" || lt == "false" ||
+                lt == "true" || lt == "integer" || lt == "string" ||
+                lt == "array" || lt == "hash") {
+                site.has_return = true;
+                if (is_sentinel_expression(node_text(last)))
+                    site.returns_sentinel = true;
+            }
+        }
 
         walk_subtree(body, [&](TSNode n) {
             std::string_view t = get_node_type(n);
@@ -1054,6 +1099,9 @@ void UnifiedExtractor::process_go_error_drop(TSNode node,
         detail.resize(57);
         detail += "...`";
     }
+    // Inside a defer the discard is the cleanup idiom (`defer func() { _ =
+    // f.Close() }()`): there is no caller left to tell.
+    if (se_guard_depth_ > 0) return;
     side_effects_->record_dropped_error(line, detail);
 }
 

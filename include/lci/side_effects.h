@@ -415,6 +415,9 @@ struct CatchSiteInfo {
     /// The header names a specific exception type (`except NameError`,
     /// `catch (IOException e)`) rather than catching everything.
     bool specific_type{};
+    /// The caught variable is named `ignored` / `_` / `unused`: the
+    /// developer's explicit discard marker. No swallow signal applies.
+    bool explicit_discard{};
     bool has_rethrow{};        // throw/raise inside the body
     bool rethrow_uses_cause{}; // rethrow references the caught variable
     bool has_log_call{};       // a log-category callee in the body

@@ -367,7 +367,7 @@ bool name_promises_a_sentinel(std::string_view fn) {
     for (std::string_view p :
          {"is", "has", "can", "should", "was", "were", "are", "try",
           "maybe", "opt", "check", "test", "supports", "contains",
-          "matches", "looks"}) {
+          "matches", "looks", "ignore"}) {
         if (!iprefix(fn, p)) continue;
         // Require a capital or underscore after the prefix so `issue()` and
         // `canvas()` are not mistaken for predicates.
@@ -384,8 +384,9 @@ bool name_promises_a_sentinel(std::string_view fn) {
     // axios's `stringifySafely` returns '' on failure, and Kotlin/Rust-style
     // `getOrNull` / `parseOrDefault` say it outright.
     for (std::string_view suf :
-         {"safe", "safely", "quietly", "ornull", "ornil", "ornone",
-          "ordefault", "orelse", "orempty", "orzero", "_safe", "noexcept"}) {
+         {"safe", "safely", "quietly", "silently", "ornull", "ornil",
+          "ornone", "ordefault", "orelse", "orempty", "orzero", "orfalse",
+          "_safe", "noexcept", "ifsupported", "ifavailable", "ifpossible"}) {
         if (fn.size() >= suf.size() &&
             iprefix(fn.substr(fn.size() - suf.size()), suf)) {
             return true;
@@ -395,9 +396,33 @@ bool name_promises_a_sentinel(std::string_view fn) {
            fn.find("Valid") != std::string_view::npos;
 }
 
+// Teardown may not throw: .NET's Dispose guideline, PHP's __destruct, Java's
+// close(), a finalizer. A throw there masks the original failure or kills
+// the finalizer thread, so catching and continuing is the documented
+// behavior of the method. serilog's sinks catch-log-continue in Dispose on
+// purpose; guzzle's CurlMultiHandler::__destruct swallows Throwable.
+bool is_cleanup_method(std::string_view fn) {
+    for (std::string_view n :
+         {"dispose", "disposeasync", "__destruct", "close", "closeasync",
+          "finalize", "shutdown", "teardown", "cleanup", "destroy",
+          "release", "stop"}) {
+        if (fn.size() == n.size() && iprefix(fn, n)) return true;
+    }
+    return false;
+}
+
 void classify_catch_site(const CatchSiteInfo& site, std::string_view fn_name,
                          std::vector<EhFinding>& out) {
+    // The site was judged before the body was read: the developer marked
+    // the discard (`catch (E ignored)`), or the function's name promises
+    // absorption (closeQuietly, ignoreIoExceptions, toHttpUrlOrNull). The
+    // sentinel rule has read those names since express/zod; okhttp showed
+    // the same names wrapping empty and continue-shaped catches.
+    if (site.explicit_discard || name_promises_a_sentinel(fn_name)) return;
+
+    const bool cleanup = is_cleanup_method(fn_name);
     auto add = [&](EhSignal sig, FindingSeverity sev, double conf) {
+        if (cleanup && sev != FindingSeverity::Low) sev = FindingSeverity::Low;
         EhFinding f;
         f.signal = sig;
         f.severity = sev;
@@ -458,13 +483,24 @@ void classify_catch_site(const CatchSiteInfo& site, std::string_view fn_name,
         // from a broken one. Med rather than High: returning a sentinel is a
         // deliberate contract in lookup-style APIs, and the caller at least
         // sees SOMETHING is absent — unlike a bare continue.
-        add(EhSignal::ErrorToSentinel, FindingSeverity::Med, 0.7);
+        // A sentinel for a NAMED failure (`catch (NumberFormatException e)
+        // { return -1; }`) is the anticipated-failure shape: same confidence
+        // cut as typed recovery.
+        add(EhSignal::ErrorToSentinel, FindingSeverity::Med,
+            site.specific_type ? 0.5 : 0.7);
+        if (site.specific_type) {
+            out.back().detail = out.back().detail.empty()
+                                    ? "typed"
+                                    : out.back().detail + ", typed";
+        }
     } else if (site.returns_sentinel) {
         // The name promised the sentinel (tryX, isX, getOrNull): the contract.
-    } else if (site.has_log_call && !site.has_other_call) {
+    } else if (site.has_log_call) {
         // Logging the bare error prints a stack; logging `e.message` prints a
         // sentence. Same swallow, materially different diagnosability, so the
-        // confidence (and thus the deduction) splits.
+        // confidence (and thus the deduction) splits. Recovery work beside
+        // the log does not make it a blind catch-and-continue: the error
+        // was reported, then handled.
         bool lossy = site.logged_fidelity == CauseFidelity::Lossy;
         add(EhSignal::LogAndSwallow, FindingSeverity::Med, lossy ? 0.75 : 0.5);
         note_fidelity(site.logged_fidelity);
@@ -844,12 +880,14 @@ void SideEffectAnalyzer::record_dropped_error(int line,
     if (!current_func_) return;
     EhFinding f;
     f.signal = EhSignal::DroppedError;
-    // One tier only. The medium tier existed for `v, _ := f()`, which
-    // process_go_error_drop stopped emitting: a trailing blank in a
-    // multi-value assign is as often an ok-bool as an error. Its caller now
-    // fires only on a sole discarded result, so the flag was always true.
-    f.severity = FindingSeverity::High;
-    f.confidence = 0.9;
+    // `_ = f()` is the developer writing "I know". errcheck, the Go
+    // community's own tool, excludes the explicit blank by default (-blank
+    // turns it on), and pocketbase's 29 were all cleanup or best-effort
+    // calls. Low: it is worth a glance, not a high-severity defect. The
+    // unchecked form errcheck does report — a bare `f()` statement — needs
+    // return types this analysis does not have, and is a known gap.
+    f.severity = FindingSeverity::Low;
+    f.confidence = 0.5;
     f.line = line;
     f.detail = std::string(detail);
     current_func_->error_findings.push_back(std::move(f));
