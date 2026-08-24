@@ -554,7 +554,17 @@ bool UnifiedExtractor::is_se_branch_node(std::string_view node_type) const {
            node_type == "else_clause" ||          // if/else arms
            node_type == "elif_clause" ||
            node_type == "else_if_clause" ||
-           node_type == "alternative";            // Python/Ruby else
+           node_type == "alternative" ||          // Python/Ruby else
+           // Exception-handler clauses: at most one arm runs per raise, so
+           // sibling handlers are alternatives exactly like switch cases.
+           // rack's method_override_param writes one line to the error
+           // stream in each of two rescue arms and read as a 2-change torn
+           // write until these joined the list.
+           node_type == "rescue" ||               // Ruby
+           node_type == "except_clause" ||        // Python
+           node_type == "except_group_clause" ||  // Python 3.11 except*
+           node_type == "catch_clause" ||         // JS/TS/Java/C#/C++/PHP
+           node_type == "catch_block";            // Kotlin
 }
 
 // ---------------------------------------------------------------------------
@@ -999,6 +1009,61 @@ void UnifiedExtractor::process_catch_site(TSNode node,
             if (site.has_return) site.body_empty = false;
         }
 
+        // Java's chain-after-construct idiom: `npe.initCause(e); throw npe;`
+        // (RxJava spells every subscribe() this way — ~690 of its 699
+        // round-5 findings). The throw statement itself never mentions the
+        // caught variable, so the mention check below cannot see the chain;
+        // a body-level pre-scan for an initCause call that receives the
+        // caught variable stands in for it.
+        // A fatal-guard call (`Exceptions.throwIfFatal(ex)` — RxJava,
+        // Reactor) is a conditional rethrow: Errors and fatal exceptions
+        // re-propagate with their cause. A broad catch built around one is
+        // exactly as broad as its guard, so it reads as a cause-keeping
+        // rethrow (687 of RxJava's round-5 findings were this shape).
+        bool cause_chained = false;
+        bool fatal_guarded = false;
+        if (!caught_var.empty()) {
+            walk_subtree(body, [&](TSNode n) {
+                bool is_fatal_guard = false;
+                if (is_identifier_type(get_node_type(n))) {
+                    std::string_view id = node_text(n);
+                    is_fatal_guard = id == "throwIfFatal" ||
+                                     id == "rethrowIfFatal" ||
+                                     id == "propagateIfFatal";
+                    if (!is_fatal_guard && id != "initCause") return true;
+                } else {
+                    return true;
+                }
+                // identifier -> invocation carrying the argument list
+                // (Java: method_invocation; Kotlin: navigation_expression
+                // under call_expression).
+                TSNode inv = ts_node_parent(n);
+                if (!ts_node_is_null(inv) &&
+                    ts_node_is_null(field(inv, "arguments"))) {
+                    inv = ts_node_parent(inv);
+                }
+                if (ts_node_is_null(inv)) return true;
+                TSNode args = field(inv, "arguments");
+                if (ts_node_is_null(args)) return true;
+                bool arg_is_cause = false;
+                walk_subtree(args, [&](TSNode a) {
+                    if (is_identifier_type(get_node_type(a)) &&
+                        node_text(a) == caught_var) {
+                        arg_is_cause = true;
+                    }
+                    return !arg_is_cause;
+                });
+                if (arg_is_cause) {
+                    (is_fatal_guard ? fatal_guarded : cause_chained) = true;
+                }
+                return !(cause_chained && fatal_guarded);
+            });
+        }
+        if (fatal_guarded) {
+            site.has_rethrow = true;
+            site.rethrow_uses_cause = true;
+        }
+
         walk_subtree(body, [&](TSNode n) {
             std::string_view t = get_node_type(n);
             if (is_throw_node(t) ||
@@ -1016,7 +1081,8 @@ void UnifiedExtractor::process_catch_site(TSNode node,
                         return !mentions_var;
                     });
                 }
-                if (mentions_var || ts_node_named_child_count(n) == 0) {
+                if (mentions_var || cause_chained ||
+                    ts_node_named_child_count(n) == 0) {
                     site.rethrow_uses_cause = true;
                 }
                 return true;

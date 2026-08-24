@@ -474,7 +474,7 @@ bool is_cleanup_method(std::string_view fn) {
     // Strip a C++ qualifier: `IndexServer::shutdown_locked`.
     if (auto q = fn.rfind("::"); q != std::string_view::npos) fn = fn.substr(q + 2);
     for (std::string_view n :
-         {"dispose", "__destruct", "close", "finalize", "shutdown",
+         {"dispose", "__destruct", "__del__", "close", "finalize", "shutdown",
           "teardown", "cleanup", "destroy", "release"}) {
         // As a whole word in snake or camel case: shutdown_locked,
         // handle_shutdown, onClose, closeQuietly — not "closest".
