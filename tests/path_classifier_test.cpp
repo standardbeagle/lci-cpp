@@ -379,5 +379,48 @@ TEST(PathClassifierTest, RejectsAnAttributeWithNeitherPatternsNorBlock) {
     EXPECT_NE(error.find("lonely"), std::string::npos) << error;
 }
 
+// -- Round-5 calibration gaps (redis, Newtonsoft.Json) ------------------------
+
+// redis vendors jemalloc under deps/; its handleOOM owned a med finding.
+TEST(PathClassifierTest, DepsDirIsVendored) {
+    PathClassifier c;
+    EXPECT_EQ(attr_of(c, "deps/jemalloc/src/jemalloc_cpp.cpp"), "vendored");
+    EXPECT_EQ(attr_of(c, "deps/lua/src/lua.c"), "vendored");
+}
+
+// C# convention: the test project is a sibling DIRECTORY named *.Tests.
+// Newtonsoft.Json.Tests/Documentation/Samples supplied most of the repo's
+// findings while the shipped serializer scored clean.
+TEST(PathClassifierTest, CsharpTestsDirSuffix) {
+    PathClassifier c;
+    EXPECT_EQ(attr_of(c, "Src/Newtonsoft.Json.Tests/Documentation/"
+                         "Samples/Serializer/Sample.cs"),
+              "test");
+    EXPECT_EQ(attr_of(c, "Src/Newtonsoft.Json.Test/A.cs"), "test");
+    // The product directory next to it stays production.
+    EXPECT_EQ(attr_of(c, "Src/Newtonsoft.Json/JsonSerializer.cs"),
+              "production");
+}
+
+// Script-style test entry points without the underscore convention:
+// redis has modules/vector-sets/test.py and utils/lru/test-lru.rb.
+TEST(PathClassifierTest, BareAndDashTestScriptBasenames) {
+    PathClassifier c;
+    EXPECT_EQ(attr_of(c, "modules/vector-sets/test.py"), "test");
+    EXPECT_EQ(attr_of(c, "utils/lru/test-lru.rb"), "test");
+    EXPECT_EQ(attr_of(c, "utils/req-res-validation/test.rb"), "test");
+    // "attest.py" / "contest.rb" must not match.
+    EXPECT_EQ(attr_of(c, "src/attest.py"), "production");
+}
+
+// Dash-spelled bench scripts: redis tools/array-bench.py drove three
+// exposure paths in the round-5 report.
+TEST(PathClassifierTest, DashBenchScriptBasenames) {
+    PathClassifier c;
+    EXPECT_EQ(attr_of(c, "tools/array-bench.py"), "benchmark");
+    EXPECT_EQ(attr_of(c, "scripts/parse-bench.js"), "benchmark");
+    EXPECT_EQ(attr_of(c, "src/workbench.py"), "production");
+}
+
 }  // namespace
 }  // namespace lci

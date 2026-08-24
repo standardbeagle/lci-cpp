@@ -2192,5 +2192,135 @@ TEST_F(SideEffectExtraction, JsBareCompoundDeleteStillCounts) {
     EXPECT_EQ(count_findings(info->error_findings, EhSignal::PartialWriteRisk), 1);
 }
 
+// -- Round 5 (redis, RxJava, rack, Newtonsoft.Json, click) --------------------
+
+// click's TextIOWrapper.__del__ is a Python finalizer: `try { detach() }
+// except Exception: pass` is the documented teardown behavior, same as
+// Dispose/__destruct. Was reported at high.
+TEST_F(SideEffectExtraction, PythonDelFinalizerSwallowIsCappedAtLow) {
+    const auto* info = analyze(Language::Python, ".py",
+                               "class W:\n"
+                               "    def __del__(self):\n"
+                               "        try:\n"
+                               "            self.detach()\n"
+                               "        except Exception:\n"
+                               "            pass\n",
+                               "__del__");
+    ASSERT_NE(info, nullptr);
+    ASSERT_FALSE(info->error_findings.empty());
+    for (const auto& f : info->error_findings) {
+        EXPECT_EQ(f.severity, FindingSeverity::Low) << to_string(f.signal);
+    }
+}
+
+// RxJava's Flowable.subscribe: catch (Throwable e) { npe.initCause(e);
+// throw npe; }. The cause is chained through initCause on the line before
+// the throw, so neither rethrow-no-cause nor broad-catch applies. This one
+// idiom produced ~690 of RxJava's 699 findings.
+TEST_F(SideEffectExtraction, JavaInitCauseBeforeRethrowKeepsTheCause) {
+    const auto* info = analyze(
+        Language::Java, ".java",
+        "class F {\n"
+        "  void subscribe(S s) {\n"
+        "    try {\n"
+        "      subscribeActual(s);\n"
+        "    } catch (Throwable e) {\n"
+        "      Exceptions.throwIfFatal(e);\n"
+        "      RxJavaPlugins.onError(e);\n"
+        "      NullPointerException npe = new NullPointerException(\"x\");\n"
+        "      npe.initCause(e);\n"
+        "      throw npe;\n"
+        "    }\n"
+        "  }\n"
+        "}\n",
+        "subscribe");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::RethrowNoCause),
+              0)
+        << "initCause(e) chained the cause before the throw";
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::BroadCatch), 0)
+        << "cause-keeping rethrow forgives the breadth";
+}
+
+// The other RxJava shape (687 of the remaining findings): catch (Throwable
+// ex) { Exceptions.throwIfFatal(ex); ...; onError(ex); }. throwIfFatal IS a
+// conditional rethrow of the fatal subset — Errors and fatal exceptions
+// re-propagate with their cause, the rest are forwarded whole to onError.
+// The breadth is exactly what the guard exists for.
+TEST_F(SideEffectExtraction, JavaThrowIfFatalGuardForgivesTheBreadth) {
+    const auto* info = analyze(
+        Language::Java, ".java",
+        "class C {\n"
+        "  public void onNext(T t) {\n"
+        "    try { collector.accumulate(container, t); }\n"
+        "    catch (Throwable ex) {\n"
+        "      Exceptions.throwIfFatal(ex);\n"
+        "      upstream.cancel();\n"
+        "      onError(ex);\n"
+        "    }\n"
+        "  }\n"
+        "}\n",
+        "onNext");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::BroadCatch), 0)
+        << "throwIfFatal(ex) re-propagates the fatal subset";
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::RethrowNoCause),
+              0);
+}
+
+// A rethrow that never chains the cause still fires both.
+TEST_F(SideEffectExtraction, JavaRethrowWithoutInitCauseStillFires) {
+    const auto* info = analyze(
+        Language::Java, ".java",
+        "class F {\n"
+        "  void run() {\n"
+        "    try { work(); }\n"
+        "    catch (Throwable e) { throw new IllegalStateException(\"x\"); }\n"
+        "  }\n"
+        "}\n",
+        "run");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::RethrowNoCause),
+              1);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::BroadCatch), 1);
+}
+
+// rack's method_override_param: two rescue arms each write one line to the
+// error stream. Only one arm can run per raise, so they are alternatives,
+// not a sequence — same rule as sibling switch cases. Read as a 2-change
+// torn write before rescue/except/catch clauses joined the arm list.
+TEST_F(SideEffectExtraction, SiblingRescueArmsAreNotASequence) {
+    const auto* info = analyze(Language::Ruby, ".rb",
+                               "def override(req)\n"
+                               "  req.check\n"
+                               "rescue InvalidParameterError\n"
+                               "  req.get_header(RACK_ERRORS).puts \"bad params\"\n"
+                               "rescue EOFError\n"
+                               "  req.get_header(RACK_ERRORS).puts \"bad body\"\n"
+                               "end\n",
+                               "override");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::PartialWriteRisk),
+              0)
+        << "only one rescue arm executes per raise";
+}
+
+// Same for Python except arms.
+TEST_F(SideEffectExtraction, SiblingExceptArmsAreNotASequence) {
+    const auto* info = analyze(Language::Python, ".py",
+                               "def override(req):\n"
+                               "    try:\n"
+                               "        req.check()\n"
+                               "    except ValueError:\n"
+                               "        session.flush()\n"
+                               "    except EOFError:\n"
+                               "        session.flush()\n",
+                               "override");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::PartialWriteRisk),
+              0)
+        << "only one except arm executes per raise";
+}
+
 }  // namespace
 }  // namespace lci
