@@ -308,6 +308,14 @@ its guard, so neither `broad-catch` nor `rethrow-no-cause` applies. This
 cleared 687 of RxJava's 699 findings; the 38 that remain hide the guard one
 helper call deep (`fail(ex)`), which the syntactic layer refuses to chase.
 
+**A setter is an assignment, and "post" needs a store.** Ruby spells
+`frame.post_context = v` as a setter call named `post_context=`, which
+prefix-matched the publish verb and made rack's exception-page renderer a
+torn write. A callee ending in `=` never reaches the work classifier, and
+`post` joins `flush`/`create` in the receiver-gated set: English "post-"
+(after — `post_process`, `post_init`) is a false friend of the HTTP verb, so
+only `client.post(...)`-shaped calls keep it.
+
 **A finalizer is teardown.** Python's `__del__` joins `Dispose`,
 `__destruct`, `close`, `finalize` in the may-not-throw family: click's
 `TextIOWrapper.__del__` swallowing its `detach()` failure is the documented
