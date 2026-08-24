@@ -26,6 +26,9 @@ attributes {
         activates "index" "search"
         dir "vendor" "vendors" "node_modules" "third_party" "thirdparty"
         dir "bower_components" ".yarn"
+        // C-project vendoring convention: redis carries jemalloc, lua and
+        // hiredis under deps/, and jemalloc's handleOOM owned a finding.
+        dir "deps"
         // Built/bundled front-end output. pocketbase's ui/public/libs
         // minified bundles used to own the worst-module error-handling score,
         // which says nothing about the code its authors wrote.
@@ -65,6 +68,13 @@ attributes {
         // check reads as product code. zod's worst error-handling module was
         // exactly this file.
         glob "test-*.ts" "test-*.js" "test-*.mjs" "test_*.ts" "test_*.js"
+        // C# convention: the test project is a sibling DIRECTORY named
+        // *.Tests — Newtonsoft.Json.Tests supplied most of that repo's
+        // error-handling findings while the shipped serializer was clean.
+        dir "*.Tests" "*.Test"
+        // Script-style test entry points: redis has modules/vector-sets/
+        // test.py and utils/lru/test-lru.rb.
+        glob "test.py" "test.rb" "test-*.py" "test-*.rb"
     }
 
     // Benchmark harnesses and their tooling. Separate from tests because a
@@ -78,6 +88,10 @@ attributes {
         glob "*_bench.go" "*_bench.cc" "*_bench.cpp" "*_bench.rs" "*_bench.py"
         glob "*_benchmark.go" "*_benchmark.cc" "*_benchmark.cpp"
         glob "*_benchmark.py"
+        // Dash spelling: redis tools/array-bench.py drove three exposure
+        // paths. "workbench.py" must not match, hence the dash.
+        glob "*-bench.py" "*-bench.js" "*-bench.ts" "*-bench.rb"
+        glob "*-bench.go" "*-bench.cc" "*-bench.cpp" "*-bench.rs"
     }
 
     // Examples and demos. A leading-underscore directory is ignored by the Go
