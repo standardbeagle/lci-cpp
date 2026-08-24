@@ -177,7 +177,10 @@ bool looks_like_utility_receiver(std::string_view q) {
 // Verbs that are durable only on a persistence receiver. Elsewhere they are
 // iterators, streams, factories and builders.
 bool verb_needs_a_store(std::string_view callee) {
-    for (std::string_view v : {"flush", "create", "add_", "register"}) {
+    // "post" is here because English "post-" (after: post_process,
+    // post_init, rack's frame.post_context) is a false friend of the
+    // publish verb; only `client.post(...)`-shaped calls keep it.
+    for (std::string_view v : {"flush", "create", "add_", "register", "post"}) {
         if (iprefix(callee, v)) return true;
     }
     return false;
@@ -286,16 +289,19 @@ void classify_work_pairing(const std::vector<WorkOp>& ops,
             op.kind != WorkKind::Irreversible) {
             return false;
         }
+        // A receiver-gated verb lives or dies on its receiver alone:
+        // `client.post(...)` is the HTTP verb even though bare "post" would
+        // otherwise be ambiguous; `post_process(x)` has no store and drops.
+        if (verb_needs_a_store(op.callee)) {
+            return looks_like_persistence_receiver(op.qualifier) &&
+                   !looks_like_utility_receiver(op.qualifier);
+        }
         if (is_bare_ambiguous_verb(op.callee)) return false;
         // `createLazyLoader(...)`, `crypto.createHash(...)`,
         // `app.add_option(...)`: create/add_/register are factories and
         // builders unless the receiver is a store (trpc's router builders,
         // lci's own CLI11 main() with 45 add_option calls, an npm
         // postinstall's createHash all read as torn writes).
-        if (verb_needs_a_store(op.callee) &&
-            !looks_like_persistence_receiver(op.qualifier)) {
-            return false;
-        }
         if (looks_like_utility_receiver(op.qualifier)) return false;
         return true;
     };
@@ -999,6 +1005,12 @@ void SideEffectAnalyzer::record_call_site_resources(std::string_view callee,
                                                     uint32_t branch_id,
                                                     std::string_view qualifier) {
     if (!current_func_) return;
+    // A Ruby setter (`frame.post_context = v` arrives as callee
+    // "post_context=") is an assignment spelled as a call — JS/Python
+    // attribute assignment never reaches the work classifier, and neither
+    // should this. rack's show_exceptions read as a torn write because
+    // "post_context=" prefix-matched the publish verb.
+    if (!callee.empty() && callee.back() == '=') return;
     // Undo-cost model: what state this call changed, in source order. Kept
     // beside the resource pairing because both answer "what is outstanding
     // when an error fires", one for handles and one for state.
