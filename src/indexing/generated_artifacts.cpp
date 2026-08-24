@@ -3,11 +3,11 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
-#include <regex>
 #include <sstream>
 
 #include <absl/container/flat_hash_set.h>
 #include <nlohmann/json.hpp>
+#include <re2/re2.h>
 
 namespace lci {
 
@@ -91,12 +91,16 @@ void collect_msbuild_outputs(const fs::path& proj_file, const fs::path& root,
                              std::vector<std::string>& out) {
     auto text = slurp(proj_file);
     if (text.empty()) return;
-    static const std::regex kProp(
+    // RE2 has no backreferences, so the closing tag is captured separately
+    // and compared below (Karpathy: no std::regex anywhere).
+    static const RE2 kProp(
         "<(OutputPath|BaseOutputPath|BaseIntermediateOutputPath)>"
-        "([^<]+)</\\1>");
-    auto begin = std::sregex_iterator(text.begin(), text.end(), kProp);
-    for (auto it = begin; it != std::sregex_iterator(); ++it) {
-        std::string dir = (*it)[2].str();
+        "([^<]+)</(OutputPath|BaseOutputPath|BaseIntermediateOutputPath)>");
+    re2::StringPiece input(text);
+    std::string open_tag, value, close_tag;
+    while (RE2::FindAndConsume(&input, kProp, &open_tag, &value, &close_tag)) {
+        if (open_tag != close_tag) continue;
+        std::string dir = std::move(value);
         // MSBuild vars ($(Configuration) etc.): keep the literal prefix
         // before the first variable; a fully-variable path contributes
         // nothing. Without the empty/separator guard below, a value like
