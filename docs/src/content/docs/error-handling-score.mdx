@@ -292,7 +292,26 @@ error was reported, then handled: that is `log-and-swallow`.
 **Mutually exclusive branches are not a sequence.** gin's `SetMode` stores four
 modes in four switch cases around a `panic`. Only one arm runs, so they cannot
 leave each other half-applied. State changes are grouped by their enclosing arm
-before anything is counted.
+before anything is counted. Exception handlers are arms too: at most one
+`rescue`/`except`/`catch` clause runs per raise, so rack's two one-line rescue
+arms are alternatives, not a two-change torn write.
+
+**A cause chained before the throw is still chained.** Java's
+`npe.initCause(e); throw npe;` keeps the whole chain — the throw statement
+just never mentions `e`. An `initCause(e)` anywhere in the catch body counts
+as the rethrow carrying the cause. RxJava spells every `subscribe()` this way.
+
+**A fatal guard is a conditional rethrow.** `Exceptions.throwIfFatal(ex)`
+re-propagates Errors and fatal exceptions with their cause; what remains is
+forwarded whole. A `catch (Throwable)` built around one is exactly as broad as
+its guard, so neither `broad-catch` nor `rethrow-no-cause` applies. This
+cleared 687 of RxJava's 699 findings; the 38 that remain hide the guard one
+helper call deep (`fail(ex)`), which the syntactic layer refuses to chase.
+
+**A finalizer is teardown.** Python's `__del__` joins `Dispose`,
+`__destruct`, `close`, `finalize` in the may-not-throw family: click's
+`TextIOWrapper.__del__` swallowing its `detach()` failure is the documented
+behavior, reported and capped at low.
 
 **A bare verb is not durable work.** `history.insert(0, r)`,
 `rows.insert(0, headers)` and `values.update(...)` are collection calls on
