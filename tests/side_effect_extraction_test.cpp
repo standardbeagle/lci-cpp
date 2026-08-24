@@ -2322,5 +2322,59 @@ TEST_F(SideEffectExtraction, SiblingExceptArmsAreNotASequence) {
         << "only one except arm executes per raise";
 }
 
+// rack's show_exceptions `pretty`: `frame.post_context = lines[...]` is a
+// Ruby SETTER call named `post_context=`, which reached the work classifier
+// and matched the "post" (publish) verb prefix. A setter is an assignment,
+// not a verb; and "post" the verb needs a store-like receiver — English
+// "post-" (after: post_process, post_init) is a false friend everywhere.
+TEST_F(SideEffectExtraction, RubySetterCallsAreAssignmentsNotWork) {
+    const auto* info = analyze(Language::Ruby, ".rb",
+                               "def pretty(v)\n"
+                               "  frame = Frame.new\n"
+                               "  begin\n"
+                               "    frame.pre_context_lineno = [v, 0].max\n"
+                               "    frame.post_context_lineno = [v, 9].min\n"
+                               "    frame.post_context = v\n"
+                               "  rescue\n"
+                               "  end\n"
+                               "  frame\n"
+                               "end\n",
+                               "pretty");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::PartialWriteRisk),
+              0)
+        << "a setter is an assignment, not a publish";
+}
+
+TEST_F(SideEffectExtraction, PostPrefixedHooksAreNotPublishes) {
+    const auto* info = analyze(Language::JavaScript, ".js",
+                               "function build(x) {\n"
+                               "  post_process(x);\n"
+                               "  postInit(x);\n"
+                               "  if (!x.ok) { throw new Error('bad'); }\n"
+                               "  post_validate(x);\n"
+                               "}\n",
+                               "build");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::PartialWriteRisk),
+              0)
+        << "post_* hooks run after something; they publish nothing";
+}
+
+// The verb survives on a receiver that names where state lives.
+TEST_F(SideEffectExtraction, PostOnAStoreReceiverIsStillDurable) {
+    const auto* info = analyze(Language::JavaScript, ".js",
+                               "function submit(order) {\n"
+                               "  client.post('/orders', order);\n"
+                               "  if (!order.ok) { throw new Error('bad'); }\n"
+                               "  client.post('/audit', order);\n"
+                               "}\n",
+                               "submit");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(count_findings(info->error_findings, EhSignal::PartialWriteRisk),
+              1)
+        << "client.post is the HTTP verb; the torn pair is real";
+}
+
 }  // namespace
 }  // namespace lci
