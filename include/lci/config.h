@@ -140,9 +140,25 @@ struct FeatureFlagsConfig {
     bool enable_feature_flag_logging = true;
 };
 
+/// code_insight analysis gates. The error-handling / resource-management
+/// report is BETA and ships dark: `error_report` is "off" by default.
+///   "off"     — the == ERROR HANDLING == / == RESOURCE MANAGEMENT ==
+///               sections (and the SUMMARY headline scores) are not
+///               computed or emitted.
+///   "capture" — sections stay out of every report, but a server writes
+///               the full untruncated report to
+///               $XDG_STATE_HOME/lci/error-reports/<root-slug>.txt on
+///               graceful shutdown. Generate-don't-publish.
+///   "on"      — sections emitted in unified/overview/detailed output.
+/// Env override: LCI_ERROR_REPORT=off|capture|on beats the file.
+struct InsightConfig {
+    std::string error_report = "off";
+};
+
 /// Complete LCI configuration.
 struct Config {
     int version = 1;
+    InsightConfig insight;
     ProjectConfig project;
     IndexConfig index;
     PerformanceConfig performance;

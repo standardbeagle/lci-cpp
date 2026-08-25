@@ -302,6 +302,29 @@ bool apply_server(Config& cfg, const KdlNode& node, std::string& error,
     return true;
 }
 
+bool valid_error_report_mode(std::string_view v) {
+    return v == "off" || v == "capture" || v == "on";
+}
+
+bool apply_insight(Config& cfg, const KdlNode& node, std::string& error,
+                   std::vector<std::string>* warnings) {
+    for (const auto& child : node.children) {
+        if (child.name == "error_report") {
+            if (!set_string(child, "insight.error_report",
+                            cfg.insight.error_report, error))
+                return false;
+            if (!valid_error_report_mode(cfg.insight.error_report)) {
+                error = "insight.error_report must be off, capture or on "
+                        "(got '" + cfg.insight.error_report + "')";
+                return false;
+            }
+        } else {
+            warn_unknown(warnings, "insight", child.name);
+        }
+    }
+    return true;
+}
+
 bool apply_ranking(SearchRankingConfig& ranking, const KdlNode& node,
                    std::string& error, std::vector<std::string>* warnings) {
     for (const auto& child : node.children) {
@@ -506,6 +529,9 @@ bool apply_kdl_nodes(Config& cfg, const std::vector<KdlNode>& nodes,
         }
         else if (node.name == "server") {
             if (!apply_server(cfg, node, error, warnings)) return false;
+        }
+        else if (node.name == "insight") {
+            if (!apply_insight(cfg, node, error, warnings)) return false;
         }
         else if (node.name == "search") {
             if (!apply_search(cfg, node, error, warnings)) return false;
@@ -765,6 +791,22 @@ namespace {
 // the implicit <root>/.lci.kdl (absent means "use defaults") from a file the
 // user named on the command line (absent means the flag did nothing, which
 // must be an error rather than a silent fallback).
+// Env beats file: LCI_ERROR_REPORT=off|capture|on lets a batch driver
+// (err-lookup) flip the beta error-report gate without editing any repo's
+// .lci.kdl. Invalid values fail fast like a bad file value would.
+bool apply_env_overrides(Config& cfg, std::string& error) {
+    if (const char* v = std::getenv("LCI_ERROR_REPORT");
+        v != nullptr && *v != '\0') {
+        if (!valid_error_report_mode(v)) {
+            error = std::string("LCI_ERROR_REPORT must be off, capture or on "
+                                "(got '") + v + "')";
+            return false;
+        }
+        cfg.insight.error_report = v;
+    }
+    return true;
+}
+
 ConfigResult load_config_from(const fs::path& kdl_path,
                               const std::string& project_root,
                               bool must_exist) {
@@ -783,6 +825,9 @@ ConfigResult load_config_from(const fs::path& kdl_path,
             return {{}, user_err, {}};
         }
         cfg.project.root = project_root;
+        if (std::string env_err; !apply_env_overrides(cfg, env_err)) {
+            return {{}, env_err, std::move(warnings)};
+        }
         if (auto verr = validate_config(cfg); !verr.empty()) {
             return {{}, verr, std::move(warnings)};
         }
@@ -816,6 +861,10 @@ ConfigResult load_config_from(const fs::path& kdl_path,
                 fs::weakly_canonical(fs::path(project_root) / cfg.project.root)
                     .string();
         }
+    }
+
+    if (std::string env_err; !apply_env_overrides(cfg, env_err)) {
+        return {{}, env_err, std::move(warnings)};
     }
 
     // Validate here, not only in `lci config show`. Every other command used

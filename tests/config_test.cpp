@@ -1132,5 +1132,56 @@ TEST_F(UserConfigTest, NoUserFileMeansPlainDefaults) {
     EXPECT_EQ(result.config.index.max_total_size_mb, 500);
 }
 
+// -- insight { error_report } — the beta error-report gate --------------------
+
+TEST_F(KdlConfigTest, ErrorReportDefaultsOff) {
+    write_kdl("project {\n}\n");
+    auto result = load_config(temp_dir_.string());
+    ASSERT_TRUE(result.ok());
+    EXPECT_EQ(result.config.insight.error_report, "off");
+}
+
+TEST_F(KdlConfigTest, ParsesInsightErrorReport) {
+    write_kdl(R"(
+insight {
+    error_report "capture"
+}
+)");
+    auto result = load_config(temp_dir_.string());
+    ASSERT_TRUE(result.ok());
+    EXPECT_EQ(result.config.insight.error_report, "capture");
+}
+
+TEST_F(KdlConfigTest, RejectsInvalidErrorReportMode) {
+    write_kdl(R"(
+insight {
+    error_report "sometimes"
+}
+)");
+    auto result = load_config(temp_dir_.string());
+    ASSERT_FALSE(result.ok());
+    EXPECT_NE(result.error.find("sometimes"), std::string::npos)
+        << result.error;
+}
+
+TEST_F(KdlConfigTest, EnvOverrideBeatsFileAndValidates) {
+    write_kdl(R"(
+insight {
+    error_report "off"
+}
+)");
+    ::setenv("LCI_ERROR_REPORT", "on", 1);
+    auto result = load_config(temp_dir_.string());
+    ::unsetenv("LCI_ERROR_REPORT");
+    ASSERT_TRUE(result.ok());
+    EXPECT_EQ(result.config.insight.error_report, "on");
+
+    ::setenv("LCI_ERROR_REPORT", "bogus", 1);
+    auto bad = load_config(temp_dir_.string());
+    ::unsetenv("LCI_ERROR_REPORT");
+    ASSERT_FALSE(bad.ok());
+    EXPECT_NE(bad.error.find("bogus"), std::string::npos) << bad.error;
+}
+
 }  // namespace
 }  // namespace lci
