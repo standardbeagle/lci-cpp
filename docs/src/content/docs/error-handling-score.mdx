@@ -5,6 +5,14 @@ description: How lci scores error handling: the signals, the deduction formula, 
 
 import { Aside } from '@astrojs/starlight/components';
 
+<Aside type="caution" title="Beta — ships dark">
+The error-handling report is **beta** and disabled by default. Nothing in
+this page appears in any `code_insight` or `side_effects` response until the
+gate is opened — see [Enabling the beta](#enabling-the-beta). The signal
+definitions, line formats, and scores documented here may still change
+between releases without a deprecation cycle.
+</Aside>
+
 Ask `code_insight` for the error-handling section and you get a number, the
 modules at either end of it, and the evidence behind it:
 
@@ -26,6 +34,54 @@ export function handle(req) {
 
 This page explains where 7.30 came from, what each signal means, and which
 claims the analysis refuses to make.
+
+## Enabling the beta
+
+The report is gated by `insight.error_report`, with three modes:
+
+| Mode | Report sections | Detailed modes | Capture file |
+|---|---|---|---|
+| `off` (default) | absent | refused with an error naming the gate | never |
+| `capture` | absent | refused | written at MCP session end |
+| `on` | emitted | served | never (already published in-band) |
+
+In `.lci.kdl` (project) or `~/.config/lci/config.kdl` (user-wide defaults —
+the right place for a batch driver that runs lci over many repos):
+
+```kdl
+insight {
+    error_report "capture"
+}
+```
+
+The environment variable `LCI_ERROR_REPORT=off|capture|on` beats both files,
+for one-off runs. An invalid value fails config loading — it is never
+silently ignored.
+
+**What each mode gates.** `off`/`capture` remove every surface at once: the
+`== ERROR HANDLING ==` and `== RESOURCE MANAGEMENT ==` sections in
+`unified`/`overview`, the `error_handling=… resources=…` headline in
+`== SUMMARY ==`, the `error_handling`/`resources` objects in the
+`side_effects` summary JSON, and the `detailed` `analysis=errors|resources`
+modes (those return an explicit error naming the gate rather than an empty
+section).
+
+**Capture: generate, don't publish.** In `capture` mode an MCP session
+computes the full, untruncated report once — after the transport exits, so
+no request ever pays for it — and writes it atomically to:
+
+```
+$XDG_STATE_HOME/lci/error-reports/<root-slug>.txt   # ~/.local/state fallback
+```
+
+`<root-slug>` is the project root with every non-`[a-zA-Z0-9.-]` character
+replaced by `-`. The file opens with a provenance header (`root=`,
+`generated_by=lci <version>`, the mode) and then carries the two sections in
+exactly the format documented below, with no finding-count truncation. A
+corpus that produced no side-effect records writes an explicit
+"no side-effect records" line — an empty capture never masquerades as a
+clean one. This is the mode for batch drivers (err-lookup): every run leaves
+a report on disk, and none of the runs' published output changes.
 
 ## The arithmetic, once
 
@@ -406,18 +462,149 @@ why the default excludes it and the exclusion is printed rather than silent.
 See [MCP Server](/mcp-server/) for the `attributes` block that defines these
 tags per project.
 
-## Reading a report
+## Reading a report — every line, every field
 
-Three numbers answer different questions, and a good report needs all three:
+A full section, annotated line by line:
 
-- `swallow_sites` — how many places delete a failure.
-- `undo_cost` — how much work an error leaves half-applied. Independent of the
-  above; the probe corpus scores 8.86 with `swallow_sites=0`.
-- `handled_ratio` — of the functions that can throw, how many have a catch
-  site in themselves or in a transitive caller within 6 hops.
+```
+== ERROR HANDLING ==
+score=9.76 modules: worst=utils/lru(9.5) best=utils/hyperloglog(10.0)
+throwers=8 handled_ratio=0.75 swallow_sites=7 unchecked_errors=0 suppressed=2
+undo_cost: uncompensated=1 irreversible_first=0
+findings:
+  [high] empty-catch: testit (utils/lru/test-lru.rb:57) [o=Eah]
+  [med] log-and-swallow: process (svc/loader.py:244) caught=IOError, level=debug [o=Ff]
+  ... and 8 more
+density: findings=10 per_100_funcs=1.42
+exposure:
+  api-reaches-swallow: echo (src/click/utils.py:252) -> _is_binary_writer swallow depth=2 log=none
+  api-reaches-cause-loss: TryConvert (src/Convert.cs:399) -> WrapAll rethrow-no-cause depth=3
+next: code_insight {"mode":"detailed","analysis":"errors"}
+```
 
-Drill into any finding with the object id it carries:
+### The headline
+
+- **`score=`** — 0.00–10.00, the weighted repo rollup from
+  [the arithmetic](#the-arithmetic-once). **10.00 is reserved for zero
+  findings.** A large mostly-clean corpus whose weighted mean rounds to 10.0
+  while findings stand is capped at 9.99, so a dashboard can trust that
+  10.00 literally means "nothing found in scored code". Treat the score as a
+  *delta gate* (did this change make it worse?), and use `density` and the
+  findings list for prioritization — a 9.99 with `density=0.4` and a 9.99
+  with `density=12.0` are different codebases.
+- **`modules: worst=… best=…`** — the module rollups at both extremes, each
+  as `package(score)`. The worst module also *bounds* the repo score (repo ≤
+  worst + 3.0): a package that swallows everywhere cannot be averaged away.
+
+### The counters
+
+- **`throwers`** — functions that can throw (syntactically: a throw/raise or
+  a callee known to).
+- **`handled_ratio`** — of the throwers, the fraction with a catch site in
+  themselves or in a transitive caller within 6 call-graph hops. There is no
+  universal "good" value — Ruby idiom sits far lower than Go idiom; compare
+  a repo against itself over time, not across languages.
+- **`swallow_sites`** — functions where a failure can *stop*: at least one
+  of `empty-catch`, `finally-discards-exception`, `catch-and-continue`,
+  `error-to-sentinel`, `log-and-swallow`. This is the count that feeds
+  `exposure:`.
+- **`unchecked_errors`** — Go-specific `dropped-error` count (`_ = f()`).
+- **`suppressed`** — findings silenced by `lci-disable*` directives, printed
+  only when non-zero: a silenced report must not look like a clean one.
+
+### `undo_cost:`
+
+Printed only when non-zero. `uncompensated` counts committed transactions
+with no rollback path plus torn multi-write sequences; `irreversible_first`
+counts irreversible-work-before-fallible-work orderings. Independent of the
+swallow counters — a function can report an error perfectly and still lose
+the data.
+
+### `findings:` — anatomy of one line
+
+```
+[med] log-and-swallow: process (svc/loader.py:244) caught=IOError, level=debug [o=Ff]
+ │     │               │        │                  │                            │
+ │     │               │        │                  │                            └ object id: get_context {"id":"o=Ff"} drills in
+ │     │               │        │                  └ detail: signal-specific evidence (see below)
+ │     │               │        └ root-relative file:line of the finding
+ │     │               └ enclosing function
+ │     └ signal name (the tables above)
+ └ severity after caps (teardown methods cap at low)
+```
+
+Ordering is deterministic: severity desc, then file, then line. The unified
+view shows 5 and prints `... and N more`; `detailed` shows all.
+
+Detail vocabulary by signal:
+
+| Detail | On | Means |
+|---|---|---|
+| `caught=<Type>` | any catch signal | the catch header's type (`caught=thrown` for a bare rethrow site) |
+| `typed` / `typed recovery` | empty-catch, error-to-sentinel, catch-and-continue | the header names a type — anticipated-failure shape, confidence cut applied |
+| `message only, stack and cause chain lost` | message-only propagation | only `.message`-shaped data left the block |
+| `level=error\|warn\|info\|debug\|print` | log-and-swallow | the strongest log call's severity. **Production log configs routinely drop `debug` and `info`, and `print` is an unleveled sink (console.log, puts, std::cerr) that may not be shipped at all — a swallow logged at `level=debug` is invisible exactly when the incident happens.** Annotation only: severity is not (yet) adjusted by level. |
+| `N state changes through line L, no compensation` | partial-write-risk | the torn-write span |
+| `commit at line L, no rollback on any path` | uncompensated-transaction | |
+| `<callee> cannot be recalled; line L can still fail` | irreversible-before-fallible | |
+| `acquire=<callee>` | resource signals | the acquisition site |
+
+### `density:`
+
+Printed when findings exist: `findings=<count> per_100_funcs=<rate>` over
+`functions_scored`. This is the prioritization number the saturating score
+cannot give you — track it per module over time and burn it down.
+
+### `exposure:` — the troubleshooting map
+
+Two kinds of line, both produced by a reverse call-graph BFS (6-hop bound)
+from every sink at once, ranked by the API symbol's transitive-caller reach,
+capped at 3 per kind:
+
+**`api-reaches-swallow: <api> (<loc>) -> <sink> swallow depth=<d> log=<x>`**
+A public-surface symbol from which a failure can reach a function that
+deletes it. `depth` is call-graph hops from the API to the sink. `log=` is
+what a production log will hold *when the swallow fires*, derived from the
+sink's own findings — `none` (nothing is logged: the silent-failure case
+that makes incidents undiagnosable), `message` (one sentence, no stack), or
+`full` (the whole error). Pre-incident hardening: fix the `log=none` paths
+with the widest reach first.
+
+**`api-reaches-cause-loss: <api> (<loc>) -> <sink> rethrow-no-cause depth=<d>`**
+The funnel map. The sink catches and rethrows a *new* error without
+chaining the cause, so an error surfacing from this API arrives renamed,
+with its original stack and cause chain destroyed at the sink. Incident
+triage reads this backwards: an error reported at `<api>` may have
+originated as *any* failure below `<sink>` — go look there, not at the
+surfaced type. Sinks that also swallow are seeded in the first list only.
+
+### `== RESOURCE MANAGEMENT ==`
+
+Same formula over the resource signals. `acquisitions` counts acquire
+sites; `released_ratio` is the fraction of acquiring functions with any
+release or fully-guarded acquires; `guarded_ratio` is the fraction of
+release calls inside `finally`/`defer`/`ensure`/RAII scope. Findings and
+`density` read exactly as above.
+
+### The JSON twin
+
+`side_effects {"mode":"summary"}` carries the same rollups as
+machine-readable `error_handling` / `resources` objects — every counter
+above, plus per-finding `severity`, `signal`, `symbol`, `file`, `line`,
+`location`, `object_id`, `detail`, `confidence`. This is the ingestion
+path for tooling; the LCF sections are the human path.
+
+### Drilling in
+
+Every finding carries an object id:
 
 ```json
-{ "name": "get_context", "arguments": { "id": "o=B" } }
+{ "name": "get_context", "arguments": { "id": "o=Ff" } }
+```
+
+and the section's `next:` line names the detailed mode that lists every
+finding untruncated:
+
+```json
+{ "name": "code_insight", "arguments": { "mode": "detailed", "analysis": "errors" } }
 ```
