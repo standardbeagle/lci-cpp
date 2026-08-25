@@ -610,6 +610,16 @@ void classify_catch_site(const CatchSiteInfo& site, std::string_view fn_name,
         bool lossy = site.logged_fidelity == CauseFidelity::Lossy;
         add(EhSignal::LogAndSwallow, FindingSeverity::Med, lossy ? 0.75 : 0.5);
         note_fidelity(site.logged_fidelity);
+        // The level rides along: prod log configs routinely drop debug and
+        // info, so `level=debug` means the report vanishes exactly when the
+        // incident happens. Annotation only — severity is unchanged until a
+        // calibration round says otherwise.
+        if (!site.log_level.empty()) {
+            out.back().detail = out.back().detail.empty()
+                                    ? "level=" + site.log_level
+                                    : out.back().detail + ", level=" +
+                                          site.log_level;
+        }
     } else if (site.specific_type) {
         // `except NameError: signature = fallback(call)`. The author named
         // the failure they expected and wrote the recovery for it; the

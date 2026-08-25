@@ -440,6 +440,13 @@ struct CatchSiteInfo {
     /// Best fidelity seen among the LOG calls the cause reached. Logging the
     /// bare error prints a stack; logging `e.message` prints one line.
     CauseFidelity logged_fidelity{CauseFidelity::None};
+    /// Severity level of the strongest log call in the body: "error",
+    /// "warn", "info", "debug", or "print" (an unleveled sink — console.log,
+    /// std::cerr, puts). Production log configs routinely drop debug and
+    /// info, so a log-and-swallow at level=debug is invisible exactly when
+    /// it matters; the level rides along on the finding so an operator can
+    /// audit that without opening the file.
+    std::string log_level;
 };
 
 /// One acquire/release call site (syntactic resource pairing).

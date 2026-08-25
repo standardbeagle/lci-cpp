@@ -73,6 +73,42 @@ bool iprefix(std::string_view name, std::string_view prefix) {
 // An "error" substring on its own does NOT qualify. getTRPCErrorFromUnknown
 // wraps, isAbortError tests, errors.push collects, opts.onError forwards;
 // reading each as a log made every one of them a swallow (trpc calibration).
+// Log severity of a callee, for the level=<x> annotation on log-and-swallow
+// findings. "print" = an unleveled sink (console.log, puts, print) — the
+// production-visibility question ("will this line even ship?") is the point,
+// so debug/info/print are kept distinct from warn/error rather than folded.
+std::string_view level_of_log_callee(std::string_view callee) {
+    for (std::string_view p : {"fatal", "critical", "severe", "error", "err",
+                               "exception"}) {
+        if (iprefix(callee, p)) return "error";
+    }
+    if (iprefix(callee, "warn")) return "warn";
+    if (iprefix(callee, "info") || iprefix(callee, "notice")) return "info";
+    for (std::string_view p : {"debug", "trace", "verbose", "fine"}) {
+        if (iprefix(callee, p)) return "debug";
+    }
+    // console.error / logger.error arrive as bare "error" handled above;
+    // what is left (log, print, puts, console, captureException-style
+    // reporters) carries no level of its own.
+    return "print";
+}
+
+// Most-severe-wins ordering for note_log_level.
+int log_level_rank(std::string_view level) {
+    if (level == "error") return 4;
+    if (level == "warn") return 3;
+    if (level == "info") return 2;
+    if (level == "debug") return 1;
+    return 0;  // "print"
+}
+
+void note_log_level(CatchSiteInfo& site, std::string_view level) {
+    if (site.log_level.empty() ||
+        log_level_rank(level) > log_level_rank(site.log_level)) {
+        site.log_level = std::string(level);
+    }
+}
+
 bool is_log_callee(std::string_view callee) {
     static constexpr std::string_view log_prefixes[] = {
         "log", "print", "puts", "warn", "debug", "trace", "console"};
@@ -1137,6 +1173,7 @@ void UnifiedExtractor::process_catch_site(TSNode node,
                      text.compare(0, 3, "LOG") == 0 ||
                      text.compare(0, 3, "log") == 0)) {
                     site.has_log_call = true;
+                    note_log_level(site, "print");  // streams carry no level
                     if (!caught_var.empty()) {
                         CauseFidelity fid = cause_fidelity(n, caught_var);
                         if (fid > site.logged_fidelity) site.logged_fidelity = fid;
@@ -1181,6 +1218,7 @@ void UnifiedExtractor::process_catch_site(TSNode node,
                 }
                 if (log) {
                     site.has_log_call = true;
+                    note_log_level(site, level_of_log_callee(bare));
                     if (fid > site.logged_fidelity) site.logged_fidelity = fid;
                 } else {
                     site.has_other_call = true;

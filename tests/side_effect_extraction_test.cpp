@@ -2376,5 +2376,51 @@ TEST_F(SideEffectExtraction, PostOnAStoreReceiverIsStillDurable) {
         << "client.post is the HTTP verb; the torn pair is real";
 }
 
+// -- Log level annotation ------------------------------------------------------
+
+// Production log configs routinely drop debug and info: a log-and-swallow at
+// level=debug is invisible exactly when the incident happens. The level rides
+// on the finding detail; severity is unchanged (annotation, not judgment).
+TEST_F(SideEffectExtraction, LogAndSwallowCarriesTheLogLevel) {
+    const auto* info = analyze(Language::JavaScript, ".js",
+                               "function load(x) {\n"
+                               "  try { return parse(x); }\n"
+                               "  catch (e) { logger.debug(e); recover(); }\n"
+                               "}\n",
+                               "load");
+    ASSERT_NE(info, nullptr);
+    bool found = false;
+    for (const auto& f : info->error_findings) {
+        if (f.signal != EhSignal::LogAndSwallow) continue;
+        found = true;
+        EXPECT_NE(f.detail.find("level=debug"), std::string::npos)
+            << f.detail;
+    }
+    EXPECT_TRUE(found);
+}
+
+// The strongest level in the body wins; console.error is level=error.
+TEST_F(SideEffectExtraction, StrongestLogLevelWins) {
+    const auto* info = analyze(Language::JavaScript, ".js",
+                               "function load(x) {\n"
+                               "  try { return parse(x); }\n"
+                               "  catch (e) {\n"
+                               "    console.log('while loading');\n"
+                               "    console.error(e);\n"
+                               "    recover();\n"
+                               "  }\n"
+                               "}\n",
+                               "load");
+    ASSERT_NE(info, nullptr);
+    bool found = false;
+    for (const auto& f : info->error_findings) {
+        if (f.signal != EhSignal::LogAndSwallow) continue;
+        found = true;
+        EXPECT_NE(f.detail.find("level=error"), std::string::npos)
+            << f.detail;
+    }
+    EXPECT_TRUE(found);
+}
+
 }  // namespace
 }  // namespace lci

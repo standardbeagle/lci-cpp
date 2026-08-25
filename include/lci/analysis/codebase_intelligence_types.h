@@ -155,9 +155,21 @@ struct EhFindingEntry {
 struct EhExposureEntry {
     std::string api_symbol;
     std::string api_location;  ///< root-relative file:line
-    std::string sink_symbol;   ///< the swallow/leak function reached
+    std::string sink_symbol;   ///< the swallow/funnel function reached
     int depth{};               ///< call-graph hops
     int reach{};               ///< api symbol's transitive caller count
+    /// "swallow": the error can vanish at the sink. "cause-loss": the sink
+    /// rethrows without the cause — the API's caller receives a transformed
+    /// error whose stack and cause chain died at the sink (the generic-
+    /// rethrow funnel). Incident triage reads this as "where could error X
+    /// have been erased or renamed on its way out of API Y".
+    std::string kind{"swallow"};
+    /// What a production log will hold when the sink fires, derived from
+    /// the sink's own findings: "none" (nothing logged), "message" (a
+    /// sentence, no stack — log-and-swallow message-only), "full" (whole
+    /// error logged). Empty for cause-loss sinks (nothing is swallowed;
+    /// the failure surfaces, renamed).
+    std::string log;
 };
 
 /// Repo-level error-handling rollup (== ERROR HANDLING ==).

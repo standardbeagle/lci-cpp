@@ -198,6 +198,7 @@ ErrorHandlingAnalyzer::Result ErrorHandlingAnalyzer::analyze(
     int releases_total = 0;
     int releases_guarded = 0;
     std::vector<const Unit*> swallow_units;
+    std::vector<const Unit*> funnel_units;
 
     for (const auto& u : units) {
         const auto& info = *u.info;
@@ -244,12 +245,18 @@ ErrorHandlingAnalyzer::Result ErrorHandlingAnalyzer::analyze(
         }
 
         bool swallows = false;
+        bool cause_loss = false;
         for (const auto& f : info.error_findings) {
             if (is_swallow_signal(f.signal)) swallows = true;
+            if (f.signal == EhSignal::RethrowNoCause) cause_loss = true;
         }
         if (swallows) {
             ++swallow_sites;
             swallow_units.push_back(&u);
+        } else if (cause_loss) {
+            // Generic-rethrow funnels: the error surfaces, but renamed and
+            // chainless. A funnel that ALSO swallows is already seeded above.
+            funnel_units.push_back(&u);
         }
 
         if (info.error_handling.can_throw) {
@@ -347,13 +354,21 @@ ErrorHandlingAnalyzer::Result ErrorHandlingAnalyzer::analyze(
     sort_findings(result.errors.findings);
     sort_findings(result.resources.findings);
 
-    // --- Exposure: public API symbols that transitively reach a swallow site.
-    if (!swallow_units.empty()) {
-        // Reverse BFS from every swallow site at once, tracking min depth and
-        // the sink each caller first reached.
+    // --- Exposure: public API symbols that transitively reach a sink.
+    // Two seed sets, same reverse BFS:
+    //  - swallow sinks (the error can vanish there), annotated with what a
+    //    production log will hold when it does;
+    //  - cause-loss funnels (generic rethrow: the error surfaces renamed,
+    //    stack and cause chain gone) — the transformation points an
+    //    incident responder needs when tracing a surfaced error backwards.
+    auto reverse_bfs = [&](const std::vector<const Unit*>& seeds,
+                           std::string_view kind,
+                           bool annotate_log) {
+        if (seeds.empty()) return;
+        // Track min depth and the sink each caller first reached.
         absl::flat_hash_map<SymbolID, std::pair<int, const Unit*>> depth_sink;
         std::deque<SymbolID> q;
-        for (const auto* su : swallow_units) {
+        for (const auto* su : seeds) {
             depth_sink[su->id] = {0, su};
             q.push_back(su->id);
         }
@@ -368,9 +383,23 @@ ErrorHandlingAnalyzer::Result ErrorHandlingAnalyzer::analyze(
                 q.push_back(caller);
             }
         }
+        // What the log will hold when this sink fires: derived from the
+        // sink's own findings, not from hope. empty-catch / catch-and-
+        // continue / error-to-sentinel log nothing; log-and-swallow logs a
+        // message or the whole error (the finding's detail already made the
+        // fidelity call per language).
+        auto sink_log = [](const Unit& sink) -> std::string {
+            for (const auto& f : sink.info->error_findings) {
+                if (f.signal != EhSignal::LogAndSwallow) continue;
+                return f.detail.find("message only") != std::string::npos
+                           ? "message"
+                           : "full";
+            }
+            return "none";
+        };
         std::vector<EhExposureEntry> exposure;
         for (const auto& [sid, ds] : depth_sink) {
-            if (ds.first == 0) continue;  // the swallow site itself
+            if (ds.first == 0) continue;  // the sink itself
             auto it = unit_by_symbol.find(sid);
             if (it == unit_by_symbol.end()) continue;
             const Unit& u = units[it->second];
@@ -380,6 +409,8 @@ ErrorHandlingAnalyzer::Result ErrorHandlingAnalyzer::analyze(
             e.sink_symbol = ds.second->name;
             e.depth = ds.first;
             e.reach = u.reach;
+            e.kind = std::string(kind);
+            if (annotate_log) e.log = sink_log(*ds.second);
             exposure.push_back(std::move(e));
         }
         std::sort(exposure.begin(), exposure.end(),
@@ -390,7 +421,23 @@ ErrorHandlingAnalyzer::Result ErrorHandlingAnalyzer::analyze(
                       return a.api_location < b.api_location;
                   });
         if (exposure.size() > 3) exposure.resize(3);
-        result.errors.exposure = std::move(exposure);
+        for (auto& e : exposure) {
+            result.errors.exposure.push_back(std::move(e));
+        }
+    };
+    reverse_bfs(swallow_units, "swallow", /*annotate_log=*/true);
+    reverse_bfs(funnel_units, "cause-loss", /*annotate_log=*/false);
+
+    // De-saturation: 10.00 means ZERO findings, always. The weighted mean
+    // rounds a large mostly-clean corpus up to 10.00 while dozens of med
+    // findings stand (RxJava: 10.00 with 38), which reads as "nothing to
+    // do" on a dashboard. The epsilon keeps the score honest without
+    // reshaping the formula.
+    if (!result.errors.findings.empty()) {
+        result.errors.score = std::min(result.errors.score, 9.99);
+    }
+    if (!result.resources.findings.empty()) {
+        result.resources.score = std::min(result.resources.score, 9.99);
     }
 
     return result;
