@@ -255,10 +255,15 @@ TEST_F(McpToolsIntegrationTest, BrowseFileToolReturnsFileInfo) {
     EXPECT_TRUE(json.contains("symbols"));
 }
 
-TEST_F(McpToolsIntegrationTest, BrowseFileToolNotFoundReturnsError) {
+TEST_F(McpToolsIntegrationTest, BrowseFileToolNotFoundReportsFoundFalse) {
+    // A lookup miss is a definitive negative answer, not a tool error.
     auto result = handle_browse_file(
         {{"file", "nonexistent.xyz"}}, *indexer_);
-    EXPECT_TRUE(result.is_error);
+    EXPECT_FALSE(result.is_error);
+    auto json = nlohmann::json::parse(result.text);
+    EXPECT_EQ(json.value("found", true), false);
+    EXPECT_NE(json.value("reason", std::string()).find("not found"),
+              std::string::npos);
 }
 
 // -- Tool: index_stats --------------------------------------------------------

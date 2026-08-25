@@ -456,20 +456,39 @@ TEST_F(CodeInsightTest, DefaultModeIsOverview) {
 
 // side_effects symbol mode against a real index but an empty analyzer: the
 // symbol resolves in the index, yet the analyzer holds no record for it. Must
-// fail loud (Karpathy #6) — a bare empty result reads as "pure" — and the
-// error must name the file root-relative ("main.go", not the temp dir).
-TEST_F(CodeInsightTest, SideEffectsSymbolFoundButNoRecordFailsLoud) {
+// stay loud — a bare empty result reads as "pure" — via an explicit
+// available=false + reason (not isError, which reads as a code failure), and
+// the reason must name the file root-relative ("main.go", not the temp dir).
+TEST_F(CodeInsightTest, SideEffectsSymbolFoundButNoRecordSaysWhy) {
     SideEffectAnalyzer empty_analyzer("go");
     nlohmann::json params;
     params["mode"] = "symbol";
     params["symbol_name"] = "main";
     auto result = handle_side_effects(params, empty_analyzer, indexer_.get());
-    EXPECT_TRUE(result.is_error);
-    auto json = nlohmann::json::parse(result.text);
-    auto err = json["error"].get<std::string>();
-    EXPECT_NE(err.find("main"), std::string::npos);
-    EXPECT_EQ(err.find(temp_dir_.string()), std::string::npos)
-        << "error leaked absolute path: " << err;
+    EXPECT_FALSE(result.is_error);
+    auto na = nlohmann::json::parse(result.text);
+    EXPECT_EQ(na.value("available", true), false);
+    EXPECT_NE(na.value("reason", std::string()).find("no side-effect record"),
+              std::string::npos);
+    auto reason = na.value("reason", std::string());
+    EXPECT_NE(reason.find("main"), std::string::npos);
+    EXPECT_EQ(reason.find(temp_dir_.string()), std::string::npos)
+        << "reason leaked absolute path: " << reason;
+}
+
+// side_effects symbol mode with a name the index does not hold: a lookup
+// miss is a definitive negative answer, not a tool error.
+TEST_F(CodeInsightTest, SideEffectsSymbolNotFoundIsNotAnError) {
+    SideEffectAnalyzer analyzer("go");
+    nlohmann::json params;
+    params["mode"] = "symbol";
+    params["symbol_name"] = "NoSuchSymbol99";
+    auto result = handle_side_effects(params, analyzer, indexer_.get());
+    EXPECT_FALSE(result.is_error);
+    auto na = nlohmann::json::parse(result.text);
+    EXPECT_EQ(na.value("available", true), false);
+    EXPECT_NE(na.value("reason", std::string()).find("symbol not found"),
+              std::string::npos);
 }
 
 // Same real index: symbol mode on a resolvable symbol emits a root-relative
@@ -1282,13 +1301,19 @@ TEST_F(ErrorHandlingSectionTest, DetailedResourcesListsAllFindings) {
     EXPECT_NE(result.text.find("leak-no-release"), std::string::npos);
 }
 
-TEST_F(ErrorHandlingSectionTest, DetailedErrorsFailsLoudWithoutRecords) {
+TEST_F(ErrorHandlingSectionTest, DetailedErrorsSaysWhyWithoutRecords) {
+    // Unpopulated analyzer: stay loud (an empty section would read as "no
+    // findings") via available=false + reason, without the error flag.
     SideEffectAnalyzer empty("go");
     nlohmann::json params;
     params["mode"] = "detailed";
     params["analysis"] = "errors";
     auto result = handle_code_insight(params, *engine_, *indexer_, &empty);
-    EXPECT_TRUE(result.is_error);
+    EXPECT_FALSE(result.is_error);
+    EXPECT_NE(result.text.find("available=false"), std::string::npos)
+        << result.text;
+    EXPECT_NE(result.text.find("unpopulated"), std::string::npos);
+    EXPECT_EQ(result.text.find("== ERROR HANDLING =="), std::string::npos);
 }
 
 TEST_F(ErrorHandlingSectionTest, SideEffectsSummaryCarriesJsonTwin) {
@@ -1378,9 +1403,15 @@ TEST_F(ErrorHandlingSectionTest, BetaGateOffRefusesDetailedErrors) {
     params["analysis"] = "errors";
     auto result = handle_code_insight(params, *engine_, off_index,
                                       analyzer_.get());
-    ASSERT_TRUE(result.is_error);
+    // Config-gated-off is a definitive not-available answer, not an error:
+    // a successful LCF block that still names the gate and how to open it.
+    ASSERT_FALSE(result.is_error) << result.text;
+    EXPECT_NE(result.text.find("available=false"), std::string::npos)
+        << result.text;
     EXPECT_NE(result.text.find("BETA"), std::string::npos) << result.text;
     EXPECT_NE(result.text.find("error_report"), std::string::npos);
+    // No report data alongside the not-applicable marker.
+    EXPECT_EQ(result.text.find("== ERROR HANDLING =="), std::string::npos);
 }
 
 TEST_F(ErrorHandlingSectionTest, CaptureModeWritesTheFullReportToStateDir) {

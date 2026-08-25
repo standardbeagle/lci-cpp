@@ -353,13 +353,18 @@ TEST_F(ExploreIndexTestFixture, BrowseFileByName) {
 }
 
 TEST_F(ExploreIndexTestFixture, BrowseFileNotFound) {
+    // A lookup miss is a definitive negative answer, not a tool error
+    // (matches the inspect_symbol not-found shape): found=false + hint.
     nlohmann::json params;
     params["file"] = "nonexistent_file.go";
     auto result = handle_browse_file(params, *indexer_);
-    EXPECT_TRUE(result.is_error);
+    EXPECT_FALSE(result.is_error);
     auto j = nlohmann::json::parse(result.text);
-    EXPECT_TRUE(j["error"].get<std::string>().find("not found") !=
-                std::string::npos);
+    EXPECT_EQ(j.value("found", true), false);
+    EXPECT_NE(j.value("reason", std::string()).find("not found"),
+              std::string::npos);
+    EXPECT_NE(j.value("hint", std::string()).find("find_files"),
+              std::string::npos);
 }
 
 TEST_F(ExploreIndexTestFixture, BrowseFileWithKindFilter) {
