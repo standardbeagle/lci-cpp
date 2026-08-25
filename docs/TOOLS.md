@@ -437,13 +437,15 @@ session-startup workhorse.
   `git::FrequencyAnalyzer` data over a rolling time window (time-volatile).
 
 > The git modes surface real data that the original Go formatter computed but
-> discarded. Both **fail fast** if the project root is not a git repository.
+> discarded. If the project root is not a git repository, both return a
+> **successful** `== GIT ==` block with `available=false`, `reason=...`, and a
+> hint — an explicit not-applicable answer, never an error and never fake
+> zeros (an error result would read as a code failure to agent callers).
 
 **Notable**: all list output deterministically sorted; LCF token estimate in
 the header; trailing newline stripped so payloads end on `---`.
 
-**Errors**: invalid `mode`; invalid `detailed` analysis; non-git root (git
-modes); git analysis failure.
+**Errors**: invalid `mode`; invalid `detailed` analysis; git analysis failure.
 
 ---
 
@@ -526,5 +528,9 @@ project root and runs `git::Analyzer`. Emits the canonical report shape
 `metrics_issues`, `naming_issues`, and `duplicates` are omitted when empty.
 File paths are normalized relative to the project root.
 
-**Errors**: invalid `scope`; `not a git repository: <root>` (fail-fast);
-`git analyze failed`.
+**Not applicable**: a non-git project root returns a **successful** payload
+`{"available": false, "reason": "not a git repository: <root>", "hint": ...}`
+instead of an error (the HTTP `/git-analyze` endpoint answers the same shape
+with status 200).
+
+**Errors**: invalid `scope`; `git analyze failed`.
