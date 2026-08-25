@@ -17,10 +17,20 @@ implemented.
   etc. emit short encoded `object_id` strings (e.g. `VE`, `tG`). Feed them to
   `get_context {"id": "..."}` (comma-separated for several) to drill in.
 - **Errors**: failures return a structured error result
-  `{"operation": "<tool>", "message": "...", "success": false}` with the
+  `{"operation": "<tool>", "error": "...", "success": false}` with the
   result flagged as an error. Tools **fail fast** — no fake/zeroed payloads.
 - **Determinism**: all list output is sorted with total-order tiebreakers
   (no hash-iteration order in user-visible output).
+
+
+### Not-applicable answers (all tools)
+
+A well-formed request whose environmental precondition is absent — index
+still warming, empty index, analyzer unpopulated, non-git root, feature
+gated off — or a definitive lookup miss (symbol/file not found) returns a
+**successful** payload with `available: false` (or `found: false`) plus a
+`reason` and `hint`, never an error result. Error results are reserved for
+caller mistakes (bad parameters) and genuine internal failures.
 
 ## Tool index
 
@@ -91,8 +101,9 @@ penalty) when a pattern *looks* regex-y; `refs`/`breadcrumbs` only attach to
 matches with normalized score ≥ 0.5; enclosing symbol resolved O(1) via
 `get_symbol_at_line` (stable empty fields when a match is outside any symbol).
 
-**Errors**: missing `pattern` and `patterns`; unrecognized `include` token;
-index unavailable.
+**Errors**: missing `pattern` and `patterns`; unrecognized `include` token.
+
+**Not applicable**: index unavailable.
 
 ---
 
@@ -117,7 +128,9 @@ File-path search (like `find`/`fd`): fuzzy, glob, type filter.
 (Levenshtein); multi-word patterns add +0.15/word (cap +0.5); deterministic
 sort score desc, then `file_id`, then path.
 
-**Errors**: missing `pattern`; no files in index; index unavailable.
+**Errors**: missing `pattern`.
+
+**Not applicable**: no files in index; index unavailable.
 
 ---
 
@@ -178,7 +191,9 @@ Expansion directives in `x`: `callees[:N]`, `callers`, `implementations`,
 `tests`, `pattern` — applied within the remaining token budget.
 
 **Errors**: empty `refs`; no `to_file`/`to_string`; no `from_file`/`from_string`;
-file not found; invalid JSON / manifest; index unavailable; invalid `operation`.
+file not found; invalid JSON / manifest; invalid `operation`.
+
+**Not applicable**: index unavailable.
 
 ---
 
@@ -206,7 +221,9 @@ Enumerate + filter symbols across the index. The "ls" for code.
 `signature`, `doc_comment`, `complexity`, `parameter_count`, `receiver_type`,
 `incoming_refs`/`outgoing_refs`, `callers[]`, `callees[]`, `scope_chain[]`.
 
-**Errors**: missing `kind`; index unavailable.
+**Errors**: missing `kind`.
+
+**Not applicable**: index unavailable.
 
 ---
 
@@ -230,7 +247,9 @@ Deep inspection of one symbol by name or ID.
 `scope_chain[]`, `incoming_refs`/`outgoing_refs`, `annotations[]`,
 `receiver_type`.
 
-**Errors**: neither `name` nor `id`; index unavailable.
+**Errors**: neither `name` nor `id`.
+
+**Not applicable**: index unavailable.
 
 ---
 
@@ -253,8 +272,11 @@ Symbol outline for a single file, with optional stats.
 `max_complexity`, `avg_complexity` (computed over the whole file, not the
 filtered subset).
 
-**Errors**: neither `file` nor `file_id`; file not found (JSON with `hint`);
-index unavailable. (`show_imports` is accepted but currently unused.)
+**Errors**: neither `file` nor `file_id`. (`show_imports` is accepted but
+currently unused.)
+
+**Not applicable**: file not found (`found: false` + `hint`); index
+unavailable.
 
 ---
 
@@ -277,7 +299,8 @@ Index status + health.
   `warnings[]` + `memory_usage`.
 - **progress** → summary with an inline `progress` object during indexing.
 
-**Errors**: index unavailable. (`include_watch_mode` accepted but unused.)
+**Not applicable**: index unavailable. (`include_watch_mode` accepted but
+unused.)
 
 ---
 
@@ -304,7 +327,9 @@ Deep diagnostics for index troubleshooting.
 
 All responses carry `mode` + `timestamp_ms`.
 
-**Errors**: unknown mode; index unavailable.
+**Errors**: unknown mode.
+
+**Not applicable**: index unavailable.
 
 ---
 
@@ -393,8 +418,11 @@ I/O, throws), with transitive call-graph analysis.
   with_throws, with_external_calls}, total_count}`. Conditional pure-counting
   (won't report all-pure on an unannotated corpus).
 
-**Errors**: `symbol` without name/path; symbol not found; `file` without path;
+**Errors**: `symbol` without name/path; `file` without path;
 `category` missing/unknown; unknown mode.
+
+**Not applicable**: symbol not found; symbol resolved but no side-effect
+record; analyzer unavailable.
 
 ---
 
