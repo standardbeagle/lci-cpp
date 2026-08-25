@@ -690,22 +690,32 @@ TEST_F(CodeInsightAttrTest, StructureCountsViaClassifier) {
     EXPECT_NE(result.text.find("example=1"), std::string::npos);
 }
 
-// The base fixture's temp_dir_ is not a git repo. Both git modes must now
-// FAIL FAST (real git wiring) instead of emitting a fake zero-STATISTICS block.
-TEST_F(CodeInsightTest, GitAnalyzeFailsFastOnNonGitDir) {
+// The base fixture's temp_dir_ is not a git repo. A well-formed request whose
+// environmental precondition is absent is NOT a tool error (isError would read
+// as a code failure to agent callers): both git modes return a successful,
+// self-describing not-applicable block — explicit available=false + reason,
+// never a fake zero-STATISTICS block.
+TEST_F(CodeInsightTest, GitAnalyzeReportsUnavailableOnNonGitDir) {
     nlohmann::json params;
     params["mode"] = "git_analyze";
     auto result = handle_code_insight(params, *engine_, *indexer_);
-    EXPECT_TRUE(result.is_error);
-    EXPECT_NE(result.text.find("git"), std::string::npos);
+    EXPECT_FALSE(result.is_error);
+    EXPECT_NE(result.text.find("available=false"), std::string::npos)
+        << result.text;
+    EXPECT_NE(result.text.find("not a git repository"), std::string::npos);
+    // No fabricated analysis data alongside the not-applicable marker.
+    EXPECT_EQ(result.text.find("files_changed"), std::string::npos);
 }
 
-TEST_F(CodeInsightTest, GitHotspotsFailsFastOnNonGitDir) {
+TEST_F(CodeInsightTest, GitHotspotsReportsUnavailableOnNonGitDir) {
     nlohmann::json params;
     params["mode"] = "git_hotspots";
     auto result = handle_code_insight(params, *engine_, *indexer_);
-    EXPECT_TRUE(result.is_error);
-    EXPECT_NE(result.text.find("git"), std::string::npos);
+    EXPECT_FALSE(result.is_error);
+    EXPECT_NE(result.text.find("available=false"), std::string::npos)
+        << result.text;
+    EXPECT_NE(result.text.find("not a git repository"), std::string::npos);
+    EXPECT_EQ(result.text.find("files_analyzed"), std::string::npos);
 }
 
 // Real-repo fixture: git-init a throwaway repo with several commits so both git

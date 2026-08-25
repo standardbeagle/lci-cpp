@@ -617,19 +617,22 @@ TEST_F(ExploreIndexTestFixture, DebugInfoUnknownMode) {
 // git_analysis tests
 // =============================================================================
 
-// The fixture's tmp_dir_ is a bare scratch directory, not a git repo. The real
-// handler must fail fast with a clear error — NOT a "not_available" stub.
-TEST_F(ExploreIndexTestFixture, GitAnalysisFailsFastOnNonGitDir) {
+// The fixture's tmp_dir_ is a bare scratch directory, not a git repo. That is
+// an absent environmental precondition, not a tool error: the handler returns
+// a successful, self-describing not-applicable payload (available=false +
+// reason) — NOT isError (reads as a code failure to agents), and NOT the old
+// zeroed "not_available" stub that mimicked real analysis data.
+TEST_F(ExploreIndexTestFixture, GitAnalysisReportsUnavailableOnNonGitDir) {
     nlohmann::json params;
     params["scope"] = "wip";
     auto result = handle_git_analysis(params, *indexer_);
-    EXPECT_TRUE(result.is_error);
+    EXPECT_FALSE(result.is_error);
     auto j = nlohmann::json::parse(result.text);
-    // make_error_response carries the operation + message; assert it names the
-    // git-repo failure rather than the old hardcoded stub payload.
+    EXPECT_EQ(j.value("available", true), false);
+    EXPECT_NE(j.value("reason", std::string()).find("not a git repository"),
+              std::string::npos);
     EXPECT_EQ(j.value("status", std::string()), std::string());  // no stub key
-    std::string text = result.text;
-    EXPECT_NE(text.find("git"), std::string::npos);
+    EXPECT_FALSE(j.contains("summary"));  // no fabricated report data
 }
 
 TEST_F(ExploreIndexTestFixture, GitAnalysisRejectsBadScope) {

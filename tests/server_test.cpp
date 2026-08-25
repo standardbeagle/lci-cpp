@@ -1156,9 +1156,15 @@ TEST_F(ServerTest, TreeChildNodesHavePositiveDepth) {
     }
 }
 
-TEST_F(ServerTest, GitAnalyzeNotImplemented) {
+TEST_F(ServerTest, GitAnalyzeReportsUnavailableOnNonGitRoot) {
+    // The test server's root is not a git repo. That is an inapplicable
+    // capability, not a request error: 200 with available=false + reason,
+    // matching the MCP git surfaces.
     auto j = post("/git-analyze", {{"scope", "staged"}});
-    EXPECT_TRUE(j.contains("error"));
+    EXPECT_FALSE(j.contains("error"));
+    EXPECT_EQ(j.value("available", true), false);
+    EXPECT_NE(j.value("reason", std::string()).find("not a git repository"),
+              std::string::npos);
 }
 
 TEST_F(ServerTest, ShutdownEndpoint) {

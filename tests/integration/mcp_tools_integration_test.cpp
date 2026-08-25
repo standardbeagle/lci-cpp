@@ -282,28 +282,35 @@ TEST_F(McpToolsIntegrationTest, DebugInfoToolReturnsData) {
 
 // -- Tool: git_analysis -------------------------------------------------------
 
-TEST_F(McpToolsIntegrationTest, GitAnalysisToolReturnsErrorOrData) {
+TEST_F(McpToolsIntegrationTest, GitAnalysisToolReturnsUnavailableOrData) {
     auto result = handle_git_analysis({{"scope", "staged"}}, *indexer_);
-    // The scratch index root is not a git repo, so the real handler fails
-    // fast with a structured error — never malformed payload.
+    // The scratch index root is not a git repo: a well-formed request against
+    // an absent precondition is answered with a successful, self-describing
+    // not-applicable payload — never isError, never malformed payload.
     auto json = nlohmann::json::parse(result.text);
     EXPECT_TRUE(json.is_object());
-    EXPECT_TRUE(result.is_error);
+    EXPECT_FALSE(result.is_error);
+    EXPECT_EQ(json.value("available", true), false);
 }
 
 TEST_F(McpToolsIntegrationTest, GitAnalysisIsWiredToRealAnalyzerNotAStub) {
-    // handle_git_analysis() now drives the real git::Analyzer (Dart task
-    // sL0AJDf2hjIh). On a non-git root it must FAIL FAST — it must NOT fall
-    // back to the old "not_available"/"future" stub payload, which would mask
-    // the missing-repo condition behind a fake-success envelope.
+    // handle_git_analysis() drives the real git::Analyzer (Dart task
+    // sL0AJDf2hjIh). On a non-git root it says so explicitly (available=false
+    // + reason) — it must NOT fall back to the old "not_available"/"future"
+    // stub payload, which mimicked real analysis data behind a fake-success
+    // envelope, and it must NOT flag isError (agents read that as a code
+    // failure rather than an inapplicable capability).
     auto result = handle_git_analysis({{"scope", "wip"}}, *indexer_);
     auto json = nlohmann::json::parse(result.text);
     ASSERT_TRUE(json.is_object());
 
-    EXPECT_TRUE(result.is_error);
-    // The dead stub keys must be gone.
+    EXPECT_FALSE(result.is_error);
+    EXPECT_EQ(json.value("available", true), false);
+    EXPECT_NE(json.value("reason", std::string()).find("not a git repository"),
+              std::string::npos);
+    // The dead stub keys must be gone, and no fabricated report data.
     EXPECT_FALSE(json.contains("status"));
-    EXPECT_NE(result.text.find("git"), std::string::npos);
+    EXPECT_FALSE(json.contains("summary"));
 }
 
 TEST_F(McpToolsIntegrationTest, GitAnalysisHandlesUnknownScope) {
