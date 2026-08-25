@@ -413,6 +413,9 @@ class CodeInsightTest : public ::testing::Test {
 
         Config config;
         config.project.root = temp_dir_.string();
+        // The error-handling report is beta and ships dark; these fixtures
+        // exercise analysis handlers, so flip the gate on.
+        config.insight.error_report = "on";
         indexer_ = std::make_unique<MasterIndex>(config);
         indexer_->index_directory(temp_dir_.string());
         engine_ = std::make_unique<CodebaseIntelligenceEngine>();
@@ -1111,6 +1114,14 @@ class ErrorHandlingSectionTest : public ::testing::Test {
                    "}\n"
                    "\n"
                    "func leakIt() {\n"
+                   "}\n"
+                   "\n"
+                   "func funnelIt() {\n"
+                   "}\n"
+                   "\n"
+                   "func PublicEntry() {\n"
+                   "\tswallowIt()\n"
+                   "\tfunnelIt()\n"
                    "}\n");
         // Same finding in a test path: must never score (production-only).
         write_file(temp_dir_ / "util_test.go",
@@ -1121,6 +1132,9 @@ class ErrorHandlingSectionTest : public ::testing::Test {
 
         Config config;
         config.project.root = temp_dir_.string();
+        // The error-handling report is beta and ships dark; these fixtures
+        // exercise analysis handlers, so flip the gate on.
+        config.insight.error_report = "on";
         indexer_ = std::make_unique<MasterIndex>(config);
         ASSERT_TRUE(indexer_->index_directory(temp_dir_.string()));
         engine_ = std::make_unique<CodebaseIntelligenceEngine>();
@@ -1138,6 +1152,20 @@ class ErrorHandlingSectionTest : public ::testing::Test {
 
         analyzer_->begin_function("leakIt", main_path, 6, 7);
         analyzer_->record_call_site_resources("Open", 6, false);
+        analyzer_->end_function();
+
+        // A cause-loss funnel: rethrows, but the new error never chains the
+        // cause. Seeds the api-reaches-cause-loss exposure via PublicEntry.
+        analyzer_->begin_function("funnelIt", main_path, 9, 10);
+        CatchSiteInfo funnel;
+        funnel.line = 9;
+        funnel.has_rethrow = true;
+        funnel.has_other_call = true;
+        analyzer_->record_catch(funnel);
+        analyzer_->end_function();
+
+        // The caller must be a scored unit for exposure to name it.
+        analyzer_->begin_function("PublicEntry", main_path, 12, 15);
         analyzer_->end_function();
 
         analyzer_->begin_function("helperSwallow", test_path, 3, 4);
@@ -1268,6 +1296,118 @@ TEST_F(ErrorHandlingSectionTest, SideEffectsSummaryCarriesJsonTwin) {
     auto loc = json["error_handling"]["findings"][0]["location"]
                    .get<std::string>();
     EXPECT_NE(loc.find("main.go:"), std::string::npos);
+}
+
+TEST_F(ErrorHandlingSectionTest, ExposureCarriesLogAnnotationAndFunnels) {
+    nlohmann::json params;
+    auto result = handle_code_insight(params, *engine_, *indexer_,
+                                      analyzer_.get());
+    ASSERT_FALSE(result.is_error) << result.text;
+    // PublicEntry -> swallowIt: an empty catch logs nothing.
+    EXPECT_NE(result.text.find("api-reaches-swallow: PublicEntry"),
+              std::string::npos)
+        << result.text;
+    EXPECT_NE(result.text.find("log=none"), std::string::npos) << result.text;
+    // PublicEntry -> funnelIt: the error surfaces renamed and chainless.
+    EXPECT_NE(result.text.find("api-reaches-cause-loss: PublicEntry"),
+              std::string::npos)
+        << result.text;
+}
+
+TEST_F(ErrorHandlingSectionTest, DensityLineDeSaturatesTheScore) {
+    nlohmann::json params;
+    auto result = handle_code_insight(params, *engine_, *indexer_,
+                                      analyzer_.get());
+    ASSERT_FALSE(result.is_error);
+    EXPECT_NE(result.text.find("density: findings="), std::string::npos)
+        << result.text;
+    // 10.00 is reserved for zero findings; this corpus has findings.
+    auto eh = result.text.find("== ERROR HANDLING ==");
+    auto res = result.text.find("== RESOURCE MANAGEMENT ==");
+    ASSERT_NE(eh, std::string::npos);
+    ASSERT_NE(res, std::string::npos);
+    std::string eh_section = result.text.substr(eh, res - eh);
+    EXPECT_EQ(eh_section.find("score=10.00"), std::string::npos)
+        << eh_section;
+}
+
+// -- The beta gate ------------------------------------------------------------
+
+TEST_F(ErrorHandlingSectionTest, BetaGateOffHidesEverySurface) {
+    Config off_cfg;
+    off_cfg.project.root = temp_dir_.string();  // error_report stays "off"
+    MasterIndex off_index(off_cfg);
+    ASSERT_TRUE(off_index.index_directory(temp_dir_.string()));
+
+    nlohmann::json params;
+    auto result = handle_code_insight(params, *engine_, off_index,
+                                      analyzer_.get());
+    ASSERT_FALSE(result.is_error) << result.text;
+    EXPECT_EQ(result.text.find("== ERROR HANDLING =="), std::string::npos);
+    EXPECT_EQ(result.text.find("== RESOURCE MANAGEMENT =="),
+              std::string::npos);
+    EXPECT_EQ(result.text.find("error_handling="), std::string::npos);
+
+    // The JSON twin goes dark too.
+    nlohmann::json sp;
+    sp["mode"] = "summary";
+    auto summary = handle_side_effects(sp, *analyzer_, &off_index);
+    ASSERT_FALSE(summary.is_error);
+    auto json = nlohmann::json::parse(summary.text);
+    EXPECT_FALSE(json.contains("error_handling")) << summary.text;
+}
+
+TEST_F(ErrorHandlingSectionTest, BetaGateOffRefusesDetailedErrors) {
+    Config off_cfg;
+    off_cfg.project.root = temp_dir_.string();
+    MasterIndex off_index(off_cfg);
+    ASSERT_TRUE(off_index.index_directory(temp_dir_.string()));
+
+    nlohmann::json params;
+    params["mode"] = "detailed";
+    params["analysis"] = "errors";
+    auto result = handle_code_insight(params, *engine_, off_index,
+                                      analyzer_.get());
+    ASSERT_TRUE(result.is_error);
+    EXPECT_NE(result.text.find("BETA"), std::string::npos) << result.text;
+    EXPECT_NE(result.text.find("error_report"), std::string::npos);
+}
+
+TEST_F(ErrorHandlingSectionTest, CaptureModeWritesTheFullReportToStateDir) {
+    auto state_dir = temp_dir_ / "state";
+    ::setenv("XDG_STATE_HOME", state_dir.string().c_str(), 1);
+
+    Config cap_cfg;
+    cap_cfg.project.root = temp_dir_.string();
+    cap_cfg.insight.error_report = "capture";
+    MasterIndex cap_index(cap_cfg);
+    ASSERT_TRUE(cap_index.index_directory(temp_dir_.string()));
+
+    // Capture publishes nothing in-band...
+    nlohmann::json params;
+    auto result = handle_code_insight(params, *engine_, cap_index,
+                                      analyzer_.get());
+    ASSERT_FALSE(result.is_error);
+    EXPECT_EQ(result.text.find("== ERROR HANDLING =="), std::string::npos);
+
+    // ...and writes the full untruncated report to the state dir.
+    std::string path =
+        write_error_report_capture(cap_index, analyzer_.get());
+    ::unsetenv("XDG_STATE_HOME");
+    ASSERT_FALSE(path.empty());
+    std::ifstream f(path);
+    ASSERT_TRUE(f.good()) << path;
+    std::stringstream ss;
+    ss << f.rdbuf();
+    std::string report = ss.str();
+    EXPECT_NE(report.find("beta capture"), std::string::npos);
+    EXPECT_NE(report.find("== ERROR HANDLING =="), std::string::npos);
+    EXPECT_NE(report.find("== RESOURCE MANAGEMENT =="), std::string::npos);
+    EXPECT_NE(report.find("empty-catch: swallowIt"), std::string::npos);
+
+    // "on" and "off" never write.
+    EXPECT_TRUE(write_error_report_capture(*indexer_, analyzer_.get())
+                    .empty());
 }
 
 // =============================================================================

@@ -1,5 +1,12 @@
 #include <lci/mcp/handlers_analysis.h>
 
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+
+#include <lci/version.h>
+
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -695,7 +702,8 @@ ToolResult side_effect_summary(SideEffectAnalyzer& analyzer,
 
     // Error-handling + resource rollups (JSON twin of the code_insight
     // sections; the natural err-lookup ingestion path).
-    if (indexer != nullptr && !analyzer.results().empty()) {
+    if (indexer != nullptr && !analyzer.results().empty() &&
+        indexer->config().insight.error_report == "on") {
         auto eh = ErrorHandlingAnalyzer::analyze(
             analyzer, *indexer, indexer->config().project.root);
         response["error_handling"] = error_handling_to_json(eh.errors);
@@ -1253,13 +1261,35 @@ void emit_error_handling(std::ostringstream& out,
     if (!s.findings.empty()) {
         out << "findings:\n";
         emit_eh_finding_lines(out, s.findings, max_findings);
+        // Density de-saturates the headline: 9.99 with density=0.4 and 9.99
+        // with density=12.0 are different codebases even though the weighted
+        // mean can no longer tell them apart.
+        if (s.functions_scored > 0) {
+            out << "density: findings=" << s.findings.size() << " per_100_funcs="
+                << fmt2(100.0 * static_cast<double>(s.findings.size()) /
+                        s.functions_scored)
+                << "\n";
+        }
     }
     if (!s.exposure.empty()) {
         out << "exposure:\n";
         for (const auto& e : s.exposure) {
-            out << "  api-reaches-swallow: " << e.api_symbol << " ("
-                << e.api_location << ") -> " << e.sink_symbol
-                << " swallow depth=" << e.depth << "\n";
+            if (e.kind == "cause-loss") {
+                // The funnel: the error surfaces from this API, but renamed
+                // and chainless — the sink threw a new error without the
+                // cause. Incident triage: an error reported at api_symbol
+                // may have originated as ANY failure below sink_symbol.
+                out << "  api-reaches-cause-loss: " << e.api_symbol << " ("
+                    << e.api_location << ") -> " << e.sink_symbol
+                    << " rethrow-no-cause depth=" << e.depth << "\n";
+            } else {
+                out << "  api-reaches-swallow: " << e.api_symbol << " ("
+                    << e.api_location << ") -> " << e.sink_symbol
+                    << " swallow depth=" << e.depth;
+                // What the production log will hold when the swallow fires.
+                if (!e.log.empty()) out << " log=" << e.log;
+                out << "\n";
+            }
         }
     }
     out << "next: code_insight {\"mode\":\"detailed\",\"analysis\":"
@@ -2139,7 +2169,12 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
         // BEARING; also feeds the SUMMARY headline). Skipped when the
         // side-effect analyzer holds no records — no stubbed zeros.
         std::optional<ErrorHandlingAnalyzer::Result> eh;
-        if (analyzer && !analyzer->results().empty()) {
+        // BETA gate: the error-handling / resource report ships dark. Only
+        // insight { error_report "on" } (or LCI_ERROR_REPORT=on) emits the
+        // sections; "capture" generates at server shutdown without
+        // publishing here.
+        if (indexer.config().insight.error_report == "on" && analyzer &&
+            !analyzer->results().empty()) {
             eh = ErrorHandlingAnalyzer::analyze(*analyzer, indexer,
                                                 project_root, scope.allowed);
         }
@@ -2248,6 +2283,15 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                     "analysis=" + detailed_mode +
                         " requires side-effect records; the analyzer is "
                         "unpopulated for this corpus");
+            }
+            if (indexer.config().insight.error_report != "on") {
+                return make_error_response(
+                    "code_insight",
+                    "analysis=" + detailed_mode +
+                        " is BETA and disabled (insight.error_report=" +
+                        indexer.config().insight.error_report +
+                        "); enable with insight { error_report \"on\" } in "
+                        ".lci.kdl or LCI_ERROR_REPORT=on");
             }
             auto eh = ErrorHandlingAnalyzer::analyze(*analyzer, indexer,
                                                      project_root,
@@ -2362,7 +2406,12 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                               !hd->problematic_symbols.empty())) ||
                       !d.naming.outliers.empty();
         std::optional<ErrorHandlingAnalyzer::Result> eh;
-        if (analyzer && !analyzer->results().empty()) {
+        // BETA gate: the error-handling / resource report ships dark. Only
+        // insight { error_report "on" } (or LCI_ERROR_REPORT=on) emits the
+        // sections; "capture" generates at server shutdown without
+        // publishing here.
+        if (indexer.config().insight.error_report == "on" && analyzer &&
+            !analyzer->results().empty()) {
             eh = ErrorHandlingAnalyzer::analyze(*analyzer, indexer,
                                                 project_root, scope.allowed);
         }
@@ -2505,6 +2554,82 @@ void register_analysis_handlers(McpServer& server,
             return handle_code_insight(p, *ci_engine, *indexer, analyzer,
                                        propagator);
         });
+}
+
+std::string write_error_report_capture(MasterIndex& indexer,
+                                       SideEffectAnalyzer* analyzer) {
+    if (indexer.config().insight.error_report != "capture") return {};
+
+    namespace fs = std::filesystem;
+    // State dir: $XDG_STATE_HOME/lci/error-reports, ~/.local/state fallback.
+    fs::path base;
+    if (const char* xdg = std::getenv("XDG_STATE_HOME");
+        xdg != nullptr && *xdg != '\0') {
+        base = fs::path(xdg);
+    } else if (const char* home = std::getenv("HOME");
+               home != nullptr && *home != '\0') {
+        base = fs::path(home) / ".local" / "state";
+    } else {
+        std::cerr << "error-report capture: no XDG_STATE_HOME or HOME\n";
+        return {};
+    }
+    fs::path dir = base / "lci" / "error-reports";
+    std::error_code ec;
+    fs::create_directories(dir, ec);
+    if (ec) {
+        std::cerr << "error-report capture: cannot create " << dir.string()
+                  << ": " << ec.message() << "\n";
+        return {};
+    }
+
+    const std::string& root = indexer.config().project.root;
+    std::string slug;
+    slug.reserve(root.size());
+    for (char c : root) {
+        slug += (std::isalnum(static_cast<unsigned char>(c)) || c == '.' ||
+                 c == '-')
+                    ? c
+                    : '-';
+    }
+    while (!slug.empty() && slug.front() == '-') slug.erase(slug.begin());
+
+    std::ostringstream out;
+    out << "LCI ERROR REPORT (beta capture)\n"
+        << "root=" << root << "\n"
+        << "generated_by=lci " << kVersion << "\n"
+        << "mode=capture (insight.error_report) — not published in any tool "
+           "response\n---\n";
+    if (analyzer == nullptr || analyzer->results().empty()) {
+        // Explicit, never silent: an empty capture file that LOOKS like a
+        // clean report would be a lie. Name the reason.
+        out << "no side-effect records: the AST warmup did not populate the "
+               "analyzer (empty, unreadable, or unsupported corpus)\n";
+    } else {
+        auto eh = ErrorHandlingAnalyzer::analyze(
+            *analyzer, indexer, root);
+        constexpr size_t kAll = static_cast<size_t>(-1);
+        emit_error_handling(out, eh.errors, kAll);
+        emit_resource_management(out, eh.resources, kAll);
+    }
+
+    fs::path final_path = dir / (slug + ".txt");
+    fs::path tmp_path = dir / (slug + ".txt.tmp");
+    {
+        std::ofstream f(tmp_path, std::ios::trunc);
+        if (!f) {
+            std::cerr << "error-report capture: cannot write "
+                      << tmp_path.string() << "\n";
+            return {};
+        }
+        f << out.str();
+    }
+    fs::rename(tmp_path, final_path, ec);
+    if (ec) {
+        std::cerr << "error-report capture: rename failed: " << ec.message()
+                  << "\n";
+        return {};
+    }
+    return final_path.string();
 }
 
 }  // namespace mcp

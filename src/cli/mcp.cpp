@@ -323,6 +323,17 @@ int run_mcp(const GlobalFlags& flags) {
     // long first index is the normal way a client gives up).
     warmup_thread.join();
 
+    // BETA error-report capture (insight.error_report = "capture"):
+    // generate-don't-publish for batch drivers like err-lookup. Runs after
+    // the transport exits and the warmup joined, so the index is complete
+    // and no request ever paid for it. No-op in "off" and "on".
+    if (std::string p =
+            mcp::write_error_report_capture(runtime_index,
+                                            &side_effect_analyzer);
+        !p.empty()) {
+        std::cerr << "error report captured: " << p << "\n";
+    }
+
     return exit_code;
 }
 

@@ -29,6 +29,19 @@ void register_analysis_handlers(McpServer& server,
                                 GraphPropagator* propagator,
                                 CodebaseIntelligenceEngine* ci_engine);
 
+/// BETA error-report capture (insight.error_report = "capture"): renders the
+/// full, untruncated == ERROR HANDLING == / == RESOURCE MANAGEMENT ==
+/// sections and writes them atomically (tmp + rename) to
+/// $XDG_STATE_HOME/lci/error-reports/<root-slug>.txt (fallback
+/// ~/.local/state). Generate-don't-publish: nothing appears in any tool
+/// response. Called from the MCP session teardown after the transport
+/// exits — the index is complete and the cost is off every request path.
+/// No-op in modes "off" and "on" ("on" publishes in-band instead). Returns
+/// the written path, or "" when nothing was written (an error is printed
+/// to stderr on failure — never silent).
+std::string write_error_report_capture(MasterIndex& indexer,
+                                       SideEffectAnalyzer* analyzer);
+
 // -- Handler functions (exposed for testing) ----------------------------------
 
 /// Handles "semantic_annotations": queries symbols by @lci: labels/categories.
