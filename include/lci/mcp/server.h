@@ -77,9 +77,19 @@ std::string dump_json_lossy(const nlohmann::json& data);
 /// Creates a JSON text response from arbitrary data.
 ToolResult make_json_response(const nlohmann::json& data);
 
-/// Creates an error response with structured error info.
+/// Creates an error response with structured error info. Reserve for caller
+/// mistakes (bad params) and genuine internal failures — an isError result
+/// reads as a code failure to agent callers.
 ToolResult make_error_response(const std::string& operation,
                                const std::string& message);
+
+/// Creates a successful not-applicable response for a well-formed request
+/// whose environmental precondition is absent (non-git root, index still
+/// warming, analyzer unpopulated, feature gated off): explicit
+/// available=false + reason + hint, never isError and never fake empty data.
+ToolResult make_unavailable_response(const std::string& operation,
+                                     const std::string& reason,
+                                     const std::string& hint);
 
 // -- McpServer ----------------------------------------------------------------
 

@@ -24,5 +24,16 @@ ToolResult make_error_response(const std::string& operation,
     return {dump_json_lossy(data), true};
 }
 
+ToolResult make_unavailable_response(const std::string& operation,
+                                     const std::string& reason,
+                                     const std::string& hint) {
+    nlohmann::json data;
+    data["operation"] = operation;
+    data["available"] = false;
+    data["reason"] = reason;
+    data["hint"] = hint;
+    return {dump_json_lossy(data), false};
+}
+
 }  // namespace mcp
 }  // namespace lci

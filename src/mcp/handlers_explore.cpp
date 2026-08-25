@@ -776,14 +776,16 @@ ToolResult handle_browse_file(const nlohmann::json& params,
     }
 
     if (!found) {
-        nlohmann::json err;
-        err["success"] = false;
-        err["error"] = "file not found: " + file_pattern;
-        err["operation"] = "browse_file";
-        err["hint"] =
+        // A definitive lookup miss, not a tool error (matches the
+        // inspect_symbol not-found shape): success with found=false + hint.
+        nlohmann::json miss;
+        miss["operation"] = "browse_file";
+        miss["found"] = false;
+        miss["reason"] = "file not found: " + file_pattern;
+        miss["hint"] =
             "Use find_files to locate the correct path, or provide "
             "file_id from search results";
-        return {dump_json_lossy(err), true};
+        return {dump_json_lossy(miss), false};
     }
 
     auto kinds = parse_symbol_kinds(params.value("kind", ""));
@@ -929,8 +931,9 @@ void register_explore_handlers(McpServer& server, MasterIndex* indexer) {
          {"kind"}},
         [indexer](const nlohmann::json& p) -> ToolResult {
             if (!indexer) {
-                return make_error_response("list_symbols",
-                                           "index not available");
+                return make_unavailable_response(
+                    "list_symbols", "index not available",
+                    "retry shortly; the server is still starting or indexing");
             }
             return handle_list_symbols(p, *indexer);
         });
@@ -959,8 +962,9 @@ void register_explore_handlers(McpServer& server, MasterIndex* indexer) {
          {}},
         [indexer](const nlohmann::json& p) -> ToolResult {
             if (!indexer) {
-                return make_error_response("inspect_symbol",
-                                           "index not available");
+                return make_unavailable_response(
+                    "inspect_symbol", "index not available",
+                    "retry shortly; the server is still starting or indexing");
             }
             return handle_inspect_symbol(p, *indexer);
         });
@@ -991,8 +995,9 @@ void register_explore_handlers(McpServer& server, MasterIndex* indexer) {
          {}},
         [indexer](const nlohmann::json& p) -> ToolResult {
             if (!indexer) {
-                return make_error_response("browse_file",
-                                           "index not available");
+                return make_unavailable_response(
+                    "browse_file", "index not available",
+                    "retry shortly; the server is still starting or indexing");
             }
             return handle_browse_file(p, *indexer);
         });

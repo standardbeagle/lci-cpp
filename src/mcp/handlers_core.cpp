@@ -1793,7 +1793,10 @@ ToolResult handle_find_files(const nlohmann::json& params,
     // Get all file IDs from the index
     auto snapshot = indexer.read_snapshot();
     if (!snapshot || snapshot->file_count() == 0) {
-        return make_error_response("find_files", "no files in index");
+        // Empty index is server state, not a caller mistake.
+        return make_unavailable_response(
+            "find_files", "no files in index",
+            "the index is empty or still building; check index_stats");
     }
 
     struct FileMatch {
@@ -2277,8 +2280,9 @@ void register_core_handlers(McpServer& server, MasterIndex* indexer,
          {"pattern"}},
         [indexer, search_engine](const nlohmann::json& p) -> ToolResult {
             if (!indexer) {
-                return make_error_response("search",
-                                           "index not available");
+                return make_unavailable_response(
+                    "search", "index not available",
+                    "retry shortly; the server is still starting or indexing");
             }
             return handle_search(p, *indexer, search_engine);
         });
@@ -2327,8 +2331,9 @@ void register_core_handlers(McpServer& server, MasterIndex* indexer,
          {"symbol_id", "object_id", "object_ids", "oid"}},
         [indexer, analyzer](const nlohmann::json& p) -> ToolResult {
             if (!indexer) {
-                return make_error_response("get_context",
-                                           "index not available");
+                return make_unavailable_response(
+                    "get_context", "index not available",
+                    "retry shortly; the server is still starting or indexing");
             }
             return handle_get_context(p, *indexer, analyzer);
         });
@@ -2360,8 +2365,9 @@ void register_core_handlers(McpServer& server, MasterIndex* indexer,
          {"pattern"}},
         [indexer](const nlohmann::json& p) -> ToolResult {
             if (!indexer) {
-                return make_error_response("find_files",
-                                           "index not available");
+                return make_unavailable_response(
+                    "find_files", "index not available",
+                    "retry shortly; the server is still starting or indexing");
             }
             return handle_find_files(p, *indexer);
         });

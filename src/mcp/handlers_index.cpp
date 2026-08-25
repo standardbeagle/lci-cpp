@@ -432,8 +432,9 @@ void register_index_handlers(McpServer& server, MasterIndex* indexer) {
          {}},
         [indexer](const nlohmann::json& p) -> ToolResult {
             if (!indexer) {
-                return make_error_response("index_stats",
-                                           "index not available");
+                return make_unavailable_response(
+                    "index_stats", "index not available",
+                    "retry shortly; the server is still starting or indexing");
             }
             return handle_index_stats(p, *indexer);
         });
@@ -459,8 +460,9 @@ void register_index_handlers(McpServer& server, MasterIndex* indexer) {
          {}},
         [indexer](const nlohmann::json& p) -> ToolResult {
             if (!indexer) {
-                return make_error_response("debug_info",
-                                           "index not available");
+                return make_unavailable_response(
+                    "debug_info", "index not available",
+                    "retry shortly; the server is still starting or indexing");
             }
             return handle_debug_info(p, *indexer);
         });

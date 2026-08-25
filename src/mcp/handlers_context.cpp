@@ -504,8 +504,8 @@ ToolResult handle_context_load(const nlohmann::json& params,
 
     // Check index availability
     if (indexer.is_indexing()) {
-        return make_error_response("context",
-                                   "index not available: indexing in progress");
+        return make_unavailable_response(
+        "context", "index not available: indexing in progress", "retry shortly; the server is still starting or indexing");
     }
 
     // Parse filter/exclude
@@ -729,7 +729,8 @@ void register_context_handlers(McpServer& server, MasterIndex* indexer) {
         std::move(ctx_def),
         [indexer, root](const nlohmann::json& p) -> ToolResult {
             if (!indexer) {
-                return make_error_response("context", "index not available");
+                return make_unavailable_response("context", "index not available",
+                                                 "retry shortly; the server is still starting or indexing");
             }
             return handle_context(p, *indexer, root);
         });

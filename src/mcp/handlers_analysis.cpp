@@ -437,24 +437,29 @@ ToolResult side_effect_symbol_query(const nlohmann::json& params,
         auto rt_snap = ref.pin();
         auto symbols = rt_snap->find_symbols_by_name(symbol_name);
         if (symbols.empty()) {
-            return make_error_response(
-                "side_effects", "symbol not found: " + symbol_name);
+            // Lookup miss: a definitive negative answer, not a tool error
+            // (matches inspect_symbol's found=false shape).
+            return make_unavailable_response(
+                "side_effects", "symbol not found: " + symbol_name,
+                "check the spelling, or use search/list_symbols to locate "
+                "the symbol");
         }
         const auto& sym = symbols[0];
         auto path = indexer->get_file_path(sym->symbol.file_id);
         auto* info = analyzer.get_result(path, sym->symbol.line);
         if (!info) {
-            // Fail loud (Karpathy #6): we resolved the symbol but the analyzer
-            // holds no side-effect record for it — a bare empty results array
-            // reads as "pure/no effects" and misleads. Say why.
-            return make_error_response(
+            // Stay loud without the error flag: we resolved the symbol but
+            // the analyzer holds no side-effect record — a bare empty results
+            // array reads as "pure/no effects" and misleads. available=false
+            // + reason says exactly why, without signaling a code failure.
+            return make_unavailable_response(
                 "side_effects",
                 "symbol '" + symbol_name + "' resolved at " +
                     std::string(relative_to_root(path, root)) + ":" +
                     std::to_string(sym->symbol.line) +
-                    " but has no side-effect record (not a function/method, or "
-                    "the analyzer is unpopulated for this corpus — try "
-                    "side_effects {\"mode\":\"summary\"})");
+                    " but has no side-effect record (not a function/method, "
+                    "or the analyzer is unpopulated for this corpus)",
+                "try side_effects {\"mode\":\"summary\"}");
         }
         auto item = side_effect_to_json(*info, include_reasons,
                                         include_transitive, include_confidence,
@@ -2282,21 +2287,31 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
             // Untruncated error-handling / resource finding lists. Fail loud
             // when the side-effect analyzer holds no records (Karpathy #6) —
             // an empty section would read as "no findings".
+            // Absent preconditions answer available=false, staying loud
+            // (an empty section would read as "no findings") without the
+            // error flag (which reads as a code failure to agent callers).
+            auto lcf_unavailable = [&](const std::string& reason,
+                                       const std::string& hint) {
+                out << "LCF/1.0\nmode=detailed\nsub=" << detailed_mode
+                    << "\ntier=2\ntokens=30\n---\n== ANALYSIS ==\n"
+                    << "available=false\nreason=" << reason << "\nhint="
+                    << hint << "\n";
+                return ToolResult{finalize_lcf(out), false};
+            };
             if (!analyzer || analyzer->results().empty()) {
-                return make_error_response(
-                    "code_insight",
+                return lcf_unavailable(
                     "analysis=" + detailed_mode +
                         " requires side-effect records; the analyzer is "
-                        "unpopulated for this corpus");
+                        "unpopulated for this corpus",
+                    "index a corpus with functions, or check index_stats");
             }
             if (indexer.config().insight.error_report != "on") {
-                return make_error_response(
-                    "code_insight",
+                return lcf_unavailable(
                     "analysis=" + detailed_mode +
                         " is BETA and disabled (insight.error_report=" +
-                        indexer.config().insight.error_report +
-                        "); enable with insight { error_report \"on\" } in "
-                        ".lci.kdl or LCI_ERROR_REPORT=on");
+                        indexer.config().insight.error_report + ")",
+                    "enable with insight { error_report \"on\" } in "
+                    ".lci.kdl or LCI_ERROR_REPORT=on");
             }
             auto eh = ErrorHandlingAnalyzer::analyze(*analyzer, indexer,
                                                      project_root,
@@ -2475,9 +2490,9 @@ void register_analysis_handlers(McpServer& server,
          {}},
         [annotator, propagator, indexer](const nlohmann::json& p) -> ToolResult {
             if (!annotator) {
-                return make_error_response(
+                return make_unavailable_response(
                     "semantic_annotations",
-                    "semantic annotator not available");
+                    "semantic annotator not available", "retry shortly; the server is still starting, or this build/config lacks the analyzer");
             }
             return handle_semantic_annotations(p, *annotator, propagator,
                                                 indexer);
@@ -2511,9 +2526,9 @@ void register_analysis_handlers(McpServer& server,
          {}},
         [analyzer, indexer](const nlohmann::json& p) -> ToolResult {
             if (!analyzer) {
-                return make_error_response(
+                return make_unavailable_response(
                     "side_effects",
-                    "side effect analysis not available");
+                    "side effect analysis not available", "retry shortly; the server is still starting, or this build/config lacks the analyzer");
             }
             return handle_side_effects(p, *analyzer, indexer);
         });
@@ -2552,9 +2567,9 @@ void register_analysis_handlers(McpServer& server,
         [ci_engine, indexer, analyzer, propagator](
             const nlohmann::json& p) -> ToolResult {
             if (!ci_engine || !indexer) {
-                return make_error_response(
+                return make_unavailable_response(
                     "code_insight",
-                    "codebase intelligence not available");
+                    "codebase intelligence not available", "retry shortly; the server is still starting, or this build/config lacks the analyzer");
             }
             return handle_code_insight(p, *ci_engine, *indexer, analyzer,
                                        propagator);
