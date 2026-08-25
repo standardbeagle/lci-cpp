@@ -2213,15 +2213,20 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
         // Real git wiring. Go computes these but its LCF formatter discards the
         // git fields (emits an all-zero STATISTICS block); C++ surfaces the
         // real data — intentional enrichment, parity is envelope-only for these
-        // two modes (git_hotspots is additionally time-window-volatile). Fail
-        // fast when the project root is not a git repository — no fake zeros.
+        // two modes (git_hotspots is additionally time-window-volatile). A
+        // non-git project root is an absent precondition, not a tool error:
+        // answer with an explicit available=false block (isError would read as
+        // a code failure to agent callers) — still no fake zeros.
         git::Provider provider;
         if (!git::Provider::create(project_root, provider)) {
-            return make_error_response(
-                "code_insight",
-                "mode=" + mode + " requires a git repository; '" +
-                    (project_root.empty() ? "<no root>" : project_root) +
-                    "' is not one");
+            emit_lcf_header(out, mode, 1, lcf_token_count(0, 0, false, 0, true));
+            out << "== GIT ==\n"
+                << "available=false\n"
+                << "reason=not a git repository: "
+                << (project_root.empty() ? "<no root>" : project_root) << "\n"
+                << "hint=git_analyze/git_hotspots need a git checkout; other "
+                   "modes work\n";
+            return ToolResult{finalize_lcf(out), false};
         }
 
         if (mode == "git_analyze") {

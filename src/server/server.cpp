@@ -1528,7 +1528,12 @@ void IndexServer::handle_git_analyze(const httplib::Request& req,
 
     git::Provider provider;
     if (!git::Provider::create(config_.project.root, provider)) {
-        error_response(res, 400, "not a git repository");
+        // Absent precondition, not a request error: 200 with an explicit
+        // not-applicable payload, matching the MCP git surfaces.
+        nlohmann::json na;
+        na["available"] = false;
+        na["reason"] = "not a git repository";
+        json_response(res, na);
         return;
     }
 

@@ -375,9 +375,16 @@ ToolResult handle_git_analysis(const nlohmann::json& params,
     const std::string& root = indexer.config().project.root;
     git::Provider provider;
     if (!git::Provider::create(root, provider)) {
-        return make_error_response(
-            "git_analysis",
-            "not a git repository: " + (root.empty() ? "<no root>" : root));
+        // Absent precondition, not a tool error: an isError result reads as a
+        // code failure to agent callers. Answer with an explicit
+        // not-applicable payload instead — and never fake report data.
+        nlohmann::json na;
+        na["operation"] = "git_analysis";
+        na["available"] = false;
+        na["reason"] =
+            "not a git repository: " + (root.empty() ? "<no root>" : root);
+        na["hint"] = "git_analysis needs a git checkout at the project root";
+        return make_json_response(na);
     }
 
     ga.base_ref = params.value("base_ref", std::string());
