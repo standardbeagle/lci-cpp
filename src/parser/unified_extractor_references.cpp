@@ -937,6 +937,36 @@ void UnifiedExtractor::process_php_reference(TSNode node,
             ts_node_is_null(obj) ? std::string_view() : node_text(obj);
         qualify_and_push(references_, std::move(cref), local_var_types_, recv,
                          node_text(nm));
+    } else if (node_type == "scoped_call_expression") {
+        // `self::m()` / `static::m()` / `ClassName::m()` / `parent::m()`.
+        // These previously emitted NO call reference at all, so PHP static
+        // recursion never formed an edge (2026-08-26 re-panel finding).
+        TSNode scope = ts_node_child_by_field_name(node, "scope",
+                                                   static_cast<uint32_t>(5));
+        TSNode nm = ts_node_child_by_field_name(node, "name",
+                                               static_cast<uint32_t>(4));
+        if (ts_node_is_null(nm)) return;
+        Reference cref =
+            create_reference(nm, ReferenceType::Call, RefStrength::Tight);
+        std::string_view sc =
+            ts_node_is_null(scope) ? std::string_view() : node_text(scope);
+        if (sc == "self" || sc == "static") {
+            // The current class: qualify when known so same-named methods on
+            // other classes cannot capture the edge; recursion stays linkable.
+            std::string cls = enclosing_class_name();
+            if (!cls.empty())
+                cref.referenced_name = cls + "." + std::string(node_text(nm));
+        } else if (sc == "parent") {
+            // A different class of unknown identity here: never direct
+            // recursion, and not a bare-name guess either.
+            cref.foreign_receiver = true;
+        } else if (!sc.empty()) {
+            // Explicit class: receiver-type-qualified; the resolver degrades
+            // to the bare name when the type is not indexed.
+            cref.referenced_name =
+                go_bare_type(sc) + "." + std::string(node_text(nm));
+        }
+        references_.push_back(std::move(cref));
     } else if (node_type == "function_call_expression") {
         TSNode func = ts_node_child_by_field_name(node, "function",
                                                   static_cast<uint32_t>(8));

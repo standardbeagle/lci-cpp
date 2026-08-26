@@ -735,6 +735,45 @@ func fact(n int) int {
     EXPECT_FALSE(rec->foreign_receiver);
 }
 
+TEST(UnifiedExtractorTest, PhpScopedCallsEmitReferences) {
+    // self::/static:: qualify to the enclosing class (recursion stays
+    // linkable); parent:: is a foreign receiver; Foo:: qualifies to Foo.
+    // scoped_call_expression previously emitted NO reference at all.
+    constexpr std::string_view src = R"(<?php
+class Norm {
+  public static function flatten($v) {
+    return self::flatten($v);
+  }
+  public function run() {
+    parent::run();
+    Other::helper();
+  }
+}
+)";
+    Language lang{};
+    ASSERT_TRUE(language_from_extension(".php", lang));
+    auto tree = parse(lang, src);
+    ASSERT_NE(tree.get(), nullptr);
+
+    UnifiedExtractor ue;
+    ue.init(src, 1, ".php", "norm.php");
+    ue.extract(tree.get());
+    auto r = ue.get_results();
+
+    const Reference* self_call = find_call_ref(r, "flatten");
+    ASSERT_NE(self_call, nullptr);
+    EXPECT_FALSE(self_call->foreign_receiver);
+    EXPECT_EQ(self_call->referenced_name, "Norm.flatten");
+
+    const Reference* parent_call = find_call_ref(r, "run");
+    ASSERT_NE(parent_call, nullptr);
+    EXPECT_TRUE(parent_call->foreign_receiver);
+
+    const Reference* scoped = find_call_ref(r, "helper");
+    ASSERT_NE(scoped, nullptr);
+    EXPECT_EQ(scoped->referenced_name, "Other.helper");
+}
+
 TEST(UnifiedExtractorTest, CsharpThisCallIsNotForeignReceiver) {
     constexpr std::string_view src = R"(
 class Svc {
