@@ -130,3 +130,34 @@ CYCLES (needs receiver-typed edge resolution, not just self-gating),
 (4) denominator/scale coherence (D4), (5) R3 re-test once the error
 report leaves beta. Fix (1)–(2) and re-run this panel; the harness for
 one round is ~30 min with the Claude arm alone.
+
+## Addendum — same-day fixes and single-arm regression check
+
+The R5 and PHP-triad items were fixed the same day and re-verified by an
+independent lci-blind auditor against a fresh guzzle capture:
+
+- ENTRY POINTS: FIXED. Three-tier grounding shipped (.lci.kdl
+  `insight { entry_points }` / `@lci:entry` -> annotated; framework
+  signature registry matched via go.mod/composer.json/package.json ->
+  framework; otherwise a labeled heuristic that asks for annotations).
+  Guzzle now leads with Client::send/request, the ClientTrait verbs, and
+  HandlerStack::create under `confidence=framework`; MockHandler is gone.
+- Magic methods: FIXED (42 dunder declarations in guzzle src, zero
+  flagged) and the previously-missed StreamHandler add_*/parse_proxy
+  snake_case cluster now flags via the per-language repo-level
+  convention fallback.
+- PHP recursion: both real self:: recursions listed; the verifier's one
+  new false positive (Psr7\Utils::modifyRequest name-collision) was
+  fixed by marking explicit-class scoped calls foreign.
+- global_writes: root cause was systemic, not PHP-specific —
+  add_local_variable had NO callers, so reassigned locals counted as
+  global writes in every language. Declaration + loop/catch-binding
+  registration and blank-identifier discard landed: guzzle 725->113,
+  chi ->53, pocketbase 1943->426. Residual: the counter still includes
+  some non-global state (by-ref params, list destructuring); rename or
+  further tighten before treating it as shared-mutable-state evidence.
+- Open items for the next full panel: exported-count inflation in
+  "... and N more exported" (guzzle claims 360 exported vs ~202 public
+  functions), acronym allowance for obscure-token (PKCE/HMAC/cidr),
+  delegation-chain cycles, D4 denominators, R3 beta re-test.
+
