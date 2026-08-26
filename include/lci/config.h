@@ -153,6 +153,12 @@ struct FeatureFlagsConfig {
 /// Env override: LCI_ERROR_REPORT=off|capture|on beats the file.
 struct InsightConfig {
     std::string error_report = "off";
+    // Author-declared entry points for code_insight's ENTRY POINTS section:
+    //   insight { entry_points "NewRouter" "URLParam" ... }
+    // Symbol names; when non-empty they are seated first and the section
+    // reports confidence=annotated. Procedural ranking cannot know a
+    // library's real front door — only its author can.
+    std::vector<std::string> entry_points;
 };
 
 /// Complete LCI configuration.

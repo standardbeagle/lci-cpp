@@ -20,6 +20,7 @@
 #include <lci/language_map.h>
 #include <lci/analysis/codebase_intelligence.h>
 #include <lci/analysis/coupling_analyzer.h>
+#include <lci/analysis/entry_signatures.h>
 #include <lci/analysis/error_handling_analyzer.h>
 #include <lci/analysis/feature_analyzer.h>
 #include <lci/analysis/health_analyzer.h>
@@ -1875,6 +1876,16 @@ void emit_entry_points(std::ostringstream& out, const EntryPointsList* ep,
                        std::string_view project_root) {
     if (!ep || ep->main_functions.empty()) return;
     out << "== ENTRY POINTS ==\n";
+    // Where the ranking's authority comes from: author annotations, a
+    // framework signature, or the heuristic exported-symbol ranking. A
+    // heuristic list is a labeled guess and says how to make it
+    // authoritative.
+    out << "confidence=" << ep->confidence << "\n";
+    if (ep->confidence == "heuristic") {
+        out << "hint=ranked exports; declare the real front door with "
+               "@lci:entry comments or insight { entry_points \"...\" } in "
+               ".lci.kdl\n";
+    }
     auto rel = [&](const std::string& location) {
         std::string loc = location;
         if (!project_root.empty() && loc.rfind(project_root, 0) == 0) {
@@ -1910,9 +1921,12 @@ void emit_entry_points(std::ostringstream& out, const EntryPointsList* ep,
             static_cast<unsigned char>(c)));
         return kTrivial.contains(low);
     };
+    // Pinned entries (annotated / framework signature) are authoritative:
+    // they keep their seats even when trivially named (guzzle's get/post
+    // verbs ARE its front door).
     std::stable_partition(apis.begin(), apis.end(),
                           [&](const EntryPointDef* e) {
-                              return !is_trivial_name(e->name);
+                              return e->pinned || !is_trivial_name(e->name);
                           });
     size_t lim = std::min(apis.size(), size_t{12});
     for (size_t i = 0; i < lim; ++i) {
@@ -2045,7 +2059,8 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                                CodebaseIntelligenceEngine& engine,
                                MasterIndex& indexer,
                                SideEffectAnalyzer* analyzer,
-                               GraphPropagator* propagator) {
+                               GraphPropagator* propagator,
+                               SemanticAnnotator* sem_annotator) {
     auto params = raw_params.is_object() ? raw_params : nlohmann::json::object();
     auto mode = params.value("mode", "overview");
 
@@ -2108,6 +2123,12 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
         ci.include.repository_map = true;
         ci.include.health_dashboard = true;
         ci.include.entry_points = true;
+        {
+            auto hints = analysis::resolve_entry_hints(
+                indexer.config().insight, project_root, sem_annotator);
+            ci.entry_point_pins = std::move(hints.pins);
+            ci.entry_point_confidence = std::move(hints.confidence);
+        }
         if (params.contains("max_results")) {
             ci.max_results = params.value("max_results", 50);
         }
@@ -2626,7 +2647,7 @@ void register_analysis_handlers(McpServer& server,
            "string"}},
          {},
          {"detailed_mode"}},
-        [ci_engine, indexer, analyzer, propagator](
+        [ci_engine, indexer, analyzer, propagator, annotator](
             const nlohmann::json& p) -> ToolResult {
             if (!ci_engine || !indexer) {
                 return make_unavailable_response(
@@ -2634,7 +2655,7 @@ void register_analysis_handlers(McpServer& server,
                     "codebase intelligence not available", "retry shortly; the server is still starting, or this build/config lacks the analyzer");
             }
             return handle_code_insight(p, *ci_engine, *indexer, analyzer,
-                                       propagator);
+                                       propagator, annotator);
         });
 }
 

@@ -127,6 +127,19 @@ foreach(_schema IN LISTS LCI_MCP_SCHEMAS)
     )
 endforeach()
 
+# Framework entry-signature registry — JSON data (content, not config) under
+# share/lci/, embedded like the MCP schemas so the binary needs no runtime
+# file lookup.
+set(_fwsig_src "${CMAKE_CURRENT_SOURCE_DIR}/share/lci/framework-entry-signatures.json")
+set(_fwsig_dst "${CMAKE_CURRENT_BINARY_DIR}/generated/lci/analysis/framework_signatures_data.h")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_fwsig_src}")
+file(READ "${_fwsig_src}" _fwsig_text)
+file(CONFIGURE
+    OUTPUT "${_fwsig_dst}"
+    CONTENT "// Auto-generated from share/lci/framework-entry-signatures.json — DO NOT EDIT.\n#pragma once\nnamespace lci::analysis {\ninline constexpr const char* kFrameworkEntrySignaturesJson = R\"LCIFWSIG(${_fwsig_text})LCIFWSIG\";\n}  // namespace lci::analysis\n"
+    @ONLY
+)
+
 # English word list embedding — SCOWL-derived list under src/analysis/data/
 # (see the README there for provenance). Same go:embed pattern as the MCP
 # schemas, but chunked: MSVC caps one string literal at 64KB, so the ~860KB

@@ -261,7 +261,7 @@ CodebaseIntelligenceResponse CodebaseIntelligenceEngine::build_overview(
 
     if (params.include.entry_points) {
         auto ep = std::make_unique<EntryPointsList>();
-        *ep = build_entry_points(files);
+        *ep = build_entry_points(files, params);
         response.entry_points = std::move(ep);
     }
 
@@ -558,8 +558,14 @@ bool is_factory_name(std::string_view name) {
 }  // namespace
 
 EntryPointsList CodebaseIntelligenceEngine::build_entry_points(
-    const std::vector<FileSymbolData>& files) const {
+    const std::vector<FileSymbolData>& files,
+    const CodebaseIntelligenceParams& params) const {
     EntryPointsList result;
+    result.confidence = params.entry_point_confidence.empty()
+                            ? std::string("heuristic")
+                            : params.entry_point_confidence;
+    absl::flat_hash_set<std::string_view> pin_set;
+    for (const auto& p : params.entry_point_pins) pin_set.insert(p);
 
     // Track path depth (slash count) per api candidate: root-package exports
     // are the library's front door; deeply nested ones usually aren't. Depth
@@ -586,6 +592,11 @@ EntryPointsList CodebaseIntelligenceEngine::build_entry_points(
             ep.signature = sym->signature;
             ep.is_exported = sym->is_exported;
             ep.importance = calculate_importance_score(*sym);
+            // Authoritative pins outrank every heuristic signal — enforced
+            // structurally in the sort comparator (importance is unbounded,
+            // so no additive bonus can guarantee seating); the emitter also
+            // exempts pinned entries from trivial-name demotion.
+            ep.pinned = pin_set.contains(std::string_view(ep.name));
             if (is_api) {
                 // Library-aware additive bonuses: exportedness, factory-name
                 // shape. These keep zero-fan-in front doors (callers live in
@@ -620,6 +631,7 @@ EntryPointsList CodebaseIntelligenceEngine::build_entry_points(
               [](const EntryPointDef& a, const EntryPointDef& b) {
                   bool am = a.type == "main", bm = b.type == "main";
                   if (am != bm) return am;
+                  if (a.pinned != b.pinned) return a.pinned;
                   if (a.importance != b.importance)
                       return a.importance > b.importance;
                   if (a.name != b.name) return a.name < b.name;

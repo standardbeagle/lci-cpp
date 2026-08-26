@@ -61,11 +61,14 @@ ToolResult handle_side_effects(const nlohmann::json& params,
 /// When null (legacy callers), purity reports total=N pure=0 impure=0.
 /// When `propagator` is non-null, the == CLUSTERS == section cross-references
 /// Louvain communities with propagated @lci: labels to name domains.
+/// `sem_annotator`, when non-null, lets ENTRY POINTS honor @lci:entry
+/// annotations (tier 2 of analysis::resolve_entry_hints).
 ToolResult handle_code_insight(const nlohmann::json& params,
                                CodebaseIntelligenceEngine& engine,
                                MasterIndex& indexer,
                                SideEffectAnalyzer* analyzer = nullptr,
-                               GraphPropagator* propagator = nullptr);
+                               GraphPropagator* propagator = nullptr,
+                               SemanticAnnotator* sem_annotator = nullptr);
 
 }  // namespace mcp
 }  // namespace lci

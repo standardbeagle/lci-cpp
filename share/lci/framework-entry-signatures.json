@@ -1,0 +1,32 @@
+{
+  "_doc": "Framework/library entry-surface signatures for code_insight's ENTRY POINTS section. A repo matches an entry either by its OWN identity (a library's go.mod module path / composer.json or package.json name) or by depending on it (go.mod require, composer/package.json dependency keys). Matched entry_symbols are seated first with confidence=framework. Every signature added here must be verifiable against a fixture or corpus repo before it ships — a wrong signature is confidently-wrong output, worse than the heuristic fallback.",
+  "frameworks": [
+    {
+      "id": "go-chi",
+      "match": { "go_module": ["github.com/go-chi/chi"] },
+      "entry_symbols": [
+        "NewRouter", "NewMux", "URLParam", "URLParamFromCtx", "RouteContext",
+        "Use", "Get", "Post", "Put", "Delete", "Patch", "Route", "Mount",
+        "Group", "Handle", "HandleFunc", "Walk", "ServeHTTP"
+      ]
+    },
+    {
+      "id": "guzzle",
+      "match": { "composer_name": ["guzzlehttp/guzzle"] },
+      "entry_symbols": [
+        "send", "sendAsync", "sendRequest", "request", "requestAsync",
+        "get", "getAsync", "head", "headAsync", "put", "putAsync",
+        "post", "postAsync", "patch", "patchAsync", "delete", "deleteAsync",
+        "create", "batch", "cookies", "httpErrors", "history", "tap",
+        "redirect", "retry", "log", "prepareBody", "mapRequest", "mapResponse"
+      ]
+    },
+    {
+      "id": "pocketbase",
+      "match": { "go_module": ["github.com/pocketbase/pocketbase"] },
+      "entry_symbols": [
+        "New", "NewWithConfig", "Start", "Execute", "Bootstrap", "OnServe"
+      ]
+    }
+  ]
+}

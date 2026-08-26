@@ -318,6 +318,19 @@ bool apply_insight(Config& cfg, const KdlNode& node, std::string& error,
                         "(got '" + cfg.insight.error_report + "')";
                 return false;
             }
+        } else if (child.name == "entry_points") {
+            bool any = false;
+            for (const auto& a : child.args) {
+                if (a.kind == TokenKind::String && !a.text.empty()) {
+                    cfg.insight.entry_points.push_back(a.text);
+                    any = true;
+                }
+            }
+            if (!any) {
+                error = "insight.entry_points: expected one or more quoted "
+                        "symbol names";
+                return false;
+            }
         } else {
             warn_unknown(warnings, "insight", child.name);
         }

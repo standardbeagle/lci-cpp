@@ -365,6 +365,10 @@ struct EntryPointDef {
     bool is_exported{};
     std::string file_id;
     double importance{};
+    // Seated by an authoritative pin (config annotation, @lci:entry, or a
+    // framework signature) — emitters keep pinned entries first and exempt
+    // them from trivial-name demotion.
+    bool pinned{};
 };
 
 /// Repository map.
@@ -383,6 +387,10 @@ struct RepositoryMap {
 /// Entry points list.
 struct EntryPointsList {
     std::vector<EntryPointDef> main_functions;
+    // How the api ranking was grounded: "annotated" (author-declared),
+    // "framework" (registry signature), or "heuristic" (ranked exports —
+    // a labeled guess).
+    std::string confidence{"heuristic"};
 };
 
 // ============================================================================

@@ -59,6 +59,7 @@ add_library(lci_lib STATIC
     analysis/layer_analyzer.cpp
     analysis/module_analyzer.cpp
     analysis/english_words.cpp
+    analysis/entry_signatures.cpp
     analysis/naming_analyzer.cpp
     analysis/token_budget.cpp
     analysis/codebase_intelligence.cpp

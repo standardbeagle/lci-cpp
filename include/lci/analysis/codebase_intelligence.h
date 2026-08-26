@@ -41,6 +41,11 @@ struct CodebaseIntelligenceParams {
     std::optional<std::string> focus;
     std::optional<std::string> target;
     std::vector<std::string> languages;
+    // Entry-point pins resolved by the caller (analysis::resolve_entry_hints):
+    // symbol names seated first in ENTRY POINTS, and the confidence tag that
+    // says where they came from.
+    std::vector<std::string> entry_point_pins;
+    std::string entry_point_confidence{"heuristic"};
 };
 
 // ============================================================================
@@ -162,9 +167,12 @@ class CodebaseIntelligenceEngine {
     std::vector<FunctionSignature> extract_critical_functions(
         const std::vector<FileSymbolData>& files, int max_results) const;
 
-    /// Builds entry points list from files.
+    /// Builds entry points list from files. Pins from
+    /// params.entry_point_pins are seated first (marked pinned) and the
+    /// list carries params.entry_point_confidence.
     EntryPointsList build_entry_points(
-        const std::vector<FileSymbolData>& files) const;
+        const std::vector<FileSymbolData>& files,
+        const CodebaseIntelligenceParams& params) const;
 
     /// Applies default values to params.
     static CodebaseIntelligenceParams apply_defaults(
