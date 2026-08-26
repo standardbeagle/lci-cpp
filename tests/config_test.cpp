@@ -1152,6 +1152,29 @@ insight {
     EXPECT_EQ(result.config.insight.error_report, "capture");
 }
 
+TEST_F(KdlConfigTest, ParsesInsightEntryPoints) {
+    write_kdl(R"(
+insight {
+    entry_points "NewRouter" "URLParam" "Use"
+}
+)");
+    auto result = load_config(temp_dir_.string());
+    ASSERT_TRUE(result.ok());
+    ASSERT_EQ(result.config.insight.entry_points.size(), 3u);
+    EXPECT_EQ(result.config.insight.entry_points[0], "NewRouter");
+    EXPECT_EQ(result.config.insight.entry_points[2], "Use");
+}
+
+TEST_F(KdlConfigTest, RejectsEmptyEntryPoints) {
+    write_kdl(R"(
+insight {
+    entry_points
+}
+)");
+    auto result = load_config(temp_dir_.string());
+    ASSERT_FALSE(result.ok());
+}
+
 TEST_F(KdlConfigTest, RejectsInvalidErrorReportMode) {
     write_kdl(R"(
 insight {

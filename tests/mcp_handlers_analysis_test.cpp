@@ -967,6 +967,127 @@ TEST(CodeInsightGraphSignals, SameNamedMethodThroughMemberIsNotACycle) {
     std::filesystem::remove_all(dir);
 }
 
+// -- Entry-point pins ---------------------------------------------------------
+// ENTRY POINTS is authoritative only when grounded: author annotations or a
+// framework signature seat the real front door first; without either the
+// section labels itself heuristic and asks for annotations.
+
+namespace {
+struct InsightCorpus {
+    std::filesystem::path dir;
+    explicit InsightCorpus(const char* tag) {
+        dir = lci::test::unique_temp_dir(tag);
+        std::filesystem::remove_all(dir);
+        std::filesystem::create_directories(dir);
+    }
+    ~InsightCorpus() { std::filesystem::remove_all(dir); }
+    void write(const char* name, const std::string& content) {
+        std::ofstream f(dir / name);
+        f << content;
+    }
+};
+}  // namespace
+
+TEST(CodeInsightEntryPins, HeuristicListSaysSoAndAsksForAnnotations) {
+    InsightCorpus c("lci_entry_heuristic_");
+    c.write("g.go",
+            "package main\n\n"
+            "func Frobnicate() int { return 1 }\n"
+            "func main() { _ = Frobnicate() }\n");
+
+    Config config;
+    config.project.root = c.dir.string();
+    MasterIndex indexer(config);
+    ASSERT_TRUE(indexer.index_directory(c.dir.string()));
+    CodebaseIntelligenceEngine engine;
+
+    auto result = handle_code_insight({}, engine, indexer);
+    ASSERT_FALSE(result.is_error) << result.text;
+    EXPECT_NE(result.text.find("confidence=heuristic"), std::string::npos)
+        << result.text;
+    EXPECT_NE(result.text.find("@lci:entry"), std::string::npos);
+}
+
+TEST(CodeInsightEntryPins, ConfigPinsSeatFirstWithAnnotatedConfidence) {
+    InsightCorpus c("lci_entry_config_");
+    c.write("g.go",
+            "package main\n\n"
+            "func Alpha() int { return 1 }\n"
+            "func Beta() int { return Alpha() }\n"
+            "func Zulu() int { return Beta() }\n"
+            "func main() { _ = Zulu() }\n");
+
+    Config config;
+    config.project.root = c.dir.string();
+    config.insight.entry_points = {"Zulu"};
+    MasterIndex indexer(config);
+    ASSERT_TRUE(indexer.index_directory(c.dir.string()));
+    CodebaseIntelligenceEngine engine;
+
+    auto result = handle_code_insight({}, engine, indexer);
+    ASSERT_FALSE(result.is_error) << result.text;
+    EXPECT_NE(result.text.find("confidence=annotated"), std::string::npos)
+        << result.text;
+    EXPECT_EQ(result.text.find("hint=ranked exports"), std::string::npos);
+    // The pinned symbol leads the api list.
+    auto ep = result.text.find("== ENTRY POINTS ==");
+    ASSERT_NE(ep, std::string::npos);
+    auto first_api = result.text.find("api: ", ep);
+    ASSERT_NE(first_api, std::string::npos);
+    EXPECT_EQ(result.text.substr(first_api + 5, 4), "Zulu") << result.text;
+}
+
+TEST(CodeInsightEntryPins, FrameworkSignatureMatchesGoModuleIdentity) {
+    InsightCorpus c("lci_entry_fw_");
+    c.write("go.mod", "module github.com/go-chi/chi/v5\n\ngo 1.21\n");
+    c.write("g.go",
+            "package chi\n\n"
+            "func NewRouter() int { return 1 }\n"
+            "func Aardvark() int { return NewRouter() }\n");
+
+    Config config;
+    config.project.root = c.dir.string();
+    MasterIndex indexer(config);
+    ASSERT_TRUE(indexer.index_directory(c.dir.string()));
+    CodebaseIntelligenceEngine engine;
+
+    auto result = handle_code_insight({}, engine, indexer);
+    ASSERT_FALSE(result.is_error) << result.text;
+    EXPECT_NE(result.text.find("confidence=framework"), std::string::npos)
+        << result.text;
+    auto ep = result.text.find("== ENTRY POINTS ==");
+    ASSERT_NE(ep, std::string::npos);
+    auto first_api = result.text.find("api: ", ep);
+    ASSERT_NE(first_api, std::string::npos);
+    EXPECT_EQ(result.text.substr(first_api + 5, 9), "NewRouter") << result.text;
+}
+
+// Pinned trivially-named symbols keep their seats (guzzle's get/post verbs
+// ARE its front door) while unpinned trivial names still demote.
+TEST(CodeInsightEntryPins, PinnedTrivialNamesAreNotDemoted) {
+    InsightCorpus c("lci_entry_trivial_");
+    c.write("g.go",
+            "package main\n\n"
+            "func Get() int { return 1 }\n"
+            "func Weird() int { return Get() }\n"
+            "func main() { _ = Weird() }\n");
+
+    Config config;
+    config.project.root = c.dir.string();
+    config.insight.entry_points = {"Get"};
+    MasterIndex indexer(config);
+    ASSERT_TRUE(indexer.index_directory(c.dir.string()));
+    CodebaseIntelligenceEngine engine;
+
+    auto result = handle_code_insight({}, engine, indexer);
+    ASSERT_FALSE(result.is_error) << result.text;
+    auto ep = result.text.find("== ENTRY POINTS ==");
+    ASSERT_NE(ep, std::string::npos);
+    auto first_api = result.text.find("api: ", ep);
+    ASSERT_NE(first_api, std::string::npos);
+    EXPECT_EQ(result.text.substr(first_api + 5, 3), "Get") << result.text;
+}
+
 // Layer violation: a Data-layer function calling a Presentation-layer function
 // is an upward call against the architecture and must be flagged.
 TEST(CodeInsightLayers, FlagsUpwardCall) {
