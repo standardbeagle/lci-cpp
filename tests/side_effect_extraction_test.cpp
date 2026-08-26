@@ -1831,6 +1831,41 @@ TEST_F(SideEffectExtraction, PhpLocalAssignmentIsNotAGlobalWrite) {
     EXPECT_NE(info->categories & side_effect::kReceiverWrite, 0u);
 }
 
+TEST_F(SideEffectExtraction, GoRangeBindingWriteIsNotAGlobalWrite) {
+    const auto* info = analyze(Language::Go, ".go",
+                               "package p\n"
+                               "func f(m map[string]int) int {\n"
+                               "\ttotal := 0\n"
+                               "\tfor k, v := range m {\n"
+                               "\t\tv = v + 1\n"
+                               "\t\ttotal += v\n"
+                               "\t\t_ = k\n"
+                               "\t}\n"
+                               "\treturn total\n"
+                               "}\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(info->categories & side_effect::kGlobalWrite, 0u)
+        << (info->impurity_reasons.empty() ? ""
+                                           : info->impurity_reasons[0]);
+}
+
+TEST_F(SideEffectExtraction, PhpForeachBindingMutationIsNotAGlobalWrite) {
+    const auto* info = analyze(Language::PHP, ".php",
+                               "<?php\n"
+                               "function tag($items) {\n"
+                               "  foreach ($items as $item) {\n"
+                               "    $item->seen = true;\n"
+                               "  }\n"
+                               "  return $items;\n"
+                               "}\n",
+                               "tag");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(info->categories & side_effect::kGlobalWrite, 0u)
+        << (info->impurity_reasons.empty() ? ""
+                                           : info->impurity_reasons[0]);
+}
+
 TEST_F(SideEffectExtraction, PythonLocalAssignmentIsNotAGlobalWrite) {
     const auto* info = analyze(Language::Python, ".py",
                                "def f(n):\n"

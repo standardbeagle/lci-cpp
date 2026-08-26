@@ -247,6 +247,9 @@ void UnifiedExtractor::record_lvalue_write(TSNode lvalue, int line, int column) 
         std::string_view t = get_node_type(n);
         if (is_identifier_type(t)) {
             std::string_view id = node_text(n);
+            // The blank identifier is a discard, not a state mutation
+            // (`_ = k` classified as a GLOBAL write).
+            if (id == "_") return;
             if (!id.empty()) {
                 // Only a BARE lvalue declares (guard==0: no member/subscript
                 // was peeled — `a.b = x` mutates an existing object). Ruby
@@ -394,8 +397,38 @@ void UnifiedExtractor::process_side_effect_node(
                 stack.push_back(ts_node_named_child(c, i));
         }
     };
-    if (node_type == "short_var_declaration") {
-        // Go `x, y := f()` — left side only.
+    if (node_type == "short_var_declaration" ||
+        node_type == "range_clause") {
+        // Go `x, y := f()` / `for k, v := range m` — left side only. Range
+        // bindings were unregistered, so later writes through them counted
+        // as global writes.
+        TSNode left = field(node, "left");
+        if (!ts_node_is_null(left)) register_decl_identifiers(left);
+    } else if (node_type == "foreach_statement" ||   // PHP foreach bindings
+               node_type == "catch_clause") {        // caught variable
+        // Register the header's bound names (never the body): direct
+        // variable_name / identifier children before the body block. In PHP
+        // a bare $var inside a function is always local, so over-registering
+        // the collection variable is harmless.
+        uint32_t n = ts_node_named_child_count(node);
+        for (uint32_t i = 0; i < n; ++i) {
+            TSNode c = ts_node_named_child(node, i);
+            std::string_view ct = get_node_type(c);
+            // Stop at the body (defined below in this file; block-shaped).
+            if (ct == "compound_statement" || ct == "block" ||
+                ct == "statement_block" || ct == "colon_block")
+                break;
+            if (ct == "variable_name" || ct == "identifier") {
+                auto id = node_text(c);
+                if (!id.empty())
+                    side_effects_->add_local_variable(id, line_of(c));
+            } else if (ct == "catch_formal_parameter" ||
+                       ct == "pair" || ct == "by_ref") {
+                register_decl_identifiers(c);
+            }
+        }
+    } else if (node_type == "for_in_statement" ||    // JS for..in/of
+               node_type == "for_statement") {       // Python for target
         TSNode left = field(node, "left");
         if (!ts_node_is_null(left)) register_decl_identifiers(left);
     } else if (node_type == "var_spec" ||                    // Go var
