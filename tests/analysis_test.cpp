@@ -516,6 +516,29 @@ TEST(ModuleAnalyzer, ClassifyMiddleware) {
     EXPECT_EQ(ModuleAnalyzer::classify_module_by_path("src/middleware"), "Middleware");
 }
 
+// Broadened buckets (2026-08-26 field run: every module of four real corpora
+// reported "General", a dead column).
+TEST(ModuleAnalyzer, ClassifyBroadenedBuckets) {
+    EXPECT_EQ(ModuleAnalyzer::classify_module_by_path("cmd/slop"),
+              "Entry Point");
+    EXPECT_EQ(ModuleAnalyzer::classify_module_by_path("website"), "UI");
+    EXPECT_EQ(ModuleAnalyzer::classify_module_by_path("internal/parser"),
+              "Language Core");
+    EXPECT_EQ(ModuleAnalyzer::classify_module_by_path("internal/evaluator"),
+              "Language Core");
+    EXPECT_EQ(ModuleAnalyzer::classify_module_by_path(
+                  "src/WorkTrack.Core/Migrations"),
+              "Data Layer");
+    // "Api" outranks "Auth": the api keyword sits earlier in the ladder.
+    EXPECT_EQ(ModuleAnalyzer::classify_module_by_path("src/WorkTrack.Api/Auth"),
+              "API Layer");
+    EXPECT_EQ(ModuleAnalyzer::classify_module_by_path("internal/auth"), "Auth");
+    EXPECT_EQ(ModuleAnalyzer::classify_module_by_path("scripts"), "Tooling");
+    // No keyword still means General.
+    EXPECT_EQ(ModuleAnalyzer::classify_module_by_path("internal/daemon"),
+              "General");
+}
+
 // ===========================================================================
 // ModuleAnalyzer - analyze
 // ===========================================================================

@@ -70,6 +70,33 @@ std::string ModuleAnalyzer::classify_module_by_path(std::string_view path) {
         return "Configuration";
     if (contains(lower, "middleware") || contains(lower, "filter"))
         return "Middleware";
+    // Broadened from the original five-bucket set: a four-repo field run
+    // (2026-08-26) showed every module of every corpus reporting "General",
+    // which made the type column dead weight.
+    if (contains(lower, "cmd") || contains(lower, "entrypoint"))
+        return "Entry Point";
+    if (contains(lower, "migration") || contains(lower, "storage") ||
+        contains(lower, "store") || contains(lower, "database"))
+        return "Data Layer";
+    if (contains(lower, "endpoint") || contains(lower, "route") ||
+        contains(lower, "http") || contains(lower, "server") ||
+        contains(lower, "rpc"))
+        return "API Layer";
+    if (contains(lower, "website") || contains(lower, "frontend") ||
+        contains(lower, "webapp") || contains(lower, "/ui") ||
+        lower.rfind("ui/", 0) == 0 || contains(lower, "pages") ||
+        contains(lower, "components") || contains(lower, "views"))
+        return "UI";
+    if (contains(lower, "parser") || contains(lower, "lexer") ||
+        contains(lower, "compil") || contains(lower, "interpret") ||
+        contains(lower, "evaluat") || contains(lower, "grammar"))
+        return "Language Core";
+    if (contains(lower, "auth"))
+        return "Auth";
+    if (contains(lower, "docs") || contains(lower, "doc/"))
+        return "Docs";
+    if (contains(lower, "script") || contains(lower, "tool"))
+        return "Tooling";
 
     return "General";
 }

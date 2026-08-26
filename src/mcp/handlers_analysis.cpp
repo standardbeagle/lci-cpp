@@ -977,8 +977,10 @@ void emit_repository_map(std::ostringstream& out,
 // symbols, purity. Object IDs ([o=XX]) come from analyzer-populated fields.
 void emit_health(std::ostringstream& out, const HealthDashboard& hd,
                  const PuritySummary* purity) {
+    // Unit-labeled: HEALTH is 0-10 while STATISTICS maintainability is
+    // 0-100; unlabeled they read as one inconsistent scale.
     out << "== HEALTH ==\n"
-        << "score=" << fmt2(hd.overall_score) << "\n"
+        << "score=" << fmt2(hd.overall_score) << "/10\n"
         << "complexity=" << fmt2(hd.complexity.average_cc) << "\n";
 
     if (!hd.smell_counts.empty()) {
@@ -1090,7 +1092,7 @@ void emit_statistics(std::ostringstream& out, const ComplexityMetrics& cm,
     out << "cohesion: avg=" << fmt2(ch.average_cohesion)
         << " min=" << fmt2(ch.min_cohesion) << "\n";
     out << "quality: maintainability=" << fmt2(q.maintainability_index)
-        << " debt=" << fmt2(q.technical_debt_ratio)
+        << "/100 debt=" << fmt2(q.technical_debt_ratio)
         << " purity=" << fmt2(purity_ratio) << "\n";
     if (!cm.high_complexity_funcs.empty()) {
         out << "  high_complexity:\n";
@@ -1364,6 +1366,8 @@ struct GraphSignals {
     std::vector<LoadBearingSym> load_bearing;
     std::vector<BrokerSym> brokers;                // top betweenness, may be empty
     std::vector<CycleGroup> cycles;                // cyclic groups with files
+    // Direct self-recursion (name, location) — reported apart from cycles.
+    std::vector<std::pair<std::string, std::string>> recursion;
     std::vector<ClusterInfo> clusters;             // communities by size desc
     std::vector<LayerViolation> layer_violations;  // upward calls, may be empty
     double modularity{};
@@ -1495,7 +1499,18 @@ GraphSignals compute_graph_signals(const MasterIndex& indexer,
     }
 
     // Cycles (top few, each showing up to 3 members + the file it lives in).
+    // Single-node SCCs are direct recursion — a property of one function,
+    // not an architectural cycle — and go to their own compact list so the
+    // CYCLES section only ever shows genuine multi-symbol loops.
     for (auto& cyc : graph.cycles()) {
+        if (cyc.size() == 1) {
+            if (sig.recursion.size() < 8) {
+                const auto& m = meta[graph.id_at(cyc.front())];
+                sig.recursion.emplace_back(m.first, m.second);
+            }
+            continue;
+        }
+        if (sig.cycles.size() >= 5) continue;
         CycleGroup g;
         g.total_size = static_cast<int>(cyc.size());
         for (int idx : cyc) {
@@ -1508,7 +1523,6 @@ GraphSignals compute_graph_signals(const MasterIndex& indexer,
         auto colon = loc.rfind(':');
         g.file = colon == std::string::npos ? loc : loc.substr(0, colon);
         sig.cycles.push_back(std::move(g));
-        if (sig.cycles.size() >= 5) break;
     }
 
     // Clusters: Louvain communities, ranked by size, with highest-reach
@@ -1633,9 +1647,10 @@ void emit_load_bearing(std::ostringstream& out, const GraphSignals& sig) {
 
 // == CYCLES == — circular call dependencies (strongly-connected components of
 // the call graph). C++ enrichment; Go has no equivalent.
-void emit_cycles(std::ostringstream& out,
-                 const std::vector<CycleGroup>& cycles) {
-    if (cycles.empty()) return;
+void emit_cycles(
+    std::ostringstream& out, const std::vector<CycleGroup>& cycles,
+    const std::vector<std::pair<std::string, std::string>>& recursion) {
+    if (cycles.empty() && recursion.empty()) return;
     out << "== CYCLES ==\n";
     out << "count=" << cycles.size() << "\n";
     for (const auto& c : cycles) {
@@ -1651,6 +1666,14 @@ void emit_cycles(std::ostringstream& out,
             out << " [+" << (c.total_size - c.names.size()) << " more]";
         out << "\n";
     }
+    if (!recursion.empty()) {
+        out << "recursion=";
+        for (size_t i = 0; i < recursion.size(); ++i) {
+            if (i) out << ", ";
+            out << recursion[i].first << " (" << recursion[i].second << ")";
+        }
+        out << "\n";
+    }
     out << "---\n";
 }
 
@@ -1661,6 +1684,11 @@ void emit_layer_violations(std::ostringstream& out,
                            const std::vector<LayerViolation>& v) {
     if (v.empty()) return;
     out << "== LAYER VIOLATIONS ==\n";
+    // The layers come from name/path inference, not declared architecture —
+    // say so, or a mislabeled helper reads as a confirmed violation (field
+    // run: an interpreter's arg validators labeled "Presentation Layer").
+    out << "layers=heuristic (name/path inference; treat as leads, not "
+           "verdicts)\n";
     out << "count=" << v.size() << "\n";
     for (const auto& x : v) {
         out << "  " << x.caller << " [" << x.caller_layer << "] -> " << x.callee
@@ -1862,6 +1890,28 @@ void emit_entry_points(std::ostringstream& out, const EntryPointsList* ep,
     for (const auto& e : ep->main_functions) {
         (e.type == "main" ? mains : apis).push_back(&e);
     }
+    // Trivially-named exports (a bare `Add`, `Get`, `Run` — C# minimal-API
+    // lambdas and interface boilerplate) tell an agent nothing about the
+    // codebase's front door; keep them but seat distinctive names first.
+    auto is_trivial_name = [](const std::string& n) {
+        static const absl::flat_hash_set<std::string> kTrivial = {
+            "add",    "get",   "set",    "run",   "new",    "do",
+            "open",   "close", "read",   "write", "init",   "start",
+            "stop",   "create", "delete", "update", "list",  "find",
+            "save",   "load",  "send",   "call",  "next",   "parse",
+            "check",  "make",  "map",    "ok",    "handle", "exec",
+            "apply",  "index", "count",  "main",  "equals", "tostring",
+            "gethashcode", "string", "error", "invoke", "invokeasync"};
+        std::string low;
+        low.reserve(n.size());
+        for (char c : n) low += static_cast<char>(std::tolower(
+            static_cast<unsigned char>(c)));
+        return kTrivial.contains(low);
+    };
+    std::stable_partition(apis.begin(), apis.end(),
+                          [&](const EntryPointDef* e) {
+                              return !is_trivial_name(e->name);
+                          });
     size_t lim = std::min(apis.size(), size_t{12});
     for (size_t i = 0; i < lim; ++i) {
         out << "  api: " << apis[i]->name << " (" << rel(apis[i]->location)
@@ -2201,7 +2251,7 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                                              project_root, 5, propagator);
             emit_load_bearing(out, sig);
             emit_clusters(out, sig);
-            emit_cycles(out, sig.cycles);
+            emit_cycles(out, sig.cycles, sig.recursion);
             emit_layer_violations(out, sig.layer_violations);
         }
         emit_modules(out, d.modules);
@@ -2453,7 +2503,7 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                                              project_root, 5, propagator);
             emit_load_bearing(out, sig);
             emit_clusters(out, sig);
-            emit_cycles(out, sig.cycles);
+            emit_cycles(out, sig.cycles, sig.recursion);
             emit_layer_violations(out, sig.layer_violations);
         }
         emit_vocabulary(out, d.naming);

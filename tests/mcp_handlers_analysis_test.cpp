@@ -891,6 +891,82 @@ TEST(CodeInsightGraphSignals, SurfacesClustersAndCycles) {
     std::filesystem::remove_all(dir);
 }
 
+// Direct recursion is a property of one function, not an architectural
+// cycle: it goes to the compact recursion= line, never a "x -> x" row.
+TEST(CodeInsightGraphSignals, RecursionIsReportedApartFromCycles) {
+    auto dir = lci::test::unique_temp_dir("lci_recursion_test_");
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    {
+        std::ofstream f(dir / "g.go");
+        f << "package main\n\n"
+             "func fact(n int) int { if n <= 1 { return 1 }; "
+             "return fact(n-1) }\n"
+             "func a1() int { return a2() }\n"
+             "func a2() int { return a1() }\n"
+             "func main() { _ = fact(3) + a1() }\n";
+    }
+
+    Config config;
+    config.project.root = dir.string();
+    MasterIndex indexer(config);
+    indexer.index_directory(dir.string());
+    CodebaseIntelligenceEngine engine;
+
+    nlohmann::json params;
+    auto result = handle_code_insight(params, engine, indexer);
+    ASSERT_FALSE(result.is_error) << result.text;
+    auto cpos = result.text.find("== CYCLES ==");
+    ASSERT_NE(cpos, std::string::npos) << result.text;
+    EXPECT_EQ(result.text.find("fact -> fact"), std::string::npos)
+        << result.text;
+    auto rpos = result.text.find("recursion=", cpos);
+    ASSERT_NE(rpos, std::string::npos) << result.text;
+    EXPECT_NE(result.text.find("fact", rpos), std::string::npos);
+    // The genuine multi-node cycle still shows.
+    EXPECT_NE(result.text.find("a1 -> a2 -> a1", cpos), std::string::npos);
+
+    std::filesystem::remove_all(dir);
+}
+
+// The `size -> size` false-cycle class: a method calling a same-named method
+// through a member of an unindexed type must produce neither a cycle nor a
+// recursion entry (discrimination test for the foreign_receiver gate).
+TEST(CodeInsightGraphSignals, SameNamedMethodThroughMemberIsNotACycle) {
+    auto dir = lci::test::unique_temp_dir("lci_selfloop_test_");
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    {
+        std::ofstream f(dir / "t.go");
+        // tracker.files is an external set type; files.size() resolves by
+        // bare name and used to link back to Tracker.size itself.
+        f << "package main\n\n"
+             "type Tracker struct { files ExternalSet }\n"
+             "func (t Tracker) size() int { return t.files.size() }\n"
+             "func main() { var t Tracker; _ = t.size() }\n";
+    }
+
+    Config config;
+    config.project.root = dir.string();
+    MasterIndex indexer(config);
+    indexer.index_directory(dir.string());
+    CodebaseIntelligenceEngine engine;
+
+    nlohmann::json params;
+    auto result = handle_code_insight(params, engine, indexer);
+    ASSERT_FALSE(result.is_error) << result.text;
+    EXPECT_EQ(result.text.find("size -> size"), std::string::npos)
+        << result.text;
+    // Not recursion either — the call goes through a foreign member.
+    auto rpos = result.text.find("recursion=");
+    if (rpos != std::string::npos) {
+        EXPECT_EQ(result.text.find("size", rpos), std::string::npos)
+            << result.text;
+    }
+
+    std::filesystem::remove_all(dir);
+}
+
 // Layer violation: a Data-layer function calling a Presentation-layer function
 // is an upward call against the architecture and must be flagged.
 TEST(CodeInsightLayers, FlagsUpwardCall) {
