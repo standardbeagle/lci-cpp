@@ -445,8 +445,14 @@ session-startup workhorse.
 **Modes / sections**
 
 - **overview** → `== SUMMARY ==` (files/symbols/dirs/depth + langs),
-  `== REPOSITORY MAP ==` (module=… files=…, ≤15), `== ENTRY POINTS ==` (≤12,
-  distinctively-named exports seated before boilerplate names like `Add`),
+  `== REPOSITORY MAP ==` (module=… files=…, ≤15), `== ENTRY POINTS ==` (≤12;
+  carries `confidence=annotated|framework|heuristic` — author pins from
+  `insight { entry_points "..." }` in `.lci.kdl` or `@lci:entry` comments
+  seat first, then framework-registry signatures
+  (`share/lci/framework-entry-signatures.json`, matched via
+  go.mod/composer.json/package.json identity); with neither, the heuristic
+  ranked-exports list labels itself and asks for annotations;
+  distinctively-named exports seat before boilerplate names like `Add`),
   `== HEALTH ==` (`score=<x>/10`, complexity, smells, problematic_symbols,
   purity + query hint), `== VOCABULARY ==` (naming outliers + aliases; real
   English per the embedded SCOWL dictionary is never an outlier),
