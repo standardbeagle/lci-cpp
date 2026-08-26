@@ -962,9 +962,14 @@ void UnifiedExtractor::process_php_reference(TSNode node,
             cref.foreign_receiver = true;
         } else if (!sc.empty()) {
             // Explicit class: receiver-type-qualified; the resolver degrades
-            // to the bare name when the type is not indexed.
-            cref.referenced_name =
-                go_bare_type(sc) + "." + std::string(node_text(nm));
+            // to the bare name when the type is not indexed. A class other
+            // than the enclosing one is a foreign receiver — without the
+            // flag, Psr7\Utils::modifyRequest inside
+            // RedirectMiddleware::modifyRequest fell back to a bare-name
+            // self-match and reported fake recursion.
+            std::string cls = go_bare_type(sc);
+            cref.referenced_name = cls + "." + std::string(node_text(nm));
+            if (cls != enclosing_class_name()) cref.foreign_receiver = true;
         }
         references_.push_back(std::move(cref));
     } else if (node_type == "function_call_expression") {

@@ -772,6 +772,34 @@ class Norm {
     const Reference* scoped = find_call_ref(r, "helper");
     ASSERT_NE(scoped, nullptr);
     EXPECT_EQ(scoped->referenced_name, "Other.helper");
+    // A class other than the enclosing one is a foreign receiver: without
+    // this, Psr7\Utils::modifyRequest inside RedirectMiddleware's own
+    // modifyRequest fell back to a bare-name self-match (fake recursion).
+    EXPECT_TRUE(scoped->foreign_receiver);
+}
+
+TEST(UnifiedExtractorTest, PhpScopedCallToOtherClassSameNameIsForeign) {
+    constexpr std::string_view src = R"(<?php
+class RedirectMiddleware {
+  public function modifyRequest($request) {
+    return Utils::modifyRequest($request);
+  }
+}
+)";
+    Language lang{};
+    ASSERT_TRUE(language_from_extension(".php", lang));
+    auto tree = parse(lang, src);
+    ASSERT_NE(tree.get(), nullptr);
+
+    UnifiedExtractor ue;
+    ue.init(src, 1, ".php", "rm.php");
+    ue.extract(tree.get());
+    auto r = ue.get_results();
+
+    const Reference* call = find_call_ref(r, "modifyRequest");
+    ASSERT_NE(call, nullptr);
+    EXPECT_TRUE(call->foreign_receiver);
+    EXPECT_EQ(call->referenced_name, "Utils.modifyRequest");
 }
 
 TEST(UnifiedExtractorTest, CsharpThisCallIsNotForeignReceiver) {
