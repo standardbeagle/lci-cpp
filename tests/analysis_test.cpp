@@ -912,6 +912,74 @@ TEST(NamingAnalyzer, RealEnglishRareTokensAreNotObscure) {
     }
 }
 
+// --- PHP triad: magic methods + repo-level convention (re-panel R4) ---------
+
+TEST(NamingAnalyzer, MagicMethodsAreNeverOutliers) {
+    // __construct/__call/__destruct are language-mandated; flagging them as
+    // snake_case convention breaks was 14/15 of guzzle's outliers.
+    auto table = SynonymTable::build_default();
+    auto a = make_ref_sym_exported("__construct", 12, 1, true);
+    auto b = make_ref_sym_exported("__call", 8, 2, true);
+    auto c = make_ref_sym_exported("__destruct", 5, 3, true);
+    auto d = make_ref_sym_exported("sendAsync", 9, 4, true);
+    auto e = make_ref_sym_exported("requestAsync", 9, 5, true);
+    auto g = make_ref_sym_exported("buildUri", 9, 6, true);
+    auto h = make_ref_sym_exported("applyOptions", 9, 7, true);
+    auto f = make_file("src/Client.php", {&a, &b, &c, &d, &e, &g, &h});
+
+    NamingAnalyzer na;
+    auto rep = na.analyze({f}, table, "");
+    for (const auto& o : rep.outliers) {
+        EXPECT_TRUE(o.name.rfind("__", 0) != 0) << o.name << " " << o.reason;
+    }
+}
+
+TEST(NamingAnalyzer, RepoLevelConventionCatchesMixedFile) {
+    // StreamHandler shape: a file with ~equal snake/camel defeats the
+    // file-local 2x gate, but the repo (same language) is overwhelmingly
+    // camelCase — snake_case members must still flag.
+    auto table = SynonymTable::build_default();
+    std::vector<EnhancedSymbol> mixed;
+    SymbolID id = 1;
+    for (const char* n : {"add_cert", "add_proxy", "add_timeout", "add_debug",
+                          "add_verify", "parse_proxy"})
+        mixed.push_back(make_ref_sym_exported(n, 4, id++, true));
+    for (const char* n : {"invokeStats", "checkDecode", "createStream",
+                          "resolveHost", "applyConfig"})
+        mixed.push_back(make_ref_sym_exported(n, 4, id++, true));
+    std::vector<const EnhancedSymbol*> mixed_ptrs;
+    for (auto& s : mixed) mixed_ptrs.push_back(&s);
+    auto f1 = make_file("src/StreamHandler.php", mixed_ptrs);
+
+    // The rest of the repo: solidly camelCase PHP.
+    std::vector<EnhancedSymbol> camel;
+    for (const char* n : {"sendAsync", "requestAsync", "buildUri",
+                          "applyOptions", "prepareDefaults", "invalidBody",
+                          "transferStats", "resolveHandler", "createResponse",
+                          "mapRequest", "mapResponse", "withOptions",
+                          "getConfig", "setConfig", "readTimeout",
+                          "writeTimeout", "connectTimeout", "proxyHost",
+                          "verifyPeer", "streamBody"})
+        camel.push_back(make_ref_sym_exported(n, 4, id++, true));
+    std::vector<const EnhancedSymbol*> camel_ptrs;
+    for (auto& s : camel) camel_ptrs.push_back(&s);
+    auto f2 = make_file("src/Client.php", camel_ptrs);
+
+    NamingAnalyzer na;
+    auto rep = na.analyze({f1, f2}, table, "");
+    bool snake_flagged = false;
+    for (const auto& o : rep.outliers) {
+        if (o.reason == "convention-mismatch" &&
+            o.name.rfind("add_", 0) == 0)
+            snake_flagged = true;
+        // The majority style never flags via the repo fallback.
+        EXPECT_FALSE(o.reason == "convention-mismatch" &&
+                     o.odd_term == "camelCase")
+            << o.name;
+    }
+    EXPECT_TRUE(snake_flagged);
+}
+
 // --- Location must always carry the filename --------------------------------
 
 TEST(NamingAnalyzer, LocationIncludesFilenameForEveryOutlier) {

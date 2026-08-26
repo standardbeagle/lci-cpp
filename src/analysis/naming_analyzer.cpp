@@ -196,6 +196,7 @@ NamingReport NamingAnalyzer::analyze(const std::vector<FileSymbolData>& files,
     struct Cand {
         const EnhancedSymbol* sym;
         std::string base_path;
+        std::string ext;  ///< language key for the repo-level style tally
         std::vector<std::string> tokens;
         NameStyle style;
         const StyleTally* file_tally;  ///< convention tally of the owning file
@@ -205,14 +206,30 @@ NamingReport NamingAnalyzer::analyze(const std::vector<FileSymbolData>& files,
     // Keyed by full file path; stable node pointers (node_hash_map semantics
     // via unique_ptr) so Cand can hold a pointer across insertions.
     absl::flat_hash_map<std::string, std::unique_ptr<StyleTally>> file_styles;
+    // Repo-level style per language (extension): the fallback for files that
+    // are themselves mixed. Guzzle's StreamHandler hides 11 snake_case
+    // methods beside ~10 camelCase ones — no 2x minority within the file, so
+    // the file-local gate never fires, while the repo is overwhelmingly
+    // camelCase (2026-08-26 re-panel miss). Per-language keying matters: a
+    // polyglot repo legitimately mixes Go camelCase with Python snake_case.
+    absl::flat_hash_map<std::string, StyleTally> ext_styles;
 
     for (const auto& file : files) {
         std::string bp = basename_of(file.path);
+        std::string ext;
+        if (auto dot = file.path.rfind('.'); dot != std::string::npos)
+            ext = file.path.substr(dot);
         auto& tally_ptr = file_styles[file.path];
         if (!tally_ptr) tally_ptr = std::make_unique<StyleTally>();
         StyleTally& tally = *tally_ptr;
         for (const auto* sym : file.symbols) {
             if (!sym || !is_function_like(sym->symbol.type)) continue;
+            // Language-mandated dunder names (__construct, __call, __init__)
+            // are neither convention breaks nor vocabulary: never candidates
+            // and never counted in a file's style tally (they'd read as
+            // snake_case and skew it). 14/15 guzzle "outliers" were magic
+            // methods before this gate (2026-08-26 re-panel).
+            if (sym->symbol.name.rfind("__", 0) == 0) continue;
             auto tokens = splitter.split(sym->symbol.name);
             if (tokens.empty()) continue;
             absl::flat_hash_set<std::string> uniq(tokens.begin(), tokens.end());
@@ -221,6 +238,9 @@ NamingReport NamingAnalyzer::analyze(const std::vector<FileSymbolData>& files,
             NameStyle style = classify_style(sym->symbol.name);
             if (style == NameStyle::Snake) tally.snake++;
             if (style == NameStyle::Camel) tally.camel++;
+            auto& et = ext_styles[ext];
+            if (style == NameStyle::Snake) et.snake++;
+            if (style == NameStyle::Camel) et.camel++;
 
             // Record synonym-group usage for the leading verb, keyed by the
             // group's primary (most recognizable) term.
@@ -229,7 +249,7 @@ NamingReport NamingAnalyzer::analyze(const std::vector<FileSymbolData>& files,
             if (!primary.empty()) {
                 group_usage[std::string(primary)][verb]++;
             }
-            cands.push_back({sym, bp, std::move(tokens), style, &tally});
+            cands.push_back({sym, bp, ext, std::move(tokens), style, &tally});
         }
     }
 
@@ -309,14 +329,27 @@ NamingReport NamingAnalyzer::analyze(const std::vector<FileSymbolData>& files,
         }
 
         // 2) Convention mismatch: minority naming style within its file
-        // (e.g. snake_case add_* methods in a camelCase codebase).
+        // (e.g. snake_case add_* methods in a camelCase codebase). A file
+        // that is itself heavily mixed defeats the local gate, so fall back
+        // to the repo-wide tally FOR THE SAME LANGUAGE with a stricter
+        // margin (3x, >=20 samples) — repo-level claims need more evidence.
         if (reason.empty() &&
             (c.style == NameStyle::Snake || c.style == NameStyle::Camel)) {
             const StyleTally& tally = *c.file_tally;
             int total = tally.snake + tally.camel;
             int mine = c.style == NameStyle::Snake ? tally.snake : tally.camel;
             int other = total - mine;
-            if (total >= 6 && mine * 2 <= other) {
+            bool flag = total >= 6 && mine * 2 <= other;
+            if (!flag) {
+                auto it = ext_styles.find(c.ext);
+                if (it != ext_styles.end()) {
+                    int rt = it->second.snake + it->second.camel;
+                    int rm = c.style == NameStyle::Snake ? it->second.snake
+                                                         : it->second.camel;
+                    flag = rt >= 20 && rm * 3 <= rt - rm;
+                }
+            }
+            if (flag) {
                 odd_term =
                     c.style == NameStyle::Snake ? "snake_case" : "camelCase";
                 reason = "convention-mismatch";
