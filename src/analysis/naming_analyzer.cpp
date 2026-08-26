@@ -79,6 +79,8 @@ const absl::flat_hash_set<std::string>& common_words() {
         "env", "src", "dst", "dest", "tmp", "vec", "fmt", "std", "impl",
         "init", "deinit", "alloc", "dealloc", "prefix", "suffix", "async",
         "sync", "mutex", "regex", "glob", "lexer", "stdin", "stdout", "stderr",
+        "whitespace", "enum", "ident", "lossy", "lorem", "noop", "varargs",
+        "iterator", "accessor", "getter", "setter", "callback", "tokenizer",
     };
     return w;
 }

@@ -1902,6 +1902,8 @@ void emit_entry_points(std::ostringstream& out, const EntryPointsList* ep,
             "check",  "make",  "map",    "ok",    "handle", "exec",
             "apply",  "index", "count",  "main",  "equals", "tostring",
             "gethashcode", "string", "error", "invoke", "invokeasync"};
+        // One- and two-character names (HTML helpers `H`, `U`) say even less.
+        if (n.size() <= 2) return true;
         std::string low;
         low.reserve(n.size());
         for (char c : n) low += static_cast<char>(std::tolower(
