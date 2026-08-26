@@ -2557,13 +2557,23 @@ void register_analysis_handlers(McpServer& server,
           {"focus", "string", "Analysis focus", ""},
           {"max_results", "integer",
            "Maximum results (keep small to avoid token overload)", ""},
+          {"scope", "string",
+           "git_analyze: staged (default), wip, commit, range", ""},
+          {"base_ref", "string",
+           "git_analyze: base ref for commit/range (e.g. HEAD~1, main)", ""},
+          {"target_ref", "string",
+           "git_analyze: target ref for range (defaults to HEAD)", ""},
+          {"time_window", "string",
+           "git_hotspots: 7d, 30d (default), 90d, or 1y", ""},
+          {"file_pattern", "string", "git_hotspots: glob filter", ""},
           {"languages", "array",
            "Filter by programming languages (e.g., [\"go\"], "
            "[\"typescript\", \"javascript\"], [\"csharp\"]). "
            "Case-insensitive with aliases (e.g., 'ts' for TypeScript, "
            "'cs' for C#).",
            "string"}},
-         {}},
+         {},
+         {"detailed_mode"}},
         [ci_engine, indexer, analyzer, propagator](
             const nlohmann::json& p) -> ToolResult {
             if (!ci_engine || !indexer) {
