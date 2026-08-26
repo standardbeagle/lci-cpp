@@ -445,12 +445,19 @@ session-startup workhorse.
 **Modes / sections**
 
 - **overview** → `== SUMMARY ==` (files/symbols/dirs/depth + langs),
-  `== REPOSITORY MAP ==` (module=… files=…, ≤15), `== ENTRY POINTS ==` (≤12),
-  `== HEALTH ==` (score, complexity, smells, problematic_symbols, purity +
-  query hint), `== VOCABULARY ==` (naming outliers + aliases), `== OBJECT IDs ==`
-  hint, `== NEXT STEPS ==`.
+  `== REPOSITORY MAP ==` (module=… files=…, ≤15), `== ENTRY POINTS ==` (≤12,
+  distinctively-named exports seated before boilerplate names like `Add`),
+  `== HEALTH ==` (`score=<x>/10`, complexity, smells, problematic_symbols,
+  purity + query hint), `== VOCABULARY ==` (naming outliers + aliases; real
+  English per the embedded SCOWL dictionary is never an outlier),
+  `== OBJECT IDs ==` hint, `== NEXT STEPS ==`. Graph sections when present:
+  `== LOAD BEARING ==` / `== CLUSTERS ==`; `== CYCLES ==` shows only
+  multi-symbol loops, with direct self-recursion on a separate `recursion=`
+  line; `== LAYER VIOLATIONS ==` opens with a `layers=heuristic` disclaimer
+  (layers are name/path inference, not declared architecture).
 - **statistics** → `== STATISTICS ==` (complexity avg/median + distribution,
-  coupling, cohesion, quality, top-3 high_complexity, top-3 low_cohesion).
+  coupling, cohesion, quality with `maintainability=<x>/100`, top-3
+  high_complexity, top-3 low_cohesion).
 - **unified** → SUMMARY + REPOSITORY MAP + ENTRY POINTS + HEALTH + `== MODULES ==`
   + `== DEPENDENCIES ==` + STATISTICS + VOCABULARY + NEXT STEPS.
 - **structure** → `== STRUCTURE ==` (dirs/files/symbols/depth, types by ext,
