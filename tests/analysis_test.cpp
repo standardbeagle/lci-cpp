@@ -11,6 +11,7 @@
 #include <lci/analysis/layer_analyzer.h>
 #include <lci/analysis/module_analyzer.h>
 #include <lci/analysis/naming_analyzer.h>
+#include <lci/analysis/english_words.h>
 #include <lci/reference.h>
 #include <lci/semantic/synonym_table.h>
 
@@ -824,6 +825,68 @@ TEST(NamingAnalyzer, CommonEnglishDerivedWordsNotObscure) {
     auto rep = na.analyze({f}, table, "");
     EXPECT_TRUE(rep.outliers.empty())
         << (rep.outliers.empty() ? "" : rep.outliers[0].name);
+}
+
+// --- Real English is never broken vocabulary (SCOWL dictionary gate) --------
+// Field-run FPs (2026-08-26 four-repo rating): fail -> tail, constant ->
+// content, external -> internal as "misspellings"; opacity, less, expect,
+// matching, lenient, enclosed as "obscure-token". All are real English and
+// must never be outliers.
+
+TEST(EnglishWords, DictionaryAndMorphology) {
+    using analysis::is_english_like_token;
+    using analysis::is_english_word;
+    // Exact SCOWL words.
+    EXPECT_TRUE(is_english_word("fail"));
+    EXPECT_TRUE(is_english_word("opacity"));
+    EXPECT_TRUE(is_english_word("lenient"));
+    EXPECT_TRUE(is_english_word("external"));
+    // Derived forms: un+scoped (prefix), serializer -> serial (Porter2 stem).
+    EXPECT_TRUE(is_english_like_token("unscoped"));
+    EXPECT_TRUE(is_english_like_token("serializer"));
+    EXPECT_TRUE(is_english_like_token("deserializer"));
+    // Genuine misspellings and jargon stay out.
+    EXPECT_FALSE(is_english_like_token("mising"));
+    EXPECT_FALSE(is_english_like_token("supress"));
+    EXPECT_FALSE(is_english_like_token("seperator"));
+    EXPECT_FALSE(is_english_like_token("errf"));
+    EXPECT_FALSE(is_english_like_token("mpsc"));
+}
+
+TEST(NamingAnalyzer, RealEnglishTokenIsNeverAMisspelling) {
+    // "tail" is corpus-frequent; "fail" is a rare lone token at distance 1.
+    // Both are real English — fail must NOT be corrected to tail.
+    auto table = SynonymTable::build_default();
+    auto a = make_ref_sym("readTailBytes", 3, 1);
+    auto b = make_ref_sym("tailWindow", 3, 2);
+    auto c = make_ref_sym("tailChunk", 3, 3);
+    auto bad = make_ref_sym_exported("failGate", 27, 4, true);
+    auto f = make_file("bench/bench_gate.py", {&a, &b, &c, &bad});
+
+    NamingAnalyzer na;
+    auto rep = na.analyze({f}, table, "");
+    const auto* o = find_outlier(rep, "failGate");
+    if (o != nullptr) {
+        EXPECT_NE(o->reason, "misspelling") << o->odd_term;
+    }
+}
+
+TEST(NamingAnalyzer, RealEnglishRareTokensAreNotObscure) {
+    // Corpus-rare but real English words (the agnt/slop field-run FPs).
+    auto table = SynonymTable::build_default();
+    auto a = make_ref_sym_exported("opacityValue", 35, 1, true);
+    auto b = make_ref_sym_exported("addLenientTool", 24, 2, true);
+    auto c = make_ref_sym_exported("NewEnclosedScope", 8, 3, true);
+    auto d = make_ref_sym_exported("unscopedQuery", 28, 4, true);
+    auto e = make_ref_sym_exported("NewSerializer", 19, 5, true);
+    auto f = make_file("scope.go", {&a, &b, &c, &d, &e});
+
+    NamingAnalyzer na;
+    auto rep = na.analyze({f}, table, "");
+    for (const auto& o : rep.outliers) {
+        EXPECT_NE(o.reason, "obscure-token") << o.name << " / " << o.odd_term;
+        EXPECT_NE(o.reason, "misspelling") << o.name << " / " << o.odd_term;
+    }
 }
 
 // --- Location must always carry the filename --------------------------------

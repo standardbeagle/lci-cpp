@@ -127,6 +127,36 @@ foreach(_schema IN LISTS LCI_MCP_SCHEMAS)
     )
 endforeach()
 
+# English word list embedding — SCOWL-derived list under src/analysis/data/
+# (see the README there for provenance). Same go:embed pattern as the MCP
+# schemas, but chunked: MSVC caps one string literal at 64KB, so the ~860KB
+# list is emitted as an array of raw literals split on line boundaries.
+set(_words_src "${CMAKE_CURRENT_SOURCE_DIR}/src/analysis/data/scowl_english_words.txt")
+set(_words_dst "${CMAKE_CURRENT_BINARY_DIR}/generated/lci/analysis/english_words_data.h")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_words_src}")
+if("${_words_src}" IS_NEWER_THAN "${_words_dst}")
+    file(STRINGS "${_words_src}" _word_lines)
+    list(LENGTH _word_lines _n_words)
+    set(_chunk_size 4000)  # ~40KB of words per literal, safely under 64KB
+    set(_chunks "")
+    set(_i 0)
+    while(_i LESS _n_words)
+        math(EXPR _end "${_i} + ${_chunk_size} - 1")
+        if(_end GREATER_EQUAL _n_words)
+            math(EXPR _end "${_n_words} - 1")
+        endif()
+        list(SUBLIST _word_lines ${_i} ${_chunk_size} _chunk_lines)
+        list(JOIN _chunk_lines "\n" _chunk_text)
+        string(APPEND _chunks "R\"LCIWORDS(${_chunk_text}\n)LCIWORDS\",\n")
+        math(EXPR _i "${_end} + 1")
+    endwhile()
+    file(CONFIGURE
+        OUTPUT "${_words_dst}"
+        CONTENT "// Auto-generated from src/analysis/data/scowl_english_words.txt — DO NOT EDIT.\n#pragma once\n#include <string_view>\nnamespace lci::analysis {\ninline constexpr std::string_view kEnglishWordChunks[] = {\n${_chunks}};\ninline constexpr int kEnglishWordCount = ${_n_words};\n}  // namespace lci::analysis\n"
+        @ONLY
+    )
+endif()
+
 # Dependencies via vcpkg (preferred) or FetchContent (fallback)
 include(FetchContent)
 

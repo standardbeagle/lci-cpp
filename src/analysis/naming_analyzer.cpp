@@ -1,5 +1,6 @@
 #include <lci/analysis/naming_analyzer.h>
 
+#include <lci/analysis/english_words.h>
 #include <lci/idcodec.h>
 #include <lci/reference.h>
 #include <lci/semantic/name_splitter.h>
@@ -72,14 +73,22 @@ const absl::flat_hash_set<std::string>& common_words() {
         "use", "mount", "group", "tee", "suppress", "separator", "missing",
         "miss", "found", "not", "discard", "seek", "effect", "escape", "rune",
         "nullify",
+        // ubiquitous programming abbreviations (field-run FPs: walkExpr,
+        // iprefix — abbreviation-shaped tokens every developer reads fluently)
+        "expr", "stmt", "elem", "iter", "attr", "attrs", "prop", "props",
+        "env", "src", "dst", "dest", "tmp", "vec", "fmt", "std", "impl",
+        "init", "deinit", "alloc", "dealloc", "prefix", "suffix", "async",
+        "sync", "mutex", "regex", "glob", "lexer", "stdin", "stdout", "stderr",
     };
     return w;
 }
 
-// True if `word` is a common word or a common derived form of one — strips a
-// frequent English suffix and re-checks the stem (seekable -> seek,
-// effective -> effect+ive, movable -> move). Guards obscure-token against
-// flagging ordinary derived English (D6 anti-signal).
+// True if `word` is recognizable vocabulary: a common programming word (or a
+// derived form of one — seekable -> seek, effective -> effect+ive), or real
+// English per the embedded SCOWL dictionary + Porter2 morphology
+// (analysis::is_english_like_token). Real English is never a "misspelling"
+// or "obscure-token" outlier — flagging fail->tail or opacity as broken
+// vocabulary is the anti-signal that makes agents distrust the report (D6).
 bool is_common_english(const std::string& word) {
     const auto& cw = common_words();
     if (cw.contains(word)) return true;
@@ -93,7 +102,7 @@ bool is_common_english(const std::string& word) {
         std::string stem = word.substr(0, word.size() - suf.size());
         if (cw.contains(stem) || cw.contains(stem + "e")) return true;
     }
-    return false;
+    return analysis::is_english_like_token(word);
 }
 
 // Bounded Levenshtein distance; returns limit+1 as soon as the distance
