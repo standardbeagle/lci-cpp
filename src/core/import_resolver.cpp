@@ -85,7 +85,8 @@ SymbolID ImportResolver::resolve_symbol_reference(
     FileID ref_file_id,
     std::string_view referenced_name,
     std::span<const SymbolID> candidates,
-    std::function<const EnhancedSymbol*(SymbolID)> symbol_lookup) const {
+    std::function<const EnhancedSymbol*(SymbolID)> symbol_lookup,
+    bool foreign_receiver) const {
 
     // Strategy 1: the name is imported by this file — but an import binding
     // names a symbol, not a defining file, so with several same-named
@@ -119,8 +120,11 @@ SymbolID ImportResolver::resolve_symbol_reference(
     // Strategy 3: a UNIQUE exported candidate. Export status ranks a single
     // library symbol above unexported shadows, but when several exported
     // symbols share the name (chi: Mux.Get vs an _examples handler Get),
-    // "first exported" is a coin flip that built wrong call edges.
-    {
+    // "first exported" is a coin flip that built wrong call edges. For a
+    // foreign-receiver call of unknown type this tier is skipped entirely:
+    // the real callee is often outside the index, so uniqueness in the
+    // corpus proves nothing (see header comment).
+    if (!foreign_receiver) {
         SymbolID only = 0;
         for (SymbolID cid : candidates) {
             const auto* sym = symbol_lookup(cid);

@@ -663,5 +663,108 @@ function helper(x: number): number {
     EXPECT_NE(find_symbol(r, "helper"), nullptr);
 }
 
+// -- foreign_receiver marking -------------------------------------------------
+// A method call through an object that is not self/this must carry
+// foreign_receiver so the resolver never links it back to the calling symbol
+// (the `size -> size` false-cycle class: DeletedFileTracker::size() calling
+// flat_hash_set::size() resolved to itself by same-file name match).
+
+const Reference* find_call_ref(const ExtractionResults& r,
+                               std::string_view name_contains) {
+    for (const auto& ref : r.references) {
+        if (ref.type == ReferenceType::Call &&
+            ref.referenced_name.find(name_contains) != std::string::npos)
+            return &ref;
+    }
+    return nullptr;
+}
+
+TEST(UnifiedExtractorTest, CppMemberCallThroughFieldIsForeignReceiver) {
+    constexpr std::string_view src = R"(
+struct Tracker {
+    Store files;
+    int size() const { return files.size(); }
+    int total() const { return size(); }
+};
+)";
+    Language lang{};
+    ASSERT_TRUE(language_from_extension(".cpp", lang));
+    auto tree = parse(lang, src);
+    ASSERT_NE(tree.get(), nullptr);
+
+    UnifiedExtractor ue;
+    ue.init(src, 1, ".cpp", "tracker.cpp");
+    ue.extract(tree.get());
+    auto r = ue.get_results();
+
+    // files.size(): explicit non-self receiver -> foreign.
+    const Reference* member_call = find_call_ref(r, "size");
+    ASSERT_NE(member_call, nullptr);
+    EXPECT_TRUE(member_call->foreign_receiver);
+
+    // size() bare call: no receiver -> not foreign (stays resolvable to the
+    // sibling method / genuine recursion).
+    bool found_bare = false;
+    for (const auto& ref : r.references) {
+        if (ref.type == ReferenceType::Call &&
+            ref.referenced_name == "size" && !ref.foreign_receiver)
+            found_bare = true;
+    }
+    EXPECT_TRUE(found_bare);
+}
+
+TEST(UnifiedExtractorTest, GoDirectRecursionIsNotForeignReceiver) {
+    constexpr std::string_view src = R"(
+package main
+
+func fact(n int) int {
+    if n <= 1 { return 1 }
+    return fact(n - 1)
+}
+)";
+    auto tree = parse(Language::Go, src);
+    ASSERT_NE(tree.get(), nullptr);
+
+    UnifiedExtractor ue;
+    ue.init(src, 1, ".go", "fact.go");
+    ue.extract(tree.get());
+    auto r = ue.get_results();
+
+    const Reference* rec = find_call_ref(r, "fact");
+    ASSERT_NE(rec, nullptr);
+    EXPECT_FALSE(rec->foreign_receiver);
+}
+
+TEST(UnifiedExtractorTest, CsharpThisCallIsNotForeignReceiver) {
+    constexpr std::string_view src = R"(
+class Svc {
+    void Run() { this.Step(); other.Step(); }
+    void Step() {}
+    Svc other;
+}
+)";
+    Language lang{};
+    ASSERT_TRUE(language_from_extension(".cs", lang));
+    auto tree = parse(lang, src);
+    ASSERT_NE(tree.get(), nullptr);
+
+    UnifiedExtractor ue;
+    ue.init(src, 1, ".cs", "svc.cs");
+    ue.extract(tree.get());
+    auto r = ue.get_results();
+
+    bool this_call_not_foreign = false, other_call_foreign = false;
+    for (const auto& ref : r.references) {
+        if (ref.type != ReferenceType::Call) continue;
+        if (ref.referenced_name.find("Step") == std::string::npos) continue;
+        if (ref.foreign_receiver)
+            other_call_foreign = true;
+        else
+            this_call_not_foreign = true;
+    }
+    EXPECT_TRUE(this_call_not_foreign);
+    EXPECT_TRUE(other_call_foreign);
+}
+
 }  // namespace
 }  // namespace lci::parser

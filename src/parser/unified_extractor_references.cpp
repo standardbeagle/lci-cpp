@@ -9,6 +9,16 @@ namespace lci::parser {
 
 namespace {
 
+// Receiver spellings that mean "the current object" across the supported
+// languages; a call through one of these can be direct recursion.
+bool is_self_receiver(std::string_view recv) {
+    return recv.empty() || recv == "this" || recv == "self" ||
+           recv == "super" || recv == "base" || recv == "cls" ||
+           recv == "$this" || recv == "Self" || recv == "static" ||
+           recv == "me" || recv == "Me" || recv == "*this" ||
+           recv == "(*this)";
+}
+
 bool is_cpp_family_extension(std::string_view ext) {
     return ext == ".c" || ext == ".cpp" || ext == ".cc" || ext == ".cxx" ||
            ext == ".h" || ext == ".hpp";
@@ -175,11 +185,15 @@ void UnifiedExtractor::process_reference_node(TSNode node,
                     TSNode fld = ts_node_child_by_field_name(
                         func, "field", static_cast<uint32_t>(5));
                     if (!ts_node_is_null(arg) && !ts_node_is_null(fld)) {
-                        auto lv = local_var_types_.find(
-                            std::string(node_text(arg)));
-                        if (lv != local_var_types_.end() && !lv->second.empty())
+                        auto recv = node_text(arg);
+                        auto lv = local_var_types_.find(std::string(recv));
+                        if (lv != local_var_types_.end() &&
+                            !lv->second.empty()) {
                             cref.referenced_name =
                                 lv->second + "." + std::string(node_text(fld));
+                        } else if (!is_self_receiver(recv)) {
+                            cref.foreign_receiver = true;
+                        }
                     }
                 }
                 references_.push_back(std::move(cref));
@@ -343,6 +357,7 @@ void UnifiedExtractor::process_go_reference(TSNode node,
                 TSNode operand = ts_node_child_by_field_name(
                     func, "operand", static_cast<uint32_t>(7));
                 if (!ts_node_is_null(operand)) {
+                    bool qualified = false;
                     const char* ot = ts_node_type(operand);
                     if (ot && std::string_view(ot) == "identifier") {
                         auto it = local_var_types_.find(
@@ -352,8 +367,16 @@ void UnifiedExtractor::process_go_reference(TSNode node,
                             cref.referenced_name =
                                 it->second + "." +
                                 std::string(node_text(field));
+                            qualified = true;
                         }
                     }
+                    // Unknown operand (package alias, untyped var, chained
+                    // expression): the receiver is not the current function's
+                    // receiver (that one is in the local type env), so the
+                    // call cannot be direct recursion and must not be guessed
+                    // from the bare name.
+                    if (!qualified && !is_self_receiver(node_text(operand)))
+                        cref.foreign_receiver = true;
                 }
                 references_.push_back(std::move(cref));
                 return;
@@ -616,9 +639,14 @@ void qualify_and_push(std::vector<Reference>& out, Reference cref,
                       const absl::flat_hash_map<std::string, std::string>& env,
                       std::string_view recv_text, std::string_view method_text) {
     auto it = env.find(std::string(recv_text));
-    if (it != env.end() && !it->second.empty())
+    if (it != env.end() && !it->second.empty()) {
         cref.referenced_name =
             it->second + "." + std::string(method_text);
+    } else if (!is_self_receiver(recv_text)) {
+        // Explicit receiver of unknown type: never direct recursion, and
+        // resolution must not guess a target from the bare name alone.
+        cref.foreign_receiver = true;
+    }
     out.push_back(std::move(cref));
 }
 }  // namespace

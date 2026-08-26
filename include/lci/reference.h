@@ -72,6 +72,11 @@ struct Reference {
     RefStrength strength{};
     std::string referenced_name;
     bool ambiguous{};
+    // Call goes through an explicit receiver that is not self/this. Such a
+    // call can never be direct recursion, and when the receiver's type is
+    // unknown the resolver must not guess a target from name evidence alone
+    // (the false self-loop / reach-inflation class).
+    bool foreign_receiver{};
     // No `quality`, `candidates`, or `failure_reason` here. They were carried
     // for every reference on every corpus and never written by any resolver,
     // never serialized, and never read -- 88 bytes of the struct plus their

@@ -77,6 +77,7 @@ Reference ReferenceTracker::Snapshot::materialize_ref(
     out.type = r.type;
     out.strength = r.strength;
     out.ambiguous = r.ambiguous;
+    out.foreign_receiver = r.foreign_receiver;
     if (r.name_id < ref_names.size()) {
         out.referenced_name = ref_names[r.name_id];
     }
@@ -337,6 +338,7 @@ std::vector<EnhancedSymbol> ReferenceTracker::process_file(
                 r.type = ref.type;
                 r.strength = ref.strength;
                 r.ambiguous = ref.ambiguous;
+                r.foreign_receiver = ref.foreign_receiver;
                 r.name_id = intern_ref_name(s, ref.referenced_name);
                 vec.push_back(r);
             }
@@ -941,8 +943,16 @@ SymbolID ReferenceTracker::resolve_reference_target(
     // (file_id, FULL 64-bit name hash). Truncating the hash to 32 bits (the
     // former key) collided two names in one file at birthday odds, and the
     // loser silently resolved to the winner's symbol.
-    std::pair<FileID, uint64_t> cache_key{owner_fid,
-                                          fnv1a_hash_name(full_name)};
+    // Foreign-receiver calls resolve under extra gates that depend on the
+    // SOURCE symbol (never-self, no-guess), so they get their own cache slot
+    // keyed by the source as well — sharing the bare-name entry would leak
+    // one caller's exclusion to every other call site of the name.
+    uint64_t name_hash = fnv1a_hash_name(full_name);
+    if (ref.foreign_receiver) {
+        name_hash ^= 0x9e3779b97f4a7c15ULL *
+                     (static_cast<uint64_t>(ref.source_symbol) | 1ULL);
+    }
+    std::pair<FileID, uint64_t> cache_key{owner_fid, name_hash};
 
     if (auto it = reference_cache_.find(cache_key);
         it != reference_cache_.end()) {
@@ -972,8 +982,11 @@ SymbolID ReferenceTracker::resolve_reference_target(
         }
     }
 
-    // Check same-file symbols first (fast path).
+    // Check same-file symbols first (fast path). A foreign-receiver call can
+    // never be direct recursion: skip the calling symbol itself (the
+    // `files.size()`-inside-`size()` false self-loop class).
     for (SymbolID id : file_symbol_ids) {
+        if (ref.foreign_receiver && id == ref.source_symbol) continue;
         if (const auto* sym = s.symbols.get(id)) {
             if (sym->symbol.name == name) {
                 reference_cache_[cache_key] = id;
@@ -1013,6 +1026,7 @@ SymbolID ReferenceTracker::resolve_reference_target(
         SymbolID same_dir = 0;
         int same_dir_count = 0;
         for (SymbolID id : candidates) {
+            if (ref.foreign_receiver && id == ref.source_symbol) continue;
             const auto* sym = s.symbols.get(id);
             if (sym == nullptr) continue;
             LangFamily family = LangFamily::kUnknown;
@@ -1038,7 +1052,8 @@ SymbolID ReferenceTracker::resolve_reference_target(
 
         resolved = import_resolver_.resolve_symbol_reference(
             owner_fid, name, filtered,
-            [&s](SymbolID id) { return s.symbols.get(id); });
+            [&s](SymbolID id) { return s.symbols.get(id); },
+            ref.foreign_receiver);
 
         // Ambiguous-name fallback: no decisive import/same-file/export
         // evidence. Package proximity breaks the tie — a unique candidate in
@@ -1046,7 +1061,10 @@ SymbolID ReferenceTracker::resolve_reference_target(
         // Failing that, a unique eligible candidate links. Anything still
         // ambiguous builds NO edge: reach/depended_on_by computed over
         // guessed edges is noise, and a missing edge is the cheaper error.
-        if (resolved == 0) {
+        // Foreign-receiver calls of unknown type never take this guess at
+        // all — `x.Add()` linking to the one `Add` the corpus happens to
+        // index is exactly the edge class that inflated LOAD BEARING reach.
+        if (resolved == 0 && !ref.foreign_receiver) {
             if (same_dir_count == 1) {
                 resolved = same_dir;
             } else if (filtered.size() == 1) {

@@ -99,12 +99,17 @@ class ImportResolver {
     /// Builds the import graph from collected data (single-threaded).
     void build_import_graph(std::span<const FileImportData> import_data);
 
-    /// Resolves which symbol a reference points to.
+    /// Resolves which symbol a reference points to. `foreign_receiver`
+    /// disables the unique-exported-candidate tier: for a call through an
+    /// object of unknown type the real callee is often unindexed, and
+    /// "the one exported name that happens to be in the corpus" is a guess,
+    /// not evidence (the LOAD BEARING reach-inflation class).
     SymbolID resolve_symbol_reference(
         FileID ref_file_id,
         std::string_view referenced_name,
         std::span<const SymbolID> candidates,
-        std::function<const EnhancedSymbol*(SymbolID)> symbol_lookup) const;
+        std::function<const EnhancedSymbol*(SymbolID)> symbol_lookup,
+        bool foreign_receiver = false) const;
 
     void remove_file(FileID file_id);
     void clear();
@@ -350,9 +355,12 @@ struct StoredRef {
     uint32_t name_id{};
     ReferenceType type{};
     RefStrength strength{};
-    bool ambiguous{};
-    bool dead{};
+    // Bitfields: three flags share one byte so the struct stays 32 bytes.
+    bool ambiguous : 1 {};
+    bool dead : 1 {};
+    bool foreign_receiver : 1 {};
 };
+static_assert(sizeof(StoredRef) == 32, "StoredRef is a per-reference cost");
 
 // ---------------------------------------------------------------------------
 // ReferenceTracker - bidirectional symbol references and scope relationships

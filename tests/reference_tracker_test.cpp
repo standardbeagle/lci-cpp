@@ -1370,5 +1370,93 @@ TEST(ReferenceTrackerTest, ScopeChainCacheDoesNotShareAcrossFiles) {
     EXPECT_EQ(b[0].scope_chain[0].name, "BetaClass");
 }
 
+// -- foreign_receiver resolution gates ---------------------------------------
+// A call through a non-self receiver must never resolve to the calling symbol
+// itself (the false self-loop that fed fake CYCLES), and must not fall back to
+// the no-evidence unique-candidate guess (which inflated LOAD BEARING reach).
+
+TEST(ReferenceTrackerTest, ForeignReceiverCallNeverResolvesToSource) {
+    ReferenceTracker rt;
+
+    // One method `size` in the file; inside it, `files.size()` — a call whose
+    // receiver is a member of an unindexed external type. Name-match would
+    // resolve it to the method itself.
+    std::vector<Symbol> symbols = {
+        make_sym("size", SymbolType::Method, 1, 10, 14),
+    };
+    Reference call;
+    call.type = ReferenceType::Call;
+    call.referenced_name = "size";
+    call.line = 12;
+    call.column = 20;
+    call.foreign_receiver = true;
+    std::vector<Reference> refs = {call};
+    std::vector<ScopeInfo> scopes;
+
+    rt.process_file(1, "tracker.h", symbols, refs, scopes);
+    rt.process_all_references();
+
+    auto ids = rt.pin()->find_symbols_by_name("size");
+    ASSERT_EQ(ids.size(), 1u);
+    EXPECT_TRUE(rt.get_callee_symbols(ids[0]->id).empty())
+        << "foreign-receiver call resolved back to its own source symbol";
+}
+
+TEST(ReferenceTrackerTest, BareRecursiveCallStillResolvesToSelf) {
+    ReferenceTracker rt;
+
+    std::vector<Symbol> symbols = {
+        make_sym("fact", SymbolType::Function, 1, 1, 6),
+    };
+    Reference call;
+    call.type = ReferenceType::Call;
+    call.referenced_name = "fact";
+    call.line = 4;
+    call.column = 12;
+    std::vector<Reference> refs = {call};
+    std::vector<ScopeInfo> scopes;
+
+    rt.process_file(1, "fact.go", symbols, refs, scopes);
+    rt.process_all_references();
+
+    auto ids = rt.pin()->find_symbols_by_name("fact");
+    ASSERT_EQ(ids.size(), 1u);
+    auto callees = rt.get_callee_symbols(ids[0]->id);
+    ASSERT_EQ(callees.size(), 1u);
+    EXPECT_EQ(callees[0], ids[0]->id);
+}
+
+TEST(ReferenceTrackerTest, ForeignReceiverSkipsNoEvidenceGuess) {
+    ReferenceTracker rt;
+
+    // Caller in a.cs; a lone same-named method `Add` in b.cs (different dir,
+    // no import evidence). For a bare call the unique-candidate fallback
+    // links; for a foreign-receiver call of unknown type it must not guess.
+    std::vector<Symbol> caller = {
+        make_sym("Run", SymbolType::Method, 1, 1, 10),
+    };
+    Reference call;
+    call.type = ReferenceType::Call;
+    call.referenced_name = "Add";
+    call.line = 5;
+    call.column = 8;
+    call.foreign_receiver = true;
+    std::vector<Reference> refs = {call};
+    std::vector<ScopeInfo> scopes;
+    rt.process_file(1, "svc/a.cs", caller, refs, scopes);
+
+    std::vector<Symbol> target = {
+        make_sym("Add", SymbolType::Method, 2, 1, 4),
+    };
+    std::vector<Reference> no_refs;
+    rt.process_file(2, "store/b.cs", target, no_refs, scopes);
+    rt.process_all_references();
+
+    auto run = rt.pin()->find_symbols_by_name("Run");
+    ASSERT_EQ(run.size(), 1u);
+    EXPECT_TRUE(rt.get_callee_symbols(run[0]->id).empty())
+        << "foreign-receiver call of unknown type linked by pure guess";
+}
+
 }  // namespace
 }  // namespace lci
