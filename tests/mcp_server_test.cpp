@@ -465,6 +465,33 @@ TEST_F(McpStdioTest, ToolCallAliasParameterAccepted) {
         << "registered alias must bypass the unknown-parameter guard";
 }
 
+TEST_F(McpStdioTest, CodeInsightGitParametersPassTheGuard) {
+    // The git modes read scope/base_ref/target_ref (git_analyze) and
+    // time_window/file_pattern (git_hotspots), and the handler accepts the
+    // legacy detailed_mode alias — all documented in docs/TOOLS.md. The
+    // registration allowlist must let every one of them through; it silently
+    // drifted and the guard rejected documented parameters.
+    auto responses = exchange({
+        make_request("initialize", 1),
+        make_request("tools/call", 2,
+                     {{"name", "code_insight"},
+                      {"arguments",
+                       {{"mode", "git_hotspots"},
+                        {"time_window", "90d"},
+                        {"file_pattern", "*.cpp"},
+                        {"scope", "wip"},
+                        {"base_ref", "main"},
+                        {"target_ref", "HEAD"},
+                        {"detailed_mode", "modules"}}}}),
+    });
+
+    ASSERT_EQ(responses.size(), 2u);
+    auto& call_resp = responses[1];
+    ASSERT_TRUE(call_resp.contains("result"));
+    auto text = call_resp["result"]["content"][0]["text"].get<std::string>();
+    EXPECT_EQ(text.find("unknown parameter"), std::string::npos) << text;
+}
+
 TEST_F(McpStdioTest, ExceptionRecovery) {
     // Register a tool that throws
     Config config;
