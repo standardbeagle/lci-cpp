@@ -233,6 +233,13 @@ bool is_assignment_node(std::string_view t) {
 
 void UnifiedExtractor::record_lvalue_write(TSNode lvalue, int line, int column) {
     if (!side_effects_) return;
+    // Assignment IS declaration in these languages: a bare `$x = 1` / `x = 1`
+    // inside a function creates a LOCAL (writing a module global needs an
+    // explicit `global` statement). Without registration every such write
+    // classified as a global write — guzzle reported global_writes=725 with
+    // zero `global` statements in the codebase (2026-08-26 re-panel).
+    bool assignment_declares =
+        ext_ == ".py" || ext_ == ".php" || ext_ == ".rb";
     TSNode n = lvalue;
     // Descend member / subscript / selector expressions to the base identifier
     // that owns the mutation (a.b.c = x mutates `a`; arr[i] = x mutates `arr`).
@@ -240,9 +247,17 @@ void UnifiedExtractor::record_lvalue_write(TSNode lvalue, int line, int column) 
         std::string_view t = get_node_type(n);
         if (is_identifier_type(t)) {
             std::string_view id = node_text(n);
-            if (!id.empty())
+            if (!id.empty()) {
+                // Only a BARE lvalue declares (guard==0: no member/subscript
+                // was peeled — `a.b = x` mutates an existing object). Ruby
+                // spells globals with a `$` sigil, so those stay global.
+                if (assignment_declares && guard == 0 &&
+                    !(ext_ == ".rb" && id.front() == '$')) {
+                    side_effects_->add_local_variable(id, line);
+                }
                 side_effects_->record_access(id, {}, AccessType::Write, line,
                                              column);
+            }
             return;
         }
         if (ts_node_named_child_count(n) == 0) {
@@ -348,6 +363,73 @@ void UnifiedExtractor::process_side_effect_node(
 
     int line = line_of(node);
     int column = col_of(node);
+
+    // Local declarations register the name so later writes classify as
+    // Local, not Global (locals were registered NOWHERE, so every re-assigned
+    // local counted as a global write across all languages — the systemic
+    // purity inflation found in the 2026-08-26 re-panel). Writes to names
+    // that stay unregistered (package/module-level variables) still classify
+    // global, which is exactly right.
+    auto register_decl_identifiers = [&](TSNode decl) {
+        // Register every identifier in declarator position (covers Go
+        // multi-assign lists and C++ declarator chains); never harvest names
+        // out of initializer expressions.
+        std::vector<TSNode> stack{decl};
+        while (!stack.empty()) {
+            TSNode c = stack.back();
+            stack.pop_back();
+            std::string_view ct = get_node_type(c);
+            if (ct == "identifier" || ct == "simple_identifier" ||
+                ct == "variable_name") {
+                auto id = node_text(c);
+                if (!id.empty())
+                    side_effects_->add_local_variable(id, line_of(c));
+                continue;
+            }
+            if (ct == "call_expression" || ct == "binary_expression" ||
+                ct == "argument_list" || ct == "initializer")
+                continue;
+            uint32_t nc = ts_node_named_child_count(c);
+            for (uint32_t i = 0; i < nc; ++i)
+                stack.push_back(ts_node_named_child(c, i));
+        }
+    };
+    if (node_type == "short_var_declaration") {
+        // Go `x, y := f()` — left side only.
+        TSNode left = field(node, "left");
+        if (!ts_node_is_null(left)) register_decl_identifiers(left);
+    } else if (node_type == "var_spec" ||                    // Go var
+               node_type == "variable_declarator" ||         // JS/TS/Java/C#
+               node_type == "init_declarator" ||             // C/C++
+               node_type == "variable_declaration") {        // Kotlin
+        // Name field when the grammar provides one; otherwise the first
+        // identifier child is the declared name.
+        TSNode nm = field(node, "name");
+        if (!ts_node_is_null(nm)) {
+            if (is_identifier_type(get_node_type(nm))) {
+                auto id = node_text(nm);
+                if (!id.empty()) side_effects_->add_local_variable(id, line);
+            } else {
+                register_decl_identifiers(nm);
+            }
+        } else {
+            TSNode decl = field(node, "declarator");
+            if (!ts_node_is_null(decl)) {
+                register_decl_identifiers(decl);
+            } else {
+                uint32_t n = ts_node_named_child_count(node);
+                for (uint32_t i = 0; i < n; ++i) {
+                    TSNode c = ts_node_named_child(node, i);
+                    if (is_identifier_type(get_node_type(c))) {
+                        auto id = node_text(c);
+                        if (!id.empty())
+                            side_effects_->add_local_variable(id, line_of(c));
+                        break;  // first identifier is the declared name
+                    }
+                }
+            }
+        }
+    }
 
     // Assignment patterns - writes to state.
     if (node_type == "assignment_expression" ||

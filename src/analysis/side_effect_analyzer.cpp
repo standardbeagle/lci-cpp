@@ -1306,7 +1306,12 @@ AccessTarget SideEffectAnalyzer::classify_target(
 
     if (ctx.parameters.contains(id)) return AccessTarget::Parameter;
 
-    if (id == ctx.receiver_name || id == "this" || id == "self")
+    // "$this" is PHP's spelling (variable_name text keeps the sigil):
+    // without it every $this-> property mutation classified as a GLOBAL
+    // write (guzzle reported global_writes=725 in a codebase with zero
+    // `global` statements — 2026-08-26 re-panel finding).
+    if (id == ctx.receiver_name || id == "this" || id == "self" ||
+        id == "$this")
         return AccessTarget::Receiver;
 
     if (ctx.local_variables.contains(id)) return AccessTarget::Local;

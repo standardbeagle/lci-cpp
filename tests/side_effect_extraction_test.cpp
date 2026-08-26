@@ -1775,6 +1775,73 @@ TEST_F(SideEffectExtraction, PhpDestructorSwallowIsCappedAtLow) {
     }
 }
 
+// -- Local writes are not global writes (2026-08-26 re-panel) -----------------
+// Locals were registered nowhere, so every reassigned local classified as a
+// global write in every language (guzzle: global_writes=725 with zero
+// `global` statements). Declarations (and assignment-declares languages)
+// must register the name; writes to genuinely package-level names stay
+// global.
+
+TEST_F(SideEffectExtraction, GoLocalReassignmentIsNotAGlobalWrite) {
+    const auto* info = analyze(Language::Go, ".go",
+                               "package p\n"
+                               "func f() int {\n"
+                               "\tx := 1\n"
+                               "\tx = 2\n"
+                               "\tx += 3\n"
+                               "\treturn x\n"
+                               "}\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(info->categories & side_effect::kGlobalWrite, 0u)
+        << (info->impurity_reasons.empty() ? ""
+                                           : info->impurity_reasons[0]);
+}
+
+TEST_F(SideEffectExtraction, GoPackageVarWriteStaysGlobal) {
+    const auto* info = analyze(Language::Go, ".go",
+                               "package p\n"
+                               "var counter int\n"
+                               "func bump() {\n"
+                               "\tcounter = counter + 1\n"
+                               "}\n",
+                               "bump");
+    ASSERT_NE(info, nullptr);
+    EXPECT_NE(info->categories & side_effect::kGlobalWrite, 0u);
+}
+
+TEST_F(SideEffectExtraction, PhpLocalAssignmentIsNotAGlobalWrite) {
+    const auto* info = analyze(Language::PHP, ".php",
+                               "<?php\n"
+                               "class C {\n"
+                               "  private $conf;\n"
+                               "  public function build($opts) {\n"
+                               "    $result = [];\n"
+                               "    $result = $opts;\n"
+                               "    $this->conf = $result;\n"
+                               "    return $result;\n"
+                               "  }\n"
+                               "}\n",
+                               "build");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(info->categories & side_effect::kGlobalWrite, 0u)
+        << (info->impurity_reasons.empty() ? ""
+                                           : info->impurity_reasons[0]);
+    // $this->conf mutation is receiver state.
+    EXPECT_NE(info->categories & side_effect::kReceiverWrite, 0u);
+}
+
+TEST_F(SideEffectExtraction, PythonLocalAssignmentIsNotAGlobalWrite) {
+    const auto* info = analyze(Language::Python, ".py",
+                               "def f(n):\n"
+                               "    acc = 0\n"
+                               "    acc = acc + n\n"
+                               "    return acc\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(info->categories & side_effect::kGlobalWrite, 0u);
+}
+
 // -- Grammar gaps surfaced by the corpora -------------------------------------
 
 // sinatra dispatch!: `rescue ::Exception => e; invoke { handle_exception!(e) }`

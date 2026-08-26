@@ -147,6 +147,19 @@ TEST(SideEffectAnalyzerTest, ReceiverWriteDetected) {
     EXPECT_TRUE(info.purity_classification.mutates_receiver);
 }
 
+// PHP's receiver spells itself "$this" (the variable_name keeps the sigil).
+// It must classify as a receiver write, never a global one — guzzle reported
+// global_writes=725 in a codebase with zero `global` statements.
+TEST(SideEffectAnalyzerTest, PhpThisWriteIsReceiverNotGlobal) {
+    SideEffectAnalyzer sa("php");
+    sa.begin_function("setName", "Client.php", 10, 13);
+    sa.record_access("$this", {"name"}, AccessType::Write, 11, 3);
+    auto info = sa.end_function();
+
+    EXPECT_NE(info.categories & side_effect::kReceiverWrite, 0u);
+    EXPECT_EQ(info.categories & side_effect::kGlobalWrite, 0u);
+}
+
 TEST(SideEffectAnalyzerTest, GlobalWriteDetected) {
     SideEffectAnalyzer sa("go");
     sa.begin_function("init", "pkg.go", 1, 5);
