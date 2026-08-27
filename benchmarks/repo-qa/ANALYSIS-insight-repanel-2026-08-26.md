@@ -193,4 +193,10 @@ every confirmed finding fixed and field-re-verified (commits 7f65986..
   cross-repo coherence defect; ripgrep as_ref reach halved but nonzero;
   DEPENDENCIES depended_on_by inflation untouched; debt=0.00 beside
   dozens of structural smells still reads as a broken instrument.
+- Round-3 follow-up: purity scoped to the analysis set and the complexity
+  distribution labeled with functions=N — the D4 denominator defect's
+  largest component (fastapi purity 4589 -> 431, now equal to the
+  distribution population). Remaining D4 residue: SUMMARY symbols counts
+  all kinds while function sections count functions (now labeled, no
+  longer contradictory).
 
