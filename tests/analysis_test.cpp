@@ -767,6 +767,28 @@ TEST(NamingAnalyzer, InformationBitsAddAcrossTokens) {
     EXPECT_LE(rep.information.median_bits, 4.0);
 }
 
+TEST(NamingAnalyzer, InformationSkipsConstructorsAndDestructors) {
+    auto table = SynonymTable::build_default();
+    // 8 symbols share "file" so any file-token name would be vague, but the
+    // ctor/dtor forms are language forms and must not rank.
+    std::vector<EnhancedSymbol> syms;
+    syms.push_back(make_ref_sym("FileStore::FileStore", 1, 1));
+    syms.push_back(make_ref_sym("~FileStore", 1, 2));
+    const char* rest[] = {"fileOpen", "fileClose", "fileRead",
+                          "fileWrite", "fileSeek", "fileStat"};
+    SymbolID id = 3;
+    for (const char* w : rest) syms.push_back(make_ref_sym(w, 1, id++));
+    std::vector<const EnhancedSymbol*> ptrs;
+    for (auto& s : syms) ptrs.push_back(&s);
+    auto f = make_file("api/f.go", ptrs);
+
+    NamingAnalyzer na;
+    auto rep = na.analyze({f}, table, "");
+    for (const auto& v : rep.information.vague_names) {
+        EXPECT_EQ(v.name.find("FileStore"), std::string::npos) << v.name;
+    }
+}
+
 TEST(NamingAnalyzer, InformationObscureTokensStillReported) {
     auto table = SynonymTable::build_default();
     // "zxq" is gibberish in 2 symbols: below the corpus-vocabulary bar,

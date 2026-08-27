@@ -293,6 +293,17 @@ NamingReport NamingAnalyzer::analyze(const std::vector<FileSymbolData>& files,
         all_bits.reserve(cands.size());
 
         for (const auto& c : cands) {
+            // Constructors/destructors are language forms, not naming
+            // choices: their tokens necessarily repeat the type name, so
+            // they'd flood the vague list without being actionable.
+            const std::string& nm = c.sym->symbol.name;
+            if (!nm.empty() && nm[0] == '~') continue;
+            if (auto sep = nm.rfind("::"); sep != std::string::npos) {
+                std::string_view last(nm.c_str() + sep + 2);
+                if (nm.compare(0, sep, last) == 0 ||
+                    (!last.empty() && last[0] == '~'))
+                    continue;
+            }
             double bits = 0.0;
             int scored = 0;
             bool has_nonword = false;
