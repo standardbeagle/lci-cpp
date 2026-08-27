@@ -23,6 +23,7 @@ add_library(lci_lib STATIC
     parser/unified_extractor_symbols.cpp
     parser/unified_extractor_references.cpp
     parser/unified_extractor_side_effects.cpp
+    parser/unified_extractor_catch_sites.cpp
     parser/unified_extractor_types.cpp
     config/gitignore.cpp
     indexing/binary_detector.cpp
