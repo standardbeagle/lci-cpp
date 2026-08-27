@@ -1079,8 +1079,12 @@ void emit_statistics(std::ostringstream& out, const ComplexityMetrics& cm,
         << " median=" << fmt2(cm.median_cc) << "\n";
     if (!cm.distribution.empty()) {
         // Go iterates the distribution map (non-deterministic). C++ emits a
-        // fixed low/medium/high order.
-        out << "  distribution:";
+        // fixed low/medium/high order. The population is FUNCTIONS with
+        // complexity records, not SUMMARY's all-kinds symbol count — say so
+        // (every audit round tripped on the unlabeled denominator).
+        int fn_total = 0;
+        for (const auto& [k, v] : cm.distribution) fn_total += v;
+        out << "  distribution: functions=" << fn_total;
         for (const char* k : {"low", "medium", "high"}) {
             auto it = cm.distribution.find(k);
             if (it != cm.distribution.end())
@@ -2006,24 +2010,39 @@ void emit_object_ids_hint(std::ostringstream& out) {
 // pure-counting only happens once at least one impure function proves the
 // analyzer ran for real (otherwise an unannotated corpus would report
 // everything pure, diverging from Go's conservative 0/0).
-PuritySummary tally_purity(SideEffectAnalyzer* analyzer) {
+// `allowed_paths`, when non-null, restricts the tally to those files — the
+// analysis scope. Without it purity counted EVERY indexed file (tests,
+// examples, docs_src), so its total disagreed with every other section's
+// population by up to 8x (fastapi: purity total=4589 vs symbols=562).
+PuritySummary tally_purity(
+    SideEffectAnalyzer* analyzer,
+    const absl::flat_hash_set<std::string_view>* allowed_paths = nullptr) {
     PuritySummary ps;
     if (!analyzer) return ps;
+    auto in_scope = [&](const SideEffectInfo& info) {
+        return allowed_paths == nullptr ||
+               allowed_paths->contains(std::string_view(info.file_path));
+    };
     int impure_n = 0;
     for (const auto& [key, info] : analyzer->results()) {
         (void)key;
-        if (!info.is_pure) ++impure_n;
+        if (in_scope(info) && !info.is_pure) ++impure_n;
     }
     int pure_n = 0;
     if (impure_n > 0) {
         for (const auto& [key, info] : analyzer->results()) {
             (void)key;
-            if (info.is_pure) ++pure_n;
+            if (in_scope(info) && info.is_pure) ++pure_n;
         }
     }
     ps.pure_functions = pure_n;
     ps.impure_functions = impure_n;
-    ps.total_functions = static_cast<int>(analyzer->results().size());
+    int total_n = 0;
+    for (const auto& [key, info] : analyzer->results()) {
+        (void)key;
+        if (in_scope(info)) ++total_n;
+    }
+    ps.total_functions = total_n;
     ps.purity_ratio = ps.total_functions > 0
         ? static_cast<double>(pure_n) / ps.total_functions
         : 0.0;
@@ -2032,6 +2051,7 @@ PuritySummary tally_purity(SideEffectAnalyzer* analyzer) {
     // per category if it (transitively) exhibits it.
     for (const auto& [key, info] : analyzer->results()) {
         (void)key;
+        if (!in_scope(info)) continue;
         uint32_t combined = info.categories | info.transitive_categories;
         if (combined & side_effect::kParamWrite) ++ps.with_param_writes;
         if (combined & side_effect::kGlobalWrite) ++ps.with_global_writes;
@@ -2137,7 +2157,10 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                                   static_cast<int>(files_data.size()),
                                   symbol_count);
         d.modules = ModuleAnalyzer().analyze(files_data, project_root);
-        d.purity = tally_purity(analyzer);
+        absl::flat_hash_set<std::string_view> scope_paths;
+        scope_paths.reserve(files_data.size());
+        for (const auto& fd : files_data) scope_paths.insert(fd.path);
+        d.purity = tally_purity(analyzer, &scope_paths);
         d.coupling = CouplingAnalyzer().analyze(
             files_data, project_root, [&indexer](SymbolID id) {
                 return indexer.ref_tracker().get_outgoing_target_symbols(id);
@@ -2183,7 +2206,11 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
         }
         CodebaseIntelligenceParams sp;
         sp.mode = "statistics";
-        double purity_ratio = tally_purity(analyzer).purity_ratio;
+        absl::flat_hash_set<std::string_view> scope_paths;
+        scope_paths.reserve(files_data.size());
+        for (const auto& fd : files_data) scope_paths.insert(fd.path);
+        double purity_ratio =
+            tally_purity(analyzer, &scope_paths).purity_ratio;
         auto resp = engine.build_statistics(
             sp, files_data, project_root, purity_ratio,
             [&indexer](SymbolID id) {

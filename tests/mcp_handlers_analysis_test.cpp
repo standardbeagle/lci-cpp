@@ -1498,6 +1498,19 @@ TEST_F(ErrorHandlingSectionTest, DetailedResourcesListsAllFindings) {
     EXPECT_NE(result.text.find("leak-no-release"), std::string::npos);
 }
 
+// Purity must count only the analysis-set files — it previously tallied
+// EVERY indexed file (tests included), so its total disagreed with every
+// other section's population by up to 8x (fastapi: 4589 vs symbols=562).
+TEST_F(ErrorHandlingSectionTest, PurityCountsOnlyAnalysisScope) {
+    nlohmann::json params;
+    auto result = handle_code_insight(params, *engine_, *indexer_,
+                                      analyzer_.get());
+    ASSERT_FALSE(result.is_error) << result.text;
+    // 4 production records (swallowIt/leakIt/funnelIt/PublicEntry); the
+    // util_test.go record (helperSwallow) must not count.
+    EXPECT_NE(result.text.find("total=4 "), std::string::npos) << result.text;
+}
+
 TEST_F(ErrorHandlingSectionTest, DetailedErrorsSaysWhyWithoutRecords) {
     // Unpopulated analyzer: stay loud (an empty section would read as "no
     // findings") via available=false + reason, without the error flag.
