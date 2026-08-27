@@ -161,3 +161,36 @@ independent lci-blind auditor against a fresh guzzle capture:
   functions), acronym allowance for obscure-token (PKCE/HMAC/cidr),
   delegation-chain cycles, D4 denominators, R3 beta re-test.
 
+## Round 3 — fresh corpora (fastapi, ripgrep, trpc), same day
+
+Three unexamined corpora audited by independent lci-blind evaluators;
+every confirmed finding fixed and field-re-verified (commits 7f65986..
+2ecb460, gate 2501 green):
+
+- Rust was name-keyed everywhere: trait-impl one-liners absorbed every
+  `.as_ref()`/`.clone()` (reach=152 for a 3-line impl), #[cfg(test)]
+  mod-tests helpers dominated entry points/smells/vocabulary, pub(crate)
+  counted as exported, build.rs main listed as a binary. Fixed: Rust
+  visibility semantics (no pub = private, pub(crate) = internal, mod
+  tests = private), foreign-receiver calls take NO name-only match
+  (same-file included), and a Rust method's bare self-name call resolves
+  to the shadowing free function. ripgrep global_writes 435->32; fake
+  recursion/self-chains gone.
+- JS/Python member+attribute calls never marked foreign receivers:
+  Array.isArray, observer.next, and super().__call__ reported as
+  recursion. Fixed (super/base are now foreign everywhere — parent-class
+  delegation is never recursion). trpc recursion list now genuine.
+- fastapi's front door was unrankable: the example rule's bare `_*` dir
+  glob (a Go-ism) swallowed fastapi/_compat. Fixed to explicit
+  _example-shaped spellings. Registry gained fastapi + trpc signatures
+  (pyproject.toml + monorepo packages/*/package.json identity), pins can
+  seat class symbols (FastAPI, APIRouter), Rust let / JS destructuring
+  bindings register as locals.
+- Residuals carried forward: std-trait delegation cycles (close->drop,
+  read_to_end via io::Read) and same-named imported free functions
+  (`symlink` test helper) need import-evidence resolution; denominator
+  mismatches (symbols vs distribution vs purity totals) remain the top
+  cross-repo coherence defect; ripgrep as_ref reach halved but nonzero;
+  DEPENDENCIES depended_on_by inflation untouched; debt=0.00 beside
+  dozens of structural smells still reads as a broken instrument.
+
