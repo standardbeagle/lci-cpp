@@ -81,6 +81,14 @@ const absl::flat_hash_set<std::string>& common_words() {
         "sync", "mutex", "regex", "glob", "lexer", "stdin", "stdout", "stderr",
         "whitespace", "enum", "ident", "lossy", "lorem", "noop", "varargs",
         "iterator", "accessor", "getter", "setter", "callback", "tokenizer",
+        // standard technical acronyms/terms (re-panel FPs: PKCE, HMAC, gzip,
+        // cidr, subnet-class networking and crypto vocabulary)
+        "backtick", "coord", "pseudorandom", "pkce", "hmac", "sha", "sha1", "sha256", "sha512", "md5", "crc",
+        "crc32", "aes", "rsa", "ecdsa", "jwt", "oauth", "tls", "ssl", "tcp",
+        "udp", "dns", "ip", "ipv4", "ipv6", "cidr", "subnet", "uuid", "ulid",
+        "base64", "utf8", "ascii", "gzip", "brotli", "zstd", "grpc", "rpc",
+        "csrf", "cors", "xss", "yaml", "toml", "csv", "html5", "svg", "dom",
+        "css", "cli", "gui", "sdk", "os", "io", "fs", "db", "orm", "cron",
     };
     return w;
 }
@@ -371,11 +379,25 @@ NamingReport NamingAnalyzer::analyze(const std::vector<FileSymbolData>& files,
                 odd_term = verb;
                 reason = "unknown-verb";
             } else {
-                // Corpus-rare, non-standard, non-common obscure token.
+                // Corpus-rare, non-standard, non-common obscure token. A
+                // token the author spelled ALL-CAPS in the symbol name
+                // (hmacSHA256, parsePKCE) is a deliberate acronym, not
+                // obscure jargon.
+                auto spelled_as_acronym = [&](const std::string& t) {
+                    if (t.size() < 2) return false;
+                    std::string upper;
+                    upper.reserve(t.size());
+                    for (char ch : t)
+                        upper += static_cast<char>(std::toupper(
+                            static_cast<unsigned char>(ch)));
+                    return c.sym->symbol.name.find(upper) !=
+                           std::string::npos;
+                };
                 for (const auto& t : c.tokens) {
                     if (!is_alpha_word(t, 4)) continue;
                     if (is_common_english(t)) continue;
                     if (!synonyms.synonyms_of(t).empty()) continue;
+                    if (spelled_as_acronym(t)) continue;
                     auto it = token_freq.find(t);
                     if (it != token_freq.end() && it->second <= 2) {
                         odd_term = t;

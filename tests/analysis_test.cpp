@@ -980,6 +980,23 @@ TEST(NamingAnalyzer, RepoLevelConventionCatchesMixedFile) {
     EXPECT_TRUE(snake_flagged);
 }
 
+TEST(NamingAnalyzer, AcronymsAreNotObscureTokens) {
+    // PKCE/HMAC-class acronyms — either list-known or spelled ALL-CAPS in
+    // the symbol name — are deliberate vocabulary, not jargon.
+    auto table = SynonymTable::build_default();
+    auto a = make_ref_sym_exported("generatePKCE", 8, 1, true);
+    auto b = make_ref_sym_exported("hmacSHA256", 8, 2, true);
+    auto c = make_ref_sym_exported("parseNoProxyCidrRule", 8, 3, true);
+    auto d = make_ref_sym_exported("signHKDF", 8, 4, true);  // ALL-CAPS spell
+    auto f = make_file("auth.go", {&a, &b, &c, &d});
+
+    NamingAnalyzer na;
+    auto rep = na.analyze({f}, table, "");
+    for (const auto& o : rep.outliers) {
+        EXPECT_NE(o.reason, "obscure-token") << o.name << " / " << o.odd_term;
+    }
+}
+
 // --- Location must always carry the filename --------------------------------
 
 TEST(NamingAnalyzer, LocationIncludesFilenameForEveryOutlier) {
