@@ -87,6 +87,7 @@ add_library(lci_lib STATIC
     mcp/formatter_compact.cpp
     mcp/handlers_core.cpp
     mcp/handlers_analysis.cpp
+    mcp/handlers_side_effects.cpp
     mcp/handlers_explore.cpp
     mcp/handlers_index.cpp
     mcp/handlers_context.cpp

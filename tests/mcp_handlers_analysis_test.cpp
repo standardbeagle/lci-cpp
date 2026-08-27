@@ -7,6 +7,7 @@
 #include <lci/core/semantic_annotator.h>
 #include <lci/indexing/master_index.h>
 #include <lci/mcp/handlers_analysis.h>
+#include <lci/mcp/handlers_side_effects.h>
 #include <lci/mcp/server.h>
 
 #include <nlohmann/json.hpp>

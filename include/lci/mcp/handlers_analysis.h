@@ -43,17 +43,7 @@ std::string write_error_report_capture(MasterIndex& indexer,
                                        SideEffectAnalyzer* analyzer);
 
 // -- Handler functions (exposed for testing) ----------------------------------
-
-/// Handles "semantic_annotations": queries symbols by @lci: labels/categories.
-ToolResult handle_semantic_annotations(const nlohmann::json& params,
-                                       SemanticAnnotator& annotator,
-                                       GraphPropagator* propagator,
-                                       MasterIndex* indexer = nullptr);
-
-/// Handles "side_effects": queries function purity with 6 modes.
-ToolResult handle_side_effects(const nlohmann::json& params,
-                               SideEffectAnalyzer& analyzer,
-                               MasterIndex* indexer);
+// semantic_annotations / side_effects live in handlers_side_effects.h.
 
 /// Handles "code_insight": dispatches to CodebaseIntelligenceEngine.
 /// When `analyzer` is non-null, unified mode reads per-function purity from
