@@ -1,0 +1,95 @@
+{
+  "repo": "chi",
+  "purpose": "naming-hard task set mined from the corpus-information naming signal: targets are low-bits (vague/ambiguous/obscure) symbols, controls are high-information symbols. Grade correctness AND cost (tokens, tool calls); a task is 'hard' for a model if it fails OR spends disproportionately vs controls.",
+  "mined_from": "code_insight VOCABULARY on chi-base (median=9.9 bits, 171 symbols)",
+  "questions": [
+    {
+      "id": "nh-chi-1",
+      "class": "target-ambiguous",
+      "signal": "Flush: 5 definitions, ~5 expected matches",
+      "difficulty": "hard",
+      "question": "A response streams through chi's Compress middleware. When the handler calls http.Flusher's Flush, which Flush implementation in this repo runs first for the compressed writer, and where is it defined?",
+      "gold_answer": "(*compressResponseWriter).Flush in middleware/compress.go:337. It flushes the compressor (if it implements io.Flusher) before delegating to the underlying writer's Flush. Four other Flush methods exist in middleware/wrap_writer.go (flushWriter:147, flushHijackWriter:172, httpFancyWriter:194, http2FancyWriter:235) which a name-only search cannot distinguish."
+    },
+    {
+      "id": "nh-chi-2",
+      "class": "target-ambiguous",
+      "signal": "Handler: 3 definitions",
+      "difficulty": "medium",
+      "question": "Which Handler method turns a configured Compressor into a middleware, and where is it defined?",
+      "gold_answer": "(*Compressor).Handler in middleware/compress.go:187 — returns func(next http.Handler) http.Handler. Distinct from (Middlewares).Handler in chain.go:12 and (HeaderRouter).Handler in middleware/route_headers.go:77."
+    },
+    {
+      "id": "nh-chi-3",
+      "class": "target-vague",
+      "signal": "New: bare generic verb, ~8 expected matches for its token",
+      "difficulty": "medium",
+      "question": "What does the exported function middleware.New do, and what is its exact signature and location?",
+      "gold_answer": "middleware/middleware.go:6 — func New(h http.Handler) func(next http.Handler) http.Handler. It wraps a terminal handler h into a middleware that ignores next and always serves h."
+    },
+    {
+      "id": "nh-chi-4",
+      "class": "target-vague",
+      "signal": "Find: bare verb name reveals nothing about routing",
+      "difficulty": "hard",
+      "question": "Where is the method that searches the routing tree for the route pattern matching a given HTTP method and path, without executing the handler?",
+      "gold_answer": "(*Mux).Find in mux.go:368 — Find(rctx *Context, method, path string) string, returning the matched route pattern."
+    },
+    {
+      "id": "nh-chi-5",
+      "class": "target-ambiguous",
+      "signal": "Write: 3 definitions",
+      "difficulty": "medium",
+      "question": "Which Write implementation records the status code and byte count for chi's logging middleware, and where is it defined?",
+      "gold_answer": "(*basicWriter).Write in middleware/wrap_writer.go:96 (the WrapResponseWriter base). Not (*compressResponseWriter).Write (compress.go:318) and not (*defaultLogEntry).Write (logger.go:134, a different five-argument log-entry method)."
+    },
+    {
+      "id": "nh-chi-6",
+      "class": "target-ambiguous",
+      "signal": "Route: 2 definitions in different packages",
+      "difficulty": "medium",
+      "question": "chi has two exported methods named Route. Name both receivers, their files, and the difference in what they do.",
+      "gold_answer": "(*Mux).Route in mux.go:272 mounts a fresh sub-Router at a URL pattern. (HeaderRouter).Route in middleware/route_headers.go:48 registers a middleware to apply when a request header matches a value."
+    },
+    {
+      "id": "nh-chi-7",
+      "class": "target-obscure",
+      "signal": "mux: obscure token (not in repo vocabulary threshold, jargon)",
+      "difficulty": "easy",
+      "question": "Which concrete type is chi's primary router implementation, and in which file is it declared?",
+      "gold_answer": "Mux, declared in mux.go (type Mux struct). It implements the Router interface."
+    },
+    {
+      "id": "nh-chi-8",
+      "class": "target-obscure",
+      "signal": "supress: misspelled exported symbol (SupressNotFound -> suppress)",
+      "difficulty": "hard",
+      "question": "chi ships a helper that stops the router's NotFound handler from firing in a specific situation. What is it called (exactly), where is it, and why might a search for it fail?",
+      "gold_answer": "SupressNotFound (sic) in supress_notfound.go:15. The exported name misspells 'suppress', so a correctly-spelled search finds nothing."
+    },
+    {
+      "id": "nh-chi-c1",
+      "class": "control-distinctive",
+      "signal": "URLParam: high-information name",
+      "difficulty": "easy",
+      "question": "Where is the exported URLParam function defined and what does it return when the routing context is missing?",
+      "gold_answer": "context.go:9-15. It returns \"\" when RouteContext(r.Context()) is nil."
+    },
+    {
+      "id": "nh-chi-c2",
+      "class": "control-distinctive",
+      "signal": "RouteContext: high-information name",
+      "difficulty": "easy",
+      "question": "What does RouteContext do and where is it defined?",
+      "gold_answer": "context.go — RouteContext(ctx context.Context) *Context pulls chi's routing Context out of a request context via ctx.Value(RouteCtxKey)."
+    },
+    {
+      "id": "nh-chi-c3",
+      "class": "control-distinctive",
+      "signal": "WrapResponseWriter: high-information name",
+      "difficulty": "easy",
+      "question": "Which constructor produces chi's status-recording response writer wrapper, and where?",
+      "gold_answer": "NewWrapResponseWriter in middleware/wrap_writer.go — selects basicWriter or the flusher/hijacker/fancy variants by the underlying writer's capabilities and HTTP protocol version."
+    }
+  ]
+}
