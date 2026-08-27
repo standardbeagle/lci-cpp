@@ -1978,7 +1978,7 @@ void emit_dependencies(std::ostringstream& out, const CouplingMetrics& cp) {
         auto it = cp.instability.find(pkg);
         if (it != cp.instability.end()) inst = it->second;
         out << "  " << pkg << " depended_on_by=" << n
-            << " instability=" << fmt2(inst) << "\n";
+            << " pkgs instability=" << fmt2(inst) << "\n";
     }
     out << "---\n";
 }

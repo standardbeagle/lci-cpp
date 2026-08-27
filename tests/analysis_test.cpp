@@ -124,6 +124,28 @@ TEST(CouplingAnalyzer, AnalyzeTwoPackages) {
     EXPECT_GT(result.coupling.average_coupling, 0.0);
 }
 
+// Ca/Ce are DISTINCT package counts (textbook Martin coupling), not raw
+// edge counts — pocketbase reported core depended_on_by=1388 edges against
+// ~30 real depending packages.
+TEST(CouplingAnalyzer, AfferentCountsDistinctPackagesNotEdges) {
+    EnhancedSymbol s1 = make_sym("A1", SymbolType::Function, 1);
+    EnhancedSymbol s2 = make_sym("A2", SymbolType::Function, 2);
+    EnhancedSymbol t = make_sym("Core", SymbolType::Function, 3);
+
+    auto f1 = make_file("/proj/pkg_a/a.go", {&s1, &s2});
+    auto f2 = make_file("/proj/core/c.go", {&t});
+
+    CouplingAnalyzer ca;
+    // Both pkg_a symbols call Core twice each: 4 edges, 1 depending package.
+    auto result = ca.analyze({f1, f2}, "/proj", [&](SymbolID id) {
+        if (id == s1.id || id == s2.id)
+            return std::vector<SymbolID>{3, 3};
+        return std::vector<SymbolID>{};
+    });
+    EXPECT_EQ(result.coupling.afferent_coupling["core"], 1);
+    EXPECT_EQ(result.coupling.efferent_coupling["pkg_a"], 1);
+}
+
 // ===========================================================================
 // CouplingAnalyzer - self-references counted as internal
 // ===========================================================================

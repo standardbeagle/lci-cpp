@@ -2,6 +2,7 @@
 
 #include <lci/reference.h>
 #include <lci/core/text.h>
+#include <absl/container/flat_hash_set.h>
 
 #include <algorithm>
 #include <cctype>
@@ -111,13 +112,18 @@ CouplingAnalyzer::CouplingResult CouplingAnalyzer::analyze(
     // the dependency edges. The per-package loop below used to re-scan every
     // package's dep map to find its incoming edges -- O(packages x edges) for
     // a number that each edge already carries.
-    absl::flat_hash_map<std::string, int> afferent_count;
+    // Ca is the number of distinct DEPENDING PACKAGES, not the raw edge
+    // count: pocketbase reported core depended_on_by=1388 (edges) against
+    // ~30 real depending packages, which read as inflation to every audit.
+    absl::flat_hash_map<std::string, absl::flat_hash_set<std::string>>
+        afferent_pkgs;
     for (const auto& [sym, src_pkg] : sym_to_pkg) {
         for (SymbolID target : targets_of(sym->id)) {
             auto it = id_to_pkg.find(target);
             if (it != id_to_pkg.end()) {
                 pkg_deps[src_pkg][it->second]++;
-                if (it->second != src_pkg) ++afferent_count[it->second];
+                if (it->second != src_pkg)
+                    afferent_pkgs[it->second].insert(src_pkg);
             }
         }
     }
@@ -140,16 +146,21 @@ CouplingAnalyzer::CouplingResult CouplingAnalyzer::analyze(
             internal_refs = it->second;
         }
 
-        // Efferent (outgoing to other packages)
+        // Efferent edges feed cohesion/normalized coupling; the Ce METRIC
+        // is the distinct package count (textbook Martin coupling).
+        int efferent_edges = 0;
         int efferent = 0;
         for (const auto& [target, count] : deps) {
-            if (target != pkg) efferent += count;
+            if (target != pkg) {
+                efferent_edges += count;
+                ++efferent;
+            }
         }
 
-        // Afferent (incoming from other packages), counted above.
+        // Afferent (distinct packages depending on this one).
         int afferent = 0;
-        if (auto it = afferent_count.find(pkg); it != afferent_count.end()) {
-            afferent = it->second;
+        if (auto it = afferent_pkgs.find(pkg); it != afferent_pkgs.end()) {
+            afferent = static_cast<int>(it->second.size());
         }
 
         coupling.afferent_coupling[pkg] = afferent;
@@ -163,10 +174,10 @@ CouplingAnalyzer::CouplingResult CouplingAnalyzer::analyze(
         }
         coupling.instability[pkg] = inst;
 
-        // Normalized coupling score
+        // Normalized coupling score (edge-based, unchanged semantics)
         double norm_coupling = 0.0;
         if (symbol_count > 0) {
-            norm_coupling = static_cast<double>(efferent) /
+            norm_coupling = static_cast<double>(efferent_edges) /
                             static_cast<double>(symbol_count * 5);
             if (norm_coupling > 1.0) norm_coupling = 1.0;
         }
@@ -174,8 +185,8 @@ CouplingAnalyzer::CouplingResult CouplingAnalyzer::analyze(
         total_coupling += norm_coupling;
         if (norm_coupling > max_coupling) max_coupling = norm_coupling;
 
-        // Cohesion: ratio of internal refs to total outgoing refs
-        int total_refs = internal_refs + efferent;
+        // Cohesion: ratio of internal refs to total outgoing refs (edges)
+        int total_refs = internal_refs + efferent_edges;
         double coh = 0.5;
         if (total_refs > 0) {
             coh = static_cast<double>(internal_refs) / static_cast<double>(total_refs);
