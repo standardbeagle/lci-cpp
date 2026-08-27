@@ -778,6 +778,51 @@ class Norm {
     EXPECT_TRUE(scoped->foreign_receiver);
 }
 
+// Symbol.visibility had no writer: every private method counted as exported
+// API (guzzle claimed 360 exported vs ~202 actual public functions).
+TEST(UnifiedExtractorTest, MethodVisibilityIsExtracted) {
+    constexpr std::string_view php_src = R"(<?php
+class C {
+  public function pub() {}
+  private function priv() {}
+  protected function prot() {}
+  function plain() {}
+}
+)";
+    Language lang{};
+    ASSERT_TRUE(language_from_extension(".php", lang));
+    auto tree = parse(lang, php_src);
+    ASSERT_NE(tree.get(), nullptr);
+    UnifiedExtractor ue;
+    ue.init(php_src, 1, ".php", "c.php");
+    ue.extract(tree.get());
+    auto r = ue.get_results();
+    EXPECT_EQ(find_symbol(r, "pub")->visibility, SymbolVisibility::Public);
+    EXPECT_EQ(find_symbol(r, "priv")->visibility, SymbolVisibility::Private);
+    EXPECT_EQ(find_symbol(r, "prot")->visibility,
+              SymbolVisibility::Protected);
+    EXPECT_EQ(find_symbol(r, "plain")->visibility,
+              SymbolVisibility::Default);
+
+    constexpr std::string_view cs_src = R"(
+class S {
+    private void Hidden() {}
+    public void Shown() {}
+}
+)";
+    Language cs{};
+    ASSERT_TRUE(language_from_extension(".cs", cs));
+    auto cstree = parse(cs, cs_src);
+    ASSERT_NE(cstree.get(), nullptr);
+    UnifiedExtractor ue2;
+    ue2.init(cs_src, 1, ".cs", "s.cs");
+    ue2.extract(cstree.get());
+    auto r2 = ue2.get_results();
+    EXPECT_EQ(find_symbol(r2, "Hidden")->visibility,
+              SymbolVisibility::Private);
+    EXPECT_EQ(find_symbol(r2, "Shown")->visibility, SymbolVisibility::Public);
+}
+
 TEST(UnifiedExtractorTest, PhpScopedCallToOtherClassSameNameIsForeign) {
     constexpr std::string_view src = R"(<?php
 class RedirectMiddleware {

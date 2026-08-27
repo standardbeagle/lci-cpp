@@ -302,7 +302,15 @@ std::vector<EnhancedSymbol> ReferenceTracker::process_file(
             Symbol sm = sym;
             sm.file_id = file_id;
 
-            bool is_exported = compute_is_exported(path, sm.name);
+            // Declared visibility beats the name heuristic: a `private
+            // function` is not API whatever its spelling (before the
+            // extractor wrote visibility, every PHP/C#/Java private method
+            // counted as exported).
+            bool is_exported =
+                sm.visibility == SymbolVisibility::Private ||
+                        sm.visibility == SymbolVisibility::Protected
+                    ? false
+                    : compute_is_exported(path, sm.name);
 
             EnhancedSymbol es;
             es.symbol = std::move(sm);

@@ -1075,6 +1075,47 @@ void UnifiedExtractor::extract_function(TSNode node,
     symbols_.push_back(std::move(sym));
 }
 
+// Declared visibility from modifier children (PHP visibility_modifier, C#/
+// Java modifier tokens, TS accessibility_modifier, Kotlin modifiers). This
+// field previously had NO writer anywhere, so every private method counted
+// as exported API (guzzle claimed 360 exported vs ~202 actual public
+// functions — 2026-08-26 re-panel finding).
+SymbolVisibility UnifiedExtractor::scan_declared_visibility(TSNode node) {
+    auto classify = [](std::string_view t) {
+        if (t == "private") return SymbolVisibility::Private;
+        if (t == "protected") return SymbolVisibility::Protected;
+        if (t == "public") return SymbolVisibility::Public;
+        if (t == "internal") return SymbolVisibility::Internal;
+        return SymbolVisibility::Default;
+    };
+    uint32_t n = ts_node_child_count(node);
+    for (uint32_t i = 0; i < n; ++i) {
+        TSNode c = ts_node_child(node, i);
+        std::string_view ct = get_node_type(c);
+        // Modifiers precede the body in every grammar we handle.
+        if (ct == "block" || ct == "compound_statement" ||
+            ct == "statement_block")
+            break;
+        // Wrapper nodes: the keyword is the node's TEXT (PHP
+        // visibility_modifier) or a child token (Java/Kotlin modifiers).
+        if (ct == "visibility_modifier" || ct == "accessibility_modifier") {
+            auto v = classify(node_text(c));
+            if (v != SymbolVisibility::Default) return v;
+        } else if (ct == "modifiers" || ct == "modifier") {
+            uint32_t m = ts_node_child_count(c);
+            for (uint32_t j = 0; j < m; ++j) {
+                auto v = classify(get_node_type(ts_node_child(c, j)));
+                if (v != SymbolVisibility::Default) return v;
+            }
+        } else {
+            // Bare keyword tokens (C# grammar emits them as direct children).
+            auto v = classify(ct);
+            if (v != SymbolVisibility::Default) return v;
+        }
+    }
+    return SymbolVisibility::Default;
+}
+
 void UnifiedExtractor::extract_method(TSNode node,
                                       [[maybe_unused]] std::string_view node_type) {
     TSPoint start = ts_node_start_point(node);
@@ -1102,6 +1143,7 @@ void UnifiedExtractor::extract_method(TSNode node,
     sym.end_line = static_cast<int>(end.row) + 1;
     sym.end_column = static_cast<int>(end.column) + 1;
     sym.parameter_count = count_parameter_names(node);
+    sym.visibility = scan_declared_visibility(node);
     symbols_.push_back(std::move(sym));
 }
 

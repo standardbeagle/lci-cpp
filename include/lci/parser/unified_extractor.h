@@ -168,6 +168,8 @@ class UnifiedExtractor {
 
     void extract_function(TSNode node, std::string_view node_type);
     void extract_method(TSNode node, std::string_view node_type);
+    /// Declared visibility from modifier children (private/protected/...).
+    SymbolVisibility scan_declared_visibility(TSNode node);
     void extract_python_method(TSNode node);
     void extract_rust_method(TSNode node);
     void extract_arrow_function_dual(TSNode func_node, TSNode decl_node);
