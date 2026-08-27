@@ -54,13 +54,15 @@ inline constexpr int kMassiveFileLines = 1000;
 inline constexpr int kMassiveFileHighSevLines = 2000;
 inline constexpr int kMaxMassiveFiles = 5;
 // Findability: a name with this many distinct definitions is ambiguous —
-// a search on it cannot single out a symbol.
+// a search on it cannot single out a symbol. The same bar bounds the
+// expected result set a vague name fails to narrow below.
 inline constexpr int kAmbiguousNameDefs = 5;
 inline constexpr int kMaxAmbiguousNames = 10;
-// Vagueness: corpus frequency at which a token counts as the repo's own
-// vocabulary (a word), and the display cap for top non-word tokens.
+// Obscurity: corpus frequency at which a token counts as the repo's own
+// vocabulary; display caps for obscure tokens and vague names.
 inline constexpr int kVaguenessCorpusWord = 3;
 inline constexpr int kMaxVagueTokens = 8;
+inline constexpr int kMaxVagueNames = 10;
 }  // namespace ci_thresholds
 
 // ============================================================================

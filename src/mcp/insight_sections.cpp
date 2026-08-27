@@ -451,15 +451,23 @@ void emit_vocabulary(std::ostringstream& out, const NamingReport& nr) {
         nr.ambiguous_names.empty())
         return;
     out << "== VOCABULARY ==\n";
-    if (nr.vagueness.total_tokens > 0) {
-        out << "vagueness=" << fmt2(nr.vagueness.score)
-            << " (non-word name tokens: " << nr.vagueness.nonword_tokens
-            << "/" << nr.vagueness.total_tokens << ", symbols affected: "
-            << nr.vagueness.symbols_with_nonwords << "/"
-            << nr.vagueness.total_symbols << ")\n";
-        if (!nr.vagueness.top_nonwords.empty()) {
-            out << "  top_nonwords:";
-            for (const auto& [t, n] : nr.vagueness.top_nonwords)
+    if (nr.information.total_symbols > 0) {
+        out << "name_information: median=" << fmt1(nr.information.median_bits)
+            << " bits over " << nr.information.total_symbols << " symbols\n";
+        if (!nr.information.vague_names.empty()) {
+            out << "vague_names (all tokens together still match ~N"
+                   " symbols):\n ";
+            for (const auto& v : nr.information.vague_names) {
+                out << " " << v.name << "(~"
+                    << static_cast<int>(v.expected_matches + 0.5);
+                if (v.definitions > 1) out << ", defs=" << v.definitions;
+                out << ")";
+            }
+            out << "\n";
+        }
+        if (!nr.information.top_nonwords.empty()) {
+            out << "obscure_tokens (unguessable, not repo vocabulary):";
+            for (const auto& [t, n] : nr.information.top_nonwords)
                 out << " " << t << "(" << n << ")";
             out << "\n";
         }

@@ -707,50 +707,81 @@ TEST(NamingAnalyzer, AmbiguousNamesSurfaceRepeatedDefinitions) {
     EXPECT_EQ(rep.ambiguous_names[0].definition_count, 5);
 }
 
-TEST(NamingAnalyzer, VaguenessZeroForDictionaryNames) {
+TEST(NamingAnalyzer, InformationDistinctiveNamesAreNotVague) {
     auto table = SynonymTable::build_default();
+    // Four names, no shared tokens: each name's tokens isolate exactly one
+    // symbol, so expected matches ~1 and nothing is vague.
     auto a = make_ref_sym("loadConfig", 1, 1);
     auto b = make_ref_sym("parseDocument", 1, 2);
-    auto f = make_file("api/cfg.go", {&a, &b});
+    auto c = make_ref_sym("renderOutput", 1, 3);
+    auto d = make_ref_sym("verifySignature", 1, 4);
+    auto f = make_file("api/x.go", {&a, &b, &c, &d});
 
     NamingAnalyzer na;
     auto rep = na.analyze({f}, table, "");
-    EXPECT_EQ(rep.vagueness.nonword_tokens, 0);
-    EXPECT_DOUBLE_EQ(rep.vagueness.score, 0.0);
-    EXPECT_EQ(rep.vagueness.total_symbols, 2);
+    EXPECT_EQ(rep.information.total_symbols, 4);
+    EXPECT_TRUE(rep.information.vague_names.empty());
+    EXPECT_GT(rep.information.median_bits, 0.0);
 }
 
-TEST(NamingAnalyzer, VaguenessCountsNonWordTokens) {
+TEST(NamingAnalyzer, InformationSharedTokenNameIsVague) {
     auto table = SynonymTable::build_default();
-    // "zxq" is gibberish in both symbols; used by only 2 symbols so it never
-    // reaches corpus-word frequency (kVaguenessCorpusWord = 3).
-    auto a = make_ref_sym("loadZxq", 1, 1);
-    auto b = make_ref_sym("parseZxq", 1, 2);
-    auto f = make_file("api/z.go", {&a, &b});
+    // "process" appears in every one of 8 names; the name "process" alone
+    // carries ~0 bits and expects ~8 matches -> vague. Two-token names
+    // ("processOrder") narrow to ~1 and are not vague.
+    std::vector<EnhancedSymbol> syms;
+    syms.push_back(make_ref_sym("process", 1, 1));
+    const char* seconds[] = {"Order",  "User",  "Refund", "Claim",
+                             "Ticket", "Batch", "Login"};
+    SymbolID id = 2;
+    for (const char* w : seconds)
+        syms.push_back(make_ref_sym(std::string("process") + w, 1, id++));
+    std::vector<const EnhancedSymbol*> ptrs;
+    for (auto& s : syms) ptrs.push_back(&s);
+    auto f = make_file("api/proc.go", ptrs);
 
     NamingAnalyzer na;
     auto rep = na.analyze({f}, table, "");
-    EXPECT_EQ(rep.vagueness.nonword_tokens, 2);
-    EXPECT_EQ(rep.vagueness.total_tokens, 4);
-    EXPECT_DOUBLE_EQ(rep.vagueness.score, 0.5);
-    EXPECT_EQ(rep.vagueness.symbols_with_nonwords, 2);
-    ASSERT_EQ(rep.vagueness.top_nonwords.size(), 1u);
-    EXPECT_EQ(rep.vagueness.top_nonwords[0].first, "zxq");
-    EXPECT_EQ(rep.vagueness.top_nonwords[0].second, 2);
+    ASSERT_EQ(rep.information.vague_names.size(), 1u);
+    EXPECT_EQ(rep.information.vague_names[0].name, "process");
+    EXPECT_GE(rep.information.vague_names[0].expected_matches, 5.0);
+    EXPECT_NEAR(rep.information.vague_names[0].bits, 0.0, 0.01);
 }
 
-TEST(NamingAnalyzer, VaguenessCorpusFrequentTokenIsDomainVocabulary) {
+TEST(NamingAnalyzer, InformationBitsAddAcrossTokens) {
     auto table = SynonymTable::build_default();
-    // "zxq" appears in 3 distinct symbols -> the repo's own vocabulary.
+    // 4 symbols; "load" in 2/4 (1 bit), "config" in 1/4 (2 bits).
+    // "loadConfig" = 3 bits -> expected matches 4 * 2^-3 = 0.5: not vague.
+    auto a = make_ref_sym("loadConfig", 1, 1);
+    auto b = make_ref_sym("loadRecord", 1, 2);
+    auto c = make_ref_sym("parseDocument", 1, 3);
+    auto d = make_ref_sym("renderOutput", 1, 4);
+    auto f = make_file("api/x.go", {&a, &b, &c, &d});
+
+    NamingAnalyzer na;
+    auto rep = na.analyze({f}, table, "");
+    EXPECT_TRUE(rep.information.vague_names.empty());
+    // median over {3.0 (loadConfig), 3.0 (loadRecord), 4.0, 4.0} = 4.0
+    // (upper median). Sanity-check the scale rather than pin exact layout.
+    EXPECT_GE(rep.information.median_bits, 3.0);
+    EXPECT_LE(rep.information.median_bits, 4.0);
+}
+
+TEST(NamingAnalyzer, InformationObscureTokensStillReported) {
+    auto table = SynonymTable::build_default();
+    // "zxq" is gibberish in 2 symbols: below the corpus-vocabulary bar,
+    // fails every dictionary -> obscure. It is NOT vague (highly selective).
     auto a = make_ref_sym("loadZxq", 1, 1);
     auto b = make_ref_sym("parseZxq", 1, 2);
-    auto c = make_ref_sym("writeZxq", 1, 3);
+    auto c = make_ref_sym("renderOutput", 1, 3);
     auto f = make_file("api/z.go", {&a, &b, &c});
 
     NamingAnalyzer na;
     auto rep = na.analyze({f}, table, "");
-    EXPECT_EQ(rep.vagueness.nonword_tokens, 0);
-    EXPECT_DOUBLE_EQ(rep.vagueness.score, 0.0);
+    EXPECT_EQ(rep.information.nonword_tokens, 2);
+    ASSERT_EQ(rep.information.top_nonwords.size(), 1u);
+    EXPECT_EQ(rep.information.top_nonwords[0].first, "zxq");
+    EXPECT_EQ(rep.information.top_nonwords[0].second, 2);
 }
 
 TEST(NamingAnalyzer, CommonWordRecognized) {

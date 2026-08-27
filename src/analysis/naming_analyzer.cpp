@@ -9,6 +9,7 @@
 #include <absl/container/flat_hash_set.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <memory>
@@ -268,39 +269,86 @@ NamingReport NamingAnalyzer::analyze(const std::vector<FileSymbolData>& files,
         }
     }
 
-    // Vagueness: dictionary scoring over every candidate's name tokens.
-    // A token is a word if English-like, common, a synonym member, or
-    // corpus-frequent (>= kVaguenessCorpusWord symbols use it — the repo's
-    // own domain vocabulary, e.g. "mcp"). Only alpha tokens are scored:
-    // digits and mixed forms carry no dictionary claim either way.
+    // Name information: corpus-relative selectivity, no English judgment.
+    // Token selectivity = fraction of candidates whose name contains it;
+    // bits add across a name (selectivities multiply — a name is the
+    // intersection of its tokens' candidate sets). A name is vague when the
+    // whole name still expects >= kAmbiguousNameDefs matches. The obscurity
+    // axis (dictionary legibility of tokens) is tallied in the same pass.
     {
-        VaguenessScore vs;
+        NameInformation ni;
+        const double n_total = cands.empty()
+                                   ? 1.0
+                                   : static_cast<double>(cands.size());
         absl::flat_hash_map<std::string, int> nonword_freq;
+        // name -> (bits, expected_matches, definitions); identical names
+        // score identically, so aggregate before ranking.
+        struct NameAgg {
+            double bits{};
+            double expected{};
+            int defs{};
+        };
+        absl::flat_hash_map<std::string, NameAgg> by_name;
+        std::vector<double> all_bits;
+        all_bits.reserve(cands.size());
+
         for (const auto& c : cands) {
+            double bits = 0.0;
+            int scored = 0;
             bool has_nonword = false;
+            absl::flat_hash_set<std::string_view> seen;
             for (const auto& t : c.tokens) {
                 if (!is_alpha_word(t, 2)) continue;
-                vs.total_tokens++;
+                if (!seen.insert(t).second) continue;
+                ni.total_tokens++;
+                auto it = token_freq.find(t);
+                int freq = it != token_freq.end() ? it->second : 1;
+                bits += -std::log2(static_cast<double>(freq) / n_total);
+                scored++;
+                // Obscurity: unguessable token (fails every dictionary and
+                // the corpus-vocabulary bar).
                 bool word = is_common_english(t) ||
-                            !synonyms.synonyms_of(t).empty();
+                            !synonyms.synonyms_of(t).empty() ||
+                            freq >= ci_thresholds::kVaguenessCorpusWord;
                 if (!word) {
-                    auto it = token_freq.find(t);
-                    word = it != token_freq.end() &&
-                           it->second >= ci_thresholds::kVaguenessCorpusWord;
-                }
-                if (!word) {
-                    vs.nonword_tokens++;
+                    ni.nonword_tokens++;
                     nonword_freq[t]++;
                     has_nonword = true;
                 }
             }
-            vs.total_symbols++;
-            if (has_nonword) vs.symbols_with_nonwords++;
+            (void)has_nonword;
+            ni.total_symbols++;
+            if (scored == 0) continue;
+            all_bits.push_back(bits);
+            auto& agg = by_name[c.sym->symbol.name];
+            agg.bits = bits;
+            agg.expected = n_total * std::exp2(-bits);
+            agg.defs++;
         }
-        vs.score = vs.total_tokens > 0
-                       ? static_cast<double>(vs.nonword_tokens) /
-                             static_cast<double>(vs.total_tokens)
-                       : 0.0;
+
+        if (!all_bits.empty()) {
+            std::sort(all_bits.begin(), all_bits.end());
+            ni.median_bits = all_bits[all_bits.size() / 2];
+        }
+
+        std::vector<VagueName> vague;
+        for (const auto& [name, agg] : by_name) {
+            if (agg.expected >=
+                static_cast<double>(ci_thresholds::kAmbiguousNameDefs)) {
+                vague.push_back(
+                    VagueName{name, agg.bits, agg.expected, agg.defs});
+            }
+        }
+        std::sort(vague.begin(), vague.end(),
+                  [](const VagueName& a, const VagueName& b) {
+                      if (a.expected_matches != b.expected_matches)
+                          return a.expected_matches > b.expected_matches;
+                      return a.name < b.name;
+                  });
+        if (vague.size() > size_t{ci_thresholds::kMaxVagueNames})
+            vague.resize(ci_thresholds::kMaxVagueNames);
+        ni.vague_names = std::move(vague);
+
         std::vector<std::pair<std::string, int>> top(nonword_freq.begin(),
                                                      nonword_freq.end());
         std::sort(top.begin(), top.end(), [](const auto& a, const auto& b) {
@@ -309,8 +357,8 @@ NamingReport NamingAnalyzer::analyze(const std::vector<FileSymbolData>& files,
         });
         if (top.size() > size_t{ci_thresholds::kMaxVagueTokens})
             top.resize(ci_thresholds::kMaxVagueTokens);
-        vs.top_nonwords = std::move(top);
-        report.vagueness = std::move(vs);
+        ni.top_nonwords = std::move(top);
+        report.information = std::move(ni);
     }
 
     // Ambiguous names: the same name defined at kAmbiguousNameDefs+ sites.

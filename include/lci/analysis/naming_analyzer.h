@@ -41,19 +41,36 @@ struct AmbiguousName {
     int definition_count{};
 };
 
-/// Dictionary-based vagueness: how much of the repo's naming is made of
-/// non-words an agent can neither read nor guess a search term for.
-/// A token is a word if it is English-like, a common programming word, a
-/// synonym-table member, or corpus-frequent (the repo's own domain
-/// vocabulary). score = non-word tokens / all name tokens (0 = every name
-/// reads as words, 1 = pure gibberish).
-struct VaguenessScore {
-    double score{};
+/// A name whose tokens fail to narrow the corpus: searching every token of
+/// the name still leaves ~`expected_matches` candidate symbols.
+struct VagueName {
+    std::string name;
+    double bits{};             ///< total information: sum of -log2(selectivity)
+    double expected_matches{}; ///< corpus_size * product(token selectivity)
+    int definitions{};         ///< how many symbols carry exactly this name
+};
+
+/// Corpus-relative name information. Each token's selectivity is the
+/// fraction of function-like symbols whose name contains it; its information
+/// is -log2(selectivity) bits. Token selectivities MULTIPLY (bits add): a
+/// name is the intersection of its tokens' candidate sets. A name is vague
+/// when the whole name still leaves an expected result set >=
+/// ci_thresholds::kAmbiguousNameDefs — the same bar ambiguous_names uses for
+/// exact-name collisions, generalized to token combinations. No English
+/// judgment is involved: "process" is vague only in a repo where many
+/// symbols contain "process".
+///
+/// The obscurity axis is separate and dictionary-based: tokens that are not
+/// English-like, not common programming words, not synonyms, and not
+/// corpus-frequent. Obscure tokens are highly selective but unguessable —
+/// the opposite failure from vagueness.
+struct NameInformation {
+    double median_bits{};      ///< median name information across the corpus
+    int total_symbols{};
+    std::vector<VagueName> vague_names;  ///< lowest-information names, capped
+    // Obscurity (dictionary legibility) axis:
     int nonword_tokens{};
     int total_tokens{};
-    int symbols_with_nonwords{};
-    int total_symbols{};
-    /// Most frequent non-word tokens, count desc then alpha; capped.
     std::vector<std::pair<std::string, int>> top_nonwords;
 };
 
@@ -61,7 +78,7 @@ struct NamingReport {
     std::vector<VocabularyOutlier> outliers;
     std::vector<AliasUsage> aliases_in_use;
     std::vector<AmbiguousName> ambiguous_names;
-    VaguenessScore vagueness;
+    NameInformation information;
 };
 
 /// Detects low-discoverability naming to cut wasted semantic searches.
