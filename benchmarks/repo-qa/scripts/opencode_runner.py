@@ -57,6 +57,10 @@ def parse_events(lines: list[str]) -> tuple[str, dict]:
         if not isinstance(part, dict):
             continue
         kind = part.get("type")
+        # opencode >=1.18 emits hyphenated part types ("step-finish");
+        # older streams used underscores. Accept both.
+        if isinstance(kind, str):
+            kind = kind.replace("-", "_")
         if kind == "text":
             message = part.get("messageID", "?")
             text = part.get("text", "")
@@ -119,6 +123,10 @@ def isolated_environment(workspace: Path) -> dict[str, str]:
     """
     environment = os.environ.copy()
     environment["OPENCODE_CONFIG"] = str(workspace / "opencode.json")
+    # Popen(cwd=...) changes the real cwd but inherits the parent's stale
+    # $PWD, which node/bun runtimes trust over process.cwd() — runs were
+    # answering from the PARENT repo. Pin it to the workspace.
+    environment["PWD"] = str(workspace)
     for variable in ("XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME"):
         environment[variable] = str(workspace / f".{variable.replace('_', '-').lower()}")
     isolated_cache = Path(environment["XDG_CACHE_HOME"]) / "opencode"
