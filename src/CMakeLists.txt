@@ -109,6 +109,8 @@ add_library(lci_lib STATIC
     cli/server.cpp
     cli/mcp.cpp
     cli/commands.cpp
+    cli/commands_config.cpp
+    cli/commands_query.cpp
     cli/debug.cpp
     cli/memprofile.cpp
     cli/update.cpp
