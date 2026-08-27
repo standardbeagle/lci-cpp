@@ -216,3 +216,28 @@ every confirmed finding fixed and field-re-verified (commits 7f65986..
   distinct DIRS not crates (granularity mismatch vs Cargo deps),
   dir-granularity labeling to clarify.
 
+## Certification panel (same day, post-fix captures)
+
+Three adversarial single-arm audits over fresh chi/guzzle/pocketbase
+captures, each giving per-section unaudited-reliance verdicts:
+
+- CERTIFIED on all three repos: LOAD BEARING (no name-collision
+  inflation found anywhere; guzzle 'fixed', pocketbase 'fixed', chi
+  'improved'), CYCLES (guzzle count=0 verified by full manual sweep,
+  with the tool correctly WITHHOLDING the CookieJar delegation
+  artifact), HEALTH problematic-symbol ranking (independent complexity
+  sweeps reproduce cc within ~10% on every spot check).
+- FAILED certification, fixed same day: DEPENDENCIES (call-edge counts
+  were materially wrong; rebuilt on import evidence — see commit),
+  VOCABULARY FP classes (auth->oauth, deprecated shims, importance gate
+  hiding idnToAsci), ENTRY POINTS dilution (abstract stubs, internal/
+  packages).
+- Remaining caveats for the next round: chi reach non-monotonicity
+  (Value=7 downstream of handle=17 — a dropped typed-local method edge;
+  the visible cost of the no-guess policy), pocketbase Encode
+  name-collision recursion entry and Send->send mailyak delegation
+  cycle, guzzle deprecated-shim convention flags crowding StreamHandler
+  add_* out of the capped list, health-vs-maintainability scale framing,
+  pocketbase 'ui/ vendored / plugins/ generated' mislabeling, and the
+  examples-main dropped from binaries in favor of a codegen main.
+
