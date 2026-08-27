@@ -578,9 +578,23 @@ EntryPointsList CodebaseIntelligenceEngine::build_entry_points(
         int depth = static_cast<int>(
             std::count(f.path.begin(), f.path.end(), '/'));
         for (const auto* sym : f.symbols) {
-            if (!is_function_like(sym->symbol.type)) continue;
+            // Pinned CLASS symbols pass the function gate: a Python or TS
+            // library's front door is often a class (FastAPI, APIRouter) —
+            // an authoritative pin on one must be able to seat it.
+            bool pinned_class =
+                (sym->symbol.type == SymbolType::Class ||
+                 sym->symbol.type == SymbolType::Struct) &&
+                pin_set.contains(std::string_view(sym->symbol.name));
+            if (!is_function_like(sym->symbol.type) && !pinned_class)
+                continue;
 
-            bool is_main = (sym->symbol.name == "main" ||
+            // Cargo build scripts define a main() that is not a program
+            // entry point (ripgrep listed `binaries: main (build.rs:1)`).
+            bool is_build_script =
+                f.path.size() >= 8 &&
+                f.path.compare(f.path.size() - 8, 8, "build.rs") == 0;
+            bool is_main = !is_build_script &&
+                           (sym->symbol.name == "main" ||
                             sym->symbol.name == "Main");
             bool is_api = !is_main && sym->is_exported;
             if (!is_main && !is_api) continue;

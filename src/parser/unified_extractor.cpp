@@ -1072,7 +1072,29 @@ void UnifiedExtractor::extract_function(TSNode node,
     sym.end_line = static_cast<int>(end.row) + 1;
     sym.end_column = static_cast<int>(end.column) + 1;
     sym.parameter_count = count_parameter_names(node);
+    sym.visibility = effective_visibility(node);
     symbols_.push_back(std::move(sym));
+}
+
+// Declared visibility adjusted for Rust semantics: no `pub` means
+// crate-private, and anything inside a `mod tests` block is test scaffolding
+// (ripgrep audit: #[cfg(test)] helpers dominated entry points, smells, and
+// vocabulary because they all counted as exported).
+SymbolVisibility UnifiedExtractor::effective_visibility(TSNode node) {
+    SymbolVisibility v = scan_declared_visibility(node);
+    if (ext_ == ".rs") {
+        // mod_item is not a scope-stack node; climb the AST ancestry.
+        for (TSNode p = ts_node_parent(node); !ts_node_is_null(p);
+             p = ts_node_parent(p)) {
+            if (get_node_type(p) != "mod_item") continue;
+            TSNode nm = ts_node_child_by_field_name(
+                p, "name", static_cast<uint32_t>(4));
+            if (!ts_node_is_null(nm) && node_text(nm) == "tests")
+                return SymbolVisibility::Private;
+        }
+        if (v == SymbolVisibility::Default) return SymbolVisibility::Private;
+    }
+    return v;
 }
 
 // Declared visibility from modifier children (PHP visibility_modifier, C#/
@@ -1086,6 +1108,11 @@ SymbolVisibility UnifiedExtractor::scan_declared_visibility(TSNode node) {
         if (t == "protected") return SymbolVisibility::Protected;
         if (t == "public") return SymbolVisibility::Public;
         if (t == "internal") return SymbolVisibility::Internal;
+        // Rust: `pub` is public; `pub(crate)`/`pub(super)`/`pub(in ...)`
+        // are crate-internal, not exported API (ripgrep surfaced a
+        // pub(crate) parser as its top entry point).
+        if (t == "pub") return SymbolVisibility::Public;
+        if (t.rfind("pub(", 0) == 0) return SymbolVisibility::Internal;
         return SymbolVisibility::Default;
     };
     uint32_t n = ts_node_child_count(node);
@@ -1143,7 +1170,7 @@ void UnifiedExtractor::extract_method(TSNode node,
     sym.end_line = static_cast<int>(end.row) + 1;
     sym.end_column = static_cast<int>(end.column) + 1;
     sym.parameter_count = count_parameter_names(node);
-    sym.visibility = scan_declared_visibility(node);
+    sym.visibility = effective_visibility(node);
     symbols_.push_back(std::move(sym));
 }
 
@@ -1202,6 +1229,7 @@ void UnifiedExtractor::extract_rust_method(TSNode node) {
     sym.end_line = static_cast<int>(end.row) + 1;
     sym.end_column = static_cast<int>(end.column) + 1;
     sym.parameter_count = count_parameter_names(node);
+    sym.visibility = effective_visibility(node);
     symbols_.push_back(std::move(sym));
 }
 
