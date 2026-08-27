@@ -27,6 +27,26 @@
       "entry_symbols": [
         "New", "NewWithConfig", "Start", "Execute", "Bootstrap", "OnServe"
       ]
+    },
+    {
+      "id": "fastapi",
+      "match": { "pypi_name": ["fastapi"] },
+      "entry_symbols": [
+        "FastAPI", "APIRouter", "Depends", "Query", "Path", "Body", "Header",
+        "Cookie", "Form", "File", "UploadFile", "BackgroundTasks",
+        "HTTPException", "WebSocket", "jsonable_encoder"
+      ]
+    },
+    {
+      "id": "trpc",
+      "match": {
+        "npm_name": ["@trpc/server", "@trpc/client", "trpc"]
+      },
+      "entry_symbols": [
+        "initTRPC", "createTRPCClient", "createTRPCProxyClient",
+        "httpBatchLink", "httpLink", "wsLink", "splitLink", "observable",
+        "createCaller", "fetchRequestHandler"
+      ]
     }
   ]
 }

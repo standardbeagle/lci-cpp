@@ -29,6 +29,7 @@ struct ProjectIdentities {
     absl::flat_hash_set<std::string> go_modules;
     absl::flat_hash_set<std::string> composer_names;
     absl::flat_hash_set<std::string> npm_names;
+    absl::flat_hash_set<std::string> pypi_names;
 };
 
 ProjectIdentities collect_identities(const std::string& root) {
@@ -86,6 +87,44 @@ ProjectIdentities collect_identities(const std::string& root) {
     };
     add_manifest("composer.json", ids.composer_names);
     add_manifest("package.json", ids.npm_names);
+
+    // Monorepo package identities: a root package.json named "root" tells
+    // us nothing; the real names live in packages/*/package.json (trpc).
+    {
+        std::error_code ec;
+        fs::path pkgs = fs::path(root) / "packages";
+        if (fs::is_directory(pkgs, ec)) {
+            int scanned = 0;
+            for (const auto& e : fs::directory_iterator(pkgs, ec)) {
+                if (!e.is_directory(ec) || ++scanned > 64) break;
+                std::string text =
+                    read_small_file(e.path() / "package.json");
+                if (text.empty()) continue;
+                auto j = nlohmann::json::parse(text, nullptr, false);
+                if (!j.is_discarded() && j.is_object() &&
+                    j.contains("name") && j["name"].is_string())
+                    ids.npm_names.insert(j["name"].get<std::string>());
+            }
+        }
+    }
+
+    // pyproject.toml: `name = "..."` (a full TOML parser is not warranted
+    // for one key; the [project] name line is the identity).
+    {
+        std::string py = read_small_file(fs::path(root) / "pyproject.toml");
+        std::istringstream in(py);
+        std::string line;
+        while (std::getline(in, line)) {
+            auto pos = line.find("name = \"");
+            if (pos == std::string::npos) pos = line.find("name=\"");
+            if (pos != std::string::npos) {
+                auto start = line.find('"', pos) + 1;
+                auto end = line.find('"', start);
+                if (end != std::string::npos && end > start)
+                    ids.pypi_names.insert(line.substr(start, end - start));
+            }
+        }
+    }
     return ids;
 }
 
@@ -108,7 +147,7 @@ std::vector<std::string> registry_pins(const std::string& root) {
     if (reg.is_discarded() || !reg.contains("frameworks")) return {};
     auto ids = collect_identities(root);
     if (ids.go_modules.empty() && ids.composer_names.empty() &&
-        ids.npm_names.empty())
+        ids.npm_names.empty() && ids.pypi_names.empty())
         return {};
 
     std::vector<std::string> pins;
@@ -130,6 +169,10 @@ std::vector<std::string> registry_pins(const std::string& root) {
         if (!hit && m.contains("npm_name")) {
             for (const auto& n : m["npm_name"])
                 if (ids.npm_names.contains(n.get<std::string>())) hit = true;
+        }
+        if (!hit && m.contains("pypi_name")) {
+            for (const auto& n : m["pypi_name"])
+                if (ids.pypi_names.contains(n.get<std::string>())) hit = true;
         }
         if (!hit) continue;
         for (const auto& s : fw["entry_symbols"]) {
