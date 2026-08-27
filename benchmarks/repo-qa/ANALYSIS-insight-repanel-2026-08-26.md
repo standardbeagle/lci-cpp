@@ -204,4 +204,15 @@ every confirmed finding fixed and field-re-verified (commits 7f65986..
   unit labeled), and debt derives from the files-based ratio pricing
   moderate-cc + high-fan-in + long functions (trpc 0.00 -> 0.19, guzzle
   0.01 -> 0.09) — the instrument finally agrees with the smells beside it.
+- Round-3 follow-up 3 (ripgrep regression re-audit + fixes): binaries and
+  entry points verified FIXED by the independent auditor; recursion 5/6
+  genuine. The auditor caught contamination MIGRATION (cfg(test)/mod-tests
+  symbols moved from entry points into LOAD BEARING/smells/clusters) —
+  fixed via a symbol-level test_scaffold marker consumed by every
+  judgment section, plus tiny-method exclusion from the LOAD BEARING
+  display (one-line trait impls). Remaining known: Rust std-trait
+  delegation cycles (close->drop) relabeled into CYCLES, vocabulary
+  domain-term FPs on Rust (PCRE2 flag names), depended_on_by counts
+  distinct DIRS not crates (granularity mismatch vs Cargo deps),
+  dir-granularity labeling to clarify.
 
