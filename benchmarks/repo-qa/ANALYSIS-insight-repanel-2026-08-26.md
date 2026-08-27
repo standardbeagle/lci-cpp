@@ -199,4 +199,9 @@ every confirmed finding fixed and field-re-verified (commits 7f65986..
   distribution population). Remaining D4 residue: SUMMARY symbols counts
   all kinds while function sections count functions (now labeled, no
   longer contradictory).
+- Round-3 follow-up 2: DEPENDENCIES afferent/efferent are now DISTINCT
+  package counts (pocketbase core depended_on_by 1388 edges -> 22 pkgs,
+  unit labeled), and debt derives from the files-based ratio pricing
+  moderate-cc + high-fan-in + long functions (trpc 0.00 -> 0.19, guzzle
+  0.01 -> 0.09) — the instrument finally agrees with the smells beside it.
 
