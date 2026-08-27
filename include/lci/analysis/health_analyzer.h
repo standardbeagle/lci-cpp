@@ -27,11 +27,18 @@ class HealthAnalyzer {
 
     /// Calculates overall health score (0-10). Strictly monotone
     /// non-increasing in worst-case complexity (complexity.max_cc), tech
-    /// debt ratio, and problematic-symbol count — a repo with a cc=70
-    /// function cannot score 10.0 (D3 de-saturation).
+    /// debt ratio, problematic-symbol count, and massive-file ratio — a
+    /// repo with a cc=70 function cannot score 10.0 (D3 de-saturation).
+    /// Weighting is LLM-consumer-oriented: massive files (context-window
+    /// busters) dominate; cyclomatic complexity is a minor deduction.
     static double calculate_overall_health_score(
         const ComplexityMetrics& complexity, double tech_debt_ratio,
-        int problematic_symbol_count);
+        int problematic_symbol_count, double massive_file_ratio = 0.0);
+
+    /// Files whose span (max symbol end_line) reaches
+    /// ci_thresholds::kMassiveFileLines, sorted largest first.
+    std::vector<MassiveFile> identify_massive_files(
+        const std::vector<FileSymbolData>& files) const;
 
     /// Calculates technical debt ratio from files.
     double calculate_tech_debt_ratio_from_files(

@@ -241,10 +241,16 @@ CodebaseIntelligenceResponse CodebaseIntelligenceEngine::build_overview(
         health->technical_debt.components =
             ha.identify_debt_components(files);
         health->problematic_symbols = ha.identify_problematic_symbols(files);
+        health->massive_files = ha.identify_massive_files(files);
+        double massive_ratio =
+            files.empty() ? 0.0
+                          : static_cast<double>(health->massive_files.size()) /
+                                static_cast<double>(files.size());
         health->overall_score =
             HealthAnalyzer::calculate_overall_health_score(
                 health->complexity, debt_ratio,
-                static_cast<int>(health->problematic_symbols.size()));
+                static_cast<int>(health->problematic_symbols.size()),
+                massive_ratio);
         // Count from the FULL smell set, then truncate for display —
         // counting a truncated list contradicted the distribution (D3).
         auto all_smells = ha.calculate_detailed_code_smells(files);
@@ -319,9 +325,13 @@ CodebaseIntelligenceResponse CodebaseIntelligenceEngine::build_statistics(
     // statistics_report below.
     auto health = std::make_unique<HealthDashboard>();
     health->complexity = complexity;
+    health->massive_files = ha.identify_massive_files(files);
     health->overall_score = HealthAnalyzer::calculate_overall_health_score(
         complexity, ha.calculate_tech_debt_ratio_from_files(files),
-        static_cast<int>(ha.identify_problematic_symbols(files).size()));
+        static_cast<int>(ha.identify_problematic_symbols(files).size()),
+        files.empty() ? 0.0
+                      : static_cast<double>(health->massive_files.size()) /
+                            static_cast<double>(files.size()));
     health->analysis_metadata.analyzed_at = std::chrono::system_clock::now();
     health->analysis_metadata.files_analyzed = static_cast<int>(files.size());
     response.health_dashboard = std::move(health);

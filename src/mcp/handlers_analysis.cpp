@@ -984,6 +984,24 @@ void emit_health(std::ostringstream& out, const HealthDashboard& hd,
         << "score=" << fmt2(hd.overall_score) << "/10\n"
         << "complexity=" << fmt2(hd.complexity.average_cc) << "\n";
 
+    // Massive files lead the detail: the score's dominant deduction. Each
+    // listed file exceeds what an agent can read whole.
+    if (!hd.massive_files.empty()) {
+        out << "massive_files (>=" << ci_thresholds::kMassiveFileLines
+            << " lines, unreadable-whole for an agent): "
+            << hd.massive_files.size() << "\n";
+        size_t lim = std::min(hd.massive_files.size(),
+                              size_t{ci_thresholds::kMaxMassiveFiles});
+        for (size_t i = 0; i < lim; ++i) {
+            out << "  " << hd.massive_files[i].path << ": "
+                << hd.massive_files[i].lines << " lines\n";
+        }
+        if (hd.massive_files.size() > lim) {
+            out << "  ... and " << (hd.massive_files.size() - lim)
+                << " more\n";
+        }
+    }
+
     if (!hd.smell_counts.empty()) {
         // Go iterates the smell-count map (non-deterministic order). The C++
         // port sorts by smell type for stable output.
@@ -2151,9 +2169,11 @@ void emit_dependencies(std::ostringstream& out, const ImportDeps& deps) {
 void emit_next_steps(std::ostringstream& out) {
     out << "== NEXT STEPS ==\n"
         << "1. ENTRY POINTS = where execution starts and the public surface.\n"
-        << "2. high-fan-in + problematic_symbols = load-bearing / risky code.\n"
-        << "3. aliases_in_use = search with THIS codebase's vocabulary.\n"
-        << "4. get_context {\"id\": \"<o=ID>\"} drills into any [o=..] symbol.\n"
+        << "2. massive_files = read via search/get_context only, never whole.\n"
+        << "3. high-fan-in + GIT HOTSPOTS = load-bearing, conflict-prone code;"
+           " edit narrowly.\n"
+        << "4. aliases_in_use = search with THIS codebase's vocabulary.\n"
+        << "5. get_context {\"id\": \"<o=ID>\"} drills into any [o=..] symbol.\n"
         << "---\n";
 }
 

@@ -199,8 +199,10 @@ std::vector<Hotspot> HealthAnalyzer::identify_hotspots_from_files(
             if (cc > ci_thresholds::kHotspotComplexity ||
                 line_count > ci_thresholds::kHotspotLinecount) {
 
-                double risk = static_cast<double>(cc) * 0.7 +
-                              static_cast<double>(line_count) * 0.03;
+                // Line count outweighs cc: a long function costs an agent
+                // context budget every read; a branchy short one does not.
+                double risk = static_cast<double>(cc) * 0.3 +
+                              static_cast<double>(line_count) * 0.08;
                 if (risk > ci_thresholds::kRiskScoreMax) {
                     risk = ci_thresholds::kRiskScoreMax;
                 }
@@ -229,6 +231,36 @@ std::vector<Hotspot> HealthAnalyzer::identify_hotspots_from_files(
 }
 
 // ---------------------------------------------------------------------------
+// Massive files
+// ---------------------------------------------------------------------------
+
+// File span approximated as the max symbol end_line — no file I/O, and for
+// code files the trailing non-symbol tail is noise at the 1000-line scale.
+std::vector<MassiveFile> HealthAnalyzer::identify_massive_files(
+    const std::vector<FileSymbolData>& files) const {
+
+    std::vector<MassiveFile> massive;
+    for (const auto& file : files) {
+        if (is_test_helper_path(file.path)) continue;
+        int max_line = 0;
+        for (const auto* sym : file.symbols) {
+            if (sym->symbol.end_line > max_line)
+                max_line = sym->symbol.end_line;
+        }
+        if (max_line >= ci_thresholds::kMassiveFileLines) {
+            massive.push_back(MassiveFile{file.path, max_line});
+        }
+    }
+    // Total order before truncation (Karpathy rule 4).
+    std::sort(massive.begin(), massive.end(),
+              [](const MassiveFile& a, const MassiveFile& b) {
+                  if (a.lines != b.lines) return a.lines > b.lines;
+                  return a.path < b.path;
+              });
+    return massive;
+}
+
+// ---------------------------------------------------------------------------
 // Overall health score
 // ---------------------------------------------------------------------------
 
@@ -236,9 +268,15 @@ std::vector<Hotspot> HealthAnalyzer::identify_hotspots_from_files(
 // deduction; there is no "mostly low complexity" bonus (the old +1.0 bonus
 // clamped every real-world repo to 10.00 while the same report showed cc=70
 // functions and god objects). 10.0 is reachable only with zero penalties.
+//
+// Weighting is calibrated for the report's actual consumer — an LLM agent.
+// Cyclomatic complexity barely predicts agent failure (models read a cc=25
+// function fine); what breaks agents is files too large to load, names they
+// cannot find, and hotspots everyone edits. So massive files carry the
+// largest deduction and every complexity term is a minor one.
 double HealthAnalyzer::calculate_overall_health_score(
     const ComplexityMetrics& complexity, double tech_debt_ratio,
-    int problematic_symbol_count) {
+    int problematic_symbol_count, double massive_file_ratio) {
 
     double score = 10.0;
 
@@ -258,32 +296,41 @@ double HealthAnalyzer::calculate_overall_health_score(
 
     double high_ratio =
         static_cast<double>(high) / static_cast<double>(total_functions);
-    score -= high_ratio * 4.0;
+    score -= high_ratio * 1.5;
 
     double med_ratio =
         static_cast<double>(med) / static_cast<double>(total_functions);
-    score -= med_ratio * 1.5;
+    score -= med_ratio * 0.5;
 
     if (complexity.average_cc >
         static_cast<double>(ci_thresholds::kComplexityLow)) {
         double deduction =
             (complexity.average_cc -
              static_cast<double>(ci_thresholds::kComplexityLow)) *
-            0.15;
-        if (deduction > 3.0) deduction = 3.0;
+            0.05;
+        if (deduction > 1.0) deduction = 1.0;
         score -= deduction;
     }
 
     // Worst-case complexity: a single cc=70 function is a real defect even
-    // when thousands of trivial functions dilute the ratios above.
+    // when thousands of trivial functions dilute the ratios above — but
+    // still a minor one for an agent, so the cap is small.
     if (complexity.max_cc > static_cast<double>(ci_thresholds::kComplexityHigh)) {
         double deduction =
             (complexity.max_cc -
              static_cast<double>(ci_thresholds::kComplexityHigh)) *
-            0.04;
-        if (deduction > 2.5) deduction = 2.5;
+            0.015;
+        if (deduction > 1.0) deduction = 1.0;
         score -= deduction;
     }
+
+    // Massive files: the dominant signal. Each file past kMassiveFileLines
+    // is one an agent cannot read whole, so the ratio of them prices how
+    // much of the repo is effectively opaque to its main consumer.
+    if (massive_file_ratio < 0.0) massive_file_ratio = 0.0;
+    double massive_deduction = massive_file_ratio * 10.0;
+    if (massive_deduction > 4.0) massive_deduction = 4.0;
+    score -= massive_deduction;
 
     // Technical debt ratio (function population, see
     // calculate_tech_debt_ratio_from_files).

@@ -46,6 +46,13 @@ inline constexpr int kShotgunSurgeryHighSev = 20;
 inline constexpr int kRiskScoreCutoff = 5;
 inline constexpr int kMaxDetailedSmells = 5;
 inline constexpr int kMaxProblematicSymbols = 5;
+// Massive files are a first-class defect for LLM consumers: a file past
+// ~1000 lines no longer fits a working context alongside the task, and past
+// ~2000 lines even a targeted read blows the budget. Weighted above
+// cyclomatic complexity in the health score.
+inline constexpr int kMassiveFileLines = 1000;
+inline constexpr int kMassiveFileHighSevLines = 2000;
+inline constexpr int kMaxMassiveFiles = 5;
 }  // namespace ci_thresholds
 
 // ============================================================================
@@ -235,8 +242,15 @@ struct PerformanceAnalysis {
 };
 
 /// Health dashboard combining all health metrics.
+/// A file too large for an LLM to read whole (>= kMassiveFileLines).
+struct MassiveFile {
+    std::string path;
+    int lines{};
+};
+
 struct HealthDashboard {
     double overall_score{};
+    std::vector<MassiveFile> massive_files;
     ComplexityMetrics complexity;
     TechnicalDebtMetrics technical_debt;
     std::vector<Hotspot> hotspots;

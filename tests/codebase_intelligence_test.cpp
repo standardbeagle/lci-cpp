@@ -116,8 +116,8 @@ TEST(HealthAnalyzer, HealthScoreAllHighComplexity) {
     cm.distribution["high"] = 100;
 
     double score = HealthAnalyzer::calculate_overall_health_score(cm, 0.0, 0);
-    // 10 - (1.0 * 4.0) - ((25-10)*0.15 = 2.25) = 3.75
-    EXPECT_NEAR(score, 3.75, 0.01);
+    // 10 - (1.0 * 1.5) - ((25-10)*0.05 = 0.75) = 7.75
+    EXPECT_NEAR(score, 7.75, 0.01);
 }
 
 TEST(HealthAnalyzer, HealthScoreMixedComplexity) {
@@ -128,10 +128,10 @@ TEST(HealthAnalyzer, HealthScoreMixedComplexity) {
     cm.distribution["high"] = 10;
 
     double score = HealthAnalyzer::calculate_overall_health_score(cm, 0.0, 0);
-    // high_ratio=0.1 => -0.4, med_ratio=0.3 => -0.45
+    // high_ratio=0.1 => -0.15, med_ratio=0.3 => -0.15
     // avg=8 <= 10 => no deduction
-    // 10 - 0.4 - 0.45 = 9.15
-    EXPECT_NEAR(score, 9.15, 0.01);
+    // 10 - 0.15 - 0.15 = 9.7
+    EXPECT_NEAR(score, 9.7, 0.01);
 }
 
 TEST(HealthAnalyzer, HealthScoreClampedToZero) {
@@ -142,8 +142,8 @@ TEST(HealthAnalyzer, HealthScoreClampedToZero) {
     cm.distribution["high"] = 100;
 
     double score = HealthAnalyzer::calculate_overall_health_score(cm, 0.0, 0);
-    // 10 - 4.0 - 3.0 (capped) = 3.0
-    EXPECT_NEAR(score, 3.0, 0.01);
+    // 10 - 1.5 - 1.0 (avg deduction capped) = 7.5
+    EXPECT_NEAR(score, 7.5, 0.01);
 }
 
 TEST(HealthAnalyzer, HealthScoreEmptyDistribution) {
@@ -211,6 +211,22 @@ TEST(HealthAnalyzer, HealthScoreMonotoneDecreasingInProblematicCount) {
     }
     EXPECT_LT(HealthAnalyzer::calculate_overall_health_score(cm, 0.0, 5),
               HealthAnalyzer::calculate_overall_health_score(cm, 0.0, 0));
+}
+
+TEST(HealthAnalyzer, HealthScoreMonotoneDecreasingInMassiveFileRatio) {
+    auto cm = score_props::healthy_baseline();
+    double prev = 11.0;
+    for (double ratio : {0.0, 0.05, 0.1, 0.25, 0.5, 1.0}) {
+        double s =
+            HealthAnalyzer::calculate_overall_health_score(cm, 0.0, 0, ratio);
+        EXPECT_LE(s, prev) << "ratio=" << ratio;
+        prev = s;
+    }
+    // Dominant signal: a 20%-massive repo loses more than a cc=70 monster.
+    auto monster = score_props::healthy_baseline();
+    monster.max_cc = 70.0;
+    EXPECT_LT(HealthAnalyzer::calculate_overall_health_score(cm, 0.0, 0, 0.2),
+              HealthAnalyzer::calculate_overall_health_score(monster, 0.0, 0));
 }
 
 TEST(HealthAnalyzer, HealthScoreMonotoneDecreasingInHighComplexityCount) {
