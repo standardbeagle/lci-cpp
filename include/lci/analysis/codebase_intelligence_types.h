@@ -57,6 +57,10 @@ inline constexpr int kMaxMassiveFiles = 5;
 // a search on it cannot single out a symbol.
 inline constexpr int kAmbiguousNameDefs = 5;
 inline constexpr int kMaxAmbiguousNames = 10;
+// Vagueness: corpus frequency at which a token counts as the repo's own
+// vocabulary (a word), and the display cap for top non-word tokens.
+inline constexpr int kVaguenessCorpusWord = 3;
+inline constexpr int kMaxVagueTokens = 8;
 }  // namespace ci_thresholds
 
 // ============================================================================

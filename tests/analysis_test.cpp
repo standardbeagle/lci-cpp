@@ -707,6 +707,52 @@ TEST(NamingAnalyzer, AmbiguousNamesSurfaceRepeatedDefinitions) {
     EXPECT_EQ(rep.ambiguous_names[0].definition_count, 5);
 }
 
+TEST(NamingAnalyzer, VaguenessZeroForDictionaryNames) {
+    auto table = SynonymTable::build_default();
+    auto a = make_ref_sym("loadConfig", 1, 1);
+    auto b = make_ref_sym("parseDocument", 1, 2);
+    auto f = make_file("api/cfg.go", {&a, &b});
+
+    NamingAnalyzer na;
+    auto rep = na.analyze({f}, table, "");
+    EXPECT_EQ(rep.vagueness.nonword_tokens, 0);
+    EXPECT_DOUBLE_EQ(rep.vagueness.score, 0.0);
+    EXPECT_EQ(rep.vagueness.total_symbols, 2);
+}
+
+TEST(NamingAnalyzer, VaguenessCountsNonWordTokens) {
+    auto table = SynonymTable::build_default();
+    // "zxq" is gibberish in both symbols; used by only 2 symbols so it never
+    // reaches corpus-word frequency (kVaguenessCorpusWord = 3).
+    auto a = make_ref_sym("loadZxq", 1, 1);
+    auto b = make_ref_sym("parseZxq", 1, 2);
+    auto f = make_file("api/z.go", {&a, &b});
+
+    NamingAnalyzer na;
+    auto rep = na.analyze({f}, table, "");
+    EXPECT_EQ(rep.vagueness.nonword_tokens, 2);
+    EXPECT_EQ(rep.vagueness.total_tokens, 4);
+    EXPECT_DOUBLE_EQ(rep.vagueness.score, 0.5);
+    EXPECT_EQ(rep.vagueness.symbols_with_nonwords, 2);
+    ASSERT_EQ(rep.vagueness.top_nonwords.size(), 1u);
+    EXPECT_EQ(rep.vagueness.top_nonwords[0].first, "zxq");
+    EXPECT_EQ(rep.vagueness.top_nonwords[0].second, 2);
+}
+
+TEST(NamingAnalyzer, VaguenessCorpusFrequentTokenIsDomainVocabulary) {
+    auto table = SynonymTable::build_default();
+    // "zxq" appears in 3 distinct symbols -> the repo's own vocabulary.
+    auto a = make_ref_sym("loadZxq", 1, 1);
+    auto b = make_ref_sym("parseZxq", 1, 2);
+    auto c = make_ref_sym("writeZxq", 1, 3);
+    auto f = make_file("api/z.go", {&a, &b, &c});
+
+    NamingAnalyzer na;
+    auto rep = na.analyze({f}, table, "");
+    EXPECT_EQ(rep.vagueness.nonword_tokens, 0);
+    EXPECT_DOUBLE_EQ(rep.vagueness.score, 0.0);
+}
+
 TEST(NamingAnalyzer, CommonWordRecognized) {
     EXPECT_TRUE(NamingAnalyzer::is_common_word("handler"));
     EXPECT_TRUE(NamingAnalyzer::is_common_word("logf"));

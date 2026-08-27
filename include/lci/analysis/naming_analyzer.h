@@ -41,10 +41,27 @@ struct AmbiguousName {
     int definition_count{};
 };
 
+/// Dictionary-based vagueness: how much of the repo's naming is made of
+/// non-words an agent can neither read nor guess a search term for.
+/// A token is a word if it is English-like, a common programming word, a
+/// synonym-table member, or corpus-frequent (the repo's own domain
+/// vocabulary). score = non-word tokens / all name tokens (0 = every name
+/// reads as words, 1 = pure gibberish).
+struct VaguenessScore {
+    double score{};
+    int nonword_tokens{};
+    int total_tokens{};
+    int symbols_with_nonwords{};
+    int total_symbols{};
+    /// Most frequent non-word tokens, count desc then alpha; capped.
+    std::vector<std::pair<std::string, int>> top_nonwords;
+};
+
 struct NamingReport {
     std::vector<VocabularyOutlier> outliers;
     std::vector<AliasUsage> aliases_in_use;
     std::vector<AmbiguousName> ambiguous_names;
+    VaguenessScore vagueness;
 };
 
 /// Detects low-discoverability naming to cut wasted semantic searches.

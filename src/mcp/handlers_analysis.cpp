@@ -1065,6 +1065,19 @@ void emit_vocabulary(std::ostringstream& out, const NamingReport& nr) {
         nr.ambiguous_names.empty())
         return;
     out << "== VOCABULARY ==\n";
+    if (nr.vagueness.total_tokens > 0) {
+        out << "vagueness=" << fmt2(nr.vagueness.score)
+            << " (non-word name tokens: " << nr.vagueness.nonword_tokens
+            << "/" << nr.vagueness.total_tokens << ", symbols affected: "
+            << nr.vagueness.symbols_with_nonwords << "/"
+            << nr.vagueness.total_symbols << ")\n";
+        if (!nr.vagueness.top_nonwords.empty()) {
+            out << "  top_nonwords:";
+            for (const auto& [t, n] : nr.vagueness.top_nonwords)
+                out << " " << t << "(" << n << ")";
+            out << "\n";
+        }
+    }
     if (!nr.ambiguous_names.empty()) {
         out << "ambiguous_names (same name, many definitions — a search"
                " returns them all):\n ";

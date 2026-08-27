@@ -268,6 +268,51 @@ NamingReport NamingAnalyzer::analyze(const std::vector<FileSymbolData>& files,
         }
     }
 
+    // Vagueness: dictionary scoring over every candidate's name tokens.
+    // A token is a word if English-like, common, a synonym member, or
+    // corpus-frequent (>= kVaguenessCorpusWord symbols use it — the repo's
+    // own domain vocabulary, e.g. "mcp"). Only alpha tokens are scored:
+    // digits and mixed forms carry no dictionary claim either way.
+    {
+        VaguenessScore vs;
+        absl::flat_hash_map<std::string, int> nonword_freq;
+        for (const auto& c : cands) {
+            bool has_nonword = false;
+            for (const auto& t : c.tokens) {
+                if (!is_alpha_word(t, 2)) continue;
+                vs.total_tokens++;
+                bool word = is_common_english(t) ||
+                            !synonyms.synonyms_of(t).empty();
+                if (!word) {
+                    auto it = token_freq.find(t);
+                    word = it != token_freq.end() &&
+                           it->second >= ci_thresholds::kVaguenessCorpusWord;
+                }
+                if (!word) {
+                    vs.nonword_tokens++;
+                    nonword_freq[t]++;
+                    has_nonword = true;
+                }
+            }
+            vs.total_symbols++;
+            if (has_nonword) vs.symbols_with_nonwords++;
+        }
+        vs.score = vs.total_tokens > 0
+                       ? static_cast<double>(vs.nonword_tokens) /
+                             static_cast<double>(vs.total_tokens)
+                       : 0.0;
+        std::vector<std::pair<std::string, int>> top(nonword_freq.begin(),
+                                                     nonword_freq.end());
+        std::sort(top.begin(), top.end(), [](const auto& a, const auto& b) {
+            if (a.second != b.second) return a.second > b.second;
+            return a.first < b.first;
+        });
+        if (top.size() > size_t{ci_thresholds::kMaxVagueTokens})
+            top.resize(ci_thresholds::kMaxVagueTokens);
+        vs.top_nonwords = std::move(top);
+        report.vagueness = std::move(vs);
+    }
+
     // Ambiguous names: the same name defined at kAmbiguousNameDefs+ sites.
     // A search on such a name returns every site, so it no longer
     // identifies a symbol (findability, not style).
