@@ -848,6 +848,29 @@ mod tests {
     EXPECT_EQ(find_symbol(r, "internal_fn")->visibility,
               SymbolVisibility::Internal);
     EXPECT_EQ(find_symbol(r, "helper")->visibility, SymbolVisibility::Private);
+    // Scaffold marker: mod-tests and #[cfg(test)] items carry it; production
+    // items don't (it gates LOAD BEARING / smells / vocabulary).
+    EXPECT_TRUE(find_symbol(r, "helper")->test_scaffold);
+    EXPECT_FALSE(find_symbol(r, "shown")->test_scaffold);
+    EXPECT_FALSE(find_symbol(r, "hidden")->test_scaffold);
+}
+
+TEST(UnifiedExtractorTest, RustCfgTestAttributeMarksScaffold) {
+    constexpr std::string_view src = R"(
+#[cfg(test)]
+fn fixture_only() {}
+fn real_fn() {}
+)";
+    Language lang{};
+    ASSERT_TRUE(language_from_extension(".rs", lang));
+    auto tree = parse(lang, src);
+    ASSERT_NE(tree.get(), nullptr);
+    UnifiedExtractor ue;
+    ue.init(src, 1, ".rs", "lib.rs");
+    ue.extract(tree.get());
+    auto r = ue.get_results();
+    EXPECT_TRUE(find_symbol(r, "fixture_only")->test_scaffold);
+    EXPECT_FALSE(find_symbol(r, "real_fn")->test_scaffold);
 }
 
 TEST(UnifiedExtractorTest, PySuperAndJsBuiltinCallsAreForeign) {

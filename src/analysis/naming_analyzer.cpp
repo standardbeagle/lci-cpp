@@ -232,6 +232,7 @@ NamingReport NamingAnalyzer::analyze(const std::vector<FileSymbolData>& files,
         StyleTally& tally = *tally_ptr;
         for (const auto* sym : file.symbols) {
             if (!sym || !is_function_like(sym->symbol.type)) continue;
+            if (sym->symbol.test_scaffold) continue;
             // Language-mandated dunder names (__construct, __call, __init__)
             // are neither convention breaks nor vocabulary: never candidates
             // and never counted in a file's style tally (they'd read as

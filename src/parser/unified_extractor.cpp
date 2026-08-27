@@ -1073,7 +1073,35 @@ void UnifiedExtractor::extract_function(TSNode node,
     sym.end_column = static_cast<int>(end.column) + 1;
     sym.parameter_count = count_parameter_names(node);
     sym.visibility = effective_visibility(node);
+    sym.test_scaffold = ext_ == ".rs" && is_rust_test_scaffold(node);
     symbols_.push_back(std::move(sym));
+}
+
+// Rust inline test scaffolding: an item under a `mod tests` ancestor, or
+// carrying (or under a mod carrying) a #[cfg(test)] attribute. Preceding
+// attribute_item siblings hold the attributes in tree-sitter-rust.
+bool UnifiedExtractor::is_rust_test_scaffold(TSNode node) {
+    auto has_cfg_test_attr = [&](TSNode item) {
+        for (TSNode sib = ts_node_prev_named_sibling(item);
+             !ts_node_is_null(sib);
+             sib = ts_node_prev_named_sibling(sib)) {
+            std::string_view st = get_node_type(sib);
+            if (st != "attribute_item") break;
+            if (node_text(sib).find("cfg(test") != std::string_view::npos)
+                return true;
+        }
+        return false;
+    };
+    if (has_cfg_test_attr(node)) return true;
+    for (TSNode p = ts_node_parent(node); !ts_node_is_null(p);
+         p = ts_node_parent(p)) {
+        if (get_node_type(p) != "mod_item") continue;
+        TSNode nm =
+            ts_node_child_by_field_name(p, "name", static_cast<uint32_t>(4));
+        if (!ts_node_is_null(nm) && node_text(nm) == "tests") return true;
+        if (has_cfg_test_attr(p)) return true;
+    }
+    return false;
 }
 
 // Declared visibility adjusted for Rust semantics: no `pub` means
@@ -1083,15 +1111,7 @@ void UnifiedExtractor::extract_function(TSNode node,
 SymbolVisibility UnifiedExtractor::effective_visibility(TSNode node) {
     SymbolVisibility v = scan_declared_visibility(node);
     if (ext_ == ".rs") {
-        // mod_item is not a scope-stack node; climb the AST ancestry.
-        for (TSNode p = ts_node_parent(node); !ts_node_is_null(p);
-             p = ts_node_parent(p)) {
-            if (get_node_type(p) != "mod_item") continue;
-            TSNode nm = ts_node_child_by_field_name(
-                p, "name", static_cast<uint32_t>(4));
-            if (!ts_node_is_null(nm) && node_text(nm) == "tests")
-                return SymbolVisibility::Private;
-        }
+        if (is_rust_test_scaffold(node)) return SymbolVisibility::Private;
         if (v == SymbolVisibility::Default) return SymbolVisibility::Private;
     }
     return v;
@@ -1171,6 +1191,7 @@ void UnifiedExtractor::extract_method(TSNode node,
     sym.end_column = static_cast<int>(end.column) + 1;
     sym.parameter_count = count_parameter_names(node);
     sym.visibility = effective_visibility(node);
+    sym.test_scaffold = ext_ == ".rs" && is_rust_test_scaffold(node);
     symbols_.push_back(std::move(sym));
 }
 
@@ -1230,6 +1251,7 @@ void UnifiedExtractor::extract_rust_method(TSNode node) {
     sym.end_column = static_cast<int>(end.column) + 1;
     sym.parameter_count = count_parameter_names(node);
     sym.visibility = effective_visibility(node);
+    sym.test_scaffold = ext_ == ".rs" && is_rust_test_scaffold(node);
     symbols_.push_back(std::move(sym));
 }
 

@@ -29,6 +29,11 @@ struct Symbol {
     // EnhancedSymbol::parameter_count, which the /list-symbols params
     // sort/filters read. Fits the struct's existing tail padding.
     uint8_t parameter_count{};
+    // Inline test scaffolding in a production file (Rust `mod tests` /
+    // #[cfg(test)] items): file-level attributes cannot see it, and without
+    // this marker test fixtures polluted LOAD BEARING, smells, CLUSTERS,
+    // and vocabulary (ripgrep audits). Fits the same tail padding.
+    bool test_scaffold{};
 };
 
 /// Forward declarations for types defined in other headers.

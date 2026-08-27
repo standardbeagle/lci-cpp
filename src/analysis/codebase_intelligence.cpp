@@ -583,6 +583,7 @@ EntryPointsList CodebaseIntelligenceEngine::build_entry_points(
         int depth = static_cast<int>(
             std::count(f.path.begin(), f.path.end(), '/'));
         for (const auto* sym : f.symbols) {
+            if (sym->symbol.test_scaffold) continue;
             // Pinned CLASS symbols pass the function gate: a Python or TS
             // library's front door is often a class (FastAPI, APIRouter) —
             // an authoritative pin on one must be able to seat it.

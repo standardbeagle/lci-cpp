@@ -173,6 +173,8 @@ class UnifiedExtractor {
     /// scan_declared_visibility adjusted for Rust (no pub = private; mod
     /// tests = private test scaffolding).
     SymbolVisibility effective_visibility(TSNode node);
+    /// Rust: item under `mod tests` or carrying #[cfg(test)].
+    bool is_rust_test_scaffold(TSNode node);
     void extract_python_method(TSNode node);
     void extract_rust_method(TSNode node);
     void extract_arrow_function_dual(TSNode func_node, TSNode decl_node);

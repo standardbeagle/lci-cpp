@@ -107,6 +107,7 @@ ComplexityMetrics HealthAnalyzer::calculate_complexity_from_files(
 
     for (const auto& file : files) {
         for (const auto* sym : file.symbols) {
+            if (sym->symbol.test_scaffold) continue;
             if (!is_function_or_method(sym->symbol.type)) continue;
 
             int cc = sym->complexity;
@@ -185,6 +186,7 @@ std::vector<Hotspot> HealthAnalyzer::identify_hotspots_from_files(
         if (is_test_helper_path(file.path)) continue;
 
         for (const auto* sym : file.symbols) {
+            if (sym->symbol.test_scaffold) continue;
             if (is_test_helper_function(sym->symbol.name)) continue;
             if (!is_function_or_method(sym->symbol.type)) continue;
 
@@ -319,6 +321,7 @@ double HealthAnalyzer::calculate_tech_debt_ratio_from_files(
     // debt=0.00 (D3).
     for (const auto& file : files) {
         for (const auto* sym : file.symbols) {
+            if (sym->symbol.test_scaffold) continue;
             if (!is_function_or_method(sym->symbol.type)) continue;
             total++;
             int line_count = sym->symbol.end_line - sym->symbol.line + 1;
@@ -351,6 +354,7 @@ std::vector<std::string> HealthAnalyzer::identify_debt_components(
     for (const auto& file : files) {
         int count = 0;
         for (const auto* sym : file.symbols) {
+            if (sym->symbol.test_scaffold) continue;
             if (!is_function_or_method(sym->symbol.type)) continue;
             if (sym->complexity > ci_thresholds::kComplexityModerate ||
                 static_cast<int>(sym->incoming_ref_count) >
@@ -402,6 +406,7 @@ std::vector<CodeSmellEntry> HealthAnalyzer::calculate_detailed_code_smells(
             std::filesystem::path(file.path).filename().string();
 
         for (const auto* sym : file.symbols) {
+            if (sym->symbol.test_scaffold) continue;
             // Empty names are extraction gaps — not actionable, fail fast
             // by filtering them out of the report.
             if (sym->symbol.name.empty()) continue;
@@ -587,6 +592,7 @@ std::vector<ProblematicSymbol> HealthAnalyzer::identify_problematic_symbols(
             std::filesystem::path(file.path).filename().string();
 
         for (const auto* sym : file.symbols) {
+            if (sym->symbol.test_scaffold) continue;
             // Empty names are extraction gaps — filter, don't report.
             if (sym->symbol.name.empty()) continue;
             if (is_test_helper_function(sym->symbol.name)) continue;

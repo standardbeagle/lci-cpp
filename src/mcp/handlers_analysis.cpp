@@ -1438,6 +1438,7 @@ GraphSignals compute_graph_signals(const MasterIndex& indexer,
     absl::flat_hash_map<SymbolID, std::string> layer;  // id -> architectural layer
     for (const auto& f : files) {
         for (const auto* sym : f.symbols) {
+            if (sym->symbol.test_scaffold) continue;
             auto t = sym->symbol.type;
             if (t != SymbolType::Function && t != SymbolType::Method &&
                 t != SymbolType::Constructor)
@@ -1460,10 +1461,23 @@ GraphSignals compute_graph_signals(const MasterIndex& indexer,
         return meta[graph.id_at(idx)].first;
     };
 
-    // Load-bearing.
+    // Load-bearing. Tiny bodies (one-line trait impls, pass-through
+    // accessors: Glob::as_ref, Error::clone) are excluded from the display —
+    // whatever their reach, there is nothing in them to act on, and they
+    // crowded out the real load-bearing functions on every Rust audit.
+    absl::flat_hash_set<SymbolID> tiny_methods;
+    for (const auto& f : files) {
+        for (const auto* sym : f.symbols) {
+            if (sym->symbol.type == SymbolType::Method &&
+                sym->symbol.end_line - sym->symbol.line + 1 <= 3)
+                tiny_methods.insert(sym->id);
+        }
+    }
     for (int i = 0; i < graph.node_count(); ++i) {
         if (reach[i] <= 0) continue;
-        const auto& m = meta[graph.id_at(i)];
+        SymbolID id = graph.id_at(i);
+        if (tiny_methods.contains(id)) continue;
+        const auto& m = meta[id];
         sig.load_bearing.push_back({m.first, m.second, reach[i]});
     }
     std::sort(sig.load_bearing.begin(), sig.load_bearing.end(),
