@@ -24,6 +24,7 @@
 #include <vector>
 
 #include <nlohmann/json.hpp>
+#include <re2/re2.h>
 
 namespace lci {
 namespace cli {
@@ -81,6 +82,31 @@ std::vector<std::string> regex_literal_seeds(const std::string& pattern);
 std::vector<std::string> resolve_scope_paths(
     const std::vector<std::string>& paths, const std::string& root,
     const std::string& cwd);
+
+
+// Row-level result transforms and file/path utilities shared by run_search /
+// run_grep after the per-command split (search.cpp / grep.cpp). Same
+// test-visibility rationale as the filters above.
+std::string to_relative_display_path(const std::string& path);
+std::string read_line_from_file(const std::string& path, int line_number);
+std::string read_match_line(const nlohmann::json& result,
+                            const std::string& path, int line_no);
+nlohmann::json invert_match_rows(const nlohmann::json& results,
+                                 const std::vector<std::string>& patterns,
+                                 bool case_insensitive,
+                                 int max_count_per_file);
+nlohmann::json apply_word_boundary(nlohmann::json results,
+                                   const std::string& pattern,
+                                   bool case_insensitive);
+nlohmann::json apply_path_filters(nlohmann::json results,
+                                  const std::string& exclude_pattern,
+                                  const std::string& include_pattern);
+nlohmann::json strip_object_ids(nlohmann::json results);
+nlohmann::json apply_max_count_per_file(nlohmann::json results,
+                                        int max_count_per_file);
+nlohmann::json count_per_file_rows(const nlohmann::json& results);
+nlohmann::json files_with_matches_rows(const nlohmann::json& results);
+nlohmann::json regex_filter_results(nlohmann::json results, const RE2& re);
 
 }  // namespace grep_filters
 }  // namespace cli

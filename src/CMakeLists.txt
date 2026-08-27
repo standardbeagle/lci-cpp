@@ -99,6 +99,9 @@ add_library(lci_lib STATIC
     mcp/context_manifest_expander.cpp
     cli/cli_core.cpp
     cli/search.cpp
+    cli/grep.cpp
+    cli/grep_filters.cpp
+    cli/ast_filters.cpp
     cli/status.cpp
     cli/server.cpp
     cli/mcp.cpp
