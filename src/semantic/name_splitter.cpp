@@ -23,6 +23,7 @@ uint8_t NameSplitter::detect_separators(std::string_view name) {
             case '-': seps |= kHyphen; break;
             case '.': seps |= kDot; break;
             case '/': seps |= kSlash; break;
+            case ':': seps |= kSlash; break;  // C++ scope :: — same class as path
             default: break;
         }
 
@@ -63,7 +64,7 @@ std::vector<std::string> NameSplitter::split_impl(std::string_view name, uint8_t
         auto ch = static_cast<unsigned char>(name[i]);
 
         // Explicit separator characters.
-        if (ch == '_' || ch == '-' || ch == '.' || ch == '/') {
+        if (ch == '_' || ch == '-' || ch == '.' || ch == '/' || ch == ':') {
             if (!word_buf.empty()) {
                 std::transform(word_buf.begin(), word_buf.end(),
                                word_buf.begin(), [](unsigned char c) {

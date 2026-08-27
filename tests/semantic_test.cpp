@@ -29,6 +29,12 @@ TEST_P(NameSplitterTest, SplitsCorrectly) {
     EXPECT_EQ(result, GetParam().expected) << "Input: " << GetParam().input;
 }
 
+INSTANTIATE_TEST_SUITE_P(ScopeResolution, NameSplitterTest, ::testing::Values(
+    SplitCase{"FileIntegrator::integrate", {"file", "integrator", "integrate"}},
+    SplitCase{"Client::browse_file", {"client", "browse", "file"}},
+    SplitCase{"ns::Klass::method", {"ns", "klass", "method"}}
+));
+
 INSTANTIATE_TEST_SUITE_P(Basic, NameSplitterTest, ::testing::Values(
     SplitCase{"", {}},
     SplitCase{"simple", {"simple"}},
