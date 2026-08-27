@@ -383,7 +383,11 @@ void UnifiedExtractor::process_side_effect_node(
             stack.pop_back();
             std::string_view ct = get_node_type(c);
             if (ct == "identifier" || ct == "simple_identifier" ||
-                ct == "variable_name") {
+                ct == "variable_name" ||
+                // JS/TS destructuring patterns bind through their own node
+                // kinds (`const {a, b} = x`).
+                ct == "shorthand_property_identifier_pattern" ||
+                ct == "shorthand_property_identifier") {
                 auto id = node_text(c);
                 if (!id.empty())
                     side_effects_->add_local_variable(id, line_of(c));
@@ -431,6 +435,9 @@ void UnifiedExtractor::process_side_effect_node(
                node_type == "for_statement") {       // Python for target
         TSNode left = field(node, "left");
         if (!ts_node_is_null(left)) register_decl_identifiers(left);
+    } else if (node_type == "let_declaration") {     // Rust let bindings
+        TSNode pat = field(node, "pattern");
+        if (!ts_node_is_null(pat)) register_decl_identifiers(pat);
     } else if (node_type == "var_spec" ||                    // Go var
                node_type == "variable_declarator" ||         // JS/TS/Java/C#
                node_type == "init_declarator" ||             // C/C++

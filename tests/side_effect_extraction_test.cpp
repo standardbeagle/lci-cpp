@@ -1866,6 +1866,35 @@ TEST_F(SideEffectExtraction, PhpForeachBindingMutationIsNotAGlobalWrite) {
                                            : info->impurity_reasons[0]);
 }
 
+TEST_F(SideEffectExtraction, RustLetBindingWriteIsNotAGlobalWrite) {
+    const auto* info = analyze(Language::Rust, ".rs",
+                               "fn f(n: i32) -> i32 {\n"
+                               "    let mut acc = 0;\n"
+                               "    acc = acc + n;\n"
+                               "    acc += 1;\n"
+                               "    acc\n"
+                               "}\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(info->categories & side_effect::kGlobalWrite, 0u)
+        << (info->impurity_reasons.empty() ? ""
+                                           : info->impurity_reasons[0]);
+}
+
+TEST_F(SideEffectExtraction, TsDestructuredBindingWriteIsNotAGlobalWrite) {
+    const auto* info = analyze(Language::TypeScript, ".ts",
+                               "function f(o: {a: number, b: number}) {\n"
+                               "  let {a, b} = o;\n"
+                               "  a = a + b;\n"
+                               "  return a;\n"
+                               "}\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(info->categories & side_effect::kGlobalWrite, 0u)
+        << (info->impurity_reasons.empty() ? ""
+                                           : info->impurity_reasons[0]);
+}
+
 TEST_F(SideEffectExtraction, PythonLocalAssignmentIsNotAGlobalWrite) {
     const auto* info = analyze(Language::Python, ".py",
                                "def f(n):\n"
