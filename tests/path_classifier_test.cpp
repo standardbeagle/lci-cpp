@@ -52,6 +52,17 @@ TEST(PathClassifierTest, GoUnderscoreDirIsExample) {
     EXPECT_EQ(attr_of(c, "_examples/rest/main.go"), "example");
 }
 
+TEST(PathClassifierTest, PythonUnderscorePackageIsProduction) {
+    PathClassifier c;
+    // fastapi audit: `_*` swallowed fastapi/_compat, so the real front door
+    // (param_functions re-exports) never entered analysis. Underscore
+    // packages are production internals in Python.
+    EXPECT_EQ(attr_of(c, "fastapi/_compat/__init__.py"), "production");
+    EXPECT_EQ(attr_of(c, "pkg/_internal/util.py"), "production");
+    // The Go example spellings still classify.
+    EXPECT_EQ(attr_of(c, "_example/main.go"), "example");
+}
+
 TEST(PathClassifierTest, GoTestdataDir) {
     PathClassifier c;
     EXPECT_EQ(attr_of(c, "pkg/parser/testdata/input.go"), "test");

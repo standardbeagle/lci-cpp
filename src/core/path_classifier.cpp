@@ -94,11 +94,15 @@ attributes {
         glob "*-bench.go" "*-bench.cc" "*-bench.cpp" "*-bench.rs"
     }
 
-    // Examples and demos. A leading-underscore directory is ignored by the Go
-    // toolchain (chi's _examples) — non-importable, never production.
+    // Examples and demos. Go's toolchain ignores leading-underscore dirs
+    // (chi's _examples), but a bare `_*` glob also swallowed Python's
+    // production `_compat`/`_internal` packages (fastapi audit: the front
+    // door could not rank because fastapi/_compat never entered analysis) —
+    // so only the example-shaped underscore spellings match.
     example rank=4 {
         activates "index" "search"
-        dir "example" "examples" "demo" "demos" "sample" "samples" "_*"
+        dir "example" "examples" "demo" "demos" "sample" "samples"
+        dir "_example" "_examples" "_demo" "_demos" "_sample" "_samples"
         // Dev playgrounds: not shipped, not tested, and conventionally the
         // laxest code in a repo. axios's worst error-handling module was its
         // sandbox/ server.
