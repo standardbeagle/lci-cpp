@@ -88,6 +88,8 @@ add_library(lci_lib STATIC
     mcp/handlers_core.cpp
     mcp/handlers_analysis.cpp
     mcp/handlers_side_effects.cpp
+    mcp/insight_graph.cpp
+    mcp/insight_sections.cpp
     mcp/handlers_explore.cpp
     mcp/handlers_index.cpp
     mcp/handlers_context.cpp

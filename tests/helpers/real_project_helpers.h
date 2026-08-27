@@ -5,6 +5,7 @@
 #include <lci/config.h>
 #include <lci/indexing/master_index.h>
 #include <lci/mcp/handlers_analysis.h>
+#include <lci/mcp/handlers_side_effects.h>
 #include <lci/mcp/handlers_core.h>
 #include <lci/mcp/handlers_context.h>
 #include <lci/mcp/handlers_explore.h>
