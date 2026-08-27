@@ -688,6 +688,25 @@ TEST(NamingAnalyzer, AliasesSurfaceNonPrimarySpelling) {
     EXPECT_TRUE(has_explode);
 }
 
+TEST(NamingAnalyzer, AmbiguousNamesSurfaceRepeatedDefinitions) {
+    auto table = SynonymTable::build_default();
+    // "process" defined at 5 sites → ambiguous; "processOrder" at 2 → not.
+    std::vector<EnhancedSymbol> syms;
+    for (int i = 0; i < 5; ++i)
+        syms.push_back(make_ref_sym("process", 0, static_cast<SymbolID>(i + 1)));
+    syms.push_back(make_ref_sym("processOrder", 0, 10));
+    syms.push_back(make_ref_sym("processOrder", 0, 11));
+    std::vector<const EnhancedSymbol*> ptrs;
+    for (auto& s : syms) ptrs.push_back(&s);
+    auto f = make_file("api/proc.go", ptrs);
+
+    NamingAnalyzer na;
+    auto rep = na.analyze({f}, table, "");
+    ASSERT_EQ(rep.ambiguous_names.size(), 1u);
+    EXPECT_EQ(rep.ambiguous_names[0].name, "process");
+    EXPECT_EQ(rep.ambiguous_names[0].definition_count, 5);
+}
+
 TEST(NamingAnalyzer, CommonWordRecognized) {
     EXPECT_TRUE(NamingAnalyzer::is_common_word("handler"));
     EXPECT_TRUE(NamingAnalyzer::is_common_word("logf"));

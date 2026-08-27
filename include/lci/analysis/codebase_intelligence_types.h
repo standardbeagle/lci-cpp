@@ -53,6 +53,10 @@ inline constexpr int kMaxProblematicSymbols = 5;
 inline constexpr int kMassiveFileLines = 1000;
 inline constexpr int kMassiveFileHighSevLines = 2000;
 inline constexpr int kMaxMassiveFiles = 5;
+// Findability: a name with this many distinct definitions is ambiguous —
+// a search on it cannot single out a symbol.
+inline constexpr int kAmbiguousNameDefs = 5;
+inline constexpr int kMaxAmbiguousNames = 10;
 }  // namespace ci_thresholds
 
 // ============================================================================

@@ -194,6 +194,8 @@ NamingReport NamingAnalyzer::analyze(const std::vector<FileSymbolData>& files,
     // Pass 1: corpus token frequency = number of distinct symbols whose name
     // contains the token.
     absl::flat_hash_map<std::string, int> token_freq;
+    // Definition-site count per full symbol name (ambiguity signal).
+    absl::flat_hash_map<std::string, int> name_defs;
     // Per-synonym-group member usage: canonical group key -> (member -> count).
     absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, int>>
         group_usage;
@@ -261,8 +263,29 @@ NamingReport NamingAnalyzer::analyze(const std::vector<FileSymbolData>& files,
             if (!primary.empty()) {
                 group_usage[std::string(primary)][verb]++;
             }
+            name_defs[sym->symbol.name]++;
             cands.push_back({sym, bp, ext, std::move(tokens), style, &tally});
         }
+    }
+
+    // Ambiguous names: the same name defined at kAmbiguousNameDefs+ sites.
+    // A search on such a name returns every site, so it no longer
+    // identifies a symbol (findability, not style).
+    {
+        std::vector<AmbiguousName> amb;
+        for (const auto& [name, n] : name_defs) {
+            if (n >= ci_thresholds::kAmbiguousNameDefs)
+                amb.push_back(AmbiguousName{name, n});
+        }
+        std::sort(amb.begin(), amb.end(),
+                  [](const AmbiguousName& a, const AmbiguousName& b) {
+                      if (a.definition_count != b.definition_count)
+                          return a.definition_count > b.definition_count;
+                      return a.name < b.name;
+                  });
+        if (amb.size() > size_t{ci_thresholds::kMaxAmbiguousNames})
+            amb.resize(ci_thresholds::kMaxAmbiguousNames);
+        report.ambiguous_names = std::move(amb);
     }
 
     // Misspelling dictionary: corpus-frequent tokens (>= 3 distinct symbols)

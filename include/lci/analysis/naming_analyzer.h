@@ -34,9 +34,17 @@ struct AliasUsage {
     std::vector<std::pair<std::string, int>> terms;  ///< member -> count
 };
 
+/// A name defined at many distinct sites: a search on it returns them all,
+/// so the name no longer identifies anything (findability defect).
+struct AmbiguousName {
+    std::string name;
+    int definition_count{};
+};
+
 struct NamingReport {
     std::vector<VocabularyOutlier> outliers;
     std::vector<AliasUsage> aliases_in_use;
+    std::vector<AmbiguousName> ambiguous_names;
 };
 
 /// Detects low-discoverability naming to cut wasted semantic searches.

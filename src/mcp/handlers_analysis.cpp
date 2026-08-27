@@ -1762,8 +1762,18 @@ void emit_clusters(std::ostringstream& out, const GraphSignals& sig) {
 // unknown/obscure vocabulary an agent won't search for; `aliases_in_use` tells
 // which member term each standard concept uses in this codebase.
 void emit_vocabulary(std::ostringstream& out, const NamingReport& nr) {
-    if (nr.outliers.empty() && nr.aliases_in_use.empty()) return;
+    if (nr.outliers.empty() && nr.aliases_in_use.empty() &&
+        nr.ambiguous_names.empty())
+        return;
     out << "== VOCABULARY ==\n";
+    if (!nr.ambiguous_names.empty()) {
+        out << "ambiguous_names (same name, many definitions — a search"
+               " returns them all):\n ";
+        for (const auto& a : nr.ambiguous_names) {
+            out << " " << a.name << "(" << a.definition_count << ")";
+        }
+        out << "\n";
+    }
     out << "outliers=" << nr.outliers.size() << "\n";
     for (const auto& o : nr.outliers) {
         out << "  " << o.name << " (" << o.location << ") fan-in=" << o.fan_in
