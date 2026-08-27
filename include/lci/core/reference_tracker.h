@@ -118,6 +118,7 @@ class ImportResolver {
     absl::flat_hash_map<FileID, std::vector<ImportBinding>> import_graph_;
 
     std::vector<ImportBinding> extract_go_imports(std::string_view match) const;
+    std::vector<ImportBinding> extract_php_imports(std::string_view line) const;
     std::vector<ImportBinding> extract_js_imports(std::string_view match) const;
     std::vector<ImportBinding> extract_python_imports(std::string_view match) const;
     std::vector<ImportBinding> extract_rust_imports(std::string_view match) const;

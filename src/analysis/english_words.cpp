@@ -66,8 +66,8 @@ bool is_english_like_token(std::string_view lower_token) {
 
     // Standard derivational prefixes SCOWL does not always pre-expand;
     // the remainder may itself be a suffix derivation (de+serializer).
-    static constexpr std::array<std::string_view, 12> kPrefixes = {
-        "un",   "re",  "non",  "pre",   "de",   "dis",
+    static constexpr std::array<std::string_view, 13> kPrefixes = {
+        "un",   "re",  "non",  "pre",   "de",    "dis",  "auto",
         "mis",  "sub", "over", "under", "multi", "anti"};
     // The remainder must be a substantial word (>= 4 chars): SCOWL contains
     // fragments like "ing", which would launder "mis"+"ing" — a real typo.

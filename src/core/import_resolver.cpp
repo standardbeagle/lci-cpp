@@ -26,6 +26,7 @@ FileImportData ImportResolver::extract_file_imports(
         case LangFamily::kRust:
         case LangFamily::kCSharp:
         case LangFamily::kCFamily:
+        case LangFamily::kPhp:
             break;
         default:
             return data;
@@ -52,6 +53,9 @@ FileImportData ImportResolver::extract_file_imports(
             case LangFamily::kRust: bindings = extract_rust_imports(line); break;
             case LangFamily::kCSharp:
                 bindings = extract_csharp_imports(line);
+                break;
+            case LangFamily::kPhp:
+                bindings = extract_php_imports(line);
                 break;
             case LangFamily::kCFamily:
                 bindings = extract_cpp_imports(line);
@@ -290,6 +294,45 @@ std::vector<ImportBinding> ImportResolver::extract_js_imports(
         bindings.push_back(std::move(b));
     }
 
+    return bindings;
+}
+
+// PHP `use Vendor\\Ns\\Class;` / `use Vendor\\Ns\\Class as Alias;` — the
+// namespaced path is the binding source; group-use and function/const
+// imports are out of scope for package-dependency purposes.
+std::vector<ImportBinding> ImportResolver::extract_php_imports(
+    std::string_view line) const {
+    std::vector<ImportBinding> bindings;
+    auto trimmed = line;
+    while (!trimmed.empty() &&
+           (trimmed.front() == ' ' || trimmed.front() == '\t')) {
+        trimmed.remove_prefix(1);
+    }
+    if (!trimmed.starts_with("use ")) return bindings;
+    trimmed.remove_prefix(4);
+    if (trimmed.starts_with("function ") || trimmed.starts_with("const "))
+        return bindings;
+    auto end = trimmed.find_first_of(";({");
+    if (end == std::string_view::npos) return bindings;
+    auto path = trimmed.substr(0, end);
+    std::string name;
+    if (auto as_pos = path.find(" as "); as_pos != std::string_view::npos) {
+        name = std::string(path.substr(as_pos + 4));
+        path = path.substr(0, as_pos);
+    }
+    while (!path.empty() && (path.back() == ' ' || path.back() == '\t'))
+        path.remove_suffix(1);
+    if (path.empty() || path.find('\\') == std::string_view::npos)
+        return bindings;
+    if (name.empty()) {
+        auto bs = path.rfind('\\');
+        name = std::string(path.substr(bs + 1));
+    }
+    ImportBinding b;
+    b.imported_name = name;
+    b.original_name = name;
+    b.source_file = std::string(path);
+    bindings.push_back(std::move(b));
     return bindings;
 }
 

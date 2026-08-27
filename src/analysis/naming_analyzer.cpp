@@ -89,6 +89,9 @@ const absl::flat_hash_set<std::string>& common_words() {
         "base64", "utf8", "ascii", "gzip", "brotli", "zstd", "grpc", "rpc",
         "csrf", "cors", "xss", "yaml", "toml", "csv", "html5", "svg", "dom",
         "css", "cli", "gui", "sdk", "os", "io", "fs", "db", "orm", "cron",
+        // certification-round FPs: HTTP/domain terms and idiomatic
+        // abbreviations flagged on chi/pocketbase
+        "auth", "charset", "erd", "addr", "cutset", "stringified",
     };
     return w;
 }
@@ -315,13 +318,17 @@ NamingReport NamingAnalyzer::analyze(const std::vector<FileSymbolData>& files,
         // Important = referenced, or part of the exported API surface
         // (a zero-fan-in exported misspelling like SupressNotFound is exactly
         // what an agent will fail to search for).
-        if (fan_in < 2 && !c.sym->is_exported) continue;
+        bool low_importance = fan_in < 2 && !c.sym->is_exported;
 
         std::string odd_term, reason;
         std::vector<std::string> suggested;
 
         // 1) Misspelling: a rare, unknown token within typo distance of the
-        // corpus's own frequent vocabulary or a common word.
+        // corpus's own frequent vocabulary or a common word. A misspelled
+        // NAME is worth flagging at any referenced importance (idnToAsci had
+        // fan-in 1 and hid behind the importance gate for three audit
+        // rounds); wholly unreferenced private symbols still skip.
+        if (low_importance && fan_in < 1) continue;
         for (const auto& t : c.tokens) {
             if (!is_alpha_word(t, 4)) continue;
             if (is_common_english(t)) continue;
@@ -337,6 +344,7 @@ NamingReport NamingAnalyzer::analyze(const std::vector<FileSymbolData>& files,
             }
         }
 
+        if (low_importance && reason.empty()) continue;
         // 2) Convention mismatch: minority naming style within its file
         // (e.g. snake_case add_* methods in a camelCase codebase). A file
         // that is itself heavily mixed defeats the local gate, so fall back

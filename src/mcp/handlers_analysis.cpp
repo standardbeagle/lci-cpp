@@ -1917,6 +1917,14 @@ void emit_entry_points(std::ostringstream& out, const EntryPointsList* ep,
     // stop eating the api slots (a library's front door is its exports).
     std::vector<const EntryPointDef*> apis, mains;
     for (const auto& e : ep->main_functions) {
+        // Certification-round exclusions: a Go internal/ package can never
+        // be an external entry point, and a bodiless declaration (an
+        // abstract method / interface stub, location line == end) is a
+        // duplicate of its concrete implementation.
+        if (e.type != "main" &&
+            (e.location.find("/internal/") != std::string::npos ||
+             e.location.rfind("internal/", 0) == 0))
+            continue;
         (e.type == "main" ? mains : apis).push_back(&e);
     }
     // Trivially-named exports (a bare `Add`, `Get`, `Run` — C# minimal-API
@@ -1968,13 +1976,149 @@ void emit_entry_points(std::ostringstream& out, const EntryPointsList* ep,
     out << "---\n";
 }
 
+
+// Import-evidence package dependencies for == DEPENDENCIES ==. The prior
+// call-edge counts were materially wrong (pocketbase tools/search claimed
+// depended_on_by=27 vs 3 real importers; a chi test-import fabricated a
+// mutual root<->middleware dependency): imports ARE the ground truth every
+// auditor measured against, so the section now reads them directly.
+struct ImportDeps {
+    // target package -> distinct importing packages
+    absl::flat_hash_map<std::string, absl::flat_hash_set<std::string>> in;
+    // source package -> distinct imported packages
+    absl::flat_hash_map<std::string, absl::flat_hash_set<std::string>> out;
+};
+
+ImportDeps compute_import_dependencies(
+    MasterIndex& indexer, const std::vector<FileSymbolData>& files,
+    std::string_view project_root) {
+    ImportDeps deps;
+    // Known package dirs (normalized to '/'-separated, as emitted).
+    absl::flat_hash_set<std::string> pkgs;
+    absl::flat_hash_map<std::string, std::string> file_pkg;  // path -> pkg
+    for (const auto& f : files) {
+        auto pkg = CouplingAnalyzer::get_package_name(
+            f.path, std::string(project_root));
+        pkgs.insert(pkg);
+        file_pkg[f.path] = std::move(pkg);
+    }
+    // Last-segment -> pkg, only when unique (PHP namespaces don't carry the
+    // src/ prefix; a unique trailing segment is decisive, anything else is
+    // dropped rather than guessed).
+    absl::flat_hash_map<std::string, std::string> last_seg;
+    absl::flat_hash_set<std::string> ambiguous_seg;
+    for (const auto& p : pkgs) {
+        auto slash = p.rfind('/');
+        std::string seg = slash == std::string::npos ? p : p.substr(slash + 1);
+        if (ambiguous_seg.contains(seg)) continue;
+        if (auto it = last_seg.find(seg); it != last_seg.end()) {
+            if (it->second != p) {
+                last_seg.erase(it);
+                ambiguous_seg.insert(seg);
+            }
+        } else {
+            last_seg[seg] = p;
+        }
+    }
+    auto resolve_import = [&](std::string imp,
+                              bool seg_fallback) -> std::string {
+        for (auto& c : imp)
+            if (c == '\\' || c == '.') c = '/';
+        while (!imp.empty() && imp.back() == '/') imp.pop_back();
+        // Longest known package that is a whole-segment suffix of the import.
+        std::string best;
+        for (const auto& p : pkgs) {
+            if (imp.size() < p.size()) continue;
+            if (imp.compare(imp.size() - p.size(), p.size(), p) != 0) continue;
+            if (imp.size() > p.size() && imp[imp.size() - p.size() - 1] != '/')
+                continue;
+            if (p.size() > best.size()) best = p;
+        }
+        if (!best.empty()) return best;
+        // PHP/JS imports name a CLASS or file inside the package: retry with
+        // trailing segments peeled (GuzzleHttp/Cookie/CookieJar ->
+        // GuzzleHttp/Cookie -> matches src/Cookie by last segment). NEVER for
+        // full-path import languages (Go): "encoding/json" must not land on
+        // a package that happens to end in /json.
+        if (!seg_fallback) return {};
+        std::string probe = imp;
+        for (int peel = 0; peel < 3 && !probe.empty(); ++peel) {
+            auto slash = probe.rfind('/');
+            std::string seg =
+                slash == std::string::npos ? probe : probe.substr(slash + 1);
+            if (auto it = last_seg.find(seg); it != last_seg.end())
+                return it->second;
+            if (slash == std::string::npos) break;
+            probe.resize(slash);
+        }
+        return {};
+    };
+    // The repo's own Go module identity maps to "(root)" (chi's middleware
+    // imports github.com/go-chi/chi/v5 — textually unmatchable otherwise).
+    std::string go_module;
+    {
+        std::ifstream gm(std::filesystem::path(project_root) / "go.mod");
+        std::string line;
+        while (gm && std::getline(gm, line)) {
+            std::istringstream ls(line);
+            std::string tok;
+            ls >> tok;
+            if (tok == "module") {
+                ls >> go_module;
+                break;
+            }
+        }
+    }
+    auto resolve_with_root = [&](const std::string& imp_raw,
+                                 bool seg_fallback) -> std::string {
+        if (!go_module.empty()) {
+            if (imp_raw == go_module) return "(root)";
+            if (imp_raw.size() > go_module.size() + 1 &&
+                imp_raw.rfind(go_module, 0) == 0 &&
+                imp_raw[go_module.size()] == '/') {
+                // module/vN → root; module/sub/pkg handled by suffix match.
+                auto rest = imp_raw.substr(go_module.size() + 1);
+                if (rest.size() >= 2 && rest[0] == 'v' &&
+                    std::isdigit(static_cast<unsigned char>(rest[1])))
+                    return "(root)";
+            }
+        }
+        return resolve_import(imp_raw, seg_fallback);
+    };
+    ImportResolver ir;
+    const auto& store = indexer.file_content_store();
+    for (auto fid : indexer.get_all_file_ids()) {
+        auto path = indexer.get_file_path(fid);
+        auto it = file_pkg.find(path);
+        if (it == file_pkg.end()) continue;  // outside the analysis set
+        auto content = store.get_content(fid);
+        if (content.empty()) continue;
+        auto data = ir.extract_file_imports(fid, path, content);
+        for (const auto& b : data.bindings) {
+            bool seg_fallback =
+                [&] {
+                    auto fam = language_info_for_path(path).family;
+                    return fam == LangFamily::kPhp ||
+                           fam == LangFamily::kJsTs;
+                }();
+            auto target = resolve_with_root(b.source_file, seg_fallback);
+            if (target.empty() || target == it->second) continue;
+            deps.in[target].insert(it->second);
+            deps.out[it->second].insert(target);
+        }
+    }
+    return deps;
+}
+
 // == DEPENDENCIES == — which modules the rest of the codebase leans on
 // (afferent coupling = number of other packages that depend on this one) and
 // how unstable each is. Sourced from CouplingAnalyzer (the engine's dependency
 // graph is still a node-only stub). C++-only session-startup section.
-void emit_dependencies(std::ostringstream& out, const CouplingMetrics& cp) {
-    std::vector<std::pair<std::string, int>> aff(cp.afferent_coupling.begin(),
-                                                 cp.afferent_coupling.end());
+void emit_dependencies(std::ostringstream& out, const ImportDeps& deps) {
+    std::vector<std::pair<std::string, int>> aff;
+    aff.reserve(deps.in.size());
+    for (const auto& [pkg, srcs] : deps.in)
+        aff.emplace_back(pkg, static_cast<int>(srcs.size()));
     aff.erase(std::remove_if(aff.begin(), aff.end(),
                              [](const auto& p) { return p.second <= 0; }),
               aff.end());
@@ -1988,9 +2132,14 @@ void emit_dependencies(std::ostringstream& out, const CouplingMetrics& cp) {
     size_t lim = std::min(aff.size(), size_t{8});
     for (size_t i = 0; i < lim; ++i) {
         const auto& [pkg, n] = aff[i];
-        double inst = 0.0;
-        auto it = cp.instability.find(pkg);
-        if (it != cp.instability.end()) inst = it->second;
+        // Instability I = Ce/(Ca+Ce) over the same import-evidence counts.
+        int ce = 0;
+        if (auto it = deps.out.find(pkg); it != deps.out.end())
+            ce = static_cast<int>(it->second.size());
+        double inst = (n + ce) > 0
+                          ? static_cast<double>(ce) /
+                                static_cast<double>(n + ce)
+                          : 0.5;
         out << "  " << pkg << " depended_on_by=" << n
             << " pkgs instability=" << fmt2(inst) << "\n";
     }
@@ -2324,7 +2473,8 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
             emit_layer_violations(out, sig.layer_violations);
         }
         emit_modules(out, d.modules);
-        emit_dependencies(out, d.coupling.coupling);
+        emit_dependencies(out, compute_import_dependencies(
+                                   indexer, files_data, project_root));
         if (hd) {
             emit_statistics(out, hd->complexity, d.coupling.coupling,
                             d.coupling.cohesion, d.quality,

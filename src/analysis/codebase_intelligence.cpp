@@ -602,6 +602,14 @@ EntryPointsList CodebaseIntelligenceEngine::build_entry_points(
             bool is_main = !is_build_script &&
                            (sym->symbol.name == "main" ||
                             sym->symbol.name == "Main");
+
+            // An abstract declaration has no body and duplicates its concrete
+            // implementation in the entry list — guzzle showed ClientTrait's
+            // abstract request() beside Client::request(). (Span-based
+            // detection is wrong: legitimate one-line functions exist.)
+            if (!is_main &&
+                sym->signature.find("abstract ") != std::string::npos)
+                continue;
             bool is_api = !is_main && sym->is_exported;
             if (!is_main && !is_api) continue;
 
