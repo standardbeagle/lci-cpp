@@ -2187,6 +2187,11 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
         if (d.result.response.health_dashboard) {
             d.quality = HealthAnalyzer::calculate_quality_from_complexity(
                 d.result.response.health_dashboard->complexity);
+            // Same files-based debt as build_statistics: the cc-only ratio
+            // read 0.00 beside dozens of structural smells.
+            d.quality.technical_debt_ratio =
+                HealthAnalyzer().calculate_tech_debt_ratio_from_files(
+                    files_data);
         }
         d.naming = NamingAnalyzer().analyze(files_data,
                                             indexer.config().synonyms,

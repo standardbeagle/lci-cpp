@@ -334,6 +334,11 @@ CodebaseIntelligenceResponse CodebaseIntelligenceEngine::build_statistics(
     report.cohesion = coupling.cohesion;
     report.quality =
         HealthAnalyzer::calculate_quality_from_complexity(complexity);
+    // The cc-distribution debt ignored long functions and hot fan-in
+    // entirely (audits: debt=0.00 beside 85 long functions); the files-based
+    // ratio prices all three.
+    report.quality.technical_debt_ratio =
+        HealthAnalyzer().calculate_tech_debt_ratio_from_files(files);
     report.purity_ratio = purity_ratio;
     response.statistics_report = std::move(report);
 

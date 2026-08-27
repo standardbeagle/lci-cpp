@@ -321,9 +321,11 @@ double HealthAnalyzer::calculate_tech_debt_ratio_from_files(
         for (const auto* sym : file.symbols) {
             if (!is_function_or_method(sym->symbol.type)) continue;
             total++;
+            int line_count = sym->symbol.end_line - sym->symbol.line + 1;
             if (sym->complexity > ci_thresholds::kComplexityModerate ||
                 static_cast<int>(sym->incoming_ref_count) >
-                    ci_thresholds::kHighReferenceCount) {
+                    ci_thresholds::kHighReferenceCount ||
+                line_count > ci_thresholds::kLongFunction) {
                 debt++;
             }
         }
