@@ -12,11 +12,13 @@ namespace {
 // Receiver spellings that mean "the current object" across the supported
 // languages; a call through one of these can be direct recursion.
 bool is_self_receiver(std::string_view recv) {
+    // NOT super/base: a call through the parent class is delegation to a
+    // DIFFERENT class's method, never direct recursion (fastapi's
+    // `super().__call__` inside `__call__` reported as recursion).
     return recv.empty() || recv == "this" || recv == "self" ||
-           recv == "super" || recv == "base" || recv == "cls" ||
-           recv == "$this" || recv == "Self" || recv == "static" ||
-           recv == "me" || recv == "Me" || recv == "*this" ||
-           recv == "(*this)";
+           recv == "cls" || recv == "$this" || recv == "Self" ||
+           recv == "static" || recv == "me" || recv == "Me" ||
+           recv == "*this" || recv == "(*this)";
 }
 
 bool is_cpp_family_extension(std::string_view ext) {
@@ -487,11 +489,18 @@ void UnifiedExtractor::process_js_reference(TSNode node,
                 TSNode obj = ts_node_child_by_field_name(
                     func, "object", static_cast<uint32_t>(6));
                 if (!ts_node_is_null(obj)) {
-                    auto it = local_var_types_.find(
-                        std::string(node_text(obj)));  // "this" or ident
-                    if (it != local_var_types_.end() && !it->second.empty())
+                    auto recv = node_text(obj);
+                    auto it = local_var_types_.find(std::string(recv));
+                    if (it != local_var_types_.end() && !it->second.empty()) {
                         cref.referenced_name =
                             it->second + "." + std::string(node_text(prop));
+                    } else if (!is_self_receiver(recv)) {
+                        // Array.isArray / observer.next: a call through an
+                        // unknown non-self receiver is never direct recursion
+                        // and must not be guessed (trpc's fake recursion=
+                        // entries were exactly this shape).
+                        cref.foreign_receiver = true;
+                    }
                 }
                 references_.push_back(std::move(cref));
                 return;
@@ -599,14 +608,23 @@ void UnifiedExtractor::process_python_reference(TSNode node,
                 TSNode obj = ts_node_child_by_field_name(
                     func, "object", static_cast<uint32_t>(6));
                 if (!ts_node_is_null(obj)) {
+                    auto recv = node_text(obj);
+                    bool qualified = false;
                     const char* ot = ts_node_type(obj);
                     if (ot && std::string_view(ot) == "identifier") {
-                        auto it = local_var_types_.find(
-                            std::string(node_text(obj)));
-                        if (it != local_var_types_.end() && !it->second.empty())
+                        auto it = local_var_types_.find(std::string(recv));
+                        if (it != local_var_types_.end() &&
+                            !it->second.empty()) {
                             cref.referenced_name =
                                 it->second + "." + std::string(node_text(attr));
+                            qualified = true;
+                        }
                     }
+                    // super().__call__ / cfg.createContext-style calls: an
+                    // unknown non-self receiver is never direct recursion
+                    // and must not be name-guessed.
+                    if (!qualified && !is_self_receiver(recv))
+                        cref.foreign_receiver = true;
                 }
                 references_.push_back(std::move(cref));
                 return;

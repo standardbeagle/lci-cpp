@@ -110,10 +110,14 @@ SymbolID ImportResolver::resolve_symbol_reference(
         }
     }
 
-    // Strategy 2: Prefer symbols from same file.
-    for (SymbolID cid : candidates) {
-        if (const auto* sym = symbol_lookup(cid)) {
-            if (sym->symbol.file_id == ref_file_id) return cid;
+    // Strategy 2: Prefer symbols from same file. Name-only, so a
+    // foreign-receiver call of unknown type never takes it (same reasoning
+    // as strategy 3 below).
+    if (!foreign_receiver) {
+        for (SymbolID cid : candidates) {
+            if (const auto* sym = symbol_lookup(cid)) {
+                if (sym->symbol.file_id == ref_file_id) return cid;
+            }
         }
     }
 

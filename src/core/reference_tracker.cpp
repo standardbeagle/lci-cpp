@@ -308,7 +308,8 @@ std::vector<EnhancedSymbol> ReferenceTracker::process_file(
             // counted as exported).
             bool is_exported =
                 sm.visibility == SymbolVisibility::Private ||
-                        sm.visibility == SymbolVisibility::Protected
+                        sm.visibility == SymbolVisibility::Protected ||
+                        sm.visibility == SymbolVisibility::Internal
                     ? false
                     : compute_is_exported(path, sm.name);
 
@@ -956,7 +957,16 @@ SymbolID ReferenceTracker::resolve_reference_target(
     // keyed by the source as well — sharing the bare-name entry would leak
     // one caller's exclusion to every other call site of the name.
     uint64_t name_hash = fnv1a_hash_name(full_name);
-    if (ref.foreign_receiver) {
+    bool rust_owner = false;
+    if (auto mit = file_resolution_meta_.find(owner_fid);
+        mit != file_resolution_meta_.end() &&
+        mit->second.language_family == LangFamily::kRust) {
+        rust_owner = true;
+    }
+    if (ref.foreign_receiver || rust_owner) {
+        // Rust bare-call resolution is source-dependent (a method's bare
+        // self-name call is the shadowing free function), so Rust refs get
+        // per-source cache slots too.
         name_hash ^= 0x9e3779b97f4a7c15ULL *
                      (static_cast<uint64_t>(ref.source_symbol) | 1ULL);
     }
@@ -990,17 +1000,49 @@ SymbolID ReferenceTracker::resolve_reference_target(
         }
     }
 
-    // Check same-file symbols first (fast path). A foreign-receiver call can
-    // never be direct recursion: skip the calling symbol itself (the
-    // `files.size()`-inside-`size()` false self-loop class).
-    for (SymbolID id : file_symbol_ids) {
-        if (ref.foreign_receiver && id == ref.source_symbol) continue;
-        if (const auto* sym = s.symbols.get(id)) {
-            if (sym->symbol.name == name) {
-                reference_cache_[cache_key] = id;
-                return id;
+    bool exclude_source = false;
+    // Check same-file symbols first (fast path). A foreign-receiver call of
+    // unknown type takes NO name-only match at all — not the calling symbol
+    // (the `files.size()` false self-loop class) and not its same-file
+    // neighbors either: every `.as_ref()` inside glob.rs resolving to
+    // `Glob::as_ref` gave a 3-line trait impl reach=152 (ripgrep audit).
+    // Such calls resolve only through receiver-type or import evidence.
+    if (!ref.foreign_receiver) {
+        // Rust bare calls inside a METHOD can never be the method itself
+        // (method calls require `self.`): `trim_line_terminator(...)` inside
+        // StandardImpl::trim_line_terminator is the same-named FREE function,
+        // and picking the method reported fake recursion (ripgrep audit).
+        SymbolID first_match = 0, other_match = 0;
+        for (SymbolID id : file_symbol_ids) {
+            if (const auto* sym = s.symbols.get(id)) {
+                if (sym->symbol.name != name) continue;
+                if (first_match == 0) first_match = id;
+                if (id != ref.source_symbol && other_match == 0)
+                    other_match = id;
+                if (first_match != 0 && other_match != 0) break;
             }
         }
+        bool rust_method_self_shadow = false;
+        if (rust_owner && first_match == ref.source_symbol) {
+            const auto* src = s.symbols.get(ref.source_symbol);
+            if (src != nullptr && src->symbol.type == SymbolType::Method) {
+                if (other_match != 0) {
+                    reference_cache_[cache_key] = other_match;
+                    return other_match;
+                }
+                // Only the method itself matches in this file; the real
+                // callee (a same-named free function, often in another
+                // crate) must come from cross-file resolution with the
+                // method excluded.
+                rust_method_self_shadow = true;
+                first_match = 0;
+            }
+        }
+        if (first_match != 0) {
+            reference_cache_[cache_key] = first_match;
+            return first_match;
+        }
+        if (rust_method_self_shadow) exclude_source = true;
     }
 
     // Cross-file: gate candidates by language family first — a call in a
@@ -1034,7 +1076,9 @@ SymbolID ReferenceTracker::resolve_reference_target(
         SymbolID same_dir = 0;
         int same_dir_count = 0;
         for (SymbolID id : candidates) {
-            if (ref.foreign_receiver && id == ref.source_symbol) continue;
+            if ((ref.foreign_receiver || exclude_source) &&
+                id == ref.source_symbol)
+                continue;
             const auto* sym = s.symbols.get(id);
             if (sym == nullptr) continue;
             LangFamily family = LangFamily::kUnknown;

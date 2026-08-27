@@ -823,6 +823,68 @@ class S {
     EXPECT_EQ(find_symbol(r2, "Shown")->visibility, SymbolVisibility::Public);
 }
 
+TEST(UnifiedExtractorTest, RustVisibilityAndTestModules) {
+    // Rust: no `pub` is crate-private; pub(crate) is internal; anything in
+    // `mod tests` is test scaffolding (ripgrep audit: cfg(test) helpers
+    // dominated entry points/smells because everything counted exported).
+    constexpr std::string_view src = R"(
+pub fn shown() {}
+fn hidden() {}
+pub(crate) fn internal_fn() {}
+mod tests {
+    pub fn helper() {}
+}
+)";
+    Language lang{};
+    ASSERT_TRUE(language_from_extension(".rs", lang));
+    auto tree = parse(lang, src);
+    ASSERT_NE(tree.get(), nullptr);
+    UnifiedExtractor ue;
+    ue.init(src, 1, ".rs", "lib.rs");
+    ue.extract(tree.get());
+    auto r = ue.get_results();
+    EXPECT_EQ(find_symbol(r, "shown")->visibility, SymbolVisibility::Public);
+    EXPECT_EQ(find_symbol(r, "hidden")->visibility, SymbolVisibility::Private);
+    EXPECT_EQ(find_symbol(r, "internal_fn")->visibility,
+              SymbolVisibility::Internal);
+    EXPECT_EQ(find_symbol(r, "helper")->visibility, SymbolVisibility::Private);
+}
+
+TEST(UnifiedExtractorTest, PySuperAndJsBuiltinCallsAreForeign) {
+    // super().__call__ delegates to the PARENT class — never recursion;
+    // Array.isArray is a builtin — never the local isArray.
+    constexpr std::string_view py = R"(
+class App:
+    def __call__(self):
+        return super().__call__()
+)";
+    Language pylang{};
+    ASSERT_TRUE(language_from_extension(".py", pylang));
+    auto pytree = parse(pylang, py);
+    ASSERT_NE(pytree.get(), nullptr);
+    UnifiedExtractor ue;
+    ue.init(py, 1, ".py", "app.py");
+    ue.extract(pytree.get());
+    auto r = ue.get_results();
+    const Reference* call = find_call_ref(r, "__call__");
+    ASSERT_NE(call, nullptr);
+    EXPECT_TRUE(call->foreign_receiver);
+
+    constexpr std::string_view js =
+        "const isArray = (v) => Array.isArray(v);\n";
+    Language jslang{};
+    ASSERT_TRUE(language_from_extension(".js", jslang));
+    auto jstree = parse(jslang, js);
+    ASSERT_NE(jstree.get(), nullptr);
+    UnifiedExtractor ue2;
+    ue2.init(js, 1, ".js", "u.js");
+    ue2.extract(jstree.get());
+    auto r2 = ue2.get_results();
+    const Reference* jcall = find_call_ref(r2, "isArray");
+    ASSERT_NE(jcall, nullptr);
+    EXPECT_TRUE(jcall->foreign_receiver);
+}
+
 TEST(UnifiedExtractorTest, PhpScopedCallToOtherClassSameNameIsForeign) {
     constexpr std::string_view src = R"(<?php
 class RedirectMiddleware {

@@ -1458,5 +1458,42 @@ TEST(ReferenceTrackerTest, ForeignReceiverSkipsNoEvidenceGuess) {
         << "foreign-receiver call of unknown type linked by pure guess";
 }
 
+TEST(ReferenceTrackerTest, RustMethodBareCallResolvesToShadowingFreeFunction) {
+    // Rust methods are invoked via `self.`; a bare `trim(...)` inside method
+    // `trim` is the same-named FREE function, never recursion.
+    ReferenceTracker rt;
+    std::vector<Symbol> symbols = {
+        make_sym("trim", SymbolType::Method, 1, 10, 14),
+        make_sym("trim", SymbolType::Function, 1, 30, 40),
+    };
+    Reference call;
+    call.type = ReferenceType::Call;
+    call.referenced_name = "trim";
+    call.line = 12;
+    call.column = 8;
+    std::vector<Reference> refs = {call};
+    std::vector<ScopeInfo> scopes;
+    rt.process_file(1, "standard.rs", symbols, refs, scopes);
+    rt.process_all_references();
+
+    auto snap = rt.pin();
+    auto method = snap->find_symbol_by_file_and_name(1, "trim");
+    // The METHOD (line 10, encloses line 12) is the caller; its callee must
+    // be the free function, not itself.
+    auto ids = snap->find_symbols_by_name("trim");
+    ASSERT_EQ(ids.size(), 2u);
+    SymbolID method_id = 0, free_id = 0;
+    for (const auto& h : ids) {
+        if (h->symbol.type == SymbolType::Method) method_id = h->id;
+        if (h->symbol.type == SymbolType::Function) free_id = h->id;
+    }
+    ASSERT_NE(method_id, 0u);
+    ASSERT_NE(free_id, 0u);
+    auto callees = rt.get_callee_symbols(method_id);
+    ASSERT_EQ(callees.size(), 1u);
+    EXPECT_EQ(callees[0], free_id);
+    (void)method;
+}
+
 }  // namespace
 }  // namespace lci
