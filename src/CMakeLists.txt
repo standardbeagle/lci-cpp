@@ -51,6 +51,7 @@ add_library(lci_lib STATIC
     semantic/vocabulary_analyzer.cpp
     analysis/call_graph.cpp
     analysis/side_effect_analyzer.cpp
+    analysis/side_effect_classifiers.cpp
     analysis/finding_suppressions.cpp
     analysis/error_handling_analyzer.cpp
     analysis/health_analyzer.cpp

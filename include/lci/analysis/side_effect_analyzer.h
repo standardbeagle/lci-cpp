@@ -214,6 +214,13 @@ PurityLevel compute_purity_level(uint32_t categories, bool has_unresolved_calls)
 enum class ResourceOpKind : uint8_t { None = 0, Acquire, Release };
 ResourceOpKind classify_resource_callee(std::string_view callee);
 
+/// Undo-cost work classification (same prefix-table mechanism).
+WorkKind classify_work_callee(std::string_view callee);
+void classify_work_pairing(const std::vector<WorkOp>& ops,
+                           const std::vector<int>& throw_lines,
+                           bool has_catch, uint32_t effects,
+                           std::vector<EhFinding>& out);
+
 /// Classifies one catch site's syntactic facts into swallow findings.
 /// Appends to `out`, deterministic order. Exposed for unit tests.
 /// Classifies one catch site into findings. `fn_name` is the enclosing
