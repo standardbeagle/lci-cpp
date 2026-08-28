@@ -506,6 +506,17 @@ void emit_vocabulary(std::ostringstream& out, const NamingReport& nr) {
             out << "\n";
         }
     }
+    if (nr.fidelity.checked > 0 && nr.fidelity.mismatched > 0) {
+        out << "name_fidelity: checked=" << nr.fidelity.checked
+            << " mismatched=" << nr.fidelity.mismatched
+            << " (name shares no vocabulary with its initializer):\n";
+        for (const auto& m : nr.fidelity.mismatches) {
+            out << "  " << m.var_name << " <- " << m.source_name << " ("
+                << m.location << ")";
+            if (m.use_count > 0) out << " uses=" << m.use_count;
+            out << "\n";
+        }
+    }
     if (!nr.ambiguous_names.empty()) {
         out << "ambiguous_names (same name, many definitions — a search"
                " returns them all):\n ";

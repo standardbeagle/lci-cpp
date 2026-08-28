@@ -5,6 +5,8 @@
 #include <utility>
 #include <vector>
 
+#include <functional>
+
 #include <lci/analysis/codebase_intelligence_types.h>
 #include <lci/semantic/synonym_table.h>
 #include <lci/symbol.h>
@@ -74,11 +76,27 @@ struct NameInformation {
     std::vector<std::pair<std::string, int>> top_nonwords;
 };
 
+/// A variable whose name shares no vocabulary with its initializer: the
+/// name says nothing about what the value is ("tmp = load_config()").
+struct FidelityMismatch {
+    std::string var_name;
+    std::string source_name;  ///< initializer callee
+    std::string location;     ///< path:line
+    int use_count{};
+};
+
+struct NameFidelity {
+    int checked{};     ///< variables with a recognizable initializer call
+    int mismatched{};  ///< total mismatches found (list below is capped)
+    std::vector<FidelityMismatch> mismatches;
+};
+
 struct NamingReport {
     std::vector<VocabularyOutlier> outliers;
     std::vector<AliasUsage> aliases_in_use;
     std::vector<AmbiguousName> ambiguous_names;
     NameInformation information;
+    NameFidelity fidelity;
 };
 
 /// Detects low-discoverability naming to cut wasted semantic searches.
@@ -92,9 +110,21 @@ class NamingAnalyzer {
   public:
     NamingAnalyzer() = default;
 
-    NamingReport analyze(const std::vector<FileSymbolData>& files,
-                         const SynonymTable& synonyms,
-                         std::string_view project_root) const;
+    /// `content_of`, when provided, enables the name-vs-source fidelity
+    /// pass: it must return the indexed content for a file id ("" when
+    /// unavailable). Without it the fidelity report stays empty.
+    NamingReport analyze(
+        const std::vector<FileSymbolData>& files, const SynonymTable& synonyms,
+        std::string_view project_root,
+        const std::function<std::string_view(FileID)>& content_of = {}) const;
+
+    /// Parses the initializer callee out of one declaration line, starting
+    /// the scan after `name_col` (1-based column of the variable name).
+    /// Recognizes `= callee(`, `:= pkg.Callee(`, `= obj.method(`,
+    /// `= make<T>(`; returns "" when the RHS is not a call. Exposed for
+    /// tests.
+    static std::string_view initializer_callee(std::string_view line,
+                                               int name_col);
 
     /// True if `word` (lowercased) is a common programming/English word that
     /// should never be treated as obscure jargon.

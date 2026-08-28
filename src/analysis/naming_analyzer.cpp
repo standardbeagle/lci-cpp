@@ -185,9 +185,10 @@ bool NamingAnalyzer::is_common_word(std::string_view word) {
     return common_words().contains(word);
 }
 
-NamingReport NamingAnalyzer::analyze(const std::vector<FileSymbolData>& files,
-                                     const SynonymTable& synonyms,
-                                     std::string_view project_root) const {
+NamingReport NamingAnalyzer::analyze(
+    const std::vector<FileSymbolData>& files, const SynonymTable& synonyms,
+    std::string_view project_root,
+    const std::function<std::string_view(FileID)>& content_of) const {
     (void)project_root;
     NameSplitter splitter;
     NamingReport report;
@@ -599,7 +600,204 @@ NamingReport NamingAnalyzer::analyze(const std::vector<FileSymbolData>& files,
               });
     if (report.aliases_in_use.size() > 12) report.aliases_in_use.resize(12);
 
+    // Name-vs-source fidelity: a variable initialized from a call should
+    // share vocabulary with its source. Textual line scan against the
+    // indexed content — report-time only, Variable symbols only.
+    if (content_of) {
+        struct Cand {
+            FidelityMismatch m;
+        };
+        std::vector<FidelityMismatch> mism;
+        for (const auto& file : files) {
+            if (file.path.find("/test") != std::string::npos ||
+                file.path.find("_test.") != std::string::npos)
+                continue;
+            std::string_view content;
+            bool have_content = false;
+            const char* line_start = nullptr;
+            // Lazily split content per file only when a Variable shows up.
+            std::vector<std::string_view> lines;
+            for (const auto* sym : file.symbols) {
+                if (sym == nullptr) continue;
+                if (sym->symbol.type != SymbolType::Variable) continue;
+                if (sym->symbol.test_scaffold) continue;
+                const std::string& vname = sym->symbol.name;
+                if (vname.size() < 2) continue;
+                if (!have_content) {
+                    content = content_of(sym->symbol.file_id);
+                    have_content = true;
+                    size_t start = 0;
+                    while (start <= content.size()) {
+                        size_t nl = content.find('\n', start);
+                        if (nl == std::string_view::npos) {
+                            lines.push_back(content.substr(start));
+                            break;
+                        }
+                        lines.push_back(content.substr(start, nl - start));
+                        start = nl + 1;
+                    }
+                }
+                int ln = sym->symbol.line;
+                if (ln < 1 || static_cast<size_t>(ln) > lines.size()) continue;
+                auto callee = initializer_callee(lines[ln - 1],
+                                                 sym->symbol.column);
+                if (callee.empty() || callee.size() < 4) continue;
+                report.fidelity.checked++;
+
+                // Only PLACEHOLDER names are defects here. A name that
+                // diverges from its source usually names the ROLE, which is
+                // good naming ("size = f.tellg()", "path = read_symlink()").
+                // The defect class is a placeholder that threw away an
+                // informative source name ("tmp = load_config()").
+                static const absl::flat_hash_set<std::string> kPlaceholders =
+                    {"tmp",  "temp",  "val",   "value", "ret",   "res",
+                     "result", "results", "data", "obj",  "object", "item",
+                     "elem", "foo",   "bar",   "baz",  "var",   "ptr",
+                     "arr",  "aux",   "misc",  "thing", "stuff", "out"};
+                {
+                    std::string lower;
+                    lower.reserve(vname.size());
+                    for (char c : vname)
+                        lower.push_back(static_cast<char>(
+                            std::tolower(static_cast<unsigned char>(c))));
+                    if (!kPlaceholders.contains(lower)) continue;
+                }
+
+                NameSplitter fsplit;
+                auto vtoks = fsplit.split(vname);
+                auto stoks = fsplit.split(callee);
+                if (vtoks.empty() || stoks.empty()) continue;
+                // The source must have an informative token to offer:
+                // real English, >= 4 chars, and not a generic derivation
+                // word — "static_cast"/"substr"/"require" teach nothing.
+                static const absl::flat_hash_set<std::string> kGenericSrc = {
+                    "cast",  "static", "dynamic", "const", "reinterpret",
+                    "require", "make", "create",  "get",   "read", "load",
+                    "init",  "alloc", "clone",   "copy",  "move", "swap",
+                    "begin", "end",   "front",   "back",  "data", "size",
+                    "substr", "sync", "async",   "call",  "func", "wrap",
+                    // Bare container/value constructors teach nothing.
+                    "array", "object", "json",    "list",  "dict", "vector",
+                    "string", "value"};
+                bool src_informative = false;
+                for (const auto& t : stoks) {
+                    if (t.size() >= 4 && !kGenericSrc.contains(t) &&
+                        is_common_english(t)) {
+                        src_informative = true;
+                        break;
+                    }
+                }
+                if (!src_informative) continue;
+                auto matches = [&](const std::string& v,
+                                   const std::string& t) {
+                    if (v == t) return true;
+                    // Abbreviation: v a subsequence of t sharing the first
+                    // char (cfg ~ config, idx ~ index).
+                    if (v.size() >= 2 && v.size() < t.size() &&
+                        v[0] == t[0]) {
+                        size_t vi = 0;
+                        for (char c : t) {
+                            if (vi < v.size() && v[vi] == c) ++vi;
+                        }
+                        if (vi == v.size()) return true;
+                    }
+                    auto pv = synonyms.primary_of(v);
+                    if (!pv.empty() && pv == synonyms.primary_of(t))
+                        return true;
+                    return false;
+                };
+                bool any = false;
+                for (const auto& v : vtoks) {
+                    for (const auto& t : stoks) {
+                        if (matches(v, t)) { any = true; break; }
+                    }
+                    if (any) break;
+                }
+                if (any) continue;
+                report.fidelity.mismatched++;
+                FidelityMismatch fm;
+                fm.var_name = vname;
+                fm.source_name = std::string(callee);
+                fm.location = basename_of(file.path) + ":" +
+                              std::to_string(ln);
+                fm.use_count =
+                    static_cast<int>(sym->incoming_ref_count);
+                mism.push_back(std::move(fm));
+            }
+        }
+        std::sort(mism.begin(), mism.end(),
+                  [](const FidelityMismatch& a, const FidelityMismatch& b) {
+                      if (a.use_count != b.use_count)
+                          return a.use_count > b.use_count;
+                      if (a.location != b.location)
+                          return a.location < b.location;
+                      return a.var_name < b.var_name;
+                  });
+        if (mism.size() > size_t{10}) mism.resize(10);
+        report.fidelity.mismatches = std::move(mism);
+    }
+
     return report;
+}
+
+
+// -- name-vs-source fidelity --------------------------------------------------
+
+std::string_view NamingAnalyzer::initializer_callee(std::string_view line,
+                                                    int name_col) {
+    size_t pos = name_col > 0 ? static_cast<size_t>(name_col - 1) : 0;
+    if (pos >= line.size()) return {};
+    // Find the assignment introducing the initializer: '=' (or Go ':='),
+    // but not '==', '<=', '>=', '!='.
+    size_t eq = std::string_view::npos;
+    for (size_t i = pos; i + 1 < line.size(); ++i) {
+        char c = line[i];
+        if (c == '=') {
+            if (line[i + 1] == '=') { ++i; continue; }
+            if (i > 0 && (line[i - 1] == '<' || line[i - 1] == '>' ||
+                          line[i - 1] == '!' || line[i - 1] == '=')) {
+                continue;
+            }
+            eq = i;
+            break;
+        }
+        if (c == ';' || c == ')') return {};
+    }
+    if (eq == std::string_view::npos) return {};
+    size_t i = eq + 1;
+    while (i < line.size() && (line[i] == ' ' || line[i] == '\t')) ++i;
+    // Identifier chain: segments joined by '.', "->", "::".
+    size_t chain_start = i;
+    size_t seg_start = i;
+    auto ident_char = [](char c) {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+               (c >= '0' && c <= '9') || c == '_';
+    };
+    while (i < line.size()) {
+        if (ident_char(line[i])) { ++i; continue; }
+        if (line[i] == '.') { seg_start = ++i; continue; }
+        if (line[i] == ':' && i + 1 < line.size() && line[i + 1] == ':') {
+            i += 2; seg_start = i; continue;
+        }
+        if (line[i] == '-' && i + 1 < line.size() && line[i + 1] == '>') {
+            i += 2; seg_start = i; continue;
+        }
+        break;
+    }
+    if (i == chain_start || seg_start >= i) return {};
+    size_t seg_end = i;
+    // Template arguments between the callee and its call parens.
+    if (i < line.size() && line[i] == '<') {
+        int depth = 1;
+        ++i;
+        while (i < line.size() && depth > 0) {
+            if (line[i] == '<') ++depth;
+            else if (line[i] == '>') --depth;
+            ++i;
+        }
+    }
+    if (i >= line.size() || line[i] != '(') return {};
+    return line.substr(seg_start, seg_end - seg_start);
 }
 
 }  // namespace lci

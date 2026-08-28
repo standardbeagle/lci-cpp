@@ -807,6 +807,52 @@ TEST(NamingAnalyzer, InformationObscureTokensStillReported) {
     EXPECT_EQ(rep.information.top_nonwords[0].second, 2);
 }
 
+TEST(NamingAnalyzer, InitializerCalleeParsing) {
+    using NA = NamingAnalyzer;
+    EXPECT_EQ(NA::initializer_callee("auto cfg = load_config(path);", 6),
+              "load_config");
+    EXPECT_EQ(NA::initializer_callee("x := pkg.LoadConfig(p)", 1),
+              "LoadConfig");
+    EXPECT_EQ(NA::initializer_callee("auto p = obj->fetch_user(id);", 6),
+              "fetch_user");
+    EXPECT_EQ(NA::initializer_callee(
+                  "auto u = std::make_unique<Foo>(1);", 6),
+              "make_unique");
+    EXPECT_EQ(NA::initializer_callee("int total = base;", 5), "");
+    EXPECT_EQ(NA::initializer_callee("if (a == b(c)) {", 5), "");
+    EXPECT_EQ(NA::initializer_callee("int x;", 5), "");
+}
+
+TEST(NamingAnalyzer, FidelityFlagsMismatchedInitializer) {
+    auto table = SynonymTable::build_default();
+    // tmp = load_config(): placeholder threw away an informative source
+    // name -> mismatch. cfg = load_config(): abbreviation, and not a
+    // placeholder anyway. user_record: role naming, never flagged.
+    // size = tellg-style role naming is exercised implicitly: only
+    // placeholder names are candidates.
+    std::string content =
+        "void setup() {\n"
+        "    auto tmp = load_config(path);\n"
+        "    auto cfg = load_config(path);\n"
+        "    auto user_record = fetch_user(id);\n"
+        "}\n";
+    EnhancedSymbol tmp = make_sym("tmp", SymbolType::Variable, 1, 7);
+    tmp.symbol.line = 2; tmp.symbol.end_line = 2; tmp.symbol.column = 10;
+    EnhancedSymbol cfg = make_sym("cfg", SymbolType::Variable, 2, 7);
+    cfg.symbol.line = 3; cfg.symbol.end_line = 3; cfg.symbol.column = 10;
+    EnhancedSymbol ur = make_sym("user_record", SymbolType::Variable, 3, 7);
+    ur.symbol.line = 4; ur.symbol.end_line = 4; ur.symbol.column = 10;
+    auto f = make_file("api/setup.go", {&tmp, &cfg, &ur});
+
+    NamingAnalyzer na;
+    auto rep = na.analyze({f}, table, "",
+                          [&](FileID) -> std::string_view { return content; });
+    EXPECT_EQ(rep.fidelity.checked, 3);
+    ASSERT_EQ(rep.fidelity.mismatched, 1);
+    EXPECT_EQ(rep.fidelity.mismatches[0].var_name, "tmp");
+    EXPECT_EQ(rep.fidelity.mismatches[0].source_name, "load_config");
+}
+
 TEST(NamingAnalyzer, CommonWordRecognized) {
     EXPECT_TRUE(NamingAnalyzer::is_common_word("handler"));
     EXPECT_TRUE(NamingAnalyzer::is_common_word("logf"));

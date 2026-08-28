@@ -394,9 +394,11 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                 HealthAnalyzer().calculate_tech_debt_ratio_from_files(
                     files_data);
         }
-        d.naming = NamingAnalyzer().analyze(files_data,
-                                            indexer.config().synonyms,
-                                            project_root);
+        d.naming = NamingAnalyzer().analyze(
+            files_data, indexer.config().synonyms, project_root,
+            [&indexer](FileID fid) -> std::string_view {
+                return indexer.file_content_store().get_content(fid);
+            });
         return d;
     };
 
