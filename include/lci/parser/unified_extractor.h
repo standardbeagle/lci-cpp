@@ -192,6 +192,15 @@ class UnifiedExtractor {
     void extract_module(TSNode node);
     void extract_namespace(TSNode node);
     void extract_variable(TSNode node);
+    /// C/C++ locals + parameters (the extractor gap that left
+    /// get_context's variable_context empty for C++ symbols).
+    void extract_cpp_parameter(TSNode node);
+    void extract_cpp_init_declarator(TSNode node);
+    void extract_cpp_local_declaration(TSNode node);
+    /// Digs through pointer/reference/array/parenthesized declarators to
+    /// the named identifier; null node if none.
+    TSNode declarator_identifier(TSNode declarator);
+    bool is_c_family() const;
     void extract_go_variable(TSNode node, std::string_view node_type);
     void extract_constructor(TSNode node);
     void extract_property(TSNode node);

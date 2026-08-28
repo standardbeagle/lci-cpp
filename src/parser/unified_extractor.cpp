@@ -884,6 +884,17 @@ void UnifiedExtractor::process_symbol_node(TSNode node,
                node_type == "var_declaration") {
         extract_go_variable(node, node_type);
 
+    // === C/C++ LOCALS + PARAMETERS ===
+    } else if (node_type == "parameter_declaration" ||
+               node_type == "optional_parameter_declaration") {
+        if (is_c_family()) extract_cpp_parameter(node);
+
+    } else if (node_type == "init_declarator") {
+        if (is_c_family()) extract_cpp_init_declarator(node);
+
+    } else if (node_type == "declaration") {
+        if (is_c_family()) extract_cpp_local_declaration(node);
+
     } else if (node_type == "const_declaration") {
         if (ext_ == ".go") {
             extract_go_variable(node, node_type);

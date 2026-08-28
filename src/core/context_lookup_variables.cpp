@@ -196,6 +196,20 @@ std::vector<VariableInfo> get_local_variables(const Snapshot& snap,
             sym->symbol.end_line > target->symbol.end_line) {
             continue;
         }
+        // Skip parameters (trap-6d marker: a Variable-type scope named
+        // after the symbol itself). Divergence-from-Go is zero in practice:
+        // the port never produced these markers for Go corpora, so this
+        // only prevents C++ parameters from double-listing as locals now
+        // that the C++ extractor emits the marker.
+        bool is_parameter = false;
+        for (const auto& scope : sym->scope_chain) {
+            if (scope.type == ScopeType::Variable &&
+                scope.name == std::string(sym->symbol.name)) {
+                is_parameter = true;
+                break;
+            }
+        }
+        if (is_parameter) continue;
         int use_count = static_cast<int>(
             snap.get_symbol_references(sym->id, "both").size());
 

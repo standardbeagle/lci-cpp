@@ -2,7 +2,7 @@
   "result": {
     "content": [
       {
-        "text": "{\"has_more\":true,\"showing\":2,\"symbols\":[{\"complexity\":1,\"file\":\"b.py\",\"is_exported\":true,\"line\":1,\"name\":\"add\",\"object_id\":\"C\",\"type\":\"function\"},{\"complexity\":1,\"file\":\"c.cpp\",\"is_exported\":true,\"line\":1,\"name\":\"add\",\"object_id\":\"E\",\"type\":\"function\"}],\"total\":4}",
+        "text": "{\"has_more\":true,\"showing\":2,\"symbols\":[{\"file\":\"c.cpp\",\"is_exported\":true,\"line\":1,\"name\":\"a\",\"object_id\":\"F\",\"type\":\"variable\"},{\"complexity\":1,\"file\":\"b.py\",\"is_exported\":true,\"line\":1,\"name\":\"add\",\"object_id\":\"C\",\"parameter_count\":2,\"type\":\"function\"}],\"total\":6}",
         "type": "text"
       }
     ]

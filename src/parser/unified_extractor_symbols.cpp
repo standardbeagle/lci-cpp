@@ -985,4 +985,166 @@ void UnifiedExtractor::count_complexity_point(TSNode node,
 }
 
 
+// ---------------------------------------------------------------------------
+// C/C++ locals + parameters
+// ---------------------------------------------------------------------------
+
+bool UnifiedExtractor::is_c_family() const {
+    return ext_ == ".c" || ext_ == ".h" || ext_ == ".cpp" || ext_ == ".hpp" ||
+           ext_ == ".cc" || ext_ == ".hh" || ext_ == ".cxx" || ext_ == ".hxx";
+}
+
+TSNode UnifiedExtractor::declarator_identifier(TSNode declarator) {
+    TSNode n = declarator;
+    for (int depth = 0; depth < 8 && !ts_node_is_null(n); ++depth) {
+        std::string_view t = get_node_type(n);
+        if (t == "identifier" || t == "field_identifier") return n;
+        // A function_declarator here means a prototype/function, not a
+        // variable — never dig through it.
+        if (t == "function_declarator") return TSNode{};
+        TSNode inner = ts_node_child_by_field_name(
+            n, "declarator", static_cast<uint32_t>(std::strlen("declarator")));
+        if (ts_node_is_null(inner)) {
+            // reference_declarator has no field in some grammar versions;
+            // fall back to the first named child.
+            if (t == "reference_declarator" || t == "pointer_declarator" ||
+                t == "parenthesized_declarator") {
+                if (ts_node_named_child_count(n) == 0) return TSNode{};
+                inner = ts_node_named_child(n, 0);
+            } else {
+                return TSNode{};
+            }
+        }
+        n = inner;
+    }
+    return TSNode{};
+}
+
+namespace {
+
+// True when `node` sits inside a function DEFINITION (or lambda) body /
+// signature rather than a bare prototype or field declaration. Prototype
+// parameters must not become symbols: a header full of declarations would
+// scatter Variable symbols through class scopes, where the class_variables
+// getter would misread them as members.
+bool inside_function_definition(TSNode node) {
+    TSNode p = ts_node_parent(node);
+    for (int depth = 0; depth < 24 && !ts_node_is_null(p); ++depth) {
+        std::string_view t = ts_node_type(p);
+        // A body reached from below: we are inside real function code.
+        // (Locals sit in declaration -> compound_statement, so plain
+        // "declaration" is NOT decisive on its own.)
+        if (t == "compound_statement" || t == "function_definition" ||
+            t == "lambda_expression") {
+            return true;
+        }
+        // File / namespace / class level reached without crossing a body:
+        // prototype parameter or global — not this extractor's business.
+        if (t == "translation_unit" || t == "namespace_definition" ||
+            t == "field_declaration_list") {
+            return false;
+        }
+        p = ts_node_parent(p);
+    }
+    return false;
+}
+
+}  // namespace
+
+void UnifiedExtractor::extract_cpp_parameter(TSNode node) {
+    if (!inside_function_definition(node)) return;
+    TSNode decl = ts_node_child_by_field_name(
+        node, "declarator", static_cast<uint32_t>(std::strlen("declarator")));
+    if (ts_node_is_null(decl)) return;  // unnamed parameter
+    TSNode id = declarator_identifier(decl);
+    if (ts_node_is_null(id)) return;
+    std::string_view name = node_text(id);
+    if (name.empty()) return;
+
+    TSPoint start = ts_node_start_point(id);
+    TSPoint end = ts_node_end_point(id);
+    int line = static_cast<int>(start.row) + 1;
+
+    Symbol sym;
+    sym.name = std::string(name);
+    sym.type = SymbolType::Variable;
+    sym.file_id = file_id_;
+    sym.line = line;
+    sym.column = static_cast<int>(start.column) + 1;
+    sym.end_line = static_cast<int>(end.row) + 1;
+    sym.end_column = static_cast<int>(end.column) + 1;
+    symbols_.push_back(std::move(sym));
+
+    // Parameter marker scope (context_lookup_variables trap 6d): a
+    // Variable-type scope whose name equals the symbol's own name marks it
+    // as a parameter. This was previously producer-less in the port, so
+    // only same-line-as-function parameters classified; wrapped signatures
+    // mis-bucketed parameters as locals.
+    ScopeInfo scope;
+    scope.type = ScopeType::Variable;
+    scope.name = std::string(name);
+    scope.full_path = build_full_qualified_name(scope.name);
+    scope.start_line = line;
+    scope.end_line = line;
+    scope.level = current_level_;
+    scopes_.push_back(std::move(scope));
+}
+
+void UnifiedExtractor::extract_cpp_init_declarator(TSNode node) {
+    if (!inside_function_definition(node)) return;
+    TSNode decl = ts_node_child_by_field_name(
+        node, "declarator", static_cast<uint32_t>(std::strlen("declarator")));
+    if (ts_node_is_null(decl)) return;
+    TSNode id = declarator_identifier(decl);
+    if (ts_node_is_null(id)) return;
+    std::string_view name = node_text(id);
+    if (name.empty()) return;
+
+    TSPoint start = ts_node_start_point(id);
+    TSPoint end = ts_node_end_point(id);
+    Symbol sym;
+    sym.name = std::string(name);
+    sym.type = SymbolType::Variable;
+    sym.file_id = file_id_;
+    sym.line = static_cast<int>(start.row) + 1;
+    sym.column = static_cast<int>(start.column) + 1;
+    sym.end_line = static_cast<int>(end.row) + 1;
+    sym.end_column = static_cast<int>(end.column) + 1;
+    symbols_.push_back(std::move(sym));
+}
+
+void UnifiedExtractor::extract_cpp_local_declaration(TSNode node) {
+    // Uninitialized locals ("int x;", "Foo a, b;"). Initialized declarators
+    // are init_declarator nodes and get their own visit; anything reaching
+    // a function_declarator is a prototype and is skipped by
+    // declarator_identifier.
+    if (!inside_function_definition(node)) return;
+    uint32_t n = ts_node_named_child_count(node);
+    for (uint32_t i = 0; i < n; ++i) {
+        TSNode child = ts_node_named_child(node, i);
+        std::string_view t = get_node_type(child);
+        if (t == "init_declarator") continue;  // separate visit
+        if (t != "identifier" && t != "pointer_declarator" &&
+            t != "reference_declarator" && t != "array_declarator" &&
+            t != "parenthesized_declarator") {
+            continue;  // type nodes, qualifiers
+        }
+        TSNode id = declarator_identifier(child);
+        if (ts_node_is_null(id)) continue;
+        std::string_view name = node_text(id);
+        if (name.empty()) continue;
+        TSPoint start = ts_node_start_point(id);
+        TSPoint end = ts_node_end_point(id);
+        Symbol sym;
+        sym.name = std::string(name);
+        sym.type = SymbolType::Variable;
+        sym.file_id = file_id_;
+        sym.line = static_cast<int>(start.row) + 1;
+        sym.column = static_cast<int>(start.column) + 1;
+        sym.end_line = static_cast<int>(end.row) + 1;
+        sym.end_column = static_cast<int>(end.column) + 1;
+        symbols_.push_back(std::move(sym));
+    }
+}
+
 }  // namespace lci::parser

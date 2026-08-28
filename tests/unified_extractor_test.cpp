@@ -964,4 +964,77 @@ class Svc {
 }
 
 }  // namespace
+
+// ===========================================================================
+// C/C++ locals + parameters (previously the extractor gap that left
+// get_context's variable_context empty for every C++ symbol)
+// ===========================================================================
+
+constexpr std::string_view kCppLocalsSource = R"cpp(
+int global_counter = 0;
+
+int compute(int base,
+            const char* label) {
+    int total = base;
+    int scratch;
+    double* rate = nullptr;
+    for (int i = 0; i < 3; ++i) total += i;
+    return total;
+}
+
+void prototype_only(int unused_param);
+
+struct Holder {
+    int member_field;
+};
+)cpp";
+
+TEST(UnifiedExtractorTest, CppLocalsAndParametersExtracted) {
+    auto tree = parse(Language::Cpp, kCppLocalsSource);
+    ASSERT_NE(tree.get(), nullptr);
+
+    UnifiedExtractor ue;
+    ue.init(kCppLocalsSource, 1, ".cpp", "locals.cpp");
+    ue.extract(tree.get());
+    auto r = ue.get_results();
+
+    // Parameters: both, including the one on a wrapped signature line.
+    const Symbol* base = find_symbol(r, "base");
+    ASSERT_NE(base, nullptr);
+    EXPECT_EQ(base->type, SymbolType::Variable);
+    const Symbol* label = find_symbol(r, "label");
+    ASSERT_NE(label, nullptr);
+    EXPECT_EQ(label->type, SymbolType::Variable);
+
+    // Initialized, uninitialized, and pointer locals.
+    for (const char* name : {"total", "scratch", "rate", "i"}) {
+        const Symbol* sym = find_symbol(r, name);
+        ASSERT_NE(sym, nullptr) << name;
+        EXPECT_EQ(sym->type, SymbolType::Variable) << name;
+    }
+
+    // Prototype parameters must NOT become symbols (a header full of
+    // declarations would scatter Variables through class scopes).
+    EXPECT_EQ(find_symbol(r, "unused_param"), nullptr);
+
+    // Parameter marker scopes (trap 6d): a Variable-type scope named after
+    // each parameter, so wrapped-signature parameters classify as
+    // parameters, not locals.
+    int param_marker_scopes = 0;
+    for (const auto& sc : r.scopes) {
+        if (sc.type == ScopeType::Variable &&
+            (sc.name == "base" || sc.name == "label")) {
+            ++param_marker_scopes;
+        }
+    }
+    EXPECT_EQ(param_marker_scopes, 2);
+
+    // Locals carry honest positions inside the function span.
+    const Symbol* compute = find_symbol(r, "compute");
+    ASSERT_NE(compute, nullptr);
+    const Symbol* total = find_symbol(r, "total");
+    EXPECT_GT(total->line, compute->line);
+    EXPECT_LT(total->line, compute->end_line);
+}
+
 }  // namespace lci::parser

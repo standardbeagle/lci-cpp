@@ -1,6 +1,6 @@
 {
-  "has_more": false,
-  "showing": 4,
+  "has_more": true,
+  "showing": 5,
   "symbols": [
     {
       "complexity": 1,
@@ -40,7 +40,14 @@
       "name": "add",
       "parameter_count": 2,
       "type": "function"
+    },
+    {
+      "file": "${CORPUS}/c.cpp",
+      "is_exported": true,
+      "line": 1,
+      "name": "a",
+      "type": "variable"
     }
   ],
-  "total": 4
+  "total": 6
 }

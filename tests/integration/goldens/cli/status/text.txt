@@ -5,7 +5,7 @@ Status: Ready
 
 Index Statistics:
   Files indexed:    4
-  Symbols indexed:  4
+  Symbols indexed:  6
   Index size:       0 bytes
 
 Server Runtime:
