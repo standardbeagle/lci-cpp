@@ -114,9 +114,10 @@ Take over only on positive absence-of-work evidence, and record it in a comment.
 
 ## Known gaps (not rules — tracked follow-ups)
 
-- `variable_context` returns empty for real self-hosted C++ symbols with obvious
-  parameters (e.g. `handle_get_context`, `determine_severity`), despite the S4
-  dispatch logic being language-agnostic. Suspected upstream C++ tree-sitter
-  extractor gap (Parameter/local-Variable symbol kinds not emitted for C++ the way
-  the Go extractor emits them for Go), NOT a defect in the S4 port. Follow-up filed
-  on parent `01KXE55HVAC1W48YSA7X4XFQEV`.
+- RESOLVED 2026-08-28 (commit 945f9ee): `variable_context` empty for C++ —
+  the extractor never dispatched `parameter_declaration` / local declarators.
+  C/C++ locals + parameters now emit as Variable symbols (function
+  definitions only; prototypes excluded), parameters carry the trap-6d
+  marker scope the port previously never produced, and the locals getter
+  excludes marker-carrying parameters. Verified live on
+  `determine_severity`.
