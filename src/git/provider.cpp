@@ -227,6 +227,41 @@ bool Provider::get_staged_content(std::string_view path, std::string& out) const
     return run_git({"show", spec, "--"}, out);
 }
 
+bool Provider::get_changed_scope(const AnalysisParams& params,
+                                 ScopeSet& out) const {
+    std::vector<std::string> args;
+    switch (params.scope) {
+        case AnalysisScope::Staged:
+            args = {"diff", "--cached", "-U0", "--no-renames", "--"};
+            break;
+        case AnalysisScope::WIP:
+            args = {"diff", "HEAD", "-U0", "--no-renames", "--"};
+            break;
+        case AnalysisScope::Commit: {
+            std::string ref = params.base_ref;
+            if (ref.empty()) ref = "HEAD";
+            if (!is_safe_ref(ref)) return false;
+            args = {"diff-tree", "--no-commit-id", "-U0", "--no-renames",
+                    "-r", "-p", ref, "--"};
+            break;
+        }
+        case AnalysisScope::Range: {
+            if (params.base_ref.empty()) return false;
+            std::string target = params.target_ref;
+            if (target.empty()) target = "HEAD";
+            if (!is_safe_ref(params.base_ref) || !is_safe_ref(target))
+                return false;
+            std::string range_spec = params.base_ref + ".." + target;
+            args = {"diff", "-U0", "--no-renames", range_spec, "--"};
+            break;
+        }
+    }
+    std::string output;
+    if (!run_git(args, output)) return false;
+    out = scope_from_unified_diff(output);
+    return true;
+}
+
 bool Provider::get_diff_stats(const AnalysisParams& params, DiffStats& out) const {
     std::vector<std::string> args;
 

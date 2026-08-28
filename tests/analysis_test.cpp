@@ -11,6 +11,7 @@
 #include <lci/analysis/layer_analyzer.h>
 #include <lci/analysis/module_analyzer.h>
 #include <lci/analysis/naming_analyzer.h>
+#include <lci/analysis/scope_set.h>
 #include <lci/analysis/english_words.h>
 #include <lci/reference.h>
 #include <lci/semantic/synonym_table.h>
@@ -1163,5 +1164,127 @@ TEST(SynonymTable, PrimaryOfReturnsGroupRepresentative) {
     EXPECT_TRUE(table.primary_of("frobnicate").empty());
 }
 
+// ===========================================================================
+// ScopeSet - selection algebra + populators
+// ===========================================================================
+
+TEST(ScopeSet, DefaultMatchesNothingAllMatchesEverything) {
+    ScopeSet none = ScopeSet::none();
+    EXPECT_FALSE(none.contains_file("a.go"));
+    EXPECT_TRUE(none.empty());
+
+    ScopeSet all = ScopeSet::all();
+    EXPECT_TRUE(all.contains_file("a.go"));
+    EXPECT_TRUE(all.contains_lines("a.go", 1, 5));
+}
+
+TEST(ScopeSet, LineRangesMergeAndOverlap) {
+    ScopeSet s;
+    s.add_lines("a.go", {10, 20});
+    s.add_lines("a.go", {21, 30});  // adjacent -> merged
+    s.add_lines("a.go", {50, 60});
+    EXPECT_TRUE(s.contains_lines("a.go", 5, 10));    // touches 10
+    EXPECT_TRUE(s.contains_lines("a.go", 25, 26));   // inside merged
+    EXPECT_FALSE(s.contains_lines("a.go", 31, 49));  // gap
+    EXPECT_FALSE(s.contains_lines("b.go", 10, 20));  // other file
+    EXPECT_TRUE(s.contains_file("a.go"));
+}
+
+TEST(ScopeSet, WholeFileAbsorbsRanges) {
+    ScopeSet s;
+    s.add_lines("a.go", {10, 20});
+    s.add_file("a.go");
+    EXPECT_TRUE(s.contains_lines("a.go", 1000, 1000));
+    s.add_lines("a.go", {1, 2});  // must stay whole-file
+    EXPECT_TRUE(s.contains_lines("a.go", 500, 500));
+}
+
+TEST(ScopeSet, IntersectKeepsRangeOverlapsOnly) {
+    ScopeSet a;
+    a.add_lines("f.go", {10, 30});
+    a.add_file("whole.go");
+    ScopeSet b;
+    b.add_lines("f.go", {25, 40});
+    b.add_lines("whole.go", {5, 6});
+    b.add_file("only-b.go");
+
+    ScopeSet i = a.intersect(b);
+    EXPECT_TRUE(i.contains_lines("f.go", 25, 30));
+    EXPECT_FALSE(i.contains_lines("f.go", 10, 24));
+    EXPECT_TRUE(i.contains_lines("whole.go", 5, 6));
+    EXPECT_FALSE(i.contains_lines("whole.go", 7, 9));
+    EXPECT_FALSE(i.contains_file("only-b.go"));
+
+    // all() is the identity.
+    ScopeSet j = ScopeSet::all().intersect(b);
+    EXPECT_TRUE(j.contains_file("only-b.go"));
+}
+
+TEST(ScopeSet, UniteMergesFilesAndRanges) {
+    ScopeSet a;
+    a.add_lines("f.go", {1, 5});
+    ScopeSet b;
+    b.add_lines("f.go", {100, 110});
+    b.add_file("g.go");
+    ScopeSet u = a.unite(b);
+    EXPECT_TRUE(u.contains_lines("f.go", 1, 1));
+    EXPECT_TRUE(u.contains_lines("f.go", 105, 105));
+    EXPECT_TRUE(u.contains_file("g.go"));
+    EXPECT_TRUE(ScopeSet::all().unite(a).is_all());
+}
+
+TEST(ScopeSet, PopulatorsGlobRegexSymbols) {
+    std::vector<std::string> paths = {"src/a.go", "src/b.py", "docs/c.md"};
+    auto g = scope_from_globs({"src/*.go"}, paths);
+    EXPECT_TRUE(g.contains_file("src/a.go"));
+    EXPECT_FALSE(g.contains_file("src/b.py"));
+
+    std::string err;
+    auto r = scope_from_regex(R"(\.(go|py)$)", paths, err);
+    EXPECT_TRUE(err.empty());
+    EXPECT_TRUE(r.contains_file("src/b.py"));
+    EXPECT_FALSE(r.contains_file("docs/c.md"));
+    auto bad = scope_from_regex("([", paths, err);
+    EXPECT_FALSE(err.empty());
+    EXPECT_TRUE(bad.empty());
+
+    EnhancedSymbol sym = make_sym("f", SymbolType::Function);
+    sym.symbol.line = 40;
+    sym.symbol.end_line = 60;
+    auto ss = scope_from_symbols({{"src/a.go", &sym}});
+    EXPECT_TRUE(ss.contains_lines("src/a.go", 55, 55));
+    EXPECT_FALSE(ss.contains_lines("src/a.go", 61, 61));
+    EXPECT_TRUE(ss.contains_symbol("src/a.go", sym));
+}
+
+TEST(ScopeSet, ParsesUnifiedDiffNewSideRanges) {
+    const char* diff =
+        "diff --git a/src/a.go b/src/a.go\n"
+        "--- a/src/a.go\n"
+        "+++ b/src/a.go\n"
+        "@@ -10,2 +12,3 @@ func x() {\n"
+        "+one\n+two\n+three\n"
+        "@@ -40 +45 @@\n"
+        "+line\n"
+        "diff --git a/gone.go b/gone.go\n"
+        "--- a/gone.go\n"
+        "+++ /dev/null\n"
+        "@@ -1,9 +0,0 @@\n"
+        "diff --git a/del.go b/del.go\n"
+        "--- a/del.go\n"
+        "+++ b/del.go\n"
+        "@@ -7,3 +6,0 @@\n";
+    auto s = scope_from_unified_diff(diff);
+    EXPECT_TRUE(s.contains_lines("src/a.go", 12, 12));
+    EXPECT_TRUE(s.contains_lines("src/a.go", 14, 14));
+    EXPECT_FALSE(s.contains_lines("src/a.go", 15, 20));
+    EXPECT_TRUE(s.contains_lines("src/a.go", 45, 45));
+    // Pure file deletion contributes nothing on the new side.
+    EXPECT_FALSE(s.contains_file("gone.go"));
+    // Pure hunk deletion anchors to the boundary line.
+    EXPECT_TRUE(s.contains_lines("del.go", 6, 6));
+}
+
 }  // namespace
 }  // namespace lci
+

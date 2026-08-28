@@ -15,9 +15,24 @@ tier: are the git changeset tools working and worthwhile?
   Fixed this audit (f660a17): CLI 30s-timeout death, findings rendered in
   LCF, gtest-macro naming noise. Still defective, in priority order below.
 
+## Update (same day): defects 1+4 fixed via ScopeSet
+
+lci::ScopeSet (analysis/scope_set.h) is the general folder/file/element
+selection abstraction: path -> merged line ranges, set algebra, and
+populators for paths, globs, regex, code-model query results
+(scope_from_symbols), and unified-diff hunks (scope_from_unified_diff /
+Provider::get_changed_scope). git-analyze now intersects parsed symbols
+with the diff's new-side hunks (Added files stay whole-file; a failed
+hunk fetch falls back to unscoped — over-report, never drop). Probe
+commit f7180a0: modified 100 -> 2, findings 27 -> 2 (both change-
+relevant), risk 1.00 -> 0.47, analysis 42s -> 7.6s. Known residue: the
+index reflects the working tree, so line drift between an analyzed
+historic commit and today's tree can make a symbol "duplicate" its own
+shifted copy (self-match guard compares exact (path,line)).
+
 ## Remaining defects (file scope, not fixed yet)
 
-1. **Not hunk-scoped — the cardinal flaw.** parse_changed_files parses whole
+1. FIXED (see update above). **Not hunk-scoped — the cardinal flaw.** parse_changed_files parses whole
    changed FILES; every pre-existing symbol in a touched file becomes a
    "new symbol". Consequences: a 33-line commit reports "~100 modified
    symbols"; findings mostly describe code the change never touched;
@@ -40,7 +55,7 @@ tier: are the git changeset tools working and worthwhile?
    make_error_response" for make_ref_sym). Candidate: back the git naming
    focus with NamingAnalyzer on the changed symbols and delete the bespoke
    path (replace-and-remove).
-4. **risk_score semantics.** Currently a function of finding counts, which
+4. Largely addressed by 1 (inputs now scoped; probe commit shows 0.47 not 1.00). **risk_score semantics.** Currently a function of finding counts, which
    defect 1 inflates; after hunk scoping, re-calibrate or drop the single
    number in favor of the per-category counts.
 

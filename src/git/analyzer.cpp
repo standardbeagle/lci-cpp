@@ -1,5 +1,7 @@
 #include <lci/git/analyzer.h>
 
+#include <lci/analysis/scope_set.h>
+
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
@@ -134,6 +136,31 @@ bool Analyzer::analyze(const AnalysisParams& params, AnalysisReport& out) {
     int skipped_unreadable = 0;
     if (!parse_changed_files(files, params, new_symbols, skipped_unreadable))
         return false;
+
+    // Scope to the CHANGE, not the file: parse_changed_files parses whole
+    // files, so without this every pre-existing symbol in a touched file
+    // was analyzed as "new" — a 33-line commit reported ~100 modified
+    // symbols, findings mostly described untouched code, and risk pegged
+    // at 1.00. Symbols in Added files stay whole-file (every line is new).
+    // A failed hunk fetch keeps the unscoped set (over-report, never drop).
+    ScopeSet changed_scope;
+    if (provider_.get_changed_scope(params, changed_scope) &&
+        !changed_scope.is_all()) {
+        absl::flat_hash_set<std::string> added_files;
+        for (const auto& f : files) {
+            if (f.status == FileChangeStatus::Added) added_files.insert(f.path);
+        }
+        std::vector<SymbolInfo> scoped;
+        scoped.reserve(new_symbols.size());
+        for (auto& si : new_symbols) {
+            if (added_files.contains(si.file_path) ||
+                changed_scope.contains_lines(si.file_path, si.line,
+                                             si.end_line)) {
+                scoped.push_back(std::move(si));
+            }
+        }
+        new_symbols = std::move(scoped);
+    }
 
     std::vector<SymbolInfo> existing_symbols;
     get_existing_symbols(existing_symbols);

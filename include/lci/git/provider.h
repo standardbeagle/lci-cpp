@@ -4,6 +4,7 @@
 #include <string_view>
 #include <vector>
 
+#include <lci/analysis/scope_set.h>
 #include <lci/git/types.h>
 
 namespace lci {
@@ -46,6 +47,11 @@ class Provider {
 
     /// Returns statistics about the diff.
     bool get_diff_stats(const AnalysisParams& params, DiffStats& out) const;
+
+    /// New-side changed line ranges for the analysis scope, as a ScopeSet
+    /// (git diff -U0 hunks). The element-level ground truth for scoping
+    /// findings to the change instead of to every symbol in touched files.
+    bool get_changed_scope(const AnalysisParams& params, ScopeSet& out) const;
 
     /// Returns the content of a file at a specific ref.
     /// If ref is empty or "WORKING", returns the working tree version.
