@@ -270,6 +270,40 @@ void emit_git_changes(std::ostringstream& out, const git::AnalysisReport& r,
     if (!s.top_recommendation.empty())
         out << "top: " << s.top_recommendation << "\n";
 
+    // Top duplicate / naming findings. These counts were previously
+    // emitted with no detail — "duplicates=7 naming=20" an agent cannot
+    // act on is a claim, not a finding.
+    if (!r.duplicates.empty()) {
+        out << "duplicates:\n";
+        size_t lim = std::min(r.duplicates.size(), size_t{5});
+        for (size_t i = 0; i < lim; ++i) {
+            const auto& d = r.duplicates[i];
+            out << "  [" << to_string(d.severity) << "] " << d.new_code.symbol_name << " ("
+                << git_rel(d.new_code.file_path, root) << ":"
+                << d.new_code.start_line << ") ~ " << d.existing_code.symbol_name
+                << " (" << git_rel(d.existing_code.file_path, root) << ":"
+                << d.existing_code.start_line << ") sim="
+                << fmt2(d.similarity) << "\n";
+        }
+        if (r.duplicates.size() > lim)
+            out << "  ... and " << (r.duplicates.size() - lim) << " more\n";
+    }
+    if (!r.naming_issues.empty()) {
+        out << "naming_issues:\n";
+        size_t lim = std::min(r.naming_issues.size(), size_t{5});
+        for (size_t i = 0; i < lim; ++i) {
+            const auto& n = r.naming_issues[i];
+            out << "  [" << to_string(n.severity) << "] "
+                << n.new_symbol.name << " ("
+                << git_rel(n.new_symbol.file_path, root) << ":"
+                << n.new_symbol.line << ") " << n.issue << ": "
+                << n.suggestion << "\n";
+        }
+        if (r.naming_issues.size() > lim)
+            out << "  ... and " << (r.naming_issues.size() - lim)
+                << " more\n";
+    }
+
     // Top metrics issues, sorted by (file, line) for deterministic output.
     if (!r.metrics_issues.empty()) {
         std::vector<const git::MetricsFinding*> mi;

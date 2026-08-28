@@ -504,6 +504,19 @@ void Analyzer::check_naming(const std::vector<SymbolInfo>& new_symbols,
     }
 
     for (const auto& ns : new_symbols) {
+        // Macro-expansion names (TEST, TEST_F, EXPECT_*) are not naming
+        // choices: the parser sees the macro identifier as the function
+        // name. Every prior "similar to TEST_F" finding was this noise.
+        bool macro_like = !ns.name.empty();
+        for (char c : ns.name) {
+            if (!(std::isupper(static_cast<unsigned char>(c)) || c == '_' ||
+                  std::isdigit(static_cast<unsigned char>(c)))) {
+                macro_like = false;
+                break;
+            }
+        }
+        if (macro_like) continue;
+
         NamingFinding finding;
         if (check_case_style(ns, finding)) {
             out.push_back(std::move(finding));

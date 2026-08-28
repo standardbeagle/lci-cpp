@@ -59,6 +59,12 @@ int run_git_analyze(const GlobalFlags& flags, const std::string& scope,
         return 1;
     }
 
+    // Change analysis compares changed symbols against the whole index and
+    // can far exceed the default 30s read timeout on large repos; the
+    // request is legitimate long-work, so give it a long leash instead of
+    // failing with a misleading "failed to connect".
+    client->set_timeout(std::chrono::minutes(5));
+
     GitAnalyzeRequest req;
     req.scope = scope;
     req.base_ref = base_ref;
