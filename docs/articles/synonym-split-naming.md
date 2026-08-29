@@ -1,10 +1,29 @@
 ---
-title: Your codebase says load_snapshot. It also says read_snapshot. Your agent just paid for both.
+title: Names are search keys. Here's how bad ones tax every agent query.
 published: false
 tags: ai, codequality, naming, devtools
 ---
 
-Here's a report our code-intelligence tool printed against its own C++ source last week:
+A coding agent doesn't read your codebase. It queries it. Every task starts with a search — "find the snapshot accessor", "find where config loads" — and the name of a function is the key that search resolves against. When the key is bad, the agent doesn't get an error. It gets a plausible-looking result set that is too big, too small, or subtly wrong, and it pays for the difference in tokens: extra results loaded into context, extra searches to recover, extra files read to disambiguate.
+
+Here is what that tax looks like in practice, with real output from running our code-intelligence tool against its own C++ source. Each failure mode wastes tokens through a different mechanism.
+
+**Collision: one name, dozens of definitions.** A search that returns 43 sites has told the agent almost nothing, but the agent still pays to find that out:
+
+```
+ambiguous_names (same name, many definitions — a search returns them all):
+  to_string(43) to_json(25) language(11) contains(8) ends_with(7) starts_with(7)
+```
+
+The agent wanted one `to_string`. It now either loads 43 candidates into context and picks by reading, or refines the query and searches again. Either path costs more than the search that should have sufficed.
+
+**Vagueness: names built from tokens that match everything.** In a repo where "process" appears in dozens of names, the name `process` carries close to zero bits of information — searching all of its tokens still leaves the corpus barely narrowed. The result set isn't wrong; it's just huge, and the agent pages through it.
+
+**Obscurity and misspellings: keys nobody would guess.** The opposite failure. `iprefix`, `rotr32`, `nullifyMisingField` (spelled exactly like that) are highly selective — if you search for them, you find them. But no agent searches for a misspelling it doesn't know exists. The search for "missing field" returns nothing, the agent concludes the code doesn't exist, and falls back to grep sweeps or reading whole files: the expensive behavior semantic search was supposed to replace.
+
+**Placeholders: names that carry no information at all.** `tmp = load_config(path)` forces every future reader — human or agent — to look up the initializer to learn what `tmp` holds. The name had an informative token available for free and discarded it.
+
+**Splits: one concept, two keys.** The failure this article is mostly about, and the quietest one:
 
 ```
 synonym_splits (same concept, different words — searching one spelling misses the rest):
@@ -12,7 +31,7 @@ synonym_splits (same concept, different words — searching one spelling misses 
   MasterIndex::load_snapshot(master_index.cpp:58) MasterIndex::read_snapshot(master_index.cpp:62)
 ```
 
-Two findings. Both real. The second one was this:
+The second finding was this:
 
 ```cpp
 std::shared_ptr<const FileSnapshot> MasterIndex::load_snapshot() const {
@@ -24,38 +43,29 @@ std::shared_ptr<const FileSnapshot> MasterIndex::read_snapshot() const {
 }
 ```
 
-A pure alias, four lines apart, that had survived every review since it was written. 74 call sites used one name, 20 used the other. Nobody noticed because humans read files. Agents search them, and that difference is the whole story.
+A pure alias, four lines apart. 74 call sites used one name, 20 used the other. An agent tracing callers of "the snapshot accessor" finds 74 of 94 sites and reasons about a call graph missing a fifth of its edges. An agent adding a caller picks whichever spelling its search surfaced, deepening the split. An agent told "rename the snapshot accessor" renames one of them. None of these are agent bugs; each search returned true results. The codebase lied by omission, and unlike collision or vagueness, the agent never learns it paid: searches don't fail, they return a subset.
 
-## Why a synonym costs an agent more than it costs you
+## Scoring names as information
 
-When a coding agent needs the snapshot accessor, it doesn't scroll. It runs a semantic search for something like "read snapshot", gets a hit, and stops. Search-and-stop is the correct strategy; reading whole files is exactly the token waste code search exists to prevent. But it has a failure mode: the search is only as complete as the vocabulary is consistent.
+These failures look unrelated until you treat a name as a search key and score it in information terms. Each token in a name has a selectivity: the fraction of symbols whose names contain it. Its information is -log2 of that. Tokens multiply their selectivities (a name is the intersection of its tokens' candidate sets), so bits add across the name. That single number sorts the failure modes:
 
-With `load_snapshot` and `read_snapshot` both live, every downstream task forks:
+- **Vague names** carry too few bits: all their tokens together still leave an expected result set of dozens. `process` in a process-heavy repo scores ~0 bits. No English judgment involved — the same name is fine in a repo where it's rare.
+- **Ambiguous names** are key collisions: the full name, at maximum information, still maps to many definitions.
+- **Obscure and misspelled tokens** carry *lots* of bits, and that's the problem. They're selective but unguessable: high information that no query will ever spend. The check is a dictionary-and-corpus test, the complement of the selectivity one.
+- **Placeholders** carry no bits and had bits available: the initializer's callee offered an informative token (`load_config` → `config`) and the name took `tmp` instead.
+- **Splits** put the right bits under two different keys. Detect them by canonicalizing every token to its synonym-group primary (`fetch`, `load`, `read` → `get`) and re-joining: names that collide on canonical form but differ in raw token sequence are one concept with two spellings.
 
-- An agent tracing callers of "the snapshot accessor" finds 74 of 94 sites and reasons about a call graph missing a fifth of its edges.
-- An agent adding a new caller picks whichever spelling its search surfaced, deepening the split.
-- An agent told "rename the snapshot accessor" renames one and leaves a broken build or, worse, a working build where the alias silently keeps old behavior alive.
+The payoff of the information framing is that every check becomes corpus-relative and mechanical. There's no style guide to argue about; the question is always "will the search an agent actually types resolve to the thing it wants, and only that thing?"
 
-None of these are agent bugs. Each search returned true results. The codebase lied by omission.
+## Precision is the hard part
 
-The human version of this cost exists too — you grep for `read_snapshot`, get 20 hits, and form a wrong mental model — but a human eventually opens `master_index.cpp` and sees both functions adjacent. An agent operating at sub-file granularity may never load those four lines together. Vocabulary consistency is the price of sub-file navigation.
+None of these signals survive contact with a real codebase in naive form. The placeholder check's first draft flagged 1,974 of 2,881 checked variables, and almost every flag was *good* naming: `size = f.tellg()` names the role, not the source, which is what you want. It shipped only after being narrowed to placeholder names that threw away an informative source.
 
-## Detecting splits without drowning in false positives
+The split detector repeated the pattern in miniature. First self-run: five groups. Three were single-token names (`add` vs `push`, `get` vs `load`, `put` vs `store`), and every one was deliberate: a queue exposes `push` and a set exposes `add` because the data structure's idiom is the right name. The shipped rule requires at least two tokens, which took the live run from 2 genuine findings out of 5 to 2 out of 2. Two exclusions do the rest of the precision work: `get_user` vs `getUser` is a casing inconsistency (a different defect, separately checked), and `fetchUser` defined at five sites is a collision, not a split. A report that's 60% noise doesn't get read, and a report agents have learned to distrust is worse than no report.
 
-The detector is small. For every function-like symbol, split the name into tokens, map each token to its synonym-group primary (`fetch`, `load`, `read` → `get`), and re-join. Names that collide on the canonical form but differ in raw token sequence are one concept with two spellings. `fetchUser` and `loadUser` collide on `get_user`; a search for either misses the other.
+## Fixing what it found
 
-Two exclusions do most of the precision work, and both fall out of keying group members on the token sequence rather than the raw name:
-
-- `get_user` vs `getUser`: identical tokens, casing aside. That's a style inconsistency, a different defect with a different fix, and it's already covered by a convention checker.
-- `fetchUser` defined at five sites: one spelling, many definitions. Also a real problem (the search returns all five), also a different one.
-
-The naive version still wasn't shippable. First self-run: five groups. Three were single-token names (`add` vs `push`, `get` vs `load`, `put` vs `store`), and every one was deliberate. A queue exposes `push` and a set exposes `add` because the data structure's idiom is the right name. So the shipped rule requires at least two tokens, which took the live run from 2 genuine findings out of 5 to 2 out of 2.
-
-That 2-of-5 → 2-of-2 step matters more than the detector itself. An earlier naming signal we built, flagging variables whose name shares no vocabulary with their initializer, flagged 1,974 of 2,881 checked variables in its naive form, and almost every flag was *good* naming: `size = f.tellg()` names the role, not the source, and that's what you want. It shipped only after being narrowed to placeholder names (`tmp = load_config()`) that threw away an informative source. The pattern generalizes: a naming detector's first draft mostly flags good naming, and the work is finding the shape where divergence is indefensible. A report that's 60% noise doesn't get read, and a report agents have learned to distrust is worse than no report.
-
-## Fixing the two findings
-
-The two findings needed opposite fixes, which is itself a lesson in what the signal means. A split is a question (is this distinction deliberate?), and the answer decides the fix.
+The two split findings needed opposite fixes, which is the point of treating a finding as a question (is this distinction deliberate?) rather than a verdict.
 
 `read_snapshot` vs `load_snapshot`: not deliberate. Same function, two names. Delete the alias, migrate 20 call sites to the 74-site majority spelling:
 
@@ -64,16 +74,14 @@ The two findings needed opposite fixes, which is itself a lesson in what the sig
 grep -rl read_snapshot src include tests | xargs sed -i 's/read_snapshot/load_snapshot/g'
 ```
 
-`get_file` vs `load_file`: deliberate, which makes it the more interesting case. `get_file` is the lock-free read accessor; `load_file` ingests a file into the store, on the serialized write path. Different operations. The defect is that "load" sits in the same synonym group as "get" in almost any vocabulary, so a reader (human or agent) meeting `load_file` cold will guess it's a read. The fix keeps the distinction and moves the write side out of the read-verb group entirely: `load_file` → `add_file`, along with its `add_file_mapped` and `batch_add_files` variants. (`load_file_from_disk`, which genuinely reads from disk, keeps its name.)
-
-Rename-to-unify and rename-to-separate are both valid outcomes. The detector can't tell you which you need; it can only tell you that right now the names claim the functions are the same operation, and for one of these pairs the names were wrong about that.
+`get_file` vs `load_file`: deliberate, which makes it the more interesting case. `get_file` is the lock-free read accessor; `load_file` ingests a file into the store, on the serialized write path. Different operations. The defect is that "load" sits in the same synonym group as "get" in almost any vocabulary, so a reader meeting `load_file` cold will guess it's a read. The fix keeps the distinction and moves the write side out of the read-verb group entirely: `load_file` → `add_file`, along with its `add_file_mapped` and `batch_add_files` variants. (`load_file_from_disk`, which genuinely reads from disk, keeps its name.)
 
 After the renames, the report section is empty and the full suite is green — 2,528 tests, including the ones that pin the detector's exclusions so the noise classes can't creep back.
 
 ## Takeaways
 
-- Agent-assisted codebases pay for vocabulary drift on every search, and the cost is invisible: searches don't fail, they return a subset.
-- The detector is ~80 lines: tokenize, canonicalize through a synonym table, group, and report groups with ≥2 distinct spellings and ≥2 tokens. The synonym table you need is small — get/fetch/load/read, add/append/push, delete/remove/erase covers most real drift.
-- Calibrate on a live codebase before trusting any naming signal. Expect the first run to be mostly false positives, and expect the fix to be a narrower trigger, not a smarter scorer.
-- Treat each finding as a question, not a verdict. Unify when the split is accidental; rename *further apart* when the split is real but the names deny it.
-- Run it on code you maintain, not code you're proud of. Both of our findings were in files with heavy recent attention.
+- Every naming defect is a search-cost defect for an agent: collisions inflate result sets, vagueness inflates them further, obscurity empties them, placeholders defer the lookup, and splits silently truncate them.
+- Scoring names by corpus-relative information (token selectivity, bits, canonical collisions) turns all five into mechanical, arguable-free checks. No dictionary opinions about what a "good name" is.
+- Expect the first run of any naming signal to flag mostly good naming. The fix is a narrower trigger, not a smarter scorer, and the narrowing is where the design lives.
+- Treat each finding as a question. Unify when the split is accidental; rename *further apart* when the distinction is real but the vocabulary denies it.
+- Run it on code you maintain, not code you're proud of. Both of our split findings were in files with heavy recent attention.
