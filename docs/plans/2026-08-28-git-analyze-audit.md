@@ -30,6 +30,30 @@ index reflects the working tree, so line drift between an analyzed
 historic commit and today's tree can make a symbol "duplicate" its own
 shifted copy (self-match guard compares exact (path,line)).
 
+## Update (2026-08-29): defects 2+3 fixed
+
+Defect 2: existing symbols are tokenized exactly once (the structural loop
+re-tokenized both sides of every new x existing pair), a set-size-ratio
+bound skips most pairwise Jaccard computations, and symbol bodies are only
+extracted when duplicates are in focus. Probe commit f7180a0: analysis
+7.6s -> 0.55s.
+
+Defect 3: the bespoke fuzzy similar-name and abbreviation-table checks are
+deleted (replace-and-remove). The naming focus now runs the report-side
+NamingAnalyzer over the index and filters its signals (synonym splits,
+ambiguous names, vague names, vocabulary outliers) to the changed symbols;
+case-style checking stays (no NamingAnalyzer overlap). New issue types:
+synonym_split, ambiguous_name, vague_name, vocabulary_outlier. Verified
+live: a staged `to_string` reports ambiguous_name (44 sites). Known
+residue: NamingAnalyzer caps its per-signal lists, so a changed name can
+miss the cut on a corpus with worse offenders — bounded over-silence, and
+signals only exist for names already present in the index (same
+index-reflects-working-tree residue as the duplicate finder).
+
+Defect 4's residual recalibration is subsumed: naming severities now come
+from issue type (Warning for splits/ambiguous/case, Info for vague/
+outliers), and risk stays the per-severity sum over scoped findings.
+
 ## Remaining defects (file scope, not fixed yet)
 
 1. FIXED (see update above). **Not hunk-scoped — the cardinal flaw.** parse_changed_files parses whole
@@ -41,14 +65,14 @@ shifted copy (self-match guard compares exact (path,line)).
    the diff) and keep only symbols whose span intersects a changed hunk.
    This single fix corrects the modified-count, definder scoping, AND risk
    saturation, and cuts analysis cost by the same factor.
-2. **O(changed x whole-index) similarity, uncached.** get_existing_symbols
+2. FIXED (see 2026-08-29 update). **O(changed x whole-index) similarity, uncached.** get_existing_symbols
    walks every indexed file, copies every function body, and computes
    nesting per symbol on EVERY request (~40-60s on this repo); check_naming
    additionally deep-copies the same-type symbol list per changed symbol.
    After hunk scoping shrinks `new_symbols`, the remaining hot fix is to
    reuse content hashes / trigram prefilters before pairwise similarity,
    and stop copying SymbolInfo (const&/pointers).
-3. **Naming checks are redundant and weaker than NamingAnalyzer.** The
+3. FIXED (see 2026-08-29 update). **Naming checks are redundant and weaker than NamingAnalyzer.** The
    bespoke case-style/similar/abbreviation checks overlap the report-side
    NamingAnalyzer (synonyms, English-likeness, corpus information) and
    produce lower-precision suggestions ("consider using existing name
