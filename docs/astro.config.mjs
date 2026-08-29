@@ -42,6 +42,12 @@ export default defineConfig({
           ],
         },
         {
+          label: 'Articles',
+          items: [
+            { label: 'Synonym-Split Naming', slug: 'synonym-split-naming' },
+          ],
+        },
+        {
           label: 'Reference',
           items: [
             { label: 'CLI Usage', slug: 'cli-usage' },

@@ -1,0 +1,78 @@
+---
+title: Synonym-Split Naming
+description: Why one concept spelled two ways breaks agent code navigation, and how the synonym-split detector finds and fixes vocabulary drift.
+---
+
+Here's a report our code-intelligence tool printed against its own C++ source last week:
+
+```
+synonym_splits (same concept, different words — searching one spelling misses the rest):
+  FileContentStore::get_file(file_content_store.cpp:283) FileContentStore::load_file(file_content_store.cpp:433)
+  MasterIndex::load_snapshot(master_index.cpp:58) MasterIndex::read_snapshot(master_index.cpp:62)
+```
+
+Two findings. Both real. The second one was this:
+
+```cpp
+std::shared_ptr<const FileSnapshot> MasterIndex::load_snapshot() const {
+    return snapshot_.load(std::memory_order_acquire);
+}
+
+std::shared_ptr<const FileSnapshot> MasterIndex::read_snapshot() const {
+    return load_snapshot();
+}
+```
+
+A pure alias, four lines apart, that had survived every review since it was written. 74 call sites used one name, 20 used the other. Nobody noticed because humans read files. Agents search them, and that difference is the whole story.
+
+## Why a synonym costs an agent more than it costs you
+
+When a coding agent needs the snapshot accessor, it doesn't scroll. It runs a semantic search for something like "read snapshot", gets a hit, and stops. Search-and-stop is the correct strategy; reading whole files is exactly the token waste code search exists to prevent. But it has a failure mode: the search is only as complete as the vocabulary is consistent.
+
+With `load_snapshot` and `read_snapshot` both live, every downstream task forks:
+
+- An agent tracing callers of "the snapshot accessor" finds 74 of 94 sites and reasons about a call graph missing a fifth of its edges.
+- An agent adding a new caller picks whichever spelling its search surfaced, deepening the split.
+- An agent told "rename the snapshot accessor" renames one and leaves a broken build or, worse, a working build where the alias silently keeps old behavior alive.
+
+None of these are agent bugs. Each search returned true results. The codebase lied by omission.
+
+The human version of this cost exists too — you grep for `read_snapshot`, get 20 hits, and form a wrong mental model — but a human eventually opens `master_index.cpp` and sees both functions adjacent. An agent operating at sub-file granularity may never load those four lines together. Vocabulary consistency is the price of sub-file navigation.
+
+## Detecting splits without drowning in false positives
+
+The detector is small. For every function-like symbol, split the name into tokens, map each token to its synonym-group primary (`fetch`, `load`, `read` → `get`), and re-join. Names that collide on the canonical form but differ in raw token sequence are one concept with two spellings. `fetchUser` and `loadUser` collide on `get_user`; a search for either misses the other.
+
+Two exclusions do most of the precision work, and both fall out of keying group members on the token sequence rather than the raw name:
+
+- `get_user` vs `getUser`: identical tokens, casing aside. That's a style inconsistency, a different defect with a different fix, and it's already covered by a convention checker.
+- `fetchUser` defined at five sites: one spelling, many definitions. Also a real problem (the search returns all five), also a different one.
+
+The naive version still wasn't shippable. First self-run: five groups. Three were single-token names (`add` vs `push`, `get` vs `load`, `put` vs `store`), and every one was deliberate. A queue exposes `push` and a set exposes `add` because the data structure's idiom is the right name. So the shipped rule requires at least two tokens, which took the live run from 2 genuine findings out of 5 to 2 out of 2.
+
+That 2-of-5 → 2-of-2 step matters more than the detector itself. An earlier naming signal we built, flagging variables whose name shares no vocabulary with their initializer, flagged 1,974 of 2,881 checked variables in its naive form, and almost every flag was *good* naming: `size = f.tellg()` names the role, not the source, and that's what you want. It shipped only after being narrowed to placeholder names (`tmp = load_config()`) that threw away an informative source. The pattern generalizes: a naming detector's first draft mostly flags good naming, and the work is finding the shape where divergence is indefensible. A report that's 60% noise doesn't get read, and a report agents have learned to distrust is worse than no report.
+
+## Fixing the two findings
+
+The two findings needed opposite fixes, which is itself a lesson in what the signal means. A split is a question (is this distinction deliberate?), and the answer decides the fix.
+
+`read_snapshot` vs `load_snapshot`: not deliberate. Same function, two names. Delete the alias, migrate 20 call sites to the 74-site majority spelling:
+
+```bash
+# alias definition and declaration removed, then:
+grep -rl read_snapshot src include tests | xargs sed -i 's/read_snapshot/load_snapshot/g'
+```
+
+`get_file` vs `load_file`: deliberate, which makes it the more interesting case. `get_file` is the lock-free read accessor; `load_file` ingests a file into the store, on the serialized write path. Different operations. The defect is that "load" sits in the same synonym group as "get" in almost any vocabulary, so a reader (human or agent) meeting `load_file` cold will guess it's a read. The fix keeps the distinction and moves the write side out of the read-verb group entirely: `load_file` → `add_file`, along with its `add_file_mapped` and `batch_add_files` variants. (`load_file_from_disk`, which genuinely reads from disk, keeps its name.)
+
+Rename-to-unify and rename-to-separate are both valid outcomes. The detector can't tell you which you need; it can only tell you that right now the names claim the functions are the same operation, and for one of these pairs the names were wrong about that.
+
+After the renames, the report section is empty and the full suite is green — 2,528 tests, including the ones that pin the detector's exclusions so the noise classes can't creep back.
+
+## Takeaways
+
+- Agent-assisted codebases pay for vocabulary drift on every search, and the cost is invisible: searches don't fail, they return a subset.
+- The detector is ~80 lines: tokenize, canonicalize through a synonym table, group, and report groups with ≥2 distinct spellings and ≥2 tokens. The synonym table you need is small — get/fetch/load/read, add/append/push, delete/remove/erase covers most real drift.
+- Calibrate on a live codebase before trusting any naming signal. Expect the first run to be mostly false positives, and expect the fix to be a narrower trigger, not a smarter scorer.
+- Treat each finding as a question, not a verdict. Unify when the split is accidental; rename *further apart* when the split is real but the names deny it.
+- Run it on code you maintain, not code you're proud of. Both of our findings were in files with heavy recent attention.
