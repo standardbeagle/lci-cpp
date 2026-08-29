@@ -91,12 +91,32 @@ struct NameFidelity {
     std::vector<FidelityMismatch> mismatches;
 };
 
+/// One spelling of a split concept: a distinct raw name (representative
+/// site) whose canonicalized tokens equal the group's.
+struct SynonymSplitMember {
+    std::string name;      ///< raw spelling (highest fan-in site)
+    std::string location;  ///< basename:line of that site
+    int fan_in{};          ///< summed incoming refs across sites spelled this way
+};
+
+/// Two or more symbols naming the same concept with different words: their
+/// names are identical after mapping every token to its synonym-group
+/// primary, but the token sequences differ (fetchUser vs loadUser). A
+/// search for one spelling misses the others — the "same word for the same
+/// thing" rule, checked corpus-wide.
+struct SynonymSplit {
+    std::string canonical;  ///< primary-token form, tokens joined by '_'
+    std::vector<SynonymSplitMember> members;  ///< distinct spellings, by fan-in
+    int total_fan_in{};
+};
+
 struct NamingReport {
     std::vector<VocabularyOutlier> outliers;
     std::vector<AliasUsage> aliases_in_use;
     std::vector<AmbiguousName> ambiguous_names;
     NameInformation information;
     NameFidelity fidelity;
+    std::vector<SynonymSplit> synonym_splits;
 };
 
 /// Detects low-discoverability naming to cut wasted semantic searches.

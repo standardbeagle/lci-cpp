@@ -853,6 +853,53 @@ TEST(NamingAnalyzer, FidelityFlagsMismatchedInitializer) {
     EXPECT_EQ(rep.fidelity.mismatches[0].source_name, "load_config");
 }
 
+TEST(NamingAnalyzer, SynonymSplitFlagsSameConceptDifferentSpelling) {
+    auto table = SynonymTable::build_default();
+    // fetchUser and loadUser canonicalize to the same concept (fetch/load are
+    // members of the "get" group) with different spellings: a search for one
+    // misses the other. parseDocument shares no concept and stays silent.
+    auto fetch = make_ref_sym("fetchUser", 5, 1);
+    auto load = make_ref_sym("loadUser", 2, 2);
+    auto parse = make_ref_sym("parseDocument", 4, 3);
+    auto f = make_file("api/user.go", {&fetch, &load, &parse});
+
+    NamingAnalyzer na;
+    auto rep = na.analyze({f}, table, "");
+    ASSERT_EQ(rep.synonym_splits.size(), 1u);
+    const auto& sp = rep.synonym_splits[0];
+    EXPECT_EQ(sp.canonical, "get_user");
+    ASSERT_EQ(sp.members.size(), 2u);
+    // Members ranked by fan-in.
+    EXPECT_EQ(sp.members[0].name, "fetchUser");
+    EXPECT_EQ(sp.members[1].name, "loadUser");
+    EXPECT_EQ(sp.total_fan_in, 7);
+}
+
+TEST(NamingAnalyzer, SynonymSplitIgnoresStyleOnlyDifference) {
+    auto table = SynonymTable::build_default();
+    // get_user vs getUser: identical token sequence, only casing differs.
+    // That is the convention-mismatch axis, not a vocabulary split.
+    auto snake = make_ref_sym("get_user", 3, 1);
+    auto camel = make_ref_sym("getUser", 3, 2);
+    auto f = make_file("api/user.go", {&snake, &camel});
+
+    NamingAnalyzer na;
+    auto rep = na.analyze({f}, table, "");
+    EXPECT_TRUE(rep.synonym_splits.empty());
+}
+
+TEST(NamingAnalyzer, SynonymSplitIgnoresSingleSpelling) {
+    auto table = SynonymTable::build_default();
+    // The same spelling at two sites is the ambiguity axis, never a split.
+    auto a = make_ref_sym("fetchUser", 3, 1);
+    auto b = make_ref_sym("fetchUser", 3, 2);
+    auto f = make_file("api/user.go", {&a, &b});
+
+    NamingAnalyzer na;
+    auto rep = na.analyze({f}, table, "");
+    EXPECT_TRUE(rep.synonym_splits.empty());
+}
+
 TEST(NamingAnalyzer, CommonWordRecognized) {
     EXPECT_TRUE(NamingAnalyzer::is_common_word("handler"));
     EXPECT_TRUE(NamingAnalyzer::is_common_word("logf"));
