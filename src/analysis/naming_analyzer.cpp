@@ -600,6 +600,84 @@ NamingReport NamingAnalyzer::analyze(
               });
     if (report.aliases_in_use.size() > 12) report.aliases_in_use.resize(12);
 
+    // Synonym splits (cluster-vocabulary coherence): names that canonicalize
+    // to the same concept — every token mapped to its synonym-group primary —
+    // but use different token sequences (fetchUser vs loadUser). One search
+    // misses the sibling spellings. Same-sequence names differing only in
+    // casing belong to the convention axis; identical spellings at many
+    // sites belong to the ambiguity axis; both stay out by keying members on
+    // the token sequence.
+    {
+        struct SpellingAgg {
+            int fan_in{};        // summed refs across sites with this spelling
+            int best_fan_in{-1};
+            std::string name;    // raw spelling at the highest-fan-in site
+            std::string location;
+        };
+        absl::flat_hash_map<std::string,
+                            absl::flat_hash_map<std::string, SpellingAgg>>
+            by_canonical;
+        std::string canon, seq;
+        for (const auto& c : cands) {
+            const std::string& nm = c.sym->symbol.name;
+            if (!nm.empty() && nm[0] == '~') continue;  // language forms
+            // Bare single-token verbs (add/push, get/load, put/store on
+            // different containers) are deliberate per-structure vocabulary,
+            // not a split — aliases_in_use already teaches those. First
+            // self-run: all 3 single-token groups were noise, both
+            // multi-token groups were real (get_file/load_file,
+            // load_snapshot/read_snapshot).
+            if (c.tokens.size() < 2) continue;
+            canon.clear();
+            seq.clear();
+            for (const auto& t : c.tokens) {
+                auto p = synonyms.primary_of(t);
+                if (!canon.empty()) {
+                    canon += '_';
+                    seq += '_';
+                }
+                canon += p.empty() ? std::string_view(t) : p;
+                seq += t;
+            }
+            auto& agg = by_canonical[canon][seq];
+            int fan_in = static_cast<int>(c.sym->incoming_ref_count);
+            agg.fan_in += fan_in;
+            if (fan_in > agg.best_fan_in) {
+                agg.best_fan_in = fan_in;
+                agg.name = nm;
+                agg.location =
+                    c.base_path + ":" + std::to_string(c.sym->symbol.line);
+            }
+        }
+        std::vector<SynonymSplit> splits;
+        for (auto& [canonical, spellings] : by_canonical) {
+            if (spellings.size() < 2) continue;
+            SynonymSplit sp;
+            sp.canonical = canonical;
+            for (auto& [s, agg] : spellings) {
+                sp.total_fan_in += agg.fan_in;
+                sp.members.push_back(SynonymSplitMember{
+                    std::move(agg.name), std::move(agg.location), agg.fan_in});
+            }
+            std::sort(sp.members.begin(), sp.members.end(),
+                      [](const SynonymSplitMember& a,
+                         const SynonymSplitMember& b) {
+                          if (a.fan_in != b.fan_in) return a.fan_in > b.fan_in;
+                          return a.name < b.name;
+                      });
+            splits.push_back(std::move(sp));
+        }
+        std::sort(splits.begin(), splits.end(),
+                  [](const SynonymSplit& a, const SynonymSplit& b) {
+                      if (a.total_fan_in != b.total_fan_in)
+                          return a.total_fan_in > b.total_fan_in;
+                      return a.canonical < b.canonical;
+                  });
+        if (splits.size() > size_t{ci_thresholds::kMaxSynonymSplits})
+            splits.resize(ci_thresholds::kMaxSynonymSplits);
+        report.synonym_splits = std::move(splits);
+    }
+
     // Name-vs-source fidelity: a variable initialized from a call should
     // share vocabulary with its source. Textual line scan against the
     // indexed content — report-time only, Variable symbols only.

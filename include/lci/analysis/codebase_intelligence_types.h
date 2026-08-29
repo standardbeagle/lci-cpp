@@ -63,6 +63,8 @@ inline constexpr int kMaxAmbiguousNames = 10;
 inline constexpr int kVaguenessCorpusWord = 3;
 inline constexpr int kMaxVagueTokens = 8;
 inline constexpr int kMaxVagueNames = 10;
+// Synonym-split groups reported (same concept, multiple spellings).
+inline constexpr int kMaxSynonymSplits = 8;
 }  // namespace ci_thresholds
 
 // ============================================================================

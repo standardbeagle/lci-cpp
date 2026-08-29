@@ -888,6 +888,20 @@ TEST(NamingAnalyzer, SynonymSplitIgnoresStyleOnlyDifference) {
     EXPECT_TRUE(rep.synonym_splits.empty());
 }
 
+TEST(NamingAnalyzer, SynonymSplitIgnoresBareSingleTokenVerbs) {
+    auto table = SynonymTable::build_default();
+    // add vs push as whole names: per-structure container vocabulary
+    // (set.add, queue.push), deliberately distinct — aliases_in_use covers
+    // the repo-level lesson. Only multi-token names can split.
+    auto add = make_ref_sym("add", 9, 1);
+    auto push = make_ref_sym("push", 7, 2);
+    auto f = make_file("core/containers.go", {&add, &push});
+
+    NamingAnalyzer na;
+    auto rep = na.analyze({f}, table, "");
+    EXPECT_TRUE(rep.synonym_splits.empty());
+}
+
 TEST(NamingAnalyzer, SynonymSplitIgnoresSingleSpelling) {
     auto table = SynonymTable::build_default();
     // The same spelling at two sites is the ambiguity axis, never a split.

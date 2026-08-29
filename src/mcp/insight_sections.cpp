@@ -482,7 +482,7 @@ void emit_resource_management(std::ostringstream& out,
 // A symbol ranked by how much of the codebase transitively depends on it.
 void emit_vocabulary(std::ostringstream& out, const NamingReport& nr) {
     if (nr.outliers.empty() && nr.aliases_in_use.empty() &&
-        nr.ambiguous_names.empty())
+        nr.ambiguous_names.empty() && nr.synonym_splits.empty())
         return;
     out << "== VOCABULARY ==\n";
     if (nr.information.total_symbols > 0) {
@@ -514,6 +514,19 @@ void emit_vocabulary(std::ostringstream& out, const NamingReport& nr) {
             out << "  " << m.var_name << " <- " << m.source_name << " ("
                 << m.location << ")";
             if (m.use_count > 0) out << " uses=" << m.use_count;
+            out << "\n";
+        }
+    }
+    if (!nr.synonym_splits.empty()) {
+        out << "synonym_splits (same concept, different words — searching one"
+               " spelling misses the rest):\n";
+        for (const auto& sp : nr.synonym_splits) {
+            out << "  " << sp.canonical << ":";
+            for (const auto& m : sp.members) {
+                out << " " << m.name << "(" << m.location;
+                if (m.fan_in > 0) out << ", refs=" << m.fan_in;
+                out << ")";
+            }
             out << "\n";
         }
     }
