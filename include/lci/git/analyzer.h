@@ -4,13 +4,13 @@
 #include <string_view>
 #include <vector>
 
+#include <absl/container/flat_hash_set.h>
 #include <nlohmann/json_fwd.hpp>
 
+#include <lci/analysis/naming_analyzer.h>
 #include <lci/git/provider.h>
 #include <lci/git/types.h>
 #include <lci/indexing/master_index.h>
-#include <lci/semantic/fuzzy_matcher.h>
-#include <lci/semantic/name_splitter.h>
 
 namespace lci {
 namespace git {
@@ -24,6 +24,15 @@ std::string normalize_code_content(std::string_view content);
 
 /// Computes Jaccard token-similarity between two code blocks.
 double code_structural_similarity(std::string_view a, std::string_view b);
+
+/// Filters a corpus-wide NamingReport down to findings involving the changed
+/// symbols (matched by name). This is the git naming focus: the report-side
+/// NamingAnalyzer signals (synonym splits, ambiguous names, vague names,
+/// vocabulary outliers) replace the bespoke fuzzy similar-name and
+/// abbreviation-table checks, which overlapped them at lower precision.
+void naming_findings_from_report(const NamingReport& report,
+                                 const std::vector<const SymbolInfo*>& changed,
+                                 std::vector<NamingFinding>& out);
 
 /// Extracts the source text for a symbol from file content (1-based lines).
 std::string extract_symbol_content(std::string_view content,
@@ -64,8 +73,6 @@ class Analyzer {
   private:
     Provider& provider_;
     MasterIndex& index_;
-    FuzzyMatcher fuzzy_matcher_;
-    NameSplitter name_splitter_;
 
     /// Extracts symbols from every readable changed file. `skipped_out`
     /// receives the count of files whose content could not be read.
@@ -82,19 +89,10 @@ class Analyzer {
                          std::vector<DuplicateFinding>& out);
 
     void check_naming(const std::vector<SymbolInfo>& new_symbols,
-                      const std::vector<SymbolInfo>& existing_symbols,
                       const AnalysisParams& params,
                       std::vector<NamingFinding>& out);
 
     bool check_case_style(const SymbolInfo& sym, NamingFinding& out);
-
-    bool find_similar_names(const SymbolInfo& sym,
-                            const std::vector<SymbolInfo>& existing,
-                            double threshold, NamingFinding& out);
-
-    bool check_abbreviations(const SymbolInfo& sym,
-                             const std::vector<SymbolInfo>& existing,
-                             NamingFinding& out);
 
     void check_metrics(const std::vector<SymbolInfo>& new_symbols,
                        const std::vector<SymbolInfo>& existing_symbols,

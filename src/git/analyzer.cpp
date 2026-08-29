@@ -3,6 +3,7 @@
 #include <lci/analysis/scope_set.h>
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
@@ -15,7 +16,6 @@
 #include <lci/parser/parser.h>
 #include <lci/parser/parser_pool.h>
 #include <lci/parser/unified_extractor.h>
-#include <lci/core/text.h>
 #include <tree_sitter/api.h>
 
 namespace lci {
@@ -53,41 +53,6 @@ int severity_rank(FindingSeverity s) {
     return 0;
 }
 
-/// Common abbreviation -> expansion mappings.
-struct AbbrevEntry {
-    std::string_view abbrev;
-    std::string_view expansions[3];
-    int count;
-};
-
-const AbbrevEntry kAbbreviations[] = {
-    {"usr", {"user", "", ""}, 1},
-    {"msg", {"message", "", ""}, 1},
-    {"req", {"request", "", ""}, 1},
-    {"res", {"response", "result", ""}, 2},
-    {"resp", {"response", "", ""}, 1},
-    {"btn", {"button", "", ""}, 1},
-    {"img", {"image", "", ""}, 1},
-    {"err", {"error", "", ""}, 1},
-    {"ctx", {"context", "", ""}, 1},
-    {"cfg", {"config", "configuration", ""}, 2},
-    {"db", {"database", "", ""}, 1},
-    {"str", {"string", "", ""}, 1},
-    {"num", {"number", "", ""}, 1},
-    {"idx", {"index", "", ""}, 1},
-    {"len", {"length", "", ""}, 1},
-    {"val", {"value", "", ""}, 1},
-    {"ptr", {"pointer", "", ""}, 1},
-    {"src", {"source", "", ""}, 1},
-    {"dst", {"destination", "dest", ""}, 2},
-    {"tmp", {"temp", "temporary", ""}, 2},
-    {"auth", {"authentication", "authorization", ""}, 2},
-    {"info", {"information", "", ""}, 1},
-    {"init", {"initialize", "initialization", ""}, 2},
-    {"param", {"parameter", "", ""}, 1},
-    {"args", {"arguments", "", ""}, 1},
-};
-
 int compute_nesting_depth(std::string_view content) {
     int depth = 0;
     int max_depth = 0;
@@ -109,10 +74,7 @@ int compute_nesting_depth(std::string_view content) {
 // ============================================================================
 
 Analyzer::Analyzer(Provider& provider, MasterIndex& index)
-    : provider_(provider),
-      index_(index),
-      fuzzy_matcher_(true, 0.8, "jaro-winkler"),
-      name_splitter_() {}
+    : provider_(provider), index_(index) {}
 
 // ============================================================================
 // Main analysis entry point
@@ -173,7 +135,7 @@ bool Analyzer::analyze(const AnalysisParams& params, AnalysisReport& out) {
         find_duplicates(new_symbols, existing_symbols, params, duplicates);
     }
     if (params.has_focus("naming")) {
-        check_naming(new_symbols, existing_symbols, params, naming_issues);
+        check_naming(new_symbols, params, naming_issues);
     }
     if (params.has_focus("metrics")) {
         check_metrics(new_symbols, existing_symbols, params, metrics_issues);
@@ -517,19 +479,91 @@ double code_structural_similarity(std::string_view a, std::string_view b) {
 // Naming consistency
 // ============================================================================
 
-void Analyzer::check_naming(const std::vector<SymbolInfo>& new_symbols,
-                            const std::vector<SymbolInfo>& existing_symbols,
-                            const AnalysisParams& params,
-                            std::vector<NamingFinding>& out) {
-    double threshold = params.similarity_threshold;
-    if (threshold <= 0.0) threshold = 0.8;
+void naming_findings_from_report(const NamingReport& report,
+                                 const std::vector<const SymbolInfo*>& changed,
+                                 std::vector<NamingFinding>& out) {
+    absl::flat_hash_map<std::string_view, const SymbolInfo*> by_name;
+    by_name.reserve(changed.size());
+    for (const auto* s : changed) by_name.emplace(s->name, s);
 
-    // Group existing by type.
-    absl::flat_hash_map<std::string, std::vector<const SymbolInfo*>> by_type;
-    for (const auto& sym : existing_symbols) {
-        by_type[sym.type].push_back(&sym);
+    for (const auto& split : report.synonym_splits) {
+        if (split.members.size() < 2) continue;
+        for (const auto& m : split.members) {
+            auto it = by_name.find(m.name);
+            if (it == by_name.end()) continue;
+            std::string others;
+            const SynonymSplitMember* top = nullptr;
+            for (const auto& o : split.members) {
+                if (o.name == m.name) continue;
+                if (!others.empty()) others += ", ";
+                others += o.name;
+                if (top == nullptr || o.fan_in > top->fan_in) top = &o;
+            }
+            if (top == nullptr) continue;
+            NamingFinding f;
+            f.issue_type = NamingIssueType::SynonymSplit;
+            f.severity = determine_naming_severity(f.issue_type);
+            f.new_symbol = *it->second;
+            f.description = "Synonym split of '" + split.canonical + "'";
+            f.issue = "Same concept already spelled differently: " + others;
+            f.suggestion = "Use one spelling — highest fan-in is '" +
+                           top->name + "'";
+            out.push_back(std::move(f));
+        }
     }
 
+    for (const auto& an : report.ambiguous_names) {
+        auto it = by_name.find(an.name);
+        if (it == by_name.end()) continue;
+        NamingFinding f;
+        f.issue_type = NamingIssueType::AmbiguousName;
+        f.severity = determine_naming_severity(f.issue_type);
+        f.new_symbol = *it->second;
+        f.description = "Ambiguous name '" + an.name + "'";
+        f.issue = "Already defined at " + std::to_string(an.definition_count) +
+                  " sites — a search on this name identifies nothing";
+        f.suggestion = "Add a distinguishing token to the name";
+        out.push_back(std::move(f));
+    }
+
+    for (const auto& vn : report.information.vague_names) {
+        auto it = by_name.find(vn.name);
+        if (it == by_name.end()) continue;
+        NamingFinding f;
+        f.issue_type = NamingIssueType::VagueName;
+        f.severity = determine_naming_severity(f.issue_type);
+        f.new_symbol = *it->second;
+        f.description = "Vague name '" + vn.name + "'";
+        f.issue = "Name only narrows the corpus to ~" +
+                  std::to_string(static_cast<int>(vn.expected_matches)) +
+                  " candidate symbols";
+        f.suggestion = "Add a more selective token to the name";
+        out.push_back(std::move(f));
+    }
+
+    for (const auto& o : report.outliers) {
+        auto it = by_name.find(o.name);
+        if (it == by_name.end()) continue;
+        NamingFinding f;
+        f.issue_type = NamingIssueType::VocabularyOutlier;
+        f.severity = determine_naming_severity(f.issue_type);
+        f.new_symbol = *it->second;
+        f.description = "Vocabulary outlier '" + o.name + "'";
+        f.issue = "Token '" + o.odd_term + "' (" + o.reason +
+                  ") is vocabulary an agent is unlikely to search for";
+        f.suggestion = o.suggested.empty()
+                           ? std::string("Use standard vocabulary for this "
+                                         "token")
+                           : "Consider '" + o.suggested[0] + "'";
+        out.push_back(std::move(f));
+    }
+}
+
+void Analyzer::check_naming(const std::vector<SymbolInfo>& new_symbols,
+                            const AnalysisParams& params,
+                            std::vector<NamingFinding>& out) {
+    std::vector<const SymbolInfo*> changed;
+    changed.reserve(new_symbols.size());
     for (const auto& ns : new_symbols) {
         // Macro-expansion names (TEST, TEST_F, EXPECT_*) are not naming
         // choices: the parser sees the macro identifier as the function
@@ -543,29 +577,38 @@ void Analyzer::check_naming(const std::vector<SymbolInfo>& new_symbols,
             }
         }
         if (macro_like) continue;
+        changed.push_back(&ns);
+    }
+    if (changed.empty()) return;
 
+    for (const auto* ns : changed) {
         NamingFinding finding;
-        if (check_case_style(ns, finding)) {
+        if (check_case_style(*ns, finding)) {
             out.push_back(std::move(finding));
         }
-
-        // Build a vector of SymbolInfo for the same type.
-        std::vector<SymbolInfo> same_type;
-        if (auto it = by_type.find(ns.type); it != by_type.end()) {
-            same_type.reserve(it->second.size());
-            for (const auto* p : it->second) same_type.push_back(*p);
-        }
-
-        NamingFinding similar_finding;
-        if (find_similar_names(ns, same_type, threshold, similar_finding)) {
-            out.push_back(std::move(similar_finding));
-        }
-
-        NamingFinding abbrev_finding;
-        if (check_abbreviations(ns, existing_symbols, abbrev_finding)) {
-            out.push_back(std::move(abbrev_finding));
-        }
     }
+
+    // Corpus-relative signals come from the report-side NamingAnalyzer
+    // (synonym splits, ambiguous names, vague names, vocabulary outliers),
+    // computed once over the index and filtered to the changed symbols. The
+    // NamingAnalyzer caps its per-signal lists, so a changed name can miss
+    // the cut on a corpus with worse offenders — over-report is bounded, not
+    // guaranteed exhaustive.
+    std::vector<FileSymbolData> files;
+    auto rt_snap = index_.ref_tracker().pin();
+    for (auto fid : index_.get_all_file_ids()) {
+        auto syms = rt_snap->get_file_enhanced_symbols(fid);
+        if (syms.empty()) continue;
+        FileSymbolData fsd;
+        fsd.path = index_.get_file_path(fid);
+        fsd.owner = rt_snap;
+        fsd.symbols.reserve(syms.size());
+        for (const auto& sym : syms) fsd.symbols.push_back(sym.get());
+        files.push_back(std::move(fsd));
+    }
+    auto report = NamingAnalyzer().analyze(files, index_.config().synonyms,
+                                           index_.config().project.root);
+    naming_findings_from_report(report, changed, out);
 
     std::sort(out.begin(), out.end(), [](const auto& a, const auto& b) {
         return severity_rank(a.severity) > severity_rank(b.severity);
@@ -606,99 +649,6 @@ bool Analyzer::check_case_style(const SymbolInfo& sym, NamingFinding& out) {
     out.issue = "Uses " + std::string(to_string(actual)) + " but convention is " + expected_str;
     out.suggestion = "Consider renaming to use " + expected_str + " style";
     return true;
-}
-
-bool Analyzer::find_similar_names(const SymbolInfo& sym,
-                                  const std::vector<SymbolInfo>& existing,
-                                  double threshold,
-                                  NamingFinding& out) {
-    std::vector<SymbolInfo> similar;
-    auto new_lower = text::ascii_lower(sym.name);
-
-    for (const auto& es : existing) {
-        if (es.name == sym.name) continue;
-        auto exist_lower = text::ascii_lower(es.name);
-        double sim = fuzzy_matcher_.similarity(new_lower, exist_lower);
-        if (sim >= threshold) {
-            similar.push_back(es);
-        }
-    }
-
-    if (similar.empty()) return false;
-    if (similar.size() > 3) similar.resize(3);
-
-    std::string names;
-    for (size_t i = 0; i < similar.size(); ++i) {
-        if (i > 0) names += ", ";
-        names += similar[i].name;
-    }
-
-    out.severity = determine_naming_severity(NamingIssueType::SimilarExists, threshold);
-    out.new_symbol = sym;
-    out.similar_names = std::move(similar);
-    out.issue_type = NamingIssueType::SimilarExists;
-    out.issue = "Similar names already exist: " + names;
-    out.suggestion = "Consider using existing name '" + out.similar_names[0].name + "'";
-    return true;
-}
-
-bool Analyzer::check_abbreviations(const SymbolInfo& sym,
-                                   const std::vector<SymbolInfo>& existing,
-                                   NamingFinding& out) {
-    auto words = name_splitter_.split(sym.name);
-    if (words.empty()) return false;
-
-    for (const auto& word : words) {
-        auto word_lower = text::ascii_lower(word);
-
-        // Check if word is a known abbreviation.
-        for (const auto& entry : kAbbreviations) {
-            if (word_lower == entry.abbrev) {
-                for (const auto& es : existing) {
-                    auto es_words = name_splitter_.split(es.name);
-                    for (const auto& ew : es_words) {
-                        auto ew_lower = text::ascii_lower(ew);
-                        for (int j = 0; j < entry.count; ++j) {
-                            if (ew_lower == entry.expansions[j]) {
-                                out.severity = FindingSeverity::Info;
-                                out.new_symbol = sym;
-                                out.similar_names = {es};
-                                out.issue_type = NamingIssueType::Abbreviation;
-                                out.issue = "Uses abbreviation '" + word +
-                                            "' but codebase uses '" + ew + "'";
-                                out.suggestion = "Consider using '" + ew +
-                                                 "' instead of '" + word + "'";
-                                return true;
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Reverse check: new uses full form, existing uses abbreviation.
-            for (int j = 0; j < entry.count; ++j) {
-                if (word_lower == entry.expansions[j]) {
-                    for (const auto& es : existing) {
-                        auto es_words = name_splitter_.split(es.name);
-                        for (const auto& ew : es_words) {
-                            if (text::ascii_lower(ew) == entry.abbrev) {
-                                out.severity = FindingSeverity::Info;
-                                out.new_symbol = sym;
-                                out.similar_names = {es};
-                                out.issue_type = NamingIssueType::Abbreviation;
-                                out.issue = "Uses full form '" + word +
-                                            "' but codebase uses abbreviation '" + ew + "'";
-                                out.suggestion = "Consider using '" + ew +
-                                                 "' instead of '" + word + "'";
-                                return true;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    return false;
 }
 
 // ============================================================================

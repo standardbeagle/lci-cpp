@@ -154,19 +154,24 @@ struct CodeLocation {
 // Naming Analysis Types
 // ============================================================================
 
-/// Categorizes naming consistency issues.
+/// Categorizes naming consistency issues. The corpus-relative types mirror
+/// the report-side NamingAnalyzer signals, filtered to the changed symbols.
 enum class NamingIssueType : uint8_t {
-    CaseMismatch,     ///< camelCase vs PascalCase vs snake_case mismatch
-    SimilarExists,    ///< Similar names already exist in codebase
-    Abbreviation,     ///< Abbreviation inconsistency (getUsr vs getUser)
+    CaseMismatch,       ///< camelCase vs PascalCase vs snake_case mismatch
+    SynonymSplit,       ///< Same concept already spelled with synonym tokens
+    AmbiguousName,      ///< Name already defined at many distinct sites
+    VagueName,          ///< Name's tokens fail to narrow the corpus
+    VocabularyOutlier,  ///< Token is jargon/obscure/misspelled vocabulary
 };
 
 /// Returns the string name for a NamingIssueType value.
 constexpr std::string_view to_string(NamingIssueType t) {
     switch (t) {
         case NamingIssueType::CaseMismatch: return "case_mismatch";
-        case NamingIssueType::SimilarExists: return "similar_exists";
-        case NamingIssueType::Abbreviation: return "abbreviation";
+        case NamingIssueType::SynonymSplit: return "synonym_split";
+        case NamingIssueType::AmbiguousName: return "ambiguous_name";
+        case NamingIssueType::VagueName: return "vague_name";
+        case NamingIssueType::VocabularyOutlier: return "vocabulary_outlier";
     }
     return "unknown";
 }
@@ -409,8 +414,8 @@ double calculate_risk_score(const std::vector<DuplicateFinding>& duplicates,
 /// Determines severity based on similarity and size.
 FindingSeverity determine_duplicate_severity(double similarity, int line_count);
 
-/// Determines severity based on issue type and context.
-FindingSeverity determine_naming_severity(NamingIssueType issue_type, double similarity);
+/// Determines severity based on issue type.
+FindingSeverity determine_naming_severity(NamingIssueType issue_type);
 
 /// Determines severity based on metrics thresholds.
 FindingSeverity determine_metrics_severity(MetricsIssueType issue_type,

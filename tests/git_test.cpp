@@ -221,13 +221,15 @@ TEST(GitResults, DetermineDuplicateSeverity) {
 }
 
 TEST(GitResults, DetermineNamingSeverity) {
-    EXPECT_EQ(determine_naming_severity(NamingIssueType::SimilarExists, 0.95),
+    EXPECT_EQ(determine_naming_severity(NamingIssueType::CaseMismatch),
               FindingSeverity::Warning);
-    EXPECT_EQ(determine_naming_severity(NamingIssueType::SimilarExists, 0.80),
+    EXPECT_EQ(determine_naming_severity(NamingIssueType::SynonymSplit),
+              FindingSeverity::Warning);
+    EXPECT_EQ(determine_naming_severity(NamingIssueType::AmbiguousName),
+              FindingSeverity::Warning);
+    EXPECT_EQ(determine_naming_severity(NamingIssueType::VagueName),
               FindingSeverity::Info);
-    EXPECT_EQ(determine_naming_severity(NamingIssueType::CaseMismatch, 0.0),
-              FindingSeverity::Warning);
-    EXPECT_EQ(determine_naming_severity(NamingIssueType::Abbreviation, 0.0),
+    EXPECT_EQ(determine_naming_severity(NamingIssueType::VocabularyOutlier),
               FindingSeverity::Info);
 }
 
@@ -647,8 +649,11 @@ TEST(GitTypes, MetricsIssueTypeToString) {
 
 TEST(GitTypes, NamingIssueTypeToString) {
     EXPECT_EQ(to_string(NamingIssueType::CaseMismatch), "case_mismatch");
-    EXPECT_EQ(to_string(NamingIssueType::SimilarExists), "similar_exists");
-    EXPECT_EQ(to_string(NamingIssueType::Abbreviation), "abbreviation");
+    EXPECT_EQ(to_string(NamingIssueType::SynonymSplit), "synonym_split");
+    EXPECT_EQ(to_string(NamingIssueType::AmbiguousName), "ambiguous_name");
+    EXPECT_EQ(to_string(NamingIssueType::VagueName), "vague_name");
+    EXPECT_EQ(to_string(NamingIssueType::VocabularyOutlier),
+              "vocabulary_outlier");
 }
 
 TEST(GitTypes, MetricsThresholdsDefaults) {
@@ -720,6 +725,88 @@ TEST(GitAnalyzer, StructuralSimilarityDifferent) {
 TEST(GitAnalyzer, StructuralSimilarityEmpty) {
     EXPECT_DOUBLE_EQ(code_structural_similarity("", "code"), 0.0);
     EXPECT_DOUBLE_EQ(code_structural_similarity("code", ""), 0.0);
+}
+
+
+// ============================================================================
+// Naming findings from the corpus-wide NamingAnalyzer report
+// ============================================================================
+
+namespace {
+
+SymbolInfo make_changed_symbol(std::string name) {
+    SymbolInfo s;
+    s.name = std::move(name);
+    s.type = "function";
+    s.file_path = "src/x.go";
+    s.line = 10;
+    s.end_line = 20;
+    return s;
+}
+
+}  // namespace
+
+TEST(GitAnalyzer, NamingFindingsFilterReportToChangedSymbols) {
+    NamingReport report;
+
+    SynonymSplit split;
+    split.canonical = "load_user";
+    split.members = {{"fetchUser", "a.go:1", 7}, {"loadUser", "b.go:2", 3}};
+    report.synonym_splits.push_back(split);
+
+    report.ambiguous_names.push_back({"loadUser", 6});
+    report.information.vague_names.push_back({"process", 1.0, 40.0, 3});
+
+    VocabularyOutlier outlier;
+    outlier.name = "frobUser";
+    outlier.odd_term = "frob";
+    outlier.reason = "unknown-verb";
+    outlier.suggested = {"transform"};
+    report.outliers.push_back(outlier);
+
+    auto load_user = make_changed_symbol("loadUser");
+    auto frob_user = make_changed_symbol("frobUser");
+    auto untouched = make_changed_symbol("unrelatedName");
+    std::vector<const SymbolInfo*> changed = {&load_user, &frob_user,
+                                              &untouched};
+
+    std::vector<NamingFinding> out;
+    naming_findings_from_report(report, changed, out);
+
+    ASSERT_EQ(out.size(), 3u);
+
+    EXPECT_EQ(out[0].issue_type, NamingIssueType::SynonymSplit);
+    EXPECT_EQ(out[0].new_symbol.name, "loadUser");
+    EXPECT_EQ(out[0].severity, FindingSeverity::Warning);
+    EXPECT_NE(out[0].issue.find("fetchUser"), std::string::npos);
+    EXPECT_NE(out[0].suggestion.find("fetchUser"), std::string::npos);
+
+    EXPECT_EQ(out[1].issue_type, NamingIssueType::AmbiguousName);
+    EXPECT_EQ(out[1].new_symbol.name, "loadUser");
+    EXPECT_NE(out[1].issue.find("6"), std::string::npos);
+
+    EXPECT_EQ(out[2].issue_type, NamingIssueType::VocabularyOutlier);
+    EXPECT_EQ(out[2].new_symbol.name, "frobUser");
+    EXPECT_EQ(out[2].severity, FindingSeverity::Info);
+    EXPECT_NE(out[2].suggestion.find("transform"), std::string::npos);
+}
+
+TEST(GitAnalyzer, NamingFindingsVagueNameMatchesOnlyChanged) {
+    NamingReport report;
+    report.information.vague_names.push_back({"process", 1.0, 40.0, 3});
+    report.information.vague_names.push_back({"handle", 1.0, 55.0, 2});
+
+    auto process = make_changed_symbol("process");
+    std::vector<const SymbolInfo*> changed = {&process};
+
+    std::vector<NamingFinding> out;
+    naming_findings_from_report(report, changed, out);
+
+    ASSERT_EQ(out.size(), 1u);
+    EXPECT_EQ(out[0].issue_type, NamingIssueType::VagueName);
+    EXPECT_EQ(out[0].new_symbol.name, "process");
+    EXPECT_EQ(out[0].severity, FindingSeverity::Info);
+    EXPECT_NE(out[0].issue.find("40"), std::string::npos);
 }
 
 // ============================================================================

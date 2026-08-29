@@ -382,13 +382,14 @@ FindingSeverity determine_duplicate_severity(double similarity, int line_count) 
     return FindingSeverity::Info;
 }
 
-FindingSeverity determine_naming_severity(NamingIssueType issue_type, double similarity) {
+FindingSeverity determine_naming_severity(NamingIssueType issue_type) {
     switch (issue_type) {
-        case NamingIssueType::SimilarExists:
-            return (similarity >= 0.9) ? FindingSeverity::Warning : FindingSeverity::Info;
         case NamingIssueType::CaseMismatch:
+        case NamingIssueType::SynonymSplit:
+        case NamingIssueType::AmbiguousName:
             return FindingSeverity::Warning;
-        case NamingIssueType::Abbreviation:
+        case NamingIssueType::VagueName:
+        case NamingIssueType::VocabularyOutlier:
             return FindingSeverity::Info;
     }
     return FindingSeverity::Info;
