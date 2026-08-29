@@ -148,7 +148,7 @@ std::vector<std::string> MasterIndex::scopes_without_indexed_match(
     // indexed at all?" independent of whether the current pattern happens to
     // occur inside it. A scope that matches an indexed file but whose pattern
     // has zero hits is a legitimate empty result, NOT an unindexed-path error.
-    auto file_snap = read_snapshot();
+    auto file_snap = load_snapshot();
     std::string_view root = config().project.root;
     for (const auto& scope : scopes) {
         std::string_view norm = normalize_scope(scope);
@@ -237,7 +237,7 @@ std::vector<SearchResult> MasterIndex::execute_search(
     // Pin the file snapshot once for the whole query so id_to_path resolves to
     // a string_view into reverse_file_map with no per-result atomic load or
     // string copy (path is copied into SearchResult::path exactly once).
-    auto file_snap = read_snapshot();
+    auto file_snap = load_snapshot();
 
     if (options.declaration_only) {
         auto symbols = refs_snap->find_symbols_by_name(pattern);

@@ -96,7 +96,7 @@ ToolResult handle_find_files(const nlohmann::json& params,
         normalized_pattern.find_first_of("*?") != std::string::npos;
 
     // Get all file IDs from the index
-    auto snapshot = indexer.read_snapshot();
+    auto snapshot = indexer.load_snapshot();
     if (!snapshot || snapshot->file_count() == 0) {
         // Empty index is server state, not a caller mistake.
         return make_unavailable_response(

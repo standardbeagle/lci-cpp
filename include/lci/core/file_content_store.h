@@ -209,19 +209,19 @@ class FileContentStore {
     // -- Write API (single-writer, serialized) --------------------------------
 
     /// Loads a file into the store and returns its ID.
-    FileID load_file(const std::string& path, std::string_view content);
+    FileID add_file(const std::string& path, std::string_view content);
 
     /// Disk-load variant that RETAINS the mmap instead of copying its
     /// bytes to the heap (see FileContent::mapping). The store takes
     /// ownership of the mapping.
-    FileID load_file_mapped(const std::string& path, MappedFile mapping);
+    FileID add_file_mapped(const std::string& path, MappedFile mapping);
 
-    /// Batch form of load_file_mapped: one snapshot clone for the batch.
-    std::vector<FileID> batch_load_files_mapped(
+    /// Batch form of add_file_mapped: one snapshot clone for the batch.
+    std::vector<FileID> batch_add_files_mapped(
         std::vector<std::pair<std::string, MappedFile>> files);
 
     /// Loads multiple files in a single batch.
-    std::vector<FileID> batch_load_files(
+    std::vector<FileID> batch_add_files(
         const std::vector<std::pair<std::string, std::string_view>>& files);
 
     /// Removes a file from the store by path.
@@ -239,9 +239,9 @@ class FileContentStore {
 
     /// Serializes write-side snapshot mutations. Reads are lock-free
     /// against the atomic shared_ptr; the mutex only orders the
-    /// load-mutate-swap dance in load_file / batch_load_files /
+    /// load-mutate-swap dance in add_file / batch_add_files /
     /// invalidate_* / clear so concurrent writers cannot lose entries.
-    /// Without it, two threads racing through `load_file` both clone the
+    /// Without it, two threads racing through `add_file` both clone the
     /// same prior snapshot, append independently, and the second store
     /// drops whatever the first appended.
     mutable std::mutex write_mu_;

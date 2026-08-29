@@ -452,7 +452,7 @@ std::vector<SearchResult> SearchEngine::search(
     // Pin the file snapshot once for the whole query: path resolution below
     // (filter + per-file path) reads a string_view into it, no per-call atomic
     // load or string copy.
-    auto file_snap = index_.read_snapshot();
+    auto file_snap = index_.load_snapshot();
 
     bool hit_collection_cap = false;
     for (FileID fid : candidates) {

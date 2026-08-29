@@ -8,7 +8,7 @@ FileService::FileService(std::shared_ptr<FileContentStore> store,
     : store_(store ? std::move(store) : std::make_shared<FileContentStore>()),
       max_file_size_bytes_(max_file_size_bytes) {}
 
-Result<FileID> FileService::load_file(const std::string& path,
+Result<FileID> FileService::add_file(const std::string& path,
                                        std::string_view content) {
     if (static_cast<int64_t>(content.size()) > max_file_size_bytes_) {
         Error e;
@@ -20,7 +20,7 @@ Result<FileID> FileService::load_file(const std::string& path,
         return e;
     }
 
-    return store_->load_file(path, content);
+    return store_->add_file(path, content);
 }
 
 Result<FileID> FileService::load_file_from_disk(const std::string& path) {
@@ -44,7 +44,7 @@ Result<FileID> FileService::load_file_from_disk(const std::string& path) {
 
     // Hand the mapping itself to the store -- page-cache-backed bytes
     // instead of a heap copy (see FileContent::mapping).
-    return store_->load_file_mapped(path, std::move(mapped));
+    return store_->add_file_mapped(path, std::move(mapped));
 }
 
 std::vector<FileID> FileService::batch_load_from_disk(
@@ -72,7 +72,7 @@ std::vector<FileID> FileService::batch_load_from_disk(
     }
 
     // Mappings move into the store and live as the entries' bytes.
-    auto ids = store_->batch_load_files_mapped(std::move(batch));
+    auto ids = store_->batch_add_files_mapped(std::move(batch));
 
     std::vector<FileID> result(paths.size(), FileID{0});
     for (size_t k = 0; k < ids.size() && k < kept_index.size(); ++k) {

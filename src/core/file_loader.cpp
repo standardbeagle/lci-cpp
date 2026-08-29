@@ -10,13 +10,13 @@ namespace lci {
 /// Loads a file via memory-mapping and stores its content.
 /// Falls back to standard file I/O if mmap fails (e.g., /proc files).
 /// Returns the FileID on success, or an Error.
-Result<FileID> load_file_mmap(FileContentStore& store, const std::string& path) {
+Result<FileID> add_file_mmap(FileContentStore& store, const std::string& path) {
     MappedFile mapped;
     std::string mmap_error;
 
     if (mapped.open(path, &mmap_error)) {
         auto view = mapped.view();
-        FileID id = store.load_file(path, view);
+        FileID id = store.add_file(path, view);
         return id;
     }
 
@@ -37,18 +37,18 @@ Result<FileID> load_file_mmap(FileContentStore& store, const std::string& path) 
         return make_file_error("load", path, "failed to read file");
     }
 
-    FileID id = store.load_file(path, content);
+    FileID id = store.add_file(path, content);
     return id;
 }
 
 /// Loads multiple files via memory-mapping in batch.
-std::vector<Result<FileID>> batch_load_files_mmap(FileContentStore& store,
+std::vector<Result<FileID>> batch_add_files_mmap(FileContentStore& store,
                                                    const std::vector<std::string>& paths) {
     std::vector<Result<FileID>> results;
     results.reserve(paths.size());
 
     for (const auto& path : paths) {
-        results.push_back(load_file_mmap(store, path));
+        results.push_back(add_file_mmap(store, path));
     }
 
     return results;

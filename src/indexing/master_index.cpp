@@ -59,10 +59,6 @@ std::shared_ptr<const FileSnapshot> MasterIndex::load_snapshot() const {
     return snapshot_.load(std::memory_order_acquire);
 }
 
-std::shared_ptr<const FileSnapshot> MasterIndex::read_snapshot() const {
-    return load_snapshot();
-}
-
 FileID MasterIndex::path_to_id(const std::string& path) const {
     auto snap = load_snapshot();
     auto it = snap->file_map.find(path);
@@ -410,7 +406,7 @@ bool MasterIndex::update_file(const std::string& path, std::string_view content)
         remove_file_from_indexes(old_id, path);
     }
 
-    FileID new_id = file_content_store_->load_file(path, content);
+    FileID new_id = file_content_store_->add_file(path, content);
     if (new_id == FileID{0}) return false;
 
     trigram_index_.index_file(new_id, content);

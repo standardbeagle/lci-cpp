@@ -221,7 +221,7 @@ TEST(FileServiceTest, DefaultConstruction) {
 
 TEST(FileServiceTest, LoadAndGetContent) {
     FileService svc;
-    auto result = svc.load_file("test.cpp", "hello world");
+    auto result = svc.add_file("test.cpp", "hello world");
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(svc.get_content(result.value()), "hello world");
 }
@@ -230,7 +230,7 @@ TEST(FileServiceTest, MaxFileSizeEnforcement) {
     FileService svc(nullptr, 100);
     std::string large_content(200, 'x');
 
-    auto result = svc.load_file("big.cpp", large_content);
+    auto result = svc.add_file("big.cpp", large_content);
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().type, ErrorType::FileTooLarge);
 }
@@ -239,7 +239,7 @@ TEST(FileServiceTest, ExactMaxFileSizeAllowed) {
     FileService svc(nullptr, 100);
     std::string exact_content(100, 'x');
 
-    auto result = svc.load_file("exact.cpp", exact_content);
+    auto result = svc.add_file("exact.cpp", exact_content);
     ASSERT_TRUE(result.has_value());
 }
 
@@ -248,7 +248,7 @@ TEST(FileServiceTest, ExactMaxFileSizeAllowed) {
 // ---------------------------------------------------------------------------
 TEST(FileServiceTest, GetLineContent) {
     FileService svc;
-    auto result = svc.load_file("test.cpp", "line1\nline2\nline3");
+    auto result = svc.add_file("test.cpp", "line1\nline2\nline3");
     ASSERT_TRUE(result.has_value());
     FileID id = result.value();
 
@@ -259,7 +259,7 @@ TEST(FileServiceTest, GetLineContent) {
 
 TEST(FileServiceTest, GetLineContentCRLF) {
     FileService svc;
-    auto result = svc.load_file("test.cpp", "line1\r\nline2\r\nline3");
+    auto result = svc.add_file("test.cpp", "line1\r\nline2\r\nline3");
     ASSERT_TRUE(result.has_value());
     FileID id = result.value();
 
@@ -270,7 +270,7 @@ TEST(FileServiceTest, GetLineContentCRLF) {
 
 TEST(FileServiceTest, GetLineContentOutOfBounds) {
     FileService svc;
-    auto result = svc.load_file("test.cpp", "hello");
+    auto result = svc.add_file("test.cpp", "hello");
     ASSERT_TRUE(result.has_value());
     FileID id = result.value();
 
@@ -280,7 +280,7 @@ TEST(FileServiceTest, GetLineContentOutOfBounds) {
 
 TEST(FileServiceTest, GetLineContentEmptyFile) {
     FileService svc;
-    auto result = svc.load_file("empty.cpp", "");
+    auto result = svc.add_file("empty.cpp", "");
     ASSERT_TRUE(result.has_value());
     FileID id = result.value();
 
@@ -290,7 +290,7 @@ TEST(FileServiceTest, GetLineContentEmptyFile) {
 
 TEST(FileServiceTest, GetLineContentSingleLine) {
     FileService svc;
-    auto result = svc.load_file("single.cpp", "only line");
+    auto result = svc.add_file("single.cpp", "only line");
     ASSERT_TRUE(result.has_value());
     FileID id = result.value();
 
@@ -300,7 +300,7 @@ TEST(FileServiceTest, GetLineContentSingleLine) {
 
 TEST(FileServiceTest, GetLineCount) {
     FileService svc;
-    auto result = svc.load_file("test.cpp", "a\nb\nc");
+    auto result = svc.add_file("test.cpp", "a\nb\nc");
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(svc.get_line_count(result.value()), 3);
 }
@@ -322,7 +322,7 @@ TEST(FileServiceTest, SharedContentStore) {
     auto store = std::make_shared<FileContentStore>();
     FileService svc(store, 1024);
 
-    auto result = svc.load_file("test.cpp", "content");
+    auto result = svc.add_file("test.cpp", "content");
     ASSERT_TRUE(result.has_value());
 
     // Verify the store is shared.

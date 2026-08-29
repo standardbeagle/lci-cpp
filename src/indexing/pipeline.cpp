@@ -60,7 +60,7 @@ void Pipeline::run() {
     // on thread scheduling — which then propagates into symbol_id
     // ordering and HTTP/MCP response ordering.
     //
-    // Batched loading: per-file load_file rewrites the FileContentSnapshot
+    // Batched loading: per-file add_file rewrites the FileContentSnapshot
     // end-to-end (RCU copy-on-write). Calling it N times in a row is
     // O(N²) in snapshot size — perf showed 13% CPU in malloc+free and
     // 6.5% in FileContentSnapshot shared_ptr ref counting, both rooted

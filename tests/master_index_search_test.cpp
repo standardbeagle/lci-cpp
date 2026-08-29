@@ -516,7 +516,7 @@ TEST(MasterIndexSearchIntegrationTest, ConcurrentSearchReads) {
                         wrong_path.fetch_add(1, std::memory_order_relaxed);
                     }
                 }
-                auto snap = mi.read_snapshot();
+                auto snap = mi.load_snapshot();
                 (void)snap->file_count();
             }
         });

@@ -86,7 +86,7 @@ ErrorHandlingAnalyzer::Result ErrorHandlingAnalyzer::analyze(
     const auto& ref = indexer.ref_tracker();
     auto rt_snap = ref.pin();
     const auto& registry = indexer.attr_registry();
-    auto file_snap = indexer.read_snapshot();
+    auto file_snap = indexer.load_snapshot();
 
     // One production, kind-gated scoring unit per callable symbol with a
     // side-effect record.

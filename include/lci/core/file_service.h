@@ -27,14 +27,14 @@ class FileService {
 
     /// Loads file content from a buffer, enforcing the max file size.
     /// Returns the FileID on success, or an error if too large.
-    Result<FileID> load_file(const std::string& path, std::string_view content);
+    Result<FileID> add_file(const std::string& path, std::string_view content);
 
     /// Loads a file from disk via memory mapping, enforcing max file size.
     /// Returns the FileID on success, or an error.
     Result<FileID> load_file_from_disk(const std::string& path);
 
     /// Batches multiple from-disk loads into a single snapshot rewrite.
-    /// Each per-file load_file rewrites the FileContentSnapshot end-to-end
+    /// Each per-file add_file rewrites the FileContentSnapshot end-to-end
     /// (RCU copy-on-write); calling that N times is O(N²) in snapshot
     /// size — the pipeline producer used to pay this for every scanned
     /// file. batch_load_from_disk mmap-opens each path, enforces the size

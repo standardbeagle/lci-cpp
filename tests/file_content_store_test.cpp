@@ -66,7 +66,7 @@ TEST(ComputeLineOffsetsTest, EmptyLinesBetween) {
 // ---------------------------------------------------------------------------
 TEST(FileContentStoreTest, LoadAndReadFile) {
     FileContentStore store;
-    FileID id = store.load_file("test.go", "package main\n\nfunc main() {}\n");
+    FileID id = store.add_file("test.go", "package main\n\nfunc main() {}\n");
 
     EXPECT_NE(id, 0u);
     EXPECT_EQ(store.get_file_count(), 1);
@@ -77,7 +77,7 @@ TEST(FileContentStoreTest, LoadAndReadFile) {
 
 TEST(FileContentStoreTest, GetLineOffsets) {
     FileContentStore store;
-    FileID id = store.load_file("test.go", "line1\nline2\nline3");
+    FileID id = store.add_file("test.go", "line1\nline2\nline3");
 
     const auto* offsets = store.get_line_offsets(id);
     ASSERT_NE(offsets, nullptr);
@@ -89,7 +89,7 @@ TEST(FileContentStoreTest, GetLineOffsets) {
 
 TEST(FileContentStoreTest, GetLine) {
     FileContentStore store;
-    FileID id = store.load_file("test.go", "line1\nline2\nline3");
+    FileID id = store.add_file("test.go", "line1\nline2\nline3");
 
     auto ref = store.get_line(id, 0);
     EXPECT_EQ(ref.offset, 0u);
@@ -105,13 +105,13 @@ TEST(FileContentStoreTest, GetLine) {
 
 TEST(FileContentStoreTest, GetLineCount) {
     FileContentStore store;
-    FileID id = store.load_file("test.go", "a\nb\nc");
+    FileID id = store.add_file("test.go", "a\nb\nc");
     EXPECT_EQ(store.get_line_count(id), 3);
 }
 
 TEST(FileContentStoreTest, GetLineOutOfBounds) {
     FileContentStore store;
-    FileID id = store.load_file("test.go", "line1\nline2");
+    FileID id = store.add_file("test.go", "line1\nline2");
 
     auto ref = store.get_line(id, -1);
     EXPECT_TRUE(ref.is_empty());
@@ -122,8 +122,8 @@ TEST(FileContentStoreTest, GetLineOutOfBounds) {
 
 TEST(FileContentStoreTest, FastHashConsistency) {
     FileContentStore store;
-    FileID id1 = store.load_file("a.go", "hello world");
-    FileID id2 = store.load_file("b.go", "hello world");
+    FileID id1 = store.add_file("a.go", "hello world");
+    FileID id2 = store.add_file("b.go", "hello world");
 
     EXPECT_EQ(store.get_fast_hash(id1), store.get_fast_hash(id2));
     EXPECT_NE(store.get_fast_hash(id1), 0u);
@@ -131,8 +131,8 @@ TEST(FileContentStoreTest, FastHashConsistency) {
 
 TEST(FileContentStoreTest, ContentHashConsistency) {
     FileContentStore store;
-    FileID id1 = store.load_file("a.go", "hello world");
-    FileID id2 = store.load_file("b.go", "hello world");
+    FileID id1 = store.add_file("a.go", "hello world");
+    FileID id2 = store.add_file("b.go", "hello world");
 
     EXPECT_EQ(store.get_content_hash(id1), store.get_content_hash(id2));
     std::array<uint8_t, 32> zero_hash{};
@@ -141,7 +141,7 @@ TEST(FileContentStoreTest, ContentHashConsistency) {
 
 TEST(FileContentStoreTest, ConcurrentContentHashReaders) {
     FileContentStore store;
-    FileID id = store.load_file("a.go", std::string(16 * 1024, 'x'));
+    FileID id = store.add_file("a.go", std::string(16 * 1024, 'x'));
     auto expected = store.get_content_hash(id);
 
     constexpr int kThreads = 16;
@@ -173,8 +173,8 @@ TEST(FileContentStoreTest, ConcurrentContentHashReaders) {
 
 TEST(FileContentStoreTest, DuplicateContentNotReloaded) {
     FileContentStore store;
-    FileID id1 = store.load_file("test.go", "same content");
-    FileID id2 = store.load_file("test.go", "same content");
+    FileID id1 = store.add_file("test.go", "same content");
+    FileID id2 = store.add_file("test.go", "same content");
 
     // Same file with same content returns same ID.
     EXPECT_EQ(id1, id2);
@@ -182,10 +182,10 @@ TEST(FileContentStoreTest, DuplicateContentNotReloaded) {
 
 TEST(FileContentStoreTest, UpdatedContentGetsNewHash) {
     FileContentStore store;
-    FileID id = store.load_file("test.go", "version1");
+    FileID id = store.add_file("test.go", "version1");
     uint64_t hash1 = store.get_fast_hash(id);
 
-    store.load_file("test.go", "version2");
+    store.add_file("test.go", "version2");
     uint64_t hash2 = store.get_fast_hash(id);
 
     EXPECT_NE(hash1, hash2);
@@ -196,7 +196,7 @@ TEST(FileContentStoreTest, UpdatedContentGetsNewHash) {
 // ---------------------------------------------------------------------------
 TEST(FileContentStoreTest, InvalidateByPath) {
     FileContentStore store;
-    store.load_file("test.go", "content");
+    store.add_file("test.go", "content");
     EXPECT_EQ(store.get_file_count(), 1);
 
     store.invalidate_file("test.go");
@@ -205,7 +205,7 @@ TEST(FileContentStoreTest, InvalidateByPath) {
 
 TEST(FileContentStoreTest, InvalidateByID) {
     FileContentStore store;
-    FileID id = store.load_file("test.go", "content");
+    FileID id = store.add_file("test.go", "content");
 
     store.invalidate_file_by_id(id);
     EXPECT_EQ(store.get_file_count(), 0);
@@ -221,7 +221,7 @@ TEST(FileContentStoreTest, InvalidateNonExistent) {
 
 TEST(FileContentStoreTest, ReturnedContentViewSurvivesInvalidation) {
     FileContentStore store;
-    FileID id = store.load_file("test.go", "content");
+    FileID id = store.add_file("test.go", "content");
 
     std::string_view content = store.get_content(id);
     ASSERT_EQ(content, "content");
@@ -233,8 +233,8 @@ TEST(FileContentStoreTest, ReturnedContentViewSurvivesInvalidation) {
 
 TEST(FileContentStoreTest, Clear) {
     FileContentStore store;
-    store.load_file("a.go", "aaa");
-    store.load_file("b.go", "bbb");
+    store.add_file("a.go", "aaa");
+    store.add_file("b.go", "bbb");
     EXPECT_EQ(store.get_file_count(), 2);
 
     store.clear();
@@ -253,7 +253,7 @@ TEST(FileContentStoreTest, BatchLoad) {
         {"c.go", "ccc"},
     };
 
-    auto ids = store.batch_load_files(files);
+    auto ids = store.batch_add_files(files);
     ASSERT_EQ(ids.size(), 3u);
     EXPECT_EQ(store.get_file_count(), 3);
 
@@ -264,7 +264,7 @@ TEST(FileContentStoreTest, BatchLoad) {
 
 TEST(FileContentStoreTest, BatchLoadEmpty) {
     FileContentStore store;
-    auto ids = store.batch_load_files({});
+    auto ids = store.batch_add_files({});
     EXPECT_TRUE(ids.empty());
 }
 
@@ -275,7 +275,7 @@ TEST(FileContentStoreTest, MemoryUsageTracking) {
     FileContentStore store;
     EXPECT_EQ(store.get_memory_usage(), 0);
 
-    store.load_file("test.go", "some content");
+    store.add_file("test.go", "some content");
     EXPECT_GT(store.get_memory_usage(), 0);
 }
 
@@ -283,20 +283,20 @@ TEST(FileContentStoreTest, MemoryLimitEviction) {
     // 200 bytes limit - should evict older files.
     FileContentStore store(200);
 
-    store.load_file("a.go", std::string(100, 'a'));
+    store.add_file("a.go", std::string(100, 'a'));
     EXPECT_EQ(store.get_file_count(), 1);
 
-    store.load_file("b.go", std::string(100, 'b'));
+    store.add_file("b.go", std::string(100, 'b'));
     // At this point we may be near or over limit due to overhead.
 
-    store.load_file("c.go", std::string(100, 'c'));
+    store.add_file("c.go", std::string(100, 'c'));
     // LRU eviction should have removed oldest files.
     EXPECT_LE(store.get_memory_usage(), 200);
 }
 
 TEST(FileContentStoreTest, PathToIdLookup) {
     FileContentStore store;
-    FileID id = store.load_file("test.go", "content");
+    FileID id = store.add_file("test.go", "content");
     EXPECT_EQ(store.path_to_id("test.go"), id);
     EXPECT_EQ(store.path_to_id("nonexistent.go"), 0u);
 }
@@ -306,7 +306,7 @@ TEST(FileContentStoreTest, PathToIdLookup) {
 // ---------------------------------------------------------------------------
 TEST(FileContentStoreTest, ConcurrentReadDuringWrite) {
     FileContentStore store;
-    store.load_file("initial.go", "initial content");
+    store.add_file("initial.go", "initial content");
 
     constexpr int kReaders = 4;
     constexpr int kIterations = 1000;
@@ -338,7 +338,7 @@ TEST(FileContentStoreTest, ConcurrentReadDuringWrite) {
     // Writer thread updates the store.
     for (int i = 0; i < kIterations; ++i) {
         std::string content = "updated content iteration " + std::to_string(i);
-        store.load_file("initial.go", content);
+        store.add_file("initial.go", content);
     }
 
     done.store(true, std::memory_order_relaxed);
@@ -434,7 +434,7 @@ TEST(MappedFileTest, MoveSemantics) {
 TEST(FileContentStoreTest, Sha256KnownValue) {
     // SHA-256("") = e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
     FileContentStore store;
-    FileID id = store.load_file("empty.go", "");
+    FileID id = store.add_file("empty.go", "");
     auto hash = store.get_content_hash(id);
 
     // Empty content has known SHA-256.
@@ -447,7 +447,7 @@ TEST(FileContentStoreTest, Sha256KnownValue) {
 TEST(FileContentStoreTest, Sha256HelloWorld) {
     // SHA-256("hello world") = b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9
     FileContentStore store;
-    FileID id = store.load_file("hw.go", "hello world");
+    FileID id = store.add_file("hw.go", "hello world");
     auto hash = store.get_content_hash(id);
 
     EXPECT_EQ(hash[0], 0xb9);
@@ -466,11 +466,11 @@ TEST(FileContentStoreTest, MultiEvictionPreservesRemainingEntries) {
     FileContentStore store(kLimit);
 
     const std::string payload(600, 'x');
-    FileID id_a = store.load_file("a.go", payload);
-    FileID id_b = store.load_file("b.go", payload);
-    FileID id_c = store.load_file("c.go", payload);
-    FileID id_d = store.load_file("d.go", payload);
-    FileID id_e = store.load_file("e.go", payload);
+    FileID id_a = store.add_file("a.go", payload);
+    FileID id_b = store.add_file("b.go", payload);
+    FileID id_c = store.add_file("c.go", payload);
+    FileID id_d = store.add_file("d.go", payload);
+    FileID id_e = store.add_file("e.go", payload);
 
     // Most recent loads must remain reachable through both lookup paths.
     EXPECT_NE(store.get_file(id_e), nullptr);
@@ -509,7 +509,7 @@ TEST(FileContentStoreTest, ReindexThenEvictKeepsMemoryAccountingConsistent) {
     // Repeatedly re-index the same file with changing content. Without dedup
     // this would push "hot.go" onto access_order once per update.
     for (int i = 0; i < 20; ++i) {
-        store.load_file("hot.go", std::string(300, static_cast<char>('a' + (i % 26))));
+        store.add_file("hot.go", std::string(300, static_cast<char>('a' + (i % 26))));
     }
     EXPECT_EQ(store.get_file_count(), 1);
 
@@ -518,7 +518,7 @@ TEST(FileContentStoreTest, ReindexThenEvictKeepsMemoryAccountingConsistent) {
     // reported usage would diverge from the actual surviving content.
     const std::string payload(300, 'z');
     for (int i = 0; i < 6; ++i) {
-        store.load_file("f" + std::to_string(i) + ".go", payload);
+        store.add_file("f" + std::to_string(i) + ".go", payload);
     }
 
     // Usage must stay non-negative and within the cap (+ per-entry overhead),

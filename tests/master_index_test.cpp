@@ -100,8 +100,8 @@ TEST(MasterIndexTest, ReadSnapshotIsLockFree) {
     Config cfg = make_default_config();
     MasterIndex mi(cfg);
 
-    auto snap1 = mi.read_snapshot();
-    auto snap2 = mi.read_snapshot();
+    auto snap1 = mi.load_snapshot();
+    auto snap2 = mi.load_snapshot();
     EXPECT_EQ(snap1.get(), snap2.get());
 }
 
@@ -256,7 +256,7 @@ TEST(MasterIndexTest, IndexDirectoryKeepsFilesWithIdsAbovePostLoadFailures) {
 
     ASSERT_TRUE(mi.index_directory(dir.path().string()));
 
-    auto snap = mi.read_snapshot();
+    auto snap = mi.load_snapshot();
     ASSERT_NE(snap, nullptr);
     for (const auto& name : text_files) {
         auto full = (dir.path() / name).string();
@@ -400,7 +400,7 @@ TEST(MasterIndexTest, ConcurrentSnapshotReads) {
     for (int i = 0; i < kReaderCount; ++i) {
         readers.emplace_back([&] {
             for (int j = 0; j < kReadsPerThread; ++j) {
-                auto snap = mi.read_snapshot();
+                auto snap = mi.load_snapshot();
                 (void)snap->file_count();
             }
         });
@@ -427,7 +427,7 @@ TEST(MasterIndexTest, ConcurrentReadsWhileUpdating) {
     for (int i = 0; i < kReaderCount; ++i) {
         readers.emplace_back([&] {
             while (!stop.load(std::memory_order_acquire)) {
-                auto snap = mi.read_snapshot();
+                auto snap = mi.load_snapshot();
                 (void)snap->file_count();
                 (void)mi.path_to_id(file_path);
             }

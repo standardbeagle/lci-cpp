@@ -73,7 +73,7 @@ struct MasterIndexStats {
 ///   - Tracks progress atomically (isIndexing, totalFiles, processedFiles).
 ///
 /// Thread safety:
-///   - read_snapshot() is lock-free.
+///   - load_snapshot() is lock-free.
 ///   - index_directory() holds bulk_mu_ (blocks other bulk ops, not reads).
 ///   - index_file / update_file / remove_file hold snapshot_mu_ and per-index write locks.
 ///   - clear() holds both mu_ and snapshot_mu_.
@@ -121,7 +121,7 @@ class MasterIndex {
     // -- Lock-free reads ------------------------------------------------------
 
     /// Returns the current file snapshot for lock-free reads.
-    std::shared_ptr<const FileSnapshot> read_snapshot() const;
+    std::shared_ptr<const FileSnapshot> load_snapshot() const;
 
     /// Returns the FileID for a path, or 0 if not found.
     FileID path_to_id(const std::string& path) const;
@@ -133,7 +133,7 @@ class MasterIndex {
 
     /// Snapshot-scoped path lookup: returns a string_view into `snap`'s
     /// reverse_file_map with no atomic load and no allocation. The caller holds
-    /// `snap` (read_snapshot()) for the view's lifetime — load once per query
+    /// `snap` (load_snapshot()) for the view's lifetime — load once per query
     /// and reuse across all id resolutions instead of paying a snapshot load +
     /// string copy per result.
     std::string_view id_to_path(const FileSnapshot& snap, FileID file_id) const;
@@ -243,7 +243,7 @@ class MasterIndex {
     /// Lock-free per-file attribute lookup (production/test/example/
     /// vendored/generated/docs). Computed once at index time; see
     /// FileSnapshot::file_attrs. For many lookups, prefer
-    /// read_snapshot()->attr_of(id).
+    /// load_snapshot()->attr_of(id).
     PathAttrId get_file_attr(FileID file_id) const;
 
     /// The attribute set in force for this index (shipped ruleset + config).
@@ -313,7 +313,6 @@ class MasterIndex {
                                   FileID new_id, FileID old_id,
                                   bool existed);
     void remove_file_from_indexes(FileID file_id, const std::string& path);
-    std::shared_ptr<const FileSnapshot> load_snapshot() const;
 
     // Search helpers (in master_index_search.cpp)
     std::string validate_search_input(const std::string& pattern,

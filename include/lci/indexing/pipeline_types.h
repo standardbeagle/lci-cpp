@@ -22,7 +22,7 @@ struct FileTask {
     int64_t size{};
     int priority{};
     /// Pre-assigned FileID from the producer's batch_load. Workers use
-    /// this directly to skip the redundant store_->load_file snapshot
+    /// this directly to skip the redundant store_->add_file snapshot
     /// copy in the hot path. 0 = not pre-loaded (worker falls back to
     /// load_file_from_disk).
     FileID preloaded_id{};

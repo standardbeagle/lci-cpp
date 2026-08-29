@@ -195,7 +195,7 @@ ProcessedFile FileProcessor::process_file(int /*worker_id*/,
     result.language = task.language;
     result.stage = "parsing";
 
-    // Producer-assigned FileID skips the redundant store_->load_file
+    // Producer-assigned FileID skips the redundant store_->add_file
     // snapshot copy. Fallback path covers single-file callers that
     // bypass the producer pipeline (tests, ad-hoc).
     FileID file_id = task.preloaded_id;

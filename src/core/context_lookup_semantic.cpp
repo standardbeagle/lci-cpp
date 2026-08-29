@@ -98,7 +98,7 @@ std::vector<CodeObjectID> find_all_entry_points(const Snapshot& snap,
         return seen.insert(key).second;
     };
 
-    auto files = indexer.read_snapshot();
+    auto files = indexer.load_snapshot();
     for (const auto& [path, file_id] : files->file_map) {
         for (const auto& sym : snap.get_file_enhanced_symbols(file_id)) {
             if (sym->symbol.type != SymbolType::Function &&

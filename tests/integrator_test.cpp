@@ -385,7 +385,7 @@ TEST(FileIntegratorTest, IntegratesWithPostingsIndex) {
     integrator.set_file_content_store(&content_store);
 
     // Load content into the store so the integrator can find it.
-    FileID fid = content_store.load_file("/src/main.go", "package main\nfunc Hello() {}\n");
+    FileID fid = content_store.add_file("/src/main.go", "package main\nfunc Hello() {}\n");
 
     auto pf = make_processed_file(
         fid, "/src/main.go", trigram_idx, "package main\nfunc Hello() {}\n");

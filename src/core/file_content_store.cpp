@@ -430,7 +430,7 @@ FileID FileContentStore::path_to_id(const std::string& path) const {
 
 // -- Write API ----------------------------------------------------------------
 
-FileID FileContentStore::load_file(const std::string& path, std::string_view content) {
+FileID FileContentStore::add_file(const std::string& path, std::string_view content) {
     // Serialize the load-mutate-swap so concurrent writers cannot drop
     // entries by basing their copy on an out-of-date snapshot.
     std::lock_guard<std::mutex> write_lock(write_mu_);
@@ -498,7 +498,7 @@ FileID FileContentStore::load_file(const std::string& path, std::string_view con
     return file_id;
 }
 
-FileID FileContentStore::load_file_mapped(const std::string& path,
+FileID FileContentStore::add_file_mapped(const std::string& path,
                                           MappedFile mapping) {
     std::lock_guard<std::mutex> write_lock(write_mu_);
 
@@ -555,7 +555,7 @@ FileID FileContentStore::load_file_mapped(const std::string& path,
     return file_id;
 }
 
-std::vector<FileID> FileContentStore::batch_load_files_mapped(
+std::vector<FileID> FileContentStore::batch_add_files_mapped(
     std::vector<std::pair<std::string, MappedFile>> files) {
     if (files.empty()) return {};
 
@@ -625,7 +625,7 @@ std::vector<FileID> FileContentStore::batch_load_files_mapped(
     return ids;
 }
 
-std::vector<FileID> FileContentStore::batch_load_files(
+std::vector<FileID> FileContentStore::batch_add_files(
     const std::vector<std::pair<std::string, std::string_view>>& files) {
     if (files.empty()) return {};
 
@@ -654,7 +654,7 @@ std::vector<FileID> FileContentStore::batch_load_files(
             // O(1) lookup; replace in place to keep index positions stable.
             auto map_it = snap->id_index.find(file_id);
             if (map_it != snap->id_index.end()) {
-                // Copy-on-write (see load_file): never write through a
+                // Copy-on-write (see add_file): never write through a
                 // shared entry.
                 const auto& old_entry = snap->entries[map_it->second];
                 total_delta -= estimate_memory(*old_entry->content);
@@ -667,7 +667,7 @@ std::vector<FileID> FileContentStore::batch_load_files(
                     map_it->second;
                 snap->entries[map_it->second] = std::move(fresh);
             }
-            // Re-indexed file: drop its stale LRU entry (see load_file).
+            // Re-indexed file: drop its stale LRU entry (see add_file).
             snap->access_order.erase(
                 std::remove(snap->access_order.begin(), snap->access_order.end(), file_id),
                 snap->access_order.end());

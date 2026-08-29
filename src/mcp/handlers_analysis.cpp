@@ -189,7 +189,7 @@ GatheredCorpus gather_file_symbol_data(MasterIndex& indexer,
     const std::string& root = indexer.config().project.root;
     auto& ref = indexer.ref_tracker();
     auto rt_snap = ref.pin();
-    auto file_snap = indexer.read_snapshot();
+    auto file_snap = indexer.load_snapshot();
     for (auto fid : indexer.get_all_file_ids()) {
         auto syms = rt_snap->get_file_enhanced_symbols(fid);
         if (syms.empty()) continue;
@@ -316,7 +316,7 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
     std::vector<std::string> file_paths;
     std::vector<PathAttrId> file_attrs;
     {
-        auto snap = indexer.read_snapshot();
+        auto snap = indexer.load_snapshot();
         for (auto fid : indexer.get_all_file_ids()) {
             auto p = indexer.get_file_path(fid);
             if (p.empty()) continue;
