@@ -727,6 +727,17 @@ TEST(GitAnalyzer, StructuralSimilarityEmpty) {
     EXPECT_DOUBLE_EQ(code_structural_similarity("code", ""), 0.0);
 }
 
+// The duplicate finder pre-tokenizes each symbol once; the set-based path
+// must agree exactly with the string_view convenience API.
+TEST(GitAnalyzer, TokenSetSimilarityMatchesStringApi) {
+    std::string a = "int foo(int x) { return x + 1; }";
+    std::string b = "int bar(int y) { return y + 1; }";
+    EXPECT_DOUBLE_EQ(token_set_similarity(code_token_set(a), code_token_set(b)),
+                     code_structural_similarity(a, b));
+    EXPECT_DOUBLE_EQ(token_set_similarity(code_token_set(a), code_token_set(a)),
+                     1.0);
+    EXPECT_DOUBLE_EQ(token_set_similarity({}, code_token_set(a)), 0.0);
+}
 
 // ============================================================================
 // Naming findings from the corpus-wide NamingAnalyzer report

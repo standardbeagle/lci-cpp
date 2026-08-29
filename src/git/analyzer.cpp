@@ -124,8 +124,12 @@ bool Analyzer::analyze(const AnalysisParams& params, AnalysisReport& out) {
         new_symbols = std::move(scoped);
     }
 
+    // Only the duplicate finder reads symbol bodies; naming runs off the
+    // corpus-wide NamingAnalyzer report instead of the raw symbol list.
     std::vector<SymbolInfo> existing_symbols;
-    get_existing_symbols(existing_symbols);
+    if (params.has_focus("duplicates") || params.has_focus("metrics")) {
+        get_existing_symbols(params.has_focus("duplicates"), existing_symbols);
+    }
 
     std::vector<DuplicateFinding> duplicates;
     std::vector<NamingFinding> naming_issues;
@@ -224,7 +228,8 @@ bool Analyzer::parse_changed_files(const std::vector<ChangedFile>& files,
     return true;
 }
 
-void Analyzer::get_existing_symbols(std::vector<SymbolInfo>& out) {
+void Analyzer::get_existing_symbols(bool with_content,
+                                    std::vector<SymbolInfo>& out) {
     auto file_ids = index_.get_all_file_ids();
     auto rt_snap = index_.ref_tracker().pin();
     for (auto fid : file_ids) {
@@ -235,7 +240,8 @@ void Analyzer::get_existing_symbols(std::vector<SymbolInfo>& out) {
         std::string path = normalize_rel(index_.get_file_path(fid),
                                          provider_.repo_root());
         if (path.empty()) continue;
-        auto content = index_.file_content_store().get_content(fid);
+        std::string_view content;
+        if (with_content) content = index_.file_content_store().get_content(fid);
         auto symbols = rt_snap->get_file_enhanced_symbols(fid);
         for (const auto& sym : symbols) {
             if (sym == nullptr) continue;
@@ -253,9 +259,11 @@ void Analyzer::get_existing_symbols(std::vector<SymbolInfo>& out) {
             si.lines_of_code = (sym->symbol.end_line >= sym->symbol.line)
                                    ? (sym->symbol.end_line - sym->symbol.line + 1)
                                    : 1;
-            si.content = extract_symbol_content(content, sym->symbol.line,
-                                                sym->symbol.end_line);
-            si.nesting_depth = compute_nesting_depth(si.content);
+            if (with_content) {
+                si.content = extract_symbol_content(content, sym->symbol.line,
+                                                    sym->symbol.end_line);
+                si.nesting_depth = compute_nesting_depth(si.content);
+            }
             out.push_back(std::move(si));
         }
     }
@@ -328,6 +336,17 @@ void Analyzer::find_duplicates(const std::vector<SymbolInfo>& new_symbols,
         existing_hashes[existing_norm.back()].push_back(&sym);
     }
 
+    // Tokenize each existing symbol EXACTLY ONCE (audit defect 2): the
+    // structural loop used to re-tokenize both sides of every (new x
+    // existing) pair — an O(new * existing * bytes) rescan.
+    std::vector<absl::flat_hash_set<std::string>> existing_tokens(
+        existing_symbols.size());
+    for (size_t ei = 0; ei < existing_symbols.size(); ++ei) {
+        if (!existing_symbols[ei].content.empty()) {
+            existing_tokens[ei] = code_token_set(existing_symbols[ei].content);
+        }
+    }
+
     for (const auto& ns : new_symbols) {
         if (ns.content.empty()) continue;
         if (ns.type != "function" && ns.type != "method") continue;
@@ -351,14 +370,23 @@ void Analyzer::find_duplicates(const std::vector<SymbolInfo>& new_symbols,
             }
         }
 
-        // Structural duplicates.
+        // Structural duplicates against pre-tokenized existing sets. The
+        // set-size ratio bounds Jaccard from above (|A∩B| <= min, |A∪B| >=
+        // max), so most pairs skip the set intersection entirely.
+        auto new_tokens = code_token_set(ns.content);
         for (size_t ei = 0; ei < existing_symbols.size(); ++ei) {
             const auto& es = existing_symbols[ei];
             if (es.content.empty()) continue;
             if (es.file_path == ns.file_path && es.line == ns.line) continue;
             if (existing_norm[ei] == new_hash) continue;
 
-            double sim = code_structural_similarity(ns.content, es.content);
+            double lo = static_cast<double>(
+                std::min(new_tokens.size(), existing_tokens[ei].size()));
+            double hi = static_cast<double>(
+                std::max(new_tokens.size(), existing_tokens[ei].size()));
+            if (hi == 0.0 || lo / hi < threshold) continue;
+
+            double sim = token_set_similarity(new_tokens, existing_tokens[ei]);
             if (sim >= threshold) {
                 DuplicateFinding f;
                 f.severity = determine_duplicate_severity(sim, ns.end_line - ns.line);
@@ -433,46 +461,44 @@ bool is_code_delimiter(char ch) {
     }
 }
 
-void tokenize_code(std::string_view content,
-                   std::vector<std::string>& out) {
+}  // namespace
+
+absl::flat_hash_set<std::string> code_token_set(std::string_view content) {
+    absl::flat_hash_set<std::string> out;
     std::string current;
     for (char ch : content) {
         if (is_code_delimiter(ch)) {
             if (!current.empty()) {
-                out.push_back(std::move(current));
+                out.insert(std::move(current));
                 current.clear();
             }
             if (ch != ' ' && ch != '\t' && ch != '\n' && ch != '\r') {
-                out.push_back(std::string(1, ch));
+                out.insert(std::string(1, ch));
             }
         } else {
             current += ch;
         }
     }
-    if (!current.empty()) out.push_back(std::move(current));
+    if (!current.empty()) out.insert(std::move(current));
+    return out;
 }
 
-}  // namespace
-
-double code_structural_similarity(std::string_view a, std::string_view b) {
-    std::vector<std::string> t1, t2;
-    tokenize_code(a, t1);
-    tokenize_code(b, t2);
-    if (t1.empty() || t2.empty()) return 0.0;
-
-    absl::flat_hash_set<std::string_view> s1, s2;
-    for (const auto& t : t1) s1.insert(t);
-    for (const auto& t : t2) s2.insert(t);
-
-    int intersection = 0;
-    for (const auto& t : s1) {
-        if (s2.contains(t)) ++intersection;
+double token_set_similarity(const absl::flat_hash_set<std::string>& a,
+                            const absl::flat_hash_set<std::string>& b) {
+    if (a.empty() || b.empty()) return 0.0;
+    const auto& small = a.size() <= b.size() ? a : b;
+    const auto& large = a.size() <= b.size() ? b : a;
+    size_t intersection = 0;
+    for (const auto& t : small) {
+        if (large.contains(t)) ++intersection;
     }
-
-    int union_size = static_cast<int>(s1.size()) +
-                     static_cast<int>(s2.size()) - intersection;
+    size_t union_size = a.size() + b.size() - intersection;
     if (union_size == 0) return 0.0;
     return static_cast<double>(intersection) / static_cast<double>(union_size);
+}
+
+double code_structural_similarity(std::string_view a, std::string_view b) {
+    return token_set_similarity(code_token_set(a), code_token_set(b));
 }
 
 // ============================================================================

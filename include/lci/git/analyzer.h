@@ -25,6 +25,15 @@ std::string normalize_code_content(std::string_view content);
 /// Computes Jaccard token-similarity between two code blocks.
 double code_structural_similarity(std::string_view a, std::string_view b);
 
+/// Tokenizes a code block into the distinct-token set that
+/// code_structural_similarity compares. Exposed so the duplicate finder can
+/// tokenize each symbol exactly once instead of once per compared pair.
+absl::flat_hash_set<std::string> code_token_set(std::string_view content);
+
+/// Jaccard similarity between two pre-tokenized code token sets.
+double token_set_similarity(const absl::flat_hash_set<std::string>& a,
+                            const absl::flat_hash_set<std::string>& b);
+
 /// Filters a corpus-wide NamingReport down to findings involving the changed
 /// symbols (matched by name). This is the git naming focus: the report-side
 /// NamingAnalyzer signals (synonym splits, ambiguous names, vague names,
@@ -81,7 +90,11 @@ class Analyzer {
                              std::vector<SymbolInfo>& out,
                              int& skipped_out);
 
-    void get_existing_symbols(std::vector<SymbolInfo>& out);
+    /// Snapshots the indexed function/method symbols. `with_content` gates
+    /// the per-symbol body extraction — only the duplicate finder reads
+    /// content, and copying every function body on every request was the
+    /// dominant cost when duplicates were not in focus.
+    void get_existing_symbols(bool with_content, std::vector<SymbolInfo>& out);
 
     void find_duplicates(const std::vector<SymbolInfo>& new_symbols,
                          const std::vector<SymbolInfo>& existing_symbols,
