@@ -247,9 +247,34 @@ int run_shutdown(const GlobalFlags& flags, bool force) {
     Client client(socket_path);
 
     if (!client.is_server_running()) {
-        std::cerr << "Error: no server is running for root: "
-                  << cfg.project.root << "\n";
-        return 1;
+        // Path-derivation fallback: a live server for this root can sit on
+        // a different address than the one we derive (root string resolved
+        // differently at its spawn — symlinks, trailing slashes). The
+        // instance registry records the address each server actually bound,
+        // so match by root there before declaring nothing running.
+        std::error_code canon_ec;
+        auto wanted = std::filesystem::weakly_canonical(cfg.project.root,
+                                                        canon_ec);
+        bool found = false;
+        for (const auto& inst :
+             list_server_instances(instance_registry_dir())) {
+            std::error_code ec2;
+            if (inst.root.empty()) continue;
+            if (std::filesystem::weakly_canonical(inst.root, ec2) != wanted)
+                continue;
+            Client candidate(inst.address);
+            if (candidate.is_server_running()) {
+                socket_path = inst.address;
+                client = Client(socket_path);
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            std::cerr << "Error: no server is running for root: "
+                      << cfg.project.root << "\n";
+            return 1;
+        }
     }
 
     std::printf("Shutting down server for root: %s\n",
