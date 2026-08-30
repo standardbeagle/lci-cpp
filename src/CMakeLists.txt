@@ -88,6 +88,7 @@ add_library(lci_lib STATIC
     server/handlers_search.cpp
     server/client.cpp
     mcp/server.cpp
+    mcp/runtime.cpp
     mcp/response.cpp
     mcp/validation.cpp
     mcp/formatter_compact.cpp
