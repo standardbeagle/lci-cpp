@@ -116,39 +116,48 @@
     "buildPresets": [
         {
             "name": "debug",
-            "configurePreset": "debug"
+            "configurePreset": "debug",
+            "jobs": 4
         },
         {
             "name": "release",
-            "configurePreset": "release"
+            "configurePreset": "release",
+            "jobs": 4
         },
         {
             "name": "sanitizer",
-            "configurePreset": "sanitizer"
+            "configurePreset": "sanitizer",
+            "jobs": 4
         },
         {
             "name": "tsan",
-            "configurePreset": "tsan"
+            "configurePreset": "tsan",
+            "jobs": 4
         },
         {
             "name": "msan",
-            "configurePreset": "msan"
+            "configurePreset": "msan",
+            "jobs": 4
         },
         {
             "name": "fuzz",
-            "configurePreset": "fuzz"
+            "configurePreset": "fuzz",
+            "jobs": 4
         },
         {
             "name": "ci",
-            "configurePreset": "ci"
+            "configurePreset": "ci",
+            "jobs": 4
         },
         {
             "name": "vcpkg",
-            "configurePreset": "vcpkg"
+            "configurePreset": "vcpkg",
+            "jobs": 4
         },
         {
             "name": "macos-universal",
-            "configurePreset": "macos-universal"
+            "configurePreset": "macos-universal",
+            "jobs": 4
         }
     ],
     "testPresets": [
