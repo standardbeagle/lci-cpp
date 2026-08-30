@@ -4,6 +4,7 @@
 // translation units. Not part of the public parser interface.
 
 #include <cstdint>
+#include <cstring>
 #include <string>
 #include <string_view>
 #include <vector>
