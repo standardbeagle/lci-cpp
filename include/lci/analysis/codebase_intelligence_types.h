@@ -482,10 +482,8 @@ struct ModuleAnalysis {
 /// Metrics for a single architectural layer.
 struct LayerMetricsData {
     int module_count{};
+    int symbol_count{};
     double cohesion_score{};
-    double coupling_score{};
-    double maintainability{};
-    double complexity{};
 };
 
 /// Detected architectural layer.
@@ -505,13 +503,11 @@ struct LayerPattern {
     std::vector<std::string> violations;
 };
 
-/// Layer analysis results.
+/// Layer analysis results. Call-edge layer violations live in the overview
+/// graph section (insight_graph), not here: this analyzer only sees names.
 struct LayerAnalysis {
     std::vector<ArchitecturalLayer> layers;
-    int violation_count{};
-    std::vector<LayerMetricsData> layer_metrics;
     std::vector<LayerPattern> patterns;
-    std::vector<std::vector<double>> dependency_matrix;
 };
 
 // ============================================================================

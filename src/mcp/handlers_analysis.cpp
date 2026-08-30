@@ -672,17 +672,20 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
         } else if (detailed_mode == "layers") {
             const auto& r = *resp.layer_analysis;
             out << "== LAYERS ==\n"
-                << "total=" << r.layers.size()
-                << " violations=" << r.violation_count << "\n";
+                << "total=" << r.layers.size() << "\n";
             for (const auto& l : r.layers) {
                 out << "  " << l.name << ": depth=" << l.depth
                     << " modules=" << l.modules.size()
+                    << " symbols=" << l.metrics.symbol_count
                     << " cohesion=" << fmt2(l.metrics.cohesion_score) << "\n";
             }
             for (const auto& p : r.patterns) {
                 out << "  pattern: " << p.name
                     << " confidence=" << fmt2(p.confidence) << "\n";
             }
+            out << "  next: call-edge layer violations are in "
+                   "code_insight {\"mode\":\"overview\"} == LAYER "
+                   "VIOLATIONS ==\n";
         } else if (detailed_mode == "features") {
             const auto& r = *resp.feature_analysis;
             out << "== FEATURES ==\n"

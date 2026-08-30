@@ -1,9 +1,8 @@
+#include <lci/analysis/coupling_analyzer.h>
 #include <lci/analysis/layer_analyzer.h>
 #include <lci/core/text.h>
 
 #include <algorithm>
-#include <cctype>
-#include <climits>
 #include <string>
 
 namespace lci {
@@ -130,25 +129,42 @@ std::string LayerAnalyzer::classify_symbol_to_layer(const EnhancedSymbol& sym) {
 
 std::vector<LayerPattern> LayerAnalyzer::detect_patterns(
     const std::vector<ArchitecturalLayer>& layers) {
+    // Confidence is MEASURED: the share of classified symbols that live in
+    // the layers the pattern requires. The previous constant 0.80 on four
+    // simultaneous patterns (Microservices included, for any corpus with
+    // >5 layers) was a fabricated prior, not a detection. Patterns below
+    // the floor are noise from incidental keyword hits and are not
+    // reported at all.
+    constexpr double kConfidenceFloor = 0.5;
+
+    int total_symbols = 0;
+    for (const auto& l : layers) total_symbols += l.metrics.symbol_count;
+    if (total_symbols == 0) return {};
+
+    auto symbol_share = [&](const std::vector<std::string_view>& names) {
+        int n = 0;
+        for (const auto& l : layers) {
+            for (auto name : names) {
+                if (l.name == name) n += l.metrics.symbol_count;
+            }
+        }
+        return static_cast<double>(n) / static_cast<double>(total_symbols);
+    };
 
     std::vector<LayerPattern> patterns;
-
-    if (has_all_layers(layers, {"Presentation Layer", "Application Layer",
-                                "Domain Layer", "Data Layer"})) {
-        patterns.push_back({"Layered Architecture", "Layered Architecture", 0.8, {}});
+    static const std::vector<std::string_view> kCore = {
+        "Presentation Layer", "Application Layer", "Domain Layer",
+        "Data Layer"};
+    if (has_all_layers(layers, kCore)) {
+        double confidence = symbol_share(kCore);
+        if (confidence >= kConfidenceFloor) {
+            patterns.push_back({"Layered Architecture",
+                                "Presentation/Application/Domain/Data "
+                                "vocabulary covers most symbols",
+                                confidence,
+                                {}});
+        }
     }
-    if (layers.size() > 5) {
-        patterns.push_back({"Microservices Architecture",
-                            "Microservices Architecture", 0.8, {}});
-    }
-    if (has_layer(layers, "Presentation Layer") &&
-        has_layer(layers, "Application Layer")) {
-        patterns.push_back({"MVC Pattern", "MVC Pattern", 0.8, {}});
-    }
-    if (has_layer(layers, "Data Layer")) {
-        patterns.push_back({"Repository Pattern", "Repository Pattern", 0.8, {}});
-    }
-
     return patterns;
 }
 
@@ -156,97 +172,78 @@ std::vector<LayerPattern> LayerAnalyzer::detect_patterns(
 // Main analysis
 // ---------------------------------------------------------------------------
 
-LayerAnalysis LayerAnalyzer::analyze(
-    const std::vector<FileSymbolData>& files) const {
-
-    // Classify every symbol into a layer.
-    absl::flat_hash_map<std::string, std::vector<const EnhancedSymbol*>> layer_map;
+LayerAnalysis LayerAnalyzer::analyze(const std::vector<FileSymbolData>& files,
+                                     std::string_view project_root) const {
+    // Classify every symbol into a layer, tracking each symbol's module
+    // (package directory, same naming as ModuleAnalyzer/CouplingAnalyzer).
+    // A layer's `modules` are MODULES — the earlier emission of one entry
+    // per symbol reported "modules=440917" on a repo with 817 modules.
+    absl::flat_hash_map<std::string, std::vector<const EnhancedSymbol*>>
+        layer_symbols;
+    absl::flat_hash_map<std::string,
+                        absl::flat_hash_map<std::string, int>>
+        module_layer_votes;  // module -> layer -> symbol count
     for (const auto& file : files) {
+        std::string module =
+            CouplingAnalyzer::get_package_name(file.path, project_root);
         for (const auto* sym : file.symbols) {
             std::string layer = classify_symbol_to_layer(*sym);
-            layer_map[layer].push_back(sym);
+            layer_symbols[layer].push_back(sym);
+            module_layer_votes[module][layer]++;
         }
     }
 
-    // Deterministic layer order (Karpathy rule 4). layer_map is an absl hash
-    // map, so without this both the emitted order AND the `depth` each layer
-    // is assigned come out of a per-process hash seed.
+    // Each module belongs to exactly one layer: majority vote of its
+    // symbols' classifications, ties broken by layer name for determinism.
+    absl::flat_hash_map<std::string, std::vector<std::string>> layer_modules;
+    for (const auto& [module, votes] : module_layer_votes) {
+        std::string best_layer;
+        int best_votes = -1;
+        for (const auto& [layer, n] : votes) {
+            if (n > best_votes ||
+                (n == best_votes && layer < best_layer)) {
+                best_layer = layer;
+                best_votes = n;
+            }
+        }
+        layer_modules[best_layer].push_back(module);
+    }
+
+    // Deterministic layer order (Karpathy rule 4). The maps above are absl
+    // hash maps, so without this both the emitted order AND the `depth`
+    // each layer is assigned come out of a per-process hash seed.
     std::vector<std::string> layer_names;
-    layer_names.reserve(layer_map.size());
-    for (const auto& [name, _] : layer_map) layer_names.push_back(name);
+    layer_names.reserve(layer_symbols.size());
+    for (const auto& [name, _] : layer_symbols) layer_names.push_back(name);
     std::sort(layer_names.begin(), layer_names.end());
 
-    // Build ArchitecturalLayer entries.
     std::vector<ArchitecturalLayer> layers;
     layers.reserve(layer_names.size());
     int depth = 1;
     for (const auto& name : layer_names) {
-        auto& syms = layer_map[name];
+        auto& syms = layer_symbols[name];
         if (syms.empty()) continue;
 
-        std::vector<std::string> module_names;
-        module_names.reserve(syms.size());
-        for (const auto* sym : syms) {
-            module_names.push_back(sym->symbol.name);
-        }
+        auto modules = std::move(layer_modules[name]);
+        std::sort(modules.begin(), modules.end());
 
         LayerMetricsData m;
-        m.module_count = static_cast<int>(syms.size());
+        m.module_count = static_cast<int>(modules.size());
+        m.symbol_count = static_cast<int>(syms.size());
         m.cohesion_score = prefix_cohesion(syms);
-        m.coupling_score = 0.3;
-        m.maintainability = 80.0;
-        m.complexity = static_cast<double>(syms.size()) / 10.0;
 
         ArchitecturalLayer al;
         al.name = name;
-        al.modules = std::move(module_names);
+        al.modules = std::move(modules);
         al.depth = depth++;
         al.component_types = {name};
         al.metrics = m;
         layers.push_back(std::move(al));
     }
 
-    // Detect violations.
-    int violation_count = 0;
-    if (!layers.empty()) {
-        int max_size = 0;
-        int min_size = INT_MAX;
-        for (const auto& l : layers) {
-            if (l.metrics.module_count > max_size) max_size = l.metrics.module_count;
-            if (l.metrics.module_count < min_size) min_size = l.metrics.module_count;
-        }
-        if (min_size > 0 && max_size > min_size * 5) ++violation_count;
-    }
-
-    static const std::string_view expected[] = {
-        "Presentation Layer", "Application Layer", "Domain Layer", "Data Layer"};
-    for (auto exp : expected) {
-        if (!has_layer(layers, exp)) ++violation_count;
-    }
-
-    // Build simple dependency matrix and metrics.
-    std::vector<LayerMetricsData> layer_metrics;
-    layer_metrics.reserve(layers.size());
-    for (const auto& l : layers) {
-        layer_metrics.push_back(l.metrics);
-    }
-
-    auto patterns = detect_patterns(layers);
-
-    std::vector<std::vector<double>> dep_matrix = {
-        {1.0, 0.5, 0.3, 0.2},
-        {0.5, 1.0, 0.7, 0.4},
-        {0.3, 0.7, 1.0, 0.6},
-        {0.2, 0.4, 0.6, 1.0},
-    };
-
     LayerAnalysis result;
+    result.patterns = detect_patterns(layers);
     result.layers = std::move(layers);
-    result.violation_count = violation_count;
-    result.layer_metrics = std::move(layer_metrics);
-    result.patterns = std::move(patterns);
-    result.dependency_matrix = std::move(dep_matrix);
-
     return result;
 }
 

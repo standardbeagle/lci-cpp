@@ -16,13 +16,17 @@ class LayerAnalyzer {
   public:
     LayerAnalyzer() = default;
 
-    /// Runs layer analysis on the given file/symbol data.
-    LayerAnalysis analyze(const std::vector<FileSymbolData>& files) const;
+    /// Runs layer analysis on the given file/symbol data. `project_root`
+    /// scopes module (package) naming, same as ModuleAnalyzer.
+    LayerAnalysis analyze(const std::vector<FileSymbolData>& files,
+                          std::string_view project_root) const;
 
     /// Classifies a single symbol to a layer name.
     static std::string classify_symbol_to_layer(const EnhancedSymbol& sym);
 
-    /// Detects architectural patterns from the layer set.
+    /// Detects architectural patterns from the layer set. Confidence is the
+    /// measured share of symbols in the pattern's layers; low-coverage
+    /// patterns are not reported.
     static std::vector<LayerPattern> detect_patterns(
         const std::vector<ArchitecturalLayer>& layers);
 };

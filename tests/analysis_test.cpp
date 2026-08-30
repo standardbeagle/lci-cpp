@@ -341,7 +341,7 @@ TEST(LayerAnalyzer, LayersEmitInSortedOrderWithMatchingDepth) {
     auto s5 = make_sym("stringUtil", SymbolType::Function, 5);
     auto f = make_file("app.go", {&s1, &s2, &s3, &s4, &s5});
 
-    auto result = LayerAnalyzer().analyze({f});
+    auto result = LayerAnalyzer().analyze({f}, "");
     ASSERT_GE(result.layers.size(), 2u);
 
     for (size_t i = 1; i < result.layers.size(); ++i) {
@@ -427,6 +427,7 @@ TEST(LayerAnalyzer, DetectLayeredArchitecture) {
                       "Domain Layer", "Data Layer"}) {
         ArchitecturalLayer al;
         al.name = name;
+        al.metrics.symbol_count = 10;
         layers.push_back(al);
     }
 
@@ -437,24 +438,6 @@ TEST(LayerAnalyzer, DetectLayeredArchitecture) {
         if (p.name == "Layered Architecture") found_layered = true;
     }
     EXPECT_TRUE(found_layered);
-}
-
-TEST(LayerAnalyzer, DetectMVCPattern) {
-    std::vector<ArchitecturalLayer> layers;
-    ArchitecturalLayer pres;
-    pres.name = "Presentation Layer";
-    ArchitecturalLayer app;
-    app.name = "Application Layer";
-    layers.push_back(pres);
-    layers.push_back(app);
-
-    auto patterns = LayerAnalyzer::detect_patterns(layers);
-
-    bool found_mvc = false;
-    for (const auto& p : patterns) {
-        if (p.name == "MVC Pattern") found_mvc = true;
-    }
-    EXPECT_TRUE(found_mvc);
 }
 
 TEST(LayerAnalyzer, DetectEmptyLayers) {
@@ -468,7 +451,7 @@ TEST(LayerAnalyzer, DetectEmptyLayers) {
 
 TEST(LayerAnalyzer, AnalyzeEmpty) {
     LayerAnalyzer la;
-    auto result = la.analyze({});
+    auto result = la.analyze({}, "/repo");
     EXPECT_TRUE(result.layers.empty());
 }
 
@@ -480,22 +463,56 @@ TEST(LayerAnalyzer, AnalyzeGroupsSymbols) {
     auto f = make_file("src/app.go", {&s1, &s2, &s3});
 
     LayerAnalyzer la;
-    auto result = la.analyze({f});
+    auto result = la.analyze({f}, "");
 
     EXPECT_GE(static_cast<int>(result.layers.size()), 2);
-    EXPECT_FALSE(result.dependency_matrix.empty());
-    EXPECT_FALSE(result.layer_metrics.empty());
 }
 
-TEST(LayerAnalyzer, AnalyzeViolationsMissingLayers) {
-    EnhancedSymbol s1 = make_sym("helperFunc", SymbolType::Function);
-    auto f = make_file("src/util.go", {&s1});
+TEST(LayerAnalyzer, LayerModulesArePackagesNotSymbols) {
+    // The defect this pins: layers emitted one "module" per SYMBOL —
+    // "Utility Layer: modules=440917" on a repo with 817 modules. Five
+    // symbols across two directories must yield module counts bounded by
+    // the directory count, with symbol counts reported separately.
+    EnhancedSymbol s1 = make_sym("helperOne", SymbolType::Function, 1);
+    EnhancedSymbol s2 = make_sym("helperTwo", SymbolType::Function, 2);
+    EnhancedSymbol s3 = make_sym("helperThree", SymbolType::Function, 3);
+    auto f1 = make_file("/repo/src/a.go", {&s1, &s2});
+    auto f2 = make_file("/repo/lib/b.go", {&s3});
 
-    LayerAnalyzer la;
-    auto result = la.analyze({f});
+    auto result = LayerAnalyzer().analyze({f1, f2}, "/repo");
+    ASSERT_EQ(result.layers.size(), 1u);  // all helpers -> Utility Layer
+    const auto& l = result.layers[0];
+    EXPECT_EQ(l.name, "Utility Layer");
+    EXPECT_EQ(l.modules.size(), 2u);  // src + lib, not 3 symbols
+    EXPECT_EQ(l.metrics.module_count, 2);
+    EXPECT_EQ(l.metrics.symbol_count, 3);
+}
 
-    // Missing expected layers should generate violations
-    EXPECT_GT(result.violation_count, 0);
+TEST(LayerAnalyzer, PatternConfidenceIsMeasuredNotConstant) {
+    // Four core layers present, but only a sliver of the corpus lives in
+    // them -> no pattern reported (the old code emitted four patterns at a
+    // constant 0.80 for any such corpus). With most symbols in the core
+    // layers, Layered Architecture is reported at its measured share.
+    auto layer = [](std::string name, int symbols) {
+        ArchitecturalLayer l;
+        l.name = std::move(name);
+        l.metrics.symbol_count = symbols;
+        return l;
+    };
+
+    auto weak = LayerAnalyzer::detect_patterns(
+        {layer("Presentation Layer", 1), layer("Application Layer", 1),
+         layer("Domain Layer", 1), layer("Data Layer", 1),
+         layer("Utility Layer", 96)});
+    EXPECT_TRUE(weak.empty());
+
+    auto strong = LayerAnalyzer::detect_patterns(
+        {layer("Presentation Layer", 30), layer("Application Layer", 30),
+         layer("Domain Layer", 20), layer("Data Layer", 10),
+         layer("Utility Layer", 10)});
+    ASSERT_EQ(strong.size(), 1u);
+    EXPECT_EQ(strong[0].name, "Layered Architecture");
+    EXPECT_NEAR(strong[0].confidence, 0.9, 1e-9);
 }
 
 // ===========================================================================

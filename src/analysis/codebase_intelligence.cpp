@@ -290,7 +290,7 @@ CodebaseIntelligenceResponse CodebaseIntelligenceEngine::build_detailed(
         response.module_analysis =
             ModuleAnalyzer().analyze(files, project_root);
     } else if (analysis_type == "layers") {
-        response.layer_analysis = LayerAnalyzer().analyze(files);
+        response.layer_analysis = LayerAnalyzer().analyze(files, project_root);
     } else if (analysis_type == "features") {
         // Feature clustering needs the reference graph; without a callee
         // lookup (e.g. the plain analyze() dispatch, which has no live index)
