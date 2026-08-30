@@ -41,3 +41,8 @@ docs/.astro/
 .work/
 .xdg-cache-home/
 .xdg-data-home/
+
+# tman run logs (machine-local; the /test and /build-debug shims are tracked)
+/.tman/
+/test.ps1
+/test.cmd

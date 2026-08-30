@@ -1,0 +1,20 @@
+defaults {
+    stall "30m"
+    max-parallel 2
+    retain "24h"
+    max-time "30m"
+}
+
+// Debug build via the preset; the preset itself caps compile jobs at 4
+// (an unbounded -j has taken this 8-core host down before).
+alias "build" {
+    command "cmake"
+    args "--build" "--preset" "debug"
+}
+
+// Unit/integration tests for the debug preset (benchmarks excluded by the
+// preset's label filter).
+alias "test" {
+    command "ctest"
+    args "--preset" "debug"
+}
