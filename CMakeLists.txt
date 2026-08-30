@@ -9,7 +9,13 @@ if(NOT DEFINED CMAKE_CXX_COMPILER_LAUNCHER)
     if(CCACHE_PROGRAM)
         set(CMAKE_C_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
         set(CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
-        message(STATUS "lci: using ccache compiler launcher (${CCACHE_PROGRAM})")
+        # GCC PCH files embed the build path, so a PCH-using translation unit
+        # can never score a ccache hit from another worktree (measured: 127 of
+        # 251 compiler calls uncacheable, dominating fresh-worktree wall-clock).
+        # With ccache present the cache replaces what PCH bought; without
+        # ccache, PCH stays on for cold-build speed.
+        set(CMAKE_DISABLE_PRECOMPILE_HEADERS ON)
+        message(STATUS "lci: using ccache compiler launcher (${CCACHE_PROGRAM}); PCH disabled in favor of the cache")
     endif()
 endif()
 
