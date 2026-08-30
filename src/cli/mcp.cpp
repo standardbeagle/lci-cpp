@@ -4,8 +4,10 @@
 #include <lci/mcp/runtime.h>
 #include <lci/mcp/server.h>
 #include <lci/search/search_engine.h>
+#include <lci/server/client.h>
 #include <lci/server/server.h>
 
+#include <cstdlib>
 #include <iostream>
 #include <string>
 #include <thread>
@@ -13,7 +15,57 @@
 namespace lci {
 namespace cli {
 
-namespace {}  // namespace
+namespace {
+
+/// Bridges this process's stdio MCP client to a running index server's
+/// POST /mcp endpoint: no local index, no re-index — the server's warmed
+/// index answers every call. Returns the process exit code, or -1 when
+/// the server does not host MCP (stale binary) and the caller should run
+/// the legacy in-process path.
+int run_mcp_bridge(Client& client) {
+    // Probe hosting support with a ping frame before committing.
+    std::string probe_resp, probe_err;
+    int status = client.mcp_dispatch(
+        R"({"jsonrpc":"2.0","id":"lci-bridge-probe","method":"ping"})",
+        probe_resp, probe_err);
+    if (status != 200) return -1;
+
+    std::string line;
+    while (std::getline(std::cin, line)) {
+        if (line.empty()) continue;
+        std::string out, err;
+        int st = client.mcp_dispatch(line, out, err);
+        if (st == 204) continue;  // notification: no response frame
+        if (st == 200) {
+            std::cout << out << '\n';
+            std::cout.flush();
+            continue;
+        }
+        // Mid-session bridge failure: answer THIS frame with a JSON-RPC
+        // error rather than dying silently; notifications and unparseable
+        // frames have nothing to answer.
+        nlohmann::json id = nullptr;
+        try {
+            auto req = nlohmann::json::parse(line);
+            if (req.contains("id")) id = req["id"];
+        } catch (const nlohmann::json::parse_error&) {
+        }
+        if (id.is_null()) continue;
+        nlohmann::json envelope = {
+            {"jsonrpc", "2.0"},
+            {"id", id},
+            {"error",
+             {{"code", -32603},
+              {"message", "bridge to index server failed: " +
+                              (st < 0 ? err
+                                      : "HTTP " + std::to_string(st))}}}};
+        std::cout << envelope.dump() << '\n';
+        std::cout.flush();
+    }
+    return 0;
+}
+
+}  // namespace
 
 // FIX-D.1 sweep (Dart FZJ6Iip4we3U): all 8 parity-compat stubs removed —
 // find_files, debug_info, list_symbols, inspect_symbol, browse_file,
@@ -35,6 +87,30 @@ int run_mcp(const GlobalFlags& flags) {
     if (std::string err = load_config_with_overrides(flags, cfg); !err.empty()) {
         std::cerr << "Error: " << err << "\n";
         return 1;
+    }
+
+    // Bridge-first: share the persistent per-root index server (spawning
+    // it if needed) so N stdio clients pay for ONE index build instead of
+    // N. Skipped when the invocation carries process-local overrides the
+    // shared server would not have — a custom config file, include/exclude
+    // globs, or LCI_ERROR_REPORT — those keep the in-process path so the
+    // overrides actually apply.
+    bool has_local_overrides =
+        flags.config_path != ".lci.kdl" || !flags.include.empty() ||
+        !flags.exclude.empty() ||
+        std::getenv("LCI_ERROR_REPORT") != nullptr;
+    if (!has_local_overrides) {
+        std::string ensure_err;
+        if (auto client = ensure_server_running(cfg, ensure_err)) {
+            int code = run_mcp_bridge(*client);
+            if (code >= 0) return code;
+            std::cerr << "Warning: index server does not host MCP (older "
+                         "binary?); falling back to an in-process index\n";
+        } else {
+            std::cerr << "Warning: could not reach or start an index "
+                         "server (" << ensure_err
+                      << "); falling back to an in-process index\n";
+        }
     }
 
     MasterIndex runtime_index(cfg);
@@ -80,6 +156,13 @@ int run_mcp(const GlobalFlags& flags) {
     // fresh process paying for a full rebuild it then discarded.)
     mcp_server.set_readiness_gate([&warmup](std::string& error) {
         return warmup.wait(error);
+    });
+
+    // Host mode also answers POST /mcp, so CONCURRENT `lci mcp` one-shots
+    // for the same root bridge to this process instead of each building
+    // their own index.
+    index_server.set_mcp_dispatcher([&mcp_server](const std::string& line) {
+        return mcp_server.dispatch_wire(line);
     });
 
     bool shared_server_started = index_server.start();

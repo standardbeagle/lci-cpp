@@ -333,6 +333,27 @@ class IndexServer {
     /// outlive the server or be cleared before it is destroyed.
     void set_search_engine(SearchEngine* engine);
 
+    /// Installs the MCP dispatcher behind POST /mcp: one JSON-RPC message
+    /// in, one wire response line out ("" = notification, answered 204).
+    /// Unset ⇒ /mcp answers 501, which `lci mcp` reads as "this server
+    /// cannot host MCP; run in-process". The dispatcher is responsible for
+    /// its own readiness blocking and serialization (McpServer::
+    /// dispatch_wire provides both).
+    void set_mcp_dispatcher(std::function<std::string(const std::string&)> d);
+
+    /// The index this server serves (owned or externally managed). Stable
+    /// for the server's lifetime; used by run_server to build the MCP
+    /// runtime over the same index it indexes.
+    MasterIndex& index() { return *indexer_; }
+
+    /// True once the index is built and the search engine is published
+    /// (the same condition /status reports as ready).
+    bool is_ready() const {
+        std::shared_lock lock(mu_);
+        return search_engine_ != nullptr &&
+               !indexing_active_.load(std::memory_order_acquire);
+    }
+
     /// Starts listening on the Unix socket. Returns false on failure.
     bool start();
 
@@ -438,6 +459,9 @@ class IndexServer {
     std::atomic<int64_t> last_registry_touch_ns_{0};
     std::string registry_dir_;   // empty = registry/eviction disabled
     std::string registry_path_;  // this server's registry file, once published
+
+    // POST /mcp dispatcher (see set_mcp_dispatcher). Set before start().
+    std::function<std::string(const std::string&)> mcp_dispatcher_;
 
     void reaper_loop(bool root_existed_at_start);
     void touch_activity();

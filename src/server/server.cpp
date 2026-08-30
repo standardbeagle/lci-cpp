@@ -332,6 +332,11 @@ void reap_stale_sockets(const std::string& own_sock) {
 }  // namespace
 #endif
 
+void IndexServer::set_mcp_dispatcher(
+    std::function<std::string(const std::string&)> d) {
+    mcp_dispatcher_ = std::move(d);
+}
+
 bool IndexServer::start() {
     std::lock_guard lifecycle_lock(lifecycle_mu_);
     if (running_.exchange(true, std::memory_order_acq_rel)) {
@@ -1057,6 +1062,27 @@ void IndexServer::register_handlers() {
     svr_.Post("/browse-file",
               [this](const httplib::Request& r, httplib::Response& s) {
                   handle_browse_file(r, s);
+              });
+
+    // Generic MCP bridge endpoint: `lci mcp` forwards each stdio JSON-RPC
+    // frame here so every stdio client shares this server's warmed index
+    // instead of re-indexing per process. The dispatcher blocks until the
+    // MCP runtime is ready; 501 tells a bridge this server predates (or
+    // never enabled) MCP hosting.
+    svr_.Post("/mcp",
+              [this](const httplib::Request& r, httplib::Response& s) {
+                  if (!mcp_dispatcher_) {
+                      s.status = 501;
+                      s.set_content("mcp hosting not enabled on this server",
+                                    "text/plain");
+                      return;
+                  }
+                  std::string out = mcp_dispatcher_(r.body);
+                  if (out.empty()) {
+                      s.status = 204;  // notification: no response frame
+                      return;
+                  }
+                  s.set_content(out, "application/json");
               });
 
     // Also register GET handlers for endpoints that don't require a body

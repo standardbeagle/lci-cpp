@@ -158,49 +158,11 @@ nlohmann::json McpServer::handle_request(const nlohmann::json& request) {
     if (method == "initialize") {
         response["result"] = handle_initialize(request);
     } else if (method == "tools/list") {
-        // tools/list emits tools alphabetically by name with a fixed field
-        // order (locked by mcp_server_test). Standard nlohmann::json
-        // alphabetises on dump, so build the entire envelope
-        // as ordered_json, serialise here, write directly, and return null to
-        // signal the run loop to skip its default write_message path.
-        nlohmann::ordered_json env;
-        env["jsonrpc"] = "2.0";
-        env["id"] = id;
-
-        nlohmann::ordered_json result_obj;
-        nlohmann::ordered_json tools_arr = nlohmann::ordered_json::array();
-
-        // Snapshot pointers and sort alphabetically by tool name (Go emits
-        // tools alphabetical-by-name; C++ registered_tools_ is in handler-file
-        // insertion order). Sort the snapshot only — do NOT mutate
-        // registered_tools_ (handle_tools_call iterates it directly; each tool
-        // name is registered exactly once, so order is not load-bearing for
-        // dispatch, but keep registered_tools_ stable regardless).
-        std::vector<const RegisteredTool*> snapshot;
-        snapshot.reserve(registered_tools_.size());
-        for (const auto& reg : registered_tools_) {
-            snapshot.push_back(&reg);
-        }
-        std::sort(snapshot.begin(), snapshot.end(),
-                  [](const RegisteredTool* a, const RegisteredTool* b) {
-                      return a->definition.name < b->definition.name;
-                  });
-
-        for (const auto* reg : snapshot) {
-            nlohmann::ordered_json tool;
-            // Tool object top-level keys: alphabetical [description,
-            // inputSchema, name] (matches Go map iteration ordered by
-            // jsonschema-go's sorted emit). Insert in sorted order.
-            tool["description"] = reg->definition.description;
-            tool["inputSchema"] = build_input_schema_ordered(reg->definition);
-            tool["name"] = reg->definition.name;
-            tools_arr.push_back(std::move(tool));
-        }
-
-        result_obj["tools"] = std::move(tools_arr);
-        env["result"] = std::move(result_obj);
-
-        std::cout << dump_json_lossy(env) << '\n';
+        // tools/list emits with a locked field order; the wire string is
+        // built by tools_list_wire (shared with dispatch_wire) and written
+        // directly, returning null to skip the default write_message path.
+        std::lock_guard lock(write_mu_);
+        std::cout << tools_list_wire(id) << '\n';
         std::cout.flush();
         return nullptr;
     } else if (method == "tools/call") {
@@ -475,6 +437,134 @@ nlohmann::json McpServer::build_input_schema(const ToolDefinition& def) {
     return nlohmann::json::parse(build_input_schema_ordered(def).dump());
 }
 
+std::string McpServer::tools_list_wire(const nlohmann::json& id) const {
+    // Standard nlohmann::json alphabetises on dump, so the entire envelope
+    // is ordered_json and serialised here (field order locked by
+    // mcp_server_test, matching Go's jsonschema-go emit).
+    nlohmann::ordered_json env;
+    env["jsonrpc"] = "2.0";
+    env["id"] = id;
+
+    nlohmann::ordered_json result_obj;
+    nlohmann::ordered_json tools_arr = nlohmann::ordered_json::array();
+
+    // Snapshot pointers and sort alphabetically by tool name (Go emits
+    // tools alphabetical-by-name; C++ registered_tools_ is in handler-file
+    // insertion order). Sort the snapshot only — registered_tools_ stays
+    // stable.
+    std::vector<const RegisteredTool*> snapshot;
+    snapshot.reserve(registered_tools_.size());
+    for (const auto& reg : registered_tools_) {
+        snapshot.push_back(&reg);
+    }
+    std::sort(snapshot.begin(), snapshot.end(),
+              [](const RegisteredTool* a, const RegisteredTool* b) {
+                  return a->definition.name < b->definition.name;
+              });
+
+    for (const auto* reg : snapshot) {
+        nlohmann::ordered_json tool;
+        // Tool object top-level keys: alphabetical [description,
+        // inputSchema, name].
+        tool["description"] = reg->definition.description;
+        tool["inputSchema"] = build_input_schema_ordered(reg->definition);
+        tool["name"] = reg->definition.name;
+        tools_arr.push_back(std::move(tool));
+    }
+
+    result_obj["tools"] = std::move(tools_arr);
+    env["result"] = std::move(result_obj);
+    return dump_json_lossy(env);
+}
+
+nlohmann::json McpServer::execute_tool_call(const RegisteredTool& tool,
+                                            const nlohmann::json& arguments,
+                                            const nlohmann::json& id) {
+    // One tool call at a time, whichever thread carries it (stdio worker or
+    // an /mcp bridge request): handlers were written for serial execution.
+    std::lock_guard lock(tool_mu_);
+
+    nlohmann::json response;
+    response["jsonrpc"] = "2.0";
+    response["id"] = id;
+
+    std::string gate_error;
+    if (readiness_gate_ && !readiness_gate_(gate_error)) {
+        // -32603 (internal error): the tool exists and the arguments were
+        // never examined; the index behind it is unusable.
+        response["error"] = {{"code", -32603},
+                             {"message", "index unavailable: " + gate_error}};
+    } else {
+        try {
+            response["result"] = handle_tools_call(tool, arguments);
+        } catch (const nlohmann::json::exception& e) {
+            response["error"] = {
+                {"code", -32600},
+                {"message", std::string("invalid request: ") + e.what()}};
+        }
+    }
+    return response;
+}
+
+std::string McpServer::dispatch_wire(const std::string& line) {
+    nlohmann::json request;
+    try {
+        request = nlohmann::json::parse(line);
+    } catch (const nlohmann::json::parse_error&) {
+        return {};  // matches the stdio loop: unparseable frames are dropped
+    }
+
+    std::string method;
+    if (auto it = request.find("method");
+        it != request.end() && it->is_string()) {
+        method = it->get<std::string>();
+    }
+    auto id = request.contains("id") ? request["id"] : nlohmann::json(nullptr);
+
+    // Notifications get no response.
+    if (id.is_null() && !request.contains("id") && !method.empty()) {
+        return {};
+    }
+
+    if (method == "tools/list") {
+        return tools_list_wire(id);
+    }
+    if (method == "tools/call") {
+        auto params = request.value("params", nlohmann::json::object());
+        auto tool_name = params.value("name", "");
+        auto it = std::find_if(
+            registered_tools_.begin(), registered_tools_.end(),
+            [&](const RegisteredTool& reg) {
+                return reg.definition.name == tool_name;
+            });
+        if (it == registered_tools_.end()) {
+            return dump_json_lossy(
+                {{"jsonrpc", "2.0"},
+                 {"id", id},
+                 {"error", {{"code", -32602},
+                            {"message",
+                             "unknown tool \"" + tool_name + "\""}}}});
+        }
+        return dump_json_lossy(execute_tool_call(
+            *it, params.value("arguments", nlohmann::json::object()), id));
+    }
+
+    // initialize / ping / unknown methods share handle_request's logic and
+    // are cheap; tools/list and tools/call were peeled off above because
+    // handle_request writes/enqueues instead of returning.
+    try {
+        auto response = handle_request(request);
+        return response.is_null() ? std::string{} : dump_json_lossy(response);
+    } catch (const nlohmann::json::exception& e) {
+        return dump_json_lossy(
+            {{"jsonrpc", "2.0"},
+             {"id", id},
+             {"error", {{"code", -32600},
+                        {"message",
+                         std::string("invalid request: ") + e.what()}}}});
+    }
+}
+
 // -- Tool worker --------------------------------------------------------------
 
 void McpServer::enqueue_call(PendingCall call) {
@@ -501,29 +591,8 @@ void McpServer::drain_calls() {
             queue_.pop_front();
         }
 
-        nlohmann::json response;
-        response["jsonrpc"] = "2.0";
-        response["id"] = call.id;
-
-        std::string gate_error;
-        if (readiness_gate_ && !readiness_gate_(gate_error)) {
-            // -32603 (internal error): the tool exists and the arguments
-            // were never examined; the index behind it is unusable.
-            response["error"] = {{"code", -32603},
-                                 {"message",
-                                  "index unavailable: " + gate_error}};
-        } else {
-            try {
-                response["result"] =
-                    handle_tools_call(*call.tool, call.arguments);
-            } catch (const nlohmann::json::exception& e) {
-                response["error"] = {
-                    {"code", -32600},
-                    {"message",
-                     std::string("invalid request: ") + e.what()}};
-            }
-        }
-        write_message(response);
+        write_message(
+            execute_tool_call(*call.tool, call.arguments, call.id));
     }
 }
 

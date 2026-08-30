@@ -368,6 +368,31 @@ void Client::set_timeout(std::chrono::milliseconds timeout) {
     timeout_ = timeout;
 }
 
+int Client::mcp_dispatch(const std::string& line, std::string& response_out,
+                         std::string& error) {
+#ifdef _WIN32
+    httplib::Client cli("http://" + socket_path_);
+#else
+    httplib::Client cli(socket_path_);
+    cli.set_address_family(AF_UNIX);
+#endif
+    cli.set_connection_timeout(timeout_);
+    // A tool call blocks server-side until the index + MCP runtime are
+    // warm; the read timeout must cover a full first index, not one IPC
+    // round-trip.
+    cli.set_read_timeout(std::chrono::minutes{15});
+    cli.set_default_headers({{"Accept-Encoding", "identity"}});
+
+    auto res = cli.Post("/mcp", line, "application/json");
+    if (!res) {
+        error = "failed to connect to server at " + socket_path_ + ": " +
+                httplib::to_string(res.error());
+        return -1;
+    }
+    response_out = res->body;
+    return res->status;
+}
+
 std::optional<nlohmann::json> Client::post_json(const std::string& path,
                                                 const nlohmann::json& body,
                                                 std::string& error) {

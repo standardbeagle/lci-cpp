@@ -98,6 +98,14 @@ class Client {
     std::optional<nlohmann::json> browse_file(const BrowseFileRequest& req,
                                               std::string& error);
 
+    /// Forwards one raw JSON-RPC frame to the server's POST /mcp bridge
+    /// endpoint. Returns the HTTP status (-1 on transport failure, filling
+    /// `error`); `response_out` receives the wire response body verbatim
+    /// (empty on 204/notification). Uses a long read timeout: the server
+    /// blocks tool calls until its index and MCP runtime are warm.
+    int mcp_dispatch(const std::string& line, std::string& response_out,
+                     std::string& error);
+
     /// Sets the connection and read timeout.
     void set_timeout(std::chrono::milliseconds timeout);
 

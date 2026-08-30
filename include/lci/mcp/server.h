@@ -146,6 +146,15 @@ class McpServer {
     /// Returns the tool definition at the given index.
     const ToolDefinition& tool_at(size_t index) const;
 
+    /// Dispatches one JSON-RPC message and returns the wire response line
+    /// ("" for notifications / unparseable input). Unlike run(), this is
+    /// synchronous and safe to call from any thread: tools/call waits the
+    /// readiness gate and executes under the same serialization as the
+    /// stdio worker. This is the entry point behind the index server's
+    /// POST /mcp endpoint, which lets `lci mcp` bridge a stdio client to
+    /// a shared, already-warmed server instead of re-indexing per process.
+    std::string dispatch_wire(const std::string& line);
+
     /// Runs the stdio transport loop. Blocks until EOF or error; queued
     /// tool calls are drained (and their responses written) before it
     /// returns, so a one-shot client that closed stdin still gets every
@@ -221,7 +230,19 @@ class McpServer {
     std::atomic<bool> running_{false};
     bool initialized_{false};
 
+    /// Builds the ordered tools/list wire envelope (field order locked by
+    /// mcp_server_test; shared by the stdio path and dispatch_wire).
+    std::string tools_list_wire(const nlohmann::json& id) const;
+
+    /// Runs the gate + handler for one resolved call and returns the full
+    /// response envelope. Serialized by tool_mu_ across the stdio worker
+    /// and dispatch_wire callers — handlers assume no concurrent peer.
+    nlohmann::json execute_tool_call(const RegisteredTool& tool,
+                                     const nlohmann::json& arguments,
+                                     const nlohmann::json& id);
+
     std::mutex write_mu_;
+    std::mutex tool_mu_;
 
     std::mutex queue_mu_;
     std::condition_variable queue_cv_;

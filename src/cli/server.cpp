@@ -1,6 +1,9 @@
 #include <lci/cli/commands.h>
 #include <lci/core/portable.h>
 #include <lci/core/subprocess.h>
+#include <lci/mcp/runtime.h>
+#include <lci/mcp/server.h>
+#include <lci/search/search_engine.h>
 #include <lci/server/server.h>
 #include <lci/version.h>
 
@@ -201,10 +204,43 @@ int run_server(const GlobalFlags& flags, bool daemon, bool foreground) {
     // opt in with their own directory.
     server.enable_instance_registry(instance_registry_dir());
 
+    // MCP hosting: this server also answers POST /mcp, so `lci mcp`
+    // processes bridge their stdio clients here and share ONE warmed
+    // index per root instead of re-indexing per stdio process (the
+    // err-lookup batch pattern: every one-shot paid a full index build).
+    // Tool calls block on the latch until the index and the analysis
+    // runtime are warm.
+    SearchEngine mcp_engine(server.index(), cfg.synonyms);
+    mcp::McpRuntime mcp_runtime(server.index());
+    mcp::McpServer mcp_registry(cfg, server.index(), &mcp_engine);
+    mcp::register_all_handlers(mcp_registry, &server.index(), &mcp_engine,
+                               &mcp_runtime);
+    mcp::WarmupLatch mcp_warm_latch;
+    mcp_registry.set_readiness_gate([&mcp_warm_latch](std::string& error) {
+        return mcp_warm_latch.wait(error);
+    });
+    server.set_mcp_dispatcher([&mcp_registry](const std::string& line) {
+        return mcp_registry.dispatch_wire(line);
+    });
+
     if (!server.start()) {
         std::cerr << "Error: failed to start server\n";
         return 1;
     }
+
+    // Warm the MCP runtime once the server's own index build completes.
+    std::thread mcp_warm_thread([&] {
+        while (server.is_running() && !server.is_ready()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        }
+        if (server.is_ready()) {
+            mcp_runtime.warmup(server.index());
+            mcp_warm_latch.finish({});
+        } else {
+            mcp_warm_latch.finish(
+                "server stopped before its index build completed");
+        }
+    });
 
     std::printf("Index server started successfully\n");
     std::printf("Socket: %s\n", socket_path.c_str());
@@ -229,6 +265,11 @@ int run_server(const GlobalFlags& flags, bool daemon, bool foreground) {
     if (!server.shutdown()) {
         std::cerr << "Warning: shutdown did not complete cleanly\n";
     }
+
+    // The warmup thread reads server state and the shared index; it must
+    // finish before either is destroyed (it exits promptly once
+    // is_running() drops).
+    mcp_warm_thread.join();
 
     std::printf("Server shut down cleanly\n");
     return 0;
