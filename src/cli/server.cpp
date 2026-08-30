@@ -212,6 +212,9 @@ int run_server(const GlobalFlags& flags, bool daemon, bool foreground) {
     // runtime are warm.
     SearchEngine mcp_engine(server.index(), cfg.synonyms);
     mcp::McpRuntime mcp_runtime(server.index());
+    // AST-fact side effects are recorded during the server's own index
+    // build (wired before start(), which kicks that build off).
+    server.index().set_side_effect_sink(&mcp_runtime.side_effects);
     mcp::McpServer mcp_registry(cfg, server.index(), &mcp_engine);
     mcp::register_all_handlers(mcp_registry, &server.index(), &mcp_engine,
                                &mcp_runtime);

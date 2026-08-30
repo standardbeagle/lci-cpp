@@ -16,6 +16,8 @@
 
 namespace lci {
 
+class SideEffectAnalyzer;
+
 /// Thread-safe bounded queue with back-pressure support.
 ///
 /// Producers block when the queue reaches capacity, preventing OOM
@@ -98,7 +100,19 @@ class FileProcessor {
     /// path the worker pool runs. Exists for instrumented callers
     /// (`lci debug memprofile`) that need exact per-file attribution.
     ProcessedFile process_single(const FileTask& task) {
-        return process_file(0, task);
+        return process_file(0, task, nullptr);
+    }
+
+    /// Side-effect recording during extraction. When set, each worker
+    /// drives a private SideEffectAnalyzer through the extractor's sink
+    /// hooks and drains its per-file records into `target` under a lock.
+    /// This replaced the MCP warmup's serial whole-corpus RE-parse
+    /// (populate_side_effects_from_ast): the extractor walks the same AST
+    /// here anyway, so the marginal cost is the record-keeping only —
+    /// measured 31% of total CPU on one thread (~85s wall on the dotnet
+    /// corpus) reduced to noise inside the parallel parse.
+    void set_side_effect_target(SideEffectAnalyzer* target) {
+        side_effect_target_ = target;
     }
 
   private:
@@ -106,12 +120,15 @@ class FileProcessor {
     std::shared_ptr<FileService> file_service_;
     BinaryDetector binary_detector_;
     TrigramIndex* trigram_index_;
+    SideEffectAnalyzer* side_effect_target_{};
+    std::mutex side_effect_mu_;
 
     void worker_loop(int worker_id,
                      BoundedQueue<FileTask>& tasks,
                      BoundedQueue<ProcessedFile>& results);
 
-    ProcessedFile process_file(int worker_id, const FileTask& task);
+    ProcessedFile process_file(int worker_id, const FileTask& task,
+                               SideEffectAnalyzer* side_effect_sink);
 };
 
 }  // namespace lci

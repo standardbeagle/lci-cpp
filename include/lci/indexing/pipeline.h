@@ -15,6 +15,8 @@
 
 namespace lci {
 
+class SideEffectAnalyzer;
+
 /// Orchestrates the 3-stage indexing pipeline: Scanner -> Processor -> Integrator.
 ///
 /// Each stage communicates through bounded queues that provide back-pressure.
@@ -31,6 +33,12 @@ class Pipeline {
     /// Runs the full pipeline: scan, process, integrate.
     /// Blocks until all stages complete or the pipeline is stopped.
     void run();
+
+    /// Records side effects during extraction into `target` (see
+    /// FileProcessor::set_side_effect_target). Set before run().
+    void set_side_effect_target(SideEffectAnalyzer* target) {
+        side_effect_target_ = target;
+    }
 
     /// Requests graceful cancellation of the pipeline.
     void request_stop();
@@ -59,6 +67,8 @@ class Pipeline {
     TrigramIndex* trigram_index_;
     ReferenceTracker* ref_tracker_;
     PostingsIndex* postings_index_;
+
+    SideEffectAnalyzer* side_effect_target_{};
 
     ProgressTracker progress_;
     FileIntegrator integrator_;

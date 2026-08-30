@@ -2,6 +2,8 @@
 
 #include <absl/container/flat_hash_map.h>
 
+#include <lci/analysis/side_effect_analyzer.h>
+
 #include <lci/core/reference_tracker.h>
 #include <lci/core/trigram.h>
 #include <lci/language_map.h>
@@ -13,6 +15,7 @@
 
 #include <chrono>
 #include <filesystem>
+#include <optional>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -35,7 +38,8 @@ namespace {
 void run_unified_extraction(ProcessedFile& result,
                             std::string_view content,
                             const std::string& path,
-                            int64_t max_parse_bytes) {
+                            int64_t max_parse_bytes,
+                            SideEffectAnalyzer* side_effect_sink) {
     auto ext = std::filesystem::path(path).extension().string();
     if (ext.empty()) {
         result.parse_skip_reason = ParseSkipReason::UnsupportedGrammar;
@@ -86,6 +90,7 @@ void run_unified_extraction(ProcessedFile& result,
 
     parser::UnifiedExtractor extractor;
     extractor.init(content, result.file_id, ext, path);
+    if (side_effect_sink) extractor.set_side_effect_sink(side_effect_sink);
     extractor.extract(tree.get());
     auto extracted = extractor.get_results();
 
@@ -180,15 +185,32 @@ void FileProcessor::worker_loop(
     BoundedQueue<FileTask>& tasks,
     BoundedQueue<ProcessedFile>& results) {
 
+    // Private per-worker analyzer: the extractor's sink hooks are a
+    // stateful per-function lifecycle, so workers never share one. Records
+    // drain into the shared target after each file under a short lock —
+    // a handful of map moves per file, no contention on the parse path.
+    std::optional<SideEffectAnalyzer> local_side_effects;
+    if (side_effect_target_) local_side_effects.emplace("generic");
+
     FileTask task;
     while (tasks.pop(task)) {
-        auto result = process_file(worker_id, task);
+        auto result = process_file(
+            worker_id, task,
+            local_side_effects ? &*local_side_effects : nullptr);
+        if (local_side_effects) {
+            auto batch = local_side_effects->take_results();
+            if (!batch.empty()) {
+                std::lock_guard lock(side_effect_mu_);
+                side_effect_target_->merge_results(std::move(batch));
+            }
+        }
         if (!results.push(std::move(result))) return;
     }
 }
 
-ProcessedFile FileProcessor::process_file(int /*worker_id*/,
-                                          const FileTask& task) {
+ProcessedFile FileProcessor::process_file(
+    int /*worker_id*/, const FileTask& task,
+    SideEffectAnalyzer* side_effect_sink) {
     auto start = std::chrono::steady_clock::now();
     ProcessedFile result;
     result.path = task.path;
@@ -236,7 +258,8 @@ ProcessedFile FileProcessor::process_file(int /*worker_id*/,
     // feeds into ReferenceTracker. Without this step, browse-file,
     // list-symbols, references, and tree endpoints all return empty.
     run_unified_extraction(result, content, task.path,
-                           config_.index.max_parse_file_size);
+                           config_.index.max_parse_file_size,
+                           side_effect_sink);
 
     // Per-occurrence trigram bucketing removed (2026-08-04): its sole
     // consumer, ShardedTrigramStorage (fed via the merger pipeline), had no

@@ -109,6 +109,7 @@ void Pipeline::run() {
     // runs from each defaulting to hw_concurrency() and oversubscribing
     // the CPU by N×.
     FileProcessor processor(config_, file_service_, trigram_index_);
+    processor.set_side_effect_target(side_effect_target_);
     int worker_count = config_.performance.parallel_file_workers;
     if (worker_count <= 0) worker_count = config_.performance.max_goroutines;
     std::thread process_thread([&, worker_count] {

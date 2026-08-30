@@ -1,9 +1,6 @@
 #include <lci/mcp/runtime.h>
 
-#include <filesystem>
-#include <fstream>
 #include <iostream>
-#include <sstream>
 #include <string>
 
 #include <lci/mcp/handlers_analysis.h>
@@ -12,57 +9,9 @@
 #include <lci/mcp/handlers_explore.h>
 #include <lci/mcp/handlers_index.h>
 #include <lci/mcp/server.h>
-#include <lci/parser/parser.h>
-#include <lci/parser/parser_pool.h>
-#include <lci/parser/unified_extractor.h>
-
-#include <tree_sitter/api.h>
 
 namespace lci {
 namespace mcp {
-
-namespace {
-
-// Drives the SideEffectAnalyzer per-function lifecycle from real syntax. Each
-// indexed file is re-read and re-parsed once, then walked by UnifiedExtractor
-// with the analyzer attached as its side-effect sink so param / receiver /
-// global writes, throws, and channel ops are recorded from the AST instead of
-// callee-name guessing. Records are keyed by absolute path + start line, the
-// same scheme populate_from_index uses, so the heuristic pass augments these
-// records rather than colliding with them.
-void populate_side_effects_from_ast(MasterIndex& index,
-                                    SideEffectAnalyzer& analyzer) {
-    for (FileID fid : index.get_all_file_ids()) {
-        std::string path = index.get_file_path(fid);
-        std::string ext = std::filesystem::path(path).extension().string();
-        if (ext.empty()) continue;
-
-        parser::Language lang{};
-        if (!parser::language_from_extension(ext, lang)) continue;
-
-        std::ifstream in(path, std::ios::binary);
-        if (!in) continue;
-        std::ostringstream ss;
-        ss << in.rdbuf();
-        std::string content = ss.str();
-        if (content.empty()) continue;
-
-        parser::PooledParser parser_guard(lang);
-        if (!parser_guard) continue;
-
-        parser::UniqueTree tree(ts_parser_parse_string(
-            parser_guard.get(), nullptr, content.data(),
-            static_cast<uint32_t>(content.size())));
-        if (!tree) continue;
-
-        parser::UnifiedExtractor extractor;
-        extractor.init(content, fid, ext, path);
-        extractor.set_side_effect_sink(&analyzer);
-        extractor.extract(tree.get());
-    }
-}
-
-}  // namespace
 
 void McpRuntime::warmup(MasterIndex& index) {
     // Walk the live index and extract every file's @lci: annotations into
@@ -80,12 +29,14 @@ void McpRuntime::warmup(MasterIndex& index) {
         }
     }
 
-    // Phase 1a: AST pass. Re-walk each file's syntax tree and drive the
-    // per-function lifecycle so param/receiver/global writes, throws, and
-    // channel ops are recorded from real AST facts — effects the
-    // callee-name heuristic below cannot see (e.g. `x.field = 1` with no
-    // impure callee, or a bare `raise`/`throw` statement).
-    populate_side_effects_from_ast(index, side_effects);
+    // Phase 1a (AST pass) happens DURING indexing now: MasterIndex's
+    // side-effect sink drives per-worker analyzers inside the extraction
+    // the index performs anyway, and their records land in `side_effects`
+    // before this warmup runs. The old serial whole-corpus re-parse here
+    // was 31% of total CPU on one thread (~85s wall on the dotnet corpus).
+    // Callers must set_side_effect_sink(&runtime.side_effects) BEFORE
+    // index_directory or the AST-fact records are simply absent (the
+    // heuristic pass below still fills every function, at lower fidelity).
 
     // Phase 1b: callee-name heuristic. Augments the AST records with
     // IO / network / database / throw categories inferred from outgoing

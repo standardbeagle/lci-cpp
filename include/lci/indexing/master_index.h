@@ -72,6 +72,8 @@ struct MasterIndexStats {
 ///   - Supports single-file IndexFile / UpdateFile / RemoveFile with fine-grained locking.
 ///   - Tracks progress atomically (isIndexing, totalFiles, processedFiles).
 ///
+class SideEffectAnalyzer;
+
 /// Thread safety:
 ///   - load_snapshot() is lock-free.
 ///   - index_directory() holds bulk_mu_ (blocks other bulk ops, not reads).
@@ -181,6 +183,15 @@ class MasterIndex {
     /// snapshot when no run is in flight. Thread-safe — readers may
     /// poll while the pipeline is active without racing the writer.
     IndexingProgressSnapshot get_progress() const;
+
+    /// Records side effects during the bulk index's extraction pass into
+    /// `analyzer` (per-worker analyzers, merged per file). Set BEFORE
+    /// index_directory; replaces the MCP warmup's serial whole-corpus
+    /// re-parse. Watcher/incremental updates do not feed it (same
+    /// staleness as the old one-shot pass).
+    void set_side_effect_sink(SideEffectAnalyzer* analyzer) {
+        side_effect_sink_ = analyzer;
+    }
 
     // -- Sub-index access (non-owning) ----------------------------------------
 
@@ -305,6 +316,7 @@ class MasterIndex {
     // `stop_mu_`.
     std::atomic<bool> stop_requested_{false};
     Pipeline* active_pipeline_{nullptr};
+    SideEffectAnalyzer* side_effect_sink_{nullptr};
     mutable std::mutex stop_mu_;
 
     // Helpers

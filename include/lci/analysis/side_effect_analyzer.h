@@ -143,6 +143,26 @@ class SideEffectAnalyzer {
     }
     const SideEffectInfo* get_result(std::string_view file, int line) const;
 
+    /// Moves the accumulated per-function records out, leaving this
+    /// analyzer empty and reusable. Used by the index pipeline's
+    /// per-worker analyzers to drain each file's records into the shared
+    /// analyzer without sharing mutable state across workers.
+    absl::flat_hash_map<std::string, SideEffectInfo> take_results() {
+        auto out = std::move(results_);
+        results_.clear();
+        return out;
+    }
+
+    /// Merges records drained from another analyzer. insert_or_assign: a
+    /// re-processed file's functions replace their old records (functions
+    /// deleted from a file leave stale keys behind — same staleness the
+    /// one-shot warmup pass had, now bounded per file instead of global).
+    void merge_results(absl::flat_hash_map<std::string, SideEffectInfo>&& other) {
+        for (auto& [key, info] : other) {
+            results_.insert_or_assign(key, std::move(info));
+        }
+    }
+
     /// Walks every function/method symbol in the indexer and augments results_
     /// with a conservative purity classification derived from callee-name
     /// heuristics. Functions whose outgoing refs target only internal symbols

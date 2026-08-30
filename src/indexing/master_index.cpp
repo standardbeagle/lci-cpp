@@ -126,6 +126,7 @@ bool MasterIndex::index_directory(const std::string& root) {
     // Run the pipeline.
     Pipeline pipeline(config_, file_service_,
                       &trigram_index_, &ref_tracker_, &postings_index_);
+    pipeline.set_side_effect_target(side_effect_sink_);
 
     // Wire the integrator with auxiliary indexes so symbol-aware paths
     // (import resolution, symbol location index) are populated as

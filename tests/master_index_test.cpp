@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <lci/analysis/side_effect_analyzer.h>
 #include <lci/config.h>
 #include <lci/indexing/master_index.h>
 
@@ -61,6 +62,45 @@ TEST(FileSnapshotTest, CopyOnWrite) {
 
     EXPECT_EQ(1, snap->file_count());
     EXPECT_EQ(2, copy->file_count());
+}
+
+// -- Side-effect sink during bulk indexing ------------------------------------
+
+// The MCP warmup's serial whole-corpus re-parse was replaced by recording
+// side effects inside the index pipeline's own extraction (per-worker
+// analyzers merged per file). This pins that a sink wired before
+// index_directory receives AST-fact records — a bare throw is an effect
+// the callee-name heuristic pass cannot see, so its presence proves the
+// AST pass ran during indexing.
+TEST(MasterIndexTest, BulkIndexFeedsSideEffectSink) {
+    TempDir dir;
+    dir.write_file("main.go",
+                   "package main\n"
+                   "\n"
+                   "func mightPanic(x int) int {\n"
+                   "\tif x < 0 {\n"
+                   "\t\tpanic(\"negative\")\n"
+                   "\t}\n"
+                   "\treturn x\n"
+                   "}\n");
+
+    Config cfg;
+    cfg.project.root = dir.path().string();
+    MasterIndex index(cfg);
+    SideEffectAnalyzer sink("generic");
+    index.set_side_effect_sink(&sink);
+    ASSERT_TRUE(index.index_directory(dir.path().string()));
+
+    ASSERT_FALSE(sink.results().empty());
+    bool found = false;
+    for (const auto& [key, info] : sink.results()) {
+        if (info.function_name == "mightPanic") {
+            found = true;
+            EXPECT_NE(info.categories & side_effect::kThrow, 0u)
+                << "AST-fact throw category missing";
+        }
+    }
+    EXPECT_TRUE(found) << "no record for mightPanic";
 }
 
 // -- MasterIndex lifecycle tests ----------------------------------------------

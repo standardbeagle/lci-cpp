@@ -116,6 +116,9 @@ int run_mcp(const GlobalFlags& flags) {
     MasterIndex runtime_index(cfg);
     SearchEngine search_engine(runtime_index, cfg.synonyms);
     mcp::McpRuntime runtime(runtime_index);
+    // AST-fact side effects are recorded during indexing (must be wired
+    // before index_directory runs in the warmup thread below).
+    runtime_index.set_side_effect_sink(&runtime.side_effects);
 
     // Shared IndexServer so CLI commands can also connect. It SHARES
     // runtime_index instead of owning a second MasterIndex: the owning
