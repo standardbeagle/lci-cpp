@@ -115,39 +115,53 @@
     ],
     "buildPresets": [
         {
+            "name": "bounded",
+            "hidden": true,
+            "jobs": 4
+        },
+        {
             "name": "debug",
+            "inherits": "bounded",
             "configurePreset": "debug"
         },
         {
             "name": "release",
+            "inherits": "bounded",
             "configurePreset": "release"
         },
         {
             "name": "sanitizer",
+            "inherits": "bounded",
             "configurePreset": "sanitizer"
         },
         {
             "name": "tsan",
+            "inherits": "bounded",
             "configurePreset": "tsan"
         },
         {
             "name": "msan",
+            "inherits": "bounded",
             "configurePreset": "msan"
         },
         {
             "name": "fuzz",
+            "inherits": "bounded",
             "configurePreset": "fuzz"
         },
         {
             "name": "ci",
+            "inherits": "bounded",
             "configurePreset": "ci"
         },
         {
             "name": "vcpkg",
+            "inherits": "bounded",
             "configurePreset": "vcpkg"
         },
         {
             "name": "macos-universal",
+            "inherits": "bounded",
             "configurePreset": "macos-universal"
         }
     ],
