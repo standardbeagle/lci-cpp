@@ -1,0 +1,37 @@
+// Supervised-run policy for lci-cpp builds and tests.
+//
+// Why this exists: an unbounded `cmake --build -j` swamped the 8-core host and
+// got the build killed. The presets now pin jobs=4; this file adds the outer
+// caps so agent-run builds cannot take the host down even when they bypass the
+// presets.
+//
+//   - `stall "8m"`   — kill only on 8 minutes of silence. Compiler output
+//                      streams per translation unit, so a live build is never
+//                      silent; only a wedged process trips this.
+//   - `max-mem 6144` — 6GB runaway backstop. 4 parallel g++ jobs on this tree
+//                      peak well below it; an OOM-spiral build does not.
+//   - `max-cpu 450`  — ~4.5 cores. jobs=4 plus make overhead fits; a fork bomb
+//                      or an unbounded -j does not.
+//   - Per-alias `name` — a second invocation of the same alias FAILS instead of
+//                      spawning a duplicate build into the same build tree.
+defaults {
+    stall "8m"
+    max-mem 6144
+    max-cpu 450
+    max-parallel 2
+    queue-timeout "30m"
+}
+
+// Configure + build the debug preset (bounded: presets carry jobs=4).
+alias "build" {
+    name "lci-build-debug"
+    command "bash"
+    args "-c" "cmake --preset debug && cmake --build --preset debug"
+}
+
+// Configure + build + run the debug test preset (benchmarks excluded).
+alias "test" {
+    name "lci-test-debug"
+    command "bash"
+    args "-c" "cmake --preset debug && cmake --build --preset debug && ctest --preset debug"
+}

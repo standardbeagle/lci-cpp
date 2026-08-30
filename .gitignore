@@ -28,6 +28,9 @@ real_projects/kotlin/
 real_projects/ruby/
 real_projects/zig/
 
+# tman supervised-run logs (per-clone)
+/.tman/
+
 # worktrack loop state (per-clone, may contain private email in lease_holder)
 .worktrack/
 

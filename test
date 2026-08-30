@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Repo-root shim: capped, deduplicated debug build + ctest via tman.
+set -euo pipefail
+cd "$(dirname "$0")"
+exec tman test "$@"
