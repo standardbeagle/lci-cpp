@@ -19,6 +19,18 @@ project(lci
     LANGUAGES C CXX
 )
 
+# Use mold for linking when it is installed (Linux only) — the debug tree
+# links ~10 executables of 100-240MB each, which dominates wall-clock once
+# ccache absorbs the compiles. Automatic where present, a no-op where absent;
+# `NOT DEFINED` respects an explicit -DCMAKE_LINKER_TYPE from CI or a preset.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT DEFINED CMAKE_LINKER_TYPE)
+    find_program(MOLD_PROGRAM mold)
+    if(MOLD_PROGRAM)
+        add_link_options(-fuse-ld=mold)
+        message(STATUS "lci: linking with mold (${MOLD_PROGRAM})")
+    endif()
+endif()
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
