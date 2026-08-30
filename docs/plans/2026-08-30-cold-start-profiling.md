@@ -80,6 +80,14 @@ runtime warmup/engine ~8s = 35.8s wall.
    self-contained-release-binary-traps), verify all three CI legs and
    the RSS self-cap behavior. Until then server deployments can take
    the win today with the LD_PRELOAD line above.
+   SHIPPED (f4db445): static link, Linux default ON, sanitizer/
+   gperftools guards, tests link it, CI installs the archive.
+   Interposition verified in the binary (weak `malloc`/`free` + 40 tc_*
+   symbols, no new shared deps). A quiet-machine wall-clock confirmation
+   of the shipped binary is still owed — every post-link benchmark ran
+   against a 12-30 load average from unrelated agent fleets; re-run
+   best-of-3 on an idle box before quoting a final number
+   (the LD_PRELOAD 27.2s A/B is the same library, quiet machine).
 2. **malloc family ~17% of CPU** (ts_malloc + malloc + _int_malloc) —
    allocation traffic in parse+extract. tree-sitter's internal
    allocations dominate; an arena for extractor-side vectors is the
