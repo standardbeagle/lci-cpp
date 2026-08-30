@@ -12,10 +12,24 @@ if(NOT DEFINED CMAKE_CXX_COMPILER_LAUNCHER)
         # the debug preset); without it every PCH consumer recompiles on every
         # fresh build tree. Carried in the launcher so the setting travels with
         # the repo instead of living in each developer's ccache.conf.
+        #
+        # NOHASHDIR + BASEDIR make cache keys independent of the tree's
+        # absolute path: with -g the default hash includes the cwd and the
+        # preprocessed line markers carry absolute paths, so a build at a new
+        # worktree path missed the entire cache. NOHASHDIR drops the cwd from
+        # the key; BASEDIR=<this source dir> rewrites paths under the tree to
+        # relative before hashing. Paired with -ffile-prefix-map in the debug
+        # preset so the replayed objects carry no absolute paths either
+        # (ccache excludes *-prefix-map arguments from its hash, so the
+        # per-tree flag value does not re-key the cache).
+        set(LCI_CCACHE_ENV
+            CCACHE_SLOPPINESS=pch_defines,time_macros
+            CCACHE_NOHASHDIR=1
+            "CCACHE_BASEDIR=${CMAKE_SOURCE_DIR}")
         set(CMAKE_C_COMPILER_LAUNCHER
-            "${CMAKE_COMMAND}" -E env CCACHE_SLOPPINESS=pch_defines,time_macros "${CCACHE_PROGRAM}")
+            "${CMAKE_COMMAND}" -E env ${LCI_CCACHE_ENV} "${CCACHE_PROGRAM}")
         set(CMAKE_CXX_COMPILER_LAUNCHER
-            "${CMAKE_COMMAND}" -E env CCACHE_SLOPPINESS=pch_defines,time_macros "${CCACHE_PROGRAM}")
+            "${CMAKE_COMMAND}" -E env ${LCI_CCACHE_ENV} "${CCACHE_PROGRAM}")
         message(STATUS "lci: using ccache compiler launcher (${CCACHE_PROGRAM})")
     endif()
 endif()

@@ -22,7 +22,8 @@
             "displayName": "Debug",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
-                "CMAKE_CXX_FLAGS": "-fpch-preprocess"
+                "CMAKE_CXX_FLAGS": "-fpch-preprocess -ffile-prefix-map=${sourceDir}=.",
+                "CMAKE_C_FLAGS": "-ffile-prefix-map=${sourceDir}=."
             }
         },
         {
