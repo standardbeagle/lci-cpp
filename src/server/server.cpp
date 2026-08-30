@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <charconv>
 #include <cstdio>
+#include <cstring>
 #include <cstdlib>
 #include <ctime>
 #include <filesystem>
@@ -33,10 +34,16 @@
 #include <psapi.h>
 #elif defined(__APPLE__)
 #include <mach/mach.h>
+#include <fcntl.h>
+#include <sys/file.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
 #include <unistd.h>
 #else
+#include <fcntl.h>
+#include <sys/file.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
 #include <unistd.h>
@@ -266,6 +273,65 @@ bool IndexServer::is_running() const {
 
 // -- Server lifecycle ---------------------------------------------------------
 
+#ifndef _WIN32
+namespace {
+
+/// True if a Unix socket path has a live listener (a bounded raw connect —
+/// no Client machinery, cheap enough to run per candidate in the reaper).
+bool unix_socket_alive(const std::string& path) {
+    int fd = ::socket(AF_UNIX, SOCK_STREAM, 0);
+    if (fd < 0) return true;  // cannot tell: assume alive, never unlink
+    struct sockaddr_un addr{};
+    addr.sun_family = AF_UNIX;
+    if (path.size() >= sizeof(addr.sun_path)) {
+        ::close(fd);
+        return true;
+    }
+    std::memcpy(addr.sun_path, path.c_str(), path.size() + 1);
+    int rc = ::connect(fd, reinterpret_cast<struct sockaddr*>(&addr),
+                       sizeof(addr));
+    ::close(fd);
+    return rc == 0;
+}
+
+/// Removes this user's dead lci socket files (and their sidecar locks)
+/// from the temp dir. Killed one-shot MCP processes leak one socket each;
+/// dozens were observed accumulated. A file is dead only when nothing
+/// answers a connect AND its sidecar lock is free (a starting server holds
+/// the lock before it binds).
+void reap_stale_sockets(const std::string& own_sock) {
+    namespace fs = std::filesystem;
+    char prefix[32];
+    std::snprintf(prefix, sizeof(prefix), "lci-%u-", current_user_id());
+    std::error_code ec;
+    for (const auto& entry :
+         fs::directory_iterator(fs::temp_directory_path(), ec)) {
+        const std::string name = entry.path().filename().string();
+        if (name.rfind(prefix, 0) != 0) continue;
+        if (name.size() < 5 || name.substr(name.size() - 5) != ".sock")
+            continue;
+        const std::string path = entry.path().string();
+        if (path == own_sock) continue;
+        if (unix_socket_alive(path)) continue;
+
+        const std::string lock_path = path + ".lock";
+        int lfd = ::open(lock_path.c_str(), O_CREAT | O_RDWR | O_CLOEXEC,
+                         0600);
+        if (lfd < 0) continue;
+        if (::flock(lfd, LOCK_EX | LOCK_NB) != 0) {
+            ::close(lfd);  // a starting server owns this path
+            continue;
+        }
+        std::error_code rm_ec;
+        fs::remove(path, rm_ec);
+        fs::remove(lock_path, rm_ec);
+        ::close(lfd);
+    }
+}
+
+}  // namespace
+#endif
+
 bool IndexServer::start() {
     std::lock_guard lifecycle_lock(lifecycle_mu_);
     if (running_.exchange(true, std::memory_order_acq_rel)) {
@@ -280,10 +346,37 @@ bool IndexServer::start() {
 
     auto sock = socket_path();
 
+#ifndef _WIN32
+    // Claim the socket path FIRST via flock on a sidecar lock file. The
+    // liveness probe and the unlink+bind below are not atomic: two servers
+    // starting concurrently could both pass the probe and bind the same
+    // path — the later bind owns the inode, the earlier keeps serving an
+    // orphaned socket (three LISTENers on one path were observed live).
+    // The kernel drops flock on process death, so no stale-pid handling.
+    {
+        const std::string lock_path = sock + ".lock";
+        int fd = ::open(lock_path.c_str(), O_CREAT | O_RDWR | O_CLOEXEC,
+                        0600);
+        if (fd >= 0 && ::flock(fd, LOCK_EX | LOCK_NB) != 0) {
+            ::close(fd);
+            std::fprintf(stderr,
+                         "Error: another index server is starting or "
+                         "already serving %s\n",
+                         sock.c_str());
+            running_.store(false, std::memory_order_release);
+            return false;
+        }
+        // fd < 0 (lock file uncreatable) degrades to the probe-only guard
+        // below rather than refusing to serve.
+        socket_lock_fd_ = fd;
+    }
+#endif
+
     // A live listener on this address means another server already owns this
-    // root. Unlinking/rebinding would silently orphan it (its socket file
-    // vanishes while the process keeps serving an unreachable inode), so
-    // refuse instead of stealing the address.
+    // root (e.g. one from a build predating the sidecar lock). Unlinking/
+    // rebinding would silently orphan it (its socket file vanishes while
+    // the process keeps serving an unreachable inode), so refuse instead of
+    // stealing the address.
     {
         Client probe(sock);
         probe.set_timeout(std::chrono::milliseconds{500});
@@ -291,15 +384,23 @@ bool IndexServer::start() {
             std::fprintf(stderr,
                          "Error: another index server is already serving %s\n",
                          sock.c_str());
+#ifndef _WIN32
+            if (socket_lock_fd_ >= 0) {
+                ::close(socket_lock_fd_);
+                socket_lock_fd_ = -1;
+            }
+#endif
             running_.store(false, std::memory_order_release);
             return false;
         }
     }
 
 #ifndef _WIN32
-    // Remove stale socket file (Unix domain socket only)
+    // Remove stale socket file (Unix domain socket only), and this user's
+    // other dead lci sockets while here — killed processes leak them.
     std::error_code ec;
     std::filesystem::remove(sock, ec);
+    reap_stale_sockets(sock);
 #endif
 
     if (!handlers_registered_) {
@@ -518,6 +619,14 @@ bool IndexServer::shutdown_locked() {
             std::filesystem::remove(sock, ec);
         }
         bound_socket_ino_.store(0, std::memory_order_release);
+    }
+
+    // Release the socket-path claim last: a successor blocked in start()'s
+    // flock proceeds only once our socket file is gone. The lock file
+    // itself stays (stable path; reaped with the socket when dead).
+    if (socket_lock_fd_ >= 0) {
+        ::close(socket_lock_fd_);
+        socket_lock_fd_ = -1;
     }
 #endif
 

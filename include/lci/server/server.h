@@ -416,6 +416,11 @@ class IndexServer {
     // restart race is never orphaned by our unlink.
     std::atomic<uint64_t> bound_socket_ino_{0};
 
+    // flock fd claiming the socket path for this server's lifetime (-1 =
+    // unclaimed / Windows). Taken before probe+bind in start(), released
+    // in shutdown_locked(); the kernel releases it on process death.
+    int socket_lock_fd_{-1};
+
     // -- Lifecycle reaper -----------------------------------------------------
     // One background thread per server enforcing three policies:
     //   1. idle exit: no non-/ping request for server.idle_timeout_sec;
