@@ -69,10 +69,17 @@ Measured on dotnet (identical corpus: 15,797 files / 596,617 symbols /
 Current dotnet split: scan 2.5s + parse 21.9s + integrate 3.5s +
 runtime warmup/engine ~8s = 35.8s wall.
 
-1. **Parse phase 21.9s vs the ~8s parallel floor.** The gap is inside
-   the worker phase itself (load batching, extraction allocations,
-   queue handoff, side-effect recording); needs a worker-phase profile
-   next, not the whole process.
+1. **Allocator contention — CONFIRMED, ~8s of parse wall, next slice.**
+   The worker-phase profile shows malloc family ~25% of CPU with
+   visible futex wait (glibc arenas under 12 threads; most traffic is
+   tree-sitter internal ts_malloc). A/B via
+   `LD_PRELOAD=libtcmalloc_minimal.so.4`: parse 21.9s → 14.0s, wall
+   35.8s → **27.2s** (−24%), RSS unchanged (1.91GB). Shipping it is
+   its own slice: static-link tcmalloc_minimal (the DYNAMIC gperftools
+   auto-link already broke a release tarball once — see
+   self-contained-release-binary-traps), verify all three CI legs and
+   the RSS self-cap behavior. Until then server deployments can take
+   the win today with the LD_PRELOAD line above.
 2. **malloc family ~17% of CPU** (ts_malloc + malloc + _int_malloc) —
    allocation traffic in parse+extract. tree-sitter's internal
    allocations dominate; an arena for extractor-side vectors is the
@@ -82,6 +89,9 @@ runtime warmup/engine ~8s = 35.8s wall.
 
 Theoretical best cold start on dotnet-class corpora ≈ scan (~1-2s) +
 parse floor (~8s) + integrate (~3s) + warmup heuristics (~3s) ≈
-**12–15s**, vs 35.8s today — the remaining ~2.4x is worker-phase
-efficiency and allocator work (malloc family was ~17% of CPU), plus
-the warmup heuristic pass, each to be profiled in isolation next.
+**12–15s**. With the tcmalloc slice landed that is ~27s vs the floor —
+the last ~2x is extraction-side allocation diet (visit_node/get_results
+string copies), the ~8s runtime-warmup/engine tail, and tree-sitter's
+own grammar-table cost (not ours). Progression this campaign:
+151s → 47.3s (side-effect fold-in) → 35.8s (scan fixes) → 27.2s
+(allocator, pending packaging).
