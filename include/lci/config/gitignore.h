@@ -24,6 +24,12 @@ struct GitignorePattern {
     PatternType type{};
     std::string prefix;
     std::string suffix;
+    /// Longest wildcard-free run of the pattern (slashes trimmed; empty if
+    /// under 3 chars). Any path the pattern can match — at full length or
+    /// any suffix — contains it verbatim, so a find() miss skips both the
+    /// glob matcher and the per-suffix retry loop. Wildcard patterns from
+    /// a large .gitignore were ~18% of scan CPU on a 55k-file corpus.
+    std::string literal;
 };
 
 /// Matches `text` against a gitignore-style glob `pattern`:

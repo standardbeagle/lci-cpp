@@ -57,6 +57,32 @@ GitignorePattern GitignoreParser::parse_pattern(std::string_view line) const {
 
     pat.pattern = text;
     pat.type = analyze_pattern(text, pat.prefix, pat.suffix);
+
+    if (pat.type == PatternType::Wildcard) {
+        // Longest run without wildcards or a character class. `[...]`
+        // counts as one wildcard position; `**/` can collapse, so boundary
+        // slashes are trimmed off the literal.
+        std::string best, current;
+        for (size_t i = 0; i < text.size(); ++i) {
+            char c = text[i];
+            if (c == '*' || c == '?') {
+                if (current.size() > best.size()) best = current;
+                current.clear();
+            } else if (c == '[') {
+                if (current.size() > best.size()) best = current;
+                current.clear();
+                auto close = text.find(']', i + 1);
+                if (close == std::string::npos) break;
+                i = close;
+            } else {
+                current += c;
+            }
+        }
+        if (current.size() > best.size()) best = std::move(current);
+        while (!best.empty() && best.front() == '/') best.erase(best.begin());
+        while (!best.empty() && best.back() == '/') best.pop_back();
+        if (best.size() >= 3) pat.literal = std::move(best);
+    }
     return pat;
 }
 
@@ -127,6 +153,14 @@ bool GitignoreParser::should_ignore(std::string_view path,
 bool GitignoreParser::matches_pattern(const GitignorePattern& pat,
                                       std::string_view path,
                                       bool is_dir) const {
+    // Literal prefilter (Wildcard only): substring presence is required
+    // wherever the pattern would match — full path or any suffix — so one
+    // find() replaces the glob matcher and the per-suffix retry loop for
+    // the common non-matching file.
+    if (!pat.literal.empty() &&
+        path.find(pat.literal) == std::string_view::npos) {
+        return false;
+    }
     // Directory-only patterns match directories and files inside them
     if (pat.directory) {
         if (is_dir) {
