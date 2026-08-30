@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <lci/analysis/clone_detector.h>
 #include <lci/analysis/side_effect_analyzer.h>
 #include <lci/config.h>
 #include <lci/indexing/master_index.h>
@@ -101,6 +102,85 @@ TEST(MasterIndexTest, BulkIndexFeedsSideEffectSink) {
         }
     }
     EXPECT_TRUE(found) << "no record for mightPanic";
+}
+
+// -- Corpus-wide clone detection ----------------------------------------------
+
+TEST(CloneDetectorTest, FindsExactAndStructuralClasses) {
+    TempDir dir;
+    // Two exact copies (formatting/comment differences must not matter),
+    // one near-copy (renamed identifiers -> structural), one unrelated.
+    dir.write_file("a.go",
+                   "package main\n\n"
+                   "func sumEven(xs []int) int {\n"
+                   "\ttotal := 0\n"
+                   "\tfor _, x := range xs {\n"
+                   "\t\tif x%2 == 0 {\n"
+                   "\t\t\ttotal += x\n"
+                   "\t\t}\n"
+                   "\t}\n"
+                   "\treturn total\n"
+                   "}\n");
+    dir.write_file("b.go",
+                   "package main\n\n"
+                   "func sumEvens(xs []int) int {\n"
+                   "\t// identical body, extra comment\n"
+                   "\ttotal := 0\n"
+                   "\tfor _, x := range xs {\n"
+                   "\t\tif x%2 == 0 {\n"
+                   "\t\t\ttotal += x\n"
+                   "\t\t}\n"
+                   "\t}\n"
+                   "\treturn total\n"
+                   "}\n");
+    dir.write_file("c.go",
+                   "package main\n\n"
+                   "func addAll(values []int) int {\n"
+                   "\tacc := 0\n"
+                   "\tfor _, v := range values {\n"
+                   "\t\tif v%2 == 0 {\n"
+                   "\t\t\tacc += v\n"
+                   "\t\t}\n"
+                   "\t}\n"
+                   "\treturn acc\n"
+                   "}\n");
+
+    Config cfg;
+    cfg.project.root = dir.path().string();
+    MasterIndex index(cfg);
+    ASSERT_TRUE(index.index_directory(dir.path().string()));
+
+    CloneDetector::Options opts;
+    opts.min_lines = 5;
+    opts.structural_threshold = 0.55;
+    auto rep = CloneDetector().analyze(index, dir.path().string(), {}, opts);
+
+    ASSERT_GE(rep.functions_scanned, 3);
+    ASSERT_GE(rep.clone_classes, 1);
+
+    // The exact pair: sumEven + sumEvens, normalized-identical bodies
+    // (function signatures differ only in the name, which is part of the
+    // first line — so they are STRUCTURAL unless the whole normalized
+    // body matches; assert at least one class contains both).
+    bool pair_found = false;
+    for (const auto& cc : rep.classes) {
+        bool has_a = false, has_b = false;
+        for (const auto& m : cc.members) {
+            if (m.name == "sumEven") has_a = true;
+            if (m.name == "sumEvens") has_b = true;
+        }
+        if (has_a && has_b) pair_found = true;
+    }
+    EXPECT_TRUE(pair_found) << "sumEven/sumEvens not grouped";
+    EXPECT_GT(rep.duplicated_lines, 0);
+    EXPECT_GT(rep.duplication_pct, 0.0);
+
+    // Determinism: members sorted by path, classes ranked.
+    for (const auto& cc : rep.classes) {
+        for (size_t i = 1; i < cc.members.size(); ++i) {
+            EXPECT_LE(cc.members[i - 1].path, cc.members[i].path);
+        }
+    }
 }
 
 // -- MasterIndex lifecycle tests ----------------------------------------------

@@ -66,6 +66,7 @@ add_library(lci_lib STATIC
     analysis/entry_signatures.cpp
     analysis/naming_analyzer.cpp
     analysis/code_similarity.cpp
+    analysis/clone_detector.cpp
     analysis/token_budget.cpp
     analysis/codebase_intelligence.cpp
     core/graph_propagator.cpp

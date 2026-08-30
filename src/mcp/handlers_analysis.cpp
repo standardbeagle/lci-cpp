@@ -24,6 +24,7 @@
 #include <lci/analysis/codebase_intelligence.h>
 #include <lci/analysis/coupling_analyzer.h>
 #include <lci/analysis/entry_signatures.h>
+#include <lci/analysis/clone_detector.h>
 #include <lci/analysis/error_handling_analyzer.h>
 #include <lci/analysis/feature_analyzer.h>
 #include <lci/analysis/health_analyzer.h>
@@ -584,6 +585,7 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                                            "git frequency analysis failed");
             emit_lcf_header(out, mode, 1, lcf_token_count(0, 0, false, 0, true));
             emit_git_hotspots(out, report, win, project_root);
+
         }
     } else if (mode == "detailed") {
         // Detailed sub-mode dispatch. The engine runs the module/layer/
@@ -595,12 +597,58 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
         if (detailed_mode.empty()) detailed_mode = "modules";
         if (detailed_mode != "modules" && detailed_mode != "layers" &&
             detailed_mode != "features" && detailed_mode != "terms" &&
-            detailed_mode != "errors" && detailed_mode != "resources") {
+            detailed_mode != "errors" && detailed_mode != "resources" &&
+            detailed_mode != "clones") {
             return make_error_response(
                 "code_insight",
                 "invalid detailed analysis '" + detailed_mode +
                 "', must be one of: modules, layers, features, terms, "
-                "errors, resources");
+                "errors, resources, clones");
+        }
+
+        if (detailed_mode == "clones") {
+            // Corpus-wide duplicate code: exact classes over the whole
+            // scoped corpus, structural classes among the largest
+            // functions (bounded pairwise stage, cap reported below).
+            CloneDetector::Options co;
+            co.min_lines = params.value("min_lines", co.min_lines);
+            co.structural_threshold =
+                params.value("threshold", co.structural_threshold);
+            co.max_classes = params.value("max_results", 20);
+            auto rep = CloneDetector().analyze(indexer, project_root,
+                                               scope.allowed, co);
+            out << "LCF/1.0\nmode=detailed\nattributes=" << scope.label
+                << "\nsub=clones\ntier=2\ntokens=100\n---\n";
+            out << "== CLONES ==\n"
+                << "functions=" << rep.functions_scanned
+                << " classes=" << rep.clone_classes
+                << " duplicated_lines=" << rep.duplicated_lines
+                << " duplication=" << fmt2(rep.duplication_pct) << "%"
+                << " (min_lines=" << co.min_lines << " structural>="
+                << fmt2(co.structural_threshold) << ", structural stage "
+                << "caps at the " << co.structural_top_n
+                << " largest functions)\n";
+            for (const auto& cc : rep.classes) {
+                out << "  " << (cc.exact ? "exact" : "structural")
+                    << " x" << cc.members.size() << " lines=" << cc.lines
+                    << " dup=" << cc.duplicated_lines;
+                if (!cc.exact) out << " sim=" << fmt2(cc.similarity);
+                out << "\n";
+                for (const auto& m : cc.members) {
+                    out << "    " << m.name << " (" << m.path << ":"
+                        << m.line << ")\n";
+                }
+            }
+            if (rep.clone_classes >
+                static_cast<int>(rep.classes.size())) {
+                out << "  ... and "
+                    << rep.clone_classes -
+                           static_cast<int>(rep.classes.size())
+                    << " smaller classes (raise max_results)\n";
+            }
+            std::string body = out.str();
+            if (!body.empty() && body.back() == '\n') body.pop_back();
+            return ToolResult{std::move(body), false};
         }
 
         if (detailed_mode == "errors" || detailed_mode == "resources") {
@@ -873,9 +921,17 @@ void register_analysis_handlers(McpServer& server,
           {"tier", "integer", "Analysis tier", ""},
           {"analysis", "string",
            "Detailed analysis: modules, layers, features, terms, errors, "
-           "resources",
+           "resources, clones (corpus-wide duplicate code)",
            ""},
           {"metrics", "array", "Metrics to include", "string"},
+          {"min_lines", "integer",
+           "analysis=clones: minimum normalized body lines for a function "
+           "to count (default 6)",
+           ""},
+          {"threshold", "number",
+           "analysis=clones: structural similarity threshold 0-1 "
+           "(default 0.9)",
+           ""},
           {"target", "string", "Target to analyze", ""},
           {"focus", "string", "Analysis focus", ""},
           {"max_results", "integer",
