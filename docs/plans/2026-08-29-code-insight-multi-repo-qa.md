@@ -123,6 +123,39 @@ high_complexity top-3 lists between statistics and unified.
 - git_hotspots empty-window output is correct but gives no "window predates
   HEAD" hint; self-repo hotspot list not sorted by the displayed field.
 
+## Fix status (2026-08-29, same day)
+
+1. Serving lifecycle — FIXED (141d12d, b26119d, 10c3978): tools/call runs
+   on a worker thread (transport keeps answering pings; EOF drains queued
+   calls; cold one-shot verified live on next.js), socket path claimed via
+   sidecar flock + dead-socket reaping, shutdown falls back to the
+   instance registry by root.
+2. LCI_ERROR_REPORT override — NOT A BUG: verified live in both directions
+   on pgvector (on renders the section, off answers available=false). The
+   QA agents' persistent drivers dropped the env var; the one-shot recipe
+   carried it. Withdrawn.
+3. layers — FIXED (7b7e5cc): modules are packages, symbol counts separate,
+   one measured pattern with a 0.5 floor, fabricated matrix/metrics/
+   violations deleted. Residual: keyword classification itself is still
+   weak (pgvector "Presentation Layer: 176 symbols").
+4. Score saturation — PARTIALLY FIXED: zero-signal corpora now render
+   score=n/a signal=none instead of a perfect 10.00 (both sections).
+   Residuals: the C classifier still cannot see Postgres ereport/elog
+   (needs its own calibration round per
+   error-handling-score-calibration discipline), and released_ratio can
+   sit at 0.45 while zero resource findings emit — the release-credit
+   rule and the finding rule disagree; recalibrate together.
+5. Consistency — PARTIALLY FIXED: git_analyze summary now labels
+   symbols_added/modified/deleted (the "contradiction" was files vs
+   symbols under one label) and the missing-ref failure names its refs
+   and the shallow-clone cause. The self-repo "wrong range" reading was
+   scope=commit semantics: base_ref names the commit to analyze, not the
+   base of a range. Remaining open: cohesion/coupling definitions differ
+   across modules/statistics/unified; cluster (Louvain) nondeterminism
+   between calls; terms count==terms duplicate field; absolute-path
+   leaks in massive_files/high_complexity; vendored code in statistics
+   exemplars under attributes=shipping.
+
 ## Suggested fix order
 
 1. Serving: make `lci mcp` attach to an existing server for the root, or
@@ -136,5 +169,41 @@ high_complexity top-3 lists between statistics and unified.
 5. Unify cohesion/coupling definitions across modes; git_analyze count
    reconciliation + wrong-range investigation; determinism of clusters.
 
-Raw outputs: scratchpad `out_*.txt` / `age_*.txt` / `dn_*.txt` per sweep
-session (transient).
+## Scale ceiling (measured 2026-08-29, release build, WSL2, one-shot mcp)
+
+Whole-process wall clock (spawn + index + one index_stats call) and peak
+RSS via /usr/bin/time -v:
+
+| Corpus | Files indexed | Symbols | References | Wall | index_time_ms | Peak RSS |
+|---|---|---|---|---|---|---|
+| pgvector | 147 | 2.8k | 5.3k | 0.4s | 126 | 31MB |
+| age | 330 | 9.1k | 32k | 2.1s | 899 | 80MB |
+| lci-cpp (self) | 4,982 | 30k | 159k | 8.1s | 4,170 | 277MB |
+| next.js | 19,293 | 87k | 589k | 23.8s | 13,116 | 547MB |
+| dotnet/runtime (default budget) | 15,797 of 55k | 597k | 1.36M | 151s | 54,573 | 3,811MB |
+| dotnet/runtime (budget raised to 55k files) | — | — | — | segfault | — | ~2.7GB at crash |
+
+Findings:
+
+- Memory scales with SYMBOL/REFERENCE density, not file count: next.js
+  (19k files, 87k symbols) peaks at 547MB while the dotnet subset (16k
+  files, 597k symbols, 1.36M refs) peaks at 3.8GB — right under the
+  4096MB `performance.max_rss_mb` self-cap. The self-cap, not the corpus
+  budget, is the binding constraint for dense corpora.
+- **Reasonable upper bound with defaults: ~20k files / ~100k symbols
+  indexes in under 25s and under 600MB — comfortable. The practical
+  ceiling is the default corpus budget (500MB / 50k files) intersected
+  with the 4GB RSS cap: ~600k symbols / ~1.4M references works (2.5min
+  index, 3.8GB peak) but has no headroom.**
+- Past the budget it is not degradation but a crash: raising the budget
+  to index all 55k dotnet files SEGFAULTS 2 of 3 runs ~135s into the
+  parallel index (survives under gdb — timing-dependent), matching the
+  known pre-existing efsw/indexing race class
+  (.claude/rules + memory: efsw-server-concurrency-races,
+  heaptrack-at-scale early-exit on 23k-file corpora). Follow-up: a TSan
+  pass on index_directory at >50k files before any budget raise is
+  recommended; until then the default budget is the guardrail, not a
+  nuisance.
+
+Raw outputs: scratchpad `out_*.txt` / `age_*.txt` / `dn_*.txt` /
+`scale_*.{json,time}` per sweep session (transient).
