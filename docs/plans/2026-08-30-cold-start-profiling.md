@@ -88,6 +88,12 @@ runtime warmup/engine ~8s = 35.8s wall.
    against a 12-30 load average from unrelated agent fleets; re-run
    best-of-3 on an idle box before quoting a final number
    (the LD_PRELOAD 27.2s A/B is the same library, quiet machine).
+   PAIRED confirmation of the shipped binary (interleaved glibc-variant
+   vs shipped, same contended box): 73.9→50.4s and 76.5→39.3s
+   (−32%/−49%; a third pair inverted when load spiked to 32 mid-run —
+   contention noise, not signal). The win grows under load: glibc's
+   own M_ARENA_MAX=4 cap (set in main.cpp for RSS) concentrates the
+   contention tcmalloc's per-thread caches avoid.
 2. **malloc family ~17% of CPU** (ts_malloc + malloc + _int_malloc) —
    allocation traffic in parse+extract. tree-sitter's internal
    allocations dominate; an arena for extractor-side vectors is the
