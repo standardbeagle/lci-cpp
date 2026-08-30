@@ -7,8 +7,15 @@ cmake_minimum_required(VERSION 3.25)
 if(NOT DEFINED CMAKE_CXX_COMPILER_LAUNCHER)
     find_program(CCACHE_PROGRAM ccache)
     if(CCACHE_PROGRAM)
-        set(CMAKE_C_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
-        set(CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
+        # sloppiness=pch_defines,time_macros lets ccache cache the 127 TUs that
+        # consume lci_lib's precompiled header (paired with -fpch-preprocess in
+        # the debug preset); without it every PCH consumer recompiles on every
+        # fresh build tree. Carried in the launcher so the setting travels with
+        # the repo instead of living in each developer's ccache.conf.
+        set(CMAKE_C_COMPILER_LAUNCHER
+            "${CMAKE_COMMAND}" -E env CCACHE_SLOPPINESS=pch_defines,time_macros "${CCACHE_PROGRAM}")
+        set(CMAKE_CXX_COMPILER_LAUNCHER
+            "${CMAKE_COMMAND}" -E env CCACHE_SLOPPINESS=pch_defines,time_macros "${CCACHE_PROGRAM}")
         message(STATUS "lci: using ccache compiler launcher (${CCACHE_PROGRAM})")
     endif()
 endif()
