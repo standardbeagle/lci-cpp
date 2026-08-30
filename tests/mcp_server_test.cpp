@@ -354,6 +354,39 @@ TEST_F(McpStdioTest, ToolCallWaitsOnTheReadinessGate) {
         << "every tool call runs against a ready index";
 }
 
+TEST_F(McpStdioTest, TransportAnswersPingsWhileToolCallWaitsOnGate) {
+    // The cold one-shot defect this pins: the gate used to run on the
+    // transport thread with a timeout, so a slow index build turned every
+    // tool call into "index unavailable" and a one-shot client (requests
+    // piped, stdin closed) could never succeed. Now the gate runs on the
+    // tool worker: the transport answers later frames first, and EOF still
+    // drains the queued call before run() returns.
+    server_->set_readiness_gate([](std::string&) {
+        std::this_thread::sleep_for(std::chrono::milliseconds{150});
+        return true;
+    });
+
+    auto responses = exchange({
+        make_request("initialize", 1),
+        make_request("tools/call", 2,
+                     {{"name", "info"},
+                      {"arguments", nlohmann::json::object()}}),
+        make_request("ping", 3),
+    });
+
+    ASSERT_EQ(responses.size(), 3u);
+    // Position in the stream: ping (id 3) must be answered BEFORE the
+    // gated tool call (id 2) — the transport did not park on the gate.
+    EXPECT_EQ(responses[1]["id"], 3);
+    EXPECT_TRUE(responses[1].contains("result"));
+    // The tool call is answered last, after EOF, via the drain.
+    EXPECT_EQ(responses[2]["id"], 2);
+    ASSERT_TRUE(responses[2].contains("result"));
+    EXPECT_FALSE(responses[2]["result"]["content"][0]["text"]
+                     .get<std::string>()
+                     .empty());
+}
+
 TEST_F(McpStdioTest, FailedReadinessGateReportsInsteadOfServingHalfIndex) {
     server_->set_readiness_gate([](std::string& error) {
         error = "index build failed";

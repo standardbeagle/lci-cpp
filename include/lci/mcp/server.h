@@ -1,9 +1,13 @@
 #pragma once
 
 #include <atomic>
+#include <condition_variable>
+#include <deque>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <nlohmann/json.hpp>
@@ -99,8 +103,11 @@ ToolResult make_unavailable_response(const std::string& operation,
 /// writes responses to stdout. Implements the MCP protocol for tool
 /// registration and invocation.
 ///
-/// Thread safety: The server runs on a single thread (the calling thread
-/// of run()). Not thread-safe for concurrent callers.
+/// Thread safety: the transport loop runs on the calling thread of run();
+/// tool calls execute serially on one internal worker thread so the
+/// transport keeps answering initialize / tools/list / ping while a tool
+/// call waits on index readiness. Handlers therefore never run
+/// concurrently with each other. stdout writes are serialized internally.
 class McpServer {
   public:
     /// Creates a server with the given config.
@@ -119,11 +126,14 @@ class McpServer {
     /// Registers a single tool.
     void add_tool(ToolDefinition def, ToolHandler handler);
 
-    /// Installs a gate consulted before every tools/call, so the transport can
-    /// answer initialize / tools/list / ping while the index is still being
-    /// built. Without it, run_mcp indexed the whole project before the loop
-    /// started reading stdin, and clients that bound the handshake (slop-mcp
-    /// among them) hit "context deadline exceeded" and marked lci failed.
+    /// Installs a gate consulted before every tools/call. The gate runs on
+    /// the internal tool worker thread, so it may block until the index is
+    /// usable without stalling the transport: initialize / tools/list /
+    /// ping keep answering while a tool call waits. (Before the worker
+    /// existed the gate had to time out and error "still building", which
+    /// made a cold one-shot client — pipe requests, close stdin — unable to
+    /// EVER succeed on a large corpus: each retry was a new process and a
+    /// full rebuild.)
     ///
     /// The gate blocks until the index is usable and returns true; on failure
     /// it fills `error` and returns false, and the call answers with that
@@ -136,7 +146,10 @@ class McpServer {
     /// Returns the tool definition at the given index.
     const ToolDefinition& tool_at(size_t index) const;
 
-    /// Runs the stdio transport loop. Blocks until EOF or error.
+    /// Runs the stdio transport loop. Blocks until EOF or error; queued
+    /// tool calls are drained (and their responses written) before it
+    /// returns, so a one-shot client that closed stdin still gets every
+    /// answer.
     /// Returns 0 on clean shutdown, non-zero on error.
     int run();
 
@@ -183,6 +196,21 @@ class McpServer {
     /// Builds the JSON Schema for a tool definition.
     static nlohmann::json build_input_schema(const ToolDefinition& def);
 
+    /// One queued tools/call awaiting the worker thread.
+    struct PendingCall {
+        const RegisteredTool* tool;
+        nlohmann::json arguments;
+        nlohmann::json id;
+    };
+
+    /// Enqueues a tools/call for the worker thread (starts it on first use).
+    void enqueue_call(PendingCall call);
+
+    /// Worker loop: pops queued calls, waits the readiness gate, runs the
+    /// handler, writes the response. Exits when told to finish and the
+    /// queue is drained.
+    void drain_calls();
+
     Config config_;
     std::string project_root_;
     MasterIndex* indexer_{};
@@ -192,6 +220,14 @@ class McpServer {
     std::function<bool(std::string& error)> readiness_gate_;
     std::atomic<bool> running_{false};
     bool initialized_{false};
+
+    std::mutex write_mu_;
+
+    std::mutex queue_mu_;
+    std::condition_variable queue_cv_;
+    std::deque<PendingCall> queue_;
+    bool finish_worker_{false};
+    std::thread worker_;
 };
 
 }  // namespace mcp

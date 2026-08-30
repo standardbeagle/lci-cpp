@@ -35,7 +35,16 @@ McpServer::McpServer(const Config& config, MasterIndex& indexer,
       indexer_(&indexer),
       search_engine_(search_engine) {}
 
-McpServer::~McpServer() = default;
+McpServer::~McpServer() {
+    // run() joins the worker on the normal path; this covers a server
+    // destroyed without run() completing.
+    {
+        std::lock_guard lock(queue_mu_);
+        finish_worker_ = true;
+    }
+    queue_cv_.notify_all();
+    if (worker_.joinable()) worker_.join();
+}
 
 // -- Tool registration --------------------------------------------------------
 
@@ -102,7 +111,9 @@ void McpServer::write_message(const nlohmann::json& msg) {
     // dump() escapes any embedded newlines, so the trailing '\n' is the
     // sole frame delimiter. Lossy UTF-8 so a response echoing non-UTF-8 bytes
     // (query text or source-derived content) can't abort the run loop on the
-    // unwrapped wire write.
+    // unwrapped wire write. Locked: the transport thread and the tool
+    // worker both write here, and an interleaved frame is unparseable.
+    std::lock_guard lock(write_mu_);
     std::cout << dump_json_lossy(msg) << '\n';
     std::cout.flush();
 }
@@ -201,21 +212,20 @@ nlohmann::json McpServer::handle_request(const nlohmann::json& request) {
             [&](const RegisteredTool& reg) {
                 return reg.definition.name == tool_name;
             });
-        std::string gate_error;
         if (it == registered_tools_.end()) {
             response["error"] = {{"code", -32602},
                                  {"message", "unknown tool \"" + tool_name +
                                                  "\""}};
-        } else if (readiness_gate_ && !readiness_gate_(gate_error)) {
-            // -32603 (internal error): the tool exists and the arguments were
-            // never examined; the index behind it is unusable.
-            response["error"] = {{"code", -32603},
-                                 {"message", "index unavailable: " +
-                                                 gate_error}};
         } else {
-            auto arguments =
-                params.value("arguments", nlohmann::json::object());
-            response["result"] = handle_tools_call(*it, arguments);
+            // Hand the call to the worker thread and answer nothing here:
+            // the worker waits the readiness gate (however long the index
+            // build takes), runs the handler, and writes the response,
+            // while this thread keeps draining stdin so initialize /
+            // tools/list / ping stay answered mid-build.
+            enqueue_call({&*it,
+                          params.value("arguments", nlohmann::json::object()),
+                          id});
+            return nullptr;
         }
     } else if (method == "ping") {
         response["result"] = nlohmann::json::object();
@@ -465,6 +475,58 @@ nlohmann::json McpServer::build_input_schema(const ToolDefinition& def) {
     return nlohmann::json::parse(build_input_schema_ordered(def).dump());
 }
 
+// -- Tool worker --------------------------------------------------------------
+
+void McpServer::enqueue_call(PendingCall call) {
+    {
+        std::lock_guard lock(queue_mu_);
+        queue_.push_back(std::move(call));
+        if (!worker_.joinable()) {
+            worker_ = std::thread([this] { drain_calls(); });
+        }
+    }
+    queue_cv_.notify_one();
+}
+
+void McpServer::drain_calls() {
+    for (;;) {
+        PendingCall call;
+        {
+            std::unique_lock lock(queue_mu_);
+            queue_cv_.wait(lock, [this] {
+                return !queue_.empty() || finish_worker_;
+            });
+            if (queue_.empty()) return;  // finish_worker_ && drained
+            call = std::move(queue_.front());
+            queue_.pop_front();
+        }
+
+        nlohmann::json response;
+        response["jsonrpc"] = "2.0";
+        response["id"] = call.id;
+
+        std::string gate_error;
+        if (readiness_gate_ && !readiness_gate_(gate_error)) {
+            // -32603 (internal error): the tool exists and the arguments
+            // were never examined; the index behind it is unusable.
+            response["error"] = {{"code", -32603},
+                                 {"message",
+                                  "index unavailable: " + gate_error}};
+        } else {
+            try {
+                response["result"] =
+                    handle_tools_call(*call.tool, call.arguments);
+            } catch (const nlohmann::json::exception& e) {
+                response["error"] = {
+                    {"code", -32600},
+                    {"message",
+                     std::string("invalid request: ") + e.what()}};
+            }
+        }
+        write_message(response);
+    }
+}
+
 // -- Main run loop ------------------------------------------------------------
 
 int McpServer::run() {
@@ -498,11 +560,24 @@ int McpServer::run() {
         }
     }
 
+    // Drain queued tool calls before returning: a one-shot client pipes its
+    // requests and closes stdin immediately, but still reads stdout — its
+    // answers must be written even though EOF arrived first.
+    {
+        std::lock_guard lock(queue_mu_);
+        finish_worker_ = true;
+    }
+    queue_cv_.notify_all();
+    if (worker_.joinable()) worker_.join();
+
     running_.store(false);
     return 0;
 }
 
-void McpServer::stop() { running_.store(false); }
+void McpServer::stop() {
+    running_.store(false);
+    queue_cv_.notify_all();
+}
 
 }  // namespace mcp
 }  // namespace lci

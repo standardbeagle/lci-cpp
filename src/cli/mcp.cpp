@@ -94,21 +94,6 @@ class Warmup {
         return failure_.empty();
     }
 
-    enum class Outcome { Ready, Failed, StillBuilding };
-
-    /// Bounded wait: the transport thread must not park forever on the
-    /// first tools/call — while it is parked, every subsequent stdin frame
-    /// (JSON-RPC pings included) goes unread, and a client that pings for
-    /// liveness declares the server dead mid-index.
-    Outcome wait_for(std::chrono::milliseconds timeout, std::string& error) {
-        std::unique_lock lock(mu_);
-        if (!cv_.wait_for(lock, timeout, [this] { return done_; })) {
-            return Outcome::StillBuilding;
-        }
-        error = failure_;
-        return failure_.empty() ? Outcome::Ready : Outcome::Failed;
-    }
-
   private:
     std::mutex mu_;
     std::condition_variable cv_;
@@ -293,22 +278,15 @@ int run_mcp(const GlobalFlags& flags) {
 
     // Serialises every handler behind the warmup: no handler observes the
     // index while the warmup thread is still writing it, and after the wait
-    // nothing mutates it again. The wait is BOUNDED: an unbounded wait here
-    // parks the single transport thread, leaving the client's liveness
-    // pings unanswered until indexing completes — the client then kills a
-    // healthy server mid-index. On timeout the tool call errors with a
-    // retryable message and the loop resumes draining stdin.
+    // nothing mutates it again. The wait is UNBOUNDED and safe to be: the
+    // gate runs on McpServer's tool worker thread, so the transport keeps
+    // answering liveness pings while a tool call waits out the index build.
+    // (The previous 20s-timeout gate made a cold one-shot client — pipe
+    // requests, close stdin — unable to ever succeed on a large corpus:
+    // every retry was a fresh process paying for a full rebuild it then
+    // discarded.)
     mcp_server.set_readiness_gate([&warmup](std::string& error) {
-        switch (warmup.wait_for(std::chrono::seconds{20}, error)) {
-            case Warmup::Outcome::Ready:
-                return true;
-            case Warmup::Outcome::Failed:
-                return false;
-            case Warmup::Outcome::StillBuilding:
-            default:
-                error = "index is still building; retry shortly";
-                return false;
-        }
+        return warmup.wait(error);
     });
 
     int exit_code = mcp_server.run();
