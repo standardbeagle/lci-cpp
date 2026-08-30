@@ -43,18 +43,36 @@ staleness, now bounded per file when a bulk reindex runs);
 functions deleted from a file leave stale keys until the next bulk
 index.
 
+## Fix 2 (landed): scanner readlink storm + glob/gitignore prefilters
+
+Per-stage wall timing (now printed by every bulk index:
+`lci: index stages: scan=… parse=… integrate=…`) attributed the
+remaining time: scan=12.8s, parse=23.6s, integrate=5.1s on dotnet.
+perf over `lci list` split the scan: 39% `fs::relative` →
+`weakly_canonical` → one readlink syscall per path component per file;
+25% `match_glob_at` backtracking; 18% gitignore Wildcard patterns
+re-running the glob at every path suffix.
+
+- Repo-relative paths are now derived lexically through the walk
+  (append entry name to the parent's rel prefix) — zero readlinks; the
+  theoretical best for "compute a relative path you already know".
+- Scanner include/exclude globs and gitignore Wildcard patterns carry
+  their longest wildcard-free literal (slash-trimmed — `**/` can
+  collapse); a `find()` miss skips the backtracking matcher and the
+  per-suffix retry loop entirely.
+
+Measured on dotnet (identical corpus: 15,797 files / 596,617 symbols /
+1,363,805 refs): scan 12.8s → 2.5s, wall 47.3s → **35.8s**.
+
 ## Remaining gap to theoretical best (next targets, with profile data)
 
-The cold start is now ≈ the parallel index itself (~45s on dotnet).
-From the profile:
+Current dotnet split: scan 2.5s + parse 21.9s + integrate 3.5s +
+runtime warmup/engine ~8s = 35.8s wall.
 
-1. **tree-sitter parse is 53% of CPU.** ~358G cycles across workers ≈
-   7.5–9s of perfectly-parallel wall on this 12-thread machine — the
-   parse floor. Observed index wall ~45s means parallel efficiency is
-   the gap, not parse cost: suspects are the bounded-queue handoff,
-   the single-threaded integrator stage consuming results, and worker
-   starvation at the scan tail. Next step: per-stage wall timing
-   (scanner vs processor vs integrator) before touching anything.
+1. **Parse phase 21.9s vs the ~8s parallel floor.** The gap is inside
+   the worker phase itself (load batching, extraction allocations,
+   queue handoff, side-effect recording); needs a worker-phase profile
+   next, not the whole process.
 2. **malloc family ~17% of CPU** (ts_malloc + malloc + _int_malloc) —
    allocation traffic in parse+extract. tree-sitter's internal
    allocations dominate; an arena for extractor-side vectors is the
@@ -62,7 +80,8 @@ From the profile:
 3. **`ts_language_table_entry` 7.8%** — C# grammar table lookups inside
    tree-sitter; not ours to fix (grammar-dependent).
 
-Theoretical best cold start on dotnet-class corpora ≈ scan (few s) +
-parse floor (~8s) + integrate + warmup heuristics (~3s) ≈ **12–15s**,
-vs 47s today — the remaining 3x is parallel-efficiency and allocator
-work, to be re-profiled after the integrator/queue timing split.
+Theoretical best cold start on dotnet-class corpora ≈ scan (~1-2s) +
+parse floor (~8s) + integrate (~3s) + warmup heuristics (~3s) ≈
+**12–15s**, vs 35.8s today — the remaining ~2.4x is worker-phase
+efficiency and allocator work (malloc family was ~17% of CPU), plus
+the warmup heuristic pass, each to be profiled in isolation next.
