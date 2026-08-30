@@ -12,7 +12,8 @@
             "binaryDir": "${sourceDir}/build/${presetName}",
             "cacheVariables": {
                 "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-                "FETCHCONTENT_BASE_DIR": "$env{HOME}/.cache/lci-cpp-deps"
+                "FETCHCONTENT_BASE_DIR": "$env{HOME}/.cache/lci-cpp-deps",
+                "FETCHCONTENT_UPDATES_DISCONNECTED": "ON"
             }
         },
         {
