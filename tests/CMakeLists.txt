@@ -80,8 +80,19 @@ target_include_directories(lci_tests PRIVATE
     "${CMAKE_BINARY_DIR}/generated"
     "${CMAKE_CURRENT_SOURCE_DIR}/helpers"
 )
-target_compile_definitions(lci_tests PRIVATE
-    LCI_TESTS_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+# The absolute-path macros are scoped to the few sources that read them
+# instead of whole targets: a target-wide -DLCI_TESTS_SOURCE_DIR=<worktree
+# path> put a per-worktree string on every test TU's command line, which
+# made ~65 otherwise-identical TUs miss the shared ccache from any other
+# worktree.
+set_source_files_properties(
+    semantic_test.cpp
+    integration/spec_runner.cpp
+    PROPERTIES COMPILE_DEFINITIONS LCI_TESTS_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+)
+set_source_files_properties(
+    soak/index_size_smoke_test.cpp
+    PROPERTIES COMPILE_DEFINITIONS LCI_PROJECT_ROOT="${CMAKE_SOURCE_DIR}"
 )
 target_link_libraries(lci_tests PRIVATE
     lci_lib
@@ -158,9 +169,6 @@ target_include_directories(lci_index_size_smoke PRIVATE
     "${CMAKE_SOURCE_DIR}/include"
     "${CMAKE_BINARY_DIR}/generated"
 )
-target_compile_definitions(lci_index_size_smoke PRIVATE
-    LCI_PROJECT_ROOT="${CMAKE_SOURCE_DIR}"
-)
 target_link_libraries(lci_index_size_smoke PRIVATE
     lci_lib
     GTest::gtest_main
@@ -196,9 +204,6 @@ target_include_directories(lci_integration_tests PRIVATE
     "${CMAKE_SOURCE_DIR}/include"
     "${CMAKE_BINARY_DIR}/generated"
     "${CMAKE_CURRENT_SOURCE_DIR}"
-)
-target_compile_definitions(lci_integration_tests PRIVATE
-    LCI_TESTS_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
 )
 target_link_libraries(lci_integration_tests PRIVATE
     lci_lib
@@ -253,9 +258,6 @@ target_include_directories(lci_real_project_tests PRIVATE
     "${CMAKE_SOURCE_DIR}/include"
     "${CMAKE_BINARY_DIR}/generated"
     "${CMAKE_CURRENT_SOURCE_DIR}"
-)
-target_compile_definitions(lci_real_project_tests PRIVATE
-    LCI_TESTS_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
 )
 target_link_libraries(lci_real_project_tests PRIVATE
     lci_lib
