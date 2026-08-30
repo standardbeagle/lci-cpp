@@ -7,6 +7,7 @@
 #include <absl/container/flat_hash_set.h>
 #include <nlohmann/json_fwd.hpp>
 
+#include <lci/analysis/code_similarity.h>
 #include <lci/analysis/naming_analyzer.h>
 #include <lci/git/provider.h>
 #include <lci/git/types.h>
@@ -19,20 +20,11 @@ namespace git {
 // Free utility functions (testable)
 // ============================================================================
 
-/// Strips comments and blank lines for content comparison.
-std::string normalize_code_content(std::string_view content);
-
-/// Computes Jaccard token-similarity between two code blocks.
-double code_structural_similarity(std::string_view a, std::string_view b);
-
-/// Tokenizes a code block into the distinct-token set that
-/// code_structural_similarity compares. Exposed so the duplicate finder can
-/// tokenize each symbol exactly once instead of once per compared pair.
-absl::flat_hash_set<std::string> code_token_set(std::string_view content);
-
-/// Jaccard similarity between two pre-tokenized code token sets.
-double token_set_similarity(const absl::flat_hash_set<std::string>& a,
-                            const absl::flat_hash_set<std::string>& b);
+// normalize_code_content / code_token_set / token_set_similarity /
+// code_structural_similarity moved to lci/analysis/code_similarity.h so the
+// corpus-wide clone detector shares them without depending on git headers;
+// unqualified callers in lci::git still resolve them via the parent
+// namespace.
 
 /// Filters a corpus-wide NamingReport down to findings involving the changed
 /// symbols (matched by name). This is the git naming focus: the report-side
