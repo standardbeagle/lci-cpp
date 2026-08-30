@@ -211,6 +211,13 @@ struct ErrorHandlingSummary {
     /// so a clean report and a silenced one do not look the same.
     int suppressed{};
     int functions_scored{};
+    /// True when the classifier saw NO error-flow constructs at all (no
+    /// throwers, no swallows, no unchecked errors, no findings) in a
+    /// non-empty corpus. A perfect score over zero signal is
+    /// indistinguishable from a corpus whose idioms the classifier does
+    /// not know (e.g. Postgres ereport/elog), so renderers report "no
+    /// signal" instead of 10.00.
+    bool no_signal{};
     std::vector<EhFindingEntry> findings;  ///< severity desc, file, line
     std::vector<EhExposureEntry> exposure;
 };
@@ -222,6 +229,8 @@ struct ResourceSummary {
     double released_ratio{};
     double guarded_ratio{};
     int functions_scored{};
+    /// See ErrorHandlingSummary::no_signal — here: zero acquisitions seen.
+    bool no_signal{};
     std::vector<EhFindingEntry> findings;
 };
 

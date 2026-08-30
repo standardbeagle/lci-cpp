@@ -440,6 +440,19 @@ ErrorHandlingAnalyzer::Result ErrorHandlingAnalyzer::analyze(
         result.resources.score = std::min(result.resources.score, 9.99);
     }
 
+    // Zero-signal honesty: a perfect score computed over NOTHING is not a
+    // measurement. pgvector scored 10.00 with throwers=0 because the C
+    // classifier does not know Postgres's ereport/elog idiom — the corpus
+    // is full of error handling the analyzer cannot see. Flag it so the
+    // renderers say "no signal" instead of 10.00.
+    result.errors.no_signal =
+        !units.empty() && throwers == 0 && swallow_sites == 0 &&
+        unchecked_errors == 0 && suppressed == 0 &&
+        result.errors.findings.empty();
+    result.resources.no_signal =
+        !units.empty() && acquisitions == 0 &&
+        result.resources.findings.empty();
+
     return result;
 }
 

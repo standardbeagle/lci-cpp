@@ -259,11 +259,16 @@ void emit_git_changes(std::ostringstream& out, const git::AnalysisReport& r,
                       std::string_view root) {
     const auto& s = r.summary;
     out << "== GIT CHANGES ==\n";
+    // added/modified/deleted count SYMBOLS, files_changed counts files
+    // (including unsupported ones that contribute no symbols) — the
+    // unlabeled mix read as a contradiction ("files_changed=1 added=0
+    // modified=0") on every doc-only commit.
     out << "scope=" << to_string(r.metadata.scope)
         << " files_changed=" << s.files_changed
-        << " added=" << s.symbols_added << " modified=" << s.symbols_modified
-        << " deleted=" << s.symbols_deleted << " risk=" << fmt2(s.risk_score)
-        << "\n";
+        << " symbols_added=" << s.symbols_added
+        << " symbols_modified=" << s.symbols_modified
+        << " symbols_deleted=" << s.symbols_deleted
+        << " risk=" << fmt2(s.risk_score) << "\n";
     out << "findings: duplicates=" << s.duplicates_found
         << " naming=" << s.naming_issues_found
         << " metrics=" << s.metrics_issues_found << "\n";
@@ -401,6 +406,17 @@ void emit_eh_finding_lines(std::ostringstream& out,
 void emit_error_handling(std::ostringstream& out,
                          const ErrorHandlingSummary& s, size_t max_findings) {
     out << "== ERROR HANDLING ==\n";
+    if (s.no_signal) {
+        // A 10.00 over zero observed error flow reads as "nothing to do";
+        // the honest statement is that the classifier saw nothing at all
+        // (possibly an idiom it does not know, e.g. Postgres ereport).
+        out << "score=n/a signal=none (no error-flow constructs recognized "
+               "in this corpus)\n";
+        out << "throwers=0 handled_ratio=0.00 swallow_sites=0 "
+               "unchecked_errors=0\n";
+        out << "---\n";
+        return;
+    }
     out << "score=" << fmt2(s.score);
     if (!s.module_scores.empty()) {
         const auto& worst = s.module_scores.front();
@@ -467,6 +483,12 @@ void emit_error_handling(std::ostringstream& out,
 void emit_resource_management(std::ostringstream& out,
                               const ResourceSummary& s, size_t max_findings) {
     out << "== RESOURCE MANAGEMENT ==\n";
+    if (s.no_signal) {
+        out << "score=n/a signal=none (no resource acquisitions recognized "
+               "in this corpus)\n";
+        out << "---\n";
+        return;
+    }
     out << "score=" << fmt2(s.score) << " acquisitions=" << s.acquisitions
         << " released_ratio=" << fmt2(s.released_ratio)
         << " guarded_ratio=" << fmt2(s.guarded_ratio) << "\n";

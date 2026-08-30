@@ -1435,6 +1435,35 @@ TEST_F(ErrorHandlingSectionTest, OverviewEmitsBothSectionsAfterHealth) {
     if (lb != std::string::npos) EXPECT_LT(res, lb);
 }
 
+TEST_F(ErrorHandlingSectionTest, ZeroSignalRendersNAInsteadOfPerfectScore) {
+    // The pgvector defect: the C classifier saw no ereport/elog error flow,
+    // so every counter was zero — and the rollup awarded a perfect 10.00
+    // over nothing. Zero observed signal must render as n/a, not as the
+    // best possible score.
+    SideEffectAnalyzer plain("go");
+    std::string main_path = (temp_dir_ / "main.go").string();
+    plain.begin_function("PublicEntry", main_path, 12, 15);
+    plain.end_function();
+
+    nlohmann::json params;
+    auto result = handle_code_insight(params, *engine_, *indexer_, &plain);
+    ASSERT_FALSE(result.is_error) << result.text;
+    EXPECT_NE(result.text.find(
+                  "score=n/a signal=none (no error-flow constructs"),
+              std::string::npos)
+        << result.text;
+    EXPECT_NE(result.text.find(
+                  "score=n/a signal=none (no resource acquisitions"),
+              std::string::npos)
+        << result.text;
+    // Neither section may carry a numeric score when there is no signal
+    // (HEALTH's own score=10.00/10 line is a different metric and fine).
+    auto eh = result.text.find("== ERROR HANDLING ==");
+    ASSERT_NE(eh, std::string::npos);
+    EXPECT_EQ(result.text.find("score=10.00", eh), std::string::npos)
+        << result.text;
+}
+
 TEST_F(ErrorHandlingSectionTest, SummaryLineCarriesBothScores) {
     nlohmann::json params;
     auto result = handle_code_insight(params, *engine_, *indexer_,
