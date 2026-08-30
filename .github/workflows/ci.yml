@@ -67,9 +67,12 @@ jobs:
           for t in ninja ccache zip unzip curl tar "${{ matrix.cc }}" "${{ matrix.cxx }}"; do
             command -v "$t" >/dev/null || need="$need $t"
           done
+          # Static tcmalloc_minimal for LCI_ENABLE_TCMALLOC (Linux default
+          # ON) — CI must build and test the allocator the release ships.
+          [ -e /usr/lib/x86_64-linux-gnu/libtcmalloc_minimal.a ] || need="$need libgoogle-perftools-dev"
           if [ -n "$need" ]; then
             sudo apt-get update
-            sudo apt-get install -y ninja-build ccache zip unzip curl tar "${{ matrix.cc }}" "${{ matrix.cxx }}"
+            sudo apt-get install -y ninja-build ccache zip unzip curl tar libgoogle-perftools-dev "${{ matrix.cc }}" "${{ matrix.cxx }}"
           fi
 
       - name: Set up vcpkg

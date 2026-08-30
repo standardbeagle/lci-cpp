@@ -209,9 +209,54 @@ else()
     endif()
 endif()
 
+# Optional: STATICALLY link tcmalloc_minimal as the allocator (Linux).
+#
+# Measured on the dotnet stress corpus (15.8k files / 597k symbols):
+# glibc malloc's arena contention under 12 index workers was ~25% of CPU
+# with visible futex wait; tcmalloc_minimal cut the parse phase 21.9s ->
+# 14.0s and the whole cold start 35.8s -> 27.2s (-24%), RSS unchanged.
+# STATIC (.a) linking keeps the release binary self-contained — the
+# earlier SHARED gperftools auto-link broke the tarball on machines
+# without libprofiler.so.0, which is why LCI_ENABLE_GPERFTOOLS above is
+# opt-in. Force-disabled under sanitizers (allocator conflict) and when
+# LCI_ENABLE_GPERFTOOLS already links its own (shared) tcmalloc.
+# Absence of the static archive is a loud STATUS downgrade, not an
+# error: the build still works, just on glibc malloc.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(LCI_TCMALLOC_DEFAULT ON)
+else()
+    set(LCI_TCMALLOC_DEFAULT OFF)
+endif()
+option(LCI_ENABLE_TCMALLOC
+    "Statically link tcmalloc_minimal into the lci binaries (-24% cold start on dense corpora)"
+    ${LCI_TCMALLOC_DEFAULT})
+set(LCI_TCMALLOC_LIB "")
+if(LCI_ENABLE_TCMALLOC AND LCI_SANITIZER_BUILD)
+    message(STATUS "sanitizer build - tcmalloc_minimal force-disabled (allocator conflict)")
+elseif(LCI_ENABLE_TCMALLOC AND LCI_ENABLE_GPERFTOOLS)
+    message(STATUS "LCI_ENABLE_GPERFTOOLS already links shared tcmalloc - static tcmalloc_minimal skipped")
+elseif(LCI_ENABLE_TCMALLOC)
+    find_library(LCI_TCMALLOC_STATIC NAMES libtcmalloc_minimal.a)
+    if(LCI_TCMALLOC_STATIC)
+        message(STATUS "tcmalloc_minimal (static) enabled: ${LCI_TCMALLOC_STATIC}")
+        set(LCI_TCMALLOC_LIB "${LCI_TCMALLOC_STATIC}")
+    else()
+        message(STATUS "libtcmalloc_minimal.a not found - building WITHOUT "
+            "tcmalloc (glibc malloc; ~24% slower cold start on dense "
+            "corpora). apt: libgoogle-perftools-dev")
+    endif()
+endif()
+
 add_executable(lci
     cli/main.cpp
 )
+if(LCI_TCMALLOC_LIB)
+    # Last on the final executable so its malloc/free win symbol resolution.
+    target_link_libraries(lci PRIVATE "${LCI_TCMALLOC_LIB}")
+endif()
+# Test binaries link the same allocator the product ships (karpathy #5:
+# test what runs in production, allocator included).
+set(LCI_TCMALLOC_LIB "${LCI_TCMALLOC_LIB}" PARENT_SCOPE)
 
 target_include_directories(lci PRIVATE
     "${CMAKE_SOURCE_DIR}/include"

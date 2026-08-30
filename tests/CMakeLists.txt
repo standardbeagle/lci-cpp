@@ -88,6 +88,11 @@ target_link_libraries(lci_tests PRIVATE
     nlohmann_json_schema_validator
     GTest::gtest_main
 )
+# Same allocator as the shipped binary (set in src/CMakeLists.txt; empty
+# when tcmalloc is disabled/unavailable — plain glibc malloc then).
+if(LCI_TCMALLOC_LIB)
+    target_link_libraries(lci_tests PRIVATE "${LCI_TCMALLOC_LIB}")
+endif()
 
 include(GoogleTest)
 gtest_discover_tests(lci_tests
@@ -206,6 +211,9 @@ target_link_libraries(lci_integration_tests PRIVATE
     spec_diff
     GTest::gtest_main
 )
+if(LCI_TCMALLOC_LIB)
+    target_link_libraries(lci_integration_tests PRIVATE "${LCI_TCMALLOC_LIB}")
+endif()
 
 # All integration spec_runner tests bundled into one ctest entry.
 # Spec descriptors in http / mcp / cli modes spawn lci server children

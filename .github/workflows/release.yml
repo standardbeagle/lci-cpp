@@ -37,6 +37,10 @@ jobs:
           command -v curl     >/dev/null || need="$need curl"
           command -v tar      >/dev/null || need="$need tar"
           command -v rpmbuild >/dev/null || need="$need rpm"
+          # Static tcmalloc_minimal (LCI_ENABLE_TCMALLOC, Linux default ON):
+          # without the archive the build downgrades to glibc malloc with a
+          # ~24% slower cold start — the release must not ship that way.
+          [ -e /usr/lib/x86_64-linux-gnu/libtcmalloc_minimal.a ] || need="$need libgoogle-perftools-dev"
           if [ -n "$need" ]; then
             sudo apt-get update
             sudo apt-get install -y $need
