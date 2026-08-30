@@ -1,6 +1,8 @@
 #include <lci/indexing/pipeline.h>
 
 #include <algorithm>
+#include <chrono>
+#include <cstdio>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -20,9 +22,12 @@ Pipeline::Pipeline(const Config& config,
       integrator_(trigram_index, ref_tracker, postings_index) {}
 
 void Pipeline::run() {
+    const auto t_start = std::chrono::steady_clock::now();
+
     // Stage 1: Scan files.
     FileScanner scanner(config_);
     auto scan_result = scanner.scan();
+    const auto t_scanned = std::chrono::steady_clock::now();
     if (!scan_result.error.empty()) {
         scan_error_ = scan_result.error;
         return;
@@ -166,6 +171,10 @@ void Pipeline::run() {
         }
     }
 
+    // Workers are done once the drain loop above exits (the processor
+    // closes result_queue after joining them).
+    const auto t_parsed = std::chrono::steady_clock::now();
+
     std::sort(buffered.begin(), buffered.end(),
               [](const ProcessedFile& a, const ProcessedFile& b) {
                   return a.file_id < b.file_id;
@@ -174,6 +183,22 @@ void Pipeline::run() {
     for (auto& result : buffered) {
         integrator_.integrate_file(result);
         progress_.increment_integrated();
+    }
+
+    // One line per bulk index: the stage wall split is the first question
+    // every indexing-perf investigation asks, and reconstructing it from a
+    // profiler costs an hour that this line costs never. parse here means
+    // the whole parallel phase (load + parse + extract + drain).
+    {
+        const auto t_done = std::chrono::steady_clock::now();
+        auto secs = [](auto a, auto b) {
+            return std::chrono::duration<double>(b - a).count();
+        };
+        std::fprintf(stderr,
+                     "lci: index stages: scan=%.1fs parse=%.1fs "
+                     "integrate=%.1fs files=%d\n",
+                     secs(t_start, t_scanned), secs(t_scanned, t_parsed),
+                     secs(t_parsed, t_done), file_count);
     }
 
     // On stop the integrator loop above breaks without draining, so
