@@ -50,14 +50,18 @@ FileScanner::FileScanner(const Config& config)
                                                    config.attributes,
                                                    attr_error_)),
       attr_classifier_(attr_registry_) {
-    exclusions_ = config.exclude;
-    inclusions_ = config.include;
+    for (const auto& glob : config.exclude) {
+        exclusions_.push_back(compile_glob(glob));
+    }
+    for (const auto& glob : config.include) {
+        inclusions_.push_back(compile_glob(glob));
+    }
 
     // Project manifests name their own generated-output dirs (tsconfig
     // outDir, composer vendor-dir, csproj OutputPath) — read them so
     // non-default layouts are excluded without per-project config.
     for (auto& glob : derive_generated_excludes(config.project.root)) {
-        exclusions_.push_back(std::move(glob));
+        exclusions_.push_back(compile_glob(std::move(glob)));
     }
 
     if (config.index.respect_gitignore) {
@@ -74,7 +78,7 @@ ScanResult FileScanner::scan(bool apply_budget) {
     std::error_code ec;
     if (!std::filesystem::exists(root, ec) || ec) return result;
 
-    walk_directory(root, visited_inodes, tasks);
+    walk_directory(root, "", visited_inodes, tasks);
 
     // Sort by priority descending so high-priority files are processed
     // first. Within the same priority bucket, sort by path ascending so
@@ -132,6 +136,7 @@ ScanResult FileScanner::scan(bool apply_budget) {
 
 void FileScanner::walk_directory(
     const std::filesystem::path& dir,
+    const std::string& rel_prefix,
     absl::flat_hash_set<uint64_t>& visited_inodes,
     std::vector<FileTask>& out) {
 
@@ -145,11 +150,11 @@ void FileScanner::walk_directory(
     auto iter = std::filesystem::directory_iterator(dir, ec);
     if (ec) return;
 
-    std::filesystem::path root(config_.project.root);
     for (const auto& entry : iter) {
-        auto rel = std::filesystem::relative(entry.path(), root, ec);
-        if (ec) continue;
-        std::string rel_path = rel.generic_string();
+        std::string name = entry.path().filename().generic_string();
+        if (name.empty()) continue;
+        std::string rel_path =
+            rel_prefix.empty() ? name : rel_prefix + '/' + name;
 
         if (entry.is_directory(ec)) {
             if (ec) continue;
@@ -170,7 +175,7 @@ void FileScanner::walk_directory(
                 if (!config_.index.follow_symlinks) continue;
             }
 
-            walk_directory(entry.path(), visited_inodes, out);
+            walk_directory(entry.path(), rel_path, visited_inodes, out);
             continue;
         }
 
@@ -198,9 +203,42 @@ void FileScanner::walk_directory(
     }
 }
 
+FileScanner::CompiledGlob FileScanner::compile_glob(std::string pattern) {
+    // Longest wildcard-free run: every path the glob matches contains it
+    // verbatim, so its absence is a certain non-match.
+    std::string best;
+    std::string current;
+    for (char c : pattern) {
+        if (c == '*' || c == '?') {
+            if (current.size() > best.size()) best = current;
+            current.clear();
+        } else {
+            current += c;
+        }
+    }
+    if (current.size() > best.size()) best = std::move(current);
+    // `**/` collapses to nothing ("**/node_modules/**" matches a top-level
+    // "node_modules/x"), so a boundary slash next to a wildcard is not
+    // guaranteed to appear verbatim — trim slashes from the literal's ends.
+    while (!best.empty() && best.front() == '/') best.erase(best.begin());
+    while (!best.empty() && best.back() == '/') best.pop_back();
+    // Short literals reject nothing worth the find() call.
+    if (best.size() < 3) best.clear();
+    return {std::move(pattern), std::move(best)};
+}
+
+bool FileScanner::matches_compiled(const CompiledGlob& glob,
+                                   std::string_view rel_path) {
+    if (!glob.literal.empty() &&
+        rel_path.find(glob.literal) == std::string_view::npos) {
+        return false;
+    }
+    return match_glob(glob.pattern, rel_path);
+}
+
 bool FileScanner::should_exclude(std::string_view rel_path) const {
     for (const auto& pattern : exclusions_) {
-        if (match_glob(pattern, rel_path)) return true;
+        if (matches_compiled(pattern, rel_path)) return true;
     }
     return false;
 }
@@ -208,7 +246,7 @@ bool FileScanner::should_exclude(std::string_view rel_path) const {
 bool FileScanner::should_include(std::string_view rel_path) const {
     if (inclusions_.empty()) return true;
     for (const auto& pattern : inclusions_) {
-        if (match_glob(pattern, rel_path)) return true;
+        if (matches_compiled(pattern, rel_path)) return true;
     }
     return false;
 }

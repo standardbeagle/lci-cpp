@@ -69,11 +69,29 @@ class FileScanner {
     const Config& config_;
     BinaryDetector binary_detector_;
     GitignoreParser gitignore_parser_;
-    std::vector<std::string> exclusions_;
-    std::vector<std::string> inclusions_;
+    /// A glob plus its longest literal (wildcard-free) run. Any path the
+    /// glob matches must contain the literal verbatim, so a cheap
+    /// `find` rejects most candidates before the backtracking matcher runs
+    /// — match_glob_at alone was 25% of scan CPU on a 55k-file corpus.
+    struct CompiledGlob {
+        std::string pattern;
+        std::string literal;
+    };
+    std::vector<CompiledGlob> exclusions_;
+    std::vector<CompiledGlob> inclusions_;
 
-    /// Recursively walks a directory, tracking visited inodes for cycle detection.
+    static CompiledGlob compile_glob(std::string pattern);
+    static bool matches_compiled(const CompiledGlob& glob,
+                                 std::string_view rel_path);
+
+    /// Recursively walks a directory, tracking visited inodes for cycle
+    /// detection. `rel_prefix` is the directory's repo-relative path (""
+    /// at the root): child paths are derived by appending the entry name,
+    /// NOT via std::filesystem::relative — fs::relative canonicalizes both
+    /// sides with a readlink per path component, which was 39% of scan
+    /// wall on a 55k-file corpus.
     void walk_directory(const std::filesystem::path& dir,
+                        const std::string& rel_prefix,
                         absl::flat_hash_set<uint64_t>& visited_inodes,
                         std::vector<FileTask>& out);
 
