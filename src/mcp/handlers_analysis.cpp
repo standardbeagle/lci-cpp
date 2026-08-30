@@ -555,9 +555,20 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
 
             git::Analyzer analyzer(provider, indexer);
             git::AnalysisReport report;
-            if (!analyzer.analyze(ga, report))
-                return make_error_response("code_insight",
-                                           "git change analysis failed");
+            if (!analyzer.analyze(ga, report)) {
+                // Name the inputs: the bare message on a missing ref (e.g.
+                // HEAD~1 in a shallow single-commit clone) hid the cause
+                // entirely.
+                std::string detail = "git change analysis failed (scope=" +
+                                     scope;
+                if (!ga.base_ref.empty())
+                    detail += " base_ref=" + ga.base_ref;
+                if (!ga.target_ref.empty())
+                    detail += " target_ref=" + ga.target_ref;
+                detail += "); check that the refs exist in this clone "
+                          "(shallow clones lack parents)";
+                return make_error_response("code_insight", detail);
+            }
             emit_lcf_header(out, mode, 1, lcf_token_count(0, 0, false, 0, true));
             emit_git_changes(out, report, project_root);
         } else {  // git_hotspots
