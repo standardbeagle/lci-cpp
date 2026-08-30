@@ -586,6 +586,83 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
             emit_lcf_header(out, mode, 1, lcf_token_count(0, 0, false, 0, true));
             emit_git_hotspots(out, report, win, project_root);
 
+            // == RISK MATRIX == — churn x complexity, the "refactor here
+            // first" join. Both signals existed for years (hotspots here,
+            // complexity in HEALTH) but were never combined. Risk is the
+            // product of the two normalized ranks; quadrant labels follow
+            // the CodeScene convention.
+            if (!report.hotspots.empty()) {
+                absl::flat_hash_map<std::string, int> max_cc_by_rel;
+                {
+                    auto rt_snap = indexer.ref_tracker().pin();
+                    for (auto fid : indexer.get_all_file_ids()) {
+                        std::string rel = git::normalize_rel(
+                            indexer.get_file_path(fid), project_root);
+                        int max_cc = 0;
+                        for (const auto& sym :
+                             rt_snap->get_file_enhanced_symbols(fid)) {
+                            if (sym && sym->complexity > max_cc)
+                                max_cc = sym->complexity;
+                        }
+                        if (max_cc > 0) max_cc_by_rel[rel] = max_cc;
+                    }
+                }
+                struct RiskRow {
+                    std::string rel;
+                    int changes;
+                    int max_cc;
+                    double risk;
+                };
+                std::vector<RiskRow> rows;
+                int peak_changes = 0, peak_cc = 0;
+                for (const auto& h : report.hotspots) {
+                    auto it = h.metrics.find(win);
+                    int changes =
+                        it != h.metrics.end() ? it->second.change_count : 0;
+                    if (changes <= 0) continue;
+                    std::string rel =
+                        git::normalize_rel(h.file_path, project_root);
+                    auto cc_it = max_cc_by_rel.find(rel);
+                    if (cc_it == max_cc_by_rel.end()) continue;
+                    rows.push_back({std::move(rel), changes,
+                                    cc_it->second, 0.0});
+                    peak_changes = std::max(peak_changes, changes);
+                    peak_cc = std::max(peak_cc, rows.back().max_cc);
+                }
+                if (!rows.empty() && peak_changes > 0 && peak_cc > 0) {
+                    for (auto& r : rows) {
+                        r.risk = (static_cast<double>(r.changes) /
+                                  peak_changes) *
+                                 (static_cast<double>(r.max_cc) / peak_cc);
+                    }
+                    std::sort(rows.begin(), rows.end(),
+                              [](const RiskRow& a, const RiskRow& b) {
+                                  if (a.risk != b.risk)
+                                      return a.risk > b.risk;
+                                  return a.rel < b.rel;
+                              });
+                    out << "== RISK MATRIX ==\n"
+                        << "risk = normalized churn x normalized max "
+                           "complexity over window=" << to_string(win)
+                        << "\n";
+                    size_t lim = std::min(rows.size(), size_t{10});
+                    for (size_t i = 0; i < lim; ++i) {
+                        const auto& r = rows[i];
+                        bool hot = r.changes * 2 >= peak_changes;
+                        bool complex_file = r.max_cc * 2 >= peak_cc;
+                        const char* quadrant =
+                            hot && complex_file ? "refactor-first"
+                            : hot               ? "active-simple"
+                            : complex_file      ? "latent-complexity"
+                                                : "stable";
+                        out << "  " << r.rel << " risk=" << fmt2(r.risk)
+                            << " changes=" << r.changes
+                            << " max_cc=" << r.max_cc << " " << quadrant
+                            << "\n";
+                    }
+                    out << "---\n";
+                }
+            }
         }
     } else if (mode == "detailed") {
         // Detailed sub-mode dispatch. The engine runs the module/layer/
@@ -598,12 +675,12 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
         if (detailed_mode != "modules" && detailed_mode != "layers" &&
             detailed_mode != "features" && detailed_mode != "terms" &&
             detailed_mode != "errors" && detailed_mode != "resources" &&
-            detailed_mode != "clones") {
+            detailed_mode != "clones" && detailed_mode != "deadcode") {
             return make_error_response(
                 "code_insight",
                 "invalid detailed analysis '" + detailed_mode +
                 "', must be one of: modules, layers, features, terms, "
-                "errors, resources, clones");
+                "errors, resources, clones, deadcode");
         }
 
         if (detailed_mode == "clones") {
@@ -645,6 +722,108 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                     << rep.clone_classes -
                            static_cast<int>(rep.classes.size())
                     << " smaller classes (raise max_results)\n";
+            }
+            std::string body = out.str();
+            if (!body.empty() && body.back() == '\n') body.pop_back();
+            return ToolResult{std::move(body), false};
+        }
+
+        if (detailed_mode == "deadcode") {
+            // Exported symbols nothing in the corpus references. Static
+            // reachability only: reflection, dynamic dispatch, and
+            // external consumers of a published library are invisible, so
+            // these are removal CANDIDATES, not verdicts. Methods are
+            // excluded (interface/trait implementations are called
+            // through their interface and would flood this with false
+            // positives).
+            absl::flat_hash_set<std::string_view> entry_names;
+            entry_names.insert("main");
+            for (const auto& ep : indexer.config().insight.entry_points) {
+                entry_names.insert(ep);
+            }
+            struct DeadExport {
+                std::string name;
+                std::string path;
+                int line;
+                std::string type;
+            };
+            std::vector<DeadExport> dead;
+            int exported_total = 0;
+            {
+                auto snap = indexer.load_snapshot();
+                auto rt_snap = indexer.ref_tracker().pin();
+                auto fids = indexer.get_all_file_ids();
+                std::sort(fids.begin(), fids.end());
+                // Constructors are invoked through their TYPE, not by a
+                // name reference — a function whose name matches any
+                // class/struct in the corpus is a constructor pattern and
+                // would flood this list (1,327 "dead" exports on the self
+                // repo before this filter, ctors/dtors everywhere).
+                absl::flat_hash_set<std::string_view> type_names;
+                for (auto fid : fids) {
+                    for (const auto& sym :
+                         rt_snap->get_file_enhanced_symbols(fid)) {
+                        if (sym == nullptr) continue;
+                        auto t = sym->symbol.type;
+                        if (t == SymbolType::Class || t == SymbolType::Struct)
+                            type_names.insert(sym->symbol.name);
+                    }
+                }
+                for (auto fid : fids) {
+                    auto attr = static_cast<size_t>(snap->attr_of(fid));
+                    if (attr >= scope.allowed.size() ||
+                        !scope.allowed[attr])
+                        continue;
+                    std::string rel = git::normalize_rel(
+                        indexer.get_file_path(fid), project_root);
+                    for (const auto& sym :
+                         rt_snap->get_file_enhanced_symbols(fid)) {
+                        if (sym == nullptr || !sym->is_exported) continue;
+                        auto t = sym->symbol.type;
+                        if (t != SymbolType::Function &&
+                            t != SymbolType::Class &&
+                            t != SymbolType::Struct)
+                            continue;
+                        const auto& nm = sym->symbol.name;
+                        // Ctors (name == a type), dtors, and operator
+                        // overloads are reached without name references.
+                        if (t == SymbolType::Function &&
+                            (nm.starts_with("~") ||
+                             nm.starts_with("operator") ||
+                             type_names.contains(nm)))
+                            continue;
+                        ++exported_total;
+                        if (sym->incoming_ref_count > 0) continue;
+                        if (entry_names.contains(nm)) continue;
+                        dead.push_back({sym->symbol.name, rel,
+                                        static_cast<int>(sym->symbol.line),
+                                        std::string(to_string(t))});
+                    }
+                }
+            }
+            std::sort(dead.begin(), dead.end(),
+                      [](const DeadExport& a, const DeadExport& b) {
+                          if (a.path != b.path) return a.path < b.path;
+                          return a.line < b.line;
+                      });
+            int max_results = params.value("max_results", 30);
+            out << "LCF/1.0\nmode=detailed\nattributes=" << scope.label
+                << "\nsub=deadcode\ntier=2\ntokens=100\n---\n";
+            out << "== DEAD EXPORTS ==\n"
+                << "exported=" << exported_total << " unreferenced="
+                << dead.size()
+                << " (static reachability only — reflection, dynamic "
+                   "dispatch, and external library consumers are not "
+                   "visible; methods excluded)\n";
+            size_t lim = std::min(dead.size(),
+                                  static_cast<size_t>(max_results));
+            for (size_t i = 0; i < lim; ++i) {
+                out << "  " << dead[i].type << " " << dead[i].name << " ("
+                    << dead[i].path << ":" << dead[i].line << ")\n";
+            }
+            if (dead.size() > lim) {
+                out << "  ... and " << dead.size() - lim
+                    << " more (raise max_results)\n";
             }
             std::string body = out.str();
             if (!body.empty() && body.back() == '\n') body.pop_back();
@@ -921,7 +1100,8 @@ void register_analysis_handlers(McpServer& server,
           {"tier", "integer", "Analysis tier", ""},
           {"analysis", "string",
            "Detailed analysis: modules, layers, features, terms, errors, "
-           "resources, clones (corpus-wide duplicate code)",
+           "resources, clones (corpus-wide duplicate code), deadcode "
+           "(unreferenced exports)",
            ""},
           {"metrics", "array", "Metrics to include", "string"},
           {"min_lines", "integer",
