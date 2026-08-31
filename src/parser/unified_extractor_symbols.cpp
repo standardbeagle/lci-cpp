@@ -964,25 +964,38 @@ void UnifiedExtractor::count_complexity_point(TSNode node,
     if (complexity_stack_.empty()) return;
     int& top = complexity_stack_.back();
 
-    if (node_type == "if_statement" || node_type == "if_expression") {
+    // The bare names (if, while, when, rescue, conditional, binary, …) are
+    // tree-sitter-ruby's; no other bundled grammar emits them, so they cannot
+    // double-count elsewhere.
+    if (node_type == "if_statement" || node_type == "if_expression" ||
+        node_type == "if" || node_type == "unless" || node_type == "elsif" ||
+        node_type == "if_modifier" || node_type == "unless_modifier") {
         ++top;
     } else if (node_type == "for_statement" ||
                node_type == "for_range_statement" ||
                node_type == "for_in_statement" ||
                node_type == "while_statement" ||
-               node_type == "do_while_statement") {
+               node_type == "do_while_statement" ||
+               node_type == "for" || node_type == "while" ||
+               node_type == "until" ||
+               node_type == "while_modifier" ||
+               node_type == "until_modifier") {
         ++top;
     } else if (node_type == "case_clause" || node_type == "case_statement" ||
                node_type == "expression_case" ||
-               node_type == "type_case") {
+               node_type == "type_case" ||
+               node_type == "when" || node_type == "in_clause") {
         ++top;
     } else if (node_type == "conditional_expression" ||
-               node_type == "ternary_expression") {
+               node_type == "ternary_expression" ||
+               node_type == "conditional") {
         ++top;
     } else if (node_type == "catch_clause" ||
-               node_type == "except_clause") {
+               node_type == "except_clause" ||
+               node_type == "rescue" || node_type == "rescue_modifier") {
         ++top;
-    } else if (node_type == "binary_expression") {
+    } else if (node_type == "binary_expression" ||
+               node_type == "binary") {
         if (ts_node_child_count(node) >= 3) {
             TSNode op = ts_node_child(node, 1);
             if (!ts_node_is_null(op)) {
