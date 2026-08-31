@@ -923,7 +923,9 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                         : fmt2(r.metrics.average_coupling))
                 << "\n"
                 << "strategy=" << r.detection_strategy;
-            if (graph) out << " (modules = call-graph communities; name = majority dir)";
+            if (graph)
+                out << " (rows = declared modules/dirs; cohesion = share of "
+                       "members in the dominant call-graph community)";
             out << "\n";
             size_t shown = std::min(r.modules.size(), size_t{20});
             for (size_t i = 0; i < shown; ++i) {
@@ -936,29 +938,73 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                     out << " coupling=" << fmt2(m.coupling_score)
                         << " deps=" << m.external_deps
                         << " instability=" << fmt2(m.stability);
-                    if (m.dir_purity < 1.0 && m.spanned_dirs.size() > 1) {
-                        out << " spans=";
-                        size_t dl = std::min(m.spanned_dirs.size(), size_t{3});
-                        for (size_t d = 0; d < dl; ++d) {
-                            if (d) out << ",";
-                            out << m.spanned_dirs[d];
-                        }
-                        if (m.spanned_dirs.size() > dl)
-                            out << ",+" << (m.spanned_dirs.size() - dl);
-                        out << " purity=" << fmt2(m.dir_purity);
-                    }
                 }
                 out << "\n";
             }
             if (r.modules.size() > shown)
                 out << "  ... and " << (r.modules.size() - shown) << " more\n";
-            if (graph && !r.split_dirs.empty()) {
-                out << "split_dirs (symbols split across communities):";
-                size_t sl = std::min(r.split_dirs.size(), size_t{8});
-                for (size_t i = 0; i < sl; ++i) out << " " << r.split_dirs[i];
-                if (r.split_dirs.size() > sl)
-                    out << " +" << (r.split_dirs.size() - sl);
-                out << "\n";
+            if (graph) {
+                if (!r.split_dirs.empty()) {
+                    out << "split (maps to several communities):";
+                    size_t sl = std::min(r.split_dirs.size(), size_t{8});
+                    for (size_t i = 0; i < sl; ++i)
+                        out << " " << r.split_dirs[i];
+                    if (r.split_dirs.size() > sl)
+                        out << " +" << (r.split_dirs.size() - sl);
+                    out << "\n";
+                }
+                size_t ml = std::min(r.misplaced_files.size(), size_t{12});
+                if (ml > 0) {
+                    out << "misplaced (joins another module's community; "
+                           "shared/utility communities exempt):\n";
+                    for (size_t i = 0; i < ml; ++i) {
+                        const auto& f = r.misplaced_files[i];
+                        out << "  " << f.file << " -> belongs with "
+                            << f.belongs_with << " (" << f.symbols << "/"
+                            << f.total_symbols << " syms)\n";
+                    }
+                    if (r.misplaced_files.size() > ml)
+                        out << "  ... and " << (r.misplaced_files.size() - ml)
+                            << " more\n";
+                }
+                size_t cl = std::min(r.communities.size(), size_t{12});
+                if (cl > 0) {
+                    out << "actual (call-graph communities; refactoring "
+                           "guide):\n";
+                    for (size_t i = 0; i < cl; ++i) {
+                        const auto& c = r.communities[i];
+                        out << "  " << c.label << ": syms=" << c.size
+                            << " files=" << c.files;
+                        if (c.dirs.size() > 1) {
+                            out << " dirs=";
+                            size_t dl = std::min(c.dirs.size(), size_t{3});
+                            for (size_t d = 0; d < dl; ++d) {
+                                if (d) out << ",";
+                                out << c.dirs[d];
+                            }
+                            if (c.dirs.size() > dl)
+                                out << ",+" << (c.dirs.size() - dl);
+                        }
+                        out << "\n";
+                    }
+                    if (r.communities.size() > cl)
+                        out << "  ... and " << (r.communities.size() - cl)
+                            << " more communities\n";
+                }
+                size_t tl = std::min(r.tight_couplings.size(), size_t{12});
+                if (tl > 0) {
+                    out << "tight coupling (calls many internals; consider "
+                           "an interface):\n";
+                    for (size_t i = 0; i < tl; ++i) {
+                        const auto& t = r.tight_couplings[i];
+                        out << "  " << t.caller << " -> " << t.callee
+                            << " targets=" << t.distinct_targets
+                            << " edges=" << t.edges << "\n";
+                    }
+                    if (r.tight_couplings.size() > tl)
+                        out << "  ... and "
+                            << (r.tight_couplings.size() - tl) << " more\n";
+                }
             }
         } else if (detailed_mode == "layers") {
             const auto& r = *resp.layer_analysis;

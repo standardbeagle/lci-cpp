@@ -561,20 +561,25 @@ TEST(ModuleAnalyzer, NoFabricatedCouplingOrArchScore) {
 // communities ARE the modules; directories are labels; divergence between
 // them is the finding). Two call-graph triangles joined by one bridge edge:
 // community A = {a1, a2 in x/, a3 in y/}, community B = {b1, b2, b3 in y/}.
-TEST(ModuleAnalyzer, GraphModulesComeFromCommunities) {
+TEST(ModuleAnalyzer, GraphModulesScoreCurrentOrganization) {
+    // Two call-graph triangles joined by one bridge. Folder x holds a1,a2;
+    // folder y holds a3 (alone in y/three.go, community A) plus b1,b2,b3
+    // (community B). Rows are the DECLARED modules (folders), scored against
+    // the communities; a3's file is the misplacement finding.
     auto a1 = make_sym("a1", SymbolType::Function, 1, 1);
     auto a2 = make_sym("a2", SymbolType::Function, 2, 1);
     auto a3 = make_sym("a3", SymbolType::Function, 3, 2);
-    auto b1 = make_sym("b1", SymbolType::Function, 4, 2);
-    auto b2 = make_sym("b2", SymbolType::Function, 5, 2);
-    auto b3 = make_sym("b3", SymbolType::Function, 6, 2);
+    auto b1 = make_sym("b1", SymbolType::Function, 4, 3);
+    auto b2 = make_sym("b2", SymbolType::Function, 5, 3);
+    auto b3 = make_sym("b3", SymbolType::Function, 6, 3);
     std::vector<FileSymbolData> files = {
         make_file("x/one.go", {&a1, &a2}),
-        make_file("y/two.go", {&a3, &b1, &b2, &b3}),
+        make_file("y/three.go", {&a3}),
+        make_file("y/two.go", {&b1, &b2, &b3}),
     };
     absl::flat_hash_map<SymbolID, std::vector<SymbolID>> edges = {
-        {1, {2, 3}}, {2, {3}}, {3, {4}},  // triangle A + bridge to B
-        {4, {5, 6}}, {5, {6}}, {6, {}},   // triangle B
+        {1, {2, 3}}, {2, {3}}, {3, {1, 4}},  // triangle A + bridge to B
+        {4, {5, 6}}, {5, {6}}, {6, {4}},     // triangle B
     };
     auto callees = [&](SymbolID id) -> std::vector<SymbolID> {
         auto it = edges.find(id);
@@ -583,37 +588,73 @@ TEST(ModuleAnalyzer, GraphModulesComeFromCommunities) {
 
     auto r = ModuleAnalyzer().analyze_graph(files, "", callees);
     EXPECT_EQ(r.detection_strategy, "call_graph_louvain");
-    ASSERT_EQ(r.modules.size(), 2u);
     EXPECT_GT(r.modularity, 0.0);
+    ASSERT_EQ(r.modules.size(), 2u);
 
-    // Modules are named by majority directory; community A spans x/ and y/.
     const ModuleBoundary* mx = nullptr;
     const ModuleBoundary* my = nullptr;
     for (const auto& m : r.modules) {
         if (m.name == "x") mx = &m;
         if (m.name == "y") my = &m;
     }
-    ASSERT_NE(mx, nullptr) << "community A labeled by its majority dir x";
-    ASSERT_NE(my, nullptr) << "community B labeled y";
-    EXPECT_EQ(mx->function_count, 3);
-    EXPECT_LT(mx->dir_purity, 1.0);
-    ASSERT_EQ(mx->spanned_dirs.size(), 2u);
-    EXPECT_EQ(mx->spanned_dirs[0], "x");  // majority first
-    EXPECT_EQ(my->dir_purity, 1.0);
+    ASSERT_NE(mx, nullptr);
+    ASSERT_NE(my, nullptr);
+    // Label cohesion = share of the folder's members in its dominant
+    // community: x is pure (both in A); y is 3/4 B.
+    EXPECT_DOUBLE_EQ(mx->cohesion_score, 1.0);
+    EXPECT_DOUBLE_EQ(my->cohesion_score, 0.75);
+    EXPECT_EQ(my->function_count, 4);
 
-    // Cohesion is the internal edge share: each triangle keeps 3 of its 4
-    // incident edges internal (the bridge is shared).
-    EXPECT_GT(mx->cohesion_score, 0.5);
-    EXPECT_LE(mx->cohesion_score, 1.0);
-    EXPECT_EQ(mx->external_deps, 1);
-    // Martin instability: A only calls out (efferent 1, afferent 0) -> 1.0;
-    // B is only called (efferent 0, afferent 1) -> 0.0.
-    EXPECT_DOUBLE_EQ(mx->stability, 1.0);
-    EXPECT_DOUBLE_EQ(my->stability, 0.0);
+    // Misplacement: y/three.go's only member joins community A, which folder
+    // x owns -> the file belongs with x. y/two.go and x/one.go stay put.
+    ASSERT_EQ(r.misplaced_files.size(), 1u);
+    EXPECT_EQ(r.misplaced_files[0].file, "y/three.go");
+    EXPECT_EQ(r.misplaced_files[0].home, "y");
+    EXPECT_EQ(r.misplaced_files[0].belongs_with, "x");
 
-    // Directory y hosts members of BOTH communities -> divergence signal.
-    ASSERT_EQ(r.split_dirs.size(), 1u);
-    EXPECT_EQ(r.split_dirs[0], "y");
+    // Refactoring guide: the two communities, labeled by owner.
+    ASSERT_EQ(r.communities.size(), 2u);
+    EXPECT_EQ(r.communities[0].size, 3);
+    EXPECT_EQ(r.communities[1].size, 3);
+
+    // Interface width x->y is 1 distinct target (narrow): no tight coupling.
+    EXPECT_TRUE(r.tight_couplings.empty());
+}
+
+// A caller reaching many DISTINCT symbols inside another folder is tight
+// coupling; the same edge count through one entry symbol is interface-like.
+TEST(ModuleAnalyzer, TightCouplingFlagsWideInterfaceOnly) {
+    // p/main.go calls 5 distinct symbols in q (wide). r/main.go calls one q
+    // symbol 3 times... edges dedup per caller, so give r three callers all
+    // hitting the same q entry (narrow).
+    auto p1 = make_sym("p1", SymbolType::Function, 1, 1);
+    auto q1 = make_sym("q1", SymbolType::Function, 2, 2);
+    auto q2 = make_sym("q2", SymbolType::Function, 3, 2);
+    auto q3 = make_sym("q3", SymbolType::Function, 4, 2);
+    auto q4 = make_sym("q4", SymbolType::Function, 5, 2);
+    auto q5 = make_sym("q5", SymbolType::Function, 6, 2);
+    auto r1 = make_sym("r1", SymbolType::Function, 7, 3);
+    auto r2 = make_sym("r2", SymbolType::Function, 8, 3);
+    std::vector<FileSymbolData> files = {
+        make_file("p/main.go", {&p1}),
+        make_file("q/impl.go", {&q1, &q2, &q3, &q4, &q5}),
+        make_file("r/main.go", {&r1, &r2}),
+    };
+    absl::flat_hash_map<SymbolID, std::vector<SymbolID>> edges = {
+        {1, {2, 3, 4, 5, 6}},  // p reaches 5 q internals: tight
+        {2, {3}}, {3, {4}}, {4, {5}}, {5, {6}}, {6, {2}},  // q internal ring
+        {7, {2}}, {8, {2}},  // r goes through the single q1 entry: narrow
+    };
+    auto callees = [&](SymbolID id) -> std::vector<SymbolID> {
+        auto it = edges.find(id);
+        return it == edges.end() ? std::vector<SymbolID>{} : it->second;
+    };
+
+    auto r = ModuleAnalyzer().analyze_graph(files, "", callees);
+    ASSERT_EQ(r.tight_couplings.size(), 1u);
+    EXPECT_EQ(r.tight_couplings[0].caller, "p");
+    EXPECT_EQ(r.tight_couplings[0].callee, "q");
+    EXPECT_EQ(r.tight_couplings[0].distinct_targets, 5);
 }
 
 TEST(ModuleAnalyzer, GraphModulesFallBackToDirsWithoutGraph) {

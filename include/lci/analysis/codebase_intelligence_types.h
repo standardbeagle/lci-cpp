@@ -484,6 +484,39 @@ struct ModuleAnalysisMetrics {
 };
 
 /// Module analysis results.
+/// A file whose symbols predominantly join ANOTHER module's call-graph
+/// community — a misplacement candidate. Files joining a shared/utility
+/// community (one no single directory owns) are never listed: a utility
+/// spanning modules is good structure, not drift.
+struct MisplacedFile {
+    std::string file;         // repo-relative path
+    std::string home;         // directory (declared module) it lives in
+    std::string belongs_with; // directory owning the community it joins
+    int symbols{};            // members joining the foreign community
+    int total_symbols{};      // the file's total graph members
+};
+
+/// A module pair whose interaction is tight coupling rather than an
+/// interface: the caller reaches many DISTINCT symbols inside the callee.
+/// Few distinct targets under many edges is interface-like and never listed.
+struct TightCoupling {
+    std::string caller;  // directory
+    std::string callee;  // directory
+    int edges{};             // call edges caller -> callee
+    int distinct_targets{};  // distinct callee symbols hit (interface width)
+};
+
+/// One call-graph community — the ACTUAL structure, surfaced as a
+/// refactoring guide beside the declared-module scoring. `label` is the
+/// owning directory, or "(shared)" for a utility community no directory
+/// owns (spanning those is good structure).
+struct CommunitySummary {
+    std::string label;
+    int size{};                       // graph members
+    int files{};                      // distinct files
+    std::vector<std::string> dirs;    // directories touched, majority first
+};
+
 struct ModuleAnalysis {
     std::vector<ModuleBoundary> modules;
     std::string detection_strategy;
@@ -491,6 +524,12 @@ struct ModuleAnalysis {
     // several communities (each with a significant share) — the divergence
     // signal between the directory layout and the real call structure.
     std::vector<std::string> split_dirs;
+    // Graph-based only: current-vs-actual findings. See the struct docs.
+    std::vector<MisplacedFile> misplaced_files;
+    std::vector<TightCoupling> tight_couplings;
+    // The measured communities themselves (refactoring guide; the scores
+    // above judge the CURRENT organization against them).
+    std::vector<CommunitySummary> communities;
     // Louvain modularity Q of the partition, -1 when not graph-based.
     double modularity{-1.0};
     absl::flat_hash_map<std::string, int> module_types;

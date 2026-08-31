@@ -171,18 +171,15 @@ void emit_modules(std::ostringstream& out, const ModuleAnalysis& ma) {
     out << "== MODULES ==\n"
         << "total=" << ma.metrics.total_modules;
     if (graph) {
-        // Modules ARE Louvain communities of the call graph; the name is the
-        // community's majority directory. cohesion/coupling are the
-        // internal/external shares of each community's call edges; stability
-        // is Martin instability over module edges.
+        // Rows are the DECLARED modules (directories) — how the system is
+        // currently oriented. cohesion = share of the module's members in
+        // its dominant call-graph community (current vs actual); coupling =
+        // external share of its call edges; instability = Martin.
         out << " modularity=" << fmt2(ma.modularity)
             << " cohesion=" << fmt2(ma.metrics.average_cohesion)
             << " coupling=" << fmt2(ma.metrics.average_coupling)
-            << " basis=call_graph_louvain (name = majority dir)\n";
+            << " basis=dirs_vs_call_graph_communities\n";
     } else {
-        // Directory-grouping fallback: name_cohesion is NAME-PREFIX
-        // similarity (a naming metric, not graph cohesion) and no coupling
-        // is computed (n/a, never a constant).
         out << " name_cohesion=" << fmt2(ma.metrics.average_cohesion)
             << " coupling="
             << (ma.metrics.average_coupling < 0.0
@@ -200,17 +197,6 @@ void emit_modules(std::ostringstream& out, const ModuleAnalysis& ma) {
                 << " coupling=" << fmt2(m.coupling_score)
                 << " deps=" << m.external_deps
                 << " instability=" << fmt2(m.stability);
-            if (m.dir_purity < 1.0 && m.spanned_dirs.size() > 1) {
-                out << " spans=";
-                size_t dl = std::min(m.spanned_dirs.size(), size_t{3});
-                for (size_t d = 0; d < dl; ++d) {
-                    if (d) out << ",";
-                    out << m.spanned_dirs[d];
-                }
-                if (m.spanned_dirs.size() > dl)
-                    out << ",+" << (m.spanned_dirs.size() - dl);
-                out << " purity=" << fmt2(m.dir_purity);
-            }
         } else {
             out << " name_cohesion=" << fmt2(m.cohesion_score);
         }
@@ -219,14 +205,69 @@ void emit_modules(std::ostringstream& out, const ModuleAnalysis& ma) {
     if (ma.modules.size() > 10) {
         out << "  ... and " << (ma.modules.size() - 10) << " more modules\n";
     }
-    if (graph && !ma.split_dirs.empty()) {
-        // The divergence signal: directory layout vs call structure.
-        out << "split_dirs (symbols split across communities):";
-        size_t sl = std::min(ma.split_dirs.size(), size_t{8});
-        for (size_t i = 0; i < sl; ++i) out << " " << ma.split_dirs[i];
-        if (ma.split_dirs.size() > sl)
-            out << " +" << (ma.split_dirs.size() - sl);
-        out << "\n";
+    if (graph) {
+        if (!ma.split_dirs.empty()) {
+            out << "split (maps to several communities):";
+            size_t sl = std::min(ma.split_dirs.size(), size_t{8});
+            for (size_t i = 0; i < sl; ++i) out << " " << ma.split_dirs[i];
+            if (ma.split_dirs.size() > sl)
+                out << " +" << (ma.split_dirs.size() - sl);
+            out << "\n";
+        }
+        // Findings. Files joining shared/utility communities are exempt by
+        // construction — a utility spanning modules is good structure.
+        size_t ml = std::min(ma.misplaced_files.size(), size_t{8});
+        if (ml > 0) {
+            out << "misplaced (joins another module's community):\n";
+            for (size_t i = 0; i < ml; ++i) {
+                const auto& f = ma.misplaced_files[i];
+                out << "  " << f.file << " -> belongs with " << f.belongs_with
+                    << " (" << f.symbols << "/" << f.total_symbols
+                    << " syms)\n";
+            }
+            if (ma.misplaced_files.size() > ml)
+                out << "  ... and " << (ma.misplaced_files.size() - ml)
+                    << " more\n";
+        }
+        // The measured communities — the refactoring guide (what modules
+        // WOULD be if layout followed call structure). Scores above judge
+        // the current organization; these rows are the target shape.
+        size_t cl = std::min(ma.communities.size(), size_t{6});
+        if (cl > 0) {
+            out << "actual (call-graph communities; refactoring guide):\n";
+            for (size_t i = 0; i < cl; ++i) {
+                const auto& c = ma.communities[i];
+                out << "  " << c.label << ": syms=" << c.size
+                    << " files=" << c.files;
+                if (c.dirs.size() > 1) {
+                    out << " dirs=";
+                    size_t dl = std::min(c.dirs.size(), size_t{3});
+                    for (size_t d = 0; d < dl; ++d) {
+                        if (d) out << ",";
+                        out << c.dirs[d];
+                    }
+                    if (c.dirs.size() > dl) out << ",+" << (c.dirs.size() - dl);
+                }
+                out << "\n";
+            }
+            if (ma.communities.size() > cl)
+                out << "  ... and " << (ma.communities.size() - cl)
+                    << " more communities\n";
+        }
+        size_t tl = std::min(ma.tight_couplings.size(), size_t{8});
+        if (tl > 0) {
+            out << "tight coupling (calls many internals; consider an "
+                   "interface):\n";
+            for (size_t i = 0; i < tl; ++i) {
+                const auto& t = ma.tight_couplings[i];
+                out << "  " << t.caller << " -> " << t.callee
+                    << " targets=" << t.distinct_targets
+                    << " edges=" << t.edges << "\n";
+            }
+            if (ma.tight_couplings.size() > tl)
+                out << "  ... and " << (ma.tight_couplings.size() - tl)
+                    << " more\n";
+        }
     }
     out << "---\n";
 }

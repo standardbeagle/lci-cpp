@@ -59,14 +59,29 @@ ModuleAnalysis ModuleAnalyzer::analyze_graph(
     const std::function<std::vector<SymbolID>(SymbolID)>& callees_of) const {
     if (!callees_of) return analyze(files, project_root);
 
-    // Node set: function-like, non-scaffold symbols of code files; each node
-    // remembers its directory (the label space) and file.
+    // Node set: function-like, non-scaffold symbols of code files. The
+    // report's rows are the DECLARED modules (directories) — that is how the
+    // system is currently oriented — and the call-graph communities are the
+    // ACTUAL structure they are compared against.
     struct NodeMeta {
         std::string dir;
         std::string file;
     };
     std::vector<SymbolID> nodes;
     absl::flat_hash_map<SymbolID, NodeMeta> meta;
+    // Repo-relative file paths throughout: findings must print the path a
+    // reader can open, not the absolute checkout location.
+    auto rel_of = [&](std::string_view path) {
+        if (!project_root.empty() && path.size() > project_root.size() &&
+            path.substr(0, project_root.size()) == project_root) {
+            size_t start = project_root.size();
+            if (start < path.size() &&
+                (path[start] == '/' || path[start] == '\\'))
+                ++start;
+            return std::string(path.substr(start));
+        }
+        return std::string(path);
+    };
     for (const auto& file : files) {
         if (!CouplingAnalyzer::is_code_file(file.path)) continue;
         std::string pkg =
@@ -78,7 +93,7 @@ ModuleAnalysis ModuleAnalyzer::analyze_graph(
                 t != SymbolType::Constructor)
                 continue;
             nodes.push_back(sym->id);
-            meta[sym->id] = {pkg, file.path};
+            meta[sym->id] = {pkg, rel_of(file.path)};
         }
     }
 
@@ -96,134 +111,225 @@ ModuleAnalysis ModuleAnalyzer::analyze_graph(
     auto comm = graph.louvain_communities(modularity);
     result.modularity = modularity;
 
+    const int n_nodes = graph.node_count();
     int k = 0;
     for (int c : comm) k = std::max(k, c + 1);
-    std::vector<std::vector<int>> members(k);
-    for (int i = 0; i < static_cast<int>(comm.size()); ++i)
-        members[comm[i]].push_back(i);
 
-    // Directed edge counts between communities feed cohesion (internal edge
-    // share), external_deps (distinct partner modules), and Martin
-    // instability (efferent / (afferent + efferent)).
-    std::vector<int> internal_edges(k, 0);
-    std::vector<absl::flat_hash_map<int, int>> out_edges(k);  // c -> {c2: n}
-    std::vector<int> afferent(k, 0), efferent(k, 0);
+    // Community -> per-directory member histogram. A community is OWNED by a
+    // directory when that directory holds a majority of its members; a
+    // community no directory owns is SHARED (utility) — spanning it is good
+    // structure, never drift.
+    std::vector<absl::flat_hash_map<std::string, int>> comm_dirs(k);
+    std::vector<int> comm_size(k, 0);
+    for (int i = 0; i < n_nodes; ++i) {
+        const NodeMeta& m = meta[graph.id_at(i)];
+        ++comm_dirs[comm[i]][m.dir];
+        ++comm_size[comm[i]];
+    }
+    // Owner dir per community ("" = shared/utility). Ties break
+    // lexicographically for determinism.
+    std::vector<std::string> comm_owner(k);
+    for (int c = 0; c < k; ++c) {
+        std::string best;
+        int best_n = 0;
+        for (const auto& [d, n] : comm_dirs[c]) {
+            if (n > best_n || (n == best_n && d < best)) {
+                best = d;
+                best_n = n;
+            }
+        }
+        if (comm_size[c] >= 2 && 2 * best_n > comm_size[c])
+            comm_owner[c] = best;
+    }
+
+    // Directory-level structures: members, dominant community, edges.
+    struct DirStat {
+        std::vector<int> members;                 // node indices
+        absl::flat_hash_map<int, int> comms;      // community -> members
+        int internal_edges{};
+        int efferent{}, afferent{};
+        absl::flat_hash_map<std::string, int> out_dirs;  // partner -> edges
+        // partner dir -> distinct callee symbols hit (interface width).
+        absl::flat_hash_map<std::string, absl::flat_hash_set<SymbolID>>
+            out_targets;
+    };
+    absl::flat_hash_map<std::string, DirStat> dirs;
+    for (int i = 0; i < n_nodes; ++i) {
+        const NodeMeta& m = meta[graph.id_at(i)];
+        auto& ds = dirs[m.dir];
+        ds.members.push_back(i);
+        ++ds.comms[comm[i]];
+    }
     const auto& adj = graph.adjacency();
-    for (int u = 0; u < graph.node_count(); ++u) {
+    for (int u = 0; u < n_nodes; ++u) {
+        const std::string& du = meta[graph.id_at(u)].dir;
         for (int v : adj[u]) {
-            int cu = comm[u], cv = comm[v];
-            if (cu == cv) {
-                ++internal_edges[cu];
+            const std::string& dv = meta[graph.id_at(v)].dir;
+            if (du == dv) {
+                ++dirs[du].internal_edges;
             } else {
-                ++out_edges[cu][cv];
-                ++efferent[cu];
-                ++afferent[cv];
+                auto& src = dirs[du];
+                ++src.efferent;
+                ++src.out_dirs[dv];
+                src.out_targets[dv].insert(graph.id_at(v));
+                ++dirs[dv].afferent;
             }
         }
     }
 
-    // dir -> (community -> member count), for the split-directory signal.
-    absl::flat_hash_map<std::string, absl::flat_hash_map<int, int>> dir_comms;
-
+    // Rows: one per directory. cohesion = the LABEL cohesion — the share of
+    // the directory's members in its dominant community (how well "current"
+    // matches "actual"); coupling = external share of its call edges;
+    // stability = Martin instability over directory edges.
     struct Built {
         ModuleBoundary mb;
         int size;
     };
     std::vector<Built> built;
-    for (int c = 0; c < k; ++c) {
-        const auto& mem = members[c];
-        if (static_cast<int>(mem.size()) < 2) continue;  // singletons: not modules
-
-        // Directory histogram + distinct files.
-        absl::flat_hash_map<std::string, int> dirs;
-        absl::flat_hash_set<std::string> file_set;
-        for (int idx : mem) {
-            const NodeMeta& m = meta[graph.id_at(idx)];
-            ++dirs[m.dir];
-            file_set.insert(m.file);
+    for (auto& [dir, ds] : dirs) {
+        int size = static_cast<int>(ds.members.size());
+        if (size < 1) continue;
+        int dom_comm = -1, dom_n = 0;
+        for (const auto& [c, n] : ds.comms) {
+            if (n > dom_n || (n == dom_n && c < dom_comm)) {
+                dom_comm = c;
+                dom_n = n;
+            }
         }
-        // Majority dir first, then count desc / name asc (deterministic).
-        std::vector<std::pair<std::string, int>> ranked(dirs.begin(),
-                                                        dirs.end());
-        std::sort(ranked.begin(), ranked.end(), [](const auto& a,
-                                                   const auto& b) {
-            if (a.second != b.second) return a.second > b.second;
-            return a.first < b.first;
-        });
+        absl::flat_hash_set<std::string> file_set;
+        for (int idx : ds.members) file_set.insert(meta[graph.id_at(idx)].file);
 
         ModuleBoundary mb;
-        mb.name = ranked.front().first;
-        mb.path = mb.name;
-        mb.type = classify_module_by_path(mb.name);
-        for (const auto& [d, n] : ranked) mb.spanned_dirs.push_back(d);
-        mb.dir_purity = static_cast<double>(ranked.front().second) /
-                        static_cast<double>(mem.size());
-        mb.file_count = static_cast<int>(file_set.size());
-        mb.function_count = static_cast<int>(mem.size());
-        int internal = internal_edges[c];
-        int external = efferent[c] + afferent[c];
-        int incident = internal + external;
+        mb.name = dir;
+        mb.path = dir;
+        mb.type = classify_module_by_path(dir);
         mb.cohesion_score =
-            incident > 0
-                ? static_cast<double>(internal) / static_cast<double>(incident)
-                : 1.0;
+            static_cast<double>(dom_n) / static_cast<double>(size);
+        mb.dir_purity = mb.cohesion_score;
+        int external = ds.efferent + ds.afferent;
+        int incident = ds.internal_edges + external;
         mb.coupling_score =
-            incident > 0
-                ? static_cast<double>(external) / static_cast<double>(incident)
-                : 0.0;
-        mb.external_deps = static_cast<int>(out_edges[c].size());
-        for (const auto& [c2, n] : out_edges[c]) {
-            (void)c2;
-            (void)n;
-        }
-        mb.stability = external > 0 ? static_cast<double>(efferent[c]) /
+            incident > 0 ? static_cast<double>(external) /
+                               static_cast<double>(incident)
+                         : 0.0;
+        mb.external_deps = static_cast<int>(ds.out_dirs.size());
+        mb.stability = external > 0 ? static_cast<double>(ds.efferent) /
                                           static_cast<double>(external)
                                     : 0.0;
-        built.push_back({std::move(mb), static_cast<int>(mem.size())});
-
-        for (const auto& [d, n] : dirs) dir_comms[d][c] += n;
+        mb.file_count = static_cast<int>(file_set.size());
+        mb.function_count = size;
+        // Actual structure the label maps to: number of communities with a
+        // significant share of this directory (>= 3 members or >= 20%).
+        int significant = 0;
+        for (const auto& [c, cn] : ds.comms) {
+            (void)c;
+            if (cn >= 3 || 5 * cn >= size) ++significant;
+        }
+        // spanned_dirs is repurposed as a count carrier via size (emitters
+        // read communities from it): store nothing here; the emitter uses
+        // external_deps/cohesion. Keep the significant-community count in
+        // stability? No — add to split_dirs below instead.
+        if (significant >= 2) result.split_dirs.push_back(dir);
+        built.push_back({std::move(mb), size});
     }
-
-    // No community of module size (edgeless or tiny corpus): the graph has
-    // nothing to say — fall back to directory grouping rather than emitting
-    // an empty section.
-    if (built.empty()) return analyze(files, project_root);
-
-    // Deterministic order: member count desc, then name asc.
     std::sort(built.begin(), built.end(), [](const Built& a, const Built& b) {
         if (a.size != b.size) return a.size > b.size;
         return a.mb.name < b.mb.name;
     });
-    // Several communities can share a majority directory; disambiguate the
-    // display name positionally so rows stay addressable (dir#2, dir#3...).
-    absl::flat_hash_map<std::string, int> name_seen;
-    for (auto& b : built) {
-        int n = ++name_seen[b.mb.name];
-        if (n > 1) b.mb.name += "#" + std::to_string(n);
-    }
+    std::sort(result.split_dirs.begin(), result.split_dirs.end());
     for (auto& b : built) {
         result.module_types[b.mb.type]++;
         result.modules.push_back(std::move(b.mb));
     }
+    if (result.modules.empty()) return analyze(files, project_root);
 
-    // A directory is SPLIT when at least two communities each hold a
-    // significant share of it (>= 20% or >= 3 members): the layout and the
-    // call structure disagree there.
-    std::vector<std::string> split;
-    for (const auto& [dir, cm] : dir_comms) {
-        int total = 0;
-        for (const auto& [c, n] : cm) total += n;
-        int significant = 0;
-        for (const auto& [c, n] : cm) {
-            (void)c;
-            if (n >= 3 || (total > 0 && 5 * n >= total)) ++significant;
-        }
-        if (significant >= 2) split.push_back(dir);
+    // Misplaced files: a file whose graph members predominantly join a
+    // community OWNED by a different directory. Shared/utility communities
+    // (no owner) are exempt. Evidence bar: majority of the file's members
+    // and at least 2 symbols, or a single-symbol file entirely elsewhere.
+    absl::flat_hash_map<std::string,
+                        std::pair<std::string, absl::flat_hash_map<int, int>>>
+        file_comms;  // file -> (home dir, community histogram)
+    for (int i = 0; i < n_nodes; ++i) {
+        const NodeMeta& m = meta[graph.id_at(i)];
+        auto& fc = file_comms[m.file];
+        fc.first = m.dir;
+        ++fc.second[comm[i]];
     }
-    std::sort(split.begin(), split.end());
-    result.split_dirs = std::move(split);
+    for (const auto& [file, fc] : file_comms) {
+        const std::string& home = fc.first;
+        int total = 0, dom_comm = -1, dom_n = 0;
+        for (const auto& [c, n] : fc.second) {
+            total += n;
+            if (n > dom_n || (n == dom_n && c < dom_comm)) {
+                dom_comm = c;
+                dom_n = n;
+            }
+        }
+        if (dom_comm < 0 || 2 * dom_n <= total) continue;  // no majority
+        const std::string& owner = comm_owner[dom_comm];
+        if (owner.empty() || owner == home) continue;  // shared, or in place
+        result.misplaced_files.push_back(
+            {file, home, owner, dom_n, total});
+    }
+    std::sort(result.misplaced_files.begin(), result.misplaced_files.end(),
+              [](const MisplacedFile& a, const MisplacedFile& b) {
+                  if (a.symbols != b.symbols) return a.symbols > b.symbols;
+                  return a.file < b.file;
+              });
 
-    // Aggregates over real per-module values.
+    // Tight coupling: a directory pair where the caller reaches MANY distinct
+    // symbols of the callee. Few targets = interface-like, never listed.
+    constexpr int kWideInterface = 5;
+    for (const auto& [dir, ds] : dirs) {
+        for (const auto& [callee, targets] : ds.out_targets) {
+            int width = static_cast<int>(targets.size());
+            if (width < kWideInterface) continue;
+            result.tight_couplings.push_back(
+                {dir, callee, ds.out_dirs.at(callee), width});
+        }
+    }
+    std::sort(result.tight_couplings.begin(), result.tight_couplings.end(),
+              [](const TightCoupling& a, const TightCoupling& b) {
+                  if (a.distinct_targets != b.distinct_targets)
+                      return a.distinct_targets > b.distinct_targets;
+                  if (a.caller != b.caller) return a.caller < b.caller;
+                  return a.callee < b.callee;
+              });
+
+    // The measured communities, as the refactoring guide: what the modules
+    // WOULD look like if the layout followed the call structure. Sorted by
+    // size desc, label asc; singletons omitted.
+    for (int c = 0; c < k; ++c) {
+        if (comm_size[c] < 2) continue;
+        CommunitySummary cs;
+        cs.label = comm_owner[c].empty() ? "(shared)" : comm_owner[c];
+        cs.size = comm_size[c];
+        absl::flat_hash_set<std::string> cfiles;
+        for (int i = 0; i < n_nodes; ++i) {
+            if (comm[i] != c) continue;
+            cfiles.insert(meta[graph.id_at(i)].file);
+        }
+        cs.files = static_cast<int>(cfiles.size());
+        std::vector<std::pair<std::string, int>> ranked(comm_dirs[c].begin(),
+                                                        comm_dirs[c].end());
+        std::sort(ranked.begin(), ranked.end(),
+                  [](const auto& a, const auto& b) {
+                      if (a.second != b.second) return a.second > b.second;
+                      return a.first < b.first;
+                  });
+        for (const auto& [d, dn] : ranked) {
+            (void)dn;
+            cs.dirs.push_back(d);
+        }
+        result.communities.push_back(std::move(cs));
+    }
+    std::sort(result.communities.begin(), result.communities.end(),
+              [](const CommunitySummary& a, const CommunitySummary& b) {
+                  if (a.size != b.size) return a.size > b.size;
+                  return a.label < b.label;
+              });
+
     double coh = 0.0, coup = 0.0;
     for (const auto& m : result.modules) {
         coh += m.cohesion_score;
@@ -231,13 +337,9 @@ ModuleAnalysis ModuleAnalyzer::analyze_graph(
     }
     int n = static_cast<int>(result.modules.size());
     result.metrics.total_modules = n;
-    result.metrics.average_cohesion =
-        n > 0 ? coh / static_cast<double>(n) : 0.0;
-    result.metrics.average_coupling =
-        n > 0 ? coup / static_cast<double>(n) : -1.0;
-    // Modularity Q is the partition-quality number this section used to fake
-    // with a 0.8 constant; report the real thing in its place.
-    result.metrics.architectural_score = n > 0 ? modularity : -1.0;
+    result.metrics.average_cohesion = coh / static_cast<double>(n);
+    result.metrics.average_coupling = coup / static_cast<double>(n);
+    result.metrics.architectural_score = modularity;
     return result;
 }
 
