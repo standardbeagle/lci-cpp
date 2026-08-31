@@ -93,7 +93,26 @@ std::unique_ptr<Client> ensure_server_running(const Config& cfg,
                          ping->build_id_value.c_str(), build_id().c_str());
             std::string shutdown_err;
             client->shutdown(false, shutdown_err);
-            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            // Wait for the old server to actually EXIT before touching its
+            // socket: unlinking while it still serves orphans it — alive,
+            // unreachable, holding the start lock — and the root is dead to
+            // new servers until its idle reaper fires (observed as a
+            // ~30-minute outage window).
+            bool gone = false;
+            for (int i = 0; i < 20; ++i) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(250));
+                if (!client->is_server_running()) {
+                    gone = true;
+                    break;
+                }
+            }
+            if (!gone) {
+                std::fprintf(stderr,
+                             "Stale server did not exit within 5s; "
+                             "continuing with the running (older-build) "
+                             "server instead of orphaning it\n");
+                return client;
+            }
 #ifndef _WIN32
             ::unlink(socket_path.c_str());
 #endif
