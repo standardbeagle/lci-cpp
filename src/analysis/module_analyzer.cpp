@@ -54,6 +54,41 @@ double stability_score(int sym_count) {
 // ---------------------------------------------------------------------------
 
 
+
+namespace {
+// Nearest ancestor directory (repo-relative, "" = repo root) carrying a
+// package manifest. Distinguishes deliberate multi-package layouts (gems,
+// workspaces, gradle modules) from plain subdirectories.
+std::string package_root_of(std::string_view project_root,
+                            std::string_view dir) {
+    static constexpr std::string_view manifests[] = {
+        "package.json", "go.mod",        "Cargo.toml", "composer.json",
+        "pyproject.toml", "setup.py",    "build.gradle",
+        "build.gradle.kts", "pom.xml",   "Gemfile",    "build.zig",
+    };
+    std::filesystem::path root(project_root.empty() ? "." : project_root);
+    std::filesystem::path rel(std::string(dir == "(root)" ? "" : dir));
+    std::error_code ec;
+    while (true) {
+        std::filesystem::path abs = root / rel;
+        for (auto m : manifests) {
+            if (std::filesystem::exists(abs / std::string(m), ec)) {
+                return rel.generic_string();
+            }
+        }
+        // Gemspecs are named <pkg>.gemspec — scan the directory once.
+        for (std::filesystem::directory_iterator it(abs, ec), end;
+             !ec && it != end; ++it) {
+            if (it->path().extension() == ".gemspec") {
+                return rel.generic_string();
+            }
+        }
+        if (rel.empty()) return {};
+        rel = rel.parent_path();
+    }
+}
+}  // namespace
+
 ModuleAnalysis ModuleAnalyzer::analyze_graph(
     const std::vector<FileSymbolData>& files, std::string_view project_root,
     const std::function<std::vector<SymbolID>(SymbolID)>& callees_of) const {
@@ -225,6 +260,7 @@ ModuleAnalysis ModuleAnalyzer::analyze_graph(
             (void)c;
             if (cn >= 3 || 5 * cn >= size) ++significant;
         }
+        mb.community_count = significant;
         // spanned_dirs is repurposed as a count carrier via size (emitters
         // read communities from it): store nothing here; the emitter uses
         // external_deps/cohesion. Keep the significant-community count in
@@ -306,8 +342,14 @@ ModuleAnalysis ModuleAnalyzer::analyze_graph(
             ++partner_dirs;
             max_dir = std::max(max_dir, n);
         }
-        // Direct-edge dominance over the home dir.
-        if (dest_edges == 0 || dest_edges <= home_edges) continue;
+        // Direct-edge dominance over the home dir picks the kind: dominance
+        // = a move candidate; strong destination traffic without dominance
+        // (>=5 edges and the community majority) = entanglement to untangle
+        // in place (pocketbase apis/realtime.go: 21/36 members join core's
+        // community while home traffic still dominates).
+        if (dest_edges == 0) continue;
+        bool entangled_only = dest_edges <= home_edges;
+        if (entangled_only && dest_edges < 5) continue;
         // Shared utility: consumed from 3+ dirs and the proposed
         // destination is not clearly the dominant partner (>= 1.5x the
         // largest other) — moving a utility to its heaviest consumer is
@@ -316,7 +358,49 @@ ModuleAnalysis ModuleAnalyzer::analyze_graph(
             dest_edges != max_dir) {
             continue;
         }
-        result.misplaced_files.push_back({file, home, owner, dom_n, total});
+        // Exposed surface: the destination already depends on home (its
+        // edges into home dominate), and MANY destination files consume
+        // this one — that is home's deliberate interface to the consumer
+        // (pocketbase core/event_request.go: 59 apis consumers; moving it
+        // would invert the apis -> core dependency into a cycle). A narrow
+        // consumer set (entry_signatures.cpp: 2 files) stays a finding.
+        {
+            auto dh = dirs.find(owner);
+            auto hh = dirs.find(home);
+            int dest_to_home = 0, home_to_dest = 0;
+            if (dh != dirs.end()) {
+                if (auto it2 = dh->second.out_dirs.find(home);
+                    it2 != dh->second.out_dirs.end())
+                    dest_to_home = it2->second;
+            }
+            if (hh != dirs.end()) {
+                if (auto it2 = hh->second.out_dirs.find(owner);
+                    it2 != hh->second.out_dirs.end())
+                    home_to_dest = it2->second;
+            }
+            if (dest_to_home > home_to_dest) {
+                // Count distinct destination FILES with edges to this file.
+                absl::flat_hash_set<std::string> consumers;
+                for (int u = 0; u < n_nodes; ++u) {
+                    const NodeMeta& mu = meta[graph.id_at(u)];
+                    if (mu.dir != owner) continue;
+                    for (int v : adj[u]) {
+                        if (meta[graph.id_at(v)].file == file)
+                            consumers.insert(mu.file);
+                    }
+                }
+                if (static_cast<int>(consumers.size()) >= 5) continue;
+            }
+        }
+        MisplacedFile mf{file, home, owner, dom_n, total};
+        if (entangled_only) mf.kind = "entangled";
+        // Cross-package extension point: home and destination sit under
+        // different package manifests — deliberate structure (sinatra's
+        // contrib gems extending lib/sinatra), reported as awareness.
+        std::string home_pkg = package_root_of(project_root, home);
+        std::string dest_pkg = package_root_of(project_root, owner);
+        if (home_pkg != dest_pkg) mf.kind = "extension";
+        result.misplaced_files.push_back(std::move(mf));
     }
     std::sort(result.misplaced_files.begin(), result.misplaced_files.end(),
               [](const MisplacedFile& a, const MisplacedFile& b) {

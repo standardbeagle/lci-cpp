@@ -935,7 +935,8 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                     << " funcs=" << m.function_count
                     << " cohesion=" << fmt2(m.cohesion_score);
                 if (graph) {
-                    out << " coupling=" << fmt2(m.coupling_score)
+                    out << " clusters=" << m.community_count
+                        << " coupling=" << fmt2(m.coupling_score)
                         << " deps=" << m.external_deps
                         << " instability=" << fmt2(m.stability);
                 }
@@ -959,9 +960,18 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                            "shared/utility communities exempt):\n";
                     for (size_t i = 0; i < ml; ++i) {
                         const auto& f = r.misplaced_files[i];
-                        out << "  " << f.file << " -> belongs with "
-                            << f.belongs_with << " (" << f.symbols << "/"
-                            << f.total_symbols << " syms)\n";
+                        out << "  " << f.file;
+                        if (f.kind == "entangled") {
+                            out << " entangled with " << f.belongs_with
+                                << " (untangle in place)";
+                        } else if (f.kind == "extension") {
+                            out << " extends " << f.belongs_with
+                                << " (cross-package extension point)";
+                        } else {
+                            out << " -> belongs with " << f.belongs_with;
+                        }
+                        out << " (" << f.symbols << "/" << f.total_symbols
+                            << " syms)\n";
                     }
                     if (r.misplaced_files.size() > ml)
                         out << "  ... and " << (r.misplaced_files.size() - ml)
@@ -998,7 +1008,7 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                     for (size_t i = 0; i < tl; ++i) {
                         const auto& t = r.tight_couplings[i];
                         out << "  " << t.caller << " -> " << t.callee
-                            << " targets=" << t.distinct_targets
+                            << " targets>=" << t.distinct_targets
                             << " edges=" << t.edges << "\n";
                     }
                     if (r.tight_couplings.size() > tl)

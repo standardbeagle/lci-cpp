@@ -194,6 +194,7 @@ void emit_modules(std::ostringstream& out, const ModuleAnalysis& ma) {
             << " files=" << m.file_count << " funcs=" << m.function_count;
         if (graph) {
             out << " cohesion=" << fmt2(m.cohesion_score)
+                << " clusters=" << m.community_count
                 << " coupling=" << fmt2(m.coupling_score)
                 << " deps=" << m.external_deps
                 << " instability=" << fmt2(m.stability);
@@ -221,8 +222,17 @@ void emit_modules(std::ostringstream& out, const ModuleAnalysis& ma) {
             out << "misplaced (joins another module's community):\n";
             for (size_t i = 0; i < ml; ++i) {
                 const auto& f = ma.misplaced_files[i];
-                out << "  " << f.file << " -> belongs with " << f.belongs_with
-                    << " (" << f.symbols << "/" << f.total_symbols
+                out << "  " << f.file;
+                if (f.kind == "entangled") {
+                    out << " entangled with " << f.belongs_with
+                        << " (untangle in place)";
+                } else if (f.kind == "extension") {
+                    out << " extends " << f.belongs_with
+                        << " (cross-package extension point)";
+                } else {
+                    out << " -> belongs with " << f.belongs_with;
+                }
+                out << " (" << f.symbols << "/" << f.total_symbols
                     << " syms)\n";
             }
             if (ma.misplaced_files.size() > ml)
@@ -261,7 +271,7 @@ void emit_modules(std::ostringstream& out, const ModuleAnalysis& ma) {
             for (size_t i = 0; i < tl; ++i) {
                 const auto& t = ma.tight_couplings[i];
                 out << "  " << t.caller << " -> " << t.callee
-                    << " targets=" << t.distinct_targets
+                    << " targets>=" << t.distinct_targets
                     << " edges=" << t.edges << "\n";
             }
             if (ma.tight_couplings.size() > tl)

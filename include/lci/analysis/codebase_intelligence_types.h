@@ -382,6 +382,11 @@ struct ModuleBoundary {
     double stability{};
     int file_count{};
     int function_count{};
+    // Graph-based: number of significant communities this directory's
+    // members split across (>=3 members or >=20% each). Pairs with
+    // cohesion_score so a large dir reads "8 clusters", not just a damning
+    // low ratio (cohesion is mechanically size-biased).
+    int community_count{};
     // Graph-based modules (Louvain communities; directories are labels):
     // every directory this community's members live in, majority first;
     // dir_purity = share of members in the majority directory; external_deps
@@ -494,6 +499,13 @@ struct MisplacedFile {
     std::string belongs_with; // directory owning the community it joins
     int symbols{};            // members joining the foreign community
     int total_symbols{};      // the file's total graph members
+    // "misplaced": direct edges with the destination dominate home — a move
+    //   candidate. "entangled": the community says it belongs elsewhere and
+    //   it talks to the destination heavily, but home traffic still
+    //   dominates — untangle, don't move. "extension": home and destination
+    //   live under different package manifests — a deliberate cross-package
+    //   extension point, reported for awareness, not relocation.
+    std::string kind{"misplaced"};
 };
 
 /// A module pair whose interaction is tight coupling rather than an
