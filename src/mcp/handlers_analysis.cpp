@@ -786,11 +786,22 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                             continue;
                         const auto& nm = sym->symbol.name;
                         // Ctors (name == a type), dtors, and operator
-                        // overloads are reached without name references.
+                        // overloads are reached without name references; a
+                        // receiver-carrying "function" is an inline class
+                        // member (C++ header methods extract as Function)
+                        // and gets the same method exclusion.
+                        bool class_scoped = false;
+                        for (const auto& sc : sym->scope_chain) {
+                            if (sc.type == ScopeType::Class ||
+                                sc.type == ScopeType::Struct) {
+                                class_scoped = true;
+                                break;
+                            }
+                        }
                         if (t == SymbolType::Function &&
                             (nm.starts_with("~") ||
                              nm.starts_with("operator") ||
-                             type_names.contains(nm)))
+                             type_names.contains(nm) || class_scoped))
                             continue;
                         ++exported_total;
                         if (sym->incoming_ref_count > 0) continue;
