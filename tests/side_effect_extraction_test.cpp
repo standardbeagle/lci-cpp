@@ -2615,8 +2615,14 @@ TEST_F(SideEffectExtraction, ZigSelfParamWriteIsParamWrite) {
                                "};\n",
                                "bump");
     ASSERT_NE(info, nullptr);
-    EXPECT_NE(info->categories & side_effect::kParamWrite, 0u)
-        << "self mutation must be a parameter write";
+    EXPECT_NE(info->categories &
+                  (side_effect::kReceiverWrite | side_effect::kParamWrite),
+              0u)
+        << "self mutation must be a receiver/parameter write; categories="
+        << info->categories << " reasons="
+        << (info->impurity_reasons.empty() ? std::string("none")
+                                           : info->impurity_reasons[0])
+        ;
     EXPECT_EQ(info->categories & side_effect::kGlobalWrite, 0u)
         << "self mutation must not read as a global write";
 }

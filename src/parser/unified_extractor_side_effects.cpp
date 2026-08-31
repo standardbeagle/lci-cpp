@@ -125,6 +125,20 @@ void UnifiedExtractor::register_function_signature(TSNode node,
     // Parameter list. Field name is "parameters" across Go / JS / TS / Python /
     // Java / C# / PHP function-and-method grammars.
     TSNode params = field(node, "parameters");
+    if (ts_node_is_null(params)) {
+        // Zig (and Kotlin's function_value_parameters): the parameter list
+        // is an unfielded named CHILD. Without this every `self: *T`
+        // mutation classified as a global write and param_writes stayed 0.
+        uint32_t nc = ts_node_named_child_count(node);
+        for (uint32_t i = 0; i < nc; ++i) {
+            TSNode c = ts_node_named_child(node, i);
+            std::string_view ct = get_node_type(c);
+            if (ct == "parameters" || ct == "function_value_parameters") {
+                params = c;
+                break;
+            }
+        }
+    }
     if (ts_node_is_null(params)) return;
 
     int index = 0;
@@ -271,9 +285,52 @@ void UnifiedExtractor::process_side_effect_node(
         }
     }
 
-    // Assignment patterns - writes to state.
+    // Zig statement-level assignment: the grammar parses `self.count += 1;`
+    // as a variable_declaration with NO const/var keyword — there is no
+    // assignment_expression node to hook. A keyword-less declaration whose
+    // first child is an lvalue expression is an assignment.
+    if (ext_ == ".zig" && node_type == "variable_declaration") {
+        bool declares = false;
+        uint32_t nc = ts_node_child_count(node);
+        for (uint32_t i = 0; i < nc && i < 2; ++i) {
+            std::string_view ct = get_node_type(ts_node_child(node, i));
+            if (ct == "const" || ct == "var" || ct == "comptime") {
+                declares = true;
+                break;
+            }
+        }
+        if (!declares && ts_node_named_child_count(node) > 0) {
+            TSNode left = ts_node_named_child(node, 0);
+            std::string_view lt = get_node_type(left);
+            if (lt == "field_expression" || lt == "identifier" ||
+                lt == "index_expression") {
+                record_lvalue_write(left, line, column);
+            }
+            return;
+        }
+    }
+
+    // Assignment patterns - writes to state. Field initializers inside a
+    // struct/initializer literal are CONSTRUCTION, not mutation: Zig's
+    // `return .{ .start = a };` parses its `.start = a` as an assignment and
+    // flagged pure functions as global writers (zls audit).
     if (node_type == "assignment_expression" ||
         node_type == "assignment_statement" || node_type == "assignment") {
+        for (TSNode p = ts_node_parent(node), guard = p; ; ) {
+            (void)guard;
+            if (ts_node_is_null(p)) break;
+            std::string_view pt = get_node_type(p);
+            if (pt == "struct_initializer" || pt == "initializer_list" ||
+                pt == "anonymous_struct_initializer" ||
+                pt == "initializer_expression") {
+                return;
+            }
+            if (pt == "block" || pt == "compound_statement" ||
+                is_function_node(pt)) {
+                break;
+            }
+            p = ts_node_parent(p);
+        }
         if (ext_ == ".go") process_go_error_drop(node, node_type);
         TSNode left = field(node, "left");
         if (ts_node_is_null(left)) left = ts_node_named_child(node, 0);
@@ -424,7 +481,14 @@ void UnifiedExtractor::process_side_effect_node(
 
     // Call expressions - record the callee for Phase-2 transitive resolution.
     if (node_type == "call_expression" || node_type == "call" ||
-        node_type == "call_statement") {
+        node_type == "call_statement" ||
+        // PHP spells calls differently; without these no PHP call was ever
+        // recorded in the AST pass, so builtin io (file_put_contents) never
+        // classified (battery audit).
+        node_type == "function_call_expression" ||
+        node_type == "member_call_expression" ||
+        node_type == "scoped_call_expression" ||
+        node_type == "nullsafe_member_call_expression") {
         TSNode func = field(node, "function");
         if (ts_node_is_null(func)) func = field(node, "name");
         if (ts_node_is_null(func)) func = field(node, "method");  // Ruby

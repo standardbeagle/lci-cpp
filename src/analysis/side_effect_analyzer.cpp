@@ -625,7 +625,11 @@ uint32_t classify_callee_category(std::string_view callee) {
         // scored pure). Stems chosen to not collide with in-memory names:
         // bare "read"/"write"/"remove"/"create"/"stat" stay unlisted.
         "mkdir", "rmdir",  "removeall", "readfile", "writefile", "readdir",
-        "walkdir", "chmod", "chown", "symlink", "truncate"};
+        "walkdir", "chmod", "chown", "symlink", "truncate",
+        // PHP filesystem/stream builtins (battery audit: file_put_contents
+        // in FileCookieJar::save carried no io). "file_" covers the
+        // file_get/put_contents/exists family; unlink is the posix delete.
+        "file_", "fput", "fget", "unlink", "tempnam", "tmpfile"};
     for (auto p : io_prefixes) {
         if (lower_starts_with(callee, p)) return side_effect::kIO;
     }
