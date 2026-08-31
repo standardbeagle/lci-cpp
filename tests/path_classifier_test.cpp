@@ -91,6 +91,36 @@ TEST(PathClassifierTest, JsTsTestPatterns) {
 
 // -- Vendored ------------------------------------------------------------------
 
+// okhttp audit (2026-08-30): the test classifier was filename-suffix-based, so
+// Kotlin/Gradle source-set LAYOUTS leaked whole test trees into the shipping
+// view — 14 non-*Test.kt files under okhttp/src/jvmTest/ (AutobahnTester,
+// MockHttp2Peer, FakeRoutePlanner…), okhttp-testing-support/src/main, and the
+// module-tests / maven-tests Gradle modules all ranked as api/binaries entry
+// points while their modules were simultaneously typed Test.
+TEST(PathClassifierTest, JvmSourceSetTestLayouts) {
+    PathClassifier c;
+    // Kotlin multiplatform <target>Test source sets.
+    EXPECT_EQ(attr_of(c, "okhttp/src/jvmTest/kotlin/okhttp3/AutobahnTester.kt"),
+              "test");
+    EXPECT_EQ(attr_of(c, "lib/src/commonTest/kotlin/Foo.kt"), "test");
+    EXPECT_EQ(attr_of(c, "app/src/androidTest/kotlin/Probe.kt"), "test");
+    // Gradle testFixtures source set.
+    EXPECT_EQ(attr_of(c, "core/src/testFixtures/java/Fixture.java"), "test");
+    // Test-support / *-tests module directories.
+    EXPECT_EQ(attr_of(
+                  c, "okhttp-testing-support/src/main/kotlin/TestUtilJvm.kt"),
+              "test");
+    EXPECT_EQ(attr_of(c, "module-tests/src/main/java/Main.java"), "test");
+    EXPECT_EQ(attr_of(c, "maven-tests/pom-checker/src/main/java/C.java"),
+              "test");
+    // Guards: production source sets and names merely containing "test"
+    // stay production.
+    EXPECT_EQ(attr_of(c, "okhttp/src/commonJvmAndroid/kotlin/Headers.kt"),
+              "production");
+    EXPECT_EQ(attr_of(c, "src/main/kotlin/Contest.kt"), "production");
+    EXPECT_EQ(attr_of(c, "protest/src/main/kotlin/March.kt"), "production");
+}
+
 TEST(PathClassifierTest, VendorDirs) {
     PathClassifier c;
     EXPECT_EQ(attr_of(c, "vendor/guzzlehttp/psr7/src/Uri.php"), "vendored");
