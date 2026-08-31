@@ -100,6 +100,11 @@ nlohmann::json similar_symbol_suggestions(
 // -- handle_info --------------------------------------------------------------
 
 ToolResult handle_info(const nlohmann::json& params) {
+    return handle_info(params, nullptr);
+}
+
+ToolResult handle_info(const nlohmann::json& params,
+                       const ToolDefinitionLookup& lookup) {
     auto tool = to_lower(params.value("tool", ""));
 
     if (tool == "version") {
@@ -203,6 +208,35 @@ ToolResult handle_info(const nlohmann::json& params) {
         return make_json_response(data);
     }
 
+    // Registry-derived help for every other registered tool: the same
+    // definition tools/list serves, so this can never lag the real surface.
+    if (lookup) {
+        if (const ToolDefinition* def = lookup(tool)) {
+            nlohmann::json data;
+            data["name"] = def->name;
+            data["description"] = def->description;
+            nlohmann::json parameters = nlohmann::json::object();
+            for (const auto& prop : def->properties) {
+                bool required =
+                    std::find(def->required.begin(), def->required.end(),
+                              prop.name) != def->required.end();
+                std::string entry;
+                if (required) entry += "REQUIRED: ";
+                entry += prop.description;
+                entry += " (";
+                entry += prop.type;
+                if (prop.type == "array" && !prop.items_type.empty()) {
+                    entry += " of " + prop.items_type;
+                }
+                entry += ")";
+                parameters[prop.name] = std::move(entry);
+            }
+            data["parameters"] = std::move(parameters);
+            if (!def->aliases.empty()) data["parameter_aliases"] = def->aliases;
+            return make_json_response(data);
+        }
+    }
+
     // Default: overview of all tools. The full text of result.content[0].text
     // is locked by the mcp/info integration golden.
     nlohmann::json data;
@@ -253,7 +287,11 @@ void register_core_handlers(McpServer& server, MasterIndex* indexer,
            "'get_context', 'version')",
            ""}},
          {}},
-        [](const nlohmann::json& p) { return handle_info(p); });
+        [&server](const nlohmann::json& p) {
+            return handle_info(p, [&server](const std::string& name) {
+                return server.find_tool_definition(name);
+            });
+        });
 
     // Register the "search" tool (definition + real handler)
     server.add_tool(

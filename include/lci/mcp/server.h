@@ -126,6 +126,11 @@ class McpServer {
     /// Registers a single tool.
     void add_tool(ToolDefinition def, ToolHandler handler);
 
+    /// Definition of a registered tool by name, or nullptr. Feeds the info
+    /// tool's registry-derived help; the pointer stays valid for the server's
+    /// lifetime (tools are registered once at startup, never removed).
+    const ToolDefinition* find_tool_definition(const std::string& name) const;
+
     /// Installs a gate consulted before every tools/call. The gate runs on
     /// the internal tool worker thread, so it may block until the index is
     /// usable without stalling the transport: initialize / tools/list /

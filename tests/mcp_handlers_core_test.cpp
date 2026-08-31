@@ -142,6 +142,59 @@ TEST(InfoHandler, CaseInsensitiveTool) {
     EXPECT_EQ(json["name"], "search");
 }
 
+// 2026-08-30 tool-battery audit: info covered 4 of 14 tools; parameter names
+// for side_effects / git_analysis had to be discovered via rejection errors.
+// Any REGISTERED tool without a hand-written help branch must derive its help
+// (name, description, parameters with types, required markers) from the tool
+// definition the server already holds — the same source tools/list serves.
+TEST(InfoHandler, RegisteredToolDerivesHelpFromDefinition) {
+    mcp::ToolDefinition def;
+    def.name = "side_effects";
+    def.description = "Query function purity and side effects.";
+    def.properties = {
+        {"mode", "string", "Query mode: 'symbol', 'impure', 'summary'", "", {}},
+        {"symbol_name", "string", "Symbol to inspect (mode=symbol)", "", {}},
+        {"max_results", "integer", "Result cap", "", {}},
+    };
+    def.required = {"mode"};
+
+    nlohmann::json params;
+    params["tool"] = "side_effects";
+    auto result = handle_info(
+        params, [&](const std::string& name) -> const mcp::ToolDefinition* {
+            return name == def.name ? &def : nullptr;
+        });
+    EXPECT_FALSE(result.is_error);
+    auto json = nlohmann::json::parse(result.text);
+    EXPECT_EQ(json["name"], "side_effects");
+    EXPECT_EQ(json["description"], def.description);
+    ASSERT_TRUE(json.contains("parameters"));
+    const auto& p = json["parameters"];
+    ASSERT_TRUE(p.contains("mode"));
+    // The derived entry names the type and marks required-ness.
+    EXPECT_NE(p["mode"].get<std::string>().find("string"), std::string::npos);
+    EXPECT_NE(p["mode"].get<std::string>().find("REQUIRED"),
+              std::string::npos);
+    EXPECT_TRUE(p.contains("symbol_name"));
+    EXPECT_TRUE(p.contains("max_results"));
+}
+
+// Hand-written branches stay authoritative even when a lookup is supplied.
+TEST(InfoHandler, HandWrittenBranchWinsOverDerived) {
+    mcp::ToolDefinition def;
+    def.name = "search";
+    def.description = "registry text that must not surface";
+    nlohmann::json params;
+    params["tool"] = "search";
+    auto result = handle_info(
+        params, [&](const std::string& name) -> const mcp::ToolDefinition* {
+            return name == def.name ? &def : nullptr;
+        });
+    auto json = nlohmann::json::parse(result.text);
+    EXPECT_TRUE(json.contains("example"));
+    EXPECT_NE(json["description"], def.description);
+}
+
 TEST(InfoHandler, UnknownToolReturnsOverview) {
     nlohmann::json params;
     params["tool"] = "nonexistent_tool";

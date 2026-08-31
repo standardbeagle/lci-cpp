@@ -52,6 +52,17 @@ void McpServer::add_tool(ToolDefinition def, ToolHandler handler) {
     registered_tools_.push_back({std::move(def), std::move(handler)});
 }
 
+const ToolDefinition* McpServer::find_tool_definition(
+    const std::string& name) const {
+    // Reverse to match dispatch: a later registration shadows an earlier one,
+    // so info must describe the definition whose handler would actually run.
+    for (auto it = registered_tools_.rbegin(); it != registered_tools_.rend();
+         ++it) {
+        if (it->definition.name == name) return &it->definition;
+    }
+    return nullptr;
+}
+
 void McpServer::set_readiness_gate(
     std::function<bool(std::string& error)> gate) {
     readiness_gate_ = std::move(gate);

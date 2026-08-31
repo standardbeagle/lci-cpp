@@ -41,6 +41,16 @@ void register_core_handlers(McpServer& server, MasterIndex* indexer,
 /// a general overview of all available tools.
 ToolResult handle_info(const nlohmann::json& params);
 
+/// As above, but any registered tool without a hand-written help branch
+/// derives its help (description, parameters with types, required markers)
+/// from the ToolDefinition the lookup returns — the same source tools/list
+/// serves, so info can never lag a tool's real surface again (the 2026-08-30
+/// audit found it covering 4 of 14 tools). Hand-written branches win.
+using ToolDefinitionLookup =
+    std::function<const ToolDefinition*(const std::string&)>;
+ToolResult handle_info(const nlohmann::json& params,
+                       const ToolDefinitionLookup& lookup);
+
 /// Handles the "search" tool: queries the index for pattern matches
 /// and returns results with optional context lines.
 ToolResult handle_search(const nlohmann::json& params,
