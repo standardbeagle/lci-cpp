@@ -1237,10 +1237,19 @@ void UnifiedExtractor::process_zig_reference(TSNode node,
             if (ts_node_is_null(mem)) return;
             Reference cref =
                 create_reference(mem, ReferenceType::Call, RefStrength::Tight);
-            std::string_view recv =
-                ts_node_is_null(obj) ? std::string_view() : node_text(obj);
-            qualify_and_push(references_, std::move(cref), local_var_types_, recv,
-                             node_text(mem));
+            if (ts_node_is_null(obj)) {
+                // Decl literal (`try .initCapacity(...)`): the receiver type
+                // is inferred from the annotation, which this extractor does
+                // not track — usually a std container. An empty receiver must
+                // not read as self: that turned these into bare-name calls
+                // the unique-candidate fallback linked to any same-named
+                // project symbol.
+                cref.foreign_receiver = true;
+                references_.push_back(std::move(cref));
+                return;
+            }
+            qualify_and_push(references_, std::move(cref), local_var_types_,
+                             node_text(obj), node_text(mem));
         } else if (std::string_view(ts_node_type(func)) == "identifier") {
             references_.push_back(
                 create_reference(func, ReferenceType::Call, RefStrength::Tight));
