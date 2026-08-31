@@ -915,6 +915,38 @@ pub fn run() void {
         << "alias call must qualify as analysis.resolveType";
 }
 
+// Kotlin class properties (declared in the body or the primary constructor)
+// keep their types across the class's methods: local_var_types_ is cleared on
+// every function_declaration, so property-receiver calls degraded to unknown
+// foreign receivers and dropped — the okhttp audit's "183 single-file
+// communities" under-connection.
+TEST(LanguageExtractionTest, KotlinPropertyReceiverQualifies) {
+    constexpr std::string_view src = R"(class Pump(private val engine: Engine) {
+    val backup: Engine = Engine()
+
+    fun start(): Int {
+        return engine.ignite() + backup.ignite()
+    }
+}
+class Engine {
+    fun ignite(): Int = 1
+}
+)";
+    auto tree = parse(Language::Kotlin, src);
+    if (!tree) {
+        GTEST_SKIP() << "Kotlin parser unavailable";
+    }
+    auto r = extract(Language::Kotlin, ".kt", src, "pump.kt");
+
+    int qualified = 0;
+    for (const auto& ref : r.references) {
+        if (ref.type != ReferenceType::Call) continue;
+        if (ref.referenced_name == "Engine.ignite") ++qualified;
+    }
+    EXPECT_EQ(qualified, 2)
+        << "both ctor-property and body-property receivers must qualify";
+}
+
 // ---------------------------------------------------------------------------
 // Ruby
 // ---------------------------------------------------------------------------
