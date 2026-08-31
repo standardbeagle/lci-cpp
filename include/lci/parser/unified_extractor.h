@@ -372,6 +372,10 @@ class UnifiedExtractor {
     // collides across same-named methods. Cleared on entering a top-level
     // function/method; closures inherit the enclosing map. Write-path only.
     absl::flat_hash_map<std::string, std::string> local_var_types_;
+    // Zig file-level import aliases: `const m = @import("x.zig")` -> m maps
+    // to file stem "x". File-scoped (not cleared per function): a call
+    // m.func() qualifies as "x.func" so resolution has import evidence.
+    absl::flat_hash_map<std::string, std::string> zig_module_aliases_;
     void seed_go_local_types(TSNode fn_node, bool is_method);
     void record_go_local_var(TSNode decl_node);
     // Nearest enclosing class/struct scope name (for self/this typing in

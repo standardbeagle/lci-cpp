@@ -617,6 +617,10 @@ class ReferenceTracker {
         /// Hash of the parent directory — package-proximity tiebreak for
         /// ambiguous bare names (Go package = directory).
         uint64_t dir_hash{0};
+        /// File basename without extension. Zig files ARE namespaces
+        /// (`const m = @import("x.zig"); m.f()`), so a qualified receiver
+        /// may name the defining file — matched against this stem.
+        std::string stem;
     };
     absl::flat_hash_map<FileID, FileResolutionMeta> file_resolution_meta_;
 

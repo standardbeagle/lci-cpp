@@ -16,6 +16,7 @@ ReferenceTracker::LangFamily language_family_for_path(std::string_view path);
 bool is_low_quality_path(const PathAttrRegistry& registry,
                          std::string_view path);
 uint64_t dir_hash_of_path(std::string_view path);
+std::string file_stem_of_path(std::string_view path);
 }  // namespace
 
 // FNV-1a constants for 64-bit hash.
@@ -317,7 +318,7 @@ std::vector<EnhancedSymbol> ReferenceTracker::process_file(
 
     file_resolution_meta_[file_id] = FileResolutionMeta{
         language_family_for_path(path), is_low_quality_path(attr_registry(), path),
-        dir_hash_of_path(path)};
+        dir_hash_of_path(path), file_stem_of_path(path)};
 
     write_snapshot([&](Snapshot& s) {
         s.scopes_by_file[file_id].assign(scopes.begin(), scopes.end());
@@ -974,6 +975,14 @@ uint64_t dir_hash_of_path(std::string_view path) {
     }
     return h;
 }
+
+std::string file_stem_of_path(std::string_view path) {
+    if (auto sl = path.find_last_of("/\\"); sl != std::string_view::npos)
+        path = path.substr(sl + 1);
+    if (auto dot = path.rfind('.'); dot != std::string_view::npos)
+        path = path.substr(0, dot);
+    return std::string(path);
+}
 }  // namespace
 
 namespace {
@@ -1058,10 +1067,27 @@ SymbolID ReferenceTracker::resolve_reference_target(
             // parameters) — the first receiver-type match stands. Arity
             // PREFERS, never drops (okhttp: create(x) inside create(x, y)
             // collapsed into false recursion).
+            // Zig: a qualified receiver may name the defining FILE
+            // (`const m = @import("x.zig"); m.f()` emits "x.f") — the
+            // import IS the evidence, so a stem match counts like a
+            // receiver-type match.
+            bool zig_owner = false;
+            if (auto zit = file_resolution_meta_.find(owner_fid);
+                zit != file_resolution_meta_.end() &&
+                zit->second.language_family == LangFamily::kZig) {
+                zig_owner = true;
+            }
+            auto stem_matches = [&](const EnhancedSymbol& sym) {
+                if (!zig_owner) return false;
+                auto mit = file_resolution_meta_.find(sym.symbol.file_id);
+                return mit != file_resolution_meta_.end() &&
+                       mit->second.stem == recv_type;
+            };
             SymbolID typed_first = 0;
             for (SymbolID id : s.symbols.get_symbols_by_name(name)) {
                 if (const auto* sym = s.symbols.get(id)) {
-                    if (!symbol_matches_receiver_type(*sym, recv_type))
+                    if (!symbol_matches_receiver_type(*sym, recv_type) &&
+                        !stem_matches(*sym))
                         continue;
                     if (call_args != 255 &&
                         sym->parameter_count == call_args) {

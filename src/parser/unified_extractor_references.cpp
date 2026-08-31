@@ -1197,6 +1197,53 @@ void UnifiedExtractor::process_zig_reference(TSNode node,
         return;
     }
     if (node_type == "variable_declaration") {
+        // `const m = @import("x.zig");` — m is an alias of FILE x: record the
+        // stem so m.func() emits qualified "x.func" (import evidence; Zig
+        // files are namespaces). External imports (`std`, package names
+        // without .zig) record too — their stems match no indexed file, so
+        // resolution correctly yields no edge instead of a guess.
+        {
+            std::string_view alias;
+            std::string stem;
+            uint32_t n = ts_node_child_count(node);
+            for (uint32_t i = 0; i < n; ++i) {
+                TSNode c = ts_node_child(node, i);
+                std::string_view ct(ts_node_type(c));
+                if (ct == "identifier" && alias.empty()) {
+                    alias = node_text(c);
+                } else if (ct == "builtin_function") {
+                    TSNode bi{};
+                    TSNode args{};
+                    uint32_t m = ts_node_named_child_count(c);
+                    for (uint32_t j = 0; j < m; ++j) {
+                        TSNode cc = ts_node_named_child(c, j);
+                        std::string_view cct(ts_node_type(cc));
+                        if (cct == "builtin_identifier") bi = cc;
+                        if (cct == "arguments") args = cc;
+                    }
+                    if (!ts_node_is_null(bi) && node_text(bi) == "@import" &&
+                        !ts_node_is_null(args) &&
+                        ts_node_named_child_count(args) > 0) {
+                        std::string_view lit =
+                            node_text(ts_node_named_child(args, 0));
+                        // strip quotes, dirs, .zig
+                        if (lit.size() >= 2 && lit.front() == '"')
+                            lit = lit.substr(1, lit.size() - 2);
+                        if (auto sl = lit.rfind('/');
+                            sl != std::string_view::npos)
+                            lit = lit.substr(sl + 1);
+                        if (lit.size() > 4 &&
+                            lit.substr(lit.size() - 4) == ".zig")
+                            lit = lit.substr(0, lit.size() - 4);
+                        stem = std::string(lit);
+                    }
+                }
+            }
+            if (!alias.empty() && !stem.empty()) {
+                zig_module_aliases_[std::string(alias)] = stem;
+                return;
+            }
+        }
         // `const a = T{};` — identifier name + a struct_initializer / call whose
         // leading identifier is the type.
         std::string_view name;
@@ -1232,6 +1279,16 @@ void UnifiedExtractor::process_zig_reference(TSNode node,
             if (ts_node_is_null(mem)) return;
             Reference cref =
                 create_call_reference(mem, node);
+            if (!ts_node_is_null(obj) &&
+                std::string_view(ts_node_type(obj)) == "identifier") {
+                auto ai = zig_module_aliases_.find(std::string(node_text(obj)));
+                if (ai != zig_module_aliases_.end()) {
+                    cref.referenced_name =
+                        ai->second + "." + std::string(node_text(mem));
+                    references_.push_back(std::move(cref));
+                    return;
+                }
+            }
             if (ts_node_is_null(obj)) {
                 // Decl literal (`try .initCapacity(...)`): the receiver type
                 // is inferred from the annotation, which this extractor does
