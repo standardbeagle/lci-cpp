@@ -1,0 +1,27 @@
+[
+  {
+    "name": "tweak",
+    "description": "Cheap tweak tier for lci-cpp: scope to the edit, then a debug-preset configure+build. Parallelism is bounded by the presets (jobs=4). The compile cache is path-independent (CCACHE_NOHASHDIR/BASEDIR + -ffile-prefix-map, per-file LCI_TESTS_SOURCE_DIR), so a NEWLY CREATED worktree at a never-built path gates in ~45-50s once any prior shipped-mechanism run has warmed the ccache (measured 2026-08-30: 45s and 48s at two randomized mktemp paths, 506/510 hits); truly cold cache is ~20min, so 600s is the backstop for warm runs, not the cold path.",
+    "autoAttachOnTags": [
+      "tweak"
+    ],
+    "steps": [
+      {
+        "kind": "file_scope",
+        "name": "scope-check",
+        "specJson": "{}",
+        "required": true,
+        "allowSkip": false,
+        "maxAttempts": 3
+      },
+      {
+        "kind": "command",
+        "name": "cmake-build",
+        "specJson": "{\"argv\":[\"bash\",\"-c\",\"cmake --preset debug && cmake --build --preset debug\"],\"expect_exit\":0,\"timeout_seconds\":600}",
+        "required": true,
+        "allowSkip": false,
+        "maxAttempts": 3
+      }
+    ]
+  }
+]
