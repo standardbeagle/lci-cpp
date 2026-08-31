@@ -847,6 +847,221 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                 out << "  ... and " << dead.size() - lim
                     << " more (raise max_results)\n";
             }
+
+            // fallow-depth passes over the same snapshot: unused private
+            // callables, unused types, unused files. All CANDIDATES under
+            // the same static-reachability caveat.
+            {
+                auto snap = indexer.load_snapshot();
+                auto rt_snap = indexer.ref_tracker().pin();
+                auto fids = indexer.get_all_file_ids();
+                std::sort(fids.begin(), fids.end());
+
+                // Names declared by any interface method spec are dispatched
+                // dynamically; a private method with such a name may be an
+                // implementation and must not be called dead.
+                absl::flat_hash_set<std::string_view> iface_method_names;
+                for (auto fid : fids) {
+                    for (const auto& sym :
+                         rt_snap->get_file_enhanced_symbols(fid)) {
+                        if (sym != nullptr && sym->symbol.declaration_only)
+                            iface_method_names.insert(sym->symbol.name);
+                    }
+                }
+
+                struct DeadEntry {
+                    std::string name;
+                    std::string path;
+                    int line;
+                    std::string type;
+                };
+                std::vector<DeadEntry> dead_private;
+                std::vector<DeadEntry> dead_types;
+                struct DeadFile {
+                    std::string path;
+                    int symbols;
+                };
+                std::vector<DeadFile> dead_files;
+                struct FileUnit {
+                    std::string path;
+                    int symbols;
+                    bool external_use;
+                    bool entry;
+                };
+                std::vector<FileUnit> file_units;
+
+                for (auto fid : fids) {
+                    auto attr = static_cast<size_t>(snap->attr_of(fid));
+                    if (attr >= scope.allowed.size() || !scope.allowed[attr])
+                        continue;
+                    std::string rel = git::normalize_rel(
+                        indexer.get_file_path(fid), project_root);
+                    auto syms = rt_snap->get_file_enhanced_symbols(fid);
+                    int graph_syms = 0;
+                    bool any_external_use = false;
+                    bool has_entry = false;
+                    for (const auto& sym : syms) {
+                        if (sym == nullptr) continue;
+                        const auto& nm = sym->symbol.name;
+                        auto t = sym->symbol.type;
+                        bool callable = t == SymbolType::Function ||
+                                        t == SymbolType::Method;
+                        bool type_like = t == SymbolType::Class ||
+                                         t == SymbolType::Struct ||
+                                         t == SymbolType::Interface ||
+                                         t == SymbolType::Type ||
+                                         t == SymbolType::Enum;
+                        if (!callable && !type_like) continue;
+                        if (sym->symbol.declaration_only) continue;
+                        if (sym->symbol.test_scaffold) continue;
+                        ++graph_syms;
+                        if (entry_names.contains(nm) || nm == "init")
+                            has_entry = true;
+                        // Cross-file incoming use for the file-level pass.
+                        if (!any_external_use &&
+                            sym->incoming_ref_count > 0) {
+                            for (const auto& r : rt_snap->get_symbol_references(
+                                     sym->id, "incoming")) {
+                                if (r.file_id != fid) {
+                                    any_external_use = true;
+                                    break;
+                                }
+                            }
+                        }
+                        // A type's declaration line references its own name
+                        // (type-position ref) — discount self-references
+                        // before judging it unused.
+                        int real_incoming = 0;
+                        if (sym->incoming_ref_count > 0) {
+                            if (callable) {
+                                real_incoming = sym->incoming_ref_count;
+                            } else {
+                                for (const auto& r :
+                                     rt_snap->get_symbol_references(
+                                         sym->id, "incoming")) {
+                                    if (r.source_symbol == sym->id) continue;
+                                    if (r.file_id == fid &&
+                                        r.line >= sym->symbol.line &&
+                                        r.line <= sym->symbol.end_line &&
+                                        r.line == sym->symbol.line)
+                                        continue;
+                                    ++real_incoming;
+                                }
+                            }
+                        }
+                        if (real_incoming > 0) continue;
+                        if (entry_names.contains(nm) || nm == "init")
+                            continue;
+                        if (nm.starts_with("~") || nm.starts_with("__") ||
+                            nm.starts_with("operator"))
+                            continue;
+                        if (callable && !sym->is_exported) {
+                            if (iface_method_names.contains(nm)) continue;
+                            dead_private.push_back(
+                                {nm, rel, static_cast<int>(sym->symbol.line),
+                                 std::string(to_string(t))});
+                        } else if (type_like) {
+                            dead_types.push_back(
+                                {nm, rel, static_cast<int>(sym->symbol.line),
+                                 std::string(to_string(t))});
+                        }
+                    }
+                    // C-family files are excluded from the FILE-level pass:
+                    // the declaration/implementation split (often several
+                    // impl files and multi-class headers per unit) divides
+                    // the use evidence, and stem pairing cannot reassemble
+                    // it reliably — reference_tracker.cpp read as unused
+                    // while its header is used everywhere. Symbol-level
+                    // passes above still cover C++.
+                    auto fam = language_info_for_path(rel).family;
+                    if (graph_syms > 0 && fam != LangFamily::kCFamily) {
+                        file_units.push_back(
+                            {rel, graph_syms, any_external_use, has_entry});
+                    }
+                }
+                // Header/impl pairing: a C++ impl file's use evidence lives
+                // on its header's declarations (reference_tracker.cpp reads
+                // as unused while reference_tracker.h is used everywhere).
+                // Group by parent-dir-basename + stem and judge the UNIT.
+                {
+                    auto unit_key = [](const std::string& rel) {
+                        std::string_view v = rel;
+                        auto dot = v.rfind('.');
+                        if (dot != std::string_view::npos) v = v.substr(0, dot);
+                        auto s1 = v.rfind('/');
+                        if (s1 == std::string_view::npos)
+                            return std::string(v);
+                        auto s2 = v.rfind('/', s1 - 1);
+                        return std::string(
+                            s2 == std::string_view::npos ? v
+                                                         : v.substr(s2 + 1));
+                    };
+                    absl::flat_hash_map<std::string, std::pair<bool, bool>>
+                        unit_state;  // key -> (any_use, any_entry)
+                    for (const auto& fu : file_units) {
+                        auto& st = unit_state[unit_key(fu.path)];
+                        st.first |= fu.external_use;
+                        st.second |= fu.entry;
+                    }
+                    for (const auto& fu : file_units) {
+                        const auto& st = unit_state[unit_key(fu.path)];
+                        if (!st.first && !st.second)
+                            dead_files.push_back({fu.path, fu.symbols});
+                    }
+                }
+                auto sort_entries = [](std::vector<DeadEntry>& v) {
+                    std::sort(v.begin(), v.end(),
+                              [](const DeadEntry& a, const DeadEntry& b) {
+                                  if (a.path != b.path) return a.path < b.path;
+                                  return a.line < b.line;
+                              });
+                };
+                sort_entries(dead_private);
+                sort_entries(dead_types);
+                std::sort(dead_files.begin(), dead_files.end(),
+                          [](const DeadFile& a, const DeadFile& b) {
+                              if (a.symbols != b.symbols)
+                                  return a.symbols > b.symbols;
+                              return a.path < b.path;
+                          });
+
+                auto emit_list = [&](const char* header,
+                                     const std::vector<DeadEntry>& v,
+                                     const char* caveat) {
+                    if (v.empty()) return;
+                    out << header << "\n" << "count=" << v.size();
+                    if (caveat[0] != '\0') out << " (" << caveat << ")";
+                    out << "\n";
+                    size_t l =
+                        std::min(v.size(), static_cast<size_t>(max_results));
+                    for (size_t i = 0; i < l; ++i) {
+                        out << "  " << v[i].type << " " << v[i].name << " ("
+                            << v[i].path << ":" << v[i].line << ")\n";
+                    }
+                    if (v.size() > l)
+                        out << "  ... and " << v.size() - l << " more\n";
+                };
+                emit_list("== UNUSED PRIVATE ==", dead_private,
+                          "unexported callables with zero references; "
+                          "interface-implementing names excluded");
+                emit_list("== UNUSED TYPES ==", dead_types,
+                          "types nothing references, any visibility");
+                if (!dead_files.empty()) {
+                    out << "== UNUSED FILES ==\n"
+                        << "count=" << dead_files.size()
+                        << " (no symbol referenced from any other file and "
+                           "no entry point; deletion candidates)\n";
+                    size_t l = std::min(dead_files.size(),
+                                        static_cast<size_t>(max_results));
+                    for (size_t i = 0; i < l; ++i) {
+                        out << "  " << dead_files[i].path << " ("
+                            << dead_files[i].symbols << " syms)\n";
+                    }
+                    if (dead_files.size() > l)
+                        out << "  ... and " << dead_files.size() - l
+                            << " more\n";
+                }
+            }
             std::string body = out.str();
             if (!body.empty() && body.back() == '\n') body.pop_back();
             return ToolResult{std::move(body), false};
