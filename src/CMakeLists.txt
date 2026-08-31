@@ -3,7 +3,6 @@ add_library(lci_lib STATIC
     error.cpp
     string_pool.cpp
     core/file_content_store.cpp
-    core/file_loader.cpp
     core/file_service.cpp
     core/line_scanner.cpp
     core/trigram.cpp
