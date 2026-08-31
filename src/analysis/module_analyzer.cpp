@@ -244,9 +244,22 @@ ModuleAnalysis ModuleAnalyzer::analyze_graph(
     if (result.modules.empty()) return analyze(files, project_root);
 
     // Misplaced files: a file whose graph members predominantly join a
-    // community OWNED by a different directory. Shared/utility communities
-    // (no owner) are exempt. Evidence bar: majority of the file's members
-    // and at least 2 symbols, or a single-symbol file entirely elsewhere.
+    // community OWNED by a different directory. Gates (each kills a verified
+    // false-positive class from the 2026-08-31 four-repo audit):
+    //  - direct-edge dominance: the file must have MORE resolved call edges
+    //    with the destination dir than with its home dir (community labels
+    //    alone flagged picker -> migratecmd with zero connecting edges);
+    //  - shared-utility exemption: a file consumed from 3+ dirs with no
+    //    majority consumer is a utility, not misplaced (HttpHeaders.kt);
+    //  - headers are convention, not drift: header/impl separation must not
+    //    read as relocation advice (3 of 7 self-repo rows were .h files);
+    //  - evidence floor: single-symbol files are too little signal.
+    auto is_header_file = [](std::string_view f) {
+        auto dot = f.rfind('.');
+        if (dot == std::string_view::npos) return false;
+        auto ext = f.substr(dot);
+        return ext == ".h" || ext == ".hpp" || ext == ".hh" || ext == ".hxx";
+    };
     absl::flat_hash_map<std::string,
                         std::pair<std::string, absl::flat_hash_map<int, int>>>
         file_comms;  // file -> (home dir, community histogram)
@@ -256,8 +269,22 @@ ModuleAnalysis ModuleAnalyzer::analyze_graph(
         fc.first = m.dir;
         ++fc.second[comm[i]];
     }
+    // Per-file directed-edge partners (both directions), by dir.
+    absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, int>>
+        file_dir_edges;
+    for (int u = 0; u < n_nodes; ++u) {
+        const NodeMeta& mu = meta[graph.id_at(u)];
+        for (int v : adj[u]) {
+            const NodeMeta& mv = meta[graph.id_at(v)];
+            if (mu.file != mv.file) {
+                ++file_dir_edges[mu.file][mv.dir];
+                ++file_dir_edges[mv.file][mu.dir];
+            }
+        }
+    }
     for (const auto& [file, fc] : file_comms) {
         const std::string& home = fc.first;
+        if (is_header_file(file)) continue;
         int total = 0, dom_comm = -1, dom_n = 0;
         for (const auto& [c, n] : fc.second) {
             total += n;
@@ -266,11 +293,30 @@ ModuleAnalysis ModuleAnalyzer::analyze_graph(
                 dom_n = n;
             }
         }
+        if (total < 2) continue;                       // evidence floor
         if (dom_comm < 0 || 2 * dom_n <= total) continue;  // no majority
         const std::string& owner = comm_owner[dom_comm];
         if (owner.empty() || owner == home) continue;  // shared, or in place
-        result.misplaced_files.push_back(
-            {file, home, owner, dom_n, total});
+        auto fe = file_dir_edges.find(file);
+        if (fe == file_dir_edges.end()) continue;
+        int dest_edges = 0, home_edges = 0, partner_dirs = 0, max_dir = 0;
+        for (const auto& [d, n] : fe->second) {
+            if (d == owner) dest_edges = n;
+            if (d == home) home_edges = n;
+            ++partner_dirs;
+            max_dir = std::max(max_dir, n);
+        }
+        // Direct-edge dominance over the home dir.
+        if (dest_edges == 0 || dest_edges <= home_edges) continue;
+        // Shared utility: consumed from 3+ dirs and the proposed
+        // destination is not clearly the dominant partner (>= 1.5x the
+        // largest other) — moving a utility to its heaviest consumer is
+        // wrong by construction.
+        if (partner_dirs >= 3 && 2 * dest_edges < 3 * max_dir &&
+            dest_edges != max_dir) {
+            continue;
+        }
+        result.misplaced_files.push_back({file, home, owner, dom_n, total});
     }
     std::sort(result.misplaced_files.begin(), result.misplaced_files.end(),
               [](const MisplacedFile& a, const MisplacedFile& b) {
@@ -281,10 +327,27 @@ ModuleAnalysis ModuleAnalyzer::analyze_graph(
     // Tight coupling: a directory pair where the caller reaches MANY distinct
     // symbols of the callee. Few targets = interface-like, never listed.
     constexpr int kWideInterface = 5;
+    // A directory whose files are (almost) all headers is a declaration
+    // surface — the interface itself. Calling many of its symbols is USING
+    // the interface, not bypassing one (self-repo audit: all three flagged
+    // pairs targeted include/lci).
+    absl::flat_hash_map<std::string, std::pair<int, int>> dir_header_files;
+    for (const auto& [file, fc] : file_comms) {
+        auto& hf = dir_header_files[fc.first];
+        ++hf.first;
+        if (is_header_file(file)) ++hf.second;
+    }
+    auto is_header_surface = [&](const std::string& d) {
+        auto it = dir_header_files.find(d);
+        if (it == dir_header_files.end()) return false;
+        return it->second.first > 0 &&
+               5 * it->second.second >= 4 * it->second.first;  // >=80% headers
+    };
     for (const auto& [dir, ds] : dirs) {
         for (const auto& [callee, targets] : ds.out_targets) {
             int width = static_cast<int>(targets.size());
             if (width < kWideInterface) continue;
+            if (is_header_surface(callee)) continue;
             result.tight_couplings.push_back(
                 {dir, callee, ds.out_dirs.at(callee), width});
         }
@@ -301,7 +364,11 @@ ModuleAnalysis ModuleAnalyzer::analyze_graph(
     // WOULD look like if the layout followed the call structure. Sorted by
     // size desc, label asc; singletons omitted.
     for (int c = 0; c < k; ++c) {
-        if (comm_size[c] < 2) continue;
+        // Dust floor: single-file or tiny communities are resolution
+        // artifacts more often than architecture (183 mostly-single-file
+        // communities made the okhttp guide unreadable). They still count
+        // toward modularity; they just do not print.
+        if (comm_size[c] < 4) continue;
         CommunitySummary cs;
         cs.label = comm_owner[c].empty() ? "(shared)" : comm_owner[c];
         cs.size = comm_size[c];

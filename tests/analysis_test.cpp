@@ -562,24 +562,29 @@ TEST(ModuleAnalyzer, NoFabricatedCouplingOrArchScore) {
 // them is the finding). Two call-graph triangles joined by one bridge edge:
 // community A = {a1, a2 in x/, a3 in y/}, community B = {b1, b2, b3 in y/}.
 TEST(ModuleAnalyzer, GraphModulesScoreCurrentOrganization) {
-    // Two call-graph triangles joined by one bridge. Folder x holds a1,a2;
-    // folder y holds a3 (alone in y/three.go, community A) plus b1,b2,b3
-    // (community B). Rows are the DECLARED modules (folders), scored against
-    // the communities; a3's file is the misplacement finding.
+    // Two 4-cliques joined by one bridge. Folder x holds a1,a2; folder y
+    // holds a3,a4 (together in y/three.go, community A, with direct edges to
+    // x — the misplacement evidence) plus b1..b4 (community B). Rows are the
+    // DECLARED modules (folders) scored against communities; y/three.go is
+    // the misplaced-file finding.
+    auto a0 = make_sym("a0", SymbolType::Function, 9, 1);
     auto a1 = make_sym("a1", SymbolType::Function, 1, 1);
     auto a2 = make_sym("a2", SymbolType::Function, 2, 1);
     auto a3 = make_sym("a3", SymbolType::Function, 3, 2);
-    auto b1 = make_sym("b1", SymbolType::Function, 4, 3);
-    auto b2 = make_sym("b2", SymbolType::Function, 5, 3);
-    auto b3 = make_sym("b3", SymbolType::Function, 6, 3);
+    auto a4 = make_sym("a4", SymbolType::Function, 4, 2);
+    auto b1 = make_sym("b1", SymbolType::Function, 5, 3);
+    auto b2 = make_sym("b2", SymbolType::Function, 6, 3);
+    auto b3 = make_sym("b3", SymbolType::Function, 7, 3);
+    auto b4 = make_sym("b4", SymbolType::Function, 8, 3);
     std::vector<FileSymbolData> files = {
-        make_file("x/one.go", {&a1, &a2}),
-        make_file("y/three.go", {&a3}),
-        make_file("y/two.go", {&b1, &b2, &b3}),
+        make_file("x/one.go", {&a0, &a1, &a2}),
+        make_file("y/three.go", {&a3, &a4}),
+        make_file("y/two.go", {&b1, &b2, &b3, &b4}),
     };
     absl::flat_hash_map<SymbolID, std::vector<SymbolID>> edges = {
-        {1, {2, 3}}, {2, {3}}, {3, {1, 4}},  // triangle A + bridge to B
-        {4, {5, 6}}, {5, {6}}, {6, {4}},     // triangle B
+        {9, {1, 2, 3, 4}},                                   // A (x majority)
+        {1, {2, 3}}, {2, {3, 4}}, {3, {1, 4}}, {4, {1, 5}},  // A + bridge
+        {5, {6, 7}}, {6, {7, 8}}, {7, {8}},    {8, {5}},     // B
     };
     auto callees = [&](SymbolID id) -> std::vector<SymbolID> {
         auto it = edges.find(id);
@@ -600,25 +605,80 @@ TEST(ModuleAnalyzer, GraphModulesScoreCurrentOrganization) {
     ASSERT_NE(mx, nullptr);
     ASSERT_NE(my, nullptr);
     // Label cohesion = share of the folder's members in its dominant
-    // community: x is pure (both in A); y is 3/4 B.
+    // community: x is pure (all in A); y is 4/6 B.
     EXPECT_DOUBLE_EQ(mx->cohesion_score, 1.0);
-    EXPECT_DOUBLE_EQ(my->cohesion_score, 0.75);
-    EXPECT_EQ(my->function_count, 4);
+    EXPECT_NEAR(my->cohesion_score, 4.0 / 6.0, 1e-9);
 
-    // Misplacement: y/three.go's only member joins community A, which folder
-    // x owns -> the file belongs with x. y/two.go and x/one.go stay put.
+    // Misplacement: y/three.go's members join community A (owned by x) and
+    // the file's direct edges with x (4) dominate its home-dir edges (1
+    // bridge to b1... which is y) — flagged, belongs with x.
     ASSERT_EQ(r.misplaced_files.size(), 1u);
     EXPECT_EQ(r.misplaced_files[0].file, "y/three.go");
     EXPECT_EQ(r.misplaced_files[0].home, "y");
     EXPECT_EQ(r.misplaced_files[0].belongs_with, "x");
+    EXPECT_EQ(r.misplaced_files[0].symbols, 2);
 
-    // Refactoring guide: the two communities, labeled by owner.
+    // Refactoring guide: both communities pass the dust floor (size 4).
     ASSERT_EQ(r.communities.size(), 2u);
-    EXPECT_EQ(r.communities[0].size, 3);
-    EXPECT_EQ(r.communities[1].size, 3);
+    EXPECT_EQ(r.communities[0].size, 5);
 
-    // Interface width x->y is 1 distinct target (narrow): no tight coupling.
     EXPECT_TRUE(r.tight_couplings.empty());
+}
+
+// A single-symbol file or one with no direct edges to the proposed
+// destination must not be flagged (verified FP classes: picker ->
+// migratecmd had ZERO connecting edges; 1/1-symbol rows were noise).
+TEST(ModuleAnalyzer, MisplacedRequiresDirectEdgeEvidence) {
+    auto a1 = make_sym("a1", SymbolType::Function, 1, 1);
+    auto a2 = make_sym("a2", SymbolType::Function, 2, 1);
+    auto a3 = make_sym("a3", SymbolType::Function, 3, 1);
+    auto u1 = make_sym("u1", SymbolType::Function, 4, 2);
+    std::vector<FileSymbolData> files = {
+        make_file("x/one.go", {&a1, &a2, &a3}),
+        make_file("y/util.go", {&u1}),
+    };
+    // u1 is called by the x clique (joins community A) but is a single
+    // symbol: evidence floor suppresses.
+    absl::flat_hash_map<SymbolID, std::vector<SymbolID>> edges = {
+        {1, {2, 4}}, {2, {3, 4}}, {3, {1, 4}},
+    };
+    auto callees = [&](SymbolID id) -> std::vector<SymbolID> {
+        auto it = edges.find(id);
+        return it == edges.end() ? std::vector<SymbolID>{} : it->second;
+    };
+    auto r = ModuleAnalyzer().analyze_graph(files, "", callees);
+    EXPECT_TRUE(r.misplaced_files.empty());
+}
+
+// Header files are convention (declaration/implementation separation), not
+// relocation candidates; and a >=80%-header directory is a declaration
+// surface whose wide use is interface USE, not tight coupling.
+TEST(ModuleAnalyzer, HeadersExemptFromMisplacedAndCoupling) {
+    auto h1 = make_sym("h1", SymbolType::Function, 1, 1);
+    auto h2 = make_sym("h2", SymbolType::Function, 2, 1);
+    auto h3 = make_sym("h3", SymbolType::Function, 3, 1);
+    auto h4 = make_sym("h4", SymbolType::Function, 4, 1);
+    auto h5 = make_sym("h5", SymbolType::Function, 5, 1);
+    auto c1 = make_sym("c1", SymbolType::Function, 6, 2);
+    auto c2 = make_sym("c2", SymbolType::Function, 7, 2);
+    std::vector<FileSymbolData> files = {
+        make_file("include/lib/api.h", {&h1, &h2, &h3, &h4, &h5}),
+        make_file("src/impl.cpp", {&c1, &c2}),
+    };
+    // src calls 5 distinct header symbols: would be tight coupling but the
+    // callee dir is a pure header surface. The header file itself joins the
+    // src community but must not be a relocation candidate.
+    absl::flat_hash_map<SymbolID, std::vector<SymbolID>> edges = {
+        {6, {1, 2, 3, 7}}, {7, {4, 5, 6}},
+    };
+    auto callees = [&](SymbolID id) -> std::vector<SymbolID> {
+        auto it = edges.find(id);
+        return it == edges.end() ? std::vector<SymbolID>{} : it->second;
+    };
+    auto r = ModuleAnalyzer().analyze_graph(files, "", callees);
+    EXPECT_TRUE(r.tight_couplings.empty())
+        << "header surface flagged as tight coupling";
+    EXPECT_TRUE(r.misplaced_files.empty()) << "header flagged as misplaced";
 }
 
 // A caller reaching many DISTINCT symbols inside another folder is tight
