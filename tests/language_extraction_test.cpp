@@ -882,6 +882,87 @@ TEST(LanguageExtractionTest, Ruby) {
     EXPECT_GE(count_symbols(r, SymbolType::Method), 2);
 }
 
+// Ruby cyclomatic complexity. The 2026-08-30 multi-repo validation sweep found
+// every Ruby function reporting cc=1: the counter only knew C-family/Go/JS
+// node types (if_statement, binary_expression) while tree-sitter-ruby emits
+// bare `if`, `elsif`, `when`, `binary`, modifier forms, etc. These snippets pin
+// each Ruby branch-point class the counter must price.
+TEST(LanguageExtractionTest, RubyComplexity) {
+    constexpr std::string_view src = R"(def classify(x)
+  if x > 10
+    "big"
+  elsif x > 5
+    "medium"
+  else
+    "small"
+  end
+end
+
+def scan(items)
+  count = 0
+  items.each do |i|
+    count += 1 if i.odd?
+  end
+  while count > 0
+    count -= 1
+  end
+  until count > 3
+    count += 1
+  end
+  count
+end
+
+def dispatch(kind)
+  case kind
+  when :a
+    1
+  when :b
+    2
+  else
+    3
+  end
+rescue StandardError
+  0
+end
+
+def gates(a, b)
+  return 1 if a && b
+  return 2 if a || b
+  a ? 3 : 4
+end
+
+def plain
+  42
+end
+)";
+    auto tree = parse(Language::Ruby, src);
+    if (!tree) {
+        GTEST_SKIP() << "Ruby parser unavailable";
+    }
+    auto r = extract(Language::Ruby, ".rb", src, "cc.rb");
+
+    auto cc_of = [&](std::string_view name) {
+        const Symbol* s = find_symbol(r, name);
+        EXPECT_NE(s, nullptr) << name;
+        if (s == nullptr) return -1;
+        for (const auto& [key, cx] : r.complexity) {
+            if (key.line == s->line && key.column == s->column) return cx;
+        }
+        return -1;
+    };
+
+    // base 1 + if + elsif
+    EXPECT_GE(cc_of("classify"), 3);
+    // base 1 + modifier-if + while + until
+    EXPECT_GE(cc_of("scan"), 4);
+    // base 1 + 2x when + rescue
+    EXPECT_GE(cc_of("dispatch"), 4);
+    // base 1 + 2x modifier-if + && + || + ternary
+    EXPECT_GE(cc_of("gates"), 6);
+    // no branch points at all
+    EXPECT_EQ(cc_of("plain"), 1);
+}
+
 // Pins Ruby `module` extraction, which is served by the shared "module" /
 // "mod_item" branch. A second, later `.rb`-gated branch used to sit behind it
 // calling a byte-identical extract_ruby_module; this test is the guard that the
