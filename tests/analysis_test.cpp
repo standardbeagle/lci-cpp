@@ -701,6 +701,46 @@ TEST(NamingAnalyzer, DoesNotFlagStandardVerb) {
     EXPECT_TRUE(rep.outliers.empty());
 }
 
+// 2026-08-30 sweep vocabulary FP classes. Established technical terms must
+// not flag as obscure/misspelling (okhttp: jvm/bom/idn/localhost; zls:
+// comptime, a Zig keyword; sinatra: etag/scss/csp, haml->html, yajl->yaml,
+// uname->name).
+TEST(NamingAnalyzer, TechTermsAreNotOutliers) {
+    auto table = SynonymTable::build_default();
+    auto a = make_ref_sym("jvmCheck", 5, 1);
+    auto b = make_ref_sym("comptimeEval", 5, 2);
+    auto c = make_ref_sym("etagHeader", 5, 3);
+    auto d = make_ref_sym("hamlRender", 5, 4);
+    auto e = make_ref_sym("unameProbe", 5, 5);
+    auto f = make_file("core/terms.go", {&a, &b, &c, &d, &e});
+
+    NamingAnalyzer na;
+    auto rep = na.analyze({f}, table, "");
+    for (const auto& o : rep.outliers) {
+        EXPECT_TRUE(false) << "false positive: " << o.name << " (" << o.reason
+                           << ")";
+    }
+}
+
+// A plural of known vocabulary is not a typo of its singular (sinatra:
+// decls -> decl, awaitNanos -> nanos "misspelling" of nano).
+TEST(NamingAnalyzer, PluralOfKnownWordIsNotMisspelling) {
+    auto table = SynonymTable::build_default();
+    // "decl" becomes corpus vocabulary via frequency (>2 distinct symbols).
+    auto d1 = make_ref_sym("declParse", 3, 1);
+    auto d2 = make_ref_sym("declPrint", 3, 2);
+    auto d3 = make_ref_sym("declWalk", 3, 3);
+    auto ds = make_ref_sym("declsCollect", 5, 4);
+    auto f = make_file("core/decl.go", {&d1, &d2, &d3, &ds});
+
+    NamingAnalyzer na;
+    auto rep = na.analyze({f}, table, "");
+    for (const auto& o : rep.outliers) {
+        EXPECT_NE(o.reason, "misspelling")
+            << o.name << ": plural of corpus vocabulary flagged as typo";
+    }
+}
+
 TEST(NamingAnalyzer, IgnoresLowFanInOutliers) {
     auto table = SynonymTable::build_default();
     auto frob = make_ref_sym("frobnicate", 1, 1);  // fan-in < 2
