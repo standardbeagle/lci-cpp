@@ -35,6 +35,10 @@ bool CouplingAnalyzer::is_code_file(std::string_view path) {
         ".java", ".rs",   ".c",   ".cpp",   ".h",    ".hpp",
         ".cs",  ".rb",    ".php", ".swift", ".kt",   ".scala",
         ".ex",  ".exs",
+        // zls audit: .zig missing here zeroed MODULES and coupling for the
+        // whole language; .kts/.cc/.cxx/.hh/.hxx close the same gap for
+        // Kotlin scripts and alternate C++ spellings the indexer accepts.
+        ".zig", ".kts",   ".cc",  ".cxx",   ".hh",   ".hxx",
     };
     for (auto e : code_exts) {
         if (ext == e) return true;
@@ -205,7 +209,9 @@ CouplingAnalyzer::CouplingResult CouplingAnalyzer::analyze(
         cohesion.average_cohesion = total_cohesion_val / static_cast<double>(pkg_count);
     }
     coupling.max_coupling = max_coupling;
-    cohesion.min_cohesion = min_cohesion;
+    // No measured package leaves the 1.0 initializer: an empty population
+    // has no minimum, and "min=1.00 avg=0.00" read as a broken instrument.
+    cohesion.min_cohesion = pkg_symbol_count.empty() ? 0.0 : min_cohesion;
 
     // Sort low cohesion by value and limit to 5
     // Package name breaks cohesion ties: low_cohesion_pkgs was collected by
