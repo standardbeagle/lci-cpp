@@ -22,6 +22,7 @@
 
 #include <absl/container/flat_hash_set.h>
 
+#include <nlohmann/json.hpp>
 #include <lci/analysis/call_graph.h>
 #include <lci/analysis/layer_analyzer.h>
 
@@ -486,6 +487,52 @@ ImportDeps compute_import_dependencies(
         }
         return {};
     };
+    // PHP PSR-4 autoload map (composer.json): namespace prefix -> directory.
+    // Guzzle's `GuzzleHttp\\` -> `src/` means GuzzleHttp\Utils names src/Utils
+    // and the ROOT namespace classes map to package `src` — without this the
+    // cross-package edges into the root package are dropped and real import
+    // cycles (src <-> src/Cookie) go unreported.
+    std::vector<std::pair<std::string, std::string>> psr4;  // prefix -> dir
+    {
+        std::ifstream cj(std::filesystem::path(project_root) / "composer.json");
+        if (cj) {
+            std::string body((std::istreambuf_iterator<char>(cj)),
+                             std::istreambuf_iterator<char>());
+            try {
+                auto j = nlohmann::json::parse(body, nullptr, false);
+                for (const char* key : {"autoload", "autoload-dev"}) {
+                    if (!j.contains(key) || !j[key].is_object()) continue;
+                    const auto& al = j[key];
+                    if (!al.contains("psr-4") || !al["psr-4"].is_object())
+                        continue;
+                    for (auto it = al["psr-4"].begin(); it != al["psr-4"].end();
+                         ++it) {
+                        std::string prefix = it.key();
+                        for (auto& c : prefix)
+                            if (c == '\\') c = '/';
+                        while (!prefix.empty() && prefix.back() == '/')
+                            prefix.pop_back();
+                        std::string dir;
+                        if (it.value().is_string())
+                            dir = it.value().get<std::string>();
+                        else if (it.value().is_array() &&
+                                 !it.value().empty() &&
+                                 it.value()[0].is_string())
+                            dir = it.value()[0].get<std::string>();
+                        while (!dir.empty() &&
+                               (dir.back() == '/' || dir.back() == '\\'))
+                            dir.pop_back();
+                        if (!prefix.empty()) psr4.emplace_back(prefix, dir);
+                    }
+                }
+            } catch (...) {
+            }
+        }
+        // Longest prefix first for greedy matching.
+        std::sort(psr4.begin(), psr4.end(), [](const auto& a, const auto& b) {
+            return a.first.size() > b.first.size();
+        });
+    }
     // The repo's own Go module identity maps to "(root)" (chi's middleware
     // imports github.com/go-chi/chi/v5 — textually unmatchable otherwise).
     std::string go_module;
@@ -504,6 +551,27 @@ ImportDeps compute_import_dependencies(
     }
     auto resolve_with_root = [&](const std::string& imp_raw,
                                  bool seg_fallback) -> std::string {
+        // PSR-4: rewrite a namespaced class to its file path before matching.
+        if (!psr4.empty()) {
+            std::string norm = imp_raw;
+            for (auto& c : norm)
+                if (c == '\\') c = '/';
+            for (const auto& [prefix, dir] : psr4) {
+                if (norm.size() < prefix.size()) continue;
+                if (norm.compare(0, prefix.size(), prefix) != 0) continue;
+                if (norm.size() > prefix.size() && norm[prefix.size()] != '/')
+                    continue;
+                std::string rest = norm.substr(prefix.size());
+                while (!rest.empty() && rest.front() == '/')
+                    rest = rest.substr(1);
+                std::string mapped = dir.empty() ? rest
+                                     : rest.empty() ? dir
+                                                    : dir + "/" + rest;
+                auto r = resolve_import(mapped, true);
+                if (!r.empty()) return r;
+                break;  // matched the prefix; no other prefix applies
+            }
+        }
         if (!go_module.empty()) {
             if (imp_raw == go_module) return "(root)";
             if (imp_raw.size() > go_module.size() + 1 &&
