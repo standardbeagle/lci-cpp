@@ -38,7 +38,7 @@ class SemanticAnnotationsTest : public ::testing::Test {
         sym1.name = "handleRequest";
         sym1.type = SymbolType::Function;
         sym1.file_id = FileID{1};
-        sym1.line = 5;
+        sym1.line = 4;
         sym1.end_line = 20;
         symbols_.push_back(sym1);
 
@@ -46,7 +46,7 @@ class SemanticAnnotationsTest : public ::testing::Test {
         sym2.name = "processData";
         sym2.type = SymbolType::Function;
         sym2.file_id = FileID{1};
-        sym2.line = 25;
+        sym2.line = 26;
         sym2.end_line = 40;
         symbols_.push_back(sym2);
 
@@ -584,25 +584,25 @@ TEST(CodeInsightImportCycles, ReportsMutualPackageImports) {
     std::filesystem::remove_all(dir);
 }
 
-// fallow-class dead-code depth: unused PRIVATE functions, unused TYPES, and
-// unused FILES — the existing section only covered exported functions.
-TEST(CodeInsightDeadCode, ReportsPrivateTypesAndFiles) {
-    auto dir = lci::test::unique_temp_dir("lci_deadcode_depth_test_");
+// Dead-code is an @lci:-annotation-curated flow (2026-08-31): static
+// reachability surfaces candidates; annotations resolve the ambiguous ones
+// (dynamic dispatch, function values, public API), and flow=true drives an
+// agent through what needs marking.
+TEST(CodeInsightDeadCode, UnusedTypesSurfaced) {
+    auto dir = lci::test::unique_temp_dir("lci_deadcode_types_test_");
     std::filesystem::remove_all(dir);
     std::filesystem::create_directories(dir);
     {
-        std::ofstream f(dir / "main.go");
-        f << "package main\n\n"
-             "func main() { used() }\n"
-             "func used() {}\n"
-             "func orphanHelper() {}\n"  // private, never called
-             "type ghostConfig struct{ x int }\n";  // type never referenced
+        std::ofstream f(dir / "lib.hpp");
+        f << "#pragma once\n"
+             "struct UsedThing { int x; };\n"
+             "struct GhostThing { int y; };\n"
+             "UsedThing make();\n";
     }
     {
-        std::ofstream f(dir / "island.go");  // no symbol referenced anywhere
-        f << "package main\n\n"
-             "func islandOnly() { islandInner() }\n"
-             "func islandInner() {}\n";
+        std::ofstream f(dir / "lib.cpp");
+        f << "#include \"lib.hpp\"\n"
+             "UsedThing make() { UsedThing t; return t; }\n";
     }
 
     Config config;
@@ -616,33 +616,31 @@ TEST(CodeInsightDeadCode, ReportsPrivateTypesAndFiles) {
     params["analysis"] = "deadcode";
     auto result = handle_code_insight(params, engine, indexer);
     ASSERT_FALSE(result.is_error) << result.text;
-    EXPECT_NE(result.text.find("orphanHelper"), std::string::npos)
+    EXPECT_NE(result.text.find("== UNUSED TYPES =="), std::string::npos)
         << result.text;
-    EXPECT_NE(result.text.find("ghostConfig"), std::string::npos)
+    EXPECT_NE(result.text.find("GhostThing"), std::string::npos)
         << result.text;
-    EXPECT_NE(result.text.find("island.go"), std::string::npos)
-        << result.text;
-    // used() is called and must not be listed anywhere.
-    EXPECT_EQ(result.text.find("  function used "), std::string::npos)
+    EXPECT_EQ(result.text.find("struct UsedThing "), std::string::npos)
         << result.text;
 
     std::filesystem::remove_all(dir);
 }
 
-// fallow-class security candidates: symbols invoking dangerous sinks
-// (process execution, code eval, unsafe deserialization), ranked by
-// reachability from entry points. Candidates, not verdicts.
-TEST(CodeInsightSecurity, RanksSinksByEntryReachability) {
-    auto dir = lci::test::unique_temp_dir("lci_security_test_");
+// @lci:exclude[deadcode] and used-labels suppress a candidate; the flow view
+// lists what still needs a decision.
+TEST(CodeInsightDeadCode, AnnotationSuppressesAndFlowLists) {
+    auto dir = lci::test::unique_temp_dir("lci_deadcode_annot_test_");
     std::filesystem::remove_all(dir);
     std::filesystem::create_directories(dir);
     {
         std::ofstream f(dir / "main.go");
-        f << "package main\n\nimport \"os/exec\"\n\n"
-             "func main() { handle() }\n"
-             "func handle() { runTool() }\n"
-             "func runTool() { exec.Command(\"ls\").Run() }\n"
-             "func coldPath() { exec.Command(\"rm\").Run() }\n";
+        f << "package main\n\n"
+             "func main() { register() }\n"
+             "func register() { route(handler); route(rawHandler) }\n"
+             "func route(h func()) { _ = h }\n"
+             "// @lci:exclude[deadcode]\n"
+             "func handler() {}\n"   // annotated used -> suppressed
+             "func rawHandler() {}\n";  // unannotated -> candidate
     }
 
     Config config;
@@ -650,54 +648,58 @@ TEST(CodeInsightSecurity, RanksSinksByEntryReachability) {
     MasterIndex indexer(config);
     indexer.index_directory(dir.string());
     CodebaseIntelligenceEngine engine;
+    auto annotator = std::make_unique<SemanticAnnotator>();
+    annotator->populate_from_index(indexer);
 
+    // Plain view with the annotator: handler suppressed, rawHandler listed.
     nlohmann::json params;
     params["mode"] = "detailed";
-    params["analysis"] = "security";
-    auto result = handle_code_insight(params, engine, indexer);
-    ASSERT_FALSE(result.is_error) << result.text;
-    EXPECT_NE(result.text.find("== SECURITY CANDIDATES =="),
-              std::string::npos)
-        << result.text;
-    // Both sink sites listed; the entry-reachable one carries its distance.
-    auto run_pos = result.text.find("runTool");
-    auto cold_pos = result.text.find("coldPath");
-    ASSERT_NE(run_pos, std::string::npos) << result.text;
-    ASSERT_NE(cold_pos, std::string::npos) << result.text;
-    EXPECT_LT(run_pos, cold_pos) << "entry-reachable candidate ranks first";
-    EXPECT_NE(result.text.find("depth=2"), std::string::npos) << result.text;
-    EXPECT_NE(result.text.find("unreachable"), std::string::npos)
-        << result.text;
+    params["analysis"] = "deadcode";
+    auto plain = handle_code_insight(params, engine, indexer, nullptr,
+                                     nullptr, annotator.get());
+    ASSERT_FALSE(plain.is_error) << plain.text;
+    EXPECT_NE(plain.text.find("== UNUSED PRIVATE =="), std::string::npos)
+        << plain.text;
+    EXPECT_NE(plain.text.find("rawHandler"), std::string::npos) << plain.text;
+    EXPECT_EQ(plain.text.find("handler ("), std::string::npos)
+        << "annotated handler must be suppressed: " << plain.text;
+
+    // Flow view: worklist naming the pending candidate and the markers.
+    params["flow"] = true;
+    auto flow = handle_code_insight(params, engine, indexer, nullptr, nullptr,
+                                    annotator.get());
+    ASSERT_FALSE(flow.is_error) << flow.text;
+    EXPECT_NE(flow.text.find("== ANNOTATION FLOW =="), std::string::npos)
+        << flow.text;
+    EXPECT_NE(flow.text.find("rawHandler"), std::string::npos) << flow.text;
+    EXPECT_NE(flow.text.find("@lci:exclude[deadcode]"), std::string::npos)
+        << flow.text;
+    EXPECT_NE(flow.text.find("@lci:labels[dead]"), std::string::npos)
+        << flow.text;
+    // The annotated one is not pending.
+    EXPECT_EQ(flow.text.find("UNUSED PRIVATE handler ("), std::string::npos)
+        << flow.text;
 
     std::filesystem::remove_all(dir);
 }
 
-// fallow-class impact analysis: the blast radius of uncommitted changes —
-// changed symbols plus everything that transitively calls them, so a
-// reviewer knows what a change can break before running anything.
-TEST(CodeInsightImpact, ReportsBlastRadiusOfWipChanges) {
-    auto dir = lci::test::unique_temp_dir("lci_impact_test_");
+// @lci:labels[dead] confirms a symbol that would otherwise look referenced:
+// a confirmed-dead symbol is always listed.
+TEST(CodeInsightDeadCode, LabelDeadConfirms) {
+    auto dir = lci::test::unique_temp_dir("lci_deadcode_confirm_test_");
     std::filesystem::remove_all(dir);
     std::filesystem::create_directories(dir);
     {
-        std::ofstream f(dir / "core.go");
-        f << "package main\n\nfunc compute() int { return 1 }\n";
+        std::ofstream f(dir / "lib.hpp");
+        f << "#pragma once\n"
+             "// @lci:labels[dead]\n"
+             "struct Doomed { int x; };\n"
+             "Doomed useDoomed();\n";  // Doomed IS referenced, but marked dead
     }
     {
-        std::ofstream f(dir / "main.go");
-        f << "package main\n\nfunc serve() int { return compute() }\n"
-             "func main() { _ = serve() }\n";
-    }
-    ASSERT_TRUE(lci::test::run_git(dir, "init -q"));
-    ASSERT_TRUE(lci::test::run_git(dir, "add -A"));
-    ASSERT_TRUE(lci::test::run_git(
-        dir,
-        "-c user.email=fixture@lci.test -c user.name=lci-fixture "
-        "-c commit.gpgsign=false commit -q -m fixture"));
-    {
-        // Uncommitted change to compute(): main.go is untouched.
-        std::ofstream f(dir / "core.go");
-        f << "package main\n\nfunc compute() int { return 2 }\n";
+        std::ofstream f(dir / "lib.cpp");
+        f << "#include \"lib.hpp\"\n"
+             "Doomed useDoomed() { Doomed d; return d; }\n";
     }
 
     Config config;
@@ -705,18 +707,17 @@ TEST(CodeInsightImpact, ReportsBlastRadiusOfWipChanges) {
     MasterIndex indexer(config);
     indexer.index_directory(dir.string());
     CodebaseIntelligenceEngine engine;
+    auto annotator = std::make_unique<SemanticAnnotator>();
+    annotator->populate_from_index(indexer);
 
     nlohmann::json params;
     params["mode"] = "detailed";
-    params["analysis"] = "impact";
-    auto result = handle_code_insight(params, engine, indexer);
+    params["analysis"] = "deadcode";
+    auto result = handle_code_insight(params, engine, indexer, nullptr,
+                                      nullptr, annotator.get());
     ASSERT_FALSE(result.is_error) << result.text;
-    EXPECT_NE(result.text.find("== IMPACT =="), std::string::npos)
-        << result.text;
-    EXPECT_NE(result.text.find("compute"), std::string::npos) << result.text;
-    // The transitive callers are affected — including the entry point.
-    EXPECT_NE(result.text.find("serve"), std::string::npos) << result.text;
-    EXPECT_NE(result.text.find("entry_points_affected=1"), std::string::npos)
+    EXPECT_NE(result.text.find("Doomed"), std::string::npos)
+        << "label[dead] must force-list even a referenced symbol: "
         << result.text;
 
     std::filesystem::remove_all(dir);

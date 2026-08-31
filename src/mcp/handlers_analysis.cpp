@@ -871,7 +871,10 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                 << " affected_files=" << affected_files.size()
                 << " entry_points_affected=" << entries_hit
                 << " (transitive callers of the changed symbols; static "
-                   "call graph — dynamic dispatch is a lower bound)\n";
+                   "call graph — dynamic dispatch is a lower bound; changed "
+                   "symbols are limited to attributes=" + scope.label +
+                   ", so test-only edits show changed_symbols=0 unless that "
+                   "scope includes tests)\n";
             out << "changed:\n";
             size_t sl = std::min(seeds.size(),
                                  static_cast<size_t>(max_results));
@@ -1066,7 +1069,60 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
             return ToolResult{std::move(body), false};
         }
 
+        auto is_c_family_path = [](std::string_view rel) {
+            auto dot = rel.rfind('.');
+            if (dot == std::string_view::npos) return false;
+            auto e = rel.substr(dot);
+            return e == ".c" || e == ".h" || e == ".cpp" || e == ".hpp" ||
+                   e == ".cc" || e == ".hh" || e == ".cxx" || e == ".hxx";
+        };
+
         if (detailed_mode == "deadcode") {
+            // @lci: annotations curate dead-code: static reachability cannot
+            // see dynamic dispatch, function-value registration, reflection,
+            // or external library consumers, so ambiguous candidates are
+            // resolved by author/agent annotations. Disposition per symbol:
+            //   Suppress  -> exclude[deadcode], or a used-label
+            //                (api/public/entry/used/keep/dynamic/reflected/
+            //                 export), or category api/endpoint/entry.
+            //   Confirmed -> label 'dead' (agent has verified it; always
+            //                listed, never suppressed).
+            enum class Disp { None, Suppress, Confirmed };
+            auto disposition = [&](FileID fid, int line, int column) -> Disp {
+                if (sem_annotator == nullptr) return Disp::None;
+                // SemanticAnnotator's synthetic symbol key (see
+                // extract_annotations): (file<<32)|(line<<16)|column.
+                SymbolID key = (static_cast<SymbolID>(fid) << 32) |
+                               (static_cast<SymbolID>(line) << 16) |
+                               static_cast<SymbolID>(column);
+                const auto* a = sem_annotator->get_annotation(fid, key);
+                if (a == nullptr) return Disp::None;
+                for (const auto& l : a->labels) {
+                    if (l == "dead" || l == "unused") return Disp::Confirmed;
+                }
+                for (const auto& ex : a->excludes)
+                    if (ex == "deadcode") return Disp::Suppress;
+                static constexpr std::string_view kUsed[] = {
+                    "api", "public", "entry", "used", "keep",
+                    "dynamic", "reflected", "export", "exported"};
+                for (const auto& l : a->labels)
+                    for (auto u : kUsed)
+                        if (l == u) return Disp::Suppress;
+                if (a->category == "api" || a->category == "endpoint" ||
+                    a->category == "entry")
+                    return Disp::Suppress;
+                return Disp::None;
+            };
+            const bool flow = params.value("flow", false);
+            // Flow worklist rows: everything ambiguous an agent should mark.
+            struct FlowItem {
+                std::string kind;    // UNUSED TYPE / DEAD EXPORT / ...
+                std::string name;
+                std::string location;
+                std::string reason;  // why static analysis is unsure
+            };
+            std::vector<FlowItem> flow_items;
+
             // Exported symbols nothing in the corpus references. Static
             // reachability only: reflection, dynamic dispatch, and
             // external consumers of a published library are invisible, so
@@ -1142,11 +1198,22 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                              type_names.contains(nm) || class_scoped))
                             continue;
                         ++exported_total;
-                        if (sym->incoming_ref_count > 0) continue;
-                        if (entry_names.contains(nm)) continue;
+                        Disp d = disposition(fid, sym->symbol.line,
+                                              sym->symbol.column);
+                        if (d == Disp::Suppress) continue;
+                        bool confirmed = d == Disp::Confirmed;
+                        if (!confirmed && sym->incoming_ref_count > 0) continue;
+                        if (!confirmed && entry_names.contains(nm)) continue;
                         dead.push_back({sym->symbol.name, rel,
                                         static_cast<int>(sym->symbol.line),
                                         std::string(to_string(t))});
+                        if (flow && !confirmed)
+                            flow_items.push_back(
+                                {"DEAD EXPORT", sym->symbol.name,
+                                 rel + ":" +
+                                     std::to_string(sym->symbol.line),
+                                 "exported, zero references — may be a "
+                                 "public API or dynamically used"});
                     }
                 }
             }
@@ -1157,7 +1224,9 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                       });
             int max_results = params.value("max_results", 30);
             out << "LCF/1.0\nmode=detailed\nattributes=" << scope.label
-                << "\nsub=deadcode\ntier=2\ntokens=100\n---\n";
+                << "\nsub=deadcode" << (flow ? " view=annotation_flow" : "")
+                << "\ntier=2\ntokens=100\n---\n";
+            if (!flow)
             out << "== DEAD EXPORTS ==\n"
                 << "exported=" << exported_total << " unreferenced="
                 << dead.size()
@@ -1166,11 +1235,12 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                    "visible; methods excluded)\n";
             size_t lim = std::min(dead.size(),
                                   static_cast<size_t>(max_results));
+            if (!flow)
             for (size_t i = 0; i < lim; ++i) {
                 out << "  " << dead[i].type << " " << dead[i].name << " ("
                     << dead[i].path << ":" << dead[i].line << ")\n";
             }
-            if (dead.size() > lim) {
+            if (!flow && dead.size() > lim) {
                 out << "  ... and " << dead.size() - lim
                     << " more (raise max_results)\n";
             }
@@ -1276,21 +1346,44 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                                 }
                             }
                         }
-                        if (real_incoming > 0) continue;
-                        if (entry_names.contains(nm) || nm == "init")
-                            continue;
-                        if (nm.starts_with("~") || nm.starts_with("__") ||
-                            nm.starts_with("operator"))
-                            continue;
+                        Disp da = disposition(fid, sym->symbol.line,
+                                               sym->symbol.column);
+                        if (da == Disp::Suppress) continue;
+                        bool confirmed_dead = da == Disp::Confirmed;
+                        if (!confirmed_dead) {
+                            if (real_incoming > 0) continue;
+                            if (entry_names.contains(nm) || nm == "init")
+                                continue;
+                            if (nm.starts_with("~") ||
+                                nm.starts_with("__") ||
+                                nm.starts_with("operator"))
+                                continue;
+                        }
+                        int ln = static_cast<int>(sym->symbol.line);
                         if (callable && !sym->is_exported) {
-                            if (iface_method_names.contains(nm)) continue;
+                            if (!confirmed_dead &&
+                                iface_method_names.contains(nm))
+                                continue;
                             dead_private.push_back(
-                                {nm, rel, static_cast<int>(sym->symbol.line),
-                                 std::string(to_string(t))});
+                                {nm, rel, ln, std::string(to_string(t))});
+                            if (flow && !confirmed_dead)
+                                flow_items.push_back(
+                                    {"UNUSED PRIVATE", nm,
+                                     rel + ":" + std::to_string(ln),
+                                     "unexported, zero static references — "
+                                     "may be a function value, callback, or "
+                                     "dynamically dispatched"});
                         } else if (type_like) {
                             dead_types.push_back(
-                                {nm, rel, static_cast<int>(sym->symbol.line),
-                                 std::string(to_string(t))});
+                                {nm, rel, ln, std::string(to_string(t))});
+                            if (flow && !confirmed_dead)
+                                flow_items.push_back(
+                                    {"UNUSED TYPE", nm,
+                                     rel + ":" + std::to_string(ln),
+                                     "no indexed reference — may be used in "
+                                     "a template-argument, field, receiver, "
+                                     "or namespaced position not yet "
+                                     "credited"});
                         }
                     }
                     // C-family files are excluded from the FILE-level pass:
@@ -1368,12 +1461,27 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                     if (v.size() > l)
                         out << "  ... and " << v.size() - l << " more\n";
                 };
-                emit_list("== UNUSED PRIVATE ==", dead_private,
-                          "unexported callables with zero references; "
-                          "interface-implementing names excluded");
-                emit_list("== UNUSED TYPES ==", dead_types,
-                          "types nothing references, any visibility");
-                if (!dead_files.empty()) {
+                if (!flow)
+                    emit_list("== UNUSED PRIVATE ==", dead_private,
+                              "unexported callables with zero static "
+                              "references — REVIEW candidates; function-value "
+                              "and dynamic-dispatch uses are not counted, so "
+                              "annotate the real ones (see annotation flow)");
+                if (!flow)
+                    emit_list("== UNUSED TYPES ==", dead_types,
+                              "types with no indexed reference — REVIEW "
+                              "candidates; template-argument/field/receiver/"
+                              "namespaced uses may not be counted");
+                if (flow) {
+                    for (const auto& df : dead_files)
+                        flow_items.push_back(
+                            {"UNUSED FILE", df.path, df.path,
+                             "no symbol referenced from another file and no "
+                             "entry point — a language import mechanism "
+                             "(@import/require/extensionless) may not be "
+                             "resolved"});
+                }
+                if (!flow && !dead_files.empty()) {
                     out << "== UNUSED FILES ==\n"
                         << "count=" << dead_files.size()
                         << " (no symbol referenced from any other file and "
@@ -1388,6 +1496,44 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                         out << "  ... and " << dead_files.size() - l
                             << " more\n";
                 }
+            }
+            if (flow) {
+                std::sort(flow_items.begin(), flow_items.end(),
+                          [](const FlowItem& a, const FlowItem& b) {
+                              if (a.kind != b.kind) return a.kind < b.kind;
+                              return a.location < b.location;
+                          });
+                out << "== ANNOTATION FLOW ==\n"
+                    << "target=deadcode pending=" << flow_items.size()
+                    << "\n"
+                    << "how=for each row, decide: if the element IS used "
+                       "(dynamic dispatch, function value, reflection, public "
+                       "API), add the @lci: marker shown above it in source "
+                       "(or an .lci/annotations/*.json entry for code you "
+                       "cannot edit); if it is truly dead, add "
+                       "@lci:labels[dead] to confirm it. Re-run to see the "
+                       "list shrink to verified-dead.\n"
+                    << "markers: @lci:exclude[deadcode] (used, generic) | "
+                       "@lci:labels[api] (public surface) | "
+                       "@lci:labels[dynamic] (dispatched/reflected) | "
+                       "@lci:labels[entry] (entry point) | "
+                       "@lci:labels[dead] (confirmed dead)\n";
+                size_t fl = std::min(flow_items.size(),
+                                     static_cast<size_t>(max_results));
+                for (size_t i = 0; i < fl; ++i) {
+                    const auto& it = flow_items[i];
+                    out << "  " << it.kind << " " << it.name << " ("
+                        << it.location << ")\n"
+                        << "    reason=" << it.reason << "\n"
+                        << "    if-used: @lci:exclude[deadcode]   "
+                           "if-dead: @lci:labels[dead]\n";
+                }
+                if (flow_items.size() > fl)
+                    out << "  ... and " << flow_items.size() - fl
+                        << " more (raise max_results)\n";
+                if (flow_items.empty())
+                    out << "(nothing pending — every candidate is either "
+                           "annotated or resolved)\n";
             }
             std::string body = out.str();
             if (!body.empty() && body.back() == '\n') body.pop_back();
@@ -1752,7 +1898,9 @@ void register_analysis_handlers(McpServer& server,
           {"analysis", "string",
            "Detailed analysis: modules, layers, features, terms, errors, "
            "resources, clones (corpus-wide duplicate code), deadcode "
-           "(unreferenced exports)",
+           "(unused code; add flow=true for the @lci: annotation worklist), "
+           "security (dangerous-sink candidates by entry reach), impact "
+           "(blast radius of a git change set)",
            ""},
           {"metrics", "array", "Metrics to include", "string"},
           {"min_lines", "integer",
@@ -1765,6 +1913,10 @@ void register_analysis_handlers(McpServer& server,
            ""},
           {"target", "string", "Target to analyze", ""},
           {"focus", "string", "Analysis focus", ""},
+          {"flow", "boolean",
+           "analysis=deadcode: emit the @lci: annotation worklist (elements "
+           "needing a used/dead decision) instead of the candidate lists",
+           ""},
           {"max_results", "integer",
            "Maximum results (keep small to avoid token overload)", ""},
           {"scope", "string",
