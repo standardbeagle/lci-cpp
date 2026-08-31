@@ -181,7 +181,39 @@ void UnifiedExtractor::process_reference_node(TSNode node,
                     pick_cpp_reference_leaf(func), ReferenceType::Call,
                     RefStrength::Tight);
                 const char* ft = ts_node_type(func);
-                if (ft && std::string_view(ft) == "field_expression") {
+                if (ft && (std::string_view(ft) == "qualified_identifier" ||
+                           std::string_view(ft) == "scoped_identifier")) {
+                    // `Widget::compute(...)`: type the call as
+                    // "Widget.compute" so it resolves to the method whose
+                    // owning type is Widget (same mechanism as typed local
+                    // receivers), and credit the TYPE itself with a
+                    // type-position usage — qualified static calls left the
+                    // class with zero incoming refs.
+                    TSNode scope = ts_node_child_by_field_name(
+                        func, "scope", static_cast<uint32_t>(5));
+                    TSNode nm = ts_node_child_by_field_name(
+                        func, "name", static_cast<uint32_t>(4));
+                    if (!ts_node_is_null(scope) && !ts_node_is_null(nm)) {
+                        std::string scope_text = std::string(node_text(scope));
+                        auto sep = scope_text.rfind("::");
+                        std::string owner = sep == std::string::npos
+                                                ? scope_text
+                                                : scope_text.substr(sep + 2);
+                        std::string_view nm_type(ts_node_type(nm));
+                        if (!owner.empty() &&
+                            nm_type != "qualified_identifier" &&
+                            nm_type != "scoped_identifier") {
+                            cref.referenced_name =
+                                owner + "." + cref.referenced_name;
+                            Reference tref = create_reference(
+                                scope, ReferenceType::Usage,
+                                RefStrength::Loose);
+                            tref.referenced_name = owner;
+                            tref.type_position = true;
+                            references_.push_back(std::move(tref));
+                        }
+                    }
+                } else if (ft && std::string_view(ft) == "field_expression") {
                     TSNode arg = ts_node_child_by_field_name(
                         func, "argument", static_cast<uint32_t>(8));
                     TSNode fld = ts_node_child_by_field_name(
@@ -204,9 +236,18 @@ void UnifiedExtractor::process_reference_node(TSNode node,
                     node_type == "qualified_identifier" ||
                     node_type == "scoped_identifier") &&
                    !is_cpp_type_declaration_name_context(node)) {
-            references_.push_back(create_reference(
-                pick_cpp_reference_leaf(node), ReferenceType::Usage,
-                RefStrength::Loose));
+            TSNode leaf = pick_cpp_reference_leaf(node);
+            Reference uref = create_reference(leaf, ReferenceType::Usage,
+                                              RefStrength::Loose);
+            // A bare type_identifier (declaration `Foo x;`, parameter type,
+            // base specifier) is a TYPE position: resolution must consider
+            // type symbols only, or a declared constructor makes the name
+            // ambiguous and no edge is built (the C++ dead-export class).
+            if (node_type == "type_identifier" ||
+                std::string_view(ts_node_type(leaf)) == "type_identifier") {
+                uref.type_position = true;
+            }
+            references_.push_back(std::move(uref));
         }
     }
 }

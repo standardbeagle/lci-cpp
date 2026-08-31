@@ -78,6 +78,7 @@ Reference ReferenceTracker::Snapshot::materialize_ref(
     out.strength = r.strength;
     out.ambiguous = r.ambiguous;
     out.foreign_receiver = r.foreign_receiver;
+    out.type_position = r.type_position;
     if (r.name_id < ref_names.size()) {
         out.referenced_name = ref_names[r.name_id];
     }
@@ -348,6 +349,7 @@ std::vector<EnhancedSymbol> ReferenceTracker::process_file(
                 r.strength = ref.strength;
                 r.ambiguous = ref.ambiguous;
                 r.foreign_receiver = ref.foreign_receiver;
+                r.type_position = ref.type_position;
                 r.name_id = intern_ref_name(s, ref.referenced_name);
                 vec.push_back(r);
             }
@@ -943,6 +945,26 @@ uint64_t dir_hash_of_path(std::string_view path) {
 }
 }  // namespace
 
+namespace {
+
+/// Symbols a TYPE-position reference may resolve to.
+bool is_type_like_symbol(SymbolType t) {
+    switch (t) {
+        case SymbolType::Class:
+        case SymbolType::Struct:
+        case SymbolType::Interface:
+        case SymbolType::Type:
+        case SymbolType::Enum:
+        case SymbolType::Record:
+        case SymbolType::Delegate:
+            return true;
+        default:
+            return false;
+    }
+}
+
+}  // namespace
+
 SymbolID ReferenceTracker::resolve_reference_target(
     const Snapshot& s, const StoredRef& ref, FileID owner_fid,
     std::string_view full_name, std::span<const SymbolID> file_symbol_ids) {
@@ -970,6 +992,9 @@ SymbolID ReferenceTracker::resolve_reference_target(
         name_hash ^= 0x9e3779b97f4a7c15ULL *
                      (static_cast<uint64_t>(ref.source_symbol) | 1ULL);
     }
+    // Type-position refs resolve against a different candidate set, so they
+    // must not share cache entries with same-named value/call refs.
+    if (ref.type_position) name_hash ^= 0xd6e8feb86659fd93ULL;
     std::pair<FileID, uint64_t> cache_key{owner_fid, name_hash};
 
     if (auto it = reference_cache_.find(cache_key);
@@ -1016,6 +1041,9 @@ SymbolID ReferenceTracker::resolve_reference_target(
         for (SymbolID id : file_symbol_ids) {
             if (const auto* sym = s.symbols.get(id)) {
                 if (sym->symbol.name != name) continue;
+                if (ref.type_position &&
+                    !is_type_like_symbol(sym->symbol.type))
+                    continue;
                 if (first_match == 0) first_match = id;
                 if (id != ref.source_symbol && other_match == 0)
                     other_match = id;
@@ -1081,6 +1109,11 @@ SymbolID ReferenceTracker::resolve_reference_target(
                 continue;
             const auto* sym = s.symbols.get(id);
             if (sym == nullptr) continue;
+            // Type positions never resolve to a function/variable: the
+            // class-vs-constructor name tie is what turned every C++ type
+            // use into an ambiguous no-edge.
+            if (ref.type_position && !is_type_like_symbol(sym->symbol.type))
+                continue;
             LangFamily family = LangFamily::kUnknown;
             bool low_quality = false;
             uint64_t dir_hash = 0;

@@ -104,6 +104,58 @@ TEST(MasterIndexTest, BulkIndexFeedsSideEffectSink) {
     EXPECT_TRUE(found) << "no record for mightPanic";
 }
 
+// -- C++ type-position reference resolution -----------------------------------
+
+// The defect this pins: a C++ class WITH a declared constructor was
+// name-ambiguous at resolution (class symbol vs ctor symbol), so `Widget w;`
+// and `Widget::compute(...)` built NO edge and every such class reported
+// incoming_ref_count == 0 — flooding dead-export candidates. Type-position
+// refs now resolve against type-like symbols only, and a qualified call
+// credits both the method (via receiver typing) and the type.
+TEST(MasterIndexTest, CppTypeUsesCreditTheClassDespiteConstructor) {
+    TempDir dir;
+    dir.write_file("lib.h",
+                   "#pragma once\n"
+                   "class Widget {\n"
+                   "  public:\n"
+                   "    Widget();\n"
+                   "    static int compute(int x) { return x * 2; }\n"
+                   "    int value() const;\n"
+                   "};\n");
+    dir.write_file("use.cpp",
+                   "#include \"lib.h\"\n"
+                   "int use_static() { return Widget::compute(4); }\n"
+                   "int use_decl() {\n"
+                   "    Widget w;\n"
+                   "    return w.value();\n"
+                   "}\n");
+
+    Config cfg;
+    cfg.project.root = dir.path().string();
+    MasterIndex index(cfg);
+    ASSERT_TRUE(index.index_directory(dir.path().string()));
+
+    auto rt_snap = index.ref_tracker().pin();
+    const EnhancedSymbol* widget_class = nullptr;
+    const EnhancedSymbol* compute_method = nullptr;
+    for (const auto& es : rt_snap->find_symbols_by_name("Widget")) {
+        if (es && es->symbol.type == SymbolType::Class) {
+            widget_class = es.get();
+        }
+    }
+    for (const auto& es : rt_snap->find_symbols_by_name("compute")) {
+        if (es) compute_method = es.get();
+    }
+    ASSERT_NE(widget_class, nullptr);
+    // `Widget w;` (type position) + the `Widget::` qualifier must both
+    // credit the CLASS even though a constructor shares its name.
+    EXPECT_GE(widget_class->incoming_ref_count, 2u)
+        << "class not credited for type uses";
+    ASSERT_NE(compute_method, nullptr);
+    EXPECT_GE(compute_method->incoming_ref_count, 1u)
+        << "qualified static call not credited to the method";
+}
+
 // -- Corpus-wide clone detection ----------------------------------------------
 
 TEST(CloneDetectorTest, FindsExactAndStructuralClasses) {

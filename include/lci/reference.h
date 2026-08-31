@@ -77,6 +77,12 @@ struct Reference {
     // unknown the resolver must not guess a target from name evidence alone
     // (the false self-loop / reach-inflation class).
     bool foreign_receiver{};
+    // The reference occurs in a TYPE position (declaration `Foo x;`, the
+    // scope of `Foo::bar`, a base-class specifier): resolution considers
+    // type-like symbols only. Without this, a class with a declared
+    // constructor was name-ambiguous (class vs ctor) and every type use
+    // built NO edge — C++ classes read as dead exports.
+    bool type_position{};
     // No `quality`, `candidates`, or `failure_reason` here. They were carried
     // for every reference on every corpus and never written by any resolver,
     // never serialized, and never read -- 88 bytes of the struct plus their

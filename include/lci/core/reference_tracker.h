@@ -360,6 +360,7 @@ struct StoredRef {
     bool ambiguous : 1 {};
     bool dead : 1 {};
     bool foreign_receiver : 1 {};
+    bool type_position : 1 {};  // see Reference::type_position
 };
 static_assert(sizeof(StoredRef) == 32, "StoredRef is a per-reference cost");
 
