@@ -2553,5 +2553,53 @@ TEST_F(SideEffectExtraction, StrongestLogLevelWins) {
     EXPECT_TRUE(found);
 }
 
+// Filesystem effects — 2026-08-30 pocketbase audit: BaseApp.Bootstrap runs
+// os.MkdirAll / os.RemoveAll (inside its OnBootstrap closure) yet scored
+// is_pure=true, purity_score=1.0. The callee classifier knew print/open/close
+// but no filesystem verbs, and the AST pass never classified its own
+// unresolved calls at all — kIO only ever arrived via the index merge.
+TEST_F(SideEffectExtraction, GoFilesystemCallIsIo) {
+    const auto* info = analyze(Language::Go, ".go",
+                               "package main\n"
+                               "import \"os\"\n"
+                               "func direct() error {\n"
+                               "\treturn os.MkdirAll(\"/tmp/x\", 0755)\n"
+                               "}\n",
+                               "direct");
+    ASSERT_NE(info, nullptr);
+    EXPECT_NE(info->categories & side_effect::kIO, 0u);
+    EXPECT_FALSE(info->is_pure);
+}
+
+// The closure form from the audit itself: the effect happens inside a func
+// literal passed as an argument; it must fold into the enclosing function.
+TEST_F(SideEffectExtraction, GoClosureFilesystemCallFoldsIntoEnclosing) {
+    const auto* info = analyze(Language::Go, ".go",
+                               "package main\n"
+                               "import \"os\"\n"
+                               "func viaClosure(run func(f func() error) error)"
+                               " error {\n"
+                               "\treturn run(func() error {\n"
+                               "\t\treturn os.RemoveAll(\"/tmp/y\")\n"
+                               "\t})\n"
+                               "}\n",
+                               "viaClosure");
+    ASSERT_NE(info, nullptr);
+    EXPECT_NE(info->categories & side_effect::kIO, 0u);
+    EXPECT_FALSE(info->is_pure);
+}
+
+// Guard: a name that merely starts like a filesystem verb's word stem must
+// not classify (writeback caches, readers of in-memory state).
+TEST_F(SideEffectExtraction, GoPlainHelperCallStaysUnclassified) {
+    const auto* info = analyze(Language::Go, ".go",
+                               "package main\n"
+                               "func f() int { return compute() }\n"
+                               "func compute() int { return 1 }\n",
+                               "f");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(info->categories & side_effect::kIO, 0u);
+}
+
 }  // namespace
 }  // namespace lci
