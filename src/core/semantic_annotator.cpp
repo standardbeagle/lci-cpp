@@ -439,10 +439,22 @@ SemanticAnnotation* SemanticAnnotator::extract_symbol_annotation(
     std::vector<std::string_view> annotation_lines;
     std::string raw_text;
 
-    for (int i = start_search; i <= end_search &&
-                                i < static_cast<int>(lines.size()); ++i) {
+    // Scan UPWARD from just above the symbol and stop at the first CODE line
+    // (a non-blank line that is not a comment). Only the contiguous comment
+    // block immediately preceding the symbol belongs to it — otherwise an
+    // annotation bleeds onto every later symbol within the window (two
+    // adjacent bare functions shared one @lci:exclude, over-suppressing).
+    auto is_comment_or_blank = [](std::string_view t) {
+        if (t.empty()) return true;
+        return t.rfind("//", 0) == 0 || t.rfind("/*", 0) == 0 ||
+               t.front() == '*' || t.front() == '#' ||
+               t.rfind("--", 0) == 0 || t.front() == ';';
+    };
+    // end_search (symbol.line - 1) is the symbol's OWN declaration line in the
+    // 0-indexed `lines`; start scanning from the line just above it.
+    for (int i = end_search - 1; i >= start_search &&
+                                 i < static_cast<int>(lines.size()); --i) {
         auto line = lines[static_cast<size_t>(i)];
-        // Trim leading whitespace for check
         auto trimmed = line;
         while (!trimmed.empty() &&
                (trimmed.front() == ' ' || trimmed.front() == '\t')) {
@@ -450,9 +462,14 @@ SemanticAnnotation* SemanticAnnotator::extract_symbol_annotation(
         }
         if (is_annotation_line(trimmed)) {
             annotation_lines.push_back(trimmed);
-            raw_text.append(trimmed);
-            raw_text.push_back('\n');
+        } else if (!is_comment_or_blank(trimmed)) {
+            break;  // reached the previous symbol / code — boundary
         }
+    }
+    std::reverse(annotation_lines.begin(), annotation_lines.end());
+    for (auto l : annotation_lines) {
+        raw_text.append(l);
+        raw_text.push_back('\n');
     }
 
     if (annotation_lines.empty()) return nullptr;
