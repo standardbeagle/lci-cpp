@@ -75,6 +75,15 @@ attributes {
         // Script-style test entry points: redis has modules/vector-sets/
         // test.py and utils/lru/test-lru.rb.
         glob "test.py" "test.rb" "test-*.py" "test-*.rb"
+        // JVM/Gradle source-set and module LAYOUTS (okhttp audit): Kotlin
+        // multiplatform <target>Test source sets, Gradle testFixtures, and
+        // test-support / *-tests modules ship whole test trees whose files
+        // carry no test suffix (AutobahnTester.kt, MockHttp2Peer.kt).
+        // "*Test" as a DIR only — bare filenames like Contest.kt never hit
+        // a dir rule, so production names containing "test" stay untouched.
+        dir "jvmTest" "commonTest" "androidTest" "jsTest" "nativeTest"
+        dir "iosTest" "jvmAndroidTest" "testFixtures"
+        dir "*-tests" "*-testing-support" "testing-support"
     }
 
     // Benchmark harnesses and their tooling. Separate from tests because a
