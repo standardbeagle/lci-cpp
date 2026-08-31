@@ -1458,6 +1458,89 @@ TEST(ReferenceTrackerTest, ForeignReceiverSkipsNoEvidenceGuess) {
         << "foreign-receiver call of unknown type linked by pure guess";
 }
 
+// A receiver-TYPE-qualified call ("Builder.apply") whose type match fails must
+// NOT degrade to bare-name resolution: the type evidence positively excludes
+// every same-named method on other types. The 2026-08-30 okhttp audit found
+// Kotlin's stdlib `apply` (112 call sites, receiver types known, no such
+// project method) all resolving to ConnectionSpec.apply via the
+// unique-candidate fallback, inflating its whole caller chain's reach
+// (concat: 1 real call site, reported reach=155) and fabricating 3/6 layer
+// violations. Same class as zls initCapacity reach=146.
+TEST(ReferenceTrackerTest, TypedReceiverMissSkipsNameFallback) {
+    ReferenceTracker rt;
+
+    // Caller in a.kt: call recorded with known receiver type Builder.
+    std::vector<Symbol> caller = {
+        make_sym("configure", SymbolType::Function, 1, 1, 10),
+    };
+    Reference call;
+    call.type = ReferenceType::Call;
+    call.referenced_name = "Builder.apply";
+    call.line = 5;
+    call.column = 8;
+    std::vector<Reference> refs = {call};
+    std::vector<ScopeInfo> no_scopes;
+    rt.process_file(1, "config/a.kt", caller, refs, no_scopes);
+
+    // The corpus's only `apply`: a method of ConnectionSpec in another dir.
+    ScopeInfo cls;
+    cls.type = ScopeType::Class;
+    cls.name = "ConnectionSpec";
+    cls.start_line = 1;
+    cls.end_line = 100;
+    std::vector<ScopeInfo> scopes = {cls};
+    std::vector<Symbol> target = {
+        make_sym("apply", SymbolType::Method, 2, 10, 20),
+    };
+    std::vector<Reference> no_refs;
+    rt.process_file(2, "net/b.kt", target, no_refs, scopes);
+    rt.process_all_references();
+
+    auto run = rt.pin()->find_symbols_by_name("configure");
+    ASSERT_EQ(run.size(), 1u);
+    EXPECT_TRUE(rt.get_callee_symbols(run[0]->id).empty())
+        << "typed-receiver miss fell back to a name-only guess";
+}
+
+// The receiver-type match itself must keep working: same setup, but the call's
+// receiver type IS the method's owning class.
+TEST(ReferenceTrackerTest, TypedReceiverMatchStillResolves) {
+    ReferenceTracker rt;
+
+    std::vector<Symbol> caller = {
+        make_sym("configure", SymbolType::Function, 1, 1, 10),
+    };
+    Reference call;
+    call.type = ReferenceType::Call;
+    call.referenced_name = "ConnectionSpec.apply";
+    call.line = 5;
+    call.column = 8;
+    std::vector<Reference> refs = {call};
+    std::vector<ScopeInfo> no_scopes;
+    rt.process_file(1, "config/a.kt", caller, refs, no_scopes);
+
+    ScopeInfo cls;
+    cls.type = ScopeType::Class;
+    cls.name = "ConnectionSpec";
+    cls.start_line = 1;
+    cls.end_line = 100;
+    std::vector<ScopeInfo> scopes = {cls};
+    std::vector<Symbol> target = {
+        make_sym("apply", SymbolType::Method, 2, 10, 20),
+    };
+    std::vector<Reference> no_refs;
+    rt.process_file(2, "net/b.kt", target, no_refs, scopes);
+    rt.process_all_references();
+
+    auto run = rt.pin()->find_symbols_by_name("configure");
+    ASSERT_EQ(run.size(), 1u);
+    auto callees = rt.get_callee_symbols(run[0]->id);
+    ASSERT_EQ(callees.size(), 1u);
+    auto apply_ids = rt.pin()->find_symbols_by_name("apply");
+    ASSERT_EQ(apply_ids.size(), 1u);
+    EXPECT_EQ(callees[0], apply_ids[0]->id);
+}
+
 TEST(ReferenceTrackerTest, RustMethodBareCallResolvesToShadowingFreeFunction) {
     // Rust methods are invoked via `self.`; a bare `trim(...)` inside method
     // `trim` is the same-named FREE function, never recursion.
