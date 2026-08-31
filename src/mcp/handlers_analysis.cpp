@@ -371,20 +371,20 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
         // constant inherited from Go) with the real per-package coupling
         // from CouplingAnalyzer. Both key modules by getPackageName, so the
         // names line up. Recompute the aggregate average from real values.
-        if (!d.coupling.coupling.module_coupling.empty()) {
+        {
             double sum = 0.0;
+            int known = 0;
             for (auto& m : d.modules.modules) {
                 auto it = d.coupling.coupling.module_coupling.find(m.name);
-                m.coupling_score =
-                    it != d.coupling.coupling.module_coupling.end()
-                        ? it->second
-                        : 0.0;
-                sum += m.coupling_score;
+                if (it != d.coupling.coupling.module_coupling.end()) {
+                    m.coupling_score = it->second;
+                    sum += m.coupling_score;
+                    ++known;
+                }
+                // else: stays -1 (unknown) — never a made-up number.
             }
-            if (!d.modules.modules.empty()) {
-                d.modules.metrics.average_coupling =
-                    sum / static_cast<double>(d.modules.modules.size());
-            }
+            d.modules.metrics.average_coupling =
+                known > 0 ? sum / static_cast<double>(known) : -1.0;
         }
         if (d.result.response.health_dashboard) {
             d.quality = HealthAnalyzer::calculate_quality_from_complexity(
@@ -919,8 +919,10 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
             out << "== MODULES ==\n"
                 << "total=" << r.metrics.total_modules
                 << " cohesion=" << fmt2(r.metrics.average_cohesion)
-                << " coupling=" << fmt2(r.metrics.average_coupling)
-                << " arch_score=" << fmt2(r.metrics.architectural_score)
+                << " coupling="
+                << (r.metrics.average_coupling < 0.0
+                        ? std::string("n/a")
+                        : fmt2(r.metrics.average_coupling))
                 << "\n"
                 << "strategy=" << r.detection_strategy << "\n";
             size_t shown = std::min(r.modules.size(), size_t{20});

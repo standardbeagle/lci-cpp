@@ -173,7 +173,10 @@ void emit_modules(std::ostringstream& out, const ModuleAnalysis& ma) {
     out << "== MODULES ==\n"
         << "total=" << ma.metrics.total_modules
         << " name_cohesion=" << fmt2(ma.metrics.average_cohesion)
-        << " coupling=" << fmt2(ma.metrics.average_coupling)
+        << " coupling="
+        << (ma.metrics.average_coupling < 0.0
+                ? std::string("n/a")
+                : fmt2(ma.metrics.average_coupling))
         << " basis=symbol_files\n";
     size_t lim = std::min(ma.modules.size(), size_t{10});
     for (size_t i = 0; i < lim; ++i) {

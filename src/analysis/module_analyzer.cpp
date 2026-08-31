@@ -144,7 +144,12 @@ ModuleAnalysis ModuleAnalyzer::analyze(
         mb.type = classify_module_by_path(pkg);
         mb.path = pkg;
         mb.cohesion_score = prefix_cohesion(syms);
-        mb.coupling_score = 0.3;
+        // This analyzer computes NO per-module coupling; the Go port carried
+        // a 0.3 constant here that rendered as a real number in detailed
+        // sub=modules while overview showed the true CouplingAnalyzer value.
+        // -1 = unknown; emitters print n/a, the overview path overwrites
+        // with the real number when it has one.
+        mb.coupling_score = -1.0;
         mb.stability = stability_score(static_cast<int>(syms.size()));
         mb.file_count = static_cast<int>(pkg_files[pkg].size());
         mb.function_count = pkg_func_count[pkg];
@@ -160,12 +165,11 @@ ModuleAnalysis ModuleAnalyzer::analyze(
                   return a.name < b.name;
               });
 
-    // Calculate aggregate metrics.
+    // Calculate aggregate metrics. Coupling and architectural score are not
+    // computed here: -1 = unknown (see coupling_score above).
     double total_cohesion = 0.0;
-    double total_coupling = 0.0;
     for (const auto& m : modules) {
         total_cohesion += m.cohesion_score;
-        total_coupling += m.coupling_score;
     }
 
     int count = static_cast<int>(modules.size());
@@ -173,9 +177,8 @@ ModuleAnalysis ModuleAnalyzer::analyze(
     metrics.total_modules = count;
     metrics.average_cohesion = (count > 0)
         ? total_cohesion / static_cast<double>(count) : 0.0;
-    metrics.average_coupling = (count > 0)
-        ? total_coupling / static_cast<double>(count) : 0.0;
-    metrics.architectural_score = 0.8;
+    metrics.average_coupling = -1.0;
+    metrics.architectural_score = -1.0;
 
     ModuleAnalysis result;
     result.modules = std::move(modules);
