@@ -542,6 +542,43 @@ TEST(GitProvider, CommitFilesOnRootCommit) {
     fs::remove_all(repo);
 }
 
+// An UNTRACKED subdirectory nested inside some outer repository (the benchmark
+// corpora under .work/, any gitignored playground) must not silently analyze
+// the enclosing repo: rev-parse walks up, finds the outer toplevel, and every
+// scope then reports a clean "no changes" about a repo the project root has no
+// files in (2026-08-30 validation sweep, guzzle corpus). tracks_any is the
+// gate the handlers use to tell that apart from a legitimate monorepo subdir.
+TEST(GitProvider, TracksAnyDistinguishesUntrackedNesting) {
+    namespace fs = std::filesystem;
+    fs::path outer = fs::temp_directory_path() /
+                     ("lci_git_nested_" +
+                      std::to_string(std::chrono::steady_clock::now()
+                                         .time_since_epoch()
+                                         .count()));
+    fs::create_directories(outer / "tracked");
+    fs::create_directories(outer / "untracked");
+    std::ofstream(outer / "tracked" / "a.go") << "package a\n";
+    std::ofstream(outer / ".gitignore") << "untracked/\n";
+    std::ofstream(outer / "untracked" / "b.go") << "package b\n";
+    ASSERT_TRUE(lci::test::run_git(outer, "init -q"));
+    ASSERT_TRUE(lci::test::run_git(outer, "add -A"));
+    ASSERT_TRUE(lci::test::run_git(
+        outer,
+        "-c user.email=fixture@lci.test -c user.name=lci-fixture "
+        "-c commit.gpgsign=false commit -q -m fixture"));
+
+    Provider p;
+    ASSERT_TRUE(Provider::create((outer / "untracked").string(), p));
+    // create() resolves to the OUTER toplevel — that is the trap.
+    EXPECT_EQ(fs::path(p.repo_root()), outer);
+    EXPECT_FALSE(p.tracks_any((outer / "untracked").string()))
+        << "gitignored corpus dir must not count as covered by the repo";
+    EXPECT_TRUE(p.tracks_any((outer / "tracked").string()))
+        << "a real monorepo subdir stays analyzable";
+
+    fs::remove_all(outer);
+}
+
 // ============================================================================
 // name-status (-z) parsing + ref hardening
 // ============================================================================

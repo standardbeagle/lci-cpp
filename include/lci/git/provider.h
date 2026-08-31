@@ -41,6 +41,12 @@ class Provider {
     /// Returns the repository root path.
     const std::string& repo_root() const { return repo_root_; }
 
+    /// True when the repository tracks at least one file under `dir`.
+    /// create() resolves upward to the enclosing toplevel, so a gitignored
+    /// project root (benchmark corpora, playgrounds) still "creates" — this is
+    /// how callers tell that apart from a legitimate monorepo subdirectory.
+    bool tracks_any(std::string_view dir) const;
+
     /// Returns the list of changed files based on analysis scope.
     bool get_changed_files(const AnalysisParams& params,
                            std::vector<ChangedFile>& out) const;

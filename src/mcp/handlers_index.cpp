@@ -386,6 +386,23 @@ ToolResult handle_git_analysis(const nlohmann::json& params,
         na["hint"] = "git_analysis needs a git checkout at the project root";
         return make_json_response(na);
     }
+    // create() resolves upward: an untracked project root nested in some
+    // OUTER repo (gitignored corpora, playgrounds) would silently analyze
+    // that repo and report a truthful-looking "no changes" about code the
+    // root has no files in. A tracked subdir is a legitimate monorepo
+    // checkout and stays analyzable.
+    if (provider.repo_root() != root && !provider.tracks_any(root)) {
+        nlohmann::json na;
+        na["operation"] = "git_analysis";
+        na["available"] = false;
+        na["reason"] = "project root is untracked in the enclosing git "
+                       "repository at " +
+                       provider.repo_root();
+        na["hint"] =
+            "git_analysis would describe the enclosing repository, not this "
+            "project; init a repository at the project root to analyze it";
+        return make_json_response(na);
+    }
 
     ga.base_ref = params.value("base_ref", std::string());
     ga.target_ref = params.value("target_ref", std::string());

@@ -78,6 +78,19 @@ bool Provider::create(std::string_view repo_root, Provider& out) {
     return true;
 }
 
+bool Provider::tracks_any(std::string_view dir) const {
+    // Path relative to the repo root: ls-files scopes to the pathspec. An
+    // absolute pathspec works too, but relative keeps the output independent
+    // of where the checkout lives.
+    std::error_code ec;
+    auto rel = std::filesystem::relative(std::string(dir), repo_root_, ec);
+    std::string spec = ec ? std::string(dir) : rel.string();
+    if (spec.empty() || spec == ".") spec = ".";
+    std::string out;
+    if (!run_git({"ls-files", "--", spec}, out)) return false;
+    return out.find_first_not_of(" \t\r\n") != std::string::npos;
+}
+
 bool Provider::is_git_repo() const {
     auto git_dir = std::filesystem::path(repo_root_) / ".git";
     return std::filesystem::is_directory(git_dir);

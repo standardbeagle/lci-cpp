@@ -543,6 +543,21 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                    "modes work\n";
             return ToolResult{finalize_lcf(out), false};
         }
+        // Untracked root nested in an outer repo: analyzing would describe
+        // THAT repo, not this project (see handle_git_analysis for the same
+        // gate). Tracked monorepo subdirs pass.
+        if (provider.repo_root() != project_root &&
+            !provider.tracks_any(project_root)) {
+            emit_lcf_header(out, mode, 1, lcf_token_count(0, 0, false, 0, true));
+            out << "== GIT ==\n"
+                << "available=false\n"
+                << "reason=project root is untracked in the enclosing git "
+                   "repository at "
+                << provider.repo_root() << "\n"
+                << "hint=init a repository at the project root to analyze it; "
+                   "other modes work\n";
+            return ToolResult{finalize_lcf(out), false};
+        }
 
         if (mode == "git_analyze") {
             git::AnalysisParams ga = git::AnalysisParams::defaults();
