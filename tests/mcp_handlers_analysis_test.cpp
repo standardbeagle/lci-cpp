@@ -543,6 +543,47 @@ TEST_F(CodeInsightTest, StructureModeWorks) {
     EXPECT_NE(result.text.find("== STRUCTURE =="), std::string::npos);
 }
 
+// fallow-class circular dependency detection: mutual package IMPORTS couple
+// whole packages even when no call edge closes a loop — the call-graph CYCLES
+// section cannot see them.
+TEST(CodeInsightImportCycles, ReportsMutualPackageImports) {
+    auto dir = lci::test::unique_temp_dir("lci_import_cycles_test_");
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir / "alpha");
+    std::filesystem::create_directories(dir / "beta");
+    {
+        std::ofstream f(dir / "go.mod");
+        f << "module example.com/app\n";
+    }
+    {
+        std::ofstream f(dir / "alpha" / "a.go");
+        f << "package alpha\n\nimport \"example.com/app/beta\"\n\n"
+             "func A() { beta.B() }\n";
+    }
+    {
+        std::ofstream f(dir / "beta" / "b.go");
+        f << "package beta\n\nimport \"example.com/app/alpha\"\n\n"
+             "func B() {}\nfunc C() { alpha.A() }\n";
+    }
+
+    Config config;
+    config.project.root = dir.string();
+    MasterIndex indexer(config);
+    indexer.index_directory(dir.string());
+    CodebaseIntelligenceEngine engine;
+
+    nlohmann::json params;
+    params["mode"] = "unified";
+    auto result = handle_code_insight(params, engine, indexer);
+    ASSERT_FALSE(result.is_error) << result.text;
+    EXPECT_NE(result.text.find("import_cycles=1"), std::string::npos)
+        << result.text;
+    EXPECT_NE(result.text.find("alpha <-> beta"), std::string::npos)
+        << result.text;
+
+    std::filesystem::remove_all(dir);
+}
+
 TEST_F(CodeInsightTest, DetailedModeWorks) {
     // detailed with default analysis (modules) now actually dispatches to
     // ModuleAnalyzer (was a silent overview fallback before).

@@ -103,6 +103,11 @@ struct ImportDeps {
     absl::flat_hash_map<std::string, absl::flat_hash_set<std::string>> in;
     // source package -> distinct imported packages
     absl::flat_hash_map<std::string, absl::flat_hash_set<std::string>> out;
+    // Circular package dependencies (SCCs of the import graph, size >= 2),
+    // members sorted, largest first. Import cycles are the fallow-class
+    // finding call-graph CYCLES cannot see: mutual imports couple whole
+    // packages even when no call edge closes a loop.
+    std::vector<std::vector<std::string>> cycles;
 };
 
 

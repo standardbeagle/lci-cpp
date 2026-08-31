@@ -1166,6 +1166,19 @@ TEST(ImportResolverTest, BuildAndResolveImportGraph) {
     EXPECT_EQ(resolved, 300u);
 }
 
+TEST(ImportResolverTest, ExtractZigImports) {
+    ImportResolver ir;
+    auto d = ir.extract_file_imports(
+        1, "src/main.zig",
+        "const completions = @import(\"features/completions.zig\");\n"
+        "const std = @import(\"std\");\n"
+        "const sibling = @import(\"analysis.zig\");\n");
+    ASSERT_EQ(d.bindings.size(), 1u)
+        << "only the directory-carrying import is cross-package evidence";
+    EXPECT_EQ(d.bindings[0].source_file, "features");
+    EXPECT_EQ(d.bindings[0].imported_name, "completions");
+}
+
 TEST(ImportResolverTest, NoEvidenceReturnsUndecided) {
     ImportResolver resolver;
 

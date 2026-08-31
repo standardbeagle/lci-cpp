@@ -540,6 +540,51 @@ ImportDeps compute_import_dependencies(
             deps.out[it->second].insert(target);
         }
     }
+    // Circular package dependencies: Tarjan over the package import graph.
+    {
+        std::vector<std::string> nodes;
+        absl::flat_hash_map<std::string, int> index_of;
+        auto intern = [&](const std::string& p) {
+            auto it = index_of.find(p);
+            if (it != index_of.end()) return it->second;
+            int id = static_cast<int>(nodes.size());
+            index_of.emplace(p, id);
+            nodes.push_back(p);
+            return id;
+        };
+        for (const auto& [src, tgts] : deps.out) {
+            intern(src);
+            for (const auto& t : tgts) intern(t);
+        }
+        std::vector<std::vector<int>> adj(nodes.size());
+        for (const auto& [src, tgts] : deps.out) {
+            int u = index_of[src];
+            for (const auto& t : tgts) adj[u].push_back(index_of[t]);
+        }
+        for (auto& v : adj) std::sort(v.begin(), v.end());
+        analysis::CallGraph pk;  // reuse: SCC over dense int graph
+        std::vector<SymbolID> ids(nodes.size());
+        for (size_t k = 0; k < nodes.size(); ++k)
+            ids[k] = static_cast<SymbolID>(k + 1);
+        pk.build(ids, [&](SymbolID sid) {
+            std::vector<SymbolID> out_ids;
+            for (int v : adj[static_cast<size_t>(sid - 1)])
+                out_ids.push_back(static_cast<SymbolID>(v + 1));
+            return out_ids;
+        });
+        for (const auto& comp : pk.cycles()) {
+            std::vector<std::string> members;
+            members.reserve(comp.size());
+            for (int idx : comp) members.push_back(nodes[pk.id_at(idx) - 1]);
+            std::sort(members.begin(), members.end());
+            if (members.size() >= 2) deps.cycles.push_back(std::move(members));
+        }
+        std::sort(deps.cycles.begin(), deps.cycles.end(),
+                  [](const auto& a, const auto& b) {
+                      if (a.size() != b.size()) return a.size() > b.size();
+                      return a < b;
+                  });
+    }
     return deps;
 }
 
@@ -575,6 +620,22 @@ void emit_dependencies(std::ostringstream& out, const ImportDeps& deps) {
                           : 0.5;
         out << "  " << pkg << " depended_on_by=" << n
             << " pkgs instability=" << fmt2(inst) << "\n";
+    }
+    if (!deps.cycles.empty()) {
+        out << "import_cycles=" << deps.cycles.size()
+            << " (mutual package imports; break with an interface or a "
+               "shared package):\n";
+        size_t cl = std::min(deps.cycles.size(), size_t{5});
+        for (size_t i = 0; i < cl; ++i) {
+            out << "  ";
+            for (size_t k = 0; k < deps.cycles[i].size(); ++k) {
+                if (k) out << " <-> ";
+                out << deps.cycles[i][k];
+            }
+            out << "\n";
+        }
+        if (deps.cycles.size() > cl)
+            out << "  ... and " << (deps.cycles.size() - cl) << " more\n";
     }
     out << "---\n";
 }

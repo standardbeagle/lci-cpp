@@ -27,6 +27,7 @@ FileImportData ImportResolver::extract_file_imports(
         case LangFamily::kCSharp:
         case LangFamily::kCFamily:
         case LangFamily::kPhp:
+        case LangFamily::kZig:
             break;
         default:
             return data;
@@ -56,6 +57,9 @@ FileImportData ImportResolver::extract_file_imports(
                 break;
             case LangFamily::kPhp:
                 bindings = extract_php_imports(line);
+                break;
+            case LangFamily::kZig:
+                bindings = extract_zig_imports(line);
                 break;
             case LangFamily::kCFamily:
                 bindings = extract_cpp_imports(line);
@@ -523,6 +527,37 @@ std::vector<ImportBinding> ImportResolver::extract_csharp_imports(
     b.original_name = std::string(last);
     b.source_file = std::string(t);
     b.is_wildcard = !is_static;
+    bindings.push_back(std::move(b));
+    return bindings;
+}
+
+
+std::vector<ImportBinding> ImportResolver::extract_zig_imports(
+    std::string_view line) const {
+    // `const m = @import("path/file.zig");` — the DIRECTORY part is the
+    // package-level dependency edge ("std" and bare sibling files carry no
+    // cross-package evidence and yield nothing). Line-based like the other
+    // extractors.
+    std::vector<ImportBinding> bindings;
+    auto at = line.find("@import(\"");
+    if (at == std::string_view::npos) return bindings;
+    auto start = at + std::strlen("@import(\"");
+    auto end = line.find('"', start);
+    if (end == std::string_view::npos || end <= start) return bindings;
+    std::string_view path = line.substr(start, end - start);
+    if (path.size() <= 4 || path.substr(path.size() - 4) != ".zig")
+        return bindings;  // package import (std, deps) — no local edge
+    auto slash = path.rfind('/');
+    if (slash == std::string_view::npos) return bindings;  // sibling file
+    std::string_view dir = path.substr(0, slash);
+    while (dir.size() >= 3 && dir.substr(0, 3) == "../")
+        dir = dir.substr(3);
+    if (dir.empty() || dir == "..") return bindings;
+    ImportBinding b;
+    b.source_file = std::string(dir);
+    auto stem = path.substr(slash + 1);
+    stem = stem.substr(0, stem.size() - 4);
+    b.imported_name = std::string(stem);
     bindings.push_back(std::move(b));
     return bindings;
 }
