@@ -1010,6 +1010,7 @@ SymbolID ReferenceTracker::resolve_reference_target(
     // existing behavior rather than failing).
     std::string_view name = full_name;
     std::string_view recv_type;
+    bool typed_receiver_miss = false;
     if (auto dot = full_name.rfind('.'); dot != std::string::npos) {
         recv_type = std::string_view(full_name).substr(0, dot);
         name = std::string_view(full_name).substr(dot + 1);
@@ -1022,6 +1023,16 @@ SymbolID ReferenceTracker::resolve_reference_target(
                     }
                 }
             }
+            // The receiver's type is KNOWN and no method of that type has
+            // this name (a stdlib/extension call the index cannot see, or an
+            // inherited method on a supertype). That evidence positively
+            // excludes every same-named method on unrelated types, so the
+            // name-only paths below (same-file fast path, unique-candidate /
+            // same-dir fallback) are forbidden — they are what resolved every
+            // Kotlin stdlib `.apply {}` to ConnectionSpec.apply (reach 1 ->
+            // 155, okhttp audit) and zls initCapacity to reach=146. Import
+            // evidence still resolves; a missing edge is the cheaper error.
+            typed_receiver_miss = true;
         }
     }
 
@@ -1032,7 +1043,7 @@ SymbolID ReferenceTracker::resolve_reference_target(
     // neighbors either: every `.as_ref()` inside glob.rs resolving to
     // `Glob::as_ref` gave a 3-line trait impl reach=152 (ripgrep audit).
     // Such calls resolve only through receiver-type or import evidence.
-    if (!ref.foreign_receiver) {
+    if (!ref.foreign_receiver && !typed_receiver_miss) {
         // Rust bare calls inside a METHOD can never be the method itself
         // (method calls require `self.`): `trim_line_terminator(...)` inside
         // StandardImpl::trim_line_terminator is the same-named FREE function,
@@ -1138,7 +1149,7 @@ SymbolID ReferenceTracker::resolve_reference_target(
         resolved = import_resolver_.resolve_symbol_reference(
             owner_fid, name, filtered,
             [&s](SymbolID id) { return s.symbols.get(id); },
-            ref.foreign_receiver);
+            ref.foreign_receiver || typed_receiver_miss);
 
         // Ambiguous-name fallback: no decisive import/same-file/export
         // evidence. Package proximity breaks the tie — a unique candidate in
@@ -1149,7 +1160,8 @@ SymbolID ReferenceTracker::resolve_reference_target(
         // Foreign-receiver calls of unknown type never take this guess at
         // all — `x.Add()` linking to the one `Add` the corpus happens to
         // index is exactly the edge class that inflated LOAD BEARING reach.
-        if (resolved == 0 && !ref.foreign_receiver) {
+        if (resolved == 0 && !ref.foreign_receiver &&
+            !typed_receiver_miss) {
             if (same_dir_count == 1) {
                 resolved = same_dir;
             } else if (filtered.size() == 1) {
