@@ -1771,6 +1771,64 @@ TEST(ReferenceTrackerTest, InterfaceQualifiedCallResolvesToSpec) {
         << "must resolve to the App interface spec";
 }
 
+// Go embedding: `type PB struct { core.App }` promotes App's methods onto
+// PB, so `pb.Bootstrap()` (receiver typed PB) must resolve through the
+// embedded type to the interface's method spec. Embedding is already
+// extracted as an Extends reference on the struct; resolution follows it
+// (bounded BFS) when the direct receiver-type match misses.
+TEST(ReferenceTrackerTest, EmbeddedTypeResolvesPromotedMethod) {
+    ReferenceTracker rt;
+
+    // File 1: the struct PB embedding App (Extends ref inside PB's span).
+    std::vector<Symbol> pb_syms = {
+        make_sym("PB", SymbolType::Struct, 1, 1, 5),
+    };
+    Reference embed;
+    embed.type = ReferenceType::Extends;
+    embed.referenced_name = "App";
+    embed.line = 2;
+    embed.column = 3;
+    std::vector<Reference> pb_refs = {embed};
+    std::vector<ScopeInfo> no_scopes;
+    rt.process_file(1, "pb/pb.go", pb_syms, pb_refs, no_scopes);
+
+    // File 2: interface App with method spec Bootstrap.
+    ScopeInfo iface;
+    iface.type = ScopeType::Interface;
+    iface.name = "App";
+    iface.start_line = 1;
+    iface.end_line = 10;
+    std::vector<ScopeInfo> scopes = {iface};
+    std::vector<Symbol> decls = {
+        make_sym("Bootstrap", SymbolType::Method, 2, 3, 3),
+    };
+    std::vector<Reference> none;
+    rt.process_file(2, "core/app.go", decls, none, scopes);
+
+    // File 3: caller with a PB-typed receiver.
+    std::vector<Symbol> caller = {
+        make_sym("main", SymbolType::Function, 3, 1, 10),
+    };
+    Reference call;
+    call.type = ReferenceType::Call;
+    call.referenced_name = "PB.Bootstrap";
+    call.line = 4;
+    call.column = 4;
+    std::vector<Reference> refs = {call};
+    rt.process_file(3, "cmd/main.go", caller, refs, no_scopes);
+    rt.process_all_references();
+
+    auto snap = rt.pin();
+    auto mains = snap->find_symbols_by_name("main");
+    ASSERT_EQ(mains.size(), 1u);
+    auto callees = rt.get_callee_symbols(mains[0]->id);
+    ASSERT_EQ(callees.size(), 1u);
+    const auto* resolved = snap->symbols.get(callees[0]);
+    ASSERT_NE(resolved, nullptr);
+    EXPECT_EQ(resolved->symbol.file_id, 2u)
+        << "PB.Bootstrap must resolve through the embedded App";
+}
+
 TEST(ReferenceTrackerTest, RustMethodBareCallResolvesToShadowingFreeFunction) {
     // Rust methods are invoked via `self.`; a bare `trim(...)` inside method
     // `trim` is the same-named FREE function, never recursion.

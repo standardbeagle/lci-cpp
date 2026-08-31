@@ -1077,24 +1077,62 @@ SymbolID ReferenceTracker::resolve_reference_target(
                 zit->second.language_family == LangFamily::kZig) {
                 zig_owner = true;
             }
-            auto stem_matches = [&](const EnhancedSymbol& sym) {
+            auto stem_matches = [&](const EnhancedSymbol& sym,
+                                    std::string_view rtype) {
                 if (!zig_owner) return false;
                 auto mit = file_resolution_meta_.find(sym.symbol.file_id);
                 return mit != file_resolution_meta_.end() &&
-                       mit->second.stem == recv_type;
+                       mit->second.stem == rtype;
             };
+            // Receiver-type frontier: the named type first, then types it
+            // EMBEDS (Go promotion: `type PB struct { core.App }` puts App's
+            // methods on PB) — followed via the struct's own Extends
+            // references, bounded BFS. Embedding is declared in source, so
+            // this is evidence, not a guess.
+            absl::InlinedVector<std::string, 4> frontier;
+            frontier.emplace_back(recv_type);
+            absl::flat_hash_set<std::string> seen_types;
+            seen_types.insert(std::string(recv_type));
             SymbolID typed_first = 0;
-            for (SymbolID id : s.symbols.get_symbols_by_name(name)) {
-                if (const auto* sym = s.symbols.get(id)) {
-                    if (!symbol_matches_receiver_type(*sym, recv_type) &&
-                        !stem_matches(*sym))
-                        continue;
-                    if (call_args != 255 &&
-                        sym->parameter_count == call_args) {
-                        reference_cache_[cache_key] = id;
-                        return id;
+            for (size_t fi = 0; fi < frontier.size() && fi < 16; ++fi) {
+                const std::string& rtype = frontier[fi];
+                for (SymbolID id : s.symbols.get_symbols_by_name(name)) {
+                    if (const auto* sym = s.symbols.get(id)) {
+                        if (!symbol_matches_receiver_type(*sym, rtype) &&
+                            !stem_matches(*sym, rtype))
+                            continue;
+                        if (call_args != 255 &&
+                            sym->parameter_count == call_args) {
+                            reference_cache_[cache_key] = id;
+                            return id;
+                        }
+                        if (typed_first == 0) typed_first = id;
                     }
-                    if (typed_first == 0) typed_first = id;
+                }
+                if (typed_first != 0) break;
+                if (fi + 1 >= 3) continue;  // depth bound on expansion
+                // Expand: outgoing Extends refs of type symbols named rtype.
+                for (SymbolID tid : s.symbols.get_symbols_by_name(rtype)) {
+                    const auto* tsym = s.symbols.get(tid);
+                    if (tsym == nullptr ||
+                        !is_type_like_symbol(tsym->symbol.type))
+                        continue;
+                    auto oit = s.outgoing_refs.find(tid);
+                    if (oit == s.outgoing_refs.end()) continue;
+                    for (uint64_t rid : oit->second) {
+                        const StoredRef* r = s.find_ref(rid);
+                        if (r == nullptr ||
+                            r->type != ReferenceType::Extends)
+                            continue;
+                        if (r->name_id >= s.ref_names.size()) continue;
+                        std::string ename = s.ref_names[r->name_id];
+                        // Qualified embeds (core.App) name the bare type.
+                        if (auto dot = ename.rfind('.');
+                            dot != std::string::npos)
+                            ename = ename.substr(dot + 1);
+                        if (seen_types.insert(ename).second)
+                            frontier.push_back(std::move(ename));
+                    }
                 }
             }
             if (typed_first != 0) {
