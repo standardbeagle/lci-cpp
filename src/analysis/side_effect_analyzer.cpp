@@ -75,6 +75,14 @@ PurityLevel compute_purity_level(uint32_t categories, bool has_unresolved) {
     return PurityLevel::InternallyPure;
 }
 
+// Forward-decl: anonymous-namespace classifier defined later in file. Used by
+// end_function so the AST pass classifies its own unresolved callees — kIO
+// must not depend on the index-merge path running (pocketbase Bootstrap
+// scored pure while calling os.MkdirAll).
+namespace {
+uint32_t classify_callee_category(std::string_view callee);
+}
+
 
 void SideEffectAnalyzer::begin_function(std::string_view name,
                                         std::string_view file,
@@ -206,6 +214,14 @@ SideEffectInfo SideEffectAnalyzer::end_function() {
                 access.base_identifier, access.line, access.column,
                 access.field_path, false});
         }
+    }
+
+    // Classify unresolved callees by name here, not only in the index merge:
+    // the heuristic (print/open/mkdir/...) is the only visibility the AST
+    // pass has into external calls, and skipping it left filesystem-heavy
+    // functions scoring pure on the unit path.
+    for (const auto& uc : ctx.unresolved_calls) {
+        info.categories |= classify_callee_category(uc.function_name);
     }
 
     populate_purity_classification(ctx, info, param_index_set);
@@ -601,7 +617,12 @@ uint32_t classify_callee_category(std::string_view callee) {
     static constexpr std::string_view io_prefixes[] = {
         "print", "fprint", "puts",  "fputs", "printf", "fprintf",
         "scanf", "fscanf", "fopen", "fread", "fwrite", "open",
-        "close", "log",    "logger"};
+        "close", "log",    "logger",
+        // Filesystem verbs (pocketbase audit: os.MkdirAll / os.RemoveAll
+        // scored pure). Stems chosen to not collide with in-memory names:
+        // bare "read"/"write"/"remove"/"create"/"stat" stay unlisted.
+        "mkdir", "rmdir",  "removeall", "readfile", "writefile", "readdir",
+        "walkdir", "chmod", "chown", "symlink", "truncate"};
     for (auto p : io_prefixes) {
         if (lower_starts_with(callee, p)) return side_effect::kIO;
     }
