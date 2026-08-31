@@ -584,6 +584,51 @@ TEST(CodeInsightImportCycles, ReportsMutualPackageImports) {
     std::filesystem::remove_all(dir);
 }
 
+// fallow-class dead-code depth: unused PRIVATE functions, unused TYPES, and
+// unused FILES — the existing section only covered exported functions.
+TEST(CodeInsightDeadCode, ReportsPrivateTypesAndFiles) {
+    auto dir = lci::test::unique_temp_dir("lci_deadcode_depth_test_");
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    {
+        std::ofstream f(dir / "main.go");
+        f << "package main\n\n"
+             "func main() { used() }\n"
+             "func used() {}\n"
+             "func orphanHelper() {}\n"  // private, never called
+             "type ghostConfig struct{ x int }\n";  // type never referenced
+    }
+    {
+        std::ofstream f(dir / "island.go");  // no symbol referenced anywhere
+        f << "package main\n\n"
+             "func islandOnly() { islandInner() }\n"
+             "func islandInner() {}\n";
+    }
+
+    Config config;
+    config.project.root = dir.string();
+    MasterIndex indexer(config);
+    indexer.index_directory(dir.string());
+    CodebaseIntelligenceEngine engine;
+
+    nlohmann::json params;
+    params["mode"] = "detailed";
+    params["analysis"] = "deadcode";
+    auto result = handle_code_insight(params, engine, indexer);
+    ASSERT_FALSE(result.is_error) << result.text;
+    EXPECT_NE(result.text.find("orphanHelper"), std::string::npos)
+        << result.text;
+    EXPECT_NE(result.text.find("ghostConfig"), std::string::npos)
+        << result.text;
+    EXPECT_NE(result.text.find("island.go"), std::string::npos)
+        << result.text;
+    // used() is called and must not be listed anywhere.
+    EXPECT_EQ(result.text.find("  function used "), std::string::npos)
+        << result.text;
+
+    std::filesystem::remove_all(dir);
+}
+
 TEST_F(CodeInsightTest, DetailedModeWorks) {
     // detailed with default analysis (modules) now actually dispatches to
     // ModuleAnalyzer (was a silent overview fallback before).
