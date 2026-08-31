@@ -574,7 +574,27 @@ void SideEffectAnalyzer::propagate_transitive(const MasterIndex& indexer) {
                 SideEffectInfo* caller = cit->second;
                 uint32_t old = caller->transitive_categories;
                 caller->transitive_categories |= to_propagate;
-                if (caller->transitive_categories != old) changed = true;
+                if (caller->transitive_categories != old) {
+                    changed = true;
+                    // Provenance: an impure verdict must carry WHY (the
+                    // sinatra audit found 36/100 impure results with an
+                    // access_pattern of "pure" and no reasons — propagated
+                    // impurity had none). Name the callee and the effects
+                    // it contributed, once per (caller, callee).
+                    std::string reason = "calls impure ";
+                    reason += info->function_name.empty() ? "<anon>"
+                                                          : info->function_name;
+                    reason += " (";
+                    bool first = true;
+                    for (const auto& cat : categories_to_strings(
+                             to_propagate & ~old)) {
+                        if (!first) reason += ",";
+                        reason += cat;
+                        first = false;
+                    }
+                    reason += ")";
+                    caller->impurity_reasons.push_back(std::move(reason));
+                }
                 if (caller_confidence > caller->transitive_confidence) {
                     caller->transitive_confidence = caller_confidence;
                     changed = true;
