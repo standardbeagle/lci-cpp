@@ -516,6 +516,31 @@ TEST(LayerAnalyzer, PatternConfidenceIsMeasuredNotConstant) {
 }
 
 // ===========================================================================
+// ModuleAnalyzer must not fabricate numbers it does not compute. The Go port
+// carried coupling_score=0.3 and architectural_score=0.8 CONSTANTS, and the
+// detailed sub=modules view rendered them raw while overview/statistics
+// replaced coupling with the real CouplingAnalyzer value — the same corpus
+// answered coupling=0.30 in one mode and 0.02 in another (okhttp audit).
+// Unknown is -1; emitters print n/a.
+TEST(ModuleAnalyzer, NoFabricatedCouplingOrArchScore) {
+    auto s1 = make_sym("A", SymbolType::Function, 1, 1);
+    auto s2 = make_sym("B", SymbolType::Function, 2, 2);
+    std::vector<FileSymbolData> files = {
+        make_file("pkg/a/x.go", {&s1}),
+        make_file("pkg/b/y.go", {&s2}),
+    };
+    auto r = ModuleAnalyzer().analyze(files, "");
+    ASSERT_FALSE(r.modules.empty());
+    for (const auto& m : r.modules) {
+        EXPECT_LT(m.coupling_score, 0.0)
+            << m.name << ": placeholder coupling constant must be gone";
+    }
+    EXPECT_LT(r.metrics.average_coupling, 0.0);
+    EXPECT_LT(r.metrics.architectural_score, 0.0)
+        << "architectural_score was a 0.8 constant";
+}
+
+// ===========================================================================
 // ModuleAnalyzer - classify_module_by_path
 // ===========================================================================
 
