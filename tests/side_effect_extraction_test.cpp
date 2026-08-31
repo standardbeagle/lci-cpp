@@ -2602,4 +2602,52 @@ TEST_F(SideEffectExtraction, GoPlainHelperCallStaysUnclassified) {
 }
 
 }  // namespace
+// Cross-language fallow features (2026-08-31): Zig parameters are an
+// unfielded child, so `self: *T` mutations classified as GLOBAL writes and
+// param_writes stayed 0 for the whole language.
+TEST_F(SideEffectExtraction, ZigSelfParamWriteIsParamWrite) {
+    const auto* info = analyze(Language::Zig, ".zig",
+                               "const S = struct {\n"
+                               "    count: u32,\n"
+                               "    fn bump(self: *S) void {\n"
+                               "        self.count += 1;\n"
+                               "    }\n"
+                               "};\n",
+                               "bump");
+    ASSERT_NE(info, nullptr);
+    EXPECT_NE(info->categories & side_effect::kParamWrite, 0u)
+        << "self mutation must be a parameter write";
+    EXPECT_EQ(info->categories & side_effect::kGlobalWrite, 0u)
+        << "self mutation must not read as a global write";
+}
+
+// Zig struct-literal field initializers are construction, not mutation: the
+// zls audit found pure functions flagged for \"writes to global 'start'\"
+// from `return .{ .start = a, .end = b };`.
+TEST_F(SideEffectExtraction, ZigStructLiteralInitIsNotAWrite) {
+    const auto* info = analyze(Language::Zig, ".zig",
+                               "const Loc = struct { start: u32, end: u32 };\n"
+                               "fn locMerge(a: u32, b: u32) Loc {\n"
+                               "    return .{ .start = a, .end = b };\n"
+                               "}\n",
+                               "locMerge");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(info->categories & side_effect::kGlobalWrite, 0u)
+        << (info->impurity_reasons.empty() ? std::string("")
+                                           : info->impurity_reasons[0]);
+}
+
+// PHP filesystem builtins (battery audit: FileCookieJar::save's
+// file_put_contents carried no io category).
+TEST_F(SideEffectExtraction, PhpFileBuiltinsAreIo) {
+    const auto* info = analyze(Language::PHP, ".php",
+                               "<?php\n"
+                               "function persist($p, $d) {\n"
+                               "    file_put_contents($p, $d);\n"
+                               "}\n",
+                               "persist");
+    ASSERT_NE(info, nullptr);
+    EXPECT_NE(info->categories & side_effect::kIO, 0u);
+}
+
 }  // namespace lci
