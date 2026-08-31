@@ -827,6 +827,39 @@ TEST(LanguageExtractionTest, Zig) {
     EXPECT_EQ(find_symbol(r, "Color")->type, SymbolType::Struct);
 }
 
+// Zig decl-literal calls (`var b: std.ArrayList(u8) = try .initCapacity(a, n)`)
+// have NO receiver expression — the type is inferred from the annotation, which
+// is usually external. An empty receiver read as "self" made these bare-name
+// calls, and the unique-candidate fallback linked all of them to whatever
+// project symbol shared the name (zls's own Stack.initCapacity collected 28
+// std-container call sites, 2026-08-30 audit). No local type evidence means
+// foreign receiver: resolve only through real evidence.
+TEST(LanguageExtractionTest, ZigDeclLiteralCallIsForeignReceiver) {
+    constexpr std::string_view src = R"(const std = @import("std");
+
+pub fn build(allocator: std.mem.Allocator) !void {
+    var buf: std.ArrayList(u8) = try .initCapacity(allocator, 16);
+    _ = buf;
+}
+)";
+    auto tree = parse(Language::Zig, src);
+    if (!tree) {
+        GTEST_SKIP() << "Zig parser unavailable";
+    }
+    auto r = extract(Language::Zig, ".zig", src, "m.zig");
+
+    bool found = false;
+    for (const auto& ref : r.references) {
+        if (ref.referenced_name == "initCapacity" &&
+            ref.type == ReferenceType::Call) {
+            found = true;
+            EXPECT_TRUE(ref.foreign_receiver)
+                << "decl-literal call with no receiver must be foreign";
+        }
+    }
+    EXPECT_TRUE(found) << "decl-literal call ref not extracted at all";
+}
+
 // ---------------------------------------------------------------------------
 // Ruby
 // ---------------------------------------------------------------------------
