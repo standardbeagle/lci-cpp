@@ -916,12 +916,17 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                 {"child_process", "process-exec", true},
                 {"execSync", "process-exec", true},
                 {"spawnSync", "process-exec", false},
-                {"spawn", "process-exec", false},
+                {"child_process.spawn", "process-exec", true},
+                {"process.spawn", "process-exec", true},
+                {"std.process.spawn", "process-exec", true},
+                {"std.process.Child", "process-exec", true},
+                {"std.process.run", "process-exec", true},
+                {"os.StartProcess", "process-exec", true},
                 {"popen", "process-exec", true},
                 {"proc_open", "process-exec", false},
                 {"shell_exec", "process-exec", false},
                 {"passthru", "process-exec", false},
-                {"system", "process-exec", false},
+                {"os.system", "process-exec", true},
                 {"subprocess.run", "process-exec", true},
                 {"subprocess.Popen", "process-exec", true},
                 {"subprocess.call", "process-exec", true},
@@ -974,6 +979,12 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                     }
                 }
             }
+            // Zero entry points in the analysis set (a library, or every main
+            // sits in excluded example/test files): reachability is UNDEFINED,
+            // not "unreachable" — stamping every sink unreachable is a false
+            // negative on risk (pocketbase LaunchURL IS reached from
+            // apis/installer.go, but the only main is in an example file).
+            const bool have_entries = !frontier.empty();
             for (size_t qi = 0; qi < frontier.size(); ++qi) {
                 SymbolID u = frontier[qi];
                 int du = depth[u];
@@ -1013,10 +1024,12 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                 }
             }
             std::sort(cands.begin(), cands.end(),
-                      [](const Candidate& a, const Candidate& b) {
-                          bool ra = a.depth >= 0, rb = b.depth >= 0;
-                          if (ra != rb) return ra;
-                          if (a.depth != b.depth) return a.depth < b.depth;
+                      [&](const Candidate& a, const Candidate& b) {
+                          if (have_entries) {
+                              bool ra = a.depth >= 0, rb = b.depth >= 0;
+                              if (ra != rb) return ra;
+                              if (a.depth != b.depth) return a.depth < b.depth;
+                          }
                           if (a.location != b.location)
                               return a.location < b.location;
                           return a.sink < b.sink;
@@ -1038,8 +1051,11 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                     << c.symbol << " (" << c.location << ") ";
                 if (c.depth >= 0)
                     out << "entry-reachable depth=" << c.depth;
-                else
+                else if (have_entries)
                     out << "unreachable-from-entries";
+                else
+                    out << "reachability-unknown (no entry points in the "
+                           "analysis set)";
                 out << "\n";
             }
             if (cands.size() > lim)
