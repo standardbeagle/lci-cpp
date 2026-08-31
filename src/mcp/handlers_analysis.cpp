@@ -687,12 +687,12 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
             detailed_mode != "features" && detailed_mode != "terms" &&
             detailed_mode != "errors" && detailed_mode != "resources" &&
             detailed_mode != "clones" && detailed_mode != "deadcode" &&
-            detailed_mode != "security") {
+            detailed_mode != "security" && detailed_mode != "impact") {
             return make_error_response(
                 "code_insight",
                 "invalid detailed analysis '" + detailed_mode +
                 "', must be one of: modules, layers, features, terms, "
-                "errors, resources, clones, deadcode, security");
+                "errors, resources, clones, deadcode, security, impact");
         }
 
         if (detailed_mode == "clones") {
@@ -734,6 +734,163 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                     << rep.clone_classes -
                            static_cast<int>(rep.classes.size())
                     << " smaller classes (raise max_results)\n";
+            }
+            std::string body = out.str();
+            if (!body.empty() && body.back() == '\n') body.pop_back();
+            return ToolResult{std::move(body), false};
+        }
+
+        if (detailed_mode == "impact") {
+            // Blast radius of changed code (fallow parity): symbols whose
+            // spans overlap the change, plus everything that TRANSITIVELY
+            // calls them. scope: wip (default, uncommitted working tree),
+            // staged, commit, range — same vocabulary as git_analyze.
+            git::Provider provider;
+            auto lcf_unavail = [&](const std::string& reason,
+                                   const std::string& hint) {
+                out << "LCF/1.0\nmode=detailed\nsub=impact\ntier=2"
+                    << "\ntokens=30\n---\n== IMPACT ==\n"
+                    << "available=false\nreason=" << reason
+                    << "\nhint=" << hint << "\n";
+                return ToolResult{finalize_lcf(out), false};
+            };
+            if (!git::Provider::create(project_root, provider)) {
+                return lcf_unavail(
+                    "not a git repository: " + std::string(project_root),
+                    "impact reads the change set from git");
+            }
+            if (provider.repo_root() != project_root &&
+                !provider.tracks_any(project_root)) {
+                return lcf_unavail(
+                    "project root is untracked in the enclosing git "
+                    "repository at " + provider.repo_root(),
+                    "init a repository at the project root");
+            }
+            git::AnalysisParams ga = git::AnalysisParams::defaults();
+            auto scope_str = params.value("scope", std::string("wip"));
+            if (scope_str == "wip") ga.scope = git::AnalysisScope::WIP;
+            else if (scope_str == "staged")
+                ga.scope = git::AnalysisScope::Staged;
+            else if (scope_str == "commit")
+                ga.scope = git::AnalysisScope::Commit;
+            else if (scope_str == "range")
+                ga.scope = git::AnalysisScope::Range;
+            else
+                return make_error_response(
+                    "code_insight",
+                    "invalid impact scope '" + scope_str +
+                        "', must be wip, staged, commit, or range");
+            ga.base_ref = params.value("base_ref", std::string());
+            ga.target_ref = params.value("target_ref", std::string());
+            ScopeSet changed;
+            if (!provider.get_changed_scope(ga, changed)) {
+                return lcf_unavail("git diff failed for scope=" + scope_str,
+                                   "check base_ref/target_ref");
+            }
+
+            const auto& ref = indexer.ref_tracker();
+            // Seed: symbols overlapping the changed line ranges.
+            struct Seed {
+                SymbolID id;
+                std::string name;
+                std::string location;
+            };
+            std::vector<Seed> seeds;
+            absl::flat_hash_map<SymbolID,
+                                std::pair<std::string, std::string>>
+                sym_meta;  // id -> (name, location)
+            for (const auto& f : files_data) {
+                std::string rel = git::normalize_rel(f.path, project_root);
+                for (const auto* sym : f.symbols) {
+                    if (sym == nullptr) continue;
+                    auto t = sym->symbol.type;
+                    if (t != SymbolType::Function &&
+                        t != SymbolType::Method &&
+                        t != SymbolType::Constructor)
+                        continue;
+                    sym_meta[sym->id] = {
+                        sym->symbol.name,
+                        rel + ":" + std::to_string(sym->symbol.line)};
+                    if (changed.contains_symbol(rel, *sym)) {
+                        seeds.push_back(
+                            {sym->id, sym->symbol.name,
+                             rel + ":" +
+                                 std::to_string(sym->symbol.line)});
+                    }
+                }
+            }
+
+            // Reverse BFS: everything that transitively calls a seed.
+            absl::flat_hash_map<SymbolID, int> depth;
+            std::vector<SymbolID> frontier;
+            for (const auto& sd : seeds) {
+                if (depth.emplace(sd.id, 0).second)
+                    frontier.push_back(sd.id);
+            }
+            for (size_t qi = 0; qi < frontier.size(); ++qi) {
+                SymbolID u = frontier[qi];
+                int du = depth[u];
+                for (SymbolID c : ref.get_caller_symbols(u)) {
+                    if (depth.emplace(c, du + 1).second)
+                        frontier.push_back(c);
+                }
+            }
+            absl::flat_hash_set<std::string_view> entry_names;
+            entry_names.insert("main");
+            for (const auto& ep : indexer.config().insight.entry_points)
+                entry_names.insert(ep);
+            struct Affected {
+                std::string name;
+                std::string location;
+                int depth;
+            };
+            std::vector<Affected> affected;
+            absl::flat_hash_set<std::string> affected_files;
+            int entries_hit = 0;
+            for (const auto& [sid, d] : depth) {
+                if (d == 0) continue;  // the seeds themselves
+                auto mit = sym_meta.find(sid);
+                if (mit == sym_meta.end()) continue;
+                affected.push_back({mit->second.first, mit->second.second, d});
+                auto colon = mit->second.second.rfind(':');
+                affected_files.insert(mit->second.second.substr(0, colon));
+                if (entry_names.contains(mit->second.first)) ++entries_hit;
+            }
+            std::sort(affected.begin(), affected.end(),
+                      [](const Affected& a, const Affected& b) {
+                          if (a.depth != b.depth) return a.depth < b.depth;
+                          return a.location < b.location;
+                      });
+
+            int max_results = params.value("max_results", 30);
+            out << "LCF/1.0\nmode=detailed\nattributes=" << scope.label
+                << "\nsub=impact\ntier=2\ntokens=100\n---\n";
+            out << "== IMPACT ==\n"
+                << "scope=" << scope_str << " changed_symbols="
+                << seeds.size() << " affected_symbols=" << affected.size()
+                << " affected_files=" << affected_files.size()
+                << " entry_points_affected=" << entries_hit
+                << " (transitive callers of the changed symbols; static "
+                   "call graph — dynamic dispatch is a lower bound)\n";
+            out << "changed:\n";
+            size_t sl = std::min(seeds.size(),
+                                 static_cast<size_t>(max_results));
+            for (size_t i = 0; i < sl; ++i)
+                out << "  " << seeds[i].name << " (" << seeds[i].location
+                    << ")\n";
+            if (seeds.size() > sl)
+                out << "  ... and " << seeds.size() - sl << " more\n";
+            if (!affected.empty()) {
+                out << "affected (depth = call hops from a change):\n";
+                size_t al = std::min(affected.size(),
+                                     static_cast<size_t>(max_results));
+                for (size_t i = 0; i < al; ++i)
+                    out << "  " << affected[i].name << " ("
+                        << affected[i].location
+                        << ") depth=" << affected[i].depth << "\n";
+                if (affected.size() > al)
+                    out << "  ... and " << affected.size() - al
+                        << " more\n";
             }
             std::string body = out.str();
             if (!body.empty() && body.back() == '\n') body.pop_back();
