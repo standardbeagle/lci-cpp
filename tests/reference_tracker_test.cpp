@@ -1541,6 +1541,102 @@ TEST(ReferenceTrackerTest, TypedReceiverMatchStillResolves) {
     EXPECT_EQ(callees[0], apply_ids[0]->id);
 }
 
+// Overload delegation must not read as recursion. okhttp audit: 6 of 8
+// reported recursion entries (create/createFormData/addPart/newStream/close/
+// send) were overloads delegating to a same-named sibling, collapsed into
+// self-calls because bare-name resolution has no arity. When the call site's
+// argument count is known and an exact-arity sibling exists, resolution picks
+// it; equal arity keeps resolving to self (genuine recursion).
+TEST(ReferenceTrackerTest, OverloadDelegationPrefersExactArity) {
+    ReferenceTracker rt;
+
+    Symbol two = make_sym("create", SymbolType::Function, 1, 1, 10);
+    two.parameter_count = 2;
+    Symbol one = make_sym("create", SymbolType::Function, 1, 12, 20);
+    one.parameter_count = 1;
+
+    // Call inside create/2's span, with ONE argument -> the sibling.
+    Reference call;
+    call.type = ReferenceType::Call;
+    call.referenced_name = "create";
+    call.line = 5;
+    call.column = 8;
+    call.call_arg_count = 1;
+    std::vector<Reference> refs = {call};
+    std::vector<ScopeInfo> scopes;
+    std::vector<Symbol> syms = {two, one};
+    rt.process_file(1, "part.kt", syms, refs, scopes);
+    rt.process_all_references();
+
+    auto snap = rt.pin();
+    auto ids = snap->find_symbols_by_name("create");
+    ASSERT_EQ(ids.size(), 2u);
+    SymbolID two_id = 0, one_id = 0;
+    for (const auto& h : ids) {
+        (h->symbol.line == 1 ? two_id : one_id) = h->id;
+    }
+    auto callees = rt.get_callee_symbols(two_id);
+    ASSERT_EQ(callees.size(), 1u);
+    EXPECT_EQ(callees[0], one_id)
+        << "one-arg call inside create/2 must resolve to create/1";
+}
+
+TEST(ReferenceTrackerTest, GenuineRecursionKeepsSelfOnMatchingArity) {
+    ReferenceTracker rt;
+
+    Symbol two = make_sym("create", SymbolType::Function, 1, 1, 10);
+    two.parameter_count = 2;
+    Symbol one = make_sym("create", SymbolType::Function, 1, 12, 20);
+    one.parameter_count = 1;
+
+    Reference call;
+    call.type = ReferenceType::Call;
+    call.referenced_name = "create";
+    call.line = 5;
+    call.column = 8;
+    call.call_arg_count = 2;
+    std::vector<Reference> refs = {call};
+    std::vector<ScopeInfo> scopes;
+    std::vector<Symbol> syms = {two, one};
+    rt.process_file(1, "part.kt", syms, refs, scopes);
+    rt.process_all_references();
+
+    auto snap = rt.pin();
+    SymbolID two_id = 0;
+    for (const auto& h : snap->find_symbols_by_name("create")) {
+        if (h->symbol.line == 1) two_id = h->id;
+    }
+    auto callees = rt.get_callee_symbols(two_id);
+    ASSERT_EQ(callees.size(), 1u);
+    EXPECT_EQ(callees[0], two_id) << "matching arity is real recursion";
+}
+
+// Unknown arg count (255) must leave resolution exactly as before.
+TEST(ReferenceTrackerTest, UnknownArityKeepsFirstMatchBehavior) {
+    ReferenceTracker rt;
+
+    Symbol two = make_sym("create", SymbolType::Function, 1, 1, 10);
+    two.parameter_count = 2;
+
+    Reference call;
+    call.type = ReferenceType::Call;
+    call.referenced_name = "create";
+    call.line = 5;
+    call.column = 8;
+    std::vector<Reference> refs = {call};
+    std::vector<ScopeInfo> scopes;
+    std::vector<Symbol> syms = {two};
+    rt.process_file(1, "part.kt", syms, refs, scopes);
+    rt.process_all_references();
+
+    auto snap = rt.pin();
+    auto ids = snap->find_symbols_by_name("create");
+    ASSERT_EQ(ids.size(), 1u);
+    auto callees = rt.get_callee_symbols(ids[0]->id);
+    ASSERT_EQ(callees.size(), 1u);
+    EXPECT_EQ(callees[0], ids[0]->id);
+}
+
 TEST(ReferenceTrackerTest, RustMethodBareCallResolvesToShadowingFreeFunction) {
     // Rust methods are invoked via `self.`; a bare `trim(...)` inside method
     // `trim` is the same-named FREE function, never recursion.

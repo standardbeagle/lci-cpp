@@ -36,6 +36,19 @@ uint8_t UnifiedExtractor::count_parameter_names(TSNode node) {
             decl = field(decl, "declarator");
         }
     }
+    if (ts_node_is_null(params)) {
+        // Kotlin's grammar is fieldless: the container is a named CHILD of
+        // type function_value_parameters. Without it every Kotlin function
+        // counted 0 parameters, so arity-preferring resolution never fired.
+        uint32_t n = ts_node_named_child_count(node);
+        for (uint32_t i = 0; i < n; ++i) {
+            TSNode c = ts_node_named_child(node, i);
+            if (get_node_type(c) == "function_value_parameters") {
+                params = c;
+                break;
+            }
+        }
+    }
     if (ts_node_is_null(params)) return 0;
 
     // One parameter node may declare several names (Go's `a, b int`), so

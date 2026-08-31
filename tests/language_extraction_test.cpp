@@ -860,6 +860,34 @@ pub fn build(allocator: std.mem.Allocator) !void {
     EXPECT_TRUE(found) << "decl-literal call ref not extracted at all";
 }
 
+// Call references carry the call site's argument count so resolution can
+// tell overload delegation (create(x) inside create(x, y)) from recursion —
+// the okhttp audit found 6/8 recursion entries were arity-collapsed overloads.
+TEST(LanguageExtractionTest, KotlinCallRefCarriesArgCount) {
+    constexpr std::string_view src = R"(class Part {
+    fun create(a: Int, b: Int): Int {
+        return create(a)
+    }
+    fun create(a: Int): Int = a
+}
+)";
+    auto tree = parse(Language::Kotlin, src);
+    if (!tree) {
+        GTEST_SKIP() << "Kotlin parser unavailable";
+    }
+    auto r = extract(Language::Kotlin, ".kt", src, "part.kt");
+
+    bool found = false;
+    for (const auto& ref : r.references) {
+        if (ref.type != ReferenceType::Call) continue;
+        if (ref.referenced_name.find("create") == std::string::npos) continue;
+        found = true;
+        EXPECT_EQ(static_cast<int>(ref.call_arg_count), 1)
+            << "call site passes one argument";
+    }
+    EXPECT_TRUE(found) << "no call ref extracted for create";
+}
+
 // ---------------------------------------------------------------------------
 // Ruby
 // ---------------------------------------------------------------------------

@@ -356,11 +356,25 @@ struct StoredRef {
     uint32_t name_id{};
     ReferenceType type{};
     RefStrength strength{};
-    // Bitfields: three flags share one byte so the struct stays 32 bytes.
+    // Bitfields: the flags and the arity nibble share one byte so the struct
+    // stays 32 bytes.
     bool ambiguous : 1 {};
     bool dead : 1 {};
     bool foreign_receiver : 1 {};
     bool type_position : 1 {};  // see Reference::type_position
+    // Call-site argument count + 1, 4 bits: 0 = unknown/not-a-call,
+    // 1..15 = min(count, 14) + 1. Decode via stored_arg_count().
+    uint8_t arg_count_p1 : 4 {};
+
+    static uint8_t encode_arg_count(uint8_t raw) {
+        if (raw == 255) return 0;
+        return static_cast<uint8_t>((raw > 14 ? 14 : raw) + 1);
+    }
+    /// 255 when unknown, else the (capped-at-14) argument count.
+    uint8_t stored_arg_count() const {
+        return arg_count_p1 == 0 ? 255
+                                 : static_cast<uint8_t>(arg_count_p1 - 1);
+    }
 };
 static_assert(sizeof(StoredRef) == 32, "StoredRef is a per-reference cost");
 

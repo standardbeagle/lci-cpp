@@ -77,6 +77,12 @@ struct Reference {
     // unknown the resolver must not guess a target from name evidence alone
     // (the false self-loop / reach-inflation class).
     bool foreign_receiver{};
+    // Argument count at a CALL site, 255 = unknown/not-a-call. Lets
+    // resolution tell overload delegation (create(x) inside create(x, y))
+    // from genuine recursion; used only as a preference among same-name
+    // candidates, never to drop an edge (default arguments make a smaller
+    // call legal against a bigger signature).
+    uint8_t call_arg_count{255};
     // The reference occurs in a TYPE position (declaration `Foo x;`, the
     // scope of `Foo::bar`, a base-class specifier): resolution considers
     // type-like symbols only. Without this, a class with a declared

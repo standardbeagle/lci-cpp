@@ -177,9 +177,7 @@ void UnifiedExtractor::process_reference_node(TSNode node,
                 node, "function",
                 static_cast<uint32_t>(std::strlen("function")));
             if (!ts_node_is_null(func)) {
-                Reference cref = create_reference(
-                    pick_cpp_reference_leaf(func), ReferenceType::Call,
-                    RefStrength::Tight);
+                Reference cref = create_call_reference(pick_cpp_reference_leaf(func), node);
                 const char* ft = ts_node_type(func);
                 if (ft && (std::string_view(ft) == "qualified_identifier" ||
                            std::string_view(ft) == "scoped_identifier")) {
@@ -392,8 +390,7 @@ void UnifiedExtractor::process_go_reference(TSNode node,
                 handled_nodes_.insert(
                     reinterpret_cast<uintptr_t>(field.id));
                 Reference cref =
-                    create_reference(field, ReferenceType::Call,
-                                     RefStrength::Tight);
+                    create_call_reference(field, node);
                 // Receiver-type qualification (SCIP base case): if the receiver
                 // is a local identifier whose type we know, emit "Type.M" so the
                 // resolver selects the exact method among same-named candidates.
@@ -426,7 +423,7 @@ void UnifiedExtractor::process_go_reference(TSNode node,
             }
         }
         references_.push_back(
-            create_reference(func, ReferenceType::Call, RefStrength::Tight));
+            create_call_reference(func, node));
     } else if (node_type == "selector_expression") {
         TSNode field = ts_node_child_by_field_name(
             node, "field", static_cast<uint32_t>(std::strlen("field")));
@@ -525,8 +522,7 @@ void UnifiedExtractor::process_js_reference(TSNode node,
                 func, "property", static_cast<uint32_t>(std::strlen("property")));
             if (!ts_node_is_null(prop)) {
                 handled_nodes_.insert(reinterpret_cast<uintptr_t>(prop.id));
-                Reference cref = create_reference(prop, ReferenceType::Call,
-                                                  RefStrength::Tight);
+                Reference cref = create_call_reference(prop, node);
                 TSNode obj = ts_node_child_by_field_name(
                     func, "object", static_cast<uint32_t>(6));
                 if (!ts_node_is_null(obj)) {
@@ -549,7 +545,7 @@ void UnifiedExtractor::process_js_reference(TSNode node,
         }
         handled_nodes_.insert(reinterpret_cast<uintptr_t>(func.id));
         references_.push_back(
-            create_reference(func, ReferenceType::Call, RefStrength::Tight));
+            create_call_reference(func, node));
     } else if (node_type == "member_expression") {
         TSNode prop = ts_node_child_by_field_name(
             node, "property",
@@ -644,8 +640,7 @@ void UnifiedExtractor::process_python_reference(TSNode node,
                 func, "attribute", static_cast<uint32_t>(std::strlen("attribute")));
             if (!ts_node_is_null(attr)) {
                 handled_nodes_.insert(reinterpret_cast<uintptr_t>(attr.id));
-                Reference cref = create_reference(attr, ReferenceType::Call,
-                                                  RefStrength::Tight);
+                Reference cref = create_call_reference(attr, node);
                 TSNode obj = ts_node_child_by_field_name(
                     func, "object", static_cast<uint32_t>(6));
                 if (!ts_node_is_null(obj)) {
@@ -672,7 +667,7 @@ void UnifiedExtractor::process_python_reference(TSNode node,
             }
         }
         references_.push_back(
-            create_reference(func, ReferenceType::Call, RefStrength::Tight));
+            create_call_reference(func, node));
     } else if (node_type == "attribute") {
         TSNode attr = ts_node_child_by_field_name(
             node, "attribute",
@@ -760,7 +755,7 @@ void UnifiedExtractor::process_java_reference(TSNode node,
                                                   static_cast<uint32_t>(4));
         if (ts_node_is_null(name)) return;
         Reference cref =
-            create_reference(name, ReferenceType::Call, RefStrength::Tight);
+            create_call_reference(name, node);
         TSNode obj = ts_node_child_by_field_name(node, "object",
                                                  static_cast<uint32_t>(6));
         std::string_view recv = ts_node_is_null(obj) ? std::string_view("this")
@@ -844,7 +839,7 @@ void UnifiedExtractor::process_csharp_reference(TSNode node,
                                                     static_cast<uint32_t>(10));
             if (ts_node_is_null(nm)) return;
             Reference cref =
-                create_reference(nm, ReferenceType::Call, RefStrength::Tight);
+                create_call_reference(nm, node);
             std::string_view recv =
                 ts_node_is_null(ex) ? std::string_view("this") : node_text(ex);
             qualify_and_push(references_, std::move(cref), local_var_types_, recv,
@@ -852,7 +847,7 @@ void UnifiedExtractor::process_csharp_reference(TSNode node,
         } else if (std::string_view(ts_node_type(func)) == "identifier") {
             qualify_and_push(
                 references_,
-                create_reference(func, ReferenceType::Call, RefStrength::Tight),
+                create_call_reference(func, node),
                 local_var_types_, "this", node_text(func));
         }
     }
@@ -938,14 +933,14 @@ void UnifiedExtractor::process_rust_reference(TSNode node,
                                                      static_cast<uint32_t>(5));
             if (ts_node_is_null(fld)) return;
             Reference cref =
-                create_reference(fld, ReferenceType::Call, RefStrength::Tight);
+                create_call_reference(fld, node);
             std::string_view recv =
                 ts_node_is_null(val) ? std::string_view() : node_text(val);
             qualify_and_push(references_, std::move(cref), local_var_types_, recv,
                              node_text(fld));
         } else if (std::string_view(ts_node_type(func)) == "identifier") {
             references_.push_back(
-                create_reference(func, ReferenceType::Call, RefStrength::Tight));
+                create_call_reference(func, node));
         }
     }
 }
@@ -991,7 +986,7 @@ void UnifiedExtractor::process_php_reference(TSNode node,
                                                 static_cast<uint32_t>(4));
         if (ts_node_is_null(nm)) return;
         Reference cref =
-            create_reference(nm, ReferenceType::Call, RefStrength::Tight);
+            create_call_reference(nm, node);
         std::string_view recv =
             ts_node_is_null(obj) ? std::string_view() : node_text(obj);
         qualify_and_push(references_, std::move(cref), local_var_types_, recv,
@@ -1006,7 +1001,7 @@ void UnifiedExtractor::process_php_reference(TSNode node,
                                                static_cast<uint32_t>(4));
         if (ts_node_is_null(nm)) return;
         Reference cref =
-            create_reference(nm, ReferenceType::Call, RefStrength::Tight);
+            create_call_reference(nm, node);
         std::string_view sc =
             ts_node_is_null(scope) ? std::string_view() : node_text(scope);
         if (sc == "self" || sc == "static") {
@@ -1037,7 +1032,7 @@ void UnifiedExtractor::process_php_reference(TSNode node,
         if (!ts_node_is_null(func) &&
             std::string_view(ts_node_type(func)) == "name") {
             references_.push_back(
-                create_reference(func, ReferenceType::Call, RefStrength::Tight));
+                create_call_reference(func, node));
         }
     }
 }
@@ -1112,7 +1107,7 @@ void UnifiedExtractor::process_kotlin_reference(TSNode node,
             TSNode m = ts_node_named_child(suffix, 0);
             if (ts_node_is_null(m)) return;
             Reference cref =
-                create_reference(m, ReferenceType::Call, RefStrength::Tight);
+                create_call_reference(m, node);
             std::string_view rt =
                 ts_node_is_null(recv) ? std::string_view() : node_text(recv);
             qualify_and_push(references_, std::move(cref), local_var_types_, rt,
@@ -1120,7 +1115,7 @@ void UnifiedExtractor::process_kotlin_reference(TSNode node,
         } else if (ft == "simple_identifier") {
             qualify_and_push(
                 references_,
-                create_reference(first, ReferenceType::Call, RefStrength::Tight),
+                create_call_reference(first, node),
                 local_var_types_, "this", node_text(first));
         }
     }
@@ -1167,7 +1162,7 @@ void UnifiedExtractor::process_ruby_reference(TSNode node,
         TSNode recv = ts_node_child_by_field_name(node, "receiver",
                                                   static_cast<uint32_t>(8));
         Reference cref =
-            create_reference(mm, ReferenceType::Call, RefStrength::Tight);
+            create_call_reference(mm, node);
         std::string_view rt =
             ts_node_is_null(recv) ? std::string_view("self") : node_text(recv);
         qualify_and_push(references_, std::move(cref), local_var_types_, rt,
@@ -1236,7 +1231,7 @@ void UnifiedExtractor::process_zig_reference(TSNode node,
                                                      static_cast<uint32_t>(6));
             if (ts_node_is_null(mem)) return;
             Reference cref =
-                create_reference(mem, ReferenceType::Call, RefStrength::Tight);
+                create_call_reference(mem, node);
             if (ts_node_is_null(obj)) {
                 // Decl literal (`try .initCapacity(...)`): the receiver type
                 // is inferred from the annotation, which this extractor does
@@ -1252,9 +1247,67 @@ void UnifiedExtractor::process_zig_reference(TSNode node,
                              node_text(obj), node_text(mem));
         } else if (std::string_view(ts_node_type(func)) == "identifier") {
             references_.push_back(
-                create_reference(func, ReferenceType::Call, RefStrength::Tight));
+                create_call_reference(func, node));
         }
     }
+}
+
+
+// Counts the arguments at a call site: named children of the call node's
+// argument container ("arguments" / "argument_list" / "value_arguments",
+// Kotlin's call_suffix wrapper, Kotlin/Swift-style trailing lambdas), comments
+// excluded. 255 when no container is found — arity then never influences
+// resolution.
+uint8_t UnifiedExtractor::call_argument_count(TSNode call_node) {
+    if (ts_node_is_null(call_node)) return 255;
+    auto count_container = [](TSNode container) -> int {
+        int count = 0;
+        uint32_t n = ts_node_named_child_count(container);
+        for (uint32_t i = 0; i < n; ++i) {
+            TSNode c = ts_node_named_child(container, i);
+            std::string_view t = ts_node_type(c);
+            if (t == "comment" || t == "line_comment" || t == "block_comment")
+                continue;
+            ++count;
+        }
+        return count;
+    };
+    int total = -1;
+    uint32_t n = ts_node_named_child_count(call_node);
+    for (uint32_t i = 0; i < n; ++i) {
+        TSNode c = ts_node_named_child(call_node, i);
+        std::string_view t = ts_node_type(c);
+        if (t == "arguments" || t == "argument_list" ||
+            t == "value_arguments") {
+            total = (total < 0 ? 0 : total) + count_container(c);
+        } else if (t == "call_suffix") {
+            // Kotlin: call_suffix wraps value_arguments and/or a trailing
+            // annotated_lambda (one argument).
+            uint32_t m = ts_node_named_child_count(c);
+            for (uint32_t k = 0; k < m; ++k) {
+                TSNode cc = ts_node_named_child(c, k);
+                std::string_view ct = ts_node_type(cc);
+                if (ct == "value_arguments") {
+                    total = (total < 0 ? 0 : total) + count_container(cc);
+                } else if (ct == "annotated_lambda" ||
+                           ct == "lambda_literal") {
+                    total = (total < 0 ? 0 : total) + 1;
+                }
+            }
+        } else if (t == "annotated_lambda" || t == "lambda_literal") {
+            total = (total < 0 ? 0 : total) + 1;
+        }
+    }
+    if (total < 0) return 255;
+    return static_cast<uint8_t>(total > 254 ? 254 : total);
+}
+
+Reference UnifiedExtractor::create_call_reference(TSNode name_node,
+                                                  TSNode call_node) {
+    Reference ref =
+        create_reference(name_node, ReferenceType::Call, RefStrength::Tight);
+    ref.call_arg_count = call_argument_count(call_node);
+    return ref;
 }
 
 Reference UnifiedExtractor::create_reference(TSNode node,

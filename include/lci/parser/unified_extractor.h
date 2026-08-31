@@ -265,6 +265,11 @@ class UnifiedExtractor {
     void process_zig_reference(TSNode node, std::string_view node_type);
     Reference create_reference(TSNode node, ReferenceType ref_type,
                                RefStrength strength);
+    // Call reference on the callee-name node with the call site's argument
+    // count read from `call_node` (255 when no argument container is found).
+    // Arity lets resolution tell overload delegation from recursion.
+    Reference create_call_reference(TSNode name_node, TSNode call_node);
+    static uint8_t call_argument_count(TSNode call_node);
 
     // --- Complexity tracking ---
     void count_complexity_point(TSNode node, std::string_view node_type);

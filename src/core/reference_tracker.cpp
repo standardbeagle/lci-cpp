@@ -79,6 +79,7 @@ Reference ReferenceTracker::Snapshot::materialize_ref(
     out.ambiguous = r.ambiguous;
     out.foreign_receiver = r.foreign_receiver;
     out.type_position = r.type_position;
+    out.call_arg_count = r.stored_arg_count();
     if (r.name_id < ref_names.size()) {
         out.referenced_name = ref_names[r.name_id];
     }
@@ -350,6 +351,8 @@ std::vector<EnhancedSymbol> ReferenceTracker::process_file(
                 r.ambiguous = ref.ambiguous;
                 r.foreign_receiver = ref.foreign_receiver;
                 r.type_position = ref.type_position;
+                r.arg_count_p1 = StoredRef::encode_arg_count(
+                    ref.call_arg_count) & 0xF;
                 r.name_id = intern_ref_name(s, ref.referenced_name);
                 vec.push_back(r);
             }
@@ -995,6 +998,12 @@ SymbolID ReferenceTracker::resolve_reference_target(
     // Type-position refs resolve against a different candidate set, so they
     // must not share cache entries with same-named value/call refs.
     if (ref.type_position) name_hash ^= 0xd6e8feb86659fd93ULL;
+    // Arity-preferring resolution: a known call-site argument count changes
+    // the answer among same-name overloads, so it gets its own cache slot.
+    const uint8_t call_args = ref.stored_arg_count();
+    if (call_args != 255) {
+        name_hash ^= 0xa0761d6478bd642fULL * (static_cast<uint64_t>(call_args) + 1);
+    }
     std::pair<FileID, uint64_t> cache_key{owner_fid, name_hash};
 
     if (auto it = reference_cache_.find(cache_key);
@@ -1015,13 +1024,28 @@ SymbolID ReferenceTracker::resolve_reference_target(
         recv_type = std::string_view(full_name).substr(0, dot);
         name = std::string_view(full_name).substr(dot + 1);
         if (!recv_type.empty() && !name.empty()) {
+            // Among the type's same-named methods (overloads), a known
+            // call-site argument count picks the exact-arity sibling;
+            // without one — or with no exact match (default/variadic
+            // parameters) — the first receiver-type match stands. Arity
+            // PREFERS, never drops (okhttp: create(x) inside create(x, y)
+            // collapsed into false recursion).
+            SymbolID typed_first = 0;
             for (SymbolID id : s.symbols.get_symbols_by_name(name)) {
                 if (const auto* sym = s.symbols.get(id)) {
-                    if (symbol_matches_receiver_type(*sym, recv_type)) {
+                    if (!symbol_matches_receiver_type(*sym, recv_type))
+                        continue;
+                    if (call_args != 255 &&
+                        sym->parameter_count == call_args) {
                         reference_cache_[cache_key] = id;
                         return id;
                     }
+                    if (typed_first == 0) typed_first = id;
                 }
+            }
+            if (typed_first != 0) {
+                reference_cache_[cache_key] = typed_first;
+                return typed_first;
             }
             // The receiver's type is KNOWN and no method of that type has
             // this name (a stdlib/extension call the index cannot see, or an
@@ -1048,7 +1072,7 @@ SymbolID ReferenceTracker::resolve_reference_target(
         // (method calls require `self.`): `trim_line_terminator(...)` inside
         // StandardImpl::trim_line_terminator is the same-named FREE function,
         // and picking the method reported fake recursion (ripgrep audit).
-        SymbolID first_match = 0, other_match = 0;
+        SymbolID first_match = 0, other_match = 0, exact_arity = 0;
         for (SymbolID id : file_symbol_ids) {
             if (const auto* sym = s.symbols.get(id)) {
                 if (sym->symbol.name != name) continue;
@@ -1058,9 +1082,18 @@ SymbolID ReferenceTracker::resolve_reference_target(
                 if (first_match == 0) first_match = id;
                 if (id != ref.source_symbol && other_match == 0)
                     other_match = id;
-                if (first_match != 0 && other_match != 0) break;
+                if (call_args != 255 && exact_arity == 0 &&
+                    sym->parameter_count == call_args) {
+                    exact_arity = id;
+                }
             }
         }
+        // A known argument count picks the exact-arity overload; a bare call
+        // matching a same-named sibling's arity but not the enclosing
+        // function's is delegation, not recursion (okhttp audit: 6/8
+        // recursion entries were this). No exact match keeps first_match —
+        // default/variadic parameters make a smaller call legal.
+        if (exact_arity != 0) first_match = exact_arity;
         bool rust_method_self_shadow = false;
         if (rust_owner && first_match == ref.source_symbol) {
             const auto* src = s.symbols.get(ref.source_symbol);
