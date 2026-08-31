@@ -16,6 +16,7 @@ ReferenceTracker::LangFamily language_family_for_path(std::string_view path);
 bool is_low_quality_path(const PathAttrRegistry& registry,
                          std::string_view path);
 uint64_t dir_hash_of_path(std::string_view path);
+std::string dir_base_of_path(std::string_view path);
 std::string file_stem_of_path(std::string_view path);
 }  // namespace
 
@@ -318,7 +319,8 @@ std::vector<EnhancedSymbol> ReferenceTracker::process_file(
 
     file_resolution_meta_[file_id] = FileResolutionMeta{
         language_family_for_path(path), is_low_quality_path(attr_registry(), path),
-        dir_hash_of_path(path), file_stem_of_path(path)};
+        dir_hash_of_path(path), dir_base_of_path(path),
+        file_stem_of_path(path)};
 
     write_snapshot([&](Snapshot& s) {
         s.scopes_by_file[file_id].assign(scopes.begin(), scopes.end());
@@ -976,6 +978,15 @@ uint64_t dir_hash_of_path(std::string_view path) {
     return h;
 }
 
+std::string dir_base_of_path(std::string_view path) {
+    auto sl = path.find_last_of("/\\");
+    if (sl == std::string_view::npos) return {};
+    auto dir = path.substr(0, sl);
+    auto sl2 = dir.find_last_of("/\\");
+    return std::string(sl2 == std::string_view::npos ? dir
+                                                     : dir.substr(sl2 + 1));
+}
+
 std::string file_stem_of_path(std::string_view path) {
     if (auto sl = path.find_last_of("/\\"); sl != std::string_view::npos)
         path = path.substr(sl + 1);
@@ -1077,12 +1088,23 @@ SymbolID ReferenceTracker::resolve_reference_target(
                 zit->second.language_family == LangFamily::kZig) {
                 zig_owner = true;
             }
+            bool go_owner = false;
+            if (auto fmit = file_resolution_meta_.find(owner_fid);
+                fmit != file_resolution_meta_.end() &&
+                fmit->second.language_family == LangFamily::kGo) {
+                go_owner = true;
+            }
             auto stem_matches = [&](const EnhancedSymbol& sym,
                                     std::string_view rtype) {
-                if (!zig_owner) return false;
                 auto mit = file_resolution_meta_.find(sym.symbol.file_id);
-                return mit != file_resolution_meta_.end() &&
-                       mit->second.stem == rtype;
+                if (mit == file_resolution_meta_.end()) return false;
+                // Zig: file IS the namespace. Go: package name is the
+                // directory basename — pkg.Func resolves into that dir.
+                if (zig_owner && mit->second.stem == rtype) return true;
+                if (go_owner && mit->second.dir_base == rtype &&
+                    mit->second.language_family == LangFamily::kGo)
+                    return true;
+                return false;
             };
             // Receiver-type frontier: the named type first, then types it
             // EMBEDS (Go promotion: `type PB struct { core.App }` puts App's

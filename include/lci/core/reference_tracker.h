@@ -618,6 +618,10 @@ class ReferenceTracker {
         /// Hash of the parent directory — package-proximity tiebreak for
         /// ambiguous bare names (Go package = directory).
         uint64_t dir_hash{0};
+        /// Parent directory basename — Go's package name is (almost
+        /// always) its directory name, so a qualified call pkg.Func may
+        /// resolve into files whose dir basename is pkg.
+        std::string dir_base;
         /// File basename without extension. Zig files ARE namespaces
         /// (`const m = @import("x.zig"); m.f()`), so a qualified receiver
         /// may name the defining file — matched against this stem.

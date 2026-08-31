@@ -686,12 +686,13 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
         if (detailed_mode != "modules" && detailed_mode != "layers" &&
             detailed_mode != "features" && detailed_mode != "terms" &&
             detailed_mode != "errors" && detailed_mode != "resources" &&
-            detailed_mode != "clones" && detailed_mode != "deadcode") {
+            detailed_mode != "clones" && detailed_mode != "deadcode" &&
+            detailed_mode != "security") {
             return make_error_response(
                 "code_insight",
                 "invalid detailed analysis '" + detailed_mode +
                 "', must be one of: modules, layers, features, terms, "
-                "errors, resources, clones, deadcode");
+                "errors, resources, clones, deadcode, security");
         }
 
         if (detailed_mode == "clones") {
@@ -734,6 +735,159 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                            static_cast<int>(rep.classes.size())
                     << " smaller classes (raise max_results)\n";
             }
+            std::string body = out.str();
+            if (!body.empty() && body.back() == '\n') body.pop_back();
+            return ToolResult{std::move(body), false};
+        }
+
+        if (detailed_mode == "security") {
+            // Dangerous-sink CANDIDATES ranked by reachability from entry
+            // points (fallow parity). Name evidence over the raw callee
+            // spellings (sinks are usually external and unresolved), ranked
+            // by forward BFS distance from mains/config entry points.
+            // Candidates, not verdicts: a reachable exec with validated
+            // input is fine — the ranking says where to LOOK first.
+            struct Sink {
+                std::string_view needle;  // matched against callee spelling
+                std::string_view category;
+                bool prefix;  // prefix match vs exact bare-name match
+            };
+            static constexpr Sink kSinks[] = {
+                {"exec.Command", "process-exec", true},
+                {"os.StartProcess", "process-exec", true},
+                {"syscall.Exec", "process-exec", true},
+                {"child_process", "process-exec", true},
+                {"execSync", "process-exec", true},
+                {"spawnSync", "process-exec", false},
+                {"spawn", "process-exec", false},
+                {"popen", "process-exec", true},
+                {"proc_open", "process-exec", false},
+                {"shell_exec", "process-exec", false},
+                {"passthru", "process-exec", false},
+                {"system", "process-exec", false},
+                {"subprocess.run", "process-exec", true},
+                {"subprocess.Popen", "process-exec", true},
+                {"subprocess.call", "process-exec", true},
+                {"os.system", "process-exec", true},
+                {"Runtime.getRuntime", "process-exec", true},
+                {"ProcessBuilder", "process-exec", false},
+                {"eval", "code-eval", false},
+                {"exec", "code-eval", false},
+                {"unserialize", "deserialization", false},
+                {"pickle.loads", "deserialization", true},
+                {"pickle.load", "deserialization", true},
+                {"Marshal.load", "deserialization", true},
+                {"yaml.load", "deserialization", true},
+                {"readObject", "deserialization", false},
+            };
+            auto sink_of = [&](std::string_view callee)
+                -> const Sink* {
+                std::string_view bare = callee;
+                if (auto dot = bare.rfind('.');
+                    dot != std::string_view::npos)
+                    bare = bare.substr(dot + 1);
+                for (const auto& sk : kSinks) {
+                    if (sk.prefix) {
+                        if (callee.size() >= sk.needle.size() &&
+                            callee.substr(0, sk.needle.size()) == sk.needle)
+                            return &sk;
+                    } else if (bare == sk.needle) {
+                        return &sk;
+                    }
+                }
+                return nullptr;
+            };
+
+            const auto& ref = indexer.ref_tracker();
+            auto rt_snap = ref.pin();
+
+            // Entry set + forward BFS depth over resolved call edges.
+            absl::flat_hash_set<std::string_view> entry_names;
+            entry_names.insert("main");
+            for (const auto& ep : indexer.config().insight.entry_points)
+                entry_names.insert(ep);
+            absl::flat_hash_map<SymbolID, int> depth;
+            std::vector<SymbolID> frontier;
+            for (const auto& f : files_data) {
+                for (const auto* sym : f.symbols) {
+                    if (sym == nullptr) continue;
+                    if (entry_names.contains(sym->symbol.name)) {
+                        depth.emplace(sym->id, 0);
+                        frontier.push_back(sym->id);
+                    }
+                }
+            }
+            for (size_t qi = 0; qi < frontier.size(); ++qi) {
+                SymbolID u = frontier[qi];
+                int du = depth[u];
+                for (SymbolID v : ref.get_callee_symbols(u)) {
+                    if (depth.emplace(v, du + 1).second)
+                        frontier.push_back(v);
+                }
+            }
+
+            struct Candidate {
+                std::string category;
+                std::string sink;
+                std::string symbol;
+                std::string location;
+                int depth;  // -1 = unreachable from entry points
+            };
+            std::vector<Candidate> cands;
+            for (const auto& f : files_data) {
+                std::string rel = git::normalize_rel(f.path, project_root);
+                for (const auto* sym : f.symbols) {
+                    if (sym == nullptr || sym->symbol.test_scaffold) continue;
+                    auto t = sym->symbol.type;
+                    if (t != SymbolType::Function && t != SymbolType::Method)
+                        continue;
+                    for (const auto& r : rt_snap->get_symbol_references(
+                             sym->id, "outgoing")) {
+                        if (r.type != ReferenceType::Call) continue;
+                        const Sink* sk = sink_of(r.referenced_name);
+                        if (sk == nullptr) continue;
+                        auto dit = depth.find(sym->id);
+                        cands.push_back(
+                            {std::string(sk->category), r.referenced_name,
+                             sym->symbol.name,
+                             rel + ":" + std::to_string(r.line),
+                             dit == depth.end() ? -1 : dit->second});
+                    }
+                }
+            }
+            std::sort(cands.begin(), cands.end(),
+                      [](const Candidate& a, const Candidate& b) {
+                          bool ra = a.depth >= 0, rb = b.depth >= 0;
+                          if (ra != rb) return ra;
+                          if (a.depth != b.depth) return a.depth < b.depth;
+                          if (a.location != b.location)
+                              return a.location < b.location;
+                          return a.sink < b.sink;
+                      });
+
+            int max_results = params.value("max_results", 30);
+            out << "LCF/1.0\nmode=detailed\nattributes=" << scope.label
+                << "\nsub=security\ntier=2\ntokens=100\n---\n";
+            out << "== SECURITY CANDIDATES ==\n"
+                << "count=" << cands.size()
+                << " (name-evidence sinks ranked by call-graph distance "
+                   "from entry points; candidates to review, not "
+                   "verdicts)\n";
+            size_t lim =
+                std::min(cands.size(), static_cast<size_t>(max_results));
+            for (size_t i = 0; i < lim; ++i) {
+                const auto& c = cands[i];
+                out << "  " << c.category << " " << c.sink << " in "
+                    << c.symbol << " (" << c.location << ") ";
+                if (c.depth >= 0)
+                    out << "entry-reachable depth=" << c.depth;
+                else
+                    out << "unreachable-from-entries";
+                out << "\n";
+            }
+            if (cands.size() > lim)
+                out << "  ... and " << cands.size() - lim
+                    << " more (raise max_results)\n";
             std::string body = out.str();
             if (!body.empty() && body.back() == '\n') body.pop_back();
             return ToolResult{std::move(body), false};

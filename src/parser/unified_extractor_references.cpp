@@ -414,9 +414,19 @@ void UnifiedExtractor::process_go_reference(TSNode node,
                     // expression): the receiver is not the current function's
                     // receiver (that one is in the local type env), so the
                     // call cannot be direct recursion and must not be guessed
-                    // from the bare name.
-                    if (!qualified && !is_self_receiver(node_text(operand)))
+                    // from the bare name. A plain-identifier operand is kept
+                    // as a QUALIFIER (pkg.Func): resolution can match it
+                    // against Go's package-directory name, and security
+                    // sink matching needs the full spelling (exec.Command).
+                    if (!qualified && !is_self_receiver(node_text(operand))) {
                         cref.foreign_receiver = true;
+                        if (std::string_view(ts_node_type(operand)) ==
+                            "identifier") {
+                            cref.referenced_name =
+                                std::string(node_text(operand)) + "." +
+                                std::string(node_text(field));
+                        }
+                    }
                 }
                 references_.push_back(std::move(cref));
                 return;
