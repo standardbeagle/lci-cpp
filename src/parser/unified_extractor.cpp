@@ -203,6 +203,7 @@ void UnifiedExtractor::reset() {
     handled_nodes_.clear();
     local_var_types_.clear();
     zig_module_aliases_.clear();
+    kotlin_property_types_.clear();
 }
 
 void UnifiedExtractor::extract(TSTree* tree) {

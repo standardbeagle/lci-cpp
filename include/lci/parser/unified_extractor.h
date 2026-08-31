@@ -376,6 +376,10 @@ class UnifiedExtractor {
     // to file stem "x". File-scoped (not cleared per function): a call
     // m.func() qualifies as "x.func" so resolution has import evidence.
     absl::flat_hash_map<std::string, std::string> zig_module_aliases_;
+    // Kotlin class-property types (body properties + primary-constructor
+    // parameters). Class-scoped: survives across the class's methods, unlike
+    // local_var_types_ (cleared per function). Cleared on class entry/file.
+    absl::flat_hash_map<std::string, std::string> kotlin_property_types_;
     void seed_go_local_types(TSNode fn_node, bool is_method);
     void record_go_local_var(TSNode decl_node);
     // Nearest enclosing class/struct scope name (for self/this typing in

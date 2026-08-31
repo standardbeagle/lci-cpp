@@ -1040,6 +1040,38 @@ void UnifiedExtractor::process_php_reference(TSNode node,
 void UnifiedExtractor::process_kotlin_reference(TSNode node,
                                                 std::string_view node_type) {
     // Kotlin's grammar is largely fieldless; navigate by ordered children.
+    if (node_type == "class_declaration") {
+        // Fresh property env per class; harvest primary-constructor
+        // parameters (`class Pump(private val engine: Engine)`) — they are
+        // properties whose receivers must qualify inside every method.
+        kotlin_property_types_.clear();
+        uint32_t n = ts_node_named_child_count(node);
+        for (uint32_t i = 0; i < n; ++i) {
+            TSNode c = ts_node_named_child(node, i);
+            if (std::string_view(ts_node_type(c)) != "primary_constructor")
+                continue;
+            uint32_t pc = ts_node_named_child_count(c);
+            for (uint32_t k = 0; k < pc; ++k) {
+                TSNode p = ts_node_named_child(c, k);
+                if (std::string_view(ts_node_type(p)) != "class_parameter")
+                    continue;
+                std::string_view pname;
+                std::string ptype;
+                uint32_t pn = ts_node_named_child_count(p);
+                for (uint32_t j = 0; j < pn; ++j) {
+                    TSNode cc = ts_node_named_child(p, j);
+                    std::string_view ct(ts_node_type(cc));
+                    if (ct == "simple_identifier" && pname.empty())
+                        pname = node_text(cc);
+                    else if (ct == "user_type")
+                        ptype = js_bare_type(node_text(cc));
+                }
+                if (!pname.empty() && !ptype.empty())
+                    kotlin_property_types_[std::string(pname)] = ptype;
+            }
+        }
+        return;
+    }
     if (node_type == "function_declaration") {
         local_var_types_.clear();
         std::string cls = enclosing_class_name();
@@ -1083,8 +1115,11 @@ void UnifiedExtractor::process_kotlin_reference(TSNode node,
                 }
             }
         }
-        if (!name.empty() && !type.empty())
+        if (!name.empty() && !type.empty()) {
             local_var_types_[std::string(name)] = type;
+            // Class-body property: keep the type across the class's methods.
+            kotlin_property_types_[std::string(name)] = type;
+        }
         return;
     }
 
@@ -1110,6 +1145,18 @@ void UnifiedExtractor::process_kotlin_reference(TSNode node,
                 create_call_reference(m, node);
             std::string_view rt =
                 ts_node_is_null(recv) ? std::string_view() : node_text(recv);
+            // Class-property receiver: the type survives across methods in
+            // kotlin_property_types_ (local_var_types_ clears per function).
+            if (!rt.empty() && !local_var_types_.contains(std::string(rt))) {
+                auto pit = kotlin_property_types_.find(std::string(rt));
+                if (pit != kotlin_property_types_.end() &&
+                    !pit->second.empty()) {
+                    cref.referenced_name =
+                        pit->second + "." + std::string(node_text(m));
+                    references_.push_back(std::move(cref));
+                    return;
+                }
+            }
             qualify_and_push(references_, std::move(cref), local_var_types_, rt,
                              node_text(m));
         } else if (ft == "simple_identifier") {
