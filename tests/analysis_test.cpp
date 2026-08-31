@@ -47,6 +47,23 @@ FileSymbolData make_file(std::string path,
 // CouplingAnalyzer - is_code_file
 // ===========================================================================
 
+// zls audit: detailed sub=modules reported total=0 over 11 dirs / 1264
+// symbols, and statistics leaked an impossible `cohesion avg=0.00 min=1.00`.
+// Root cause: .zig (and .kts/.cc) missing from is_code_file, so every file
+// was filtered and min_cohesion kept its 1.0 initializer over zero packages.
+TEST(CouplingAnalyzer, IsCodeFileZigKtsCcTrue) {
+    EXPECT_TRUE(CouplingAnalyzer::is_code_file("src/analysis.zig"));
+    EXPECT_TRUE(CouplingAnalyzer::is_code_file("build.gradle.kts"));
+    EXPECT_TRUE(CouplingAnalyzer::is_code_file("src/foo.cc"));
+}
+
+TEST(CouplingAnalyzer, NoPackagesReportsZeroMinCohesion) {
+    std::vector<FileSymbolData> files;  // nothing analyzable
+    auto r = CouplingAnalyzer().analyze(files, "", nullptr);
+    EXPECT_EQ(r.cohesion.min_cohesion, 0.0)
+        << "min over an empty population must not report the 1.0 initializer";
+}
+
 TEST(CouplingAnalyzer, IsCodeFileGoTrue) {
     EXPECT_TRUE(CouplingAnalyzer::is_code_file("main.go"));
 }
