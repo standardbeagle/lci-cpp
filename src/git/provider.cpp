@@ -122,8 +122,8 @@ bool Provider::get_commit_files(std::string_view commit_ref,
     if (!is_safe_ref(ref)) return false;
 
     std::string output;
-    if (!run_git({"diff-tree", "--no-commit-id", "--name-status", "-z", "-r",
-                  ref, "--"},
+    if (!run_git({"diff-tree", "--root", "--no-commit-id", "--name-status",
+                  "-z", "-r", ref, "--"},
                  output)) {
         return false;
     }
@@ -241,8 +241,8 @@ bool Provider::get_changed_scope(const AnalysisParams& params,
             std::string ref = params.base_ref;
             if (ref.empty()) ref = "HEAD";
             if (!is_safe_ref(ref)) return false;
-            args = {"diff-tree", "--no-commit-id", "-U0", "--no-renames",
-                    "-r", "-p", ref, "--"};
+            args = {"diff-tree", "--root", "--no-commit-id", "-U0",
+                    "--no-renames", "-r", "-p", ref, "--"};
             break;
         }
         case AnalysisScope::Range: {
