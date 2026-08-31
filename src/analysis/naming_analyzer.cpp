@@ -93,6 +93,13 @@ const absl::flat_hash_set<std::string>& common_words() {
         // certification-round FPs: HTTP/domain terms and idiomatic
         // abbreviations flagged on chi/pocketbase
         "auth", "charset", "erd", "addr", "cutset", "stringified",
+        // 2026-08-30 sweep FPs — platform/runtime terms (okhttp), language
+        // keywords (Zig comptime), web/templating vocabulary (sinatra), and
+        // unix command names read as typos of nearby words (uname -> name).
+        "jvm", "jre", "jdk", "localhost", "oob", "bom", "idn", "punycode",
+        "canonical", "canonicalize", "loggable", "comptime", "etag", "scss",
+        "sass", "csp", "haml", "yajl", "uname", "nano", "nanos", "dont",
+        "webhook", "middleware", "eval", "lint", "repl", "stdlib",
     };
     return w;
 }
@@ -464,6 +471,12 @@ NamingReport NamingAnalyzer::analyze(
             auto it = token_freq.find(t);
             if (it != token_freq.end() && it->second > 2) continue;
             auto fix = find_correction(t);
+            // A plural of known vocabulary is not a typo of its singular
+            // (decls -> decl, nanos -> nano): the s-suffix IS the edit.
+            if (!fix.empty() &&
+                (t == std::string(fix) + "s" || std::string(fix) == t + "s")) {
+                continue;
+            }
             if (!fix.empty()) {
                 odd_term = t;
                 reason = "misspelling";
