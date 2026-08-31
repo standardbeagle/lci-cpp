@@ -287,8 +287,11 @@ CodebaseIntelligenceResponse CodebaseIntelligenceEngine::build_detailed(
     std::string analysis_type = params.analysis.value_or("modules");
 
     if (analysis_type == "modules") {
+        // Graph-based when a callee lookup exists (Louvain communities as
+        // modules, dirs as labels); directory grouping only as the
+        // no-live-index fallback.
         response.module_analysis =
-            ModuleAnalyzer().analyze(files, project_root);
+            ModuleAnalyzer().analyze_graph(files, project_root, callees_of);
     } else if (analysis_type == "layers") {
         response.layer_analysis = LayerAnalyzer().analyze(files, project_root);
     } else if (analysis_type == "features") {

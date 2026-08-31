@@ -557,6 +557,73 @@ TEST(ModuleAnalyzer, NoFabricatedCouplingOrArchScore) {
         << "architectural_score was a 0.8 constant";
 }
 
+// Graph-based module generation (user decision 2026-08-29: Louvain
+// communities ARE the modules; directories are labels; divergence between
+// them is the finding). Two call-graph triangles joined by one bridge edge:
+// community A = {a1, a2 in x/, a3 in y/}, community B = {b1, b2, b3 in y/}.
+TEST(ModuleAnalyzer, GraphModulesComeFromCommunities) {
+    auto a1 = make_sym("a1", SymbolType::Function, 1, 1);
+    auto a2 = make_sym("a2", SymbolType::Function, 2, 1);
+    auto a3 = make_sym("a3", SymbolType::Function, 3, 2);
+    auto b1 = make_sym("b1", SymbolType::Function, 4, 2);
+    auto b2 = make_sym("b2", SymbolType::Function, 5, 2);
+    auto b3 = make_sym("b3", SymbolType::Function, 6, 2);
+    std::vector<FileSymbolData> files = {
+        make_file("x/one.go", {&a1, &a2}),
+        make_file("y/two.go", {&a3, &b1, &b2, &b3}),
+    };
+    absl::flat_hash_map<SymbolID, std::vector<SymbolID>> edges = {
+        {1, {2, 3}}, {2, {3}}, {3, {4}},  // triangle A + bridge to B
+        {4, {5, 6}}, {5, {6}}, {6, {}},   // triangle B
+    };
+    auto callees = [&](SymbolID id) -> std::vector<SymbolID> {
+        auto it = edges.find(id);
+        return it == edges.end() ? std::vector<SymbolID>{} : it->second;
+    };
+
+    auto r = ModuleAnalyzer().analyze_graph(files, "", callees);
+    EXPECT_EQ(r.detection_strategy, "call_graph_louvain");
+    ASSERT_EQ(r.modules.size(), 2u);
+    EXPECT_GT(r.modularity, 0.0);
+
+    // Modules are named by majority directory; community A spans x/ and y/.
+    const ModuleBoundary* mx = nullptr;
+    const ModuleBoundary* my = nullptr;
+    for (const auto& m : r.modules) {
+        if (m.name == "x") mx = &m;
+        if (m.name == "y") my = &m;
+    }
+    ASSERT_NE(mx, nullptr) << "community A labeled by its majority dir x";
+    ASSERT_NE(my, nullptr) << "community B labeled y";
+    EXPECT_EQ(mx->function_count, 3);
+    EXPECT_LT(mx->dir_purity, 1.0);
+    ASSERT_EQ(mx->spanned_dirs.size(), 2u);
+    EXPECT_EQ(mx->spanned_dirs[0], "x");  // majority first
+    EXPECT_EQ(my->dir_purity, 1.0);
+
+    // Cohesion is the internal edge share: each triangle keeps 3 of its 4
+    // incident edges internal (the bridge is shared).
+    EXPECT_GT(mx->cohesion_score, 0.5);
+    EXPECT_LE(mx->cohesion_score, 1.0);
+    EXPECT_EQ(mx->external_deps, 1);
+    // Martin instability: A only calls out (efferent 1, afferent 0) -> 1.0;
+    // B is only called (efferent 0, afferent 1) -> 0.0.
+    EXPECT_DOUBLE_EQ(mx->stability, 1.0);
+    EXPECT_DOUBLE_EQ(my->stability, 0.0);
+
+    // Directory y hosts members of BOTH communities -> divergence signal.
+    ASSERT_EQ(r.split_dirs.size(), 1u);
+    EXPECT_EQ(r.split_dirs[0], "y");
+}
+
+TEST(ModuleAnalyzer, GraphModulesFallBackToDirsWithoutGraph) {
+    auto s1 = make_sym("A", SymbolType::Function, 1, 1);
+    std::vector<FileSymbolData> files = {make_file("pkg/a/x.go", {&s1})};
+    auto r = ModuleAnalyzer().analyze_graph(files, "", nullptr);
+    EXPECT_EQ(r.detection_strategy, "directory_structure");
+    EXPECT_EQ(r.modularity, -1.0);
+}
+
 // ===========================================================================
 // ModuleAnalyzer - classify_module_by_path
 // ===========================================================================

@@ -333,7 +333,8 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
     // analyzers, mirroring Go's Server.buildOverview/Statistics path.
     struct EngineData {
         CodebaseIntelligenceEngine::Result result;
-        ModuleAnalysis modules;  // repository map + == MODULES == (same naming)
+        ModuleAnalysis modules;        // directory map -> == REPOSITORY MAP ==
+        ModuleAnalysis graph_modules;  // Louvain communities -> == MODULES ==
         PuritySummary purity;
         CouplingAnalyzer::CouplingResult coupling;
         QualityMetrics quality;
@@ -359,6 +360,13 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                                   static_cast<int>(files_data.size()),
                                   symbol_count);
         d.modules = ModuleAnalyzer().analyze(files_data, project_root);
+        {
+            const auto& ref = indexer.ref_tracker();
+            d.graph_modules = ModuleAnalyzer().analyze_graph(
+                files_data, project_root, [&ref](SymbolID id) {
+                    return ref.get_callee_symbols(id);
+                });
+        }
         absl::flat_hash_set<std::string_view> scope_paths;
         scope_paths.reserve(files_data.size());
         for (const auto& fd : files_data) scope_paths.insert(fd.path);
@@ -371,21 +379,9 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
         // constant inherited from Go) with the real per-package coupling
         // from CouplingAnalyzer. Both key modules by getPackageName, so the
         // names line up. Recompute the aggregate average from real values.
-        {
-            double sum = 0.0;
-            int known = 0;
-            for (auto& m : d.modules.modules) {
-                auto it = d.coupling.coupling.module_coupling.find(m.name);
-                if (it != d.coupling.coupling.module_coupling.end()) {
-                    m.coupling_score = it->second;
-                    sum += m.coupling_score;
-                    ++known;
-                }
-                // else: stays -1 (unknown) — never a made-up number.
-            }
-            d.modules.metrics.average_coupling =
-                known > 0 ? sum / static_cast<double>(known) : -1.0;
-        }
+        // == MODULES == now renders graph_modules (real per-community edge
+        // metrics); the directory grouping in d.modules feeds only the
+        // repository map, which prints no coupling.
         if (d.result.response.health_dashboard) {
             d.quality = HealthAnalyzer::calculate_quality_from_complexity(
                 d.result.response.health_dashboard->complexity);
@@ -513,7 +509,7 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
             emit_cycles(out, sig.cycles, sig.recursion);
             emit_layer_violations(out, sig.layer_violations);
         }
-        emit_modules(out, d.modules);
+        emit_modules(out, d.graph_modules);
         emit_dependencies(out, compute_import_dependencies(
                                    indexer, files_data, project_root));
         if (hd) {
@@ -916,25 +912,54 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
             << "\ntier=2\ntokens=100\n---\n";
         if (detailed_mode == "modules") {
             const auto& r = *resp.module_analysis;
+            const bool graph = r.detection_strategy == "call_graph_louvain";
             out << "== MODULES ==\n"
-                << "total=" << r.metrics.total_modules
-                << " cohesion=" << fmt2(r.metrics.average_cohesion)
+                << "total=" << r.metrics.total_modules;
+            if (graph) out << " modularity=" << fmt2(r.modularity);
+            out << " cohesion=" << fmt2(r.metrics.average_cohesion)
                 << " coupling="
                 << (r.metrics.average_coupling < 0.0
                         ? std::string("n/a")
                         : fmt2(r.metrics.average_coupling))
                 << "\n"
-                << "strategy=" << r.detection_strategy << "\n";
+                << "strategy=" << r.detection_strategy;
+            if (graph) out << " (modules = call-graph communities; name = majority dir)";
+            out << "\n";
             size_t shown = std::min(r.modules.size(), size_t{20});
             for (size_t i = 0; i < shown; ++i) {
                 const auto& m = r.modules[i];
                 out << "  " << m.name << ": type=" << m.type
                     << " files=" << m.file_count
                     << " funcs=" << m.function_count
-                    << " cohesion=" << fmt2(m.cohesion_score) << "\n";
+                    << " cohesion=" << fmt2(m.cohesion_score);
+                if (graph) {
+                    out << " coupling=" << fmt2(m.coupling_score)
+                        << " deps=" << m.external_deps
+                        << " instability=" << fmt2(m.stability);
+                    if (m.dir_purity < 1.0 && m.spanned_dirs.size() > 1) {
+                        out << " spans=";
+                        size_t dl = std::min(m.spanned_dirs.size(), size_t{3});
+                        for (size_t d = 0; d < dl; ++d) {
+                            if (d) out << ",";
+                            out << m.spanned_dirs[d];
+                        }
+                        if (m.spanned_dirs.size() > dl)
+                            out << ",+" << (m.spanned_dirs.size() - dl);
+                        out << " purity=" << fmt2(m.dir_purity);
+                    }
+                }
+                out << "\n";
             }
             if (r.modules.size() > shown)
                 out << "  ... and " << (r.modules.size() - shown) << " more\n";
+            if (graph && !r.split_dirs.empty()) {
+                out << "split_dirs (symbols split across communities):";
+                size_t sl = std::min(r.split_dirs.size(), size_t{8});
+                for (size_t i = 0; i < sl; ++i) out << " " << r.split_dirs[i];
+                if (r.split_dirs.size() > sl)
+                    out << " +" << (r.split_dirs.size() - sl);
+                out << "\n";
+            }
         } else if (detailed_mode == "layers") {
             const auto& r = *resp.layer_analysis;
             out << "== LAYERS ==\n"

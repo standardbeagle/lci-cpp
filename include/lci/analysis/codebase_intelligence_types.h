@@ -382,6 +382,15 @@ struct ModuleBoundary {
     double stability{};
     int file_count{};
     int function_count{};
+    // Graph-based modules (Louvain communities; directories are labels):
+    // every directory this community's members live in, majority first;
+    // dir_purity = share of members in the majority directory; external_deps
+    // = number of OTHER modules this one has call edges to. A community
+    // spanning directories (dir_purity < 1) is an architecture finding, not
+    // an error.
+    std::vector<std::string> spanned_dirs;
+    double dir_purity{1.0};
+    int external_deps{};
     std::vector<std::string> file_ids;
     std::vector<std::string> function_ids;
     std::vector<std::string> class_ids;
@@ -478,6 +487,12 @@ struct ModuleAnalysisMetrics {
 struct ModuleAnalysis {
     std::vector<ModuleBoundary> modules;
     std::string detection_strategy;
+    // Graph-based modules only: directories whose symbols split across
+    // several communities (each with a significant share) — the divergence
+    // signal between the directory layout and the real call structure.
+    std::vector<std::string> split_dirs;
+    // Louvain modularity Q of the partition, -1 when not graph-based.
+    double modularity{-1.0};
     absl::flat_hash_map<std::string, int> module_types;
     absl::flat_hash_map<std::string, std::vector<std::string>> layer_distribution;
     std::vector<Violation> violations;

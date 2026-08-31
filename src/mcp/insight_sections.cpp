@@ -167,26 +167,66 @@ void emit_health(std::ostringstream& out, const HealthDashboard& hd,
 // name_cohesion so the two aggregations are never read as one number.
 void emit_modules(std::ostringstream& out, const ModuleAnalysis& ma) {
     if (ma.modules.empty()) return;
-    // basis=symbol_files: module file counts cover symbol-bearing files only
-    // (the analyzer's input), so they can sit below STRUCTURE's full file
-    // census (pocketbase core: 123 vs 134). Declared, not silent.
+    const bool graph = ma.detection_strategy == "call_graph_louvain";
     out << "== MODULES ==\n"
-        << "total=" << ma.metrics.total_modules
-        << " name_cohesion=" << fmt2(ma.metrics.average_cohesion)
-        << " coupling="
-        << (ma.metrics.average_coupling < 0.0
-                ? std::string("n/a")
-                : fmt2(ma.metrics.average_coupling))
-        << " basis=symbol_files\n";
+        << "total=" << ma.metrics.total_modules;
+    if (graph) {
+        // Modules ARE Louvain communities of the call graph; the name is the
+        // community's majority directory. cohesion/coupling are the
+        // internal/external shares of each community's call edges; stability
+        // is Martin instability over module edges.
+        out << " modularity=" << fmt2(ma.modularity)
+            << " cohesion=" << fmt2(ma.metrics.average_cohesion)
+            << " coupling=" << fmt2(ma.metrics.average_coupling)
+            << " basis=call_graph_louvain (name = majority dir)\n";
+    } else {
+        // Directory-grouping fallback: name_cohesion is NAME-PREFIX
+        // similarity (a naming metric, not graph cohesion) and no coupling
+        // is computed (n/a, never a constant).
+        out << " name_cohesion=" << fmt2(ma.metrics.average_cohesion)
+            << " coupling="
+            << (ma.metrics.average_coupling < 0.0
+                    ? std::string("n/a")
+                    : fmt2(ma.metrics.average_coupling))
+            << " basis=symbol_files\n";
+    }
     size_t lim = std::min(ma.modules.size(), size_t{10});
     for (size_t i = 0; i < lim; ++i) {
         const auto& m = ma.modules[i];
         out << "  " << m.name << ": type=" << m.type
-            << " files=" << m.file_count << " funcs=" << m.function_count
-            << " name_cohesion=" << fmt2(m.cohesion_score) << "\n";
+            << " files=" << m.file_count << " funcs=" << m.function_count;
+        if (graph) {
+            out << " cohesion=" << fmt2(m.cohesion_score)
+                << " coupling=" << fmt2(m.coupling_score)
+                << " deps=" << m.external_deps
+                << " instability=" << fmt2(m.stability);
+            if (m.dir_purity < 1.0 && m.spanned_dirs.size() > 1) {
+                out << " spans=";
+                size_t dl = std::min(m.spanned_dirs.size(), size_t{3});
+                for (size_t d = 0; d < dl; ++d) {
+                    if (d) out << ",";
+                    out << m.spanned_dirs[d];
+                }
+                if (m.spanned_dirs.size() > dl)
+                    out << ",+" << (m.spanned_dirs.size() - dl);
+                out << " purity=" << fmt2(m.dir_purity);
+            }
+        } else {
+            out << " name_cohesion=" << fmt2(m.cohesion_score);
+        }
+        out << "\n";
     }
     if (ma.modules.size() > 10) {
         out << "  ... and " << (ma.modules.size() - 10) << " more modules\n";
+    }
+    if (graph && !ma.split_dirs.empty()) {
+        // The divergence signal: directory layout vs call structure.
+        out << "split_dirs (symbols split across communities):";
+        size_t sl = std::min(ma.split_dirs.size(), size_t{8});
+        for (size_t i = 0; i < sl; ++i) out << " " << ma.split_dirs[i];
+        if (ma.split_dirs.size() > sl)
+            out << " +" << (ma.split_dirs.size() - sl);
+        out << "\n";
     }
     out << "---\n";
 }
