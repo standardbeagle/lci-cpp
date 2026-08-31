@@ -1,7 +1,11 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <string>
+
+#include "helpers/test_git.h"
 
 #include <nlohmann/json.hpp>
 
@@ -493,6 +497,49 @@ TEST(GitProvider, CreateInGitRepo) {
             EXPECT_FALSE(branch.empty());
         }
     }
+}
+
+// A repository whose HEAD is a root commit (single commit, no parent) must
+// still report that commit's files: `git diff-tree <ref>` prints nothing for a
+// root commit without --root, which made scope=commit return files_changed=0
+// on single-commit corpora (2026-08-30 validation sweep) — a false zero, the
+// exact silent-fallback class Karpathy rule 6 forbids.
+TEST(GitProvider, CommitFilesOnRootCommit) {
+    namespace fs = std::filesystem;
+    fs::path repo = fs::temp_directory_path() /
+                    ("lci_git_root_commit_" +
+                     std::to_string(std::chrono::steady_clock::now()
+                                        .time_since_epoch()
+                                        .count()));
+    fs::create_directories(repo);
+    {
+        std::ofstream(repo / "a.go") << "package main\nfunc A() {}\n";
+        std::ofstream(repo / "b.go") << "package main\nfunc B() {}\n";
+    }
+    ASSERT_TRUE(lci::test::run_git(repo, "init -q"));
+    ASSERT_TRUE(lci::test::run_git(repo, "add -A"));
+    ASSERT_TRUE(lci::test::run_git(
+        repo,
+        "-c user.email=fixture@lci.test -c user.name=lci-fixture "
+        "-c commit.gpgsign=false commit -q -m fixture"));
+
+    Provider p;
+    ASSERT_TRUE(Provider::create(repo.string(), p));
+
+    AnalysisParams params = AnalysisParams::defaults();
+    params.scope = AnalysisScope::Commit;
+
+    std::vector<ChangedFile> files;
+    ASSERT_TRUE(p.get_changed_files(params, files));
+    EXPECT_EQ(files.size(), 2u)
+        << "root commit's files must be reported (diff-tree needs --root)";
+
+    ScopeSet scope;
+    ASSERT_TRUE(p.get_changed_scope(params, scope));
+    EXPECT_FALSE(scope.empty())
+        << "commit-scope line ranges must be non-empty for a root commit";
+
+    fs::remove_all(repo);
 }
 
 // ============================================================================
