@@ -629,6 +629,49 @@ TEST(CodeInsightDeadCode, ReportsPrivateTypesAndFiles) {
     std::filesystem::remove_all(dir);
 }
 
+// fallow-class security candidates: symbols invoking dangerous sinks
+// (process execution, code eval, unsafe deserialization), ranked by
+// reachability from entry points. Candidates, not verdicts.
+TEST(CodeInsightSecurity, RanksSinksByEntryReachability) {
+    auto dir = lci::test::unique_temp_dir("lci_security_test_");
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    {
+        std::ofstream f(dir / "main.go");
+        f << "package main\n\nimport \"os/exec\"\n\n"
+             "func main() { handle() }\n"
+             "func handle() { runTool() }\n"
+             "func runTool() { exec.Command(\"ls\").Run() }\n"
+             "func coldPath() { exec.Command(\"rm\").Run() }\n";
+    }
+
+    Config config;
+    config.project.root = dir.string();
+    MasterIndex indexer(config);
+    indexer.index_directory(dir.string());
+    CodebaseIntelligenceEngine engine;
+
+    nlohmann::json params;
+    params["mode"] = "detailed";
+    params["analysis"] = "security";
+    auto result = handle_code_insight(params, engine, indexer);
+    ASSERT_FALSE(result.is_error) << result.text;
+    EXPECT_NE(result.text.find("== SECURITY CANDIDATES =="),
+              std::string::npos)
+        << result.text;
+    // Both sink sites listed; the entry-reachable one carries its distance.
+    auto run_pos = result.text.find("runTool");
+    auto cold_pos = result.text.find("coldPath");
+    ASSERT_NE(run_pos, std::string::npos) << result.text;
+    ASSERT_NE(cold_pos, std::string::npos) << result.text;
+    EXPECT_LT(run_pos, cold_pos) << "entry-reachable candidate ranks first";
+    EXPECT_NE(result.text.find("depth=2"), std::string::npos) << result.text;
+    EXPECT_NE(result.text.find("unreachable"), std::string::npos)
+        << result.text;
+
+    std::filesystem::remove_all(dir);
+}
+
 TEST_F(CodeInsightTest, DetailedModeWorks) {
     // detailed with default analysis (modules) now actually dispatches to
     // ModuleAnalyzer (was a silent overview fallback before).
