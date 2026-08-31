@@ -267,6 +267,21 @@ GraphSignals compute_graph_signals(const MasterIndex& indexer,
     // layer calling a shallower one). Calls should flow downward; an upward edge
     // (e.g. Data -> Presentation) inverts the dependency and is a violation.
     // Utility/unknown layers are exempt (depth -1).
+    //
+    // Majority-flow evidence gate (graph technique over the name-heuristic
+    // layer labels): an upward edge is only a meaningful violation where the
+    // codebase actually LAYERS those two labels — i.e. the downward flow
+    // between the pair clearly dominates. Where flows are balanced, the
+    // heuristic layer assignment itself is the suspect, and reporting the
+    // edge as an architecture defect is the anti-signal the audits flagged.
+    // First pass: per ordered layer pair, count edges each way.
+    absl::flat_hash_map<int, std::pair<int, int>> pair_flow;  // key: hi*4+lo
+    auto pair_key = [](int shallow, int deep) { return deep * 4 + shallow; };
+    struct Upward {
+        SymbolID u, v;
+        int du, dv;
+    };
+    std::vector<Upward> upward;
     for (SymbolID u : nodes) {
         int du = layer_depth(layer[u]);
         if (du < 0) continue;
@@ -274,12 +289,25 @@ GraphSignals compute_graph_signals(const MasterIndex& indexer,
             auto lv = layer.find(v);
             if (lv == layer.end()) continue;
             int dv = layer_depth(lv->second);
-            if (dv < 0 || du <= dv) continue;  // exempt or downward/same = ok
-            if (is_middleware_chain_call(meta[u].first, meta[v].first))
-                continue;  // chain dispatch is the pattern, not a violation
-            sig.layer_violations.push_back(
-                {meta[u].first, layer[u], meta[v].first, lv->second});
+            if (dv < 0 || du == dv) continue;
+            if (du < dv) {
+                // Downward (correct direction) for the pair (du, dv).
+                pair_flow[pair_key(du, dv)].first++;
+            } else {
+                pair_flow[pair_key(dv, du)].second++;
+                if (!is_middleware_chain_call(meta[u].first, meta[v].first))
+                    upward.push_back({u, v, du, dv});
+            }
         }
+    }
+    for (const auto& e : upward) {
+        const auto& flow = pair_flow[pair_key(e.dv, e.du)];
+        // Evidence bar: at least 4 downward edges and a 3:1 dominance.
+        // Below it the two labels are not demonstrably layered in this
+        // codebase, so the edge is withheld rather than guessed.
+        if (flow.first < 4 || flow.first < 3 * flow.second) continue;
+        sig.layer_violations.push_back(
+            {meta[e.u].first, layer[e.u], meta[e.v].first, layer[e.v]});
     }
     std::sort(sig.layer_violations.begin(), sig.layer_violations.end(),
               [](const LayerViolation& a, const LayerViolation& b) {
@@ -357,7 +385,8 @@ void emit_layer_violations(std::ostringstream& out,
     // say so, or a mislabeled helper reads as a confirmed violation (field
     // run: an interpreter's arg validators labeled "Presentation Layer").
     out << "layers=heuristic (name/path inference; treat as leads, not "
-           "verdicts)\n";
+           "verdicts); upward edges report only where downward flow "
+           "dominates the layer pair (flow evidence >=4 edges, 3:1)\n";
     out << "count=" << v.size() << "\n";
     for (const auto& x : v) {
         out << "  " << x.caller << " [" << x.caller_layer << "] -> " << x.callee

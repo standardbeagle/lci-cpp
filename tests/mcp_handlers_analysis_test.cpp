@@ -1097,12 +1097,19 @@ TEST(CodeInsightLayers, FlagsUpwardCall) {
     std::filesystem::create_directories(dir);
     {
         std::ofstream f(dir / "g.go");
-        // saveRecord -> Data Layer (save*). renderView -> Presentation (render*).
-        // Data calling Presentation = upward violation.
+        // saveRecord -> Data Layer (save*). render* -> Presentation.
+        // The flow-evidence gate (2026-08-31) reports an upward edge only
+        // where downward flow dominates the layer pair (>=4 edges, 3:1), so
+        // the fixture establishes real Presentation->Data layering first and
+        // then inverts one edge.
         f << "package main\n\n"
-             "func renderView() int { return 1 }\n"
+             "func saveA() int { return 1 }\n"
+             "func saveB() int { return 1 }\n"
+             "func saveC() int { return 1 }\n"
+             "func saveD() int { return 1 }\n"
+             "func renderView() int { return saveA() + saveB() + saveC() + saveD() }\n"
              "func saveRecord() int { return renderView() }\n"
-             "func main() { _ = saveRecord() }\n";
+             "func main() { _ = saveRecord() + renderView() }\n";
     }
 
     Config config;
@@ -1118,6 +1125,36 @@ TEST(CodeInsightLayers, FlagsUpwardCall) {
         << result.text;
     EXPECT_NE(result.text.find("saveRecord"), std::string::npos);
     EXPECT_NE(result.text.find("renderView"), std::string::npos);
+
+    std::filesystem::remove_all(dir);
+}
+
+// The complement: with NO established downward flow between two labels, a
+// single upward edge is more likely a mislabeled helper than architecture —
+// the audits measured 3/6 reported violations as fabricated. Withhold it.
+TEST(CodeInsightLayers, WithholdsUpwardCallWithoutFlowEvidence) {
+    auto dir = lci::test::unique_temp_dir("lci_layers_noev_test_");
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    {
+        std::ofstream f(dir / "g.go");
+        f << "package main\n\n"
+             "func renderView() int { return 1 }\n"
+             "func saveRecord() int { return renderView() }\n"
+             "func main() { _ = saveRecord() }\n";
+    }
+
+    Config config;
+    config.project.root = dir.string();
+    MasterIndex indexer(config);
+    indexer.index_directory(dir.string());
+    CodebaseIntelligenceEngine engine;
+
+    nlohmann::json params;
+    auto result = handle_code_insight(params, engine, indexer);
+    ASSERT_FALSE(result.is_error) << result.text;
+    EXPECT_EQ(result.text.find("saveRecord [Data Layer]"), std::string::npos)
+        << "upward edge without dominance evidence must be withheld";
 
     std::filesystem::remove_all(dir);
 }
