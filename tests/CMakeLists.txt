@@ -80,9 +80,13 @@ target_include_directories(lci_tests PRIVATE
     "${CMAKE_BINARY_DIR}/generated"
     "${CMAKE_CURRENT_SOURCE_DIR}/helpers"
 )
-target_compile_definitions(lci_tests PRIVATE
-    LCI_TESTS_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
-)
+# LCI_TESTS_SOURCE_DIR embeds this tree's absolute path, which would make
+# every TU carrying it a guaranteed cross-tree ccache miss (ccache hashes -D
+# values verbatim). Scope it to the two files that actually read the macro
+# instead of stamping whole targets; the property is directory-scoped, so it
+# covers spec_runner.cpp in both targets that compile it.
+set_source_files_properties(semantic_test.cpp integration/spec_runner.cpp
+    PROPERTIES COMPILE_DEFINITIONS "LCI_TESTS_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}\"")
 target_link_libraries(lci_tests PRIVATE
     lci_lib
     nlohmann_json_schema_validator
@@ -197,9 +201,6 @@ target_include_directories(lci_integration_tests PRIVATE
     "${CMAKE_BINARY_DIR}/generated"
     "${CMAKE_CURRENT_SOURCE_DIR}"
 )
-target_compile_definitions(lci_integration_tests PRIVATE
-    LCI_TESTS_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
-)
 target_link_libraries(lci_integration_tests PRIVATE
     lci_lib
     lci_parity_runner_lib
@@ -253,9 +254,6 @@ target_include_directories(lci_real_project_tests PRIVATE
     "${CMAKE_SOURCE_DIR}/include"
     "${CMAKE_BINARY_DIR}/generated"
     "${CMAKE_CURRENT_SOURCE_DIR}"
-)
-target_compile_definitions(lci_real_project_tests PRIVATE
-    LCI_TESTS_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
 )
 target_link_libraries(lci_real_project_tests PRIVATE
     lci_lib
