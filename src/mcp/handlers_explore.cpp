@@ -280,6 +280,24 @@ nlohmann::json build_explore_symbol(const EnhancedSymbol& sym,
     if (includes_has(includes, "refs")) {
         j["incoming_refs"] = static_cast<int>(sym.incoming_ref_count);
         j["outgoing_refs"] = static_cast<int>(sym.outgoing_ref_count);
+        // Dynamic-dispatch honesty: the no-guess policy builds no edge for
+        // interface/trait-mediated calls, so incoming_refs is a lower bound.
+        // Say so whenever same-name call sites stayed unresolved.
+        bool callable = sym.symbol.type == SymbolType::Function ||
+                        sym.symbol.type == SymbolType::Method ||
+                        sym.symbol.type == SymbolType::Constructor;
+        if (callable) {
+            int unresolved =
+                tracker.pin()->count_unresolved_calls(sym.symbol.name);
+            if (unresolved > 0) {
+                j["unresolved_same_name_calls"] = unresolved;
+                j["refs_note"] =
+                    "incoming_refs is a lower bound: " +
+                    std::to_string(unresolved) +
+                    " same-name call site(s) have no resolved target "
+                    "(dynamic dispatch / unknown receiver)";
+            }
+        }
     }
 
     if (includes_has(includes, "callers")) {
@@ -385,6 +403,24 @@ nlohmann::json build_inspect_result(const EnhancedSymbol& sym,
     if (includes_has(includes, "refs")) {
         j["incoming_refs"] = static_cast<int>(sym.incoming_ref_count);
         j["outgoing_refs"] = static_cast<int>(sym.outgoing_ref_count);
+        // Dynamic-dispatch honesty: the no-guess policy builds no edge for
+        // interface/trait-mediated calls, so incoming_refs is a lower bound.
+        // Say so whenever same-name call sites stayed unresolved.
+        bool callable = sym.symbol.type == SymbolType::Function ||
+                        sym.symbol.type == SymbolType::Method ||
+                        sym.symbol.type == SymbolType::Constructor;
+        if (callable) {
+            int unresolved =
+                tracker.pin()->count_unresolved_calls(sym.symbol.name);
+            if (unresolved > 0) {
+                j["unresolved_same_name_calls"] = unresolved;
+                j["refs_note"] =
+                    "incoming_refs is a lower bound: " +
+                    std::to_string(unresolved) +
+                    " same-name call site(s) have no resolved target "
+                    "(dynamic dispatch / unknown receiver)";
+            }
+        }
     }
 
 

@@ -544,6 +544,15 @@ class ReferenceTracker {
         /// Count of live references (tombstones excluded).
         size_t live_ref_count() const;
 
+        /// Number of live Call references named `name` (bare, or a
+        /// qualified "Type.name" spelling) with NO resolved target — the
+        /// dynamic-dispatch call sites the no-guess policy leaves out of the
+        /// graph. Surfaced beside incoming-ref counts so reference recall
+        /// reads as a labeled lower bound instead of failing silently
+        /// (2026-08-30 battery: Bootstrap 3/15 refs with no indication).
+        /// Full ref scan; inspect/refs paths only, never /search.
+        int count_unresolved_calls(std::string_view name) const;
+
         std::vector<SymbolHandle> find_symbols_by_name(
             std::string_view name) const;
         std::vector<Reference> get_symbol_references(

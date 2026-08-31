@@ -86,6 +86,34 @@ Reference ReferenceTracker::Snapshot::materialize_ref(
     return out;
 }
 
+int ReferenceTracker::Snapshot::count_unresolved_calls(
+    std::string_view name) const {
+    if (name.empty()) return 0;
+    // Interned pool: collect the ids whose spelling is `name` or ends in
+    // ".name" (typed-receiver qualifications), then count live unresolved
+    // Call refs carrying one of them. Two linear passes; query paths only.
+    absl::flat_hash_set<uint32_t> ids;
+    for (size_t i = 0; i < ref_names.size(); ++i) {
+        const std::string& n = ref_names[i];
+        if (n == name ||
+            (n.size() > name.size() + 1 &&
+             n[n.size() - name.size() - 1] == '.' &&
+             std::string_view(n).substr(n.size() - name.size()) == name)) {
+            ids.insert(static_cast<uint32_t>(i));
+        }
+    }
+    if (ids.empty()) return 0;
+    int count = 0;
+    for (const auto& [fid, vec] : refs_by_file) {
+        for (const auto& r : vec) {
+            if (r.dead || r.type != ReferenceType::Call) continue;
+            if (r.target_symbol != 0) continue;
+            if (ids.contains(r.name_id)) ++count;
+        }
+    }
+    return count;
+}
+
 size_t ReferenceTracker::Snapshot::live_ref_count() const {
     size_t n = 0;
     for (const auto& [fid, vec] : refs_by_file) {

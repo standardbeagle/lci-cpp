@@ -1637,6 +1637,45 @@ TEST(ReferenceTrackerTest, UnknownArityKeepsFirstMatchBehavior) {
     EXPECT_EQ(callees[0], ids[0]->id);
 }
 
+// The no-guess policy drops dynamic-dispatch edges (Go interface calls, PHP
+// trait callers) — correct for the graph, but the 2026-08-30 battery measured
+// refs recall at ~20% on Bootstrap with the omission SILENT. The unresolved
+// same-name call-site count is the honest surface: recall becomes a labeled
+// lower bound. Qualified "Type.M" spellings count toward M.
+TEST(ReferenceTrackerTest, CountsUnresolvedSameNameCallSites) {
+    ReferenceTracker rt;
+
+    std::vector<Symbol> caller = {
+        make_sym("Run", SymbolType::Method, 1, 1, 10),
+    };
+    Reference c1;  // unknown-receiver call, stays unresolved
+    c1.type = ReferenceType::Call;
+    c1.referenced_name = "Bootstrap";
+    c1.line = 3;
+    c1.column = 4;
+    c1.foreign_receiver = true;
+    Reference c2;  // typed-receiver miss, also unresolved
+    c2.type = ReferenceType::Call;
+    c2.referenced_name = "App.Bootstrap";
+    c2.line = 5;
+    c2.column = 4;
+    std::vector<Reference> refs = {c1, c2};
+    std::vector<ScopeInfo> scopes;
+    rt.process_file(1, "svc/a.go", caller, refs, scopes);
+
+    std::vector<Symbol> target = {
+        make_sym("Bootstrap", SymbolType::Method, 2, 1, 5),
+    };
+    std::vector<Reference> none;
+    rt.process_file(2, "core/b.go", target, none, scopes);
+    rt.process_all_references();
+
+    auto snap = rt.pin();
+    EXPECT_EQ(snap->count_unresolved_calls("Bootstrap"), 2)
+        << "both dynamic call sites must be countable";
+    EXPECT_EQ(snap->count_unresolved_calls("NoSuchName"), 0);
+}
+
 TEST(ReferenceTrackerTest, RustMethodBareCallResolvesToShadowingFreeFunction) {
     // Rust methods are invoked via `self.`; a bare `trim(...)` inside method
     // `trim` is the same-named FREE function, never recursion.
