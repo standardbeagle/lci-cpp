@@ -40,6 +40,15 @@ std::string go_bare_type(std::string_view t) {
 // A light per-line scan recovers the function symbol directly. Cython class
 // definitions (`cdef class Foo`) already recover as class_definition nodes and
 // plain `def` bodies parse normally, so only cpdef/cdef *functions* need this.
+/// True when a C/C++ class/struct/enum specifier carries a body — i.e. it
+/// is a DEFINITION. Bodyless specifiers are forward declarations or type
+/// usage (`struct Foo x;`) and must not create symbols.
+bool cpp_specifier_has_body(TSNode node) {
+    TSNode body = ts_node_child_by_field_name(
+        node, "body", static_cast<uint32_t>(4));
+    return !ts_node_is_null(body);
+}
+
 bool is_ident_char(char c) {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
            (c >= '0' && c <= '9') || c == '_';
@@ -799,6 +808,13 @@ void UnifiedExtractor::process_symbol_node(TSNode node,
                node_type == "class_definition" ||
                node_type == "class_specifier" ||
                node_type == "class") {
+        // C/C++ specifiers without a body are forward declarations (or
+        // `struct Foo x;` usage sites), not definitions: they produced one
+        // phantom Class symbol PER forward declaration (7 for
+        // SideEffectAnalyzer alone), polluting `def`, making type-position
+        // resolution ambiguous, and flooding dead-export candidates.
+        if (node_type == "class_specifier" && !cpp_specifier_has_body(node))
+            return;
         extract_class(node, node_type);
 
     // === INTERFACES ===
@@ -819,6 +835,7 @@ void UnifiedExtractor::process_symbol_node(TSNode node,
         extract_struct(node);
 
     } else if (node_type == "struct_specifier") {
+        if (!cpp_specifier_has_body(node)) return;  // fwd decl / usage
         extract_struct_specifier(node);
 
     // === ENUMS ===
@@ -827,6 +844,7 @@ void UnifiedExtractor::process_symbol_node(TSNode node,
         extract_enum(node);
 
     } else if (node_type == "enum_specifier") {
+        if (!cpp_specifier_has_body(node)) return;  // fwd decl / usage
         extract_enum_specifier(node);
 
     // === RECORDS (C#, Java) ===
