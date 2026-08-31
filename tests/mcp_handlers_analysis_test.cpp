@@ -672,6 +672,56 @@ TEST(CodeInsightSecurity, RanksSinksByEntryReachability) {
     std::filesystem::remove_all(dir);
 }
 
+// fallow-class impact analysis: the blast radius of uncommitted changes —
+// changed symbols plus everything that transitively calls them, so a
+// reviewer knows what a change can break before running anything.
+TEST(CodeInsightImpact, ReportsBlastRadiusOfWipChanges) {
+    auto dir = lci::test::unique_temp_dir("lci_impact_test_");
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    {
+        std::ofstream f(dir / "core.go");
+        f << "package main\n\nfunc compute() int { return 1 }\n";
+    }
+    {
+        std::ofstream f(dir / "main.go");
+        f << "package main\n\nfunc serve() int { return compute() }\n"
+             "func main() { _ = serve() }\n";
+    }
+    ASSERT_TRUE(lci::test::run_git(dir, "init -q"));
+    ASSERT_TRUE(lci::test::run_git(dir, "add -A"));
+    ASSERT_TRUE(lci::test::run_git(
+        dir,
+        "-c user.email=fixture@lci.test -c user.name=lci-fixture "
+        "-c commit.gpgsign=false commit -q -m fixture"));
+    {
+        // Uncommitted change to compute(): main.go is untouched.
+        std::ofstream f(dir / "core.go");
+        f << "package main\n\nfunc compute() int { return 2 }\n";
+    }
+
+    Config config;
+    config.project.root = dir.string();
+    MasterIndex indexer(config);
+    indexer.index_directory(dir.string());
+    CodebaseIntelligenceEngine engine;
+
+    nlohmann::json params;
+    params["mode"] = "detailed";
+    params["analysis"] = "impact";
+    auto result = handle_code_insight(params, engine, indexer);
+    ASSERT_FALSE(result.is_error) << result.text;
+    EXPECT_NE(result.text.find("== IMPACT =="), std::string::npos)
+        << result.text;
+    EXPECT_NE(result.text.find("compute"), std::string::npos) << result.text;
+    // The transitive callers are affected — including the entry point.
+    EXPECT_NE(result.text.find("serve"), std::string::npos) << result.text;
+    EXPECT_NE(result.text.find("entry_points_affected=1"), std::string::npos)
+        << result.text;
+
+    std::filesystem::remove_all(dir);
+}
+
 TEST_F(CodeInsightTest, DetailedModeWorks) {
     // detailed with default analysis (modules) now actually dispatches to
     // ModuleAnalyzer (was a silent overview fallback before).
