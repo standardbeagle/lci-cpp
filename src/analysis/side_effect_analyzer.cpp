@@ -457,6 +457,9 @@ void SideEffectAnalyzer::populate_from_index(const MasterIndex& indexer) {
                                es->symbol.type == SymbolType::Method ||
                                es->symbol.type == SymbolType::Constructor;
             if (!is_callable) continue;
+            // Bodiless declarations (interface method specs) have no effects
+            // of their own; counting them inflated purity denominators.
+            if (es->symbol.declaration_only) continue;
 
             uint32_t cats = side_effect::kNone;
             for (const auto& callee : ref.get_callee_names(es->id)) {

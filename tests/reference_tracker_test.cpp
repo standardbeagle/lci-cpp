@@ -1719,6 +1719,58 @@ TEST(ReferenceTrackerTest, ZigFileStemQualifiedCallResolves) {
         << "must resolve into analysis.zig, not the same-named decoy";
 }
 
+// An interface-typed call ("App.Bootstrap") resolves to the interface's
+// method SPEC once specs are symbols under an Interface scope.
+TEST(ReferenceTrackerTest, InterfaceQualifiedCallResolvesToSpec) {
+    ReferenceTracker rt;
+
+    std::vector<Symbol> caller = {
+        make_sym("run", SymbolType::Function, 1, 1, 10),
+    };
+    Reference call;
+    call.type = ReferenceType::Call;
+    call.referenced_name = "App.Bootstrap";
+    call.line = 5;
+    call.column = 4;
+    std::vector<Reference> refs = {call};
+    std::vector<ScopeInfo> no_scopes;
+    rt.process_file(1, "svc/run.go", caller, refs, no_scopes);
+
+    ScopeInfo iface;
+    iface.type = ScopeType::Interface;
+    iface.name = "App";
+    iface.start_line = 1;
+    iface.end_line = 10;
+    std::vector<ScopeInfo> scopes = {iface};
+    std::vector<Symbol> decls = {
+        make_sym("Bootstrap", SymbolType::Method, 2, 3, 3),
+    };
+    // Same-named impl on another type must not shadow the typed match.
+    ScopeInfo cls;
+    cls.type = ScopeType::Struct;
+    cls.name = "OtherThing";
+    cls.start_line = 1;
+    cls.end_line = 10;
+    std::vector<ScopeInfo> other_scopes = {cls};
+    std::vector<Symbol> impl = {
+        make_sym("Bootstrap", SymbolType::Method, 3, 5, 7),
+    };
+    std::vector<Reference> none;
+    rt.process_file(2, "core/app.go", decls, none, scopes);
+    rt.process_file(3, "other/impl.go", impl, none, other_scopes);
+    rt.process_all_references();
+
+    auto snap = rt.pin();
+    auto runs = snap->find_symbols_by_name("run");
+    ASSERT_EQ(runs.size(), 1u);
+    auto callees = rt.get_callee_symbols(runs[0]->id);
+    ASSERT_EQ(callees.size(), 1u);
+    const auto* resolved = snap->symbols.get(callees[0]);
+    ASSERT_NE(resolved, nullptr);
+    EXPECT_EQ(resolved->symbol.file_id, 2u)
+        << "must resolve to the App interface spec";
+}
+
 TEST(ReferenceTrackerTest, RustMethodBareCallResolvesToShadowingFreeFunction) {
     // Rust methods are invoked via `self.`; a bare `trim(...)` inside method
     // `trim` is the same-named FREE function, never recursion.

@@ -371,7 +371,12 @@ TEST(UnifiedExtractorTest, GoComplexity) {
     auto r = ue.get_results();
 
     // The Greet method has an if statement, so complexity should be >= 2
-    const Symbol* greet = find_symbol(r, "Greet");
+    // kGoSrc declares Greet twice now: the interface SPEC (declaration_only)
+    // and the implementation. Complexity belongs to the implementation.
+    const Symbol* greet = nullptr;
+    for (const auto& sym : r.symbols) {
+        if (sym.name == "Greet" && !sym.declaration_only) greet = &sym;
+    }
     ASSERT_NE(greet, nullptr);
     int cx = find_complexity(r, greet->line, greet->column);
     EXPECT_GE(cx, 2) << "Greet method should have complexity >= 2 (base + if)";

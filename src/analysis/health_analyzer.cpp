@@ -108,6 +108,7 @@ ComplexityMetrics HealthAnalyzer::calculate_complexity_from_files(
     for (const auto& file : files) {
         for (const auto* sym : file.symbols) {
             if (sym->symbol.test_scaffold) continue;
+            if (sym->symbol.declaration_only) continue;
             if (!is_function_or_method(sym->symbol.type)) continue;
 
             int cc = sym->complexity;

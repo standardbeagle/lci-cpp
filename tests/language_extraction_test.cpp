@@ -116,6 +116,35 @@ TEST(LanguageExtractionTest, Go) {
     EXPECT_TRUE(found_fmt);
 }
 
+// Go interface method declarations are symbols: `app.Bootstrap()` on an
+// interface-typed value names the SPEC, and without a symbol for it every
+// interface-mediated call dropped silently (~20% refs recall, battery audit).
+// The interface also contributes a scope so the spec's receiver matches.
+TEST(LanguageExtractionTest, GoInterfaceMethodSpecsAreSymbols) {
+    constexpr std::string_view src = R"(package main
+
+type App interface {
+	Bootstrap() error
+	Reload() error
+}
+)";
+    auto r = extract(Language::Go, ".go", src, "app.go");
+
+    int specs = 0;
+    for (const auto& sym : r.symbols) {
+        if (sym.type != SymbolType::Method) continue;
+        if (sym.name == "Bootstrap" || sym.name == "Reload") ++specs;
+    }
+    EXPECT_EQ(specs, 2) << "interface method specs must extract as methods";
+
+    bool iface_scope = false;
+    for (const auto& sc : r.scopes) {
+        if (sc.type == ScopeType::Interface && sc.name == "App")
+            iface_scope = true;
+    }
+    EXPECT_TRUE(iface_scope) << "interface must contribute a scope";
+}
+
 // ---------------------------------------------------------------------------
 // Python
 // ---------------------------------------------------------------------------

@@ -440,6 +440,7 @@ void UnifiedExtractor::extract_type_declaration(TSNode node) {
         std::string name;
         SymbolType sym_type = SymbolType::Type;
         BlockType blk_type = BlockType::Other;
+        TSNode iface_node{};
         uint32_t spec_count = ts_node_child_count(spec);
         for (uint32_t j = 0; j < spec_count; ++j) {
             TSNode sc = ts_node_child(spec, j);
@@ -452,6 +453,7 @@ void UnifiedExtractor::extract_type_declaration(TSNode node) {
             } else if (sct == "interface_type") {
                 sym_type = SymbolType::Interface;
                 blk_type = BlockType::Interface;
+                iface_node = sc;
             }
         }
         if (name.empty()) continue;
@@ -475,6 +477,44 @@ void UnifiedExtractor::extract_type_declaration(TSNode node) {
         sym.end_line = static_cast<int>(end.row) + 1;
         sym.end_column = static_cast<int>(end.column) + 1;
         symbols_.push_back(std::move(sym));
+
+        // Interface method DECLARATIONS are symbols: an interface-typed call
+        // (`app.Bootstrap()` on `app App`) names the spec, and without a
+        // symbol for it every interface-mediated call dropped silently
+        // (~20% refs recall, 2026-08-30 battery audit). The interface also
+        // contributes an Interface scope so the spec's receiver-type match
+        // works (`App.Bootstrap` -> the spec under scope App).
+        if (!ts_node_is_null(iface_node)) {
+            ScopeInfo iface_scope;
+            iface_scope.type = ScopeType::Interface;
+            iface_scope.name = symbols_.back().name;
+            iface_scope.start_line = static_cast<int>(start.row) + 1;
+            iface_scope.end_line = static_cast<int>(end.row) + 1;
+            scopes_.push_back(std::move(iface_scope));
+
+            uint32_t mc = ts_node_named_child_count(iface_node);
+            for (uint32_t m = 0; m < mc; ++m) {
+                TSNode elem = ts_node_named_child(iface_node, m);
+                std::string_view et = get_node_type(elem);
+                if (et != "method_elem" && et != "method_spec") continue;
+                TSNode mn = ts_node_child_by_field_name(
+                    elem, "name", static_cast<uint32_t>(4));
+                if (ts_node_is_null(mn)) continue;
+                TSPoint ms = ts_node_start_point(elem);
+                TSPoint me = ts_node_end_point(elem);
+                Symbol spec_sym;
+                spec_sym.name = std::string(node_text(mn));
+                spec_sym.type = SymbolType::Method;
+                spec_sym.file_id = file_id_;
+                spec_sym.line = static_cast<int>(ms.row) + 1;
+                spec_sym.column = static_cast<int>(ms.column) + 1;
+                spec_sym.end_line = static_cast<int>(me.row) + 1;
+                spec_sym.end_column = static_cast<int>(me.column) + 1;
+                spec_sym.parameter_count = count_parameter_names(elem);
+                spec_sym.declaration_only = true;
+                symbols_.push_back(std::move(spec_sym));
+            }
+        }
     }
 }
 

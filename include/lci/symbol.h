@@ -34,6 +34,11 @@ struct Symbol {
     // this marker test fixtures polluted LOAD BEARING, smells, CLUSTERS,
     // and vocabulary (ripgrep audits). Fits the same tail padding.
     bool test_scaffold{};
+    // Declaration without a body (Go interface method specs): a real symbol
+    // for reference resolution (interface-typed calls land here), but not an
+    // implementation — complexity/purity population counts skip it so the
+    // denominators keep meaning "functions with bodies".
+    bool declaration_only{};
 };
 
 /// Forward declarations for types defined in other headers.
