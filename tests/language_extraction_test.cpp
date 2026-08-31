@@ -888,6 +888,33 @@ TEST(LanguageExtractionTest, KotlinCallRefCarriesArgCount) {
     EXPECT_TRUE(found) << "no call ref extracted for create";
 }
 
+// `const m = @import("x.zig")` makes m an alias of file x; a call m.func()
+// must emit qualified with the imported file's stem so resolution has import
+// evidence instead of dropping the edge as an unknown foreign receiver.
+TEST(LanguageExtractionTest, ZigImportAliasCallQualifiesWithFileStem) {
+    constexpr std::string_view src = R"(const analysis = @import("analysis.zig");
+const std = @import("std");
+
+pub fn run() void {
+    analysis.resolveType();
+    std.debug.print("x", .{});
+}
+)";
+    auto tree = parse(Language::Zig, src);
+    if (!tree) {
+        GTEST_SKIP() << "Zig parser unavailable";
+    }
+    auto r = extract(Language::Zig, ".zig", src, "main.zig");
+
+    bool found = false;
+    for (const auto& ref : r.references) {
+        if (ref.type != ReferenceType::Call) continue;
+        if (ref.referenced_name == "analysis.resolveType") found = true;
+    }
+    EXPECT_TRUE(found)
+        << "alias call must qualify as analysis.resolveType";
+}
+
 // ---------------------------------------------------------------------------
 // Ruby
 // ---------------------------------------------------------------------------

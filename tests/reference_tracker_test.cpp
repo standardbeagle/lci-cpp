@@ -1676,6 +1676,49 @@ TEST(ReferenceTrackerTest, CountsUnresolvedSameNameCallSites) {
     EXPECT_EQ(snap->count_unresolved_calls("NoSuchName"), 0);
 }
 
+// Zig files ARE namespaces: `const analysis = @import("analysis.zig");
+// analysis.resolveType(...)` names the defining FILE. The extractor emits the
+// call qualified with the imported file's stem; resolution matches a
+// qualified receiver against the candidate's file basename for Zig — real
+// import evidence (the audit measured Zig namespaced-call recall at ~30%).
+TEST(ReferenceTrackerTest, ZigFileStemQualifiedCallResolves) {
+    ReferenceTracker rt;
+
+    std::vector<Symbol> caller = {
+        make_sym("main", SymbolType::Function, 1, 1, 10),
+    };
+    Reference call;
+    call.type = ReferenceType::Call;
+    call.referenced_name = "analysis.resolveType";
+    call.line = 5;
+    call.column = 4;
+    std::vector<Reference> refs = {call};
+    std::vector<ScopeInfo> scopes;
+    rt.process_file(1, "src/main.zig", caller, refs, scopes);
+
+    std::vector<Symbol> target = {
+        make_sym("resolveType", SymbolType::Function, 2, 1, 5),
+    };
+    // A same-named decoy in an unrelated file must not win.
+    std::vector<Symbol> decoy = {
+        make_sym("resolveType", SymbolType::Function, 3, 1, 5),
+    };
+    std::vector<Reference> none;
+    rt.process_file(2, "src/analysis.zig", target, none, scopes);
+    rt.process_file(3, "src/other.zig", decoy, none, scopes);
+    rt.process_all_references();
+
+    auto snap = rt.pin();
+    auto mains = snap->find_symbols_by_name("main");
+    ASSERT_EQ(mains.size(), 1u);
+    auto callees = rt.get_callee_symbols(mains[0]->id);
+    ASSERT_EQ(callees.size(), 1u);
+    const auto* resolved = snap->symbols.get(callees[0]);
+    ASSERT_NE(resolved, nullptr);
+    EXPECT_EQ(resolved->symbol.file_id, 2u)
+        << "must resolve into analysis.zig, not the same-named decoy";
+}
+
 TEST(ReferenceTrackerTest, RustMethodBareCallResolvesToShadowingFreeFunction) {
     // Rust methods are invoked via `self.`; a bare `trim(...)` inside method
     // `trim` is the same-named FREE function, never recursion.
