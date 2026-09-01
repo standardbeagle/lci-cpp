@@ -687,12 +687,14 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
             detailed_mode != "features" && detailed_mode != "terms" &&
             detailed_mode != "errors" && detailed_mode != "resources" &&
             detailed_mode != "clones" && detailed_mode != "deadcode" &&
-            detailed_mode != "security" && detailed_mode != "impact") {
+            detailed_mode != "security" && detailed_mode != "impact" &&
+            detailed_mode != "annotate") {
             return make_error_response(
                 "code_insight",
                 "invalid detailed analysis '" + detailed_mode +
                 "', must be one of: modules, layers, features, terms, "
-                "errors, resources, clones, deadcode, security, impact");
+                "errors, resources, clones, deadcode, security, impact, "
+                "annotate");
         }
 
         if (detailed_mode == "clones") {
@@ -1064,6 +1066,232 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
             if (cands.size() > lim)
                 out << "  ... and " << cands.size() - lim
                     << " more (raise max_results)\n";
+            std::string body = out.str();
+            if (!body.empty() && body.back() == '\n') body.pop_back();
+            return ToolResult{std::move(body), false};
+        }
+
+        if (detailed_mode == "annotate") {
+            // The annotation path driver: walk an agent through every @lci:
+            // annotation LCI consumes. Each dimension lists the elements that
+            // would benefit, why, and the exact marker to add. `target`
+            // (all | entry | domain | hotpath | deadcode) filters dimensions.
+            std::string tgt = params.value("target", std::string("all"));
+            if (tgt != "all" && tgt != "entry" && tgt != "domain" &&
+                tgt != "hotpath" && tgt != "deadcode") {
+                return make_error_response(
+                    "code_insight",
+                    "invalid annotate target '" + tgt +
+                        "', must be all, entry, domain, hotpath, or deadcode");
+            }
+            bool want_entry = tgt == "all" || tgt == "entry";
+            bool want_domain = tgt == "all" || tgt == "domain";
+            bool want_hot = tgt == "all" || tgt == "hotpath";
+            bool want_dead = tgt == "all" || tgt == "deadcode";
+            int max_results = params.value("max_results", 20);
+
+            // Annotation lookups by the annotator's synthetic (file,line,col)
+            // key. Returns the annotation, or nullptr.
+            auto annot_at = [&](FileID fid, int line,
+                                int column) -> const SemanticAnnotation* {
+                if (sem_annotator == nullptr) return nullptr;
+                SymbolID key = (static_cast<SymbolID>(fid) << 32) |
+                               (static_cast<SymbolID>(line) << 16) |
+                               static_cast<SymbolID>(column);
+                return sem_annotator->get_annotation(fid, key);
+            };
+            auto has_label = [](const SemanticAnnotation* a,
+                                std::string_view l) {
+                if (a == nullptr) return false;
+                for (const auto& x : a->labels)
+                    if (x == l) return true;
+                return a->category == l;
+            };
+
+            auto rt_snap = indexer.ref_tracker().pin();
+
+            out << "LCF/1.0\nmode=detailed\nattributes=" << scope.label
+                << "\nsub=annotate target=" << tgt
+                << "\ntier=2\ntokens=100\n---\n";
+            out << "== ANNOTATION PATH ==\n"
+                << "how=for each element add the shown @lci: comment above it "
+                   "in source (or an .lci/annotations/*.json entry for code "
+                   "you cannot edit), then re-run to see the list shrink. "
+                   "Each annotation improves a specific analysis.\n";
+
+            int pending = 0;
+
+            if (want_entry) {
+                // Exported callables ranked by transitive reach that carry no
+                // entry annotation — the real front doors to confirm so
+                // ENTRY POINTS stops being a heuristic guess.
+                out << "-- ENTRY (confirm real front doors -> @lci:labels[entry]"
+                       ", or insight { entry_points \"...\" } in .lci.kdl) --\n";
+                // Entry points are call-graph ROOTS: exported callables that
+                // nothing in the corpus calls (the external front door), not
+                // high-reach utilities. Rank the roots by fan-OUT (how much
+                // they drive) so the real front doors lead.
+                struct Root { std::string name, loc; int fanout; };
+                std::vector<Root> roots;
+                for (const auto& f : files_data) {
+                    std::string rel = git::normalize_rel(f.path, project_root);
+                    for (const auto* sym : f.symbols) {
+                        if (sym == nullptr) continue;
+                        auto t = sym->symbol.type;
+                        if (t != SymbolType::Function &&
+                            t != SymbolType::Method)
+                            continue;
+                        if (!sym->is_exported) continue;
+                        if (sym->symbol.declaration_only) continue;
+                        if (sym->symbol.test_scaffold) continue;
+                        if (sym->incoming_ref_count > 0) continue;  // not a root
+                        if (has_label(annot_at(sym->symbol.file_id,
+                                               sym->symbol.line,
+                                               sym->symbol.column),
+                                      "entry"))
+                            continue;
+                        int fanout =
+                            static_cast<int>(sym->outgoing_ref_count);
+                        roots.push_back(
+                            {sym->symbol.name,
+                             rel + ":" +
+                                 std::to_string(sym->symbol.line),
+                             fanout});
+                    }
+                }
+                std::sort(roots.begin(), roots.end(),
+                          [](const Root& a, const Root& b) {
+                              if (a.fanout != b.fanout)
+                                  return a.fanout > b.fanout;
+                              return a.name < b.name;
+                          });
+                int shown = 0;
+                for (const auto& r : roots) {
+                    if (shown >= max_results) break;
+                    out << "  " << r.name << " (" << r.loc
+                        << ") fan_out=" << r.fanout
+                        << "  reason=exported, no in-corpus caller — a "
+                           "candidate front door\n";
+                    ++shown;
+                    ++pending;
+                }
+                if (shown == 0)
+                    out << "  (none pending)\n";
+            }
+
+            if (want_domain) {
+                // Call-graph communities with no propagated @lci: label — an
+                // agent names the domain so CLUSTERS can label it.
+                out << "-- DOMAIN (name the communities -> @lci:labels[<concept>]"
+                       " on an exemplar; propagation spreads it) --\n";
+                auto sig = compute_graph_signals(indexer, files_data,
+                                                 project_root, max_results,
+                                                 propagator);
+                int shown = 0;
+                for (const auto& c : sig.clusters) {
+                    if (shown >= max_results) break;
+                    if (c.size < 4) continue;          // dust
+                    if (!c.domain.empty()) continue;   // already named
+                    out << "  community size=" << c.size << " exemplars=";
+                    for (size_t i = 0; i < c.exemplars.size() && i < 3; ++i) {
+                        if (i) out << ",";
+                        out << c.exemplars[i];
+                    }
+                    out << "  reason=no propagated domain label\n";
+                    ++shown;
+                    ++pending;
+                }
+                if (shown == 0)
+                    out << "  (none pending)\n";
+            }
+
+            if (want_hot) {
+                // Memory analysis hints: high-reach functions want a
+                // call-frequency; recursion/cycles want a loop bound.
+                out << "-- HOTPATH (memory: @lci:call-frequency[hot-path] on "
+                       "high-reach; @lci:loop-bounded[N] / @lci:loop-weight[w] "
+                       "on loops & recursion) --\n";
+                auto sig = compute_graph_signals(indexer, files_data,
+                                                 project_root, max_results,
+                                                 propagator);
+                int shown = 0;
+                for (const auto& lb : sig.load_bearing) {
+                    if (shown >= max_results) break;
+                    // Skip if it already carries a frequency hint.
+                    bool annotated = false;
+                    for (const auto& f : files_data) {
+                        for (const auto* sym : f.symbols) {
+                            if (sym == nullptr || sym->symbol.name != lb.name)
+                                continue;
+                            const auto* a = annot_at(sym->symbol.file_id,
+                                                     sym->symbol.line,
+                                                     sym->symbol.column);
+                            if (a && (!a->call_frequency.empty() ||
+                                      a->has_memory_hints))
+                                annotated = true;
+                            break;
+                        }
+                        if (annotated) break;
+                    }
+                    if (annotated) continue;
+                    out << "  " << lb.name << " (" << lb.location
+                        << ") reach=" << lb.reach
+                        << "  suggest=@lci:call-frequency[hot-path]\n";
+                    ++shown;
+                    ++pending;
+                }
+                for (const auto& r : sig.recursion) {
+                    if (shown >= max_results) break;
+                    out << "  " << r.first << " (" << r.second
+                        << ")  reason=recursion, unbounded  "
+                           "suggest=@lci:loop-bounded[N]\n";
+                    ++shown;
+                    ++pending;
+                }
+                if (shown == 0)
+                    out << "  (none pending)\n";
+            }
+
+            if (want_dead) {
+                // Ambiguous dead-code candidates — the deadcode flow owns the
+                // full worklist; here we surface the count + pointer.
+                out << "-- DEADCODE (used? -> @lci:exclude[deadcode]; dead? -> "
+                       "@lci:labels[dead]; full list: analysis=deadcode "
+                       "flow=true) --\n";
+                int dead_candidates = 0;
+                for (const auto& f : files_data) {
+                    for (const auto* sym : f.symbols) {
+                        if (sym == nullptr) continue;
+                        auto t = sym->symbol.type;
+                        bool callable = t == SymbolType::Function ||
+                                        t == SymbolType::Method;
+                        if (!callable) continue;
+                        if (sym->symbol.declaration_only) continue;
+                        if (sym->symbol.test_scaffold) continue;
+                        if (sym->is_exported) continue;
+                        if (sym->incoming_ref_count > 0) continue;
+                        const auto& nm = sym->symbol.name;
+                        if (nm == "main" || nm == "init") continue;
+                        if (nm.starts_with("~") || nm.starts_with("__") ||
+                            nm.starts_with("operator"))
+                            continue;
+                        const auto* a = annot_at(sym->symbol.file_id,
+                                                 sym->symbol.line,
+                                                 sym->symbol.column);
+                        bool suppressed = false;
+                        if (a) {
+                            for (const auto& ex : a->excludes)
+                                if (ex == "deadcode") suppressed = true;
+                        }
+                        if (suppressed) continue;
+                        ++dead_candidates;
+                    }
+                }
+                out << "  pending=" << dead_candidates << "\n";
+                pending += dead_candidates;
+            }
+
+            out << "total_pending=" << pending << "\n";
             std::string body = out.str();
             if (!body.empty() && body.back() == '\n') body.pop_back();
             return ToolResult{std::move(body), false};
@@ -1900,7 +2128,8 @@ void register_analysis_handlers(McpServer& server,
            "resources, clones (corpus-wide duplicate code), deadcode "
            "(unused code; add flow=true for the @lci: annotation worklist), "
            "security (dangerous-sink candidates by entry reach), impact "
-           "(blast radius of a git change set)",
+           "(blast radius of a git change set), annotate (the @lci: "
+           "annotation path driver: what to mark and with which marker)",
            ""},
           {"metrics", "array", "Metrics to include", "string"},
           {"min_lines", "integer",
@@ -1911,7 +2140,7 @@ void register_analysis_handlers(McpServer& server,
            "analysis=clones: structural similarity threshold 0-1 "
            "(default 0.9)",
            ""},
-          {"target", "string", "Target to analyze", ""},
+          {"target", "string", "analysis=annotate: which annotation dimension (all, entry, domain, hotpath, deadcode)", ""},
           {"focus", "string", "Analysis focus", ""},
           {"flow", "boolean",
            "analysis=deadcode: emit the @lci: annotation worklist (elements "
