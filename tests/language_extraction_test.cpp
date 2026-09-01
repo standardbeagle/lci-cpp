@@ -976,6 +976,62 @@ class Engine {
         << "both ctor-property and body-property receivers must qualify";
 }
 
+// Function-value references: a function passed as a value (callback/handler
+// registration) must produce a reference so the target shows callers and is
+// not judged dead. The 2026-08-31 audits found this was the top cross-language
+// gap (Go handlers registered by value scored 8/8 false-positive dead).
+TEST(LanguageExtractionTest, GoFunctionValueReference) {
+    constexpr std::string_view src = R"(package main
+
+func caller() { route(target); register(target) }
+func route(h func()) { h() }
+func register(h func()) {}
+func target() {}
+)";
+    auto r = extract(Language::Go, ".go", src, "m.go");
+    int refs_to_target = 0;
+    for (const auto& ref : r.references) {
+        if (ref.referenced_name == "target") ++refs_to_target;
+    }
+    EXPECT_GE(refs_to_target, 2)
+        << "target passed as a value twice must be referenced";
+}
+
+TEST(LanguageExtractionTest, PhpFunctionValueReference) {
+    constexpr std::string_view src = R"(<?php
+function caller() {
+    array_map('handler', $items);
+    register(handler(...));
+}
+function handler($x) { return $x; }
+)";
+    auto tree = parse(Language::PHP, src);
+    if (!tree) GTEST_SKIP() << "PHP parser unavailable";
+    auto r = extract(Language::PHP, ".php", src, "m.php");
+    int refs = 0;
+    for (const auto& ref : r.references)
+        if (ref.referenced_name == "handler") ++refs;
+    EXPECT_GE(refs, 1)
+        << "string callable / first-class callable must reference handler";
+}
+
+TEST(LanguageExtractionTest, CppFunctionValueReference) {
+    constexpr std::string_view src = R"(void handler();
+void reg(void (*f)());
+void caller() {
+    reg(handler);
+    auto f = handler;
+}
+void handler() {}
+)";
+    auto r = extract(Language::Cpp, ".cpp", src, "m.cpp");
+    int refs = 0;
+    for (const auto& ref : r.references)
+        if (ref.referenced_name == "handler") ++refs;
+    EXPECT_GE(refs, 2)
+        << "&handler / bare handler passed as a value must reference it";
+}
+
 // ---------------------------------------------------------------------------
 // Ruby
 // ---------------------------------------------------------------------------
