@@ -237,6 +237,27 @@ void UnifiedExtractor::process_reference_node(TSNode node,
             TSNode leaf = pick_cpp_reference_leaf(node);
             Reference uref = create_reference(leaf, ReferenceType::Usage,
                                               RefStrength::Loose);
+            // Keep the innermost scope qualifier on a nested-type use so
+            // resolution can disambiguate: Outer::Inner -> "Outer.Inner"
+            // matches the Inner whose scope_chain contains Outer, not a
+            // same-named standalone type (ReferenceTracker::Snapshot vs a
+            // minor Snapshot). Only the immediate scope is used; deeper
+            // qualification (A::B::C) still resolves on the leaf.
+            if (node_type == "qualified_identifier" ||
+                node_type == "scoped_identifier") {
+                TSNode scope = ts_node_child_by_field_name(
+                    node, "scope", static_cast<uint32_t>(std::strlen("scope")));
+                if (!ts_node_is_null(scope)) {
+                    std::string_view sv = node_text(scope);
+                    // Bare last segment of the scope (ns::Outer -> Outer).
+                    if (auto cc = sv.rfind("::"); cc != std::string_view::npos)
+                        sv = sv.substr(cc + 2);
+                    std::string_view leaf_name = node_text(leaf);
+                    if (!sv.empty() && !leaf_name.empty())
+                        uref.referenced_name =
+                            std::string(sv) + "." + std::string(leaf_name);
+                }
+            }
             // A bare type_identifier (declaration `Foo x;`, parameter type,
             // base specifier) is a TYPE position: resolution must consider
             // type symbols only, or a declared constructor makes the name
