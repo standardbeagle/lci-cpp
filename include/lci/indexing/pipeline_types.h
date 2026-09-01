@@ -90,6 +90,7 @@ struct ProcessedFile {
     std::vector<Symbol> symbols;
     std::vector<EnhancedSymbol> enhanced_symbols;
     std::vector<Reference> references;
+    std::vector<FieldType> field_types;  // struct/class field types
     std::vector<ScopeInfo> scopes;
     std::vector<ProcessedSymbolMetadata> symbol_metadata;
     BucketedTrigramResult bucketed_trigrams;

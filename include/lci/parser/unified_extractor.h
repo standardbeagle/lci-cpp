@@ -74,6 +74,7 @@ struct ExtractionResults {
     absl::flat_hash_map<PositionKey, DeclarationInfo, PositionKeyHash>
         declarations;
     std::vector<std::pair<PositionKey, int>> complexity;
+    std::vector<::lci::FieldType> field_types;
 };
 
 /// Performs all AST extraction in a single tree walk.
@@ -323,6 +324,7 @@ class UnifiedExtractor {
     absl::flat_hash_map<PositionKey, DeclarationInfo, PositionKeyHash>
         declarations_;
     std::vector<std::pair<PositionKey, int>> complexity_;
+    std::vector<::lci::FieldType> field_types_;
 
     // Cached content lines (lazily initialized)
     std::vector<std::string_view> lines_;

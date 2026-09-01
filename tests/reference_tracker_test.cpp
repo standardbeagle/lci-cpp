@@ -1959,6 +1959,52 @@ TEST(ReferenceTrackerTest, ScopeQualifiedTypeResolvesToNested) {
         << "the standalone Inner must not be credited";
 }
 
+// Go field-access receiver: e.App.Find() where e is *RequestEvent and App is
+// a field of type core.App resolves to App's Find via the field-type table.
+TEST(ReferenceTrackerTest, GoFieldAccessReceiverResolves) {
+    ReferenceTracker rt;
+
+    // File 1: RequestEvent has field App of type App; App interface has Find.
+    ScopeInfo appscope;
+    appscope.type = ScopeType::Interface;
+    appscope.name = "App";
+    appscope.start_line = 1;
+    appscope.end_line = 5;
+    std::vector<ScopeInfo> a_scopes = {appscope};
+    std::vector<Symbol> core_syms = {
+        make_sym("App", SymbolType::Interface, 1, 1, 5),
+        make_sym("Find", SymbolType::Method, 1, 2, 2),
+        make_sym("RequestEvent", SymbolType::Struct, 1, 7, 9),
+    };
+    std::vector<Reference> none;
+    std::vector<FieldType> ftypes = {{"RequestEvent", "App", "App"}};
+    rt.process_file(1, "core/base.go", core_syms, none, a_scopes, ftypes);
+
+    // File 2: a handler with e *RequestEvent calling e.App.Find().
+    std::vector<Symbol> handler = {
+        make_sym("handle", SymbolType::Function, 2, 1, 5),
+    };
+    Reference call;
+    call.type = ReferenceType::Call;
+    call.referenced_name = "RequestEvent.App.Find";
+    call.line = 3;
+    call.column = 4;
+    std::vector<Reference> refs = {call};
+    std::vector<ScopeInfo> no_sc;
+    rt.process_file(2, "apis/h.go", handler, refs, no_sc);
+    rt.process_all_references();
+
+    auto snap = rt.pin();
+    auto hs = snap->find_symbols_by_name("handle");
+    ASSERT_EQ(hs.size(), 1u);
+    auto callees = rt.get_callee_symbols(hs[0]->id);
+    ASSERT_EQ(callees.size(), 1u);
+    const auto* resolved = snap->symbols.get(callees[0]);
+    ASSERT_NE(resolved, nullptr);
+    EXPECT_EQ(resolved->symbol.name, "Find")
+        << "e.App.Find must resolve through RequestEvent's App field";
+}
+
 TEST(ReferenceTrackerTest, RustMethodBareCallResolvesToShadowingFreeFunction) {
     // Rust methods are invoked via `self.`; a bare `trim(...)` inside method
     // `trim` is the same-named FREE function, never recursion.

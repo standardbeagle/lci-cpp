@@ -133,7 +133,7 @@ void FileIntegrator::merge_symbols(ProcessedFile& file) {
 
         auto enhanced = ref_tracker_->process_file(
             file.file_id, file.path, file.symbols,
-            file.references, file.scopes);
+            file.references, file.scopes, file.field_types);
 
         // Enrich EnhancedSymbols with parser-only metadata (complexity,
         // signature, doc comment). ReferenceTracker stores these as zero

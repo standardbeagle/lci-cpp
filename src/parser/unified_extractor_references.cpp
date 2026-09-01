@@ -452,6 +452,31 @@ void UnifiedExtractor::process_go_reference(TSNode node,
                                 std::string(node_text(field));
                             qualified = true;
                         }
+                    } else if (ot &&
+                               std::string_view(ot) == "selector_expression") {
+                        // Field-access chain e.App.Method(): operand is the
+                        // inner selector `e.App`. If e is a typed local, emit
+                        // "EType.App.Method" so the resolver chains through
+                        // EType's field App to its type, then Method.
+                        TSNode inner_op = ts_node_child_by_field_name(
+                            operand, "operand", static_cast<uint32_t>(7));
+                        TSNode inner_fld = ts_node_child_by_field_name(
+                            operand, "field", static_cast<uint32_t>(5));
+                        if (!ts_node_is_null(inner_op) &&
+                            !ts_node_is_null(inner_fld) &&
+                            std::string_view(ts_node_type(inner_op)) ==
+                                "identifier") {
+                            auto it = local_var_types_.find(
+                                std::string(node_text(inner_op)));
+                            if (it != local_var_types_.end() &&
+                                !it->second.empty()) {
+                                cref.referenced_name =
+                                    it->second + "." +
+                                    std::string(node_text(inner_fld)) + "." +
+                                    std::string(node_text(field));
+                                qualified = true;
+                            }
+                        }
                     }
                     // Unknown operand (package alias, untyped var, chained
                     // expression): the receiver is not the current function's

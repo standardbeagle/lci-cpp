@@ -441,6 +441,7 @@ void UnifiedExtractor::extract_type_declaration(TSNode node) {
         SymbolType sym_type = SymbolType::Type;
         BlockType blk_type = BlockType::Other;
         TSNode iface_node{};
+        TSNode struct_node{};
         uint32_t spec_count = ts_node_child_count(spec);
         for (uint32_t j = 0; j < spec_count; ++j) {
             TSNode sc = ts_node_child(spec, j);
@@ -450,6 +451,7 @@ void UnifiedExtractor::extract_type_declaration(TSNode node) {
             } else if (sct == "struct_type") {
                 sym_type = SymbolType::Struct;
                 blk_type = BlockType::Struct;
+                struct_node = sc;
             } else if (sct == "interface_type") {
                 sym_type = SymbolType::Interface;
                 blk_type = BlockType::Interface;
@@ -477,6 +479,43 @@ void UnifiedExtractor::extract_type_declaration(TSNode node) {
         sym.end_line = static_cast<int>(end.row) + 1;
         sym.end_column = static_cast<int>(end.column) + 1;
         symbols_.push_back(std::move(sym));
+
+        // Go struct field types: record (StructName, field, bareType) so a
+        // field-access method call (e.App.Method(), App is a field of e's
+        // type) can resolve cross-file through the field's type.
+        if (!ts_node_is_null(struct_node)) {
+            const std::string& struct_name = symbols_.back().name;
+            uint32_t sc2 = ts_node_named_child_count(struct_node);
+            for (uint32_t k = 0; k < sc2; ++k) {
+                TSNode fdl = ts_node_named_child(struct_node, k);
+                if (get_node_type(fdl) != "field_declaration_list") continue;
+                uint32_t fn = ts_node_named_child_count(fdl);
+                for (uint32_t m = 0; m < fn; ++m) {
+                    TSNode fd = ts_node_named_child(fdl, m);
+                    if (get_node_type(fd) != "field_declaration") continue;
+                    TSNode fnm = ts_node_child_by_field_name(
+                        fd, "name", static_cast<uint32_t>(4));
+                    TSNode fty = ts_node_child_by_field_name(
+                        fd, "type", static_cast<uint32_t>(4));
+                    if (ts_node_is_null(fnm) || ts_node_is_null(fty)) continue;
+                    // Bare field type: strip leading *, &, [], and the pkg.
+                    // qualifier (core.App -> App), matching go_bare_type.
+                    std::string_view tv = node_text(fty);
+                    size_t bi = 0;
+                    while (bi < tv.size() &&
+                           (tv[bi] == '*' || tv[bi] == '&' ||
+                            tv[bi] == '[' || tv[bi] == ']'))
+                        ++bi;
+                    tv = tv.substr(bi);
+                    if (auto d = tv.rfind('.'); d != std::string_view::npos)
+                        tv = tv.substr(d + 1);
+                    std::string bt(tv);
+                    if (!bt.empty())
+                        field_types_.push_back(
+                            {struct_name, std::string(node_text(fnm)), bt});
+                }
+            }
+        }
 
         // Interface method DECLARATIONS are symbols: an interface-typed call
         // (`app.Bootstrap()` on `app App`) names the spec, and without a

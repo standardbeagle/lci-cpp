@@ -181,6 +181,7 @@ void UnifiedExtractor::reset() {
     references_.clear();
     declarations_.clear();
     complexity_.clear();
+    field_types_.clear();
 
     lines_.clear();
     lines_initialized_ = false;
@@ -276,8 +277,8 @@ void UnifiedExtractor::extract(TSTree* tree) {
 }
 
 ExtractionResults UnifiedExtractor::get_results() const {
-    return {symbols_,      blocks_,  imports_,     scopes_,
-            references_,   declarations_, complexity_};
+    return {symbols_,      blocks_,       imports_,     scopes_,
+            references_,   declarations_, complexity_, field_types_};
 }
 
 std::pair<std::string_view, std::string_view>

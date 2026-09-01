@@ -41,6 +41,15 @@ struct Symbol {
     bool declaration_only{};
 };
 
+/// A struct/class field's declared type: owner type -> field name -> bare
+/// type. Feeds cross-file receiver resolution of field-access method calls
+/// (e.App.Method() where App is a field of e's type).
+struct FieldType {
+    std::string owner;
+    std::string field;
+    std::string type;
+};
+
 /// Forward declarations for types defined in other headers.
 struct Reference;
 

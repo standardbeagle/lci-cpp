@@ -312,10 +312,18 @@ std::vector<EnhancedSymbol> ReferenceTracker::process_file(
     FileID file_id, std::string_view path,
     std::span<const Symbol> symbols,
     std::span<const Reference> references,
-    std::span<const ScopeInfo> scopes) {
+    std::span<const ScopeInfo> scopes,
+    std::span<const FieldType> field_types) {
 
     std::vector<EnhancedSymbol> enhanced;
     enhanced.reserve(symbols.size());
+
+    // Cross-file struct/class field-type table for field-access receiver
+    // resolution (e.App.Method(): App is a field of e's type).
+    for (const auto& ft : field_types) {
+        if (!ft.owner.empty() && !ft.field.empty() && !ft.type.empty())
+            field_types_[ft.owner][ft.field] = ft.type;
+    }
 
     file_resolution_meta_[file_id] = FileResolutionMeta{
         language_family_for_path(path), is_low_quality_path(attr_registry(), path),
@@ -1068,9 +1076,26 @@ SymbolID ReferenceTracker::resolve_reference_target(
     std::string_view name = full_name;
     std::string_view recv_type;
     bool typed_receiver_miss = false;
+    std::string recv_type_holder;
     if (auto dot = full_name.rfind('.'); dot != std::string::npos) {
         recv_type = std::string_view(full_name).substr(0, dot);
         name = std::string_view(full_name).substr(dot + 1);
+        // Field-access chain: recv_type is itself "Owner.field" (the
+        // extractor emits "RequestEvent.App.Method" for e.App.Method() where
+        // e is typed RequestEvent). Resolve the field's type from the
+        // cross-file field table and continue as if the receiver were that
+        // type — one level of field access.
+        if (auto fdot = recv_type.rfind('.'); fdot != std::string_view::npos) {
+            std::string owner(recv_type.substr(0, fdot));
+            std::string field(recv_type.substr(fdot + 1));
+            if (auto oit = field_types_.find(owner); oit != field_types_.end()) {
+                if (auto fit = oit->second.find(field);
+                    fit != oit->second.end()) {
+                    recv_type_holder = fit->second;
+                    recv_type = recv_type_holder;
+                }
+            }
+        }
         if (!recv_type.empty() && !name.empty()) {
             // Among the type's same-named methods (overloads), a known
             // call-site argument count picks the exact-arity sibling;

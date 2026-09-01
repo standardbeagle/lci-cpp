@@ -412,7 +412,8 @@ class ReferenceTracker {
         FileID file_id, std::string_view path,
         std::span<const Symbol> symbols,
         std::span<const Reference> references,
-        std::span<const ScopeInfo> scopes);
+        std::span<const ScopeInfo> scopes,
+        std::span<const FieldType> field_types = {});
 
     /// Processes a file's imports for symbol resolution.
     void process_file_imports(FileID file_id, std::string_view file_path,
@@ -628,6 +629,12 @@ class ReferenceTracker {
         std::string stem;
     };
     absl::flat_hash_map<FileID, FileResolutionMeta> file_resolution_meta_;
+    // owner type -> field name -> bare field type (cross-file), for
+    // field-access receiver resolution (e.App.Method(): App is a field of
+    // e's type). Guarded by the snapshot write path.
+    absl::flat_hash_map<std::string,
+                        absl::flat_hash_map<std::string, std::string>>
+        field_types_;
 
     SymbolID next_symbol_id_{1};
     uint64_t next_ref_id_{1};

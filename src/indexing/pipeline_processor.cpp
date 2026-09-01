@@ -128,6 +128,7 @@ void run_unified_extraction(ProcessedFile& result,
 
     result.symbols = std::move(extracted.symbols);
     result.references = std::move(extracted.references);
+    result.field_types = std::move(extracted.field_types);
     result.scopes = std::move(extracted.scopes);
 }
 
