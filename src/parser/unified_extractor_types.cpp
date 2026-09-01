@@ -19,6 +19,8 @@ void UnifiedExtractor::process_type_relationships(
         process_js_type_relationships(node, node_type);
     } else if (ext_ == ".py") {
         process_python_type_relationships(node, node_type);
+    } else if (ext_ == ".php") {
+        process_php_type_relationships(node, node_type);
     }
 }
 
@@ -119,6 +121,72 @@ void UnifiedExtractor::process_go_type_relationships(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+
+// ---------------------------------------------------------------------------
+// PHP type relationships (extends, implements, trait use)
+// ---------------------------------------------------------------------------
+
+void UnifiedExtractor::process_php_type_relationships(
+    TSNode node, std::string_view node_type) {
+    if (node_type != "class_declaration") return;
+    TSNode body = ts_node_child_by_field_name(
+        node, "body", static_cast<uint32_t>(std::strlen("body")));
+
+    auto emit = [&](TSNode name_node, ReferenceType rt) {
+        if (ts_node_is_null(name_node)) return;
+        Reference ref;
+        ref.id = ref_id_++;
+        ref.file_id = file_id_;
+        TSPoint sp = ts_node_start_point(name_node);
+        ref.line = static_cast<int>(sp.row) + 1;
+        ref.column = static_cast<int>(sp.column) + 1;
+        ref.type = rt;
+        ref.strength = RefStrength::Tight;
+        // Bare last segment of a namespaced name (App\Helper -> Helper).
+        std::string_view nm = node_text(name_node);
+        if (auto bs = nm.rfind('\\'); bs != std::string_view::npos)
+            nm = nm.substr(bs + 1);
+        ref.referenced_name = std::string(nm);
+        references_.push_back(std::move(ref));
+    };
+
+    // extends BaseClass, implements Interface(s) — direct children.
+    uint32_t n = ts_node_child_count(node);
+    for (uint32_t i = 0; i < n; ++i) {
+        TSNode c = ts_node_child(node, i);
+        std::string_view ct = get_node_type(c);
+        ReferenceType rt = ct == "base_clause"        ? ReferenceType::Extends
+                           : ct == "class_interface_clause"
+                               ? ReferenceType::Implements
+                               : ReferenceType::Usage;
+        if (ct != "base_clause" && ct != "class_interface_clause") continue;
+        uint32_t cn = ts_node_named_child_count(c);
+        for (uint32_t j = 0; j < cn; ++j) {
+            TSNode nm = ts_node_named_child(c, j);
+            std::string_view nt = get_node_type(nm);
+            if (nt == "name" || nt == "qualified_name") emit(nm, rt);
+        }
+    }
+
+    // use TraitName; inside the body — traits are compile-time flattened, so
+    // the class GAINS the trait's methods: model as Extends so receiver-type
+    // resolution follows the trait ($this->traitMethod resolves through it).
+    if (!ts_node_is_null(body)) {
+        uint32_t bn = ts_node_named_child_count(body);
+        for (uint32_t i = 0; i < bn; ++i) {
+            TSNode c = ts_node_named_child(body, i);
+            if (get_node_type(c) != "use_declaration") continue;
+            uint32_t un = ts_node_named_child_count(c);
+            for (uint32_t j = 0; j < un; ++j) {
+                TSNode nm = ts_node_named_child(c, j);
+                std::string_view nt = get_node_type(nm);
+                if (nt == "name" || nt == "qualified_name")
+                    emit(nm, ReferenceType::Extends);
             }
         }
     }

@@ -1842,6 +1842,68 @@ TEST(ReferenceTrackerTest, EmbeddedTypeResolvesPromotedMethod) {
         << "PB.Bootstrap must resolve through the embedded App";
 }
 
+// PHP trait method resolution: Service `use`s Helper (an Extends ref), so
+// $this->help() inside Service (qualified Service.help) resolves through the
+// trait to Helper::help. Reuses the embedding BFS.
+TEST(ReferenceTrackerTest, PhpTraitMethodResolvesThroughUse) {
+    ReferenceTracker rt;
+
+    // File 1: Service class with an Extends ref to Helper + the qualified call.
+    ScopeInfo svc;
+    svc.type = ScopeType::Class;
+    svc.name = "Service";
+    svc.start_line = 1;
+    svc.end_line = 20;
+    std::vector<ScopeInfo> svc_scopes = {svc};
+    std::vector<Symbol> svc_syms = {
+        make_sym("Service", SymbolType::Class, 1, 1, 20),
+    };
+    Reference ext;
+    ext.type = ReferenceType::Extends;
+    ext.referenced_name = "Helper";
+    ext.line = 2;
+    ext.column = 5;
+    std::vector<Reference> svc_refs = {ext};
+    rt.process_file(1, "svc.php", svc_syms, svc_refs, svc_scopes);
+
+    std::vector<Symbol> caller_syms = {
+        make_sym("run", SymbolType::Function, 3, 1, 10),
+    };
+    Reference call;
+    call.type = ReferenceType::Call;
+    call.referenced_name = "Service.help";
+    call.line = 5;
+    call.column = 8;
+    std::vector<Reference> caller_refs = {call};
+    std::vector<ScopeInfo> no_sc;
+    rt.process_file(3, "caller.php", caller_syms, caller_refs, no_sc);
+
+    // File 2: the trait with the method.
+    ScopeInfo helper;
+    helper.type = ScopeType::Class;  // trait modeled as a class scope
+    helper.name = "Helper";
+    helper.start_line = 1;
+    helper.end_line = 10;
+    std::vector<ScopeInfo> h_scopes = {helper};
+    std::vector<Symbol> h_syms = {
+        make_sym("Helper", SymbolType::Class, 2, 1, 10),
+        make_sym("help", SymbolType::Method, 2, 3, 5),
+    };
+    std::vector<Reference> none;
+    rt.process_file(2, "helper.php", h_syms, none, h_scopes);
+    rt.process_all_references();
+
+    auto snap = rt.pin();
+    auto runs = snap->find_symbols_by_name("run");
+    ASSERT_EQ(runs.size(), 1u);
+    auto callees = rt.get_callee_symbols(runs[0]->id);
+    ASSERT_EQ(callees.size(), 1u);
+    const auto* resolved = snap->symbols.get(callees[0]);
+    ASSERT_NE(resolved, nullptr);
+    EXPECT_EQ(resolved->symbol.file_id, 2u)
+        << "Service.help must resolve into the Helper trait";
+}
+
 TEST(ReferenceTrackerTest, RustMethodBareCallResolvesToShadowingFreeFunction) {
     // Rust methods are invoked via `self.`; a bare `trim(...)` inside method
     // `trim` is the same-named FREE function, never recursion.

@@ -980,6 +980,32 @@ class Engine {
 // registration) must produce a reference so the target shows callers and is
 // not judged dead. The 2026-08-31 audits found this was the top cross-language
 // gap (Go handlers registered by value scored 8/8 false-positive dead).
+// PHP traits are compile-time copy-paste: `use Helper;` inside a class gives
+// the class the trait's methods, so it emits an Extends reference the resolver
+// can follow ($this->traitMethod() resolves through the class to the trait).
+TEST(LanguageExtractionTest, PhpTraitUseEmitsExtends) {
+    constexpr std::string_view src = R"(<?php
+trait Helper {
+    public function help() { return 1; }
+}
+class Service {
+    use Helper;
+    public function run() { return $this->help(); }
+}
+)";
+    auto tree = parse(Language::PHP, src);
+    if (!tree) GTEST_SKIP() << "PHP parser unavailable";
+    auto r = extract(Language::PHP, ".php", src, "svc.php");
+    bool has_extends_helper = false;
+    for (const auto& ref : r.references) {
+        if (ref.type == ReferenceType::Extends &&
+            ref.referenced_name == "Helper")
+            has_extends_helper = true;
+    }
+    EXPECT_TRUE(has_extends_helper)
+        << "use Helper must emit an Extends reference to the trait";
+}
+
 TEST(LanguageExtractionTest, GoFunctionValueReference) {
     constexpr std::string_view src = R"(package main
 

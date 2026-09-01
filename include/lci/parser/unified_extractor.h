@@ -280,6 +280,8 @@ class UnifiedExtractor {
     void process_js_type_relationships(TSNode node, std::string_view node_type);
     void process_python_type_relationships(TSNode node,
                                            std::string_view node_type);
+    void process_php_type_relationships(TSNode node,
+                                        std::string_view node_type);
 
     // --- Side effect tracking (in unified_extractor_side_effects.cpp) ---
     void process_side_effect_node(TSNode node, std::string_view node_type);
