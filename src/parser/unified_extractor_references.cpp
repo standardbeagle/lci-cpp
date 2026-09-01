@@ -246,6 +246,28 @@ void UnifiedExtractor::process_reference_node(TSNode node,
                 uref.type_position = true;
             }
             references_.push_back(std::move(uref));
+        } else if (node_type == "identifier") {
+            // Function-value use: a bare identifier naming a function passed
+            // as a value — reg(handler), &handler, auto f = handler. Emit a
+            // Usage ref so the function shows callers and is not judged dead.
+            if (handled_nodes_.contains(reinterpret_cast<uintptr_t>(node.id)))
+                return;
+            std::string_view id = node_text(node);
+            if (id.empty() || local_var_types_.contains(std::string(id)))
+                return;
+            TSNode parent = ts_node_parent(node);
+            if (ts_node_is_null(parent)) return;
+            std::string_view pt = ts_node_type(parent);
+            bool value_pos = pt == "argument_list" ||
+                             pt == "init_declarator" ||
+                             pt == "return_statement" ||
+                             pt == "pointer_expression" ||   // &handler
+                             pt == "unary_expression" ||
+                             pt == "assignment_expression" ||
+                             pt == "initializer_list";
+            if (value_pos)
+                references_.push_back(create_reference(
+                    node, ReferenceType::Usage, RefStrength::Loose));
         }
     }
 }
@@ -447,6 +469,27 @@ void UnifiedExtractor::process_go_reference(TSNode node,
             references_.push_back(
                 create_reference(node, ReferenceType::Usage, RefStrength::Loose));
         }
+    } else if (node_type == "identifier") {
+        // Function-value use: a bare identifier in a value position (a call
+        // argument, an assignment/var RHS, a return, or a composite-literal
+        // element) that names a function — the handler/callback registration
+        // pattern (route(target), var fp = target). Emit a Usage ref so the
+        // target shows callers and is not judged dead. Known locals are
+        // skipped; resolution credits only real function symbols, so a bare
+        // identifier that names nothing builds no edge.
+        if (is_handled(node)) return;
+        std::string_view id = node_text(node);
+        if (id.empty() || local_var_types_.contains(std::string(id))) return;
+        TSNode parent = ts_node_parent(node);
+        if (ts_node_is_null(parent)) return;
+        std::string_view pt = ts_node_type(parent);
+        bool value_pos = pt == "argument_list" || pt == "expression_list" ||
+                         pt == "return_statement" ||
+                         pt == "literal_value" || pt == "keyed_element" ||
+                         pt == "element";
+        if (value_pos)
+            references_.push_back(create_reference(node, ReferenceType::Usage,
+                                                   RefStrength::Loose));
     }
 }
 

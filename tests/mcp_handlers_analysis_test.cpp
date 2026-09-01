@@ -636,11 +636,10 @@ TEST(CodeInsightDeadCode, AnnotationSuppressesAndFlowLists) {
         std::ofstream f(dir / "main.go");
         f << "package main\n\n"
              "func main() { register() }\n"
-             "func register() { route(handler); route(rawHandler) }\n"
-             "func route(h func()) { _ = h }\n"
+             "func register() {}\n"
              "// @lci:exclude[deadcode]\n"
              "func handler() {}\n"   // annotated used -> suppressed
-             "func rawHandler() {}\n";  // unannotated -> candidate
+             "func rawHandler() {}\n";  // truly unreferenced -> candidate
     }
 
     Config config;
