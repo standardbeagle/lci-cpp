@@ -844,6 +844,44 @@ TEST(CodeInsightAnnotate, AnnotatedElementLeavesWorklist) {
     std::filesystem::remove_all(dir);
 }
 
+// The DYNAMIC section maps where the code opts OUT of static analysis:
+// dynamic-dispatch call sites (through unknown receivers), the hubs that make
+// them, and symbols reachable only dynamically. Using dynamic features
+// explicitly limits what static analysis can see — that map is the value.
+TEST(CodeInsightDynamic, ReportsDynamicDispatch) {
+    auto dir = lci::test::unique_temp_dir("lci_dynamic_test_");
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    {
+        // handler dispatches through an interface value (dynamic); target is
+        // reachable only through that dynamic call.
+        std::ofstream f(dir / "srv.go");
+        f << "package srv\n\n"
+             "type Handler interface { Serve() }\n"
+             "func run(h Handler) { h.Serve() }\n"
+             "type Impl struct{}\n"
+             "func (i *Impl) Serve() {}\n";
+    }
+
+    Config config;
+    config.project.root = dir.string();
+    MasterIndex indexer(config);
+    indexer.index_directory(dir.string());
+    CodebaseIntelligenceEngine engine;
+
+    nlohmann::json params;
+    params["mode"] = "unified";
+    auto result = handle_code_insight(params, engine, indexer);
+    ASSERT_FALSE(result.is_error) << result.text;
+    EXPECT_NE(result.text.find("== DYNAMIC =="), std::string::npos)
+        << result.text;
+    // h.Serve() is a dynamic-dispatch call site.
+    EXPECT_NE(result.text.find("dynamic_call_sites="), std::string::npos)
+        << result.text;
+
+    std::filesystem::remove_all(dir);
+}
+
 TEST_F(CodeInsightTest, DetailedModeWorks) {
     // detailed with default analysis (modules) now actually dispatches to
     // ModuleAnalyzer (was a silent overview fallback before).

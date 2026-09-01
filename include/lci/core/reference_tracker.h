@@ -555,6 +555,37 @@ class ReferenceTracker {
         /// Full ref scan; inspect/refs paths only, never /search.
         int count_unresolved_calls(std::string_view name) const;
 
+        /// Split of the unresolved same-name Call sites into DYNAMIC dispatch
+        /// (through an unknown-typed receiver — foreign_receiver, the
+        /// interface/virtual/duck calls the no-guess policy deliberately does
+        /// not resolve) versus plain UNRESOLVED (a bare name with no indexed
+        /// target — an external library or a missing definition). A developer
+        /// reads "dynamic" as "callers you won't find in the static graph"
+        /// and "unresolved" as "target lives outside the index".
+        struct SameNameCallStats {
+            int dynamic{};
+            int unresolved{};
+            int total() const { return dynamic + unresolved; }
+        };
+        SameNameCallStats classify_same_name_calls(std::string_view name) const;
+
+        /// Corpus-wide counts of live Call sites by resolution state:
+        /// resolved (has a target), dynamic (unresolved + foreign_receiver =
+        /// dispatched through an unknown receiver), unresolved (bare name,
+        /// no indexed target). The dynamic share measures how much control
+        /// flow the code deliberately hides from static analysis.
+        struct CallResolutionTotals {
+            int resolved{};
+            int dynamic{};
+            int unresolved{};
+        };
+        CallResolutionTotals call_resolution_totals() const;
+
+        /// Number of live Call refs whose SOURCE is `symbol_id` that dispatch
+        /// dynamically (unresolved + foreign_receiver): how many calls this
+        /// function makes whose target is not statically known.
+        int count_dynamic_calls_out(SymbolID symbol_id) const;
+
         std::vector<SymbolHandle> find_symbols_by_name(
             std::string_view name) const;
         std::vector<Reference> get_symbol_references(

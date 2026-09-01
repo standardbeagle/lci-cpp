@@ -116,6 +116,73 @@ int ReferenceTracker::Snapshot::count_unresolved_calls(
     return count;
 }
 
+ReferenceTracker::Snapshot::SameNameCallStats
+ReferenceTracker::Snapshot::classify_same_name_calls(
+    std::string_view name) const {
+    SameNameCallStats out;
+    if (name.empty()) return out;
+    absl::flat_hash_set<uint32_t> ids;
+    for (size_t i = 0; i < ref_names.size(); ++i) {
+        const std::string& n = ref_names[i];
+        if (n == name ||
+            (n.size() > name.size() + 1 &&
+             n[n.size() - name.size() - 1] == '.' &&
+             std::string_view(n).substr(n.size() - name.size()) == name)) {
+            ids.insert(static_cast<uint32_t>(i));
+        }
+    }
+    if (ids.empty()) return out;
+    for (const auto& [fid, vec] : refs_by_file) {
+        for (const auto& r : vec) {
+            if (r.dead || r.type != ReferenceType::Call) continue;
+            if (r.target_symbol != 0) continue;
+            if (!ids.contains(r.name_id)) continue;
+            if (r.foreign_receiver) ++out.dynamic;
+            else ++out.unresolved;
+        }
+    }
+    return out;
+}
+
+ReferenceTracker::Snapshot::CallResolutionTotals
+ReferenceTracker::Snapshot::call_resolution_totals() const {
+    CallResolutionTotals t;
+    for (const auto& [fid, vec] : refs_by_file) {
+        for (const auto& r : vec) {
+            if (r.dead || r.type != ReferenceType::Call) continue;
+            if (r.target_symbol != 0) {
+                // A call that resolves to a bodiless DECLARATION (an interface
+                // / abstract method spec) is still dynamic dispatch: the
+                // concrete implementation is chosen at runtime. Only a call
+                // to a real (bodied) function is statically pinned.
+                const auto* tsym = symbols.get(r.target_symbol);
+                if (tsym != nullptr && tsym->symbol.declaration_only)
+                    ++t.dynamic;
+                else
+                    ++t.resolved;
+            } else if (r.foreign_receiver) {
+                ++t.dynamic;
+            } else {
+                ++t.unresolved;
+            }
+        }
+    }
+    return t;
+}
+
+int ReferenceTracker::Snapshot::count_dynamic_calls_out(
+    SymbolID symbol_id) const {
+    auto it = outgoing_refs.find(symbol_id);
+    if (it == outgoing_refs.end()) return 0;
+    int n = 0;
+    for (uint64_t rid : it->second) {
+        const StoredRef* r = find_ref(rid);
+        if (r == nullptr || r->type != ReferenceType::Call) continue;
+        if (r->target_symbol == 0 && r->foreign_receiver) ++n;
+    }
+    return n;
+}
+
 size_t ReferenceTracker::Snapshot::live_ref_count() const {
     size_t n = 0;
     for (const auto& [fid, vec] : refs_by_file) {

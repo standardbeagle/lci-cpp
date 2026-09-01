@@ -287,16 +287,26 @@ nlohmann::json build_explore_symbol(const EnhancedSymbol& sym,
                         sym.symbol.type == SymbolType::Method ||
                         sym.symbol.type == SymbolType::Constructor;
         if (callable) {
-            int unresolved =
-                tracker.pin()->count_unresolved_calls(sym.symbol.name);
-            if (unresolved > 0) {
-                j["unresolved_same_name_calls"] = unresolved;
+            auto snap = tracker.pin();
+            auto st = snap->classify_same_name_calls(sym.symbol.name);
+            // dynamic_callers: sites that call this NAME through an unknown
+            // receiver (interface/virtual/duck) — real callers the static
+            // graph cannot attribute. unresolved_callers: bare-name sites
+            // whose target is not in the index (external/missing).
+            if (st.dynamic > 0) j["dynamic_callers"] = st.dynamic;
+            if (st.unresolved > 0) j["unresolved_callers"] = st.unresolved;
+            if (st.total() > 0) {
+                j["unresolved_same_name_calls"] = st.total();  // back-compat
                 j["refs_note"] =
                     "incoming_refs is a lower bound: " +
-                    std::to_string(unresolved) +
-                    " same-name call site(s) have no resolved target "
-                    "(dynamic dispatch / unknown receiver)";
+                    std::to_string(st.dynamic) +
+                    " dynamic-dispatch and " +
+                    std::to_string(st.unresolved) +
+                    " unresolved same-name call site(s) are not in the "
+                    "static graph";
             }
+            int dyn_out = snap->count_dynamic_calls_out(sym.id);
+            if (dyn_out > 0) j["dynamic_calls_out"] = dyn_out;
         }
     }
 
@@ -410,16 +420,26 @@ nlohmann::json build_inspect_result(const EnhancedSymbol& sym,
                         sym.symbol.type == SymbolType::Method ||
                         sym.symbol.type == SymbolType::Constructor;
         if (callable) {
-            int unresolved =
-                tracker.pin()->count_unresolved_calls(sym.symbol.name);
-            if (unresolved > 0) {
-                j["unresolved_same_name_calls"] = unresolved;
+            auto snap = tracker.pin();
+            auto st = snap->classify_same_name_calls(sym.symbol.name);
+            // dynamic_callers: sites that call this NAME through an unknown
+            // receiver (interface/virtual/duck) — real callers the static
+            // graph cannot attribute. unresolved_callers: bare-name sites
+            // whose target is not in the index (external/missing).
+            if (st.dynamic > 0) j["dynamic_callers"] = st.dynamic;
+            if (st.unresolved > 0) j["unresolved_callers"] = st.unresolved;
+            if (st.total() > 0) {
+                j["unresolved_same_name_calls"] = st.total();  // back-compat
                 j["refs_note"] =
                     "incoming_refs is a lower bound: " +
-                    std::to_string(unresolved) +
-                    " same-name call site(s) have no resolved target "
-                    "(dynamic dispatch / unknown receiver)";
+                    std::to_string(st.dynamic) +
+                    " dynamic-dispatch and " +
+                    std::to_string(st.unresolved) +
+                    " unresolved same-name call site(s) are not in the "
+                    "static graph";
             }
+            int dyn_out = snap->count_dynamic_calls_out(sym.id);
+            if (dyn_out > 0) j["dynamic_calls_out"] = dyn_out;
         }
     }
 

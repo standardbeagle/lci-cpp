@@ -512,6 +512,130 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
         emit_modules(out, d.graph_modules);
         emit_dependencies(out, compute_import_dependencies(
                                    indexer, files_data, project_root));
+        // == DYNAMIC == : where the code opts OUT of static analysis.
+        // Dynamic dispatch (calls through an unknown-typed receiver) and
+        // reflection are invisible to the call graph, so this maps how much
+        // control flow is hidden, the hubs that dispatch dynamically, and
+        // symbols reachable only through a dynamic call (they look dead but
+        // are not). Using these features is an explicit, local decision — the
+        // map tells a reader which seams need runtime reasoning/tests.
+        {
+            auto rt_snap = indexer.ref_tracker().pin();
+            auto totals = rt_snap->call_resolution_totals();
+            int all_calls =
+                totals.resolved + totals.dynamic + totals.unresolved;
+            if (totals.dynamic > 0) {
+                double pct = all_calls > 0
+                                 ? 100.0 * totals.dynamic /
+                                       static_cast<double>(all_calls)
+                                 : 0.0;
+                out << "== DYNAMIC ==\n"
+                    << "dynamic_call_sites=" << totals.dynamic << " of "
+                    << all_calls << " calls (" << fmt2(pct)
+                    << "% dispatch through an unknown receiver — invisible to "
+                    << "the static call graph)\n";
+
+                // Hubs: functions making the most dynamic calls (the framework
+                // / plugin / registry seams).
+                struct Hub {
+                    std::string name;
+                    std::string loc;
+                    int dyn;
+                };
+                std::vector<Hub> hubs;
+                // Reached-only-dynamically: callable, zero static callers, but
+                // named by >=1 dynamic call site.
+                struct DynOnly {
+                    std::string name;
+                    std::string loc;
+                    int dyn;
+                };
+                std::vector<DynOnly> dyn_only;
+                for (const auto& f : files_data) {
+                    std::string rel = git::normalize_rel(f.path, project_root);
+                    for (const auto* sym : f.symbols) {
+                        if (sym == nullptr || sym->symbol.test_scaffold)
+                            continue;
+                        auto t = sym->symbol.type;
+                        bool callable = t == SymbolType::Function ||
+                                        t == SymbolType::Method ||
+                                        t == SymbolType::Constructor;
+                        if (!callable) continue;
+                        std::string loc =
+                            rel + ":" + std::to_string(sym->symbol.line);
+                        int dout = rt_snap->count_dynamic_calls_out(sym->id);
+                        if (dout > 0) hubs.push_back({sym->symbol.name, loc, dout});
+                        if (sym->incoming_ref_count == 0 &&
+                            !sym->symbol.declaration_only) {
+                            auto st = rt_snap->classify_same_name_calls(
+                                sym->symbol.name);
+                            if (st.dynamic > 0)
+                                dyn_only.push_back(
+                                    {sym->symbol.name, loc, st.dynamic});
+                        }
+                    }
+                }
+                std::sort(hubs.begin(), hubs.end(),
+                          [](const Hub& a, const Hub& b) {
+                              if (a.dyn != b.dyn) return a.dyn > b.dyn;
+                              return a.loc < b.loc;
+                          });
+                std::sort(dyn_only.begin(), dyn_only.end(),
+                          [](const DynOnly& a, const DynOnly& b) {
+                              if (a.dyn != b.dyn) return a.dyn > b.dyn;
+                              return a.loc < b.loc;
+                          });
+                if (!hubs.empty()) {
+                    out << "dynamic hubs (dispatch the most; framework/plugin "
+                           "seams):\n";
+                    for (size_t i = 0; i < hubs.size() && i < 5; ++i)
+                        out << "  " << hubs[i].name << " (" << hubs[i].loc
+                            << ") dynamic_calls=" << hubs[i].dyn << "\n";
+                }
+                if (!dyn_only.empty()) {
+                    out << "reached only dynamically (0 static callers; look "
+                           "dead but are dispatched to):\n";
+                    for (size_t i = 0; i < dyn_only.size() && i < 5; ++i)
+                        out << "  " << dyn_only[i].name << " ("
+                            << dyn_only[i].loc
+                            << ") dynamic_callers=" << dyn_only[i].dyn << "\n";
+                }
+                // Reflection / eval escapes: the true "can jump anywhere"
+                // points, from the side-effect classifier.
+                if (analyzer != nullptr) {
+                    std::vector<std::string> escapes;
+                    for (const auto& f : files_data) {
+                        std::string rel =
+                            git::normalize_rel(f.path, project_root);
+                        for (const auto* sym : f.symbols) {
+                            if (sym == nullptr || sym->symbol.name.empty())
+                                continue;
+                            auto t2 = sym->symbol.type;
+                            if (t2 != SymbolType::Function &&
+                                t2 != SymbolType::Method &&
+                                t2 != SymbolType::Constructor)
+                                continue;
+                            const auto* se = analyzer->get_result(
+                                f.path, sym->symbol.line);
+                            if (se == nullptr) continue;
+                            if (se->categories & (side_effect::kDynamicCall |
+                                                  side_effect::kReflection))
+                                escapes.push_back(
+                                    sym->symbol.name + " (" + rel + ":" +
+                                    std::to_string(sym->symbol.line) + ")");
+                        }
+                    }
+                    std::sort(escapes.begin(), escapes.end());
+                    if (!escapes.empty()) {
+                        out << "reflection/eval escapes (dispatch to anything "
+                               "at runtime):\n";
+                        for (size_t i = 0; i < escapes.size() && i < 5; ++i)
+                            out << "  " << escapes[i] << "\n";
+                    }
+                }
+                out << "---\n";
+            }
+        }
         if (hd) {
             emit_statistics(out, hd->complexity, d.coupling.coupling,
                             d.coupling.cohesion, d.quality,
