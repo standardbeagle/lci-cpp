@@ -723,6 +723,128 @@ TEST(CodeInsightDeadCode, LabelDeadConfirms) {
     std::filesystem::remove_all(dir);
 }
 
+// The annotation path driver (analysis=annotate) walks an agent through
+// every @lci: annotation LCI supports: entry points, community domains,
+// hot-path/loop memory hints, and dead code. Each dimension lists the
+// elements that would benefit and the exact marker to add.
+TEST(CodeInsightAnnotate, DrivesAllDimensions) {
+    auto dir = lci::test::unique_temp_dir("lci_annotate_test_");
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    {
+        // A small call graph: Serve (exported entry-ish) -> handle -> work;
+        // a recursive walk; a dead helper.
+        std::ofstream f(dir / "srv.go");
+        f << "package srv\n\n"
+             "func Serve() { handle() }\n"
+             "func handle() { work(); walk(3) }\n"
+             "func work() {}\n"
+             "func walk(n int) { if n > 0 { walk(n-1) } }\n"
+             "func deadHelper() {}\n";
+    }
+
+    Config config;
+    config.project.root = dir.string();
+    MasterIndex indexer(config);
+    indexer.index_directory(dir.string());
+    CodebaseIntelligenceEngine engine;
+    auto annotator = std::make_unique<SemanticAnnotator>();
+    annotator->populate_from_index(indexer);
+
+    nlohmann::json params;
+    params["mode"] = "detailed";
+    params["analysis"] = "annotate";
+    auto result = handle_code_insight(params, engine, indexer, nullptr,
+                                      nullptr, annotator.get());
+    ASSERT_FALSE(result.is_error) << result.text;
+    EXPECT_NE(result.text.find("== ANNOTATION PATH =="), std::string::npos)
+        << result.text;
+    // Every dimension's marker vocabulary is documented.
+    EXPECT_NE(result.text.find("@lci:labels[entry]"), std::string::npos)
+        << result.text;
+    EXPECT_NE(result.text.find("@lci:call-frequency[hot-path]"),
+              std::string::npos)
+        << result.text;
+    EXPECT_NE(result.text.find("@lci:loop-bounded"), std::string::npos)
+        << result.text;
+    EXPECT_NE(result.text.find("@lci:exclude[deadcode]"), std::string::npos)
+        << result.text;
+    // walk is recursive -> a loop-bound candidate.
+    EXPECT_NE(result.text.find("walk"), std::string::npos) << result.text;
+
+    std::filesystem::remove_all(dir);
+}
+
+// A target filter narrows the driver to one dimension.
+TEST(CodeInsightAnnotate, TargetFilterSelectsDimension) {
+    auto dir = lci::test::unique_temp_dir("lci_annotate_target_test_");
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    {
+        std::ofstream f(dir / "srv.go");
+        f << "package srv\n\n"
+             "func Serve() { handle() }\n"
+             "func handle() { work() }\n"
+             "func work() {}\n";
+    }
+
+    Config config;
+    config.project.root = dir.string();
+    MasterIndex indexer(config);
+    indexer.index_directory(dir.string());
+    CodebaseIntelligenceEngine engine;
+    auto annotator = std::make_unique<SemanticAnnotator>();
+    annotator->populate_from_index(indexer);
+
+    nlohmann::json params;
+    params["mode"] = "detailed";
+    params["analysis"] = "annotate";
+    params["target"] = "entry";
+    auto result = handle_code_insight(params, engine, indexer, nullptr,
+                                      nullptr, annotator.get());
+    ASSERT_FALSE(result.is_error) << result.text;
+    EXPECT_NE(result.text.find("-- ENTRY"), std::string::npos) << result.text;
+    // Other dimensions' section headers are absent under a target filter.
+    EXPECT_EQ(result.text.find("-- DEADCODE"), std::string::npos)
+        << result.text;
+
+    std::filesystem::remove_all(dir);
+}
+
+// An @lci annotation removes an element from its dimension's worklist.
+TEST(CodeInsightAnnotate, AnnotatedElementLeavesWorklist) {
+    auto dir = lci::test::unique_temp_dir("lci_annotate_supp_test_");
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    {
+        std::ofstream f(dir / "srv.go");
+        f << "package srv\n\n"
+             "// @lci:labels[entry]\n"
+             "func Serve() { handle() }\n"
+             "func handle() {}\n";
+    }
+
+    Config config;
+    config.project.root = dir.string();
+    MasterIndex indexer(config);
+    indexer.index_directory(dir.string());
+    CodebaseIntelligenceEngine engine;
+    auto annotator = std::make_unique<SemanticAnnotator>();
+    annotator->populate_from_index(indexer);
+
+    nlohmann::json params;
+    params["mode"] = "detailed";
+    params["analysis"] = "annotate";
+    params["target"] = "entry";
+    auto result = handle_code_insight(params, engine, indexer, nullptr,
+                                      nullptr, annotator.get());
+    ASSERT_FALSE(result.is_error) << result.text;
+    // Serve is already labeled entry -> not pending under the entry target.
+    EXPECT_EQ(result.text.find("Serve ("), std::string::npos) << result.text;
+
+    std::filesystem::remove_all(dir);
+}
+
 TEST_F(CodeInsightTest, DetailedModeWorks) {
     // detailed with default analysis (modules) now actually dispatches to
     // ModuleAnalyzer (was a silent overview fallback before).
