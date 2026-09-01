@@ -1492,6 +1492,7 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                 std::string path;
                 int line;
                 std::string type;
+                int dynamic;  // same-name dynamic-dispatch call sites
             };
             std::vector<DeadExport> dead;
             int exported_total = 0;
@@ -1556,16 +1557,26 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                         bool confirmed = d == Disp::Confirmed;
                         if (!confirmed && sym->incoming_ref_count > 0) continue;
                         if (!confirmed && entry_names.contains(nm)) continue;
+                        int dyn = rt_snap->classify_same_name_calls(
+                                      sym->symbol.name).dynamic;
                         dead.push_back({sym->symbol.name, rel,
                                         static_cast<int>(sym->symbol.line),
-                                        std::string(to_string(t))});
-                        if (flow && !confirmed)
+                                        std::string(to_string(t)), dyn});
+                        if (flow && !confirmed) {
+                            std::string reason =
+                                "exported, zero references — may be a "
+                                "public API or dynamically used";
+                            if (dyn > 0)
+                                reason += "; name dynamically dispatched " +
+                                          std::to_string(dyn) +
+                                          "x — if reached that way, tag "
+                                          "@lci:labels[dynamic]";
                             flow_items.push_back(
                                 {"DEAD EXPORT", sym->symbol.name,
                                  rel + ":" +
                                      std::to_string(sym->symbol.line),
-                                 "exported, zero references — may be a "
-                                 "public API or dynamically used"});
+                                 std::move(reason)});
+                        }
                     }
                 }
             }
@@ -1590,7 +1601,11 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
             if (!flow)
             for (size_t i = 0; i < lim; ++i) {
                 out << "  " << dead[i].type << " " << dead[i].name << " ("
-                    << dead[i].path << ":" << dead[i].line << ")\n";
+                    << dead[i].path << ":" << dead[i].line << ")";
+                if (dead[i].dynamic > 0)
+                    out << " [name dynamically dispatched "
+                        << dead[i].dynamic << "x — may be reached that way]";
+                out << "\n";
             }
             if (!flow && dead.size() > lim) {
                 out << "  ... and " << dead.size() - lim
@@ -1623,6 +1638,7 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                     std::string path;
                     int line;
                     std::string type;
+                    int dynamic{};  // same-name dynamic-dispatch call sites
                 };
                 std::vector<DeadEntry> dead_private;
                 std::vector<DeadEntry> dead_types;
@@ -1716,26 +1732,47 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                             if (!confirmed_dead &&
                                 iface_method_names.contains(nm))
                                 continue;
+                            int dynp =
+                                rt_snap->classify_same_name_calls(nm).dynamic;
                             dead_private.push_back(
-                                {nm, rel, ln, std::string(to_string(t))});
-                            if (flow && !confirmed_dead)
+                                {nm, rel, ln, std::string(to_string(t)),
+                                 dynp});
+                            if (flow && !confirmed_dead) {
+                                std::string reason =
+                                    "unexported, zero static references — "
+                                    "may be a function value, callback, or "
+                                    "dynamically dispatched";
+                                if (dynp > 0)
+                                    reason += "; name dynamically dispatched " +
+                                              std::to_string(dynp) +
+                                              "x — if reached that way, tag "
+                                              "@lci:labels[dynamic]";
                                 flow_items.push_back(
                                     {"UNUSED PRIVATE", nm,
                                      rel + ":" + std::to_string(ln),
-                                     "unexported, zero static references — "
-                                     "may be a function value, callback, or "
-                                     "dynamically dispatched"});
+                                     std::move(reason)});
+                            }
                         } else if (type_like) {
+                            int dynt =
+                                rt_snap->classify_same_name_calls(nm).dynamic;
                             dead_types.push_back(
-                                {nm, rel, ln, std::string(to_string(t))});
-                            if (flow && !confirmed_dead)
+                                {nm, rel, ln, std::string(to_string(t)),
+                                 dynt});
+                            if (flow && !confirmed_dead) {
+                                std::string reason =
+                                    "no indexed reference — may be used in "
+                                    "a template-argument, field, receiver, "
+                                    "or namespaced position not yet credited";
+                                if (dynt > 0)
+                                    reason += "; name dynamically dispatched " +
+                                              std::to_string(dynt) +
+                                              "x — if reached that way, tag "
+                                              "@lci:labels[dynamic]";
                                 flow_items.push_back(
                                     {"UNUSED TYPE", nm,
                                      rel + ":" + std::to_string(ln),
-                                     "no indexed reference — may be used in "
-                                     "a template-argument, field, receiver, "
-                                     "or namespaced position not yet "
-                                     "credited"});
+                                     std::move(reason)});
+                            }
                         }
                     }
                     // C-family files are excluded from the FILE-level pass:
@@ -1808,7 +1845,12 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                         std::min(v.size(), static_cast<size_t>(max_results));
                     for (size_t i = 0; i < l; ++i) {
                         out << "  " << v[i].type << " " << v[i].name << " ("
-                            << v[i].path << ":" << v[i].line << ")\n";
+                            << v[i].path << ":" << v[i].line << ")";
+                        if (v[i].dynamic > 0)
+                            out << " [name dynamically dispatched "
+                                << v[i].dynamic
+                                << "x — may be reached that way]";
+                        out << "\n";
                     }
                     if (v.size() > l)
                         out << "  ... and " << v.size() - l << " more\n";

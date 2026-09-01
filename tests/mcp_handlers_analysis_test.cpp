@@ -844,6 +844,49 @@ TEST(CodeInsightAnnotate, AnnotatedElementLeavesWorklist) {
     std::filesystem::remove_all(dir);
 }
 
+// Dead-code candidates whose name is dynamically dispatched are MARKED (not
+// suppressed — the by-name count is a lower bound): the flow hands the agent
+// the exact tag (@lci:labels[dynamic]) to resolve the ambiguity.
+TEST(CodeInsightDeadCode, MarksDynamicallyDispatchedCandidates) {
+    auto dir = lci::test::unique_temp_dir("lci_dc_dyn_test_");
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    {
+        std::ofstream f(dir / "srv.go");
+        f << "package srv\n\n"
+             "type impl struct{}\n"
+             "func (i *impl) serve() {}\n"   // unexported, 0 static callers
+             "func run(xs []interface{ serve() }) {\n"
+             "    for _, x := range xs { x.serve() }\n"  // dynamic dispatch
+             "}\n";
+    }
+
+    Config config;
+    config.project.root = dir.string();
+    MasterIndex indexer(config);
+    indexer.index_directory(dir.string());
+    CodebaseIntelligenceEngine engine;
+
+    nlohmann::json params;
+    params["mode"] = "detailed";
+    params["analysis"] = "deadcode";
+    params["flow"] = true;
+    auto result = handle_code_insight(params, engine, indexer);
+    ASSERT_FALSE(result.is_error) << result.text;
+    // serve is a candidate whose name is dynamically dispatched -> the flow
+    // carries the dynamic evidence and the resolving tag.
+    if (result.text.find("serve") != std::string::npos) {
+        EXPECT_NE(result.text.find("dynamically dispatched"),
+                  std::string::npos)
+            << result.text;
+        EXPECT_NE(result.text.find("@lci:labels[dynamic]"),
+                  std::string::npos)
+            << result.text;
+    }
+
+    std::filesystem::remove_all(dir);
+}
+
 // The DYNAMIC section maps where the code opts OUT of static analysis:
 // dynamic-dispatch call sites (through unknown receivers), the hubs that make
 // them, and symbols reachable only dynamically. Using dynamic features
