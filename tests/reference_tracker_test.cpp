@@ -1904,6 +1904,61 @@ TEST(ReferenceTrackerTest, PhpTraitMethodResolvesThroughUse) {
         << "Service.help must resolve into the Helper trait";
 }
 
+// Scope-qualified type resolution: `Outer.Inner` resolves to the Inner whose
+// enclosing scope is Outer, not the same-named standalone type.
+TEST(ReferenceTrackerTest, ScopeQualifiedTypeResolvesToNested) {
+    ReferenceTracker rt;
+
+    // Nested Outer::Inner (scope_chain has Outer) and a standalone Inner.
+    ScopeInfo outer;
+    outer.type = ScopeType::Class;
+    outer.name = "Outer";
+    outer.start_line = 1;
+    outer.end_line = 5;
+    std::vector<ScopeInfo> nested_scope = {outer};
+    std::vector<Symbol> nested = {
+        make_sym("Outer", SymbolType::Struct, 1, 1, 5),
+        make_sym("Inner", SymbolType::Struct, 1, 2, 3),
+    };
+    std::vector<Reference> none;
+    rt.process_file(1, "a.hpp", nested, none, nested_scope);
+
+    std::vector<Symbol> standalone = {
+        make_sym("Inner", SymbolType::Struct, 2, 1, 3),
+    };
+    rt.process_file(2, "b.hpp", standalone, none, {});
+
+    // A caller referencing Outer.Inner in type position.
+    std::vector<Symbol> user = {
+        make_sym("make", SymbolType::Function, 3, 1, 3),
+    };
+    Reference tref;
+    tref.type = ReferenceType::Usage;
+    tref.type_position = true;
+    tref.referenced_name = "Outer.Inner";
+    tref.line = 2;
+    tref.column = 1;
+    std::vector<Reference> urefs = {tref};
+    rt.process_file(3, "use.cpp", user, urefs, {});
+    rt.process_all_references();
+
+    auto snap = rt.pin();
+    // The nested Inner (file 1) carries the incoming ref; the standalone
+    // (file 2) does not.
+    const EnhancedSymbol* nested_inner = nullptr;
+    const EnhancedSymbol* standalone_inner = nullptr;
+    for (const auto& h : snap->find_symbols_by_name("Inner")) {
+        if (h->symbol.file_id == 1) nested_inner = &*h;
+        if (h->symbol.file_id == 2) standalone_inner = &*h;
+    }
+    ASSERT_NE(nested_inner, nullptr);
+    ASSERT_NE(standalone_inner, nullptr);
+    EXPECT_GT(nested_inner->incoming_ref_count, 0)
+        << "Outer.Inner must credit the nested Inner";
+    EXPECT_EQ(standalone_inner->incoming_ref_count, 0)
+        << "the standalone Inner must not be credited";
+}
+
 TEST(ReferenceTrackerTest, RustMethodBareCallResolvesToShadowingFreeFunction) {
     // Rust methods are invoked via `self.`; a bare `trim(...)` inside method
     // `trim` is the same-named FREE function, never recursion.

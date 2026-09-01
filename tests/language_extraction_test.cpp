@@ -980,6 +980,26 @@ class Engine {
 // registration) must produce a reference so the target shows callers and is
 // not judged dead. The 2026-08-31 audits found this was the top cross-language
 // gap (Go handlers registered by value scored 8/8 false-positive dead).
+// C++ nested-type disambiguation: a qualified type use `Outer::Inner` must
+// carry the scope so it resolves to the Inner nested in Outer, not a same-named
+// type elsewhere. Dropping the qualifier made ReferenceTracker::Snapshot (the
+// heavily-used one) show 0 refs while a minor same-named Snapshot got them.
+TEST(LanguageExtractionTest, CppQualifiedTypeRefKeepsScope) {
+    constexpr std::string_view src = R"(struct Outer {
+    struct Inner { int x; };
+};
+struct Inner { int y; };
+Outer::Inner make();
+)";
+    auto r = extract(Language::Cpp, ".cpp", src, "m.cpp");
+    bool has_qualified = false;
+    for (const auto& ref : r.references) {
+        if (ref.referenced_name == "Outer.Inner") has_qualified = true;
+    }
+    EXPECT_TRUE(has_qualified)
+        << "Outer::Inner must emit a scope-qualified type reference";
+}
+
 // PHP traits are compile-time copy-paste: `use Helper;` inside a class gives
 // the class the trait's methods, so it emits an Extends reference the resolver
 // can follow ($this->traitMethod() resolves through the class to the trait).
