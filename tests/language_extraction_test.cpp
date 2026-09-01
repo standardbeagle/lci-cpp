@@ -1000,6 +1000,35 @@ Outer::Inner make();
         << "Outer::Inner must emit a scope-qualified type reference";
 }
 
+// Go inferred-type locals: `x := NewApp()` types x by NewApp's return type,
+// so x.Method() resolves. The extractor records the function return type
+// (owner "$ret") and emits the call as "$ret.NewApp.Method" for the resolver's
+// field-access chain to decode.
+TEST(LanguageExtractionTest, GoInferredTypeLocalFromConstructor) {
+    constexpr std::string_view src = R"(package main
+
+func NewApp() *App { return nil }
+type App struct{}
+func use() {
+    x := NewApp()
+    x.Run()
+}
+)";
+    auto r = extract(Language::Go, ".go", src, "m.go");
+    bool ret_captured = false;
+    for (const auto& ft : r.field_types) {
+        if (ft.owner == "$ret" && ft.field == "NewApp" && ft.type == "App")
+            ret_captured = true;
+    }
+    EXPECT_TRUE(ret_captured) << "NewApp's return type must be recorded";
+    bool chained_call = false;
+    for (const auto& ref : r.references) {
+        if (ref.referenced_name == "$ret.NewApp.Run") chained_call = true;
+    }
+    EXPECT_TRUE(chained_call)
+        << "x.Run() where x := NewApp() must emit the return-type chain";
+}
+
 // PHP traits are compile-time copy-paste: `use Helper;` inside a class gives
 // the class the trait's methods, so it emits an Extends reference the resolver
 // can follow ($this->traitMethod() resolves through the class to the trait).

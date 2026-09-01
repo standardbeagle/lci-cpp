@@ -375,6 +375,19 @@ void UnifiedExtractor::record_go_local_var(TSNode decl) {
                 r = rt ? rt : "";
             }
         }
+        if (r == "call_expression") {  // x := NewT() / pkg.NewT()
+            // Type x by the return type of the called function, resolved
+            // later via the "$ret" field-access chain. Plain-identifier
+            // callee only (pkg.NewT would need the package's return table).
+            TSNode fn = ts_node_child_by_field_name(rex, "function",
+                                                    static_cast<uint32_t>(8));
+            if (!ts_node_is_null(fn) &&
+                std::string_view(ts_node_type(fn)) == "identifier") {
+                local_var_types_[std::string(node_text(lid))] =
+                    "$ret." + std::string(node_text(fn));
+            }
+            return;
+        }
         if (r == "composite_literal") {  // T{...}
             TSNode ty = ts_node_child_by_field_name(rex, "type",
                                                     static_cast<uint32_t>(4));
@@ -397,6 +410,34 @@ void UnifiedExtractor::process_go_reference(TSNode node,
     // deliberately does NOT clear — it inherits the enclosing function's types.
     if (node_type == "function_declaration") {
         seed_go_local_types(node, false);
+        // Record the function's single return type under the reserved "$ret"
+        // owner so `x := NewApp()` can infer x's type (return-type of NewApp)
+        // and x.Method() resolves through the field-access chain. Handles
+        // `func f() T`, `func f() *T`, and `func f() (*T, error)` (first).
+        TSNode fname = ts_node_child_by_field_name(node, "name",
+                                                   static_cast<uint32_t>(4));
+        TSNode result = ts_node_child_by_field_name(node, "result",
+                                                    static_cast<uint32_t>(6));
+        if (!ts_node_is_null(fname) && !ts_node_is_null(result)) {
+            TSNode ty = result;
+            std::string_view rt(ts_node_type(result));
+            if (rt == "parameter_list") {
+                // (*T, error) -> the first parameter's type.
+                for (uint32_t i = 0; i < ts_node_named_child_count(result);
+                     ++i) {
+                    TSNode p = ts_node_named_child(result, i);
+                    if (std::string_view(ts_node_type(p)) == "parameter_declaration") {
+                        TSNode pt = ts_node_child_by_field_name(
+                            p, "type", static_cast<uint32_t>(4));
+                        if (!ts_node_is_null(pt)) { ty = pt; break; }
+                    }
+                }
+            }
+            std::string bt = go_bare_type(node_text(ty));
+            if (!bt.empty() && bt != "error")
+                field_types_.push_back(
+                    {"$ret", std::string(node_text(fname)), bt});
+        }
         return;
     }
     if (node_type == "method_declaration") {
