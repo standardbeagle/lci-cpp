@@ -97,6 +97,41 @@ TEST(ReferenceTrackerTest, BidirectionalReferences) {
     EXPECT_GT(stats.total_references, 0);
 }
 
+// Pins the classify/call_resolution_totals consistency fix: a call resolved
+// to a bodiless DECLARATION (interface / abstract method spec) is dynamic
+// dispatch in call_resolution_totals — classify_same_name_calls used to
+// skip every resolved ref, undercounting `dynamic` for exactly the
+// interface-reached dead-code candidates the count exists for.
+TEST(ReferenceTrackerTest, DeclarationOnlyTargetCountsAsDynamic) {
+    ReferenceTracker rt;
+
+    Symbol decl = make_sym("Handle", SymbolType::Method, 1, 1, 1);
+    decl.declaration_only = true;
+    std::vector<Symbol> symbols = {
+        decl,
+        make_sym("caller", SymbolType::Function, 1, 5, 15),
+    };
+
+    Reference call_ref;
+    call_ref.type = ReferenceType::Call;
+    call_ref.referenced_name = "Handle";
+    call_ref.line = 8;
+    call_ref.column = 4;
+    std::vector<Reference> refs = {call_ref};
+    std::vector<ScopeInfo> scopes;
+
+    rt.process_file(1, "test.go", symbols, refs, scopes);
+    rt.process_all_references();
+
+    auto snap = rt.pin();
+    auto totals = snap->call_resolution_totals();
+    ASSERT_EQ(totals.dynamic, 1) << "resolved-to-declaration call must be "
+                                    "dynamic in the totals";
+    auto stats = snap->classify_same_name_calls("Handle");
+    EXPECT_EQ(stats.dynamic, 1)
+        << "classify_same_name_calls disagrees with call_resolution_totals";
+}
+
 TEST(ReferenceTrackerTest, FindSymbolsByName) {
     ReferenceTracker rt;
 

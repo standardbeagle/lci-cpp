@@ -135,8 +135,19 @@ ReferenceTracker::Snapshot::classify_same_name_calls(
     for (const auto& [fid, vec] : refs_by_file) {
         for (const auto& r : vec) {
             if (r.dead || r.type != ReferenceType::Call) continue;
-            if (r.target_symbol != 0) continue;
             if (!ids.contains(r.name_id)) continue;
+            if (r.target_symbol != 0) {
+                // Consistent with call_resolution_totals: a call resolved to
+                // a bodiless DECLARATION (interface / abstract method spec)
+                // is dynamic dispatch — the concrete implementation is
+                // chosen at runtime. Skipping these undercounted `dynamic`
+                // for every dead-code candidate reached through an
+                // interface.
+                const auto* tsym = symbols.get(r.target_symbol);
+                if (tsym != nullptr && tsym->symbol.declaration_only)
+                    ++out.dynamic;
+                continue;
+            }
             if (r.foreign_receiver) ++out.dynamic;
             else ++out.unresolved;
         }
