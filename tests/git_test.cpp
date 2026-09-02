@@ -542,6 +542,42 @@ TEST(GitProvider, CommitFilesOnRootCommit) {
     fs::remove_all(repo);
 }
 
+// WORKING-ref content reads bypass git and hit the filesystem directly, so
+// they must be confined to the repository: a "../" (or absolute) path used to
+// read any file the process could. The git-ref paths never had this hole —
+// git resolves "<ref>:<path>" inside the repo itself.
+TEST(GitProvider, GetFileContentWorkingRefusesPathTraversal) {
+    namespace fs = std::filesystem;
+    fs::path base = fs::temp_directory_path() /
+                    ("lci_git_traversal_" +
+                     std::to_string(std::chrono::steady_clock::now()
+                                        .time_since_epoch()
+                                        .count()));
+    fs::path repo = base / "repo";
+    fs::create_directories(repo);
+    std::ofstream(repo / "inside.txt") << "inside\n";
+    // A real, readable file OUTSIDE the repo: the refusal below is about
+    // confinement, not absence.
+    std::ofstream(base / "secret.txt") << "outside\n";
+    ASSERT_TRUE(lci::test::run_git(repo, "init -q"));
+
+    Provider p;
+    ASSERT_TRUE(Provider::create(repo.string(), p));
+
+    std::string content;
+    EXPECT_TRUE(p.get_file_content("WORKING", "inside.txt", content));
+    EXPECT_EQ(content, "inside\n");
+
+    content.clear();
+    EXPECT_FALSE(p.get_file_content("WORKING", "../secret.txt", content))
+        << "dot-dot traversal out of the repo must be refused";
+    EXPECT_FALSE(p.get_file_content("WORKING",
+                                    (base / "secret.txt").string(), content))
+        << "absolute path out of the repo must be refused";
+
+    fs::remove_all(base);
+}
+
 // An UNTRACKED subdirectory nested inside some outer repository (the benchmark
 // corpora under .work/, any gitignored playground) must not silently analyze
 // the enclosing repo: rev-parse walks up, finds the outer toplevel, and every

@@ -217,8 +217,22 @@ FileChangeStatus parse_status(std::string_view status) {
 bool Provider::get_file_content(std::string_view ref, std::string_view path,
                                 std::string& out) const {
     if (ref.empty() || ref == "WORKING") {
-        auto full_path = std::filesystem::path(repo_root_) / std::string(path);
-        std::ifstream ifs(full_path, std::ios::binary);
+        namespace fs = std::filesystem;
+        auto full_path = fs::path(repo_root_) / std::string(path);
+        // Confine WORKING reads to the repository. Without this, a
+        // caller-supplied "../..."-style path (or an absolute one) read any
+        // file the process can — the git-ref paths never had this hole
+        // because git itself resolves "<ref>:<path>" inside the repo.
+        // weakly_canonical also resolves symlinks, so a link pointing out
+        // of the repo is refused too.
+        std::error_code ec;
+        auto canon = fs::weakly_canonical(full_path, ec);
+        if (ec) return false;
+        auto root = fs::weakly_canonical(repo_root_, ec);
+        if (ec) return false;
+        auto rel = canon.lexically_relative(root);
+        if (rel.empty() || *rel.begin() == "..") return false;
+        std::ifstream ifs(canon, std::ios::binary);
         if (!ifs) return false;
         std::ostringstream ss;
         ss << ifs.rdbuf();
