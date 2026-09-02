@@ -573,38 +573,53 @@ void sort_symbols(std::vector<SymbolWithFile>& symbols,
 }
 
 /// Sorts enhanced symbol pointers by the given key.
+/// Every key applies a (line, column, name) tiebreaker so the order is a
+/// TOTAL order — mirrors sort_symbols above (karpathy #4: never rely on the
+/// hash-iteration order the input arrived in for user-visible output).
 void sort_enhanced_symbols(
     std::vector<const EnhancedSymbol*>& symbols,
     const std::string& sort_by) {
+    auto tiebreak = [](const EnhancedSymbol* a, const EnhancedSymbol* b) {
+        if (a->symbol.line != b->symbol.line)
+            return a->symbol.line < b->symbol.line;
+        if (a->symbol.column != b->symbol.column)
+            return a->symbol.column < b->symbol.column;
+        return a->symbol.name < b->symbol.name;
+    };
     auto low = to_lower(sort_by);
     if (low == "name") {
         std::sort(symbols.begin(), symbols.end(),
-                  [](const EnhancedSymbol* a, const EnhancedSymbol* b) {
-                      return a->symbol.name < b->symbol.name;
+                  [&](const EnhancedSymbol* a, const EnhancedSymbol* b) {
+                      if (a->symbol.name != b->symbol.name)
+                          return a->symbol.name < b->symbol.name;
+                      return tiebreak(a, b);
                   });
     } else if (low == "type") {
         std::sort(symbols.begin(), symbols.end(),
-                  [](const EnhancedSymbol* a, const EnhancedSymbol* b) {
-                      return to_string(a->symbol.type) <
-                             to_string(b->symbol.type);
+                  [&](const EnhancedSymbol* a, const EnhancedSymbol* b) {
+                      auto at = to_string(a->symbol.type);
+                      auto bt = to_string(b->symbol.type);
+                      if (at != bt) return at < bt;
+                      return tiebreak(a, b);
                   });
     } else if (low == "complexity") {
         std::sort(symbols.begin(), symbols.end(),
-                  [](const EnhancedSymbol* a, const EnhancedSymbol* b) {
-                      return a->complexity > b->complexity;
+                  [&](const EnhancedSymbol* a, const EnhancedSymbol* b) {
+                      if (a->complexity != b->complexity)
+                          return a->complexity > b->complexity;
+                      return tiebreak(a, b);
                   });
     } else if (low == "refs") {
         std::sort(symbols.begin(), symbols.end(),
-                  [](const EnhancedSymbol* a, const EnhancedSymbol* b) {
-                      return a->incoming_ref_count >
-                             b->incoming_ref_count;
+                  [&](const EnhancedSymbol* a, const EnhancedSymbol* b) {
+                      if (a->incoming_ref_count != b->incoming_ref_count)
+                          return a->incoming_ref_count >
+                                 b->incoming_ref_count;
+                      return tiebreak(a, b);
                   });
     } else {
-        // Default: sort by line
-        std::sort(symbols.begin(), symbols.end(),
-                  [](const EnhancedSymbol* a, const EnhancedSymbol* b) {
-                      return a->symbol.line < b->symbol.line;
-                  });
+        // Default: sort by line (tiebreak covers column + name).
+        std::sort(symbols.begin(), symbols.end(), tiebreak);
     }
 }
 
