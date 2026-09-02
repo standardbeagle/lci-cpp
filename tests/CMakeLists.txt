@@ -39,6 +39,7 @@ add_executable(lci_tests
     parser_pool_test.cpp
     unified_extractor_test.cpp
     language_extraction_test.cpp
+    svelte_extraction_test.cpp
     symbol_store_test.cpp
     trigram_test.cpp
     reference_tracker_test.cpp

@@ -16,6 +16,7 @@ add_library(lci_lib STATIC
     core/subprocess.cpp
     core/postings.cpp
     parser/parser.cpp
+    parser/svelte_script.cpp
     parser/parser_pool.cpp
     parser/parse_methods.cpp
     parser/unified_extractor.cpp
