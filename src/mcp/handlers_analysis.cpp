@@ -2237,7 +2237,10 @@ void register_analysis_handlers(McpServer& server,
             }
             return handle_semantic_annotations(p, *annotator, propagator,
                                                 indexer);
-        });
+        }
+        // exclusive (default): SemanticAnnotator/GraphPropagator hold their
+        // own mutable analysis state; not audited for concurrent reads.
+    );
 
     // Replace "side_effects" stub
     server.add_tool(
@@ -2272,7 +2275,10 @@ void register_analysis_handlers(McpServer& server,
                     "side effect analysis not available", "retry shortly; the server is still starting, or this build/config lacks the analyzer");
             }
             return handle_side_effects(p, *analyzer, indexer);
-        });
+        }
+        // exclusive (default): SideEffectAnalyzer state is not audited for
+        // concurrent reads.
+    );
 
     // Replace "code_insight" stub
     server.add_tool(
@@ -2340,7 +2346,11 @@ void register_analysis_handlers(McpServer& server,
             }
             return handle_code_insight(p, *ci_engine, *indexer, analyzer,
                                        propagator, annotator);
-        });
+        }
+        // exclusive (default): CodebaseIntelligenceEngine builds and caches
+        // analysis results — shared mutable state, unaudited for concurrent
+        // execution, so the long insight run keeps the exclusive lock.
+    );
 }
 
 std::string write_error_report_capture(MasterIndex& indexer,

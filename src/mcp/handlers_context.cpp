@@ -779,7 +779,10 @@ void register_context_handlers(McpServer& server, MasterIndex* indexer) {
                                                  "retry shortly; the server is still starting or indexing");
             }
             return handle_context(p, *indexer, root);
-        });
+        }
+        // exclusive (default): save/append write manifest files (read-modify-
+        // write on append); not a read-only tool.
+    );
 }
 
 }  // namespace mcp

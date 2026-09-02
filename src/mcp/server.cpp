@@ -49,7 +49,8 @@ McpServer::~McpServer() {
 
 // -- Tool registration --------------------------------------------------------
 
-void McpServer::add_tool(ToolDefinition def, ToolHandler handler) {
+void McpServer::add_tool(ToolDefinition def, ToolHandler handler,
+                         bool concurrent_ok) {
     // Registration is startup-only: enqueue_call stores raw pointers into
     // registered_tools_, so a push_back after the transport loop starts can
     // reallocate the vector under a queued call and dangle it. Fail fast
@@ -59,7 +60,8 @@ void McpServer::add_tool(ToolDefinition def, ToolHandler handler) {
             "McpServer::add_tool called after run() started; tools must be "
             "registered before the transport loop");
     }
-    registered_tools_.push_back({std::move(def), std::move(handler)});
+    registered_tools_.push_back(
+        {std::move(def), std::move(handler), concurrent_ok});
 }
 
 const ToolDefinition* McpServer::find_tool_definition(
@@ -501,9 +503,18 @@ std::string McpServer::tools_list_wire(const nlohmann::json& id) const {
 nlohmann::json McpServer::execute_tool_call(const RegisteredTool& tool,
                                             const nlohmann::json& arguments,
                                             const nlohmann::json& id) {
-    // One tool call at a time, whichever thread carries it (stdio worker or
-    // an /mcp bridge request): handlers were written for serial execution.
-    std::lock_guard lock(tool_mu_);
+    // concurrent_ok handlers (audited RCU-snapshot readers) may overlap each
+    // other under a shared lock — a long exclusive tool no longer serializes
+    // the whole read path behind it (karpathy #3). Everything unaudited
+    // takes the exclusive lock and runs with no concurrent peer, exactly as
+    // before.
+    std::shared_lock<std::shared_mutex> shared;
+    std::unique_lock<std::shared_mutex> exclusive;
+    if (tool.concurrent_ok) {
+        shared = std::shared_lock(tool_mu_);
+    } else {
+        exclusive = std::unique_lock(tool_mu_);
+    }
 
     nlohmann::json response;
     response["jsonrpc"] = "2.0";

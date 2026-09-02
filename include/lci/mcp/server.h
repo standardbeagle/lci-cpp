@@ -6,6 +6,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <shared_mutex>
 #include <string>
 #include <thread>
 #include <vector>
@@ -124,7 +125,18 @@ class McpServer {
     McpServer& operator=(const McpServer&) = delete;
 
     /// Registers a single tool.
-    void add_tool(ToolDefinition def, ToolHandler handler);
+    ///
+    /// `concurrent_ok` declares the handler safe to run concurrently with
+    /// other concurrent_ok handlers (it takes a shared lock instead of the
+    /// exclusive tool lock — karpathy #3: no global serialization on the
+    /// read path). Set it ONLY for handlers proven to (a) read exclusively
+    /// through RCU/atomic-snapshot structures (symbol store, reference
+    /// tracker, file snapshot, content store — all lock-free reads) and
+    /// (b) hold no handler-local shared mutable state (only const/constexpr
+    /// statics). Record the proof as a comment at the registration site.
+    /// Default false = exclusive, the safe choice for anything unaudited.
+    void add_tool(ToolDefinition def, ToolHandler handler,
+                  bool concurrent_ok = false);
 
     /// Definition of a registered tool by name, or nullptr. Feeds the info
     /// tool's registry-derived help; the pointer stays valid for the server's
@@ -177,6 +189,9 @@ class McpServer {
     struct RegisteredTool {
         ToolDefinition definition;
         ToolHandler handler;
+        /// True = read-only handler audited for concurrent execution; runs
+        /// under a shared lock. See add_tool.
+        bool concurrent_ok{false};
     };
 
     /// Reads a single JSON-RPC message from stdin.
@@ -240,14 +255,15 @@ class McpServer {
     std::string tools_list_wire(const nlohmann::json& id) const;
 
     /// Runs the gate + handler for one resolved call and returns the full
-    /// response envelope. Serialized by tool_mu_ across the stdio worker
-    /// and dispatch_wire callers — handlers assume no concurrent peer.
+    /// response envelope. concurrent_ok tools hold tool_mu_ shared (read
+    /// handlers may overlap each other); everything else holds it exclusive
+    /// (no concurrent peer of any kind).
     nlohmann::json execute_tool_call(const RegisteredTool& tool,
                                      const nlohmann::json& arguments,
                                      const nlohmann::json& id);
 
     std::mutex write_mu_;
-    std::mutex tool_mu_;
+    std::shared_mutex tool_mu_;
 
     std::mutex queue_mu_;
     std::condition_variable queue_cv_;

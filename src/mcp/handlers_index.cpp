@@ -454,7 +454,11 @@ void register_index_handlers(McpServer& server, MasterIndex* indexer) {
                     "retry shortly; the server is still starting or indexing");
             }
             return handle_index_stats(p, *indexer);
-        });
+        },
+        // concurrent_ok proof: reads get_stats() (atomics + snapshot
+        // counts), path_to_id / get_file_path (atomic file snapshot),
+        // content store and tracker stats via const snapshot APIs.
+        /*concurrent_ok=*/true);
 
     server.add_tool(
         {"debug_info",
@@ -482,7 +486,10 @@ void register_index_handlers(McpServer& server, MasterIndex* indexer) {
                     "retry shortly; the server is still starting or indexing");
             }
             return handle_debug_info(p, *indexer);
-        });
+        }
+        // exclusive (default): diagnostic dump walks more internals than the
+        // audited snapshot read set; not proven snapshot-only.
+    );
 
     server.add_tool(
         {"git_analysis",
@@ -515,7 +522,10 @@ void register_index_handlers(McpServer& server, MasterIndex* indexer) {
          {}},
         [indexer](const nlohmann::json& p) -> ToolResult {
             return handle_git_analysis(p, *indexer);
-        });
+        }
+        // exclusive (default): shells out to git and analyzes working-tree
+        // state; not a snapshot read path.
+    );
 }
 
 }  // namespace mcp

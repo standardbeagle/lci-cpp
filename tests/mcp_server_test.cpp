@@ -9,7 +9,11 @@
 #include <lci/mcp/server.h>
 
 #include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <mutex>
 #include <set>
+#include <thread>
 #include <sstream>
 #include <string>
 
@@ -242,6 +246,110 @@ TEST_F(McpStdioTest, TypeConfusedRequestGetsErrorAndServerSurvives) {
     // The valid request after the malformed ones still gets served.
     EXPECT_EQ(responses[2]["id"], 3);
     EXPECT_TRUE(responses[2].contains("result"));
+}
+
+// karpathy #3: concurrent_ok tools hold tool_mu_ shared, so two audited
+// read handlers can be inside their handlers at the same time. The proof is
+// a rendezvous: each handler waits (bounded) until BOTH are inside — under
+// the old exclusive-only lock this rendezvous can never complete and both
+// calls report "serialized".
+TEST_F(McpStdioTest, ConcurrentOkToolsOverlapUnderSharedLock) {
+    std::mutex m;
+    std::condition_variable cv;
+    int inside = 0;
+    auto rendezvous_handler = [&](const nlohmann::json&) -> ToolResult {
+        std::unique_lock lk(m);
+        ++inside;
+        cv.notify_all();
+        bool both = cv.wait_for(lk, std::chrono::seconds(5),
+                                [&] { return inside >= 2; });
+        return {both ? "overlapped" : "serialized", !both};
+    };
+    ToolDefinition a;
+    a.name = "shared_a";
+    ToolDefinition b;
+    b.name = "shared_b";
+    server_->add_tool(a, rendezvous_handler, /*concurrent_ok=*/true);
+    server_->add_tool(b, rendezvous_handler, /*concurrent_ok=*/true);
+
+    std::string ra, rb;
+    std::thread ta([&] {
+        ra = server_->dispatch_wire(
+            R"({"jsonrpc":"2.0","id":1,"method":"tools/call",)"
+            R"("params":{"name":"shared_a","arguments":{}}})");
+    });
+    std::thread tb([&] {
+        rb = server_->dispatch_wire(
+            R"({"jsonrpc":"2.0","id":2,"method":"tools/call",)"
+            R"("params":{"name":"shared_b","arguments":{}}})");
+    });
+    ta.join();
+    tb.join();
+
+    auto ja = nlohmann::json::parse(ra);
+    auto jb = nlohmann::json::parse(rb);
+    EXPECT_EQ(ja["result"]["content"][0]["text"], "overlapped");
+    EXPECT_EQ(jb["result"]["content"][0]["text"], "overlapped");
+}
+
+// An exclusive (default) tool must NOT overlap a concurrent_ok tool: while
+// the shared holder is parked inside its handler, the exclusive call queues
+// on the unique lock; `entered_exclusive` stays false until the shared
+// handler is released.
+TEST_F(McpStdioTest, ExclusiveToolWaitsForSharedHolder) {
+    std::mutex m;
+    std::condition_variable cv;
+    bool shared_inside = false;
+    bool release_shared = false;
+    std::atomic<bool> entered_exclusive{false};
+
+    ToolDefinition s;
+    s.name = "shared_hold";
+    server_->add_tool(
+        s,
+        [&](const nlohmann::json&) -> ToolResult {
+            std::unique_lock lk(m);
+            shared_inside = true;
+            cv.notify_all();
+            cv.wait_for(lk, std::chrono::seconds(5),
+                        [&] { return release_shared; });
+            return {"done", false};
+        },
+        /*concurrent_ok=*/true);
+    ToolDefinition x;
+    x.name = "exclusive_probe";
+    server_->add_tool(x, [&](const nlohmann::json&) -> ToolResult {
+        entered_exclusive.store(true);
+        return {"done", false};
+    });  // exclusive by default
+
+    std::thread ts([&] {
+        server_->dispatch_wire(
+            R"({"jsonrpc":"2.0","id":1,"method":"tools/call",)"
+            R"("params":{"name":"shared_hold","arguments":{}}})");
+    });
+    {
+        std::unique_lock lk(m);
+        ASSERT_TRUE(cv.wait_for(lk, std::chrono::seconds(5),
+                                [&] { return shared_inside; }));
+    }
+    std::thread tx([&] {
+        server_->dispatch_wire(
+            R"({"jsonrpc":"2.0","id":2,"method":"tools/call",)"
+            R"("params":{"name":"exclusive_probe","arguments":{}}})");
+    });
+    // Give the exclusive call time to (incorrectly) slip through.
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    EXPECT_FALSE(entered_exclusive.load())
+        << "exclusive tool ran while a shared holder was inside its handler";
+    {
+        std::lock_guard lk(m);
+        release_shared = true;
+    }
+    cv.notify_all();
+    ts.join();
+    tx.join();
+    EXPECT_TRUE(entered_exclusive.load());
 }
 
 // find_tool_definition must agree with dispatch: both take the FIRST

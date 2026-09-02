@@ -21,6 +21,7 @@
 #include <fstream>
 #include <set>
 #include <sstream>
+#include <thread>
 #include <string>
 
 namespace lci {
@@ -237,6 +238,42 @@ TEST(InfoHandler, UnknownToolReturnsOverview) {
     EXPECT_FALSE(result.is_error);
     auto json = nlohmann::json::parse(result.text);
     EXPECT_TRUE(json.contains("server"));
+}
+
+// karpathy #3: search is concurrent_ok — two threads dispatching real
+// searches against a real index must both get complete, identical, parseable
+// results (no torn state, no serialization requirement for correctness).
+TEST_F(HandlersFixture, ConcurrentSearchesReturnIdenticalUntornResults) {
+    Config config;
+    config.project.root = temp_dir_.string();
+    mcp::McpServer server(config, *indexer_, search_engine_.get());
+    register_core_handlers(server, indexer_.get(), search_engine_.get(),
+                           nullptr);
+
+    const std::string req =
+        R"({"jsonrpc":"2.0","id":1,"method":"tools/call",)"
+        R"("params":{"name":"search","arguments":{"pattern":"main"}}})";
+    // Sequential baseline.
+    auto baseline = server.dispatch_wire(req);
+    ASSERT_FALSE(baseline.empty());
+
+    constexpr int kIters = 25;
+    std::vector<std::string> out_a(kIters), out_b(kIters);
+    std::thread ta([&] {
+        for (int i = 0; i < kIters; ++i) out_a[i] = server.dispatch_wire(req);
+    });
+    std::thread tb([&] {
+        for (int i = 0; i < kIters; ++i) out_b[i] = server.dispatch_wire(req);
+    });
+    ta.join();
+    tb.join();
+
+    for (int i = 0; i < kIters; ++i) {
+        EXPECT_EQ(out_a[i], baseline) << "thread A iter " << i;
+        EXPECT_EQ(out_b[i], baseline) << "thread B iter " << i;
+        auto j = nlohmann::json::parse(out_a[i]);
+        EXPECT_FALSE(j["result"].value("isError", false));
+    }
 }
 
 // =============================================================================

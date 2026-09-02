@@ -1007,7 +1007,11 @@ void register_explore_handlers(McpServer& server, MasterIndex* indexer) {
                     "retry shortly; the server is still starting or indexing");
             }
             return handle_list_symbols(p, *indexer);
-        });
+        },
+        // concurrent_ok proof: pins one ReferenceTracker RCU snapshot
+        // (tracker.pin()), reads symbol store / file paths / content store
+        // through their lock-free snapshot APIs; only const statics.
+        /*concurrent_ok=*/true);
 
     server.add_tool(
         {"inspect_symbol",
@@ -1038,7 +1042,12 @@ void register_explore_handlers(McpServer& server, MasterIndex* indexer) {
                     "retry shortly; the server is still starting or indexing");
             }
             return handle_inspect_symbol(p, *indexer);
-        });
+        },
+        // concurrent_ok proof: same shape as list_symbols — tracker.pin()
+        // snapshot + const tracker reads (get_caller_names/get_callee_names/
+        // get_type_relationships) + snapshot file/content reads; no shared
+        // mutable state.
+        /*concurrent_ok=*/true);
 
     server.add_tool(
         {"browse_file",
@@ -1071,7 +1080,10 @@ void register_explore_handlers(McpServer& server, MasterIndex* indexer) {
                     "retry shortly; the server is still starting or indexing");
             }
             return handle_browse_file(p, *indexer);
-        });
+        },
+        // concurrent_ok proof: tracker.pin() snapshot + snapshot-based file
+        // path / content store reads; only const statics.
+        /*concurrent_ok=*/true);
 }
 
 }  // namespace mcp

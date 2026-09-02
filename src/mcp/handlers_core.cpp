@@ -208,7 +208,10 @@ void register_core_handlers(McpServer& server, MasterIndex* indexer,
             return handle_info(p, [&server](const std::string& name) {
                 return server.find_tool_definition(name);
             });
-        });
+        },
+        // concurrent_ok proof: reads only registered_tools_, which is frozen
+        // before run() (add_tool rejects late registration); no other state.
+        /*concurrent_ok=*/true);
 
     // Register the "search" tool (definition + real handler)
     server.add_tool(
@@ -271,7 +274,13 @@ void register_core_handlers(McpServer& server, MasterIndex* indexer,
                     "retry shortly; the server is still starting or indexing");
             }
             return handle_search(p, *indexer, search_engine);
-        });
+        },
+        // concurrent_ok proof: SearchEngine::search is const with no mutable
+        // members; MasterIndex/trigram/postings/reference-tracker reads are
+        // RCU snapshots (search_count_ is atomic); handler statics are const
+        // magic-statics (flag table, JSON-schema validator, validate() is
+        // const). No handler-local shared mutable state.
+        /*concurrent_ok=*/true);
 
     // Register the "get_context" tool (definition + real handler)
     server.add_tool(
@@ -322,7 +331,10 @@ void register_core_handlers(McpServer& server, MasterIndex* indexer,
                     "retry shortly; the server is still starting or indexing");
             }
             return handle_get_context(p, *indexer, analyzer);
-        });
+        }
+        // exclusive (default): the context-lookup engine + SideEffectAnalyzer
+        // path is unaudited for concurrent reads — not proven snapshot-only.
+    );
 
     // Register the "find_files" tool (definition + real handler)
     server.add_tool(
@@ -356,7 +368,10 @@ void register_core_handlers(McpServer& server, MasterIndex* indexer,
                     "retry shortly; the server is still starting or indexing");
             }
             return handle_find_files(p, *indexer);
-        });
+        },
+        // concurrent_ok proof: reads only indexer.load_snapshot() (atomic
+        // file snapshot) and config(); no statics, no mutation.
+        /*concurrent_ok=*/true);
 }
 
 }  // namespace mcp
