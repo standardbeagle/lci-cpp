@@ -184,14 +184,41 @@ std::unique_ptr<Client> ensure_server_running(const Config& cfg,
 
     std::fprintf(stderr, "Waiting for index server to be ready...\n");
 
-    int ready_timeout_sec = cfg.performance.indexing_timeout_sec > 0
+    // Two distinct waits, two distinct failures. Conflating them made a
+    // healthy server on a large corpus report "did not become ready" when
+    // only the INDEX was still building past the timeout.
+    //
+    // Phase 1 — spawn-ready: the spawned process binds its socket and
+    // answers /ping. Corpus-size independent; a healthy spawn is up within
+    // seconds, so a small fixed bound is right.
+    constexpr auto kSpawnReadyTimeout = std::chrono::seconds(30);
+    constexpr auto kSpawnPollInterval = std::chrono::milliseconds(250);
+    const auto spawn_deadline =
+        std::chrono::steady_clock::now() + kSpawnReadyTimeout;
+    bool listening = false;
+    while (std::chrono::steady_clock::now() < spawn_deadline) {
+        if (client->is_server_running()) {
+            listening = true;
+            break;
+        }
+        std::this_thread::sleep_for(kSpawnPollInterval);
+    }
+    if (!listening) {
+        error = "server process did not start listening within 30s";
+        return nullptr;
+    }
+
+    // Phase 2 — index-ready: wait_for_ready's timeout bounds STALL, not
+    // wall clock, so a big corpus that keeps making progress is fine; only
+    // a genuinely stuck index trips it.
+    int index_timeout_sec = cfg.performance.indexing_timeout_sec > 0
                                 ? cfg.performance.indexing_timeout_sec
                                 : 30;
 
     std::string wait_err;
-    if (!client->wait_for_ready(std::chrono::seconds(ready_timeout_sec),
+    if (!client->wait_for_ready(std::chrono::seconds(index_timeout_sec),
                                 wait_err)) {
-        error = "server did not become ready: " + wait_err;
+        error = "server started, but its index is not ready: " + wait_err;
         return nullptr;
     }
 
