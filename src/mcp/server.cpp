@@ -690,6 +690,16 @@ int McpServer::run() {
 
 void McpServer::stop() {
     running_.store(false);
+    // Wake the drain worker for real: its wait predicate only observes the
+    // queue and finish_worker_, so notifying without setting the flag was a
+    // no-op wake and stop() silently did nothing until the next stdin frame.
+    // The read loop itself can still be blocked in getline(); interrupting
+    // stdin is the caller's job (close the pipe or exit the process) — this
+    // guarantees the worker drains and exits, not that run() returns early.
+    {
+        std::lock_guard lock(queue_mu_);
+        finish_worker_ = true;
+    }
     queue_cv_.notify_all();
 }
 
