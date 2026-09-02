@@ -1,0 +1,10 @@
+{
+  "result": {
+    "content": [
+      {
+        "text": "{\"callers\":[{\"call_count\":1,\"call_lines\":[16],\"caller\":\"HandleGet\",\"caller_type\":\"function\",\"file_path\":\"api/handler.go\",\"line\":14},{\"call_count\":1,\"call_lines\":[26],\"caller\":\"HandlePost\",\"caller_type\":\"function\",\"file_path\":\"api/handler.go\",\"line\":24},{\"call_count\":1,\"call_lines\":[11],\"caller\":\"Route\",\"caller_type\":\"function\",\"file_path\":\"api/router.go\",\"line\":4}],\"definitions\":[{\"file_path\":\"api/handler.go\",\"line\":9,\"name\":\"Logf\",\"type\":\"function\"}],\"symbol\":\"Logf\",\"total_call_sites\":3,\"total_callers\":3,\"truncated\":false}",
+        "type": "text"
+      }
+    ]
+  }
+}

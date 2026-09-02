@@ -1,0 +1,5 @@
+callee: Logf (function) api/handler.go:9
+3 callers, 3 call sites
+  HandleGet api/handler.go:14  calls at 16
+  HandlePost api/handler.go:24  calls at 26
+  Route api/router.go:4  calls at 11
