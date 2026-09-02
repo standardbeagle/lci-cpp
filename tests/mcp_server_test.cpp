@@ -90,7 +90,8 @@ class McpServerTest : public ::testing::Test {
 
 TEST(McpResponse, LossyDumpToleratesInvalidUtf8) {
     nlohmann::json j;
-    j["value"] = std::string("bad\x8a\xffbyte");  // lone 0x8A/0xFF: invalid UTF-8
+    // lone 0x8A/0xFF: invalid UTF-8. Literal split so 'b' doesn't extend \xff.
+    j["value"] = std::string("bad\x8a\xff" "byte");
     EXPECT_NO_THROW({ (void)lci::mcp::dump_json_lossy(j); });
     EXPECT_NO_THROW({ (void)lci::mcp::make_json_response(j); });
     EXPECT_NO_THROW(
@@ -755,7 +756,8 @@ TEST_F(McpStdioTest, InvalidUtf8ToolOutputDoesNotAbortRunLoop) {
     srv->add_tool(
         {"bad_utf8", "emits invalid utf8", {}, {}},
         [](const nlohmann::json& /*params*/) -> ToolResult {
-            return {std::string("payload\x8a\xffend"), false};
+            // Split so 'e' doesn't extend the \xff hex escape (AppleClang errors).
+            return {std::string("payload\x8a\xff" "end"), false};
         });
 
     std::string input =
