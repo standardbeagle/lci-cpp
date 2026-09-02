@@ -6,7 +6,9 @@
 
 #include <algorithm>
 #include <cctype>
+#include <map>
 #include <string>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
@@ -26,6 +28,11 @@ inline std::string to_lower(std::string s) {
                    [](unsigned char c) { return std::tolower(c); });
     return s;
 }
+
+/// Language-name → file-extension table (lowercase keys + aliases), shared
+/// by search's `languages[]` / `filter` translation and find_files' `filter`.
+/// Defined in handlers_search.cpp.
+const std::map<std::string, std::vector<std::string>>& language_ext_table();
 
 /// True if the comma-separated `list` contains `item` (trimmed, exact).
 bool comma_list_contains(const std::string& list, const std::string& item);

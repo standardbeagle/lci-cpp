@@ -3184,6 +3184,102 @@ TEST_F(AiContextFixture, HandlerRichRequestCarriesPerformanceMetadataEnvelope) {
     }
 }
 
+// =============================================================================
+// Silent-filter fixes: a filter must filter or error, never silently no-op
+// =============================================================================
+
+// find_files filter: ".go" is "*.go" — matches only that extension.
+TEST_F(HandlersFixture, FindFilesFilterDotExtensionMatches) {
+    nlohmann::json params;
+    params["pattern"] = "*";
+    params["filter"] = ".go";
+    auto result = handle_find_files(params, *indexer_);
+    ASSERT_FALSE(result.is_error) << result.text;
+    auto json = nlohmann::json::parse(result.text);
+    EXPECT_GT(json["total_matches"].get<int>(), 0);
+    for (const auto& r : json["results"]) {
+        const auto p = r["path"].get<std::string>();
+        EXPECT_TRUE(p.size() > 3 && p.compare(p.size() - 3, 3, ".go") == 0)
+            << p;
+    }
+}
+
+// A dot-extension filter matching nothing yields ZERO results — the old code
+// fell through and returned every file (silent superset).
+TEST_F(HandlersFixture, FindFilesFilterDotExtensionExcludesEverythingElse) {
+    nlohmann::json params;
+    params["pattern"] = "*";
+    params["filter"] = ".cpp";
+    auto result = handle_find_files(params, *indexer_);
+    ASSERT_FALSE(result.is_error) << result.text;
+    auto json = nlohmann::json::parse(result.text);
+    EXPECT_EQ(json["total_matches"].get<int>(), 0) << result.text;
+}
+
+// Non-"*.ext" basename globs ("test_*"-style prefix globs) now filter.
+TEST_F(HandlersFixture, FindFilesFilterBasenamePrefixGlob) {
+    nlohmann::json params;
+    params["pattern"] = "*";
+    params["filter"] = "hand*";
+    auto result = handle_find_files(params, *indexer_);
+    ASSERT_FALSE(result.is_error) << result.text;
+    auto json = nlohmann::json::parse(result.text);
+    ASSERT_EQ(json["total_matches"].get<int>(), 1) << result.text;
+    EXPECT_EQ(json["results"][0]["path"], "handler.go");
+}
+
+// Exact-filename filter ("handlers.go" shape) now filters.
+TEST_F(HandlersFixture, FindFilesFilterExactBasename) {
+    nlohmann::json params;
+    params["pattern"] = "*";
+    params["filter"] = "handler.go";
+    auto result = handle_find_files(params, *indexer_);
+    ASSERT_FALSE(result.is_error) << result.text;
+    auto json = nlohmann::json::parse(result.text);
+    ASSERT_EQ(json["total_matches"].get<int>(), 1) << result.text;
+    EXPECT_EQ(json["results"][0]["path"], "handler.go");
+}
+
+// Path globs ("src/*.go" shape) now filter against the full relative path.
+TEST_F(HandlersFixture, FindFilesFilterPathGlob) {
+    nlohmann::json params;
+    params["pattern"] = "*";
+    params["filter"] = "internal/*.go";
+    auto result = handle_find_files(params, *indexer_);
+    ASSERT_FALSE(result.is_error) << result.text;
+    auto json = nlohmann::json::parse(result.text);
+    ASSERT_EQ(json["total_matches"].get<int>(), 1) << result.text;
+    EXPECT_EQ(json["results"][0]["path"], "internal/api/server.go");
+}
+
+// Bare language names expand via the shared language table.
+TEST_F(HandlersFixture, FindFilesFilterLanguageName) {
+    nlohmann::json params;
+    params["pattern"] = "*";
+    params["filter"] = "go";
+    auto result = handle_find_files(params, *indexer_);
+    ASSERT_FALSE(result.is_error) << result.text;
+    auto json = nlohmann::json::parse(result.text);
+    EXPECT_GT(json["total_matches"].get<int>(), 0);
+
+    params["filter"] = "typescript";
+    auto r2 = handle_find_files(params, *indexer_);
+    ASSERT_FALSE(r2.is_error) << r2.text;
+    auto j2 = nlohmann::json::parse(r2.text);
+    EXPECT_EQ(j2["total_matches"].get<int>(), 0) << r2.text;
+}
+
+// An uninterpretable filter is an explicit error naming the allowed forms.
+TEST_F(HandlersFixture, FindFilesFilterUnparseableErrors) {
+    nlohmann::json params;
+    params["pattern"] = "*";
+    params["filter"] = "go files";
+    auto result = handle_find_files(params, *indexer_);
+    EXPECT_TRUE(result.is_error);
+    EXPECT_NE(result.text.find("allowed forms"), std::string::npos)
+        << result.text;
+}
+
 }  // namespace
 }  // namespace mcp
 }  // namespace lci

@@ -97,8 +97,11 @@ nlohmann::json scope_chain_to_breadcrumbs(const EnhancedSymbol& sym) {
     return crumbs;
 }
 
+}  // namespace
+
 /// Language-name → file-extension table, shared by the `languages[]`
-/// include filter and the `filter` token translation. Same table as Go
+/// include filter, the `filter` token translation, and find_files'
+/// `filter` (declared in handlers_core_shared.h). Same table as Go
 /// languageToExtensions (handlers.go:926); lowercase keys + aliases so
 /// callers can pass "ts", "TypeScript", "typescript" interchangeably.
 const std::map<std::string, std::vector<std::string>>& language_ext_table() {
@@ -150,6 +153,8 @@ const std::map<std::string, std::vector<std::string>>& language_ext_table() {
     };
     return kTable;
 }
+
+namespace {
 
 /// Builds a path-include regex from a list of language names.
 /// Go parity: languagesToIncludePattern (handlers.go:967). Returns empty

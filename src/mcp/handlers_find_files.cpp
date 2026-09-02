@@ -154,6 +154,110 @@ ToolResult handle_find_files(const nlohmann::json& params,
         }
     }
 
+    // -- filter classification (once, before the per-file loop) --------------
+    // Allowed forms:
+    //   language name        "go", "typescript"  → any of its extensions
+    //   bare extension       "md"                → extension equality
+    //   dot extension        ".cpp"              → same as "*.cpp"
+    //   basename glob        "*.ts", "test_*"    → wildcard on basename
+    //   path glob / literal  "src/*.go"          → wildcard on full path
+    //   exact filename       "handlers.go"       → basename equality
+    // Every previously-fallthrough form now either filters or errors —
+    // never a silent no-op superset (karpathy rule 6).
+    enum class FilterKind { None, Extensions, BasenameGlob, PathGlob, Basename };
+    FilterKind filter_kind = FilterKind::None;
+    std::string filter_pat;                    // glob / basename / extension
+    std::vector<std::string> filter_exts;      // Extensions kind (lowercase)
+    if (!filter.empty()) {
+        if (filter.find_first_of(" \t\r\n") != std::string::npos ||
+            filter.find(',') != std::string::npos) {
+            return make_error_response(
+                "find_files",
+                "unsupported filter '" + filter +
+                    "'; allowed forms: language name (go), extension (.cpp "
+                    "or cpp), basename glob (*.ts, test_*), path glob "
+                    "(src/*.go), or exact filename (handlers.go)");
+        }
+        const bool has_wild = filter.find_first_of("*?") != std::string::npos;
+        const bool has_slash = filter.find('/') != std::string::npos;
+        const bool has_dot = filter.find('.') != std::string::npos;
+        if (has_slash) {
+            filter_kind = FilterKind::PathGlob;
+            filter_pat = filter;
+        } else if (has_wild) {
+            filter_kind = FilterKind::BasenameGlob;
+            filter_pat = filter;
+        } else if (has_dot) {
+            if (filter.front() == '.' && filter.rfind('.') == 0) {
+                // ".cpp" → "*.cpp"
+                filter_kind = FilterKind::BasenameGlob;
+                filter_pat = "*" + filter;
+            } else {
+                filter_kind = FilterKind::Basename;
+                filter_pat = filter;
+            }
+        } else {
+            filter_kind = FilterKind::Extensions;
+            std::string lower = to_lower(filter);
+            const auto& table = language_ext_table();
+            auto it = table.find(lower);
+            if (it != table.end()) {
+                filter_exts = it->second;
+            } else {
+                // Unknown language name: treat as a literal extension.
+                filter_exts.push_back(std::move(lower));
+            }
+        }
+    }
+    auto passes_filter = [&](const std::string& path) -> bool {
+        if (filter_kind == FilterKind::None) return true;
+        auto slash_pos = path.rfind('/');
+        std::string_view basename =
+            (slash_pos == std::string::npos)
+                ? std::string_view(path)
+                : std::string_view(path).substr(slash_pos + 1);
+        switch (filter_kind) {
+            case FilterKind::Extensions: {
+                auto dot_pos = basename.rfind('.');
+                if (dot_pos == std::string_view::npos) return false;
+                auto ext = to_lower(std::string(basename.substr(dot_pos + 1)));
+                for (const auto& e : filter_exts) {
+                    if (ext == e) return true;
+                }
+                return false;
+            }
+            case FilterKind::BasenameGlob:
+                return wildcard_match(basename, filter_pat);
+            case FilterKind::PathGlob:
+                return wildcard_match(path, filter_pat);
+            case FilterKind::Basename:
+                return basename == filter_pat;
+            case FilterKind::None:
+                return true;
+        }
+        return true;
+    };
+
+    // Hidden file test — root-relative components only, so dotted ancestors
+    // of the project root never hide the whole corpus. Shared by the main
+    // pass and the multi-word pass.
+    auto is_hidden = [](const std::string& path) -> bool {
+        size_t pos = 0;
+        while (pos < path.size()) {
+            auto sep = path.find('/', pos);
+            auto component = (sep == std::string::npos)
+                                 ? path.substr(pos)
+                                 : path.substr(pos, sep - pos);
+            if (!component.empty() && component[0] == '.' &&
+                component != "." && component != "..") {
+                return true;
+            }
+            if (sep == std::string::npos) break;
+            pos = sep + 1;
+        }
+        return false;
+    };
+
     for (const auto& [abs_path, fid] : snapshot->file_map) {
         const std::string path = rel_of(abs_path);
         // Directory filter (root-relative)
@@ -165,57 +269,10 @@ ToolResult handle_find_files(const nlohmann::json& params,
             }
         }
 
-        // Hidden file filter — root-relative components only, so dotted
-        // ancestors of the project root never hide the whole corpus.
-        if (!include_hidden) {
-            bool hidden = false;
-            size_t pos = 0;
-            while (pos < path.size()) {
-                auto sep = path.find('/', pos);
-                auto component =
-                    (sep == std::string::npos)
-                        ? path.substr(pos)
-                        : path.substr(pos, sep - pos);
-                if (!component.empty() && component[0] == '.' &&
-                    component != "." && component != "..") {
-                    hidden = true;
-                    break;
-                }
-                if (sep == std::string::npos) break;
-                pos = sep + 1;
-            }
-            if (hidden) continue;
-        }
+        if (!include_hidden && is_hidden(path)) continue;
 
         // File type/glob filter
-        if (!filter.empty()) {
-            bool is_language_filter =
-                filter.find('*') == std::string::npos &&
-                filter.find('.') == std::string::npos;
-            if (is_language_filter) {
-                auto dot_pos = path.rfind('.');
-                if (dot_pos == std::string::npos) continue;
-                auto ext = path.substr(dot_pos + 1);
-                if (to_lower(ext) != to_lower(filter)) continue;
-            } else {
-                // Simple glob: match basename against pattern
-                auto slash_pos = path.rfind('/');
-                auto basename =
-                    (slash_pos == std::string::npos)
-                        ? path
-                        : path.substr(slash_pos + 1);
-                // Simple wildcard match: *.ext
-                if (filter.size() > 2 && filter[0] == '*' &&
-                    filter[1] == '.') {
-                    auto ext_filter = filter.substr(1);
-                    if (basename.size() < ext_filter.size() ||
-                        basename.substr(basename.size() -
-                                        ext_filter.size()) != ext_filter) {
-                        continue;
-                    }
-                }
-            }
-        }
+        if (!passes_filter(path)) continue;
 
         // Matching
         std::string match_path = path;
