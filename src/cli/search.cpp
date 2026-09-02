@@ -377,7 +377,22 @@ int run_search(const GlobalFlags& flags, const SearchCommandOptions& options) {
     if (use_regex && !regex_seeds.empty()) {
         all_patterns = regex_seeds;  // Union of every literal run.
     } else if (!effective_pattern.empty()) {
-        all_patterns.push_back(effective_pattern);
+        // Bare top-level literal alternation ("FileWatcher|DebouncedRebuilder"
+        // with no --regex): OR the branches through the literal fast path.
+        // The literal engine would otherwise search for the pipe byte
+        // verbatim and return a silent zero (Karpathy rule 6 class).
+        auto or_terms = split_literal_alternation(effective_pattern);
+        if (!or_terms.empty()) {
+            if (!json_output) {
+                std::cerr << "Note: pattern treated as OR of "
+                          << or_terms.size()
+                          << " literal terms (use --regex for full regex "
+                             "syntax).\n";
+            }
+            all_patterns = std::move(or_terms);
+        } else {
+            all_patterns.push_back(effective_pattern);
+        }
     }
     for (const auto& p : extra_patterns) {
         if (!p.empty()) all_patterns.push_back(p);
@@ -639,6 +654,52 @@ int run_search(const GlobalFlags& flags, const SearchCommandOptions& options) {
             ctx["start_line"] = start_line + from;
             ctx["end_line"] = start_line + to - 1;
         }
+    }
+
+    // -- --group: per-file grouped output ------------------------------------
+    //
+    // Path once, total count, per-term counts (meaningful for OR queries:
+    // bare `A|B` alternation or --patterns), sorted line numbers. Post-filter
+    // over the already-capped row set — not a hot path.
+    if (options.group) {
+        auto rows = j.value("results", nlohmann::json::array());
+        auto groups = group_rows_by_file(rows, all_patterns, case_insensitive);
+        if (json_output) {
+            nlohmann::json output{
+                {"query", options.pattern},
+                {"time_ms", elapsed_ms},
+                {"count", rows.size()},
+                {"unique_files", groups.size()},
+                {"results", groups},
+                {"mode", "group"},
+            };
+            std::cout << output.dump(2) << '\n';
+            return 0;
+        }
+        std::printf("Found %zu matches in %zu file(s) in %.1fms (group mode)\n\n",
+                    rows.size(), groups.size(), elapsed_ms);
+        for (const auto& g : groups) {
+            std::string path =
+                to_relative_display_path(g.value("path", std::string{}));
+            std::printf("%s: %d", path.c_str(), g.value("count", 0));
+            const auto& terms = g["terms"];
+            if (terms.is_object() && !terms.empty()) {
+                std::printf(" (");
+                bool first = true;
+                for (auto it = terms.begin(); it != terms.end(); ++it) {
+                    std::printf("%s%s x%d", first ? "" : ", ",
+                                it.key().c_str(), it.value().get<int>());
+                    first = false;
+                }
+                std::printf(")");
+            }
+            std::printf("  lines:");
+            for (const auto& ln : g["lines"]) {
+                std::printf(" %d", ln.get<int>());
+            }
+            std::printf("\n");
+        }
+        return 0;
     }
 
     return render_search_output(options, j, elapsed_ms, verbose_start);

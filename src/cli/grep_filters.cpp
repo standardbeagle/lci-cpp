@@ -12,6 +12,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <optional>
 #include <set>
 #include <string>
@@ -735,6 +736,90 @@ nlohmann::json regex_filter_results(nlohmann::json results,
         if (seen.contains(key)) continue;
         seen.insert(key);
         out.push_back(std::move(row));
+    }
+    return out;
+}
+
+std::vector<std::string> split_literal_alternation(std::string_view pattern) {
+    std::vector<std::string> branches;
+    if (pattern.find('|') == std::string_view::npos) return branches;
+    // Any regex metacharacter (other than the splitting '|') disqualifies the
+    // whole pattern: it is a real regex and belongs to --regex.
+    constexpr std::string_view kMeta = "\\.*+?()[]{}^$";
+    if (pattern.find_first_of(kMeta) != std::string_view::npos) {
+        return branches;
+    }
+    size_t start = 0;
+    while (true) {
+        size_t bar = pattern.find('|', start);
+        std::string_view branch =
+            bar == std::string_view::npos
+                ? pattern.substr(start)
+                : pattern.substr(start, bar - start);
+        if (branch.empty()) return {};  // "a||b", "|a", "a|" — not literal OR.
+        branches.emplace_back(branch);
+        if (bar == std::string_view::npos) break;
+        start = bar + 1;
+    }
+    if (branches.size() < 2) return {};
+    return branches;
+}
+
+nlohmann::json group_rows_by_file(const nlohmann::json& results,
+                                  const std::vector<std::string>& terms,
+                                  bool case_insensitive) {
+    auto fold = [case_insensitive](std::string s) {
+        if (case_insensitive) {
+            std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
+                return static_cast<char>(std::tolower(c));
+            });
+        }
+        return s;
+    };
+    // Folded term -> original query-term spelling (the reported key).
+    std::vector<std::pair<std::string, const std::string*>> folded_terms;
+    folded_terms.reserve(terms.size());
+    for (const auto& t : terms) folded_terms.emplace_back(fold(t), &t);
+
+    struct Group {
+        std::string path;
+        int count = 0;
+        std::vector<int> lines;
+        nlohmann::json term_counts = nlohmann::json::object();
+    };
+    std::vector<Group> groups;
+    std::map<std::string, size_t> group_of;  // path -> index (bounded rows).
+
+    for (const auto& row : results) {
+        if (!row.is_object()) continue;
+        std::string path = row.value("path", std::string{});
+        auto [it, inserted] = group_of.emplace(path, groups.size());
+        if (inserted) {
+            groups.push_back({});
+            groups.back().path = std::move(path);
+        }
+        Group& g = groups[it->second];
+        ++g.count;
+        g.lines.push_back(row.value("line", 0));
+        std::string match = fold(row.value("match", std::string{}));
+        for (const auto& [folded, original] : folded_terms) {
+            if (match == folded) {
+                auto& slot = g.term_counts[*original];
+                slot = (slot.is_number_integer() ? slot.get<int>() : 0) + 1;
+                break;
+            }
+        }
+    }
+
+    nlohmann::json out = nlohmann::json::array();
+    for (auto& g : groups) {
+        std::sort(g.lines.begin(), g.lines.end());
+        g.lines.erase(std::unique(g.lines.begin(), g.lines.end()),
+                      g.lines.end());
+        out.push_back({{"path", std::move(g.path)},
+                       {"count", g.count},
+                       {"lines", g.lines},
+                       {"terms", std::move(g.term_counts)}});
     }
     return out;
 }

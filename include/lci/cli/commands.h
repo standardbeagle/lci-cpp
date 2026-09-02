@@ -56,6 +56,9 @@ struct SearchCommandOptions {
     bool json_output{};
     bool light{};
     bool compact{};
+    // --group: per-file grouped output (path once, per-term counts, line
+    // list). Serves "which files mention any of these N names".
+    bool group{};
     bool use_regex{};
     std::string exclude_pattern;
     std::string include_pattern;

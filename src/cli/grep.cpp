@@ -229,6 +229,21 @@ int run_grep(const GlobalFlags& flags, const GrepCommandOptions& options) {
         std::cerr << "Error: at least one pattern is required\n";
         return 1;
     }
+    // Bare top-level literal alternation ("A|B", no --regex): OR the branches
+    // through the literal path — same rescue as `lci search` (the literal
+    // engine matches the pipe byte verbatim, a guaranteed silent zero).
+    if (!use_regex && all_patterns.size() == 1) {
+        auto or_terms = split_literal_alternation(all_patterns.front());
+        if (!or_terms.empty()) {
+            if (!json_output) {
+                std::cerr << "Note: pattern treated as OR of "
+                          << or_terms.size()
+                          << " literal terms (use --regex for full regex "
+                             "syntax).\n";
+            }
+            all_patterns = std::move(or_terms);
+        }
+    }
 
     // -- --regex (grep -E) for `lci grep` ----------------------------------
     //

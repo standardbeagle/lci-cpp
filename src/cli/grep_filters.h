@@ -108,6 +108,27 @@ nlohmann::json count_per_file_rows(const nlohmann::json& results);
 nlohmann::json files_with_matches_rows(const nlohmann::json& results);
 nlohmann::json regex_filter_results(nlohmann::json results, const RE2& re);
 
+/// Splits a bare top-level alternation of PURE literals ("a|b|c") into its
+/// branches, so `lci search "FileWatcher|DebouncedRebuilder"` (no --regex)
+/// ORs the names through the literal fast path instead of searching for the
+/// pipe byte verbatim and silently matching nothing. Returns empty — caller
+/// keeps the pattern as one literal — unless there are >=2 branches, every
+/// branch is non-empty, and no branch carries regex metacharacters
+/// (`\ . * + ? ( ) [ ] { } ^ $`): those patterns are --regex territory and
+/// splitting them would change semantics.
+std::vector<std::string> split_literal_alternation(std::string_view pattern);
+
+/// Groups server result rows by `path` (first-appearance order). Each group:
+///   { path, count, lines: [sorted deduped line numbers],
+///     terms: { query_term: count, ... } }
+/// Term attribution compares each row's `match` text to the query terms
+/// (case-folded when `case_insensitive`); rows whose match equals no term
+/// still count in `count`/`lines` but appear under no term key. Post-filter
+/// over an already-capped row set (<= max_results) — not a hot path.
+nlohmann::json group_rows_by_file(const nlohmann::json& results,
+                                  const std::vector<std::string>& terms,
+                                  bool case_insensitive);
+
 }  // namespace grep_filters
 }  // namespace cli
 }  // namespace lci

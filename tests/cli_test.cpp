@@ -2301,6 +2301,117 @@ TEST(AstFiltersApply, PreservesInputOrdering) {
     EXPECT_EQ(kept[2]["line"].get<int>(), 30);
 }
 
+// -- split_literal_alternation (bare `a|b` OR queries) ------------------------
+//
+// Reviewers typed `lci search "FileWatcher|DebouncedRebuilder"` (no --regex)
+// and got a silent zero: the literal engine searched for the pipe byte
+// verbatim. A top-level alternation of PURE literals is unambiguous — treat
+// it as a multi-pattern OR through the existing literal fast path. Anything
+// carrying real regex syntax stays out (that is --regex territory).
+
+TEST(SplitLiteralAlternation, TwoNames) {
+    auto terms =
+        grep_filters::split_literal_alternation("FileWatcher|DebouncedRebuilder");
+    ASSERT_EQ(terms.size(), 2u);
+    EXPECT_EQ(terms[0], "FileWatcher");
+    EXPECT_EQ(terms[1], "DebouncedRebuilder");
+}
+
+TEST(SplitLiteralAlternation, ThreeNamesWithSpaces) {
+    auto terms = grep_filters::split_literal_alternation("foo bar|baz|qux");
+    ASSERT_EQ(terms.size(), 3u);
+    EXPECT_EQ(terms[0], "foo bar");
+}
+
+TEST(SplitLiteralAlternation, SingleTermIsNotAlternation) {
+    EXPECT_TRUE(grep_filters::split_literal_alternation("FileWatcher").empty());
+}
+
+TEST(SplitLiteralAlternation, EmptyBranchDisqualifies) {
+    EXPECT_TRUE(grep_filters::split_literal_alternation("foo|").empty());
+    EXPECT_TRUE(grep_filters::split_literal_alternation("|foo").empty());
+    EXPECT_TRUE(grep_filters::split_literal_alternation("a||b").empty());
+}
+
+TEST(SplitLiteralAlternation, RegexMetaInBranchDisqualifies) {
+    // These need --regex; silently splitting them would change semantics.
+    EXPECT_TRUE(grep_filters::split_literal_alternation("\\d+|foo").empty());
+    EXPECT_TRUE(grep_filters::split_literal_alternation("foo.*|bar").empty());
+    EXPECT_TRUE(grep_filters::split_literal_alternation("(foo)|bar").empty());
+    EXPECT_TRUE(grep_filters::split_literal_alternation("foo[ab]|bar").empty());
+    EXPECT_TRUE(grep_filters::split_literal_alternation("^foo|bar").empty());
+    EXPECT_TRUE(grep_filters::split_literal_alternation("foo|bar$").empty());
+}
+
+TEST(SplitLiteralAlternation, PunctuationLiteralsStayLiteral) {
+    // '.'/'('/etc. are regex meta — a branch carrying them is ambiguous, so
+    // the split declines and the pattern flows through the plain literal path
+    // (which already handles punctuation bytes).
+    EXPECT_TRUE(grep_filters::split_literal_alternation(".dump(|catch").empty());
+}
+
+// -- group_rows_by_file (per-file grouped output, --group) --------------------
+//
+// Reviewer need: "which files mention any of these N names, grouped per file
+// with counts". Groups server result rows by path (first-appearance order),
+// with total count, sorted deduped line list, and per-term counts.
+
+namespace {
+
+nlohmann::json make_group_row(const std::string& path, int line,
+                              const std::string& match) {
+    return nlohmann::json{{"path", path}, {"line", line}, {"match", match}};
+}
+
+}  // namespace
+
+TEST(GroupRowsByFile, GroupsAndCountsPerTerm) {
+    nlohmann::json rows = nlohmann::json::array();
+    rows.push_back(make_group_row("src/a.cpp", 3, "FileWatcher"));
+    rows.push_back(make_group_row("src/b.cpp", 1, "DebouncedRebuilder"));
+    rows.push_back(make_group_row("src/a.cpp", 9, "FileWatcher"));
+
+    auto groups = grep_filters::group_rows_by_file(
+        rows, {"FileWatcher", "DebouncedRebuilder"}, false);
+    ASSERT_EQ(groups.size(), 2u);
+    EXPECT_EQ(groups[0]["path"], "src/a.cpp");
+    EXPECT_EQ(groups[0]["count"].get<int>(), 2);
+    ASSERT_EQ(groups[0]["lines"].size(), 2u);
+    EXPECT_EQ(groups[0]["lines"][0].get<int>(), 3);
+    EXPECT_EQ(groups[0]["lines"][1].get<int>(), 9);
+    EXPECT_EQ(groups[0]["terms"]["FileWatcher"].get<int>(), 2);
+    EXPECT_FALSE(groups[0]["terms"].contains("DebouncedRebuilder"));
+    EXPECT_EQ(groups[1]["path"], "src/b.cpp");
+    EXPECT_EQ(groups[1]["terms"]["DebouncedRebuilder"].get<int>(), 1);
+}
+
+TEST(GroupRowsByFile, CaseInsensitiveTermAttribution) {
+    nlohmann::json rows = nlohmann::json::array();
+    rows.push_back(make_group_row("a.go", 5, "filewatcher"));
+    auto groups =
+        grep_filters::group_rows_by_file(rows, {"FileWatcher"}, true);
+    ASSERT_EQ(groups.size(), 1u);
+    // Attribution folds case; the reported key is the QUERY term so callers
+    // can join counts back to what they asked for.
+    EXPECT_EQ(groups[0]["terms"]["FileWatcher"].get<int>(), 1);
+}
+
+TEST(GroupRowsByFile, DuplicateLinesDedupedInLineList) {
+    nlohmann::json rows = nlohmann::json::array();
+    rows.push_back(make_group_row("a.go", 7, "x"));
+    rows.push_back(make_group_row("a.go", 7, "x"));
+    auto groups = grep_filters::group_rows_by_file(rows, {"x"}, false);
+    ASSERT_EQ(groups.size(), 1u);
+    EXPECT_EQ(groups[0]["count"].get<int>(), 2);
+    ASSERT_EQ(groups[0]["lines"].size(), 1u);
+}
+
+TEST(GroupRowsByFile, EmptyInput) {
+    auto groups = grep_filters::group_rows_by_file(nlohmann::json::array(),
+                                                   {"x"}, false);
+    EXPECT_TRUE(groups.empty());
+}
+
 }  // namespace
 }  // namespace cli
 }  // namespace lci

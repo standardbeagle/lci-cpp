@@ -165,6 +165,12 @@ int main(int argc, char* argv[]) {
     search_cmd->add_flag("--compact-search,--cs", search_compact,
                          "Show compact output");
 
+    bool search_group = false;
+    search_cmd->add_flag(
+        "--group", search_group,
+        "Group results per file: path once, total count, per-term counts "
+        "(for OR queries like 'A|B' or --patterns), and line numbers");
+
     std::string search_rank_by;
     search_cmd->add_option(
         "--rank-by", search_rank_by,
@@ -215,6 +221,7 @@ int main(int argc, char* argv[]) {
             .json_output = search_json,
             .light = search_light,
             .compact = search_compact,
+            .group = search_group,
             .use_regex = search_regex,
             .exclude_pattern = search_exclude,
             .include_pattern = search_include,
