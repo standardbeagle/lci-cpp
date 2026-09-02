@@ -88,6 +88,7 @@ jobs:
         run: |
           cmake --preset ${{ matrix.preset }} \
             -G Ninja \
+            -DFETCHCONTENT_BASE_DIR=$PWD/.deps-ninja \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake
@@ -177,6 +178,7 @@ jobs:
       - name: Configure
         run: |
           cmake --preset release `
+            -DFETCHCONTENT_BASE_DIR=$PWD/.deps-msvc `
             -DVCPKG_TARGET_TRIPLET=x64-windows-static-md `
             -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
 
@@ -265,6 +267,7 @@ jobs:
         run: |
           cmake --preset release \
             -G Ninja \
+            -DFETCHCONTENT_BASE_DIR=$PWD/.deps-ninja \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake
@@ -329,6 +332,7 @@ jobs:
         run: |
           cmake --preset release \
             -G Ninja \
+            -DFETCHCONTENT_BASE_DIR=$PWD/.deps-ninja \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake

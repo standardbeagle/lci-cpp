@@ -154,7 +154,9 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_words_src}")
 if("${_words_src}" IS_NEWER_THAN "${_words_dst}")
     file(STRINGS "${_words_src}" _word_lines)
     list(LENGTH _word_lines _n_words)
-    set(_chunk_size 4000)  # ~40KB of words per literal, safely under 64KB
+    # MSVC's per-literal cap is 16380 bytes (C2026 "string too big"), not the
+    # 64KB total-after-concatenation limit; ~1500 lines ≈ 14KB stays under it.
+    set(_chunk_size 1200)
     set(_chunks "")
     set(_i 0)
     while(_i LESS _n_words)
