@@ -469,6 +469,8 @@ ToolResult handle_find_files(const nlohmann::json& params,
                             (path.size() > directory.size() &&
                              path[directory.size()] != '/')) continue;
                     }
+                    if (!include_hidden && is_hidden(path)) continue;
+                    if (!passes_filter(path)) continue;
                     std::string mp = case_insensitive ? to_lower(path) : path;
                     if (mp.find(norm_w) == std::string::npos) continue;
                     auto it = by_path.find(path);

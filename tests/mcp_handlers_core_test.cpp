@@ -3280,6 +3280,34 @@ TEST_F(HandlersFixture, FindFilesFilterUnparseableErrors) {
         << result.text;
 }
 
+// Multi-word patterns go through a second scan pass; it must respect
+// include_hidden. ".hidden/secret.go" used to leak in via word_substring.
+TEST_F(HandlersFixture, FindFilesMultiWordRespectsHidden) {
+    nlohmann::json params;
+    params["pattern"] = "secret utils";
+    params["include_hidden"] = false;
+    auto result = handle_find_files(params, *indexer_);
+    ASSERT_FALSE(result.is_error) << result.text;
+    auto json = nlohmann::json::parse(result.text);
+    for (const auto& r : json["results"]) {
+        EXPECT_EQ(r["path"].get<std::string>().find(".hidden"),
+                  std::string::npos)
+            << r["path"];
+    }
+}
+
+// ... and the filter. A filter excluding every file must also exclude
+// word-pass additions.
+TEST_F(HandlersFixture, FindFilesMultiWordRespectsFilter) {
+    nlohmann::json params;
+    params["pattern"] = "handler utils";
+    params["filter"] = ".cpp";
+    auto result = handle_find_files(params, *indexer_);
+    ASSERT_FALSE(result.is_error) << result.text;
+    auto json = nlohmann::json::parse(result.text);
+    EXPECT_EQ(json["total_matches"].get<int>(), 0) << result.text;
+}
+
 }  // namespace
 }  // namespace mcp
 }  // namespace lci
