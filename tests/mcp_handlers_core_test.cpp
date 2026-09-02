@@ -3347,6 +3347,38 @@ TEST(SearchLanguagesCaseInsensitive, UppercaseExtensionIsIncluded) {
     std::filesystem::remove_all(dir, ec);
 }
 
+// Regex-fallback merge deduplicates: a line hit by both the literal pass and
+// the regex fallback surfaces once (the literal, full-score copy wins).
+TEST(SearchRegexFallbackDedupe, SameLineSurfacesOnce) {
+    auto dir = lci::test::unique_temp_dir("lci_rxdedupe_");
+    std::filesystem::create_directories(dir);
+    {
+        std::ofstream o(dir / "dup.go");
+        // Literal "a[1]" and regex a[1] (= "a1") both match line 3.
+        o << "package main\n\nvar y = a[1] // a1 note\n";
+    }
+    Config config;
+    config.project.root = dir.string();
+    MasterIndex indexer(config);
+    indexer.index_directory(dir.string());
+    SearchEngine engine(indexer);
+
+    nlohmann::json params;
+    params["pattern"] = "a[1]";  // looks_like_regex, rx flag NOT set
+    auto result = handle_search(params, indexer, &engine);
+    ASSERT_FALSE(result.is_error) << result.text;
+    auto json = nlohmann::json::parse(result.text);
+    int line3_hits = 0;
+    for (const auto& group : json["results"]) {
+        for (const auto& hit : group["hits"]) {
+            if (hit.value("line", 0) == 3) ++line3_hits;
+        }
+    }
+    EXPECT_EQ(line3_hits, 1) << result.text;
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+}
+
 }  // namespace
 }  // namespace mcp
 }  // namespace lci

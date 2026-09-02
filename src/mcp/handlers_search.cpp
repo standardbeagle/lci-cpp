@@ -585,9 +585,11 @@ ToolResult handle_search(const nlohmann::json& params,
         rx_opts.use_regex = true;
         auto rx_results = run(pattern, rx_opts);
         for (auto& r : rx_results) r.score *= 0.7;
-        // Merge with existing literal results, then re-rank.
-        results.reserve(results.size() + rx_results.size());
-        for (auto& r : rx_results) results.emplace_back(std::move(r));
+        // Merge with existing literal results, dedupe (a line the literal
+        // pass already matched keeps its full-score copy; the 0.7-scaled
+        // regex duplicate is dropped), then re-rank.
+        results = SearchCoordinator::merge(std::move(results),
+                                           std::move(rx_results));
         SearchCoordinator::rank(results);
         // Combined totals: `run` overwrote stats with the regex pass; keep
         // the larger honest floor and the literal pass's dir histogram when
