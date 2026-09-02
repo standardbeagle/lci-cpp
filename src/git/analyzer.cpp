@@ -232,14 +232,45 @@ void Analyzer::get_existing_symbols(bool with_content,
                                     std::vector<SymbolInfo>& out) {
     auto file_ids = index_.get_all_file_ids();
     auto rt_snap = index_.ref_tracker().pin();
+
+    // Repo-relative, like the git diff's changed-file paths: the duplicate
+    // finder's same-location guard compares the two, and an absolute-vs-
+    // relative mismatch made every changed symbol "duplicate" its own
+    // indexed copy (self-match noise findings). Index paths carry the
+    // PROJECT root's spelling while provider_.repo_root() has symlinks
+    // resolved (macOS: /var/folders -> /private/var/folders), so stripping
+    // with the git root silently fails on a symlinked checkout. Strip with
+    // the project root (exact prefix by construction), then re-anchor under
+    // the git root when the project root is a subdirectory of the repo.
+    const std::string& project_root = index_.config().project.root;
+    std::string repo_prefix;
+    {
+        std::error_code ec;
+        auto canon_root = std::filesystem::weakly_canonical(project_root, ec);
+        if (!ec) {
+            repo_prefix = normalize_rel(canon_root.generic_string(),
+                                        provider_.repo_root());
+            const bool rooted =
+                !repo_prefix.empty() &&
+                (repo_prefix.front() == '/' ||
+                 (repo_prefix.size() >= 2 && repo_prefix[1] == ':'));
+            if (rooted) repo_prefix.clear();  // outside the repo: no prefix
+        }
+    }
     for (auto fid : file_ids) {
-        // Repo-relative, like the git diff's changed-file paths: the
-        // duplicate finder's same-location guard compares the two, and an
-        // absolute-vs-relative mismatch made every changed symbol "duplicate"
-        // its own indexed copy (self-match noise findings).
         std::string path = normalize_rel(index_.get_file_path(fid),
-                                         provider_.repo_root());
+                                         project_root);
         if (path.empty()) continue;
+        const bool still_rooted =
+            path.front() == '/' ||
+            (path.size() >= 2 && path[1] == ':');
+        if (still_rooted) {
+            // Index path outside the project root's spelling: the git root
+            // is the remaining chance (pre-existing behavior).
+            path = normalize_rel(path, provider_.repo_root());
+        } else if (!repo_prefix.empty()) {
+            path = repo_prefix + "/" + path;
+        }
         std::string_view content;
         if (with_content) content = index_.file_content_store().get_content(fid);
         auto symbols = rt_snap->get_file_enhanced_symbols(fid);
