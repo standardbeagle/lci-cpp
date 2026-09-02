@@ -951,6 +951,25 @@ TEST(MasterIndexTest, ReceiverTypeMethodOnlyIncludesOutOfClassDefs) {
     }
 }
 
+// Pins the index_file full-re-parse fix: the single-file add API shared
+// update_file's defect — it indexed text (trigram+postings) but never
+// extracted symbols, so a file added through it was searchable as text yet
+// invisible to every symbol endpoint.
+TEST(MasterIndexTest, IndexFileExtractsSymbols) {
+    TempDir dir;
+
+    Config cfg;
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+
+    dir.write_file("solo.go", "package main\nfunc SoloFunc() {}\n");
+    ASSERT_TRUE(mi.index_file((dir.path() / "solo.go").string()));
+
+    EXPECT_FALSE(
+        mi.ref_tracker().pin()->find_symbols_by_name("SoloFunc").empty())
+        << "index_file did not extract the file's symbols";
+}
+
 // Pins the update_file full-re-parse fix: updating a file used to rebuild
 // only trigram+postings, permanently dropping its symbols/references (the
 // old ones were removed and nothing re-extracted). After update_file the

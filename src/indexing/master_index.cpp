@@ -380,6 +380,35 @@ MasterIndex::IndexingProgressSnapshot MasterIndex::get_progress() const {
 
 // -- Single-file operations ---------------------------------------------------
 
+// Shared full re-parse for the single-file write APIs (index_file /
+// update_file): runs the same extraction the bulk pipeline uses and merges
+// through a symbols-only FileIntegrator wired to ref_tracker_ /
+// symbol_location_index_, then re-resolves references. Caller holds
+// snapshot_mu_ and has already stored the content under `file_id`.
+void MasterIndex::reparse_file_symbols(const std::string& path, FileID file_id,
+                                       int64_t size) {
+    if (!single_processor_) {
+        single_processor_ = std::make_unique<FileProcessor>(
+            config_, file_service_, &trigram_index_);
+        single_integrator_ = std::make_unique<FileIntegrator>(
+            /*trigram_index=*/nullptr, &ref_tracker_,
+            /*postings_index=*/nullptr);
+        single_integrator_->set_file_content_store(file_content_store_.get());
+        single_integrator_->set_symbol_location_index(&symbol_location_index_);
+    }
+    FileTask task;
+    task.path = path;
+    task.size = size;
+    task.preloaded_id = file_id;
+    auto processed = single_processor_->process_single(task);
+    if (!processed.has_error && processed.file_id != FileID{0}) {
+        single_integrator_->integrate_file(processed);
+        // Re-resolve so this file's references bind to targets (and stale
+        // edges into the old generation of this file are rebuilt).
+        ref_tracker_.process_all_references();
+    }
+}
+
 bool MasterIndex::index_file(const std::string& path) {
     if (path.empty()) return false;
     if (!std::filesystem::exists(path)) return false;
@@ -412,6 +441,11 @@ bool MasterIndex::index_file(const std::string& path) {
     trigram_index_.index_file(file_id, content_sv);
     postings_index_.index_file(file_id, content_sv,
                                data_cap(config_, path, content_sv));
+    // Full re-parse: index_file shared update_file's defect — it indexed
+    // text (trigram+postings) but never extracted symbols, so a file added
+    // through this API was invisible to every symbol endpoint.
+    reparse_file_symbols(path, file_id,
+                         static_cast<int64_t>(content_sv.size()));
     update_snapshot_for_file(path, file_id, FileID{0}, false);
 
     processed_files_.fetch_add(1, std::memory_order_relaxed);
@@ -451,28 +485,8 @@ bool MasterIndex::update_file(const std::string& path, std::string_view content)
     // Full re-parse. update_file used to rebuild only trigram+postings, so
     // every update permanently dropped the file's symbols, references and
     // scopes (remove_file_from_indexes above erased them and nothing re-added
-    // them). Run the same extraction path the bulk pipeline uses and merge
-    // through the shared FileIntegrator symbol path.
-    if (!single_processor_) {
-        single_processor_ = std::make_unique<FileProcessor>(
-            config_, file_service_, &trigram_index_);
-        single_integrator_ = std::make_unique<FileIntegrator>(
-            /*trigram_index=*/nullptr, &ref_tracker_,
-            /*postings_index=*/nullptr);
-        single_integrator_->set_file_content_store(file_content_store_.get());
-        single_integrator_->set_symbol_location_index(&symbol_location_index_);
-    }
-    FileTask task;
-    task.path = path;
-    task.size = static_cast<int64_t>(content.size());
-    task.preloaded_id = new_id;
-    auto processed = single_processor_->process_single(task);
-    if (!processed.has_error && processed.file_id != FileID{0}) {
-        single_integrator_->integrate_file(processed);
-        // Re-resolve so this file's references bind to targets (and stale
-        // edges into the old generation of this file are rebuilt).
-        ref_tracker_.process_all_references();
-    }
+    // them).
+    reparse_file_symbols(path, new_id, static_cast<int64_t>(content.size()));
 
     update_snapshot_for_file(path, new_id, old_id, existed);
     return true;

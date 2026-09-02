@@ -309,6 +309,11 @@ class MasterIndex {
     // symbols-only FileIntegrator wired to ref_tracker_ /
     // symbol_location_index_ (trigram/postings are re-indexed directly on
     // the update path). Both guarded by snapshot_mu_.
+    /// Shared full re-parse for the single-file write APIs (index_file /
+    /// update_file). Caller holds snapshot_mu_; content already stored.
+    void reparse_file_symbols(const std::string& path, FileID file_id,
+                              int64_t size);
+
     std::unique_ptr<FileProcessor> single_processor_;
     std::unique_ptr<FileIntegrator> single_integrator_;
 
