@@ -181,6 +181,12 @@ ReferenceTracker::Snapshot::call_resolution_totals() const {
     return t;
 }
 
+ReferenceTracker::Snapshot::CallersResult
+ReferenceTracker::Snapshot::collect_callers(std::string_view name) const {
+    (void)name;
+    return {};  // RED stub
+}
+
 int ReferenceTracker::Snapshot::count_dynamic_calls_out(
     SymbolID symbol_id) const {
     auto it = outgoing_refs.find(symbol_id);

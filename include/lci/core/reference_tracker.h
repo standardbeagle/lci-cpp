@@ -581,6 +581,38 @@ class ReferenceTracker {
         };
         CallResolutionTotals call_resolution_totals() const;
 
+        /// One call site attributed (or attributable) to `name`. `caller` is
+        /// the enclosing symbol the reference was extracted inside (0 = file
+        /// scope); `target` is the resolved definition for confirmed sites
+        /// and 0 for dynamic/unresolved ones.
+        struct CallSite {
+            FileID file_id{};
+            int line{};
+            int column{};
+            SymbolID caller{};
+            SymbolID target{};
+        };
+
+        /// Callers-of query result. `confirmed` holds only Call references
+        /// whose resolved target is one of `definitions` (a bodied
+        /// definition of `name`); sites the static graph cannot attribute
+        /// are split out — `dynamic` (foreign receiver, or resolved to a
+        /// bodiless declaration: runtime dispatch) and `unresolved` (bare
+        /// name with no indexed target) — so confirmed callers never mix
+        /// with guesses. All vectors sorted by (file_id, line, column);
+        /// definitions by (file_id, line).
+        struct CallersResult {
+            std::vector<SymbolHandle> definitions;
+            std::vector<CallSite> confirmed;
+            std::vector<CallSite> dynamic;
+            std::vector<CallSite> unresolved;
+        };
+
+        /// Collects every live Call reference attributable to `name` (exact,
+        /// or a qualified "Type.name" spelling for unresolved sites). Full
+        /// ref scan; callers/inspect query paths only, never /search.
+        CallersResult collect_callers(std::string_view name) const;
+
         /// Number of live Call refs whose SOURCE is `symbol_id` that dispatch
         /// dynamically (unresolved + foreign_receiver): how many calls this
         /// function makes whose target is not statically known.

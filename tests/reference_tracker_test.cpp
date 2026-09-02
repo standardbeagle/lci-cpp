@@ -2077,5 +2077,145 @@ TEST(ReferenceTrackerTest, RustMethodBareCallResolvesToShadowingFreeFunction) {
     (void)method;
 }
 
+// ---------------------------------------------------------------------------
+// collect_callers - callers-of query
+// ---------------------------------------------------------------------------
+
+namespace {
+Reference make_call(const std::string& name, int line, int column = 4) {
+    Reference r;
+    r.type = ReferenceType::Call;
+    r.referenced_name = name;
+    r.line = line;
+    r.column = column;
+    return r;
+}
+}  // namespace
+
+TEST(ReferenceTrackerTest, CollectCallersAttributesConfirmedSitesToEnclosingCaller) {
+    ReferenceTracker rt;
+
+    std::vector<Symbol> symbols = {
+        make_sym("alpha", SymbolType::Function, 1, 1, 10),
+        make_sym("beta", SymbolType::Function, 1, 15, 25),
+        make_sym("target_fn", SymbolType::Function, 1, 30, 40),
+    };
+    std::vector<Reference> refs = {
+        make_call("target_fn", 5),
+        make_call("target_fn", 7),
+        make_call("target_fn", 20),
+    };
+    rt.process_file(1, "test.go", symbols, refs, {});
+    rt.process_all_references();
+
+    auto snap = rt.pin();
+    auto alpha = snap->find_symbol_by_file_and_name(1, "alpha");
+    auto beta = snap->find_symbol_by_file_and_name(1, "beta");
+    auto target = snap->find_symbol_by_file_and_name(1, "target_fn");
+    ASSERT_TRUE(alpha && beta && target);
+
+    auto result = snap->collect_callers("target_fn");
+    ASSERT_EQ(result.definitions.size(), 1u);
+    EXPECT_EQ(result.definitions[0]->id, target->id);
+    ASSERT_EQ(result.confirmed.size(), 3u);
+    EXPECT_TRUE(result.dynamic.empty());
+    EXPECT_TRUE(result.unresolved.empty());
+    // Sorted by (file, line, column); enclosing caller attributed per site.
+    EXPECT_EQ(result.confirmed[0].line, 5);
+    EXPECT_EQ(result.confirmed[0].caller, alpha->id);
+    EXPECT_EQ(result.confirmed[1].line, 7);
+    EXPECT_EQ(result.confirmed[1].caller, alpha->id);
+    EXPECT_EQ(result.confirmed[2].line, 20);
+    EXPECT_EQ(result.confirmed[2].caller, beta->id);
+    for (const auto& s : result.confirmed) {
+        EXPECT_EQ(s.target, target->id);
+    }
+}
+
+TEST(ReferenceTrackerTest, CollectCallersSeparatesDynamicAndUnresolvedSites) {
+    ReferenceTracker rt;
+
+    std::vector<Symbol> symbols = {
+        make_sym("caller", SymbolType::Function, 1, 1, 20),
+    };
+    Reference unresolved = make_call("target_fn", 5);
+    Reference dyn = make_call("target_fn", 9);
+    dyn.foreign_receiver = true;
+    std::vector<Reference> refs = {unresolved, dyn};
+    rt.process_file(1, "test.py", symbols, refs, {});
+    rt.process_all_references();
+
+    auto snap = rt.pin();
+    auto result = snap->collect_callers("target_fn");
+    EXPECT_TRUE(result.definitions.empty());
+    EXPECT_TRUE(result.confirmed.empty());
+    ASSERT_EQ(result.dynamic.size(), 1u);
+    EXPECT_EQ(result.dynamic[0].line, 9);
+    ASSERT_EQ(result.unresolved.size(), 1u);
+    EXPECT_EQ(result.unresolved[0].line, 5);
+    EXPECT_EQ(result.unresolved[0].target, 0u);
+}
+
+TEST(ReferenceTrackerTest, CollectCallersDeclarationOnlyTargetIsDynamic) {
+    ReferenceTracker rt;
+
+    Symbol decl = make_sym("Handle", SymbolType::Method, 1, 1, 1);
+    decl.declaration_only = true;
+    std::vector<Symbol> symbols = {
+        decl,
+        make_sym("caller", SymbolType::Function, 1, 5, 15),
+    };
+    std::vector<Reference> refs = {make_call("Handle", 8)};
+    rt.process_file(1, "test.go", symbols, refs, {});
+    rt.process_all_references();
+
+    auto snap = rt.pin();
+    auto result = snap->collect_callers("Handle");
+    EXPECT_TRUE(result.confirmed.empty())
+        << "a call resolved to a bodiless declaration is runtime dispatch, "
+           "never a confirmed static caller";
+    ASSERT_EQ(result.dynamic.size(), 1u);
+    EXPECT_EQ(result.dynamic[0].line, 8);
+}
+
+TEST(ReferenceTrackerTest, CollectCallersMatchesQualifiedUnresolvedSpelling) {
+    ReferenceTracker rt;
+
+    std::vector<Symbol> symbols = {
+        make_sym("caller", SymbolType::Function, 1, 1, 20),
+    };
+    // Typed-receiver qualification with no indexed target: attributable by
+    // its ".Close" suffix, reported as unresolved (external library).
+    std::vector<Reference> refs = {make_call("Conn.Close", 6)};
+    rt.process_file(1, "test.go", symbols, refs, {});
+    rt.process_all_references();
+
+    auto snap = rt.pin();
+    auto result = snap->collect_callers("Close");
+    ASSERT_EQ(result.unresolved.size(), 1u);
+    EXPECT_EQ(result.unresolved[0].line, 6);
+    // Substring spellings must NOT match ("disclose" is not ".Close").
+    EXPECT_TRUE(snap->collect_callers("lose").unresolved.empty());
+}
+
+TEST(ReferenceTrackerTest, CollectCallersExcludesVariableDefinitionsFromList) {
+    ReferenceTracker rt;
+
+    std::vector<Symbol> symbols = {
+        make_sym("total", SymbolType::Function, 1, 1, 10),
+        make_sym("total", SymbolType::Variable, 1, 20, 20),
+        make_sym("caller", SymbolType::Function, 1, 25, 35),
+    };
+    std::vector<Reference> refs = {make_call("total", 30)};
+    rt.process_file(1, "test.go", symbols, refs, {});
+    rt.process_all_references();
+
+    auto snap = rt.pin();
+    auto result = snap->collect_callers("total");
+    // The same-name local variable is not a callable definition.
+    ASSERT_EQ(result.definitions.size(), 1u);
+    EXPECT_EQ(result.definitions[0]->symbol.type, SymbolType::Function);
+}
+
 }  // namespace
 }  // namespace lci
