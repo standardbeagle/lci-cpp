@@ -694,5 +694,55 @@ TEST(SearchEngineIntegrationTest, EmptyPatternReportsAnError) {
     EXPECT_FALSE(stats.error.empty());
 }
 
+// A path filter that fails to compile must surface an error, never silently
+// degrade into "no filter" (which searches a superset of what was asked).
+TEST(SearchEngineIntegrationTest, BrokenIncludePatternReportsAnError) {
+    TempDir dir;
+    dir.write_file("a.go", "package main // tokHit\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    SearchEngine engine(mi);
+    SearchOptions opts;
+    opts.include_pattern = "([";  // invalid RE2
+    SearchStats stats;
+    auto results = engine.search("tokHit", opts, &stats);
+    EXPECT_TRUE(results.empty());
+    ASSERT_FALSE(stats.error.empty());
+    EXPECT_NE(stats.error.find("include_pattern"), std::string::npos)
+        << stats.error;
+
+    // A valid include filter still works.
+    SearchOptions ok_opts;
+    ok_opts.include_pattern = "\\.go$";
+    SearchStats ok_stats;
+    auto ok = engine.search("tokHit", ok_opts, &ok_stats);
+    EXPECT_EQ(1u, ok.size());
+    EXPECT_TRUE(ok_stats.error.empty());
+}
+
+TEST(SearchEngineIntegrationTest, BrokenExcludePatternReportsAnError) {
+    TempDir dir;
+    dir.write_file("a.go", "package main // tokHit\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    SearchEngine engine(mi);
+    SearchOptions opts;
+    opts.exclude_pattern = "*bad";  // invalid RE2 (leading repetition)
+    SearchStats stats;
+    auto results = engine.search("tokHit", opts, &stats);
+    EXPECT_TRUE(results.empty());
+    ASSERT_FALSE(stats.error.empty());
+    EXPECT_NE(stats.error.find("exclude_pattern"), std::string::npos)
+        << stats.error;
+}
+
 }  // namespace
 }  // namespace lci

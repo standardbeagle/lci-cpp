@@ -185,9 +185,11 @@ std::string language_array_to_file_extensions(
     }
     if (exts.empty()) return "";
 
+    // (?i): extension match is case-insensitive so `.CPP` / `.Go` files do
+    // not escape a languages[] filter (extensions in the table are lowercase).
     std::string out;
-    out.reserve(exts.size() * 5 + 8);
-    out.append("\\.(");
+    out.reserve(exts.size() * 5 + 12);
+    out.append("(?i)\\.(");
     for (size_t i = 0; i < exts.size(); ++i) {
         if (i) out.push_back('|');
         out.append(exts[i]);

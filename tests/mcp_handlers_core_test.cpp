@@ -3321,6 +3321,32 @@ TEST_F(HandlersFixture, SearchUnknownLanguageErrors) {
     EXPECT_NE(result.text.find("golang"), std::string::npos) << result.text;
 }
 
+// languages[] extension match is case-insensitive: an indexed `.GO` file
+// must not escape the go filter.
+TEST(SearchLanguagesCaseInsensitive, UppercaseExtensionIsIncluded) {
+    auto dir = lci::test::unique_temp_dir("lci_lang_ci_");
+    std::filesystem::create_directories(dir);
+    {
+        std::ofstream o(dir / "UPPER.GO");
+        o << "package main\n\nfunc uniqueCaseToken() {}\n";
+    }
+    Config config;
+    config.project.root = dir.string();
+    MasterIndex indexer(config);
+    indexer.index_directory(dir.string());
+    SearchEngine engine(indexer);
+
+    nlohmann::json params;
+    params["pattern"] = "uniqueCaseToken";
+    params["languages"] = {"go"};
+    auto result = handle_search(params, indexer, &engine);
+    ASSERT_FALSE(result.is_error) << result.text;
+    auto json = nlohmann::json::parse(result.text);
+    EXPECT_GT(json["total_matches"].get<int>(), 0) << result.text;
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+}
+
 }  // namespace
 }  // namespace mcp
 }  // namespace lci

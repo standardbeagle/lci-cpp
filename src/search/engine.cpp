@@ -75,17 +75,15 @@ bool looks_like_regex_impl(std::string_view p) {
     return false;
 }
 
-/// Lowercase a path for RE2 path-filter compile (RE2 has no PCRE-style /i).
-/// Used only at compile time on the filter strings — not on every line.
-void lower_inplace(std::string& s) {
-    for (auto& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-}
-
 /// Build a path-filter RE2 from include_pattern + exclude_pattern. nullptr
 /// when both empty. Returned regexes are pre-compiled once per call.
+/// A pattern that fails to compile sets `error` — the caller MUST surface
+/// it instead of searching unfiltered (karpathy rule 6: a broken filter is
+/// an error, never a silent superset).
 struct PathFilter {
     std::unique_ptr<RE2> include;
     std::unique_ptr<RE2> exclude;
+    std::string error;
 
     bool matches(std::string_view path) const {
         if (include && !RE2::PartialMatch(path, *include)) return false;
@@ -100,11 +98,21 @@ PathFilter make_path_filter(const SearchOptions& opts) {
     ro.set_log_errors(false);
     if (!opts.include_pattern.empty()) {
         pf.include = std::make_unique<RE2>(opts.include_pattern, ro);
-        if (!pf.include->ok()) pf.include.reset();
+        if (!pf.include->ok()) {
+            pf.error = "invalid include_pattern regex '" +
+                       opts.include_pattern + "': " + pf.include->error();
+            pf.include.reset();
+            return pf;
+        }
     }
     if (!opts.exclude_pattern.empty()) {
         pf.exclude = std::make_unique<RE2>(opts.exclude_pattern, ro);
-        if (!pf.exclude->ok()) pf.exclude.reset();
+        if (!pf.exclude->ok()) {
+            pf.error = "invalid exclude_pattern regex '" +
+                       opts.exclude_pattern + "': " + pf.exclude->error();
+            pf.exclude.reset();
+            return pf;
+        }
     }
     return pf;
 }
@@ -402,6 +410,12 @@ std::vector<SearchResult> SearchEngine::search(
 
     // Karpathy rule 2: build path-filter regexes once per call, not per file.
     auto path_filter = make_path_filter(options);
+    if (!path_filter.error.empty()) {
+        // A filter that cannot compile must not degrade into "no filter" —
+        // that silently searches a superset of what the caller asked for.
+        if (stats != nullptr) stats->error = path_filter.error;
+        return {};
+    }
     const std::string& proj_root = index_.config().project.root;
     const bool scope_is_glob =
         options.path_scope.find_first_of("*?") != std::string::npos;
