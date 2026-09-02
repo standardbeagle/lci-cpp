@@ -306,6 +306,47 @@ TEST(FileIntegratorTest, IntegrateFromQueue) {
     EXPECT_EQ(integrator.path_to_id("/b.go"), FileID{2});
 }
 
+// Pins the symbol-id determinism fix: results arriving from the worker pool
+// in scheduling order must be integrated in file_id order, so SymbolID
+// assignment (next_symbol_id_ in ReferenceTracker) never depends on thread
+// timing (karpathy #4).
+TEST(FileIntegratorTest, IntegratesInFileIdOrderRegardlessOfArrival) {
+    TrigramIndex trigram_idx;
+    ReferenceTracker ref_tracker;
+    PostingsIndex postings_idx;
+    FileIntegrator integrator(&trigram_idx, &ref_tracker, &postings_idx);
+
+    auto with_symbol = [&](FileID fid, const std::string& path,
+                           const std::string& name) {
+        auto pf = make_processed_file(fid, path, trigram_idx, "package x");
+        Symbol sym;
+        sym.name = name;
+        sym.type = SymbolType::Function;
+        sym.file_id = fid;
+        sym.line = 1;
+        sym.end_line = 2;
+        pf.symbols.push_back(sym);
+        return pf;
+    };
+
+    BoundedQueue<ProcessedFile> results(10);
+    // Deliberately out of order: file 2 arrives before file 1.
+    results.push(with_symbol(FileID{2}, "/b.go", "BFunc"));
+    results.push(with_symbol(FileID{1}, "/a.go", "AFunc"));
+    results.close();
+
+    integrator.integrate(results);
+
+    auto snap = ref_tracker.pin();
+    auto a = snap->find_symbols_by_name("AFunc");
+    auto b = snap->find_symbols_by_name("BFunc");
+    ASSERT_EQ(a.size(), 1u);
+    ASSERT_EQ(b.size(), 1u);
+    // File 1's symbol must draw the lower SymbolID even though it arrived
+    // second.
+    EXPECT_LT(a[0]->id, b[0]->id);
+}
+
 TEST(FileIntegratorTest, SkipsErrorFiles) {
     TrigramIndex trigram_idx;
     ReferenceTracker ref_tracker;

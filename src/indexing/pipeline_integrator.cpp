@@ -1,5 +1,8 @@
 #include <lci/indexing/pipeline_integrator.h>
 
+#include <algorithm>
+#include <vector>
+
 namespace lci {
 
 const std::string FileIntegrator::kEmptyString;
@@ -43,11 +46,25 @@ MergerStats FileIntegrator::get_merger_stats() const {
 }
 
 void FileIntegrator::integrate(BoundedQueue<ProcessedFile>& results) {
+    // Drain the whole queue, then integrate in ascending file_id order.
+    // Worker results arrive in scheduling order; integrating on arrival
+    // made symbol_id assignment (ReferenceTracker::next_symbol_id_) depend
+    // on thread timing — nondeterministic across runs (karpathy #4). The
+    // producer assigns file ids deterministically in scan order, so sorting
+    // by file_id restores a stable integration (and symbol id) order. The
+    // Pipeline's own drain loop does the same; this keeps every caller of
+    // the queue-draining API deterministic too.
+    std::vector<ProcessedFile> buffered;
     ProcessedFile file;
     while (results.pop(file)) {
         if (file.has_error || file.file_id == 0) continue;
-        integrate_file(file);
+        buffered.push_back(std::move(file));
     }
+    std::sort(buffered.begin(), buffered.end(),
+              [](const ProcessedFile& a, const ProcessedFile& b) {
+                  return a.file_id < b.file_id;
+              });
+    for (auto& f : buffered) integrate_file(f);
     disable_merger_pipeline();
 }
 
