@@ -54,11 +54,11 @@ void McpServer::add_tool(ToolDefinition def, ToolHandler handler) {
 
 const ToolDefinition* McpServer::find_tool_definition(
     const std::string& name) const {
-    // Reverse to match dispatch: a later registration shadows an earlier one,
-    // so info must describe the definition whose handler would actually run.
-    for (auto it = registered_tools_.rbegin(); it != registered_tools_.rend();
-         ++it) {
-        if (it->definition.name == name) return &it->definition;
+    // Forward to match dispatch (handle_request / dispatch_wire both take the
+    // FIRST matching registration via find_if from begin), so info describes
+    // the definition whose handler actually runs.
+    for (const auto& reg : registered_tools_) {
+        if (reg.definition.name == name) return &reg.definition;
     }
     return nullptr;
 }

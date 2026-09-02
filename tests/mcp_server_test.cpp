@@ -244,6 +244,35 @@ TEST_F(McpStdioTest, TypeConfusedRequestGetsErrorAndServerSurvives) {
     EXPECT_TRUE(responses[2].contains("result"));
 }
 
+// find_tool_definition must agree with dispatch: both take the FIRST
+// registration of a name (dispatch uses find_if from begin). It used to
+// reverse-iterate, so on a duplicate name info described a definition whose
+// handler never runs.
+TEST_F(McpStdioTest, DuplicateToolNameFirstRegistrationWinsEverywhere) {
+    ToolDefinition first;
+    first.name = "dup_tool";
+    first.description = "first registration";
+    ToolDefinition second;
+    second.name = "dup_tool";
+    second.description = "second registration";
+    server_->add_tool(first, [](const nlohmann::json&) -> ToolResult {
+        return {"first handler", false};
+    });
+    server_->add_tool(second, [](const nlohmann::json&) -> ToolResult {
+        return {"second handler", false};
+    });
+
+    const auto* def = server_->find_tool_definition("dup_tool");
+    ASSERT_NE(def, nullptr);
+    EXPECT_EQ(def->description, "first registration");
+
+    auto wire = server_->dispatch_wire(
+        R"({"jsonrpc":"2.0","id":1,"method":"tools/call",)"
+        R"("params":{"name":"dup_tool","arguments":{}}})");
+    auto resp = nlohmann::json::parse(wire);
+    EXPECT_EQ(resp["result"]["content"][0]["text"], "first handler");
+}
+
 // dispatch_wire peels tools/call params before its try block; a non-object
 // "params" (or non-string "name") used to throw type_error out of
 // dispatch_wire entirely — the stdio loop has a backstop catch, but the HTTP
