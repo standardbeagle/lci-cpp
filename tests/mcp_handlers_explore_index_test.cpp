@@ -868,7 +868,7 @@ TEST_F(ExploreIndexTestFixture, RegisterIndexHandlers) {
     McpServer server(config, *indexer_, nullptr);
     size_t before = server.tool_count();
     register_index_handlers(server, indexer_.get());
-    EXPECT_EQ(server.tool_count(), before + 4);
+    EXPECT_EQ(server.tool_count(), before + 3);
 }
 
 // =============================================================================
