@@ -304,6 +304,14 @@ class MasterIndex {
     std::shared_ptr<FileContentStore> file_content_store_;
     std::shared_ptr<FileService> file_service_;
 
+    // Lazily built single-file re-parse machinery for update_file: a private
+    // FileProcessor (tree-sitter grammar warm-up paid once) and a
+    // symbols-only FileIntegrator wired to ref_tracker_ /
+    // symbol_location_index_ (trigram/postings are re-indexed directly on
+    // the update path). Both guarded by snapshot_mu_.
+    std::unique_ptr<FileProcessor> single_processor_;
+    std::unique_ptr<FileIntegrator> single_integrator_;
+
     // File snapshot (atomic swap for lock-free reads)
     AtomicSharedPtr<const FileSnapshot> snapshot_;
 

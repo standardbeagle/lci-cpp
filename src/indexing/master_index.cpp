@@ -448,6 +448,32 @@ bool MasterIndex::update_file(const std::string& path, std::string_view content)
     postings_index_.index_file(new_id, content,
                                data_cap(config_, path, content));
 
+    // Full re-parse. update_file used to rebuild only trigram+postings, so
+    // every update permanently dropped the file's symbols, references and
+    // scopes (remove_file_from_indexes above erased them and nothing re-added
+    // them). Run the same extraction path the bulk pipeline uses and merge
+    // through the shared FileIntegrator symbol path.
+    if (!single_processor_) {
+        single_processor_ = std::make_unique<FileProcessor>(
+            config_, file_service_, &trigram_index_);
+        single_integrator_ = std::make_unique<FileIntegrator>(
+            /*trigram_index=*/nullptr, &ref_tracker_,
+            /*postings_index=*/nullptr);
+        single_integrator_->set_file_content_store(file_content_store_.get());
+        single_integrator_->set_symbol_location_index(&symbol_location_index_);
+    }
+    FileTask task;
+    task.path = path;
+    task.size = static_cast<int64_t>(content.size());
+    task.preloaded_id = new_id;
+    auto processed = single_processor_->process_single(task);
+    if (!processed.has_error && processed.file_id != FileID{0}) {
+        single_integrator_->integrate_file(processed);
+        // Re-resolve so this file's references bind to targets (and stale
+        // edges into the old generation of this file are rebuilt).
+        ref_tracker_.process_all_references();
+    }
+
     update_snapshot_for_file(path, new_id, old_id, existed);
     return true;
 }

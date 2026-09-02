@@ -906,6 +906,33 @@ TEST(MasterIndexTest, GetProgressPercentCompleteAlwaysWithinBounds) {
     poller.join();
 }
 
+// Pins the update_file full-re-parse fix: updating a file used to rebuild
+// only trigram+postings, permanently dropping its symbols/references (the
+// old ones were removed and nothing re-extracted). After update_file the
+// new symbols must be present and the old ones gone.
+TEST(MasterIndexTest, UpdateFileReparsesSymbols) {
+    TempDir dir;
+    dir.write_file("m.go", "package main\nfunc Alpha() {}\n");
+
+    Config cfg;
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    ASSERT_FALSE(
+        mi.ref_tracker().pin()->find_symbols_by_name("Alpha").empty());
+
+    const std::string new_content = "package main\nfunc Beta() {}\n";
+    dir.write_file("m.go", new_content);
+    ASSERT_TRUE(mi.update_file((dir.path() / "m.go").string(), new_content));
+
+    auto snap = mi.ref_tracker().pin();
+    EXPECT_FALSE(snap->find_symbols_by_name("Beta").empty())
+        << "updated file's symbols were not re-extracted";
+    EXPECT_TRUE(snap->find_symbols_by_name("Alpha").empty())
+        << "stale pre-update symbol survived the update";
+}
+
 // Pins the live-/reindex FileID aliasing fix: FileIDs are monotonic across
 // generations and path-stable, so a stale FileID held from the previous
 // generation either resolves to its OWN file's content or to nothing —
