@@ -279,7 +279,11 @@ void IndexServer::handle_shutdown(const httplib::Request& req,
                 // which is owned and joined for exactly that reason).
                 std::thread([] {
                     std::this_thread::sleep_for(std::chrono::seconds{5});
-                    std::_Exit(0);
+                    // Non-zero: reaching this line means teardown HUNG and
+                    // the watchdog killed the process. Exiting 0 here made
+                    // a hung teardown indistinguishable from a clean exit
+                    // for anything watching the exit status.
+                    std::_Exit(1);
                 }).detach();
             }
         });
