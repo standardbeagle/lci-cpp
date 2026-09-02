@@ -613,5 +613,22 @@ TEST(FileContentStoreTest, UnchangedReAddRefreshesLruOrder) {
         << "expected the least-recently-touched file to be evicted";
 }
 
+// get_line and get_line_view must agree on CRLF lines: both strip the
+// trailing CR (get_line used to hash/measure the '\r' in).
+TEST(FileContentStoreTest, GetLineAndGetLineViewAgreeOnCrlf) {
+    FileContentStore store;
+    FileID id = store.add_file("crlf.txt", "one\r\ntwo\r\nthree");
+
+    for (int line = 0; line < 3; ++line) {
+        auto ref = store.get_line(id, line);
+        std::string via_ref(store.get_string(ref));
+        std::string via_view(store.get_line_view(id, line));
+        EXPECT_EQ(via_ref, via_view) << "line " << line;
+        EXPECT_TRUE(via_ref.empty() || via_ref.back() != '\r')
+            << "line " << line << " kept its CR";
+    }
+    EXPECT_EQ(std::string(store.get_line_view(id, 0)), "one");
+}
+
 }  // namespace
 }  // namespace lci

@@ -277,8 +277,11 @@ class FileContentStore {
     void enforce_memory_limit(std::shared_ptr<FileContentSnapshot>& snap);
 };
 
-/// Computes byte offsets for each line in the content.
-/// Matches Go's computeLineOffsets exactly (CRLF-aware).
+/// Computes byte offsets for each line in the content: offset 0 plus the
+/// byte after every '\n' that is not the file's last byte. It does NOT
+/// treat a bare CR as a line break; CR handling happens at the line
+/// accessors (get_line / get_line_view), which both strip a trailing '\r'
+/// from the returned line text.
 std::vector<uint32_t> compute_line_offsets(std::string_view content);
 
 }  // namespace lci

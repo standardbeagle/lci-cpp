@@ -346,6 +346,10 @@ StringRef FileContentStore::get_line(FileID file_id, int line_num) const {
     } else {
         end = static_cast<uint32_t>(bytes.size());
     }
+    // Strip a trailing CR exactly as get_line_view does: the two accessors
+    // must agree on line text, or the same line hashes differently
+    // depending on which accessor read it (CRLF files).
+    if (end > start && bytes[end - 1] == '\r') --end;
 
     uint32_t length = end - start;
     uint64_t h = 0;
