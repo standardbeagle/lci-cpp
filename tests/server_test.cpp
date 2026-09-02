@@ -446,6 +446,10 @@ TEST_F(ServerTest, PingEndpoint) {
     EXPECT_TRUE(j.contains("uptime_seconds"));
     EXPECT_TRUE(j.contains("version"));
     EXPECT_EQ(j["build_id"], "test-build-id");
+    // Root lets clients detect socket-hash collisions (two roots, one
+    // address) instead of silently searching the wrong project.
+    ASSERT_TRUE(j.contains("root"));
+    EXPECT_EQ(j["root"], config_.project.root);
 }
 
 TEST_F(ServerTest, PingViaGet) {

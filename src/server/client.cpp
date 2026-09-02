@@ -26,6 +26,7 @@ std::optional<PingResponse> Client::ping(std::string& error) {
     resp.uptime_seconds = j->value("uptime_seconds", 0.0);
     resp.version = j->value("version", "");
     resp.build_id_value = j->value("build_id", "");
+    resp.root = j->value("root", "");
     return resp;
 }
 

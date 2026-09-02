@@ -69,6 +69,9 @@ struct PingResponse {
     double uptime_seconds{};
     std::string version;
     std::string build_id_value;
+    // Project root the answering server serves. Empty when talking to an
+    // older binary that predates the field.
+    std::string root;
 };
 
 struct IndexStatus {

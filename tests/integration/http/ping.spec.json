@@ -18,9 +18,11 @@
       "timestamp", "schema_version",
       "uptime_seconds",
       "build_id",
-      "version"
+      "version",
+      "root"
     ]
   },
+  "_rationale_ignore_root": "root echoes the absolute corpus path of the checkout running the suite (collision-detection field for clients); absolute paths differ per machine/worktree, so parity on it is meaningless.",
   "tolerances": {"score_abs": 0.05, "timed_max_ms": 60000},
   "expect_exit": 200
 }

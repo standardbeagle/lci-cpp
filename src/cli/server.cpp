@@ -85,6 +85,44 @@ std::unique_ptr<Client> ensure_server_running(const Config& cfg,
     if (client->is_server_running()) {
         std::string ping_err;
         auto ping = client->ping(ping_err);
+
+        // Wrong-root guard: the socket name is a 31-hash of the project
+        // root (a 1000-slot port window on Windows), so two roots can
+        // collide on one address. A collision used to be silent — every
+        // command searched the OTHER project. /ping now reports the root
+        // the server actually serves; on mismatch, find OUR server through
+        // the instance registry (each server records its real address
+        // there), and fail loudly if it has none. Old binaries omit the
+        // field (empty root) and keep the previous trust-the-address
+        // behaviour.
+        if (ping && !ping->root.empty()) {
+            std::error_code ec_want, ec_got;
+            auto wanted = std::filesystem::weakly_canonical(cfg.project.root,
+                                                            ec_want);
+            auto got =
+                std::filesystem::weakly_canonical(ping->root, ec_got);
+            if (!ec_want && !ec_got && wanted != got) {
+                for (const auto& inst :
+                     list_server_instances(instance_registry_dir())) {
+                    if (inst.root.empty()) continue;
+                    std::error_code ec_inst;
+                    if (std::filesystem::weakly_canonical(inst.root,
+                                                          ec_inst) != wanted)
+                        continue;
+                    auto candidate = std::make_unique<Client>(inst.address);
+                    if (candidate->is_server_running()) {
+                        return candidate;
+                    }
+                }
+                error = "socket address collision: the server at " +
+                        socket_path + " serves root '" + ping->root +
+                        "', not '" + cfg.project.root +
+                        "', and no registered server for this root is "
+                        "running";
+                return nullptr;
+            }
+        }
+
         if (ping && !ping->build_id_value.empty() &&
             ping->build_id_value != build_id()) {
             std::fprintf(stderr,

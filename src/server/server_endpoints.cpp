@@ -92,6 +92,12 @@ void IndexServer::handle_ping(const httplib::Request& /*req*/,
     j["uptime_seconds"] = uptime;
     j["version"] = kVersion;
     j["build_id"] = bid;
+    // The project root this server actually serves. Socket names are a
+    // 31-hash of the root (a 1000-slot port window on Windows), so two
+    // roots CAN collide on one address; without this field a client that
+    // reached "a" server had no way to notice it was someone else's, and
+    // silently searched the wrong project.
+    j["root"] = config_.project.root;
     json_response(res, j);
 }
 
