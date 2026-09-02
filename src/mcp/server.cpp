@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <iostream>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 
 #include <nlohmann/json.hpp>
@@ -49,6 +50,15 @@ McpServer::~McpServer() {
 // -- Tool registration --------------------------------------------------------
 
 void McpServer::add_tool(ToolDefinition def, ToolHandler handler) {
+    // Registration is startup-only: enqueue_call stores raw pointers into
+    // registered_tools_, so a push_back after the transport loop starts can
+    // reallocate the vector under a queued call and dangle it. Fail fast
+    // instead of corrupting.
+    if (running_.load()) {
+        throw std::logic_error(
+            "McpServer::add_tool called after run() started; tools must be "
+            "registered before the transport loop");
+    }
     registered_tools_.push_back({std::move(def), std::move(handler)});
 }
 
