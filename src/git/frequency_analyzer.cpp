@@ -452,9 +452,11 @@ bool HistoryProvider::get_commit_history(int64_t since_epoch,
         for (const auto& p : paths) args.push_back(p);
     }
 
-    // Reuse Provider::run_git — it cd's into the repo root and shell-quotes
-    // every arg, so the `--format=%H|%an|%ae|%at|%s` placeholders (the `|` in
-    // particular) reach git literally instead of being parsed as shell pipes.
+    // Reuse Provider::run_git — it argv-execs git in the repo root with no
+    // shell at all (subprocess::run_capture), so the
+    // `--format=%H|%an|%ae|%at|%s` placeholders (the `|` in particular)
+    // reach git literally; there is no shell to parse them as pipes and no
+    // quoting involved.
     std::string output;
     // A non-zero git exit means the history is incomplete (bad ref, broken
     // pipe, mid-stream failure). Fail rather than parse a truncated stream and
