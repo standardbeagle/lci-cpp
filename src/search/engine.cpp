@@ -454,6 +454,14 @@ std::vector<SearchResult> SearchEngine::search(
     // load or string copy.
     auto file_snap = index_.load_snapshot();
 
+    // Symbol-type filter runs INSIDE the collection loop (before the cap):
+    // filtering after collection let non-matching results consume the
+    // collection budget, silently starving matching files that sorted later.
+    std::shared_ptr<const ReferenceTracker::Snapshot> type_filter_snap;
+    if (!options.symbol_types.empty()) {
+        type_filter_snap = index_.ref_tracker().pin();
+    }
+
     bool hit_collection_cap = false;
     for (FileID fid : candidates) {
         if (effective_cap > 0 &&
@@ -484,21 +492,24 @@ std::vector<SearchResult> SearchEngine::search(
                 continue;
             }
         }
+        size_t before = results.size();
         process_file(fid, pattern, options, effective_cap, results, *file_snap);
-    }
-
-    // Symbol-type filter — apply after match, before scoring.
-    if (!options.symbol_types.empty()) {
-        auto& tracker = index_.ref_tracker();
-        auto rt_snap = tracker.pin();
-        results.erase(std::remove_if(results.begin(), results.end(),
-            [&](const SearchResult& r) {
-                auto sym =
-                    rt_snap->get_symbol_at_line(r.file_id, r.line);
-                if (sym == nullptr) return true;
-                return !symbol_type_matches_filter(options.symbol_types,
-                                                   to_string(sym->symbol.type));
-            }), results.end());
+        if (type_filter_snap && results.size() > before) {
+            results.erase(
+                std::remove_if(
+                    results.begin() +
+                        static_cast<std::ptrdiff_t>(before),
+                    results.end(),
+                    [&](const SearchResult& r) {
+                        auto sym = type_filter_snap->get_symbol_at_line(
+                            r.file_id, r.line);
+                        if (sym == nullptr) return true;
+                        return !symbol_type_matches_filter(
+                            options.symbol_types,
+                            to_string(sym->symbol.type));
+                    }),
+                results.end());
+        }
     }
 
     // Score and rank results.
