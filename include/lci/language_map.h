@@ -45,6 +45,7 @@ enum class LangId : uint8_t {
     Ruby,
     Swift,
     Scala,
+    Svelte,
 };
 
 /// Coarse language family for cross-language link gating. Families, not exact
@@ -93,6 +94,7 @@ constexpr std::string_view to_string(LangId id) {
         case LangId::Ruby: return "ruby";
         case LangId::Swift: return "swift";
         case LangId::Scala: return "scala";
+        case LangId::Svelte: return "svelte";
         case LangId::Unknown: return "unknown";
     }
     return "unknown";
@@ -181,7 +183,9 @@ inline constexpr LangMapEntry kLangMap[] = {
     {".cljs", LangId::Unknown, LangFamily::kUnknown, true},
     {".elm", LangId::Unknown, LangFamily::kUnknown, true},
     {".vue", LangId::Unknown, LangFamily::kUnknown, true},
-    {".svelte", LangId::Unknown, LangFamily::kUnknown, true},
+    // Svelte components carry a JS/TS <script> block; kJsTs so references
+    // between component scripts and plain .ts/.js modules may cross-link.
+    {".svelte", LangId::Svelte, LangFamily::kJsTs, true},
     {".nim", LangId::Unknown, LangFamily::kUnknown, true},
     {".v", LangId::Unknown, LangFamily::kUnknown, true},
     {".d", LangId::Unknown, LangFamily::kUnknown, true},

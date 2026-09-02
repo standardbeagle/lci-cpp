@@ -53,11 +53,19 @@ TEST(LanguageMap, CaseInsensitiveAndPathForm) {
 
 TEST(LanguageMap, NonLanguageCodeExtensionsStillCode) {
     // Extensions with a tree-sitter-less language: no LangId, but still code.
-    for (std::string_view ext : {".lua", ".hs", ".vue", ".svelte"}) {
+    for (std::string_view ext : {".lua", ".hs", ".vue"}) {
         auto info = language_info(ext);
         EXPECT_EQ(info.language, LangId::Unknown) << ext;
         EXPECT_TRUE(info.is_code) << ext;
     }
+}
+
+TEST(LanguageMap, SvelteIsJsTsFamilyCode) {
+    auto info = language_info(".svelte");
+    EXPECT_EQ(info.language, LangId::Svelte);
+    EXPECT_EQ(info.family, LangFamily::kJsTs);
+    EXPECT_TRUE(info.is_code);
+    EXPECT_EQ(to_string(LangId::Svelte), "svelte");
 }
 
 // -- Consumer: search/engine classify_file (is_code) ------------------------

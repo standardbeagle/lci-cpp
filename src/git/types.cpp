@@ -257,6 +257,9 @@ Language get_language_from_path(std::string_view path) {
         case LangId::Kotlin: return Language::Kotlin;
         case LangId::Scala: return Language::Scala;
         case LangId::Zig: return Language::Zig;
+        // Svelte symbols come from the component's JS/TS script block, so
+        // JavaScript naming conventions apply.
+        case LangId::Svelte: return Language::JavaScript;
         case LangId::Unknown: return Language::Unknown;
     }
     return Language::Unknown;

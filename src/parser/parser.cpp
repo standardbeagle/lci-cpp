@@ -54,6 +54,8 @@ bool language_from_extension(std::string_view ext, Language& out) {
         case LangId::Ruby: out = Language::Ruby; return true;
         case LangId::Swift:   // no tree-sitter-swift grammar linked
         case LangId::Scala:   // no tree-sitter-scala grammar linked
+        case LangId::Svelte:  // parsed via the masked-script JS/TS path
+                              // (svelte_script.h), not a direct grammar
         case LangId::Unknown:
             return false;
     }
