@@ -982,6 +982,77 @@ TEST(MasterIndexSearchIntegrationTest, BulkSubstringOfTokenFound) {
     EXPECT_TRUE(any_result_in(results, "a.go"));
 }
 
+// -- Punctuation/operator patterns (silent-zero pins) -------------------------
+//
+// The tokenizer strips punctuation when building postings, and trigram
+// windows skip no-alnum runs — a naive narrowing over either index could
+// certify `.dump(` or `catch (...)` absent everywhere and return a silent
+// zero. Pin the contract: zero results must mean the bytes are truly absent,
+// never that the tokenizer dropped the pattern's punctuation.
+
+TEST(MasterIndexSearchIntegrationTest, BulkPunctuationCallPatternFound) {
+    TempDir dir;
+    dir.write_file("a.cpp",
+                   "int main() {\n  payload.dump(2);\n  return 0;\n}\n");
+    Config cfg = make_default_config();
+    cfg.index.data_file_token_cap = 25;
+    write_partial_residue_file(dir, cfg, "residue.go");
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    auto results = mi.search_with_options(".dump(", SearchOptions{});
+    EXPECT_TRUE(any_result_in(results, "a.cpp"))
+        << "punctuation-carrying pattern must reach the verify scan";
+}
+
+TEST(MasterIndexSearchIntegrationTest, BulkOperatorOnlyTailPatternFound) {
+    TempDir dir;
+    dir.write_file("a.cpp",
+                   "void f() {\n  try { g(); } catch (...) {}\n}\n");
+    Config cfg = make_default_config();
+    cfg.index.data_file_token_cap = 25;
+    write_partial_residue_file(dir, cfg, "residue.go");
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    auto results = mi.search_with_options("catch (...)", SearchOptions{});
+    EXPECT_TRUE(any_result_in(results, "a.cpp"))
+        << "operator-only tail (`(...)`) must not be certified absent";
+}
+
+TEST(MasterIndexSearchIntegrationTest, BulkQuoteAndParenPatternFound) {
+    TempDir dir;
+    dir.write_file("a.cpp",
+                   "void h(Json j) {\n  auto p = j.value(\"params\", 0);\n}\n");
+    Config cfg = make_default_config();
+    cfg.index.data_file_token_cap = 25;
+    write_partial_residue_file(dir, cfg, "residue.go");
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    auto results =
+        mi.search_with_options("value(\"params\"", SearchOptions{});
+    EXPECT_TRUE(any_result_in(results, "a.cpp"));
+}
+
+TEST(MasterIndexSearchIntegrationTest, BulkAbsentPunctuationPatternIsEmpty) {
+    // Discrimination pair for the pins above: the same punctuation shape,
+    // genuinely absent from the corpus, returns empty.
+    TempDir dir;
+    dir.write_file("a.cpp",
+                   "int main() {\n  payload.dump(2);\n  return 0;\n}\n");
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    auto results = mi.search_with_options(".undump(", SearchOptions{});
+    EXPECT_TRUE(results.empty());
+}
+
 TEST(MasterIndexSearchIntegrationTest,
      BulkBloomCertifiesAbsenceIncludingPartialResidue) {
     // The per-file trigram bloom is built by the bulk pipeline workers and

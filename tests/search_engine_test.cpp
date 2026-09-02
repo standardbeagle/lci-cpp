@@ -382,6 +382,37 @@ TEST(SearchEngineIntegrationTest, BasicSearch) {
     }
 }
 
+TEST(SearchEngineIntegrationTest, PunctuationPatternsNotSilentlyDropped) {
+    // MCP-path pin (SearchEngine::search -> find_candidate_files): patterns
+    // built from punctuation/operator bytes the tokenizer discards must still
+    // reach the verify scan. Zero results must mean truly absent (Karpathy
+    // rule 6), never "the tokenizer dropped the pattern".
+    TempDir dir;
+    dir.write_file("dump.cpp",
+        "void emit(Json payload) {\n"
+        "    payload.dump(2);\n"
+        "    try { run(); } catch (...) {}\n"
+        "    auto p = payload.value(\"params\", 0);\n"
+        "}\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    SearchEngine engine(mi);
+    SearchOptions opts;
+    for (const char* pattern :
+         {".dump(", "catch (...)", "value(\"params\""}) {
+        auto results = engine.search(pattern, opts);
+        ASSERT_GE(results.size(), 1u) << "silent zero for: " << pattern;
+        EXPECT_TRUE(results.front().path.ends_with("dump.cpp"));
+    }
+
+    // Discrimination pair: same shape, genuinely absent.
+    EXPECT_TRUE(engine.search(".undump(", opts).empty());
+}
+
 TEST(SearchEngineIntegrationTest, CaseInsensitiveSearch) {
     TempDir dir;
     dir.write_file("case.js",
