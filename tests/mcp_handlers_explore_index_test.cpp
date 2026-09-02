@@ -792,6 +792,80 @@ TEST_F(ExploreIndexTestFixture, GitAnalysisStagedDetectsExactDuplicate) {
     std::filesystem::remove_all(repo);
 }
 
+// macOS CI shape reproduced on any platform: the project root reaches the
+// repo through a SYMLINK (/var/folders -> /private/var/folders), so git's
+// rev-parse --show-toplevel (symlinks resolved) never prefix-matches the
+// index's file paths. The duplicate finder's same-location guard then
+// compares an absolute existing path against a repo-relative new path and
+// misses, emitting a self-match finding for every changed symbol.
+TEST_F(ExploreIndexTestFixture, GitAnalysisSymlinkedRootSuppressesSelfMatch) {
+    auto real_repo =
+        lci::test::unique_temp_dir("lci_git_analysis_symlink_real_");
+    std::filesystem::remove_all(real_repo);
+    std::filesystem::create_directories(real_repo);
+    auto link = lci::test::unique_temp_dir("lci_git_analysis_symlink_link_");
+    std::filesystem::remove_all(link);
+    std::error_code ec;
+    std::filesystem::create_directory_symlink(real_repo, link, ec);
+    if (ec) GTEST_SKIP() << "symlinks unavailable: " << ec.message();
+
+    auto git = [&](const std::string& args) {
+        return test::run_git(real_repo, args);
+    };
+    ASSERT_TRUE(git("init"));
+    git("config user.email test@test.com");
+    git("config user.name test");
+
+    const std::string add_fn =
+        "func Add(a, b int) int {\n"
+        "\tresult := a + b\n"
+        "\treturn result\n"
+        "}\n";
+    {
+        std::ofstream f(real_repo / "math.go");
+        f << "package main\n\n" << add_fn;
+    }
+    ASSERT_TRUE(git("add ."));
+    ASSERT_TRUE(git("commit -m baseline"));
+    {
+        std::ofstream f(real_repo / "copy.go");
+        f << "package main\n\n" << add_fn;
+    }
+    ASSERT_TRUE(git("add copy.go"));
+
+    // Index THROUGH the symlink: file paths carry the link spelling while
+    // git reports the resolved root.
+    Config cfg;
+    cfg.project.root = link.string();
+    MasterIndex idx(cfg);
+    idx.index_directory(link.string());
+
+    auto params = nlohmann::json::object();  // scope defaults to staged
+    auto result = handle_git_analysis(params, idx);
+    ASSERT_FALSE(result.is_error) << result.text;
+
+    auto j = nlohmann::json::parse(result.text);
+    ASSERT_TRUE(j.contains("duplicates")) << result.text;
+    bool found_cross_file_exact = false;
+    for (const auto& dup : j["duplicates"]) {
+        const auto& existing = dup["existing_code"];
+        const auto& fresh = dup["new_code"];
+        EXPECT_FALSE(existing.value("file_path", std::string()) ==
+                         fresh.value("file_path", std::string()) &&
+                     existing.value("start_line", -1) ==
+                         fresh.value("start_line", -2))
+            << "self-match finding: " << dup.dump();
+        if (existing.value("file_path", std::string()) == "math.go" &&
+            dup.value("type", std::string()) == "exact") {
+            found_cross_file_exact = true;
+        }
+    }
+    EXPECT_TRUE(found_cross_file_exact) << result.text;
+
+    std::filesystem::remove_all(link);
+    std::filesystem::remove_all(real_repo);
+}
+
 // Commit and range scopes walk ref resolution paths the staged/wip legs never
 // touch (rev-parse of base/target, HEAD~1..HEAD diffs).
 TEST_F(ExploreIndexTestFixture, GitAnalysisCommitAndRangeScopes) {
