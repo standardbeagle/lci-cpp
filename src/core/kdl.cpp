@@ -211,7 +211,8 @@ class Parser {
                 set_error();
                 return nodes;
             }
-            if (cur_.kind == TokenKind::Ident) {
+            if (cur_.kind == TokenKind::Ident ||
+                cur_.kind == TokenKind::String) {
                 nodes.push_back(parse_node());
                 if (!error_.empty()) return nodes;
             } else {
@@ -242,7 +243,14 @@ class Parser {
     Node parse_node() {
         Node node;
         node.name = cur_.text;
+        // A quoted string in node position is a KDL quoted node name — the
+        // pattern-list block form `include { "*.rs" "*.go" }` puts every
+        // pattern there. It is a LEAF: consuming trailing strings as args
+        // would swallow the sibling patterns (`"*.go"` would become an
+        // argument of `"*.rs"` and vanish from collect_strings).
+        const bool quoted_name = cur_.kind == TokenKind::String;
         advance();
+        if (quoted_name) return node;
 
         // Collect arguments and `key=value` properties until a child block or
         // the next node name at this level. A property is an identifier the

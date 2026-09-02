@@ -116,6 +116,34 @@ TEST(KdlTest, SkipsLineAndBlockComments) {
     EXPECT_EQ("two", nodes[1].first_string());
 }
 
+// Quoted strings in node position are quoted node names — the block form
+// pattern list `include { "*.rs" }` puts every pattern there. The lexer/
+// parser used to skip them as "unexpected tokens", so the block form
+// silently parsed to zero patterns.
+TEST(KdlTest, QuotedStringsInBlockBecomeChildNodes) {
+    auto nodes = parse_ok(R"(
+        include {
+            "*.rs"
+            "*.zig"
+        }
+    )");
+    ASSERT_EQ(1u, nodes.size());
+    ASSERT_EQ(2u, nodes[0].children.size());
+    EXPECT_EQ("*.rs", nodes[0].children[0].name);
+    EXPECT_EQ("*.zig", nodes[0].children[1].name);
+}
+
+// Quoted node names are leaves: a sibling pattern on the same line must not
+// be swallowed as an argument of the previous one.
+TEST(KdlTest, QuotedNodeNamesDoNotConsumeSiblings) {
+    auto nodes = parse_ok(R"(include { "*.rs" "*.zig" })");
+    ASSERT_EQ(1u, nodes.size());
+    ASSERT_EQ(2u, nodes[0].children.size());
+    EXPECT_EQ("*.rs", nodes[0].children[0].name);
+    EXPECT_TRUE(nodes[0].children[0].args.empty());
+    EXPECT_EQ("*.zig", nodes[0].children[1].name);
+}
+
 TEST(KdlTest, CollectsEveryStringArgument) {
     auto nodes = parse_ok(R"(dir "vendor" "node_modules" "third_party")");
     ASSERT_EQ(1u, nodes.size());
