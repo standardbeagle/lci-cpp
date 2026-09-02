@@ -265,6 +265,40 @@ TEST(DebouncedRebuilderTest, DeduplicatesFiles) {
 // FileWatcher tests
 // =============================================================================
 
+// Pins the flush/timer callback race fix: force_rebuild and the timer
+// thread used to invoke the callback concurrently. dispatch_mu_ now
+// serializes invocation; two callbacks must never overlap.
+TEST(DebouncedRebuilderTest, CallbackInvocationsAreSerialized) {
+    std::atomic<int> in_flight{0};
+    std::atomic<int> max_in_flight{0};
+
+    DebouncedRebuilder rebuilder(std::chrono::milliseconds{1});
+    rebuilder.set_callback([&](const std::vector<FileID>&) {
+        int now = in_flight.fetch_add(1) + 1;
+        int prev = max_in_flight.load();
+        while (now > prev &&
+               !max_in_flight.compare_exchange_weak(prev, now)) {
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds{2});
+        in_flight.fetch_sub(1);
+    });
+
+    std::thread forcer([&] {
+        for (int i = 0; i < 30; ++i) {
+            rebuilder.schedule_rebuild(FileID{static_cast<uint32_t>(i + 1)});
+            rebuilder.force_rebuild();
+        }
+    });
+    for (int i = 0; i < 30; ++i) {
+        rebuilder.schedule_rebuild(FileID{static_cast<uint32_t>(i + 100)});
+        std::this_thread::sleep_for(std::chrono::milliseconds{1});
+    }
+    forcer.join();
+    rebuilder.shutdown();
+
+    EXPECT_EQ(max_in_flight.load(), 1) << "rebuild callback ran concurrently";
+}
+
 TEST(FileWatcherTest, DisabledWatchModeReturnsFalse) {
     Config cfg = make_default_config();
     cfg.index.watch_mode = false;

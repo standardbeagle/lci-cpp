@@ -84,12 +84,18 @@ void DebouncedRebuilder::timer_thread_func() {
         pending_.clear();
 
         auto cb = callback_;
+        // Take the dispatch lock BEFORE releasing mu_ (consistent
+        // mu_ -> dispatch_mu_ order with flush_pending), so a concurrent
+        // flush can neither run its callback at the same time as this one
+        // nor overtake this earlier-gathered batch.
+        std::unique_lock dispatch(dispatch_mu_);
         lock.unlock();
 
         if (cb && !files.empty()) {
             cb(files);
         }
 
+        dispatch.unlock();
         lock.lock();
     }
 }
@@ -97,14 +103,16 @@ void DebouncedRebuilder::timer_thread_func() {
 void DebouncedRebuilder::flush_pending() {
     std::vector<FileID> files;
     RebuildCallback cb;
-    {
-        std::lock_guard lock(mu_);
-        files.assign(pending_.begin(), pending_.end());
-        std::sort(files.begin(), files.end());
-        pending_.clear();
-        has_pending_ = false;
-        cb = callback_;
-    }
+    std::unique_lock lock(mu_);
+    files.assign(pending_.begin(), pending_.end());
+    std::sort(files.begin(), files.end());
+    pending_.clear();
+    has_pending_ = false;
+    cb = callback_;
+    // mu_ -> dispatch_mu_ order matches the timer thread; holding
+    // dispatch_mu_ across the callback serializes invocation with it.
+    std::unique_lock dispatch(dispatch_mu_);
+    lock.unlock();
     cv_.notify_all();
     if (cb && !files.empty()) {
         cb(files);

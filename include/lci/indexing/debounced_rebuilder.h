@@ -57,6 +57,13 @@ class DebouncedRebuilder {
     std::chrono::milliseconds debounce_;
 
     mutable std::mutex mu_;
+    /// Serializes CALLBACK INVOCATION between the timer thread and
+    /// force_rebuild/flush_pending callers. Acquired while still holding
+    /// mu_ (consistent mu_ -> dispatch_mu_ order, no inversion) and held
+    /// across the callback, so two batches can never run the callback
+    /// concurrently or out of gather order. Separate from mu_ so
+    /// schedule_rebuild never blocks behind a running rebuild.
+    std::mutex dispatch_mu_;
     std::condition_variable cv_;
     absl::flat_hash_set<FileID> pending_;
     std::chrono::steady_clock::time_point deadline_;
