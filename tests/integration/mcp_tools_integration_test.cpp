@@ -139,7 +139,18 @@ TEST_F(McpToolsIntegrationTest, InfoToolReturnsOverview) {
 }
 
 TEST_F(McpToolsIntegrationTest, InfoToolWithSpecificTool) {
-    auto result = handle_info({{"tool", "search"}});
+    // Per-tool help is registry-derived (the hand-written branches drifted
+    // and were removed), so exercise it the way production wires it: with
+    // the server's find_tool_definition as the lookup.
+    Config config;
+    config.project.root = dir_.path().string();
+    McpServer server(config, *indexer_, search_engine_.get());
+    register_real_handlers(server);
+    auto result = handle_info(
+        {{"tool", "search"}},
+        [&](const std::string& name) {
+            return server.find_tool_definition(name);
+        });
     EXPECT_FALSE(result.is_error);
     auto json = nlohmann::json::parse(result.text);
     EXPECT_EQ(json["name"], "search");

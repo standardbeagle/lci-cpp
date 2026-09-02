@@ -310,9 +310,10 @@ TEST_F(RealProjectContextManifestTest, SaveAndLoadCompactKeysFileRoundTrip) {
     ASSERT_FALSE(search_results.empty());
     auto file_path = search_results[0].path;
 
-    auto tmp_dir = fs::temp_directory_path() /
-                   ("lci_iter13_manifest_" +
-                    std::to_string(::getpid()));
+    // Manifest paths are confined to the project root (path-escape fix), so
+    // the scratch file must live under the fixture repo, not the system tmp.
+    auto tmp_dir = fs::path(path) /
+                   (".lci_iter13_manifest_" + std::to_string(::getpid()));
     fs::create_directories(tmp_dir);
     auto manifest_rel = ".lci-manifest-iter13.json";
     auto manifest_abs = tmp_dir / manifest_rel;
