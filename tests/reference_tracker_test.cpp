@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <lci/core/callers_report.h>
 #include <lci/core/reference_tracker.h>
 
 #include <string>
@@ -2229,6 +2230,103 @@ TEST(ReferenceTrackerTest, CollectCallersFindsQualifiedCppDefinitionFromBareName
                                qual.dynamic.size() +
                                qual.unresolved.size()),
               1);
+}
+
+TEST(ReferenceTrackerTest, TypedReceiverCallResolvesToQualifiedCppMember) {
+    ReferenceTracker rt;
+
+    // The extractor emits "MasterIndex.update_file" when the receiver's type
+    // is locally known; the out-of-line C++ definition is stored under its
+    // QUALIFIED name. Typed-receiver resolution must look the qualified name
+    // up too — bare-name candidates alone leave every such call unresolved.
+    std::vector<Symbol> defs = {
+        make_sym("MasterIndex::update_file", SymbolType::Function, 1, 10, 30),
+    };
+    rt.process_file(1, "master_index.cpp", defs, {}, {});
+
+    std::vector<Symbol> callers = {
+        make_sym("caller", SymbolType::Function, 2, 1, 20),
+    };
+    std::vector<Reference> refs = {make_call("MasterIndex.update_file", 5)};
+    rt.process_file(2, "index_user.cpp", callers, refs, {});
+    rt.process_all_references();
+
+    auto snap = rt.pin();
+    auto result = snap->collect_callers("update_file");
+    ASSERT_EQ(result.definitions.size(), 1u);
+    ASSERT_EQ(result.confirmed.size(), 1u)
+        << "typed-receiver call must resolve to the qualified member "
+           "definition, not fall out as unresolved";
+    EXPECT_EQ(result.confirmed[0].line, 5);
+    EXPECT_EQ(result.confirmed[0].target, result.definitions[0]->id);
+    EXPECT_TRUE(result.unresolved.empty());
+    EXPECT_TRUE(result.dynamic.empty());
+}
+
+TEST(ReferenceTrackerTest, CollectCallersQualifiedQueryExcludesOtherReceivers) {
+    ReferenceTracker rt;
+
+    std::vector<Symbol> defs = {
+        make_sym("LinkerEngine::update_file", SymbolType::Function, 1, 10, 30),
+    };
+    rt.process_file(1, "linker_engine.cpp", defs, {}, {});
+
+    std::vector<Symbol> callers = {
+        make_sym("caller", SymbolType::Function, 2, 1, 20),
+    };
+    // A qualified spelling naming a DIFFERENT receiver type (no such
+    // definition indexed), plus a bare spelling.
+    std::vector<Reference> refs = {make_call("MasterIndex.update_file", 5),
+                                   make_call("update_file", 7)};
+    rt.process_file(2, "some_test.cpp", callers, refs, {});
+    rt.process_all_references();
+
+    auto snap = rt.pin();
+    // Qualified query: a spelling whose receiver names ANOTHER type
+    // contradicts the query and must not be attributed; the bare spelling
+    // cannot be disproven and stays.
+    auto qual = snap->collect_callers("LinkerEngine::update_file");
+    ASSERT_EQ(qual.unresolved.size(), 1u)
+        << "MasterIndex.update_file must not be attributed to a "
+           "LinkerEngine::update_file query";
+    EXPECT_EQ(qual.unresolved[0].line, 7);
+
+    // Bare query: both spellings attributed (cannot disambiguate).
+    auto bare = snap->collect_callers("update_file");
+    EXPECT_EQ(bare.unresolved.size(), 2u);
+}
+
+TEST(ReferenceTrackerTest, CallersReportKeepsFileScopeGroupsPerFile) {
+    ReferenceTracker rt;
+
+    // Exported Go function (uppercase) so top-level cross-file calls resolve.
+    std::vector<Symbol> defs = {
+        make_sym("TargetFn", SymbolType::Function, 1, 1, 10)};
+    std::vector<Reference> no_refs;
+    rt.process_file(1, "lib.go", defs, no_refs, {});
+    // Two files with TOP-LEVEL call sites (no enclosing symbol).
+    std::vector<Symbol> no_syms;
+    std::vector<Reference> refs_a = {make_call("TargetFn", 3)};
+    std::vector<Reference> refs_b = {make_call("TargetFn", 8)};
+    rt.process_file(2, "a.go", no_syms, refs_a, {});
+    rt.process_file(3, "b.go", no_syms, refs_b, {});
+    rt.process_all_references();
+
+    auto snap = rt.pin();
+    auto path_of = [](FileID fid) { return "f" + std::to_string(fid); };
+    auto report = build_callers_report(*snap, "TargetFn", 50, path_of);
+
+    // One <file scope> group PER FILE — never merged across files.
+    ASSERT_EQ(report["callers"].size(), 2u)
+        << report.dump(2);
+    EXPECT_EQ(report["total_callers"], 2);
+    EXPECT_EQ(report["callers"][0]["caller"], "<file scope>");
+    EXPECT_EQ(report["callers"][0]["file_path"], "f2");
+    EXPECT_EQ(report["callers"][0]["call_lines"],
+              nlohmann::json::array({3}));
+    EXPECT_EQ(report["callers"][1]["file_path"], "f3");
+    EXPECT_EQ(report["callers"][1]["call_lines"],
+              nlohmann::json::array({8}));
 }
 
 TEST(ReferenceTrackerTest, CollectCallersExcludesVariableDefinitionsFromList) {
