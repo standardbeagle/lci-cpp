@@ -224,6 +224,12 @@ int64_t FileContentStore::estimate_memory(const FileContent& fc) {
     // Mapped bytes are file-backed and kernel-evictable -- they are not
     // heap, so they do not count against the heap cap (max_memory_mb).
     // line_offsets and bookkeeping are heap either way.
+    //
+    // Because a mapped entry's chargeable size is ~0, mapped entries are
+    // kept OUT of access_order entirely (see add_file_mapped): evicting
+    // one reclaims nothing while silently making the file unsearchable,
+    // which under cap pressure degenerated into mass eviction with no
+    // memory recovered.
     const int64_t owned =
         fc.mapping.is_open() ? 0 : static_cast<int64_t>(fc.content.size());
     return owned + static_cast<int64_t>(fc.line_offsets.size()) * 4 + 64;
@@ -444,6 +450,16 @@ FileID FileContentStore::add_file(const std::string& path, std::string_view cont
     if (existing_id != 0) {
         const auto& existing_fc = snap->find_by_id(existing_id);
         if (existing_fc && existing_fc->fast_hash == new_hash) {
+            // Unchanged content is still a touch: refresh the LRU slot so a
+            // hot re-added file is not first in line for eviction. (Mapped
+            // entries never sit in access_order; nothing to refresh then.)
+            auto pos = std::find(snap->access_order.begin(),
+                                 snap->access_order.end(), existing_id);
+            if (pos != snap->access_order.end()) {
+                snap->access_order.erase(pos);
+                snap->access_order.push_back(existing_id);
+                snapshot_.store(std::move(snap), std::memory_order_release);
+            }
             return existing_id;
         }
     }
@@ -510,6 +526,15 @@ FileID FileContentStore::add_file_mapped(const std::string& path,
     if (existing_id != 0) {
         const auto& existing_fc = snap->find_by_id(existing_id);
         if (existing_fc && existing_fc->fast_hash == new_hash) {
+            // Unchanged content is a touch: refresh a (previously owned)
+            // entry's LRU slot. Mapped entries are not in access_order.
+            auto pos = std::find(snap->access_order.begin(),
+                                 snap->access_order.end(), existing_id);
+            if (pos != snap->access_order.end()) {
+                snap->access_order.erase(pos);
+                snap->access_order.push_back(existing_id);
+                snapshot_.store(std::move(snap), std::memory_order_release);
+            }
             return existing_id;
         }
     }
@@ -531,6 +556,8 @@ FileID FileContentStore::add_file_mapped(const std::string& path,
             snap->path_index[std::string_view(fresh->path)] = map_it->second;
             snap->entries[map_it->second] = std::move(fresh);
         }
+        // Drop any stale OWNED-era LRU slot; mapped entries stay out of
+        // access_order (their chargeable size is ~0 — see estimate_memory).
         snap->access_order.erase(
             std::remove(snap->access_order.begin(), snap->access_order.end(),
                         file_id),
@@ -549,7 +576,6 @@ FileID FileContentStore::add_file_mapped(const std::string& path,
         snap->id_index[file_id] = new_pos;
     }
 
-    snap->access_order.push_back(file_id);
     enforce_memory_limit(snap);
     snapshot_.store(std::move(snap), std::memory_order_release);
     return file_id;
@@ -595,6 +621,8 @@ std::vector<FileID> FileContentStore::batch_add_files_mapped(
                     map_it->second;
                 snap->entries[map_it->second] = std::move(fresh);
             }
+            // Drop any stale OWNED-era LRU slot; mapped entries stay out
+            // of access_order (chargeable size ~0 — see estimate_memory).
             snap->access_order.erase(
                 std::remove(snap->access_order.begin(),
                             snap->access_order.end(), file_id),
@@ -612,7 +640,6 @@ std::vector<FileID> FileContentStore::batch_add_files_mapped(
             snap->id_index[file_id] = new_pos;
         }
 
-        snap->access_order.push_back(file_id);
         ids.push_back(file_id);
     }
 
@@ -643,6 +670,14 @@ std::vector<FileID> FileContentStore::batch_add_files(
         if (existing_id != 0) {
             const auto& existing_fc = snap->find_by_id(existing_id);
             if (existing_fc && existing_fc->fast_hash == new_hash) {
+                // Unchanged content is a touch: refresh the LRU slot in the
+                // shared clone (stored at batch end).
+                auto pos = std::find(snap->access_order.begin(),
+                                     snap->access_order.end(), existing_id);
+                if (pos != snap->access_order.end()) {
+                    snap->access_order.erase(pos);
+                    snap->access_order.push_back(existing_id);
+                }
                 ids.push_back(existing_id);
                 continue;
             }

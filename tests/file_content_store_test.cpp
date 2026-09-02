@@ -561,5 +561,57 @@ TEST(FileContentStoreTest, RetainOnlyDropsOtherEntries) {
     EXPECT_EQ(store.path_to_id("a.go"), FileID{0});
 }
 
+// Mapped entries are exempt from LRU eviction: their chargeable size is ~0,
+// so evicting them frees nothing while silently making the file
+// unsearchable.
+TEST(FileContentStoreTest, MappedEntriesExemptFromEviction) {
+    std::string path =
+        (std::filesystem::temp_directory_path() /
+         ("lci_fcs_mapped_evict_" +
+          std::to_string(lci::portable::process_id()) + ".txt"))
+            .string();
+    {
+        std::ofstream out(path);
+        out << std::string(300, 'm');
+    }
+
+    FileContentStore store(400);  // tiny cap to force eviction pressure
+    MappedFile mf;
+    ASSERT_TRUE(mf.open(path));
+    FileID mapped_id = store.add_file_mapped(path, std::move(mf));
+    ASSERT_NE(mapped_id, FileID{0});
+
+    // Owned adds large enough to blow the cap repeatedly.
+    store.add_file("a.go", std::string(300, 'a'));
+    store.add_file("b.go", std::string(300, 'b'));
+    store.add_file("c.go", std::string(300, 'c'));
+
+    // The mapped entry must survive every eviction round.
+    EXPECT_EQ(store.get_content(mapped_id), std::string(300, 'm'));
+
+    std::remove(path.c_str());
+}
+
+// Re-adding a file with unchanged content must refresh its LRU slot, not
+// leave it first in line for eviction.
+TEST(FileContentStoreTest, UnchangedReAddRefreshesLruOrder) {
+    FileContentStore store(700);
+    FileID a = store.add_file("a.go", std::string(200, 'a'));
+    store.add_file("b.go", std::string(200, 'b'));
+
+    // Touch a.go via a hash-identical re-add: it should move behind b.go
+    // in the eviction order.
+    EXPECT_EQ(a, store.add_file("a.go", std::string(200, 'a')));
+
+    // Force eviction of exactly one entry.
+    store.add_file("c.go", std::string(200, 'c'));
+
+    EXPECT_EQ(store.get_content(a), std::string(200, 'a'))
+        << "recently touched file was evicted first";
+    EXPECT_TRUE(store.get_content(store.path_to_id("b.go")).empty() ||
+                store.path_to_id("b.go") == FileID{0})
+        << "expected the least-recently-touched file to be evicted";
+}
+
 }  // namespace
 }  // namespace lci
