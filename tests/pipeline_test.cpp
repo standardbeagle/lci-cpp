@@ -442,6 +442,33 @@ TEST(FileScannerTest, SkipsHiddenDirectories) {
     }
 }
 
+// A bare include glob ("*.zig", no '/') is a basename match over the whole
+// tree, like .gitignore — it used to anchor at the root and silently drop
+// every nested file.
+TEST(FileScannerTest, BareIncludeGlobMatchesNestedFiles) {
+    TempDir dir;
+    dir.write_file("root.zig", "const root = 1;");
+    dir.write_file("sub/nested.zig", "const nested = 1;");
+    dir.write_file("sub/skipme.go", "package skipme");
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    cfg.include = {"*.zig"};
+
+    FileScanner scanner(cfg);
+    auto tasks = scanner.scan().tasks;
+
+    bool found_root = false;
+    bool found_nested = false;
+    for (const auto& t : tasks) {
+        if (t.path.find("root.zig") != std::string::npos) found_root = true;
+        if (t.path.find("nested.zig") != std::string::npos) found_nested = true;
+        EXPECT_EQ(t.path.find("skipme.go"), std::string::npos);
+    }
+    EXPECT_TRUE(found_root);
+    EXPECT_TRUE(found_nested);
+}
+
 TEST(FileScannerTest, RespectsExclusionPatterns) {
     TempDir dir;
     dir.write_file("main.go", "package main");

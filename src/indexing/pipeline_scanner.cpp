@@ -204,6 +204,14 @@ void FileScanner::walk_directory(
 }
 
 FileScanner::CompiledGlob FileScanner::compile_glob(std::string pattern) {
+    // A bare pattern with no '/' names FILES, not root-level entries:
+    // include { "*.zig" } means every .zig file in the tree, exactly like
+    // .gitignore's basename semantics. Without this, "*.zig" matched only
+    // root.zig and silently dropped sub/nested.zig. `**/` collapses to
+    // nothing (see below), so root-level files still match.
+    if (pattern.find('/') == std::string::npos) {
+        pattern.insert(0, "**/");
+    }
     // Longest wildcard-free run: every path the glob matches contains it
     // verbatim, so its absence is a certain non-match.
     std::string best;
