@@ -119,97 +119,14 @@ ToolResult handle_info(const nlohmann::json& params,
         return make_json_response(data);
     }
 
-    if (tool == "search") {
-        nlohmann::json data;
-        data["name"] = "search";
-        data["description"] =
-            "Sub-millisecond semantic code search with multi-layer matching.";
-        data["parameters"] = {
-            {"pattern", "REQUIRED: Search pattern (string)"},
-            {"max", "Max results (default: 15, hard cap: 100)"},
-            {"output",
-             "Output format: 'line', 'ctx', 'ctx:N', 'full', 'files', "
-             "'count'"},
-            {"path",
-             "Root-relative scope: dir prefix ('src/http') or glob "
-             "('**/*.kt')"},
-            {"filter",
-             "Include-only filter: languages/extensions/globs CSV, e.g. "
-             "'go', 'md,*.yml', 'src/**/*.py'"},
-            {"flags",
-             "Search flags: 'ci' (case-insensitive), 'rx' (regex), 'iv' "
-             "(invert), 'wb' (word-boundary), 'nt' (no-tests), 'nc' "
-             "(no-comments)"},
-        };
-        data["response"] = {
-            {"results",
-             "Per-file groups: {file (root-relative), hits:[{line, sym, "
-             "type, id, callers, text}]}. id feeds get_context; callers = "
-             "incoming references."},
-            {"other_files", "Doc/generated files: {path: match_count}"},
-            {"total_matches",
-             "TRUE match count (may exceed rows shown; truncated:true then "
-             "set, with a dirs histogram for narrowing via path=)"},
-            {"similar_symbols", "On 0 matches: fuzzy near-miss symbol names"},
-        };
-        data["example"] = {{"basic", R"({"pattern": "user"})"},
-                           {"with_flags", R"({"pattern": "user", "flags": "ci,nt"})"},
-                           {"with_path", R"({"pattern": "user", "path": "src/auth"})"},
-                           {"with_output", R"({"pattern": "TODO", "output": "ctx:3"})"}};
-        return make_json_response(data);
-    }
+    // "files" is the historic short name for find_files (kept in the
+    // overview text); map it before the registry lookup.
+    if (tool == "files") tool = "find_files";
 
-    if (tool == "get_context") {
-        nlohmann::json data;
-        data["name"] = "get_context";
-        data["description"] =
-            "Deep context retrieval for symbols. Get call hierarchy and "
-            "references.";
-        data["parameters"] = {
-            {"name", "Symbol name for lookup"},
-            {"file_id", "File ID to narrow scope"},
-            {"line", "Line number within file"},
-            {"include_call_hierarchy", "Include call graph (default: true)"},
-            {"max_depth", "Max depth for call hierarchy (default: 3)"},
-        };
-        data["examples"] = {{"by_name", R"({"name": "handleSearch"})"},
-                            {"with_hierarchy",
-                             R"({"name": "handleSearch", "include_call_hierarchy": true})"}};
-        return make_json_response(data);
-    }
-
-    if (tool == "find_files" || tool == "files") {
-        nlohmann::json data;
-        data["name"] = "find_files";
-        data["description"] =
-            "Like 'find' or 'fd' - searches file paths on an in-memory index.";
-        data["parameters"] = {
-            {"pattern", "REQUIRED: File/path pattern to search for"},
-            {"max", "Maximum results (default: 50, max: 200)"},
-            {"filter", "Filter by file type or glob"},
-            {"flags", "Search flags: 'ci' (case-insensitive), 'exact'"},
-            {"include_hidden", "Include hidden files (default: false)"},
-            {"directory", "Directory to search within"},
-        };
-        data["examples"] = {
-            {"by_name", R"({"pattern": "UserController"})"},
-            {"with_filter", R"({"pattern": "handler", "filter": "*.go"})"}};
-        return make_json_response(data);
-    }
-
-    if (tool == "index_stats") {
-        nlohmann::json data;
-        data["name"] = "index_stats";
-        data["description"] =
-            "Index status and health monitoring for diagnostics.";
-        data["parameters"] = {
-            {"mode", "Query mode: 'summary', 'detailed', 'progress', 'health'"},
-        };
-        return make_json_response(data);
-    }
-
-    // Registry-derived help for every other registered tool: the same
-    // definition tools/list serves, so this can never lag the real surface.
+    // Registry-derived help for every registered tool: the same definition
+    // tools/list serves, so this can never lag the real surface. The
+    // hand-written per-tool branches this replaces had drifted (get_context
+    // showed 5 of 17 parameters).
     if (lookup) {
         if (const ToolDefinition* def = lookup(tool)) {
             nlohmann::json data;

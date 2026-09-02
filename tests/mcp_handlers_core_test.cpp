@@ -104,39 +104,74 @@ TEST(InfoHandler, VersionReturnsServerInfo) {
     EXPECT_TRUE(json.contains("capabilities"));
 }
 
-TEST(InfoHandler, SearchReturnsHelpText) {
-    nlohmann::json params;
-    params["tool"] = "search";
-    auto result = handle_info(params);
+// The hand-written per-tool info branches drifted from the registered
+// definitions (get_context showed 5 of 17 parameters), so info for every
+// registered tool now derives from the registry — the same definitions
+// tools/list serves. These tests run against the real core registrations.
+class InfoRegistryFixture : public ::testing::Test {
+  protected:
+    void SetUp() override {
+        Config config;
+        config.project.root = "/tmp/lci-info-test";
+        server_ = std::make_unique<mcp::McpServer>(config);
+        register_core_handlers(*server_, nullptr, nullptr, nullptr);
+    }
+
+    ToolResult info_for(const std::string& tool) {
+        nlohmann::json params;
+        params["tool"] = tool;
+        return handle_info(params, [this](const std::string& name) {
+            return server_->find_tool_definition(name);
+        });
+    }
+
+    std::unique_ptr<mcp::McpServer> server_;
+};
+
+TEST_F(InfoRegistryFixture, SearchDerivesFullParameterSurface) {
+    auto result = info_for("search");
     EXPECT_FALSE(result.is_error);
     auto json = nlohmann::json::parse(result.text);
     EXPECT_EQ(json["name"], "search");
-    EXPECT_TRUE(json.contains("parameters"));
-    EXPECT_TRUE(json.contains("example"));
+    ASSERT_TRUE(json.contains("parameters"));
+    // Every registered property appears — no drifted subset.
+    const auto* def = server_->find_tool_definition("search");
+    ASSERT_NE(def, nullptr);
+    for (const auto& prop : def->properties) {
+        EXPECT_TRUE(json["parameters"].contains(prop.name))
+            << "missing parameter: " << prop.name;
+    }
+    EXPECT_NE(json["parameters"]["pattern"].get<std::string>().find(
+                  "REQUIRED"),
+              std::string::npos);
 }
 
-TEST(InfoHandler, GetContextReturnsHelpText) {
-    nlohmann::json params;
-    params["tool"] = "get_context";
-    auto result = handle_info(params);
+TEST_F(InfoRegistryFixture, GetContextDerivesFullParameterSurface) {
+    auto result = info_for("get_context");
     EXPECT_FALSE(result.is_error);
     auto json = nlohmann::json::parse(result.text);
     EXPECT_EQ(json["name"], "get_context");
+    const auto* def = server_->find_tool_definition("get_context");
+    ASSERT_NE(def, nullptr);
+    // The drifted hand-written branch listed 5 parameters; the registry
+    // definition carries the full surface (17 at the time of writing).
+    EXPECT_EQ(json["parameters"].size(), def->properties.size());
+    EXPECT_TRUE(json["parameters"].contains("include_sections"));
+    EXPECT_TRUE(json.contains("parameter_aliases"));
 }
 
-TEST(InfoHandler, FindFilesReturnsHelpText) {
-    nlohmann::json params;
-    params["tool"] = "find_files";
-    auto result = handle_info(params);
-    EXPECT_FALSE(result.is_error);
-    auto json = nlohmann::json::parse(result.text);
-    EXPECT_EQ(json["name"], "find_files");
+TEST_F(InfoRegistryFixture, FindFilesDerivesHelpAndFilesAliasResolves) {
+    for (const char* name : {"find_files", "files"}) {
+        auto result = info_for(name);
+        EXPECT_FALSE(result.is_error);
+        auto json = nlohmann::json::parse(result.text);
+        EXPECT_EQ(json["name"], "find_files") << name;
+        EXPECT_TRUE(json["parameters"].contains("include_hidden")) << name;
+    }
 }
 
-TEST(InfoHandler, CaseInsensitiveTool) {
-    nlohmann::json params;
-    params["tool"] = "SEARCH";
-    auto result = handle_info(params);
+TEST_F(InfoRegistryFixture, CaseInsensitiveTool) {
+    auto result = info_for("SEARCH");
     EXPECT_FALSE(result.is_error);
     auto json = nlohmann::json::parse(result.text);
     EXPECT_EQ(json["name"], "search");
@@ -179,11 +214,12 @@ TEST(InfoHandler, RegisteredToolDerivesHelpFromDefinition) {
     EXPECT_TRUE(p.contains("max_results"));
 }
 
-// Hand-written branches stay authoritative even when a lookup is supplied.
-TEST(InfoHandler, HandWrittenBranchWinsOverDerived) {
+// The registry is the sole source: whatever definition the lookup serves is
+// what info reports (no hand-written branch can shadow it and drift).
+TEST(InfoHandler, RegistryDefinitionIsAuthoritative) {
     mcp::ToolDefinition def;
     def.name = "search";
-    def.description = "registry text that must not surface";
+    def.description = "registry text that must surface";
     nlohmann::json params;
     params["tool"] = "search";
     auto result = handle_info(
@@ -191,8 +227,7 @@ TEST(InfoHandler, HandWrittenBranchWinsOverDerived) {
             return name == def.name ? &def : nullptr;
         });
     auto json = nlohmann::json::parse(result.text);
-    EXPECT_TRUE(json.contains("example"));
-    EXPECT_NE(json["description"], def.description);
+    EXPECT_EQ(json["description"], def.description);
 }
 
 TEST(InfoHandler, UnknownToolReturnsOverview) {
