@@ -992,8 +992,31 @@ std::string_view go_signature_receiver(std::string_view sig) {
 /// Class/Struct scope (chains are ordered outermost-first, so scan from
 /// the back). Top-level symbols stay "" -- absence keeps its meaning.
 std::string derive_receiver_type(const EnhancedSymbol& es) {
+    // Receiver semantics are METHOD-ONLY: the receiver filter answers "which
+    // methods hang off type T". The type symbol itself, its fields, nested
+    // types etc. carry no receiver — deriving one for them made
+    // `symbols --receiver T` list the class and every field instead of its
+    // methods (filter contract: server_endpoints_symbols.cpp /
+    // handlers_explore.cpp receiver filters).
+    const SymbolType st = es.symbol.type;
+    if (st != SymbolType::Function && st != SymbolType::Method) return {};
     if (auto recv = go_signature_receiver(es.signature); !recv.empty()) {
         return std::string(recv);
+    }
+    // Out-of-class C++ definition: `Class::method` / `Outer::Inner::method`
+    // carries its receiver in the qualified NAME (the scope chain holds no
+    // Class scope for a definition at namespace/file scope). The
+    // penultimate qualifier is the receiver type. Heuristic limit: a
+    // namespace-qualified free function (`ns::fn` written qualified at
+    // definition) is indistinguishable here and reads its qualifier as a
+    // receiver.
+    const std::string& nm = es.symbol.name;
+    if (auto pos = nm.rfind("::"); pos != std::string::npos && pos > 0) {
+        std::string_view qual(nm.data(), pos);
+        if (auto prev = qual.rfind("::"); prev != std::string_view::npos) {
+            qual = qual.substr(prev + 2);
+        }
+        if (!qual.empty()) return std::string(bare_type_name(qual));
     }
     const auto& chain = es.scope_chain;
     for (size_t i = chain.size(); i > 0; --i) {

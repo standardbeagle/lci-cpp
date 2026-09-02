@@ -906,6 +906,51 @@ TEST(MasterIndexTest, GetProgressPercentCompleteAlwaysWithinBounds) {
     poller.join();
 }
 
+// Pins the receiver_type fixes: (a) out-of-class C++ definitions
+// (`Widget::size` at file scope) derive their receiver from the qualified
+// name; (b) receiver semantics are method-only — the type symbol itself and
+// its fields carry NO receiver_type, so `symbols --receiver Widget` lists
+// methods, not the class and every field.
+TEST(MasterIndexTest, ReceiverTypeMethodOnlyIncludesOutOfClassDefs) {
+    TempDir dir;
+    dir.write_file("w.h",
+                   "class Widget {\n"
+                   " public:\n"
+                   "  int size() const;\n"
+                   "  int count_;\n"
+                   "};\n");
+    dir.write_file("w.cpp",
+                   "#include \"w.h\"\n"
+                   "int Widget::size() const { return count_; }\n");
+
+    Config cfg;
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    auto snap = mi.ref_tracker().pin();
+
+    // Out-of-class definition carries the receiver from its qualified name.
+    auto defs = snap->find_symbols_by_name("Widget::size");
+    ASSERT_FALSE(defs.empty());
+    bool def_has_receiver = false;
+    for (const auto& h : defs) {
+        if (h->receiver_type == "Widget") def_has_receiver = true;
+    }
+    EXPECT_TRUE(def_has_receiver)
+        << "out-of-class Widget::size did not derive receiver_type=Widget";
+
+    // The class symbol itself and its field carry no receiver.
+    for (const auto& h : snap->find_symbols_by_name("Widget")) {
+        EXPECT_TRUE(h->receiver_type.empty())
+            << "type symbol must not carry a receiver_type";
+    }
+    for (const auto& h : snap->find_symbols_by_name("count_")) {
+        EXPECT_TRUE(h->receiver_type.empty())
+            << "field must not carry a receiver_type";
+    }
+}
+
 // Pins the update_file full-re-parse fix: updating a file used to rebuild
 // only trigram+postings, permanently dropping its symbols/references (the
 // old ones were removed and nothing re-extracted). After update_file the
