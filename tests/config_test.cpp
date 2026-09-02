@@ -415,6 +415,56 @@ exclude "**/real_projects/**"
     EXPECT_EQ(result.config.exclude[0], "**/real_projects/**");
 }
 
+TEST_F(KdlConfigTest, ParsesIncludeInlineForm) {
+    write_kdl(R"(
+include "*.rs" "*.zig"
+)");
+    auto result = load_config(temp_dir_.string());
+    ASSERT_TRUE(result.ok()) << result.error;
+    EXPECT_EQ(result.config.include,
+              (std::vector<std::string>{"*.rs", "*.zig"}));
+}
+
+// The block form used to lex the quoted patterns as "unexpected tokens"
+// and parse to ZERO patterns — the server then fail-opened onto the
+// defaults and indexed everything.
+TEST_F(KdlConfigTest, ParsesIncludeBlockForm) {
+    write_kdl(R"(
+include {
+    "*.rs"
+    "*.zig"
+}
+)");
+    auto result = load_config(temp_dir_.string());
+    ASSERT_TRUE(result.ok()) << result.error;
+    EXPECT_EQ(result.config.include,
+              (std::vector<std::string>{"*.rs", "*.zig"}));
+}
+
+TEST_F(KdlConfigTest, ParsesIncludeMixedInlineAndBlockForm) {
+    write_kdl(R"(
+include "*.rs" {
+    "*.zig"
+}
+)");
+    auto result = load_config(temp_dir_.string());
+    ASSERT_TRUE(result.ok()) << result.error;
+    EXPECT_EQ(result.config.include,
+              (std::vector<std::string>{"*.rs", "*.zig"}));
+}
+
+// A present-but-empty include section is a config error, not a silent
+// fall-open onto the default corpus (karpathy #6: fail fast).
+TEST_F(KdlConfigTest, RejectsEmptyIncludeSection) {
+    write_kdl(R"(
+include {
+}
+)");
+    auto result = load_config(temp_dir_.string());
+    ASSERT_FALSE(result.ok());
+    EXPECT_NE(result.error.find("include"), std::string::npos);
+}
+
 TEST_F(KdlConfigTest, ParsesIndexSection) {
     write_kdl(R"(
 index {

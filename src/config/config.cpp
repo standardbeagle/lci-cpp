@@ -111,17 +111,18 @@ void warn_unknown(std::vector<std::string>* warnings, std::string_view scope,
 
 std::vector<std::string> collect_strings(const KdlNode& n) {
     std::vector<std::string> result;
+    // Inline args and block children are both pattern carriers; a mixed
+    // `include "*.a" { "*.b" }` keeps every pattern, so collect both
+    // unconditionally instead of treating children as a fallback.
     for (const auto& a : n.args) {
         if (a.kind == TokenKind::String) result.push_back(a.text);
     }
-    if (result.empty()) {
-        for (const auto& child : n.children) {
-            std::string s;
-            if (get_string(child, s)) {
-                result.push_back(std::move(s));
-            } else if (!child.name.empty()) {
-                result.push_back(child.name);
-            }
+    for (const auto& child : n.children) {
+        std::string s;
+        if (get_string(child, s)) {
+            result.push_back(std::move(s));
+        } else if (!child.name.empty()) {
+            result.push_back(child.name);
         }
     }
     return result;
@@ -549,7 +550,20 @@ bool apply_kdl_nodes(Config& cfg, const std::vector<KdlNode>& nodes,
         else if (node.name == "search") {
             if (!apply_search(cfg, node, error, warnings)) return false;
         }
-        else if (node.name == "include") cfg.include = collect_strings(node);
+        else if (node.name == "include") {
+            cfg.include = collect_strings(node);
+            // An include section that yields zero patterns is a config
+            // defect, not a shrug: the author intended to restrict the
+            // corpus, and silently indexing the defaults instead is
+            // fail-open (karpathy #6). Omit the section entirely to index
+            // all supported file types.
+            if (cfg.include.empty()) {
+                error = "include: section present but no patterns given — "
+                        "remove the section to index default file types, or "
+                        "add patterns like include { \"*.rs\" }";
+                return false;
+            }
+        }
         else if (node.name == "exclude") cfg.exclude = collect_strings(node);
         else if (node.name == "propagation_config_dir") {
             if (!set_string(node, "propagation_config_dir",

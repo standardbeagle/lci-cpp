@@ -90,11 +90,13 @@ exclude {
     // "**/*.generated.ts"
 }
 
-// Add additional file types to index
-include {
-    // "*.rs"                      // Rust files
-    // "*.zig"                     // Zig files
-}
+// Add additional file types to index. An include section must carry at
+// least one pattern (a present-but-empty section is a config error), so
+// the whole block stays commented until you need it:
+// include {
+//     "*.rs"                      // Rust files
+//     "*.zig"                     // Zig files
+// }
 )";
         } else {
             content = R"(// Lightning Code Index Configuration
@@ -305,10 +307,11 @@ int run_config_validate(const GlobalFlags& flags) {
         warnings.push_back(
             "MaxFileCount is very low (<100), may limit indexing capability");
     }
-    if (cfg.include.empty()) {
-        warnings.push_back(
-            "No include patterns specified, no files will be indexed");
-    }
+    // No warning for an empty cfg.include: with no include section the
+    // scanner indexes every supported file type (the defaults), and a
+    // present-but-empty include section never reaches here — config
+    // loading rejects it as an error. The old "no files will be indexed"
+    // warning described behavior the server never had.
 
     std::printf("Configuration file is valid\n");
     std::printf("Config source: %s\n", flags.config_path.c_str());
