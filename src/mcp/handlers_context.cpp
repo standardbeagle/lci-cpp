@@ -249,15 +249,36 @@ nlohmann::json hydrated_context_to_json(const HydratedContext& ctx) {
 
 namespace {
 
-/// Resolves a manifest path relative to the project root.
+/// Resolves a manifest path against the project root and confines it there.
+/// Returns the resolved absolute path, or empty when the input (absolute
+/// path, `..` traversal, symlink) lands outside the project root — callers
+/// answer with an error, never touch the filesystem outside the root.
 std::string resolve_manifest_path(const std::string& relative_path,
                                    const std::string& project_root) {
+    namespace fs = std::filesystem;
     if (relative_path.empty()) return {};
-    if (!relative_path.empty() && relative_path[0] == '/') {
-        return relative_path;
+
+    std::error_code ec;
+    auto root = fs::weakly_canonical(
+        project_root.empty() ? fs::path(".") : fs::path(project_root), ec);
+    if (ec || root.empty()) return {};
+
+    fs::path candidate(relative_path);
+    if (!candidate.is_absolute()) candidate = root / candidate;
+    // weakly_canonical resolves `..`, `.`, and existing symlinks without
+    // requiring the file to exist yet (save creates it).
+    auto resolved = fs::weakly_canonical(candidate, ec);
+    if (ec) return {};
+
+    // Containment: resolved must equal root or live beneath it.
+    auto root_str = root.generic_string();
+    auto resolved_str = resolved.generic_string();
+    if (resolved_str.size() <= root_str.size() ||
+        resolved_str.compare(0, root_str.size(), root_str) != 0 ||
+        resolved_str[root_str.size()] != '/') {
+        return {};
     }
-    auto root = project_root.empty() ? "." : project_root;
-    return root + "/" + relative_path;
+    return resolved.string();
 }
 
 /// Saves a manifest to a file atomically.
@@ -418,6 +439,11 @@ ToolResult handle_context_save(const nlohmann::json& params,
     bool append = params.value("append", false);
     if (append && !to_file.empty()) {
         auto full_path = resolve_manifest_path(to_file, project_root);
+        if (full_path.empty()) {
+            return make_error_response(
+                "context",
+                "'to_file' must resolve inside the project root: " + to_file);
+        }
         ContextManifest existing;
         auto load_err = load_manifest_from_file(full_path, existing);
         if (load_err.empty()) {
@@ -437,6 +463,11 @@ ToolResult handle_context_save(const nlohmann::json& params,
 
     if (!to_file.empty()) {
         auto full_path = resolve_manifest_path(to_file, project_root);
+        if (full_path.empty()) {
+            return make_error_response(
+                "context",
+                "'to_file' must resolve inside the project root: " + to_file);
+        }
         auto save_err = save_manifest_to_file(manifest, full_path);
         if (!save_err.empty()) {
             return make_error_response("context",
@@ -490,6 +521,12 @@ ToolResult handle_context_load(const nlohmann::json& params,
     ContextManifest manifest;
     if (!from_file.empty()) {
         auto full_path = resolve_manifest_path(from_file, project_root);
+        if (full_path.empty()) {
+            return make_error_response(
+                "context",
+                "'from_file' must resolve inside the project root: " +
+                    from_file);
+        }
         auto err = load_manifest_from_file(full_path, manifest);
         if (!err.empty()) {
             return make_error_response(

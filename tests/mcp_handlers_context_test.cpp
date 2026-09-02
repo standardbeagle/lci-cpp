@@ -356,6 +356,48 @@ TEST_F(ContextHandlerFixture, SaveToleratesInvalidUtf8InRefNote) {
         std::filesystem::exists(temp_dir_ / "utf8_manifest.json"));
 }
 
+// resolve_manifest_path must confine manifests to the project root: `..`
+// traversal and out-of-root absolute paths are errors, never filesystem
+// writes/reads outside the root.
+TEST_F(ContextHandlerFixture, SaveRejectsPathEscapingProjectRoot) {
+    for (const std::string& escape :
+         {std::string("../escape.json"),
+          std::string("sub/../../escape.json"),
+          std::string("/tmp/lci_context_escape.json")}) {
+        nlohmann::json params = {
+            {"operation", "save"},
+            {"to_file", escape},
+            {"refs", {{{"f", "main.go"}, {"s", "main"}}}}};
+        auto result =
+            handle_context(params, *indexer_, temp_dir_.string());
+        EXPECT_TRUE(result.is_error) << escape << ": " << result.text;
+    }
+    EXPECT_FALSE(std::filesystem::exists(temp_dir_.parent_path() /
+                                         "escape.json"));
+}
+
+TEST_F(ContextHandlerFixture, LoadRejectsPathEscapingProjectRoot) {
+    nlohmann::json params = {{"operation", "load"},
+                             {"from_file", "../outside_manifest.json"}};
+    auto result = handle_context(params, *indexer_, temp_dir_.string());
+    EXPECT_TRUE(result.is_error);
+    auto j = nlohmann::json::parse(result.text);
+    EXPECT_TRUE(j.contains("error"));
+}
+
+// An absolute path INSIDE the root stays accepted (pre-confinement behavior
+// that legitimate callers rely on).
+TEST_F(ContextHandlerFixture, SaveAcceptsAbsolutePathInsideRoot) {
+    auto abs = (temp_dir_ / "abs_manifest.json").string();
+    nlohmann::json params = {
+        {"operation", "save"},
+        {"to_file", abs},
+        {"refs", {{{"f", "main.go"}, {"s", "main"}}}}};
+    auto result = handle_context(params, *indexer_, temp_dir_.string());
+    EXPECT_FALSE(result.is_error) << result.text;
+    EXPECT_TRUE(std::filesystem::exists(abs));
+}
+
 TEST_F(ContextHandlerFixture, LoadFromStringWorks) {
     nlohmann::json manifest = {
         {"task", "string load"},
