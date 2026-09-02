@@ -420,7 +420,8 @@ PartitionedReferences partition_references(
 }
 
 int run_refs(const GlobalFlags& flags, const std::string& symbol,
-             bool json_output, bool show_all, bool count_only, bool terse) {
+             bool json_output, bool show_all, bool count_only, bool terse,
+             int max_results) {
     if (json_output) {
         std::cout
             << "Incorrect Usage: flag provided but not defined: -json\n\n"
@@ -449,11 +450,16 @@ int run_refs(const GlobalFlags& flags, const std::string& symbol,
     }
 
     std::string refs_err;
-    auto results = client->get_references(symbol, 100, refs_err);
+    auto results = client->get_references(symbol, max_results, refs_err);
     if (!results) {
         std::cerr << "Error: references search failed: " << refs_err << "\n";
         return 1;
     }
+    // A page exactly at the cap almost certainly means the server truncated;
+    // say so everywhere (counts included) so a capped page is never mistaken
+    // for a total (certified-absence discipline).
+    const bool truncated =
+        results->size() >= static_cast<size_t>(max_results);
 
     // Partition so real code references (imports/calls/decorators/attribute
     // accesses/plain identifiers) print FIRST and lexical-only matches (inside
@@ -465,7 +471,12 @@ int run_refs(const GlobalFlags& flags, const std::string& symbol,
     if (count_only) {
         size_t n = parts.code.size();
         if (show_all) n += parts.lexical.size();
-        std::printf("%zu\n", n);
+        if (truncated) {
+            std::printf("%zu+ (capped at %d, raise with --max)\n", n,
+                        max_results);
+        } else {
+            std::printf("%zu\n", n);
+        }
         return 0;
     }
 
@@ -498,6 +509,12 @@ int run_refs(const GlobalFlags& flags, const std::string& symbol,
                         "(use --all to show)\n",
                         parts.lexical.size(), plural);
         }
+    }
+
+    if (truncated) {
+        std::printf("-- results capped at %d; more may exist "
+                    "(raise with --max) --\n",
+                    max_results);
     }
 
     return 0;

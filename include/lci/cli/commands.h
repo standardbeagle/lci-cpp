@@ -164,9 +164,11 @@ int run_def(const GlobalFlags& flags, const std::string& symbol);
 /// `count_only` prints a single integer (code refs; with `show_all` code +
 /// lexical) — agents were piping refs output through `grep -c` for this.
 /// `terse` emits one `path:line` per reference with no context text.
+/// `max_results` caps how many references the server returns; when the cap
+/// is hit the output says so — a full page must never read as a total.
 int run_refs(const GlobalFlags& flags, const std::string& symbol,
              bool json_output, bool show_all, bool count_only = false,
-             bool terse = false);
+             bool terse = false, int max_results = 100);
 
 // -- refs ranking -------------------------------------------------------------
 

@@ -527,10 +527,15 @@ int main(int argc, char* argv[]) {
     bool refs_terse = false;
     refs_cmd->add_flag("--terse", refs_terse,
                        "One line per reference: path:line");
+    int refs_max = 100;
+    refs_cmd->add_option("-m,--max", refs_max,
+                         "Maximum references to return (default 100; "
+                         "output marks when the cap is hit)")
+        ->check(CLI::PositiveNumber);
 
     refs_cmd->callback([&]() {
         std::exit(run_refs(gflags, refs_symbol, refs_json, refs_all,
-                           refs_count, refs_terse));
+                           refs_count, refs_terse, refs_max));
     });
 
     // -- Tree subcommand ------------------------------------------------------
