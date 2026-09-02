@@ -2,6 +2,8 @@
 
 #include <lci/language_map.h>
 
+#include <absl/container/flat_hash_set.h>
+
 #include <malloc.h>
 
 #include <chrono>
@@ -112,12 +114,18 @@ bool MasterIndex::index_directory(const std::string& root) {
 
     auto start = std::chrono::steady_clock::now();
 
-    // Clear existing data for a full reindex.
+    // Clear existing data for a full reindex. The file content store is
+    // deliberately NOT cleared here: queries against the still-published
+    // old snapshot resolve FileIDs through it for the whole pipeline run,
+    // and FileIDs are path-stable (add_file reuses the existing id for a
+    // known path), so surviving files keep their ids and their content
+    // stays readable throughout the window. Prior-generation-only entries
+    // (deleted files, load failures) are pruned after the new snapshot is
+    // published — see retain_only below.
     trigram_index_.clear();
     ref_tracker_.clear();
     postings_index_.clear();
     symbol_location_index_.clear();
-    file_content_store_->clear();
     processed_files_.store(0, std::memory_order_release);
     total_files_.store(0, std::memory_order_release);
 
@@ -203,15 +211,28 @@ bool MasterIndex::index_directory(const std::string& root) {
     // INVARIANT: a bulk reindex must never run concurrently with the
     // incremental writers (index_file/update_file/remove_file). Those take
     // snapshot_mu_, but this bulk publish holds only bulk_mu_, and the bulk
-    // window above clear()s every sub-index and resets next_id_ to 0 — so a
-    // concurrent incremental write would draw file IDs from the reset counter
-    // and be silently clobbered here, diverging IDs across indexes. The server
+    // window above clear()s every sub-index — so a concurrent incremental
+    // write's per-index entries would be silently clobbered here, diverging
+    // state across indexes. The server
     // enforces this by wiring: reindex is serialized by is_indexing_/bulk_mu_
     // and no watch/incremental path is active alongside it. If watch-mode is
     // ever wired to write concurrently, this whole bulk clear→publish span must
     // become mutually exclusive with the snapshot_mu_ writers (not just this
     // store); a lock here alone would leave the sub-index/ID divergence unfixed.
     publish_snapshot(std::move(new_snapshot));
+
+    // New generation is live: drop content entries that did not survive it
+    // (deleted files, load/binary failures, and — on the very first build —
+    // nothing). Doing this AFTER publish keeps the whole run window free of
+    // FileID aliasing: a stale id either resolves to its own (possibly
+    // refreshed) file's content or to nothing, never to a different file.
+    {
+        absl::flat_hash_set<FileID> keep;
+        keep.reserve(integrated_files.size());
+        for (const auto& [path_unused, fid] : integrated_files) keep.insert(fid);
+        file_content_store_->retain_only(keep);
+    }
+
     processed_files_.store(static_cast<int64_t>(integrated),
                            std::memory_order_release);
     total_files_.store(static_cast<int64_t>(progress.total_files),

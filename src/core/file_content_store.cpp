@@ -750,11 +750,40 @@ void FileContentStore::invalidate_file_by_id(FileID file_id) {
     snapshot_.store(std::move(snap), std::memory_order_release);
 }
 
+void FileContentStore::retain_only(const absl::flat_hash_set<FileID>& keep) {
+    std::lock_guard<std::mutex> write_lock(write_mu_);
+
+    auto snap = std::make_shared<FileContentSnapshot>(*load_snapshot());
+    int64_t freed = 0;
+    auto new_end = std::remove_if(
+        snap->entries.begin(), snap->entries.end(),
+        [&](const std::shared_ptr<const FileContentSnapshot::Entry>& ep) {
+            if (keep.contains(ep->file_id)) return false;
+            freed += estimate_memory(*ep->content);
+            return true;
+        });
+    if (new_end == snap->entries.end()) return;
+    snap->entries.erase(new_end, snap->entries.end());
+
+    snap->access_order.erase(
+        std::remove_if(snap->access_order.begin(), snap->access_order.end(),
+                       [&](FileID id) { return !keep.contains(id); }),
+        snap->access_order.end());
+
+    snap->rebuild_indices();
+    current_memory_.fetch_sub(freed, std::memory_order_relaxed);
+    snapshot_.store(std::move(snap), std::memory_order_release);
+}
+
 void FileContentStore::clear() {
     std::lock_guard<std::mutex> write_lock(write_mu_);
     snapshot_.store(std::make_shared<FileContentSnapshot>(), std::memory_order_release);
     current_memory_.store(0, std::memory_order_relaxed);
-    next_id_.store(0, std::memory_order_relaxed);
+    // next_id_ is deliberately NOT reset: FileIDs are monotonic for the
+    // store's lifetime. A live /reindex clears and repopulates while old
+    // read snapshots (searchable_ids) are still being served — resetting
+    // the counter let a stale FileID alias a DIFFERENT file's content in
+    // the window between clear and the new generation's publish.
 }
 
 }  // namespace lci

@@ -11,6 +11,7 @@
 #include <vector>
 
 #include <absl/container/flat_hash_map.h>
+#include <absl/container/flat_hash_set.h>
 
 #include <lci/core/atomic_shared_ptr.h>
 #include <lci/string_ref.h>
@@ -230,7 +231,15 @@ class FileContentStore {
     /// Removes a file from the store by ID.
     void invalidate_file_by_id(FileID file_id);
 
-    /// Removes all files from the store.
+    /// Removes every file whose FileID is NOT in `keep`. Used by the bulk
+    /// reindex publish step to drop prior-generation entries atomically
+    /// once the new generation's snapshot is live.
+    void retain_only(const absl::flat_hash_set<FileID>& keep);
+
+    /// Removes all files from the store. FileID assignment is NOT reset:
+    /// ids are monotonic for the lifetime of the store, so a stale FileID
+    /// held across a clear/reindex can never alias a different file's
+    /// content (it resolves to nothing until reassigned to the same path).
     void clear();
 
   private:

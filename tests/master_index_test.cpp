@@ -906,5 +906,49 @@ TEST(MasterIndexTest, GetProgressPercentCompleteAlwaysWithinBounds) {
     poller.join();
 }
 
+// Pins the live-/reindex FileID aliasing fix: FileIDs are monotonic across
+// generations and path-stable, so a stale FileID held from the previous
+// generation either resolves to its OWN file's content or to nothing —
+// never to a different file. Before the fix, index_directory cleared the
+// content store (resetting the id counter), so during and after a reindex
+// the old snapshot's ids pointed at whichever file re-drew the same number.
+TEST(MasterIndexTest, ReindexKeepsFileIdsMonotonicAndUnaliased) {
+    TempDir dir;
+    dir.write_file("a.go", "package main\nfunc Alpha() {}\n");
+    dir.write_file("b.go", "package main\nfunc Beta() {}\n");
+
+    Config cfg;
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    const std::string a_path = (dir.path() / "a.go").string();
+    const std::string b_path = (dir.path() / "b.go").string();
+    FileID a_id = mi.path_to_id(a_path);
+    FileID b_id = mi.path_to_id(b_path);
+    ASSERT_NE(a_id, FileID{0});
+    ASSERT_NE(b_id, FileID{0});
+
+    // Delete a.go, add c.go, reindex the same directory in-process.
+    std::filesystem::remove(dir.path() / "a.go");
+    dir.write_file("c.go", "package main\nfunc Gamma() {}\n");
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    // Survivor keeps its id and its own content.
+    EXPECT_EQ(b_id, mi.path_to_id(b_path));
+    auto b_content = mi.file_content_store().get_content(b_id);
+    EXPECT_NE(b_content.find("Beta"), std::string_view::npos);
+
+    // The stale id resolves to NOTHING — never to another file's bytes.
+    EXPECT_TRUE(mi.file_content_store().get_content(a_id).empty());
+    EXPECT_TRUE(mi.id_to_path(a_id).empty());
+
+    // A new file draws a fresh id; deleted ids are never recycled.
+    FileID c_id = mi.path_to_id((dir.path() / "c.go").string());
+    ASSERT_NE(c_id, FileID{0});
+    EXPECT_NE(c_id, a_id);
+    EXPECT_GT(c_id, b_id);
+}
+
 }  // namespace
 }  // namespace lci

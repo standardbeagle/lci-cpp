@@ -531,5 +531,35 @@ TEST(FileContentStoreTest, ReindexThenEvictKeepsMemoryAccountingConsistent) {
     EXPECT_GE(store.get_file_count(), 1);
 }
 
+// ---------------------------------------------------------------------------
+// Cross-generation FileID + LRU accounting fixes
+// ---------------------------------------------------------------------------
+
+// FileIDs are monotonic for the store's lifetime: clear() must not reset the
+// counter, or a stale id held across a live reindex aliases a different file.
+TEST(FileContentStoreTest, FileIdsMonotonicAcrossClear) {
+    FileContentStore store;
+    FileID a = store.add_file("a.go", "aaa");
+    store.clear();
+    FileID b = store.add_file("b.go", "bbb");
+    EXPECT_NE(a, b) << "clear() recycled a FileID onto a different file";
+    EXPECT_GT(b, a);
+    EXPECT_TRUE(store.get_content(a).empty());
+}
+
+TEST(FileContentStoreTest, RetainOnlyDropsOtherEntries) {
+    FileContentStore store;
+    FileID a = store.add_file("a.go", "aaa");
+    FileID b = store.add_file("b.go", "bbb");
+
+    absl::flat_hash_set<FileID> keep{b};
+    store.retain_only(keep);
+
+    EXPECT_EQ(store.get_file_count(), 1);
+    EXPECT_TRUE(store.get_content(a).empty());
+    EXPECT_EQ(store.get_content(b), "bbb");
+    EXPECT_EQ(store.path_to_id("a.go"), FileID{0});
+}
+
 }  // namespace
 }  // namespace lci
