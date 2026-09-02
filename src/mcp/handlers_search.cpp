@@ -421,11 +421,27 @@ ToolResult handle_search(const nlohmann::json& params,
     }
 
     // languages[] → include_pattern (regex matching file extensions).
+    // An unknown name ("golang") used to expand to nothing, which silently
+    // DROPPED the filter and searched every language — fail fast instead
+    // (karpathy rule 6).
     if (params.contains("languages") && params["languages"].is_array()) {
         std::vector<std::string> langs;
         langs.reserve(params["languages"].size());
+        const auto& table = language_ext_table();
         for (const auto& v : params["languages"]) {
-            if (v.is_string()) langs.push_back(v.get<std::string>());
+            if (!v.is_string()) continue;
+            auto lang = v.get<std::string>();
+            if (table.find(to_lower(lang)) == table.end()) {
+                std::string known;
+                for (const auto& [name, exts] : table) {
+                    if (!known.empty()) known += ", ";
+                    known += name;
+                }
+                return make_error_response(
+                    "search", "unknown language '" + lang +
+                                  "'; known languages: " + known);
+            }
+            langs.push_back(std::move(lang));
         }
         options.include_pattern =
             language_array_to_file_extensions(langs);

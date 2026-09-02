@@ -3308,6 +3308,19 @@ TEST_F(HandlersFixture, FindFilesMultiWordRespectsFilter) {
     EXPECT_EQ(json["total_matches"].get<int>(), 0) << result.text;
 }
 
+// search languages[]: an unknown name is an error listing known languages,
+// not a silently dropped filter.
+TEST_F(HandlersFixture, SearchUnknownLanguageErrors) {
+    nlohmann::json params;
+    params["pattern"] = "handle";
+    params["languages"] = {"golang"};
+    auto result = handle_search(params, *indexer_, search_engine_.get());
+    EXPECT_TRUE(result.is_error);
+    EXPECT_NE(result.text.find("unknown language"), std::string::npos)
+        << result.text;
+    EXPECT_NE(result.text.find("golang"), std::string::npos) << result.text;
+}
+
 }  // namespace
 }  // namespace mcp
 }  // namespace lci
