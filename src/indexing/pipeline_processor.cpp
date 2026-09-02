@@ -9,6 +9,7 @@
 #include <lci/language_map.h>
 #include <lci/parser/parser.h>
 #include <lci/parser/parser_pool.h>
+#include <lci/parser/svelte_script.h>
 #include <lci/parser/unified_extractor.h>
 
 #include <tree_sitter/api.h>
@@ -44,6 +45,20 @@ void run_unified_extraction(ProcessedFile& result,
     if (ext.empty()) {
         result.parse_skip_reason = ParseSkipReason::UnsupportedGrammar;
         return;
+    }
+
+    // Svelte components have no dedicated grammar: mask the markup to
+    // spaces (geometry-preserving) and parse the <script> block(s) with the
+    // JS/TS grammar. Positions in the masked buffer are positions in the
+    // original file. See lci/parser/svelte_script.h.
+    const bool is_svelte = (ext == ".svelte");
+    std::string svelte_masked;
+    if (is_svelte) {
+        auto sv = parser::mask_svelte_script(content, svelte_masked);
+        ext = sv.typescript ? ".ts" : ".js";
+        content = svelte_masked;
+        // A script-less component still parses (all-blank buffer, zero
+        // symbols) and gets its synthesized component symbol below.
     }
 
     parser::Language lang{};
@@ -127,6 +142,27 @@ void run_unified_extraction(ProcessedFile& result,
     }
 
     result.symbols = std::move(extracted.symbols);
+
+    // Every .svelte file IS a component: synthesize a file-level Class
+    // symbol named after the file stem so `search Counter` / list_symbols
+    // surface the component itself, not only its script internals.
+    if (is_svelte) {
+        Symbol comp;
+        comp.name = std::filesystem::path(path).stem().string();
+        comp.type = SymbolType::Class;
+        comp.file_id = result.file_id;
+        comp.line = 1;
+        comp.column = 1;
+        comp.end_line = 1;
+        comp.end_column = 1;
+        comp.visibility = SymbolVisibility::Public;
+        ProcessedSymbolMetadata comp_meta;
+        comp_meta.line = comp.line;
+        comp_meta.column = comp.column;
+        result.symbols.push_back(std::move(comp));
+        result.symbol_metadata.push_back(std::move(comp_meta));
+    }
+
     result.references = std::move(extracted.references);
     result.field_types = std::move(extracted.field_types);
     result.scopes = std::move(extracted.scopes);

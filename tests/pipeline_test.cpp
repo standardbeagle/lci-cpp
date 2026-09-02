@@ -1349,6 +1349,54 @@ TEST(FileProcessorTest, SuccessfulExtractionRecordsNoSkip) {
     EXPECT_FALSE(r.symbols.empty());
 }
 
+TEST(FileProcessorTest, SvelteFileParsesScriptAndSynthesizesComponent) {
+    TempDir dir;
+    dir.write_file("Counter.svelte",
+                   "<script>\n"
+                   "export let start = 0;\n"
+                   "function increment() { return start + 1; }\n"
+                   "</script>\n"
+                   "<button on:click={increment}>+1</button>\n");
+
+    Config cfg = make_default_config();
+    auto store = std::make_shared<FileContentStore>();
+    auto file_service = std::make_shared<FileService>(store);
+    TrigramIndex trigram_idx;
+
+    BoundedQueue<FileTask> task_queue(10);
+    BoundedQueue<ProcessedFile> result_queue(10);
+
+    FileTask t;
+    t.path = (dir.path() / "Counter.svelte").string();
+    t.language = "svelte";
+    t.size = 120;
+    task_queue.push(std::move(t));
+    task_queue.close();
+
+    FileProcessor processor(cfg, file_service, &trigram_idx);
+    processor.process(task_queue, result_queue, 1);
+
+    ProcessedFile r;
+    ASSERT_TRUE(result_queue.pop(r));
+    EXPECT_EQ(r.parse_skip_reason, ParseSkipReason::None);
+
+    bool saw_component = false;
+    bool saw_increment = false;
+    for (const auto& s : r.symbols) {
+        if (s.name == "Counter" && s.type == SymbolType::Class) {
+            saw_component = true;
+        }
+        if (s.name == "increment" && s.type == SymbolType::Function) {
+            saw_increment = true;
+            EXPECT_EQ(s.line, 3);  // position in the original .svelte file
+        }
+    }
+    EXPECT_TRUE(saw_component);
+    EXPECT_TRUE(saw_increment);
+    // Index-aligned metadata invariant holds for the appended component.
+    EXPECT_EQ(r.symbols.size(), r.symbol_metadata.size());
+}
+
 // ---------------------------------------------------------------------------
 // Generated-artifact awareness: manifest-derived and default excludes
 // ---------------------------------------------------------------------------
