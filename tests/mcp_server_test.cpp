@@ -244,6 +244,30 @@ TEST_F(McpStdioTest, TypeConfusedRequestGetsErrorAndServerSurvives) {
     EXPECT_TRUE(responses[2].contains("result"));
 }
 
+// dispatch_wire peels tools/call params before its try block; a non-object
+// "params" (or non-string "name") used to throw type_error out of
+// dispatch_wire entirely — the stdio loop has a backstop catch, but the HTTP
+// /mcp bridge does not, so the escaped throw surfaced as a 500. Both shapes
+// must answer -32600 in-band.
+TEST_F(McpStdioTest, DispatchWireNonObjectToolsCallParamsIsInvalidRequest) {
+    auto wire = server_->dispatch_wire(
+        R"({"jsonrpc":"2.0","id":9,"method":"tools/call","params":"x"})");
+    ASSERT_FALSE(wire.empty());
+    auto resp = nlohmann::json::parse(wire);
+    EXPECT_EQ(resp["id"], 9);
+    ASSERT_TRUE(resp.contains("error"));
+    EXPECT_EQ(resp["error"]["code"], -32600);
+
+    auto wire2 = server_->dispatch_wire(
+        R"({"jsonrpc":"2.0","id":10,"method":"tools/call",)"
+        R"("params":{"name":42}})");
+    ASSERT_FALSE(wire2.empty());
+    auto resp2 = nlohmann::json::parse(wire2);
+    EXPECT_EQ(resp2["id"], 10);
+    ASSERT_TRUE(resp2.contains("error"));
+    EXPECT_EQ(resp2["error"]["code"], -32600);
+}
+
 TEST_F(McpStdioTest, ToolsList) {
     auto responses = exchange({
         make_request("initialize", 1),

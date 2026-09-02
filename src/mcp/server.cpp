@@ -541,7 +541,31 @@ std::string McpServer::dispatch_wire(const std::string& line) {
         return tools_list_wire(id);
     }
     if (method == "tools/call") {
+        // The params peel runs outside the catch below, so a type-confused
+        // request ("params" as a string, "name" as a number, ...) must be
+        // rejected here: an escaped type_error turns into a 500 on the HTTP
+        // /mcp bridge, which has no backstop of its own (the stdio loop's
+        // catch in run() never sees this path).
+        if (auto pit = request.find("params");
+            pit != request.end() && !pit->is_object()) {
+            return dump_json_lossy(
+                {{"jsonrpc", "2.0"},
+                 {"id", id},
+                 {"error", {{"code", -32600},
+                            {"message",
+                             "invalid request: params must be an object"}}}});
+        }
         auto params = request.value("params", nlohmann::json::object());
+        if (auto nit = params.find("name");
+            nit != params.end() && !nit->is_string()) {
+            return dump_json_lossy(
+                {{"jsonrpc", "2.0"},
+                 {"id", id},
+                 {"error", {{"code", -32600},
+                            {"message",
+                             "invalid request: params.name must be a "
+                             "string"}}}});
+        }
         auto tool_name = params.value("name", "");
         auto it = std::find_if(
             registered_tools_.begin(), registered_tools_.end(),
