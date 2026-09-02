@@ -31,11 +31,11 @@ class EfswBridge final : public efsw::FileWatchListener {
 
     void handleFileAction(efsw::WatchID /*wid*/, const std::string& dir,
                           const std::string& filename, efsw::Action action,
-                          std::string /*old_filename*/) override {
+                          std::string old_filename) override {
         if (!owner_) return;
         FileEventType type{};
         if (!map_action(action, type)) return;
-        owner_->on_efsw_event(dir, filename, type);
+        owner_->on_efsw_event(dir, filename, type, old_filename);
     }
 
   private:
@@ -176,7 +176,16 @@ void FileWatcher::dispatch_event(const std::string& path, FileEventType type) {
 
 void FileWatcher::on_efsw_event(const std::string& dir,
                                 const std::string& filename,
-                                FileEventType type) {
+                                FileEventType type,
+                                const std::string& old_filename) {
+    // A rename carries TWO facts: the old path is gone and the new one
+    // exists. Dropping old_filename left the old path's index entries
+    // (content, trigrams, symbols) alive forever after every rename.
+    if (type == FileEventType::Rename && !old_filename.empty() &&
+        old_filename != filename) {
+        on_efsw_event(dir, old_filename, FileEventType::Remove);
+    }
+
     // efsw delivers `dir` with a trailing separator on POSIX; concat is safe.
     std::string full_path;
     full_path.reserve(dir.size() + filename.size() + 1);
@@ -194,11 +203,20 @@ void FileWatcher::on_efsw_event(const std::string& dir,
     bool is_dir = fs::is_directory(full_path, ec);
     if (!ec && is_dir) {
         if (should_ignore_dir(full_path)) return;
-        // Directory create/delete events are not propagated to callers — the
-        // prior implementation only fired on file events.  Preserve that
-        // contract.
+        // A directory that still EXISTS (create / modify / rename-target)
+        // stays suppressed: per-file events inside it arrive separately.
+        // But a Remove of a formerly-watched directory must propagate —
+        // the kernel does not deliver per-child events for a recursive
+        // delete, so swallowing it stranded every child in the index.
+        // Dispatch directly: should_process_path applies FILE include
+        // patterns (e.g. *.go) that a directory path would never match.
+        if (type == FileEventType::Remove) dispatch_event(full_path, type);
         return;
     }
+    // Note: for a deleted path (file OR directory) the filesystem check
+    // above cannot classify it — the path is gone. Remove events therefore
+    // always flow through; consumers treat a Remove of a path they track
+    // as a prefix (directory) or exact (file) invalidation.
 
     if (!should_process_path(full_path)) return;
 

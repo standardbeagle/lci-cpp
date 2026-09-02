@@ -349,6 +349,65 @@ TEST(FileWatcherTest, DetectsFileCreate) {
     EXPECT_TRUE(found_create);
 }
 
+// Pins the rename fix: a Rename must ALSO emit a Remove for the old path.
+// Before the fix the bridge discarded efsw's old_filename, so the renamed-
+// away path's index entries lived forever.
+TEST(FileWatcherTest, RenameEmitsRemoveForOldPath) {
+    TempDir tmp;
+    tmp.write_file("new_name.go", "package main\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = tmp.path().string();
+
+    std::vector<std::pair<std::string, FileEventType>> events;
+    FileWatcher watcher(cfg);
+    watcher.set_callback([&](const std::string& path, FileEventType type) {
+        events.emplace_back(path, type);
+    });
+
+    watcher.on_efsw_event(tmp.path().string() + "/", "new_name.go",
+                          FileEventType::Rename, "old_name.go");
+
+    ASSERT_EQ(events.size(), 2u);
+    EXPECT_EQ(events[0].second, FileEventType::Remove);
+    EXPECT_NE(events[0].first.find("old_name.go"), std::string::npos);
+    EXPECT_EQ(events[1].second, FileEventType::Rename);
+    EXPECT_NE(events[1].first.find("new_name.go"), std::string::npos);
+}
+
+// Pins the directory-delete fix: a Remove of a directory that still exists
+// as a directory (the existing-dir branch) must dispatch instead of being
+// swallowed; recursive deletes deliver no per-child events.
+TEST(FileWatcherTest, DirectoryRemoveDispatches) {
+    TempDir tmp;
+    std::filesystem::create_directories(tmp.path() / "sub");
+
+    Config cfg = make_default_config();
+    cfg.project.root = tmp.path().string();
+    cfg.include = {"**/*.go"};  // file include patterns must not filter dirs
+
+    std::vector<std::pair<std::string, FileEventType>> events;
+    FileWatcher watcher(cfg);
+    watcher.set_callback([&](const std::string& path, FileEventType type) {
+        events.emplace_back(path, type);
+    });
+
+    // Remove event for an existing directory (efsw can deliver the event
+    // while the entry is still present).
+    watcher.on_efsw_event(tmp.path().string() + "/", "sub",
+                          FileEventType::Remove);
+    ASSERT_EQ(events.size(), 1u);
+    EXPECT_EQ(events[0].second, FileEventType::Remove);
+    EXPECT_NE(events[0].first.find("sub"), std::string::npos);
+
+    // Create of an existing directory stays suppressed (per-file events
+    // inside it arrive separately).
+    events.clear();
+    watcher.on_efsw_event(tmp.path().string() + "/", "sub",
+                          FileEventType::Create);
+    EXPECT_TRUE(events.empty());
+}
+
 TEST(FileWatcherTest, DetectsFileModify) {
     TempDir tmp;
     tmp.write_file("existing.go", "package main\n");

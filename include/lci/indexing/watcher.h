@@ -65,8 +65,12 @@ class FileWatcher {
 
     // -- Internal: invoked by the efsw listener adapter.  Public so the
     // -- adapter (defined in the .cpp) can dispatch without friend coupling.
+    /// `old_filename` is non-empty only for Rename events: efsw's previous
+    /// name for the entry. The watcher then emits a Remove for the old path
+    /// before the Rename for the new one.
     void on_efsw_event(const std::string& dir, const std::string& filename,
-                       FileEventType type);
+                       FileEventType type,
+                       const std::string& old_filename = std::string());
 
   private:
     bool should_ignore_dir(const std::string& path) const;
