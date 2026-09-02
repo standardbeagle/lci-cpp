@@ -69,6 +69,10 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
     # /wd4100 = unused parameter, /wd4505 = unused static function (match the
     # -Wno-unused-{parameter,function} rationale on GCC/Clang).
     set(LCI_WARNING_FLAGS /W4 /permissive- /wd4100 /wd4505)
+    # windows.h defines min/max macros that break std::numeric_limits<T>::max()
+    # and friends with C2589 wherever a TU transitively includes it (httplib,
+    # efsw). Kill them globally instead of parenthesizing call sites one by one.
+    add_compile_definitions(NOMINMAX)
 endif()
 
 option(LCI_WARNINGS_AS_ERRORS "Treat warnings as errors (for CI)" OFF)

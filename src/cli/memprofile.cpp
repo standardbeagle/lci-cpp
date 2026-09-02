@@ -21,7 +21,9 @@
 #include <cinttypes>
 #include <cstdint>
 #include <cstdio>
-#include <malloc.h>
+#if defined(__linux__)
+#include <malloc.h>  // defines __GLIBC__ for the guards below
+#endif
 #include <string>
 #include <unordered_set>
 #include <vector>

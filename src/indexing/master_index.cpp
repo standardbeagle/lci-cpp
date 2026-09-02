@@ -4,7 +4,9 @@
 
 #include <absl/container/flat_hash_set.h>
 
-#include <malloc.h>
+#if defined(__linux__)
+#include <malloc.h>  // defines __GLIBC__ for the malloc_trim guard below
+#endif
 
 #include <chrono>
 #include <filesystem>
