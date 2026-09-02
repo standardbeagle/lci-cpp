@@ -135,6 +135,37 @@ TEST(MasterIndexSearchTest, GetAllFileIdsEmpty) {
 
 // -- Integration tests: index files and search --------------------------------
 
+// Pins the evicted-but-searchable fix: LRU eviction (simulated here by
+// invalidating the content-store entry while the file stays in every other
+// index) must not turn matches into silent false negatives — the scan
+// reloads the bytes from disk into a request-local buffer.
+TEST(MasterIndexSearchIntegrationTest, SearchStillFindsEvictedFileContent) {
+    TempDir dir;
+    dir.write_file("main.go",
+                   "package main\n"
+                   "func main() { evictable_needle() }\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    auto before = mi.search("evictable_needle", 0);
+    ASSERT_GE(before.size(), 1u);
+
+    // Simulate LRU eviction: content gone, file still searchable.
+    mi.file_content_store().invalidate_file(
+        (dir.path() / "main.go").string());
+    ASSERT_TRUE(mi.file_content_store()
+                    .get_content(before[0].file_id)
+                    .empty());
+
+    auto after = mi.search("evictable_needle", 0);
+    ASSERT_GE(after.size(), 1u)
+        << "eviction silently dropped a searchable file's matches";
+    EXPECT_EQ(after[0].line, before[0].line);
+}
+
 TEST(MasterIndexSearchIntegrationTest, IndexAndSearchText) {
     TempDir dir;
     dir.write_file("main.go",

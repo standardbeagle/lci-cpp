@@ -409,8 +409,23 @@ std::vector<SearchResult> MasterIndex::execute_search(
         // shared_ptr keeps both the content view and line_offsets alive
         // lock-free — this is the lifetime role the Content ReadGuard played.
         auto fc = file_content_store_->get_file(fid);
-        if (!fc) continue;
-        std::string_view content_sv = fc->view();
+        std::string_view content_sv;
+        std::string reloaded;
+        std::vector<uint32_t> reloaded_offsets;
+        const std::vector<uint32_t>* line_offsets = nullptr;
+        if (fc) {
+            content_sv = fc->view();
+            line_offsets = &fc->line_offsets;
+        } else {
+            // LRU-evicted-but-searchable candidate: skipping it would be a
+            // silent false negative. Reload from disk into a request-local
+            // buffer (store untouched, read path lock-free).
+            reloaded = reload_evicted_content(*file_snap, fid);
+            if (reloaded.empty()) continue;
+            content_sv = reloaded;
+            reloaded_offsets = compute_line_offsets(content_sv);
+            line_offsets = &reloaded_offsets;
+        }
         if (content_sv.empty()) continue;
 
         // Single disciplined matcher, shared with SearchEngine::find_matches.
@@ -431,11 +446,10 @@ std::vector<SearchResult> MasterIndex::execute_search(
         auto matches = find_content_matches(content_sv, pattern, scan_options);
         if (matches.empty()) continue;
 
-        // Resolve line numbers via binary search over the precomputed
-        // line-start offsets instead of rescanning from offset 0 per match
-        // (the former O(matches×filesize) quadratic). Points into the pinned
-        // fc above, valid for the scan.
-        const std::vector<uint32_t>* line_offsets = &fc->line_offsets;
+        // Line numbers resolve via binary search over the precomputed
+        // line-start offsets (line_offsets, set above: pinned fc's offsets
+        // or the reloaded buffer's) instead of rescanning from offset 0 per
+        // match (the former O(matches×filesize) quadratic).
 
         // Resolve the path once per file (was once per match — every match in a
         // file shares the same path).
@@ -482,8 +496,17 @@ SearchContext MasterIndex::extract_context(FileID file_id, int match_line,
     // it until they are copied into ctx.lines. A bare get_content view could be
     // freed by a concurrent invalidate_file before that copy.
     auto fc = file_content_store_->get_file(file_id);
-    if (!fc) return ctx;
-    std::string_view content_sv = fc->view();
+    std::string_view content_sv;
+    std::string reloaded;
+    if (fc) {
+        content_sv = fc->view();
+    } else {
+        // LRU-evicted content: reload so results from evicted-but-searchable
+        // files still carry context (see the candidate scan above).
+        reloaded = reload_evicted_content(*load_snapshot(), file_id);
+        if (reloaded.empty()) return ctx;
+        content_sv = reloaded;
+    }
     if (content_sv.empty()) return ctx;
 
     // Slice the context window straight out of the precomputed line-start
@@ -496,7 +519,8 @@ SearchContext MasterIndex::extract_context(FileID file_id, int match_line,
     // offsets[0] is 0 and each subsequent entry is the byte after a '\n' that
     // is not the file's last byte, so offsets.size() equals the old
     // lines.size() and a trailing '\n' never opens a new line.
-    const std::vector<uint32_t>* offsets = &fc->line_offsets;
+    static const std::vector<uint32_t> kNoOffsets;
+    const std::vector<uint32_t>* offsets = fc ? &fc->line_offsets : &kNoOffsets;
     std::vector<uint32_t> computed;
     if (offsets->empty()) {
         // Content stored without offsets (non-store callers). Derive them

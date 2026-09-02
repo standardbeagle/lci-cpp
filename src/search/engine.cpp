@@ -813,7 +813,16 @@ void SearchEngine::process_file(
     const FileSnapshot& snap) const {
 
     auto content_sv = index_.file_content_store().get_content(file_id);
-    if (content_sv.empty()) return;
+    // LRU-evicted-but-searchable: the file is still a trigram/postings
+    // candidate but its bytes were evicted. Silently skipping it is a false
+    // negative — reload into a request-local buffer (read path stays
+    // lock-free; the store is not mutated).
+    std::string reloaded;
+    if (content_sv.empty()) {
+        reloaded = index_.reload_evicted_content(snap, file_id);
+        if (reloaded.empty()) return;
+        content_sv = reloaded;
+    }
 
     // Resolve the path once per file as a string_view into the pinned snapshot;
     // each match copies it into its own SearchResult::path. Previously this was

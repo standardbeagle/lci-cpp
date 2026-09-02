@@ -8,6 +8,7 @@
 
 #include <chrono>
 #include <filesystem>
+#include <fstream>
 
 namespace lci {
 
@@ -77,6 +78,18 @@ std::string_view MasterIndex::id_to_path(const FileSnapshot& snap,
 std::string MasterIndex::id_to_path(FileID file_id) const {
     auto snap = load_snapshot();
     return std::string(id_to_path(*snap, file_id));
+}
+
+std::string MasterIndex::reload_evicted_content(const FileSnapshot& snap,
+                                                FileID file_id) const {
+    std::string_view path = id_to_path(snap, file_id);
+    if (path.empty()) return {};
+    std::ifstream in{std::string(path), std::ios::binary};
+    if (!in) return {};
+    std::string bytes((std::istreambuf_iterator<char>(in)),
+                      std::istreambuf_iterator<char>());
+    if (!in.good() && !in.eof()) return {};
+    return bytes;
 }
 
 // -- Bulk indexing mode toggle ------------------------------------------------

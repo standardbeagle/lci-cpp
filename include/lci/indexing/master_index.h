@@ -140,6 +140,15 @@ class MasterIndex {
     /// string copy per result.
     std::string_view id_to_path(const FileSnapshot& snap, FileID file_id) const;
 
+    /// Cold-path recovery for a searchable file whose content was LRU-evicted
+    /// from the content store: the file is still in the trigram/postings
+    /// indexes and the file snapshot, so skipping it would be a silent false
+    /// negative. Reloads the bytes from disk into a request-local buffer —
+    /// the store is not touched and the read path stays lock-free. Returns
+    /// empty on any I/O failure (then the caller skips the file).
+    std::string reload_evicted_content(const FileSnapshot& snap,
+                                       FileID file_id) const;
+
     // -- Statistics ------------------------------------------------------------
 
     MasterIndexStats get_stats() const;
