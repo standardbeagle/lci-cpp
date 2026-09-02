@@ -273,7 +273,12 @@ std::string save_manifest_to_file(const ContextManifest& manifest,
     }
 
     auto data = manifest_to_json(manifest);
-    auto json_str = data.dump(2);
+    // Lossy dump: ref notes / tasks / file paths are caller- and
+    // source-derived text that may hold non-UTF-8 bytes (e.g. 0x8A latin-1);
+    // the strict default handler throws type_error.316 and fails the whole
+    // save. Same rationale as dump_json_lossy (response.cpp), with indent.
+    auto json_str = data.dump(2, ' ', /*ensure_ascii=*/false,
+                              nlohmann::json::error_handler_t::replace);
 
     auto temp_path = file_path + ".tmp";
     {
@@ -451,7 +456,11 @@ ToolResult handle_context_save(const nlohmann::json& params,
     // Return as string
     auto manifest_json = manifest_to_json(manifest);
     nlohmann::json response;
-    response["manifest"] = manifest_json.dump(2);
+    // Lossy for the same reason as save_manifest_to_file: strict dump throws
+    // type_error.316 on non-UTF-8 input bytes and fails the whole call.
+    response["manifest"] =
+        manifest_json.dump(2, ' ', /*ensure_ascii=*/false,
+                           nlohmann::json::error_handler_t::replace);
     response["stats"] = {{"ref_count", stats.ref_count},
                          {"file_count", stats.file_count},
                          {"total_lines", stats.total_lines}};

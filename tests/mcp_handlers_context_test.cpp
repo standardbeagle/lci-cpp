@@ -331,6 +331,31 @@ TEST_F(ContextHandlerFixture, SaveToFileAndLoadRoundTrip) {
     EXPECT_EQ(load_j["stats"]["refs_loaded"], 1);
 }
 
+// Manifest text is caller/source-derived and may hold non-UTF-8 bytes (0x8A
+// latin-1). The strict dump(2) used to throw type_error.316 and fail the
+// whole save; both the to_file and to_string paths must serialize lossily.
+TEST_F(ContextHandlerFixture, SaveToleratesInvalidUtf8InRefNote) {
+    std::string bad_note = "latin1 \x8A byte";
+    nlohmann::json params = {
+        {"operation", "save"},
+        {"to_string", true},
+        {"task", "utf8"},
+        {"refs", {{{"f", "main.go"}, {"s", "main"}, {"note", bad_note}}}}};
+    auto result = handle_context(params, *indexer_, temp_dir_.string());
+    EXPECT_FALSE(result.is_error) << result.text;
+
+    nlohmann::json file_params = {
+        {"operation", "save"},
+        {"to_file", "utf8_manifest.json"},
+        {"task", "utf8"},
+        {"refs", {{{"f", "main.go"}, {"s", "main"}, {"note", bad_note}}}}};
+    auto file_result =
+        handle_context(file_params, *indexer_, temp_dir_.string());
+    EXPECT_FALSE(file_result.is_error) << file_result.text;
+    EXPECT_TRUE(
+        std::filesystem::exists(temp_dir_ / "utf8_manifest.json"));
+}
+
 TEST_F(ContextHandlerFixture, LoadFromStringWorks) {
     nlohmann::json manifest = {
         {"task", "string load"},
