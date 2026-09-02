@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include <lci/core/callers_report.h>
 #include <lci/core/reference_tracker.h>
 #include <lci/idcodec.h>
 #include <lci/pagination.h>
@@ -797,6 +798,35 @@ ToolResult handle_inspect_symbol(const nlohmann::json& params,
     return make_json_response(response);
 }
 
+// -- handle_callers -----------------------------------------------------------
+
+ToolResult handle_callers(const nlohmann::json& params, MasterIndex& indexer) {
+    auto name = params.value("name", "");
+    if (name.empty()) {
+        return make_error_response("callers", "'name' parameter is required");
+    }
+    int max_callers = clamp_int(params.value("max", 50), 1, 1000);
+
+    auto rt_snap = indexer.ref_tracker().pin();
+    const std::string& root = indexer.config().project.root;
+    auto path_of = [&](FileID fid) {
+        return std::string(
+            relative_to_root(indexer.get_file_path(fid), root));
+    };
+    auto report = build_callers_report(*rt_snap, name, max_callers, path_of);
+
+    // Empty lookup fails loud: hint + fuzzy near-miss suggestions.
+    if (report["definitions"].empty() && !report.contains("dynamic_count") &&
+        !report.contains("unresolved_count")) {
+        report["hint"] = "no callable definition of '" + name +
+                         "' in the index. Check similar_symbols below, or "
+                         "use search to locate it.";
+        auto sims = similar_symbol_suggestions(*rt_snap, name);
+        if (!sims.empty()) report["similar_symbols"] = std::move(sims);
+    }
+    return make_json_response(report);
+}
+
 // -- handle_browse_file -------------------------------------------------------
 
 ToolResult handle_browse_file(const nlohmann::json& params,
@@ -1083,6 +1113,29 @@ void register_explore_handlers(McpServer& server, MasterIndex* indexer) {
         },
         // concurrent_ok proof: tracker.pin() snapshot + snapshot-based file
         // path / content store reads; only const statics.
+        /*concurrent_ok=*/true);
+
+    server.add_tool(
+        {"callers",
+         "📞 Who calls this symbol? Resolved call-graph query (not a text "
+         "scan): confirmed callers grouped by enclosing function with "
+         "call-site lines and counts. Dynamic-dispatch and unresolved call "
+         "sites are listed separately, never mixed into confirmed callers.",
+         {{"name", "string", "REQUIRED: Symbol name (exact match)", ""},
+          {"max", "integer",
+           "Max caller groups (default: 50, max: 1000); response sets "
+           "truncated=true when the cap is hit",
+           ""}},
+         {"name"}},
+        [indexer](const nlohmann::json& p) -> ToolResult {
+            if (!indexer) {
+                return make_unavailable_response(
+                    "callers", "index not available",
+                    "retry shortly; the server is still starting or indexing");
+            }
+            return handle_callers(p, *indexer);
+        },
+        // concurrent_ok proof: tracker.pin() snapshot reads only.
         /*concurrent_ok=*/true);
 }
 

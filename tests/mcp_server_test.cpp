@@ -416,10 +416,10 @@ TEST_F(McpStdioTest, ToolsList) {
     EXPECT_EQ(tools_resp["id"], 2);
 
     auto& tools = tools_resp["result"]["tools"];
-    EXPECT_EQ(tools.size(), 14u);
+    EXPECT_EQ(tools.size(), 15u);
 
     // Tools emit alphabetically by name. First tool alphabetically across the
-    // 14 registered names is "browse_file".
+    // 15 registered names is "browse_file".
     EXPECT_EQ(tools[0]["name"], "browse_file");
     EXPECT_TRUE(tools[0].contains("inputSchema"));
 
@@ -834,9 +834,9 @@ TEST_F(McpStdioTest, AllToolSchemasValid) {
     }
 }
 
-// -- Verify all 14 tool names --------------------------------------------------
+// -- Verify all 15 tool names --------------------------------------------------
 
-TEST_F(McpStdioTest, All14ToolNamesPresent) {
+TEST_F(McpStdioTest, All15ToolNamesPresent) {
     auto responses = exchange({
         make_request("initialize", 1),
         make_request("tools/list", 2),
@@ -845,10 +845,10 @@ TEST_F(McpStdioTest, All14ToolNamesPresent) {
     ASSERT_EQ(responses.size(), 2u);
     auto& tools = responses[1]["result"]["tools"];
 
-    // Alphabetical-by-name emit order. The 14 tool names sorted
+    // Alphabetical-by-name emit order. The 15 tool names sorted
     // lexicographically against the C++ registration set.
     std::vector<std::string> expected = {
-        "browse_file",     "code_insight",   "context",
+        "browse_file",     "callers",        "code_insight",   "context",
         "debug_info",      "find_files",     "get_context",
         "git_analysis",    "index_stats",    "info",
         "inspect_symbol",  "list_symbols",   "search",

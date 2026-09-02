@@ -545,6 +545,28 @@ int main(int argc, char* argv[]) {
                            refs_count, refs_terse, refs_max));
     });
 
+    // -- Callers subcommand ---------------------------------------------------
+    auto* callers_cmd = app.add_subcommand(
+        "callers",
+        "List functions that call a symbol (resolved call graph, "
+        "grouped by caller; dynamic/unresolved sites listed separately)");
+
+    std::string callers_symbol;
+    callers_cmd->add_option("symbol", callers_symbol, "Symbol name")
+        ->required();
+    bool callers_json = false;
+    callers_cmd->add_flag("--json", callers_json, "Output as JSON");
+    int callers_max = 50;
+    callers_cmd->add_option("-m,--max", callers_max,
+                            "Maximum callers to show (default 50; "
+                            "output marks when the cap is hit)")
+        ->check(CLI::PositiveNumber);
+
+    callers_cmd->callback([&]() {
+        std::exit(run_callers(gflags, callers_symbol, callers_json,
+                              callers_max));
+    });
+
     // -- Tree subcommand ------------------------------------------------------
     auto* tree_cmd =
         app.add_subcommand("tree",

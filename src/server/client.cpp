@@ -150,6 +150,20 @@ std::optional<std::vector<DefinitionLocation>> Client::get_definition(
     return defs;
 }
 
+std::optional<nlohmann::json> Client::get_callers(const std::string& symbol,
+                                                  int max_callers,
+                                                  std::string& error) {
+    nlohmann::json body = {{"pattern", symbol},
+                           {"max_callers", max_callers}};
+    auto j = post_json("/callers", body, error);
+    if (!j) return std::nullopt;
+    if (j->contains("error") && !(*j)["error"].get<std::string>().empty()) {
+        error = "callers error: " + (*j)["error"].get<std::string>();
+        return std::nullopt;
+    }
+    return j;
+}
+
 std::optional<std::vector<ReferenceLocation>> Client::get_references(
     const std::string& pattern, int max_results, std::string& error) {
     nlohmann::json body = {{"pattern", pattern}, {"max_results", max_results}};

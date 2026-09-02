@@ -393,6 +393,7 @@ class IndexServer {
     void handle_stats(const httplib::Request& req, httplib::Response& res);
     void handle_definition(const httplib::Request& req, httplib::Response& res);
     void handle_references(const httplib::Request& req, httplib::Response& res);
+    void handle_callers(const httplib::Request& req, httplib::Response& res);
     void handle_tree(const httplib::Request& req, httplib::Response& res);
     void handle_git_analyze(const httplib::Request& req, httplib::Response& res);
     void handle_list_symbols(const httplib::Request& req,

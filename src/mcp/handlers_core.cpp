@@ -165,6 +165,7 @@ ToolResult handle_info(const nlohmann::json& params,
         "list_symbols - enumerate and filter symbols (the 'ls' for code)",
         "inspect_symbol - deep inspect a single symbol",
         "browse_file - file outline view with all symbols",
+        "callers - resolved callers-of table for a symbol",
         "semantic_annotations - find code by semantic tags",
         "code_insight - comprehensive codebase analysis (includes git "
         "analysis modes)",

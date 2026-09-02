@@ -1,6 +1,8 @@
 #include <lci/server/server.h>
 
+#include <lci/core/callers_report.h>
 #include <lci/indexing/master_index.h>
+#include <lci/search/search_engine.h>  // relative_to_root
 #include <lci/search/search_options.h>
 #include <lci/server/request_decode.h>
 
@@ -299,6 +301,42 @@ void IndexServer::handle_references(const httplib::Request& req,
     nlohmann::json j;
     j["references"] = refs;
     json_response(res, j);
+}
+
+// -- Endpoint: /callers -------------------------------------------------------
+
+void IndexServer::handle_callers(const httplib::Request& req,
+                                 httplib::Response& res) {
+    if (!require_ready(res)) return;
+
+    nlohmann::json body;
+    try {
+        body = nlohmann::json::parse(req.body);
+    } catch (const nlohmann::json::exception&) {
+        error_response(res, 400, "invalid JSON body");
+        return;
+    }
+
+    std::string decode_error;
+    auto request = server_request::decode_limited_pattern(body, decode_error);
+    if (!request) {
+        error_response(res, 400, decode_error);
+        return;
+    }
+    int max_callers = body.value("max_callers", 50);
+    if (max_callers <= 0) max_callers = 50;
+    max_callers = std::min(max_callers, 1000);
+
+    // Resolved call graph, not text occurrences: RCU snapshot pin, no lock
+    // on the read path.
+    auto rt_snap = indexer_->ref_tracker().pin();
+    const std::string& root = indexer_->config().project.root;
+    auto path_of = [&](FileID fid) {
+        return std::string(
+            relative_to_root(indexer_->get_file_path(fid), root));
+    };
+    json_response(res, build_callers_report(*rt_snap, request->pattern,
+                                            max_callers, path_of));
 }
 
 }  // namespace lci

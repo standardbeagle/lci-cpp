@@ -13,8 +13,8 @@ class MasterIndex;
 
 namespace mcp {
 
-/// Registers the 3 explore tool handlers (list_symbols, inspect_symbol,
-/// browse_file) on the given server, replacing stub handlers.
+/// Registers the 4 explore tool handlers (list_symbols, inspect_symbol,
+/// browse_file, callers) on the given server, replacing stub handlers.
 ///
 /// Requires a valid MasterIndex. Handlers return errors if index is null.
 void register_explore_handlers(McpServer& server, MasterIndex* indexer);
@@ -32,6 +32,10 @@ ToolResult handle_inspect_symbol(const nlohmann::json& params,
 /// Handles "browse_file": file content with symbol annotations.
 ToolResult handle_browse_file(const nlohmann::json& params,
                               MasterIndex& indexer);
+
+/// Handles "callers": resolved callers-of table for a symbol, grouped by
+/// enclosing caller; dynamic/unresolved call sites listed separately.
+ToolResult handle_callers(const nlohmann::json& params, MasterIndex& indexer);
 
 }  // namespace mcp
 }  // namespace lci

@@ -67,6 +67,12 @@ class Client {
     std::optional<std::vector<ReferenceLocation>> get_references(
         const std::string& pattern, int max_results, std::string& error);
 
+    /// Resolved callers-of report for a symbol (see build_callers_report
+    /// for the JSON shape). `max_callers` caps the confirmed caller groups.
+    std::optional<nlohmann::json> get_callers(const std::string& symbol,
+                                              int max_callers,
+                                              std::string& error);
+
     /// Generates a function call hierarchy tree.
     std::optional<nlohmann::json> get_tree(const TreeRequest& req,
                                            std::string& error);

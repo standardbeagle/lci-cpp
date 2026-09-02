@@ -520,6 +520,93 @@ int run_refs(const GlobalFlags& flags, const std::string& symbol,
     return 0;
 }
 
+int run_callers(const GlobalFlags& flags, const std::string& symbol,
+                bool json_output, int max_callers) {
+    Config cfg;
+    if (std::string err = load_config_with_overrides(flags, cfg); !err.empty()) {
+        std::cerr << "Error: " << err << "\n";
+        return 1;
+    }
+
+    std::string conn_err;
+    auto client = ensure_server_running(cfg, conn_err);
+    if (!client) {
+        std::cerr << "Error: " << conn_err << "\n";
+        return 1;
+    }
+
+    std::string err;
+    auto report = client->get_callers(symbol, max_callers, err);
+    if (!report) {
+        std::cerr << "Error: callers lookup failed: " << err << "\n";
+        return 1;
+    }
+
+    if (json_output) {
+        std::cout << report->dump(2) << "\n";
+        return 0;
+    }
+
+    const auto& j = *report;
+    const auto& defs = j["definitions"];
+    if (defs.empty()) {
+        std::printf("no callable definition of '%s' in the index\n",
+                    symbol.c_str());
+    } else {
+        for (const auto& d : defs) {
+            std::printf("callee: %s (%s) %s:%d\n",
+                        d.value("name", "").c_str(),
+                        d.value("type", "").c_str(),
+                        d.value("file_path", "").c_str(), d.value("line", 0));
+        }
+    }
+
+    const int total_callers = j.value("total_callers", 0);
+    const int total_sites = j.value("total_call_sites", 0);
+    std::printf("%d caller%s, %d call site%s\n", total_callers,
+                total_callers == 1 ? "" : "s", total_sites,
+                total_sites == 1 ? "" : "s");
+    for (const auto& c : j["callers"]) {
+        std::string lines;
+        for (const auto& ln : c["call_lines"]) {
+            if (!lines.empty()) lines += ",";
+            lines += std::to_string(ln.get<int>());
+        }
+        std::printf("  %s %s:%d  calls at %s\n",
+                    c.value("caller", "").c_str(),
+                    c.value("file_path", "").c_str(), c.value("line", 0),
+                    lines.c_str());
+    }
+    if (j.value("truncated", false)) {
+        std::printf("  ... showing %zu of %d callers (raise --max)\n",
+                    j["callers"].size(), total_callers);
+    }
+
+    // Unattributable sites: labeled, never mixed with confirmed callers.
+    auto print_sites = [&](const char* key, const char* count_key,
+                           const char* label) {
+        if (!j.contains(key)) return;
+        std::printf("%s: %d\n", label, j.value(count_key, 0));
+        for (const auto& s : j[key]) {
+            std::printf("  %s:%d%s%s\n", s.value("file_path", "").c_str(),
+                        s.value("line", 0),
+                        s.contains("caller") ? "  in " : "",
+                        s.value("caller", "").c_str());
+        }
+        if (j.value(count_key, 0) > static_cast<int>(j[key].size())) {
+            std::printf("  ... showing %zu of %d (raise --max)\n",
+                        j[key].size(), j.value(count_key, 0));
+        }
+    };
+    print_sites("dynamic_call_sites", "dynamic_count",
+                "dynamic call sites (receiver type unknown at index time; "
+                "not attributable statically)");
+    print_sites("unresolved_call_sites", "unresolved_count",
+                "unresolved call sites (target not in the index)");
+
+    return 0;
+}
+
 // -- tree command -------------------------------------------------------------
 
 namespace {

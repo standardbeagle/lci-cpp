@@ -912,6 +912,44 @@ TEST(IndexLanguageCentralization, MjsFileClassifiesAsJavaScript) {
     std::filesystem::remove_all(dir);
 }
 
+// =============================================================================
+// callers tool
+// =============================================================================
+
+TEST_F(ExploreIndexTestFixture, CallersRequiresName) {
+    auto result = handle_callers(nlohmann::json::object(), *indexer_);
+    EXPECT_TRUE(result.is_error);
+}
+
+TEST_F(ExploreIndexTestFixture, CallersGroupsConfirmedByEnclosingFunction) {
+    auto result = handle_callers({{"name", "processPath"}}, *indexer_);
+    ASSERT_FALSE(result.is_error) << result.text;
+    auto j = nlohmann::json::parse(result.text);
+
+    ASSERT_EQ(j["definitions"].size(), 1u);
+    EXPECT_EQ(j["definitions"][0]["name"], "processPath");
+    EXPECT_EQ(j["definitions"][0]["file_path"], "main.go");
+
+    ASSERT_EQ(j["total_callers"].get<int>(), 1);
+    ASSERT_EQ(j["callers"].size(), 1u);
+    const auto& c = j["callers"][0];
+    EXPECT_EQ(c["caller"], "HandleRequest");
+    EXPECT_EQ(c["file_path"], "main.go");
+    EXPECT_EQ(c["call_count"].get<int>(), 1);
+    ASSERT_EQ(c["call_lines"].size(), 1u);
+    EXPECT_EQ(c["call_lines"][0].get<int>(), 7);
+    EXPECT_FALSE(j["truncated"].get<bool>());
+}
+
+TEST_F(ExploreIndexTestFixture, CallersUnknownNameFailsLoudWithHint) {
+    auto result = handle_callers({{"name", "definitelyMissing"}}, *indexer_);
+    ASSERT_FALSE(result.is_error) << result.text;
+    auto j = nlohmann::json::parse(result.text);
+    EXPECT_TRUE(j["definitions"].empty());
+    EXPECT_EQ(j["total_callers"].get<int>(), 0);
+    EXPECT_TRUE(j.contains("hint"));
+}
+
 }  // namespace
 }  // namespace mcp
 }  // namespace lci

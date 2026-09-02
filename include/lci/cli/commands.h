@@ -173,6 +173,13 @@ int run_refs(const GlobalFlags& flags, const std::string& symbol,
              bool json_output, bool show_all, bool count_only = false,
              bool terse = false, int max_results = 100);
 
+/// callers subcommand: resolved callers-of table for a symbol, grouped by
+/// enclosing caller. Confirmed (resolved-target) callers only; dynamic and
+/// unresolved call sites print in their own labeled sections, never mixed
+/// in. `max_callers` caps the caller groups; output marks truncation.
+int run_callers(const GlobalFlags& flags, const std::string& symbol,
+                bool json_output, int max_callers = 50);
+
 // -- refs ranking -------------------------------------------------------------
 
 /// Split of `lci refs` results into real code references vs lexical-only noise.

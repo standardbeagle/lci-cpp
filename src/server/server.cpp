@@ -1091,6 +1091,10 @@ void IndexServer::register_handlers() {
               [this](const httplib::Request& r, httplib::Response& s) {
                   handle_references(r, s);
               });
+    svr_.Post("/callers",
+              [this](const httplib::Request& r, httplib::Response& s) {
+                  handle_callers(r, s);
+              });
     svr_.Post("/tree",
               [this](const httplib::Request& r, httplib::Response& s) {
                   handle_tree(r, s);

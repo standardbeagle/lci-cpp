@@ -8,6 +8,7 @@ add_library(lci_lib STATIC
     core/trigram.cpp
     core/symbol_store.cpp
     core/trigram_bucketing.cpp
+    core/callers_report.cpp
     core/reference_tracker.cpp
     core/import_resolver.cpp
     core/portable.cpp
