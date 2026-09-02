@@ -99,8 +99,8 @@ TEST(McpResponse, LossyDumpToleratesInvalidUtf8) {
 
 // -- Tool registration tests --------------------------------------------------
 
-TEST_F(McpServerTest, RegistersAll14Tools) {
-    EXPECT_EQ(server_->tool_count(), 14u);
+TEST_F(McpServerTest, RegistersAll15Tools) {
+    EXPECT_EQ(server_->tool_count(), 15u);
     // Registration order follows the register_*_handlers bundle order (not a
     // single registrar), so assert distinct names (no shadow double-registration
     // under forward-iter dispatch) + presence of the boundary tools, not order.
@@ -108,7 +108,7 @@ TEST_F(McpServerTest, RegistersAll14Tools) {
     for (size_t i = 0; i < server_->tool_count(); ++i) {
         names.insert(server_->tool_at(i).name);
     }
-    EXPECT_EQ(names.size(), 14u) << "tool names must be unique (no shadows)";
+    EXPECT_EQ(names.size(), 15u) << "tool names must be unique (no shadows)";
     EXPECT_TRUE(names.count("info"));
     EXPECT_TRUE(names.count("search"));
     EXPECT_TRUE(names.count("browse_file"));

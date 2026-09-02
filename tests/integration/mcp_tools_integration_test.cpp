@@ -412,7 +412,7 @@ TEST_F(McpToolsIntegrationTest, StdioRoundTripWithRealIndex) {
 
     // Response 2: tools/list
     EXPECT_EQ(responses[1]["id"], 2);
-    EXPECT_EQ(responses[1]["result"]["tools"].size(), 14u);
+    EXPECT_EQ(responses[1]["result"]["tools"].size(), 15u);
 
     // Response 3: tools/call search with real index
     EXPECT_EQ(responses[2]["id"], 3);
