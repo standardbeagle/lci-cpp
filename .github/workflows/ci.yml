@@ -178,7 +178,7 @@ jobs:
       - name: Configure
         run: |
           cmake --preset release `
-            -DFETCHCONTENT_BASE_DIR=$PWD/.deps-msvc `
+            "-DFETCHCONTENT_BASE_DIR=$PWD/.deps-msvc" `
             -DVCPKG_TARGET_TRIPLET=x64-windows-static-md `
             -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
 
