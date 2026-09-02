@@ -28,7 +28,8 @@ namespace lci {
 /// (file_path, line) — deterministic across machines. Dynamic/unresolved
 /// sites are listed separately and NEVER counted among confirmed callers
 /// (consistent with the dynamic-dispatch marking in code_insight).
-/// `max_callers` caps the confirmed caller groups (<=0 = unlimited);
+/// `max_callers` caps the confirmed caller groups (clamped to >= 1; every
+/// surface already clamps into [1,1000], so there is no unlimited mode);
 /// dynamic/unresolved lists are capped at the same bound.
 /// `path_of` maps a FileID to the path to emit (typically root-relative).
 nlohmann::json build_callers_report(

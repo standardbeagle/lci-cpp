@@ -32,7 +32,7 @@ nlohmann::json build_site_list(const Snapshot& snap,
                                size_t cap,
                                const std::function<std::string(FileID)>& path_of) {
     nlohmann::json arr = nlohmann::json::array();
-    const size_t n = cap == 0 ? sites.size() : std::min(sites.size(), cap);
+    const size_t n = std::min(sites.size(), cap);
     for (size_t i = 0; i < n; ++i) {
         const auto& s = sites[i];
         nlohmann::json j;
@@ -72,11 +72,16 @@ nlohmann::json build_callers_report(
     // Group confirmed sites by enclosing caller. Sites arrive sorted by
     // (file_id, line, column); groups re-sort by emitted path for
     // cross-machine determinism.
-    absl::flat_hash_map<SymbolID, size_t> group_of;
+    // File-scope sites (caller == 0) group PER FILE — one shared key would
+    // merge top-level callers across files into a single bogus group.
+    absl::flat_hash_map<std::pair<SymbolID, FileID>, size_t> group_of;
     std::vector<CallerGroup> groups;
     groups.reserve(16);
     for (const auto& s : result.confirmed) {
-        auto [it, inserted] = group_of.emplace(s.caller, groups.size());
+        const FileID scope_file = s.caller == 0 ? s.file_id : FileID{};
+        auto [it, inserted] =
+            group_of.emplace(std::make_pair(s.caller, scope_file),
+                             groups.size());
         if (inserted) {
             CallerGroup g;
             g.caller = s.caller;
@@ -105,9 +110,8 @@ nlohmann::json build_callers_report(
                   return a.caller_name < b.caller_name;
               });
 
-    const auto cap = max_callers > 0 ? static_cast<size_t>(max_callers) : 0u;
-    const size_t shown =
-        cap == 0 ? groups.size() : std::min(groups.size(), cap);
+    const auto cap = static_cast<size_t>(std::max(max_callers, 1));
+    const size_t shown = std::min(groups.size(), cap);
 
     nlohmann::json callers = nlohmann::json::array();
     for (size_t i = 0; i < shown; ++i) {
