@@ -337,6 +337,10 @@ void IndexServer::set_mcp_dispatcher(
     mcp_dispatcher_ = std::move(d);
 }
 
+void IndexServer::set_self_stop_callback(std::function<void(const char*)> cb) {
+    self_stop_cb_ = std::move(cb);
+}
+
 bool IndexServer::start() {
     std::lock_guard lifecycle_lock(lifecycle_mu_);
     if (running_.exchange(true, std::memory_order_acq_rel)) {
@@ -930,6 +934,12 @@ void IndexServer::request_self_stop(const char* reason) {
         shutdown_requested_ = true;
     }
     shutdown_cv_.notify_all();
+    // Last: an owner that cannot poll is_running() (MCP-host stdio loop)
+    // gets told directly. Runs after the listener stopped so the callback
+    // may exit the process without leaving a half-serving socket behind.
+    if (self_stop_cb_) {
+        self_stop_cb_(reason);
+    }
 }
 
 void IndexServer::reaper_loop(bool root_existed_at_start) {

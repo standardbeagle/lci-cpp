@@ -7,6 +7,7 @@
 #include <lci/server/client.h>
 #include <lci/server/server.h>
 
+#include <cstdio>
 #include <cstdlib>
 #include <iostream>
 #include <string>
@@ -166,6 +167,21 @@ int run_mcp(const GlobalFlags& flags) {
     // their own index.
     index_server.set_mcp_dispatcher([&mcp_server](const std::string& line) {
         return mcp_server.dispatch_wire(line);
+    });
+
+    // A self-stop (RSS self-cap, project root deleted; idle exit is
+    // disabled above) must end THIS process, not just its listener: the
+    // stdio loop below blocks in getline and never observes the server's
+    // shutdown flag, so before this callback a self-stop left the process
+    // alive with the full index resident — exactly the RSS harm the cap
+    // exists to prevent. Exit hard, like the standalone server leaving its
+    // serve loop: the MCP client sees EOF and respawns on demand.
+    index_server.set_self_stop_callback([](const char* reason) {
+        std::fprintf(stderr,
+                     "lci mcp: shared index server self-stopped (%s); "
+                     "exiting\n",
+                     reason);
+        std::_Exit(0);
     });
 
     bool shared_server_started = index_server.start();

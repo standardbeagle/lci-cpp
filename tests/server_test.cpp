@@ -9,6 +9,7 @@
 #include <cctype>
 #include <chrono>
 #include <functional>
+#include <future>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -286,6 +287,39 @@ TEST(ServerLifecycleTest, CanRestartAfterCleanShutdown) {
     ASSERT_TRUE(server.shutdown());
     ASSERT_TRUE(server.start());
     EXPECT_TRUE(server.is_running());
+    EXPECT_TRUE(server.shutdown());
+}
+
+TEST(ServerLifecycleTest, SelfStopInvokesCallbackWhenRootDeleted) {
+    // The reaper's self-stop (root deleted here; same path serves the RSS
+    // self-cap) must notify an owner whose main loop cannot poll
+    // is_running() — the MCP-host stdio transport blocks in getline and
+    // used to keep the whole index resident after a self-stop.
+    TempDir tmp;
+    auto root = tmp.path() / "project";
+    std::filesystem::create_directories(root);
+
+    Config config;
+    config.project.root = root.string();
+    MasterIndex indexer(config);
+    SearchEngine engine(indexer);
+    IndexServer server(config, indexer, &engine);
+    server.set_socket_path(test::next_test_server_address());
+
+    std::promise<std::string> stopped;
+    auto stopped_reason = stopped.get_future();
+    server.set_self_stop_callback([&stopped](const char* reason) {
+        stopped.set_value(reason);
+    });
+
+    ASSERT_TRUE(server.start());
+    std::filesystem::remove_all(root);
+
+    // Reaper ticks every 500ms; 10s is a generous ceiling, not a wait.
+    ASSERT_EQ(stopped_reason.wait_for(std::chrono::seconds(10)),
+              std::future_status::ready);
+    EXPECT_EQ(stopped_reason.get(), "project root deleted");
+    EXPECT_FALSE(server.is_running());
     EXPECT_TRUE(server.shutdown());
 }
 

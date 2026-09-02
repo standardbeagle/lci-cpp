@@ -341,6 +341,15 @@ class IndexServer {
     /// dispatch_wire provides both).
     void set_mcp_dispatcher(std::function<std::string(const std::string&)> d);
 
+    /// Installs a callback invoked when the server decides to stop itself
+    /// (idle timeout, project root deleted, RSS self-cap). Runs on the
+    /// reaper thread AFTER the listener has been stopped and the shutdown
+    /// flag raised. An owner whose main loop cannot observe is_running()
+    /// (the stdio MCP transport blocks in getline) uses this to exit the
+    /// process; without it a self-stop only silences the listener while the
+    /// process keeps its full index resident. Set before start().
+    void set_self_stop_callback(std::function<void(const char*)> cb);
+
     /// The index this server serves (owned or externally managed). Stable
     /// for the server's lifetime; used by run_server to build the MCP
     /// runtime over the same index it indexes.
@@ -462,6 +471,10 @@ class IndexServer {
 
     // POST /mcp dispatcher (see set_mcp_dispatcher). Set before start().
     std::function<std::string(const std::string&)> mcp_dispatcher_;
+
+    // Self-stop notification (see set_self_stop_callback). Set before
+    // start(); invoked from request_self_stop with the stop reason.
+    std::function<void(const char*)> self_stop_cb_;
 
     void reaper_loop(bool root_existed_at_start);
     void touch_activity();
