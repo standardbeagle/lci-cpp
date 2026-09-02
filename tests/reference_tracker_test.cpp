@@ -2198,6 +2198,39 @@ TEST(ReferenceTrackerTest, CollectCallersMatchesQualifiedUnresolvedSpelling) {
     EXPECT_TRUE(snap->collect_callers("lose").unresolved.empty());
 }
 
+TEST(ReferenceTrackerTest, CollectCallersFindsQualifiedCppDefinitionFromBareName) {
+    ReferenceTracker rt;
+
+    // C++ out-of-line member definitions are stored QUALIFIED
+    // (MasterIndex::update_file); a bare-name query must still find them.
+    std::vector<Symbol> symbols = {
+        make_sym("MasterIndex::update_file", SymbolType::Function, 1, 10, 30),
+        make_sym("caller", SymbolType::Function, 1, 40, 60),
+    };
+    std::vector<Reference> refs = {make_call("update_file", 45)};
+    rt.process_file(1, "master_index.cpp", symbols, refs, {});
+    rt.process_all_references();
+
+    auto snap = rt.pin();
+    auto bare = snap->collect_callers("update_file");
+    ASSERT_EQ(bare.definitions.size(), 1u);
+    EXPECT_EQ(bare.definitions[0]->symbol.name, "MasterIndex::update_file");
+    EXPECT_EQ(static_cast<int>(bare.confirmed.size() +
+                               bare.dynamic.size() +
+                               bare.unresolved.size()),
+              1)
+        << "the call site must surface in exactly one section";
+
+    // The qualified spelling keeps working, and still attributes the
+    // bare-spelled call site.
+    auto qual = snap->collect_callers("MasterIndex::update_file");
+    ASSERT_EQ(qual.definitions.size(), 1u);
+    EXPECT_EQ(static_cast<int>(qual.confirmed.size() +
+                               qual.dynamic.size() +
+                               qual.unresolved.size()),
+              1);
+}
+
 TEST(ReferenceTrackerTest, CollectCallersExcludesVariableDefinitionsFromList) {
     ReferenceTracker rt;
 

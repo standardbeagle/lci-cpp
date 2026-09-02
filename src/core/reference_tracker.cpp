@@ -229,6 +229,26 @@ ReferenceTracker::Snapshot::collect_callers(std::string_view name) const {
         def_ids.insert(h->id);
         out.definitions.push_back(std::move(h));
     }
+    // C++ out-of-line member definitions are stored QUALIFIED
+    // (MasterIndex::update_file), so a bare-name lookup finds nothing.
+    // Fall back to a "::name" suffix scan over the store — callers/inspect
+    // query paths only, never /search.
+    if (out.definitions.empty() && name.find(':') == std::string_view::npos) {
+        const std::string suffix = "::" + std::string(name);
+        symbols.range([&](SymbolID id, const EnhancedSymbol& s) {
+            if (is_callable_definition(s.symbol.type) &&
+                s.symbol.name.size() > suffix.size() &&
+                std::string_view(s.symbol.name)
+                        .substr(s.symbol.name.size() - suffix.size()) ==
+                    suffix) {
+                if (auto h = get_enhanced_symbol(id)) {
+                    def_ids.insert(id);
+                    out.definitions.push_back(std::move(h));
+                }
+            }
+            return true;
+        });
+    }
     std::sort(out.definitions.begin(), out.definitions.end(),
               [](const SymbolHandle& a, const SymbolHandle& b) {
                   if (a->symbol.file_id != b->symbol.file_id)
@@ -236,10 +256,18 @@ ReferenceTracker::Snapshot::collect_callers(std::string_view name) const {
                   return a->symbol.line < b->symbol.line;
               });
 
-    // Unresolved sites are attributed by spelling: `name` exactly, or a
-    // qualified "Type.name". Same matching rule as count_unresolved_calls /
-    // classify_same_name_calls.
-    const auto name_ids = matching_ref_name_ids(ref_names, name);
+    // Unresolved sites are attributed by spelling: the query's LAST segment
+    // exactly, or a qualified "Type.name" — same matching rule as
+    // count_unresolved_calls / classify_same_name_calls. Using the tail lets
+    // a qualified query (MasterIndex::update_file) still attribute
+    // bare-spelled call sites.
+    std::string_view tail = name;
+    if (auto pos = name.rfind("::"); pos != std::string_view::npos) {
+        tail = name.substr(pos + 2);
+    } else if (auto dot = name.rfind('.'); dot != std::string_view::npos) {
+        tail = name.substr(dot + 1);
+    }
+    const auto name_ids = matching_ref_name_ids(ref_names, tail);
 
     for (const auto& [fid, vec] : refs_by_file) {
         for (const auto& r : vec) {
