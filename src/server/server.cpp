@@ -1022,6 +1022,24 @@ void IndexServer::reaper_loop(bool root_existed_at_start) {
 // -- Handler registration -----------------------------------------------------
 
 void IndexServer::register_handlers() {
+    // Listener caps. The server is loopback-only (Unix socket / 127.0.0.1),
+    // but a runaway or buggy local client must still not be able to park an
+    // unbounded body in memory or pin a worker on a dead connection.
+    //   - 16 MiB body: an order of magnitude above the largest legitimate
+    //     request (JSON tool calls; /mcp lines) while far below index size.
+    //   - 30 s socket read/write timeouts: per-I/O-op stall bounds, not
+    //     handler-duration bounds — a slow /reindex still answers, a peer
+    //     that stops draining does not hold a worker forever.
+    //   - keep-alive capped so one connection cannot monopolise a worker
+    //     indefinitely; clients reconnect transparently.
+    constexpr size_t kMaxRequestBodyBytes = 16ull * 1024 * 1024;
+    constexpr time_t kSocketTimeoutSec = 30;
+    constexpr size_t kKeepAliveMaxRequests = 64;
+    svr_.set_payload_max_length(kMaxRequestBodyBytes);
+    svr_.set_read_timeout(kSocketTimeoutSec, 0);
+    svr_.set_write_timeout(kSocketTimeoutSec, 0);
+    svr_.set_keep_alive_max_count(kKeepAliveMaxRequests);
+
     // /ping is excluded from activity stamping so liveness probes (client
     // discovery, peer eviction scans) don't keep an otherwise-unused server
     // alive forever.
