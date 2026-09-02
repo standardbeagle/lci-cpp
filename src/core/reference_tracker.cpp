@@ -94,15 +94,28 @@ namespace {
 /// typed-receiver qualification). Shared by every same-name call query;
 /// linear over the bounded name pool, query paths only.
 absl::flat_hash_set<uint32_t> matching_ref_name_ids(
-    const std::deque<std::string>& ref_names, std::string_view name) {
+    const std::deque<std::string>& ref_names, std::string_view name,
+    std::string_view required_receiver = {}) {
     absl::flat_hash_set<uint32_t> ids;
     if (name.empty()) return ids;
     for (size_t i = 0; i < ref_names.size(); ++i) {
         const std::string& n = ref_names[i];
-        if (n == name ||
-            (n.size() > name.size() + 1 &&
-             n[n.size() - name.size() - 1] == '.' &&
-             std::string_view(n).substr(n.size() - name.size()) == name)) {
+        if (n == name) {
+            ids.insert(static_cast<uint32_t>(i));
+            continue;
+        }
+        if (n.size() > name.size() + 1 &&
+            n[n.size() - name.size() - 1] == '.' &&
+            std::string_view(n).substr(n.size() - name.size()) == name) {
+            // Qualified spelling "Recv.name": with a required receiver, a
+            // spelling naming ANOTHER receiver contradicts the query and is
+            // excluded (bare spellings above cannot be disproven and pass).
+            if (!required_receiver.empty()) {
+                std::string_view recv(n.data(), n.size() - name.size() - 1);
+                if (auto d = recv.rfind('.'); d != std::string_view::npos)
+                    recv = recv.substr(d + 1);
+                if (recv != required_receiver) continue;
+            }
             ids.insert(static_cast<uint32_t>(i));
         }
     }
@@ -260,14 +273,23 @@ ReferenceTracker::Snapshot::collect_callers(std::string_view name) const {
     // exactly, or a qualified "Type.name" — same matching rule as
     // count_unresolved_calls / classify_same_name_calls. Using the tail lets
     // a qualified query (MasterIndex::update_file) still attribute
-    // bare-spelled call sites.
+    // bare-spelled call sites; a qualified query's receiver additionally
+    // EXCLUDES spellings that name a different receiver type.
     std::string_view tail = name;
+    std::string_view receiver;
     if (auto pos = name.rfind("::"); pos != std::string_view::npos) {
         tail = name.substr(pos + 2);
+        receiver = name.substr(0, pos);
     } else if (auto dot = name.rfind('.'); dot != std::string_view::npos) {
         tail = name.substr(dot + 1);
+        receiver = name.substr(0, dot);
     }
-    const auto name_ids = matching_ref_name_ids(ref_names, tail);
+    // Receiver comparison is by bare type name (last qualifier component).
+    if (auto pos = receiver.rfind("::"); pos != std::string_view::npos)
+        receiver = receiver.substr(pos + 2);
+    if (auto dot = receiver.rfind('.'); dot != std::string_view::npos)
+        receiver = receiver.substr(dot + 1);
+    const auto name_ids = matching_ref_name_ids(ref_names, tail, receiver);
 
     for (const auto& [fid, vec] : refs_by_file) {
         for (const auto& r : vec) {
@@ -1362,17 +1384,40 @@ SymbolID ReferenceTracker::resolve_reference_target(
             SymbolID typed_first = 0;
             for (size_t fi = 0; fi < frontier.size() && fi < 16; ++fi) {
                 const std::string& rtype = frontier[fi];
+                // Returns a nonzero id on an exact-arity hit (resolution is
+                // done); otherwise records the first receiver match.
+                auto typed_candidate = [&](SymbolID id,
+                                           bool receiver_in_name) -> SymbolID {
+                    const auto* sym = s.symbols.get(id);
+                    if (sym == nullptr) return 0;
+                    if (!receiver_in_name &&
+                        !symbol_matches_receiver_type(*sym, rtype) &&
+                        !stem_matches(*sym, rtype))
+                        return 0;
+                    if (call_args != 255 &&
+                        sym->parameter_count == call_args) {
+                        return id;
+                    }
+                    if (typed_first == 0) typed_first = id;
+                    return 0;
+                };
                 for (SymbolID id : s.symbols.get_symbols_by_name(name)) {
-                    if (const auto* sym = s.symbols.get(id)) {
-                        if (!symbol_matches_receiver_type(*sym, rtype) &&
-                            !stem_matches(*sym, rtype))
-                            continue;
-                        if (call_args != 255 &&
-                            sym->parameter_count == call_args) {
-                            reference_cache_[cache_key] = id;
-                            return id;
-                        }
-                        if (typed_first == 0) typed_first = id;
+                    if (SymbolID hit = typed_candidate(id, false)) {
+                        reference_cache_[cache_key] = hit;
+                        return hit;
+                    }
+                }
+                // C++ out-of-line member definitions are stored under their
+                // QUALIFIED name (Type::method) and never appear in the
+                // bare-name bucket; the qualified name itself carries the
+                // receiver match.
+                std::string qual_name;
+                qual_name.reserve(rtype.size() + 2 + name.size());
+                qual_name.append(rtype).append("::").append(name);
+                for (SymbolID id : s.symbols.get_symbols_by_name(qual_name)) {
+                    if (SymbolID hit = typed_candidate(id, true)) {
+                        reference_cache_[cache_key] = hit;
+                        return hit;
                     }
                 }
                 if (typed_first != 0) break;
