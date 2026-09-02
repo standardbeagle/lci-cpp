@@ -88,13 +88,15 @@ Reference ReferenceTracker::Snapshot::materialize_ref(
     return out;
 }
 
-int ReferenceTracker::Snapshot::count_unresolved_calls(
-    std::string_view name) const {
-    if (name.empty()) return 0;
-    // Interned pool: collect the ids whose spelling is `name` or ends in
-    // ".name" (typed-receiver qualifications), then count live unresolved
-    // Call refs carrying one of them. Two linear passes; query paths only.
+namespace {
+
+/// Interned-pool ids whose spelling is `name` or ends in ".name" (a
+/// typed-receiver qualification). Shared by every same-name call query;
+/// linear over the bounded name pool, query paths only.
+absl::flat_hash_set<uint32_t> matching_ref_name_ids(
+    const std::deque<std::string>& ref_names, std::string_view name) {
     absl::flat_hash_set<uint32_t> ids;
+    if (name.empty()) return ids;
     for (size_t i = 0; i < ref_names.size(); ++i) {
         const std::string& n = ref_names[i];
         if (n == name ||
@@ -104,6 +106,15 @@ int ReferenceTracker::Snapshot::count_unresolved_calls(
             ids.insert(static_cast<uint32_t>(i));
         }
     }
+    return ids;
+}
+
+}  // namespace
+
+int ReferenceTracker::Snapshot::count_unresolved_calls(
+    std::string_view name) const {
+    if (name.empty()) return 0;
+    const auto ids = matching_ref_name_ids(ref_names, name);
     if (ids.empty()) return 0;
     int count = 0;
     for (const auto& [fid, vec] : refs_by_file) {
@@ -121,16 +132,7 @@ ReferenceTracker::Snapshot::classify_same_name_calls(
     std::string_view name) const {
     SameNameCallStats out;
     if (name.empty()) return out;
-    absl::flat_hash_set<uint32_t> ids;
-    for (size_t i = 0; i < ref_names.size(); ++i) {
-        const std::string& n = ref_names[i];
-        if (n == name ||
-            (n.size() > name.size() + 1 &&
-             n[n.size() - name.size() - 1] == '.' &&
-             std::string_view(n).substr(n.size() - name.size()) == name)) {
-            ids.insert(static_cast<uint32_t>(i));
-        }
-    }
+    const auto ids = matching_ref_name_ids(ref_names, name);
     if (ids.empty()) return out;
     for (const auto& [fid, vec] : refs_by_file) {
         for (const auto& r : vec) {
@@ -181,10 +183,92 @@ ReferenceTracker::Snapshot::call_resolution_totals() const {
     return t;
 }
 
+namespace {
+
+/// True when a symbol of this type can be the callee of a Call reference:
+/// functions/methods/constructors, plus type-like symbols (constructor
+/// calls resolve to the type). Variables/fields/parameters that merely
+/// share the name are not callable definitions.
+bool is_callable_definition(SymbolType t) {
+    switch (t) {
+        case SymbolType::Function:
+        case SymbolType::Method:
+        case SymbolType::Constructor:
+        case SymbolType::Class:
+        case SymbolType::Struct:
+        case SymbolType::Interface:
+        case SymbolType::Type:
+        case SymbolType::Trait:
+        case SymbolType::Record:
+        case SymbolType::Enum:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool call_site_less(const ReferenceTracker::Snapshot::CallSite& a,
+                    const ReferenceTracker::Snapshot::CallSite& b) {
+    if (a.file_id != b.file_id) return a.file_id < b.file_id;
+    if (a.line != b.line) return a.line < b.line;
+    return a.column < b.column;
+}
+
+}  // namespace
+
 ReferenceTracker::Snapshot::CallersResult
 ReferenceTracker::Snapshot::collect_callers(std::string_view name) const {
-    (void)name;
-    return {};  // RED stub
+    CallersResult out;
+    if (name.empty()) return out;
+
+    // Definition candidates: exact name matches that are callable. Resolution
+    // already decided targets, so confirmed matching is by target ID.
+    absl::flat_hash_set<SymbolID> def_ids;
+    for (auto& h : find_symbols_by_name(name)) {
+        if (!is_callable_definition(h->symbol.type)) continue;
+        def_ids.insert(h->id);
+        out.definitions.push_back(std::move(h));
+    }
+    std::sort(out.definitions.begin(), out.definitions.end(),
+              [](const SymbolHandle& a, const SymbolHandle& b) {
+                  if (a->symbol.file_id != b->symbol.file_id)
+                      return a->symbol.file_id < b->symbol.file_id;
+                  return a->symbol.line < b->symbol.line;
+              });
+
+    // Unresolved sites are attributed by spelling: `name` exactly, or a
+    // qualified "Type.name". Same matching rule as count_unresolved_calls /
+    // classify_same_name_calls.
+    const auto name_ids = matching_ref_name_ids(ref_names, name);
+
+    for (const auto& [fid, vec] : refs_by_file) {
+        for (const auto& r : vec) {
+            if (r.dead || r.type != ReferenceType::Call) continue;
+            CallSite site{fid, r.line, r.column, r.source_symbol,
+                          r.target_symbol};
+            if (r.target_symbol != 0) {
+                if (!def_ids.contains(r.target_symbol)) continue;
+                const auto* tsym = symbols.get(r.target_symbol);
+                if (tsym != nullptr && tsym->symbol.declaration_only) {
+                    // Runtime dispatch through an interface/abstract spec:
+                    // never a confirmed static caller (consistent with
+                    // call_resolution_totals).
+                    site.target = 0;
+                    out.dynamic.push_back(site);
+                } else {
+                    out.confirmed.push_back(site);
+                }
+            } else if (name_ids.contains(r.name_id)) {
+                (r.foreign_receiver ? out.dynamic : out.unresolved)
+                    .push_back(site);
+            }
+        }
+    }
+
+    std::sort(out.confirmed.begin(), out.confirmed.end(), call_site_less);
+    std::sort(out.dynamic.begin(), out.dynamic.end(), call_site_less);
+    std::sort(out.unresolved.begin(), out.unresolved.end(), call_site_less);
+    return out;
 }
 
 int ReferenceTracker::Snapshot::count_dynamic_calls_out(
