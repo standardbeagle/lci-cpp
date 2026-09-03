@@ -73,6 +73,11 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
     # and friends with C2589 wherever a TU transitively includes it (httplib,
     # efsw). Kill them globally instead of parenthesizing call sites one by one.
     add_compile_definitions(NOMINMAX)
+    # Bare windows.h also pulls the LEGACY winsock.h; any TU that later
+    # reaches winsock2.h (httplib) then dies on sockaddr redefinition
+    # (C2011 in ws2def.h). Lean-and-mean drops winsock.h globally so
+    # include order stops mattering.
+    add_compile_definitions(WIN32_LEAN_AND_MEAN)
 endif()
 
 option(LCI_WARNINGS_AS_ERRORS "Treat warnings as errors (for CI)" OFF)
@@ -166,7 +171,12 @@ if("${_words_src}" IS_NEWER_THAN "${_words_dst}")
         endif()
         list(SUBLIST _word_lines ${_i} ${_chunk_size} _chunk_lines)
         list(JOIN _chunk_lines "\n" _chunk_text)
-        string(APPEND _chunks "R\"LCIWORDS(${_chunk_text}\n)LCIWORDS\",\n")
+        # Emit the literal WITH its byte length: string_view{lit} runs a
+        # constexpr strlen per literal, and ~660KB of that blows clang's
+        # default -fconstexpr-steps budget (gcc/MSVC were fine).
+        string(LENGTH "${_chunk_text}\n" _chunk_len)
+        string(APPEND _chunks
+               "std::string_view{R\"LCIWORDS(${_chunk_text}\n)LCIWORDS\", ${_chunk_len}},\n")
         math(EXPR _i "${_end} + 1")
     endwhile()
     file(CONFIGURE

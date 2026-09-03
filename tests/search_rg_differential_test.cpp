@@ -29,6 +29,12 @@
 #include <algorithm>
 #include <array>
 #include <cstdio>
+
+#ifdef _WIN32
+// MSVC spells the POSIX process-pipe pair with an underscore.
+#define popen _popen
+#define pclose _pclose
+#endif
 #include <filesystem>
 #include <fstream>
 #include <random>
@@ -113,7 +119,11 @@ HitSet lci_hits(const MasterIndex& mi, const std::string& root,
 }
 
 bool rg_available() {
+#ifdef _WIN32
+    return std::system("rg --version > NUL 2>&1") == 0;
+#else
     return std::system("rg --version > /dev/null 2>&1") == 0;
+#endif
 }
 
 /// ripgrep oracle: `rg --fixed-strings --line-number --no-heading`.
