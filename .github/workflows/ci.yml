@@ -310,6 +310,12 @@ jobs:
   # ---------------------------------------------------------------------------
   benchmarks:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # The perf gate shares the self-hosted runner with the build/test legs:
+    # run it AFTER them or their compiles contend and every wall-clock
+    # benchmark reads 2-10x slow (2026-09-03: a quiet-runner A/B of the same
+    # commits measured 0.98-1.07x on benchmarks the loaded gate flagged at
+    # 1.5-5x).
+    needs: linux
     runs-on: [self-hosted, linux, lci-linux]
     timeout-minutes: 60
     # Cap parallelism on the shared self-hosted runner — see the linux job.
