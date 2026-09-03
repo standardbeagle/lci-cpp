@@ -276,34 +276,63 @@ TEST(SymbolStoreTest, SwapAndDeleteMaintainsCorrectness) {
 // ---------------------------------------------------------------------------
 // SymbolStore - O(1) lookup benchmark
 // ---------------------------------------------------------------------------
-TEST(SymbolStoreTest, BenchmarkLookup) {
-    SymbolStore store(10000);
-    for (int i = 1; i <= 10000; ++i) {
+namespace {
+
+SymbolStore make_filled_store(int n) {
+    SymbolStore store(n);
+    for (int i = 1; i <= n; ++i) {
         store.set(static_cast<SymbolID>(i),
                   make_symbol(static_cast<SymbolID>(i),
                               "sym_" + std::to_string(i),
                               SymbolType::Function, 1,
                               i, 0, i + 10, 0));
     }
+    return store;
+}
 
-    // Best-of-K batches: contention (parallel CTest) only adds wall time, so the
-    // fastest batch approximates true unloaded per-lookup cost. Absolute-wall-clock
-    // asserts flake under -j load; the minimum does not.
+long long best_ns_per_lookup(const SymbolStore& store, int n, int batches) {
     volatile const EnhancedSymbol* ptr = nullptr;
-    long long best_ns_per_lookup = std::numeric_limits<long long>::max();
-    for (int batch = 0; batch < 50; ++batch) {
+    long long best = std::numeric_limits<long long>::max();
+    for (int batch = 0; batch < batches; ++batch) {
         auto start = std::chrono::steady_clock::now();
         for (int iter = 0; iter < 20000; ++iter) {
-            auto id = static_cast<SymbolID>((iter % 10000) + 1);
+            auto id = static_cast<SymbolID>((iter % n) + 1);
             ptr = store.get(id);
         }
         auto elapsed = std::chrono::steady_clock::now() - start;
-        auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(elapsed).count();
-        best_ns_per_lookup = std::min<long long>(best_ns_per_lookup, ns / 20000);
+        auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                      elapsed).count();
+        best = std::min<long long>(best, ns / 20000);
     }
     (void)ptr;
+    return best;
+}
 
-    EXPECT_LT(best_ns_per_lookup, 2000) << "O(1) lookup should be under 2us";
+}  // namespace
+
+TEST(SymbolStoreTest, BenchmarkLookup) {
+    // O(1)-ness is asserted RELATIVELY: per-lookup cost must not scale with
+    // store size (10x symbols -> ~1x cost; O(n) would read ~10x). An
+    // absolute-ns bound — even best-of-K — still failed on the CI runner in
+    // a -O0 debug build under full-matrix load; a ratio of two interleaved
+    // best-of-K minima is immune to both the build type and the load.
+    SymbolStore small = make_filled_store(1000);
+    SymbolStore big = make_filled_store(10000);
+
+    long long best_small = std::numeric_limits<long long>::max();
+    long long best_big = std::numeric_limits<long long>::max();
+    for (int round = 0; round < 10; ++round) {  // interleave: equal exposure
+        best_small = std::min(best_small, best_ns_per_lookup(small, 1000, 5));
+        best_big = std::min(best_big, best_ns_per_lookup(big, 10000, 5));
+    }
+
+    const double ratio = static_cast<double>(best_big) /
+                         static_cast<double>(std::max<long long>(best_small, 1));
+    EXPECT_LT(ratio, 3.0)
+        << "per-lookup cost scaled with store size (O(1) expected): "
+        << best_small << "ns @1k vs " << best_big << "ns @10k";
+    // Loose sanity ceiling only — generous enough for a loaded -O0 build.
+    EXPECT_LT(best_big, 50000) << "lookup pathologically slow";
 }
 
 // ---------------------------------------------------------------------------
