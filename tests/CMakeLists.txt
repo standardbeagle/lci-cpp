@@ -132,6 +132,9 @@ gtest_discover_tests(lci_helpers_tests
 # unreachable memory at exit; this catches reachable unbounded growth — the
 # failure mode that matters for a long-running server. RUN_SERIAL because RSS
 # is a whole-process measurement and sibling tests under -j add noise.
+# Linux-only: the measurement reads /proc/self/status (the test SKIPs where
+# that is absent, and the file does not compile on Windows at all).
+if(NOT WIN32)
 add_executable(lci_soak_tests
     soak/soak_memory_test.cpp
 )
@@ -148,6 +151,7 @@ set_tests_properties(lci_memory_soak PROPERTIES
     LABELS "soak"
     TIMEOUT 900
     RUN_SERIAL TRUE)
+endif()
 
 # ---------------------------------------------------------------------------
 # Index-size smoke tests (large long-tail repos across languages)
