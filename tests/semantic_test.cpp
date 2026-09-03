@@ -622,7 +622,7 @@ TEST(VocabularyAnalysisTest, FilterProductionSymbols) {
         {"test/helper.go", "MockService", "function", false},
     };
 
-    ProjectConfig config;
+    VocabularyFilterConfig config;
     config.language = "go";
 
     auto production = filter_production_symbols(symbols, config);

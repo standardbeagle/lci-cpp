@@ -22,7 +22,7 @@ const std::vector<std::string>& common_exclude_patterns() {
     return patterns;
 }
 
-bool is_production_code(const FileSymbol& symbol, const ProjectConfig& config) {
+bool is_production_code(const FileSymbol& symbol, const VocabularyFilterConfig& config) {
     const auto& path = symbol.file_path;
 
     // Check exclude directories.
@@ -75,7 +75,7 @@ bool is_production_code(const FileSymbol& symbol, const ProjectConfig& config) {
 
 std::vector<FileSymbol> filter_production_symbols(
     const std::vector<FileSymbol>& symbols,
-    const ProjectConfig& config) {
+    const VocabularyFilterConfig& config) {
 
     std::vector<FileSymbol> result;
     result.reserve(symbols.size());

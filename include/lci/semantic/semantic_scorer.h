@@ -108,8 +108,11 @@ struct FileSymbol {
     bool is_exported{};
 };
 
-/// Configuration for production code filtering.
-struct ProjectConfig {
+/// Configuration for production code filtering. Renamed from ProjectConfig:
+/// that name collided with lci::ProjectConfig in lci/config.h — an ODR
+/// violation with different layouts, and the debug build read one struct
+/// through the other's definition (SEGFAULT in is_production_code).
+struct VocabularyFilterConfig {
     std::string language;
     std::vector<std::string> source_dirs;
     std::vector<std::string> test_markers;
@@ -158,7 +161,7 @@ struct VocabularyAnalysis {
 /// Filters symbols to only production code.
 std::vector<FileSymbol> filter_production_symbols(
     const std::vector<FileSymbol>& symbols,
-    const ProjectConfig& config);
+    const VocabularyFilterConfig& config);
 
 // -- Semantic scorer ----------------------------------------------------------
 
