@@ -65,7 +65,7 @@ jobs:
         run: |
           cmake --preset release \
             -G Ninja \
-            -DFETCHCONTENT_BASE_DIR=$PWD/.deps-ninja \
+            -DFETCHCONTENT_BASE_DIR=$PWD/.deps-release-gcc-13 \
             -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake
 
       - name: Build
