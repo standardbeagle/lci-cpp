@@ -423,6 +423,12 @@ class IndexServer {
 
     std::chrono::steady_clock::time_point start_time_;
     std::atomic<bool> running_{false};
+    // httplib::Server::stop() is NOT idempotent under a debug build: of two
+    // racing calls (reaper self-stop vs owner shutdown) the second finds
+    // svr_sock_ already INVALID while is_running_ is still true and trips
+    // httplib's assert. stop_listener_once() gates the real stop on this
+    // flag; start() re-arms it for the next listen.
+    std::atomic<bool> listener_stop_issued_{false};
     std::atomic<bool> indexing_active_{false};
     mutable std::shared_mutex mu_;
     std::mutex lifecycle_mu_;
@@ -502,6 +508,7 @@ class IndexServer {
     // multiple times. Called from shutdown().
     void cancel_indexing_thread();
     bool shutdown_locked();
+    void stop_listener_once();
 
     // Cancels any in-flight indexing run, joins its thread, and
     // installs `new_thread` as the active indexing thread. Atomic with

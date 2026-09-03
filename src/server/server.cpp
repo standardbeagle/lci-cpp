@@ -346,6 +346,7 @@ bool IndexServer::start() {
     if (running_.exchange(true, std::memory_order_acq_rel)) {
         return false;  // already running
     }
+    listener_stop_issued_.store(false, std::memory_order_release);
 
     {
         std::lock_guard lock(shutdown_mu_);
@@ -604,10 +605,19 @@ bool IndexServer::shutdown() {
     return shutdown_locked();
 }
 
+void IndexServer::stop_listener_once() {
+    // See listener_stop_issued_ in the header: exactly one svr_.stop() per
+    // listen, or the loser of a self-stop/shutdown race hits httplib's
+    // debug assert (svr_sock_ already INVALID, is_running_ still true).
+    if (!listener_stop_issued_.exchange(true, std::memory_order_acq_rel)) {
+        svr_.stop();
+    }
+}
+
 bool IndexServer::shutdown_locked() {
     running_.store(false, std::memory_order_release);
 
-    svr_.stop();
+    stop_listener_once();
 
     if (listen_thread_.joinable()) {
         listen_thread_.join();
@@ -926,9 +936,10 @@ void IndexServer::request_self_stop(const char* reason) {
     // Stop accepting immediately: an owner that never polls is_running()
     // (the embedded MCP server) must not keep serving as a half-dead
     // zombie after deciding to exit. Full teardown still happens in the
-    // owner's shutdown(); httplib's stop() is safe from this thread and
-    // idempotent with the one in shutdown_locked().
-    svr_.stop();
+    // owner's shutdown(). stop_listener_once() makes the pair with
+    // shutdown_locked() single-shot — bare svr_.stop() is NOT idempotent
+    // under a debug build (httplib asserts on the second racing call).
+    stop_listener_once();
     {
         std::lock_guard lock(shutdown_mu_);
         shutdown_requested_ = true;
