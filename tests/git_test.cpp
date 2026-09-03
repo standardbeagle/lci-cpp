@@ -605,8 +605,10 @@ TEST(GitProvider, TracksAnyDistinguishesUntrackedNesting) {
 
     Provider p;
     ASSERT_TRUE(Provider::create((outer / "untracked").string(), p));
-    // create() resolves to the OUTER toplevel — that is the trap.
-    EXPECT_EQ(fs::path(p.repo_root()), outer);
+    // create() resolves to the OUTER toplevel — that is the trap. Compare
+    // canonicalized: rev-parse resolves symlinks, and macOS temp dirs live
+    // behind one (/var/folders -> /private/var/folders).
+    EXPECT_EQ(fs::path(p.repo_root()), fs::weakly_canonical(outer));
     EXPECT_FALSE(p.tracks_any((outer / "untracked").string()))
         << "gitignored corpus dir must not count as covered by the repo";
     EXPECT_TRUE(p.tracks_any((outer / "tracked").string()))

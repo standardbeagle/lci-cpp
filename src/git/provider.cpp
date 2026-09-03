@@ -81,9 +81,14 @@ bool Provider::create(std::string_view repo_root, Provider& out) {
 bool Provider::tracks_any(std::string_view dir) const {
     // Path relative to the repo root: ls-files scopes to the pathspec. An
     // absolute pathspec works too, but relative keeps the output independent
-    // of where the checkout lives.
+    // of where the checkout lives. Canonicalize first: repo_root_ comes from
+    // rev-parse with symlinks resolved (macOS temp dirs: /var/folders ->
+    // /private/var/folders), so an unresolved `dir` spelling would produce a
+    // ../.. chain pathspec that scopes to nothing.
     std::error_code ec;
-    auto rel = std::filesystem::relative(std::string(dir), repo_root_, ec);
+    auto canon_dir = std::filesystem::weakly_canonical(std::string(dir), ec);
+    if (ec) canon_dir = std::string(dir);
+    auto rel = std::filesystem::relative(canon_dir, repo_root_, ec);
     std::string spec = ec ? std::string(dir) : rel.string();
     if (spec.empty() || spec == ".") spec = ".";
     std::string out;
