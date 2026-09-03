@@ -12,17 +12,7 @@
 #include <string_view>
 #include <vector>
 
-#ifdef _WIN32
-#include <cstdlib>
-// MSVC ships no POSIX setenv/unsetenv; these tests need only the narrow
-// overwrite/remove semantics, which _putenv_s provides (empty value removes).
-namespace {
-int setenv(const char* name, const char* value, int /*overwrite*/) {
-    return _putenv_s(name, value);
-}
-int unsetenv(const char* name) { return _putenv_s(name, ""); }
-}  // namespace
-#endif
+#include "portable_env.h"
 
 namespace lci {
 namespace {

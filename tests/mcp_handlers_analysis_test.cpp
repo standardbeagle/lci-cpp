@@ -12,6 +12,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "portable_env.h"
 #include "test_git.h"
 #include "unique_temp.h"
 

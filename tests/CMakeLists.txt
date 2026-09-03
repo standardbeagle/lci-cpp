@@ -14,11 +14,11 @@ FetchContent_MakeAvailable(googletest)
 # vs kernel ASLR) and the probe then hard-fails the whole tsan configure
 # ("Failed to determine the source files for the regular expression
 # backend"). Pin the probe results so nothing is executed during
-# configure. RUN_HAVE_* holds the probe binary's EXIT CODE: 0 = works —
-# std::regex on, posix/gnu off.
-set(RUN_HAVE_STD_REGEX 0 CACHE INTERNAL "benchmark regex probe pinned")
-set(RUN_HAVE_POSIX_REGEX 1 CACHE INTERNAL "benchmark regex probe pinned")
-set(RUN_HAVE_GNU_POSIX_REGEX 1 CACHE INTERNAL "benchmark regex probe pinned")
+# configure. CXXFeatureCheck early-returns when HAVE_<VAR> is DEFINED (any
+# value counts as available — so pin ONLY the backend we want); the
+# posix/gnu probes may still run and fail, which is harmless once
+# std::regex is pinned available.
+set(HAVE_STD_REGEX 1 CACHE INTERNAL "benchmark regex backend pinned")
 set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
 set(BENCHMARK_ENABLE_GTEST_TESTS OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(googlebenchmark
