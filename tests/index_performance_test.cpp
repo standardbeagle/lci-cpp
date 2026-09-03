@@ -371,11 +371,17 @@ TEST(IndexPerformanceRequirements, PaginationRandomTraversalIsFlat) {
     EXPECT_LT(ratio, 4.0)
         << "deep pages cost >> shallow pages: offset handling went "
            "super-linear";
-    // O(total) collect+sort per call; 20ms leaves an order of magnitude of
-    // headroom over the measured cost on a loaded machine while still
-    // catching an accidental O(total^2) page walk.
-    EXPECT_LT(random_cost.count(), 20'000'000)
-        << "random page window cost regressed past 20ms";
+    // O(total) collect+sort per call. The ceiling is a pathology tripwire
+    // (accidental O(total^2) walk), not a latency SLO — the ratio above is
+    // the real property. A -O0 debug build measures ~30ms/page on a loaded
+    // CI runner, so the debug ceiling carries 5x the release one.
+#ifdef NDEBUG
+    constexpr int64_t kRandomCeilingNs = 20'000'000;
+#else
+    constexpr int64_t kRandomCeilingNs = 100'000'000;
+#endif
+    EXPECT_LT(random_cost.count(), kRandomCeilingNs)
+        << "random page window cost regressed past the tripwire";
 }
 
 }  // namespace
