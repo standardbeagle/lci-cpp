@@ -96,6 +96,26 @@ TEST(SpecDiffAssertMatches, JsonRewritesCorpusPrefixOnBothSides) {
     EXPECT_TRUE(r.passed);
 }
 
+TEST(SpecDiffAssertMatches, JsonRewritesEmbeddedCorpusPath) {
+    SpecDescriptor d;
+    d.parse = SpecDescriptor::Parse::Json;
+    d.corpus_prefix = "/checkout-a/corpus";
+    // The corpus path sits MID-string (http /reindex echoes "Re-indexing
+    // started for <corpus>"): a differently-located checkout must still
+    // match a golden that pins the token.
+    auto r = assert_matches_with_golden(
+        R"({"message":"Re-indexing started for /checkout-a/corpus"})",
+        R"({"message":"Re-indexing started for ${CORPUS}"})",
+        d);
+    EXPECT_TRUE(r.passed) << (r.reasons.empty() ? "" : r.reasons[0]);
+    // Boundary guard: a sibling dir sharing the prefix is NOT the corpus.
+    auto r2 = assert_matches_with_golden(
+        R"({"message":"saw /checkout-a/corpus2/x"})",
+        R"({"message":"saw ${CORPUS}2/x"})",
+        d);
+    EXPECT_FALSE(r2.passed);
+}
+
 TEST(SpecDiffAssertMatches, JsonStripsPreambleLinesBeforeParse) {
     SpecDescriptor d;
     d.parse = SpecDescriptor::Parse::Json;

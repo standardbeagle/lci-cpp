@@ -1,4 +1,4 @@
 {
-  "message": "Re-indexing started for /home/beagle/work/core/lci-cpp/tests/parity/corpora/synthetic/multi-lang",
+  "message": "Re-indexing started for ${CORPUS}",
   "success": true
 }

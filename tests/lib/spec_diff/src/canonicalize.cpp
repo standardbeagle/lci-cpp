@@ -48,11 +48,32 @@ void rewrite_paths_recursive(nlohmann::json& node,
     } else if (node.is_array()) {
         for (auto& elem : node) rewrite_paths_recursive(elem, corpus_prefix);
     } else if (node.is_string()) {
-        std::string s = node.get<std::string>();
-        if (s.size() >= corpus_prefix.size() &&
-            s.compare(0, corpus_prefix.size(), corpus_prefix) == 0 &&
-            (s.size() == corpus_prefix.size() || s[corpus_prefix.size()] == '/')) {
-            node = std::string("${CORPUS}") + s.substr(corpus_prefix.size());
+        // Replace EVERY occurrence, not just a whole-string prefix: the
+        // corpus path can sit mid-string ("Re-indexing started for
+        // <corpus>"), and an unrewritten absolute path pins the golden to
+        // one checkout location. Segment-boundary guarded so a sibling dir
+        // sharing the prefix ("<corpus>2/") is left alone.
+        const std::string& s = node.get_ref<const std::string&>();
+        std::string out;
+        size_t pos = 0;
+        bool changed = false;
+        while (true) {
+            size_t hit = s.find(corpus_prefix, pos);
+            if (hit == std::string::npos) break;
+            const size_t end = hit + corpus_prefix.size();
+            if (end == s.size() || s[end] == '/') {
+                out.append(s, pos, hit - pos);
+                out += "${CORPUS}";
+                pos = end;
+                changed = true;
+            } else {
+                out.append(s, pos, end - pos);
+                pos = end;
+            }
+        }
+        if (changed) {
+            out.append(s, pos, std::string::npos);
+            node = std::move(out);
         }
     }
 }
