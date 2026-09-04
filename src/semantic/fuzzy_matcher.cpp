@@ -5,8 +5,9 @@
 #include <rapidfuzz/distance/JaroWinkler.hpp>
 
 // Thin wrapper over rapidfuzz-cpp (header-only, SIMD-accelerated).
-// Public API returns normalized [0.0, 1.0] for stability with semantic_scorer,
-// git/analyzer, and existing FuzzyMatcher* GTests. rapidfuzz fuzz::* returns
+// Public API returns normalized [0.0, 1.0] for stability with the CLI query
+// commands, git/analyzer, and existing FuzzyMatcher* GTests. (It also served
+// the semantic scorer, deleted as unreachable.) rapidfuzz fuzz::* returns
 // [0, 100]; JaroWinkler::normalized_similarity returns [0, 1]. Scale at boundary.
 
 namespace lci {

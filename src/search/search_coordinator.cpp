@@ -85,56 +85,7 @@ bool is_word_boundary(std::string_view content, int pos) {
     return prev_is_word != curr_is_word;
 }
 
-std::vector<int> find_literal_occurrences(std::string_view content,
-                                          std::string_view pattern) {
-    std::vector<int> positions;
-    if (pattern.empty() || content.empty() ||
-        pattern.size() > content.size()) {
-        return positions;
-    }
 
-    size_t offset = 0;
-    while (offset + pattern.size() <= content.size()) {
-        auto found = content.find(pattern, offset);
-        if (found == std::string_view::npos) break;
-        positions.push_back(static_cast<int>(found));
-        offset = found + 1;
-    }
-    return positions;
-}
-
-std::vector<int> find_literal_occurrences_ci(std::string_view content,
-                                             std::string_view pattern) {
-    if (pattern.empty() || content.empty()) return {};
-
-    std::string lower_content(content.size(), '\0');
-    for (size_t i = 0; i < content.size(); ++i) {
-        lower_content[i] = static_cast<char>(
-            std::tolower(static_cast<unsigned char>(content[i])));
-    }
-
-    std::string lower_pattern(pattern.size(), '\0');
-    for (size_t i = 0; i < pattern.size(); ++i) {
-        lower_pattern[i] = static_cast<char>(
-            std::tolower(static_cast<unsigned char>(pattern[i])));
-    }
-
-    return find_literal_occurrences(lower_content, lower_pattern);
-}
-
-std::vector<int> find_whole_word_occurrences(std::string_view content,
-                                             std::string_view pattern) {
-    auto positions = find_literal_occurrences(content, pattern);
-    std::vector<int> words;
-    int pat_len = static_cast<int>(pattern.size());
-    for (int pos : positions) {
-        if (is_word_boundary(content, pos) &&
-            is_word_boundary(content, pos + pat_len)) {
-            words.push_back(pos);
-        }
-    }
-    return words;
-}
 
 int calculate_pattern_complexity(std::string_view pattern) {
     if (pattern.empty()) return 0;

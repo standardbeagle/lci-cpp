@@ -43,14 +43,10 @@ add_library(lci_lib STATIC
     search/engine.cpp
     search/search_coordinator.cpp
     search/engine_context.cpp
-    search/semantic_filter.cpp
-    semantic/score_types.cpp
     semantic/name_splitter.cpp
     semantic/stemmer.cpp
     semantic/fuzzy_matcher.cpp
-    semantic/semantic_scorer.cpp
     semantic/synonym_table.cpp
-    semantic/vocabulary_analyzer.cpp
     analysis/call_graph.cpp
     analysis/side_effect_analyzer.cpp
     analysis/side_effect_classifiers.cpp

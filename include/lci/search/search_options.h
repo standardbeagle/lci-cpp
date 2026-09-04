@@ -251,18 +251,6 @@ bool line_is_comment_only(std::string_view line);
 /// Returns true if there is a word boundary at the given position.
 bool is_word_boundary(std::string_view content, int pos);
 
-/// Finds all literal occurrences of pattern in content. Returns start offsets.
-std::vector<int> find_literal_occurrences(std::string_view content,
-                                          std::string_view pattern);
-
-/// Finds case-insensitive literal occurrences. Returns start offsets.
-std::vector<int> find_literal_occurrences_ci(std::string_view content,
-                                             std::string_view pattern);
-
-/// Finds occurrences where pattern appears as a whole word.
-std::vector<int> find_whole_word_occurrences(std::string_view content,
-                                             std::string_view pattern);
-
 /// Returns a pattern complexity score (higher = more specific).
 int calculate_pattern_complexity(std::string_view pattern);
 

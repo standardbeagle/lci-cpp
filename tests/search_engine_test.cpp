@@ -88,32 +88,6 @@ TEST(SearchPureFunctions, IsWordBoundary) {
     EXPECT_TRUE(is_word_boundary(content, 6));
 }
 
-TEST(SearchPureFunctions, FindLiteralOccurrences) {
-    auto hits = find_literal_occurrences("abcabc", "abc");
-    ASSERT_EQ(2u, hits.size());
-    EXPECT_EQ(0, hits[0]);
-    EXPECT_EQ(3, hits[1]);
-}
-
-TEST(SearchPureFunctions, FindLiteralOccurrencesEmpty) {
-    EXPECT_TRUE(find_literal_occurrences("", "abc").empty());
-    EXPECT_TRUE(find_literal_occurrences("abc", "").empty());
-}
-
-TEST(SearchPureFunctions, FindLiteralOccurrencesCaseInsensitive) {
-    auto hits = find_literal_occurrences_ci("AbCaBc", "abc");
-    ASSERT_EQ(2u, hits.size());
-    EXPECT_EQ(0, hits[0]);
-    EXPECT_EQ(3, hits[1]);
-}
-
-TEST(SearchPureFunctions, FindWholeWordOccurrences) {
-    auto hits = find_whole_word_occurrences("foo bar foo_bar foo", "foo");
-    ASSERT_EQ(2u, hits.size());
-    EXPECT_EQ(0, hits[0]);
-    EXPECT_EQ(16, hits[1]);
-}
-
 TEST(SearchPureFunctions, CalculatePatternComplexity) {
     EXPECT_EQ(0, calculate_pattern_complexity(""));
     EXPECT_GT(calculate_pattern_complexity("myFunction"), 10);
@@ -1005,7 +979,8 @@ TEST(SearchCoordinatorTest, UniquePathsKeepsAdjacentAndEmptyCases) {
 
 // Criterion 1: the MCP handler sets SearchOptions::exclude_comments and
 // ::invert_match from flags nc/iv, and the engine never read either field.
-// The only reader was semantic_filter.cpp, which has no production caller. So
+// The only reader was semantic_filter.cpp, which had no production caller and
+// has since been deleted as part of the same slice. So
 // `flags=iv` returned exactly the lines it was asked to exclude, and
 // `flags=nc` returned the comments it was asked to drop.
 TEST(SearchFlagNoComments, ExcludesCommentOnlyLines) {
