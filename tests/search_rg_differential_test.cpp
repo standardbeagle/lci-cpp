@@ -407,9 +407,15 @@ HitSet naive_no_comment_hits(const TempCorpus& corpus,
             size_t e = raw.find_last_not_of(" \t\r");
             std::string t = raw.substr(b, e - b + 1);
 
+            // Comment-only means the line OPENS with a comment marker.
+            // An earlier version of this oracle asked whether the line
+            // CONTAINED "*/", which is the production predicate's own former
+            // rule -- so the oracle inherited exactly the blind spot it exists
+            // to catch, and agreed that `int x = 1; /* c */` was a comment.
+            // Independence has to cover the SPECIFICATION, not just the
+            // mechanism (bench-harness-oracle-independence rule 1).
             bool comment_only = t.rfind("//", 0) == 0 || t[0] == '#' ||
-                                t.rfind("/*", 0) == 0 ||
-                                t.find("*/") != std::string::npos;
+                                t.rfind("/*", 0) == 0 || t[0] == '*';
             if (comment_only) continue;
             hits.emplace(rel, static_cast<int>(i) + 1);
         }
@@ -485,7 +491,7 @@ void build_flag_corpus(TempCorpus& corpus) {
     corpus.write_file("delta.c",
         "/* Widget block opener */\n"          // 1 comment-only, matches
         "int Widget = 3;\n"                    // 2 code, matches
-        "int tail = 4; /* Widget */\n");       // 3 code + block comment
+        "int tail = 4; /* Widget */\n");       // 3 CODE + trailing block comment
 }
 
 TEST(SearchRgDifferentialTest, InvertMatchEqualsInvertOracle) {

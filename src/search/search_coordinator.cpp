@@ -61,10 +61,23 @@ bool line_is_comment_only(std::string_view line) {
     }
     if (trimmed.empty()) return false;
 
+    // A line is comment-only when it OPENS with a comment marker. The markers
+    // are the three line/block openers plus '*', which carries block-comment
+    // continuation and close lines (" * text", " */").
     if (trimmed.substr(0, 2) == "//") return true;
     if (trimmed.front() == '#') return true;
     if (trimmed.substr(0, 2) == "/*") return true;
-    if (trimmed.find("*/") != std::string_view::npos) return true;
+    if (trimmed.front() == '*') return true;
+
+    // Deliberately NOT "the line contains */". That rule deleted real code:
+    // `int x = 1; /* note */` and a string literal holding "*/" both matched
+    // it, so exclude_comments removed lines the caller had asked for. The
+    // residual gap is a line of prose inside a block comment that merely
+    // closes it ("trailing prose */"), which is not decidable from the line
+    // alone -- it needs cross-line state the search path does not carry. That
+    // trade is deliberate and asymmetric: a false negative keeps a comment,
+    // which is noise, while a false positive deletes code, which is a wrong
+    // answer.
     return false;
 }
 
