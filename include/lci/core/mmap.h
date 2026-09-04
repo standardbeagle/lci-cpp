@@ -69,8 +69,18 @@ class MappedFile {
         close();
 
 #ifdef _WIN32
-        file_handle_ = CreateFileA(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
-                                   OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        // FILE_SHARE_DELETE and FILE_SHARE_WRITE are load-bearing: content
+        // stays mapped for the index lifetime, and without them every
+        // indexed file is locked against deletion/rewrite for as long as
+        // the server runs — editors and `git checkout` in the user's repo
+        // would start failing, and any temp-dir teardown throws
+        // "process cannot access the file". POSIX mmap has no such lock;
+        // this restores the same semantics.
+        file_handle_ = CreateFileA(path.c_str(), GENERIC_READ,
+                                   FILE_SHARE_READ | FILE_SHARE_WRITE |
+                                       FILE_SHARE_DELETE,
+                                   nullptr, OPEN_EXISTING,
+                                   FILE_ATTRIBUTE_NORMAL, nullptr);
         if (file_handle_ == INVALID_HANDLE_VALUE) {
             if (error_out) *error_out = "failed to open file: " + path;
             return false;
