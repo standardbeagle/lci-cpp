@@ -154,6 +154,40 @@ TEST(ReferenceTrackerTest, FindSymbolsByName) {
     EXPECT_TRUE(not_found.empty());
 }
 
+// Root cause 3: clear() reset next_symbol_id_ to 1 while FileIDs were
+// deliberately made monotonic for exactly this reason. An encode_symbol_id
+// value an MCP client is holding must never resolve to a DIFFERENT symbol
+// after a reindex, so symbol ids are never recycled either.
+TEST(ReferenceTrackerTest, SymbolIdsMonotonicAcrossClear) {
+    ReferenceTracker rt;
+
+    std::vector<Symbol> before = {
+        make_sym("First", SymbolType::Function, 1, 1, 3),
+        make_sym("Second", SymbolType::Function, 1, 5, 7),
+    };
+    auto pre = rt.process_file(1, "a.go", before, {}, {});
+    ASSERT_EQ(pre.size(), 2u);
+    std::vector<SymbolID> pre_ids;
+    for (const auto& s : pre) pre_ids.push_back(s.id);
+
+    rt.clear();
+
+    std::vector<Symbol> after = {
+        make_sym("Third", SymbolType::Function, 1, 1, 3),
+        make_sym("Fourth", SymbolType::Function, 1, 5, 7),
+    };
+    auto post = rt.process_file(1, "a.go", after, {}, {});
+    ASSERT_EQ(post.size(), 2u);
+
+    for (const auto& s : post) {
+        for (SymbolID old_id : pre_ids) {
+            EXPECT_NE(s.id, old_id)
+                << "symbol id " << s.id << " was recycled across clear()";
+        }
+        EXPECT_GT(s.id, pre_ids.back());
+    }
+}
+
 TEST(ReferenceTrackerTest, SymbolHandleRetainsTemporaryPinnedSnapshot) {
     ReferenceTracker rt;
     std::vector<Symbol> symbols = {

@@ -9,6 +9,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
@@ -1039,6 +1040,113 @@ TEST(MasterIndexTest, ReindexKeepsFileIdsMonotonicAndUnaliased) {
     ASSERT_NE(c_id, FileID{0});
     EXPECT_NE(c_id, a_id);
     EXPECT_GT(c_id, b_id);
+}
+
+// -- Reindex window: prior generation stays live until the single publish ------
+
+// Root cause 1: index_directory used to clear() every sub-index BEFORE
+// opening the bulk window, so each clear published an empty RCU snapshot
+// and the live server answered "symbol not found" for the whole reindex.
+// The clear belongs on the commit path, inside the bulk window, where it
+// only ever touches unpublished staging.
+TEST(MasterIndexTest, ReindexKeepsPriorSnapshotReadableUntilPublish) {
+    TempDir dir;
+    dir.write_file("a.go", "package main\nfunc AlphaSymbol() {}\n");
+    dir.write_file("b.go", "package main\nfunc BetaSymbol() {}\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+    ASSERT_FALSE(mi.ref_tracker().pin()->find_symbols_by_name("AlphaSymbol").empty());
+
+    const uint64_t publishes_before = mi.snapshot_publish_count();
+    const int files_before = mi.file_count();
+
+    int hook_calls = 0;
+    bool symbol_visible_mid_run = false;
+    int files_mid_run = 0;
+    uint64_t publishes_mid_run = 0;
+    mi.set_post_parse_hook([&] {
+        ++hook_calls;
+        symbol_visible_mid_run =
+            !mi.ref_tracker().pin()->find_symbols_by_name("AlphaSymbol").empty();
+        files_mid_run = mi.file_count();
+        publishes_mid_run = mi.snapshot_publish_count();
+    });
+
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    EXPECT_EQ(hook_calls, 1);
+    EXPECT_TRUE(symbol_visible_mid_run)
+        << "the prior generation's symbols vanished during the reindex";
+    EXPECT_EQ(files_mid_run, files_before)
+        << "the prior file snapshot was dropped during the reindex";
+    EXPECT_EQ(publishes_mid_run, publishes_before)
+        << "the reindex published a generation before it committed";
+    EXPECT_EQ(mi.snapshot_publish_count(), publishes_before + 1)
+        << "a reindex must publish exactly one snapshot";
+}
+
+// Root cause 2: after request_stop the partially drained buffer was still
+// integrated and published, and index_directory returned true -- a
+// cancelled reindex was indistinguishable from a complete one. Cancel must
+// report failure and leave the prior generation exactly as it was.
+TEST(MasterIndexTest, CancelledReindexReturnsFalseAndKeepsPriorGeneration) {
+    TempDir dir;
+    dir.write_file("a.go", "package main\nfunc AlphaSymbol() {}\n");
+    dir.write_file("b.go", "package main\nfunc BetaSymbol() {}\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    const int files_before = mi.file_count();
+    const uint64_t publishes_before = mi.snapshot_publish_count();
+    ASSERT_GT(files_before, 0);
+
+    // Cancel while the run is in flight: the hook fires on the indexing
+    // thread with the parse done and the commit not yet started.
+    mi.set_post_parse_hook([&] { mi.request_stop(); });
+
+    EXPECT_FALSE(mi.index_directory(dir.path().string()))
+        << "a cancelled reindex must not report success";
+    EXPECT_EQ(mi.file_count(), files_before)
+        << "a cancelled reindex replaced the published generation";
+    EXPECT_FALSE(mi.ref_tracker().pin()->find_symbols_by_name("AlphaSymbol").empty())
+        << "a cancelled reindex dropped the prior generation's symbols";
+    EXPECT_EQ(mi.snapshot_publish_count(), publishes_before)
+        << "a cancelled reindex published a snapshot";
+    EXPECT_FALSE(mi.is_indexing());
+}
+
+// Root cause 4: nothing unwound is_indexing_ or the bulk window, so an
+// exception escaping the run (directory_iterator, generated-artifact
+// probing) left is_indexing_=1 forever and every later reindex returned
+// false. The hook throw stands in for any such throw.
+TEST(MasterIndexTest, ThrowDuringReindexUnwindsIndexingStateAndAllowsRetry) {
+    TempDir dir;
+    dir.write_file("a.go", "package main\nfunc AlphaSymbol() {}\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+    const int files_before = mi.file_count();
+
+    mi.set_post_parse_hook([] { throw std::runtime_error("scanner blew up"); });
+    EXPECT_THROW(mi.index_directory(dir.path().string()), std::runtime_error);
+
+    EXPECT_FALSE(mi.is_indexing())
+        << "the failed run left the index permanently marked as indexing";
+    EXPECT_EQ(mi.file_count(), files_before)
+        << "the failed run damaged the published generation";
+
+    mi.set_post_parse_hook(nullptr);
+    EXPECT_TRUE(mi.index_directory(dir.path().string()))
+        << "no later reindex could run after the throw";
+    EXPECT_FALSE(mi.ref_tracker().pin()->find_symbols_by_name("AlphaSymbol").empty());
 }
 
 }  // namespace
