@@ -2,7 +2,7 @@
   "result": {
     "content": [
       {
-        "text": "{\"results\":[{\"file\":\"a.go\",\"hits\":[{\"exported\":true,\"id\":\"B\",\"line\":3,\"match\":\"Add\",\"sym\":\"Add\",\"text\":\"func Add(a, b int) int { return a + b }\",\"type\":\"function\"}]},{\"file\":\"b.py\",\"hits\":[{\"callers\":1,\"exported\":true,\"id\":\"C\",\"line\":1,\"match\":\"add\",\"sym\":\"add\",\"text\":\"def add(a: int, b: int) -> int:\",\"type\":\"function\"}]},{\"file\":\"c.cpp\",\"hits\":[{\"exported\":true,\"id\":\"E\",\"line\":1,\"match\":\"add\",\"sym\":\"add\",\"text\":\"int add(int a, int b) { return a + b; }\",\"type\":\"function\"}]},{\"file\":\"d.rs\",\"hits\":[{\"exported\":true,\"id\":\"D\",\"line\":1,\"match\":\"add\",\"sym\":\"add\",\"type\":\"function\"}]}],\"showing\":4,\"total_matches\":4}",
+        "text": "{\"results\":[{\"file\":\"b.py\",\"hits\":[{\"callers\":1,\"exported\":true,\"id\":\"C\",\"line\":1,\"match\":\"add\",\"sym\":\"add\",\"text\":\"def add(a: int, b: int) -> int:\",\"type\":\"function\"}]},{\"file\":\"c.cpp\",\"hits\":[{\"exported\":true,\"id\":\"E\",\"line\":1,\"match\":\"add\",\"sym\":\"add\",\"text\":\"int add(int a, int b) { return a + b; }\",\"type\":\"function\"}]},{\"file\":\"d.rs\",\"hits\":[{\"exported\":true,\"id\":\"D\",\"line\":1,\"match\":\"add\",\"sym\":\"add\",\"text\":\"pub fn add(a: i32, b: i32) -> i32 { a + b }\",\"type\":\"function\"}]},{\"file\":\"a.go\",\"hits\":[{\"exported\":true,\"id\":\"B\",\"line\":3,\"match\":\"Add\",\"sym\":\"Add\",\"type\":\"function\"}]}],\"showing\":4,\"total_matches\":4}",
         "type": "text"
       }
     ]
