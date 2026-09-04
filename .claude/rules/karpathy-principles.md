@@ -15,6 +15,24 @@ LCI's reason to exist is sub-millisecond semantic code search with 79.8% context
 - "Faster than I expected" is not a measurement. Numbers in the PR/commit/Dart comment, or it didn't happen.
 - Stability: 10/10 stable runs minimum on parity tests before marking Done.
 - Floor check: full non-parity unit suite must hold or improve vs prior iteration baseline. Regressions block merge.
+- An **inherited** baseline — one measured by an earlier attempt, a dead agent's transcript, or a
+  sibling slice — is legitimate evidence, but only when it is DISCLOSED as inherited and the
+  conditions are stated: same corpus, same pre-change tree, run count and spread, and a delta at
+  least an order of magnitude above that spread. Re-measuring is the default; reusing is the
+  exception you write down. Silently presenting an inherited number as freshly measured denies the
+  reviewer the one check that makes it sound. Here: 3 pre-change runs spanning 0.4% (172.4-173.1 MB)
+  carried a +110 MB delta, disclosed in the comment and validated by the reviewer.
+  <!-- written_at: 2026-09-04T15:00:00Z  source_event: task:01M1NCSJ31MG00VGMWRSRS88J1, comment:01M1PBKWV6TNCGS700RY105RKD, comment:01M1PD8VGXBQWQDC2YP4JKAPV6 -->
+- **A correct fix can falsify a justification written in another file.** The caller-audit clause
+  (rule 3) covers a caller that cancels your fix; this is its mirror — your fix silently invalidates
+  a documented premise somewhere outside your `fileScope`, and nothing fails. Any change to what a
+  resource IS (file-backed vs anonymous, borrowed vs owned, cached vs recomputed) obliges a grep for
+  the prose that reasons about that property, and a report on every site the change makes false.
+  Here `a9bf1ac` moved content from mmap to heap, falsifying `src/server/server.cpp:97-101`
+  ("since the content store retains file-backed mmaps, VmRSS counts page-cache pages the kernel
+  reclaims on its own") and the sibling rationale at `include/lci/config.h:75` — the RssAnon self-cap
+  now bounds bytes it was written to exclude (filed: `01M1PE7698726F1P9QQMTQ5FT1`).
+  <!-- written_at: 2026-09-04T15:00:00Z  source_event: task:01M1NCSJ31MG00VGMWRSRS88J1, comment:01M1PE4T1Y319BETECJGPYKCW5, git:a9bf1ac -->
 
 ### 2. No allocation in inner loops
 - Pre-size containers. Reserve `std::vector` / `std::string` capacity from known bounds.
