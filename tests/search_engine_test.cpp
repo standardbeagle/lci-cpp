@@ -1157,5 +1157,46 @@ TEST(SearchHandlerFilesOutput, NoDuplicatePathsWhenRankedRowsInterleave) {
         << "unique_files disagrees with the emitted list";
 }
 
+// Criterion 5, second half: a synonym-expanded hit must rank BELOW an
+// original-pattern hit.
+//
+// Provenance already reaches the engine -- expand_pattern_semantic hands the
+// handler a per-pattern synonym flag vector, which the handler forwards to the
+// multi-pattern search() overload. Pre-fix that flag was used for ONE thing,
+// forcing case-insensitivity on expanded patterns; it never reached scoring.
+// So a well-placed synonym hit outscored a poorly-placed hit on the word the
+// user actually typed.
+TEST(SearchEngineRanking, SynonymHitRanksBelowOriginalPatternHit) {
+    TempDir dir;
+    // The synonym hit is deliberately the higher-QUALITY match: whole word, at
+    // line start, exact case. The original-pattern hit is a mid-token
+    // substring. Quality alone would therefore rank the synonym first.
+    dir.write_file("a.go",
+        "  x = maybe_login_here\n"  // line 1: 'login' substring, low quality
+        "signin = 1\n");            // line 2: 'signin' word+start+case, high
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    SearchEngine engine(mi);
+    SearchOptions opts;
+    opts.case_insensitive = false;
+
+    // patterns[0] is what the user typed; patterns[1] is synonym-expanded.
+    std::vector<std::string> patterns{"login", "signin"};
+    std::vector<bool> synonym_flags{false, true};
+
+    auto results = engine.search(patterns, synonym_flags, opts);
+    ASSERT_EQ(2u, results.size());
+
+    EXPECT_EQ(1, results[0].line)
+        << "the original-pattern hit (line 1) must rank first even though the "
+           "synonym hit (line 2) is the better-placed match; got line "
+        << results[0].line;
+    EXPECT_EQ(2, results[1].line);
+}
+
 }  // namespace
 }  // namespace lci
