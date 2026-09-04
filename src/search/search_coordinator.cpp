@@ -80,8 +80,18 @@ bool line_is_comment_only(std::string_view line, LangId lang) {
     switch (lang) {
         case LangId::Python:
         case LangId::Ruby:
-        case LangId::PHP:
+            // Neither language gives '#' a second meaning: outside a string
+            // literal a leading '#' is always a comment, and "#[" is not a
+            // construct in either, so "#[x]" really is an ordinary comment.
             if (trimmed.front() == '#') return true;
+            break;
+        case LangId::PHP:
+            // PHP 8.0 gave "#[" to ATTRIBUTES. `#[Route('/x')]` is code, and
+            // often the only place a route name appears, so treating it as a
+            // comment deletes it. A plain '#' line is still a comment.
+            if (trimmed.front() == '#' && trimmed.substr(0, 2) != "#[") {
+                return true;
+            }
             break;
         default:
             break;
@@ -117,6 +127,19 @@ bool line_is_comment_only(std::string_view line, LangId lang) {
     // caller asked for, which is a wrong answer. Only the second kind is a
     // defect worth trading correctness for, so the tie always breaks toward
     // keeping the line.
+    //
+    // Three further cases this predicate cannot decide from one line, all of
+    // them the same shape -- the marker is real but the surrounding construct
+    // changes its meaning:
+    //   - A '#' or '//' line inside a multi-line string or heredoc is string
+    //     CONTENT. Measured: 139 '//'-leading lines across .py files in this
+    //     repo outside build/ (dotnet codegen under .work/smoke-corpora
+    //     emitting C from Python), every one dropped today.
+    //   - A '#' line in the HTML body of a .php/.phtml template, i.e. outside
+    //     any <?php block, is literal output rather than a comment.
+    //   - The block-comment continuation described above.
+    // All three need to know what encloses the line, so they belong to the
+    // parse-based replacement rather than a further heuristic clause.
     //
     // Deciding the continuation case properly needs the enclosing comment
     // span, which the index does not retain: tree-sitter comment nodes are
