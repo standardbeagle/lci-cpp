@@ -485,8 +485,7 @@ ToolResult handle_search(const nlohmann::json& params,
         // "C:/repo/internal" on Windows, so front()=='/' recognised only the
         // first and a Windows caller's absolute path fell through as a
         // literal prefix that matched nothing.
-        if (!options.path_scope.empty() &&
-            std::filesystem::path(options.path_scope).is_absolute()) {
+        if (is_absolute_scope(options.path_scope)) {
             std::string root = indexer.config().project.root;
             std::replace(root.begin(), root.end(), '\\', '/');
             if (options.path_scope == root) {

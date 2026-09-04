@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <filesystem>
 #include <map>
 #include <string>
 #include <vector>
@@ -40,6 +41,19 @@ bool comma_list_contains(const std::string& list, const std::string& item);
 /// Fuzzy near-miss suggestions for an empty symbol lookup (cold path).
 nlohmann::json similar_symbol_suggestions(
     const ReferenceTracker::Snapshot& rt_snap, const std::string& query);
+
+/// True when a caller-supplied path scope is absolute, in either spelling.
+///
+/// Both tests are needed. std::filesystem::path::is_absolute() is false on
+/// Windows for "/foo" — no drive letter makes it root-relative to the current
+/// drive, not absolute — so a POSIX-spelled scope would slip through as a
+/// relative path and match nothing instead of erroring. A bare front()=='/'
+/// misses "C:/repo". Scopes reach this already folded to '/'.
+inline bool is_absolute_scope(const std::string& p) {
+    if (p.empty()) return false;
+    if (p.front() == '/') return true;
+    return std::filesystem::path(p).is_absolute();
+}
 
 /// get_context param canonicalization, shared with tool registration.
 bool normalize_context_params(nlohmann::json& params);

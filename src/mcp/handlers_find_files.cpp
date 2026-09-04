@@ -146,7 +146,7 @@ ToolResult handle_find_files(const nlohmann::json& params,
     // on Windows, so front()=='/' recognised only the first and a Windows
     // caller's absolute path fell through as a literal prefix that matched
     // nothing. is_absolute() covers both spellings.
-    if (!directory.empty() && std::filesystem::path(directory).is_absolute()) {
+    if (is_absolute_scope(directory)) {
         std::string root_generic = proj_root;
         std::replace(root_generic.begin(), root_generic.end(), '\\', '/');
         if (directory == root_generic) {
