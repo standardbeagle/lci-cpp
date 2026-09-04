@@ -410,7 +410,8 @@ int Client::mcp_dispatch(const std::string& line, std::string& response_out,
                          std::string& error) {
 #ifdef _WIN32
     if (!valid_tcp_address(socket_path_)) {
-        error = "invalid server address: " + socket_path_;
+        error = "failed to connect to server at " + socket_path_ +
+                ": invalid address";
         return -1;
     }
     httplib::Client cli("http://" + socket_path_);
@@ -441,7 +442,8 @@ std::optional<nlohmann::json> Client::post_json(const std::string& path,
 #ifdef _WIN32
     // On Windows, socket_path_ is "127.0.0.1:<port>" for TCP transport.
     if (!valid_tcp_address(socket_path_)) {
-        error = "invalid server address: " + socket_path_;
+        error = "failed to connect to server at " + socket_path_ +
+                ": invalid address";
         return std::nullopt;
     }
     httplib::Client cli("http://" + socket_path_);
@@ -484,7 +486,8 @@ std::optional<nlohmann::json> Client::get_json(const std::string& path,
                                                std::string& error) {
 #ifdef _WIN32
     if (!valid_tcp_address(socket_path_)) {
-        error = "invalid server address: " + socket_path_;
+        error = "failed to connect to server at " + socket_path_ +
+                ": invalid address";
         return std::nullopt;
     }
     httplib::Client cli("http://" + socket_path_);
