@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <lci/core/file_content_store.h>
+#include <lci/core/file_service.h>
 #include <lci/core/mmap.h>
 #include <lci/core/portable.h>
 
@@ -628,6 +629,44 @@ TEST(FileContentStoreTest, GetLineAndGetLineViewAgreeOnCrlf) {
             << "line " << line << " kept its CR";
     }
     EXPECT_EQ(std::string(store.get_line_view(id, 0)), "one");
+}
+
+// Truncating an indexed file in place must not fault the reader and must not
+// change what the store returns. The store owns a copy of the bytes taken at
+// index time; a writer that shrinks the file afterwards (VS Code save, `git
+// checkout` to a shorter file, `> file`) cannot reach through into the
+// store's memory. When the store RETAINED the read-time mmap, reading past
+// the new EOF raised SIGBUS and killed the process.
+TEST(FileContentStore, TruncateInPlaceAfterIndexDoesNotFault) {
+    const size_t kSize = 8192;  // two pages
+    std::string path =
+        (std::filesystem::temp_directory_path() /
+         ("lci_fcs_truncate_" + std::to_string(lci::portable::process_id()) +
+          ".txt"))
+            .string();
+    {
+        std::ofstream out(path, std::ios::binary);
+        out << std::string(kSize, 'z');
+    }
+
+    FileService svc;
+    auto loaded = svc.load_file_from_disk(path);
+    ASSERT_TRUE(loaded.has_value());
+    FileID id = loaded.value();
+
+    std::filesystem::resize_file(path, 10);
+
+    std::string_view content = svc.store().get_content(id);
+    ASSERT_EQ(content.size(), kSize);
+    // Touch every byte: with a retained mapping the pages past the new EOF
+    // raise SIGBUS here.
+    size_t zs = 0;
+    for (char c : content) {
+        if (c == 'z') ++zs;
+    }
+    EXPECT_EQ(zs, kSize) << "stored bytes changed when the file was truncated";
+
+    std::remove(path.c_str());
 }
 
 }  // namespace

@@ -3,7 +3,13 @@
 #include <lci/core/file_service.h>
 #include <lci/core/line_scanner.h>
 
+#include <cstdio>
+#include <filesystem>
+#include <fstream>
 #include <string>
+#include <vector>
+
+#include <lci/core/portable.h>
 
 namespace lci {
 namespace {
@@ -328,6 +334,39 @@ TEST(FileServiceTest, SharedContentStore) {
     // Verify the store is shared.
     EXPECT_EQ(store->get_file_count(), 1);
     EXPECT_EQ(store->get_content(result.value()), "content");
+}
+
+// A file that cannot be opened mid-batch must be REPORTED, not silently
+// skipped: batch_load_from_disk used to return 0 for the failed slot and drop
+// the error, so an indexing run over a corpus with unreadable paths reported
+// success.
+TEST(FileServiceTest, BatchLoadReportsOpenFailure) {
+    FileService svc;
+
+    std::string good =
+        (std::filesystem::temp_directory_path() /
+         ("lci_fs_batch_good_" + std::to_string(lci::portable::process_id()) +
+          ".txt"))
+            .string();
+    {
+        std::ofstream out(good, std::ios::binary);
+        out << "hello\n";
+    }
+    const std::string missing =
+        (std::filesystem::temp_directory_path() /
+         "lci_fs_batch_definitely_missing_file.txt")
+            .string();
+
+    std::vector<Error> failures;
+    auto ids = svc.batch_load_from_disk({good, missing}, &failures);
+
+    ASSERT_EQ(ids.size(), 2u);
+    EXPECT_NE(ids[0], FileID{0});
+    EXPECT_EQ(ids[1], FileID{0});
+    ASSERT_EQ(failures.size(), 1u);
+    EXPECT_EQ(failures[0].file_path, missing);
+
+    std::remove(good.c_str());
 }
 
 }  // namespace
