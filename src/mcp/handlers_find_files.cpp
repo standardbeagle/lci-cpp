@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <filesystem>
 #include <functional>
 #include <map>
 #include <string>
@@ -76,6 +77,11 @@ ToolResult handle_find_files(const nlohmann::json& params,
     // carry the name across tools.
     auto directory = params.value("directory", "");
     if (directory.empty()) directory = params.value("path", "");
+    // One generic spelling at the boundary. Every comparison below — and
+    // every indexed path — uses '/', so a Windows caller sending
+    // "internal\api" or "C:\repo\internal" must be folded here or it
+    // matches nothing and returns a silent 0.
+    std::replace(directory.begin(), directory.end(), '\\', '/');
     bool include_hidden = params.value("include_hidden", false);
     int max_results = params.value("max", 50);
     max_results = clamp_int(max_results, 1, 200);
@@ -119,13 +125,11 @@ ToolResult handle_find_files(const nlohmann::json& params,
     // mark every file "hidden", and directory= / glob patterns are written
     // by callers against the repo layout, not the machine's filesystem.
     const std::string& proj_root = indexer.config().project.root;
+    // Shared with search rather than reimplemented here: the prefix compare
+    // has to tolerate a native-spelled root against generic indexed paths
+    // (see relative_to_root), and a second copy of that rule drifts.
     auto rel_of = [&proj_root](const std::string& abs) -> std::string {
-        if (!proj_root.empty() && abs.size() > proj_root.size() &&
-            abs.compare(0, proj_root.size(), proj_root) == 0 &&
-            abs[proj_root.size()] == '/') {
-            return abs.substr(proj_root.size() + 1);
-        }
-        return abs;
+        return std::string(relative_to_root(abs, proj_root));
     };
 
     // Normalize the directory scope the same way search's path= does:
@@ -138,12 +142,19 @@ ToolResult handle_find_files(const nlohmann::json& params,
         directory.pop_back();
     }
     if (directory == ".") directory.clear();
-    if (!directory.empty() && directory.front() == '/') {
-        if (directory == proj_root) {
+    // An absolute scope reads "/repo/internal" on POSIX but "C:/repo/internal"
+    // on Windows, so front()=='/' recognised only the first and a Windows
+    // caller's absolute path fell through as a literal prefix that matched
+    // nothing. is_absolute() covers both spellings.
+    if (!directory.empty() && std::filesystem::path(directory).is_absolute()) {
+        std::string root_generic = proj_root;
+        std::replace(root_generic.begin(), root_generic.end(), '\\', '/');
+        if (directory == root_generic) {
             directory.clear();
         } else {
-            auto rel = relative_to_root(directory, proj_root);
-            if (!rel.empty() && rel.front() == '/') {
+            auto rel = relative_to_root(directory, root_generic);
+            // Unchanged means it does not live under the project root.
+            if (rel.size() == directory.size()) {
                 return make_error_response(
                     "find_files",
                     "directory must be project-root-relative (or an "
