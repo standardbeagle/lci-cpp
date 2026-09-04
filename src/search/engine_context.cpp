@@ -57,31 +57,43 @@ int ContextExtractor::find_function_start(
     return start;
 }
 
+std::string_view ContextExtractor::resolve_content(
+    FileID file_id, std::string_view content) const {
+    // A caller-held buffer wins over the store: it is the same bytes without
+    // a second lookup, and for an LRU-evicted file it is the only copy left.
+    if (!content.empty()) return content;
+    return store_.get_content(file_id);
+}
+
 SearchContext ContextExtractor::extract(
     FileID file_id,
     const std::vector<BlockBoundary>& blocks,
     int match_line,
-    int max_context_lines) const {
+    int max_context_lines,
+    std::string_view content) const {
+
+    content = resolve_content(file_id, content);
 
     if (max_context_lines == 0 && !blocks.empty()) {
-        return extract_block_context(file_id, blocks, match_line);
+        return extract_block_context(file_id, blocks, match_line, content);
     }
 
     if (max_context_lines > 0 && !blocks.empty()) {
         return extract_function_context(file_id, blocks, match_line,
-                                         max_context_lines);
+                                         max_context_lines, content);
     }
 
     int ctx_lines = (max_context_lines > 0) ? max_context_lines
                                              : default_context_lines_;
-    return extract_line_context(file_id, match_line, ctx_lines);
+    return extract_line_context(file_id, match_line, ctx_lines, content);
 }
 
 SearchContext ContextExtractor::extract_line_context(
-    FileID file_id, int match_line, int num_lines) const {
+    FileID file_id, int match_line, int num_lines,
+    std::string_view content) const {
 
     SearchContext ctx;
-    auto content = store_.get_content(file_id);
+    content = resolve_content(file_id, content);
     if (content.empty()) return ctx;
 
     auto lines = split_lines(content);
@@ -113,12 +125,13 @@ SearchContext ContextExtractor::extract_line_context(
 SearchContext ContextExtractor::extract_block_context(
     FileID file_id,
     const std::vector<BlockBoundary>& blocks,
-    int match_line) const {
+    int match_line,
+    std::string_view content) const {
 
-    auto content = store_.get_content(file_id);
+    content = resolve_content(file_id, content);
     if (content.empty()) {
         return extract_line_context(file_id, match_line,
-                                     default_context_lines_ * 2);
+                                     default_context_lines_ * 2, content);
     }
 
     auto lines = split_lines(content);
@@ -136,14 +149,14 @@ SearchContext ContextExtractor::extract_block_context(
 
     if (!best) {
         return extract_line_context(file_id, match_line,
-                                     default_context_lines_ * 2);
+                                     default_context_lines_ * 2, content);
     }
 
     // Reject unreasonably large blocks (likely parser error).
     int block_length = best->end - best->start + 1;
     if (block_length > 500) {
         return extract_line_context(file_id, match_line,
-                                     default_context_lines_ * 2);
+                                     default_context_lines_ * 2, content);
     }
 
     int start = best->start;
@@ -166,11 +179,12 @@ SearchContext ContextExtractor::extract_function_context(
     FileID file_id,
     const std::vector<BlockBoundary>& blocks,
     int match_line,
-    int /*max_context_lines*/) const {
+    int /*max_context_lines*/,
+    std::string_view content) const {
 
-    auto content = store_.get_content(file_id);
+    content = resolve_content(file_id, content);
     if (content.empty()) {
-        return extract_line_context(file_id, match_line, 5);
+        return extract_line_context(file_id, match_line, 5, content);
     }
 
     auto lines = split_lines(content);

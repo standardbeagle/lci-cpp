@@ -62,23 +62,34 @@ class ContextExtractor {
                               int default_context_lines = kDefaultContextLines);
 
     /// Extracts context around a match line with default options.
+    ///
+    /// `content` is the file's bytes when the caller already holds them.
+    /// Pass it whenever possible: it skips a redundant store read on the hot
+    /// path, and it is the ONLY way to get context for a file whose bytes
+    /// were LRU-evicted from the store but which is still a search candidate
+    /// (SearchEngine::process_file reloads such a file into a request-local
+    /// buffer). Left empty, every helper below falls back to the store and an
+    /// evicted file silently yields an empty context block.
     SearchContext extract(FileID file_id,
                           const std::vector<BlockBoundary>& blocks,
                           int match_line,
-                          int max_context_lines) const;
+                          int max_context_lines,
+                          std::string_view content = {}) const;
 
     /// Extracts block-aware context using block boundaries.
     SearchContext extract_block_context(
         FileID file_id,
         const std::vector<BlockBoundary>& blocks,
-        int match_line) const;
+        int match_line,
+        std::string_view content = {}) const;
 
     /// Extracts function context with padding around match.
     SearchContext extract_function_context(
         FileID file_id,
         const std::vector<BlockBoundary>& blocks,
         int match_line,
-        int max_context_lines) const;
+        int max_context_lines,
+        std::string_view content = {}) const;
 
   private:
     const FileContentStore& store_;
@@ -87,7 +98,12 @@ class ContextExtractor {
     /// Extracts simple line-range context.
     SearchContext extract_line_context(FileID file_id,
                                        int match_line,
-                                       int num_lines) const;
+                                       int num_lines,
+                                       std::string_view content = {}) const;
+
+    /// Returns `content` when non-empty, otherwise the store's copy.
+    std::string_view resolve_content(FileID file_id,
+                                     std::string_view content) const;
 
     /// Splits content into lines.
     std::vector<std::string_view> split_lines(std::string_view content) const;

@@ -419,6 +419,24 @@ std::vector<SearchResult> SearchEngine::search(
         return {};
     }
 
+    // Fail fast on an uncompilable regex. Without this the pattern is handed
+    // to find_content_matches, which fails to compile it once per candidate
+    // file and returns no matches -- the caller then cannot distinguish a
+    // broken query from an absent one (Karpathy rule 6). Compiling here also
+    // means the per-file cache only ever sees patterns known to be good.
+    if (options.use_regex) {
+        RE2::Options ro(RE2::Quiet);
+        ro.set_log_errors(false);
+        ro.set_case_sensitive(!options.case_insensitive);
+        RE2 probe(pattern, ro);
+        if (!probe.ok()) {
+            if (stats != nullptr) {
+                stats->error = "invalid regex: " + probe.error();
+            }
+            return {};
+        }
+    }
+
     // Karpathy rule 2: build path-filter regexes once per call, not per file.
     auto path_filter = make_path_filter(options);
     if (!path_filter.error.empty()) {
@@ -537,9 +555,14 @@ std::vector<SearchResult> SearchEngine::search(
         }
     }
 
-    // Score and rank results.
+    // Score and rank results. process_file has already seeded each row with
+    // its match-quality bonus (word boundary / line start / exact case) --
+    // the only place the match's byte range and the file's bytes are both in
+    // hand -- so this ADDS the file-and-pattern component rather than
+    // overwriting it. Overwriting is what made every hit for one pattern in
+    // one file tie, leaving rank() to order them positionally.
     for (auto& r : results) {
-        r.score = score_result(r, pattern);
+        r.score += score_result(r, pattern);
     }
 
     SearchCoordinator::rank(results);
@@ -932,13 +955,26 @@ void SearchEngine::process_file(
 
         SearchContext ctx;
         if (options.max_context_lines > 0) {
+            // Hand over the bytes we already hold. Re-resolving by FileID
+            // costs a second store read, and for a file reloaded above after
+            // LRU eviction the store has nothing to return -- the row would
+            // carry a match with an empty context block.
             ctx = context_extractor_.extract(file_id, blocks, line,
-                                              options.max_context_lines);
+                                              options.max_context_lines,
+                                              content_sv);
         }
+
+        // Match-quality bonus, seeded here because this is the only point
+        // where the match offsets and the file bytes are both available.
+        // kBaseMatchScore is subtracted out: score_result contributes it once,
+        // in SearchEngine::search.
+        double quality = calculate_match_quality(content_sv, match.start,
+                                                 match.end, pattern) -
+                         kBaseMatchScore;
 
         results.push_back(SearchResult{
             file_id, std::string(path), line, col,
-            std::move(match_text), 0.0, std::move(ctx)});
+            std::move(match_text), quality, std::move(ctx)});
     }
 }
 
