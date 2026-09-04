@@ -47,6 +47,27 @@ int search_line_end(std::string_view content, int offset) {
     return len;
 }
 
+bool line_is_comment_only(std::string_view line) {
+    size_t i = 0;
+    while (i < line.size() &&
+           std::isspace(static_cast<unsigned char>(line[i]))) {
+        ++i;
+    }
+    if (i >= line.size()) return false;
+    std::string_view trimmed = line.substr(i);
+    while (!trimmed.empty() &&
+           std::isspace(static_cast<unsigned char>(trimmed.back()))) {
+        trimmed.remove_suffix(1);
+    }
+    if (trimmed.empty()) return false;
+
+    if (trimmed.substr(0, 2) == "//") return true;
+    if (trimmed.front() == '#') return true;
+    if (trimmed.substr(0, 2) == "/*") return true;
+    if (trimmed.find("*/") != std::string_view::npos) return true;
+    return false;
+}
+
 bool is_word_character(char c) {
     auto u = static_cast<unsigned char>(c);
     return (u >= 'a' && u <= 'z') || (u >= 'A' && u <= 'Z') ||

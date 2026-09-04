@@ -16,8 +16,6 @@
 #include <absl/container/flat_hash_map.h>
 #include <absl/container/flat_hash_set.h>
 #include <nlohmann/json-schema.hpp>
-#include <rapidfuzz/distance/Levenshtein.hpp>
-#include <re2/re2.h>
 
 #include <lci/analysis/side_effect_analyzer.h>
 #include <lci/core/context_lookup.h>

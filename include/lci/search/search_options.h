@@ -227,6 +227,16 @@ int search_line_end(std::string_view content, int offset);
 /// Returns true if the byte is a word character (alphanumeric or underscore).
 bool is_word_character(char c);
 
+/// Returns true if `line` carries nothing but a comment.
+///
+/// Backs SearchOptions::exclude_comments. Deliberately the same rule the CLI
+/// applies in src/cli/grep_filters.cpp (line_looks_like_comment) so `flags=nc`
+/// over MCP and `--comments`-style filtering over the CLI agree: leading `//`,
+/// `#` or `/*`, or a line containing `*/`. A code line with a TRAILING comment
+/// is not comment-only and is kept. The two copies exist because the CLI's
+/// lives in a private src/cli header; they are meant to converge on this one.
+bool line_is_comment_only(std::string_view line);
+
 /// Returns true if there is a word boundary at the given position.
 bool is_word_boundary(std::string_view content, int pos);
 

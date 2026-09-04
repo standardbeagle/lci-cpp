@@ -468,7 +468,11 @@ std::vector<SearchResult> SearchEngine::search(
     // regex queries we must scan all indexed files because the literal
     // shortlist cannot represent character classes / anchors.
     std::vector<FileID> candidates;
-    if (options.use_regex) {
+    if (options.use_regex || options.invert_match) {
+        // Invert reports the lines that do NOT match, so a file containing no
+        // match at all contributes every one of its lines -- exactly the files
+        // the trigram shortlist is designed to exclude. Scoping invert to the
+        // candidate set would drop them silently (rg -v does not).
         candidates = index_.get_all_file_ids();
     } else {
         // find_candidate_files returns the certified scan set: every file
@@ -913,7 +917,9 @@ void SearchEngine::process_file(
             effective_cap - static_cast<int>(results.size());
     }
     auto matches = find_matches(content_sv, pattern, scan_options);
-    if (matches.empty()) return;
+    // Invert reports non-matching lines, so a file with zero matches is the
+    // most productive input there is -- it contributes all of its lines.
+    if (matches.empty() && !options.invert_match) return;
 
     // Block-aware context is not yet wired; context_extractor falls back to
     // line-window extraction with an empty block list. (Previously this fetched
@@ -939,6 +945,67 @@ void SearchEngine::process_file(
     int cursor_line_start = 0;
     const int content_len = static_cast<int>(content_sv.size());
 
+    // Returns the text of the line starting at `line_start`, newline trimmed.
+    auto line_text_at = [&](int line_start) -> std::string_view {
+        int end = line_start;
+        while (end < content_len && content_sv[static_cast<size_t>(end)] != '\n') {
+            ++end;
+        }
+        if (end > line_start &&
+            content_sv[static_cast<size_t>(end - 1)] == '\r') {
+            --end;
+        }
+        return content_sv.substr(static_cast<size_t>(line_start),
+                                 static_cast<size_t>(end - line_start));
+    };
+
+    if (options.invert_match) {
+        // Mark every line carrying a match, then emit the rest. One forward
+        // pass each, no per-line allocation (Karpathy rule 2).
+        absl::flat_hash_set<int> matching_lines;
+        matching_lines.reserve(matches.size());
+        for (const auto& match : matches) {
+            int ms = match.start < 0 ? 0 : match.start;
+            if (ms > content_len) ms = content_len;
+            for (; cursor < ms; ++cursor) {
+                if (content_sv[static_cast<size_t>(cursor)] == '\n') {
+                    ++cursor_line;
+                }
+            }
+            matching_lines.insert(cursor_line);
+        }
+
+        int line_no = 1;
+        int line_start = 0;
+        for (int i = 0; i <= content_len; ++i) {
+            bool at_end = (i == content_len);
+            if (!at_end && content_sv[static_cast<size_t>(i)] != '\n') continue;
+            if (at_end && i == line_start) break;  // no trailing partial line
+
+            if (effective_cap > 0 &&
+                static_cast<int>(results.size()) >= effective_cap) {
+                return;
+            }
+            if (!matching_lines.contains(line_no)) {
+                auto text = line_text_at(line_start);
+                if (!options.exclude_comments || !line_is_comment_only(text)) {
+                    SearchContext ctx;
+                    if (options.max_context_lines > 0) {
+                        ctx = context_extractor_.extract(
+                            file_id, blocks, line_no,
+                            options.max_context_lines, content_sv);
+                    }
+                    results.push_back(SearchResult{
+                        file_id, std::string(path), line_no, 0,
+                        std::string(text), 0.0, std::move(ctx)});
+                }
+            }
+            ++line_no;
+            line_start = i + 1;
+        }
+        return;
+    }
+
     for (const auto& match : matches) {
         if (effective_cap > 0 &&
             static_cast<int>(results.size()) >= effective_cap) {
@@ -957,6 +1024,13 @@ void SearchEngine::process_file(
 
         if (seen_lines.contains(line)) continue;
         seen_lines.insert(line);
+
+        // A comment-only line is dropped; a code line with a TRAILING comment
+        // is kept, matching the CLI's rule.
+        if (options.exclude_comments &&
+            line_is_comment_only(line_text_at(cursor_line_start))) {
+            continue;
+        }
 
         int col = match_start - cursor_line_start;
 
