@@ -348,12 +348,23 @@ SearchEngine::SearchEngine(MasterIndex& index, const SynonymTable& synonyms)
 
 // Root-relative view of an absolute indexed path. Returns `abs` unchanged
 // when it does not live under `root`.
+//
+// The two sides reach here in different spellings on Windows: indexed paths
+// are generic (the scanner stores generic_string()), while `root` carries
+// whatever the platform handed us — config.project.root from a CLI arg, or a
+// caller pasting "C:\repo\internal" back out of another tool. A byte-equal
+// prefix compare then misses and every path stays absolute, which silently
+// broke directory scopes, hidden-file detection and glob filters. Compare
+// separator-insensitively so a native root still strips a generic path.
 std::string_view relative_to_root(std::string_view abs, std::string_view root) {
-    if (!root.empty() && abs.size() > root.size() &&
-        abs.substr(0, root.size()) == root && abs[root.size()] == '/') {
-        return abs.substr(root.size() + 1);
+    if (root.empty() || abs.size() <= root.size()) return abs;
+    auto sep = [](char c) { return c == '/' || c == '\\'; };
+    for (size_t i = 0; i < root.size(); ++i) {
+        if (abs[i] == root[i]) continue;
+        if (!sep(abs[i]) || !sep(root[i])) return abs;
     }
-    return abs;
+    if (!sep(abs[root.size()])) return abs;
+    return abs.substr(root.size() + 1);
 }
 
 namespace {
