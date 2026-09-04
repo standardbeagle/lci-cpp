@@ -555,10 +555,12 @@ TEST(GitProvider, GetFileContentWorkingRefusesPathTraversal) {
                                         .count()));
     fs::path repo = base / "repo";
     fs::create_directories(repo);
-    std::ofstream(repo / "inside.txt") << "inside\n";
+    // Binary mode: a text-mode stream writes CRLF on Windows and the exact
+    // content assertion below then fails on the line ending, not the guard.
+    std::ofstream(repo / "inside.txt", std::ios::binary) << "inside\n";
     // A real, readable file OUTSIDE the repo: the refusal below is about
     // confinement, not absence.
-    std::ofstream(base / "secret.txt") << "outside\n";
+    std::ofstream(base / "secret.txt", std::ios::binary) << "outside\n";
     ASSERT_TRUE(lci::test::run_git(repo, "init -q"));
 
     Provider p;
