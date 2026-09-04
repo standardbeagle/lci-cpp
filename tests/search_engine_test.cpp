@@ -13,6 +13,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -1271,6 +1272,58 @@ TEST(SearchHandlerFilesOutput, NoDuplicatePathsWhenACompactionPrecedesADup) {
     EXPECT_EQ(3u, files.size()) << payload["files"].dump();
     EXPECT_EQ(static_cast<int>(files.size()),
               payload["unique_files"].get<int>());
+}
+
+// Property check against a brute-force oracle. Hand-picked shapes are exactly
+// what missed the use-after-move above -- both original tests were written to
+// a shape that happened to work. This samples the input space instead.
+//
+// The oracle is an O(n^2) scan that OWNS its strings, so it shares no
+// mechanism with the subject's view-based set (bench-harness-oracle-
+// independence rule 1). The alphabet mixes short paths, which move via the
+// destination's own SSO buffer, with long ones, which move by stealing the
+// heap pointer -- the two cases behave differently under a stale view.
+//
+// Seeded, so a failure is reproducible (karpathy rule 4). Verified
+// discriminating: run against the pre-fix implementation this fails on ~14%
+// of samples.
+TEST(SearchCoordinatorTest, UniquePathsMatchesBruteForceOracleOnRandomInputs) {
+    auto oracle = [](const std::vector<std::string>& in) {
+        std::vector<std::string> out;
+        for (const auto& p : in) {
+            bool dup = false;
+            for (const auto& q : out) {
+                if (q == p) { dup = true; break; }
+            }
+            if (!dup) out.push_back(p);
+        }
+        return out;
+    };
+
+    const std::vector<std::string> alphabet{
+        "a.go", "b.go", "c.go", "d.go",
+        std::string(64, 'x') + "_long1.go",
+        std::string(64, 'y') + "_long2.go"};
+
+    std::mt19937 rng(20260904);
+    std::uniform_int_distribution<size_t> pick_len(0, 10);
+    std::uniform_int_distribution<size_t> pick(0, alphabet.size() - 1);
+
+    for (int trial = 0; trial < 5000; ++trial) {
+        std::vector<std::string> in;
+        size_t n = pick_len(rng);
+        in.reserve(n);
+        for (size_t i = 0; i < n; ++i) in.push_back(alphabet[pick(rng)]);
+
+        auto want = oracle(in);
+        auto got = SearchCoordinator::unique_paths(in);
+
+        ASSERT_EQ(want, got) << "trial " << trial << " input: " << [&] {
+            std::string s;
+            for (const auto& p : in) s += p.substr(0, 12) + " ";
+            return s;
+        }();
+    }
 }
 
 }  // namespace

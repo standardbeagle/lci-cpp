@@ -261,12 +261,31 @@ std::vector<std::string> SearchCoordinator::unique_paths(
     seen.reserve(paths.size());
 
     // Compact in place: no second buffer, and each survivor is moved rather
-    // than copied. The views point into `paths` entries at indices below
-    // `keep`, which are never written again.
+    // than copied.
+    //
+    // Order matters. The seen-set holds views, so a view must be taken from
+    // the slot the survivor ENDS UP in, never from the slot it came from:
+    // taking it before the move leaves it pointing at a moved-from string, and
+    // a later duplicate then goes unrecognized. (For short paths the move
+    // copies into the destination's own SSO buffer and abandons the source's,
+    // so the stale view reads moved-from bytes rather than the path.)
+    //
+    // Why a view of paths[keep] stays valid for the rest of the scan: `keep`
+    // only ever increases, and the sole write is to paths[keep] immediately
+    // before it is incremented, so every subsequent write lands on a strictly
+    // greater index. The vector never grows, so no write reallocates and
+    // element addresses are stable. The closing resize() only destroys indices
+    // at or above the final `keep`, and every registered view sits below it.
+    //
+    // Costs one extra lookup per survivor (contains, then insert). That is
+    // paid once per query over at most a page of rows, and correctness here is
+    // not negotiable: reading moved-from state would make the output depend on
+    // unspecified values (karpathy rule 4).
     size_t keep = 0;
     for (size_t i = 0; i < paths.size(); ++i) {
-        if (!seen.insert(std::string_view(paths[i])).second) continue;
+        if (seen.contains(std::string_view(paths[i]))) continue;
         if (keep != i) paths[keep] = std::move(paths[i]);
+        seen.insert(std::string_view(paths[keep]));
         ++keep;
     }
     paths.resize(keep);
