@@ -1,12 +1,35 @@
 #include <lci/server/client.h>
 
 #include <algorithm>
+#include <cctype>
 
 #include <httplib.h>
 
 #include <thread>
 
 namespace lci {
+
+#ifdef _WIN32
+namespace {
+// Windows transport is loopback TCP "host:<numeric port>". Constructing an
+// httplib::Client from any other spelling — a malformed port, or a stale
+// unix-socket PATH read out of a dead registry entry — crashes inside
+// httplib's URL parsing (observed as SEH 0xc0000005 on the CI leg).
+// Validate the shape and fail fast as "not reachable" instead.
+bool valid_tcp_address(const std::string& addr) {
+    auto colon = addr.rfind(':');
+    if (colon == std::string::npos || colon + 1 >= addr.size()) return false;
+    if (addr.find('/') != std::string::npos ||
+        addr.find('\\') != std::string::npos) {
+        return false;
+    }
+    for (size_t i = colon + 1; i < addr.size(); ++i) {
+        if (!std::isdigit(static_cast<unsigned char>(addr[i]))) return false;
+    }
+    return true;
+}
+}  // namespace
+#endif
 
 Client::Client() : socket_path_(get_socket_path()) {}
 
@@ -386,6 +409,10 @@ void Client::set_timeout(std::chrono::milliseconds timeout) {
 int Client::mcp_dispatch(const std::string& line, std::string& response_out,
                          std::string& error) {
 #ifdef _WIN32
+    if (!valid_tcp_address(socket_path_)) {
+        error = "invalid server address: " + socket_path_;
+        return -1;
+    }
     httplib::Client cli("http://" + socket_path_);
 #else
     httplib::Client cli(socket_path_);
@@ -413,6 +440,10 @@ std::optional<nlohmann::json> Client::post_json(const std::string& path,
                                                 std::string& error) {
 #ifdef _WIN32
     // On Windows, socket_path_ is "127.0.0.1:<port>" for TCP transport.
+    if (!valid_tcp_address(socket_path_)) {
+        error = "invalid server address: " + socket_path_;
+        return std::nullopt;
+    }
     httplib::Client cli("http://" + socket_path_);
 #else
     httplib::Client cli(socket_path_);
@@ -452,6 +483,10 @@ std::optional<nlohmann::json> Client::post_json(const std::string& path,
 std::optional<nlohmann::json> Client::get_json(const std::string& path,
                                                std::string& error) {
 #ifdef _WIN32
+    if (!valid_tcp_address(socket_path_)) {
+        error = "invalid server address: " + socket_path_;
+        return std::nullopt;
+    }
     httplib::Client cli("http://" + socket_path_);
 #else
     httplib::Client cli(socket_path_);
