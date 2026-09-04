@@ -289,6 +289,10 @@ void SearchCoordinator::rank(std::vector<SearchResult>& results) {
     // multi-pattern path is hash order (Karpathy rule 4).
     std::sort(results.begin(), results.end(),
               [](const SearchResult& a, const SearchResult& b) {
+                  // Original-pattern rows before synonym-expanded ones, ahead
+                  // of score. A synonym is a guess about what the caller
+                  // meant; it must not displace a hit on what they wrote.
+                  if (a.from_synonym != b.from_synonym) return !a.from_synonym;
                   if (a.score != b.score) return a.score > b.score;
                   if (a.path != b.path) return a.path < b.path;
                   if (a.line != b.line) return a.line < b.line;

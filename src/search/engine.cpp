@@ -622,7 +622,9 @@ std::vector<SearchResult> SearchEngine::search(
         if (!synonym_flags.empty() && synonym_flags[0]) {
             SearchOptions po = options;
             po.case_insensitive = true;
-            return search(patterns[0], po, stats);
+            auto rs = search(patterns[0], po, stats);
+            for (auto& r : rs) r.from_synonym = true;
+            return rs;
         }
         return search(patterns[0], options, stats);
     }
@@ -680,7 +682,9 @@ std::vector<SearchResult> SearchEngine::search(
                 stats->error = sub_stats.error;
             }
         }
+        const bool is_synonym = i < synonym_flags.size() && synonym_flags[i];
         for (auto& r : rs) {
+            r.from_synonym = is_synonym;
             ResultKey k{r.file_id, r.line, r.match_text};
             auto it = acc.find(k);
             if (it == acc.end()) {
@@ -690,6 +694,10 @@ std::vector<SearchResult> SearchEngine::search(
                 if (r.score > it->second.result.score) {
                     it->second.result.score = r.score;
                 }
+                // A row reached by BOTH an original and an expanded pattern is
+                // an original-pattern hit: the caller's own word found it.
+                it->second.result.from_synonym =
+                    it->second.result.from_synonym && r.from_synonym;
             }
         }
     }

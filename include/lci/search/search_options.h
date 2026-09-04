@@ -209,6 +209,17 @@ struct SearchResult {
     std::string match_text;
     double score{};
     SearchContext context;
+
+    /// True when this row was produced by a SYNONYM-expanded pattern rather
+    /// than the pattern the caller typed. SearchCoordinator::rank orders
+    /// original-pattern rows ahead of synonym rows outright, ahead of score:
+    /// an expansion is a guess, and a well-placed guess must not outrank a
+    /// poorly-placed hit on the actual query. Ordering on provenance directly
+    /// rather than via a score penalty keeps the guarantee exact instead of
+    /// making it depend on the scoring constants staying in a particular
+    /// numeric relationship. Always false on the single-pattern path.
+    /// Declared last so the existing aggregate initializations stay valid.
+    bool from_synonym{false};
 };
 
 // -- Search-specific pure helper functions ------------------------------------
