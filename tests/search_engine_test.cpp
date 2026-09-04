@@ -3,6 +3,7 @@
 #include <lci/config.h>
 #include <lci/indexing/master_index.h>
 #include <lci/search/search_engine.h>
+#include <lci/search/symbol_type_alias.h>
 
 #include "unique_temp.h"
 
@@ -885,6 +886,90 @@ TEST(SearchEngineContext, EvictedFileStillGetsLineContext) {
     ASSERT_GE(after.size(), 1u) << "evicted file dropped out of results";
     EXPECT_FALSE(after[0].context.lines.empty())
         << "evicted file returned a match with empty context";
+}
+
+// Criterion 2: the MCP `search` tool description advertises short symbol-type
+// aliases (func, var, cls, ...), but the engine compared the caller's strings
+// verbatim against SymbolType names. Every advertised alias matched nothing,
+// and the caller got an empty result set plus a hint blaming its pattern.
+TEST(SearchSymbolTypeFilter, AliasReturnsSameSetAsCanonicalName) {
+    TempDir dir;
+    dir.write_file("a.go",
+        "package main\n"
+        "func Widget() {}\n"
+        "var Widgets = 1\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    SearchEngine engine(mi);
+
+    SearchOptions canonical;
+    canonical.symbol_types = {"function"};
+    auto by_canonical = engine.search("Widget", canonical);
+
+    SearchOptions alias;
+    alias.symbol_types = {"func"};
+    auto by_alias = engine.search("Widget", alias);
+
+    ASSERT_FALSE(by_canonical.empty())
+        << "control: symbol_types=function matched nothing, test is not "
+           "measuring the alias";
+    ASSERT_EQ(by_canonical.size(), by_alias.size());
+    for (size_t i = 0; i < by_canonical.size(); ++i) {
+        EXPECT_EQ(by_canonical[i].path, by_alias[i].path);
+        EXPECT_EQ(by_canonical[i].line, by_alias[i].line);
+    }
+}
+
+// Criterion 2, other half: an unknown symbol type is a caller mistake and must
+// be reported. Pre-fix it filtered every row away and returned zero matches --
+// the same answer as a correct query over an empty corpus.
+TEST(SearchSymbolTypeFilter, UnknownTypeIsAnErrorNotZeroResults) {
+    TempDir dir;
+    dir.write_file("a.go", "package main\nfunc Widget() {}\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    SearchEngine engine(mi);
+    SearchOptions opts;
+    opts.symbol_types = {"funtcion"};  // typo
+
+    SearchStats stats;
+    auto results = engine.search("Widget", opts, &stats);
+
+    EXPECT_TRUE(results.empty());
+    EXPECT_NE(stats.error.find("funtcion"), std::string::npos)
+        << "stats.error was: '" << stats.error << "'";
+    EXPECT_NE(stats.error.find("symbol_type"), std::string::npos)
+        << "stats.error was: '" << stats.error << "'";
+}
+
+// Alias canonicalization is a pure table lookup; pin it directly so a future
+// edit to the table cannot quietly drop an advertised alias.
+TEST(SymbolTypeAlias, CanonicalizesAdvertisedAliases) {
+    EXPECT_EQ("function", canonical_symbol_type("func"));
+    EXPECT_EQ("function", canonical_symbol_type("fn"));
+    EXPECT_EQ("function", canonical_symbol_type("def"));
+    EXPECT_EQ("variable", canonical_symbol_type("var"));
+    EXPECT_EQ("constant", canonical_symbol_type("const"));
+    EXPECT_EQ("class", canonical_symbol_type("cls"));
+    EXPECT_EQ("method", canonical_symbol_type("meth"));
+    EXPECT_EQ("interface", canonical_symbol_type("iface"));
+    // Canonical names pass through, case-insensitively.
+    EXPECT_EQ("function", canonical_symbol_type("Function"));
+    EXPECT_EQ("enum_member", canonical_symbol_type("ENUM_MEMBER"));
+    // Deliberate divergence from the tool description: `trait` is its own
+    // SymbolType, so it must NOT fold into `interface`.
+    EXPECT_EQ("trait", canonical_symbol_type("trait"));
+    // Unknown spellings are reported, never silently accepted.
+    EXPECT_TRUE(canonical_symbol_type("funtcion").empty());
+    EXPECT_TRUE(canonical_symbol_type("").empty());
 }
 
 }  // namespace
