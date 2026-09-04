@@ -231,9 +231,35 @@ jobs:
           & $spec.FullName
           if ($LASTEXITCODE -ne 0) { throw "spec_diff_unit_tests failed ($LASTEXITCODE)" }
 
+      # The only lci.exe that exists anywhere. No fleet machine can build it
+      # (MSVC + vcpkg live on this runner alone), and "Reclaim build space"
+      # deletes it seconds from now — so without this upload a green Windows
+      # leg proves the code compiles and leaves nothing to ship.
+      # deploy-lci.sh's header already tells operators to "pull the artifact
+      # from that CI leg"; this is the step that makes that true.
+      - name: Stage lci.exe
+        run: |
+          $exe = Get-ChildItem -Path build/release -Recurse -Filter lci.exe |
+                 Where-Object { $_.FullName -notmatch 'CMakeFiles' } |
+                 Select-Object -First 1
+          if (-not $exe) { throw "lci.exe not found under build/release" }
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item $exe.FullName dist/lci.exe
+          & dist/lci.exe --version
+
+      - name: Upload lci.exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: lci-windows-amd64
+          path: dist/lci.exe
+          retention-days: 14
+          if-no-files-found: error
+
       - name: Reclaim build space
         if: always()
-        run: if (Test-Path build/release) { Remove-Item -Recurse -Force build/release }
+        run: |
+          if (Test-Path build/release) { Remove-Item -Recurse -Force build/release }
+          if (Test-Path dist) { Remove-Item -Recurse -Force dist }
 
   # ---------------------------------------------------------------------------
   # macOS — GitHub-hosted, the ONLY billed runner (10x). Restricted to pushes
