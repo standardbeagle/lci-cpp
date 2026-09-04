@@ -434,7 +434,21 @@ void MasterIndex::reparse_file_symbols(const std::string& path, FileID file_id,
     }
 }
 
-bool MasterIndex::index_file(const std::string& path) {
+namespace {
+// file_map keys are generic forward-slash paths (the scanner stores
+// generic_string). Public path-taking entry points accept native spellings
+// (watcher events, CLI args on Windows) and normalize here so they address
+// the same keys instead of aliasing a second entry per file.
+std::string generic_path(std::string p) {
+#ifdef _WIN32
+    std::replace(p.begin(), p.end(), '\\', '/');
+#endif
+    return p;
+}
+}  // namespace
+
+bool MasterIndex::index_file(const std::string& path_arg) {
+    const std::string path = generic_path(path_arg);
     if (path.empty()) return false;
     if (!std::filesystem::exists(path)) return false;
     // Attribute gate, path-only: an attribute that does not activate Index
@@ -477,7 +491,9 @@ bool MasterIndex::index_file(const std::string& path) {
     return true;
 }
 
-bool MasterIndex::update_file(const std::string& path, std::string_view content) {
+bool MasterIndex::update_file(const std::string& path_arg,
+                              std::string_view content) {
+    const std::string path = generic_path(path_arg);
     if (path.empty() || content.empty()) return false;
     if (!std::filesystem::exists(path)) return false;
 
@@ -517,7 +533,8 @@ bool MasterIndex::update_file(const std::string& path, std::string_view content)
     return true;
 }
 
-bool MasterIndex::remove_file(const std::string& path) {
+bool MasterIndex::remove_file(const std::string& path_arg) {
+    const std::string path = generic_path(path_arg);
     // snapshot_mu_ serializes the whole composite write and spans the file_map
     // lookup so two concurrent removals can't both act on the same id. RCU
     // reads need no lock; the old IndexLockManager WriteGuards are retired.
