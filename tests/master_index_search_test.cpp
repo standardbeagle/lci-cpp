@@ -154,8 +154,11 @@ TEST(MasterIndexSearchIntegrationTest, SearchStillFindsEvictedFileContent) {
     ASSERT_GE(before.size(), 1u);
 
     // Simulate LRU eviction: content gone, file still searchable.
+    // The content store is keyed by the index's generic spelling (every
+    // production caller comes through MasterIndex::remove_file, which
+    // normalizes first), so a native path here would silently miss.
     mi.file_content_store().invalidate_file(
-        (dir.path() / "main.go").string());
+        (dir.path() / "main.go").generic_string());
     ASSERT_TRUE(mi.file_content_store()
                     .get_content(before[0].file_id)
                     .empty());
@@ -839,7 +842,10 @@ TEST(MasterIndexSearchIntegrationTest, SearchAfterSingleFileIndex) {
     auto results = mi.search("singleSearch", 0);
     EXPECT_GE(results.size(), 1u);
     if (!results.empty()) {
-        EXPECT_EQ(file_path, results[0].path);
+        // index_file accepts a native spelling and normalizes it; results
+        // come back in the index's generic spelling, so compare against that.
+        EXPECT_EQ(std::filesystem::path(file_path).generic_string(),
+                  results[0].path);
     }
 }
 

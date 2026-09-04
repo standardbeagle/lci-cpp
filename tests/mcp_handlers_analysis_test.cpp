@@ -1787,8 +1787,11 @@ class ErrorHandlingSectionTest : public ::testing::Test {
         engine_ = std::make_unique<CodebaseIntelligenceEngine>();
 
         analyzer_ = std::make_unique<SideEffectAnalyzer>("go");
-        std::string main_path = (temp_dir_ / "main.go").string();
-        std::string test_path = (temp_dir_ / "util_test.go").string();
+        // generic_string(), not string(): the extractor feeds the analyzer
+        // the index's generic spelling, so a native path here would key the
+        // findings under a name the report can never join back.
+        std::string main_path = (temp_dir_ / "main.go").generic_string();
+        std::string test_path = (temp_dir_ / "util_test.go").generic_string();
 
         analyzer_->begin_function("swallowIt", main_path, 3, 4);
         CatchSiteInfo site;
