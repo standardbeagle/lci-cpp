@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <memory>
+#include <vector>
 
 #include <lci/config.h>
 #include <lci/core/file_service.h>
@@ -32,7 +33,21 @@ class Pipeline {
 
     /// Runs the full pipeline: scan, process, integrate.
     /// Blocks until all stages complete or the pipeline is stopped.
+    /// Equivalent to scan_and_parse() followed by integrate() when the scan
+    /// succeeded and no stop was requested.
     void run();
+
+    /// Stage 1+2 only: scan the corpus and parse every file into an internal
+    /// buffer. Writes NOTHING into the trigram/reference/postings indexes —
+    /// that is integrate()'s job. Splitting the two lets a caller keep the
+    /// previously published generation intact for the whole (long) parse
+    /// phase and clear the sub-indexes only once the run is known to commit.
+    void scan_and_parse();
+
+    /// Stage 3: drain the buffer built by scan_and_parse() into the indexes.
+    /// Idempotent-by-consumption: the buffer is emptied, so a second call
+    /// integrates nothing.
+    void integrate();
 
     /// Records side effects during extraction into `target` (see
     /// FileProcessor::set_side_effect_target). Set before run().
@@ -72,6 +87,9 @@ class Pipeline {
 
     ProgressTracker progress_;
     FileIntegrator integrator_;
+    /// Parsed-but-not-yet-integrated results, sorted by file_id by
+    /// scan_and_parse() so symbol_id assignment follows scan order.
+    std::vector<ProcessedFile> buffered_;
     std::atomic<bool> stop_flag_{false};
     std::string scan_error_;
 };

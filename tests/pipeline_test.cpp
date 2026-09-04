@@ -936,6 +936,35 @@ TEST(PipelineTest, RunsThreeStages) {
     EXPECT_GE(p.files_processed, 2);
 }
 
+// Pins the run()/integrate() split: scanning and parsing must write
+// NOTHING into the indexes, so a caller can hold the previous generation
+// live for the whole parse phase and commit only when the run succeeds.
+TEST(PipelineTest, ScanAndParseBuffersWithoutIntegrating) {
+    TempDir dir;
+    dir.write_file("main.go", "package main\nfunc main() {}\n");
+    dir.write_file("lib.go", "package lib\nfunc Helper() {}\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+
+    auto store = std::make_shared<FileContentStore>();
+    auto file_service = std::make_shared<FileService>(store);
+    TrigramIndex trigram_idx;
+    ReferenceTracker ref_tracker;
+    PostingsIndex postings_idx;
+
+    Pipeline pipeline(cfg, file_service, &trigram_idx,
+                      &ref_tracker, &postings_idx);
+    pipeline.scan_and_parse();
+
+    EXPECT_TRUE(pipeline.integrator().file_map().empty())
+        << "scan_and_parse must not integrate";
+    EXPECT_EQ(pipeline.integrator().file_count(), 0);
+
+    pipeline.integrate();
+    EXPECT_GE(pipeline.integrator().file_count(), 2);
+}
+
 TEST(PipelineTest, ProgressReportsCompletion) {
     TempDir dir;
     dir.write_file("a.go", "package a\nfunc A() {}\n");

@@ -22,6 +22,13 @@ Pipeline::Pipeline(const Config& config,
       integrator_(trigram_index, ref_tracker, postings_index) {}
 
 void Pipeline::run() {
+    scan_and_parse();
+    if (!scan_error_.empty()) return;
+    if (stop_flag_.load(std::memory_order_acquire)) return;
+    integrate();
+}
+
+void Pipeline::scan_and_parse() {
     const auto t_start = std::chrono::steady_clock::now();
 
     // Stage 1: Scan files.
@@ -131,7 +138,7 @@ void Pipeline::run() {
     // assignment in ref_tracker.process_file follows the same scan
     // order. This mirrors Go's reference indexer ordering and keeps
     // HTTP / MCP responses bit-stable across runs.
-    std::vector<ProcessedFile> buffered;
+    buffered_.clear();
     {
         ProcessedFile result;
         while (result_queue.pop(result)) {
@@ -167,7 +174,7 @@ void Pipeline::run() {
                 progress_.add_error(std::move(warn));
             }
 
-            buffered.push_back(std::move(result));
+            buffered_.push_back(std::move(result));
         }
     }
 
@@ -175,30 +182,24 @@ void Pipeline::run() {
     // closes result_queue after joining them).
     const auto t_parsed = std::chrono::steady_clock::now();
 
-    std::sort(buffered.begin(), buffered.end(),
+    std::sort(buffered_.begin(), buffered_.end(),
               [](const ProcessedFile& a, const ProcessedFile& b) {
                   return a.file_id < b.file_id;
               });
 
-    for (auto& result : buffered) {
-        integrator_.integrate_file(result);
-        progress_.increment_integrated();
-    }
-
     // One line per bulk index: the stage wall split is the first question
     // every indexing-perf investigation asks, and reconstructing it from a
     // profiler costs an hour that this line costs never. parse here means
-    // the whole parallel phase (load + parse + extract + drain).
+    // the whole parallel phase (load + parse + extract + drain); integrate
+    // is reported separately by integrate(), which may never run (cancel).
     {
-        const auto t_done = std::chrono::steady_clock::now();
         auto secs = [](auto a, auto b) {
             return std::chrono::duration<double>(b - a).count();
         };
         std::fprintf(stderr,
-                     "lci: index stages: scan=%.1fs parse=%.1fs "
-                     "integrate=%.1fs files=%d\n",
+                     "lci: index stages: scan=%.1fs parse=%.1fs files=%d\n",
                      secs(t_start, t_scanned), secs(t_scanned, t_parsed),
-                     secs(t_parsed, t_done), file_count);
+                     file_count);
     }
 
     // On stop the integrator loop above breaks without draining, so
@@ -213,6 +214,23 @@ void Pipeline::run() {
 
     producer.join();
     process_thread.join();
+}
+
+void Pipeline::integrate() {
+    const auto t_start = std::chrono::steady_clock::now();
+    const int file_count = static_cast<int>(buffered_.size());
+
+    for (auto& result : buffered_) {
+        integrator_.integrate_file(result);
+        progress_.increment_integrated();
+    }
+    buffered_.clear();
+    buffered_.shrink_to_fit();
+
+    std::fprintf(stderr, "lci: index stages: integrate=%.1fs files=%d\n",
+                 std::chrono::duration<double>(
+                     std::chrono::steady_clock::now() - t_start).count(),
+                 file_count);
 }
 
 void Pipeline::request_stop() {
