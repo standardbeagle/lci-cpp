@@ -1326,5 +1326,69 @@ TEST(SearchCoordinatorTest, UniquePathsMatchesBruteForceOracleOnRandomInputs) {
     }
 }
 
+// Criterion 1 follow-up: line_is_comment_only keyed on a line CONTAINING
+// "*/", which is wrong in both directions.
+//
+// The damaging direction is the false positive: `int x = 1; /* note */` and a
+// string literal holding "*/" are real code, and flags=nc was deleting them
+// from the results. Dropping a line the caller asked for is a silent wrong
+// answer -- the same class this slice exists to remove -- and strictly worse
+// than keeping a comment line, which is merely noise.
+//
+// The false negative is a block-comment CONTINUATION line (" * text"), which
+// was kept because it starts with neither "//" nor "/*".
+//
+// A line that is prose inside a block comment and merely ends the block
+// ("  trailing prose */") is NOT decidable from the line alone -- it needs
+// cross-line state the search path does not carry. That residual false
+// negative is accepted deliberately: it keeps a comment line, it does not
+// delete code.
+TEST(CommentPredicate, KeepsCodeAndCatchesBlockContinuations) {
+    // Comment-only: dropped by flags=nc.
+    EXPECT_TRUE(line_is_comment_only("// line comment"));
+    EXPECT_TRUE(line_is_comment_only("   # hash comment"));
+    EXPECT_TRUE(line_is_comment_only("/* block opener */"));
+    EXPECT_TRUE(line_is_comment_only("  * continuation line"));
+    EXPECT_TRUE(line_is_comment_only("  */"));
+
+    // Code: must survive flags=nc.
+    EXPECT_FALSE(line_is_comment_only("int x = 1; /* trailing note */"))
+        << "a code line with a trailing block comment is not comment-only";
+    EXPECT_FALSE(line_is_comment_only("std::string s = \"*/\";"))
+        << "a string literal containing */ is not a comment";
+    EXPECT_FALSE(line_is_comment_only("int y = a / *b;"));
+    EXPECT_FALSE(line_is_comment_only("code(); // trailing line comment"));
+    EXPECT_FALSE(line_is_comment_only(""));
+    EXPECT_FALSE(line_is_comment_only("    "));
+}
+
+// The same, through the engine: a code line carrying a trailing block comment
+// must still be returned under exclude_comments.
+TEST(SearchFlagNoComments, KeepsCodeLinesWithTrailingBlockComments) {
+    TempDir dir;
+    dir.write_file("a.c",
+        "/* Widget opener */\n"        // 1 comment-only, matches
+        " * Widget continuation\n"     // 2 comment-only, matches
+        "int Widget = 1; /* keep */\n" // 3 CODE with trailing block comment
+        "const char* s = \"Widget */\";\n");  // 4 CODE, */ inside a string
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    SearchEngine engine(mi);
+    SearchOptions nc;
+    nc.case_insensitive = false;
+    nc.exclude_comments = true;
+    auto results = engine.search("Widget", nc);
+
+    std::vector<int> lines;
+    for (const auto& r : results) lines.push_back(r.line);
+    std::sort(lines.begin(), lines.end());
+    EXPECT_EQ((std::vector<int>{3, 4}), lines)
+        << "comment-only lines 1-2 must go; code lines 3-4 must stay";
+}
+
 }  // namespace
 }  // namespace lci
