@@ -1348,8 +1348,33 @@ TEST(CommentPredicate, KeepsCodeAndCatchesBlockContinuations) {
     EXPECT_TRUE(line_is_comment_only("// line comment"));
     EXPECT_TRUE(line_is_comment_only("   # hash comment"));
     EXPECT_TRUE(line_is_comment_only("/* block opener */"));
-    EXPECT_TRUE(line_is_comment_only("  * continuation line"));
     EXPECT_TRUE(line_is_comment_only("  */"));
+
+    // A leading '*' is a dereference or a continued expression far more often
+    // than it is a comment continuation. Measured over this repo's own
+    // sources: of the 25 lines under src/ and include/ whose trimmed form
+    // starts with '*', ALL 25 are code -- dereferences (*snapshot_.load(...),
+    // *error = "...") and one continued multiplication
+    // (* stats.confidence);, trigram_predictor.h:49). Classifying them as
+    // comments deletes code the caller asked for.
+    EXPECT_FALSE(line_is_comment_only("*ptr = 5;"))
+        << "a dereference is not a comment";
+    EXPECT_FALSE(line_is_comment_only("  *error = \"boom\";"))
+        << "a dereference is not a comment";
+    EXPECT_FALSE(line_is_comment_only("  *snapshot_.load(order));"))
+        << "a dereference is not a comment";
+    EXPECT_FALSE(line_is_comment_only("      * stats.confidence);"))
+        << "a continued multiplication is not a comment; this exact line is "
+           "real code at include/lci/alloc/trigram_predictor.h:49";
+
+    // ACCEPTED FALSE NEGATIVE, asserted so the behaviour is pinned rather than
+    // merely believed: a block-comment continuation is KEPT. It is textually
+    // identical to the continued expression above, so no per-line classifier
+    // can separate them -- deciding it needs the enclosing block state, which
+    // the search path does not carry. Keeping a comment line is noise;
+    // deleting a code line is a wrong answer, so the tie breaks this way.
+    EXPECT_FALSE(line_is_comment_only("  * continuation prose"))
+        << "accepted residual: indistinguishable from a continued expression";
 
     // Code: must survive flags=nc.
     EXPECT_FALSE(line_is_comment_only("int x = 1; /* trailing note */"))

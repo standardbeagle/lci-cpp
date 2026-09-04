@@ -38,6 +38,7 @@
 #endif
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <random>
 #include <set>
 #include <sstream>
@@ -389,34 +390,34 @@ HitSet naive_invert_hits(const TempCorpus& corpus, const std::string& pattern) {
     return hits;
 }
 
-/// Independent oracle for `flags=nc`: matching lines, minus lines that are
-/// nothing but a comment. Spelled out here rather than calling the production
-/// line_is_comment_only, so the checker cannot inherit that predicate's blind
-/// spots (bench-harness-oracle-independence rule 1).
-HitSet naive_no_comment_hits(const TempCorpus& corpus,
-                             const std::string& pattern) {
+/// Ground-truth comment labels for the flag corpus, keyed by path. Index i is
+/// line i+1.
+using CommentLabels = std::map<std::string, std::vector<bool>>;
+
+/// Oracle for `flags=nc`: matching lines, minus the lines a HUMAN classified as
+/// nothing-but-a-comment when writing the corpus.
+///
+/// This deliberately applies NO RULE. Two previous versions of this oracle
+/// restated the production predicate's rule of the day -- first `contains
+/// "*/"`, then `starts with '*'` -- and each time inherited exactly the blind
+/// spot it existed to catch, passing while the predicate deleted real code.
+/// A checker that re-derives the subject's rule has no discriminating power
+/// over that rule, however differently it is spelled. So the expected
+/// classification is DATA, fixed when the corpus line is written, and the
+/// comparison is against intent rather than against a reimplementation
+/// (bench-harness-oracle-independence rule 1).
+HitSet labeled_no_comment_hits(const TempCorpus& corpus,
+                               const CommentLabels& labels,
+                               const std::string& pattern) {
     HitSet hits;
     for (const auto& [rel, content] : corpus.files()) {
         auto lines = corpus_lines(content);
+        auto it = labels.find(rel);
         for (size_t i = 0; i < lines.size(); ++i) {
-            const std::string& raw = lines[i];
-            if (raw.find(pattern) == std::string::npos) continue;
-
-            size_t b = raw.find_first_not_of(" \t\r");
-            if (b == std::string::npos) continue;
-            size_t e = raw.find_last_not_of(" \t\r");
-            std::string t = raw.substr(b, e - b + 1);
-
-            // Comment-only means the line OPENS with a comment marker.
-            // An earlier version of this oracle asked whether the line
-            // CONTAINED "*/", which is the production predicate's own former
-            // rule -- so the oracle inherited exactly the blind spot it exists
-            // to catch, and agreed that `int x = 1; /* c */` was a comment.
-            // Independence has to cover the SPECIFICATION, not just the
-            // mechanism (bench-harness-oracle-independence rule 1).
-            bool comment_only = t.rfind("//", 0) == 0 || t[0] == '#' ||
-                                t.rfind("/*", 0) == 0 || t[0] == '*';
-            if (comment_only) continue;
+            if (lines[i].find(pattern) == std::string::npos) continue;
+            bool is_comment = it != labels.end() && i < it->second.size() &&
+                              it->second[i];
+            if (is_comment) continue;
             hits.emplace(rel, static_cast<int>(i) + 1);
         }
     }
@@ -472,31 +473,58 @@ HitSet engine_hits(const SearchEngine& engine, const std::string& root,
 /// A corpus with comment-only lines, trailing comments, and -- critically --
 /// a file containing NO occurrence of the pattern, which `rg -v` still reports
 /// in full.
-void build_flag_corpus(TempCorpus& corpus) {
+void build_flag_corpus(TempCorpus& corpus, CommentLabels& labels) {
+    // Each line carries a hand-assigned classification: is this line nothing
+    // but a comment? Assigned by reading the line, not by running any rule.
+    //
+    // Every line here is UNAMBIGUOUS on its own. A block-comment continuation
+    // (" * more prose") is deliberately absent: it is textually identical to a
+    // continued expression (" * stats.confidence);", real code in this repo),
+    // so no per-line classifier can separate them and putting both here with
+    // opposite labels would make the corpus unsatisfiable. That ambiguous case
+    // is pinned as an accepted residual in the unit tests instead.
     corpus.write_file("alpha.go",
         "package main\n"                       // 1 no match
-        "// Widget is the comment form\n"      // 2 comment-only, matches
-        "type Widget struct{}\n"               // 3 code, matches
+        "// Widget is the comment form\n"      // 2 comment
+        "type Widget struct{}\n"               // 3 code
         "func run() { use(Widget{}) } // Widget again\n"  // 4 code + trailing
         "var unrelated = 1\n");                // 5 no match
+    labels["alpha.go"] = {false, true, false, false, false};
+
     corpus.write_file("beta.py",
         "import os\n"                          // 1 no match
-        "# Widget helper\n"                    // 2 comment-only, matches
-        "class Widget:\n"                      // 3 code, matches
+        "# Widget helper\n"                    // 2 comment
+        "class Widget:\n"                      // 3 code
         "    pass\n");                         // 4 no match
+    labels["beta.py"] = {false, true, false, false};
+
     corpus.write_file("gamma.go",
         "package gamma\n"                      // 1 no match
         "func nothing() {}\n"                  // 2 no match
-        "var plain = 2\n");                    // 3 no match  (NO pattern here)
+        "var plain = 2\n");                    // 3 no match (NO pattern here)
+    labels["gamma.go"] = {false, false, false};
+
     corpus.write_file("delta.c",
-        "/* Widget block opener */\n"          // 1 comment-only, matches
-        "int Widget = 3;\n"                    // 2 code, matches
-        "int tail = 4; /* Widget */\n");       // 3 CODE + trailing block comment
+        "/* Widget block opener */\n"          // 1 comment
+        "int Widget = 3;\n"                    // 2 code
+        "int tail = 4; /* Widget */\n");       // 3 code + trailing block
+    labels["delta.c"] = {true, false, false};
+
+    // Leading-star lines. All CODE: a dereference and a continued
+    // multiplication. Both are shapes this repo actually contains.
+    corpus.write_file("epsilon.c",
+        "  *Widget = ptr;\n"                   // 1 code (dereference)
+        "  int n = (base\n"                    // 2 no match
+        "      * Widget);\n"                   // 3 code (continued expression)
+        "  const char* s = \"Widget */\";\n"   // 4 code (*/ inside a string)
+        "  */\n");                             // 5 comment (bare block close)
+    labels["epsilon.c"] = {false, false, false, false, true};
 }
 
 TEST(SearchRgDifferentialTest, InvertMatchEqualsInvertOracle) {
     TempCorpus corpus;
-    build_flag_corpus(corpus);
+    CommentLabels labels;
+    build_flag_corpus(corpus, labels);
 
     Config cfg = make_default_config();
     cfg.project.root = corpus.path().string();
@@ -537,7 +565,8 @@ TEST(SearchRgDifferentialTest, InvertMatchEqualsInvertOracle) {
 
 TEST(SearchRgDifferentialTest, ExcludeCommentsDropsCommentOnlyLines) {
     TempCorpus corpus;
-    build_flag_corpus(corpus);
+    CommentLabels labels;
+    build_flag_corpus(corpus, labels);
 
     Config cfg = make_default_config();
     cfg.project.root = corpus.path().string();
@@ -557,20 +586,27 @@ TEST(SearchRgDifferentialTest, ExcludeCommentsDropsCommentOnlyLines) {
     nc.case_insensitive = false;
     nc.exclude_comments = true;
     auto got = engine_hits(engine, cfg.project.root, pattern, nc);
-    auto want = naive_no_comment_hits(corpus, pattern);
+    auto want = labeled_no_comment_hits(corpus, labels, pattern);
 
     EXPECT_EQ(want, got)
         << "\n  want: " << describe(want) << "\n  got:  " << describe(got);
 
-    // Every comment-only line the plain search returned must be gone, and
-    // every code line must survive -- including one with a trailing comment.
+    // Spot checks in both directions, named so a failure says which.
     EXPECT_TRUE(got.count({"alpha.go", 2}) == 0) << "// comment-only kept";
     EXPECT_TRUE(got.count({"beta.py", 2}) == 0) << "# comment-only kept";
     EXPECT_TRUE(got.count({"delta.c", 1}) == 0) << "/* comment-only kept";
+    EXPECT_TRUE(got.count({"epsilon.c", 5}) == 0) << "bare */ close kept";
     EXPECT_TRUE(got.count({"alpha.go", 3}) == 1) << "code line dropped";
     EXPECT_TRUE(got.count({"alpha.go", 4}) == 1)
         << "code line with a TRAILING comment must be kept";
-    EXPECT_TRUE(got.count({"beta.py", 3}) == 1) << "code line dropped";
+    EXPECT_TRUE(got.count({"delta.c", 3}) == 1)
+        << "code line with a trailing BLOCK comment must be kept";
+    EXPECT_TRUE(got.count({"epsilon.c", 1}) == 1)
+        << "a dereference is not a comment";
+    EXPECT_TRUE(got.count({"epsilon.c", 3}) == 1)
+        << "a continued multiplication is not a comment";
+    EXPECT_TRUE(got.count({"epsilon.c", 4}) == 1)
+        << "a string literal containing */ is not a comment";
 }
 
 }  // namespace
