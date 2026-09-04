@@ -716,9 +716,9 @@ TEST(MasterIndexTest, RequestStopBeforeIndexingPersistsAndAbortsRun) {
     mi.request_stop();
     EXPECT_TRUE(mi.stop_requested());
 
-    // index_directory() still returns true (it ran), but the pipeline
-    // observed the pre-stop. Check that the integrated count is at
-    // most the scanned count and indexing finished cleanly.
+    // A stop requested BEFORE the run is stale by definition: the entry
+    // CAS clears it, so this run completes and reports success. Only a
+    // stop that lands while the run is in flight cancels it.
     EXPECT_TRUE(mi.index_directory(dir.path().string()));
     EXPECT_FALSE(mi.is_indexing());
 }

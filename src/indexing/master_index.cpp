@@ -14,6 +14,30 @@
 #include <fstream>
 
 namespace lci {
+namespace {
+
+/// Runs `f` on scope exit. Used to release the bulk indexing window and
+/// the is_indexing_ flag on every path out of index_directory(),
+/// exceptions included.
+template <class F>
+class ScopeExit {
+  public:
+    explicit ScopeExit(F f) : f_(std::move(f)) {}
+    ~ScopeExit() { f_(); }
+    ScopeExit(const ScopeExit&) = delete;
+    ScopeExit& operator=(const ScopeExit&) = delete;
+
+  private:
+    F f_;
+};
+
+template <class F>
+ScopeExit<F> make_scope_exit(F f) {
+    return ScopeExit<F>(std::move(f));
+}
+
+}  // namespace
+
 
 namespace {
 /// Same cap policy as the pipeline worker (pipeline_processor.cpp);
@@ -152,22 +176,32 @@ bool MasterIndex::index_directory(const std::string& root) {
 
     auto start = std::chrono::steady_clock::now();
 
-    // Clear existing data for a full reindex. The file content store is
-    // deliberately NOT cleared here: queries against the still-published
-    // old snapshot resolve FileIDs through it for the whole pipeline run,
-    // and FileIDs are path-stable (add_file reuses the existing id for a
-    // known path), so surviving files keep their ids and their content
-    // stays readable throughout the window. Prior-generation-only entries
-    // (deleted files, load failures) are pruned after the new snapshot is
-    // published — see retain_only below.
-    trigram_index_.clear();
-    ref_tracker_.clear();
-    postings_index_.clear();
-    symbol_location_index_.clear();
-    processed_files_.store(0, std::memory_order_release);
-    total_files_.store(0, std::memory_order_release);
+    // Unwind guard. Anything that escapes this body -- a throwing
+    // directory_iterator in the scanner, a generated-artifact probe, a
+    // bad_alloc mid-parse -- must still close the bulk window and release
+    // is_indexing_. Without it a single throw latched is_indexing_=1 and
+    // every later reindex returned false for the life of the process.
+    bool bulk_window_open = false;
+    auto unwind = make_scope_exit([&] {
+        if (bulk_window_open) set_bulk_indexing(false);
+        is_indexing_.store(0, std::memory_order_release);
+    });
 
+    // Open the bulk window BEFORE touching any sub-index. Each sub-index
+    // takes a private staging copy of its current generation and publishes
+    // nothing until the window closes, so every read during this run keeps
+    // answering from the previously published generation. The old order --
+    // clear() first, window second -- published four empty snapshots up
+    // front, which is why the live server answered "symbol not found" for
+    // the whole duration of a reindex.
+    //
+    // The file content store is deliberately left alone: queries against
+    // the still-published old snapshot resolve FileIDs through it, and
+    // FileIDs are path-stable, so surviving files keep their ids and their
+    // content stays readable throughout. Prior-generation-only entries are
+    // pruned after the new snapshot is published -- see retain_only below.
     set_bulk_indexing(true);
+    bulk_window_open = true;
 
     // Run the pipeline.
     Pipeline pipeline(config_, file_service_,
@@ -193,7 +227,10 @@ bool MasterIndex::index_directory(const std::string& root) {
         }
     }
 
-    pipeline.run();
+    // Scan + parse only: buffers ProcessedFile results, writes nothing
+    // into the indexes. Integration is a separate step below, reached
+    // only once the run is known to commit.
+    pipeline.scan_and_parse();
 
     {
         std::lock_guard<std::mutex> stop_lock(stop_mu_);
@@ -205,11 +242,32 @@ bool MasterIndex::index_directory(const std::string& root) {
     if (!pipeline.scan_error().empty()) {
         // Reject overflow policy: fail the run with the scanner's message
         // rather than publishing an empty index that looks like success.
+        // The guard closes the window, republishing the untouched clone of
+        // the prior generation.
         std::fprintf(stderr, "lci: %s\n", pipeline.scan_error().c_str());
-        set_bulk_indexing(false);
-        is_indexing_.store(0, std::memory_order_release);
         return false;
     }
+
+    if (stop_requested()) {
+        // Cancellation is a failure, not a shorter success. The buffered
+        // partial parse is discarded and nothing is cleared, so the
+        // previously published generation survives the run intact and the
+        // caller can tell a cancelled reindex from a complete one.
+        std::fprintf(stderr, "lci: index cancelled; keeping the previous "
+                             "index generation\n");
+        return false;
+    }
+
+    // -- Commit path ---------------------------------------------------------
+    // Past this point the run is known to succeed. Clearing here only
+    // empties the unpublished staging snapshots; readers still see the old
+    // generation until the window closes below.
+    trigram_index_.clear();
+    ref_tracker_.clear();
+    postings_index_.clear();
+    symbol_location_index_.clear();
+
+    pipeline.integrate();
 
     // Publish the symbol-location index now: the pipeline has fully populated
     // it, and process_all_references reads it (find_symbol_id_at_position) to
@@ -279,6 +337,7 @@ bool MasterIndex::index_directory(const std::string& root) {
                        std::memory_order_release);
 
     set_bulk_indexing(false);
+    bulk_window_open = false;
 
 #if defined(__GLIBC__)
     // Return freed arena to the OS. The parse stage's transient peak
@@ -295,7 +354,7 @@ bool MasterIndex::index_directory(const std::string& root) {
         std::chrono::duration_cast<std::chrono::nanoseconds>(elapsed).count(),
         std::memory_order_release);
 
-    is_indexing_.store(0, std::memory_order_release);
+    // is_indexing_ is released by the unwind guard.
     return true;
 }
 
