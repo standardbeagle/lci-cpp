@@ -990,8 +990,13 @@ TEST(SearchFlagNoComments, ExcludesCommentOnlyLines) {
         "package main\n"          // 1
         "// Config is a comment\n" // 2 comment-only, matches
         "var Config = 1\n"        // 3 code, matches
-        "  # Config hash\n"       // 4 comment-only, matches
-        "run(Config)  // Config\n");  // 5 code with trailing comment, matches
+        "run(Config)  // Config\n");  // 4 code with trailing comment, matches
+    // The '#' case belongs in a language where '#' actually opens a comment.
+    // Go has none: a '#' line in a .go file is not a comment (and would not
+    // compile), so asserting it away here was asserting the defect.
+    dir.write_file("b.py",
+        "# Config hash\n"         // 1 comment-only, matches
+        "Config = 2\n");          // 2 code, matches
 
     Config cfg = make_default_config();
     cfg.project.root = dir.path().string();
@@ -1002,18 +1007,24 @@ TEST(SearchFlagNoComments, ExcludesCommentOnlyLines) {
 
     SearchOptions all;
     auto every = engine.search("Config", all);
-    ASSERT_EQ(4u, every.size()) << "control: expected matches on lines 2,3,4,5";
+    ASSERT_EQ(5u, every.size())
+        << "control: a.go lines 2,3,4 and b.py lines 1,2";
 
     SearchOptions no_comments;
     no_comments.exclude_comments = true;
     auto kept = engine.search("Config", no_comments);
 
-    std::vector<int> lines;
-    for (const auto& r : kept) lines.push_back(r.line);
-    std::sort(lines.begin(), lines.end());
-    EXPECT_EQ((std::vector<int>{3, 5}), lines)
-        << "comment-only lines 2 and 4 must be dropped; a trailing comment on "
-           "a code line (5) must not drop the line";
+    std::vector<std::pair<std::string, int>> got;
+    for (const auto& r : kept) {
+        got.emplace_back(std::filesystem::path(r.path).filename().string(),
+                         r.line);
+    }
+    std::sort(got.begin(), got.end());
+    std::vector<std::pair<std::string, int>> want{
+        {"a.go", 3}, {"a.go", 4}, {"b.py", 2}};
+    EXPECT_EQ(want, got)
+        << "// comment-only and python '#' must be dropped; a trailing comment "
+           "on a code line must not drop the line";
 }
 
 // `iv` must behave like `rg -v`: every line that does NOT match, across the
@@ -1345,10 +1356,26 @@ TEST(SearchCoordinatorTest, UniquePathsMatchesBruteForceOracleOnRandomInputs) {
 // delete code.
 TEST(CommentPredicate, KeepsCodeAndCatchesBlockContinuations) {
     // Comment-only: dropped by flags=nc.
-    EXPECT_TRUE(line_is_comment_only("// line comment"));
-    EXPECT_TRUE(line_is_comment_only("   # hash comment"));
-    EXPECT_TRUE(line_is_comment_only("/* block opener */"));
-    EXPECT_TRUE(line_is_comment_only("  */"));
+    EXPECT_TRUE(line_is_comment_only("// line comment", LangId::Cpp));
+    EXPECT_TRUE(line_is_comment_only("   # hash comment", LangId::Python));
+    EXPECT_TRUE(line_is_comment_only("# note", LangId::Ruby));
+
+    // '#' is a preprocessor directive in the C family, not a comment. 2,345
+    // lines in this repo's own src/ and include/ start with '#' and every one
+    // is code, so an ungated rule deleted all of them under flags=nc.
+    EXPECT_FALSE(line_is_comment_only("#include <vector>", LangId::Cpp))
+        << "#include is a preprocessor directive";
+    EXPECT_FALSE(line_is_comment_only("#pragma once", LangId::Cpp))
+        << "#pragma is a preprocessor directive";
+    EXPECT_FALSE(line_is_comment_only("#endif", LangId::C))
+        << "#endif is a preprocessor directive";
+    // Unrecognized languages fall through to "not a comment" on purpose:
+    // Markdown is not in the language table and '#' opens a heading there,
+    // which is content the caller searched for.
+    EXPECT_FALSE(line_is_comment_only("# Heading", LangId::Unknown))
+        << "an unknown language must not have its '#' lines deleted";
+    EXPECT_TRUE(line_is_comment_only("/* block opener */", LangId::Cpp));
+    EXPECT_TRUE(line_is_comment_only("  */", LangId::Cpp));
 
     // A leading '*' is a dereference or a continued expression far more often
     // than it is a comment continuation. Measured over this repo's own
@@ -1357,13 +1384,13 @@ TEST(CommentPredicate, KeepsCodeAndCatchesBlockContinuations) {
     // *error = "...") and one continued multiplication
     // (* stats.confidence);, trigram_predictor.h:49). Classifying them as
     // comments deletes code the caller asked for.
-    EXPECT_FALSE(line_is_comment_only("*ptr = 5;"))
+    EXPECT_FALSE(line_is_comment_only("*ptr = 5;", LangId::Cpp))
         << "a dereference is not a comment";
-    EXPECT_FALSE(line_is_comment_only("  *error = \"boom\";"))
+    EXPECT_FALSE(line_is_comment_only("  *error = \"boom\";", LangId::Cpp))
         << "a dereference is not a comment";
-    EXPECT_FALSE(line_is_comment_only("  *snapshot_.load(order));"))
+    EXPECT_FALSE(line_is_comment_only("  *snapshot_.load(order);", LangId::Cpp))
         << "a dereference is not a comment";
-    EXPECT_FALSE(line_is_comment_only("      * stats.confidence);"))
+    EXPECT_FALSE(line_is_comment_only("      * stats.confidence);", LangId::Cpp))
         << "a continued multiplication is not a comment; this exact line is "
            "real code at include/lci/alloc/trigram_predictor.h:49";
 
@@ -1373,18 +1400,18 @@ TEST(CommentPredicate, KeepsCodeAndCatchesBlockContinuations) {
     // can separate them -- deciding it needs the enclosing block state, which
     // the search path does not carry. Keeping a comment line is noise;
     // deleting a code line is a wrong answer, so the tie breaks this way.
-    EXPECT_FALSE(line_is_comment_only("  * continuation prose"))
+    EXPECT_FALSE(line_is_comment_only("  * continuation prose", LangId::Cpp))
         << "accepted residual: indistinguishable from a continued expression";
 
     // Code: must survive flags=nc.
-    EXPECT_FALSE(line_is_comment_only("int x = 1; /* trailing note */"))
+    EXPECT_FALSE(line_is_comment_only("int x = 1; /* trailing note */", LangId::Cpp))
         << "a code line with a trailing block comment is not comment-only";
-    EXPECT_FALSE(line_is_comment_only("std::string s = \"*/\";"))
+    EXPECT_FALSE(line_is_comment_only("std::string s = \"*/\";", LangId::Cpp))
         << "a string literal containing */ is not a comment";
-    EXPECT_FALSE(line_is_comment_only("int y = a / *b;"));
-    EXPECT_FALSE(line_is_comment_only("code(); // trailing line comment"));
-    EXPECT_FALSE(line_is_comment_only(""));
-    EXPECT_FALSE(line_is_comment_only("    "));
+    EXPECT_FALSE(line_is_comment_only("int y = a / *b;", LangId::Cpp));
+    EXPECT_FALSE(line_is_comment_only("code(); // trailing line comment", LangId::Cpp));
+    EXPECT_FALSE(line_is_comment_only("", LangId::Cpp));
+    EXPECT_FALSE(line_is_comment_only("    ", LangId::Cpp));
 }
 
 // The same, through the engine: a code line carrying a trailing block comment

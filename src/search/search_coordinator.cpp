@@ -47,7 +47,7 @@ int search_line_end(std::string_view content, int offset) {
     return len;
 }
 
-bool line_is_comment_only(std::string_view line) {
+bool line_is_comment_only(std::string_view line, LangId lang) {
     size_t i = 0;
     while (i < line.size() &&
            std::isspace(static_cast<unsigned char>(line[i]))) {
@@ -64,8 +64,28 @@ bool line_is_comment_only(std::string_view line) {
     // A line is comment-only when it OPENS with a line/block comment marker,
     // or when it is exactly a block close.
     if (trimmed.substr(0, 2) == "//") return true;
-    if (trimmed.front() == '#') return true;
     if (trimmed.substr(0, 2) == "/*") return true;
+
+    // '#' is a comment ONLY where the language says so. Ungated, it matched
+    // every C and C++ preprocessor directive: measured over this repo's own
+    // src/ and include/ .cpp/.h files, 2,345 lines start with '#' and ALL
+    // 2,345 are code (1,996 #include, 121 #pragma, 78 #endif, plus
+    // #if/#ifdef/#define). `search pattern=include flags=nc` deleted every one.
+    //
+    // The allow-list is deliberate rather than a deny-list: an unrecognized
+    // language must fall through to "not a comment", because the failure modes
+    // are not symmetric. Markdown is the case that settles it -- '#' opens a
+    // heading, which is content the caller searched for, and .md is not in the
+    // language table at all, so a deny-list would delete it.
+    switch (lang) {
+        case LangId::Python:
+        case LangId::Ruby:
+        case LangId::PHP:
+            if (trimmed.front() == '#') return true;
+            break;
+        default:
+            break;
+    }
     // Exactly "*/" and nothing else. Not a prefix test: "*/" alone is not a
     // valid expression in any language indexed here, so this cannot fire on
     // code, while a leading-'*' test fires on code constantly (see below).

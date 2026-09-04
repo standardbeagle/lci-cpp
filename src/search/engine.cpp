@@ -917,6 +917,12 @@ void SearchEngine::process_file(
 
     if (options.exclude_tests && is_test_file(path)) return;
 
+    // Resolved once per file, not per match: '#' means a comment in some
+    // languages and a preprocessor directive in others, and the comment filter
+    // below needs to tell them apart. language_info_for_path is a constexpr
+    // table lookup on the extension, so this is a few byte compares.
+    const LangId file_lang = language_info_for_path(path).language;
+
     // Per-file collection bounded by the remaining collection budget, not
     // the hidden kMaxMatchesPerFile constant (silent 100-per-file cap).
     SearchOptions scan_options = options;
@@ -996,7 +1002,8 @@ void SearchEngine::process_file(
             }
             if (!matching_lines.contains(line_no)) {
                 auto text = line_text_at(line_start);
-                if (!options.exclude_comments || !line_is_comment_only(text)) {
+                if (!options.exclude_comments ||
+                    !line_is_comment_only(text, file_lang)) {
                     SearchContext ctx;
                     if (options.max_context_lines > 0) {
                         ctx = context_extractor_.extract(
@@ -1036,7 +1043,8 @@ void SearchEngine::process_file(
         // A comment-only line is dropped; a code line with a TRAILING comment
         // is kept, matching the CLI's rule.
         if (options.exclude_comments &&
-            line_is_comment_only(line_text_at(cursor_line_start))) {
+            line_is_comment_only(line_text_at(cursor_line_start),
+                                 file_lang)) {
             continue;
         }
 
