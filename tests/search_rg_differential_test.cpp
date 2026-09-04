@@ -512,6 +512,20 @@ void build_flag_corpus(TempCorpus& corpus, CommentLabels& labels) {
 
     // Leading-star lines. All CODE: a dereference and a continued
     // multiplication. Both are shapes this repo actually contains.
+    // The '#' language gate, both directions. The corpus previously had NO
+    // C-family '#' line at all, which is exactly why it could not see that
+    // every preprocessor directive was being classified as a comment.
+    corpus.write_file("zeta.cpp",
+        "#include <Widget.h>\n"                // 1 CODE (preprocessor)
+        "#pragma once\n"                       // 2 no match
+        "int Widget = 7;\n");                  // 3 code
+    labels["zeta.cpp"] = {false, false, false};
+
+    corpus.write_file("eta.py",
+        "# Widget note\n"                      // 1 comment ('#' IS a comment)
+        "Widget = 8\n");                       // 2 code
+    labels["eta.py"] = {true, false};
+
     corpus.write_file("epsilon.c",
         "  *Widget = ptr;\n"                   // 1 code (dereference)
         "  int n = (base\n"                    // 2 no match
@@ -607,6 +621,28 @@ TEST(SearchRgDifferentialTest, ExcludeCommentsDropsCommentOnlyLines) {
         << "a continued multiplication is not a comment";
     EXPECT_TRUE(got.count({"epsilon.c", 4}) == 1)
         << "a string literal containing */ is not a comment";
+    EXPECT_TRUE(got.count({"zeta.cpp", 1}) == 1)
+        << "#include is a preprocessor directive, not a comment";
+    EXPECT_TRUE(got.count({"eta.py", 2}) == 1) << "python code line dropped";
+    EXPECT_TRUE(got.count({"eta.py", 1}) == 0)
+        << "# IS a comment in python and must be dropped";
+
+    // Second query. The bare "*/" close on epsilon.c:5 contains no "Widget",
+    // so under the pattern above its label can never fire -- the clause had
+    // unit coverage only. Searching for "*/" itself makes that line, and every
+    // other line carrying the delimiter, live in the differential.
+    const std::string delim = "*/";
+    auto got_delim = engine_hits(engine, cfg.project.root, delim, nc);
+    auto want_delim = labeled_no_comment_hits(corpus, labels, delim);
+    EXPECT_EQ(want_delim, got_delim)
+        << "\n  want: " << describe(want_delim)
+        << "\n  got:  " << describe(got_delim);
+    EXPECT_TRUE(got_delim.count({"epsilon.c", 5}) == 0)
+        << "a bare */ close is comment-only and must be dropped";
+    EXPECT_TRUE(got_delim.count({"epsilon.c", 4}) == 1)
+        << "a string literal containing */ must survive";
+    EXPECT_TRUE(got_delim.count({"delta.c", 3}) == 1)
+        << "code with a trailing block comment must survive";
 }
 
 }  // namespace

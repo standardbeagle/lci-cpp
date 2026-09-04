@@ -1424,5 +1424,48 @@ TEST(SearchFlagNoComments, KeepsCodeLinesWithTrailingBlockComments) {
            "the accepted false negative";
 }
 
+// Criterion 1, fourth defect in this predicate: '#' was treated as a comment
+// marker in EVERY language. In C and C++ it opens a preprocessor directive.
+// Measured over this repo's own src/ and include/ .cpp/.h files: 2,345 lines
+// start with '#', and all 2,345 are code -- 1,996 #include, 121 #pragma, 78
+// #endif, plus #if/#ifdef/#define. So `search pattern=include flags=nc` was
+// deleting every one of them. Markdown headings fail the same way.
+TEST(SearchFlagNoComments, KeepsPreprocessorDirectivesInCFamilyFiles) {
+    TempDir dir;
+    dir.write_file("a.cpp",
+        "#include <Widget.h>\n"     // 1 CODE: preprocessor directive
+        "#pragma Widget once\n"     // 2 CODE: preprocessor directive
+        "int Widget = 1;\n"         // 3 CODE
+        "// Widget comment\n");     // 4 comment
+    // '#' really is a line comment here, so the gate must not over-correct.
+    dir.write_file("b.py",
+        "# Widget note\n"           // 1 comment
+        "Widget = 2\n");            // 2 CODE
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    SearchEngine engine(mi);
+    SearchOptions nc;
+    nc.case_insensitive = false;
+    nc.exclude_comments = true;
+    auto results = engine.search("Widget", nc);
+
+    std::vector<std::pair<std::string, int>> got;
+    for (const auto& r : results) {
+        got.emplace_back(std::filesystem::path(r.path).filename().string(),
+                         r.line);
+    }
+    std::sort(got.begin(), got.end());
+
+    std::vector<std::pair<std::string, int>> want{
+        {"a.cpp", 1}, {"a.cpp", 2}, {"a.cpp", 3}, {"b.py", 2}};
+    EXPECT_EQ(want, got)
+        << "C-family '#' lines are preprocessor directives and must survive; "
+           "python '#' is a comment and must be dropped";
+}
+
 }  // namespace
 }  // namespace lci
