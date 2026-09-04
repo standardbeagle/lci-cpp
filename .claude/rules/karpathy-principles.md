@@ -27,6 +27,20 @@ LCI's reason to exist is sub-millisecond semantic code search with 79.8% context
 - LCI is read-heavy. Hot reads use lock-free structures or RCU-style snapshots.
 - Mutex is acceptable on the indexing write path; never on `/search`, `/browse-file`, `/list-symbols`, `/references`, `/tree`, `/inspect-symbol`.
 - If you must lock on a read, prove it (benchmark, contention numbers) and document the trade in the file header.
+- A lock-free read path is only as good as its worst-published snapshot. `clear()` on any
+  RCU-backed store publishes an EMPTY generation the instant it runs — every concurrent
+  reader sees "not found", and search silently degrades to scan-all. Clear inside the bulk
+  window / on the commit path, never before it opens.
+  <!-- written_at: 2026-09-04T14:00:00Z  source_event: task:01M1NCSJ31P21DT2VVB2H0DSKS, git:15f8f52, git:8acde22 -->
+- **Audit every caller of an API you change, including the read-only ones your `fileScope`
+  excludes.** A caller that pre-clears, pre-locks, or pre-resets before calling the fixed API
+  cancels the fix for that path, and the fix ships looking complete. Two callers of the same
+  API that differ in their preamble is the tell — diff them before claiming the root cause is
+  closed. Here `server.cpp:455` got the full benefit while `handle_reindex`
+  (`src/server/server_endpoints.cpp:341`) called `indexer_->clear()` immediately before
+  `index_directory()`, so the HTTP `/reindex` path never saw the fix (filed:
+  `01M1PA4DNHVBWX1749E3KQJA5N`). Out-of-scope means do-not-edit, never do-not-read.
+  <!-- written_at: 2026-09-04T14:00:00Z  source_event: task:01M1NCSJ31P21DT2VVB2H0DSKS, comment:01M1PA20HWVVR13XS0BHX3ETHM -->
 
 ### 4. Determinism is non-negotiable
 - File IDs, symbol IDs, scan order, output ordering — deterministic across runs and across machines for the same corpus.
