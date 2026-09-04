@@ -526,6 +526,16 @@ void build_flag_corpus(TempCorpus& corpus, CommentLabels& labels) {
         "Widget = 8\n");                       // 2 code
     labels["eta.py"] = {true, false};
 
+    // PHP, pinned in BOTH directions. One-directional pinning is what let the
+    // '#' language gate ship with PHP wrong: an attribute line is code, a
+    // plain '#' line is a comment, and only having the second would hide it.
+    corpus.write_file("theta.php",
+        "<?php\n"                              // 1 no match
+        "#[Route('/Widget')]\n"                // 2 CODE (PHP 8 attribute)
+        "function Widget() { return 1; }\n"    // 3 code
+        "# Widget note\n");                    // 4 comment
+    labels["theta.php"] = {false, false, false, true};
+
     corpus.write_file("epsilon.c",
         "  *Widget = ptr;\n"                   // 1 code (dereference)
         "  int n = (base\n"                    // 2 no match
@@ -626,6 +636,11 @@ TEST(SearchRgDifferentialTest, ExcludeCommentsDropsCommentOnlyLines) {
     EXPECT_TRUE(got.count({"eta.py", 2}) == 1) << "python code line dropped";
     EXPECT_TRUE(got.count({"eta.py", 1}) == 0)
         << "# IS a comment in python and must be dropped";
+    EXPECT_TRUE(got.count({"theta.php", 2}) == 1)
+        << "#[ opens a PHP attribute, which is code";
+    EXPECT_TRUE(got.count({"theta.php", 3}) == 1) << "php code line dropped";
+    EXPECT_TRUE(got.count({"theta.php", 4}) == 0)
+        << "a plain '#' line IS a comment in PHP and must be dropped";
 
     // Second query. The bare "*/" close on epsilon.c:5 contains no "Widget",
     // so under the pattern above its label can never fire -- the clause had

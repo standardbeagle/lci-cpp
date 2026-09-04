@@ -1374,6 +1374,21 @@ TEST(CommentPredicate, KeepsCodeAndCatchesBlockContinuations) {
     // which is content the caller searched for.
     EXPECT_FALSE(line_is_comment_only("# Heading", LangId::Unknown))
         << "an unknown language must not have its '#' lines deleted";
+
+    // PHP 8.0 gave '#[' to ATTRIBUTES, so a '#' line is only a comment when it
+    // is not an attribute. This is PHP-specific on purpose: in Python and Ruby
+    // '#[' has no meaning, so "#[x]" there really is an ordinary comment and
+    // must keep being dropped.
+    EXPECT_FALSE(line_is_comment_only("#[Route('/x')]", LangId::PHP))
+        << "#[ opens a PHP attribute, which is code";
+    EXPECT_FALSE(line_is_comment_only("  #[Attribute]", LangId::PHP))
+        << "#[ opens a PHP attribute, which is code";
+    EXPECT_TRUE(line_is_comment_only("# a php comment", LangId::PHP))
+        << "a plain '#' line is still a comment in PHP";
+    EXPECT_TRUE(line_is_comment_only("#[not an attribute]", LangId::Python))
+        << "'#[' has no meaning in python; the line is a comment";
+    EXPECT_TRUE(line_is_comment_only("#[also a comment]", LangId::Ruby))
+        << "'#[' has no meaning in ruby; the line is a comment";
     EXPECT_TRUE(line_is_comment_only("/* block opener */", LangId::Cpp));
     EXPECT_TRUE(line_is_comment_only("  */", LangId::Cpp));
 
