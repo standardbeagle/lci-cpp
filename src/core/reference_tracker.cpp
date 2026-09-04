@@ -513,7 +513,11 @@ void ReferenceTracker::clear() {
     ref_name_ids_.clear();
     scope_chain_cache_.clear();
     file_resolution_meta_.clear();
-    next_symbol_id_ = 1;
+    // next_symbol_id_ is deliberately NOT reset: symbol ids must be
+    // monotonic across generations for the same reason FileIDs are
+    // (file_content_store.cpp). A client holding an encode_symbol_id
+    // value across a reindex must resolve it to its own symbol or to
+    // nothing -- never to whichever symbol re-drew the number.
     next_ref_id_ = 1;
     import_resolver_.clear();
     if (staging_) {
