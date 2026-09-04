@@ -4,6 +4,8 @@
 #include <lci/indexing/master_index.h>
 #include <lci/search/search_engine.h>
 #include <lci/search/symbol_type_alias.h>
+#include <lci/mcp/handlers_core.h>
+#include <nlohmann/json.hpp>
 
 #include "unique_temp.h"
 
@@ -1093,6 +1095,66 @@ TEST(SearchFlagInvertMatch, CoversFilesWithNoMatchAtAll) {
     EXPECT_TRUE(saw_none_go)
         << "a file containing no match contributes every one of its lines to "
            "rg -v output; scoping invert to the candidate set drops it";
+}
+
+// Criterion 4, end-to-end pin of the PRODUCTION path.
+//
+// SearchCoordinatorTest.UniquePathsCollapsesNonAdjacentDuplicates pins the
+// helper, but it would stay green if handle_search were reverted to its old
+// adjacent-only loop -- the helper would simply go uncalled. This drives the
+// real MCP handler so the wiring itself is pinned.
+//
+// The corpus is built so the RANKED rows interleave files: a.go carries both
+// the best and the worst match, b.go the middle one, so the score order is
+// a, b, a. That is precisely the shape an adjacency filter cannot collapse.
+TEST(SearchHandlerFilesOutput, NoDuplicatePathsWhenRankedRowsInterleave) {
+    TempDir dir;
+    dir.write_file("a.go",
+        "Widget = 1\n"          // line 1: word boundary + line start + case
+        "var q = xWidget2\n");  // line 2: substring, no boundary -> lowest
+    dir.write_file("b.go",
+        "  var r = Widget\n");  // line 1: word boundary + case, no line start
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+    SearchEngine engine(mi);
+
+    // Control: the ranked order really does interleave the two files.
+    SearchOptions probe;
+    probe.case_insensitive = false;
+    auto ranked = engine.search("Widget", probe);
+    ASSERT_EQ(3u, ranked.size());
+    std::vector<std::string> ranked_names;
+    for (const auto& r : ranked) {
+        ranked_names.push_back(
+            std::filesystem::path(r.path).filename().string());
+    }
+    ASSERT_EQ((std::vector<std::string>{"a.go", "b.go", "a.go"}), ranked_names)
+        << "control: this test only measures the defect when the ranked rows "
+           "interleave; adjust the corpus if scoring changes";
+
+    nlohmann::json params;
+    params["pattern"] = "Widget";
+    params["output"] = "files";
+    params["flags"] = "cs";
+    auto result = mcp::handle_search(params, mi, &engine);
+    ASSERT_FALSE(result.is_error) << result.text;
+
+    auto payload = nlohmann::json::parse(result.text);
+    ASSERT_TRUE(payload.contains("files")) << result.text;
+    auto files = payload["files"].get<std::vector<std::string>>();
+
+    std::vector<std::string> sorted = files;
+    std::sort(sorted.begin(), sorted.end());
+    ASSERT_TRUE(std::adjacent_find(sorted.begin(), sorted.end()) ==
+                sorted.end())
+        << "duplicate path in output=files: " << payload["files"].dump();
+    EXPECT_EQ(2u, files.size());
+    EXPECT_EQ(static_cast<int>(files.size()),
+              payload["unique_files"].get<int>())
+        << "unique_files disagrees with the emitted list";
 }
 
 }  // namespace
