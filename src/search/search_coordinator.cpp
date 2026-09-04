@@ -61,23 +61,49 @@ bool line_is_comment_only(std::string_view line) {
     }
     if (trimmed.empty()) return false;
 
-    // A line is comment-only when it OPENS with a comment marker. The markers
-    // are the three line/block openers plus '*', which carries block-comment
-    // continuation and close lines (" * text", " */").
+    // A line is comment-only when it OPENS with a line/block comment marker,
+    // or when it is exactly a block close.
     if (trimmed.substr(0, 2) == "//") return true;
     if (trimmed.front() == '#') return true;
     if (trimmed.substr(0, 2) == "/*") return true;
-    if (trimmed.front() == '*') return true;
+    // Exactly "*/" and nothing else. Not a prefix test: "*/" alone is not a
+    // valid expression in any language indexed here, so this cannot fire on
+    // code, while a leading-'*' test fires on code constantly (see below).
+    if (trimmed == "*/") return true;
 
-    // Deliberately NOT "the line contains */". That rule deleted real code:
-    // `int x = 1; /* note */` and a string literal holding "*/" both matched
-    // it, so exclude_comments removed lines the caller had asked for. The
-    // residual gap is a line of prose inside a block comment that merely
-    // closes it ("trailing prose */"), which is not decidable from the line
-    // alone -- it needs cross-line state the search path does not carry. That
-    // trade is deliberate and asymmetric: a false negative keeps a comment,
-    // which is noise, while a false positive deletes code, which is a wrong
-    // answer.
+    // Two rules were tried here and both DELETED CODE, which is why neither
+    // survives:
+    //
+    //   "line contains */"  -- matched `int x = 1; /* note */` and a string
+    //                          literal holding "*/".
+    //   "line starts with *" -- matched dereferences and continued
+    //                          expressions. Measured over this repo: of the 25
+    //                          lines under src/ and include/ whose trimmed
+    //                          form starts with '*', ALL 25 are code
+    //                          (*snapshot_.load(...), *error = "...", and
+    //                          "* stats.confidence);" at
+    //                          trigram_predictor.h:49). That rule was wrong on
+    //                          every line of its own population.
+    //
+    // ACCEPTED FALSE NEGATIVES, stated precisely because an earlier version of
+    // this comment claimed the residual was harmless when it was not: a
+    // block-comment CONTINUATION (" * more prose") and any prose line inside
+    // an open block are KEPT. Neither is decidable from the line alone -- " *
+    // more prose" and "* stats.confidence);" are the same shape -- and this
+    // predicate sees one line at a time.
+    //
+    // The trade is deliberate and asymmetric. A false negative keeps a comment
+    // line, which is noise in the results. A false positive deletes a line the
+    // caller asked for, which is a wrong answer. Only the second kind is a
+    // defect worth trading correctness for, so the tie always breaks toward
+    // keeping the line.
+    //
+    // Deciding the continuation case properly needs the enclosing comment
+    // span, which the index does not retain: tree-sitter comment nodes are
+    // visited only to skip them, no byte range is stored, ExtractionResults
+    // carries no comment ranges, and the TSTree is freed at the end of the
+    // per-file parse. Closing this needs index-side plumbing, tracked
+    // separately.
     return false;
 }
 

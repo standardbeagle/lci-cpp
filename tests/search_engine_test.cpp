@@ -1392,10 +1392,11 @@ TEST(CommentPredicate, KeepsCodeAndCatchesBlockContinuations) {
 TEST(SearchFlagNoComments, KeepsCodeLinesWithTrailingBlockComments) {
     TempDir dir;
     dir.write_file("a.c",
-        "/* Widget opener */\n"        // 1 comment-only, matches
-        " * Widget continuation\n"     // 2 comment-only, matches
+        "/* Widget opener */\n"        // 1 comment-only, dropped
+        " * Widget continuation\n"     // 2 comment, KEPT (accepted residual)
         "int Widget = 1; /* keep */\n" // 3 CODE with trailing block comment
-        "const char* s = \"Widget */\";\n");  // 4 CODE, */ inside a string
+        "const char* s = \"Widget */\";\n"  // 4 CODE, */ inside a string
+        "  *Widget = ptr;\n");         // 5 CODE, dereference
 
     Config cfg = make_default_config();
     cfg.project.root = dir.path().string();
@@ -1411,8 +1412,16 @@ TEST(SearchFlagNoComments, KeepsCodeLinesWithTrailingBlockComments) {
     std::vector<int> lines;
     for (const auto& r : results) lines.push_back(r.line);
     std::sort(lines.begin(), lines.end());
-    EXPECT_EQ((std::vector<int>{3, 4}), lines)
-        << "comment-only lines 1-2 must go; code lines 3-4 must stay";
+    // Line 2 is a block-comment continuation. It is KEPT, and that is the
+    // documented residual, not an oversight: it is textually identical to a
+    // continued expression ("* stats.confidence);", real code in this repo),
+    // so a per-line classifier cannot separate the two. Keeping a comment is
+    // noise; the alternative rule deleted code on all 25 leading-'*' lines in
+    // this repo. Asserted explicitly so the trade is visible and would have to
+    // be changed deliberately.
+    EXPECT_EQ((std::vector<int>{2, 3, 4, 5}), lines)
+        << "line 1 (/* opener) must go; code lines 3-5 must stay; line 2 is "
+           "the accepted false negative";
 }
 
 }  // namespace
