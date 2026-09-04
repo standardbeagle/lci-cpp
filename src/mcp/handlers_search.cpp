@@ -3,6 +3,7 @@
 #include <lci/mcp/handlers_core_shared.h>
 
 #include <algorithm>
+#include <filesystem>
 #include <cctype>
 #include <chrono>
 #include <functional>
@@ -461,6 +462,11 @@ ToolResult handle_search(const nlohmann::json& params,
     // scoping a search to a subtree is a natural ask; support it directly.
     if (params.contains("path") && params["path"].is_string()) {
         options.path_scope = params["path"].get<std::string>();
+        // One generic spelling at the boundary: indexed paths and every
+        // comparison below use '/', so a Windows caller's "internal\\api"
+        // or "C:\\repo\\internal" has to be folded here.
+        std::replace(options.path_scope.begin(), options.path_scope.end(),
+                     '\\', '/');
         // Normalize: strip leading ./ and any trailing slash so both
         // "src/http/" and "./src/http" scope to src/http/**. "." and "./"
         // mean the whole root — no scoping.
@@ -475,18 +481,28 @@ ToolResult handle_search(const nlohmann::json& params,
         // An absolute path is accepted when it points inside the project
         // root (agents paste absolute paths back from other tools) and is
         // relativized; anything else can never match — fail fast.
-        if (!options.path_scope.empty() && options.path_scope.front() == '/') {
-            const std::string& root = indexer.config().project.root;
-            if (options.path_scope == root) options.path_scope.clear();
-            auto rel = relative_to_root(options.path_scope, root);
-            if (!rel.empty() && rel.front() == '/') {
-                return make_error_response(
-                    "search",
-                    "path must be project-root-relative (or an absolute "
-                    "path under the project root " + root + "); got: " +
-                        options.path_scope);
+        // An absolute scope reads "/repo/internal" on POSIX but
+        // "C:/repo/internal" on Windows, so front()=='/' recognised only the
+        // first and a Windows caller's absolute path fell through as a
+        // literal prefix that matched nothing.
+        if (!options.path_scope.empty() &&
+            std::filesystem::path(options.path_scope).is_absolute()) {
+            std::string root = indexer.config().project.root;
+            std::replace(root.begin(), root.end(), '\\', '/');
+            if (options.path_scope == root) {
+                options.path_scope.clear();
+            } else {
+                auto rel = relative_to_root(options.path_scope, root);
+                // Unchanged means it does not live under the project root.
+                if (rel.size() == options.path_scope.size()) {
+                    return make_error_response(
+                        "search",
+                        "path must be project-root-relative (or an absolute "
+                        "path under the project root " + root + "); got: " +
+                            options.path_scope);
+                }
+                options.path_scope = std::string(rel);
             }
-            options.path_scope = std::string(rel);
         }
     }
 
