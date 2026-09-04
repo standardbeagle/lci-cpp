@@ -75,6 +75,15 @@ jobs:
             sudo apt-get install -y ninja-build ccache zip unzip curl tar libgoogle-perftools-dev "${{ matrix.cc }}" "${{ matrix.cxx }}"
           fi
 
+      # Sanitizer runtimes predate this kernel's 32-bit mmap ASLR entropy:
+      # every TSan binary aborts at startup ("unexpected memory mapping"),
+      # including configure-time probes and gtest discovery. 28 bits is the
+      # documented ceiling sanitizers handle; resets on host reboot, so
+      # re-apply per run.
+      - name: Kernel ASLR compat for sanitizers
+        if: ${{ matrix.preset == 'tsan' || matrix.preset == 'sanitizer' }}
+        run: sudo sysctl -w vm.mmap_rnd_bits=28
+
       - name: Set up vcpkg
         uses: lukka/run-vcpkg@v11
         with:

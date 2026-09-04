@@ -8,6 +8,7 @@
 #include <malloc.h>  // defines __GLIBC__ for the malloc_trim guard below
 #endif
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -48,6 +49,16 @@ MasterIndex::MasterIndex(const Config& config)
           static_cast<int64_t>(config.performance.max_memory_mb) * 1024 * 1024)),
       file_service_(std::make_shared<FileService>(
           file_content_store_, config.index.max_file_size)) {
+#ifdef _WIN32
+    // Every stored file path is GENERIC (forward-slash: the scanner keys
+    // file_map by entry.path().generic_string()), and
+    // relative_to_project_root prefix-strips the root against those keys. A
+    // native backslash root (std::filesystem::path::string()) never
+    // matches, so every attribute rule and root-relative emission silently
+    // misclassified on Windows. Normalize the root once, up front.
+    std::replace(config_.project.root.begin(), config_.project.root.end(),
+                 '\\', '/');
+#endif
     // Reference resolution reads the same attribute set the classifier does,
     // so a project's `.lci.kdl` attributes reach the low-quality gate.
     ref_tracker_.set_attr_registry(&attr_registry_);
@@ -67,6 +78,18 @@ std::shared_ptr<const FileSnapshot> MasterIndex::load_snapshot() const {
 FileID MasterIndex::path_to_id(const std::string& path) const {
     auto snap = load_snapshot();
     auto it = snap->file_map.find(path);
+#ifdef _WIN32
+    // file_map keys are generic (forward-slash) paths — the scanner stores
+    // entry.path().generic_string(). Callers routinely hold native
+    // backslash spellings (std::filesystem::path::string()), so retry with
+    // separators normalized before reporting a miss.
+    if (it == snap->file_map.end() &&
+        path.find('\\') != std::string::npos) {
+        std::string generic = path;
+        std::replace(generic.begin(), generic.end(), '\\', '/');
+        it = snap->file_map.find(generic);
+    }
+#endif
     return it != snap->file_map.end() ? it->second : FileID{0};
 }
 
