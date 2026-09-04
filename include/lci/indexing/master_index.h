@@ -1,6 +1,8 @@
 #pragma once
 
 #include <atomic>
+#include <cstdint>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -193,6 +195,21 @@ class MasterIndex {
     /// poll while the pipeline is active without racing the writer.
     IndexingProgressSnapshot get_progress() const;
 
+    /// Instrumentation seam: invoked on the indexing thread once per
+    /// index_directory() run, after the pipeline's scan+parse phase and
+    /// before the commit path touches any sub-index. It is the only
+    /// deterministic vantage point on the window in which the previously
+    /// published generation must still be fully readable. An exception
+    /// thrown from the hook propagates out of index_directory() and so
+    /// also exercises the unwind path a throwing scanner takes.
+    void set_post_parse_hook(std::function<void()> hook);
+
+    /// File-snapshot publishes since construction. A bulk reindex must
+    /// contribute EXACTLY one; incremental writers contribute one each.
+    uint64_t snapshot_publish_count() const {
+        return snapshot_publish_count_.load(std::memory_order_acquire);
+    }
+
     /// Records side effects during the bulk index's extraction pass into
     /// `analyzer` (per-worker analyzers, merged per file). Set BEFORE
     /// index_directory; replaces the MCP warmup's serial whole-corpus
@@ -330,6 +347,7 @@ class MasterIndex {
     std::atomic<int64_t> processed_files_{0};
     std::atomic<int64_t> indexing_time_ns_{0};
     mutable std::atomic<int64_t> search_count_{0};
+    std::atomic<uint64_t> snapshot_publish_count_{0};
 
     // Cancellation. `stop_requested_` is the persistent user-visible
     // signal forwarded into the active `Pipeline`. `active_pipeline_` is
@@ -339,6 +357,7 @@ class MasterIndex {
     std::atomic<bool> stop_requested_{false};
     Pipeline* active_pipeline_{nullptr};
     SideEffectAnalyzer* side_effect_sink_{nullptr};
+    std::function<void()> post_parse_hook_;
     mutable std::mutex stop_mu_;
 
     // Helpers

@@ -200,6 +200,8 @@ bool MasterIndex::index_directory(const std::string& root) {
         active_pipeline_ = nullptr;
     }
 
+    if (post_parse_hook_) post_parse_hook_();
+
     if (!pipeline.scan_error().empty()) {
         // Reject overflow policy: fail the run with the scanner's message
         // rather than publishing an empty index that looks like success.
@@ -295,6 +297,10 @@ bool MasterIndex::index_directory(const std::string& root) {
 
     is_indexing_.store(0, std::memory_order_release);
     return true;
+}
+
+void MasterIndex::set_post_parse_hook(std::function<void()> hook) {
+    post_parse_hook_ = std::move(hook);
 }
 
 void MasterIndex::request_stop() {
@@ -706,6 +712,7 @@ void MasterIndex::publish_snapshot(std::shared_ptr<FileSnapshot> snap) {
     // Derived view, computed ONCE per snapshot. Sorted so the read path
     // inherits a deterministic scan order (karpathy #4) instead of the
     // hash-map order the file_map walk would give it.
+    snapshot_publish_count_.fetch_add(1, std::memory_order_acq_rel);
     snap->searchable_ids.clear();
     snap->searchable_ids.reserve(snap->file_map.size());
     for (const auto& [path_unused, fid] : snap->file_map) {
