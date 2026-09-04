@@ -1173,5 +1173,105 @@ TEST(SearchEngineRanking, SynonymHitRanksBelowOriginalPatternHit) {
     EXPECT_EQ(2, results[1].line);
 }
 
+// Criterion 4 regression: unique_paths compacts in place, and a view of a
+// moved-FROM slot cannot be used to recognize a later duplicate.
+//
+// The inputs below are derived from the failure mode, not from a shape that
+// looks reasonable. The bug needs three things in order: a skip (so `keep`
+// falls behind `i`), then a NEW path that therefore gets moved, then a
+// duplicate of that moved path. Inputs lacking any of those -- including
+// {a,b,a,b}, the shape the original tests used -- never move anything before
+// a duplicate check and pass no matter which way the function is written.
+TEST(SearchCoordinatorTest, UniquePathsSurvivesCompactionBeforeADuplicate) {
+    // Skip at index 2 makes keep lag i; c.go is then moved at index 3; the
+    // duplicate c.go at index 4 must still be recognized.
+    std::vector<std::string> ranked{"a.go", "b.go", "a.go", "c.go", "c.go"};
+    auto paths = SearchCoordinator::unique_paths(ranked);
+
+    ASSERT_EQ(3u, paths.size())
+        << "duplicate survived a compaction: " << [&] {
+               std::string s;
+               for (const auto& p : paths) s += p + " ";
+               return s;
+           }();
+    EXPECT_EQ("a.go", paths[0]);
+    EXPECT_EQ("b.go", paths[1]);
+    EXPECT_EQ("c.go", paths[2]);
+}
+
+TEST(SearchCoordinatorTest, UniquePathsSurvivesCompactionAtADifferentOffset) {
+    // Same failure mode, compaction starting one slot earlier.
+    std::vector<std::string> ranked{"a.go", "a.go", "b.go", "b.go"};
+    auto paths = SearchCoordinator::unique_paths(ranked);
+
+    ASSERT_EQ(2u, paths.size())
+        << "duplicate survived a compaction: " << [&] {
+               std::string s;
+               for (const auto& p : paths) s += p + " ";
+               return s;
+           }();
+    EXPECT_EQ("a.go", paths[0]);
+    EXPECT_EQ("b.go", paths[1]);
+}
+
+// The same failure mode through the real MCP handler. The unit test alone is
+// what let the original defect through, so the production path gets its own
+// case: the ranked rows must spell a.go, b.go, a.go, c.go, c.go.
+TEST(SearchHandlerFilesOutput, NoDuplicatePathsWhenACompactionPrecedesADup) {
+    TempDir dir;
+    // Scores are engineered so the ranked path sequence is a, b, a, c, c:
+    //   a.go:1  word boundary + line start + exact case  (highest)
+    //   b.go:1  word boundary + exact case
+    //   a.go:2  word boundary only (lowercase, so no exact-case bonus)
+    //   c.go:1  substring, exact case only  (lowest, ties with c.go:2)
+    //   c.go:2  substring, exact case only
+    dir.write_file("a.go",
+        "Widget = 1\n"
+        "  z = widget\n");
+    dir.write_file("b.go",
+        "  y = Widget\n");
+    dir.write_file("c.go",
+        "  q = xWidgety\n"
+        "  r = xWidgetz\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+    SearchEngine engine(mi);
+
+    // Control: without this exact interleaving the test measures nothing.
+    SearchOptions probe;
+    probe.case_insensitive = true;
+    auto ranked = engine.search("Widget", probe);
+    std::vector<std::string> ranked_names;
+    for (const auto& r : ranked) {
+        ranked_names.push_back(
+            std::filesystem::path(r.path).filename().string());
+    }
+    ASSERT_EQ((std::vector<std::string>{"a.go", "b.go", "a.go", "c.go", "c.go"}),
+              ranked_names)
+        << "control: ranked rows must compact-then-duplicate; adjust the "
+           "corpus if scoring changes";
+
+    nlohmann::json params;
+    params["pattern"] = "Widget";
+    params["output"] = "files";
+    auto result = mcp::handle_search(params, mi, &engine);
+    ASSERT_FALSE(result.is_error) << result.text;
+
+    auto payload = nlohmann::json::parse(result.text);
+    auto files = payload["files"].get<std::vector<std::string>>();
+
+    std::vector<std::string> sorted = files;
+    std::sort(sorted.begin(), sorted.end());
+    ASSERT_TRUE(std::adjacent_find(sorted.begin(), sorted.end()) ==
+                sorted.end())
+        << "duplicate path in output=files: " << payload["files"].dump();
+    EXPECT_EQ(3u, files.size()) << payload["files"].dump();
+    EXPECT_EQ(static_cast<int>(files.size()),
+              payload["unique_files"].get<int>());
+}
+
 }  // namespace
 }  // namespace lci
