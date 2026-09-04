@@ -3,6 +3,7 @@
 #include <lci/mcp/handlers_core_shared.h>
 
 #include <algorithm>
+#include <stdexcept>
 #include <filesystem>
 #include <cctype>
 #include <chrono>
@@ -239,18 +240,41 @@ std::vector<std::string> filter_tokens_to_globs(const std::string& csv) {
     return globs;
 }
 
-/// Parses output format and returns context line count.
-int parse_context_lines(const std::string& output) {
-    if (output == "full") return 10;
-    if (output == "ctx") return 5;
+/// Parses the output format into a context-line count.
+///
+/// Returns false and fills `error` when `output` is a malformed `ctx:N`. N was
+/// previously taken unbounded, so `ctx:100000` made one row carry a whole file;
+/// it is now clamped to kMaxRequestedContextLines. A negative or non-numeric N
+/// used to be swallowed by a catch-all and silently demoted to 5, which
+/// answered a question the caller did not ask (Karpathy rule 6).
+bool parse_context_lines(const std::string& output, int& out,
+                         std::string& error) {
+    if (output == "full") { out = 10; return true; }
+    if (output == "ctx") { out = 5; return true; }
     if (output.size() > 4 && output.substr(0, 4) == "ctx:") {
+        const std::string digits = output.substr(4);
+        int n = 0;
         try {
-            return std::stoi(output.substr(4));
-        } catch (...) {
-            return 5;
+            size_t consumed = 0;
+            n = std::stoi(digits, &consumed);
+            if (consumed != digits.size()) throw std::invalid_argument("");
+        } catch (const std::invalid_argument&) {
+            error = "output 'ctx:N' needs a whole number, got '" + digits + "'";
+            return false;
+        } catch (const std::out_of_range&) {
+            error = "output 'ctx:N' is out of range: '" + digits + "'";
+            return false;
         }
+        if (n < 0) {
+            error = "output 'ctx:N' must not be negative, got " +
+                    std::to_string(n);
+            return false;
+        }
+        out = std::min(n, kMaxRequestedContextLines);
+        return true;
     }
-    return 1;
+    out = 1;
+    return true;
 }
 
 // -- json-schema validation glue ---------------------------------------------
@@ -392,7 +416,11 @@ ToolResult handle_search(const nlohmann::json& params,
     // pass max explicitly; hard cap stays 100.
     int max_results = params.value("max", 15);
     max_results = clamp_int(max_results, 1, 100);
-    int context_lines = parse_context_lines(output);
+    int context_lines = 0;
+    if (std::string ctx_error; !parse_context_lines(output, context_lines,
+                                                    ctx_error)) {
+        return make_error_response("search", ctx_error);
+    }
 
     SearchOptions options;
     options.max_results = max_results;
@@ -676,13 +704,14 @@ ToolResult handle_search(const nlohmann::json& params,
 
     // Handle files-only output
     if (output == "files") {
-        std::vector<std::string> files;
-        for (const auto& r : results) {
-            auto rp = rel(r.path);
-            if (files.empty() || files.back() != rp) {
-                files.push_back(std::move(rp));
-            }
-        }
+        // Rows arrive in SCORE order, so one file's rows interleave with
+        // another's. Filtering only against the PREVIOUS path, as this used
+        // to, emitted a file once per run of its rows and made unique_files
+        // over-count the distinct files.
+        std::vector<std::string> ranked_paths;
+        ranked_paths.reserve(results.size());
+        for (const auto& r : results) ranked_paths.push_back(rel(r.path));
+        auto files = SearchCoordinator::unique_paths(std::move(ranked_paths));
         nlohmann::json response;
         response["files"] = files;
         response["showing"] = shown;

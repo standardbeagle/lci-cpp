@@ -21,6 +21,13 @@ inline constexpr int kTokensPerContextLine = 20;
 /// Maximum matches per file before truncation.
 inline constexpr int kMaxMatchesPerFile = 100;
 
+/// Largest context window a caller may request (MCP `output=ctx:N`). N was
+/// previously passed through unbounded, so a single row could carry an entire
+/// file and one response could exceed any sane token budget. Requests above
+/// this are clamped; the ceiling matches kDefaultContextLines, the widest
+/// window the engine produces on its own.
+inline constexpr int kMaxRequestedContextLines = kDefaultContextLines;
+
 /// Longest accepted search pattern, in bytes. Longer patterns are rejected
 /// with an explicit SearchStats::error rather than silently returning no
 /// matches (Karpathy rule 6: fail fast, surface signal).

@@ -4,6 +4,7 @@
 #include <cctype>
 
 #include <absl/container/flat_hash_map.h>
+#include <absl/container/flat_hash_set.h>
 
 namespace lci {
 
@@ -273,6 +274,27 @@ void SearchCoordinator::rank(std::vector<SearchResult>& results) {
                   if (a.column != b.column) return a.column < b.column;
                   return a.match_text < b.match_text;
               });
+}
+
+std::vector<std::string> SearchCoordinator::unique_paths(
+    std::vector<std::string> paths) {
+
+    if (paths.size() <= 1) return paths;
+
+    absl::flat_hash_set<std::string_view> seen;
+    seen.reserve(paths.size());
+
+    // Compact in place: no second buffer, and each survivor is moved rather
+    // than copied. The views point into `paths` entries at indices below
+    // `keep`, which are never written again.
+    size_t keep = 0;
+    for (size_t i = 0; i < paths.size(); ++i) {
+        if (!seen.insert(std::string_view(paths[i])).second) continue;
+        if (keep != i) paths[keep] = std::move(paths[i]);
+        ++keep;
+    }
+    paths.resize(keep);
+    return paths;
 }
 
 }  // namespace lci

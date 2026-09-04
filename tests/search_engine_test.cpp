@@ -972,5 +972,34 @@ TEST(SymbolTypeAlias, CanonicalizesAdvertisedAliases) {
     EXPECT_TRUE(canonical_symbol_type("").empty());
 }
 
+// Criterion 4: `output=files` collapsed the ranked rows to paths by comparing
+// each against only the PREVIOUS one. Results are ordered by score, so rows
+// for one file interleave with rows for others: a file that appears at ranks
+// 1 and 3 was emitted twice, and unique_files counted it twice.
+TEST(SearchCoordinatorTest, UniquePathsCollapsesNonAdjacentDuplicates) {
+    // Ranked order interleaves a.go and b.go, as a score-ordered list does.
+    std::vector<std::string> ranked{"a.go", "b.go", "a.go", "b.go"};
+
+    auto paths = SearchCoordinator::unique_paths(ranked);
+
+    ASSERT_EQ(2u, paths.size())
+        << "non-adjacent duplicate paths survived";
+    EXPECT_EQ("a.go", paths[0]);  // best-ranked appearance wins
+    EXPECT_EQ("b.go", paths[1]);
+}
+
+TEST(SearchCoordinatorTest, UniquePathsKeepsAdjacentAndEmptyCases) {
+    EXPECT_TRUE(SearchCoordinator::unique_paths({}).empty());
+
+    std::vector<std::string> adjacent{"a.go", "a.go", "b.go"};
+    auto paths = SearchCoordinator::unique_paths(adjacent);
+    ASSERT_EQ(2u, paths.size());
+    EXPECT_EQ("a.go", paths[0]);
+    EXPECT_EQ("b.go", paths[1]);
+
+    std::vector<std::string> single{"only.go"};
+    EXPECT_EQ(1u, SearchCoordinator::unique_paths(single).size());
+}
+
 }  // namespace
 }  // namespace lci

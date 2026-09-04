@@ -194,6 +194,16 @@ class SearchCoordinator {
 
     /// Sorts results by score (descending), then path, then line.
     static void rank(std::vector<SearchResult>& results);
+
+    /// Removes repeat paths from a ranked path list, keeping each path's
+    /// first (best-ranked) appearance and the list's order.
+    ///
+    /// Results are ordered by SCORE, so rows for one file are interleaved
+    /// with rows for others. Callers that compared each path against only the
+    /// PREVIOUS one therefore emitted a path once per run of its rows and
+    /// over-counted the distinct files.
+    static std::vector<std::string> unique_paths(
+        std::vector<std::string> paths);
 };
 
 }  // namespace lci
