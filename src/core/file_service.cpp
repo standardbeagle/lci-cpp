@@ -42,20 +42,22 @@ Result<FileID> FileService::load_file_from_disk(const std::string& path) {
         return e;
     }
 
-    // Hand the mapping itself to the store -- page-cache-backed bytes
-    // instead of a heap copy (see FileContent::mapping).
-    return store_->add_file_mapped(path, std::move(mapped));
+    // Copy the bytes into the store; the mapping dies at scope end. See
+    // FileContent for why nothing may retain a mapping past index time.
+    return store_->add_file(path, view);
 }
 
 std::vector<FileID> FileService::batch_load_from_disk(
-    const std::vector<std::string>& paths) {
+    const std::vector<std::string>& paths, std::vector<Error>* failures) {
     if (paths.empty()) return {};
 
-    // mmap all viable files first. MappedFile holds an mmap'd region so
-    // string_views into mapped.view() stay valid until MappedFile is
-    // destroyed — keep the MappedFile vector alive across the batch
-    // store call.
-    std::vector<std::pair<std::string, MappedFile>> batch;
+    // Map each file transiently, submit the batch as views into those
+    // mappings, then let every mapping die when `batch` goes out of scope:
+    // the store copies the bytes it keeps. The mappings must stay alive
+    // across the batch_add_files call because the views point into them.
+    std::vector<MappedFile> mappings;
+    mappings.reserve(paths.size());
+    std::vector<std::pair<std::string, std::string_view>> batch;
     batch.reserve(paths.size());
     std::vector<size_t> kept_index;
     kept_index.reserve(paths.size());
@@ -63,16 +65,34 @@ std::vector<FileID> FileService::batch_load_from_disk(
     for (size_t i = 0; i < paths.size(); ++i) {
         std::string err;
         MappedFile m;
-        if (!m.open(paths[i], &err)) continue;
-        if (static_cast<int64_t>(m.view().size()) > max_file_size_bytes_) {
+        if (!m.open(paths[i], &err)) {
+            if (failures) {
+                failures->push_back(
+                    make_file_error("load", paths[i],
+                                    "failed to open file: " + err));
+            }
             continue;
         }
-        batch.emplace_back(paths[i], std::move(m));
+        auto view = m.view();
+        if (static_cast<int64_t>(view.size()) > max_file_size_bytes_) {
+            if (failures) {
+                Error e;
+                e.type = ErrorType::FileTooLarge;
+                e.file_path = paths[i];
+                e.message = "file too large (" + std::to_string(view.size()) +
+                            " bytes, limit " +
+                            std::to_string(max_file_size_bytes_) + ")";
+                e.operation = "load";
+                failures->push_back(std::move(e));
+            }
+            continue;
+        }
+        mappings.push_back(std::move(m));
+        batch.emplace_back(paths[i], mappings.back().view());
         kept_index.push_back(i);
     }
 
-    // Mappings move into the store and live as the entries' bytes.
-    auto ids = store_->batch_add_files_mapped(std::move(batch));
+    auto ids = store_->batch_add_files(batch);
 
     std::vector<FileID> result(paths.size(), FileID{0});
     for (size_t k = 0; k < ids.size() && k < kept_index.size(); ++k) {

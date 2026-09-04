@@ -29,8 +29,9 @@ class FileService {
     /// Returns the FileID on success, or an error if too large.
     Result<FileID> add_file(const std::string& path, std::string_view content);
 
-    /// Loads a file from disk via memory mapping, enforcing max file size.
-    /// Returns the FileID on success, or an error.
+    /// Loads a file from disk, enforcing max file size. The read uses a
+    /// TRANSIENT memory mapping and the store copies the bytes at index
+    /// time; no mapping outlives this call. Returns the FileID or an error.
     Result<FileID> load_file_from_disk(const std::string& path);
 
     /// Batches multiple from-disk loads into a single snapshot rewrite.
@@ -38,12 +39,16 @@ class FileService {
     /// (RCU copy-on-write); calling that N times is O(N²) in snapshot
     /// size — the pipeline producer used to pay this for every scanned
     /// file. batch_load_from_disk mmap-opens each path, enforces the size
-    /// limit, then submits the survivors as one batch. Returns FileIDs in
-    /// input order; 0 for files that failed to open or exceeded the size
-    /// limit (the corresponding error is silently skipped — caller can
-    /// pre-validate paths if surfacing is needed).
+    /// limit, then submits the survivors as one batch. Each mapping is
+    /// transient: the store copies the bytes, and every mapping is unmapped
+    /// before this returns.
+    ///
+    /// Returns FileIDs in input order; 0 for files that failed to open or
+    /// exceeded the size limit. When `failures` is non-null, each such file
+    /// pushes an Error onto it — a load failure is never silently dropped.
     std::vector<FileID> batch_load_from_disk(
-        const std::vector<std::string>& paths);
+        const std::vector<std::string>& paths,
+        std::vector<Error>* failures = nullptr);
 
     /// Returns the raw content for a file, or empty if not found.
     std::string_view get_content(FileID id) const;

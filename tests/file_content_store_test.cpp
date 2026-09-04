@@ -562,37 +562,6 @@ TEST(FileContentStoreTest, RetainOnlyDropsOtherEntries) {
     EXPECT_EQ(store.path_to_id("a.go"), FileID{0});
 }
 
-// Mapped entries are exempt from LRU eviction: their chargeable size is ~0,
-// so evicting them frees nothing while silently making the file
-// unsearchable.
-TEST(FileContentStoreTest, MappedEntriesExemptFromEviction) {
-    std::string path =
-        (std::filesystem::temp_directory_path() /
-         ("lci_fcs_mapped_evict_" +
-          std::to_string(lci::portable::process_id()) + ".txt"))
-            .string();
-    {
-        std::ofstream out(path);
-        out << std::string(300, 'm');
-    }
-
-    FileContentStore store(400);  // tiny cap to force eviction pressure
-    MappedFile mf;
-    ASSERT_TRUE(mf.open(path));
-    FileID mapped_id = store.add_file_mapped(path, std::move(mf));
-    ASSERT_NE(mapped_id, FileID{0});
-
-    // Owned adds large enough to blow the cap repeatedly.
-    store.add_file("a.go", std::string(300, 'a'));
-    store.add_file("b.go", std::string(300, 'b'));
-    store.add_file("c.go", std::string(300, 'c'));
-
-    // The mapped entry must survive every eviction round.
-    EXPECT_EQ(store.get_content(mapped_id), std::string(300, 'm'));
-
-    std::remove(path.c_str());
-}
-
 // Re-adding a file with unchanged content must refresh its LRU slot, not
 // leave it first in line for eviction.
 TEST(FileContentStoreTest, UnchangedReAddRefreshesLruOrder) {

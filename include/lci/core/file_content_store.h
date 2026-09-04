@@ -15,7 +15,6 @@
 
 #include <lci/core/atomic_shared_ptr.h>
 #include <lci/string_ref.h>
-#include <lci/core/mmap.h>
 #include <lci/types.h>
 
 namespace lci {
@@ -24,18 +23,25 @@ namespace lci {
 /// Immutable once constructed; updates create new instances.
 struct FileContent {
     FileID file_id{};
-    /// Exactly one of `content` / `mapping` holds the bytes. Disk loads
-    /// RETAIN the read-time mmap instead of copying to the heap: the
-    /// page cache backs the bytes (file-backed, kernel-evictable), not
-    /// anonymous heap -- the content store was the largest single index
-    /// term (~1x corpus) as heap copies. The mapping pins the inode:
-    /// rename-replace saves leave pinned readers on the old bytes; an
-    /// in-place overwrite may tear a concurrent view for at most the
-    /// watcher debounce window before the reload swaps a fresh entry --
-    /// the same freshness contract the watcher already defines. The copy
-    /// path remains for byte-push callers (update_file, tests).
+    /// The store OWNS its bytes: they are copied out of the read-time
+    /// mapping at index time and the mapping dies immediately. Retaining
+    /// a mapping for the index lifetime was a crash and a scale ceiling,
+    /// not a memory win: an in-place truncation (VS Code save, `git
+    /// checkout` to a shorter file, `> file`) makes any later read past
+    /// the new EOF raise SIGBUS and kill the server mid-search; one VMA
+    /// per file hits Linux vm.max_map_count (65530) so corpora past ~65k
+    /// files stop mapping; and on Windows an active MapViewOfFile blocks
+    /// SetEndOfFile, so editors cannot save while the server runs.
+    ///
+    /// Bytes live in a per-file owned vector, not a per-generation arena.
+    /// Entries are immutable, shared across snapshot generations, and
+    /// individually evicted or replaced; an arena would pin every
+    /// replaced and evicted file's bytes until the whole generation died,
+    /// raising PEAK RSS — the exact cost this design accepts and wants
+    /// bounded. The RssAnon self-cap and the malloc_trim-after-bulk path
+    /// both depend on freed file bytes returning to the allocator
+    /// promptly, which per-file vectors do and an arena does not.
     std::vector<uint8_t> content;
-    MappedFile mapping;
     std::vector<uint32_t> line_offsets;
     uint64_t fast_hash{};
     mutable std::mutex content_hash_mu;
@@ -46,9 +52,8 @@ struct FileContent {
     FileContent(const FileContent&) = delete;
     FileContent& operator=(const FileContent&) = delete;
 
-    /// Returns the content as a string_view (mapped or owned).
+    /// Returns the owned content as a string_view.
     std::string_view view() const {
-        if (mapping.is_open()) return mapping.view();
         return {reinterpret_cast<const char*>(content.data()), content.size()};
     }
 };
@@ -212,15 +217,6 @@ class FileContentStore {
     /// Loads a file into the store and returns its ID.
     FileID add_file(const std::string& path, std::string_view content);
 
-    /// Disk-load variant that RETAINS the mmap instead of copying its
-    /// bytes to the heap (see FileContent::mapping). The store takes
-    /// ownership of the mapping.
-    FileID add_file_mapped(const std::string& path, MappedFile mapping);
-
-    /// Batch form of add_file_mapped: one snapshot clone for the batch.
-    std::vector<FileID> batch_add_files_mapped(
-        std::vector<std::pair<std::string, MappedFile>> files);
-
     /// Loads multiple files in a single batch.
     std::vector<FileID> batch_add_files(
         const std::vector<std::pair<std::string, std::string_view>>& files);
@@ -267,8 +263,6 @@ class FileContentStore {
 
     /// Creates a new FileContent from raw data.
     std::shared_ptr<FileContent> make_file_content(FileID id, std::string_view data) const;
-    std::shared_ptr<FileContent> make_file_content_mapped(
-        FileID id, MappedFile mapping) const;
 
     /// Computes the estimated memory footprint of a FileContent.
     static int64_t estimate_memory(const FileContent& fc);
