@@ -775,5 +775,117 @@ TEST(SearchEngineIntegrationTest, BrokenExcludePatternReportsAnError) {
         << stats.error;
 }
 
+// -- S5 regression tests ------------------------------------------------------
+
+// Criterion 3: an uncompilable RE2 pattern must be reported, not silently
+// turned into "0 matches". Pre-fix, SearchEngine::search never validated the
+// regex: find_content_matches recompiled it per candidate file, every compile
+// failed, and the caller got an empty vector with an EMPTY stats.error --
+// indistinguishable from a valid query that matched nothing.
+TEST(SearchEngineRegexValidation, InvalidRegexReportsErrorInsteadOfZeroMatches) {
+    TempDir dir;
+    dir.write_file("a.go", "package main\nfunc Alpha() {}\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    SearchEngine engine(mi);
+    SearchOptions opts;
+    opts.use_regex = true;
+
+    SearchStats stats;
+    auto results = engine.search("(", opts, &stats);
+
+    EXPECT_TRUE(results.empty());
+    EXPECT_NE(stats.error.find("invalid regex"), std::string::npos)
+        << "stats.error was: '" << stats.error << "'";
+}
+
+// Criterion 3, valid-regex control: validation must not reject good patterns.
+TEST(SearchEngineRegexValidation, ValidRegexStillSearches) {
+    TempDir dir;
+    dir.write_file("a.go", "package main\nfunc Alpha() {}\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    SearchEngine engine(mi);
+    SearchOptions opts;
+    opts.use_regex = true;
+
+    SearchStats stats;
+    auto results = engine.search("func +Alpha", opts, &stats);
+    EXPECT_TRUE(stats.error.empty()) << stats.error;
+    EXPECT_GE(results.size(), 1u);
+}
+
+// Criterion 5: a whole-word, exact-case hit must outrank a substring hit of
+// the same pattern in the same file. Pre-fix, score_result() derived the score
+// from the file class and the pattern text ONLY -- both identical here -- so
+// every row tied and rank() fell through to its path/line tiebreak, making the
+// order purely positional: the substring hit on the earlier line won.
+TEST(SearchEngineRanking, ExactWordMatchOutranksSubstringMatch) {
+    TempDir dir;
+    dir.write_file("a.go",
+        "package main\n"
+        "var Configuration = 1\n"   // line 2: substring hit, earlier
+        "var other = 2\n"
+        "var Config = 3\n");        // line 4: whole-word exact hit, later
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    SearchEngine engine(mi);
+    SearchOptions opts;
+    opts.case_insensitive = false;
+    auto results = engine.search("Config", opts);
+
+    ASSERT_GE(results.size(), 2u);
+    EXPECT_EQ(4, results[0].line)
+        << "expected the whole-word hit (line 4) to rank first, got line "
+        << results[0].line;
+    EXPECT_GT(results[0].score, results[1].score);
+}
+
+// Criterion 7: a file whose bytes were evicted from the content store is still
+// a search candidate (process_file reloads it into a request-local buffer), but
+// the context extractor re-fetched the content from the store BY ID and got
+// nothing -- so the row came back with a match and an EMPTY context block.
+TEST(SearchEngineContext, EvictedFileStillGetsLineContext) {
+    TempDir dir;
+    dir.write_file("a.go",
+        "package main\n"
+        "// leading\n"
+        "func Target() {}\n"
+        "// trailing\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    SearchEngine engine(mi);
+    SearchOptions opts;
+    opts.max_context_lines = 5;
+
+    auto before = engine.search("Target", opts);
+    ASSERT_GE(before.size(), 1u);
+    ASSERT_FALSE(before[0].context.lines.empty());
+
+    // Simulate LRU eviction of the file's bytes while it stays a candidate.
+    mi.file_content_store().invalidate_file_by_id(before[0].file_id);
+
+    auto after = engine.search("Target", opts);
+    ASSERT_GE(after.size(), 1u) << "evicted file dropped out of results";
+    EXPECT_FALSE(after[0].context.lines.empty())
+        << "evicted file returned a match with empty context";
+}
+
 }  // namespace
 }  // namespace lci
