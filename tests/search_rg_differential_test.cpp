@@ -236,7 +236,7 @@ TEST(SearchRgDifferentialTest, RandomLiteralPatternsMatchIndependentOracles) {
         ++checked;
 
         HitSet expected = naive_hits(corpus, pattern);
-        HitSet actual = lci_hits(mi, corpus.path().string(), pattern);
+        HitSet actual = lci_hits(mi, corpus.path().generic_string(), pattern);
         EXPECT_EQ(expected, actual)
             << "pattern [" << pattern << "]\n  naive: " << describe(expected)
             << "\n  lci:   " << describe(actual);
@@ -277,7 +277,7 @@ TEST(SearchRgDifferentialTest, DirectedCornerPatternsMatchNaiveOracle) {
         HitSet expected = naive_hits(corpus, pattern);
         ASSERT_FALSE(expected.empty())
             << "corpus must contain directed pattern [" << pattern << "]";
-        HitSet actual = lci_hits(mi, corpus.path().string(), pattern);
+        HitSet actual = lci_hits(mi, corpus.path().generic_string(), pattern);
         EXPECT_EQ(expected, actual)
             << "pattern [" << pattern << "]\n  naive: " << describe(expected)
             << "\n  lci:   " << describe(actual);
@@ -335,7 +335,8 @@ TEST(SearchRgDifferentialTest, CaseInsensitivePatternsMatchNaiveOracle) {
         HitSet actual;
         for (const auto& r : mi.search_with_options(pattern, opts)) {
             std::string rel = r.path;
-            const std::string& root = cfg.project.root;
+            // Result paths are generic; match the strip prefix's spelling.
+            const std::string root = corpus.path().generic_string();
             if (rel.rfind(root, 0) == 0 && rel.size() > root.size()) {
                 rel = rel.substr(root.size() + 1);
             }
