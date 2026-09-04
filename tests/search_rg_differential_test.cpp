@@ -23,6 +23,7 @@
 
 #include <lci/config.h>
 #include <lci/indexing/master_index.h>
+#include <lci/search/search_engine.h>
 
 #include "unique_temp.h"
 
@@ -347,6 +348,223 @@ TEST(SearchRgDifferentialTest, CaseInsensitivePatternsMatchNaiveOracle) {
             << "ci pattern [" << pattern << "]\n  naive: "
             << describe(expected) << "\n  lci:   " << describe(actual);
     }
+}
+
+// -- invert-match / exclude-comments differential ------------------------------
+//
+// These drive SearchEngine, not MasterIndex::search_with_options, because the
+// MCP `search` handler uses SearchEngine whenever one exists
+// (handlers_search.cpp:578) and that is the path `flags=iv` / `flags=nc`
+// travel. See the divergence note on the exclude-comments test below.
+
+/// Splits content into lines the way rg counts them: '\n' terminated, and a
+/// trailing newline does NOT create a final empty line.
+std::vector<std::string> corpus_lines(const std::string& content) {
+    std::vector<std::string> lines;
+    size_t start = 0;
+    for (size_t i = 0; i < content.size(); ++i) {
+        if (content[i] == '\n') {
+            lines.push_back(content.substr(start, i - start));
+            start = i + 1;
+        }
+    }
+    if (start < content.size()) lines.push_back(content.substr(start));
+    return lines;
+}
+
+/// Independent oracle for `rg -v`: every line that does NOT contain the
+/// pattern, across EVERY file -- including files with no match at all.
+/// Built on std::string::find over the content the test wrote; shares no
+/// mechanism with lci's matcher (bench-harness-oracle-independence rule 1).
+HitSet naive_invert_hits(const TempCorpus& corpus, const std::string& pattern) {
+    HitSet hits;
+    for (const auto& [rel, content] : corpus.files()) {
+        auto lines = corpus_lines(content);
+        for (size_t i = 0; i < lines.size(); ++i) {
+            if (lines[i].find(pattern) == std::string::npos) {
+                hits.emplace(rel, static_cast<int>(i) + 1);
+            }
+        }
+    }
+    return hits;
+}
+
+/// Independent oracle for `flags=nc`: matching lines, minus lines that are
+/// nothing but a comment. Spelled out here rather than calling the production
+/// line_is_comment_only, so the checker cannot inherit that predicate's blind
+/// spots (bench-harness-oracle-independence rule 1).
+HitSet naive_no_comment_hits(const TempCorpus& corpus,
+                             const std::string& pattern) {
+    HitSet hits;
+    for (const auto& [rel, content] : corpus.files()) {
+        auto lines = corpus_lines(content);
+        for (size_t i = 0; i < lines.size(); ++i) {
+            const std::string& raw = lines[i];
+            if (raw.find(pattern) == std::string::npos) continue;
+
+            size_t b = raw.find_first_not_of(" \t\r");
+            if (b == std::string::npos) continue;
+            size_t e = raw.find_last_not_of(" \t\r");
+            std::string t = raw.substr(b, e - b + 1);
+
+            bool comment_only = t.rfind("//", 0) == 0 || t[0] == '#' ||
+                                t.rfind("/*", 0) == 0 ||
+                                t.find("*/") != std::string::npos;
+            if (comment_only) continue;
+            hits.emplace(rel, static_cast<int>(i) + 1);
+        }
+    }
+    return hits;
+}
+
+/// ripgrep invert oracle: `rg -v --fixed-strings`.
+HitSet rg_invert_hits(const std::filesystem::path& root,
+                      const std::string& pattern) {
+    std::string cmd = "cd '" + root.string() +
+                      "' && rg --fixed-strings --invert-match --line-number "
+                      "--no-heading --with-filename -e '" +
+                      pattern + "' . 2>/dev/null";
+    HitSet hits;
+    FILE* pipe = popen(cmd.c_str(), "r");
+    if (pipe == nullptr) return hits;
+    std::array<char, 4096> buf{};
+    std::string out;
+    while (fgets(buf.data(), buf.size(), pipe) != nullptr) out += buf.data();
+    pclose(pipe);
+
+    std::istringstream lines(out);
+    std::string line;
+    while (std::getline(lines, line)) {
+        size_t c1 = line.find(':');
+        if (c1 == std::string::npos) continue;
+        size_t c2 = line.find(':', c1 + 1);
+        if (c2 == std::string::npos) continue;
+        std::string rel = line.substr(0, c1);
+        if (rel.rfind("./", 0) == 0) rel = rel.substr(2);
+        int lineno = std::atoi(line.substr(c1 + 1, c2 - c1 - 1).c_str());
+        if (lineno > 0) hits.emplace(rel, lineno);
+    }
+    return hits;
+}
+
+/// Runs a SearchEngine query and reduces it to the (rel path, line) hit set.
+HitSet engine_hits(const SearchEngine& engine, const std::string& root,
+                   const std::string& pattern, const SearchOptions& base) {
+    SearchOptions opts = base;
+    opts.max_results = 5000;
+    HitSet hits;
+    for (const auto& r : engine.search(pattern, opts)) {
+        std::string rel = r.path;
+        if (rel.rfind(root, 0) == 0 && rel.size() > root.size()) {
+            rel = rel.substr(root.size() + 1);
+        }
+        hits.emplace(rel, r.line);
+    }
+    return hits;
+}
+
+/// A corpus with comment-only lines, trailing comments, and -- critically --
+/// a file containing NO occurrence of the pattern, which `rg -v` still reports
+/// in full.
+void build_flag_corpus(TempCorpus& corpus) {
+    corpus.write_file("alpha.go",
+        "package main\n"                       // 1 no match
+        "// Widget is the comment form\n"      // 2 comment-only, matches
+        "type Widget struct{}\n"               // 3 code, matches
+        "func run() { use(Widget{}) } // Widget again\n"  // 4 code + trailing
+        "var unrelated = 1\n");                // 5 no match
+    corpus.write_file("beta.py",
+        "import os\n"                          // 1 no match
+        "# Widget helper\n"                    // 2 comment-only, matches
+        "class Widget:\n"                      // 3 code, matches
+        "    pass\n");                         // 4 no match
+    corpus.write_file("gamma.go",
+        "package gamma\n"                      // 1 no match
+        "func nothing() {}\n"                  // 2 no match
+        "var plain = 2\n");                    // 3 no match  (NO pattern here)
+    corpus.write_file("delta.c",
+        "/* Widget block opener */\n"          // 1 comment-only, matches
+        "int Widget = 3;\n"                    // 2 code, matches
+        "int tail = 4; /* Widget */\n");       // 3 code + block comment
+}
+
+TEST(SearchRgDifferentialTest, InvertMatchEqualsInvertOracle) {
+    TempCorpus corpus;
+    build_flag_corpus(corpus);
+
+    Config cfg = make_default_config();
+    cfg.project.root = corpus.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(corpus.path().string()));
+    SearchEngine engine(mi);
+
+    const std::string pattern = "Widget";
+    SearchOptions opts;
+    opts.invert_match = true;
+    opts.case_insensitive = false;
+
+    auto got = engine_hits(engine, cfg.project.root, pattern, opts);
+    auto want = naive_invert_hits(corpus, pattern);
+
+    EXPECT_EQ(want, got)
+        << "\n  want: " << describe(want) << "\n  got:  " << describe(got);
+
+    // The decisive case: gamma.go contains no occurrence at all, so every one
+    // of its lines belongs in rg -v output. A candidate-set-scoped invert
+    // drops the file entirely.
+    bool saw_gamma = false;
+    for (const auto& [rel, line] : got) {
+        (void)line;
+        if (rel == "gamma.go") saw_gamma = true;
+    }
+    EXPECT_TRUE(saw_gamma) << "a file with no match must still contribute";
+
+    if (rg_available()) {
+        auto rg = rg_invert_hits(corpus.path(), pattern);
+        EXPECT_EQ(rg, got)
+            << "\n  rg:  " << describe(rg) << "\n  got: " << describe(got);
+    } else {
+        GTEST_LOG_(INFO)
+            << "rg not reachable via system(); naive invert oracle only";
+    }
+}
+
+TEST(SearchRgDifferentialTest, ExcludeCommentsDropsCommentOnlyLines) {
+    TempCorpus corpus;
+    build_flag_corpus(corpus);
+
+    Config cfg = make_default_config();
+    cfg.project.root = corpus.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(corpus.path().string()));
+    SearchEngine engine(mi);
+
+    const std::string pattern = "Widget";
+
+    SearchOptions plain;
+    plain.case_insensitive = false;
+    auto all_hits = engine_hits(engine, cfg.project.root, pattern, plain);
+    ASSERT_EQ(naive_hits(corpus, pattern), all_hits)
+        << "control: unfiltered search must match the plain oracle first";
+
+    SearchOptions nc;
+    nc.case_insensitive = false;
+    nc.exclude_comments = true;
+    auto got = engine_hits(engine, cfg.project.root, pattern, nc);
+    auto want = naive_no_comment_hits(corpus, pattern);
+
+    EXPECT_EQ(want, got)
+        << "\n  want: " << describe(want) << "\n  got:  " << describe(got);
+
+    // Every comment-only line the plain search returned must be gone, and
+    // every code line must survive -- including one with a trailing comment.
+    EXPECT_TRUE(got.count({"alpha.go", 2}) == 0) << "// comment-only kept";
+    EXPECT_TRUE(got.count({"beta.py", 2}) == 0) << "# comment-only kept";
+    EXPECT_TRUE(got.count({"delta.c", 1}) == 0) << "/* comment-only kept";
+    EXPECT_TRUE(got.count({"alpha.go", 3}) == 1) << "code line dropped";
+    EXPECT_TRUE(got.count({"alpha.go", 4}) == 1)
+        << "code line with a TRAILING comment must be kept";
+    EXPECT_TRUE(got.count({"beta.py", 3}) == 1) << "code line dropped";
 }
 
 }  // namespace
