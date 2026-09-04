@@ -1,4 +1,5 @@
 #include <lci/search/search_engine.h>
+#include <lci/search/symbol_type_alias.h>
 
 #include <lci/core/reference_tracker.h>
 #include <lci/core/text.h>
@@ -117,20 +118,20 @@ PathFilter make_path_filter(const SearchOptions& opts) {
     return pf;
 }
 
-/// Returns true if `enclosing` symbol-type matches any user-requested type.
-/// Type-string match (lowercase). Empty allow-list = accept all.
+/// Returns true if `actual` symbol-type matches any user-requested type.
+/// Both sides go through canonical_symbol_type, so the aliases the MCP tool
+/// description advertises (func, var, cls, ...) compare equal to the
+/// SymbolType names they stand for. Comparing the raw strings, as this used
+/// to, made every advertised alias filter all rows away.
+/// Empty allow-list = accept all. `wanted` is expected to have been validated
+/// by SearchEngine::search, so an unknown entry here cannot match anything.
 bool symbol_type_matches_filter(const std::vector<std::string>& wanted,
                                 std::string_view actual) {
     if (wanted.empty()) return true;
+    auto actual_canonical = canonical_symbol_type(actual);
+    if (actual_canonical.empty()) return false;
     for (const auto& w : wanted) {
-        if (w.size() != actual.size()) continue;
-        bool eq = true;
-        for (size_t i = 0; i < w.size(); ++i) {
-            char a = static_cast<char>(std::tolower(static_cast<unsigned char>(w[i])));
-            char b = static_cast<char>(std::tolower(static_cast<unsigned char>(actual[i])));
-            if (a != b) { eq = false; break; }
-        }
-        if (eq) return true;
+        if (canonical_symbol_type(w) == actual_canonical) return true;
     }
     return false;
 }
@@ -432,6 +433,20 @@ std::vector<SearchResult> SearchEngine::search(
         if (!probe.ok()) {
             if (stats != nullptr) {
                 stats->error = "invalid regex: " + probe.error();
+            }
+            return {};
+        }
+    }
+
+    // An unrecognized symbol type is a caller mistake, not an empty corpus.
+    // Left unvalidated it filtered every row away and returned zero matches --
+    // the same answer a correct query gives, so the caller could not tell the
+    // two apart and the handler's hint blamed its pattern (Karpathy rule 6).
+    for (const auto& t : options.symbol_types) {
+        if (canonical_symbol_type(t).empty()) {
+            if (stats != nullptr) {
+                stats->error = "unknown symbol_type '" + t + "' (valid: " +
+                               canonical_symbol_type_list() + ")";
             }
             return {};
         }
