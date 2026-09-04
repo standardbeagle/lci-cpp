@@ -1001,5 +1001,99 @@ TEST(SearchCoordinatorTest, UniquePathsKeepsAdjacentAndEmptyCases) {
     EXPECT_EQ(1u, SearchCoordinator::unique_paths(single).size());
 }
 
+// Criterion 1: the MCP handler sets SearchOptions::exclude_comments and
+// ::invert_match from flags nc/iv, and the engine never read either field.
+// The only reader was semantic_filter.cpp, which has no production caller. So
+// `flags=iv` returned exactly the lines it was asked to exclude, and
+// `flags=nc` returned the comments it was asked to drop.
+TEST(SearchFlagNoComments, ExcludesCommentOnlyLines) {
+    TempDir dir;
+    dir.write_file("a.go",
+        "package main\n"          // 1
+        "// Config is a comment\n" // 2 comment-only, matches
+        "var Config = 1\n"        // 3 code, matches
+        "  # Config hash\n"       // 4 comment-only, matches
+        "run(Config)  // Config\n");  // 5 code with trailing comment, matches
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    SearchEngine engine(mi);
+
+    SearchOptions all;
+    auto every = engine.search("Config", all);
+    ASSERT_EQ(4u, every.size()) << "control: expected matches on lines 2,3,4,5";
+
+    SearchOptions no_comments;
+    no_comments.exclude_comments = true;
+    auto kept = engine.search("Config", no_comments);
+
+    std::vector<int> lines;
+    for (const auto& r : kept) lines.push_back(r.line);
+    std::sort(lines.begin(), lines.end());
+    EXPECT_EQ((std::vector<int>{3, 5}), lines)
+        << "comment-only lines 2 and 4 must be dropped; a trailing comment on "
+           "a code line (5) must not drop the line";
+}
+
+// `iv` must behave like `rg -v`: every line that does NOT match, across the
+// searched corpus -- not merely the non-matching lines of files that happen to
+// contain a match.
+TEST(SearchFlagInvertMatch, ReturnsOnlyNonMatchingLines) {
+    TempDir dir;
+    dir.write_file("a.go",
+        "package main\n"     // 1 no match
+        "var Config = 1\n"   // 2 match
+        "var other = 2\n");  // 3 no match
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    SearchEngine engine(mi);
+    SearchOptions opts;
+    opts.invert_match = true;
+    auto results = engine.search("Config", opts);
+
+    std::vector<int> lines;
+    for (const auto& r : results) {
+        EXPECT_EQ(std::string::npos, r.match_text.find("Config"))
+            << "invert returned a line containing the pattern";
+        lines.push_back(r.line);
+    }
+    std::sort(lines.begin(), lines.end());
+    EXPECT_EQ((std::vector<int>{1, 3}), lines);
+}
+
+// rg -v reports non-matching lines from files with NO match at all. Scoping
+// invert to the trigram candidate set (files that contain the pattern) would
+// silently drop those files entirely.
+TEST(SearchFlagInvertMatch, CoversFilesWithNoMatchAtAll) {
+    TempDir dir;
+    dir.write_file("has.go", "package main\nvar Config = 1\n");
+    dir.write_file("none.go", "package main\nvar plain = 2\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    SearchEngine engine(mi);
+    SearchOptions opts;
+    opts.invert_match = true;
+    auto results = engine.search("Config", opts);
+
+    bool saw_none_go = false;
+    for (const auto& r : results) {
+        if (r.path.find("none.go") != std::string::npos) saw_none_go = true;
+    }
+    EXPECT_TRUE(saw_none_go)
+        << "a file containing no match contributes every one of its lines to "
+           "rg -v output; scoping invert to the candidate set drops it";
+}
+
 }  // namespace
 }  // namespace lci
