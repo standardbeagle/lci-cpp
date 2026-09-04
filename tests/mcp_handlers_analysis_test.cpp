@@ -1864,7 +1864,9 @@ TEST_F(ErrorHandlingSectionTest, ZeroSignalRendersNAInsteadOfPerfectScore) {
     // over nothing. Zero observed signal must render as n/a, not as the
     // best possible score.
     SideEffectAnalyzer plain("go");
-    std::string main_path = (temp_dir_ / "main.go").string();
+    // generic_string() for the same reason as the fixture's paths: the
+    // report joins findings back through the index's generic spelling.
+    std::string main_path = (temp_dir_ / "main.go").generic_string();
     plain.begin_function("PublicEntry", main_path, 12, 15);
     plain.end_function();
 
