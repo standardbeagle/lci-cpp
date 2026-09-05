@@ -4,10 +4,12 @@
 
 #include "grep_filters.h"
 
+#include <lci/cli/column.h>
 #include <lci/core/mmap.h>
 #include <lci/search/search_options.h>
 
 #include <algorithm>
+#include <cassert>
 #include <cctype>
 #include <cstdio>
 #include <filesystem>
@@ -208,7 +210,7 @@ nlohmann::json apply_word_boundary(nlohmann::json results,
     for (auto& r : results) {
         std::string path = r.value("path", "");
         int line_no = r.value("line", 0);
-        int column = r.value("column", 0);
+        int column = r.value("column", kColumnUnknown);
         if (path.empty() || line_no <= 0) {
             // Missing position → can't classify; drop to mirror grep -w
             // strictness (Go's regex `\bfoo\b` would simply not match).
@@ -218,14 +220,10 @@ nlohmann::json apply_word_boundary(nlohmann::json results,
         std::string match_str = r.value("match", pattern);
         if (match_str.empty()) match_str = pattern;
 
-        // The server's literal-match engine emits a 0-based byte offset in
-        // `column` for match positions on the matched line. (Note: the AST
-        // filters in this file treat column as 1-based — that path runs on
-        // a DIFFERENT engine output where `column` is post-normalized to
-        // 1-based by the formatter. Here we read raw indexer rows pre-
-        // formatter, so we use the 0-based byte offset directly.)
-        // `column < 0` is treated as "unknown" — fall back to substring scan.
-        if (column < 0) {
+        // `column` follows the one column contract (lci/cli/column.h):
+        // a 0-based byte offset into the matched line, kColumnUnknown
+        // when the engine didn't record a position.
+        if (column == kColumnUnknown) {
             // Server didn't record column. Fall back to scanning for the
             // first occurrence on the line.
             size_t pos = std::string::npos;
@@ -692,6 +690,11 @@ nlohmann::json regex_filter_results(nlohmann::json results,
     // next seed hit.
     std::set<std::pair<std::string, int>> seen;
     for (auto& row : results) {
+        // Server boundary: rows entering the CLI filter pipeline must
+        // already honor the one column contract (lci/cli/column.h) —
+        // 0-based byte offset, or kColumnUnknown when not recorded.
+        assert(column_honors_contract(row.value("column", kColumnUnknown)) &&
+               "server row column violates the 0-based column contract");
         auto& ctx = row["context"];
         if (!ctx.is_object() || !ctx.contains("lines") ||
             !ctx["lines"].is_array()) {
@@ -716,7 +719,9 @@ nlohmann::json regex_filter_results(nlohmann::json results,
             }
             auto position = submatches[0].data() - line.data();
             row["line"] = start_line + idx;
-            row["column"] = static_cast<int>(position) + 1;
+            // Column contract (lci/cli/column.h): 0-based byte offset, the
+            // same base the server's literal-match engine emits.
+            row["column"] = static_cast<int>(position);
             row["match"] = std::string(submatches[0].data(),
                                        submatches[0].size());
             return true;

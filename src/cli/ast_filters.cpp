@@ -5,6 +5,8 @@
 
 #include "grep_filters.h"
 
+#include <lci/cli/column.h>
+
 #include <algorithm>
 #include <string>
 #include <string_view>
@@ -39,18 +41,17 @@ namespace ast_filters {
 //     past the opener comment bytes; `*/` anywhere makes columns up to
 //     and including the closer comment bytes.
 //
-// Both helpers treat `column` as 1-based to match the indexer convention
-// (`column == 0` is a sentinel meaning "match position not recorded";
-// callers fall back to line-level classification in that case).
+// Both helpers follow the one column contract (lci/cli/column.h):
+// `column` is a 0-based byte offset into `line`; kColumnUnknown (-1)
+// means "match position not recorded" and callers fall back to
+// line-level classification in that case.
 
 bool match_is_in_string_literal(std::string_view line, int column) {
+    // kColumnUnknown: match position not recorded — report false and let
+    // callers fall back to line-level heuristics (e.g. tag the whole row
+    // as code or comment based on `line_looks_like_comment`).
     if (column < 0) return false;
-    // Convert to 0-based byte index. column == 0 is treated as "match
-    // position unknown"; in that case we report false and let callers
-    // fall back to line-level heuristics (e.g. tag the whole row as code
-    // or comment based on `line_looks_like_comment`).
-    if (column == 0) return false;
-    size_t target = static_cast<size_t>(column - 1);
+    size_t target = static_cast<size_t>(column);
     if (target >= line.size()) return false;
 
     // Scanner state. We walk left-to-right and stop the moment we know
@@ -221,12 +222,11 @@ bool match_is_in_string_literal(std::string_view line, int column) {
 }
 
 bool match_is_in_comment(std::string_view line, int column) {
-    if (column < 0) return false;
-    // column == 0 means "no column recorded" — fall back to line-level
+    // kColumnUnknown means "no column recorded" — fall back to line-level
     // heuristic (whole-line classifier).
-    if (column == 0) return line_looks_like_comment(line);
+    if (column < 0) return line_looks_like_comment(line);
 
-    size_t target = static_cast<size_t>(column - 1);
+    size_t target = static_cast<size_t>(column);
     if (target >= line.size()) return false;
 
     // Trim leading whitespace to mirror line_looks_like_comment(): a line
@@ -351,7 +351,7 @@ nlohmann::json apply_comments_only(nlohmann::json results) {
             continue;
         }
         std::string text = read_match_line(r, path, line_no);
-        int column = r.value("column", 0);
+        int column = r.value("column", kColumnUnknown);
         if (!match_is_in_comment(text, column)) continue;
         out.push_back(std::move(r));
     }
@@ -371,7 +371,7 @@ nlohmann::json apply_strings_only(nlohmann::json results) {
             continue;
         }
         std::string text = read_match_line(r, path, line_no);
-        int column = r.value("column", 0);
+        int column = r.value("column", kColumnUnknown);
         if (!match_is_in_string_literal(text, column)) continue;
         out.push_back(std::move(r));
     }
@@ -392,7 +392,7 @@ nlohmann::json apply_code_only(nlohmann::json results) {
             continue;
         }
         std::string text = read_match_line(r, path, line_no);
-        int column = r.value("column", 0);
+        int column = r.value("column", kColumnUnknown);
         if (match_is_in_comment(text, column)) continue;
         if (match_is_in_string_literal(text, column)) continue;
         out.push_back(std::move(r));

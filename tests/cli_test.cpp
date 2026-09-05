@@ -2021,58 +2021,61 @@ TEST(RankOptionsApplyRank, EmptyResultsProducesEmpty) {
 //
 // Direct unit tests for the AST-aware match-position classifiers backing
 // `--comments-only`, `--code-only`, and `--strings-only`. These exercise the
-// pure heuristic without going through the server. Columns are 1-based.
+// pure heuristic without going through the server. Columns are 0-based byte
+// offsets (the one column contract, include/lci/cli/column.h); -1 means
+// "position not recorded".
 
 namespace af = ::lci::cli::ast_filters;
 
 TEST(AstFiltersString, MatchInsideDoubleQuoted) {
-    // `int x = "foo bar";` — column 12 ('o' in foo) is inside the literal.
+    // `int x = "foo bar";` — column 11 ('o' in foo) is inside the literal.
     std::string line = "int x = \"foo bar\";";
-    EXPECT_TRUE(af::match_is_in_string_literal(line, 12));
+    EXPECT_TRUE(af::match_is_in_string_literal(line, 11));
 }
 
 TEST(AstFiltersString, MatchOutsideDoubleQuoted) {
-    // Column 1 ('i' of int) is in code, not a string.
+    // Column 0 ('i' of int) is in code, not a string.
     std::string line = "int x = \"foo\";";
-    EXPECT_FALSE(af::match_is_in_string_literal(line, 1));
+    EXPECT_FALSE(af::match_is_in_string_literal(line, 0));
 }
 
 TEST(AstFiltersString, MatchInsideSingleQuoted) {
-    // `char c = 'X';` — column 11 (the 'X') is inside the literal.
+    // `char c = 'X';` — column 10 (the 'X') is inside the literal.
     std::string line = "char c = 'X';";
-    EXPECT_TRUE(af::match_is_in_string_literal(line, 11));
+    EXPECT_TRUE(af::match_is_in_string_literal(line, 10));
 }
 
 TEST(AstFiltersString, EscapedQuoteDoesNotCloseLiteral) {
     // `"a\"b"` — backslash-escaped quote keeps us in-string for 'b'.
     std::string line = "x = \"a\\\"b\";";
-    // Position of 'b': after `"a\"` → x(1) =(3) " "(5) "(6) a(7) \(8) "(9) b(10).
-    // Recompute: x=1 space=2 ==3 space=4 "=5 a=6 \=7 "=8 b=9 "=10 ;=11
-    // So 'b' is at column 9.
-    EXPECT_TRUE(af::match_is_in_string_literal(line, 9));
+    // 0-based: x=0 space=1 ==2 space=3 "=4 a=5 \=6 "=7 b=8 "=9 ;=10
+    // So 'b' is at column 8.
+    EXPECT_TRUE(af::match_is_in_string_literal(line, 8));
 }
 
 TEST(AstFiltersString, MatchInComment) {
-    // `// hello world` — column 5 ('h' of hello) is in a comment, NOT a string.
+    // `// hello world` — column 4 ('h' of hello) is in a comment, NOT a string.
     std::string line = "// hello world";
-    EXPECT_FALSE(af::match_is_in_string_literal(line, 5));
+    EXPECT_FALSE(af::match_is_in_string_literal(line, 4));
 }
 
 TEST(AstFiltersString, QuoteInsideCommentDoesNotOpenString) {
     // `// "hello"` — the quotes are inside a comment, no string is opened.
-    // The 'h' is at column 5 (still inside the comment).
+    // The 'h' is at column 4 (still inside the comment).
     std::string line = "// \"hello\"";
-    EXPECT_FALSE(af::match_is_in_string_literal(line, 5));
+    EXPECT_FALSE(af::match_is_in_string_literal(line, 4));
 }
 
-TEST(AstFiltersString, ColumnZeroReturnsFalse) {
-    // Sentinel: column 0 means "no column recorded" — caller falls back to
-    // line-level heuristics; we conservatively report false here.
+TEST(AstFiltersString, ColumnZeroIsARealPosition) {
+    // 0-based contract: column 0 is the first byte of the line, a REAL
+    // position — here 'x', which is code, not a string.
     std::string line = "x = \"foo\";";
     EXPECT_FALSE(af::match_is_in_string_literal(line, 0));
 }
 
 TEST(AstFiltersString, NegativeColumnReturnsFalse) {
+    // kColumnUnknown (-1): position not recorded — report false, caller
+    // falls back to line-level heuristics.
     EXPECT_FALSE(af::match_is_in_string_literal("anything", -1));
 }
 
@@ -2082,50 +2085,50 @@ TEST(AstFiltersString, ColumnPastEndReturnsFalse) {
 }
 
 TEST(AstFiltersString, TripleDoubleQuoteInside) {
-    // Python triple-quoted string: `x = """body"""`. Column 11 ('o' of body)
+    // Python triple-quoted string: `x = """body"""`. Column 8 ('o' of body)
     // is inside the literal.
     std::string line = "x = \"\"\"body\"\"\"";
-    // x(1) space(2) =(3) space(4) "(5) "(6) "(7) b(8) o(9) d(10) y(11) ...
-    EXPECT_TRUE(af::match_is_in_string_literal(line, 9));
+    // x(0) space(1) =(2) space(3) "(4) "(5) "(6) b(7) o(8) d(9) y(10) ...
+    EXPECT_TRUE(af::match_is_in_string_literal(line, 8));
 }
 
 TEST(AstFiltersString, UnclosedLiteralRunsThroughEol) {
     // Unclosed `"...` — match anywhere after the opener should report
     // in-string (we treat the literal as continuing through EOL).
     std::string line = "x = \"unterminated";
-    // 'u' of "unterminated" sits right after the opening quote at column 5.
-    EXPECT_TRUE(af::match_is_in_string_literal(line, 6));
+    // 'u' of "unterminated" sits right after the opening quote at column 4.
+    EXPECT_TRUE(af::match_is_in_string_literal(line, 5));
 }
 
 TEST(AstFiltersString, BlockCommentSameLineNotString) {
     // `/* hello */` — `hello` is in a comment, not a string.
     std::string line = "x = /* hello */ 42;";
-    // 'h' position: x(1) space(2) =(3) space(4) /(5) *(6) space(7) h(8)
-    EXPECT_FALSE(af::match_is_in_string_literal(line, 8));
+    // 'h' position: x(0) space(1) =(2) space(3) /(4) *(5) space(6) h(7)
+    EXPECT_FALSE(af::match_is_in_string_literal(line, 7));
 }
 
 TEST(AstFiltersComment, LineLeadingSlashSlash) {
     // `// comment` — every column is in a comment, including leading ws.
-    EXPECT_TRUE(af::match_is_in_comment("// hello", 1));
-    EXPECT_TRUE(af::match_is_in_comment("// hello", 5));
-    EXPECT_TRUE(af::match_is_in_comment("    // indented", 4));
-    EXPECT_TRUE(af::match_is_in_comment("    // indented", 9));
+    EXPECT_TRUE(af::match_is_in_comment("// hello", 0));
+    EXPECT_TRUE(af::match_is_in_comment("// hello", 4));
+    EXPECT_TRUE(af::match_is_in_comment("    // indented", 3));
+    EXPECT_TRUE(af::match_is_in_comment("    // indented", 8));
 }
 
 TEST(AstFiltersComment, LineLeadingHash) {
-    EXPECT_TRUE(af::match_is_in_comment("# python comment", 1));
-    EXPECT_TRUE(af::match_is_in_comment("# python comment", 10));
+    EXPECT_TRUE(af::match_is_in_comment("# python comment", 0));
+    EXPECT_TRUE(af::match_is_in_comment("# python comment", 9));
 }
 
 TEST(AstFiltersComment, InlineSlashSlashSplitsLine) {
     // `int x = 1; // tail` — column on the code part is NOT a comment, but
     // a column at or past the `//` opener IS.
     std::string line = "int x = 1; // tail";
-    // i(1) n(2) t(3) space(4) x(5) space(6) =(7) space(8) 1(9) ;(10)
-    // space(11) /(12) /(13) space(14) t(15)
-    EXPECT_FALSE(af::match_is_in_comment(line, 5));   // 'x' in code
-    EXPECT_TRUE(af::match_is_in_comment(line, 12));   // first '/' of `//`
-    EXPECT_TRUE(af::match_is_in_comment(line, 15));   // 't' of tail
+    // i(0) n(1) t(2) space(3) x(4) space(5) =(6) space(7) 1(8) ;(9)
+    // space(10) /(11) /(12) space(13) t(14)
+    EXPECT_FALSE(af::match_is_in_comment(line, 4));   // 'x' in code
+    EXPECT_TRUE(af::match_is_in_comment(line, 11));   // first '/' of `//`
+    EXPECT_TRUE(af::match_is_in_comment(line, 14));   // 't' of tail
 }
 
 TEST(AstFiltersComment, SlashSlashInsideStringNotComment) {
@@ -2133,49 +2136,49 @@ TEST(AstFiltersComment, SlashSlashInsideStringNotComment) {
     // NOT mark the rest of the line as comment. Match on `e` of `example`
     // is in a string, not a comment.
     std::string line = "s = \"https://example.com\";";
-    // s(1) space(2) =(3) space(4) "(5) h(6) t(7) t(8) p(9) s(10)
-    // :(11) /(12) /(13) e(14)
-    EXPECT_FALSE(af::match_is_in_comment(line, 14));
+    // s(0) space(1) =(2) space(3) "(4) h(5) t(6) t(7) p(8) s(9)
+    // :(10) /(11) /(12) e(13)
+    EXPECT_FALSE(af::match_is_in_comment(line, 13));
 }
 
 TEST(AstFiltersComment, BlockCommentCloserOnLine) {
     // `body */ rest` — columns up to and including the `/` of `*/` are
     // comment, columns after are code.
     std::string line = "body */ rest";
-    // b(1) o(2) d(3) y(4) space(5) *(6) /(7) space(8) r(9) e(10) s(11) t(12)
-    EXPECT_TRUE(af::match_is_in_comment(line, 1));   // 'b' inside comment tail
-    EXPECT_TRUE(af::match_is_in_comment(line, 7));   // closing '/'
-    EXPECT_FALSE(af::match_is_in_comment(line, 9));  // 'r' of rest -> code
+    // b(0) o(1) d(2) y(3) space(4) *(5) /(6) space(7) r(8) e(9) s(10) t(11)
+    EXPECT_TRUE(af::match_is_in_comment(line, 0));   // 'b' inside comment tail
+    EXPECT_TRUE(af::match_is_in_comment(line, 6));   // closing '/'
+    EXPECT_FALSE(af::match_is_in_comment(line, 8));  // 'r' of rest -> code
 }
 
 TEST(AstFiltersComment, BlockCommentOpenerWithoutCloser) {
     // `code /* tail` — every column from the `/*` opener is comment.
     std::string line = "x = 1 /* tail";
-    // x(1) space(2) =(3) space(4) 1(5) space(6) /(7) *(8) space(9) t(10)
-    EXPECT_FALSE(af::match_is_in_comment(line, 1));
-    EXPECT_TRUE(af::match_is_in_comment(line, 7));
-    EXPECT_TRUE(af::match_is_in_comment(line, 10));
+    // x(0) space(1) =(2) space(3) 1(4) space(5) /(6) *(7) space(8) t(9)
+    EXPECT_FALSE(af::match_is_in_comment(line, 0));
+    EXPECT_TRUE(af::match_is_in_comment(line, 6));
+    EXPECT_TRUE(af::match_is_in_comment(line, 9));
 }
 
 TEST(AstFiltersComment, BlockCommentSameLineWithCode) {
     // `int x = /* note */ 42;` — `note` columns are comment, `42` is code.
     std::string line = "int x = /* note */ 42;";
-    // ...space(8) /(9) *(10) space(11) n(12) o(13) t(14) e(15) space(16)
-    // *(17) /(18) space(19) 4(20)
-    EXPECT_TRUE(af::match_is_in_comment(line, 12));   // 'n' of note
-    EXPECT_FALSE(af::match_is_in_comment(line, 20));  // '4' of 42
+    // ...space(7) /(8) *(9) space(10) n(11) o(12) t(13) e(14) space(15)
+    // *(16) /(17) space(18) 4(19)
+    EXPECT_TRUE(af::match_is_in_comment(line, 11));   // 'n' of note
+    EXPECT_FALSE(af::match_is_in_comment(line, 19));  // '4' of 42
 }
 
-TEST(AstFiltersComment, ColumnZeroFallsBackToLineHeuristic) {
-    // No column recorded -> line-level classification: a leading `//` line
+TEST(AstFiltersComment, UnknownColumnFallsBackToLineHeuristic) {
+    // kColumnUnknown (-1) -> line-level classification: a leading `//` line
     // reports comment, a code line reports not-comment.
-    EXPECT_TRUE(af::match_is_in_comment("// only", 0));
-    EXPECT_FALSE(af::match_is_in_comment("int x = 1;", 0));
+    EXPECT_TRUE(af::match_is_in_comment("// only", -1));
+    EXPECT_FALSE(af::match_is_in_comment("int x = 1;", -1));
 }
 
 TEST(AstFiltersComment, EmptyOrWhitespaceLine) {
-    EXPECT_FALSE(af::match_is_in_comment("", 1));
-    EXPECT_FALSE(af::match_is_in_comment("   ", 1));
+    EXPECT_FALSE(af::match_is_in_comment("", 0));
+    EXPECT_FALSE(af::match_is_in_comment("   ", 0));
 }
 
 // -- ast_filters JSON transform tests ----------------------------------------
@@ -2184,19 +2187,19 @@ TEST(AstFiltersApplyCommentsOnly, KeepsOnlyCommentRows) {
     nlohmann::json comment_row;
     comment_row["path"] = "/no/such/file.cpp";
     comment_row["line"] = 1;
-    comment_row["column"] = 1;
+    comment_row["column"] = 0;
     comment_row["context"] = {{"start_line", 1}, {"lines", {"// in a comment"}}};
 
     nlohmann::json code_row;
     code_row["path"] = "/no/such/file.cpp";
     code_row["line"] = 2;
-    code_row["column"] = 1;
+    code_row["column"] = 0;
     code_row["context"] = {{"start_line", 2}, {"lines", {"int x = 1;"}}};
 
     nlohmann::json string_row;
     string_row["path"] = "/no/such/file.cpp";
     string_row["line"] = 3;
-    string_row["column"] = 11;  // inside the string literal
+    string_row["column"] = 10;  // closing quote of the string literal
     string_row["context"] = {{"start_line", 3}, {"lines", {"x = \"hello\";"}}};
 
     nlohmann::json results =
@@ -2210,20 +2213,20 @@ TEST(AstFiltersApplyStringsOnly, KeepsOnlyStringRows) {
     nlohmann::json comment_row;
     comment_row["path"] = "/no/such/file.cpp";
     comment_row["line"] = 1;
-    comment_row["column"] = 5;
+    comment_row["column"] = 4;
     comment_row["context"] = {{"start_line", 1}, {"lines", {"// hello"}}};
 
     nlohmann::json code_row;
     code_row["path"] = "/no/such/file.cpp";
     code_row["line"] = 2;
-    code_row["column"] = 1;
+    code_row["column"] = 0;
     code_row["context"] = {{"start_line", 2}, {"lines", {"int x = 1;"}}};
 
-    // `x = "hello";` — 'h' at column 6.
+    // `x = "hello";` — 'h' at column 5.
     nlohmann::json string_row;
     string_row["path"] = "/no/such/file.cpp";
     string_row["line"] = 3;
-    string_row["column"] = 6;
+    string_row["column"] = 5;
     string_row["context"] = {{"start_line", 3}, {"lines", {"x = \"hello\";"}}};
 
     nlohmann::json results =
@@ -2237,19 +2240,19 @@ TEST(AstFiltersApplyCodeOnly, DropsCommentAndStringRows) {
     nlohmann::json comment_row;
     comment_row["path"] = "/no/such/file.cpp";
     comment_row["line"] = 1;
-    comment_row["column"] = 5;
+    comment_row["column"] = 4;
     comment_row["context"] = {{"start_line", 1}, {"lines", {"// hello"}}};
 
     nlohmann::json code_row;
     code_row["path"] = "/no/such/file.cpp";
     code_row["line"] = 2;
-    code_row["column"] = 5;  // 'x' in `int x = 1;`
+    code_row["column"] = 4;  // 'x' in `int x = 1;`
     code_row["context"] = {{"start_line", 2}, {"lines", {"int x = 1;"}}};
 
     nlohmann::json string_row;
     string_row["path"] = "/no/such/file.cpp";
     string_row["line"] = 3;
-    string_row["column"] = 6;  // 'h' inside `x = "hello";`
+    string_row["column"] = 5;  // 'h' inside `x = "hello";`
     string_row["context"] = {{"start_line", 3}, {"lines", {"x = \"hello\";"}}};
 
     nlohmann::json results =
@@ -2288,7 +2291,7 @@ TEST(AstFiltersApply, PreservesInputOrdering) {
         nlohmann::json r;
         r["path"] = "/no/such/file.cpp";
         r["line"] = line_no;
-        r["column"] = 1;
+        r["column"] = 0;
         r["context"] = {{"start_line", line_no}, {"lines", {"// kept"}}};
         return r;
     };

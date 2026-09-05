@@ -50,8 +50,11 @@ namespace lci {
 namespace cli {
 namespace ast_filters {
 
-/// Returns true if the byte at `column` (1-based) on `line` falls inside a
-/// string literal. Quote scanner walks the line left-to-right tracking
+/// Returns true if the byte at `column` on `line` falls inside a
+/// string literal. `column` follows the one column contract
+/// (include/lci/cli/column.h): a 0-based byte offset into the line,
+/// kColumnUnknown (-1) when the match position was not recorded.
+/// Quote scanner walks the line left-to-right tracking
 /// state (in_single_quote, in_double_quote, in_triple_quote, in_block_comment),
 /// honors backslash escapes inside single/double quotes, and bails out
 /// early when a single-line comment opens (// or # outside a string —
@@ -66,12 +69,13 @@ namespace ast_filters {
 /// when both ends appear on the same line; partial block comments behave
 /// like single-line comments after their opener.
 ///
-/// `column` is 1-based to match the indexer's convention; pass 0 to ask
-/// for the leftmost-column match position. Negative columns return false.
+/// kColumnUnknown returns false — the caller falls back to line-level
+/// heuristics.
 bool match_is_in_string_literal(std::string_view line, int column);
 
-/// Returns true if the byte at `column` (1-based) on `line` falls inside a
-/// comment token. A line-leading `//`, `#`, or `/*` makes EVERY column on
+/// Returns true if the byte at `column` on `line` falls inside a
+/// comment token. Same column contract as above (0-based; kColumnUnknown
+/// when not recorded). A line-leading `//`, `#`, or `/*` makes EVERY column on
 /// the line a comment (the whole line is comment body). When a single-line
 /// comment opens partway through the line (`code(); // tail`), only columns
 /// at or past the comment opener are considered comment bytes — so a match
