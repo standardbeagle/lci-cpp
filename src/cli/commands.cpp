@@ -393,7 +393,8 @@ PartitionedReferences partition_references(
         // A match is lexical-only noise when it falls inside a comment, a
         // single-line string literal, OR an interior line of a multi-line
         // docstring. `context` is the exact source line and `column` the
-        // 1-based match position (see handle_references). Everything else —
+        // 0-based byte offset of the match (see handle_references and
+        // include/lci/cli/column.h). Everything else — imports, calls,
         // imports, calls, decorators, attribute accesses, plain identifiers —
         // is a real code reference and ranks first. A match we cannot classify
         // (empty line text) is kept as code-context, never silently hidden.
@@ -422,20 +423,6 @@ PartitionedReferences partition_references(
 int run_refs(const GlobalFlags& flags, const std::string& symbol,
              bool json_output, bool show_all, bool count_only, bool terse,
              int max_results) {
-    if (json_output) {
-        std::cout
-            << "Incorrect Usage: flag provided but not defined: -json\n\n"
-            << "NAME:\n"
-            << "   lci refs - Find symbol references\n\n"
-            << "USAGE:\n"
-            << "   lci refs command [command options] \n\n"
-            << "COMMANDS:\n"
-            << "   help, h  Shows a list of commands or help for one command\n\n"
-            << "OPTIONS:\n"
-            << "   --help, -h  show help\n";
-        return 1;
-    }
-
     Config cfg;
     if (std::string err = load_config_with_overrides(flags, cfg); !err.empty()) {
         std::cerr << "Error: " << err << "\n";
@@ -467,6 +454,43 @@ int run_refs(const GlobalFlags& flags, const std::string& symbol,
     // like `deprecated`, the whole-text-search backend returns hundreds of
     // natural-language occurrences that would otherwise bury the real refs.
     PartitionedReferences parts = partition_references(*results);
+
+    if (json_output) {
+        auto ref_row = [](const ReferenceLocation& r) {
+            nlohmann::json row = {{"file_path", r.file_path},
+                                  {"line", r.line},
+                                  {"column", r.column}};
+            if (!r.context.empty()) row["context"] = r.context;
+            if (!r.match_text.empty()) row["match_text"] = r.match_text;
+            return row;
+        };
+        if (count_only) {
+            size_t n = parts.code.size();
+            if (show_all) n += parts.lexical.size();
+            std::cout << nlohmann::json({{"count", n},
+                                         {"truncated", truncated}})
+                             .dump(2)
+                      << "\n";
+            return 0;
+        }
+        nlohmann::json code = nlohmann::json::array();
+        for (const auto& r : parts.code) {
+            code.push_back(ref_row(r));
+        }
+        nlohmann::json out = {{"symbol", symbol},
+                              {"truncated", truncated},
+                              {"references", std::move(code)},
+                              {"lexical_count", parts.lexical.size()}};
+        if (show_all) {
+            nlohmann::json lexical = nlohmann::json::array();
+            for (const auto& r : parts.lexical) {
+                lexical.push_back(ref_row(r));
+            }
+            out["lexical_references"] = std::move(lexical);
+        }
+        std::cout << out.dump(2) << "\n";
+        return 0;
+    }
 
     if (count_only) {
         size_t n = parts.code.size();
