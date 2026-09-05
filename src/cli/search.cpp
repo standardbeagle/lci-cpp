@@ -9,7 +9,8 @@
 //
 //   --invert-match  (synthesizes one row per non-matching line)
 //     { query, time_ms, count, mode: "invert-match",
-//       results: [ { path, line, column: 0, match, context: { lines:[line] } } ] }
+//       results: [ { path, line, column: kColumnUnknown, match,
+//                    context: { lines:[line] } } ] }
 //
 //   --count
 //     { query, time_ms, count, mode: "count",
@@ -27,9 +28,11 @@
 // callers can identify the shape via the `mode` field.
 
 #include <lci/cli/commands.h>
+#include <lci/cli/column.h>
 #include <lci/core/mmap.h>
 #include <lci/indexing/pipeline_scanner.h>
 #include <lci/indexing/pipeline_types.h>
+#include <lci/search/search_engine.h>  // relative_to_root
 #include <lci/search/search_options.h>
 
 #include "ast_filters.h"
@@ -147,6 +150,99 @@ void emit_search_compatibility_notices(const SearchCommandOptions& options) {
     }
 }
 
+
+}  // namespace
+
+namespace {
+
+// Pages through the server's /search results until a short page signals
+// the end of the result set. The server caps one response at the requested
+// max_results (decode ceiling 100000), and run_search post-filters rows
+// client-side — so requesting a single fixed page applied the cap BEFORE
+// the filters and a match past row 500 was reported absent (certified
+// absence). The page base stays 500; each round doubles the request so the
+// total transfer stays O(N) — the /search API has no offset parameter, so
+// a later page is a larger prefix re-request.
+constexpr int kSearchPageBase = 500;
+constexpr int kSearchServerCeiling = 100000;  // decode_search clamp
+
+std::optional<nlohmann::json> search_all_pages(
+    Client& client, const std::string& pattern, bool case_insensitive,
+    std::string& error, const std::vector<std::string>& paths) {
+    int request = kSearchPageBase;
+    for (;;) {
+        std::string page_err;
+        auto page = client.search(pattern, request, case_insensitive, false,
+                                  page_err, paths);
+        if (!page) {
+            error = page_err;
+            return std::nullopt;
+        }
+        size_t rows = 0;
+        if (auto it = page->find("results");
+            it != page->end() && it->is_array()) {
+            rows = it->size();
+        }
+        if (static_cast<int>(rows) < request) return page;  // short page: end
+        if (request >= kSearchServerCeiling) {
+            std::cerr << "Warning: result set reaches the server's "
+                      << kSearchServerCeiling
+                      << "-row ceiling; output beyond it is truncated\n";
+            return page;
+        }
+        request = std::min(request * 2, kSearchServerCeiling);
+    }
+}
+
+// Regex-aware invert-match: synthesizes one row per line that does NOT
+// match `re`, for every file in `results` (first-seen order). The literal
+// invert_match_rows cannot serve regex mode — it would invert against the
+// trigram seeds, not the pattern. Honors the per-file cap like grep -m.
+nlohmann::json invert_match_rows_regex(const nlohmann::json& results,
+                                       const RE2& re,
+                                       int max_count_per_file) {
+    std::vector<std::string> ordered_paths;
+    std::set<std::string> seen;
+    for (const auto& r : results) {
+        std::string p = r.value("path", "");
+        if (p.empty() || seen.contains(p)) continue;
+        seen.insert(p);
+        ordered_paths.push_back(std::move(p));
+    }
+
+    nlohmann::json inverted = nlohmann::json::array();
+    for (const auto& path : ordered_paths) {
+        std::ifstream in(path);
+        if (!in) continue;
+        std::string line;
+        int line_no = 0;
+        int kept = 0;
+        while (std::getline(in, line)) {
+            ++line_no;
+            re2::StringPiece sp(line.data(), line.size());
+            if (RE2::PartialMatch(sp, re)) continue;
+            nlohmann::json row;
+            row["path"] = path;
+            row["line"] = line_no;
+            row["column"] = kColumnUnknown;
+            row["match"] = line;
+            nlohmann::json ctx;
+            ctx["block_type"] = "lines";
+            ctx["start_line"] = line_no;
+            ctx["end_line"] = line_no;
+            ctx["is_complete"] = true;
+            ctx["lines"] = nlohmann::json::array({line});
+            ctx["matched_lines"] = nlohmann::json::array({line_no});
+            ctx["match_count"] = 1;
+            row["context"] = std::move(ctx);
+            inverted.push_back(std::move(row));
+            if (max_count_per_file > 0 && ++kept >= max_count_per_file) {
+                break;
+            }
+        }
+    }
+    return inverted;
+}
 
 }  // namespace
 
@@ -302,10 +398,16 @@ int run_search(const GlobalFlags& flags, const SearchCommandOptions& options) {
         }
     }
 
+    std::string search_err;
+    std::optional<nlohmann::json> result;
+    std::vector<std::string> all_patterns;
+
     // Pure-meta regex full-scan path. Walks the FileScanner queue (same
     // file set ctest's `lci list` produces), mmaps each file, applies
     // RE2 line-by-line, emits server-shape result rows. Skips the
-    // server entirely.
+    // server entirely, so the filters the server would apply (path scope)
+    // are applied here, and the rows flow through the SAME post-filter /
+    // render pipeline as server results below — no raw-JSON side exit.
     if (regex_full_scan) {
         FileScanner scanner(cfg);
         // Budget-exempt: this path mmaps files one at a time, so memory is
@@ -316,9 +418,35 @@ int run_search(const GlobalFlags& flags, const SearchCommandOptions& options) {
                       return a.path < b.path;
                   });
 
+        // Path scope: exact file or directory prefix over the root-relative
+        // path, mirroring the server engine's scope matcher. A scope that
+        // matches no scanned file fails loudly (mirrors the server's
+        // "path matches no indexed file") instead of returning silent empty.
+        std::vector<bool> scope_hit(scoped_paths.size(), false);
+        auto in_scope = [&](std::string_view rel) {
+            bool any = false;
+            for (size_t i = 0; i < scoped_paths.size(); ++i) {
+                const std::string& s = scoped_paths[i];
+                const bool hit =
+                    rel.size() == s.size()
+                        ? rel == s
+                        : rel.size() > s.size() &&
+                              rel.compare(0, s.size(), s) == 0 &&
+                              rel[s.size()] == '/';
+                if (hit) {
+                    scope_hit[i] = true;
+                    any = true;
+                }
+            }
+            return any;
+        };
+
         nlohmann::json results = nlohmann::json::array();
-        int total_matches = 0;
         for (const auto& task : tasks) {
+            if (!scoped_paths.empty() &&
+                !in_scope(relative_to_root(task.path, cfg.project.root))) {
+                continue;
+            }
             MappedFile mf;
             std::string err;
             if (!mf.open(task.path, &err)) continue;
@@ -343,18 +471,27 @@ int run_search(const GlobalFlags& flags, const SearchCommandOptions& options) {
                     nlohmann::json row;
                     row["path"] = task.path;
                     row["line"] = line_no;
-                    row["column"] = 0;
-                    row["match_text"] = std::string(line);
+                    // Match position not recorded on this path — the
+                    // column contract (lci/cli/column.h) reserves 0 for
+                    // the first byte of the line.
+                    row["column"] = kColumnUnknown;
+                    row["match"] = std::string(line);
                     row["score"] = 1.0;
+                    // Single-line context block, same shape as the
+                    // server's, so the shared render/filter pipeline
+                    // (which requires context.lines) applies unchanged.
+                    nlohmann::json ctx;
+                    ctx["block_type"] = "lines";
+                    ctx["block_name"] = "";
+                    ctx["start_line"] = line_no;
+                    ctx["end_line"] = line_no;
+                    ctx["is_complete"] = true;
+                    ctx["lines"] = nlohmann::json::array({std::string(line)});
+                    ctx["matched_lines"] =
+                        nlohmann::json::array({line_no});
+                    ctx["match_count"] = 1;
+                    row["context"] = std::move(ctx);
                     results.push_back(std::move(row));
-                    ++total_matches;
-                    if (max_count_per_file > 0 &&
-                        total_matches >= max_count_per_file) {
-                        // Per-file cap handled inline since we already
-                        // know which file this hit came from.
-                        // (Cross-file cap handled below if max-count
-                        // limits exist.)
-                    }
                 }
                 if (eol == std::string_view::npos) break;
                 pos = eol + 1;
@@ -362,61 +499,100 @@ int run_search(const GlobalFlags& flags, const SearchCommandOptions& options) {
             }
         }
 
+        if (!scoped_paths.empty()) {
+            std::string unmatched;
+            for (size_t i = 0; i < scoped_paths.size(); ++i) {
+                if (scope_hit[i]) continue;
+                if (!unmatched.empty()) unmatched += ", ";
+                unmatched += scoped_paths[i];
+            }
+            if (!unmatched.empty()) {
+                std::cerr << "Error: path matches no indexed file: "
+                          << unmatched << "\n";
+                return 1;
+            }
+        }
+
         // Build the same envelope shape the server returns so the
         // downstream display/filter pipeline doesn't branch.
         nlohmann::json envelope;
         envelope["results"] = std::move(results);
-        envelope["total_matches"] = total_matches;
-        std::cout << envelope.dump(2) << "\n";
-        return 0;
-    }
-
-    // Multi-pattern fan-out: same algorithm as `lci grep` so OR semantics
-    // are identical between the two commands. See `search_union_patterns`.
-    std::vector<std::string> all_patterns;
-    if (use_regex && !regex_seeds.empty()) {
-        all_patterns = regex_seeds;  // Union of every literal run.
-    } else if (!effective_pattern.empty()) {
-        // Bare top-level literal alternation ("FileWatcher|DebouncedRebuilder"
-        // with no --regex): OR the branches through the literal fast path.
-        // The literal engine would otherwise search for the pipe byte
-        // verbatim and return a silent zero (Karpathy rule 6 class).
-        auto or_terms = split_literal_alternation(effective_pattern);
-        if (!or_terms.empty()) {
-            if (!json_output) {
-                std::cerr << "Note: pattern treated as OR of "
-                          << or_terms.size()
-                          << " literal terms (use --regex for full regex "
-                             "syntax).\n";
-            }
-            all_patterns = std::move(or_terms);
-        } else {
-            all_patterns.push_back(effective_pattern);
-        }
-    }
-    for (const auto& p : extra_patterns) {
-        if (!p.empty()) all_patterns.push_back(p);
-    }
-    if (all_patterns.empty()) {
-        // Edge case: query was `file:*.cpp` with no bare terms. The trigram
-        // engine cannot run without a pattern, so ask the user to add one.
-        // Mirrors Go's behavior where `parseQuerySyntax` of a directive-only
-        // query returns an empty `contentPattern` and the engine errors out.
-        std::cerr << "Error: at least one search term is required "
-                     "(directives like `file:`, `kind:`, `symbol:` cannot "
-                     "stand alone)\n";
-        return 1;
-    }
-
-    std::string search_err;
-    std::optional<nlohmann::json> result;
-    if (all_patterns.size() == 1) {
-        result = client->search(all_patterns.front(), 500, case_insensitive,
-                                false, search_err, scoped_paths);
+        result = std::move(envelope);
     } else {
-        result = search_union_patterns(*client, all_patterns, 500,
-                                       case_insensitive, search_err,
-                                       scoped_paths);
+        // Multi-pattern fan-out: same algorithm as `lci grep` so OR
+        // semantics are identical between the two commands.
+        if (use_regex && !regex_seeds.empty()) {
+            all_patterns = regex_seeds;  // Union of every literal run.
+        } else if (!effective_pattern.empty()) {
+            // Bare top-level literal alternation
+            // ("FileWatcher|DebouncedRebuilder" with no --regex): OR the
+            // branches through the literal fast path. The literal engine
+            // would otherwise search for the pipe byte verbatim and return
+            // a silent zero (Karpathy rule 6 class).
+            auto or_terms = split_literal_alternation(effective_pattern);
+            if (!or_terms.empty()) {
+                if (!json_output) {
+                    std::cerr << "Note: pattern treated as OR of "
+                              << or_terms.size()
+                              << " literal terms (use --regex for full regex "
+                                 "syntax).\n";
+                }
+                all_patterns = std::move(or_terms);
+            } else {
+                all_patterns.push_back(effective_pattern);
+            }
+        }
+        for (const auto& p : extra_patterns) {
+            if (!p.empty()) all_patterns.push_back(p);
+        }
+        if (all_patterns.empty()) {
+            // Edge case: query was `file:*.cpp` with no bare terms. The
+            // trigram engine cannot run without a pattern, so ask the user
+            // to add one. Mirrors Go's behavior where `parseQuerySyntax`
+            // of a directive-only query returns an empty `contentPattern`
+            // and the engine errors out.
+            std::cerr << "Error: at least one search term is required "
+                         "(directives like `file:`, `kind:`, `symbol:` cannot "
+                         "stand alone)\n";
+            return 1;
+        }
+
+        if (all_patterns.size() == 1) {
+            result = search_all_pages(*client, all_patterns.front(),
+                                      case_insensitive, search_err,
+                                      scoped_paths);
+        } else {
+            // Union of per-pattern pages, dedup by (path, line), first
+            // occurrence wins so the positional pattern's ranking is
+            // preserved. Same merge as search_union_patterns, but paged:
+            // a fixed per-pattern cap applied before the client-side
+            // post-filters reports matches past the cap as absent.
+            nlohmann::json all = nlohmann::json::array();
+            std::set<std::pair<std::string, int>> seen;
+            bool failed = false;
+            for (const auto& p : all_patterns) {
+                auto page = search_all_pages(*client, p, case_insensitive,
+                                             search_err, scoped_paths);
+                if (!page) {
+                    failed = true;
+                    break;
+                }
+                auto it = page->find("results");
+                if (it == page->end() || !it->is_array()) continue;
+                for (auto& r : *it) {
+                    auto key = std::make_pair(r.value("path", std::string{}),
+                                              r.value("line", 0));
+                    if (seen.insert(key).second) {
+                        all.push_back(std::move(r));
+                    }
+                }
+            }
+            if (!failed) {
+                nlohmann::json wrapper;
+                wrapper["results"] = std::move(all);
+                result = std::move(wrapper);
+            }
+        }
     }
 
     auto elapsed = std::chrono::steady_clock::now() - start;
@@ -523,29 +699,20 @@ int run_search(const GlobalFlags& flags, const SearchCommandOptions& options) {
         }
     }
 
-    // -- File path exclude filter (Go honors on `lci search`) ---------------
+    // -- File path include/exclude filters ------------------------------------
     //
     // Go's `lci search` forwards --exclude to the server engine which calls
     // filterExcludedFiles (engine.go:2381) — regex/glob path filter applied
-    // server-side. C++ post-filters here client-side (compiled once before
-    // the loop, Karpathy rule — operates on bounded N ≤ 500 row set).
+    // server-side. C++ post-filters here client-side (compiled once per
+    // call inside apply_path_filters, Karpathy rule).
     //
-    // `--include` is NOT honored on `lci search`: Go's server.go:506 forwards
-    // only `ExcludePattern: req.Exclude` to the engine, dropping include on
-    // the server boundary. Mirror that silently — see iter-10 (DART-6lwWAw28lQfj)
-    // pattern: when Go ignores a CLI flag, C++ ignores it too with no client
-    // post-filter. Emits a one-line stderr notice (suppressed under --json)
-    // for surface parity with the iter-10 grep-style flag notice.
-    if (!include_pattern.empty() && !json_output) {
-        std::cerr << "Note: --include is ignored by `lci search` "
-                     "(mirrors Go reference — server forwards only "
-                     "--exclude to the engine). Use `lci grep --include` "
-                     "for path filtering on the grep command.\n";
-    }
-    if (!exclude_pattern.empty()) {
+    // --include is honored here too: a flag that parses and then does
+    // nothing is a silent no-op defect, and dropping it on the server
+    // boundary (Go server.go:506) is a Go-side limitation, not a contract.
+    if (!exclude_pattern.empty() || !include_pattern.empty()) {
         auto raw = j.value("results", nlohmann::json::array());
         j["results"] = apply_path_filters(std::move(raw), exclude_pattern,
-                                          /*include_pattern=*/"");
+                                          include_pattern);
     }
 
     // -- Word boundary filter (grep -w, Go honors on `lci search`) ----------
@@ -582,38 +749,100 @@ int run_search(const GlobalFlags& flags, const SearchCommandOptions& options) {
         j["results"] = strip_object_ids(std::move(raw));
     }
 
-    // -- Grep-filter post-processing for `lci search` ------------------------
+    // -- Grep-style filter flags ----------------------------------------------
     //
-    // Go's `lci search` ignores grep-style flags (`--invert-match`,
-    // `--max-count`, `--count`, `--files-with-matches`, `--word-regexp`):
-    // they are accepted on the command line but not applied to the standard /
-    // integrated display path. See cmd/lci/search.go:103-156 — the flags are
-    // forwarded into `SearchOptions` but the `displayStandardResults*` writer
-    // ignores them; only `lci grep` (`cmd/lci/grep.go`) honors them.
+    // --invert-match / --max-count / --count / --files-with-matches are
+    // honored here: a flag that parses and then does nothing is a silent
+    // no-op defect. The filters run on the already-narrowed row set (after
+    // directive/rank/AST/path/word filters), mirroring `lci grep`'s order:
+    // invert (or the per-file cap) first, then the summary modes.
     //
-    // The previous C++ implementation post-filtered results client-side
-    // here, but the filters operated on the trigram literal-seed (not the
-    // regex), so `--regex --invert-match` and `--regex --max-count`
-    // produced wrong row counts (DART-6lwWAw28lQfj). Worse, even on
-    // non-regex queries the row counts diverged from Go because Go's
-    // standard display path never honors these flags at all.
-    //
-    // Fix: parity with Go — emit a one-line stderr notice the first time a
-    // user passes a grep-style flag to `lci search`, then fall through to
-    // the standard / integrated display path. Users who need grep semantics
-    // should use `lci grep`. The notice is suppressed under `--json` so
-    // structured consumers see a clean stream.
-    //
-    // `word_boundary` was already silently discarded (parameter named
-    // `/*word_boundary*/` since iter-0) — keep the discard but cover it by
-    // the same notice for consistency.
-    bool any_grep_flag = invert_match || count_per_file || files_only ||
-                         max_count_per_file > 0;
-    if (any_grep_flag && !json_output) {
-        std::cerr << "Note: --invert-match, --max-count, --count, and "
-                     "--files-with-matches are ignored by `lci search` "
-                     "(mirrors Go reference). Use `lci grep` for "
-                     "grep-style filtering.\n";
+    // In regex mode invert must match against the regex itself, not the
+    // trigram literal seeds — seed-based inversion was the DART-6lwWAw28lQfj
+    // wrong-row-count bug.
+    if (invert_match) {
+        auto raw = j.value("results", nlohmann::json::array());
+        if (regex_filter) {
+            j["results"] = invert_match_rows_regex(
+                std::move(raw), *regex_filter, max_count_per_file);
+        } else {
+            j["results"] = invert_match_rows(std::move(raw), all_patterns,
+                                             case_insensitive,
+                                             max_count_per_file);
+        }
+    } else if (max_count_per_file > 0) {
+        auto raw = j.value("results", nlohmann::json::array());
+        j["results"] = apply_max_count_per_file(std::move(raw),
+                                                max_count_per_file);
+    }
+
+    // --count: one {path, count} row per file (mode "count").
+    if (count_per_file) {
+        auto summary =
+            count_per_file_rows(j.value("results", nlohmann::json::array()));
+        if (json_output) {
+            nlohmann::json output{
+                {"query", options.pattern},
+                {"time_ms", elapsed_ms},
+                {"count", summary.size()},
+                {"results", summary},
+                {"mode", "count"},
+            };
+            std::cout << output.dump(2) << '\n';
+            return 0;
+        }
+        std::printf("Found matches in %zu file(s) in %.1fms (count mode)\n\n",
+                    summary.size(), elapsed_ms);
+        for (const auto& row : summary) {
+            std::string path =
+                to_relative_display_path(row.value("path", ""));
+            std::printf("%s: %d\n", path.c_str(), row.value("count", 0));
+        }
+        return 0;
+    }
+
+    // -l / --files-with-matches: one {path} row per file (mode
+    // "files-with-matches").
+    if (files_only) {
+        auto summary = files_with_matches_rows(
+            j.value("results", nlohmann::json::array()));
+        if (json_output) {
+            nlohmann::json output{
+                {"query", options.pattern},
+                {"time_ms", elapsed_ms},
+                {"count", summary.size()},
+                {"results", summary},
+                {"mode", "files-with-matches"},
+            };
+            std::cout << output.dump(2) << '\n';
+            return 0;
+        }
+        std::printf("Found %zu file(s) with matches in %.1fms "
+                    "(files-with-matches mode)\n\n",
+                    summary.size(), elapsed_ms);
+        for (const auto& row : summary) {
+            std::string path =
+                to_relative_display_path(row.value("path", ""));
+            std::printf("%s\n", path.c_str());
+        }
+        return 0;
+    }
+
+    // --invert-match --json: unwrapped rows with mode "invert-match" (the
+    // wrapped "standard" envelope would mislabel synthesized rows). Text
+    // mode falls through to the shared renderer; invert rows carry a
+    // single-line context block it prints unchanged.
+    if (invert_match && json_output) {
+        auto rows = j.value("results", nlohmann::json::array());
+        nlohmann::json output{
+            {"query", options.pattern},
+            {"time_ms", elapsed_ms},
+            {"count", rows.size()},
+            {"results", std::move(rows)},
+            {"mode", "invert-match"},
+        };
+        std::cout << output.dump(2) << '\n';
+        return 0;
     }
 
     // -- --max-lines: truncate context.lines around the match --------------
