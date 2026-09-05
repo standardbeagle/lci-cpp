@@ -15,31 +15,93 @@
     "release_gate": "cmake --build build/release --parallel && ctest --test-dir build/release --output-on-failure -j 4"
   },
   "before": {
-    "lci_benchmarks_wall_s": [102.80, 128.22, 120.74, 105.59, 111.66],
-    "lci_real_project_suite_wall_s": [27.88, 29.09, 30.76, 27.55, 27.27]
+    "lci_benchmarks_wall_s": [
+      102.8,
+      128.22,
+      120.74,
+      105.59,
+      111.66
+    ],
+    "lci_real_project_suite_wall_s": [
+      27.88,
+      29.09,
+      30.76,
+      27.55,
+      27.27
+    ]
   },
   "after": {
-    "lci_benchmarks_wall_s": [91.48, 95.16, 146.96, 91.27, 104.23],
-    "lci_real_project_suite_wall_s": [36.86, 49.20, 39.80, 47.82, 37.15],
-    "max_min_ratio": {"lci_benchmarks": 1.607, "lci_real_project_suite": 1.335}
+    "lci_benchmarks_wall_s": [
+      91.48,
+      95.16,
+      146.96,
+      91.27,
+      104.23
+    ],
+    "lci_real_project_suite_wall_s": [
+      36.86,
+      49.2,
+      39.8,
+      47.82,
+      37.15
+    ],
+    "max_min_ratio": {
+      "lci_benchmarks": 1.607,
+      "lci_real_project_suite": 1.335
+    }
   },
   "measured_cause": {
-    "summary": "CTest allowed lci_benchmarks to overlap other work despite its internally parallel, memory-heavy MasterIndex workload.",
+    "summary": "Both bundled tails are internally parallel (~3 cores) and >2 GiB RSS, so their wall time tracks host CPU contention. CTest metadata lacked RUN_SERIAL for lci_benchmarks (necessary isolation hygiene), but the before/after series each ran the entry alone, so they do not demonstrate CTest overlap as the cause; the residual variance is host load from processes outside CTest.",
     "observations": [
       "lci_benchmarks used 250-298% CPU and 2.12-2.18 GiB RSS.",
       "lci_real_project_suite used 252-317% CPU and 2.54-2.61 GiB RSS.",
       "Higher load coincided with reduced CPU efficiency and longer wall time.",
       "Generated CTest metadata had RUN_SERIAL for lci_real_project_suite but not lci_benchmarks."
     ],
-    "fix": "Declare lci_benchmarks RUN_SERIAL and enforce both bundled-tail declarations with a regression test."
+    "fix": "Declare lci_benchmarks RUN_SERIAL and enforce both bundled-tail declarations with a regression test.",
+    "not_demonstrated": [
+      "CTest overlap as the contending load: no series ran the entry concurrently with other tests, and the after series is not faster or tighter than the before series.",
+      "Per-run host load, CPU%, and RSS are not in this record (ranges only); the load/wall correlation is not re-derivable from committed data."
+    ],
+    "corrected_at_review": "2026-09-05"
   },
   "release_confirmation": {
     "status": "pass",
     "confirmed_commit": "2df9da5103914355d85a2d9497250d2b85d79afb",
     "green_runs": [
-      {"run": 1, "build_wall_s": 31.96, "test_wall_s": 279.63, "total_wall_s": 311.59, "tests_passed": 1997, "tests_failed": 0, "lci_benchmarks_wall_s": 187.26, "lci_real_project_suite_wall_s": 62.67, "lci_integration_suite_wall_s": 19.57},
-      {"run": 2, "build_wall_s": 2.43, "test_wall_s": 269.81, "total_wall_s": 272.24, "tests_passed": 1997, "tests_failed": 0, "lci_benchmarks_wall_s": 185.95, "lci_real_project_suite_wall_s": 55.19, "lci_integration_suite_wall_s": 17.97},
-      {"run": 3, "build_wall_s": 2.17, "test_wall_s": 241.02, "total_wall_s": 243.19, "tests_passed": 1997, "tests_failed": 0, "lci_benchmarks_wall_s": 178.33, "lci_real_project_suite_wall_s": 45.56, "lci_integration_suite_wall_s": 16.32}
+      {
+        "run": 1,
+        "build_wall_s": 31.96,
+        "test_wall_s": 279.63,
+        "total_wall_s": 311.59,
+        "tests_passed": 1997,
+        "tests_failed": 0,
+        "lci_benchmarks_wall_s": 187.26,
+        "lci_real_project_suite_wall_s": 62.67,
+        "lci_integration_suite_wall_s": 19.57
+      },
+      {
+        "run": 2,
+        "build_wall_s": 2.43,
+        "test_wall_s": 269.81,
+        "total_wall_s": 272.24,
+        "tests_passed": 1997,
+        "tests_failed": 0,
+        "lci_benchmarks_wall_s": 185.95,
+        "lci_real_project_suite_wall_s": 55.19,
+        "lci_integration_suite_wall_s": 17.97
+      },
+      {
+        "run": 3,
+        "build_wall_s": 2.17,
+        "test_wall_s": 241.02,
+        "total_wall_s": 243.19,
+        "tests_passed": 1997,
+        "tests_failed": 0,
+        "lci_benchmarks_wall_s": 178.33,
+        "lci_real_project_suite_wall_s": 45.56,
+        "lci_integration_suite_wall_s": 16.32
+      }
     ],
     "invalid_attempts": [
       "Attempt 1: benchmark 124.69s, real-project 34.25s; integration timed out at 600s after socket bind failures.",

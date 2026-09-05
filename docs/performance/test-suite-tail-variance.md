@@ -1,16 +1,28 @@
 # Bundled test tail variance (S4a)
 
-The measured cause is missing scheduler isolation for `lci_benchmarks`. Both
-bundled entries repeatedly construct `MasterIndex` instances across real
+Both bundled entries repeatedly construct `MasterIndex` instances across real
 corpora, use roughly three CPU cores, and peak above 2 GiB RSS. CTest already
 serialized `lci_real_project_suite`; it did not serialize `lci_benchmarks`.
+Declaring `lci_benchmarks` `RUN_SERIAL` is necessary hygiene: under `-j 4` CTest
+could overlap it with other tests. It is not shown to be sufficient. The
+before/after series below ran each entry alone (`-R '^<entry>$'`), so neither
+series contained any CTest overlap, and the after series is not faster or
+tighter than the before series. What the numbers demonstrate is that both tails
+are sensitive to host contention from processes outside CTest; the residual
+variance is a host-load effect that scheduler isolation inside CTest cannot
+remove. (Corrected 2026-09-05 at review; the original text claimed missing
+scheduler isolation as the measured cause. Corroboration on 2026-09-05: three
+exact full gates on the same tree spanned 354s, 840s, 545s tracking host load
+3, 32, 20 from other sessions.)
 
 ## Reproduction
 
 All entry runs used commit `1330bca900b50668a96c03e81d79803d12f8b90e`,
 the `release` preset (GNU 13.3.0), the same repository `real_projects` corpus,
-and warm build/filesystem caches. Host load, CPU time, wall time, and RSS were
-recorded for every run.
+and warm build/filesystem caches. Wall time is recorded per run below. CPU
+time and RSS were observed as ranges only; host load was observed but not
+recorded numerically, so the load/wall correlation stated below cannot be
+re-derived from this record (tracked as a follow-up).
 
 | entry | before wall seconds (5 consecutive) | after wall seconds (5 consecutive) | after max/min |
 | --- | --- | --- | ---: |
@@ -19,9 +31,10 @@ recorded for every run.
 
 The benchmark consumed 250–298% CPU and 2.12–2.18 GiB RSS. The real-project
 suite consumed 252–317% CPU and 2.54–2.61 GiB RSS. Higher host load coincided
-with lower process CPU efficiency and longer walls. This directly localizes
-the variance to contention around the internally parallel bundled processes,
-not a conclusion inferred from the full-suite totals.
+with lower process CPU efficiency and longer walls. This localizes the
+variance to CPU contention around the internally parallel bundled processes
+rather than to anything inferred from full-suite totals; it does not show that
+CTest overlap was the contending load, because each series ran the entry alone.
 
 ## Regression and fix
 
