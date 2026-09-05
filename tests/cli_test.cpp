@@ -125,14 +125,15 @@ ReferenceLocation make_ref(std::string file, int line, int column,
 
 // The core discrimination: a `@deprecated` decorator usage is a code
 // reference, while the same word inside a docstring is lexical-only noise.
-// Column is 1-based and points at the match ("deprecated").
+// Column is a 0-based byte offset (the one column contract,
+// include/lci/cli/column.h) and points at the match ("deprecated").
 TEST(CliRefsPartitionTest, DecoratorIsCodeDocstringIsLexical) {
     std::vector<ReferenceLocation> refs = {
         // Docstring hit — appears FIRST in the raw text-search results, which
         // is exactly the noise-outranks-code failure we are fixing.
-        make_ref("a.py", 3, 8, "    \"\"\"This is deprecated behavior.\"\"\""),
+        make_ref("a.py", 3, 7, "    \"\"\"This is deprecated behavior.\"\"\""),
         // Decorator usage — real code reference.
-        make_ref("b.py", 10, 2, "@deprecated"),
+        make_ref("b.py", 10, 1, "@deprecated"),
     };
 
     PartitionedReferences parts = partition_references(refs);
@@ -147,10 +148,10 @@ TEST(CliRefsPartitionTest, DecoratorIsCodeDocstringIsLexical) {
 // reference precedes every lexical-only one, regardless of the input order.
 TEST(CliRefsPartitionTest, CodeAlwaysPrecedesLexicalInMergedOrder) {
     std::vector<ReferenceLocation> refs = {
-        make_ref("doc.py", 1, 5, "# deprecated: use foo instead"),  // comment
-        make_ref("use.py", 2, 1, "deprecated(func)"),               // call
-        make_ref("s.py", 3, 12, "msg = \"deprecated api\""),        // string
-        make_ref("imp.py", 4, 20, "from x import deprecated"),      // import
+        make_ref("doc.py", 1, 4, "# deprecated: use foo instead"),  // comment
+        make_ref("use.py", 2, 0, "deprecated(func)"),               // call
+        make_ref("s.py", 3, 11, "msg = \"deprecated api\""),        // string
+        make_ref("imp.py", 4, 19, "from x import deprecated"),      // import
     };
 
     PartitionedReferences parts = partition_references(refs);
@@ -169,7 +170,7 @@ TEST(CliRefsPartitionTest, CodeAlwaysPrecedesLexicalInMergedOrder) {
 // A ref with no line text cannot be classified; keep it as code-context so a
 // possibly-real reference is never silently hidden.
 TEST(CliRefsPartitionTest, EmptyContextIsKeptAsCode) {
-    std::vector<ReferenceLocation> refs = {make_ref("x.py", 1, 0, "")};
+    std::vector<ReferenceLocation> refs = {make_ref("x.py", 1, -1, "")};
     PartitionedReferences parts = partition_references(refs);
     EXPECT_EQ(parts.code.size(), 1u);
     EXPECT_TRUE(parts.lexical.empty());

@@ -232,7 +232,8 @@ struct PartitionedReferences {
 /// per-line/column classifiers `match_is_in_string_literal` /
 /// `match_is_in_comment` (the same predicates `lci search --code-only` uses).
 /// Each `ReferenceLocation::context` is the exact source line at the match and
-/// `column` the 1-based match column. A ref whose line text is empty cannot be
+/// `column` the 0-based match column (the one column contract,
+/// include/lci/cli/column.h). A ref whose line text is empty cannot be
 /// classified and is kept as code-context (never silently hidden). Used to keep
 /// real references above natural-language "deprecated"-style docstring noise for
 /// common-word symbol names.
