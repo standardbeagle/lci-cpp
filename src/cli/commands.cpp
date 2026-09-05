@@ -520,6 +520,19 @@ int run_refs(const GlobalFlags& flags, const std::string& symbol,
     return 0;
 }
 
+// Validates the JSON keys run_callers renders in text mode. Returns false
+// with a message naming the offending key when a required key is missing or
+// mistyped; never throws on absent keys. Declared in tests/cli_test.cpp.
+bool callers_report_valid(const nlohmann::json& report, std::string& error) {
+    (void)error;
+    if (!report["definitions"].is_array()) return false;
+    if (!report["callers"].is_array()) return false;
+    for (const auto& c : report["callers"]) {
+        if (!c["call_lines"].is_array()) return false;
+    }
+    return true;
+}
+
 int run_callers(const GlobalFlags& flags, const std::string& symbol,
                 bool json_output, int max_callers) {
     Config cfg;

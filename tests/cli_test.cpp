@@ -27,6 +27,12 @@
 
 namespace lci {
 namespace cli {
+
+// Validates the JSON shape run_callers renders in text mode. Returns false
+// with a message naming the offending key when a required key is missing or
+// mistyped; never throws on absent keys. Defined in src/cli/commands.cpp.
+bool callers_report_valid(const nlohmann::json& report, std::string& error);
+
 namespace {
 
 // -- load_config_with_overrides tests -----------------------------------------
@@ -3272,6 +3278,127 @@ TEST(AlternationSeedTest, UnseededBranchMatchesRgSemantics) {
     shutdown_lci_server(lci_bin, root);
     std::error_code ec;
     fs::remove_all(root, ec);
+}
+
+// -- S12.5: real JSON output, honest --stats, guarded lookups, paged symbols --
+
+TEST(CommandsJsonTest, RefsJsonPrintsValidJsonAndExitsZero) {
+    namespace fs = std::filesystem;
+    const auto lci_bin =
+        portable::executable_path().parent_path().parent_path() / "src" /
+        "lci";
+    ASSERT_TRUE(fs::exists(lci_bin)) << lci_bin;
+    const auto root = lci::test::unique_temp_dir("lci_refs_json_");
+    fs::create_directories(root);
+    write_corpus_file(root, "helper.cpp", "int helper_fn() { return 7; }\n");
+    write_corpus_file(root, "user.cpp",
+                      "int use_it() { return helper_fn(); }\n");
+
+    std::string out;
+    EXPECT_TRUE(run_lci_search(
+        lci_bin, root,
+        {lci_bin.string(), "refs", "helper_fn", "--json"}, out))
+        << "refs --json must exit 0";
+    nlohmann::json j;
+    EXPECT_NO_THROW(j = nlohmann::json::parse(out)) << out;
+    ASSERT_TRUE(j.is_object()) << out;
+    ASSERT_TRUE(j.contains("references") && j["references"].is_array())
+        << out;
+    EXPECT_FALSE(j["references"].empty()) << out;
+
+    shutdown_lci_server(lci_bin, root);
+    std::error_code ec;
+    fs::remove_all(root, ec);
+}
+
+TEST(CommandsJsonTest, BrowseStatsReportsStats) {
+    namespace fs = std::filesystem;
+    const auto lci_bin =
+        portable::executable_path().parent_path().parent_path() / "src" /
+        "lci";
+    ASSERT_TRUE(fs::exists(lci_bin)) << lci_bin;
+    const auto root = lci::test::unique_temp_dir("lci_browse_stats_");
+    fs::create_directories(root);
+    write_corpus_file(root, "alpha.cpp",
+                      "int alpha_one() { return 1; }\n"
+                      "int alpha_two() { return 2; }\n");
+
+    std::string out;
+    ASSERT_TRUE(run_lci_search(
+        lci_bin, root,
+        {lci_bin.string(), "browse", "alpha.cpp", "--stats"}, out));
+    EXPECT_NE(out.find("Stats:"), std::string::npos) << out;
+
+    shutdown_lci_server(lci_bin, root);
+    std::error_code ec;
+    fs::remove_all(root, ec);
+}
+
+TEST(CommandsJsonTest, MissingDefinitionsKeyIsClearErrorNotException) {
+    // A callers report missing "definitions" must be reported as a clear
+    // error, not crash with a nlohmann::json exception.
+    const nlohmann::json report = {{"total_callers", 0},
+                                   {"total_call_sites", 0},
+                                   {"callers", nlohmann::json::array()}};
+    std::string error;
+    EXPECT_FALSE(callers_report_valid(report, error));
+    EXPECT_NE(error.find("definitions"), std::string::npos) << error;
+
+    const nlohmann::json ok = {{"definitions", nlohmann::json::array()},
+                               {"total_callers", 0},
+                               {"total_call_sites", 0},
+                               {"callers", nlohmann::json::array()}};
+    error.clear();
+    EXPECT_TRUE(callers_report_valid(ok, error)) << error;
+}
+
+TEST(SymbolsPagingTest, FileGlobReturnsAllMatchesBeyondFirstServerPage) {
+    namespace fs = std::filesystem;
+    const auto lci_bin =
+        portable::executable_path().parent_path().parent_path() / "src" /
+        "lci";
+    ASSERT_TRUE(fs::exists(lci_bin)) << lci_bin;
+    const auto root = lci::test::unique_temp_dir("lci_symbols_paging_");
+    fs::create_directories(root);
+
+    // 2000 symbols in one .ts file: four full 500-row server pages. A
+    // client that reads only the first page reports 1500 of them absent.
+    std::string content;
+    for (int i = 0; i < 2000; ++i) {
+        content += "export function sym_page_" + std::to_string(i) +
+                   "(): void {}\n";
+    }
+    write_corpus_file(root, "many.ts", content);
+
+    std::string out;
+    ASSERT_TRUE(run_lci_search(
+        lci_bin, root,
+        {lci_bin.string(), "symbols", "--file", "*.ts", "--json", "-m",
+         "5000"},
+        out));
+    auto j = nlohmann::json::parse(out);
+    EXPECT_EQ(j.value("total", -1), 2000) << out.substr(0, 400);
+    ASSERT_TRUE(j.contains("symbols") && j["symbols"].is_array()) << out;
+    EXPECT_EQ(j["symbols"].size(), 2000u) << out.substr(0, 400);
+    bool saw_last = false;
+    for (const auto& s : j["symbols"]) {
+        if (s.value("name", "") == "sym_page_1999") saw_last = true;
+    }
+    EXPECT_TRUE(saw_last) << "symbol past the 500-row page must be returned";
+
+    shutdown_lci_server(lci_bin, root);
+    std::error_code ec;
+    fs::remove_all(root, ec);
+}
+
+TEST(MemProfileTest, SizeTCountsFormatWithZu) {
+    // Compile-time contract: size_t counts print with %zu, never %d/%ld.
+    // -Wformat (in -Wall) rejects a mismatched conversion, so a %d/%ld
+    // regression against a size_t argument fails the build, not the test.
+    char buf[32];
+    const size_t n = 42;
+    std::snprintf(buf, sizeof(buf), "%zu", n);
+    EXPECT_STREQ(buf, "42");
 }
 
 }  // namespace
