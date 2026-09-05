@@ -3183,6 +3183,55 @@ TEST(SearchPagingTest, MatchBeyondRow500IsReturned) {
     fs::remove_all(root, ec);
 }
 
+// -- S12.6: alternation branch without a literal seed --------------------------
+//
+// `lci search -E 'foobar|ab'`: the "ab" branch has no >=3-char literal, so
+// trigram seed extraction yields {"foobar"} only. Pre-fix, lines matching
+// only the "ab" branch were silently absent from -E results with no
+// diagnostic (certified-absence class: wrong answer, not slow). The fix
+// must either fail loudly or fall back to a full scan for the pattern.
+
+TEST(AlternationSeedTest, UnseededBranchMatchesRgSemantics) {
+    // rg is NOT installed on this host, so the expected line set is pinned
+    // from rg's documented semantics: `rg -e 'foobar|ab'` reports every
+    // line matching either alternative — one row per matching line, so
+    // both alpha.cpp:1 (foobar branch) and beta.cpp:1 (ab branch only).
+    namespace fs = std::filesystem;
+    const auto lci_bin =
+        portable::executable_path().parent_path().parent_path() / "src" /
+        "lci";
+    ASSERT_TRUE(fs::exists(lci_bin)) << lci_bin;
+    const auto root = lci::test::unique_temp_dir("lci_alt_seed_");
+    fs::create_directories(root);
+    write_corpus_file(root, "alpha.cpp", "int foobar_alpha = 1;\n");
+    write_corpus_file(root, "beta.cpp",
+                      "ab short branch hit\n"
+                      "plain line\n");
+
+    std::string out;
+    ASSERT_TRUE(run_lci_search(
+        lci_bin, root,
+        {lci_bin.string(), "search", "-E", "foobar|ab", "--json"}, out));
+    auto j = nlohmann::json::parse(out);
+    ASSERT_TRUE(j.contains("results")) << out;
+
+    std::set<std::pair<std::string, int>> hits;
+    for (const auto& row : j["results"]) {
+        const auto& r = row.contains("result") ? row["result"] : row;
+        hits.emplace(r.value("path", ""), r.value("line", 0));
+    }
+    const std::set<std::pair<std::string, int>> expected = {
+        {"alpha.cpp", 1}, {"beta.cpp", 1}};
+    EXPECT_EQ(hits, expected)
+        << "the 'ab' branch has no trigram seed; its match must still be "
+           "reported (full-scan fallback), not silently dropped\n"
+        << out;
+
+    shutdown_lci_server(lci_bin, root);
+    std::error_code ec;
+    fs::remove_all(root, ec);
+}
+
 }  // namespace
 }  // namespace cli
 }  // namespace lci
