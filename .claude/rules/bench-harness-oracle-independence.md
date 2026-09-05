@@ -54,3 +54,27 @@ oracle at all.
    acceptable as long as rule 1 (independence) holds afterward.
 
 `source_event: task-01KXEEH7RD3D03VN6EP8ZZEP0F, review-panel step 01KXH30SW99FM2VWYZF7VHPBAM attempt1 (failed, rewind_to bench-unit-tests) -> attempt2 (passed), commits 0bb3d8d (RED: pin the TS oracle's blind spot) + fdbf4d6 (GREEN: repoint bare first-party + subdir specifiers), 2026-07-14T20:54 / 2026-07-15T02:52-02:54`
+
+## 5. The rule covers any soundness check that MIRRORS its extractor — not just forge/validator pairs
+
+Rule 1's "shared code object = shared blind spot" understates the failure: two
+*separately written* walkers over the same grammar inherit the same blind spot when
+one is authored to mirror the other. `src/cli/grep_filters.cpp` holds exactly that
+pair — `regex_literal_seeds` extracts trigram seeds from a pattern, and
+`regex_every_match_has_seed` decides whether the trigram fast path is lossless for
+that pattern. They share no code, but the coverage check was written to mirror the
+extractor's walk, so both treated `\x41`, `\x{41}`, `\pL` and `\Q..\E` argument bytes
+as literal text. The extractor banked a seed no match carries; the check certified it;
+`lci search -E '\x41bc'` returned a silent empty — a certified-absence defect that
+per-branch analysis in the member slice missed and no member test caught. Only the
+whole-epic review found it (fixed in place, `9c6ff20`: unsure -> full scan for
+`search`, loud error for `grep`, pinned in `AlternationSeedTest.UnseededBranchForcesFallback`).
+
+Applies to any index-narrowing prefilter followed by an exact filter (trigram seeds,
+bloom, n-gram). Two additions to rule 2's discrimination test:
+- Enumerate the **escape and metacharacter classes** the walker must handle, and pin
+  one case per class. A slice whose acceptance criteria name only the shapes the
+  author thought of will ship the shapes they did not.
+- Pin **both directions**: an unseeded shape forces the fallback, a seeded shape keeps
+  the index. A one-directional test lets the check decay into a blanket downgrade.
+<!-- written_at: 2026-09-05T23:30:00Z  source_event: task:01M1NCSJ31EQ7WZ9GEEB8CDCY5, comment:01M1SWJGAX1RRNBG64E34M7ZDW (systemicObservations, costGate verdict fix-now), git:9c6ff20 -->

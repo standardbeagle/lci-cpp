@@ -54,3 +54,38 @@ either re-pin in the same commit or name the goldens you are deferring. Do not r
 on the container gate to discover it; the gate reports the failure without the
 context that explains it.
 <!-- written_at: 2026-09-05T20:00:00Z  source_event: task:01M1PTEH33DW573D3R5J2N00PS, git:ecd810c, git:f3662ce, git:5ebad10, workflow-step:ctest-full-gate attempt1 -->
+
+## 5. Run `lci_integration_suite` as a cheap pre-gate before the full `ctest`
+
+The full gate costs 545-840 s wall; `lci_integration_suite` alone costs ~53 s and
+holds every golden. Stale goldens are the failure class a container gate is most
+likely to meet first, because members run only targeted `ctest -R` (rule 4) — so the
+expensive run is spent discovering something the 53-second run already knew.
+
+Evidence: S12's `ctest-full-gate` attempt 1 spent 555 s to report 3 failures, all of
+them CLI goldens still pinning defects S12.5 had fixed
+(`cli_symbols_browse_stats`, `cli_symbols_browse_stats_json`, `cli_symbols_refs_json`;
+re-pinned in `496ab2d` + `1b24cab`). `lci_integration_suite` was the only failing
+ctest entry — 2712 of 2715 other tests ran for nothing. The same class had already
+cost a full cycle one task earlier (`5ebad10`).
+
+Rule: a container/epic gate runs
+`ctest --test-dir build/release -R lci_integration_suite --output-on-failure` first,
+and only on green proceeds to the full `-j4` suite. A golden failure then costs 53 s
+and names itself. This does NOT add a full run — rule 2 still allows exactly one.
+<!-- written_at: 2026-09-05T23:30:00Z  source_event: task:01M1NCSJ31EQ7WZ9GEEB8CDCY5, workflow-step:ctest-full-gate attempt1 (555s, 3 golden failures) vs attempt3 (lci_integration_suite 53.28s), git:496ab2d, git:1b24cab, git:5ebad10 -->
+
+## 6. A gate suite must not contain an absolute wall-clock assertion
+
+`RealProjectSearchLatencyTest.FastapiSearchUnder5ms` asserts an absolute bound and
+runs inside the `-j4` gate. Under host load from sibling sessions it failed attempts
+2 and 3 of S12's gate as the *sole* failure (2714/2715), then passed 3/3 in isolation
+at the same load — costing 1386 s of gate wall-clock and a `forced_v1` override that
+had to argue orthogonality from the diff.
+
+Until the test is made contention-robust (best-of-K min, or a relative-scaling ratio
+— owner task `01KXMV1BXH6K5DRXGN3FVA1DQV`), a gate failure whose only entry is a
+latency assertion is a load artifact, not a regression: confirm by re-running that
+one filter in isolation, then force per
+`worktree-isolation-and-goldens.md` rule 3. Do not spend a gate attempt on it.
+<!-- written_at: 2026-09-05T23:30:00Z  source_event: task:01M1NCSJ31EQ7WZ9GEEB8CDCY5, workflow-step:ctest-full-gate attempt2+attempt3, comment:01M1SS0ETX44R3301Z74V07SSM, memory:contention-robust-perf-tests -->
