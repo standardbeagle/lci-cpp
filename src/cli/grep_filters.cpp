@@ -111,7 +111,8 @@ bool any_pattern_matches(std::string_view haystack,
 /// Iterates files in `results` (preserving first-seen order) and produces a
 /// new array of synthetic "non-match" rows for invert-match mode.
 ///
-/// A row is shaped like the regular grep result: `path`, `line`, `column=0`,
+/// A row is shaped like the regular grep result: `path`, `line`,
+/// `column=kColumnUnknown` (an inverted line has no match position),
 /// `match` (the raw line text), and a one-line `context` block. This keeps
 /// downstream JSON consumers (`--json`) and text formatters happy without
 /// special-casing the inverted output.
@@ -146,7 +147,7 @@ nlohmann::json invert_match_rows(const nlohmann::json& results,
             nlohmann::json r;
             r["path"] = path;
             r["line"] = line_no;
-            r["column"] = 0;
+            r["column"] = kColumnUnknown;
             r["match"] = line;
             nlohmann::json ctx;
             ctx["block_type"] = "lines";
@@ -195,8 +196,9 @@ bool match_at_word_boundary(std::string_view line, size_t col_start,
 }
 
 /// Filters `results` to keep only rows whose match on the matched line is
-/// bounded by word boundaries on both sides. Uses 1-based `column` from the
-/// result row (server emits 1-based column for matches). Pattern length is
+/// bounded by word boundaries on both sides. `column` follows the one column
+/// contract (lci/cli/column.h): 0-based byte offset, kColumnUnknown when the
+/// engine recorded no position. Pattern length is
 /// taken from the row's `match` field when present, falling back to looking
 /// for `pattern` on the matched line.
 ///
