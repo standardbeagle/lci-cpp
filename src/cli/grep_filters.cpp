@@ -672,6 +672,11 @@ namespace {
 struct SeedCoverage {
     std::string_view s;
     size_t i = 0;
+    // Set on an escape whose ARGUMENT bytes are not literal text (`\x41`,
+    // `\x{41}`, `\pL`, `\p{Greek}`, `\Q...\E`): regex_literal_seeds banks
+    // those bytes as a run ("41bc" for `\x41bc`), a seed no match carries.
+    // Unsure means false — full scan, never a silently dropped match.
+    bool unsure = false;
 
     char peek() const { return i < s.size() ? s[i] : '\0'; }
 
@@ -750,7 +755,11 @@ struct SeedCoverage {
             if (c == '\\' && i + 1 < s.size()) {
                 char esc = s[i + 1];
                 i += 2;
-                if (std::isalpha(static_cast<unsigned char>(esc))) {
+                if (esc == 'x' || esc == 'p' || esc == 'P' || esc == 'Q' ||
+                    esc == 'E') {
+                    unsure = true;
+                    run = 0;
+                } else if (std::isalpha(static_cast<unsigned char>(esc))) {
                     run = 0;  // \d \w \s \b ...: not a literal
                 } else {
                     ++run;
@@ -799,7 +808,8 @@ struct SeedCoverage {
 
 bool regex_every_match_has_seed(std::string_view pattern) {
     SeedCoverage p{pattern, 0};
-    return p.parse_alt();
+    const bool covered = p.parse_alt();
+    return covered && !p.unsure;
 }
 
 

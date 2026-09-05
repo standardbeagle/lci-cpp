@@ -738,6 +738,13 @@ TEST(AlternationSeedTest, UnseededBranchForcesFallback) {
     EXPECT_FALSE(grep_filters::regex_every_match_has_seed("abc{0,2}"));
     // Pure meta.
     EXPECT_FALSE(grep_filters::regex_every_match_has_seed(R"(\d+)"));
+    // Escapes whose argument bytes are not literal text: the extractor
+    // banks "41bc" / "Labc" as seeds no match carries, so claiming
+    // "seeded" here would silently drop every match (review finding).
+    EXPECT_FALSE(grep_filters::regex_every_match_has_seed(R"(\x41bc)"));
+    EXPECT_FALSE(grep_filters::regex_every_match_has_seed(R"(\x{41}bcd)"));
+    EXPECT_FALSE(grep_filters::regex_every_match_has_seed(R"(\pLabc)"));
+    EXPECT_FALSE(grep_filters::regex_every_match_has_seed(R"(\Qa.b\Ecd)"));
 }
 
 TEST(AlternationSeedTest, SeededPatternKeepsTrigramIndex) {

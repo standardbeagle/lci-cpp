@@ -9,7 +9,8 @@
 //
 //   --invert-match  (synthesizes one row per non-matching line)
 //     { query, time_ms, count, mode: "invert-match",
-//       results: [ { path, line, column: 0, match, context: { lines:[line] } } ] }
+//       results: [ { path, line, column: kColumnUnknown, match,
+//                    context: { lines:[line] } } ] }
 //
 //   --count
 //     { query, time_ms, count, mode: "count",
@@ -27,6 +28,7 @@
 // callers can identify the shape via the `mode` field.
 
 #include <lci/cli/commands.h>
+#include <lci/cli/column.h>
 #include <lci/core/mmap.h>
 #include <lci/indexing/pipeline_scanner.h>
 #include <lci/indexing/pipeline_types.h>
@@ -497,7 +499,7 @@ int run_grep(const GlobalFlags& flags, const GrepCommandOptions& options) {
     for (auto& r : results_arr) {
         std::string path = to_relative_display_path(r.value("path", ""));
         int line = r.value("line", 0);
-        int column = r.value("column", 0);
+        int column = r.value("column", kColumnUnknown);
 
         if (invert_match) {
             // Synthetic invert rows already carry the bare line text in
