@@ -3,6 +3,8 @@
 #include <string>
 #include <vector>
 
+#include <cstdint>
+
 #include <lci/config.h>
 #include <lci/server/client.h>
 
@@ -33,8 +35,24 @@ std::string load_config_with_overrides(const GlobalFlags& flags, Config& out);
 
 // -- Server management -------------------------------------------------------
 
+/// Builds the argv for spawning a background index server. The invocation's
+/// global flags (-c/--config, --include, --exclude) are threaded through so
+/// the server indexes with the SAME settings the command-line asked for —
+/// dropping them made the server serve a differently-filtered index while
+/// the CLI believed its flags applied. A relative -c is made absolute
+/// against the cwd (matching load_config_with_overrides) because the spawned
+/// server's cwd is not guaranteed to be ours.
+std::vector<std::string> build_server_spawn_argv(const std::string& exe,
+                                                 const Config& cfg,
+                                                 const GlobalFlags& flags);
+
 /// Ensures the index server is running, starting it if necessary.
 /// Returns a connected Client, or sets error and returns nullptr.
+std::unique_ptr<Client> ensure_server_running(const Config& cfg,
+                                              const GlobalFlags& flags,
+                                              std::string& error);
+
+/// Overload for callers that carry no global flags (spawn gets none).
 std::unique_ptr<Client> ensure_server_running(const Config& cfg,
                                               std::string& error);
 

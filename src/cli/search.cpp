@@ -225,7 +225,7 @@ int run_search(const GlobalFlags& flags, const SearchCommandOptions& options) {
         std::filesystem::current_path(scope_cwd_ec).string());
 
     std::string conn_err;
-    auto client = ensure_server_running(cfg, conn_err);
+    auto client = ensure_server_running(cfg, flags, conn_err);
     if (!client) {
         std::cerr << "Error: " << conn_err << "\n";
         return 1;

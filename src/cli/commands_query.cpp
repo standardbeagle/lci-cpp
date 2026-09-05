@@ -53,7 +53,7 @@ int run_git_analyze(const GlobalFlags& flags, const std::string& scope,
     }
 
     std::string conn_err;
-    auto client = ensure_server_running(cfg, conn_err);
+    auto client = ensure_server_running(cfg, flags, conn_err);
     if (!client) {
         std::cerr << "Error: " << conn_err << "\n";
         return 1;
@@ -384,7 +384,7 @@ int run_symbols(const GlobalFlags& flags, const std::string& kind,
     }
 
     std::string conn_err;
-    auto client = ensure_server_running(cfg, conn_err);
+    auto client = ensure_server_running(cfg, flags, conn_err);
     if (!client) {
         std::cerr << "Error: " << conn_err << "\n";
         return 1;
@@ -511,7 +511,7 @@ int run_inspect(const GlobalFlags& flags, const std::string& name,
     }
 
     std::string conn_err;
-    auto client = ensure_server_running(cfg, conn_err);
+    auto client = ensure_server_running(cfg, flags, conn_err);
     if (!client) {
         std::cerr << "Error: " << conn_err << "\n";
         return 1;
@@ -654,7 +654,7 @@ int run_browse(const GlobalFlags& flags, const std::string& file_path,
     }
 
     std::string conn_err;
-    auto client = ensure_server_running(cfg, conn_err);
+    auto client = ensure_server_running(cfg, flags, conn_err);
     if (!client) {
         std::cerr << "Error: " << conn_err << "\n";
         return 1;

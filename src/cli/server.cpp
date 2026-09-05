@@ -28,6 +28,8 @@
 namespace lci {
 namespace cli {
 
+namespace fs = std::filesystem;
+
 namespace {
 
 std::atomic<bool> g_shutdown_requested{false};
@@ -77,7 +79,39 @@ std::string instance_registry_dir() {
 
 // -- ensure_server_running ----------------------------------------------------
 
+std::vector<std::string> build_server_spawn_argv(const std::string& exe,
+                                                 const Config& cfg,
+                                                 const GlobalFlags& flags) {
+    std::vector<std::string> argv;
+    argv.reserve(4 + flags.include.size() * 2 + flags.exclude.size() * 2);
+    argv.push_back(exe);
+    if (!cfg.project.root.empty() && cfg.project.root != ".") {
+        argv.push_back("--root");
+        argv.push_back(cfg.project.root);
+    }
+    if (!flags.config_path.empty() && flags.config_path != ".lci.kdl") {
+        const fs::path p(flags.config_path);
+        argv.push_back("-c");
+        // Match load_config_with_overrides: a user-named relative -c
+        // resolves against the cwd; make it absolute so the spawned
+        // server reads the same file regardless of its own cwd.
+        argv.push_back(p.is_relative() ? fs::absolute(p).string()
+                                       : p.string());
+    }
+    for (const auto& inc : flags.include) {
+        argv.push_back("--include");
+        argv.push_back(inc);
+    }
+    for (const auto& exc : flags.exclude) {
+        argv.push_back("--exclude");
+        argv.push_back(exc);
+    }
+    argv.push_back("server");
+    return argv;
+}
+
 std::unique_ptr<Client> ensure_server_running(const Config& cfg,
+                                              const GlobalFlags& flags,
                                               std::string& error) {
     std::string socket_path = get_socket_path_for_root(cfg.project.root);
     auto client = std::make_unique<Client>(socket_path);
@@ -170,12 +204,8 @@ std::unique_ptr<Client> ensure_server_running(const Config& cfg,
         return nullptr;
     }
 
-    std::vector<std::string> argv{exe.string()};
-    if (!cfg.project.root.empty() && cfg.project.root != ".") {
-        argv.push_back("--root");
-        argv.push_back(cfg.project.root);
-    }
-    argv.push_back("server");
+    std::vector<std::string> argv =
+        build_server_spawn_argv(exe.string(), cfg, flags);
 
     if (!subprocess::spawn_detached(argv)) {
         error = "failed to spawn background server process";
@@ -226,6 +256,11 @@ std::unique_ptr<Client> ensure_server_running(const Config& cfg,
     return client;
 }
 
+std::unique_ptr<Client> ensure_server_running(const Config& cfg,
+                                              std::string& error) {
+    return ensure_server_running(cfg, GlobalFlags{}, error);
+}
+
 // -- Server start -------------------------------------------------------------
 
 int run_server(const GlobalFlags& flags, bool daemon, bool foreground) {
@@ -263,12 +298,8 @@ int run_server(const GlobalFlags& flags, bool daemon, bool foreground) {
             return 1;
         }
 
-        std::vector<std::string> argv{exe.string()};
-        if (!cfg.project.root.empty() && cfg.project.root != ".") {
-            argv.push_back("--root");
-            argv.push_back(cfg.project.root);
-        }
-        argv.push_back("server");
+        std::vector<std::string> argv =
+            build_server_spawn_argv(exe.string(), cfg, flags);
         argv.push_back("--foreground");
 
         if (!subprocess::spawn_detached(argv)) {

@@ -223,7 +223,7 @@ int run_def(const GlobalFlags& flags, const std::string& symbol) {
     }
 
     std::string conn_err;
-    auto client = ensure_server_running(cfg, conn_err);
+    auto client = ensure_server_running(cfg, flags, conn_err);
     if (!client) {
         std::cerr << "Error: " << conn_err << "\n";
         return 1;
@@ -443,7 +443,7 @@ int run_refs(const GlobalFlags& flags, const std::string& symbol,
     }
 
     std::string conn_err;
-    auto client = ensure_server_running(cfg, conn_err);
+    auto client = ensure_server_running(cfg, flags, conn_err);
     if (!client) {
         std::cerr << "Error: " << conn_err << "\n";
         return 1;
@@ -529,7 +529,7 @@ int run_callers(const GlobalFlags& flags, const std::string& symbol,
     }
 
     std::string conn_err;
-    auto client = ensure_server_running(cfg, conn_err);
+    auto client = ensure_server_running(cfg, flags, conn_err);
     if (!client) {
         std::cerr << "Error: " << conn_err << "\n";
         return 1;
@@ -667,7 +667,7 @@ int run_tree(const GlobalFlags& flags, const std::string& function_name,
     }
 
     std::string conn_err;
-    auto client = ensure_server_running(cfg, conn_err);
+    auto client = ensure_server_running(cfg, flags, conn_err);
     if (!client) {
         std::cerr << "Error: " << conn_err << "\n";
         return 1;

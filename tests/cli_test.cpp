@@ -2443,6 +2443,72 @@ TEST(CliConfigGuardTest, CwdWithoutConfigOrGitRootFailsNamingLciInit) {
     fs::remove_all(dir, ec);
 }
 
+// -- server spawn argv carries the global flags -------------------------------
+//
+// The auto-spawned server used to receive only --root: -c/--config,
+// --include and --exclude were dropped, so every server-backed command
+// silently ran against an index built with DIFFERENT filters than the
+// invocation asked for.
+
+namespace {
+
+/// Offset of `flag`'s VALUE in argv, or npos when the flag is absent.
+size_t flag_value_pos(const std::vector<std::string>& argv,
+                      const std::string& flag) {
+    for (size_t i = 0; i + 1 < argv.size(); ++i) {
+        if (argv[i] == flag) return i + 1;
+    }
+    return std::string::npos;
+}
+
+}  // namespace
+
+TEST(CliServerSpawnTest, SpawnArgvCarriesConfigIncludeExcludeFlags) {
+    GlobalFlags flags;
+    flags.config_path = "custom.kdl";
+    flags.include = {"src/**"};
+    flags.exclude = {"x/**"};
+    Config cfg;
+    cfg.project.root = "/repo";
+
+    const auto argv = build_server_spawn_argv("/bin/lci", cfg, flags);
+
+    ASSERT_EQ(argv.front(), "/bin/lci");
+    EXPECT_EQ(argv.back(), "server");
+
+    const size_t root_pos = flag_value_pos(argv, "--root");
+    ASSERT_NE(root_pos, std::string::npos);
+    EXPECT_EQ(argv[root_pos], "/repo");
+
+    // -c is made absolute (against the cwd) so the spawned server reads the
+    // file the user named regardless of its own working directory.
+    const size_t config_pos = flag_value_pos(argv, "-c");
+    ASSERT_NE(config_pos, std::string::npos) << "-c was dropped";
+    EXPECT_TRUE(std::filesystem::path(argv[config_pos]).is_absolute())
+        << argv[config_pos];
+    EXPECT_EQ(std::filesystem::path(argv[config_pos]).filename(),
+              "custom.kdl");
+
+    const size_t inc_pos = flag_value_pos(argv, "--include");
+    ASSERT_NE(inc_pos, std::string::npos) << "--include was dropped";
+    EXPECT_EQ(argv[inc_pos], "src/**");
+
+    const size_t exc_pos = flag_value_pos(argv, "--exclude");
+    ASSERT_NE(exc_pos, std::string::npos) << "--exclude was dropped";
+    EXPECT_EQ(argv[exc_pos], "x/**");
+}
+
+TEST(CliServerSpawnTest, SpawnArgvWithoutFlagsCarriesOnlyRoot) {
+    GlobalFlags flags;
+    Config cfg;
+    cfg.project.root = "/repo";
+    const auto argv = build_server_spawn_argv("/bin/lci", cfg, flags);
+    EXPECT_EQ(flag_value_pos(argv, "-c"), std::string::npos);
+    EXPECT_EQ(flag_value_pos(argv, "--include"), std::string::npos);
+    EXPECT_EQ(flag_value_pos(argv, "--exclude"), std::string::npos);
+}
+
+
 // -- relative -c resolves against the cwd, not --root -------------------------
 //
 // `lci -r /repo -c mine.kdl` names ./mine.kdl — the directory the command was
