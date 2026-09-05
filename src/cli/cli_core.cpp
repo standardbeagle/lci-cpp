@@ -23,11 +23,32 @@ namespace cli {
 
 namespace fs = std::filesystem;
 
+namespace {
+
+/// True when `dir` or any ancestor holds a `.git` entry — a directory in a
+/// plain checkout, a FILE in a linked worktree. A repository without a
+/// .lci.kdl still gets rich defaults rooted at the cwd; only a directory
+/// with NEITHER is refused (below).
+bool has_git_root_at_or_above(const fs::path& dir) {
+    std::error_code ec;
+    fs::path p = fs::absolute(dir, ec);
+    if (ec) return false;
+    while (true) {
+        if (fs::exists(p / ".git", ec)) return true;
+        const fs::path parent = p.parent_path();
+        if (parent == p) return false;
+        p = parent;
+    }
+}
+
+}  // namespace
+
 // -- Config loading -----------------------------------------------------------
 
 std::string load_config_with_overrides(const GlobalFlags& flags, Config& out) {
-    std::string root_dir = flags.root.empty() ? fs::current_path().string()
-                                              : flags.root;
+    const bool root_from_cwd = flags.root.empty();
+    std::string root_dir = root_from_cwd ? fs::current_path().string()
+                                         : flags.root;
 
     // -c/--config used to be parsed and then thrown away: every command read
     // <root>/.lci.kdl regardless of the file the user named. A named file is
@@ -39,7 +60,32 @@ std::string load_config_with_overrides(const GlobalFlags& flags, Config& out) {
     std::string config_path = flags.config_path;
     if (config_path.empty()) config_path = ".lci.kdl";
     if (fs::path(config_path).is_relative()) {
-        config_path = (fs::path(root_dir) / config_path).string();
+        if (named_config) {
+            // A user-named relative -c resolves against the directory the
+            // command was typed in, not --root: `lci -r /repo -c mine.kdl`
+            // names ./mine.kdl. Absolute also guarantees the auto-spawned
+            // server (whose cwd may differ) reads the same file.
+            config_path = fs::absolute(fs::path(config_path)).string();
+        } else {
+            // The DEFAULT .lci.kdl keeps resolving against the root — that
+            // is where `lci init` writes it.
+            config_path = (fs::path(root_dir) / config_path).string();
+        }
+    }
+
+    // No cwd auto-index: with the root auto-picked from the cwd, no config
+    // file and no git root above, "defaults for the cwd" made
+    // ensure_server_running index the ENTIRE current directory (reproduced:
+    // `lci search` from /tmp indexed /tmp). Refuse and point at the fix.
+    if (!named_config && root_from_cwd) {
+        std::error_code ec;
+        if (!fs::exists(fs::path(config_path), ec) &&
+            !has_git_root_at_or_above(fs::path(root_dir))) {
+            return "no .lci.kdl in the current directory and no git "
+                   "repository above it; refusing to index the whole cwd. "
+                   "Run `lci init` to create a config here, or pass "
+                   "--root / -c.";
+        }
     }
 
     auto result = named_config ? load_config_file(config_path, root_dir)
