@@ -16,6 +16,37 @@
 
 #include "profiling.h"
 
+namespace {
+
+// CLI11 never assigns a dash-prefixed token to a positional: it classifies
+// any `-x...` token as a short-option candidate and errors out before the
+// required `pattern` positional is populated, so `lci search '->next'`
+// aborted with "pattern is required" before query_parser.h ran at all.
+// The discriminator for C++ arrow content (member-access patterns like
+// `->next`) is a '-' immediately followed by '>'. Escape such tokens by
+// replacing the leading '-' with a sentinel byte before parsing, and
+// restore it in the positional-bound strings inside the subcommand
+// callbacks (callbacks run during parse(), so restoration must happen
+// there, not after parse returns). Genuine options like `-m 5` or
+// `--json` are untouched — option validation stays fully in force.
+constexpr char kArrowEscape = '\x01';
+
+void escape_arrow_tokens(std::vector<std::string>& args) {
+    for (auto& a : args) {
+        if (a.size() >= 2 && a[0] == '-' && a[1] == '>') a[0] = kArrowEscape;
+    }
+}
+
+void restore_arrow_token(std::string& s) {
+    if (!s.empty() && s[0] == kArrowEscape) s[0] = '-';
+}
+
+void restore_arrow_tokens(std::vector<std::string>& v) {
+    for (auto& s : v) restore_arrow_token(s);
+}
+
+}  // namespace
+
 int main(int argc, char* argv[]) {
     using namespace lci::cli;
 
@@ -214,6 +245,8 @@ int main(int argc, char* argv[]) {
                            "function | class | top-level");
 
     search_cmd->callback([&]() {
+        restore_arrow_token(search_pattern);
+        restore_arrow_tokens(search_paths);
         SearchCommandOptions options{
             .pattern = search_pattern,
             .paths = search_paths,
@@ -349,6 +382,8 @@ int main(int argc, char* argv[]) {
                          "Stop after N matches per file (grep -m, 0=unlimited)");
 
     grep_cmd->callback([&]() {
+        restore_arrow_token(grep_pattern);
+        restore_arrow_tokens(grep_paths);
         GrepCommandOptions opts;
         opts.pattern = grep_pattern;
         opts.paths = grep_paths;
@@ -1033,9 +1068,11 @@ int main(int argc, char* argv[]) {
     // accepted AFTER the subcommand too: `lci search foo -r .` is the
     // documented invocation shape (.claude/rules/test-iteration-discipline.md)
     // and the natural one to type. Without fallthrough, CLI11 rejects the
-    // trailing global option with "argument was not expected". Options are
-    // never swallowed by greedy positionals (CLI11 does not assign
-    // dash-prefixed tokens to positionals), so this only widens acceptance.
+    // trailing global option with "argument was not expected". Dash-prefixed
+    // options are never swallowed by greedy positionals (CLI11 does not
+    // assign dash-prefixed tokens to positionals — arrow content like
+    // '->next' reaches positionals only via the kArrowEscape rewrite above),
+    // so this only widens acceptance.
     // Walk the whole subcommand tree, not just the top level: `config show`
     // is nested, and without fallthrough on `show` itself CLI11 rejects
     // `lci config show -r <dir>` with "argument was not expected".
@@ -1057,7 +1094,13 @@ int main(int argc, char* argv[]) {
     // shell pipelines that branch on non-zero behaving identically across
     // the two binaries, and matches `if err != nil { os.Exit(1) }` shape.
     try {
-        app.parse(argc, argv);
+        // CLI11's vector overload consumes from the back: args go in
+        // reversed, mirroring parse_char_t (program name excluded).
+        std::vector<std::string> args;
+        args.reserve(static_cast<std::size_t>(argc) - 1);
+        for (int i = argc - 1; i > 0; --i) args.emplace_back(argv[i]);
+        escape_arrow_tokens(args);
+        app.parse(std::move(args));
     } catch (const CLI::ParseError& e) {
         int rc = app.exit(e);
         return rc == 0 ? 0 : 1;
