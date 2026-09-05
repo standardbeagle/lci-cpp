@@ -711,6 +711,44 @@ TEST(RegexLiteralSeeds, DuplicateRunsDedup) {
     EXPECT_EQ(seeds, (std::vector<std::string>{"foo", "bar"}));
 }
 
+// -- regex_every_match_has_seed ------------------------------------------------
+//
+// The per-branch decision behind the S12.6 fix: the trigram-seeded fast path
+// is sound only when EVERY match of the pattern carries a bankable seed. A
+// false here routes `lci search -E` to the full scan (and fails `lci grep -E`
+// loudly); a true keeps the indexed path. These pin BOTH directions so the
+// fallback stays per-branch and never degrades into a blanket full scan.
+
+TEST(AlternationSeedTest, UnseededBranchForcesFallback) {
+    // The root-cause pattern: "ab" has no >=3-char literal.
+    EXPECT_FALSE(grep_filters::regex_every_match_has_seed("foobar|ab"));
+    // Nested group, same defect shape.
+    EXPECT_FALSE(grep_filters::regex_every_match_has_seed("(foobar|ab)"));
+    // Optional group: `x(?:abc)?` can match "x", which carries no seed.
+    EXPECT_FALSE(grep_filters::regex_every_match_has_seed("x(?:abc)?"));
+    // Quantified-away runs: `ab*` can match "a"; `abc{0,2}` only guarantees
+    // "ab" (the `{0,2}` makes the 'c' optional) — neither reaches 3 chars.
+    EXPECT_FALSE(grep_filters::regex_every_match_has_seed("ab*"));
+    EXPECT_FALSE(grep_filters::regex_every_match_has_seed("abc{0,2}"));
+    // Pure meta.
+    EXPECT_FALSE(grep_filters::regex_every_match_has_seed(R"(\d+)"));
+}
+
+TEST(AlternationSeedTest, SeededPatternKeepsTrigramIndex) {
+    // Every branch seedable -> indexed fast path stays.
+    EXPECT_TRUE(grep_filters::regex_every_match_has_seed("foobar|barbaz"));
+    EXPECT_TRUE(grep_filters::regex_every_match_has_seed("foobar"));
+    // A required outer literal covers an unseedable inner alternation:
+    // every match of `foo(bar|ab)` contains "foo".
+    EXPECT_TRUE(grep_filters::regex_every_match_has_seed("foo(bar|ab)"));
+    // `+` requires its char; `*` only drops the one quantified char.
+    EXPECT_TRUE(grep_filters::regex_every_match_has_seed("abcd+"));
+    EXPECT_TRUE(grep_filters::regex_every_match_has_seed("abcde*"));
+    // The production detector that motivated the multi-seed extractor.
+    EXPECT_TRUE(grep_filters::regex_every_match_has_seed(
+        R"(\b(?:panic|unreachable|todo|unimplemented)!\s*\()"));
+}
+
 // The one comment-classification predicate, shared by CLI and MCP.
 TEST(GrepFiltersComment, LineSlashSlashIsComment) {
     EXPECT_TRUE(lci::line_is_comment_only("// hello", LangId::Cpp));
@@ -3218,7 +3256,11 @@ TEST(AlternationSeedTest, UnseededBranchMatchesRgSemantics) {
     std::set<std::pair<std::string, int>> hits;
     for (const auto& row : j["results"]) {
         const auto& r = row.contains("result") ? row["result"] : row;
-        hits.emplace(r.value("path", ""), r.value("line", 0));
+        // Rows carry cwd-relative paths; compare on the filename so the
+        // pinned set reads as the rg-equivalent (file, line) pairs.
+        hits.emplace(
+            std::filesystem::path(r.value("path", "")).filename().string(),
+            r.value("line", 0));
     }
     const std::set<std::pair<std::string, int>> expected = {
         {"alpha.cpp", 1}, {"beta.cpp", 1}};

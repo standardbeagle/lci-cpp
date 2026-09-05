@@ -660,6 +660,149 @@ std::vector<std::string> regex_literal_seeds(const std::string& re) {
     return seeds;
 }
 
+// Conservative answer to: does EVERY match of `re` necessarily contain a
+// literal run of >=3 chars that regex_literal_seeds will bank? The seeded
+// fast path is only sound when this holds — otherwise an alternation branch
+// like the "ab" in `foobar|ab` matches text no seed row ever carries and is
+// silently absent from -E results. Conservative = false on uncertainty,
+// which costs a full scan, never a dropped result. Run/quantifier rules
+// mirror regex_literal_seeds exactly (`*`/`?`/`{` drop the preceding char,
+// `+` keeps it, `\d`-style shorthands and char classes break a run).
+namespace {
+struct SeedCoverage {
+    std::string_view s;
+    size_t i = 0;
+
+    char peek() const { return i < s.size() ? s[i] : '\0'; }
+
+    // After a literal char or a group: consume a trailing quantifier.
+    // For a literal char, `run` is the current guaranteed run length and is
+    // updated in place. Returns false iff the quantifier voids a preceding
+    // GROUP's guarantee (`*`, `?`, `{0,..}`).
+    bool apply_quantifier(size_t* run) {
+        char c = peek();
+        if (c != '*' && c != '+' && c != '?' && c != '{') return true;
+        ++i;
+        if (c == '{') {
+            size_t min = 0;
+            while (i < s.size() && s[i] >= '0' && s[i] <= '9') {
+                min = min * 10 + static_cast<size_t>(s[i] - '0');
+                ++i;
+            }
+            while (i < s.size() && s[i] != '}') ++i;
+            if (i < s.size()) ++i;  // consume '}'
+            if (min == 0) {
+                if (run && *run > 0) --*run;
+                return false;
+            }
+            // min >= 1: the atom is required. Mirror the extractor, which
+            // pops one char on `{` unconditionally — conservative.
+            if (run && *run > 0) --*run;
+            return true;
+        }
+        if (c == '+' ) return true;  // atom required at least once
+        // '*' or '?': atom may be absent.
+        if (run && *run > 0) --*run;
+        return false;
+    }
+
+    // Parses a group body. Returns true if every match of the group carries
+    // a seed. Consumes through the closing ')' (or end on imbalance — the
+    // RE2 compile step reports the pattern error separately).
+    bool parse_group() {
+        // Non-capturing/flag groups: skip "?...:" prefix. Lookahead and
+        // other `(?...)` forms make no guarantee about the consumed text;
+        // parse to stay aligned but discard the result.
+        bool usable = true;
+        if (peek() == '?') {
+            size_t j = i;
+            while (j < s.size() && s[j] != ':' && s[j] != ')') ++j;
+            if (j < s.size() && s[j] == ':') {
+                i = j + 1;
+            } else {
+                usable = false;
+                ++i;  // step past '?' so the body parse terminates
+            }
+        }
+        bool g = parse_alt();
+        if (peek() == ')') ++i;
+        return usable && g;
+    }
+
+    // Alternation: every branch must guarantee a seed (a match takes ONE
+    // branch, so the guarantee is only as strong as the weakest branch).
+    bool parse_alt() {
+        bool all = parse_concat();
+        while (peek() == '|') {
+            ++i;
+            all = parse_concat() && all;
+        }
+        return all;
+    }
+
+    // Concatenation: ANY term guaranteeing a seed covers the whole concat
+    // (the match contains every term's match).
+    bool parse_concat() {
+        size_t run = 0;  // current guaranteed literal run length
+        bool guaranteed = false;
+        while (i < s.size() && peek() != '|' && peek() != ')') {
+            char c = s[i];
+            if (c == '\\' && i + 1 < s.size()) {
+                char esc = s[i + 1];
+                i += 2;
+                if (std::isalpha(static_cast<unsigned char>(esc))) {
+                    run = 0;  // \d \w \s \b ...: not a literal
+                } else {
+                    ++run;
+                    apply_quantifier(&run);
+                }
+            } else if (c == '(') {
+                ++i;
+                run = 0;  // group boundary breaks literal adjacency
+                bool g = parse_group();
+                if (!apply_quantifier(nullptr)) g = false;
+                guaranteed = guaranteed || g;
+            } else if (c == '[') {
+                ++i;
+                if (peek() == '^') ++i;
+                if (peek() == ']') ++i;  // literal ']' first in class
+                while (i < s.size() && s[i] != ']') ++i;
+                if (i < s.size()) ++i;
+                run = 0;
+                apply_quantifier(nullptr);
+            } else if (c == '.' || c == '^' || c == '$' || c == '}') {
+                ++i;
+                run = 0;
+            } else if (c == '*' || c == '?' || c == '+' || c == '{') {
+                // Quantifier applying to a preceding NON-literal atom
+                // (class, dot, \d-style shorthand) — quantifiers after
+                // literal chars/groups were already consumed by
+                // apply_quantifier. Consume so it is not miscounted as a
+                // literal char; the run is already broken.
+                ++i;
+                if (c == '{') {
+                    while (i < s.size() && s[i] != '}') ++i;
+                    if (i < s.size()) ++i;
+                }
+                run = 0;
+            } else {
+                ++i;
+                ++run;
+                apply_quantifier(&run);
+            }
+            if (run >= 3) guaranteed = true;
+        }
+        return guaranteed;
+    }
+};
+}  // namespace
+
+bool regex_every_match_has_seed(std::string_view pattern) {
+    SeedCoverage p{pattern, 0};
+    return p.parse_alt();
+}
+
+
 // Filter result rows by re-matching their content line against the
 // user-supplied regex. Drops rows whose context block has no line
 // matching the regex; rows that do match get their `line`, `column`,

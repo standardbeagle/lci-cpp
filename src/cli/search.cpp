@@ -381,19 +381,23 @@ int run_search(const GlobalFlags& flags, const SearchCommandOptions& options) {
             return 1;
         }
         regex_filter = std::move(re);
-        if (!regex_seeds.empty()) {
+        if (!regex_seeds.empty() &&
+            grep_filters::regex_every_match_has_seed(effective_pattern)) {
             // Fast path: seed-then-filter via the indexed server search.
             // ALL literal runs seed (union) — a single longest-run seed
             // was alternation-blind and silently dropped every branch
-            // that lacked it.
+            // that lacked it. The seed path is only sound when EVERY
+            // alternation branch carries a seedable literal; otherwise a
+            // branch like the "ab" in `foobar|ab` matches text no seed
+            // row ever carries and is silently absent from the results.
             effective_pattern = regex_seeds.front();
         } else {
-            // Pure-meta regex (no usable trigram seed). Mirror Go's
-            // behavior: scan every indexed file directly with RE2.
+            // Pure-meta regex, or an alternation with an unseedable
+            // branch: scan every indexed file directly with RE2.
             // Slower than the seeded path but matches Karpathy rule 1
             // (Go is the bar) for patterns like '\\d+' / '^[a-z]+$' /
-            // '.{N}' that Go handles via cmd/lci/search.go's
-            // full-corpus fallback.
+            // '.{N}' / 'foobar|ab' that Go handles via
+            // cmd/lci/search.go's full-corpus fallback.
             regex_full_scan = true;
         }
     }
