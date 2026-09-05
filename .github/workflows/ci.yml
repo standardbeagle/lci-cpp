@@ -231,12 +231,16 @@ jobs:
           & $spec.FullName
           if ($LASTEXITCODE -ne 0) { throw "spec_diff_unit_tests failed ($LASTEXITCODE)" }
 
-      # The only lci.exe that exists anywhere. No fleet machine can build it
-      # (MSVC + vcpkg live on this runner alone), and "Reclaim build space"
-      # deletes it seconds from now — so without this upload a green Windows
-      # leg proves the code compiles and leaves nothing to ship.
-      # deploy-lci.sh's header already tells operators to "pull the artifact
-      # from that CI leg"; this is the step that makes that true.
+      # A per-COMMIT Windows binary. The shipping channel is release.yml,
+      # which packages lci-<ver>-win64.tar.gz for install.ps1 — that is the
+      # canonical download and this does not replace it. What this covers is
+      # the gap between tags: MSVC + vcpkg live only on this runner, no WSL
+      # box can cross-compile, and "Reclaim build space" deletes
+      # build/release unconditionally, so a green Windows leg otherwise
+      # leaves nothing installable for the commit it just validated.
+      # Same x64-windows-static-md linkage as the release, so what ships
+      # here is self-contained rather than the DLL build the default
+      # triplet would produce.
       - name: Stage lci.exe
         run: |
           $exe = Get-ChildItem -Path build/release -Recurse -Filter lci.exe |
