@@ -2950,6 +2950,239 @@ TEST(ColumnContract, UnknownColumnSentinelIsMinusOne) {
     EXPECT_TRUE(af::match_is_in_comment("// x", 0));
 }
 
+// -- S12.4: meta-regex full-scan filters, flag effects, result paging --------
+//
+// These tests drive the built `lci` binary against a temp corpus: the
+// defects they pin live in run_search's plumbing (the pure-meta regex
+// full-scan path, silently-ignored flags, the pre-filter 500-row cap), which
+// pure-unit tests over the filter helpers cannot observe.
+
+// Writes `content` to `root/rel`, creating parent directories.
+void write_corpus_file(const std::filesystem::path& root,
+                       const std::string& rel, const std::string& content) {
+    const auto p = root / rel;
+    std::filesystem::create_directories(p.parent_path());
+    std::ofstream f(p);
+    f << content;
+}
+
+// Runs `lci <args...> -r <root>`, capturing stdout. Returns run_capture's
+// spawn/exit-status bool; `out` receives stdout.
+bool run_lci_search(const std::filesystem::path& lci_bin,
+                    const std::filesystem::path& root,
+                    std::vector<std::string> args, std::string& out) {
+    args.push_back("-r");
+    args.push_back(root.string());
+    return subprocess::run_capture(args, "", out);
+}
+
+void shutdown_lci_server(const std::filesystem::path& lci_bin,
+                         const std::filesystem::path& root) {
+    std::string ignored;
+    subprocess::run_capture(
+        {lci_bin.string(), "shutdown", "-r", root.string()}, "", ignored);
+}
+
+TEST(SearchMetaRegexTest, TextModePrintsTextNotJson) {
+    namespace fs = std::filesystem;
+    const auto lci_bin =
+        portable::executable_path().parent_path().parent_path() / "src" /
+        "lci";
+    ASSERT_TRUE(fs::exists(lci_bin)) << lci_bin;
+    const auto root = lci::test::unique_temp_dir("lci_meta_text_");
+    fs::create_directories(root);
+    write_corpus_file(root, "alpha.cpp", "12345\n");
+
+    std::string out;
+    ASSERT_TRUE(run_lci_search(
+        lci_bin, root,
+        {lci_bin.string(), "search", "-E", "^\\d{5}$"}, out));
+    // Text mode must render the text listing, not a raw JSON envelope.
+    EXPECT_EQ(out.find("\"results\""), std::string::npos) << out;
+    EXPECT_NE(out.find("alpha.cpp"), std::string::npos) << out;
+
+    shutdown_lci_server(lci_bin, root);
+    std::error_code ec;
+    fs::remove_all(root, ec);
+}
+
+TEST(SearchMetaRegexTest, HonorsPathScopeAndExclude) {
+    namespace fs = std::filesystem;
+    const auto lci_bin =
+        portable::executable_path().parent_path().parent_path() / "src" /
+        "lci";
+    ASSERT_TRUE(fs::exists(lci_bin)) << lci_bin;
+    const auto root = lci::test::unique_temp_dir("lci_meta_scope_");
+    fs::create_directories(root);
+    write_corpus_file(root, "keep/alpha.cpp", "12345\n");
+    write_corpus_file(root, "drop/beta.cpp", "67890\n");
+
+    // Path scope: only keep/ is searched.
+    std::string out;
+    ASSERT_TRUE(run_lci_search(
+        lci_bin, root,
+        {lci_bin.string(), "search", "-E", "^\\d{5}$",
+         (root / "keep").string()},
+        out));
+    EXPECT_NE(out.find("alpha.cpp"), std::string::npos) << out;
+    EXPECT_EQ(out.find("beta.cpp"), std::string::npos) << out;
+
+    // --exclude drops the drop/ file.
+    out.clear();
+    ASSERT_TRUE(run_lci_search(
+        lci_bin, root,
+        {lci_bin.string(), "search", "-E", "^\\d{5}$", "--exclude", "drop"},
+        out));
+    EXPECT_NE(out.find("alpha.cpp"), std::string::npos) << out;
+    EXPECT_EQ(out.find("beta.cpp"), std::string::npos) << out;
+
+    shutdown_lci_server(lci_bin, root);
+    std::error_code ec;
+    fs::remove_all(root, ec);
+}
+
+TEST(SearchMetaRegexTest, HonorsMaxCount) {
+    namespace fs = std::filesystem;
+    const auto lci_bin =
+        portable::executable_path().parent_path().parent_path() / "src" /
+        "lci";
+    ASSERT_TRUE(fs::exists(lci_bin)) << lci_bin;
+    const auto root = lci::test::unique_temp_dir("lci_meta_maxc_");
+    fs::create_directories(root);
+    write_corpus_file(root, "gamma.cpp", "11111\n22222\n33333\n");
+
+    std::string out;
+    ASSERT_TRUE(run_lci_search(
+        lci_bin, root,
+        {lci_bin.string(), "search", "-E", "^\\d{5}$", "--max-count", "1"},
+        out));
+    EXPECT_NE(out.find("Found 1 results"), std::string::npos) << out;
+
+    shutdown_lci_server(lci_bin, root);
+    std::error_code ec;
+    fs::remove_all(root, ec);
+}
+
+// Every flag that parses must change the output. Corpus: `token` appears
+// twice in alpha.cpp (plus one plain line) and once in beta.cpp (plus one
+// plain line), so each flag has an observable effect.
+class SearchFlagEffectTest : public ::testing::Test {
+  protected:
+    std::filesystem::path lci_bin;
+    std::filesystem::path root;
+
+    void SetUp() override {
+        lci_bin = portable::executable_path().parent_path().parent_path() /
+                  "src" / "lci";
+        ASSERT_TRUE(std::filesystem::exists(lci_bin)) << lci_bin;
+        root = lci::test::unique_temp_dir("lci_search_flags_");
+        std::filesystem::create_directories(root);
+        write_corpus_file(root, "alpha.cpp",
+                          "int token_alpha_one;\n"
+                          "int token_alpha_two;\n"
+                          "plain alpha line\n");
+        write_corpus_file(root, "beta.cpp",
+                          "int token_beta_one;\n"
+                          "plain beta line\n");
+    }
+
+    void TearDown() override {
+        shutdown_lci_server(lci_bin, root);
+        std::error_code ec;
+        std::filesystem::remove_all(root, ec);
+    }
+
+    nlohmann::json search_json(std::vector<std::string> extra) {
+        std::vector<std::string> args = {lci_bin.string(), "search", "token",
+                                         "--json"};
+        args.insert(args.end(), extra.begin(), extra.end());
+        std::string out;
+        EXPECT_TRUE(run_lci_search(lci_bin, root, args, out));
+        return nlohmann::json::parse(out);
+    }
+};
+
+TEST_F(SearchFlagEffectTest, IncludeFiltersResults) {
+    auto j = search_json({"--include", "alpha"});
+    ASSERT_TRUE(j.contains("results"));
+    EXPECT_EQ(j.value("count", -1), 2) << j.dump();
+    for (const auto& row : j["results"]) {
+        const std::string path = row["result"].value("path", "");
+        EXPECT_NE(path.find("alpha.cpp"), std::string::npos) << path;
+    }
+}
+
+TEST_F(SearchFlagEffectTest, InvertMatchChangesOutput) {
+    auto j = search_json({"--invert-match"});
+    EXPECT_EQ(j.value("mode", ""), "invert-match") << j.dump();
+    bool saw_plain = false;
+    for (const auto& row : j["results"]) {
+        if (row.value("match", "").find("plain") != std::string::npos) {
+            saw_plain = true;
+        }
+    }
+    EXPECT_TRUE(saw_plain) << j.dump();
+}
+
+TEST_F(SearchFlagEffectTest, CountChangesOutput) {
+    auto j = search_json({"--count"});
+    EXPECT_EQ(j.value("mode", ""), "count") << j.dump();
+    int total = 0;
+    for (const auto& row : j["results"]) {
+        ASSERT_TRUE(row.contains("count")) << row.dump();
+        total += row.value("count", 0);
+    }
+    EXPECT_EQ(total, 3) << j.dump();
+}
+
+TEST_F(SearchFlagEffectTest, FilesWithMatchesChangesOutput) {
+    auto j = search_json({"-l"});
+    EXPECT_EQ(j.value("mode", ""), "files-with-matches") << j.dump();
+    EXPECT_EQ(j["results"].size(), 2u) << j.dump();
+    for (const auto& row : j["results"]) {
+        EXPECT_TRUE(row.contains("path")) << row.dump();
+        EXPECT_FALSE(row.contains("line")) << row.dump();
+    }
+}
+
+TEST_F(SearchFlagEffectTest, MaxCountCapsPerFile) {
+    auto baseline = search_json({});
+    EXPECT_EQ(baseline.value("count", -1), 3) << baseline.dump();
+    auto j = search_json({"--max-count", "1"});
+    EXPECT_EQ(j.value("count", -1), 2) << j.dump();  // one per file
+}
+
+TEST(SearchPagingTest, MatchBeyondRow500IsReturned) {
+    namespace fs = std::filesystem;
+    const auto lci_bin =
+        portable::executable_path().parent_path().parent_path() / "src" /
+        "lci";
+    ASSERT_TRUE(fs::exists(lci_bin)) << lci_bin;
+    const auto root = lci::test::unique_temp_dir("lci_search_paging_");
+    fs::create_directories(root);
+
+    // 600 filler hits push the unique-tail hit to row 601 — past the old
+    // hard 500-row client cap.
+    std::string content;
+    for (int i = 0; i < 600; ++i) {
+        content += "needle filler line " + std::to_string(i) + "\n";
+    }
+    content += "needle_unique_tail\n";
+    write_corpus_file(root, "big.cpp", content);
+
+    std::string out;
+    ASSERT_TRUE(run_lci_search(
+        lci_bin, root,
+        {lci_bin.string(), "search", "needle", "--json"}, out));
+    auto j = nlohmann::json::parse(out);
+    EXPECT_EQ(j.value("count", -1), 601) << out.substr(0, 400);
+    EXPECT_NE(out.find("needle_unique_tail"), std::string::npos);
+
+    shutdown_lci_server(lci_bin, root);
+    std::error_code ec;
+    fs::remove_all(root, ec);
+}
+
 }  // namespace
 }  // namespace cli
 }  // namespace lci
