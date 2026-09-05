@@ -18,11 +18,11 @@
     "exit"
   ],
   "parse": "text",
-  "_rationale": "High-signal QA find. Go rejects `refs --json` with a normal CLI error (exit 1 and usage text on stdout). C++ exits 109 with empty stdout on the same invocation. This is intentionally red so the crash/exit-path mismatch stays visible.",
+  "_rationale": "Pins `refs --json` emitting a real JSON reference report. Previously `--json` was unregistered on the refs subcommand, so the golden captured a usage error at exit 1; fixed by 3e68da2. Verified: stdout parses as JSON and lists the three lowercase `add` definitions in the multi-lang corpus (b.py, d.rs, c.cpp), correctly excluding Go's capitalized `Add`.",
   "tiers": {},
   "tolerances": {
     "score_abs": 0.0,
     "timed_max_ms": 60000
   },
-  "expect_exit": 1
+  "expect_exit": 0
 }

@@ -1,13 +1,25 @@
-Incorrect Usage: flag provided but not defined: -json
-
-NAME:
-   lci refs - Find symbol references
-
-USAGE:
-   lci refs command [command options]
-
-COMMANDS:
-   help, h  Shows a list of commands or help for one command
-
-OPTIONS:
-   --help, -h  show help
+{
+  "lexical_count": 0,
+  "references": [
+    {
+      "column": 4,
+      "context": "def add(a: int, b: int) -> int:",
+      "file_path": "${CORPUS}/b.py",
+      "line": 1
+    },
+    {
+      "column": 7,
+      "context": "pub fn add(a: i32, b: i32) -> i32 { a + b }\n",
+      "file_path": "${CORPUS}/d.rs",
+      "line": 1
+    },
+    {
+      "column": 4,
+      "context": "int add(int a, int b) { return a + b; }\n",
+      "file_path": "${CORPUS}/c.cpp",
+      "line": 1
+    }
+  ],
+  "symbol": "add",
+  "truncated": false
+}
