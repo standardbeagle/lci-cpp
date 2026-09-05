@@ -148,7 +148,8 @@ inline std::string ascii_lower(std::string_view s) {
 ///   - `-<term>`         — exclusion: drop results whose match line contains
 ///                         the term (case-insensitive). A bare `-` (no term)
 ///                         is treated as a content token to avoid silently
-///                         eating user input.
+///                         eating user input; `->…` (e.g. the C++ member-
+///                         access pattern `->next`) is content too.
 ///
 /// Tokens with a colon but an unrecognized directive prefix (e.g. `foo:bar`)
 /// fall through to the content-term bucket. This is intentional: the trigram
@@ -176,7 +177,11 @@ inline ParsedQuery parse(std::string_view query) {
             if (!val.empty()) out.symbols.push_back(std::move(val));
             continue;
         }
-        if (tok.size() >= 2 && tok.front() == '-') {
+        // A leading '-' followed by '>' is a C++ member-access pattern
+        // (`->next`), not an exclusion: the discriminator is the character
+        // after the dash, never the whole token, so any `->…` shape stays
+        // content while a genuine `-term` still excludes.
+        if (tok.size() >= 2 && tok.front() == '-' && tok[1] != '>') {
             out.exclusions.push_back(tok.substr(1));
             continue;
         }
