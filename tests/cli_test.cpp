@@ -502,6 +502,100 @@ TEST(CliSubcommandTest, NestedSubcommandAcceptsGlobalRootFlag) {
     fs::remove_all(root, ec);
 }
 
+// -- arrow patterns through the real binary ----------------------------------
+// `lci search '->next'`: CLI11 never assigns a dash-prefixed token to a
+// positional, so without the argv escape in main.cpp the parse aborts with
+// "pattern is required" BEFORE query_parser.h runs. A parser unit test
+// cannot observe that rejection — these drive the built binary.
+
+TEST(CliSubcommandTest, ArrowPatternParsesAsContent) {
+    namespace fs = std::filesystem;
+    const auto lci_bin =
+        portable::executable_path().parent_path().parent_path() / "src" /
+        "lci";
+    ASSERT_TRUE(fs::exists(lci_bin)) << lci_bin;
+
+    const auto root = lci::test::unique_temp_dir("lci_cli_arrow_");
+    fs::create_directories(root);
+    {
+        std::ofstream f(root / "a.cpp");
+        f << "struct N { N* next; };\n"
+             "int go(N* n) { return n ->next != nullptr; }\n"
+             "int other(N* n) { return n->prev != nullptr; }\n";
+    }
+
+    // Bare arrow token: normal search exit + the match, not a parse error.
+    std::string out;
+    EXPECT_TRUE(subprocess::run_capture(
+        {lci_bin.string(), "search", "->next", "-r", root.string()}, "",
+        out));
+    EXPECT_NE(out.find("a.cpp"), std::string::npos) << out;
+
+    // Arrow token after a term stays content, not an exclusion (guards the
+    // query_parser gate from 4a0080a end to end).
+    out.clear();
+    EXPECT_TRUE(subprocess::run_capture(
+        {lci_bin.string(), "search", "n ->next", "-r", root.string()}, "",
+        out));
+    EXPECT_NE(out.find("a.cpp"), std::string::npos) << out;
+
+    std::string ignored;
+    subprocess::run_capture(
+        {lci_bin.string(), "shutdown", "-r", root.string()}, "", ignored);
+    std::error_code ec;
+    fs::remove_all(root, ec);
+}
+
+TEST(CliSubcommandTest, QuotedExclusionStillParses) {
+    namespace fs = std::filesystem;
+    const auto lci_bin =
+        portable::executable_path().parent_path().parent_path() / "src" /
+        "lci";
+    ASSERT_TRUE(fs::exists(lci_bin)) << lci_bin;
+
+    const auto root = lci::test::unique_temp_dir("lci_cli_excl_");
+    fs::create_directories(root);
+    {
+        std::ofstream f(root / "b.txt");
+        f << "foo bar\nfoo baz\n";
+    }
+
+    // `lci search 'foo -bar'` must run as a normal search — the `-bar`
+    // exclusion directive is query_parser's job (PlainExclusionStillWorks),
+    // and the argv escape must not disturb it.
+    std::string out;
+    EXPECT_TRUE(subprocess::run_capture(
+        {lci_bin.string(), "search", "foo -bar", "-r", root.string()}, "",
+        out));
+    EXPECT_NE(out.find("b.txt"), std::string::npos) << out;
+
+    std::string ignored;
+    subprocess::run_capture(
+        {lci_bin.string(), "shutdown", "-r", root.string()}, "", ignored);
+    std::error_code ec;
+    fs::remove_all(root, ec);
+}
+
+TEST(CliSubcommandTest, UnknownOptionStillErrors) {
+    // The arrow fix must not disable option validation: a genuine unknown
+    // option is still a parse error, not silently swallowed as content.
+    namespace fs = std::filesystem;
+    const auto lci_bin =
+        portable::executable_path().parent_path().parent_path() / "src" /
+        "lci";
+    ASSERT_TRUE(fs::exists(lci_bin)) << lci_bin;
+
+    const auto root = lci::test::unique_temp_dir("lci_cli_badopt_");
+    fs::create_directories(root);
+    std::string out;
+    EXPECT_FALSE(subprocess::run_capture(
+        {lci_bin.string(), "search", "foo", "--nosuchflag", "-r",
+         root.string()},
+        "", out));
+    std::error_code ec;
+    fs::remove_all(root, ec);
+}
+
 // -- git-analyze validation tests ---------------------------------------------
 
 TEST(CliGitAnalyzeTest, InvalidScopeFails) {
