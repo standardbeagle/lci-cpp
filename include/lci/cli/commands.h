@@ -56,6 +56,24 @@ std::unique_ptr<Client> ensure_server_running(const Config& cfg,
 std::unique_ptr<Client> ensure_server_running(const Config& cfg,
                                               std::string& error);
 
+#ifndef _WIN32
+/// Inode identity of a socket path, captured before a stale server is asked
+/// to exit. After the exit, the path is unlinked ONLY if the identity still
+/// matches: a successor server can bind the same path inside the exit-wait
+/// window, and unlinking unconditionally orphaned it (alive, unreachable,
+/// holding the start lock).
+struct SocketFileIdentity {
+    uint64_t dev = 0;
+    uint64_t ino = 0;
+    bool valid = false;
+};
+SocketFileIdentity socket_file_identity(const std::string& path);
+/// Unlinks `path` only when its current dev+inode still equal `id`. Returns
+/// true when the unlink happened.
+bool unlink_socket_if_identity(const std::string& path,
+                               const SocketFileIdentity& id);
+#endif
+
 // -- MCP auto-detection -------------------------------------------------------
 
 /// Returns true if the process should enter MCP mode (piped stdin, env var,

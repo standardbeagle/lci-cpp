@@ -2508,6 +2508,54 @@ TEST(CliServerSpawnTest, SpawnArgvWithoutFlagsCarriesOnlyRoot) {
     EXPECT_EQ(flag_value_pos(argv, "--exclude"), std::string::npos);
 }
 
+// -- stale-server socket unlink is inode-guarded ------------------------------
+//
+// After a stale-build server is told to exit, a successor can bind the same
+// socket path inside the 250ms exit-poll window. Unlinking unconditionally
+// removed the SUCCESSOR's socket (alive, unreachable, holding the start
+// lock). The unlink must fire only when the path's inode still matches the
+// one observed before the kill.
+
+#ifndef _WIN32
+TEST(CliServerSpawnTest, SocketUnlinkOnlyWhenInodeMatches) {
+    namespace fs = std::filesystem;
+    auto dir = lci::test::unique_temp_dir("lci_cli_sock_inode_");
+    fs::create_directories(dir);
+    const fs::path sock = dir / "srv.sock";
+
+    // Same inode observed before the kill -> unlinked.
+    {
+        std::ofstream f(sock);
+        f << "x";
+    }
+    const auto id = socket_file_identity(sock.string());
+    ASSERT_TRUE(id.valid);
+    // Prepare the "successor" bind BEFORE unlinking the stale one (a fresh
+    // create after unlink can recycle the just-freed inode, which is exactly
+    // the aliasing the guard exists to distrust): distinct live files are
+    // guaranteed distinct inodes.
+    const fs::path successor = dir / "srv.sock.successor";
+    {
+        std::ofstream f(successor);
+        f << "y";
+    }
+    EXPECT_TRUE(unlink_socket_if_identity(sock.string(), id));
+    EXPECT_FALSE(fs::exists(sock));
+
+    // Rebound path (the successor's inode) + pre-kill identity -> kept.
+    fs::rename(successor, sock);
+    const auto rebound = socket_file_identity(sock.string());
+    ASSERT_TRUE(rebound.valid);
+    ASSERT_NE(rebound.ino, id.ino);
+    EXPECT_FALSE(unlink_socket_if_identity(sock.string(), id));
+    EXPECT_TRUE(fs::exists(sock)) << "successor's socket was unlinked";
+    // And the matching identity DOES unlink it.
+    EXPECT_TRUE(unlink_socket_if_identity(sock.string(), rebound));
+
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+}
+#endif  // _WIN32
 
 // -- relative -c resolves against the cwd, not --root -------------------------
 //

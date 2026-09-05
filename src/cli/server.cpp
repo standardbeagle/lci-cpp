@@ -110,6 +110,23 @@ std::vector<std::string> build_server_spawn_argv(const std::string& exe,
     return argv;
 }
 
+#ifndef _WIN32
+SocketFileIdentity socket_file_identity(const std::string& path) {
+    struct stat st {};
+    if (::stat(path.c_str(), &st) != 0) return {};
+    return {static_cast<uint64_t>(st.st_dev), static_cast<uint64_t>(st.st_ino),
+            true};
+}
+
+bool unlink_socket_if_identity(const std::string& path,
+                               const SocketFileIdentity& id) {
+    if (!id.valid) return false;
+    const auto now = socket_file_identity(path);
+    if (!now.valid || now.dev != id.dev || now.ino != id.ino) return false;
+    return ::unlink(path.c_str()) == 0;
+}
+#endif
+
 std::unique_ptr<Client> ensure_server_running(const Config& cfg,
                                               const GlobalFlags& flags,
                                               std::string& error) {
@@ -163,6 +180,12 @@ std::unique_ptr<Client> ensure_server_running(const Config& cfg,
                          "Stale server detected (build %s != %s), "
                          "restarting...\n",
                          ping->build_id_value.c_str(), build_id().c_str());
+#ifndef _WIN32
+            // Capture the socket's inode BEFORE the stale server exits: a
+            // successor can bind the same path inside the exit-wait window,
+            // and the unlink below must not remove ITS socket.
+            const auto pre_kill_socket = socket_file_identity(socket_path);
+#endif
             std::string shutdown_err;
             client->shutdown(false, shutdown_err);
             // Wait for the old server to actually EXIT before touching its
@@ -186,7 +209,7 @@ std::unique_ptr<Client> ensure_server_running(const Config& cfg,
                 return client;
             }
 #ifndef _WIN32
-            ::unlink(socket_path.c_str());
+            unlink_socket_if_identity(socket_path, pre_kill_socket);
 #endif
         } else {
             return client;
