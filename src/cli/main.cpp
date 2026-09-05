@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <functional>
 #include <iostream>
 #include <string>
 #include <string_view>
@@ -1035,8 +1036,18 @@ int main(int argc, char* argv[]) {
     // trailing global option with "argument was not expected". Options are
     // never swallowed by greedy positionals (CLI11 does not assign
     // dash-prefixed tokens to positionals), so this only widens acceptance.
+    // Walk the whole subcommand tree, not just the top level: `config show`
+    // is nested, and without fallthrough on `show` itself CLI11 rejects
+    // `lci config show -r <dir>` with "argument was not expected".
+    const std::function<void(CLI::App*)> set_fallthrough =
+        [&set_fallthrough](CLI::App* cmd) {
+            cmd->fallthrough();
+            for (auto* nested : cmd->get_subcommands({})) {
+                set_fallthrough(nested);
+            }
+        };
     for (auto* sub : app.get_subcommands({})) {
-        sub->fallthrough();
+        set_fallthrough(sub);
     }
 
     // Manual parse + exit-code remap. CLI11's default `ExtrasError` exit
