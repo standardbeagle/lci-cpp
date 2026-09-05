@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <set>
 #include <string>
 
 #include <nlohmann/json.hpp>
@@ -12,6 +13,8 @@
 #include <lci/cli/commands.h>
 #include <lci/core/portable.h>
 #include <lci/core/subprocess.h>
+#include <lci/language_map.h>
+#include <lci/search/search_options.h>
 
 #include "../src/cli/ast_filters.h"
 #include "../src/cli/grep_filters.h"
@@ -838,6 +841,112 @@ TEST(GrepFiltersApplyExcludeComments, UsesEmbeddedContext) {
     auto filtered = gf::apply_exclude_comments(results);
     ASSERT_EQ(filtered.size(), 1u);
     EXPECT_EQ(filtered[0]["line"].get<int>(), 2);
+}
+
+TEST(GrepFiltersApplyExcludeComments, KeepsCodeLineContainingStarSlash) {
+    // DATA LOSS regression pin: a line is comment-only only when it OPENS
+    // with a comment marker. `int x = 1; /* note */` is real code with a
+    // trailing comment and `std::string s = "*/";` carries the marker inside
+    // a string literal. The pre-fix CLI heuristic classified ANY line
+    // containing `*/` as comment-only and silently dropped both rows.
+    auto make_row = [](int line, const std::string& text) {
+        nlohmann::json row;
+        row["path"] = "/no/such/file.cpp";
+        row["line"] = line;
+        row["context"] = {{"start_line", line}, {"lines", {text}}};
+        return row;
+    };
+    nlohmann::json results = nlohmann::json::array(
+        {make_row(1, "int x = 1; /* note */"),
+         make_row(2, "std::string s = \"*/\";")});
+    auto filtered = gf::apply_exclude_comments(results);
+    ASSERT_EQ(filtered.size(), 2u)
+        << "comment filter deleted real code lines containing `*/`";
+}
+
+TEST(GrepFiltersApplyExcludeComments, DropsLinesOpeningWithCommentMarker) {
+    // Retained behavior guard (passes pre-fix): lines that OPEN with a
+    // comment marker stay dropped. `#` is language-gated, so the hash row
+    // uses a .py path where `#` unambiguously opens a comment.
+    auto make_row = [](const std::string& path, int line,
+                       const std::string& text) {
+        nlohmann::json row;
+        row["path"] = path;
+        row["line"] = line;
+        row["context"] = {{"start_line", line}, {"lines", {text}}};
+        return row;
+    };
+    nlohmann::json results = nlohmann::json::array(
+        {make_row("/no/such/a.cpp", 1, "// line comment"),
+         make_row("/no/such/b.py", 2, "  # hash comment"),
+         make_row("/no/such/c.cpp", 3, "/* block opener"),
+         make_row("/no/such/d.cpp", 4, "*/"),
+         make_row("/no/such/e.cpp", 5, "int kept = 1;")});
+    auto filtered = gf::apply_exclude_comments(results);
+    ASSERT_EQ(filtered.size(), 1u);
+    EXPECT_EQ(filtered[0]["line"].get<int>(), 5);
+}
+
+TEST(GrepFiltersApplyExcludeComments, BlockCloseProseIsKeptResidual) {
+    // ACCEPTED RESIDUAL, asserted so it reads as chosen, not overlooked: a
+    // line that merely CONTAINS `*/` (closing a block comment opened on an
+    // earlier line) is KEPT. Undecidable from one line without cross-line
+    // state, and the trade is deliberately asymmetric — keeping a comment
+    // line is noise; deleting a code line is a wrong answer.
+    auto make_row = [](int line, const std::string& text) {
+        nlohmann::json row;
+        row["path"] = "/no/such/file.cpp";
+        row["line"] = line;
+        row["context"] = {{"start_line", line}, {"lines", {text}}};
+        return row;
+    };
+    nlohmann::json results = nlohmann::json::array(
+        {make_row(1, "done */"), make_row(2, " * more prose")});
+    auto filtered = gf::apply_exclude_comments(results);
+    ASSERT_EQ(filtered.size(), 2u)
+        << "accepted residual: block-close/continuation prose is kept";
+}
+
+TEST(GrepFiltersApplyExcludeComments, AgreesWithSharedPredicate) {
+    // Anti-drift pin: the CLI filter and the MCP-side shared predicate
+    // (lci::line_is_comment_only) must agree line-for-line on the same
+    // input, so the two paths cannot diverge again.
+    const std::vector<std::string> lines = {
+        "// line comment",
+        "   // indented",
+        "# hash comment",
+        "#include <vector>",
+        "/* block opener",
+        "int x = 1; /* note */",
+        "std::string s = \"*/\";",
+        "done */",
+        "*/",
+        " * more prose",
+        "int plain = 42;",
+        "",
+    };
+    const std::string path = "/no/such/file.py";
+    nlohmann::json results = nlohmann::json::array();
+    for (size_t i = 0; i < lines.size(); ++i) {
+        nlohmann::json row;
+        row["path"] = path;
+        row["line"] = static_cast<int>(i + 1);
+        row["context"] = {{"start_line", static_cast<int>(i + 1)},
+                          {"lines", {lines[i]}}};
+        results.push_back(std::move(row));
+    }
+    auto filtered = gf::apply_exclude_comments(results);
+    std::set<int> kept_lines;
+    for (const auto& row : filtered) {
+        kept_lines.insert(row["line"].get<int>());
+    }
+    const LangId lang = language_info_for_path(path).language;
+    for (size_t i = 0; i < lines.size(); ++i) {
+        bool expect_kept = !lci::line_is_comment_only(lines[i], lang);
+        EXPECT_EQ(kept_lines.contains(static_cast<int>(i + 1)), expect_kept)
+            << "CLI filter disagrees with lci::line_is_comment_only on: "
+            << lines[i];
+    }
 }
 
 TEST(GrepFiltersWidenContext, ZeroIsPassthrough) {
