@@ -405,10 +405,14 @@ int run_symbols(const GlobalFlags& flags, const std::string& kind,
     req.name = name;
     req.receiver = receiver;
     req.sort = sort;
-    // Always pull the server's max page (server caps at 500). We apply the
-    // user's --max client-side after sort/glob so post-processing sees the
-    // full candidate set, not a server-truncated head.
-    req.max = 500;
+    // Pull the server's full page size (server caps at 500) and page through
+    // with offset until a short page signals the end. Glob --file filtering
+    // and sorting run client-side, so reading a single page reported matches
+    // past row 500 as absent (certified absence). The user's --max is still
+    // applied client-side after sort/glob, so post-processing sees the full
+    // candidate set, not a server-truncated head.
+    constexpr int kSymbolsPageSize = 500;
+    req.max = kSymbolsPageSize;
     if (exported) {
         req.exported = true;
     }
@@ -419,18 +423,29 @@ int run_symbols(const GlobalFlags& flags, const std::string& kind,
         req.max_complexity = max_complexity;
     }
 
-    std::string sym_err;
-    auto result = client->list_symbols(req, sym_err);
-    if (!result) {
-        std::cerr << "Error: list symbols failed: " << sym_err << "\n";
-        return 1;
+    nlohmann::json all_symbols = nlohmann::json::array();
+    nlohmann::json result;
+    for (int offset = 0;; offset += kSymbolsPageSize) {
+        req.offset = offset;
+        std::string sym_err;
+        auto page = client->list_symbols(req, sym_err);
+        if (!page) {
+            std::cerr << "Error: list symbols failed: " << sym_err << "\n";
+            return 1;
+        }
+        size_t rows = 0;
+        if (page->contains("symbols") && (*page)["symbols"].is_array()) {
+            rows = (*page)["symbols"].size();
+            for (auto& s : (*page)["symbols"]) {
+                all_symbols.push_back(std::move(s));
+            }
+        }
+        result = std::move(*page);
+        if (static_cast<int>(rows) < kSymbolsPageSize) break;  // short page
     }
 
     // Client-side post-processing: glob file filter, sort, then --max.
-    nlohmann::json symbols_arr = nlohmann::json::array();
-    if (result->contains("symbols") && (*result)["symbols"].is_array()) {
-        symbols_arr = (*result)["symbols"];
-    }
+    nlohmann::json symbols_arr = std::move(all_symbols);
     if (file_is_glob) {
         symbols_arr = sym_apply_file_glob(std::move(symbols_arr), file);
     }
@@ -445,13 +460,13 @@ int run_symbols(const GlobalFlags& flags, const std::string& kind,
     // filtering (including glob); `showing` is what we're emitting now;
     // `has_more` is true iff the user's --max truncated the set.
     int showing = static_cast<int>(symbols_arr.size());
-    (*result)["symbols"] = symbols_arr;
-    (*result)["total"] = total_after_filter;
-    (*result)["showing"] = showing;
-    (*result)["has_more"] = showing < total_after_filter;
+    result["symbols"] = symbols_arr;
+    result["total"] = total_after_filter;
+    result["showing"] = showing;
+    result["has_more"] = showing < total_after_filter;
 
     if (json_output) {
-        std::cout << result->dump(2) << "\n";
+        std::cout << result.dump(2) << "\n";
         return 0;
     }
 
@@ -665,10 +680,7 @@ int run_browse(const GlobalFlags& flags, const std::string& file_path,
     req.kind = kind;
     req.sort = sort;
     req.show_imports = show_imports;
-    // Go's browse surface accepts --stats but does not currently enrich the
-    // CLI/JSON payload with a dedicated stats block for this command path.
-    // Keep C++ aligned with that contract instead of emitting extra fields.
-    req.show_stats = false;
+    req.show_stats = show_stats;
     if (exported) {
         req.exported = true;
     }
