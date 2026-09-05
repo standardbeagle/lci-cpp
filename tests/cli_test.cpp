@@ -11,6 +11,7 @@
 
 #include <lci/cli/commands.h>
 #include <lci/core/portable.h>
+#include <lci/core/subprocess.h>
 
 #include "../src/cli/ast_filters.h"
 #include "../src/cli/grep_filters.h"
@@ -475,6 +476,30 @@ TEST(CliConfigShowTest, JsonFormatReturnsZero) {
     GlobalFlags flags;
     int rc = run_config_show(flags, "json");
     EXPECT_EQ(rc, 0);
+}
+
+// -- nested subcommand + global flag fallthrough ------------------------------
+// `lci config show -r <dir>` must parse: -r is a global option of the root
+// app, accepted after a nested subcommand. main.cpp sets fallthrough() only
+// on top-level subcommands, so CLI11 rejects the trailing -r with
+// "argument was not expected" when the subcommand is nested (config show).
+
+TEST(CliSubcommandTest, NestedSubcommandAcceptsGlobalRootFlag) {
+    // Requires the built `lci` binary next to this test tree
+    // (build/<preset>/src/lci); the test binary lives in build/<preset>/tests.
+    namespace fs = std::filesystem;
+    const auto lci_bin =
+        portable::executable_path().parent_path().parent_path() / "src" /
+        "lci";
+    ASSERT_TRUE(fs::exists(lci_bin)) << lci_bin;
+
+    const auto root = lci::test::unique_temp_dir("lci_cli_subcmd_");
+    fs::create_directories(root);
+    std::string out;
+    EXPECT_TRUE(subprocess::run_capture(
+        {lci_bin.string(), "config", "show", "-r", root.string()}, "", out));
+    std::error_code ec;
+    fs::remove_all(root, ec);
 }
 
 // -- git-analyze validation tests ---------------------------------------------
