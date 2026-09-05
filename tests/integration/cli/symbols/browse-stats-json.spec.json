@@ -19,7 +19,7 @@
     "exit"
   ],
   "parse": "json",
-  "_rationale": "Go browse JSON omits a `stats` object for this case; C++ includes a populated `stats` block. This red parity case pins the discrepancy instead of relying on manual comparison.",
+  "_rationale": "Pins `browse --json --stats` emitting a populated `stats` object. `--stats` was forced false before 15eac92, so the golden captured output with no stats block. Verified against the fixture: a.go holds exactly one exported function `Add` of complexity 1, matching symbol_count 1 / function_count 1 / type_count 0 / exported_count 1 / avg_complexity 1.0 / max_complexity 1.",
   "tiers": {},
   "tolerances": {
     "score_abs": 0.0,

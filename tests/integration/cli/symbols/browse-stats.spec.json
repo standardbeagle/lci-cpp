@@ -18,7 +18,7 @@
     "exit"
   ],
   "parse": "text",
-  "_rationale": "Go and C++ diverge on browse text output when `--stats` is enabled. Go omits an explicit stats summary line for this corpus; C++ injects one. Added as an intentionally red QA parity test.",
+  "_rationale": "Pins the `browse --stats` text summary line. `--stats` was forced false before 15eac92, so the golden captured output with the summary missing. The pinned numbers match the fixture: a.go holds one exported function `Add` of complexity 1.",
   "tiers": {},
   "tolerances": {
     "score_abs": 0.0,
