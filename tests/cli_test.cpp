@@ -711,45 +711,66 @@ TEST(RegexLiteralSeeds, DuplicateRunsDedup) {
     EXPECT_EQ(seeds, (std::vector<std::string>{"foo", "bar"}));
 }
 
+// The one comment-classification predicate, shared by CLI and MCP.
 TEST(GrepFiltersComment, LineSlashSlashIsComment) {
-    EXPECT_TRUE(gf::line_looks_like_comment("// hello"));
-    EXPECT_TRUE(gf::line_looks_like_comment("    // indented"));
-    EXPECT_TRUE(gf::line_looks_like_comment("\t// tabbed"));
+    EXPECT_TRUE(lci::line_is_comment_only("// hello", LangId::Cpp));
+    EXPECT_TRUE(lci::line_is_comment_only("    // indented", LangId::Cpp));
+    EXPECT_TRUE(lci::line_is_comment_only("\t// tabbed", LangId::Cpp));
 }
 
-TEST(GrepFiltersComment, LineHashIsComment) {
-    EXPECT_TRUE(gf::line_looks_like_comment("# python"));
-    EXPECT_TRUE(gf::line_looks_like_comment("  #include"));  // matches Go heuristic
+TEST(GrepFiltersComment, LineHashIsLanguageGated) {
+    // '#' is a comment only where the language says so: Python/Ruby yes,
+    // C/C++ no (2,345 '#' lines under src/+include/ are ALL preprocessor
+    // code), PHP yes except the '#[' attribute syntax.
+    EXPECT_TRUE(lci::line_is_comment_only("# python", LangId::Python));
+    EXPECT_TRUE(lci::line_is_comment_only("# note", LangId::Ruby));
+    EXPECT_TRUE(lci::line_is_comment_only("# note", LangId::PHP));
+    EXPECT_FALSE(lci::line_is_comment_only("#[Route('/x')]", LangId::PHP));
+    EXPECT_FALSE(lci::line_is_comment_only("  #include", LangId::Cpp));
 }
 
 TEST(GrepFiltersComment, LineSlashStarIsComment) {
-    EXPECT_TRUE(gf::line_looks_like_comment("/* opening"));
-    EXPECT_TRUE(gf::line_looks_like_comment("   /* indented opener"));
+    EXPECT_TRUE(lci::line_is_comment_only("/* opening", LangId::Cpp));
+    EXPECT_TRUE(
+        lci::line_is_comment_only("   /* indented opener", LangId::Cpp));
 }
 
-TEST(GrepFiltersComment, LineWithStarSlashIsComment) {
-    // Block comment closer anywhere on the line counts as "in a comment"
-    // (the line crossed the close marker, so its tail is the comment body).
-    EXPECT_TRUE(gf::line_looks_like_comment("done */"));
-    EXPECT_TRUE(gf::line_looks_like_comment("payload */ trailing"));
+TEST(GrepFiltersComment, StarSlashAnywhereDoesNotMakeAComment) {
+    // The defect this task fixed: a line CONTAINING `*/` is not
+    // comment-only unless the marker is the whole line. These are real
+    // code (trailing comment, string literal) and must be KEPT.
+    EXPECT_FALSE(
+        lci::line_is_comment_only("int x = 1; /* note */", LangId::Cpp));
+    EXPECT_FALSE(
+        lci::line_is_comment_only("std::string s = \"*/\";", LangId::Cpp));
+    // Accepted residual (chosen, not overlooked): prose that merely CLOSES
+    // a block comment is kept — undecidable from one line, and the safe
+    // direction is keep. Exactly `*/` alone is still a comment line.
+    EXPECT_FALSE(lci::line_is_comment_only("done */", LangId::Cpp));
+    EXPECT_FALSE(lci::line_is_comment_only("payload */ trailing", LangId::Cpp));
+    EXPECT_TRUE(lci::line_is_comment_only("*/", LangId::Cpp));
 }
 
 TEST(GrepFiltersComment, PlainCodeIsNotComment) {
-    EXPECT_FALSE(gf::line_looks_like_comment("int x = 42;"));
-    EXPECT_FALSE(gf::line_looks_like_comment("    foo(\"//\", x);"));
-    EXPECT_FALSE(gf::line_looks_like_comment("string s = \"# not a comment\";"));
+    EXPECT_FALSE(lci::line_is_comment_only("int x = 42;", LangId::Cpp));
+    EXPECT_FALSE(lci::line_is_comment_only("    foo(\"//\", x);", LangId::Cpp));
+    EXPECT_FALSE(lci::line_is_comment_only("string s = \"# not a comment\";",
+                                           LangId::Cpp));
 }
 
 TEST(GrepFiltersComment, EmptyOrWhitespaceIsNotComment) {
-    EXPECT_FALSE(gf::line_looks_like_comment(""));
-    EXPECT_FALSE(gf::line_looks_like_comment("   "));
-    EXPECT_FALSE(gf::line_looks_like_comment("\t\t"));
+    EXPECT_FALSE(lci::line_is_comment_only("", LangId::Cpp));
+    EXPECT_FALSE(lci::line_is_comment_only("   ", LangId::Cpp));
+    EXPECT_FALSE(lci::line_is_comment_only("\t\t", LangId::Cpp));
 }
 
 TEST(GrepFiltersComment, MultilineBlockBodyNotDetected) {
-    // Known limitation matched with Go: a line inside `/* ... */` that
-    // doesn't contain `/*` or `*/` is NOT classified as a comment.
-    EXPECT_FALSE(gf::line_looks_like_comment("inside block comment"));
+    // Known limitation: a line inside `/* ... */` that doesn't open with a
+    // marker is NOT classified as a comment ("* more prose" and a
+    // dereference like "*p = x" are the same shape on one line).
+    EXPECT_FALSE(
+        lci::line_is_comment_only("inside block comment", LangId::Cpp));
+    EXPECT_FALSE(lci::line_is_comment_only(" * more prose", LangId::Cpp));
 }
 
 TEST(GrepFiltersTests, BasenameUnderscoreTestSuffix) {

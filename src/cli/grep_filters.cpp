@@ -6,6 +6,7 @@
 
 #include <lci/cli/column.h>
 #include <lci/core/mmap.h>
+#include <lci/language_map.h>
 #include <lci/search/search_options.h>
 
 #include <algorithm>
@@ -382,34 +383,16 @@ nlohmann::json files_with_matches_rows(const nlohmann::json& results) {
     return out;
 }
 
-/// Returns true if the trimmed `line` looks like it starts inside or contains
-/// a comment token. Mirrors Go's `Engine.isInComment` logic
-/// (internal/search/engine.go:1804): a line is considered "in a comment" if,
-/// after trimming leading/trailing whitespace, it starts with `//`, `#`, or
-/// `/*`, or anywhere contains `*/`. This is a deliberately cheap heuristic —
-/// it does not parse multi-line block comments — but matches Go bit-for-bit
-/// so `--exclude-comments` produces the same drop-set across both binaries.
+/// Compatibility shim for the remaining out-of-scope caller
+/// (ast_filters.cpp's column-unknown fallback). The classification rule
+/// itself lives in ONE place: lci::line_is_comment_only (declared in
+/// include/lci/search/search_options.h), shared with the MCP path so the
+/// two cannot drift. LangId::Unknown is the honest choice here — the
+/// caller supplies no path, and an unknown language must classify as
+/// "not a comment" (the allow-list in the shared predicate is deliberate:
+/// a false negative keeps a comment line, a false positive deletes code).
 bool line_looks_like_comment(std::string_view line) {
-    // Trim leading whitespace.
-    size_t i = 0;
-    while (i < line.size() &&
-           std::isspace(static_cast<unsigned char>(line[i]))) {
-        ++i;
-    }
-    if (i >= line.size()) return false;
-    std::string_view trimmed = line.substr(i);
-    // Trim trailing whitespace.
-    while (!trimmed.empty() &&
-           std::isspace(static_cast<unsigned char>(trimmed.back()))) {
-        trimmed.remove_suffix(1);
-    }
-    if (trimmed.empty()) return false;
-
-    if (trimmed.substr(0, 2) == "//") return true;
-    if (trimmed.front() == '#') return true;
-    if (trimmed.substr(0, 2) == "/*") return true;
-    if (trimmed.find("*/") != std::string_view::npos) return true;
-    return false;
+    return lci::line_is_comment_only(line, LangId::Unknown);
 }
 
 /// Reads the line text for `(path, line_no)` from the result's embedded
@@ -515,9 +498,12 @@ nlohmann::json apply_exclude_tests(nlohmann::json results) {
     return out;
 }
 
-/// Filters out result rows whose match line looks like it lives inside a
-/// comment. Reads the match line via `read_match_line()` (uses the embedded
-/// context block when present, falls back to disk). Stable order.
+/// Filters out result rows whose match line is comment-only. Reads the match
+/// line via `read_match_line()` (uses the embedded context block when
+/// present, falls back to disk). Classification delegates to the single
+/// shared predicate lci::line_is_comment_only with the language resolved
+/// from the row's path, so `--exclude-comments` (CLI) and `flags=nc` (MCP)
+/// agree line-for-line. Stable order.
 nlohmann::json apply_exclude_comments(nlohmann::json results) {
     nlohmann::json out = nlohmann::json::array();
     for (auto& r : results) {
@@ -528,7 +514,8 @@ nlohmann::json apply_exclude_comments(nlohmann::json results) {
             continue;
         }
         std::string text = read_match_line(r, path, line_no);
-        if (line_looks_like_comment(text)) continue;
+        const LangId lang = language_info_for_path(path).language;
+        if (lci::line_is_comment_only(text, lang)) continue;
         out.push_back(std::move(r));
     }
     return out;
