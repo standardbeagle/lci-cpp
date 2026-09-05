@@ -2443,6 +2443,48 @@ TEST(CliConfigGuardTest, CwdWithoutConfigOrGitRootFailsNamingLciInit) {
     fs::remove_all(dir, ec);
 }
 
+// -- relative -c resolves against the cwd, not --root -------------------------
+//
+// `lci -r /repo -c mine.kdl` names ./mine.kdl — the directory the command was
+// typed in. Resolving it against --root reads a different file (or, when the
+// root happens to hold a same-named file, silently applies the wrong config).
+
+TEST(CliConfigGuardTest, RelativeConfigResolvesAgainstCwdNotRoot) {
+    namespace fs = std::filesystem;
+    auto cwd_dir = lci::test::unique_temp_dir("lci_cli_relc_cwd_");
+    auto root_dir = lci::test::unique_temp_dir("lci_cli_relc_root_");
+    fs::create_directories(cwd_dir);
+    fs::create_directories(root_dir);
+
+    {
+        std::ofstream f(cwd_dir / "custom.kdl");
+        f << "search {\n  max_results 66\n}\n";
+    }
+    {
+        // Same-named file under --root with a DIFFERENT value: reading it
+        // instead of the cwd file is the silent wrong-config defect.
+        std::ofstream f(root_dir / "custom.kdl");
+        f << "search {\n  max_results 99\n}\n";
+    }
+
+    const fs::path old_cwd = fs::current_path();
+    fs::current_path(cwd_dir);
+    GlobalFlags flags;
+    flags.root = root_dir.string();
+    flags.config_path = "custom.kdl";
+    Config cfg;
+    std::string err = load_config_with_overrides(flags, cfg);
+    fs::current_path(old_cwd);
+
+    EXPECT_TRUE(err.empty()) << err;
+    EXPECT_EQ(cfg.search.max_results, 66)
+        << "relative -c must resolve against the cwd, not --root";
+
+    std::error_code ec;
+    fs::remove_all(cwd_dir, ec);
+    fs::remove_all(root_dir, ec);
+}
+
 // -- arrow patterns: `lci search '->next'` — a token starting with `->` is a
 // C++ member-access pattern, not a `-` exclusion directive.
 
