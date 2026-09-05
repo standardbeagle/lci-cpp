@@ -31,3 +31,26 @@ capability (and note the gap as a finding).
 Implementer/reviewer subagent dispatches MUST include the Grep tool in their
 toolset (5 dispatches in the audited session lacked it and burned turns
 shell-catting files). Default: full toolset.
+
+## 4. A change to a repo-wide output contract must grep `tests/integration/goldens/` before the gate
+
+Targeted `ctest -R <Suite>` never runs the integration golden suites, and under the
+snackable-member / container-gate split (`.worktrack/s12-decomposition.md`) member
+slices run ONLY targeted tests. So a member that changes an emitted field repo-wide
+re-pins the unit tests it can see and leaves the goldens encoding the old contract.
+The failure then surfaces at some LATER task's full gate, charged to a change that
+did not cause it.
+
+Evidence: `ecd810c` (column becomes a 0-based byte offset repo-wide) and `f3662ce`
+(invert rows carry `kColumnUnknown` instead of a fake 0) re-pinned
+`tests/cli_test.cpp` and `include/lci/cli/column.h` and touched no golden. Two
+`grep_compat` goldens kept the pre-`ecd810c` column base until an unrelated task's
+`ctest-full-gate` failed on them (attempt 1, 2698 tests, 2 failed), costing a build +
+full-suite cycle and a re-pin commit (`5ebad10`).
+
+Rule: when a slice changes what any emitted field MEANS — not just its value —
+`grep -rl '<field>' tests/integration/goldens/` before declaring the slice done, and
+either re-pin in the same commit or name the goldens you are deferring. Do not rely
+on the container gate to discover it; the gate reports the failure without the
+context that explains it.
+<!-- written_at: 2026-09-05T20:00:00Z  source_event: task:01M1PTEH33DW573D3R5J2N00PS, git:ecd810c, git:f3662ce, git:5ebad10, workflow-step:ctest-full-gate attempt1 -->
