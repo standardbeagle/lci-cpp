@@ -271,7 +271,8 @@ int run_debug_memprofile(const GlobalFlags& flags,
         size_t ref_name_pool_bytes = 0;
         for (const auto& n : snap->ref_names) ref_name_pool_bytes += n.size();
         std::printf("\n== structure census ==\n");
-        std::printf("symbols:                 %d\n", snap->symbols.size());
+        std::printf("symbols:                 %zu\n",
+                    static_cast<size_t>(snap->symbols.size()));
         std::printf("references:              %zu (sizeof %zu B stored, "
                     "%.1f MB name pool of %zu)\n",
                     ref_count, sizeof(lci::StoredRef),
