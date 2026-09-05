@@ -2412,6 +2412,135 @@ TEST(GroupRowsByFile, EmptyInput) {
     EXPECT_TRUE(groups.empty());
 }
 
+// -- S12 RED pins --------------------------------------------------------------
+//
+// Each test below pins a defect called out in task S12 and FAILS on the
+// pre-fix tree. They are grouped by the GREEN commit that fixes them.
+
+// -- no cwd auto-index: running a server-backed command from a directory with
+// no .lci.kdl and no git root must fail naming `lci init` instead of spawning
+// a server that silently indexes the whole cwd.
+
+TEST(CliConfigGuardTest, CwdWithoutConfigOrGitRootFailsNamingLciInit) {
+    namespace fs = std::filesystem;
+    auto dir = lci::test::unique_temp_dir("lci_cli_no_config_");
+    fs::create_directories(dir);
+    // Neither .lci.kdl nor .git here, and the system temp dir is not inside
+    // a git checkout.
+
+    const fs::path old_cwd = fs::current_path();
+    fs::current_path(dir);
+    GlobalFlags flags;  // no --root, no -c: the cwd auto-pick path
+    Config cfg;
+    std::string err = load_config_with_overrides(flags, cfg);
+    fs::current_path(old_cwd);
+
+    EXPECT_FALSE(err.empty()) << "cwd without .lci.kdl/git root must not "
+                                 "auto-index; got a valid config";
+    EXPECT_NE(err.find("lci init"), std::string::npos) << err;
+
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+}
+
+// -- arrow patterns: `lci search '->next'` — a token starting with `->` is a
+// C++ member-access pattern, not a `-` exclusion directive.
+
+TEST(QueryParserArrow, ArrowTokenIsContentNotExclusion) {
+    auto q = query_parser::parse("->next");
+    EXPECT_TRUE(q.exclusions.empty());
+    EXPECT_EQ(q.content_query, "->next");
+}
+
+TEST(QueryParserArrow, ArrowAfterTermStaysWhole) {
+    // `x ->next`: the `->next` token must not be eaten as an exclusion of
+    // `>next` — the pair is one logical query.
+    auto q = query_parser::parse("x ->next");
+    EXPECT_TRUE(q.exclusions.empty());
+    EXPECT_EQ(q.content_query, "x ->next");
+}
+
+TEST(QueryParserArrow, PlainExclusionStillWorks) {
+    auto q = query_parser::parse("auth -test");
+    ASSERT_EQ(q.exclusions.size(), 1u);
+    EXPECT_EQ(q.exclusions[0], "test");
+    EXPECT_EQ(q.content_query, "auth");
+}
+
+// -- one column base: every CLI-facing `column` is a 0-based byte offset into
+// the matched line (the base the server/search engine and the pinned goldens
+// already use); -1 means "not recorded".
+
+TEST(ColumnContract, RegexFilterResultsEmitsZeroBasedColumn) {
+    // Line "ab foo": `foo` starts at byte offset 3. The -E row filter used
+    // to emit 4 (1-based) while literal rows from the server carry 3
+    // (0-based) — the two modes disagreed in --json output.
+    nlohmann::json row;
+    row["path"] = "/no/such/file";
+    row["line"] = 1;
+    row["column"] = 0;
+    row["context"] = {{"start_line", 1}, {"lines", {"ab foo"}}};
+    nlohmann::json results = nlohmann::json::array({row});
+
+    RE2 re("foo");
+    auto out = grep_filters::regex_filter_results(std::move(results), re);
+    ASSERT_EQ(out.size(), 1u);
+    EXPECT_EQ(out[0]["column"].get<int>(), 3);
+    EXPECT_EQ(out[0]["match"].get<std::string>(), "foo");
+}
+
+TEST(ColumnContract, WordBoundaryAfterRegexRowIsNotOffByOne) {
+    // `lci search -E foo -w`: the regex filter rewrote the column to 1-based
+    // and apply_word_boundary then checked the byte window one position too
+    // far right, so `foo` in "ab foo" (a real word hit) was DROPPED.
+    nlohmann::json row;
+    row["path"] = "/no/such/file";
+    row["line"] = 1;
+    row["column"] = 0;
+    row["context"] = {{"start_line", 1}, {"lines", {"ab foo"}}};
+    nlohmann::json results = nlohmann::json::array({row});
+
+    RE2 re("foo");
+    auto filtered = grep_filters::regex_filter_results(std::move(results), re);
+    auto kept =
+        grep_filters::apply_word_boundary(std::move(filtered), "foo", false);
+    EXPECT_EQ(kept.size(), 1u) << "word hit at a real boundary was dropped";
+
+    // Discrimination: "abfood" has `foo` but not at a word boundary.
+    nlohmann::json row2;
+    row2["path"] = "/no/such/file";
+    row2["line"] = 1;
+    row2["column"] = 0;
+    row2["context"] = {{"start_line", 1}, {"lines", {"abfood"}}};
+    RE2 re2("foo");
+    auto filtered2 = grep_filters::regex_filter_results(
+        nlohmann::json::array({row2}), re2);
+    auto kept2 = grep_filters::apply_word_boundary(std::move(filtered2),
+                                                   "foo", false);
+    EXPECT_TRUE(kept2.empty());
+}
+
+TEST(ColumnContract, AstCommentClassifierIsZeroBased) {
+    // "int y; // c": the `//` opener is at byte offset 7 (0-based). The
+    // classifier used to treat the column as 1-based and inspected offset 6.
+    EXPECT_TRUE(af::match_is_in_comment("int y; // c", 7));
+    EXPECT_FALSE(af::match_is_in_comment("int y; // c", 4));  // 'y'
+}
+
+TEST(ColumnContract, AstStringClassifierIsZeroBased) {
+    // `x = "foo";`: byte offset 9 is the `;` — code, not string. A 1-based
+    // reading inspects offset 8 (the closing quote) and misclassifies.
+    EXPECT_FALSE(af::match_is_in_string_literal("x = \"foo\";", 9));
+    EXPECT_TRUE(af::match_is_in_string_literal("x = \"foo\";", 5));  // 'f'
+}
+
+TEST(ColumnContract, UnknownColumnSentinelIsMinusOne) {
+    // -1 means "position not recorded"; 0 is a real (first-byte) position.
+    EXPECT_FALSE(af::match_is_in_string_literal("x = \"foo\";", -1));
+    // Column 0 on a comment line: first byte of `// x` IS in a comment.
+    EXPECT_TRUE(af::match_is_in_comment("// x", 0));
+}
+
 }  // namespace
 }  // namespace cli
 }  // namespace lci
