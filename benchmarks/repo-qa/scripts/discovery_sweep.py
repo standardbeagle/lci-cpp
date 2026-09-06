@@ -5,8 +5,15 @@ Two arms (DISJOINT, per predictions.json: the treatment has no Grep/Glob, the
 baseline has no LCI) x two measurement levels (direct tool call, and an agent
 run) x every cell of every registered family. Grading is set-wise against the
 D1 gopls answer key; the runner package holds the parts that must be provable
-without a model, and this script only supplies the executors that touch a real
-MCP server, a real grep, and a real agent.
+without a model -- including the routing table and the payload renderer that put
+BOTH arms' raw tool output into the grader's `path:line` syntax -- and this
+script only supplies the executors that touch a real MCP server, a real grep,
+and a real agent.
+
+Tool routing is probed against the live MCP surface, never read off
+predictions.json's arms list, which names `mcp__lci__callers` and
+`mcp__lci__references`: `callers` IS live and returns call sites with paths;
+only `references` is absent (D3 follow-up 01M1VR4TAQ2W3N380QVG6WHQQQ).
 
   # plan only -- no execution, prints the grid and any cohort reduction
   discovery_sweep.py plan --registry ... --cohorts ...
@@ -55,58 +62,15 @@ def _load_discovery_runner():
         sys.modules["discovery_runner"] = module
         spec.loader.exec_module(module)
     return [importlib.import_module("discovery_runner." + name)
-            for name in ("answer_sets", "cells", "grading", "sweep")]
+            for name in ("answer_sets", "cells", "grading", "rendering", "sweep")]
 
 
-_, cells, _grading, sweep = _load_discovery_runner()
+_, cells, _grading, rendering, sweep = _load_discovery_runner()
 
 DISCOVERY_DIR = os.path.join(bl.BENCH_ROOT, "discovery")
 DEFAULT_REGISTRY = os.path.join(DISCOVERY_DIR, "predictions.json")
 DEFAULT_COHORTS = os.path.join(DISCOVERY_DIR, "cohorts", "cohorts.json")
 DEFAULT_ORACLE_CACHE = os.path.join(DISCOVERY_DIR, "oracle", "cache")
-
-# Which LCI tool answers which task shape at the tool level, with the ARGUMENTS
-# that tool actually takes. Probed against the live MCP surface, not read off
-# predictions.json's arms list, which names `mcp__lci__callers` and
-# `mcp__lci__references` -- neither exists as a tool; the call hierarchy and the
-# reference set both come out of `get_context`. The treatment arm reaches every
-# answer through the semantic surface; there is no grep fallback, by design.
-def _anchor(cell, **extra):
-    args = {"name": cell["name"], "line": cell["line"], "column": cell["column"]}
-    args.update(extra)
-    return args
-
-
-_LCI_TOOL = {
-    "exhaustive_callers": (
-        "get_context",
-        lambda c: _anchor(c, include_call_hierarchy=True, max_depth=1),
-    ),
-    "transitive_callers_depth2": (
-        "get_context",
-        lambda c: _anchor(c, include_call_hierarchy=True, max_depth=2),
-    ),
-    "definition_lookup": (
-        "list_symbols",
-        lambda c: {"name": c["name"]},
-    ),
-    "production_reference_partition": (
-        "get_context",
-        lambda c: _anchor(c, include_all_references=True, exclude_test_files=True),
-    ),
-    "implementations_lookup": (
-        "get_context",
-        lambda c: _anchor(c, include_sections=["structure"]),
-    ),
-    "literal_string_search": (
-        "search",
-        lambda c: {"pattern": c["name"]},
-    ),
-    "budget_constrained_variant": (
-        "search",
-        lambda c: {"pattern": c["name"]},
-    ),
-}
 
 
 def load_json(path):
@@ -163,7 +127,11 @@ def tool_executor(corpus_root, lci_bin):
 
         if session["mcp"] is None:
             session["mcp"] = McpSession(lci_bin, corpus_root)
-        tool, build_args = _LCI_TOOL[job["task_shape"]]
+        tool, build_args = rendering.tool_for(job["task_shape"])
+        if tool is None:
+            return {"status": "error",
+                    "detail": "no LCI tool routed for task shape %r"
+                              % (job["task_shape"],)}
         payload, latency_ms = session["mcp"].call_tool(tool, build_args(cell))
         if "text" not in payload or response_is_error(payload):
             # An LCI error payload arrives over a successful RPC. Grading its
@@ -171,7 +139,18 @@ def tool_executor(corpus_root, lci_bin):
             # correctly -- exactly the zeroed row that reads as a real loss.
             return {"status": "error",
                     "detail": "%s refused the call: %s" % (tool, str(payload)[:300])}
-        return {"status": "ok", "answer": payload["text"], "tool_calls": 1,
+        try:
+            # The baseline's grep output is rendered into `path:line`; the
+            # treatment's JSON must be too, or it cannot cite by construction.
+            answer = rendering.render_tool_answer(
+                tool, job["task_shape"], payload["text"])
+        except rendering.UncitableToolResponse as exc:
+            # A broken cell, never a zero: the reason travels to the report so
+            # D5 attributes an output-format gap as one.
+            return {"status": "error",
+                    "detail": "%s payload is uncitable [%s]: %s"
+                              % (tool, exc.reason, exc.detail[:200])}
+        return {"status": "ok", "answer": answer, "tool_calls": 1,
                 "wall_seconds": round(latency_ms / 1000.0, 3)}
 
     return execute

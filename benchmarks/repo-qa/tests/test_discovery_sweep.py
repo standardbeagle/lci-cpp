@@ -623,8 +623,9 @@ class ToolRoutingTest(unittest.TestCase):
             rendering.tool_for("transitive_callers_depth2")[0], "callers")
 
     def test_every_registered_task_shape_has_a_route(self):
-        registry = json.load(open(os.path.join(
-            BENCH_ROOT, "discovery", "predictions.json"), encoding="utf-8"))
+        path = os.path.join(BENCH_ROOT, "discovery", "predictions.json")
+        with open(path, encoding="utf-8") as handle:
+            registry = json.load(handle)
         for family in registry["families"]:
             self.assertIsNotNone(rendering.tool_for(family["task_shape"])[0],
                                  family["task_shape"])
