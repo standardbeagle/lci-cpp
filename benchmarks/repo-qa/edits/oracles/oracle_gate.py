@@ -91,6 +91,56 @@ _MAX_TAIL = 4000
 # with Reason.TIMEOUT rather than hanging the gate.
 DEFAULT_TIMEOUT = 120
 
+# The edits/ root (this file lives at edits/oracles/oracle_gate.py). Task-JSON
+# argv tokens and oracle_patch.path references resolve against it.
+EDITS_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+ORACLE_PATCH_SCHEMA = "edit_oracle_patch_v1"
+
+
+def resolve_argv(argv):
+    """Substitute the task-JSON argv tokens ``{edits_root}`` and ``{python}``.
+
+    Task JSON is corpus- and host-independent, so a probe argv names the probe
+    by its edits-root-relative path and the interpreter by token; resolution
+    happens HERE, just before the run (precedent: exploration_corpus_forge.py
+    resolves ``{python}``/``{forge}`` the same way).
+    """
+    return [
+        arg.replace("{edits_root}", EDITS_ROOT).replace("{python}", sys.executable)
+        for arg in argv
+    ]
+
+
+def load_oracle_patch_file(path):
+    """Load a sidecar oracle patch file into apply_patch's shape.
+
+    The sidecar is ``{"schema": "edit_oracle_patch_v1", "task_id": ...,
+    "files": {relpath: text|None}}``; returns the ``files`` mapping verbatim
+    (a string overwrites, None deletes). Fails fast on a wrong schema or a
+    malformed files mapping -- a corrupt answer key is never half-applied.
+    """
+    with open(path, encoding="utf-8") as handle:
+        sidecar = json.load(handle)
+    if not isinstance(sidecar, dict) or sidecar.get("schema") != ORACLE_PATCH_SCHEMA:
+        raise ValueError(
+            f"oracle patch sidecar {path!r} schema "
+            f"{sidecar.get('schema') if isinstance(sidecar, dict) else None!r}"
+            f" != {ORACLE_PATCH_SCHEMA!r}"
+        )
+    files = sidecar.get("files")
+    if not isinstance(files, dict) or not files:
+        raise ValueError(f"oracle patch sidecar {path!r} has no files mapping")
+    for rel, content in files.items():
+        if not isinstance(rel, str) or not rel:
+            raise ValueError(f"oracle patch sidecar {path!r} has a non-string path")
+        if content is not None and not isinstance(content, str):
+            raise ValueError(
+                f"oracle patch sidecar {path!r} entry {rel!r} is neither a "
+                f"string nor null"
+            )
+    return files
+
 
 class Reason:
     """Stable reason-code enum. Codes are part of the machine contract and are
@@ -673,7 +723,10 @@ def evaluate_oracle(
         patch_changed_paths(oracle_patch), blast_allow, max_files
     )
 
-    behavior_command = behavior_command or _behavior_command_of(task)
+    behavior_command = resolve_argv(behavior_command or _behavior_command_of(task))
+    existing_suite_command = (
+        resolve_argv(existing_suite_command) if existing_suite_command else None
+    )
 
     try:
         with materialized_worktree(source_tree_dir, workspace_root) as tree:
@@ -773,9 +826,13 @@ def evaluate_task_in_corpus(
 
     Fails closed with MANIFEST_ABSENT when the never-vendored forged corpus is
     absent (the CI case), and with ORACLE_PATCH_ABSENT when the corpus IS there
-    but the caller supplied no patch -- the gate is a judgement, not a linter,
-    and the two faults have different owners. When both are present it delegates
-    to :func:`evaluate_oracle` against the forged tree.
+    but no patch is available -- the gate is a judgement, not a linter,
+    and the two faults have different owners. When the caller passes no
+    ``oracle_patch``, the sidecar named by the task's ``oracle_patch.path``
+    (edits-root relative) is loaded instead; ``existing_suite_command``
+    defaults to the task's ``existing_suite.command``. When both a corpus and
+    a patch are present it delegates to :func:`evaluate_oracle` against the
+    forged tree.
     """
     ref = task.get("manifest_ref", {})
     corpus_id = task.get("corpus")
@@ -784,7 +841,17 @@ def evaluate_task_in_corpus(
     if manifest is None:
         return _manifest_absent_aggregate(task, corpus_id, seed)
     if oracle_patch is None:
+        ref_path = (task.get("oracle_patch") or {}).get("path")
+        if ref_path:
+            sidecar = os.path.join(EDITS_ROOT, ref_path)
+            if os.path.isfile(sidecar):
+                oracle_patch = load_oracle_patch_file(sidecar)
+    if oracle_patch is None:
         return _oracle_patch_absent_aggregate(task, corpus_id, seed)
+    if kwargs.get("existing_suite_command") is None:
+        suite = (task.get("existing_suite") or {}).get("command")
+        if suite:
+            kwargs["existing_suite_command"] = suite
     return evaluate_oracle(task, tree_dir, oracle_patch, **kwargs)
 
 
