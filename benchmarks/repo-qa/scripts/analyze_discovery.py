@@ -68,18 +68,33 @@ def load_run(run_dir):
     return rows
 
 
-def _token_total(value):
-    """Agent rows carry `tokens` as a nested object; tool rows carry None.
+BILLABLE_TOKEN_KEYS = ("input", "output", "reasoning")
+# bench.py flattens opencode's nested `cache` block into these two counters at
+# its step_finish sink. They are cache traffic, not spend either arm paid for;
+# on real rows they are ~85% of the object, so summing them would report the
+# cache-warm arm as the expensive one.
+CACHE_TOKEN_KEYS = ("cache_read", "cache_write")
 
-    Only the flat counters are billable spend -- the nested cache read/write
-    block is not tokens either arm paid for, and summing it would report a
-    cache-heavy arm as the expensive one.
+
+def _token_total(value):
+    """Billable tokens from an agent row's `tokens` object; tool rows carry None.
+
+    bench.py emits FLAT keys -- input/output/reasoning/cache_read/cache_write.
+    Only the billable three are counted. An unrecognised key is a shape this
+    analyzer has not been taught to classify, so it raises rather than guessing
+    which side of the billable line it falls on.
     """
     if value is None:
         return None
-    if isinstance(value, dict):
-        return sum(v for v in value.values() if isinstance(v, (int, float)))
-    return value
+    if not isinstance(value, dict):
+        return value
+    unknown = sorted(set(value) - set(BILLABLE_TOKEN_KEYS) - set(CACHE_TOKEN_KEYS))
+    if unknown:
+        raise ValueError(
+            "unrecognised token counter(s) %s in row tokens %r; classify them as "
+            "billable or cache in analyze_discovery.py before reporting spend"
+            % (", ".join(unknown), sorted(value)))
+    return sum(value.get(k, 0) for k in BILLABLE_TOKEN_KEYS)
 
 
 def _mean(values):
