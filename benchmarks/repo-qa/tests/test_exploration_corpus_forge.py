@@ -842,6 +842,39 @@ class TestTypeScriptCorpus(unittest.TestCase):
 
 
 class TestSourceGuards(ForgeTestCase):
+    def test_missing_source_path_fails_fast_naming_the_path(self):
+        """A source_path pinned at a directory that does not exist must refuse
+        to forge immediately, naming the missing path.
+
+        Regression: corpora.json pinned two corpora inside a sibling repo that
+        was deleted; the forge must say WHICH path is gone, not emit a generic
+        'not a git checkout' that reads like a layout problem in a live tree.
+        """
+        missing = os.path.join(self.tmp, "deleted-sibling-repo", "scikit-learn")
+        spec = spec_for(missing, self.commit)
+
+        with self.assertRaises(forge.ForgeError) as ctx:
+            forge.forge_corpus(spec, seed=7, out_dir=self.out("gone"))
+        message = str(ctx.exception)
+        self.assertIn(missing, message)
+        self.assertIn("does not exist", message)
+        # fail fast means NOTHING was materialized
+        self.assertFalse(os.path.exists(os.path.join(self.out("gone"), "tree")))
+
+    def test_head_mismatch_fails_naming_path_head_and_pin(self):
+        """A live checkout whose HEAD moved off the pin must name all three:
+        the path, the actual HEAD, and the pinned commit."""
+        spec = spec_for(self.source, self.commit)
+        with open(os.path.join(self.source, "alpha", "util", "helpers.py"), "a") as f:
+            f.write("# moved on\n")
+        git(self.source, "commit", "-qam", "move HEAD off the pin")
+
+        with self.assertRaises(forge.ForgeError) as ctx:
+            forge.forge_corpus(spec, seed=7, out_dir=self.out("a"))
+        message = str(ctx.exception)
+        self.assertIn(self.source, message)
+        self.assertIn(self.commit, message)
+
     def test_dirty_source_is_refused(self):
         with open(os.path.join(self.source, "alpha", "util", "helpers.py"), "a") as f:
             f.write("# dirty\n")
