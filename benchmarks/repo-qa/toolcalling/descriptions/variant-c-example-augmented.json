@@ -1,0 +1,24 @@
+{
+  "descriptions": {
+    "browse_file": "Browse all symbols in a file - the outline view, with filtering, sorting and optional imports and stats. Example invocation: {\"file\": \"src/server/server.cpp\", \"kind\": \"function\", \"sort\": \"line\", \"show_imports\": true}",
+    "callers": "Who calls this symbol? A resolved call-graph query: confirmed callers grouped by enclosing function with call-site lines and counts, unresolved sites kept separate. Example invocation: {\"name\": \"IndexDirectory\", \"max\": 50}",
+    "code_insight": "Codebase-wide intelligence: overview, detailed analysis, statistics, structure and git analysis, selected by mode. Example invocation: {\"mode\": \"overview\", \"scope\": \"src\", \"max_results\": 20}",
+    "context": "Capture and hydrate code context manifests for agent handoff - 'save' writes a compact manifest, 'load' hydrates it with source and call graphs. Example invocation: {\"operation\": \"save\", \"task\": \"port the indexer\", \"refs\": \"IndexDirectory,SymbolStore\", \"to_file\": \"handoff.json\"}",
+    "debug_info": "Deep debug information for index troubleshooting: symbol distribution, type breakdown, reference statistics and file-level detail. Example invocation: {\"mode\": \"references\", \"file_path\": \"src/index/indexer.cpp\", \"verbose\": true}",
+    "find_files": "Like 'find' or 'fd' - searches file paths, not content, on an in-memory index, with fuzzy matching, globs and filters. Example invocation: {\"pattern\": \"*_test.go\", \"directory\": \"internal\", \"max\": 20}",
+    "get_context": "Detailed context for specific code objects: signature, file path, line numbers, callers and callees, references, source excerpt and snippets. Example invocation: {\"id\": \"4211\", \"include_call_hierarchy\": true, \"max_depth\": 2}",
+    "git_analysis": "Analyze git changes for duplicates, naming inconsistencies and function complexity before you commit. Example invocation: {\"scope\": \"staged\", \"focus\": \"duplicates\", \"max_findings\": 25}",
+    "index_stats": "Index status and health: indexing progress, component health, memory usage and file-watcher status. Example invocation: {\"mode\": \"health\", \"include_memory\": true, \"include_watch_mode\": true}",
+    "info": "Detailed help and examples for any tool - an overview, or specifics for one tool. Example invocation: {\"tool\": \"search\"}",
+    "inspect_symbol": "Deep inspect a single symbol: signature, doc, complexity, callers, callees, type hierarchy, scope chain, flags and a bounded source excerpt. Example invocation: {\"name\": \"SymbolStore\", \"include\": \"callers,callees\", \"max_depth\": 2}",
+    "list_symbols": "Enumerate and filter symbols in the index - the 'ls' for code - by kind, file, complexity, parameters and exported status. Example invocation: {\"kind\": \"function\", \"min_complexity\": 10, \"exported\": true, \"max\": 50}",
+    "search": "Sub-millisecond in-memory semantic code search, grouped per file with per-hit line numbers; symbol hits carry an id that feeds get_context. Example invocation: {\"pattern\": \"NewRouter\", \"path\": \"internal\", \"max\": 20}",
+    "semantic_annotations": "Query symbols by semantic label or category, including labels propagated through call graphs. Example invocation: {\"label\": \"auth\", \"include_propagated\": true, \"max_results\": 50}",
+    "side_effects": "Query function purity and side effects: writes to parameters, globals and closures, I/O and exception handling, optionally transitive. Example invocation: {\"symbol_name\": \"IndexDirectory\", \"include_transitive\": true, \"include_reasons\": true}"
+  },
+  "na": {},
+  "note": "Example-augmented arm. E2.2 description variant arm. Only the description text differs between arms: the mock MCP takes the tool names and the input schema from the live-surface manifest, so name and schema are constant by construction and pinned by tests/test_description_variants.py. Every claim here is true of the live tool -- backticked identifiers are real parameters of that tool's live input schema or real tool names, and worked invocations use only real parameters.",
+  "schema": "toolcalling_descriptions_v1",
+  "variant": "C",
+  "version": 1
+}

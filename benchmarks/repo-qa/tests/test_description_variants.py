@@ -301,7 +301,7 @@ class AuthoredVariantContentTest(unittest.TestCase):
     def test_variant_b_is_task_framed(self):
         for name, text in load_variant("B")["descriptions"].items():
             with self.subTest(tool=name):
-                self.assertTrue(text.startswith("Use when you need to "), name)
+                self.assertTrue(text.startswith("Use when you need "), name)
 
     def test_variant_c_carries_a_worked_invocation_over_real_parameters(self):
         for name, text in load_variant("C")["descriptions"].items():

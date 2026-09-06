@@ -1,0 +1,41 @@
+{
+  "descriptions": {
+    "browse_file": "Browse all symbols in a file - the outline view for one file you name, with filtering, sorting and optional imports and stats. Unlike `list_symbols`, which enumerates and filters symbols across the whole index, this is scoped to that single file.",
+    "callers": "Who calls this symbol? A resolved call-graph query: confirmed callers grouped by enclosing function with call-site lines and counts. Unlike `inspect_symbol`, which reports callers as one field of a full metadata dump, this answers only who calls it and keeps unresolved sites separate.",
+    "code_insight": "Comprehensive codebase intelligence: overview, detailed analysis, statistics, structure and git analysis. Unlike `index_stats`, which reports the health and progress of the index itself, this analyses the code the index holds.",
+    "context": "Capture and hydrate code context manifests for agent handoff: 'save' writes a compact manifest of symbol references, 'load' hydrates it with source and call graphs. Unlike `get_context`, which returns context for objects you name right now, this persists a manifest so a later session need not re-explore.",
+    "debug_info": "Deep debug information for troubleshooting index issues: symbol distribution, type breakdown, reference statistics and file-level detail. Unlike `index_stats`, which reports indexing progress and component health, this breaks down what the index actually contains.",
+    "find_files": "Like 'find' or 'fd' - searches file paths on an in-memory index, with fuzzy matching, globs and filters. Unlike `search`, which matches code content and returns matching lines, this matches paths only.",
+    "get_context": "Detailed context for specific code objects: signature, file path, line numbers, callers and callees, references, source excerpt and snippets. Unlike `context`, which saves and reloads a manifest for handoff between sessions, this returns the context for the objects you name now.",
+    "git_analysis": "Analyze git changes for code quality: duplicates, naming inconsistencies and function complexity in new or modified code. Unlike `code_insight`, whose report covers the codebase as it stands, this is scoped to a git range - 'staged', 'wip', 'commit' or 'range' - and compares the changed code against the rest.",
+    "index_stats": "Index status and health monitoring: indexing progress, component health, memory usage and file-watcher status. Unlike `debug_info`, which breaks down the index's contents for troubleshooting, this reports whether the index is ready and healthy.",
+    "info": "Detailed help and examples for any tool, plus server version information. Unlike `index_stats`, which reports the runtime state of the index, this documents the tools themselves.",
+    "inspect_symbol": "Deep inspect a single symbol: signature, doc, complexity, callers, callees, type hierarchy, scope chain, flags and a bounded source excerpt. Unlike `callers`, which returns only the confirmed call sites of a symbol, this returns all of its metadata at once.",
+    "list_symbols": "Enumerate and filter symbols in the index - the 'ls' for code - by kind, file, complexity, parameters and exported status. Unlike `browse_file`, which outlines the symbols of one file you name, this ranges over the whole index.",
+    "search": "Sub-millisecond in-memory semantic code search; results are grouped per file with per-hit line numbers, and the returned lines are source evidence. Unlike `find_files`, which matches file paths only, this matches the content of the code.",
+    "semantic_annotations": "Query symbols by semantic label or category: direct @lci: annotations, external annotation manifests, and labels propagated through call graphs. Unlike `search`, which matches the text of the code, this queries the labels attached to symbols.",
+    "side_effects": "Query function purity and side effects: writes to parameters, globals and closures, I/O operations and exception handling, optionally transitive. Unlike `get_context`, which returns a symbol's context and relationships, this answers only what the function mutates or performs."
+  },
+  "na": {},
+  "neighbor_contrast": {
+    "browse_file": "list_symbols",
+    "callers": "inspect_symbol",
+    "code_insight": "index_stats",
+    "context": "get_context",
+    "debug_info": "index_stats",
+    "find_files": "search",
+    "get_context": "context",
+    "git_analysis": "code_insight",
+    "index_stats": "debug_info",
+    "info": "index_stats",
+    "inspect_symbol": "callers",
+    "list_symbols": "browse_file",
+    "search": "find_files",
+    "semantic_annotations": "search",
+    "side_effects": "get_context"
+  },
+  "note": "Disambiguated arm: one clause contrasting the tool's ACTUAL confusable neighbor from the E2.1 map in toolcalling/tasks/*.json. E2.2 description variant arm. Only the description text differs between arms: the mock MCP takes the tool names and the input schema from the live-surface manifest, so name and schema are constant by construction and pinned by tests/test_description_variants.py. Every claim here is true of the live tool -- backticked identifiers are real parameters of that tool's live input schema or real tool names, and worked invocations use only real parameters.",
+  "schema": "toolcalling_descriptions_v1",
+  "variant": "D",
+  "version": 1
+}

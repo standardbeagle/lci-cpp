@@ -1,0 +1,24 @@
+{
+  "descriptions": {
+    "browse_file": "Use when you need the outline of ONE file you can already name: its complete symbol table, with filtering, sorting and optional imports and stats. The outline is source-derived, so it stands in for opening the file to check symbol names, signatures or line numbers.",
+    "callers": "Use when you need the confirmed call sites of one named symbol: a resolved call-graph query rather than a text scan, with callers grouped by enclosing function and each call-site line and count, and dynamic-dispatch or unresolved sites listed separately.",
+    "code_insight": "Use when you need a report about the codebase as a whole rather than one symbol: high-level overview, detailed analysis, code statistics, structure or git analysis, selected by mode (overview, detailed, statistics, unified, structure, git_analyze, git_hotspots).",
+    "context": "Use when you need to carry code context across agent sessions: 'save' captures a compact 2-5KB manifest of symbol references, and 'load' hydrates it back into full context with source code and call graphs, so the next session does not repeat the exploration.",
+    "debug_info": "Use when you need to troubleshoot the index itself: symbol distribution, type breakdown, reference statistics and file-level detail. Reach for it when index_stats reports problems or when relationship queries come back empty.",
+    "find_files": "Use when you need to locate files by PATH rather than by content - the 'find' or 'fd' job, answered from an in-memory index, with fuzzy matching, glob patterns and filters.",
+    "get_context": "Use when you need detailed context for code objects you can already identify: signature, file path, line numbers, callers and callees, references, a source excerpt and snippets, intended to replace opening the source file.",
+    "git_analysis": "Use when you need to judge the quality of your git changes before committing: new or modified code compared against the existing codebase for duplicate code, naming inconsistencies and function complexity, over the 'staged', 'wip', 'commit' or 'range' scope.",
+    "index_stats": "Use when you need to know whether the index is ready and healthy: indexing progress, component health, memory usage and file-watcher status - the tool for diagnosing 'index not ready' or searches that return empty.",
+    "info": "Use when you need help on the tools themselves: an overview of what this server offers, detailed help and examples for one named tool, or the server version.",
+    "inspect_symbol": "Use when you need everything known about ONE symbol, given its name or object ID: signature, doc, complexity, callers, callees, type hierarchy, scope chain, flags and a bounded source excerpt.",
+    "list_symbols": "Use when you need to enumerate and filter symbols across the index - the 'ls' for code - by kind, file, complexity, parameter count and exported status, to discover what exists without searching for it.",
+    "search": "Use when you need to find code by its text or meaning across the corpus, in place of grep, rg or find. Results are grouped per file with per-hit line numbers, and symbol hits carry an id that feeds get_context.",
+    "semantic_annotations": "Use when you need symbols by semantic LABEL or category rather than by text: direct @lci: annotations, external annotation manifests, and labels propagated through call graphs.",
+    "side_effects": "Use when you need to know whether a function is pure: writes to parameters, globals and closures, I/O operations and exception handling, optionally followed transitively through the call graph."
+  },
+  "na": {},
+  "note": "Task-framed arm. E2.2 description variant arm. Only the description text differs between arms: the mock MCP takes the tool names and the input schema from the live-surface manifest, so name and schema are constant by construction and pinned by tests/test_description_variants.py. Every claim here is true of the live tool -- backticked identifiers are real parameters of that tool's live input schema or real tool names, and worked invocations use only real parameters.",
+  "schema": "toolcalling_descriptions_v1",
+  "variant": "B",
+  "version": 1
+}
