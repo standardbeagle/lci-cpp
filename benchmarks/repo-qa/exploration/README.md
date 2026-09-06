@@ -11,7 +11,11 @@ gitignored: corpus content is NEVER committed, only regenerated from
 recipe below cannot rebuild byte-identically.
 
 All three `source_path`s live under THIS checkout (`lci-cpp/real_projects/`).
-A benchmark must never depend on a sibling repo's presence.
+A benchmark must never depend on a sibling repo's presence. The paths are
+absolute and assume the checkout at `/home/beagle/work/core/lci-cpp`; on a
+host where the checkout lives elsewhere, edit the three `source_path` values
+in `corpora.json` (and the clone targets below) before forging -- the forge
+fails fast naming the path if you forget.
 
 ## If a source checkout is missing
 
