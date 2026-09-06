@@ -364,6 +364,38 @@ class BankDeclaredForgeVersionGateTest(unittest.TestCase):
                 )
 
 
+class ReferenceTreeHashDriftTest(unittest.TestCase):
+    """A clobbered .work tree rewrites manifest AND tree together, so the
+    manifest-pinned tree hash still verifies; only the committed reference
+    hash in corpora.json detects the drift."""
+
+    def test_prepare_checkout_rejects_drift_from_the_recorded_reference(self):
+        with TemporaryDirectory() as root:
+            # Self-consistent synthetic corpus impersonating a REGISTERED
+            # corpus (pocketbase seed 7): its manifest pins its own tree, so
+            # every manifest-local check passes.
+            corpus_dir, _tree, manifest = forge_fixture(root)
+            spec = forge.load_corpora()["pocketbase"]
+            clobbered = dict(
+                manifest,
+                forge_version=spec["reference_forge_version"],
+                source_commit=spec["pinned_commit"],
+            )
+            forge._write_json_atomic(
+                os.path.join(corpus_dir, "manifest.json"), clobbered
+            )
+            ref = {
+                "corpus_id": "pocketbase",
+                "source_commit": spec["pinned_commit"],
+                "seed": 7,
+                "forge_version": spec["reference_forge_version"],
+            }
+            with self.assertRaisesRegex(corpus.TreeHashMismatch, "reference"):
+                corpus.prepare_checkout(
+                    root, ref, os.path.join(root, "co")
+                )
+
+
 class ConfigParityTest(unittest.TestCase):
     def test_agent_visible_task_contains_only_claim_and_request(self):
         task = fake_task()

@@ -17,7 +17,9 @@ pin for hosts that never forge the corpus.
 import glob
 import json
 import os
+import sys
 import unittest
+from tempfile import TemporaryDirectory
 
 BENCH_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BANK_DIRS = (
@@ -26,6 +28,14 @@ BANK_DIRS = (
 )
 CORPORA_PATH = os.path.join(BENCH_ROOT, "exploration", "corpora.json")
 CORPUS_ROOT = os.path.join(BENCH_ROOT, ".work", "exploration")
+
+for _p in (os.path.join(BENCH_ROOT, "exploration"),
+           os.path.join(BENCH_ROOT, "scripts")):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
+import exploration_corpus_forge as forge  # noqa: E402
+from runner import corpus  # noqa: E402
 
 # Number of committed bank files at the time this alignment gate landed; a
 # changed count means new banks must be covered (or the pin revisited).
@@ -91,6 +101,79 @@ class BankCorpusVersionAlignmentTest(unittest.TestCase):
                     f"{ref['corpus_id']} seed {ref['seed']} is {expected!r}"
                 )
         self.assertEqual(mismatches, [], "\n".join(mismatches))
+
+
+EXPECTED_CORPORA = {"scikit-learn", "pocketbase", "next.js"}
+REFERENCE_SEED = "seed-7"
+
+
+def _corpus_specs():
+    with open(CORPORA_PATH, encoding="utf-8") as handle:
+        data = json.load(handle)
+    return {spec["id"]: spec for spec in data["corpora"]}
+
+
+class ReferenceTreeHashPinTest(unittest.TestCase):
+    """corpora.json must record the reference tree hash per corpus/seed, and
+    the runner must verify the real tree against it: a clobbered .work tree
+    (manifest AND tree rewritten consistently) passes the manifest-pinned
+    hash, so only the committed, non-content reference detects the drift."""
+
+    def test_corpora_json_records_a_reference_tree_hash_per_corpus_seed(self):
+        specs = _corpus_specs()
+        self.assertEqual(EXPECTED_CORPORA, set(specs))
+        for corpus_id, spec in sorted(specs.items()):
+            refs = spec.get("reference_tree_hash") or {}
+            recorded = refs.get(REFERENCE_SEED)
+            self.assertIsNotNone(
+                recorded,
+                f"{corpus_id}: corpora.json records no reference_tree_hash "
+                f"for {REFERENCE_SEED}",
+            )
+            self.assertRegex(recorded, r"^[0-9a-f]{64}$")
+
+    def test_recorded_hash_verifies_against_the_real_tree(self):
+        present = []
+        absent = []
+        for corpus_id, spec in sorted(_corpus_specs().items()):
+            tree_dir = os.path.join(CORPUS_ROOT, corpus_id, REFERENCE_SEED, "tree")
+            if os.path.isdir(tree_dir):
+                present.append((corpus_id, spec, tree_dir))
+            else:
+                absent.append(corpus_id)
+        if not present:
+            raise unittest.SkipTest(
+                f"no .work trees on this host (absent: {sorted(absent)}); "
+                f"the recorded-reference verify path is untestable here"
+            )
+        for corpus_id, spec, tree_dir in present:
+            with self.subTest(corpus=corpus_id):
+                recorded = spec["reference_tree_hash"][REFERENCE_SEED]
+                manifest = {
+                    "tree_hash": recorded,
+                    "corpus_id": corpus_id,
+                    "seed": int(REFERENCE_SEED.split("-")[1]),
+                }
+                self.assertEqual(
+                    corpus.verify_tree_hash(tree_dir, manifest), recorded
+                )
+
+    def test_verify_tree_hash_fails_on_an_altered_tree(self):
+        """Discrimination: the verify path must FAIL on drift, not only pass
+        on the happy path."""
+        with TemporaryDirectory() as root:
+            tree_dir = os.path.join(root, "tree")
+            os.makedirs(tree_dir)
+            target = os.path.join(tree_dir, "base.go")
+            with open(target, "w", encoding="utf-8") as handle:
+                handle.write("package core\n\nfunc NewBaseApp() {}\n")
+            pinned = forge.tree_hash(tree_dir)
+            manifest = {"tree_hash": pinned, "corpus_id": "synthetic", "seed": 7}
+            self.assertEqual(corpus.verify_tree_hash(tree_dir, manifest), pinned)
+            with open(target, "a", encoding="utf-8") as handle:
+                handle.write("func Clobbered() {}\n")
+            with self.assertRaises(corpus.TreeHashMismatch):
+                corpus.verify_tree_hash(tree_dir, manifest)
 
 
 if __name__ == "__main__":
