@@ -374,11 +374,15 @@ def materialized_worktree(source_tree_dir, workspace_root=None):
 
     The copy is removed on BOTH normal exit and exception, so the source corpora
     are never mutated and no throwaway tree leaks. Reads the source only.
+
+    Symlinks are copied AS symlinks: real forged corpora contain links whose
+    targets do not exist on this machine, and a dereferencing copy would abort
+    the whole gate on them.
     """
     holder = tempfile.mkdtemp(prefix="edit-oracle-", dir=workspace_root)
     dest = os.path.join(holder, "tree")
     try:
-        shutil.copytree(source_tree_dir, dest)
+        shutil.copytree(source_tree_dir, dest, symlinks=True)
         yield dest
     finally:
         shutil.rmtree(holder, ignore_errors=True)
