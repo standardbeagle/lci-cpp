@@ -369,3 +369,73 @@ three were deleted, not relabelled (`09abd89`).
   holds on description specificity alone. Record such cells as surface redundancy before
   the results slice reads them as a selection failure.
 <!-- written_at: 2026-09-06T20:00:00Z  source_event: task:01KXSHA3NRNK2JB9T43F3X5NYY, comment:01M1W1JHMNFK283DJ9NXZM6SY3, comment:01M1W2W200F212FTW2YZFFBYD1, comment:01M1W384M3JE6V2CT2378GCVKN, git:09abd89, git:5b97c51 -->
+
+### 10b. A vendor provider/model id is an absence claim in disguise — probe `opencode models`, and name the hang
+
+Rule 10 bars an unprobed claim that something is missing; 10a bars an unquoted claim that
+something is present. A model id is both at once, and it fails silently in a way a tool
+name does not: an unserved id produces no "not found", it produces a plausible-looking
+provider failure. Commit `869898a` asserted the weak id `opencode/deepseek-v4-flash-free`
+was "registered in config.kdl". No `config.kdl` contains it and `opencode models` does not
+serve it — the id is dead. The two weak cells that ran on it returned an opaque
+`UnknownError` in 5.9 s and then a 300 s timeout with a ZERO-EVENT stream, and both read
+as provider flakiness. The real id is `opencode-go/deepseek-v4-flash` (probed: answered in
+28.4 s, `lci_callers` first).
+
+- **Every vendor id a bench arm names is verified against `opencode models` by a
+  pre-flight or a test, not against a memory, a sibling script, or a `config.kdl` alias.**
+  The probe is one command and it also gives you the tier and the served-name spelling.
+- **A hang-to-timeout with an EMPTY event stream is a named provider outcome
+  (`provider_unserved` / `provider_timeout`), never a selection or comprehension result.**
+  Zero events means the arm never ran; scoring it as a miss makes a typo look like a model
+  weakness. Same denominator discipline as rule 12's non-selection outcomes.
+- **A dead id spreads by copy.** After the fix here, `grep -rn <dead id> benchmarks/`
+  still found it in `comprehension_ab.py` and `analyze_comprehension.py`
+  (filed `01M1W646T76HF9CDAPBGYW57XP`). Grep for the id across `benchmarks/` in the same
+  commit that corrects it — rule 8a's "grep for readers before refreshing" applied to ids.
+<!-- written_at: 2026-09-06T20:30:00Z  source_event: task:01KXSHA3Q1QCHM8T68WS6MS1NC, comment:01M1W63EGNJXC9XMVWAF0ZXXMK (probes.opencode_models, probes.weak_old_id), comment:01M1W63SVJ0A342RZVHWNWM2Z0 (systemicObservations), git:869898a, git:cc113ae -->
+
+### 9a. A parser fixture is a VERBATIM excerpt of a recorded real stream, and it names the recording
+
+Rule 6 says prove the gate on real material; rule 9 says pin a per-arm fixture captured
+from the real tool surface. Third recurrence, so the clause gets teeth: this task's
+`first_call_native` was never assigned, because the hand-built fixture event omitted
+`part.type="tool"` — a field the real opencode 1.18.26 stream carries on every tool event.
+The suite was green: 22 tests passing against a shape the provider does not emit. The
+defect surfaced only when a live probe stream was read next to the fixture.
+
+A fixture authored from the same mental model as the parser inherits the parser's blind
+spot, exactly as rule 6's synthetic leak-check fixtures did. So:
+
+- **Author no parser fixture by hand.** Capture a real stream, excerpt it byte-for-byte,
+  and paste the excerpt. Trimming events is allowed; editing the shape of one is not.
+- **Name the recording in the test** — tool + version + the command that produced it
+  (here: `opencode 1.18.26`, `opencode run --format json`). A fixture with no cited source
+  is unverified, and the version is what tells the next reader when to re-capture.
+- **A field the parser reads and the fixture never sets is the signature.** If an
+  assignment can never fire under the fixture set, the fixture set is incomplete — assert
+  the positive case for every branch the parser has, not only the ones the author expected
+  to take.
+<!-- written_at: 2026-09-06T20:30:00Z  source_event: task:01KXSHA3Q1QCHM8T68WS6MS1NC, comment:01M1W63EGNJXC9XMVWAF0ZXXMK (fixedInPlace: first_call_native never assigned; fixture event() now carries part.type=tool), git:cc113ae; recurrence: rule 6 (leak-gate fixtures), rule 9 (per-arm rendering fixtures) -->
+
+## 13. A resume ledger must distinguish TERMINAL outcomes from RETRYABLE ones
+
+Skip-if-a-record-exists is the standard idempotence trick for an expensive grid, and it is
+correct only if every recorded outcome is final. It never is: a provider outage, a
+timeout, a quota kill and a non-zero exit are all recorded like results, so the first
+transient failure freezes that cell permanently. The grid then reports a hole that reads
+as missing data rather than as an unretried error, and the only recovery is deleting
+records by hand.
+
+- **The skip predicate reads the outcome, not the record's existence.** Terminal: any
+  graded result. Retryable: the named non-selection outcomes of rule 12
+  (`provider_error`, `provider_timeout`, `provider_quota`, `malformed_provider_stream`,
+  `exit_N`).
+- **Retrying is opt-in and the default stays a no-op**, so an in-flight resume is
+  unchanged; last record wins. Landed here as `selection_ab.py --retry-provider-failures`.
+- **An in-invocation `--retries` does not satisfy this.** It cannot survive the process,
+  which is the case the ledger exists for.
+- Same defect still lives in the template this was copied from —
+  `scripts/bench.py:253` skips any existing result file while `run_one` writes one for
+  every status (filed `01M1W6858497HAM3W5QZ6QRGGV`).
+<!-- written_at: 2026-09-06T20:30:00Z  source_event: task:01KXSHA3Q1QCHM8T68WS6MS1NC, comment:01M1W63EGNJXC9XMVWAF0ZXXMK (fixedInPlace: resume ledger froze provider failures), git:cc113ae, code:benchmarks/repo-qa/scripts/bench.py:253 -->
