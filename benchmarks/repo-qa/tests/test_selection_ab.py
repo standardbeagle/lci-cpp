@@ -227,14 +227,14 @@ class ArgsPlausibilityTest(unittest.TestCase):
 
     def test_plausible_args_validate(self):
         record = self.grader.grade(self.task, sr.trace.parse_trace([
-            event("lci_callers", {"symbol": "processRequest"}),
+            event("lci_callers", {"name": "processRequest"}),
         ]), run_status="answered")
         self.assertTrue(record["args_plausible"])
         self.assertEqual(record["args_errors"], [])
 
     def test_type_wrong_args_are_implausible(self):
         record = self.grader.grade(self.task, sr.trace.parse_trace([
-            event("lci_callers", {"symbol": ["processRequest"]}),
+            event("lci_callers", {"name": ["processRequest"]}),
         ]), run_status="answered")
         self.assertFalse(record["args_plausible"])
         self.assertTrue(record["args_errors"])
