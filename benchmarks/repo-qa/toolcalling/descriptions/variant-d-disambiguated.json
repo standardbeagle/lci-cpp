@@ -34,7 +34,7 @@
     "semantic_annotations": "search",
     "side_effects": "get_context"
   },
-  "note": "Disambiguated arm: one clause contrasting the tool's ACTUAL confusable neighbor from the E2.1 map in toolcalling/tasks/*.json. E2.2 description variant arm. Only the description text differs between arms: the mock MCP takes the tool names and the input schema from the live-surface manifest, so name and schema are constant by construction and pinned by tests/test_description_variants.py. Every claim here is true of the live tool -- backticked identifiers are real parameters of that tool's live input schema or real tool names, and worked invocations use only real parameters.",
+  "note": "Disambiguated arm: one clause contrasting the tool's ACTUAL confusable neighbor from the E2.1 map in toolcalling/tasks/*.json. E2.2 description variant arm. Only the description text differs between arms: the mock MCP takes the tool names from the live-surface manifest and serves the same input schema for every arm, so name and schema are constant by construction and pinned by tests/test_description_variants.py. Every claim here is true of the live tool -- backticked identifiers are real parameters of that tool's live input schema or real tool names, and worked invocations validate against that schema.",
   "schema": "toolcalling_descriptions_v1",
   "variant": "D",
   "version": 1

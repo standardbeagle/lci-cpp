@@ -17,7 +17,7 @@
     "side_effects": "Use when you need to know whether a function is pure: writes to parameters, globals and closures, I/O operations and exception handling, optionally followed transitively through the call graph."
   },
   "na": {},
-  "note": "Task-framed arm. E2.2 description variant arm. Only the description text differs between arms: the mock MCP takes the tool names and the input schema from the live-surface manifest, so name and schema are constant by construction and pinned by tests/test_description_variants.py. Every claim here is true of the live tool -- backticked identifiers are real parameters of that tool's live input schema or real tool names, and worked invocations use only real parameters.",
+  "note": "Task-framed arm. E2.2 description variant arm. Only the description text differs between arms: the mock MCP takes the tool names from the live-surface manifest and serves the same input schema for every arm, so name and schema are constant by construction and pinned by tests/test_description_variants.py. Every claim here is true of the live tool -- backticked identifiers are real parameters of that tool's live input schema or real tool names, and worked invocations validate against that schema.",
   "schema": "toolcalling_descriptions_v1",
   "variant": "B",
   "version": 1
