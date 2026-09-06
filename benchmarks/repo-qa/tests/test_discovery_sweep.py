@@ -18,9 +18,31 @@ import tempfile
 import unittest
 
 BENCH_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(BENCH_ROOT, "discovery"))
 
-from runner import answer_sets, cells, grading, sweep  # noqa: E402
+import importlib
+import importlib.util
+
+# `discovery/runner` and `exploration/runner` are both named `runner`. Putting
+# either directory on sys.path shadows the other for the whole process, so this
+# package is loaded from its path under a unique module name instead.
+_RUNNER_DIR = os.path.join(BENCH_ROOT, "discovery", "runner")
+
+
+def _load_discovery_runner():
+    if "discovery_runner" not in sys.modules:
+        spec = importlib.util.spec_from_file_location(
+            "discovery_runner",
+            os.path.join(_RUNNER_DIR, "__init__.py"),
+            submodule_search_locations=[_RUNNER_DIR],
+        )
+        module = importlib.util.module_from_spec(spec)
+        sys.modules["discovery_runner"] = module
+        spec.loader.exec_module(module)
+    return [importlib.import_module("discovery_runner." + name)
+            for name in ("answer_sets", "cells", "grading", "sweep")]
+
+
+answer_sets, cells, grading, sweep = _load_discovery_runner()
 
 
 # --- fixtures ---------------------------------------------------------------
@@ -280,6 +302,15 @@ class PlanTest(unittest.TestCase):
         self.assertIsNone(plan["cohort_reduction"]["max_cells_per_family"])
         self.assertEqual(plan["cohort_reduction"]["families"], {})
 
+    def test_unfilled_prompt_token_fails_loud(self):
+        """A prompt field the cohort file does not publish is a finding."""
+        fam = _family("f", "definition_lookup",
+                      {"kind": "cohort_cell", "cell": "cell_x"}, 2,
+                      arm_visible_prompt="find {{symbol_name}} on {{receiver_type}}")
+        with self.assertRaises(cells.PlanError) as ctx:
+            cells.build_plan(_registry([fam]), self.cohorts)
+        self.assertIn("receiver_type", str(ctx.exception))
+
     def test_voided_family_is_skipped_and_named(self):
         fam = _family("f", "definition_lookup",
                       {"kind": "cohort_cell", "cell": "cell_x"}, 2,
@@ -359,7 +390,8 @@ class SweepTest(unittest.TestCase):
         self.assertEqual(agent["treatment"]["dnf_count"], 2)
         self.assertEqual(agent["treatment"]["dnf_rate_pct"], 100.0)
         self.assertEqual(agent["baseline"]["dnf_rate_pct"], 0.0)
-        row = json.load(open(os.path.join(self.run_dir, "f__treatment__agent__s1.json")))
+        with open(os.path.join(self.run_dir, "f__treatment__agent__s1.json")) as fh:
+            row = json.load(fh)
         self.assertEqual(row["status"], "dnf")
         self.assertIsNone(row["score"]["f1"])
 
@@ -436,7 +468,8 @@ class SweepTest(unittest.TestCase):
         })
         self._run(ex)
         self.assertEqual(len(ex.calls), 2 * 2 * 2)
-        self.assertEqual(len(os.listdir(self.run_dir)), 8)
+        rows = [n for n in os.listdir(self.run_dir) if n != sweep.PLAN_FILE]
+        self.assertEqual(len(rows), 8)
 
     def test_report_carries_the_reduction_record(self):
         plan = cells.build_plan(self.registry, self.cohorts, max_cells_per_family=1)
