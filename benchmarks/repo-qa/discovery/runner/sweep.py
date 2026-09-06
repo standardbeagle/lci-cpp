@@ -154,10 +154,20 @@ def run_sweep(plan, answer_key_for, executor, run_dir, literal_corpus_root=None)
     return {"executed": executed, "resumed": resumed, "dnf": dnf}
 
 
+def _is_row_file(name):
+    """Rows are named family__arm__level__slug.json.
+
+    The run directory also holds the plan and the emitted report, and reading
+    one of those as a row is how a second `run` of an already-complete sweep
+    crashed instead of reprinting its report.
+    """
+    return name.endswith(".json") and name.count("__") == 3
+
+
 def _load_rows(run_dir):
     rows = []
     for name in sorted(os.listdir(run_dir)):
-        if not name.endswith(".json") or name == PLAN_FILE:
+        if not _is_row_file(name):
             continue
         with open(os.path.join(run_dir, name), encoding="utf-8") as handle:
             rows.append(json.load(handle))
@@ -184,6 +194,11 @@ def _summarize(rows):
                                       for r in ungradable
                                       if r["score"]["ungradable_reason"]}),
         "correct_count": sum(1 for r in graded if r["score"]["correct"]),
+        # An arm that cited NOTHING scores 0.0 the same way an arm that cited
+        # only wrong locations does, and the two mean different things: the
+        # first can be an arm whose tool emits no path:line at all. Counted
+        # here so a 0.0 family cannot be read as "wrong" without checking.
+        "zero_citation_count": sum(1 for r in graded if r["score"]["cited_total"] == 0),
     }
     for name, key in _METRIC_KEYS.items():
         summary[name] = (

@@ -31,7 +31,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import benchlib as bl  # noqa: E402
 import bench  # noqa: E402
-from tooleval import McpSession  # noqa: E402
+from tooleval import McpSession, response_is_error  # noqa: E402
 
 BENCH_ROOT = bl.BENCH_ROOT
 
@@ -65,17 +65,47 @@ DEFAULT_REGISTRY = os.path.join(DISCOVERY_DIR, "predictions.json")
 DEFAULT_COHORTS = os.path.join(DISCOVERY_DIR, "cohorts", "cohorts.json")
 DEFAULT_ORACLE_CACHE = os.path.join(DISCOVERY_DIR, "oracle", "cache")
 
-# Which LCI tool answers which task shape at the tool level. The treatment arm
-# must reach every answer through the semantic surface -- there is no grep
-# fallback, by design.
+# Which LCI tool answers which task shape at the tool level, with the ARGUMENTS
+# that tool actually takes. Probed against the live MCP surface, not read off
+# predictions.json's arms list, which names `mcp__lci__callers` and
+# `mcp__lci__references` -- neither exists as a tool; the call hierarchy and the
+# reference set both come out of `get_context`. The treatment arm reaches every
+# answer through the semantic surface; there is no grep fallback, by design.
+def _anchor(cell, **extra):
+    args = {"name": cell["name"], "line": cell["line"], "column": cell["column"]}
+    args.update(extra)
+    return args
+
+
 _LCI_TOOL = {
-    "exhaustive_callers": ("lci_callers", lambda c: {"symbol": c["name"], "file": c["path"]}),
-    "transitive_callers_depth2": ("lci_get_context", lambda c: {"symbol": c["name"], "file": c["path"]}),
-    "definition_lookup": ("lci_search", lambda c: {"query": c["name"], "kind": "definition"}),
-    "production_reference_partition": ("lci_references", lambda c: {"symbol": c["name"], "file": c["path"]}),
-    "implementations_lookup": ("lci_get_context", lambda c: {"symbol": c["name"], "file": c["path"]}),
-    "literal_string_search": ("lci_search", lambda c: {"query": c["name"]}),
-    "budget_constrained_variant": ("lci_search", lambda c: {"query": c["name"]}),
+    "exhaustive_callers": (
+        "get_context",
+        lambda c: _anchor(c, include_call_hierarchy=True, max_depth=1),
+    ),
+    "transitive_callers_depth2": (
+        "get_context",
+        lambda c: _anchor(c, include_call_hierarchy=True, max_depth=2),
+    ),
+    "definition_lookup": (
+        "list_symbols",
+        lambda c: {"name": c["name"]},
+    ),
+    "production_reference_partition": (
+        "get_context",
+        lambda c: _anchor(c, include_all_references=True, exclude_test_files=True),
+    ),
+    "implementations_lookup": (
+        "get_context",
+        lambda c: _anchor(c, include_sections=["structure"]),
+    ),
+    "literal_string_search": (
+        "search",
+        lambda c: {"pattern": c["name"]},
+    ),
+    "budget_constrained_variant": (
+        "search",
+        lambda c: {"pattern": c["name"]},
+    ),
 }
 
 
@@ -135,9 +165,12 @@ def tool_executor(corpus_root, lci_bin):
             session["mcp"] = McpSession(lci_bin, corpus_root)
         tool, build_args = _LCI_TOOL[job["task_shape"]]
         payload, latency_ms = session["mcp"].call_tool(tool, build_args(cell))
-        if "text" not in payload:
+        if "text" not in payload or response_is_error(payload):
+            # An LCI error payload arrives over a successful RPC. Grading its
+            # text would score the treatment 0.0 on a cell it was never asked
+            # correctly -- exactly the zeroed row that reads as a real loss.
             return {"status": "error",
-                    "detail": "%s returned no content: %s" % (tool, payload)}
+                    "detail": "%s refused the call: %s" % (tool, str(payload)[:300])}
         return {"status": "ok", "answer": payload["text"], "tool_calls": 1,
                 "wall_seconds": round(latency_ms / 1000.0, 3)}
 

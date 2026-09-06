@@ -485,6 +485,30 @@ class SweepTest(unittest.TestCase):
         self.assertEqual(report["cohort_reduction"]["max_cells_per_family"], 1)
         self.assertEqual(report["cohort_reduction"]["families"]["f"]["ran_n"], 1)
 
+    def test_zero_citation_arm_is_counted_apart_from_a_wrong_one(self):
+        ex = _Executor({
+            ("tool", "treatment"): {"status": "ok", "answer": "callers: Foo, Bar"},
+            ("tool", "baseline"): {"status": "ok", "answer": "wrong.go:1"},
+            ("agent", "treatment"): {"status": "ok", "answer": _full_answer()},
+            ("agent", "baseline"): {"status": "ok", "answer": _full_answer()},
+        })
+        self._run(ex)
+        tool = sweep.build_report(self.run_dir)["levels"]["tool"]["f"]
+        self.assertEqual(tool["treatment"]["mean_f1"], 0.0)
+        self.assertEqual(tool["treatment"]["zero_citation_count"], 2)
+        self.assertEqual(tool["baseline"]["mean_f1"], 0.0)
+        self.assertEqual(tool["baseline"]["zero_citation_count"], 0)
+
+    def test_report_ignores_its_own_output_files(self):
+        ex = _Executor({(lvl, arm): {"status": "ok", "answer": _full_answer()}
+                        for lvl in ("tool", "agent")
+                        for arm in ("treatment", "baseline")})
+        self._run(ex)
+        with open(os.path.join(self.run_dir, "report.json"), "w") as fh:
+            json.dump(sweep.build_report(self.run_dir), fh)
+        again = sweep.build_report(self.run_dir)
+        self.assertEqual(again["levels"]["tool"]["f"]["treatment"]["cell_count"], 2)
+
     def test_oracle_failure_is_a_broken_cell(self):
         def boom(cell):
             raise RuntimeError("gopls-oracle FAILED: [GOPLS_MISSING]")
