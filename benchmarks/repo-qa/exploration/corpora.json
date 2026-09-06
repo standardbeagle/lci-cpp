@@ -17,7 +17,7 @@
   "corpora": [
     {
       "id": "scikit-learn",
-      "source_path": "/home/beagle/work/core/lci/scikit-learn",
+      "source_path": "/home/beagle/work/core/lci-cpp/real_projects/python/scikit-learn",
       "pinned_commit": "0885712e436b07cd04d60e955101aaf6a8cbb709",
       "language": "python",
       "source_extensions": [
@@ -54,7 +54,8 @@
       },
       "subdir_directive_files": [
         "meson.build"
-      ]
+      ],
+      "clone_url": "https://github.com/scikit-learn/scikit-learn.git"
     },
     {
       "id": "pocketbase",
@@ -99,11 +100,12 @@
         },
         "expect_exit": 0,
         "timeout_seconds": 900
-      }
+      },
+      "clone_url": "https://github.com/pocketbase/pocketbase.git"
     },
     {
       "id": "next.js",
-      "source_path": "/home/beagle/work/core/lci/real_projects/typescript/next.js",
+      "source_path": "/home/beagle/work/core/lci-cpp/real_projects/typescript/next.js",
       "pinned_commit": "97532172c065ca2b49dd79d1fa44c3a0b864065b",
       "language": "typescript",
       "source_extensions": [
@@ -163,7 +165,8 @@
       },
       "first_party_prefixes": {
         "next/dist/": "packages/next/src/"
-      }
+      },
+      "clone_url": "https://github.com/vercel/next.js.git"
     }
   ]
 }

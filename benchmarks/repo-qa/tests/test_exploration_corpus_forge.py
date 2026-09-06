@@ -1017,6 +1017,23 @@ class TestRealCorporaConfig(unittest.TestCase):
             self.assertTrue(spec["validation"]["argv"])
             self.assertTrue(spec["mutations"]["decoys"] >= 1)
             self.assertTrue(os.path.isabs(spec["source_path"]))
+            self.assertTrue(spec["clone_url"].startswith("https://"))
+
+    def test_no_source_path_depends_on_a_sibling_repo(self):
+        """Every source_path must live under THIS checkout.
+
+        corpora.json previously pinned two sources inside a sibling repo that
+        was later deleted; a benchmark must not silently depend on another
+        repo's presence. Paths that do not exist yet are fine -- verify_source
+        fails fast naming them -- but paths OUTSIDE this repo are not.
+        """
+        repo_root = os.path.dirname(os.path.dirname(forge.BENCH_ROOT))
+        for spec in forge.load_corpora(forge.CORPORA_PATH).values():
+            self.assertTrue(
+                spec["source_path"].startswith(repo_root + os.sep),
+                f"{spec['id']}: source_path escapes this checkout: "
+                f"{spec['source_path']}",
+            )
 
 
 class TestForgeVersionCompat(unittest.TestCase):
