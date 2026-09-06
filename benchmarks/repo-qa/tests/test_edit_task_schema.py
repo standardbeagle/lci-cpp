@@ -475,6 +475,17 @@ class ValidatorTest(unittest.TestCase):
             msg="\n".join(self.fx.run()),
         )
 
+    def test_prompt_leaking_patch_basename_fails(self):
+        # A prompt naming only the target's basename (no directory) is the
+        # same leak as the full path; the check must not require the full
+        # path to appear verbatim.
+        self.fx.task["prompt"] += f" Look in {os.path.basename(PATCH_REL)}."
+        self.fx._flush_task()
+        self.assertTrue(
+            any("oracle patch leak" in p for p in self.fx.run()),
+            msg="\n".join(self.fx.run()),
+        )
+
     def test_prompt_leaking_patch_content_fails(self):
         # A substantial authored patch line in the prompt is answer-key leakage.
         self.fx.task["prompt"] += (

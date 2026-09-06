@@ -318,7 +318,16 @@ def _patch_leak_problems(task_id, prompt, patch):
         )
 
     for rel in sorted(patch["files"]):
-        if _hit(rel):
+        # The full path AND each multi-token segment of it: a prompt naming
+        # just the basename (`record_crud.go`) or a distinctive directory
+        # (`next-app-loader`) hands over the target as surely as the full
+        # path does. Single-token segments (`apis`, `sklearn`, `src`) are
+        # too common to discriminate and are skipped.
+        needles = [rel] + [
+            seg for seg in rel.split("/")
+            if len(leak_linter.normalize_tokens(seg)) >= 2
+        ]
+        if any(_hit(needle) for needle in needles):
             problems.append(
                 f"{task_id}: oracle patch leak: prompt names patch path "
                 f"{leak_linter.redact(rel)}"
