@@ -20,8 +20,8 @@
   "behavior": {
     "command": [
       "go",
-      "build",
-      "./..."
+      "run",
+      "{edits_root}/patches/pocketbase/pb-module-1.probe.go"
     ],
     "assertion": "callers obtain the value from a New<Type> constructor",
     "discrimination": {
@@ -73,5 +73,17 @@
     ],
     "resolved": true,
     "notes": "Two independent passes selected the same live exemplars; no disagreement to resolve."
+  },
+  "oracle_patch": {
+    "path": "patches/pocketbase/pb-module-1.json",
+    "format": "edit_oracle_patch_v1"
+  },
+  "existing_suite": {
+    "command": [
+      "go",
+      "build",
+      "./..."
+    ],
+    "notes": "measured wall-clock on the forged seed-7 tree: go build ./... ~3.3s, go test -count=1 ./apis/... ~31.6s (GOPROXY=off, warm module cache); both fit DEFAULT_TIMEOUT=120"
   }
 }

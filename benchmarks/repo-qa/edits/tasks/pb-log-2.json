@@ -20,8 +20,8 @@
   "behavior": {
     "command": [
       "go",
-      "test",
-      "./..."
+      "run",
+      "{edits_root}/patches/pocketbase/pb-log-2.probe.go"
     ],
     "assertion": "the diagnostic appears as a structured record with attribute keys",
     "discrimination": {
@@ -74,5 +74,17 @@
     ],
     "resolved": true,
     "notes": "Two independent passes selected the same live exemplars; no disagreement to resolve."
+  },
+  "oracle_patch": {
+    "path": "patches/pocketbase/pb-log-2.json",
+    "format": "edit_oracle_patch_v1"
+  },
+  "existing_suite": {
+    "command": [
+      "go",
+      "build",
+      "./..."
+    ],
+    "notes": "measured wall-clock on the forged seed-7 tree: go build ./... ~3.3s, go test -count=1 ./apis/... ~31.6s (GOPROXY=off, warm module cache); both fit DEFAULT_TIMEOUT=120"
   }
 }

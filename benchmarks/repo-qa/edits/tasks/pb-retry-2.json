@@ -20,8 +20,8 @@
   "behavior": {
     "command": [
       "go",
-      "test",
-      "./..."
+      "run",
+      "{edits_root}/patches/pocketbase/pb-retry-2.probe.go"
     ],
     "assertion": "errors.Is/As can reach the original cause from the returned error",
     "discrimination": {
@@ -76,5 +76,17 @@
     ],
     "resolved": true,
     "notes": "ann-quill additionally proposed a third exemplar; adjudicated down to the two both annotators agreed were clearest. All final exemplars are attested live and conforming by both annotators."
+  },
+  "oracle_patch": {
+    "path": "patches/pocketbase/pb-retry-2.json",
+    "format": "edit_oracle_patch_v1"
+  },
+  "existing_suite": {
+    "command": [
+      "go",
+      "build",
+      "./..."
+    ],
+    "notes": "measured wall-clock on the forged seed-7 tree: go build ./... ~3.3s, go test -count=1 ./apis/... ~31.6s (GOPROXY=off, warm module cache); both fit DEFAULT_TIMEOUT=120"
   }
 }

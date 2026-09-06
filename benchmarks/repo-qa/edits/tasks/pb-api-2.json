@@ -20,8 +20,8 @@
   "behavior": {
     "command": [
       "go",
-      "test",
-      "./apis/..."
+      "run",
+      "{edits_root}/patches/pocketbase/pb-api-2.probe.go"
     ],
     "assertion": "the handler registers with the router without an adapter",
     "discrimination": {
@@ -69,5 +69,17 @@
     ],
     "resolved": true,
     "notes": "Two independent passes selected the same live exemplars; no disagreement to resolve."
+  },
+  "oracle_patch": {
+    "path": "patches/pocketbase/pb-api-2.json",
+    "format": "edit_oracle_patch_v1"
+  },
+  "existing_suite": {
+    "command": [
+      "go",
+      "build",
+      "./..."
+    ],
+    "notes": "measured wall-clock on the forged seed-7 tree: go build ./... ~3.3s (GOPROXY=off, warm module cache); go test -count=1 ./apis/... exceeds DEFAULT_TIMEOUT=120 inside the gate's throwaway copy, so the build is the regression guard"
   }
 }
