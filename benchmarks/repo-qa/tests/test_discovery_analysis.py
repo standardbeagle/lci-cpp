@@ -342,5 +342,25 @@ class RegistryVerdictTests(AnalyzerFixture):
         self.assertEqual(level["additional_requirement"]["kind"], "unanimous_cells")
 
 
+class TokenAccountingTests(AnalyzerFixture):
+    def test_agent_token_dicts_are_totalled_not_summed_as_objects(self):
+        """bench.py reports tokens as {input, output, reasoning, cache}."""
+        rows = [
+            _row("fam", "treatment", "agent", "s1", 1.0,
+                 tokens={"input": 100, "output": 10, "reasoning": 5,
+                         "cache": {"read": 999, "write": 0}}),
+            _row("fam", "baseline", "agent", "s1", 1.0,
+                 tokens={"input": 200, "output": 20, "reasoning": 0,
+                         "cache": {"read": 0, "write": 0}}),
+        ]
+        run = self.write_run("r1", rows)
+        out = ad.analyze(self.registry([family("fam", "lci_wins")]),
+                         self.cohorts([]), [run])
+        arms = out["families"]["fam"]["levels"]["agent"]["arms"]
+        # nested cache counters are not billable output; only the flat ones count
+        self.assertEqual(arms["treatment"]["mean_tokens"], 115)
+        self.assertEqual(arms["baseline"]["mean_tokens"], 220)
+
+
 if __name__ == "__main__":
     unittest.main()
