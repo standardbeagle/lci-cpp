@@ -38,6 +38,8 @@ import sys
 import unittest
 from pathlib import Path
 
+import jsonschema
+
 ROOT = Path(__file__).resolve().parents[3]
 REPO_QA = ROOT / "benchmarks/repo-qa"
 MANIFEST = REPO_QA / "comprehension/surface/tool-surface.json"
@@ -109,8 +111,24 @@ def load_variant(key: str) -> dict:
 # scanner is deliberately independent of how the text was AUTHORED -- it reads
 # the emitted string, not an author-supplied list of what the string cites.
 _BACKTICKED = re.compile(r"`([^`]+)`")
-# A worked invocation is a JSON object literal in the description text.
-_JSON_OBJECT = re.compile(r"\{[^{}]*\}")
+# A worked invocation is a JSON object literal in the description text. A regex
+# cannot read one: `refs` takes an ARRAY OF OBJECTS, so a brace-matching pattern
+# stops at the first inner object and hands the checker a fragment. Decode from
+# the first brace with the JSON decoder itself, which knows the nesting.
+_INVOCATION_LEAD = "Example invocation: "
+
+
+def worked_invocation(text: str):
+    """Return the worked invocation decoded from a description, or None."""
+    start = text.find(_INVOCATION_LEAD)
+    start = text.find("{", start if start >= 0 else 0)
+    if start < 0:
+        return None
+    try:
+        args, _ = json.JSONDecoder().raw_decode(text[start:])
+    except ValueError:
+        return None
+    return args if isinstance(args, dict) else None
 
 
 def validate_variant(payload: dict, tools: dict[str, dict],
@@ -306,9 +324,8 @@ class AuthoredVariantContentTest(unittest.TestCase):
     def test_variant_c_carries_a_worked_invocation_over_real_parameters(self):
         for name, text in load_variant("C")["descriptions"].items():
             with self.subTest(tool=name):
-                objects = _JSON_OBJECT.findall(text)
-                self.assertTrue(objects, f"{name}: no worked invocation")
-                args = json.loads(objects[-1])
+                args = worked_invocation(text)
+                self.assertIsNotNone(args, f"{name}: no worked invocation")
                 self.assertTrue(args, f"{name}: empty invocation")
                 props = schema_properties(self.tools[name])
                 self.assertLessEqual(set(args), props, f"{name}: invented parameters")
@@ -318,11 +335,29 @@ class AuthoredVariantContentTest(unittest.TestCase):
                     required, set(args),
                     f"{name}: worked invocation omits a required parameter")
 
+    def test_variant_c_examples_validate_against_the_live_input_schema(self):
+        """Key names are not enough: an example may cite a real parameter with
+        the WRONG TYPE and still teach the model an unusable call. Validate the
+        whole invocation against the tool's live input schema."""
+        for name, text in load_variant("C")["descriptions"].items():
+            with self.subTest(tool=name):
+                args = worked_invocation(text)
+                self.assertIsNotNone(args, f"{name}: no worked invocation")
+                jsonschema.validate(args, self.tools[name]["input_schema"])
+
     def test_variant_c_example_gate_catches_an_invented_parameter(self):
         props = schema_properties(self.tools["callers"])
-        args = json.loads(_JSON_OBJECT.findall(
-            'Example: {"name": "X", "regex": true}')[-1])
+        args = worked_invocation('Example: {"name": "X", "regex": true}')
         self.assertFalse(set(args) <= props)
+
+    def test_variant_c_example_gate_catches_a_type_wrong_parameter(self):
+        """Discrimination case for the schema gate: `focus` is an array of
+        strings on the live tool, so a comma-string example must FAIL while the
+        array form passes. Without this pairing the gate is unproven."""
+        schema = self.tools["git_analysis"]["input_schema"]
+        with self.assertRaises(jsonschema.ValidationError):
+            jsonschema.validate({"scope": "staged", "focus": "duplicates"}, schema)
+        jsonschema.validate({"scope": "staged", "focus": ["duplicates"]}, schema)
 
     def test_variant_d_contrasts_a_real_confusable_neighbor(self):
         payload = load_variant("D")
