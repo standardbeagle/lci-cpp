@@ -49,6 +49,18 @@ def load_tool_names(manifest: Path = MANIFEST) -> list[str]:
     return sorted(t["name"] for t in json.loads(manifest.read_text())["tools"])
 
 
+def load_input_schemas(manifest: Path = MANIFEST) -> dict[str, dict]:
+    """Per-tool input schemas as the live binary serves them.
+
+    Serving a stub schema would hide every parameter from the agent, so a
+    selection arm could only guess argument names and no arm could carry the
+    "input-schema hints" the experiment varies. Like the names, these come from
+    the probed manifest so the mock cannot drift from the real surface.
+    """
+    return {t["name"]: t["input_schema"]
+            for t in json.loads(manifest.read_text())["tools"]}
+
+
 def load_descriptions(path: Path | None = None) -> dict[str, str]:
     path = path or BASELINE_DESCRIPTIONS
     payload = json.loads(Path(path).read_text())
@@ -159,16 +171,17 @@ def neighbor_coverage(tasks: list[dict]) -> set[str]:
 
 class MockServer:
     def __init__(self, tool_names: list[str], descriptions: dict[str, str],
-                 call_log: Path | None = None):
+                 input_schemas: dict[str, dict], call_log: Path | None = None):
         self.tool_names = tool_names
         self.descriptions = descriptions
+        self.input_schemas = input_schemas
         self.call_log = call_log
 
     def tools_list(self) -> dict:
         return {"tools": [{
             "name": name,
             "description": self.descriptions[name],
-            "inputSchema": {"type": "object", "properties": {}, "additionalProperties": True},
+            "inputSchema": self.input_schemas[name],
         } for name in self.tool_names]}
 
     def call(self, name: str, arguments: dict) -> dict:
@@ -229,7 +242,7 @@ def build_server(descriptions_path: Path | None = None,
         raise SystemExit(
             f"description set does not match the live surface: "
             f"missing={missing} unexpected={extra}")
-    return MockServer(names, descriptions, call_log)
+    return MockServer(names, descriptions, load_input_schemas(), call_log)
 
 
 def main(argv: list[str] | None = None) -> int:
