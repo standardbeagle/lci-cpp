@@ -1,0 +1,22 @@
+{
+  "schema": "toolcalling_descriptions_v1",
+  "version": 1,
+  "variant": "baseline",
+  "note": "Neutral wording. E2.2 swaps this file for variants and measures the shift in the confusion matrix.",
+  "descriptions": {
+    "browse_file": "Walk through one source file and report what it declares, in the order the declarations appear.",
+    "code_insight": "Characterize a whole repository: size, languages, entry points, and overall shape.",
+    "context": "Assemble the source lines surrounding a given file location into one payload.",
+    "debug_info": "Report the indexer's internal diagnostic record for one path, including how it was parsed.",
+    "find_files": "List files whose path matches a name fragment or glob.",
+    "get_context": "Gather everything known about one named symbol: definition, documentation, and related symbols.",
+    "git_analysis": "Report version-control facts for the checkout: current commit, authors, and change history.",
+    "index_stats": "Report whether the corpus is ingested and how many entries the index holds.",
+    "info": "Describe the operations this server offers and what each one does.",
+    "inspect_symbol": "Given one exact symbol name, report its declaration site, signature, and kind.",
+    "list_symbols": "Return a flat machine-readable list of the declarations in one file.",
+    "search": "Find occurrences of a text pattern anywhere in the indexed corpus.",
+    "semantic_annotations": "Collect the @lci markers authors left in the source.",
+    "side_effects": "For one function, report the external state it mutates and the routines it invokes."
+  }
+}

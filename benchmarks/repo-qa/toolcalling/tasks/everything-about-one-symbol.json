@@ -1,0 +1,14 @@
+{
+  "schema": "toolcalling_selection_task_v1",
+  "version": 1,
+  "id": "everything-about-one-symbol",
+  "correct_tool": "get_context",
+  "confusable_neighbors": [
+    "inspect_symbol",
+    "context",
+    "side_effects"
+  ],
+  "control": false,
+  "prompt": "Pull together everything known about one named routine: where it is declared, the documentation attached to it, and what else relates to it. One payload, not several lookups.",
+  "rationale": "The enriched, multi-section payload for a named symbol is get_context; inspect_symbol returns only the declaration facts."
+}

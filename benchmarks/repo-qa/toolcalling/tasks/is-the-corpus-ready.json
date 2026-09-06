@@ -1,0 +1,13 @@
+{
+  "schema": "toolcalling_selection_task_v1",
+  "version": 1,
+  "id": "is-the-corpus-ready",
+  "correct_tool": "index_stats",
+  "confusable_neighbors": [
+    "debug_info",
+    "info"
+  ],
+  "control": false,
+  "prompt": "Before I ask anything else: is this project fully ingested yet, and how many entries are currently held?",
+  "rationale": "Readiness and entry counts are index_stats; debug_info is per path and info describes capabilities."
+}

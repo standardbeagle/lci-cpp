@@ -176,14 +176,17 @@ class MockMcpHandshakeTest(unittest.TestCase):
             "protocolVersion": "2025-06-18", "capabilities": {},
             "clientInfo": {"name": "toolcalling-test", "version": "0"}})
         session._notify("notifications/initialized")
+        self.addCleanup(self._close, session)
         return session
 
-    def test_tools_list_exposes_every_live_tool_name(self):
-        session = self._session()
-        try:
-            listed = session._rpc("tools/list", {})["result"]["tools"]
-        finally:
+    @staticmethod
+    def _close(session):
+        if session.proc.poll() is None:
             session.close()
+        session.proc.stdout.close()
+
+    def test_tools_list_exposes_every_live_tool_name(self):
+        listed = self._session()._rpc("tools/list", {})["result"]["tools"]
         self.assertEqual(sorted(t["name"] for t in listed), sorted(self.tools))
 
     def test_tools_list_serves_the_injected_descriptions(self):
@@ -193,11 +196,7 @@ class MockMcpHandshakeTest(unittest.TestCase):
             path.write_text(json.dumps(
                 {"schema": "toolcalling_descriptions_v1", "version": 1,
                  "variant": "test", "descriptions": variant}))
-            session = self._session(path)
-            try:
-                listed = session._rpc("tools/list", {})["result"]["tools"]
-            finally:
-                session.close()
+            listed = self._session(path)._rpc("tools/list", {})["result"]["tools"]
         self.assertEqual({t["name"]: t["description"] for t in listed}, variant)
 
     def test_baseline_descriptions_cover_exactly_the_live_surface(self):
@@ -208,13 +207,10 @@ class MockMcpHandshakeTest(unittest.TestCase):
 
     def test_every_handler_returns_a_deterministic_stub_recording_the_call(self):
         session = self._session()
-        try:
-            first = {name: session.call_tool(name, {"q": "x"})[0]["text"]
-                     for name in self.tools}
-            second = {name: session.call_tool(name, {"q": "x"})[0]["text"]
-                      for name in self.tools}
-        finally:
-            session.close()
+        first = {name: session.call_tool(name, {"q": "x"})[0]["text"]
+                 for name in self.tools}
+        second = {name: session.call_tool(name, {"q": "x"})[0]["text"]
+                  for name in self.tools}
         self.assertEqual(first, second)
         for name, text in first.items():
             self.assertIn(name, text)

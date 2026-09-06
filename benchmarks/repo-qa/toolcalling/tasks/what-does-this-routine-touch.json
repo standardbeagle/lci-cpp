@@ -1,0 +1,13 @@
+{
+  "schema": "toolcalling_selection_task_v1",
+  "version": 1,
+  "id": "what-does-this-routine-touch",
+  "correct_tool": "side_effects",
+  "confusable_neighbors": [
+    "get_context",
+    "code_insight"
+  ],
+  "control": false,
+  "prompt": "For one routine, tell me what external state it mutates and which other routines it invokes when it runs.",
+  "rationale": "Mutation and invocation effects for one routine are side_effects; get_context reports relationships, not effects."
+}

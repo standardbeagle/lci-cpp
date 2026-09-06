@@ -1,0 +1,13 @@
+{
+  "schema": "toolcalling_selection_task_v1",
+  "version": 1,
+  "id": "locate-by-path-fragment",
+  "correct_tool": "find_files",
+  "confusable_neighbors": [
+    "search",
+    "browse_file"
+  ],
+  "control": false,
+  "prompt": "I only remember a fragment of the path name, something like 'record upsert'. Which paths in this project match that fragment?",
+  "rationale": "Matching a path fragment is find_files; search matches text inside contents, not path names."
+}

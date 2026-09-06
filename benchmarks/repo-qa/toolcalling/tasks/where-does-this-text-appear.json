@@ -1,0 +1,14 @@
+{
+  "schema": "toolcalling_selection_task_v1",
+  "version": 1,
+  "id": "where-does-this-text-appear",
+  "correct_tool": "search",
+  "confusable_neighbors": [
+    "find_files",
+    "get_context",
+    "semantic_annotations"
+  ],
+  "control": false,
+  "prompt": "Somewhere in this project a literal phrase appears in the source text. Find every place that phrase occurs.",
+  "rationale": "Locating literal text across contents is search; find_files matches paths only."
+}

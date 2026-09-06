@@ -1,0 +1,14 @@
+{
+  "schema": "toolcalling_selection_task_v1",
+  "version": 1,
+  "id": "repo-shape-first-look",
+  "correct_tool": "code_insight",
+  "confusable_neighbors": [
+    "context",
+    "index_stats",
+    "git_analysis"
+  ],
+  "control": false,
+  "prompt": "I have never opened this project before. Give me a high-level characterization of the whole thing: how large it is, which languages it uses, and where execution starts.",
+  "rationale": "A whole-repository characterization is code_insight; index_stats reports ingestion counts only and git_analysis reports history, not shape."
+}

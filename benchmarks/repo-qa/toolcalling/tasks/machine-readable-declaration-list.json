@@ -1,0 +1,13 @@
+{
+  "schema": "toolcalling_selection_task_v1",
+  "version": 1,
+  "id": "machine-readable-declaration-list",
+  "correct_tool": "list_symbols",
+  "confusable_neighbors": [
+    "browse_file",
+    "inspect_symbol"
+  ],
+  "control": false,
+  "prompt": "Give me every declaration in one source unit as a flat, machine-readable list I can iterate over programmatically.",
+  "rationale": "A flat enumerable list for one unit is list_symbols; browse_file returns a human-oriented ordered walkthrough."
+}

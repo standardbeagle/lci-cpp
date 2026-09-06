@@ -1,0 +1,13 @@
+{
+  "schema": "toolcalling_selection_task_v1",
+  "version": 1,
+  "id": "browse-one-file-walkthrough",
+  "correct_tool": "browse_file",
+  "confusable_neighbors": [
+    "list_symbols",
+    "find_files"
+  ],
+  "control": false,
+  "prompt": "I have one path in mind. Walk me through what that single source unit declares, in the order the declarations appear in it, with enough of the surrounding lines to read them.",
+  "rationale": "A guided, ordered walkthrough of one known path is browse_file's job; list_symbols would return a flat unordered list and find_files would only locate the path."
+}

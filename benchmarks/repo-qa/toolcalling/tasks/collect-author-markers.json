@@ -1,0 +1,13 @@
+{
+  "schema": "toolcalling_selection_task_v1",
+  "version": 1,
+  "id": "collect-author-markers",
+  "correct_tool": "semantic_annotations",
+  "confusable_neighbors": [
+    "search",
+    "browse_file"
+  ],
+  "control": false,
+  "prompt": "The authors left structured @lci markers in the source. Collect all of them for me.",
+  "rationale": "Harvesting the structured marker set is semantic_annotations; a raw text scan would return unstructured hits."
+}
