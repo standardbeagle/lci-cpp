@@ -533,6 +533,41 @@ class BankCoverageTest(unittest.TestCase):
         )
 
 
+class OraclePatchPathPatternTest(unittest.TestCase):
+    """The schema's oracle_patch.path pattern must admit a real corpus dir name.
+
+    The forged corpora are keyed by their upstream package name, so the
+    prescribed layout for next.js is literally ``patches/next.js/<task-id>.json``
+    -- a dot INSIDE a path segment. The pattern must accept that while still
+    rejecting traversal and absolute paths (discrimination both ways).
+    """
+
+    @staticmethod
+    def _pattern():
+        import re
+
+        with open(vedt.DEFAULT_SCHEMA_PATH) as fh:
+            schema = json.load(fh)
+        return re.compile(
+            schema["properties"]["oracle_patch"]["properties"]["path"]["pattern"]
+        )
+
+    def test_dotted_corpus_dir_is_accepted(self):
+        self.assertTrue(
+            self._pattern().search("patches/next.js/nx-api-1.json"),
+            msg="schema rejects the prescribed patches/<corpus>/<id>.json layout",
+        )
+
+    def test_plain_corpus_dir_still_accepted(self):
+        self.assertTrue(self._pattern().search("patches/pocketbase/pb-ctor-shape.json"))
+
+    def test_traversal_and_absolute_paths_still_rejected(self):
+        pattern = self._pattern()
+        for bad in ("patches/../x.json", "/abs/x.json", "patches/../../x.json",
+                    "patches/next..js/x.json", "patches/x.json.bak"):
+            self.assertIsNone(pattern.search(bad), msg=f"{bad!r} must be rejected")
+
+
 class RealTaskBankTest(unittest.TestCase):
     """The committed bank must be schema+structurally valid without a live tree."""
 
