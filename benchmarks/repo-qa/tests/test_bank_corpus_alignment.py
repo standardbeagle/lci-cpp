@@ -146,7 +146,6 @@ class ReferenceTreeHashPinTest(unittest.TestCase):
                 f"no .work trees on this host (absent: {sorted(absent)}); "
                 f"the recorded-reference verify path is untestable here"
             )
-        verified = 0
         for corpus_id, spec, seed_dir in present:
             with self.subTest(corpus=corpus_id):
                 recorded = spec["reference_tree_hash"][REFERENCE_SEED]
@@ -162,27 +161,15 @@ class ReferenceTreeHashPinTest(unittest.TestCase):
                     f"{corpus_id}: .work manifest tree_hash drifted from the "
                     f"recorded reference",
                 )
-                actual = forge.tree_hash(os.path.join(seed_dir, "tree"))
-                if actual != manifest["tree_hash"]:
-                    raise unittest.SkipTest(
-                        f"{corpus_id}: .work tree drifted from its own "
-                        f"manifest ({actual[:12]} != "
-                        f"{manifest['tree_hash'][:12]}); pre-existing host "
-                        f"pollution of the gitignored tree -- re-forging is "
-                        f"out of scope here"
-                    )
+                # A present tree that drifted from its own manifest is a
+                # host defect (stray __pycache__, partial re-forge): fail
+                # loud so it is repaired, never skipped past.
                 self.assertEqual(
                     corpus.verify_tree_hash(
                         os.path.join(seed_dir, "tree"), manifest
                     ),
                     recorded,
                 )
-                verified += 1
-        if verified == 0:
-            raise unittest.SkipTest(
-                "every present .work tree drifted from its own manifest; "
-                "no intact tree to verify the recorded reference against"
-            )
 
     def test_verify_tree_hash_fails_on_an_altered_tree(self):
         """Discrimination: the verify path must FAIL on drift, not only pass
