@@ -418,6 +418,26 @@ spot, exactly as rule 6's synthetic leak-check fixtures did. So:
   to take.
 <!-- written_at: 2026-09-06T20:30:00Z  source_event: task:01KXSHA3Q1QCHM8T68WS6MS1NC, comment:01M1W63EGNJXC9XMVWAF0ZXXMK (fixedInPlace: first_call_native never assigned; fixture event() now carries part.type=tool), git:cc113ae; recurrence: rule 6 (leak-gate fixtures), rule 9 (per-arm rendering fixtures) -->
 
+### 8b. A "Reproducing" recipe in a committed report is a declaration about a derived artefact — execute it and cmp against the committed output
+
+Rule 8 governs a committed label describing a gitignored tree; a reproduce recipe is the
+same shape with the artefact being the report's own numbers. E2.4's recipe passed
+`rep*/shard*.jsonl` to `analyze_selection.py`, but every `--ledgers` path is treated as one
+rep — so the recipe produced 12 reps with a per-shard spread and a JSON that differed from
+the committed `selection-analysis.json`. Only the reviewer re-running it caught this
+(corrected in `0b47e24`: shards merged into `rep1..3.jsonl`, `--exclude-ledger` carried,
+`--help` no longer citing a nonexistent `--rep-glob`). This is the third recipe/string drift
+in one session — the D5 `--not-run` string and the E2.2 arm note being the others — so the
+class is recurrent, not incidental.
+
+- **Run the recipe verbatim and `cmp` its output against the committed artefact** before
+  the report is committed. Reading it is not executing it.
+- **Any analyzer taking a list of ledgers silently accepts shards as reps.** Two analyzers
+  in `benchmarks/repo-qa/scripts/` take `nargs="+"` ledger lists with no rep-identity
+  check. Until a sidecar `shard` key is refused in code, the recipe is the only guard and
+  must be executed.
+<!-- written_at: 2026-09-06T23:55:00Z  source_event: task:01KXSHA3QKT5RDT4F08RA08H1N, comment:01M1WHW7X2KRSA1V6QJRNC7V2Y (fixedInPlace), comment:01M1WHWNM6ECEJ2TP6X1QF5CHE (systemicObservations costGate), git:0b47e24; recurrence: D5 --not-run string, E2.2 arm note -->
+
 ## 13. A resume ledger must distinguish TERMINAL outcomes from RETRYABLE ones
 
 Skip-if-a-record-exists is the standard idempotence trick for an expensive grid, and it is
@@ -439,3 +459,49 @@ records by hand.
   `scripts/bench.py:253` skips any existing result file while `run_one` writes one for
   every status (filed `01M1W6858497HAM3W5QZ6QRGGV`).
 <!-- written_at: 2026-09-06T20:30:00Z  source_event: task:01KXSHA3Q1QCHM8T68WS6MS1NC, comment:01M1W63EGNJXC9XMVWAF0ZXXMK (fixedInPlace: resume ledger froze provider failures), git:cc113ae, code:benchmarks/repo-qa/scripts/bench.py:253 -->
+
+## 14. The competitor for a tool call is the agent's OWN native toolset, not a neighbouring MCP tool
+
+Rule 12 proved the arms were non-disjoint; this is what the surviving native tools then do
+to a SELECTION bench. E2.4 ran a 384-cell description grid built entirely around confusable
+LCI neighbours and found no rewrite beat the shipped descriptions (A 0.791 weak / 0.711
+strong; B 0.615/0.618; C 0.575/0.592; D 0.695/0.659). Every rewrite arm lost its ground to
+native `glob`/`read` — strong-tier native-first calls rose 21% -> 32-34% — while neighbour
+pressure stayed flat or fell. Three tools (`list_symbols`, `browse_file`, `inspect_symbol`)
+sat at the floor under every arm because native `read` answers those prompts. The
+confusable-neighbour axis the epic was designed around was not where the mass went. D5
+reached the same conclusion from the other direction (native-first dominant in the discovery
+sweep).
+
+- **Any selection or lift bench must carry the agent's native tools as a first-class column
+  before it measures neighbours.** Report native-first call share per arm alongside the
+  selection rate; a description change that does not move it has not moved the thing that
+  decides the call.
+- **A description rewrite competes against `glob`/`read`, not against a sibling.** Write the
+  variant to argue why the tool beats reading the file, and pre-register that as the
+  hypothesis.
+- **A live-smoke mis-selection seen once is not a defect to design an arm around.** E2.3's
+  search-for-callers confusion did not reproduce once in 24 graded baseline runs, yet variant
+  D existed to fix it. Pin a smoke finding with reps before it earns an arm.
+<!-- written_at: 2026-09-06T23:55:00Z  source_event: task:01KXSHA3QKT5RDT4F08RA08H1N, comment:01M1WHMYBBF9XDKQ9KDRBBWMYW (lessons), comment:01M1WHW7X2KRSA1V6QJRNC7V2Y (verified.recommendations item 5), task:01KXQ2V3PW91QTTQ1NTZXH7PR6 (D5 native-first) -->
+
+## 15. A pre-registered lift rule needs a non-degenerate-spread floor — a spread of exactly 0.0 means UNMEASURED, not CERTAIN
+
+"Credit a lift when the gap exceeds the run-to-run spread" is the right shape and has a hole
+at the floor: a baseline that scores 0 in every rep has spread exactly 0.0, so ANY non-zero
+treatment result clears the bar. E2.4 hit it live — `browse_file`/strong/variant D was
+credited a lift off one correct call against a 0/3 baseline. With 3 floor-pinned tasks x 2
+models, 6 of the grid's cells were degenerate by construction. The same arithmetic bites the
+ceiling (baseline correct in every rep).
+
+- **Pre-register a minimum-successes (or minimum-n) gate alongside the spread rule**, so a
+  baseline pinned at floor or ceiling yields `no_effect`, not a lift.
+- **Denominators of 12-15 per cell are the practical ceiling for a 3-rep 16-task grid on the
+  free fleet** (provider noise, rule 13). Almost every honest delta lands inside spread; a
+  rule with a degenerate hole will manufacture the exceptions.
+- **When a pre-registered rule misfires, report the misfire with its mechanism and
+  pre-register the fix for the NEXT run.** E2.4 recorded the degenerate lift in the JSON,
+  excluded it from the Markdown recommendations with the reason, and left the rule as
+  registered — editing a decision rule after seeing the data is the failure this discipline
+  exists to prevent.
+<!-- written_at: 2026-09-06T23:55:00Z  source_event: task:01KXSHA3QKT5RDT4F08RA08H1N, comment:01M1WHMYBBF9XDKQ9KDRBBWMYW (lessons: floor-pinned-baseline hole), comment:01M1WHWNM6ECEJ2TP6X1QF5CHE (passPatterns + suggestions), follow-up:01M1WHXFH8C1HGJQT8FHWS0F16 -->
