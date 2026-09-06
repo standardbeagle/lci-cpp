@@ -39,10 +39,10 @@ def _load_discovery_runner():
         sys.modules["discovery_runner"] = module
         spec.loader.exec_module(module)
     return [importlib.import_module("discovery_runner." + name)
-            for name in ("answer_sets", "cells", "grading", "sweep")]
+            for name in ("answer_sets", "cells", "grading", "rendering", "sweep")]
 
 
-answer_sets, cells, grading, sweep = _load_discovery_runner()
+answer_sets, cells, grading, rendering, sweep = _load_discovery_runner()
 
 
 # --- fixtures ---------------------------------------------------------------
@@ -518,6 +518,117 @@ class SweepTest(unittest.TestCase):
                         for lvl in ("tool", "agent") for arm in ("treatment", "baseline")})
         with self.assertRaises(sweep.BrokenCellError):
             sweep.run_sweep(plan, answer_key_for=boom, executor=ex, run_dir=self.run_dir)
+
+
+
+# --- tool-payload rendering -------------------------------------------------
+#
+# The grader only ever counts `path:line` citations, so an arm whose raw tool
+# output is handed to it unrendered scores 0.0 BY CONSTRUCTION -- not because it
+# was wrong. The baseline's grep output is rendered; the treatment's LCI JSON
+# must be rendered to the same syntax or the instrument is rigged. These payloads
+# are the REAL shapes captured from the live MCP surface against
+# real_projects/go/pocketbase, not invented fixtures.
+
+_CALLERS_PAYLOAD = json.dumps({
+    "callers": [{"call_count": 1, "call_lines": [616],
+                 "caller": "NewTestAppWithConfig", "caller_type": "function",
+                 "file_path": "tests/app.go", "line": 94}],
+    "definitions": [{"file_path": "core/app.go", "line": 1333,
+                     "name": "OnRecordAuthRequest", "type": "method"}],
+    "dynamic_call_sites": [{"caller": "recordAuthResponse",
+                            "file_path": "apis/record_helpers.go", "line": 71}],
+    "dynamic_count": 1, "symbol": "OnRecordAuthRequest",
+    "total_call_sites": 1, "total_callers": 1, "truncated": False,
+})
+
+_GET_CONTEXT_PAYLOAD = json.dumps({
+    "contexts": [{"call_tree": {"children": [], "root": "IsDev"},
+                  "callers": ["<anonymous>", "getLoggerMinLevel"],
+                  "definition": "IsDev", "file_path": "core/base.go",
+                  "is_exported": True, "line": 594, "object_id": "eP",
+                  "symbol_name": "IsDev", "symbol_type": "method"}],
+    "count": 1,
+})
+
+_LIST_SYMBOLS_PAYLOAD = json.dumps({
+    "has_more": False, "showing": 1,
+    "symbols": [{"file": "core/base.go", "is_exported": True, "line": 594,
+                 "name": "IsDev", "object_id": "eP", "type": "method"}],
+    "total": 1,
+})
+
+_SEARCH_PAYLOAD = json.dumps({
+    "results": [{"file": "core/base.go",
+                 "hits": [{"line": 591, "match": "IsDev"},
+                          {"line": 594, "match": "IsDev", "sym": "IsDev"}]}],
+})
+
+
+class ToolAnswerRenderingTest(unittest.TestCase):
+    def _cited(self, text):
+        return grading.parse_answer_locations(text)
+
+    def test_callers_payload_renders_call_sites_as_citations(self):
+        text = rendering.render_tool_answer(
+            "callers", "exhaustive_callers", _CALLERS_PAYLOAD)
+        cited = self._cited(text)
+        self.assertIn(("tests/app.go", 616), cited)
+        self.assertIn(("apis/record_helpers.go", 71), cited)
+
+    def test_callers_payload_renders_caller_definitions_for_depth_shape(self):
+        text = rendering.render_tool_answer(
+            "callers", "transitive_callers_depth2", _CALLERS_PAYLOAD)
+        self.assertIn(("tests/app.go", 94), self._cited(text))
+
+    def test_get_context_payload_renders_definition_locations(self):
+        text = rendering.render_tool_answer(
+            "get_context", "implementations_lookup", _GET_CONTEXT_PAYLOAD)
+        self.assertIn(("core/base.go", 594), self._cited(text))
+
+    def test_list_symbols_and_search_payloads_render(self):
+        self.assertIn(("core/base.go", 594), self._cited(
+            rendering.render_tool_answer(
+                "list_symbols", "definition_lookup", _LIST_SYMBOLS_PAYLOAD)))
+        self.assertIn(("core/base.go", 591), self._cited(
+            rendering.render_tool_answer(
+                "search", "literal_string_search", _SEARCH_PAYLOAD)))
+
+    def test_unknown_tool_shape_fails_loud_never_empty(self):
+        with self.assertRaises(rendering.UncitableToolResponse):
+            rendering.render_tool_answer(
+                "code_insight", "exhaustive_callers", json.dumps({"anything": 1}))
+
+    def test_pathless_location_payload_is_uncitable_not_empty(self):
+        # get_context locations that carry only {FileID, Line, Column} -- the
+        # product gap tracked as 01M1VR4TBD7GXAXWBQXV2MCR49. Must name itself,
+        # not silently return an uncited (0.0-scoring) answer.
+        payload = json.dumps({"contexts": [
+            {"symbol_name": "IsDev", "file_id": 12, "line": 594, "column": 21}]})
+        with self.assertRaises(rendering.UncitableToolResponse) as ctx:
+            rendering.render_tool_answer(
+                "get_context", "implementations_lookup", payload)
+        self.assertEqual(ctx.exception.reason, "uncitable_location")
+
+    def test_non_json_payload_fails_loud(self):
+        with self.assertRaises(rendering.UncitableToolResponse):
+            rendering.render_tool_answer(
+                "callers", "exhaustive_callers", "not json at all")
+
+
+class ToolRoutingTest(unittest.TestCase):
+    def test_call_site_families_route_through_the_live_callers_tool(self):
+        self.assertEqual(rendering.tool_for("exhaustive_callers")[0], "callers")
+        self.assertEqual(
+            rendering.tool_for("transitive_callers_depth2")[0], "callers")
+
+    def test_every_registered_task_shape_has_a_route(self):
+        registry = json.load(open(os.path.join(
+            BENCH_ROOT, "discovery", "predictions.json"), encoding="utf-8"))
+        for family in registry["families"]:
+            self.assertIsNotNone(rendering.tool_for(family["task_shape"])[0],
+                                 family["task_shape"])
+
 
 
 if __name__ == "__main__":
