@@ -1,0 +1,1 @@
+{"schema": "edit_oracle_patch_v1", "task_id": "skl-module-2", "files": {"sklearn/externals/_scipy/sparse/csgraph/__init__.py": "from ._laplacian import laplacian\n\n__all__ = [\"laplacian\"]\n"}}

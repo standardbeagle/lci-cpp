@@ -19,9 +19,8 @@
   },
   "behavior": {
     "command": [
-      "python",
-      "-c",
-      "import sklearn"
+      "{python}",
+      "{edits_root}/patches/scikit-learn/skl-module-2.probe.py"
     ],
     "assertion": "the module exposes a curated __all__",
     "discrimination": {
@@ -73,5 +72,19 @@
     ],
     "resolved": true,
     "notes": "Two independent passes selected the same live exemplars; no disagreement to resolve."
+  },
+  "oracle_patch": {
+    "path": "patches/scikit-learn/skl-module-2.json",
+    "format": "edit_oracle_patch_v1"
+  },
+  "existing_suite": {
+    "command": [
+      "{python}",
+      "-m",
+      "compileall",
+      "-q",
+      "sklearn"
+    ],
+    "notes": "unbuilt Cython tree: byte-compile is the only whole-corpus check that runs (import sklearn can never succeed on the unbuilt git-archive export; scipy/sklearn are not importable on the host); measured wall-clock on the forged seed-7 tree: python3 -m compileall -q sklearn ~8.6s, well under DEFAULT_TIMEOUT=120"
   }
 }
