@@ -83,6 +83,31 @@ class TaskSetShapeTest(unittest.TestCase):
                 self.assertIn(neighbor, self.tools)
                 self.assertNotEqual(neighbor, task["correct_tool"])
 
+    def test_every_task_cites_live_description_evidence_for_its_answer(self):
+        """The answer key must be keyed to what the tool ACTUALLY does.
+
+        Review attempt 1 found three tasks whose "correct" tool could not
+        serve the stated need, because the baseline descriptions had been
+        rewritten by hand and the tasks were keyed to the invention. Each task
+        therefore quotes a VERBATIM fragment of the live manifest description
+        of its correct tool; a fabricated capability has no such fragment.
+        """
+        live = {t["name"]: t["description"]
+                for t in json.loads(MANIFEST.read_text())["tools"]}
+        for task in self.tasks:
+            evidence = task["answer_key_evidence"]
+            self.assertTrue(evidence.strip(), task["id"])
+            self.assertIn(
+                evidence, live[task["correct_tool"]],
+                f"{task['id']}: answer-key evidence is not in the live description "
+                f"of its correct tool")
+
+    def test_evidence_gate_rejects_an_invented_capability(self):
+        live = {t["name"]: t["description"]
+                for t in json.loads(MANIFEST.read_text())["tools"]}
+        invented = "returns the lines surrounding a file position"
+        self.assertNotIn(invented, live["context"])
+
     def test_every_live_tool_has_a_correct_selection_task(self):
         self.assertEqual(
             sorted({t["correct_tool"] for t in self.tasks}), sorted(self.tools))
@@ -204,6 +229,24 @@ class MockMcpHandshakeTest(unittest.TestCase):
         self.assertEqual(sorted(payload["descriptions"]), sorted(self.tools))
         for text in payload["descriptions"].values():
             self.assertTrue(text.strip())
+
+    def test_baseline_descriptions_are_the_live_descriptions_verbatim(self):
+        """The baseline arm must measure the REAL surface, not a paraphrase.
+
+        A hand-written baseline is already a wording variant, so the E2.2
+        deltas would be measured against an arm nobody ships, and any invented
+        capability in it silently re-keys the answer set.
+        """
+        live = {t["name"]: t["description"]
+                for t in json.loads(MANIFEST.read_text())["tools"]}
+        payload = json.loads(BASELINE_DESCRIPTIONS.read_text())
+        self.assertEqual(payload["descriptions"], live)
+
+    def test_verbatim_gate_catches_a_reworded_baseline(self):
+        live = {t["name"]: t["description"]
+                for t in json.loads(MANIFEST.read_text())["tools"]}
+        reworded = dict(live, search="Find text in the corpus.")
+        self.assertNotEqual(reworded, live)
 
     def test_every_handler_returns_a_deterministic_stub_recording_the_call(self):
         session = self._session()

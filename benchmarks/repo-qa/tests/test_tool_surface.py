@@ -9,6 +9,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = ROOT / "benchmarks/repo-qa/scripts/enumerate_tool_surface.py"
 MANIFEST = ROOT / "benchmarks/repo-qa/comprehension/surface/tool-surface.json"
+LCI_BIN = ROOT / "build/release/src/lci"
+LIVE_CORPUS = ROOT / "benchmarks/repo-qa/.work/pocketbase-base"
 SPEC = importlib.util.spec_from_file_location("enumerate_tool_surface", SCRIPT)
 surface = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader
@@ -39,6 +41,34 @@ class ToolSurfaceTest(unittest.TestCase):
         covered = {case["tool"] for case in cases}
         live = {tool["name"] for tool in self.manifest["tools"]}
         self.assertEqual(covered, live)
+
+    def test_manifest_equals_the_live_tools_list(self):
+        """A committed snapshot is only as fresh as its last probe.
+
+        Nothing else in the suite compares the manifest to the binary, so a
+        tool added to the server (callers, 01ba88f) silently left every bench
+        built on this file measuring a tool set that no longer exists. This
+        gate SKIPS with a named reason when the binary or corpus is absent --
+        it must never pass vacuously by treating absence as agreement.
+        """
+        if not LCI_BIN.exists():
+            self.skipTest(
+                f"live surface unverified: no LCI binary at {LCI_BIN}; "
+                "build it (cmake --build build/release --target lci) to run this gate")
+        if not LIVE_CORPUS.is_dir():
+            self.skipTest(
+                f"live surface unverified: no corpus at {LIVE_CORPUS}; "
+                "the server needs a directory to serve tools/list from")
+        session = surface.McpSession(LCI_BIN, LIVE_CORPUS)
+        try:
+            live = session.rpc("tools/list")["tools"]
+        finally:
+            session.close()
+        committed = {t["name"]: t["description"] for t in self.manifest["tools"]}
+        self.assertEqual(
+            {t["name"]: t.get("description", "") for t in live}, committed,
+            "committed tool-surface manifest no longer matches the live tools/list; "
+            "re-run scripts/enumerate_tool_surface.py")
 
     def test_manifest_is_canonical_and_byte_stable(self):
         self.assertEqual(MANIFEST.read_text(), surface.canonical_json(self.manifest))
