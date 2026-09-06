@@ -10,5 +10,6 @@
   ],
   "control": false,
   "prompt": "I have never opened this project before. Give me a high-level characterization of the whole thing: how large it is, which languages it uses, and where execution starts.",
-  "rationale": "A whole-repository characterization is code_insight; index_stats reports ingestion counts only and git_analysis reports history, not shape."
+  "rationale": "A whole-repository characterization is code_insight; index_stats reports ingestion counts only and git_analysis reports history, not shape.",
+  "answer_key_evidence": "Comprehensive codebase intelligence system for AI agents"
 }

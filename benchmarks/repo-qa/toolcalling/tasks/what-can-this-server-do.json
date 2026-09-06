@@ -9,5 +9,6 @@
   ],
   "control": false,
   "prompt": "Describe the operations this server offers and what each one is for, so I can choose correctly on my next request.",
-  "rationale": "A capability description is info; index_stats and code_insight describe data, not the server's operations."
+  "rationale": "A capability description is info; index_stats and code_insight describe data, not the server's operations.",
+  "answer_key_evidence": "Get detailed help and examples for any tool"
 }

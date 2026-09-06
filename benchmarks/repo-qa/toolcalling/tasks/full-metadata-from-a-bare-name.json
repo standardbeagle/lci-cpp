@@ -1,0 +1,15 @@
+{
+  "schema": "toolcalling_selection_task_v1",
+  "version": 1,
+  "id": "full-metadata-from-a-bare-name",
+  "correct_tool": "inspect_symbol",
+  "confusable_neighbors": [
+    "get_context",
+    "callers",
+    "list_symbols"
+  ],
+  "control": false,
+  "prompt": "All I have is one exact routine name typed out by hand. Give me everything the index knows about it in a single lookup: signature, documentation, complexity, what it calls and what reaches it, its type hierarchy and scope, and a bounded excerpt of its source.",
+  "rationale": "The live contract takes a NAME or an object id and returns all metadata in one payload. get_context is keyed by object ids from a previous result, which the prompt says it does not have; that is the discriminator between the pair on the live surface.",
+  "answer_key_evidence": "Given a name or object ID, returns all metadata"
+}

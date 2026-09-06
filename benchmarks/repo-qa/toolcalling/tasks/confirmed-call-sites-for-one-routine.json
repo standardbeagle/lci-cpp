@@ -1,0 +1,15 @@
+{
+  "schema": "toolcalling_selection_task_v1",
+  "version": 1,
+  "id": "confirmed-call-sites-for-one-routine",
+  "correct_tool": "callers",
+  "confusable_neighbors": [
+    "inspect_symbol",
+    "search",
+    "side_effects"
+  ],
+  "control": false,
+  "prompt": "For one exact routine name, list every place it is actually invoked from, grouped by the routine that encloses each invocation, with the line of each one and how many times. I want the resolved call graph, not text matches, and I want anything unresolved kept separate.",
+  "rationale": "A resolved call-graph query grouped by enclosing function, with unresolved dispatch listed separately, is exactly this tool's contract. inspect_symbol also reports who calls the symbol but as one field of a full metadata dump, not grouped with call-site lines and counts; search would return text matches, which is what the prompt explicitly rules out.",
+  "answer_key_evidence": "confirmed callers grouped by enclosing function with call-site lines and counts"
+}

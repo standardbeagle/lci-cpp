@@ -6,5 +6,6 @@
   "confusable_neighbors": [],
   "control": true,
   "prompt": "Report the number of entries currently held for this project.",
-  "rationale": "CONTROL: an entry count has exactly one home regardless of how the operations are worded, so any wording-induced change here is harness noise, not a real selection effect."
+  "rationale": "CONTROL: an entry count has exactly one home regardless of how the operations are worded, so any wording-induced change here is harness noise, not a real selection effect.",
+  "answer_key_evidence": "Comprehensive index status and health monitoring"
 }

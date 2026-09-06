@@ -1,0 +1,14 @@
+{
+  "schema": "toolcalling_selection_task_v1",
+  "version": 1,
+  "id": "pre-commit-change-quality",
+  "correct_tool": "git_analysis",
+  "confusable_neighbors": [
+    "code_insight",
+    "side_effects"
+  ],
+  "control": false,
+  "prompt": "I am about to commit. Take the code I have added and modified and weigh it against the rest of the project: is any of it duplicating logic that already exists, does any of it name things inconsistently with the surrounding code, and is any of it too complicated?",
+  "rationale": "Comparing new and modified code against the existing codebase for duplication, naming and complexity is this tool's stated job. code_insight characterizes the repository as a whole and has no notion of what changed.",
+  "answer_key_evidence": "Compares new/modified code against the existing codebase to find duplicates, naming inconsistencies, and function complexity issues"
+}

@@ -9,5 +9,6 @@
   ],
   "control": false,
   "prompt": "For one routine, tell me what external state it mutates and which other routines it invokes when it runs.",
-  "rationale": "Mutation and invocation effects for one routine are side_effects; get_context reports relationships, not effects."
+  "rationale": "Mutation and invocation effects for one routine are side_effects; get_context reports relationships, not effects.",
+  "answer_key_evidence": "Query function purity and side effects"
 }

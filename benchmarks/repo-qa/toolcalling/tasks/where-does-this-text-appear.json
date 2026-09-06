@@ -10,5 +10,6 @@
   ],
   "control": false,
   "prompt": "Somewhere in this project a literal phrase appears in the source text. Find every place that phrase occurs.",
-  "rationale": "Locating literal text across contents is search; find_files matches paths only."
+  "rationale": "Locating literal text across contents is search; find_files matches paths only.",
+  "answer_key_evidence": "Sub-millisecond in-memory semantic code search"
 }

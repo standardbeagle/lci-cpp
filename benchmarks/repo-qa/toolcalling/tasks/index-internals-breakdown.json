@@ -1,0 +1,14 @@
+{
+  "schema": "toolcalling_selection_task_v1",
+  "version": 1,
+  "id": "index-internals-breakdown",
+  "correct_tool": "debug_info",
+  "confusable_neighbors": [
+    "index_stats",
+    "code_insight"
+  ],
+  "control": false,
+  "prompt": "Relationship queries keep coming back empty and I want to know what the ingester really stored. Show me the deep internal breakdown: how declarations are distributed, the type breakdown, and the reference statistics.",
+  "rationale": "Symbol distribution, type breakdown and reference statistics for troubleshooting an index that returns empty relationships is this tool's stated job. index_stats reports progress and health, not these internals.",
+  "answer_key_evidence": "Shows symbol distribution, type breakdown, reference statistics"
+}

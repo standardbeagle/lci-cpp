@@ -9,5 +9,6 @@
   ],
   "control": false,
   "prompt": "I have one path in mind. Walk me through what that single source unit declares, in the order the declarations appear in it, with enough of the surrounding lines to read them.",
-  "rationale": "A guided, ordered walkthrough of one known path is browse_file's job; list_symbols would return a flat unordered list and find_files would only locate the path."
+  "rationale": "A guided, ordered walkthrough of one known path is browse_file's job; list_symbols would return a flat unordered list and find_files would only locate the path.",
+  "answer_key_evidence": "Browse all symbols in a file - the outline view"
 }

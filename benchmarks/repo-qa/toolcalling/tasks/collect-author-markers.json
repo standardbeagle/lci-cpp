@@ -9,5 +9,6 @@
   ],
   "control": false,
   "prompt": "The authors left structured @lci markers in the source. Collect all of them for me.",
-  "rationale": "Harvesting the structured marker set is semantic_annotations; a raw text scan would return unstructured hits."
+  "rationale": "Harvesting the structured marker set is semantic_annotations; a raw text scan would return unstructured hits.",
+  "answer_key_evidence": "Query symbols by semantic labels or categories"
 }

@@ -9,5 +9,6 @@
   ],
   "control": false,
   "prompt": "Before I ask anything else: is this project fully ingested yet, and how many entries are currently held?",
-  "rationale": "Readiness and entry counts are index_stats; debug_info is per path and info describes capabilities."
+  "rationale": "Readiness and entry counts are index_stats; debug_info is per path and info describes capabilities.",
+  "answer_key_evidence": "Use this to diagnose 'index not ready' issues"
 }

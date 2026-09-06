@@ -9,5 +9,6 @@
   ],
   "control": false,
   "prompt": "I only remember a fragment of the path name, something like 'record upsert'. Which paths in this project match that fragment?",
-  "rationale": "Matching a path fragment is find_files; search matches text inside contents, not path names."
+  "rationale": "Matching a path fragment is find_files; search matches text inside contents, not path names.",
+  "answer_key_evidence": "searches file paths, not content"
 }

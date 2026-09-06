@@ -1,0 +1,14 @@
+{
+  "schema": "toolcalling_selection_task_v1",
+  "version": 1,
+  "id": "package-a-handoff-manifest",
+  "correct_tool": "context",
+  "confusable_neighbors": [
+    "get_context",
+    "code_insight"
+  ],
+  "control": false,
+  "prompt": "I am about to hand this investigation to a different agent session. Package the small set of code objects I have gathered into one compact manifest they can later rehydrate into full detail, so they do not repeat the exploration I already did.",
+  "rationale": "Save/load of compact manifests for agent handoff is this tool's stated purpose. get_context hydrates ids for the caller now; it does not persist a manifest for a later session.",
+  "answer_key_evidence": "Capture and hydrate code context manifests for efficient agent handoff"
+}

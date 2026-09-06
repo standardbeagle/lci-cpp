@@ -1,0 +1,15 @@
+{
+  "schema": "toolcalling_selection_task_v1",
+  "version": 1,
+  "id": "hydrate-identifiers-from-a-prior-lookup",
+  "correct_tool": "get_context",
+  "confusable_neighbors": [
+    "inspect_symbol",
+    "context",
+    "callers"
+  ],
+  "control": false,
+  "prompt": "My previous query handed back a list of opaque object identifiers. Take those identifiers and give me the detail behind each one - signature, path, line numbers, source excerpt - so I never have to open the files.",
+  "rationale": "The live contract keys this tool on the 'id' parameter with object ids from prior results. inspect_symbol accepts a bare name, so the discriminator is that the requester holds identifiers rather than a name.",
+  "answer_key_evidence": "Use the 'id' parameter with object IDs from search results"
+}
