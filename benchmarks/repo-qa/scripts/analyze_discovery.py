@@ -178,6 +178,78 @@ def _sign_test(per_cell):
     }
 
 
+def _mcnemar_completion(level_rows_by_run):
+    """Paired completion outcomes: cells where exactly one arm did not finish."""
+    pairs = {}
+    for rows in level_rows_by_run.values():
+        for row in rows:
+            pairs.setdefault(row["slug"], {})[row["arm"]] = (row["status"] == "dnf")
+    only_baseline = 0
+    only_treatment = 0
+    for arms in pairs.values():
+        if "treatment" not in arms or "baseline" not in arms:
+            continue
+        if arms["baseline"] and not arms["treatment"]:
+            only_baseline += 1
+        elif arms["treatment"] and not arms["baseline"]:
+            only_treatment += 1
+    discordant = only_baseline + only_treatment
+    return {
+        "paired_cells": len(pairs),
+        "baseline_only_dnf": only_baseline,
+        "treatment_only_dnf": only_treatment,
+        "discordant": discordant,
+        "two_sided_p": _binom_two_sided(only_baseline, discordant),
+    }
+
+
+def _additional_requirement(threshold, sign_test, per_cell, mcnemar):
+    """Evaluate the registry's second gate. Effect size alone never confirms."""
+    requirement = (threshold or {}).get("additional_requirement")
+    if not requirement:
+        return None
+    kind = requirement.get("kind")
+    value = requirement.get("value")
+    block = {"kind": kind, "value": value,
+             "description": requirement.get("description"), "met": False,
+             "evidence": None}
+    if kind == "sign_test_p":
+        p = sign_test.get("two_sided_p")
+        block["evidence"] = {"treatment_wins": sign_test["treatment_wins"],
+                             "discordant": sign_test["discordant"],
+                             "two_sided_p": p}
+        block["met"] = p is not None and p < value
+    elif kind == "unanimous_cells":
+        graded = [d for d in per_cell.values() if d is not None]
+        dissent = sum(1 for d in graded if d < 0)
+        block["evidence"] = {"cells_graded": len(graded), "dissenting_cells": dissent,
+                             "required_cells": value}
+        block["met"] = len(graded) >= value and dissent == 0
+    elif kind == "mcnemar_p":
+        p = mcnemar.get("two_sided_p")
+        block["evidence"] = mcnemar
+        block["met"] = p is not None and p < value
+    else:
+        block["evidence"] = {"note": "unknown requirement kind; not evaluated"}
+        block["met"] = None
+    return block
+
+
+def _registry_verdict(threshold, threshold_met, requirement):
+    """confirmed / falsified / effect_met_significance_not_reached."""
+    if not threshold or threshold_met is None:
+        return "not_evaluable"
+    if not threshold_met:
+        return "falsified"
+    if requirement is None:
+        return "confirmed"
+    if requirement["met"] is True:
+        return "confirmed"
+    if requirement["met"] is None:
+        return "not_evaluable"
+    return "effect_met_significance_not_reached"
+
+
 def _per_cell_deltas(level_rows, metric):
     """Mean per-cell delta across runs, keyed by slug."""
     key = _METRIC_KEYS.get(metric, "f1")
@@ -251,6 +323,9 @@ def _analyze_level(level_rows_by_run, threshold):
         arms_across[arm] = block
 
     per_cell = _per_cell_deltas(level_rows_by_run, metric)
+    sign_test = _sign_test(per_cell)
+    mcnemar = _mcnemar_completion(level_rows_by_run)
+    requirement = _additional_requirement(threshold, sign_test, per_cell, mcnemar)
     observed = sorted({row["slug"] for rows in level_rows_by_run.values()
                        for row in rows})
     return {
@@ -271,7 +346,12 @@ def _analyze_level(level_rows_by_run, threshold):
         "separation": separation,
         "separation_claimable": claimable,
         "per_cell_delta": per_cell,
-        "sign_test": _sign_test(per_cell),
+        "sign_test": sign_test,
+        "mcnemar_completion": mcnemar,
+        "additional_requirement": requirement,
+        # The registry's own two-part bar. Effect size alone never confirms a
+        # pre-registered prediction that also carries a significance gate.
+        "registry_verdict": _registry_verdict(threshold, threshold_met, requirement),
     }
 
 
@@ -356,7 +436,9 @@ def analyze(registry, cohorts, run_dirs, not_run_reasons=None):
             "threshold": entry.get("threshold"),
             "predicted_outcome": predicted,
             "prediction_confidence": prediction.get("confidence"),
-            "epic_intuition": (entry.get("epic_intuition") or {}).get("outcome"),
+            "epic_intuition": (entry["epic_intuition"].get("outcome")
+                               if isinstance(entry.get("epic_intuition"), dict)
+                               else entry.get("epic_intuition")),
         }
 
         # RULE 2: never ran => NOT RUN, with its reason, and no aggregates.
