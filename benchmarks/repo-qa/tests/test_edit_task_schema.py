@@ -386,45 +386,40 @@ class ValidatorTest(unittest.TestCase):
         self.assertTrue(any("exceeds file length" in p for p in self.fx.run()))
 
     # ---- oracle patch / existing suite (answer key) --------------------
-    def test_missing_oracle_patch_field_is_allowed_by_default(self):
-        # The answer-key fields are OPTIONAL until M5 flips them: S3.2b
-        # iterates the bank without them, so a missing field must pass.
+    def test_missing_oracle_patch_field_fails(self):
+        # The answer-key fields are REQUIRED (S3.3b-M5): a task shipping
+        # without an oracle patch must fail PLAIN validation at authoring
+        # time, not ORACLE_PATCH_ABSENT at S3.6 run time.
         del self.fx.task["oracle_patch"]
         self.fx._flush_task()
-        self.assertEqual(self.fx.run(), [])
-
-    def test_missing_oracle_patch_field_fails_with_require_answer_key(self):
-        del self.fx.task["oracle_patch"]
-        self.fx._flush_task()
-        problems = self.fx.run(require_answer_key=True)
+        problems = self.fx.run()
         self.assertTrue(
-            any("oracle_patch" in p and "answer key" in p for p in problems),
+            any("schema violation" in p and "oracle_patch" in p
+                for p in problems),
             msg="\n".join(problems),
         )
 
-    def test_missing_existing_suite_field_fails_with_require_answer_key(self):
+    def test_missing_existing_suite_field_fails(self):
         del self.fx.task["existing_suite"]
         self.fx._flush_task()
-        problems = self.fx.run(require_answer_key=True)
+        problems = self.fx.run()
         self.assertTrue(
-            any("existing_suite" in p and "answer key" in p for p in problems),
+            any("schema violation" in p and "existing_suite" in p
+                for p in problems),
             msg="\n".join(problems),
         )
 
-    def test_require_answer_key_flag_reports_missing_fields(self):
-        # Bank level: a task lacking the answer-key fields is reported when
-        # --require-answer-key is set, and passes without it.
+    def test_missing_answer_key_fields_fail_bank_validation(self):
+        # Bank level: a task lacking the answer-key fields fails PLAIN bank
+        # validation; no enforcement flag is needed once the schema requires
+        # them (the M1 --require-answer-key opt-in is subsumed).
         del self.fx.task["oracle_patch"]
         del self.fx.task["existing_suite"]
         self.fx._flush_task()
-        # A one-task bank always trips the category-coverage gate; the
-        # discrimination here is the answer-key problem specifically.
-        self.assertFalse(
-            any("answer key" in p for p in self.fx.run_bank())
-        )
-        problems = self.fx.run_bank(require_answer_key=True)
+        problems = self.fx.run_bank()
         self.assertTrue(
-            any("answer key" in p for p in problems),
+            any("schema violation" in p and "oracle_patch" in p
+                for p in problems),
             msg="\n".join(problems),
         )
 
@@ -583,6 +578,13 @@ class RealTaskBankTest(unittest.TestCase):
         )
         for corpus, count in summary["per_corpus"].items():
             self.assertGreater(count, 0, msg=f"{corpus} has no tasks")
+    def test_every_task_carries_answer_key(self):
+        # M5 close-out: every committed task carries oracle_patch +
+        # existing_suite, so the bank passes with the answer key REQUIRED.
+        problems, _summary = vedt.validate_bank(
+            require_live=False, require_answer_key=True
+        )
+        self.assertEqual(problems, [], msg="\n".join(problems))
 
 
 if __name__ == "__main__":
