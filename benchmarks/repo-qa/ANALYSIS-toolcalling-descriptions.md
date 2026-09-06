@@ -40,7 +40,9 @@ deltas (-0.093, -0.119) exceed that tier's spread.**
 ### The mechanism: rewrites cost ground to `native:*`, not to neighbours
 
 `native:*` first calls — the agent opening with its built-in glob/read/bash
-instead of any offered tool — as a share of the graded denominator:
+instead of any offered tool — as a share of the graded denominator (confusable
+and control cells pooled, so 41 = 38 confusable + 3 control; the JSON's `g4`
+figures use the confusable tier alone):
 
 | variant | weak | strong |
 |---|---|---|
@@ -216,12 +218,33 @@ python3 benchmarks/repo-qa/scripts/selection_ab.py run --live \
   --records benchmarks/repo-qa/.work/toolcalling/rep1/shard0.jsonl \
   --retry-provider-failures
 
-# 3. the analysis (deterministic: run twice, cmp)
+# 3. merge the four shards of a rep into ONE ledger per rep. The analyzer
+#    treats every --ledgers path as a rep; passing rep*/shard*.jsonl yields
+#    12 "reps" and a spread taken across 32-cell shards, which is not the
+#    run-to-run spread the decision rule is defined on.
+for r in 1 2 3; do
+  cat benchmarks/repo-qa/.work/toolcalling/rep$r/shard*.jsonl \
+    > benchmarks/repo-qa/.work/toolcalling/rep$r.jsonl
+  # rep$r.meta.json: {"rep": $r, "shards": 4, "started_at": <earliest shard
+  # started_at>, "predictions_commit": "db9f200..."}
+done
+
+# 4. the analysis (deterministic: run twice, cmp)
 python3 benchmarks/repo-qa/scripts/analyze_selection.py \
-  --ledgers benchmarks/repo-qa/.work/toolcalling/rep*/shard*.jsonl \
+  --ledgers benchmarks/repo-qa/.work/toolcalling/rep1.jsonl \
+            benchmarks/repo-qa/.work/toolcalling/rep2.jsonl \
+            benchmarks/repo-qa/.work/toolcalling/rep3.jsonl \
   --predictions-commit-time 2026-09-06T20:43:08Z \
+  --exclude-ledger '.work/toolcalling/records.jsonl=E2.3 smoke records: written before the mock served real input schemas (01M1W40XF2E0HKT05SS51A5PJ2) and carrying no time evidence, so they are not comparable to the E2.4 grid' \
   --out benchmarks/repo-qa/toolcalling/analysis/selection-analysis.json
 ```
+
+Time evidence: `selection_ab.py` writes no per-record timestamp, so the
+ordering gate reads each rep's `.meta.json` sidecar (`started_at`, written by
+the run wrapper when the shard opened; the sidecar mtimes match). The
+`written_at` field inside `predictions.json` (`20:50:00Z`) is an author-typed
+estimate and is later than both the commit and the first ledger; the commit
+time `20:43:08Z` is the authoritative ordering evidence.
 
 Ledgers live under `benchmarks/repo-qa/.work/toolcalling/` and are gitignored;
 the committed artifact is the aggregate JSON, which holds no traces.

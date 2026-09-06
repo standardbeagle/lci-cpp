@@ -489,8 +489,9 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--ledgers", nargs="+", required=True,
-                        help="one JSONL ledger per rep (or per shard; shards of the "
-                             "same rep are merged by passing them as one --rep-glob)")
+                        help="one JSONL ledger per REP. Every path is treated as a rep, so "
+                             "shards of one rep must be concatenated into a single "
+                             "ledger (with a merged .meta.json sidecar) before analysis")
     parser.add_argument("--tasks-dir", default=TASKS_DIR)
     parser.add_argument("--predictions", default=PREDICTIONS)
     parser.add_argument("--predictions-commit-time", required=True,
