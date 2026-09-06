@@ -1,0 +1,76 @@
+{
+  "api_impact": {
+    "detail": "no impacted symbols declared or derivable; the public-API blast radius was NOT evaluated",
+    "escaped_refs": [],
+    "passed": false,
+    "reason": "API_IMPACT_NOT_EVALUATED",
+    "schema": "api_impact_v1",
+    "symbols": []
+  },
+  "changed_path": {
+    "allow": [
+      "sklearn/**"
+    ],
+    "changed": [
+      "sklearn/manifold/_locally_linear.py"
+    ],
+    "detail": "all 1 changed file(s) within the declared blast radius",
+    "max_files": 2,
+    "out_of_scope": [],
+    "passed": true,
+    "reason": "WITHIN_SCOPE",
+    "schema": "changed_path_v1"
+  },
+  "diagnostic": "API_IMPACT_NOT_EVALUATED: no impacted symbols declared or derivable; the public-API blast radius was NOT evaluated",
+  "discrimination": {
+    "detail": "behaviour is RED pristine and GREEN patched (the edit discriminates)",
+    "passed": true,
+    "patched": {
+      "argv": [
+        "/usr/bin/python3",
+        "/home/beagle/work/core/lci-cpp/benchmarks/repo-qa/edits/patches/scikit-learn/skl-retry-2.probe.py"
+      ],
+      "exit_code": 0,
+      "observed": "green",
+      "reason": null,
+      "stderr_tail": "",
+      "stdout_tail": ""
+    },
+    "pristine": {
+      "argv": [
+        "/usr/bin/python3",
+        "/home/beagle/work/core/lci-cpp/benchmarks/repo-qa/edits/patches/scikit-learn/skl-retry-2.probe.py"
+      ],
+      "exit_code": 1,
+      "observed": "red",
+      "reason": null,
+      "stderr_tail": "probe: barycenter_weights in sklearn/manifold/_locally_linear.py validates its arguments with `assert` instead of raising an explanatory ValueError\n",
+      "stdout_tail": ""
+    },
+    "reason": "DISCRIMINATES",
+    "schema": "discrimination_v1"
+  },
+  "existing_suite": {
+    "detail": "existing suite is green on the patched tree",
+    "passed": true,
+    "reason": "SUITE_GREEN",
+    "run": {
+      "argv": [
+        "/usr/bin/python3",
+        "-m",
+        "compileall",
+        "-q",
+        "sklearn"
+      ],
+      "exit_code": 0,
+      "observed": "green",
+      "reason": null,
+      "stderr_tail": "",
+      "stdout_tail": ""
+    },
+    "schema": "existing_suite_v1"
+  },
+  "passed": false,
+  "schema": "oracle_gate_v1",
+  "task_id": "skl-retry-2"
+}
