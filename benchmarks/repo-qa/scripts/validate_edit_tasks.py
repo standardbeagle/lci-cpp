@@ -42,6 +42,7 @@ silently passed) and the structural layers still gate.
 """
 
 import argparse
+import fnmatch
 import os
 import re
 import sys
@@ -57,11 +58,13 @@ EDITS_ROOT = os.path.join(BENCH_ROOT, "edits")
 DEFAULT_TASKS_DIR = os.path.join(EDITS_ROOT, "tasks")
 DEFAULT_ANNOTATIONS_DIR = os.path.join(EDITS_ROOT, "annotations")
 DEFAULT_SCHEMA_PATH = os.path.join(EDITS_ROOT, "schema", "edit-task.schema.json")
+DEFAULT_PATCHES_DIR = os.path.join(EDITS_ROOT, "patches")
 DEFAULT_CORPORA_PATH = vet.DEFAULT_CORPORA_PATH
 DEFAULT_CORPUS_ROOT = vet.DEFAULT_CORPUS_ROOT
 
 TASK_SCHEMA_CONST = "edit_task_v1"
 ANNOTATION_SCHEMA_CONST = "edit_annotation_v1"
+ORACLE_PATCH_FORMAT = "edit_oracle_patch_v1"
 
 REQUIRED_CATEGORIES = {
     "retry-error-handling",
@@ -232,12 +235,120 @@ def verify_exemplar_live(anchor, convention_re, manifest, tree_dir):
 
 
 # ---------------------------------------------------------------------------
+# oracle patch (answer key) validation
+# ---------------------------------------------------------------------------
+#
+# The scope check below deliberately uses fnmatch, NOT the runtime gate's
+# custom glob translator (oracle_gate._glob_to_regex): per the
+# bench-harness-oracle-independence rule the bank validator must not share its
+# matcher with the gate it cross-checks, so a glob-translation bug in the gate
+# cannot be mirrored here. fnmatch is STRICTER for `*` (it crosses `/`), which
+# is the safe direction for a validator: it may reject a glob the gate would
+# allow, never the reverse.
+
+
+def _patch_scope_problems(task_id, files, blast):
+    problems = []
+    allow = blast.get("allow") or []
+    max_files = blast.get("max_files")
+    for rel in sorted(files):
+        if not any(fnmatch.fnmatchcase(rel, glob) for glob in allow):
+            problems.append(
+                f"{task_id}: oracle patch path {rel!r} matches no "
+                f"blast_radius.allow glob"
+            )
+    if isinstance(max_files, int) and len(files) > max_files:
+        problems.append(
+            f"{task_id}: oracle patch touches {len(files)} file(s); "
+            f"blast_radius.max_files is {max_files}"
+        )
+    return problems
+
+
+def load_oracle_patch(patches_dir, ref_path):
+    """Load and structurally validate an oracle patch file. Raises Problem."""
+    edits_root = os.path.dirname(os.path.abspath(patches_dir))
+    abs_path = os.path.normpath(os.path.join(edits_root, ref_path))
+    if not abs_path.startswith(os.path.abspath(patches_dir) + os.sep):
+        raise Problem(f"oracle_patch path {ref_path!r} escapes the patches dir")
+    if not os.path.isfile(abs_path):
+        raise Problem(f"oracle patch file does not exist: {ref_path!r}")
+    patch = _load_json(abs_path)
+    if not isinstance(patch, dict):
+        raise Problem(f"oracle patch {ref_path!r} is not a JSON object")
+    if patch.get("schema") != ORACLE_PATCH_FORMAT:
+        raise Problem(
+            f"oracle patch {ref_path!r} schema {patch.get('schema')!r} != "
+            f"{ORACLE_PATCH_FORMAT!r}"
+        )
+    files = patch.get("files")
+    if not isinstance(files, dict) or not files:
+        raise Problem(f"oracle patch {ref_path!r} has no files mapping")
+    for rel, content in files.items():
+        if not isinstance(rel, str) or not rel:
+            raise Problem(f"oracle patch {ref_path!r} has a non-string path")
+        norm = os.path.normpath(rel)
+        if norm.startswith("..") or os.path.isabs(rel):
+            raise Problem(
+                f"oracle patch {ref_path!r} path {rel!r} escapes the tree"
+            )
+        if content is not None and not isinstance(content, str):
+            raise Problem(
+                f"oracle patch {ref_path!r} entry {rel!r} is neither a "
+                f"string nor null"
+            )
+    return patch
+
+
+def _patch_leak_problems(task_id, prompt, patch):
+    """The answer key must never leak into the agent-visible prompt.
+
+    Reuses the exploration leak linter's token matcher (normalize_tokens,
+    _contiguous, _squash_hit) against two needle classes: every path the patch
+    touches, and every substantial content line the patch writes.
+    """
+    problems = []
+    prompt_tokens = leak_linter.normalize_tokens(prompt)
+
+    def _hit(needle_raw):
+        needle = leak_linter.normalize_tokens(str(needle_raw))
+        return bool(needle) and (
+            leak_linter._contiguous(needle, prompt_tokens)
+            or leak_linter._squash_hit(needle, prompt_tokens)
+        )
+
+    for rel in sorted(patch["files"]):
+        if _hit(rel):
+            problems.append(
+                f"{task_id}: oracle patch leak: prompt names patch path "
+                f"{leak_linter.redact(rel)}"
+            )
+    for rel, content in sorted(patch["files"].items()):
+        if content is None:
+            continue
+        for line in content.splitlines():
+            stripped = line.strip()
+            # Short/common lines (braces, imports) cannot discriminate a leak;
+            # only a substantial authored line is answer-key material.
+            if len(leak_linter.normalize_tokens(stripped)) < 4:
+                continue
+            if _hit(stripped):
+                problems.append(
+                    f"{task_id}: oracle patch leak: prompt contains patch "
+                    f"content line from {leak_linter.redact(rel)}"
+                )
+    return problems
+
+
+# ---------------------------------------------------------------------------
 # per-task validation
 # ---------------------------------------------------------------------------
 
 
 def validate_task(
-    task, schema, corpora, annotations_dir, corpus_root, require_live
+    task, schema, corpora, annotations_dir, corpus_root, require_live,
+    patches_dir=DEFAULT_PATCHES_DIR,
+    require_answer_key=False,
 ):
     problems = []
 
@@ -295,6 +406,50 @@ def validate_task(
                 f"{task_id}: blast_radius allow entry {glob!r} matches "
                 f"everything (degenerate patch scope)"
             )
+
+    # ---- oracle patch (answer key) ---------------------------------------
+    # The answer-key fields are OPTIONAL until the per-corpus batch lands
+    # (S3.2b iterates the bank without them); --require-answer-key is the
+    # enforcement switch M5 flips on. A task that DOES declare them is always
+    # fully checked -- optional never means unvalidated.
+    if require_answer_key:
+        for field in ("oracle_patch", "existing_suite"):
+            if field not in task:
+                problems.append(
+                    f"{task_id}: answer key field {field!r} is missing "
+                    f"(required by --require-answer-key)"
+                )
+    patch = None
+    if "oracle_patch" in task:
+        try:
+            patch = load_oracle_patch(patches_dir, task["oracle_patch"]["path"])
+        except Problem as err:
+            problems.append(f"{task_id}: {err}")
+            patch = None
+    if patch is not None:
+        if patch.get("task_id") != task_id:
+            problems.append(
+                f"{task_id}: oracle patch task_id {patch.get('task_id')!r} "
+                f"does not match the task id"
+            )
+        problems.extend(
+            _patch_scope_problems(task_id, patch["files"], task["blast_radius"])
+        )
+        problems.extend(
+            _patch_leak_problems(task_id, task["prompt"], patch)
+        )
+        # The agent-visible task JSON must never name a patch target: a probe
+        # argv names only the task id (via {edits_root}); the target path
+        # lives in the probe body. Conformance tests (S3.2b) read task JSON,
+        # so a relpath here would hand them the answer.
+        for token in task["behavior"].get("command") or []:
+            for rel in patch["files"]:
+                if rel in token:
+                    problems.append(
+                        f"{task_id}: behavior.command names patch path "
+                        f"{leak_linter.redact(rel)} (the target path belongs "
+                        f"in the probe body, never in the task JSON)"
+                    )
 
     exemplars = task["exemplars"]
 
@@ -430,6 +585,8 @@ def validate_bank(
     corpora_path=DEFAULT_CORPORA_PATH,
     corpus_root=DEFAULT_CORPUS_ROOT,
     require_live=False,
+    patches_dir=DEFAULT_PATCHES_DIR,
+    require_answer_key=False,
 ):
     """Validate every task file under tasks_dir. Returns (problems, summary)."""
     if not os.path.isdir(tasks_dir):
@@ -455,7 +612,9 @@ def validate_bank(
         seen_ids[task_id] = name
         problems.extend(
             validate_task(
-                task, schema, corpora, annotations_dir, corpus_root, require_live
+                task, schema, corpora, annotations_dir, corpus_root,
+                require_live, patches_dir=patches_dir,
+                require_answer_key=require_answer_key,
             )
         )
         per_corpus[task.get("corpus")] = per_corpus.get(task.get("corpus"), 0) + 1
@@ -487,10 +646,17 @@ def main(argv=None):
     parser.add_argument("--schema", default=DEFAULT_SCHEMA_PATH)
     parser.add_argument("--corpora", default=DEFAULT_CORPORA_PATH)
     parser.add_argument("--corpus-root", default=DEFAULT_CORPUS_ROOT)
+    parser.add_argument("--patches-dir", default=DEFAULT_PATCHES_DIR)
     parser.add_argument(
         "--require-live",
         action="store_true",
         help="fail if the forged corpus is absent instead of skipping live checks",
+    )
+    parser.add_argument(
+        "--require-answer-key",
+        action="store_true",
+        help="fail on any task missing the oracle_patch/existing_suite "
+        "answer-key fields (they are optional until the per-corpus batch lands)",
     )
     args = parser.parse_args(argv)
 
@@ -501,6 +667,8 @@ def main(argv=None):
         corpora_path=args.corpora,
         corpus_root=args.corpus_root,
         require_live=args.require_live,
+        patches_dir=args.patches_dir,
+        require_answer_key=args.require_answer_key,
     )
 
     for problem in sorted(problems):

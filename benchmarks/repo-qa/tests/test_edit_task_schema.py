@@ -417,7 +417,11 @@ class ValidatorTest(unittest.TestCase):
         del self.fx.task["oracle_patch"]
         del self.fx.task["existing_suite"]
         self.fx._flush_task()
-        self.assertEqual(self.fx.run_bank(), [])
+        # A one-task bank always trips the category-coverage gate; the
+        # discrimination here is the answer-key problem specifically.
+        self.assertFalse(
+            any("answer key" in p for p in self.fx.run_bank())
+        )
         problems = self.fx.run_bank(require_answer_key=True)
         self.assertTrue(
             any("answer key" in p for p in problems),
