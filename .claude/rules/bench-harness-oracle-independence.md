@@ -78,3 +78,53 @@ bloom, n-gram). Two additions to rule 2's discrimination test:
 - Pin **both directions**: an unseeded shape forces the fallback, a seeded shape keeps
   the index. A one-directional test lets the check decay into a blanket downgrade.
 <!-- written_at: 2026-09-05T23:30:00Z  source_event: task:01M1NCSJ31EQ7WZ9GEEB8CDCY5, comment:01M1SWJGAX1RRNBG64E34M7ZDW (systemicObservations, costGate verdict fix-now), git:9c6ff20 -->
+
+## 6. Verify a leak gate by re-injecting REAL committed answer-key material, and enumerate the needle's GRANULARITIES
+
+Rule 2 demands a discrimination test; rule 5 adds "enumerate the escape classes". The
+third axis a mirror-blind walker misses is **granularity of the same needle**. The
+edit-bank leak check matched an answer-key patch path only as its full contiguous
+token run, so a prompt naming `apis/record_crud.go` was caught while one naming just
+`record_crud.go` or `next-app-loader` passed — and the basename hands the agent the
+target as surely as the full path does. The synthetic-fixture tests that shipped with
+the check never exercised a partial-path form; the miss surfaced only when the
+whole-epic review re-injected three REAL committed patches (`pb-api-1`, `skl-log-1`,
+`nx-retry-2`) into their REAL prompts. Path-segment needles landed in `4e248e8`
+(single-token segments like `apis`, `src`, `sklearn` stay skipped — they cannot
+discriminate); the target-SYMBOL granularity is still ungated and filed as
+`01M1VJCZ109H2KVN8Y3T9T5P86`.
+
+For any prompt/answer-key linter in `benchmarks/repo-qa` (exploration, edits, future
+banks):
+- Enumerate the granularities at which the secret is still a give-away — full path,
+  each multi-token path segment, basename, target symbol, distinctive content line —
+  and pin one discrimination case per granularity.
+- Prove the gate on **real committed material**, not fixtures. A fixture set is
+  authored from the same mental model as the checker, so it inherits the checker's
+  blind spot; the committed bank is not.
+<!-- written_at: 2026-09-06T15:00:00Z  source_event: task:01KXPDP6VBM33EP5088AY2WQTP, comment:01M1VJEGARVAW30VERNZMPX704 (systemicObservations, costGate frequency=24, verdict fix-now+file), git:4e248e8 -->
+
+## 7. A foundation/mechanism slice must smoke against EVERY real corpus it will serve, not one
+
+A slice that builds the shared mechanism other slices consume is tested, by default,
+against whatever fixture its author invented — and a synthetic fixture has no
+symlinks, no dotted directory names, and no upstream package naming. Both of the
+edit-bank foundation's residual defects were found by the THIRD consuming member,
+after two corpora had already passed:
+
+- `shutil.copytree` follows symlinks by default, so a corpus holding a link to a
+  target absent on this host made materialization raise and the gate stamp
+  `TOOL_FAILURE` for every task in that corpus (`4646883` RED / `cd52c95` GREEN).
+- The `oracle_patch.path` segment class allowed only `[a-z0-9-]`, rejecting
+  `patches/next.js/<id>.json` — corpus dirs take their upstream package name
+  verbatim, so every next.js answer key was unvalidatable (`fc0ede5` RED /
+  `cc4ce56` GREEN).
+
+Both were mechanism gaps owned by the foundation member, discovered and paid for by a
+downstream member whose own subject was answer keys, not plumbing.
+
+Rule: a foundation slice's acceptance includes a smoke run of the mechanism against
+every real corpus in `benchmarks/repo-qa/.work/exploration/` it is expected to serve —
+one materialization plus one validate per corpus — before it is declared done. The
+corpora differ in exactly the ways a hand-built fixture does not.
+<!-- written_at: 2026-09-06T15:00:00Z  source_event: task:01M1T0WJFF6JM6TA5HEB3MJVTT (foundation), task:01M1T0WJRHKB1HTRZE9DV7CC8T (next.js member, found both), git:cd52c95, git:cc4ce56 -->
