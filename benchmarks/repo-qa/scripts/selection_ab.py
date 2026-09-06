@@ -46,7 +46,7 @@ DEFAULT_RECORDS = DEFAULT_OUT / "records.jsonl"
 
 # Full provider/model ids; never a config alias, never a paid provider.
 MODELS = {
-    "weak": "opencode/deepseek-v4-free",
+    "weak": "opencode/deepseek-v4-flash-free",
     "strong": "opencode-go/glm-5.2",
 }
 DEFAULT_TIMEOUT = 300.0
