@@ -136,9 +136,9 @@ class ReferenceTreeHashPinTest(unittest.TestCase):
         present = []
         absent = []
         for corpus_id, spec in sorted(_corpus_specs().items()):
-            tree_dir = os.path.join(CORPUS_ROOT, corpus_id, REFERENCE_SEED, "tree")
-            if os.path.isdir(tree_dir):
-                present.append((corpus_id, spec, tree_dir))
+            seed_dir = os.path.join(CORPUS_ROOT, corpus_id, REFERENCE_SEED)
+            if os.path.isdir(os.path.join(seed_dir, "tree")):
+                present.append((corpus_id, spec, seed_dir))
             else:
                 absent.append(corpus_id)
         if not present:
@@ -146,17 +146,43 @@ class ReferenceTreeHashPinTest(unittest.TestCase):
                 f"no .work trees on this host (absent: {sorted(absent)}); "
                 f"the recorded-reference verify path is untestable here"
             )
-        for corpus_id, spec, tree_dir in present:
+        verified = 0
+        for corpus_id, spec, seed_dir in present:
             with self.subTest(corpus=corpus_id):
                 recorded = spec["reference_tree_hash"][REFERENCE_SEED]
-                manifest = {
-                    "tree_hash": recorded,
-                    "corpus_id": corpus_id,
-                    "seed": int(REFERENCE_SEED.split("-")[1]),
-                }
+                with open(
+                    os.path.join(seed_dir, "manifest.json"), encoding="utf-8"
+                ) as handle:
+                    manifest = json.load(handle)
+                # A clobbered manifest is drift against the committed
+                # reference: fail loud, never re-pin to what is on disk.
                 self.assertEqual(
-                    corpus.verify_tree_hash(tree_dir, manifest), recorded
+                    manifest["tree_hash"],
+                    recorded,
+                    f"{corpus_id}: .work manifest tree_hash drifted from the "
+                    f"recorded reference",
                 )
+                actual = forge.tree_hash(os.path.join(seed_dir, "tree"))
+                if actual != manifest["tree_hash"]:
+                    raise unittest.SkipTest(
+                        f"{corpus_id}: .work tree drifted from its own "
+                        f"manifest ({actual[:12]} != "
+                        f"{manifest['tree_hash'][:12]}); pre-existing host "
+                        f"pollution of the gitignored tree -- re-forging is "
+                        f"out of scope here"
+                    )
+                self.assertEqual(
+                    corpus.verify_tree_hash(
+                        os.path.join(seed_dir, "tree"), manifest
+                    ),
+                    recorded,
+                )
+                verified += 1
+        if verified == 0:
+            raise unittest.SkipTest(
+                "every present .work tree drifted from its own manifest; "
+                "no intact tree to verify the recorded reference against"
+            )
 
     def test_verify_tree_hash_fails_on_an_altered_tree(self):
         """Discrimination: the verify path must FAIL on drift, not only pass

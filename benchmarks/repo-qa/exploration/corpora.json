@@ -26,6 +26,9 @@
       "source_path": "/home/beagle/work/core/lci-cpp/real_projects/python/scikit-learn",
       "pinned_commit": "0885712e436b07cd04d60e955101aaf6a8cbb709",
       "reference_forge_version": "1",
+      "reference_tree_hash": {
+        "seed-7": "2c8e1660624b4aaf6d8288ff7ae000754f33a887b48d1669cf137594de3cee61"
+      },
       "language": "python",
       "source_extensions": [
         ".py"
@@ -69,6 +72,9 @@
       "source_path": "/home/beagle/work/core/lci-cpp/real_projects/go/pocketbase",
       "pinned_commit": "d438c6a96a0252ff9df62c1cfe193480ed9ff15d",
       "reference_forge_version": "1",
+      "reference_tree_hash": {
+        "seed-7": "65119ec1226bdb6e2a45791e41f5a1c099d9bb5baf65200d1ece813bae26840d"
+      },
       "language": "go",
       "source_extensions": [
         ".go"
@@ -116,6 +122,9 @@
       "source_path": "/home/beagle/work/core/lci-cpp/real_projects/typescript/next.js",
       "pinned_commit": "97532172c065ca2b49dd79d1fa44c3a0b864065b",
       "reference_forge_version": "1",
+      "reference_tree_hash": {
+        "seed-7": "e3a6fc4e730e68a50db223cfa5205cba7e2d8d25c8283e7d8d98945154742af5"
+      },
       "language": "typescript",
       "source_extensions": [
         ".ts",

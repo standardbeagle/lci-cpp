@@ -17,6 +17,11 @@ import shutil
 
 import exploration_corpus_forge as forge
 
+# Committed registry pinning what the task banks were anchored against;
+# reference_tree_hash lives there so a clobbered .work tree is detected as
+# drift even when manifest and tree were rewritten consistently together.
+DEFAULT_CORPORA_PATH = forge.CORPORA_PATH
+
 
 class CorpusError(Exception):
     """Base class for corpus-preparation failures (config-class errors)."""
@@ -88,7 +93,21 @@ def verify_tree_hash(tree_dir, manifest):
     return actual
 
 
-def prepare_checkout(corpus_root, manifest_ref, dest):
+def recorded_reference_tree_hash(corpus_id, seed, corpora_path=DEFAULT_CORPORA_PATH):
+    """The committed reference tree hash for (corpus_id, seed), or None when
+    the registry records none (corpus unknown to corpora.json -- only
+    synthetic test corpora; real banks reference registered corpora, which
+    the task validators enforce)."""
+    with open(corpora_path, encoding="utf-8") as handle:
+        data = json.load(handle)
+    for spec in data["corpora"]:
+        if spec["id"] == corpus_id:
+            return spec.get("reference_tree_hash", {}).get(f"seed-{seed}")
+    return None
+
+
+def prepare_checkout(corpus_root, manifest_ref, dest,
+                     corpora_path=DEFAULT_CORPORA_PATH):
     """Locate + integrity-check the forged corpus, then copy its tree to `dest`.
 
     Returns (manifest, checkout_dir). Raises MissingCorpus / TreeHashMismatch
@@ -114,6 +133,20 @@ def prepare_checkout(corpus_root, manifest_ref, dest):
             f"task manifest_ref.source_commit {manifest_ref['source_commit']}"
         )
     verify_tree_hash(tree_dir, manifest)
+    # The manifest pins its own tree, so a clobbered .work corpus (manifest
+    # AND tree rewritten consistently) passes verify_tree_hash. The committed
+    # reference in corpora.json is outside .work: drift against it is loud.
+    reference = recorded_reference_tree_hash(
+        manifest_ref["corpus_id"], manifest_ref["seed"], corpora_path
+    )
+    if reference is not None and manifest.get("tree_hash") != reference:
+        raise TreeHashMismatch(
+            f"manifest tree_hash {manifest.get('tree_hash')} != reference "
+            f"tree_hash {reference} recorded in {corpora_path} for corpus "
+            f"{manifest_ref['corpus_id']} seed {manifest_ref['seed']}; the "
+            f".work corpus was clobbered -- re-forge it, never re-pin the "
+            f"reference"
+        )
     reject_escaping_symlinks(tree_dir)
     if os.path.exists(dest):
         shutil.rmtree(dest)

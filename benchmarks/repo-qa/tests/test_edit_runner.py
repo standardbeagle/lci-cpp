@@ -70,7 +70,7 @@ class _StaticLci:
 GATE_KWARGS = dict(impacted_symbols=("NewStore",), lci=_StaticLci())
 
 
-def forge_fixture(root, corpus_id="pocketbase", seed=7):
+def forge_fixture(root, corpus_id="synthetic-corpus", seed=7):
     """Synthesise a forged corpus with two LIVE Go constructor exemplars that
     conform to the go-constructor-new-pointer rule (so the convention gate can
     pass), plus the manifest pinning the tree hash."""
@@ -109,7 +109,7 @@ def forge_fixture(root, corpus_id="pocketbase", seed=7):
     return corpus_dir, tree, manifest
 
 
-def edit_task(corpus_id="pocketbase", seed=7, task_id="pb-module-1"):
+def edit_task(corpus_id="synthetic-corpus", seed=7, task_id="pb-module-1"):
     return {
         "schema": "edit_task_v1",
         "id": task_id,
@@ -231,7 +231,7 @@ class ProvenanceRecordTest(unittest.TestCase):
             self.assertEqual(rec["source_commit"], FAKE_COMMIT)
             self.assertEqual(rec["manifest_id"], manifest["tree_hash"])
             # mutation manifest reference
-            self.assertEqual(rec["manifest_ref"]["corpus_id"], "pocketbase")
+            self.assertEqual(rec["manifest_ref"]["corpus_id"], "synthetic-corpus")
             self.assertEqual(rec["manifest_ref"]["forge_version"], forge.FORGE_VERSION)
             # task / schema / gate versions
             self.assertEqual(rec["task_digest"], task_digest(task))
@@ -352,12 +352,12 @@ class OracleIsolationTest(unittest.TestCase):
 class DeterminismAndResumeTest(unittest.TestCase):
     def test_bank_cell_order_is_deterministic(self):
         with TemporaryDirectory() as root:
-            forge_fixture(root, corpus_id="pocketbase", seed=7)
-            forge_fixture(root, corpus_id="scikit-learn", seed=7)
+            forge_fixture(root, corpus_id="synthetic-a", seed=7)
+            forge_fixture(root, corpus_id="synthetic-b", seed=7)
             tasks = [
                 edit_task(task_id="pb-module-1"),
                 edit_task(
-                    corpus_id="scikit-learn", task_id="skl-module-1"
+                    corpus_id="synthetic-b", task_id="skl-module-1"
                 ),
             ]
             work = os.path.join(root, "work")

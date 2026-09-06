@@ -44,7 +44,7 @@ from task_digest import task_digest  # noqa: E402
 FAKE_COMMIT = "0" * 40
 
 
-def forge_fixture(root, corpus_id="pocketbase", seed=7):
+def forge_fixture(root, corpus_id="synthetic-corpus", seed=7):
     """Synthesise a forged corpus dir (manifest.json + tree/) the runner reads.
 
     Mirrors the forge's on-disk emit shape: <root>/<corpus_id>/seed-<seed>/
@@ -77,7 +77,7 @@ def forge_fixture(root, corpus_id="pocketbase", seed=7):
     return corpus_dir, tree, manifest
 
 
-def fake_task(corpus_id="pocketbase", seed=7, task_id="pb-password-login-route"):
+def fake_task(corpus_id="synthetic-corpus", seed=7, task_id="pb-password-login-route"):
     return {
         "schema": "exploration_task_v1",
         "id": task_id,
@@ -374,7 +374,7 @@ class ReferenceTreeHashDriftTest(unittest.TestCase):
             # Self-consistent synthetic corpus impersonating a REGISTERED
             # corpus (pocketbase seed 7): its manifest pins its own tree, so
             # every manifest-local check passes.
-            corpus_dir, _tree, manifest = forge_fixture(root)
+            corpus_dir, _tree, manifest = forge_fixture(root, corpus_id="pocketbase")
             spec = forge.load_corpora()["pocketbase"]
             clobbered = dict(
                 manifest,
@@ -655,7 +655,7 @@ class RecordShapeTest(unittest.TestCase):
             )
             self.assertEqual(rec["status"], record.STATUS_ANSWERED)
             self.assertEqual(rec["task_id"], task["id"])
-            self.assertEqual(rec["corpus_id"], "pocketbase")
+            self.assertEqual(rec["corpus_id"], "synthetic-corpus")
             self.assertEqual(rec["manifest_id"], manifest["tree_hash"])
             self.assertEqual(rec["task_digest"], run.exploration_task_digest(task))
             self.assertEqual(rec["arm"], toolsets.BASELINE)
