@@ -330,6 +330,40 @@ class StaleForgeVersionCorpusTest(unittest.TestCase):
                 )
 
 
+class BankDeclaredForgeVersionGateTest(unittest.TestCase):
+    """The version gate must compare the corpus manifest against the
+    forge_version the BANK declares (manifest_ref), never against the forge's
+    current output version: committed banks pin v1 corpora while the forge
+    emits v2 for newly forged corpora (direction (b), worktrack task
+    01M1VMC1DEDYTPXRYNK1VA2CG5)."""
+
+    def test_accepts_v1_manifest_for_a_v1_declared_bank(self):
+        with TemporaryDirectory() as root:
+            corpus_dir, _tree, manifest = forge_fixture(root)
+            v1 = dict(manifest, forge_version="1")
+            forge._write_json_atomic(
+                os.path.join(corpus_dir, "manifest.json"), v1
+            )
+            ref = dict(fake_task()["manifest_ref"], forge_version="1")
+            _manifest, checkout = corpus.prepare_checkout(
+                root, ref, os.path.join(root, "co")
+            )
+            self.assertTrue(
+                os.path.isfile(os.path.join(checkout, "apis", "base.go"))
+            )
+
+    def test_rejects_a_manifest_newer_than_the_bank_declares(self):
+        """forge_fixture emits the forge's CURRENT version; a bank still
+        declaring v1 must reject it -- the mismatch gate fires both ways."""
+        with TemporaryDirectory() as root:
+            forge_fixture(root)
+            ref = dict(fake_task()["manifest_ref"], forge_version="1")
+            with self.assertRaisesRegex(corpus.CorpusError, "forge_version"):
+                corpus.prepare_checkout(
+                    root, ref, os.path.join(root, "co")
+                )
+
+
 class ConfigParityTest(unittest.TestCase):
     def test_agent_visible_task_contains_only_claim_and_request(self):
         task = fake_task()
