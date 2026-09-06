@@ -12,13 +12,20 @@
     "",
     "mutable_roots bound the blast radius. Directory renames only apply STRICTLY",
     "BELOW a root, so the root itself stays a stable anchor for the import rewriter.",
-    "validation is the oracle: a corpus that fails it is never marked ready."
+    "validation is the oracle: a corpus that fails it is never marked ready.",
+    "",
+    "reference_forge_version / reference_tree_hash pin what the COMMITTED task",
+    "banks were anchored against (the local .work corpora), while the top-level",
+    "forge_version is what the forge PRODUCES today. They legitimately differ:",
+    "the banks pin v1 corpora (worktrack 01M1VMC1DEDYTPXRYNK1VA2CG5, direction b)",
+    "while the forge emits v2 for any newly forged corpus."
   ],
   "corpora": [
     {
       "id": "scikit-learn",
       "source_path": "/home/beagle/work/core/lci-cpp/real_projects/python/scikit-learn",
       "pinned_commit": "0885712e436b07cd04d60e955101aaf6a8cbb709",
+      "reference_forge_version": "1",
       "language": "python",
       "source_extensions": [
         ".py"
@@ -61,6 +68,7 @@
       "id": "pocketbase",
       "source_path": "/home/beagle/work/core/lci-cpp/real_projects/go/pocketbase",
       "pinned_commit": "d438c6a96a0252ff9df62c1cfe193480ed9ff15d",
+      "reference_forge_version": "1",
       "language": "go",
       "source_extensions": [
         ".go"
@@ -107,6 +115,7 @@
       "id": "next.js",
       "source_path": "/home/beagle/work/core/lci-cpp/real_projects/typescript/next.js",
       "pinned_commit": "97532172c065ca2b49dd79d1fa44c3a0b864065b",
+      "reference_forge_version": "1",
       "language": "typescript",
       "source_extensions": [
         ".ts",

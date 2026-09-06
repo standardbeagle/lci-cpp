@@ -69,6 +69,13 @@ def _pinned_commit():
     return corpora[CORPUS_ID]["pinned_commit"]
 
 
+def _reference_forge_version():
+    """The forge version the committed banks (and their corpora) pin -- what
+    the validator checks manifest_ref against, NOT what the forge emits today."""
+    corpora = vedt.vet.load_corpora()
+    return corpora[CORPUS_ID]["reference_forge_version"]
+
+
 def _write(path, obj):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as handle:
@@ -97,7 +104,7 @@ class Fixture:
             "corpus_id": CORPUS_ID,
             "source_commit": self.commit,
             "seed": SEED,
-            "forge_version": vedt.vet.forge.FORGE_VERSION,
+            "forge_version": _reference_forge_version(),
             "path_map": {FILE_REL: FILE_REL},
             "decoys": [{"path": DECOY_REL, "derived_from": FILE_REL}],
             "tree_hash": "0" * 64,
@@ -120,7 +127,7 @@ class Fixture:
                 "corpus_id": CORPUS_ID,
                 "source_commit": self.commit,
                 "seed": SEED,
-                "forge_version": vedt.vet.forge.FORGE_VERSION,
+                "forge_version": _reference_forge_version(),
             },
             "prompt": (
                 "One type in this backend is assembled inline by its callers "

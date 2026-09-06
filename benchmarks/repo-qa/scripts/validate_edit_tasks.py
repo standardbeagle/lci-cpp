@@ -390,10 +390,18 @@ def validate_task(
             f"{task_id}: manifest_ref.source_commit does not match the pinned "
             f"commit for {corpus_id}"
         )
-    if ref["forge_version"] != vet.forge.FORGE_VERSION:
+    reference_version = spec.get("reference_forge_version")
+    if reference_version is None:
+        problems.append(
+            f"{task_id}: corpora.json spec for {corpus_id!r} lacks "
+            f"reference_forge_version; the bank's pinned forge_version is "
+            f"unverifiable"
+        )
+    elif ref["forge_version"] != reference_version:
         problems.append(
             f"{task_id}: manifest_ref.forge_version {ref['forge_version']!r} != "
-            f"{vet.forge.FORGE_VERSION!r}"
+            f"reference_forge_version {reference_version!r} recorded for "
+            f"{corpus_id} in corpora.json"
         )
 
     # ---- degeneracy gates ----------------------------------------------

@@ -57,6 +57,13 @@ def _pinned_commit():
     return corpora[CORPUS_ID]["pinned_commit"]
 
 
+def _reference_forge_version():
+    """The forge version the committed banks (and their corpora) pin -- what
+    the validator checks manifest_ref against, NOT what the forge emits today."""
+    corpora = vet.load_corpora()
+    return corpora[CORPUS_ID]["reference_forge_version"]
+
+
 def _write(path, obj):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as handle:
@@ -83,7 +90,7 @@ class Fixture:
             "corpus_id": CORPUS_ID,
             "source_commit": self.commit,
             "seed": SEED,
-            "forge_version": vet.forge.FORGE_VERSION,
+            "forge_version": _reference_forge_version(),
             "path_map": {FILE_REL: FILE_REL},
             "decoys": [],
             "tree_hash": "0" * 64,
@@ -102,7 +109,7 @@ class Fixture:
                 "corpus_id": CORPUS_ID,
                 "source_commit": self.commit,
                 "seed": SEED,
-                "forge_version": vet.forge.FORGE_VERSION,
+                "forge_version": _reference_forge_version(),
             },
             "prompt": (
                 "When this backend first comes up, where does it wire the "
@@ -211,10 +218,16 @@ class ValidatorTest(unittest.TestCase):
         )
 
     def test_stale_forge_version_manifest_ref_fails(self):
-        """Trap injection + manifest v2 changed forge output for the same
-        (spec, seed): a task still pinning the old forge version references a
-        corpus the current forge can no longer reproduce, so it must fail."""
-        self.fx.task["manifest_ref"]["forge_version"] = "1"
+        """The bank pins the forge version its anchors were verified against
+        (corpora.json reference_forge_version). A task pinning any other
+        version -- e.g. the forge's current output version -- references a
+        corpus layout the bank was never anchored on, so it must fail."""
+        self.fx.task["manifest_ref"]["forge_version"] = vet.forge.FORGE_VERSION
+        self.assertNotEqual(
+            vet.forge.FORGE_VERSION, _reference_forge_version(),
+            "this test is only a discrimination case while the forge's output "
+            "version differs from the version the banks pin",
+        )
         self.fx._flush_task()
         self.assertTrue(any("forge_version" in p for p in self.fx.run()))
 
