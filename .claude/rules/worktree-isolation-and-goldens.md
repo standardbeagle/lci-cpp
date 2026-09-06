@@ -96,3 +96,19 @@ Distinguish two dirty-tree shapes on task resume, they need opposite fixes:
   confirmed dead.
 
 `source_event: task-01KXEEH7RD3D03VN6EP8ZZEP0F ("S1 — Forge deterministic mutated exploration corpora"), workflow 01KXH30SW9CRPTKQ1CPPV89SRJ bench-unit-tests attempt1 (failed, ImportError, 2026-07-14T19:52) -> attempt2 (passed, 2026-07-14T20:48), comment 01KXH65CHP9GDD5670RMVSCY3X, 2026-07-14/15`
+
+## 5. Never `git checkout` the shared primary checkout onto a feature branch — add a worktree instead
+
+Rule 1 covers a sibling's dirty tree poisoning YOUR scope gate. This is the mirror: YOU
+poisoning every sibling session. The primary checkout at
+`/home/beagle/work/core/lci-cpp` is shared by concurrent loop sessions that all assume
+`main`. Switching its branch silently relocates every sibling's build tree, `ctest`
+target, and scope-gate diff base, and nothing reports it — the sibling just starts
+failing gates against code it never wrote.
+
+D4's implementer switched the primary checkout to `worktrack/d4-sweep` to build on an
+unmerged chain. The correct move for the same need is rule 1's recipe used
+proactively: `git worktree add ../lci-cpp-<slug> <branch>`, implement there, and point
+every command step's `cwd` at the worktree. A branch switch of the shared checkout is
+never in a task's `fileScope` and never needs to be.
+<!-- written_at: 2026-09-06T17:00:00Z  source_event: task:01KXQ2V3P299T64XZ6BXS2QMH1, comment:01M1VQREGZM95YZ2VP0E96VN9S, comment:01M1VQV19V92QMV155QYPZMJ4X, git:945e50a -->

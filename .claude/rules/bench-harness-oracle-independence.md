@@ -166,3 +166,66 @@ values differing (`FORGE_VERSION` != the pinned reference), assert that inequali
 the test. Otherwise a later re-forge makes them equal and the test passes vacuously
 instead of announcing that it stopped discriminating.
 <!-- written_at: 2026-09-06T16:00:00Z  source_event: task:01M1VMC1DEDYTPXRYNK1VA2CG5, comment:01M1VP25HW4D70S1FAWYD6T5EE, comment:01M1VPMW3R09KB2Q35BDC99FGZ, git:2701344, git:6ef7208, git:87f9e6c -->
+
+## 9. In a two-arm harness, BOTH arms' raw tool output must be rendered into the graded syntax — one rendered arm is a rigged instrument
+
+Rules 1-5 protect the oracle's independence from the thing it grades. This one protects
+the ARMS' symmetry, which a correct oracle does not give you. The discovery sweep's
+tool-level grader parsed `path:line` citations. The baseline's grep output was rendered
+into that syntax by `_grep_answer`; the treatment's raw LCI JSON (`file_path` and `line`
+as separate fields) was handed to the same parser, which returned `[]`. The treatment
+scored 0.0 on every family **by construction**, and the one real cell that had been run
+read as a legitimate capability loss. Fixed in `e7897f5` by
+`benchmarks/repo-qa/discovery/runner/rendering.py`, one renderer per tool response shape;
+the same real cell then read treatment P=1.0/R=1.0 against baseline P=0.111/R=1.0.
+
+- **A uniform floor is an instrument-defect signature.** When one arm reports exactly
+  0.0 across every family, treat it as a harness bug until disproven. A real capability
+  loss is ragged; construction-zero is flat.
+- **Pin a per-arm fixture captured from the real tool surface**, showing non-zero
+  citations. Rule 6's "real material, not fixtures" applies per arm: an invented payload
+  would have missed that `callers` emits `call_lines` as a LIST distinct from the
+  caller's own definition line — the whole difference between call sites and callers.
+- **An unrenderable payload is a BROKEN CELL, never an empty answer.** The grader scores
+  an empty answer identically to a wrong one, so a silent `[]` fabricates a loss. Raise
+  with a NAMED reason (`unrecognised_tool_shape` / `unparseable_payload` /
+  `uncitable_location`) so the downstream analysis slice can attribute an output-format
+  gap rather than a capability gap.
+- **A renderer must honour the payload's own completeness flags** (`truncated`,
+  `total_matches`, `has_more`). LCI `search` caps at 100 hits
+  (`handlers_search.cpp:416`; live `Close` 100/409); rendering a capped page as complete
+  converts a known cap into an apparent recall loss. Filed `01M1VSHDVWEF7MHQWHW8J5W68H`.
+<!-- written_at: 2026-09-06T17:00:00Z  source_event: task:01KXQ2V3P299T64XZ6BXS2QMH1, comment:01M1VR6R67634DGA7G2Z86RCRN, comment:01M1VR77X0B7Z31KTNMWEE8A4J, comment:01M1VS46STNF46BDD0CTKP4JT8, git:4fbb0ac, git:e7897f5 -->
+
+## 10. A claim that a tool, field, or capability is ABSENT must cite the probe — a registry, a docstring, or a prior attempt is not evidence
+
+Attempt 1 routed the caller families through `get_context` on the written claim that
+`mcp__lci__callers` does not exist. The claim came from reading `predictions.json` prose.
+One `tools/list` call in attempt 2 disproved it: `callers` is live and returns
+`file_path` + `call_lines`; only `mcp__lci__references` is genuinely absent. The false
+absence cost a rewind and produced the wrong measurement for two families.
+
+An absence claim is load-bearing — everything downstream is designed around the hole —
+so it carries the same evidence bar as a security or performance claim: name the probe
+(`tools/list`, `tools/call`, the failing import, the `git grep` that returned empty) in
+the comment or the docstring that asserts it. Probing also yields the payload SHAPE that
+rule 9's fixtures need, so the probe pays for itself twice. Corollary found by the same
+probe: `get_context` emits callers and call trees as bare NAMES with no location, so it
+cannot answer ANY citation-graded call or reference question — `callers` is the only tool
+that emits caller locations with a path (product gap `01M1VR4TBD7GXAXWBQXV2MCR49`).
+<!-- written_at: 2026-09-06T17:00:00Z  source_event: task:01KXQ2V3P299T64XZ6BXS2QMH1, comment:01M1VR6R67634DGA7G2Z86RCRN, comment:01M1VS3B70HPMKMRGFS6BVWV5C, git:e7897f5 -->
+
+## 11. Whatever decides WHICH tool is called and HOW its reply is parsed belongs in the hermetically tested package, not the executor script
+
+The discovery runner put the arm executor behind an injected callable — a good pattern
+(31 hermetic tests, seconds, no clone, no model). But the real executors lived in
+`scripts/discovery_sweep.py`, outside the suite, and **all three live defects were in
+that untested half**: the error-payload-graded-as-an-answer, the wrong `get_context`
+arguments, and the phantom-tool routing. The implementer's own attempt-1 annotation named
+the gap before the reviewer found the defects in it.
+
+Split the harness so the tested package owns the routing table and the payload renderer;
+leave only the socket, the subprocess, and the agent outside it. The residual risk — a
+test passing against a shape the live server no longer emits — is paid for by pinning the
+fixtures from a live capture and recording the corpus and commit in the test.
+<!-- written_at: 2026-09-06T17:00:00Z  source_event: task:01KXQ2V3P299T64XZ6BXS2QMH1, comment:01M1VQS5EZKAD73G32Z3AV8F93, comment:01M1VSJQ9F3EWC3MCFDD5KR1FM, git:e7897f5 -->
