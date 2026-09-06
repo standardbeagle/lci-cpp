@@ -592,6 +592,27 @@ class WorktreeContextManagerTest(unittest.TestCase):
                     raise RuntimeError("boom")
             self.assertFalse(os.path.exists(captured["holder"]))
 
+    def test_dangling_symlink_is_copied_as_a_symlink(self):
+        # The forged next.js tree carries 27 symlinks, one of which points at an
+        # absolute path that exists only on the upstream author's machine.
+        # Dereferencing copy raises ENOENT and the whole gate reports
+        # TOOL_FAILURE before a single probe runs, so the copy must preserve
+        # links AS links rather than following them.
+        with tempfile.TemporaryDirectory() as src:
+            os.symlink("/nonexistent/upstream/fixture", os.path.join(src, "dangling"))
+            os.symlink("real.txt", os.path.join(src, "live"))
+            with open(os.path.join(src, "real.txt"), "w") as fh:
+                fh.write("body\n")
+            with gate.materialized_worktree(src) as tree:
+                self.assertTrue(os.path.islink(os.path.join(tree, "dangling")))
+                self.assertEqual(
+                    os.readlink(os.path.join(tree, "dangling")),
+                    "/nonexistent/upstream/fixture",
+                )
+                self.assertTrue(os.path.islink(os.path.join(tree, "live")))
+                with open(os.path.join(tree, "live")) as fh:
+                    self.assertEqual(fh.read(), "body\n")
+
 
 # ---------------------------------------------------------------------------
 # real committed bank: the gate runs over every task and fails closed because
