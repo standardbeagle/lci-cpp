@@ -54,6 +54,15 @@ FILE_BODY = "\n".join(
 
 CONFORMS = r"^func New\w+\("
 
+PATCH_REL = "core/configured_store.go"
+PATCH_CONTENT = (
+    "package core\n\n"
+    "// NewConfiguredStore builds a Store pre-bound to the given Config.\n"
+    "func NewConfiguredStore(cfg Config) *Store {\n"
+    "\treturn &Store{}\n"
+    "}\n"
+)
+
 
 def _pinned_commit():
     corpora = vedt.vet.load_corpora()
@@ -76,6 +85,7 @@ class Fixture:
         self.root = root
         self.tasks_dir = os.path.join(root, "tasks")
         self.annotations_dir = os.path.join(root, "annotations")
+        self.patches_dir = os.path.join(root, "patches")
         self.corpus_root = os.path.join(root, "corpus_root")
         self.commit = _pinned_commit()
 
@@ -149,6 +159,14 @@ class Fixture:
                 },
             ],
             "blast_radius": {"allow": ["core/**"], "max_files": 2},
+            "oracle_patch": {
+                "path": f"patches/{self.task_id_value()}.json",
+                "format": "edit_oracle_patch_v1",
+            },
+            "existing_suite": {
+                "command": ["go", "test", "./..."],
+                "notes": "the corpus's full existing test suite",
+            },
             "adjudication": {
                 "annotators": ["ann-a", "ann-b"],
                 "resolved": True,
@@ -158,6 +176,20 @@ class Fixture:
         self._annotation("ann-a")
         self._annotation("ann-b")
         self._flush_task()
+        self._flush_patch()
+
+    def task_id_value(self):
+        return "pb-ctor-shape"
+
+    def _flush_patch(self, files=None, task_id=None):
+        patch = {
+            "schema": "edit_oracle_patch_v1",
+            "task_id": task_id if task_id is not None else self.task["id"],
+            "files": files if files is not None else {PATCH_REL: PATCH_CONTENT},
+        }
+        _write(
+            os.path.join(self.patches_dir, f"{self.task['id']}.json"), patch
+        )
 
     def _ann_exemplars(self, exemplars):
         out = []
@@ -196,7 +228,7 @@ class Fixture:
             os.path.join(self.tasks_dir, f"{self.task['id']}.json"), self.task
         )
 
-    def run(self, require_live=True):
+    def run(self, require_live=True, require_answer_key=False):
         # Per-task gates, like the exploration fixture: bank-level coverage
         # gates are exercised separately (a one-task bank cannot cover all
         # four convention categories).
@@ -207,9 +239,11 @@ class Fixture:
             self.annotations_dir,
             self.corpus_root,
             require_live,
+            patches_dir=self.patches_dir,
+            require_answer_key=require_answer_key,
         )
 
-    def run_bank(self, require_live=True):
+    def run_bank(self, require_live=True, require_answer_key=False):
         return vedt.validate_bank(
             tasks_dir=self.tasks_dir,
             annotations_dir=self.annotations_dir,
@@ -217,6 +251,8 @@ class Fixture:
             corpora_path=vedt.DEFAULT_CORPORA_PATH,
             corpus_root=self.corpus_root,
             require_live=require_live,
+            patches_dir=self.patches_dir,
+            require_answer_key=require_answer_key,
         )[0]
 
 
@@ -348,6 +384,108 @@ class ValidatorTest(unittest.TestCase):
         self.fx._annotation("ann-b", self.fx.task["exemplars"])
         self.fx._flush_task()
         self.assertTrue(any("exceeds file length" in p for p in self.fx.run()))
+
+    # ---- oracle patch / existing suite (answer key) --------------------
+    def test_missing_oracle_patch_field_is_allowed_by_default(self):
+        # The answer-key fields are OPTIONAL until M5 flips them: S3.2b
+        # iterates the bank without them, so a missing field must pass.
+        del self.fx.task["oracle_patch"]
+        self.fx._flush_task()
+        self.assertEqual(self.fx.run(), [])
+
+    def test_missing_oracle_patch_field_fails_with_require_answer_key(self):
+        del self.fx.task["oracle_patch"]
+        self.fx._flush_task()
+        problems = self.fx.run(require_answer_key=True)
+        self.assertTrue(
+            any("oracle_patch" in p and "answer key" in p for p in problems),
+            msg="\n".join(problems),
+        )
+
+    def test_missing_existing_suite_field_fails_with_require_answer_key(self):
+        del self.fx.task["existing_suite"]
+        self.fx._flush_task()
+        problems = self.fx.run(require_answer_key=True)
+        self.assertTrue(
+            any("existing_suite" in p and "answer key" in p for p in problems),
+            msg="\n".join(problems),
+        )
+
+    def test_require_answer_key_flag_reports_missing_fields(self):
+        # Bank level: a task lacking the answer-key fields is reported when
+        # --require-answer-key is set, and passes without it.
+        del self.fx.task["oracle_patch"]
+        del self.fx.task["existing_suite"]
+        self.fx._flush_task()
+        self.assertEqual(self.fx.run_bank(), [])
+        problems = self.fx.run_bank(require_answer_key=True)
+        self.assertTrue(
+            any("answer key" in p for p in problems),
+            msg="\n".join(problems),
+        )
+
+    def test_patch_path_in_behavior_command_fails(self):
+        # A probe argv may name only the task id (via {edits_root}); the
+        # patch's target relpath lives in the probe body, never in the task
+        # JSON, because conformance tests read task JSON.
+        self.fx.task["behavior"]["command"] = [
+            "go", "run", f"probes/{PATCH_REL}.probe.go",
+        ]
+        self.fx._flush_task()
+        problems = self.fx.run()
+        self.assertTrue(
+            any("behavior.command" in p and "patch path" in p for p in problems),
+            msg="\n".join(problems),
+        )
+
+    def test_absent_patch_file_fails(self):
+        os.remove(os.path.join(self.fx.patches_dir, "pb-ctor-shape.json"))
+        self.assertTrue(
+            any("patch file does not exist" in p for p in self.fx.run())
+        )
+
+    def test_patch_outside_blast_radius_fails(self):
+        self.fx._flush_patch(files={"tools/evil.go": PATCH_CONTENT})
+        self.assertTrue(
+            any("matches no" in p and "blast_radius" in p for p in self.fx.run())
+        )
+
+    def test_patch_exceeding_max_files_fails(self):
+        self.fx._flush_patch(files={
+            PATCH_REL: PATCH_CONTENT,
+            "core/extra_a.go": PATCH_CONTENT,
+            "core/extra_b.go": PATCH_CONTENT,
+        })
+        self.assertTrue(any("max_files" in p for p in self.fx.run()))
+
+    def test_patch_task_id_mismatch_fails(self):
+        self.fx._flush_patch(task_id="pb-other")
+        self.assertTrue(any("does not match the task id" in p for p in self.fx.run()))
+
+    def test_patch_traversal_path_fails(self):
+        self.fx._flush_patch(files={"../escape.go": PATCH_CONTENT})
+        self.assertTrue(any("escapes" in p for p in self.fx.run()))
+
+    def test_prompt_leaking_patch_path_fails(self):
+        # Discrimination for the patch-leak check: re-inject the patch's path
+        # into the prompt and assert the linter FAILS.
+        self.fx.task["prompt"] += f" Touch {PATCH_REL}."
+        self.fx._flush_task()
+        self.assertTrue(
+            any("oracle patch leak" in p for p in self.fx.run()),
+            msg="\n".join(self.fx.run()),
+        )
+
+    def test_prompt_leaking_patch_content_fails(self):
+        # A substantial authored patch line in the prompt is answer-key leakage.
+        self.fx.task["prompt"] += (
+            " It should read func NewConfiguredStore(cfg Config) *Store."
+        )
+        self.fx._flush_task()
+        self.assertTrue(
+            any("oracle patch leak" in p for p in self.fx.run()),
+            msg="\n".join(self.fx.run()),
+        )
 
     # ---- prompt leak (criterion 2) -------------------------------------
     def test_prompt_leak_of_identifier_fails(self):
