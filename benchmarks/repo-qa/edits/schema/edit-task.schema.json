@@ -5,7 +5,7 @@
   "description": "A goal-only small-edit/refactor task pinned to a forged/mutated corpus. The prompt states ONLY the desired behavioural/convention outcome; it never names the target path or symbol. The oracle key carries a behaviour command with a red->green discrimination, a mechanical convention rule, >=2 LIVE convention-exemplar anchors (each independently annotated), and a declared patch scope (blast radius). Anchors are expressed against MUTATED relative paths so a tool that memorised the upstream repo cannot short-circuit them.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "id", "corpus", "category", "manifest_ref", "prompt", "rubric", "behavior", "convention", "exemplars", "blast_radius", "adjudication"],
+  "required": ["schema", "id", "corpus", "category", "manifest_ref", "prompt", "rubric", "behavior", "convention", "exemplars", "blast_radius", "adjudication", "oracle_patch", "existing_suite"],
   "properties": {
     "schema": {
       "const": "edit_task_v1"
@@ -134,7 +134,7 @@
     "oracle_patch": {
       "type": "object",
       "additionalProperties": false,
-      "description": "OPTIONAL until the answer-key batch lands (validate with --require-answer-key to enforce). Answer-key ONLY: a reference to the known-good minimal patch (a JSON file under edits/patches/ mapping relative paths to their full post-edit contents, or null to delete). NEVER part of the agent-visible prompt; the validator fails a prompt that leaks any patch path or content line.",
+      "description": "REQUIRED answer key: a reference to the known-good minimal patch (a JSON file under edits/patches/ mapping relative paths to their full post-edit contents, or null to delete). NEVER part of the agent-visible prompt; the validator fails a prompt that leaks any patch path or content line.",
       "required": ["path", "format"],
       "properties": {
         "path": {
@@ -151,7 +151,7 @@
     "existing_suite": {
       "type": "object",
       "additionalProperties": false,
-      "description": "OPTIONAL until the answer-key batch lands. The DECLARED existing test suite of the task's corpus, run by the oracle gate on the patched tree as a regression guard (distinct from the task's behaviour probe).",
+      "description": "REQUIRED. The DECLARED existing test suite of the task's corpus, run by the oracle gate on the patched tree as a regression guard (distinct from the task's behaviour probe).",
       "required": ["command"],
       "properties": {
         "command": {

@@ -1,9 +1,11 @@
 # Edit-task answer keys (oracle patches, probes, evidence)
 
 This directory holds the ANSWER KEYS for the stage-3 edit tasks declared in
-`../tasks/`. Nothing here is agent-visible: `validate_edit_tasks.py` fails any
-task whose prompt leaks a patch path or a substantial patch content line, and
-whose `behavior.command` names a patch target relpath.
+`../tasks/`. `oracle_patch` and `existing_suite` are REQUIRED task fields
+(since the S3.3b-M5 close-out): the schema rejects any task that ships
+without them. Nothing here is agent-visible: `validate_edit_tasks.py` fails
+any task whose prompt leaks a patch path or a substantial patch content
+line, and whose `behavior.command` names a patch target relpath.
 
 ## Layout
 
