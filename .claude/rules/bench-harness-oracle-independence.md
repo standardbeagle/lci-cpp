@@ -102,6 +102,22 @@ banks):
 - Prove the gate on **real committed material**, not fixtures. A fixture set is
   authored from the same mental model as the checker, so it inherits the checker's
   blind spot; the committed bank is not.
+- **The rule is not about linters — it holds for EVERY emitter/consumer pair in this
+  bench.** Any consumer of a `bench.py` / sweep row (token totals, timing, result rows)
+  builds its fixture by copying one committed real row and mutating it. D5 shipped an
+  invented `tokens.cache` nested object; `bench.py:154-158` emits FLAT
+  `cache_read`/`cache_write`, so `_token_total`'s "sum every numeric key" rule absorbed
+  ~85% cache traffic into a figure the decision document labelled billable — "5.2x fewer
+  tokens" was really 2.7x. The fixture passed because it was authored from the same model
+  as the code. Third recurrence of this shape in `benchmarks/repo-qa` since 2026-08
+  (rules 5, 6, 7).
+- **An aggregator over an upstream emitter's fields ENUMERATES what counts and FAILS on
+  the rest.** "Sum every numeric key" has no contract: it silently adopts every field the
+  emitter adds next, and the drift lands in a quoted cost claim rather than in a test.
+  Landed as an explicit allowlist (`input`/`output`/`reasoning`) plus `ValueError` on any
+  unrecognised counter (`5bf46bc` RED / `174a4d6` GREEN). Keep a test that REJECTS the
+  previously-invented shape, or the next author re-invents it.
+<!-- written_at: 2026-09-06T19:00:00Z  source_event: task:01KXQ2V3PW91QTTQ1NTZXH7PR6, comment:01M1W02T0C1W20W449Q8XXRNV8 (systemicObservations, costGate frequency=3, verdict file), comment:01M1W0DFH9TRFTSZKK7418ZAGE, git:174a4d6 -->
 <!-- written_at: 2026-09-06T15:00:00Z  source_event: task:01KXPDP6VBM33EP5088AY2WQTP, comment:01M1VJEGARVAW30VERNZMPX704 (systemicObservations, costGate frequency=24, verdict fix-now+file), git:4e248e8 -->
 
 ## 7. A foundation/mechanism slice must smoke against EVERY real corpus it will serve, not one
@@ -229,3 +245,33 @@ leave only the socket, the subprocess, and the agent outside it. The residual ri
 test passing against a shape the live server no longer emits — is paid for by pinning the
 fixtures from a live capture and recording the corpus and commit in the test.
 <!-- written_at: 2026-09-06T17:00:00Z  source_event: task:01KXQ2V3P299T64XZ6BXS2QMH1, comment:01M1VQS5EZKAD73G32Z3AV8F93, comment:01M1VSJQ9F3EWC3MCFDD5KR1FM, git:e7897f5 -->
+
+## 12. An A/B arm definition is unproven until a test shows the treatment CANNOT reach the baseline's mechanism — pre-registration of PREDICTIONS does not cover it
+
+D3 pre-registered hypotheses, thresholds and falsifiers, and D5 applied them honestly.
+None of that examined whether the two arms were disjoint. `bench.py:58 workspace_config`
+ADDS the LCI MCP server to the treatment agent and never disables native grep/glob, so
+every agent-level "treatment" number ever produced by this harness means *LCI in addition
+to grep*, not the registered *LCI instead of grep* (filed
+`01M1W0147178Z2PZNZ6ZQQQBRR`). The matching tool-level defect is the mirror: the baseline
+is unfiltered grep with recall 1.000 and precision 0.05-0.56 everywhere, so every
+tool-level LCI "win" measures a filtering step the baseline was never given. The epic's
+null result is therefore instrument-first, and the literal-search control — the one cell
+that could prove an LCI loss — had no teeth at the agent level.
+
+- **Pin arm disjointness with a test, before any cell runs.** The treatment must be
+  unable to reach the baseline's mechanism, and the baseline unable to reach the
+  treatment's. Assert on the produced arm config (tools enabled/disabled, binary path),
+  not on the registry's prose description of the arms.
+- **Pre-flight one smoke cell per arm and read the tool-call trace for the forbidden
+  mechanism.** Minutes. D5 spent 60 agent cells and 3 tool sweeps on an instrument later
+  shown non-disjoint. A treatment trace containing a `grep`/`glob` call is a stop.
+- **Both arms must be handed the same class of post-processing.** A raw retrieval tool
+  versus an index is not an A/B of capability; it is an A/B of whether a filtering step
+  exists. Give the baseline its classification step or state, in the report, that the
+  delta measures filtering.
+- **Every arm-defining knob must reach every measurement level.** The sweep's
+  `--lci-bin` reached only the tool level; the agent level silently used `config.kdl`'s
+  default binary, so the two levels exercised different builds (filed
+  `01M1W01483B3PBGDF58B75CA49`).
+<!-- written_at: 2026-09-06T19:00:00Z  source_event: task:01KXQ2V3PW91QTTQ1NTZXH7PR6, comment:01M1VZMG8NK4DZ54NG45XCHDF8 (outOfScopeDefectsReported), comment:01M1W0MNSG8YRWW3GJA934BVMS, task:01M1W0147178Z2PZNZ6ZQQQBRR, task:01M1W01483B3PBGDF58B75CA49 -->
