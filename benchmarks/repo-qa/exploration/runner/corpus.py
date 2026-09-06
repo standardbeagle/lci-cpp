@@ -97,13 +97,12 @@ def prepare_checkout(corpus_root, manifest_ref, dest):
     manifest, tree_dir = locate_forged_corpus(
         corpus_root, manifest_ref["corpus_id"], manifest_ref["seed"]
     )
-    # A stale corpus from an older forge is self-consistent (its tree matches
-    # its own manifest hash), so only this version gate can reject it.
-    if manifest.get("forge_version") != forge.FORGE_VERSION:
-        raise ForgeVersionMismatch(
-            f"forged manifest forge_version {manifest.get('forge_version')!r} != "
-            f"current forge {forge.FORGE_VERSION!r}; re-forge the corpus"
-        )
+    # The version gate compares against the forge_version the BANK declares
+    # (manifest_ref), not the forge's current output version: committed banks
+    # pin the corpus version their anchors were verified against (v1), while
+    # the forge emits v2 for newly forged corpora. A stale or newer corpus
+    # than the bank declares is rejected either way; only an exact match with
+    # the bank's declaration passes.
     if manifest.get("forge_version") != manifest_ref["forge_version"]:
         raise ForgeVersionMismatch(
             f"forged manifest forge_version {manifest.get('forge_version')!r} != "
