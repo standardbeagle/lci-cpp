@@ -99,6 +99,12 @@ def verify_source(spec, allow_dirty, allow_head_mismatch):
     hard refusal unless explicitly overridden.
     """
     source = spec["source_path"]
+    if not os.path.exists(source):
+        raise ForgeError(
+            f"source_path does not exist: {source}. Re-clone the upstream at "
+            f"pinned_commit {spec['pinned_commit']} (see "
+            f"benchmarks/repo-qa/exploration/README.md for the recovery recipe)."
+        )
     if not os.path.isdir(os.path.join(source, ".git")):
         raise ForgeError(f"source is not a git checkout: {source}")
 
