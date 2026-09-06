@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Run the stage-3 behaviour oracle for ONE edit task and emit its outcome.
 
+With --all, sweep every task in --tasks-dir instead: one
+'<id> <discrimination.reason> <existing_suite.passed>' line per task,
+exit 1 if any is not DISCRIMINATES.
+
 Loads the task JSON, delegates to oracle_gate.evaluate_task_in_corpus (which
 locates the forged corpus, loads the sidecar oracle patch named by
 task.oracle_patch.path, resolves {edits_root}/{python} argv tokens, and
@@ -36,9 +40,70 @@ DEFAULT_CORPUS_ROOT = os.path.join(
 )
 
 
+def _evaluate_one(args, task_id):
+    """Evaluate one task and return (outcome, error_exit_code_or_None)."""
+    task_path = os.path.join(args.tasks_dir, f"{task_id}.json")
+    if not os.path.isfile(task_path):
+        print(f"error: no task file for id {task_id!r}: {task_path}",
+              file=sys.stderr)
+        return None, 2
+    with open(task_path, encoding="utf-8") as handle:
+        task = json.load(handle)
+    if task.get("id") != task_id:
+        print(
+            f"error: task file {task_path} id {task.get('id')!r} != "
+            f"{task_id!r}",
+            file=sys.stderr,
+        )
+        return None, 2
+    return gate.evaluate_task_in_corpus(
+        task, args.corpus_root, timeout=args.timeout
+    ), None
+
+
+def _run_all(args):
+    """Sweep every task in the tasks dir, one line per id.
+
+    Prints '<id> <discrimination.reason> <existing_suite.passed>' per task
+    in sorted id order and exits 1 if any task is not DISCRIMINATES (with
+    --discrimination-only a red existing suite also fails the sweep).
+    """
+    if args.evidence_dir is not None:
+        print("error: --evidence-dir is not supported with --all",
+              file=sys.stderr)
+        return 2
+    task_ids = sorted(
+        name[: -len(".json")]
+        for name in os.listdir(args.tasks_dir)
+        if name.endswith(".json")
+    )
+    if not task_ids:
+        print(f"error: no task files in {args.tasks_dir}", file=sys.stderr)
+        return 2
+    all_ok = True
+    for task_id in task_ids:
+        outcome, err = _evaluate_one(args, task_id)
+        if err is not None:
+            return err
+        reason = outcome["discrimination"]["reason"]
+        suite_passed = outcome["existing_suite"]["passed"]
+        print(f"{task_id} {reason} {suite_passed}")
+        if reason != gate.Reason.DISCRIMINATES or (
+            args.discrimination_only and not suite_passed
+        ):
+            all_ok = False
+    return 0 if all_ok else 1
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--task-id", required=True, help="edit task id")
+    parser.add_argument("--task-id", default=None, help="edit task id")
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="sweep every task in --tasks-dir: one '<id> <reason> "
+        "<suite-passed>' line each, exit 1 if any is not DISCRIMINATES",
+    )
     parser.add_argument("--tasks-dir", default=vedt.DEFAULT_TASKS_DIR)
     parser.add_argument("--corpus-root", default=DEFAULT_CORPUS_ROOT)
     parser.add_argument("--timeout", type=int, default=gate.DEFAULT_TIMEOUT)
@@ -56,24 +121,20 @@ def main(argv=None):
     )
     args = parser.parse_args(argv)
 
-    task_path = os.path.join(args.tasks_dir, f"{args.task_id}.json")
-    if not os.path.isfile(task_path):
-        print(f"error: no task file for id {args.task_id!r}: {task_path}",
+    if args.all:
+        if args.task_id is not None:
+            print("error: --all and --task-id are mutually exclusive",
+                  file=sys.stderr)
+            return 2
+        return _run_all(args)
+    if args.task_id is None:
+        print("error: one of --task-id or --all is required",
               file=sys.stderr)
         return 2
-    with open(task_path, encoding="utf-8") as handle:
-        task = json.load(handle)
-    if task.get("id") != args.task_id:
-        print(
-            f"error: task file {task_path} id {task.get('id')!r} != "
-            f"{args.task_id!r}",
-            file=sys.stderr,
-        )
-        return 2
 
-    outcome = gate.evaluate_task_in_corpus(
-        task, args.corpus_root, timeout=args.timeout
-    )
+    outcome, err = _evaluate_one(args, args.task_id)
+    if err is not None:
+        return err
     rendered = gate.to_json(outcome)
     print(rendered)
 
