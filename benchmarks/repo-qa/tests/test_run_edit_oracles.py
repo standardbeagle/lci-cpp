@@ -155,6 +155,33 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertFalse(os.path.exists(self.evidence_dir))
 
+    # ---- --all sweep mode (M5 close-out) --------------------------------
+    def _argv_all(self, *extra):
+        return [
+            "--all",
+            "--tasks-dir", self.tasks_dir,
+            "--corpus-root", self.corpus_root,
+            *extra,
+        ]
+
+    def test_all_prints_one_line_per_task_and_exits_zero(self):
+        self._write_patch("NEW handler body\n")
+        code, out = self._run(self._argv_all("--discrimination-only"))
+        self.assertEqual(code, 0, msg=out)
+        self.assertEqual(
+            out.strip().splitlines(), ["pb-mini-1 DISCRIMINATES True"]
+        )
+
+    def test_all_exits_one_when_any_task_does_not_discriminate(self):
+        # The patch fails to introduce the marker: the sweep must report the
+        # real verdict and fail, never swallow it.
+        self._write_patch("STILL OLD handler body\n")
+        code, out = self._run(self._argv_all("--discrimination-only"))
+        self.assertEqual(code, 1, msg=out)
+        self.assertEqual(
+            out.strip().splitlines(), ["pb-mini-1 NON_DISCRIMINATING True"]
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
