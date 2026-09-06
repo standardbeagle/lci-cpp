@@ -6,6 +6,7 @@
   "confusable_neighbors": [
     "find_files",
     "get_context",
+    "callers",
     "semantic_annotations"
   ],
   "control": false,

@@ -9,6 +9,6 @@
   ],
   "control": false,
   "prompt": "I am about to commit. Take the code I have added and modified and weigh it against the rest of the project: is any of it duplicating logic that already exists, does any of it name things inconsistently with the surrounding code, and is any of it too complicated?",
-  "rationale": "Comparing new and modified code against the existing codebase for duplication, naming and complexity is this tool's stated job. code_insight characterizes the repository as a whole and has no notion of what changed.",
+  "rationale": "Comparing new and modified code against the existing codebase for duplicates, naming inconsistencies and function complexity, before committing, is this tool's stated job. code_insight also exposes a git_analyze mode over the same change scopes, but its description names only 'git analysis' generically and never the three qualities the prompt asks for, so under the live descriptions this tool is the explicit match and code_insight is the informative confusable.",
   "answer_key_evidence": "Compares new/modified code against the existing codebase to find duplicates, naming inconsistencies, and function complexity issues"
 }

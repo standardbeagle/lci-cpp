@@ -5,6 +5,7 @@
   "correct_tool": "callers",
   "confusable_neighbors": [
     "inspect_symbol",
+    "get_context",
     "search",
     "side_effects"
   ],
