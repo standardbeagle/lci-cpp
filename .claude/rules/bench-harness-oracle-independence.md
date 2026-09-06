@@ -128,3 +128,41 @@ every real corpus in `benchmarks/repo-qa/.work/exploration/` it is expected to s
 one materialization plus one validate per corpus — before it is declared done. The
 corpora differ in exactly the ways a hand-built fixture does not.
 <!-- written_at: 2026-09-06T15:00:00Z  source_event: task:01M1T0WJFF6JM6TA5HEB3MJVTT (foundation), task:01M1T0WJRHKB1HTRZE9DV7CC8T (next.js member, found both), git:cd52c95, git:cc4ce56 -->
+
+## 8. A committed declaration ABOUT a gitignored artefact is unverified until a test compares the two — and the check must fail, not skip, when the artefact is present but wrong
+
+Rules 1-7 govern a validator versus the transformer it validates. This is the same
+independence problem one level up: the committed banks *describe* the corpus they were
+built on, the corpus itself is gitignored, and nothing compared the description to the
+thing. All 54 committed banks declared `forge_version` 2 while every local
+`.work/exploration/*/seed-7/manifest.json` said 1, and the anchors were demonstrably
+authored against the v1 layout — four bank tests failed on a re-forged v2 pocketbase
+tree and passed on v1. The label had been bumped with the forge script; the artefact it
+described had not. No test held the two side by side, so the split survived 54 banks and
+blocked two downstream baselines before a review found it.
+
+Three requirements for any committed artefact that declares a property of a derived,
+gitignored one:
+
+1. **Assert the declaration against the artefact in the test suite**, not at baseline
+   launch. A version/shape gate that only runs when the long benchmark starts converts a
+   test-time failure into a run-time abort hours later.
+2. **Pin the artefact's identity in a committed, non-content registry** — here
+   `exploration/corpora.json` `reference_forge_version` + `reference_tree_hash` per
+   corpus/seed — and check BOTH the artefact's self-pin and the external pin. A manifest
+   cannot detect its own rewrite: only the outside pin catches a manifest and tree
+   clobbered consistently. The unrecorded original pocketbase v1 hash (`8e0d6d03`,
+   `git grep` -> empty) is the cost of not having had this registry; that tree is
+   unrecoverable.
+3. **Present-but-invalid is a failure; only absent is a skip.** The drift check first
+   shipped reporting a present, drifted tree via `SkipTest`, which reads green on every
+   run — a host whose scikit-learn tree had silently accumulated 658 stray
+   `__pycache__/*.pyc` blobs (writer unknown; re-running the oracle leaves none) still
+   passed. Gate the skip on absence of the artefact alone, and prove the discrimination
+   by injecting a stray file into a clean tree.
+
+A companion guard: when a discrimination test's failure case depends on two config
+values differing (`FORGE_VERSION` != the pinned reference), assert that inequality in
+the test. Otherwise a later re-forge makes them equal and the test passes vacuously
+instead of announcing that it stopped discriminating.
+<!-- written_at: 2026-09-06T16:00:00Z  source_event: task:01M1VMC1DEDYTPXRYNK1VA2CG5, comment:01M1VP25HW4D70S1FAWYD6T5EE, comment:01M1VPMW3R09KB2Q35BDC99FGZ, git:2701344, git:6ef7208, git:87f9e6c -->
