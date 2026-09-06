@@ -251,7 +251,11 @@ def _analyze_level(level_rows_by_run, threshold):
         arms_across[arm] = block
 
     per_cell = _per_cell_deltas(level_rows_by_run, metric)
+    observed = sorted({row["slug"] for rows in level_rows_by_run.values()
+                       for row in rows})
     return {
+        "cells_observed": len(observed),
+        "slugs_observed": observed,
         "metric": metric,
         "threshold_registered": bool(threshold),
         "runs": run_names,

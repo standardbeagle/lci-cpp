@@ -105,6 +105,7 @@ class SeparationTests(AnalyzerFixture):
                          [os.path.join(self.root, "r1"), os.path.join(self.root, "r2")])
         level = out["families"]["fam"]["levels"]["tool"]
         self.assertEqual(level["separation"], "none")
+        self.assertEqual(level["cells_observed"], 2)
         self.assertTrue(level["within_variance"])
         self.assertAlmostEqual(level["delta_mean"], 0.0, places=6)
         self.assertGreater(level["delta_spread"], 0.0)
