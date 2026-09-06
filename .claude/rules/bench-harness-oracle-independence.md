@@ -117,6 +117,23 @@ banks):
   Landed as an explicit allowlist (`input`/`output`/`reasoning`) plus `ValueError` on any
   unrecognised counter (`5bf46bc` RED / `174a4d6` GREEN). Keep a test that REJECTS the
   previously-invented shape, or the next author re-invents it.
+- **NAME is not the contract; TYPE, required-ness, and enum membership are separate
+  granularities of the same needle.** A "the example cites real parameters" gate that
+  checks key membership only (`set(args) <= properties`) certifies an invocation the real
+  tool rejects. Two of fifteen variant-C worked invocations (13%) were type-wrong while
+  the gate was green — `context.refs` given as a comma string against an array of
+  `{f,l}` objects, `git_analysis.focus` as a string against an array — so the C arm would
+  have shipped into E2.3 measuring wording plus an uncallable claim. An example or
+  invocation embedded in bench material is validated with the REAL schema validator
+  against the LIVE schema (`jsonschema.validate` is importable under `/usr/bin/python3`),
+  never a hand-rolled key check, and the paired discrimination case is type-wrong, not
+  name-wrong (`430334f` RED / `df522f6` GREEN).
+- **An extractor that can silently truncate its subject must fail on truncation.** The
+  same gate pulled the example out of prose with a non-nesting brace regex, so for a
+  nested example it validated the INNER object and reported green on a fragment. Decode
+  embedded JSON with the JSON decoder (`raw_decode` from the first brace), never a brace
+  regex; a partial parse is an error, not a smaller input.
+<!-- written_at: 2026-09-06T20:10:00Z  source_event: task:01KXSHA3PEAEHXDQ7XZVXW3186, comment:01M1W40JEAEJZQCF3GN6XG79TD (systemicObservations, costGate frequency=2, verdict fix-now), comment:01M1W4D8JFVZ2MNBNABD5AKSEP, git:430334f, git:df522f6 -->
 <!-- written_at: 2026-09-06T19:00:00Z  source_event: task:01KXQ2V3PW91QTTQ1NTZXH7PR6, comment:01M1W02T0C1W20W449Q8XXRNV8 (systemicObservations, costGate frequency=3, verdict file), comment:01M1W0DFH9TRFTSZKK7418ZAGE, git:174a4d6 -->
 <!-- written_at: 2026-09-06T15:00:00Z  source_event: task:01KXPDP6VBM33EP5088AY2WQTP, comment:01M1VJEGARVAW30VERNZMPX704 (systemicObservations, costGate frequency=24, verdict fix-now+file), git:4e248e8 -->
 
@@ -181,6 +198,20 @@ A companion guard: when a discrimination test's failure case depends on two conf
 values differing (`FORGE_VERSION` != the pinned reference), assert that inequality in
 the test. Otherwise a later re-forge makes them equal and the test passes vacuously
 instead of announcing that it stopped discriminating.
+Same shape, one step further: **a test whose subject is served by a permissive
+stand-in cannot fail at all.** E2.2's "name and schema are constant across variants"
+test rendered every arm through the mock and diffed `(name, inputSchema)` tuples — but
+`scripts/mock_lci_mcp.py:171` serves an empty permissive `inputSchema` for every tool,
+so the tuples were equal by construction and the gate proved nothing about the arms.
+The committed note beside the arms CLAIMED the mock served the manifest schema. Before
+asserting an invariant, check what actually supplies the value: if a stub, mock, or
+default supplies it uniformly, the assertion is vacuous and must either move to the real
+supplier or be deleted. And a prose note explaining WHY an experiment holds something
+constant is a load-bearing claim about code that may sit outside `fileScope` — verify it
+against the file that ships it (here the mock, one directory away; corrected in
+`df522f6`, real-schema mock filed as `01M1W40XF2E0HKT05SS51A5PJ2`).
+<!-- written_at: 2026-09-06T20:10:00Z  source_event: task:01KXSHA3PEAEHXDQ7XZVXW3186, comment:01M1W402AFKB7SPSJJRNKYQ04B (advisory), comment:01M1W4D8JFVZ2MNBNABD5AKSEP, git:df522f6 -->
+
 <!-- written_at: 2026-09-06T16:00:00Z  source_event: task:01M1VMC1DEDYTPXRYNK1VA2CG5, comment:01M1VP25HW4D70S1FAWYD6T5EE, comment:01M1VPMW3R09KB2Q35BDC99FGZ, git:2701344, git:6ef7208, git:87f9e6c -->
 
 ## 9. In a two-arm harness, BOTH arms' raw tool output must be rendered into the graded syntax — one rendered arm is a rigged instrument
