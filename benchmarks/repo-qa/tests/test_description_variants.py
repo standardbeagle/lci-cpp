@@ -421,11 +421,45 @@ class VariantRenderingTest(unittest.TestCase):
             shapes[key] = sorted(
                 (t["name"], json.dumps(t["inputSchema"], sort_keys=True))
                 for t in listed)
+        manifest = sorted(
+            (t["name"], json.dumps(t["input_schema"], sort_keys=True))
+            for t in json.loads(MANIFEST.read_text())["tools"])
         reference = shapes["A"]
         self.assertEqual([n for n, _ in reference], self.tools)
+        # Non-vacuity: constancy across variants is trivially true when every
+        # tool is served the same stub schema. Pin the served shape to the
+        # manifest's real schema, and assert it actually carries parameters.
+        self.assertEqual(reference, manifest)
+        self.assertTrue(any(json.loads(s).get("properties") for _, s in reference))
         for key, shape in shapes.items():
             with self.subTest(variant=key):
                 self.assertEqual(shape, reference)
+
+    def test_served_schema_matches_the_live_binary_tools_list(self):
+        """Freshness: the manifest the mock serves must still be what LCI emits.
+
+        SKIPS with a named reason when the binary or corpus is absent -- absence
+        must never read as agreement.
+        """
+        if not LCI_BIN.exists():
+            self.skipTest(
+                f"served input schemas unverified against the live surface: no "
+                f"LCI binary at {LCI_BIN}; build it "
+                f"(cmake --build build/release --target lci)")
+        if not LIVE_CORPUS.is_dir():
+            self.skipTest(
+                f"served input schemas unverified against the live surface: no "
+                f"corpus at {LIVE_CORPUS}")
+        import enumerate_tool_surface as surface
+        session = surface.McpSession(LCI_BIN, LIVE_CORPUS)
+        try:
+            live = session.rpc("tools/list")["tools"]
+        finally:
+            session.close()
+        served = {t["name"]: t["inputSchema"] for t in self._listed(VARIANT_FILES["A"])}
+        self.assertEqual(
+            json.dumps(served, sort_keys=True),
+            json.dumps({t["name"]: t["inputSchema"] for t in live}, sort_keys=True))
 
 
 if __name__ == "__main__":

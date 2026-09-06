@@ -224,6 +224,37 @@ class MockMcpHandshakeTest(unittest.TestCase):
             listed = self._session(path)._rpc("tools/list", {})["result"]["tools"]
         self.assertEqual({t["name"]: t["description"] for t in listed}, variant)
 
+    def test_tools_list_serves_the_manifest_input_schema(self):
+        """An empty inputSchema shows the model no parameter at all.
+
+        Every selection arm then has to guess argument names, so `{}` args are
+        ungradable and the E2.2 schema-constancy gate is vacuously true. The
+        mock must serve the manifest's real per-tool schema verbatim.
+        """
+        manifest = {t["name"]: t["input_schema"]
+                    for t in json.loads(MANIFEST.read_text())["tools"]}
+        listed = self._session()._rpc("tools/list", {})["result"]["tools"]
+        served = {t["name"]: t["inputSchema"] for t in listed}
+        self.assertEqual(json.dumps(served, sort_keys=True),
+                         json.dumps(manifest, sort_keys=True))
+        self.assertTrue(any((s.get("properties") or {}) for s in served.values()))
+
+    def test_served_schema_follows_the_manifest_rather_than_a_hard_coding(self):
+        """Discrimination: a mutated manifest schema must reach tools/list.
+
+        Equality with the manifest proves nothing if the mock hard-codes the
+        same shape the manifest happens to hold today.
+        """
+        names = mock_mcp.load_tool_names()
+        descriptions = mock_mcp.load_descriptions()
+        schemas = mock_mcp.load_input_schemas()
+        mutated = {"type": "object",
+                   "properties": {"MUTATED_PROBE": {"type": "string"}}}
+        schemas = dict(schemas, **{names[0]: mutated})
+        listed = mock_mcp.MockServer(names, descriptions, schemas).tools_list()
+        served = {t["name"]: t["inputSchema"] for t in listed["tools"]}
+        self.assertEqual(served[names[0]], mutated)
+
     def test_baseline_descriptions_cover_exactly_the_live_surface(self):
         payload = json.loads(BASELINE_DESCRIPTIONS.read_text())
         self.assertEqual(sorted(payload["descriptions"]), sorted(self.tools))
