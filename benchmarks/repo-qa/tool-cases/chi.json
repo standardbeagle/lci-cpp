@@ -109,6 +109,12 @@
       "expect": {"contains": ["mux.go"], "max_latency_ms": 800}
     },
     {
+      "id": "callers-of-a-known-method",
+      "tool": "callers",
+      "args": {"name": "ServeHTTP"},
+      "expect": {"contains": ["mux.go"], "min_results": 1, "max_latency_ms": 800}
+    },
+    {
       "id": "index-stats-sane",
       "tool": "index_stats",
       "args": {},

@@ -11,6 +11,14 @@
     },
     {
       "arguments": {
+        "max": 10,
+        "name": "Execute"
+      },
+      "name": "callers",
+      "normalized_output": "{\"callers\":[{\"call_count\":1,\"call_lines\":[171],\"caller\":\"Start\",\"caller_type\":\"method\",\"file_path\":\"pocketbase.go\",\"line\":166}],\"definitions\":[{\"file_path\":\"pocketbase.go\",\"line\":179,\"name\":\"Execute\",\"type\":\"method\"}],\"dynamic_call_sites\":[{\"caller\":\"\",\"file_path\":\"cmd/superuser_test.go\",\"line\":73},{\"caller\":\"\",\"file_path\":\"cmd/superuser_test.go\",\"line\":156},{\"caller\":\"\",\"file_path\":\"cmd/superuser_test.go\",\"line\":237},{\"caller\":\"\",\"file_path\":\"cmd/superuser_test.go\",\"line\":295},{\"caller\":\"\",\"file_path\":\"cmd/superuser_test.go\",\"line\":382},{\"caller\":\"\",\"file_path\":\"cmd/superuser_test.go\",\"line\":440},{\"caller\":\"\",\"file_path\":\"core/base.go\",\"line\":1361},{\"caller\":\"\",\"file_path\":\"core/base.go\",\"line\":1366},{\"caller\":\"\",\"file_path\":\"core/base.go\",\"line\":1371},{\"caller\":\"\",\"file_path\":\"core/base.go\",\"line\":1516}],\"dynamic_count\":75,\"symbol\":\"Execute\",\"total_call_sites\":1,\"total_callers\":1,\"truncated\":false,\"unresolved_call_sites\":[{\"caller\":\"\",\"file_path\":\"core/collection_record_table_sync.go\",\"line\":276},{\"caller\":\"\",\"file_path\":\"pocketbase.go\",\"line\":200},{\"caller\":\"Render\",\"file_path\":\"tools/template/renderer.go\",\"line\":28}],\"unresolved_count\":3}"
+    },
+    {
+      "arguments": {
         "analysis": "overview",
         "max_results": 10
       },

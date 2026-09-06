@@ -23,6 +23,11 @@ CASES = {
         "oracle_command": "rg -n '^func \\(pb \\*PocketBase\\) [A-Z]' pocketbase.go",
         "answer": ["Execute", "Start"],
     },
+    "callers": {
+        "question": "Which line invokes PocketBase.Execute, and where does that call site live?",
+        "oracle_command": "gopls references -d pocketbase.go:179:23",
+        "answer": ["pocketbase.go:171"],
+    },
     "code_insight": {
         "question": "How many Go source files are in the repository?",
         "oracle_command": "find . -type f -name '*.go' -print | LC_ALL=C sort | wc -l",

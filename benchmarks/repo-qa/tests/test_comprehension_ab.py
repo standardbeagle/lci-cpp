@@ -64,7 +64,12 @@ class ComprehensionAbTest(unittest.TestCase):
 
     def test_full_ids_required_and_grid_has_both_capability_tiers(self):
         self.assertEqual(ab.DEFAULT_MODELS, ["opencode/deepseek-v4-flash-free", "opencode-go/glm-5.2"])
-        self.assertEqual(len(ab.load_bank()), 28)
+        # Derived, not a magic 28: the bank is one cell per live tool per
+        # format variant. Hard-coding the count let the surface gain a tool
+        # (callers, 01ba88f) while this gate kept asserting the old width.
+        surface = json.loads(
+            (ROOT / "benchmarks/repo-qa/comprehension/surface/tool-surface.json").read_text())
+        self.assertEqual(len(ab.load_bank()), 2 * len(surface["tools"]))
 
     def test_resume_key_and_atomic_result_are_stable(self):
         key = ab.cell_key("search", "annotated", "opencode-go/glm-5.2", 2)

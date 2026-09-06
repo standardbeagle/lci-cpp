@@ -16,6 +16,7 @@ import replay_common
 
 ARGS = {
     "browse_file": {"file": "pocketbase.go", "exported": True, "max": 20},
+    "callers": {"name": "Execute", "max": 10},
     "code_insight": {"analysis": "overview", "max_results": 10},
     "context": {"operation": "save", "refs": [{"f": "pocketbase.go", "l": {"start": 160, "end": 181}}], "to_string": True},
     "debug_info": {"mode": "files", "file_path": "pocketbase.go", "max_results": 10},
