@@ -51,8 +51,10 @@ import selection_ab  # noqa: E402
 
 
 def event(tool, args=None, status="completed", output="ok"):
+    """Shape of a real `opencode run --format json` (1.18.26) tool event:
+    top-level type `tool_use`, part type `tool`, args under state.input."""
     return json.dumps({"type": "tool_use", "part": {
-        "tool": tool,
+        "type": "tool", "tool": tool,
         "state": {"status": status, "input": args or {}, "output": output},
     }})
 
@@ -183,6 +185,7 @@ class GradingTest(unittest.TestCase):
             event("lci_callers", {"symbol": "x"}),
         ]), run_status="answered")
         self.assertFalse(record["selected_correct"])
+        self.assertTrue(record["first_call_native"])
         self.assertEqual(record["first_called_tool"], "native:grep")
         self.assertEqual(record["matrix_cell"], ("callers", "native:grep"))
         self.assertTrue(record["correct_ever"])
@@ -317,6 +320,42 @@ class GridTest(unittest.TestCase):
             self.assertEqual(len(second), 3)
             lines = records.read_text().strip().splitlines()
             self.assertEqual(len(lines), 3, "records must not duplicate")
+
+    def test_provider_failures_are_retried_only_on_request(self):
+        outcomes = iter(["provider_error", "graded"])
+
+        def flaky_cell(cell, **kwargs):
+            return {"run_key": cell["run_key"], "outcome": next(outcomes),
+                    "counts_in_matrix": False, "matrix_cell": None,
+                    "variant": cell["variant"], "model": cell["model"],
+                    "tier": "confusable", "correct_tool": "callers"}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            records = Path(tmp) / "records.jsonl"
+            cells = selection_ab.plan_cells(TASKS_DIR, ["a"], ["weak"])[:1]
+            selection_ab.run_cells(cells, records, flaky_cell)
+            again = selection_ab.run_cells(cells, records, flaky_cell)
+            self.assertEqual(again[0]["outcome"], "provider_error",
+                             "default resume must not re-spend a call")
+            retried = selection_ab.run_cells(cells, records, flaky_cell,
+                                             retry_provider_failures=True)
+            self.assertEqual(retried[0]["outcome"], "graded")
+            self.assertEqual(selection_ab.read_records(records)[cells[0]["run_key"]]
+                             ["outcome"], "graded", "last record wins on resume")
+            # a graded cell is never retried, even with the flag
+            selection_ab.run_cells(cells, records, flaky_cell,
+                                   retry_provider_failures=True)
+
+    def test_report_names_the_mock_schema_caveat(self):
+        import io
+        from contextlib import redirect_stdout
+        with tempfile.TemporaryDirectory() as tmp:
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                selection_ab.main(["report", "--records", str(Path(tmp) / "r.jsonl")])
+        report = json.loads(buf.getvalue())
+        self.assertTrue(any("01M1W40XF2E0HKT05SS51A5PJ2" in c and "mock" in c
+                            for c in report["caveats"]))
 
 
 if __name__ == "__main__":

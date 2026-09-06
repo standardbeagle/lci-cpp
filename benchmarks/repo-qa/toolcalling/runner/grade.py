@@ -91,6 +91,7 @@ class Grader:
             return record
 
         first = calls[0]
+        record["first_call_native"] = first["native"]
         if first["native"]:
             record["first_called_tool"] = f"native:{first['tool']}"
             record["outcome"] = "graded"

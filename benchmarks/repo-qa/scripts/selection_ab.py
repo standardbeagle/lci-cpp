@@ -45,8 +45,13 @@ DEFAULT_OUT = BENCH_ROOT / ".work/toolcalling"
 DEFAULT_RECORDS = DEFAULT_OUT / "records.jsonl"
 
 # Full provider/model ids; never a config alias, never a paid provider.
+# `opencode/deepseek-v4-flash-free` is no longer served: `opencode models`
+# (1.18.26, 2026-09-06) lists no deepseek under the `opencode` provider, and a
+# cell against it returns UnknownError in 6s or hangs to the 300s timeout with
+# an empty stream. The same model is served on the go plan, which is already
+# the strong arm's route, so both arms cost the same.
 MODELS = {
-    "weak": "opencode/deepseek-v4-flash-free",
+    "weak": "opencode-go/deepseek-v4-flash",
     "strong": "opencode-go/glm-5.2",
 }
 DEFAULT_TIMEOUT = 300.0
@@ -104,6 +109,33 @@ def plan_cells(tasks_dir: Path, variants, models) -> list[dict]:
     return cells
 
 
+# Outcomes that say nothing about selection and may be worth re-spending a
+# call on once the provider recovers. Held out of the default resume so a
+# re-run stays a no-op; opted in with `run --retry-provider-failures`.
+PROVIDER_FAILURE_OUTCOMES = frozenset({
+    "provider_quota", "provider_timeout", "provider_error",
+    "malformed_provider_stream", "empty_answer",
+})
+
+# Every report carries this: args plausibility is a CONTRACT judgement
+# against the committed manifest, not a runtime one against the mock.
+REPORT_CAVEATS = [
+    "args_plausible is validated against comprehension/surface/tool-surface.json "
+    "input_schema, NOT the schema the mock serves: the mock serves an empty "
+    "permissive inputSchema for every tool (follow-up 01M1W40XF2E0HKT05SS51A5PJ2), "
+    "so a call the mock accepted can still grade implausible.",
+    "Only the FIRST call's args are graded; a native:* first call has "
+    "args_plausible=null.",
+    "denominator excludes every non-selection outcome (see `excluded`); report n "
+    "alongside every rate.",
+]
+
+
+def is_provider_failure(record: dict) -> bool:
+    outcome = record.get("outcome", "")
+    return outcome in PROVIDER_FAILURE_OUTCOMES or outcome.startswith("exit_")
+
+
 # ------------------------------------------------------------------ resume ledger
 
 def read_records(records_path: Path) -> dict[str, dict]:
@@ -117,15 +149,23 @@ def read_records(records_path: Path) -> dict[str, dict]:
     return out
 
 
-def run_cells(cells, records_path: Path, execute) -> list[dict]:
-    """Execute the cells not already recorded; append each result once."""
+def run_cells(cells, records_path: Path, execute,
+              retry_provider_failures: bool = False) -> list[dict]:
+    """Execute the cells not already recorded; append each result once.
+
+    With `retry_provider_failures`, a recorded provider-side outcome is run
+    again and the new record appended; `read_records` keeps the LAST record
+    per run_key, so a recovered cell supersedes the failed one.
+    """
     records_path = Path(records_path)
     records_path.parent.mkdir(parents=True, exist_ok=True)
     done = read_records(records_path)
     results = []
     for cell in cells:
-        if cell["run_key"] in done:
-            results.append(done[cell["run_key"]])
+        prior = done.get(cell["run_key"])
+        if prior is not None and not (retry_provider_failures
+                                      and is_provider_failure(prior)):
+            results.append(prior)
             continue
         record = execute(cell)
         record["run_key"] = cell["run_key"]
@@ -201,7 +241,8 @@ def cmd_run(args) -> int:
     grader = sr.grade.Grader.from_manifest(MANIFEST)
     execute = live_executor(grader, opencode_bin, args.timeout,
                             Path(args.records).parent)
-    for record in run_cells(cells, Path(args.records), execute):
+    for record in run_cells(cells, Path(args.records), execute,
+                            retry_provider_failures=args.retry_provider_failures):
         print(f"{record['run_key']}: {record['outcome']} "
               f"first={record.get('first_called_tool')}")
     return 0
@@ -211,6 +252,7 @@ def cmd_report(args) -> int:
     records = list(read_records(Path(args.records)).values())
     print(json.dumps({
         "records": len(records),
+        "caveats": REPORT_CAVEATS,
         "matrices": sr.matrix.confusion_matrices(records),
     }, indent=2, sort_keys=True))
     return 0
@@ -233,6 +275,8 @@ def main(argv=None) -> int:
     run.add_argument("--task", default=None)
     run.add_argument("--opencode-bin", default="opencode")
     run.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT)
+    run.add_argument("--retry-provider-failures", action="store_true",
+                     help="re-run recorded provider_*/exit_*/empty_answer cells")
     run.set_defaults(func=cmd_run)
     sub.add_parser("report", parents=[shared]).set_defaults(func=cmd_report)
     args = parser.parse_args(argv)
