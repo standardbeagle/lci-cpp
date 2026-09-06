@@ -1,0 +1,2391 @@
+{
+  "boundary": "Measures TOOL SELECTION against a mock MCP serving deterministic stubs. It does not show that the selected tool then produces a correct answer (epic 1), and it does not show that an LCI-equipped agent beats grep end to end (discovery epic).",
+  "caveats": [
+    "Denominators exclude every non-selection outcome; n is reported beside every rate.",
+    "A native:* first call (the agent reaching for its built-in bash/read before the offered toolset) IS a selection outcome and keeps its own confusion column.",
+    "Only the FIRST call is graded. A run that reached the right tool third has mis-selected."
+  ],
+  "confusion_matrices": [
+    {
+      "cell": "a|strong|confusable",
+      "mean_rate": 0.7111111111111111,
+      "per_rep": [
+        {
+          "columns": {
+            "callers": 1,
+            "code_insight": 1,
+            "context": 1,
+            "debug_info": 1,
+            "find_files": 1,
+            "git_analysis": 1,
+            "index_stats": 1,
+            "info": 1,
+            "inspect_symbol": 1,
+            "native:glob": 3,
+            "search": 2,
+            "semantic_annotations": 1
+          },
+          "correct": 11,
+          "denominator": 15,
+          "excluded": {},
+          "rate": 0.7333333333333333
+        },
+        {
+          "columns": {
+            "code_insight": 1,
+            "context": 1,
+            "debug_info": 1,
+            "find_files": 1,
+            "get_context": 1,
+            "git_analysis": 1,
+            "index_stats": 2,
+            "info": 1,
+            "native:read": 3,
+            "search": 1,
+            "semantic_annotations": 1,
+            "side_effects": 1
+          },
+          "correct": 11,
+          "denominator": 15,
+          "excluded": {},
+          "rate": 0.7333333333333333
+        },
+        {
+          "columns": {
+            "code_insight": 1,
+            "context": 1,
+            "debug_info": 1,
+            "find_files": 1,
+            "get_context": 1,
+            "git_analysis": 1,
+            "index_stats": 1,
+            "info": 1,
+            "list_symbols": 1,
+            "native:bash": 1,
+            "native:glob": 1,
+            "native:read": 2,
+            "semantic_annotations": 1,
+            "side_effects": 1
+          },
+          "correct": 10,
+          "denominator": 15,
+          "excluded": {},
+          "rate": 0.6666666666666666
+        }
+      ]
+    },
+    {
+      "cell": "a|strong|control",
+      "mean_rate": 1.0,
+      "per_rep": [
+        {
+          "columns": {
+            "index_stats": 1
+          },
+          "correct": 1,
+          "denominator": 1,
+          "excluded": {},
+          "rate": 1.0
+        },
+        {
+          "columns": {
+            "index_stats": 1
+          },
+          "correct": 1,
+          "denominator": 1,
+          "excluded": {},
+          "rate": 1.0
+        },
+        {
+          "columns": {
+            "index_stats": 1
+          },
+          "correct": 1,
+          "denominator": 1,
+          "excluded": {},
+          "rate": 1.0
+        }
+      ]
+    },
+    {
+      "cell": "a|weak|confusable",
+      "mean_rate": 0.7905982905982906,
+      "per_rep": [
+        {
+          "columns": {
+            "code_insight": 1,
+            "context": 1,
+            "debug_info": 1,
+            "find_files": 2,
+            "git_analysis": 1,
+            "index_stats": 1,
+            "info": 1,
+            "list_symbols": 2,
+            "native:glob": 1,
+            "search": 1,
+            "semantic_annotations": 1
+          },
+          "correct": 8,
+          "denominator": 13,
+          "excluded": {
+            "empty_answer": 1,
+            "provider_timeout": 1
+          },
+          "rate": 0.6153846153846154
+        },
+        {
+          "columns": {
+            "callers": 1,
+            "code_insight": 1,
+            "context": 1,
+            "debug_info": 1,
+            "find_files": 2,
+            "git_analysis": 1,
+            "index_stats": 1,
+            "info": 1,
+            "list_symbols": 1,
+            "semantic_annotations": 1,
+            "side_effects": 1
+          },
+          "correct": 10,
+          "denominator": 12,
+          "excluded": {
+            "empty_answer": 1,
+            "no_tool_call": 2
+          },
+          "rate": 0.8333333333333334
+        },
+        {
+          "columns": {
+            "callers": 1,
+            "code_insight": 1,
+            "context": 1,
+            "debug_info": 1,
+            "find_files": 2,
+            "git_analysis": 1,
+            "index_stats": 1,
+            "info": 1,
+            "inspect_symbol": 1,
+            "search": 1,
+            "semantic_annotations": 1,
+            "side_effects": 1
+          },
+          "correct": 12,
+          "denominator": 13,
+          "excluded": {
+            "empty_answer": 1,
+            "no_tool_call": 1
+          },
+          "rate": 0.9230769230769231
+        }
+      ]
+    },
+    {
+      "cell": "a|weak|control",
+      "mean_rate": 1.0,
+      "per_rep": [
+        {
+          "columns": {
+            "index_stats": 1
+          },
+          "correct": 1,
+          "denominator": 1,
+          "excluded": {},
+          "rate": 1.0
+        },
+        {
+          "columns": {
+            "index_stats": 1
+          },
+          "correct": 1,
+          "denominator": 1,
+          "excluded": {},
+          "rate": 1.0
+        },
+        {
+          "columns": {
+            "index_stats": 1
+          },
+          "correct": 1,
+          "denominator": 1,
+          "excluded": {},
+          "rate": 1.0
+        }
+      ]
+    },
+    {
+      "cell": "b|strong|confusable",
+      "mean_rate": 0.6178266178266179,
+      "per_rep": [
+        {
+          "columns": {
+            "code_insight": 1,
+            "debug_info": 1,
+            "find_files": 1,
+            "get_context": 1,
+            "git_analysis": 1,
+            "index_stats": 1,
+            "info": 1,
+            "native:bash": 1,
+            "native:glob": 1,
+            "native:read": 4,
+            "semantic_annotations": 1
+          },
+          "correct": 8,
+          "denominator": 14,
+          "excluded": {
+            "empty_answer": 1
+          },
+          "rate": 0.5714285714285714
+        },
+        {
+          "columns": {
+            "code_insight": 1,
+            "context": 1,
+            "debug_info": 1,
+            "find_files": 1,
+            "git_analysis": 1,
+            "index_stats": 1,
+            "info": 1,
+            "native:bash": 2,
+            "native:glob": 3,
+            "semantic_annotations": 1
+          },
+          "correct": 8,
+          "denominator": 13,
+          "excluded": {
+            "empty_answer": 1,
+            "no_tool_call": 1
+          },
+          "rate": 0.6153846153846154
+        },
+        {
+          "columns": {
+            "browse_file": 1,
+            "code_insight": 1,
+            "context": 1,
+            "debug_info": 1,
+            "find_files": 1,
+            "git_analysis": 1,
+            "index_stats": 1,
+            "info": 1,
+            "native:glob": 1,
+            "native:read": 2,
+            "semantic_annotations": 1
+          },
+          "correct": 8,
+          "denominator": 12,
+          "excluded": {
+            "empty_answer": 1,
+            "no_tool_call": 2
+          },
+          "rate": 0.6666666666666666
+        }
+      ]
+    },
+    {
+      "cell": "b|strong|control",
+      "mean_rate": 1.0,
+      "per_rep": [
+        {
+          "columns": {
+            "index_stats": 1
+          },
+          "correct": 1,
+          "denominator": 1,
+          "excluded": {},
+          "rate": 1.0
+        },
+        {
+          "columns": {
+            "index_stats": 1
+          },
+          "correct": 1,
+          "denominator": 1,
+          "excluded": {},
+          "rate": 1.0
+        },
+        {
+          "columns": {
+            "index_stats": 1
+          },
+          "correct": 1,
+          "denominator": 1,
+          "excluded": {},
+          "rate": 1.0
+        }
+      ]
+    },
+    {
+      "cell": "b|weak|confusable",
+      "mean_rate": 0.6153846153846154,
+      "per_rep": [
+        {
+          "columns": {
+            "code_insight": 1,
+            "debug_info": 1,
+            "find_files": 2,
+            "git_analysis": 1,
+            "index_stats": 3,
+            "info": 2,
+            "list_symbols": 1,
+            "native:bash": 1,
+            "semantic_annotations": 1
+          },
+          "correct": 7,
+          "denominator": 13,
+          "excluded": {
+            "empty_answer": 1,
+            "no_tool_call": 1
+          },
+          "rate": 0.5384615384615384
+        },
+        {
+          "columns": {
+            "code_insight": 1,
+            "context": 1,
+            "debug_info": 1,
+            "find_files": 2,
+            "get_context": 1,
+            "git_analysis": 1,
+            "index_stats": 1,
+            "info": 1,
+            "list_symbols": 2,
+            "native:bash": 1,
+            "native:glob": 1
+          },
+          "correct": 8,
+          "denominator": 13,
+          "excluded": {
+            "empty_answer": 2
+          },
+          "rate": 0.6153846153846154
+        },
+        {
+          "columns": {
+            "callers": 1,
+            "code_insight": 1,
+            "context": 1,
+            "debug_info": 1,
+            "find_files": 1,
+            "git_analysis": 1,
+            "index_stats": 2,
+            "info": 1,
+            "list_symbols": 1,
+            "native:glob": 1,
+            "semantic_annotations": 1,
+            "side_effects": 1
+          },
+          "correct": 9,
+          "denominator": 13,
+          "excluded": {
+            "empty_answer": 2
+          },
+          "rate": 0.6923076923076923
+        }
+      ]
+    },
+    {
+      "cell": "b|weak|control",
+      "mean_rate": 1.0,
+      "per_rep": [
+        {
+          "columns": {
+            "index_stats": 1
+          },
+          "correct": 1,
+          "denominator": 1,
+          "excluded": {},
+          "rate": 1.0
+        },
+        {
+          "columns": {
+            "index_stats": 1
+          },
+          "correct": 1,
+          "denominator": 1,
+          "excluded": {},
+          "rate": 1.0
+        },
+        {
+          "columns": {
+            "index_stats": 1
+          },
+          "correct": 1,
+          "denominator": 1,
+          "excluded": {},
+          "rate": 1.0
+        }
+      ]
+    },
+    {
+      "cell": "c|strong|confusable",
+      "mean_rate": 0.5920634920634921,
+      "per_rep": [
+        {
+          "columns": {
+            "code_insight": 1,
+            "context": 1,
+            "debug_info": 1,
+            "find_files": 1,
+            "get_context": 1,
+            "git_analysis": 1,
+            "index_stats": 1,
+            "info": 1,
+            "native:bash": 1,
+            "native:grep": 1,
+            "native:read": 4,
+            "search": 1
+          },
+          "correct": 8,
+          "denominator": 15,
+          "excluded": {},
+          "rate": 0.5333333333333333
+        },
+        {
+          "columns": {
+            "callers": 1,
+            "code_insight": 1,
+            "context": 1,
+            "debug_info": 1,
+            "find_files": 1,
+            "get_context": 1,
+            "git_analysis": 1,
+            "index_stats": 1,
+            "info": 1,
+            "native:read": 5,
+            "search": 1
+          },
+          "correct": 9,
+          "denominator": 15,
+          "excluded": {},
+          "rate": 0.6
+        },
+        {
+          "columns": {
+            "code_insight": 1,
+            "context": 1,
+            "debug_info": 1,
+            "find_files": 1,
+            "get_context": 1,
+            "git_analysis": 1,
+            "index_stats": 1,
+            "info": 1,
+            "native:bash": 2,
+            "native:glob": 1,
+            "native:grep": 1,
+            "native:read": 1,
+            "side_effects": 1
+          },
+          "correct": 9,
+          "denominator": 14,
+          "excluded": {
+            "empty_answer": 1
+          },
+          "rate": 0.6428571428571429
+        }
+      ]
+    },
+    {
+      "cell": "c|strong|control",
+      "mean_rate": 1.0,
+      "per_rep": [
+        {
+          "columns": {
+            "index_stats": 1
+          },
+          "correct": 1,
+          "denominator": 1,
+          "excluded": {},
+          "rate": 1.0
+        },
+        {
+          "columns": {
+            "index_stats": 1
+          },
+          "correct": 1,
+          "denominator": 1,
+          "excluded": {},
+          "rate": 1.0
+        },
+        {
+          "columns": {
+            "index_stats": 1
+          },
+          "correct": 1,
+          "denominator": 1,
+          "excluded": {},
+          "rate": 1.0
+        }
+      ]
+    },
+    {
+      "cell": "c|weak|confusable",
+      "mean_rate": 0.5750915750915752,
+      "per_rep": [
+        {
+          "columns": {
+            "callers": 1,
+            "code_insight": 1,
+            "debug_info": 1,
+            "find_files": 1,
+            "git_analysis": 1,
+            "index_stats": 1,
+            "info": 1,
+            "list_symbols": 2,
+            "native:bash": 1,
+            "native:glob": 1,
+            "search": 2
+          },
+          "correct": 7,
+          "denominator": 13,
+          "excluded": {
+            "empty_answer": 2
+          },
+          "rate": 0.5384615384615384
+        },
+        {
+          "columns": {
+            "callers": 1,
+            "code_insight": 2,
+            "context": 1,
+            "debug_info": 1,
+            "find_files": 1,
+            "git_analysis": 1,
+            "index_stats": 1,
+            "info": 1,
+            "list_symbols": 1,
+            "native:bash": 1,
+            "native:glob": 1,
+            "search": 1
+          },
+          "correct": 8,
+          "denominator": 13,
+          "excluded": {
+            "empty_answer": 2
+          },
+          "rate": 0.6153846153846154
+        },
+        {
+          "columns": {
+            "browse_file": 1,
+            "code_insight": 3,
+            "context": 1,
+            "debug_info": 1,
+            "find_files": 1,
+            "git_analysis": 1,
+            "index_stats": 1,
+            "info": 1,
+            "list_symbols": 1,
+            "native:bash": 1,
+            "native:glob": 1,
+            "search": 1
+          },
+          "correct": 8,
+          "denominator": 14,
+          "excluded": {
+            "no_tool_call": 1
+          },
+          "rate": 0.5714285714285714
+        }
+      ]
+    },
+    {
+      "cell": "c|weak|control",
+      "mean_rate": 1.0,
+      "per_rep": [
+        {
+          "columns": {
+            "index_stats": 1
+          },
+          "correct": 1,
+          "denominator": 1,
+          "excluded": {},
+          "rate": 1.0
+        },
+        {
+          "columns": {
+            "index_stats": 1
+          },
+          "correct": 1,
+          "denominator": 1,
+          "excluded": {},
+          "rate": 1.0
+        },
+        {
+          "columns": {
+            "index_stats": 1
+          },
+          "correct": 1,
+          "denominator": 1,
+          "excluded": {},
+          "rate": 1.0
+        }
+      ]
+    },
+    {
+      "cell": "d|strong|confusable",
+      "mean_rate": 0.6587301587301587,
+      "per_rep": [
+        {
+          "columns": {
+            "code_insight": 1,
+            "context": 1,
+            "debug_info": 1,
+            "find_files": 1,
+            "get_context": 1,
+            "git_analysis": 1,
+            "index_stats": 1,
+            "info": 1,
+            "native:bash": 1,
+            "native:glob": 2,
+            "native:read": 2,
+            "search": 1,
+            "semantic_annotations": 1
+          },
+          "correct": 10,
+          "denominator": 15,
+          "excluded": {},
+          "rate": 0.6666666666666666
+        },
+        {
+          "columns": {
+            "browse_file": 1,
+            "code_insight": 1,
+            "context": 1,
+            "debug_info": 1,
+            "find_files": 1,
+            "git_analysis": 1,
+            "index_stats": 1,
+            "info": 1,
+            "native:bash": 1,
+            "native:read": 4,
+            "semantic_annotations": 1
+          },
+          "correct": 9,
+          "denominator": 14,
+          "excluded": {
+            "empty_answer": 1
+          },
+          "rate": 0.6428571428571429
+        },
+        {
+          "columns": {
+            "code_insight": 1,
+            "context": 1,
+            "debug_info": 1,
+            "find_files": 1,
+            "git_analysis": 1,
+            "index_stats": 1,
+            "info": 1,
+            "native:glob": 1,
+            "native:read": 3,
+            "semantic_annotations": 1
+          },
+          "correct": 8,
+          "denominator": 12,
+          "excluded": {
+            "empty_answer": 1,
+            "no_tool_call": 2
+          },
+          "rate": 0.6666666666666666
+        }
+      ]
+    },
+    {
+      "cell": "d|strong|control",
+      "mean_rate": 0.6666666666666666,
+      "per_rep": [
+        {
+          "columns": {
+            "index_stats": 1
+          },
+          "correct": 1,
+          "denominator": 1,
+          "excluded": {},
+          "rate": 1.0
+        },
+        {
+          "columns": {
+            "debug_info": 1
+          },
+          "correct": 0,
+          "denominator": 1,
+          "excluded": {},
+          "rate": 0.0
+        },
+        {
+          "columns": {
+            "index_stats": 1
+          },
+          "correct": 1,
+          "denominator": 1,
+          "excluded": {},
+          "rate": 1.0
+        }
+      ]
+    },
+    {
+      "cell": "d|weak|confusable",
+      "mean_rate": 0.6950549450549451,
+      "per_rep": [
+        {
+          "columns": {
+            "code_insight": 1,
+            "context": 1,
+            "debug_info": 1,
+            "find_files": 1,
+            "get_context": 1,
+            "git_analysis": 1,
+            "index_stats": 1,
+            "info": 1,
+            "list_symbols": 2,
+            "native:bash": 1,
+            "native:glob": 1,
+            "semantic_annotations": 1
+          },
+          "correct": 9,
+          "denominator": 13,
+          "excluded": {
+            "empty_answer": 2
+          },
+          "rate": 0.6923076923076923
+        },
+        {
+          "columns": {
+            "code_insight": 1,
+            "debug_info": 1,
+            "find_files": 4,
+            "git_analysis": 1,
+            "index_stats": 1,
+            "info": 1,
+            "inspect_symbol": 1,
+            "search": 1,
+            "side_effects": 1
+          },
+          "correct": 9,
+          "denominator": 12,
+          "excluded": {
+            "empty_answer": 2,
+            "no_tool_call": 1
+          },
+          "rate": 0.75
+        },
+        {
+          "columns": {
+            "debug_info": 1,
+            "find_files": 1,
+            "get_context": 1,
+            "git_analysis": 1,
+            "index_stats": 2,
+            "info": 1,
+            "list_symbols": 1,
+            "native:bash": 1,
+            "native:glob": 1,
+            "native:read": 1,
+            "search": 1,
+            "semantic_annotations": 1,
+            "side_effects": 1
+          },
+          "correct": 9,
+          "denominator": 14,
+          "excluded": {
+            "empty_answer": 1
+          },
+          "rate": 0.6428571428571429
+        }
+      ]
+    },
+    {
+      "cell": "d|weak|control",
+      "mean_rate": 1.0,
+      "per_rep": [
+        {
+          "columns": {
+            "index_stats": 1
+          },
+          "correct": 1,
+          "denominator": 1,
+          "excluded": {},
+          "rate": 1.0
+        },
+        {
+          "columns": {
+            "index_stats": 1
+          },
+          "correct": 1,
+          "denominator": 1,
+          "excluded": {},
+          "rate": 1.0
+        },
+        {
+          "columns": {
+            "index_stats": 1
+          },
+          "correct": 1,
+          "denominator": 1,
+          "excluded": {},
+          "rate": 1.0
+        }
+      ]
+    }
+  ],
+  "control_null": {
+    "control": {
+      "a|strong": {
+        "n": 3,
+        "rate": 1.0
+      },
+      "a|weak": {
+        "n": 3,
+        "rate": 1.0
+      },
+      "b|strong": {
+        "n": 3,
+        "rate": 1.0
+      },
+      "b|weak": {
+        "n": 3,
+        "rate": 1.0
+      },
+      "c|strong": {
+        "n": 3,
+        "rate": 1.0
+      },
+      "c|weak": {
+        "n": 3,
+        "rate": 1.0
+      },
+      "d|strong": {
+        "n": 3,
+        "rate": 0.6666666666666666
+      },
+      "d|weak": {
+        "n": 3,
+        "rate": 1.0
+      }
+    }
+  },
+  "excluded_ledgers": [
+    {
+      "path": ".work/toolcalling/records.jsonl",
+      "reason": "E2.3 smoke records: written before the mock served real input schemas (01M1W40XF2E0HKT05SS51A5PJ2) and carrying no time evidence, so they are not comparable to the E2.4 grid"
+    }
+  ],
+  "global_claims": {
+    "g1-d-fixes-callers-search-confusion": {
+      "held": true,
+      "observed": "under D, mean `search` first calls on the callers task = 0.0; `callers` first calls on the search task A=0.0 -> D=0.0"
+    },
+    "g2-weak-tier-gains-most": {
+      "held": false,
+      "observed": "best-arm gain weak=-0.09554334554334543 strong=-0.05238095238095242"
+    },
+    "g3-control-null": {
+      "held": true,
+      "observed": {
+        "b|strong": "no_effect",
+        "b|weak": "no_effect",
+        "c|strong": "no_effect",
+        "c|weak": "no_effect",
+        "d|strong": "no_effect",
+        "d|weak": "no_effect"
+      }
+    },
+    "g4-native-first-is-wording-insensitive": {
+      "held": true,
+      "observed": {
+        "a": 0.22222222222222224,
+        "b": 0.3543956043956044,
+        "c": 0.36349206349206353,
+        "d": 0.3412698412698412
+      }
+    },
+    "g5-c-is-a-null": {
+      "held": true,
+      "observed": {
+        "strong": {
+          "delta": -0.11904761904761907,
+          "spread": 0.06666666666666665,
+          "verdict": "no_effect"
+        },
+        "weak": {
+          "delta": -0.2155067155067154,
+          "spread": 0.3076923076923077,
+          "verdict": "no_effect"
+        }
+      }
+    },
+    "g6-hallucination-rate-low": {
+      "held": true,
+      "observed": {
+        "a|strong": 0.0,
+        "a|weak": 0.0,
+        "b|strong": 0.0,
+        "b|weak": 0.0,
+        "c|strong": 0.0,
+        "c|weak": 0.0,
+        "d|strong": 0.0,
+        "d|weak": 0.0
+      }
+    }
+  },
+  "inputs_digest": "d40aa396c29ab3ca",
+  "ledgers": [
+    {
+      "path": "rep1.jsonl",
+      "records": 128,
+      "started_at": "2026-09-06T20:43:30Z"
+    },
+    {
+      "path": "rep2.jsonl",
+      "records": 128,
+      "started_at": "2026-09-06T21:14:32Z"
+    },
+    {
+      "path": "rep3.jsonl",
+      "records": 128,
+      "started_at": "2026-09-06T21:43:10Z"
+    }
+  ],
+  "neighbor_pressure": {
+    "a|strong": {
+      "browse_file": 0.0,
+      "callers": 0.0,
+      "code_insight": 0.0,
+      "context": 0.0,
+      "debug_info": 0.0,
+      "find_files": 0.0,
+      "get_context": 0.0,
+      "git_analysis": 0.0,
+      "index_stats": 0.0,
+      "info": 0.0,
+      "inspect_symbol": 0.0,
+      "list_symbols": 0.0,
+      "search": 0.0,
+      "semantic_annotations": 0.0,
+      "side_effects": 0.0
+    },
+    "a|weak": {
+      "browse_file": 0.0,
+      "callers": 0.0,
+      "code_insight": 0.0,
+      "context": 0.0,
+      "debug_info": 0.0,
+      "find_files": 0.5,
+      "get_context": 0.0,
+      "git_analysis": 0.0,
+      "index_stats": 0.0,
+      "info": 0.0,
+      "inspect_symbol": 0.0,
+      "list_symbols": 0.5,
+      "search": 0.0,
+      "semantic_annotations": 0.0,
+      "side_effects": 0.0
+    },
+    "b|strong": {
+      "browse_file": 0.1111111111111111,
+      "callers": 0.0,
+      "code_insight": 0.0,
+      "context": 0.0,
+      "debug_info": 0.0,
+      "find_files": 0.0,
+      "get_context": 0.0,
+      "git_analysis": 0.0,
+      "index_stats": 0.0,
+      "info": 0.0,
+      "inspect_symbol": 0.0,
+      "list_symbols": 0.0,
+      "search": 0.0,
+      "side_effects": 0.0
+    },
+    "b|weak": {
+      "browse_file": 0.0,
+      "callers": 0.0,
+      "code_insight": 0.0,
+      "context": 0.16666666666666666,
+      "debug_info": 0.0,
+      "find_files": 0.0,
+      "get_context": 0.0,
+      "git_analysis": 0.0,
+      "index_stats": 0.0,
+      "info": 0.0,
+      "inspect_symbol": 0.0,
+      "list_symbols": 0.5,
+      "search": 0.0,
+      "semantic_annotations": 0.0,
+      "side_effects": 0.0
+    },
+    "c|strong": {
+      "browse_file": 0.0,
+      "callers": 0.0,
+      "code_insight": 0.0,
+      "context": 0.0,
+      "debug_info": 0.0,
+      "find_files": 0.0,
+      "get_context": 0.0,
+      "git_analysis": 0.0,
+      "index_stats": 0.0,
+      "info": 0.0,
+      "inspect_symbol": 0.0,
+      "list_symbols": 0.0,
+      "search": 0.2222222222222222,
+      "semantic_annotations": 0.0,
+      "side_effects": 0.0
+    },
+    "c|weak": {
+      "browse_file": 0.0,
+      "callers": 0.0,
+      "code_insight": 0.06666666666666667,
+      "context": 0.0,
+      "debug_info": 0.0,
+      "find_files": 0.0,
+      "get_context": 0.0,
+      "git_analysis": 0.0,
+      "index_stats": 0.0,
+      "info": 0.0,
+      "inspect_symbol": 0.0,
+      "list_symbols": 0.6666666666666666,
+      "search": 0.1111111111111111,
+      "side_effects": 0.0
+    },
+    "d|strong": {
+      "browse_file": 0.0,
+      "callers": 0.0,
+      "code_insight": 0.0,
+      "context": 0.0,
+      "debug_info": 0.0,
+      "find_files": 0.0,
+      "get_context": 0.0,
+      "git_analysis": 0.0,
+      "index_stats": 0.0,
+      "info": 0.0,
+      "inspect_symbol": 0.0,
+      "list_symbols": 0.0,
+      "search": 0.0,
+      "semantic_annotations": 0.0,
+      "side_effects": 0.0
+    },
+    "d|weak": {
+      "browse_file": 0.0,
+      "callers": 0.0,
+      "code_insight": 0.0,
+      "context": 0.0,
+      "debug_info": 0.0,
+      "find_files": 0.25,
+      "get_context": 0.0,
+      "git_analysis": 0.0,
+      "index_stats": 0.0,
+      "info": 0.0,
+      "inspect_symbol": 0.0,
+      "list_symbols": 0.3333333333333333,
+      "search": 0.0,
+      "semantic_annotations": 0.0,
+      "side_effects": 0.0
+    }
+  },
+  "per_task_best_variant": {
+    "browse-one-file-walkthrough": {
+      "strong": {
+        "baseline_mean": 0.0,
+        "best_variant": "d",
+        "candidates": {
+          "b": {
+            "baseline_mean": 0.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.1111111111111111,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 0.0,
+            "verdict": "no_effect"
+          },
+          "c": {
+            "baseline_mean": 0.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 0.0,
+            "verdict": "no_effect"
+          },
+          "d": {
+            "baseline_mean": 0.0,
+            "delta": 0.3333333333333333,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 0.3333333333333333,
+            "verdict": "lift"
+          }
+        },
+        "verdict": "lift"
+      },
+      "weak": {
+        "baseline_mean": 0.0,
+        "best_variant": "a",
+        "candidates": {
+          "b": {
+            "baseline_mean": 0.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": null,
+            "treatment_mean": 0.0,
+            "verdict": "no_effect"
+          },
+          "c": {
+            "baseline_mean": 0.0,
+            "delta": 0.5,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": null,
+            "treatment_mean": 0.5,
+            "verdict": "no_effect"
+          },
+          "d": {
+            "baseline_mean": 0.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": null,
+            "treatment_mean": 0.0,
+            "verdict": "no_effect"
+          }
+        },
+        "verdict": "no_effect"
+      }
+    },
+    "collect-author-markers": {
+      "strong": {
+        "baseline_mean": 1.0,
+        "best_variant": "a",
+        "candidates": {
+          "b": {
+            "baseline_mean": 1.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 1.0,
+            "verdict": "no_effect"
+          },
+          "c": {
+            "baseline_mean": 1.0,
+            "delta": -1.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 0.0,
+            "verdict": "no_effect"
+          },
+          "d": {
+            "baseline_mean": 1.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 1.0,
+            "verdict": "no_effect"
+          }
+        },
+        "verdict": "no_effect"
+      },
+      "weak": {
+        "baseline_mean": 1.0,
+        "best_variant": "a",
+        "candidates": {
+          "b": {
+            "baseline_mean": 1.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 1.0,
+            "verdict": "no_effect"
+          },
+          "c": {
+            "baseline_mean": 1.0,
+            "delta": -1.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 0.0,
+            "verdict": "no_effect"
+          },
+          "d": {
+            "baseline_mean": 1.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 1.0,
+            "verdict": "no_effect"
+          }
+        },
+        "verdict": "no_effect"
+      }
+    },
+    "confirmed-call-sites-for-one-routine": {
+      "strong": {
+        "baseline_mean": 0.3333333333333333,
+        "best_variant": "a",
+        "candidates": {
+          "b": {
+            "baseline_mean": 0.3333333333333333,
+            "delta": -0.3333333333333333,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 1.0,
+            "treatment_mean": 0.0,
+            "verdict": "no_effect"
+          },
+          "c": {
+            "baseline_mean": 0.3333333333333333,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 1.0,
+            "treatment_mean": 0.3333333333333333,
+            "verdict": "no_effect"
+          },
+          "d": {
+            "baseline_mean": 0.3333333333333333,
+            "delta": -0.3333333333333333,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 1.0,
+            "treatment_mean": 0.0,
+            "verdict": "no_effect"
+          }
+        },
+        "verdict": "no_effect"
+      },
+      "weak": {
+        "baseline_mean": 0.6666666666666666,
+        "best_variant": "a",
+        "candidates": {
+          "b": {
+            "baseline_mean": 0.6666666666666666,
+            "delta": -0.3333333333333333,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 1.0,
+            "treatment_mean": 0.3333333333333333,
+            "verdict": "no_effect"
+          },
+          "c": {
+            "baseline_mean": 0.6666666666666666,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 1.0,
+            "treatment_mean": 0.6666666666666666,
+            "verdict": "no_effect"
+          },
+          "d": {
+            "baseline_mean": 0.6666666666666666,
+            "delta": -0.6666666666666666,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 1.0,
+            "treatment_mean": 0.0,
+            "verdict": "no_effect"
+          }
+        },
+        "verdict": "no_effect"
+      }
+    },
+    "control-corpus-readiness": {
+      "strong": {
+        "baseline_mean": 1.0,
+        "best_variant": "a",
+        "candidates": {
+          "b": {
+            "baseline_mean": 1.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 1.0,
+            "verdict": "no_effect"
+          },
+          "c": {
+            "baseline_mean": 1.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 1.0,
+            "verdict": "no_effect"
+          },
+          "d": {
+            "baseline_mean": 1.0,
+            "delta": -0.33333333333333337,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 0.6666666666666666,
+            "verdict": "no_effect"
+          }
+        },
+        "verdict": "no_effect"
+      },
+      "weak": {
+        "baseline_mean": 1.0,
+        "best_variant": "a",
+        "candidates": {
+          "b": {
+            "baseline_mean": 1.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 1.0,
+            "verdict": "no_effect"
+          },
+          "c": {
+            "baseline_mean": 1.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 1.0,
+            "verdict": "no_effect"
+          },
+          "d": {
+            "baseline_mean": 1.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 1.0,
+            "verdict": "no_effect"
+          }
+        },
+        "verdict": "no_effect"
+      }
+    },
+    "full-metadata-from-a-bare-name": {
+      "strong": {
+        "baseline_mean": 0.3333333333333333,
+        "best_variant": "a",
+        "candidates": {
+          "b": {
+            "baseline_mean": 0.3333333333333333,
+            "delta": -0.3333333333333333,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 1.0,
+            "treatment_mean": 0.0,
+            "verdict": "no_effect"
+          },
+          "c": {
+            "baseline_mean": 0.3333333333333333,
+            "delta": -0.3333333333333333,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 1.0,
+            "treatment_mean": 0.0,
+            "verdict": "no_effect"
+          },
+          "d": {
+            "baseline_mean": 0.3333333333333333,
+            "delta": -0.3333333333333333,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 1.0,
+            "treatment_mean": 0.0,
+            "verdict": "no_effect"
+          }
+        },
+        "verdict": "no_effect"
+      },
+      "weak": {
+        "baseline_mean": 0.3333333333333333,
+        "best_variant": "a",
+        "candidates": {
+          "b": {
+            "baseline_mean": 0.3333333333333333,
+            "delta": -0.3333333333333333,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 1.0,
+            "treatment_mean": 0.0,
+            "verdict": "no_effect"
+          },
+          "c": {
+            "baseline_mean": 0.3333333333333333,
+            "delta": -0.3333333333333333,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 1.0,
+            "treatment_mean": 0.0,
+            "verdict": "no_effect"
+          },
+          "d": {
+            "baseline_mean": 0.3333333333333333,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 1.0,
+            "treatment_mean": 0.3333333333333333,
+            "verdict": "no_effect"
+          }
+        },
+        "verdict": "no_effect"
+      }
+    },
+    "hydrate-identifiers-from-a-prior-lookup": {
+      "strong": {
+        "baseline_mean": 0.6666666666666666,
+        "best_variant": "a",
+        "candidates": {
+          "b": {
+            "baseline_mean": 0.6666666666666666,
+            "delta": 0.33333333333333337,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 1.0,
+            "treatment_mean": 1.0,
+            "verdict": "no_effect"
+          },
+          "c": {
+            "baseline_mean": 0.6666666666666666,
+            "delta": 0.33333333333333337,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 1.0,
+            "treatment_mean": 1.0,
+            "verdict": "no_effect"
+          },
+          "d": {
+            "baseline_mean": 0.6666666666666666,
+            "delta": -0.16666666666666663,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 1.0,
+            "treatment_mean": 0.5,
+            "verdict": "no_effect"
+          }
+        },
+        "verdict": "no_effect"
+      },
+      "weak": {
+        "baseline_mean": 0.0,
+        "best_variant": "a",
+        "candidates": {
+          "b": {
+            "baseline_mean": 0.0,
+            "delta": 0.5,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": null,
+            "treatment_mean": 0.5,
+            "verdict": "no_effect"
+          },
+          "c": {
+            "baseline_mean": 0.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": null,
+            "treatment_mean": 0.0,
+            "verdict": "no_effect"
+          },
+          "d": {
+            "baseline_mean": 0.0,
+            "delta": 0.6666666666666666,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": null,
+            "treatment_mean": 0.6666666666666666,
+            "verdict": "no_effect"
+          }
+        },
+        "verdict": "no_effect"
+      }
+    },
+    "index-internals-breakdown": {
+      "strong": {
+        "baseline_mean": 1.0,
+        "best_variant": "a",
+        "candidates": {
+          "b": {
+            "baseline_mean": 1.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 1.0,
+            "verdict": "no_effect"
+          },
+          "c": {
+            "baseline_mean": 1.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 1.0,
+            "verdict": "no_effect"
+          },
+          "d": {
+            "baseline_mean": 1.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 1.0,
+            "verdict": "no_effect"
+          }
+        },
+        "verdict": "no_effect"
+      },
+      "weak": {
+        "baseline_mean": 1.0,
+        "best_variant": "a",
+        "candidates": {
+          "b": {
+            "baseline_mean": 1.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 1.0,
+            "verdict": "no_effect"
+          },
+          "c": {
+            "baseline_mean": 1.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 1.0,
+            "verdict": "no_effect"
+          },
+          "d": {
+            "baseline_mean": 1.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 1.0,
+            "verdict": "no_effect"
+          }
+        },
+        "verdict": "no_effect"
+      }
+    },
+    "is-the-corpus-ready": {
+      "strong": {
+        "baseline_mean": 1.0,
+        "best_variant": "a",
+        "candidates": {
+          "b": {
+            "baseline_mean": 1.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 1.0,
+            "verdict": "no_effect"
+          },
+          "c": {
+            "baseline_mean": 1.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 1.0,
+            "verdict": "no_effect"
+          },
+          "d": {
+            "baseline_mean": 1.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 1.0,
+            "verdict": "no_effect"
+          }
+        },
+        "verdict": "no_effect"
+      },
+      "weak": {
+        "baseline_mean": 1.0,
+        "best_variant": "a",
+        "candidates": {
+          "b": {
+            "baseline_mean": 1.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 1.0,
+            "verdict": "no_effect"
+          },
+          "c": {
+            "baseline_mean": 1.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 1.0,
+            "verdict": "no_effect"
+          },
+          "d": {
+            "baseline_mean": 1.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 1.0,
+            "verdict": "no_effect"
+          }
+        },
+        "verdict": "no_effect"
+      }
+    },
+    "locate-by-path-fragment": {
+      "strong": {
+        "baseline_mean": 1.0,
+        "best_variant": "a",
+        "candidates": {
+          "b": {
+            "baseline_mean": 1.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 1.0,
+            "verdict": "no_effect"
+          },
+          "c": {
+            "baseline_mean": 1.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 1.0,
+            "verdict": "no_effect"
+          },
+          "d": {
+            "baseline_mean": 1.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 1.0,
+            "verdict": "no_effect"
+          }
+        },
+        "verdict": "no_effect"
+      },
+      "weak": {
+        "baseline_mean": 1.0,
+        "best_variant": "a",
+        "candidates": {
+          "b": {
+            "baseline_mean": 1.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": -0.5,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 1.0,
+            "verdict": "no_effect"
+          },
+          "c": {
+            "baseline_mean": 1.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": -0.5,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 1.0,
+            "verdict": "no_effect"
+          },
+          "d": {
+            "baseline_mean": 1.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": -0.25,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 1.0,
+            "verdict": "no_effect"
+          }
+        },
+        "verdict": "no_effect"
+      }
+    },
+    "machine-readable-declaration-list": {
+      "strong": {
+        "baseline_mean": 0.0,
+        "best_variant": "a",
+        "candidates": {
+          "b": {
+            "baseline_mean": 0.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 0.0,
+            "verdict": "no_effect"
+          },
+          "c": {
+            "baseline_mean": 0.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 0.0,
+            "verdict": "no_effect"
+          },
+          "d": {
+            "baseline_mean": 0.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 0.0,
+            "verdict": "no_effect"
+          }
+        },
+        "verdict": "no_effect"
+      },
+      "weak": {
+        "baseline_mean": 0.0,
+        "best_variant": "a",
+        "candidates": {
+          "b": {
+            "baseline_mean": 0.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 0.0,
+            "verdict": "no_effect"
+          },
+          "c": {
+            "baseline_mean": 0.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.16666666666666663,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 0.0,
+            "verdict": "no_effect"
+          },
+          "d": {
+            "baseline_mean": 0.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": -0.16666666666666669,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 0.0,
+            "verdict": "no_effect"
+          }
+        },
+        "verdict": "no_effect"
+      }
+    },
+    "package-a-handoff-manifest": {
+      "strong": {
+        "baseline_mean": 1.0,
+        "best_variant": "a",
+        "candidates": {
+          "b": {
+            "baseline_mean": 1.0,
+            "delta": -0.33333333333333337,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 0.6666666666666666,
+            "verdict": "no_effect"
+          },
+          "c": {
+            "baseline_mean": 1.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 1.0,
+            "verdict": "no_effect"
+          },
+          "d": {
+            "baseline_mean": 1.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 1.0,
+            "verdict": "no_effect"
+          }
+        },
+        "verdict": "no_effect"
+      },
+      "weak": {
+        "baseline_mean": 1.0,
+        "best_variant": "a",
+        "candidates": {
+          "b": {
+            "baseline_mean": 1.0,
+            "delta": -0.5,
+            "neighbor_precision_delta": 0.16666666666666666,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 0.5,
+            "verdict": "no_effect"
+          },
+          "c": {
+            "baseline_mean": 1.0,
+            "delta": -0.33333333333333337,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 0.6666666666666666,
+            "verdict": "no_effect"
+          },
+          "d": {
+            "baseline_mean": 1.0,
+            "delta": -0.5,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 0.5,
+            "verdict": "no_effect"
+          }
+        },
+        "verdict": "no_effect"
+      }
+    },
+    "pre-commit-change-quality": {
+      "strong": {
+        "baseline_mean": 1.0,
+        "best_variant": "a",
+        "candidates": {
+          "b": {
+            "baseline_mean": 1.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 1.0,
+            "verdict": "no_effect"
+          },
+          "c": {
+            "baseline_mean": 1.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 1.0,
+            "verdict": "no_effect"
+          },
+          "d": {
+            "baseline_mean": 1.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 1.0,
+            "verdict": "no_effect"
+          }
+        },
+        "verdict": "no_effect"
+      },
+      "weak": {
+        "baseline_mean": 1.0,
+        "best_variant": "a",
+        "candidates": {
+          "b": {
+            "baseline_mean": 1.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 1.0,
+            "verdict": "no_effect"
+          },
+          "c": {
+            "baseline_mean": 1.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 1.0,
+            "verdict": "no_effect"
+          },
+          "d": {
+            "baseline_mean": 1.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 1.0,
+            "verdict": "no_effect"
+          }
+        },
+        "verdict": "no_effect"
+      }
+    },
+    "repo-shape-first-look": {
+      "strong": {
+        "baseline_mean": 1.0,
+        "best_variant": "a",
+        "candidates": {
+          "b": {
+            "baseline_mean": 1.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 1.0,
+            "verdict": "no_effect"
+          },
+          "c": {
+            "baseline_mean": 1.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 1.0,
+            "verdict": "no_effect"
+          },
+          "d": {
+            "baseline_mean": 1.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 1.0,
+            "verdict": "no_effect"
+          }
+        },
+        "verdict": "no_effect"
+      },
+      "weak": {
+        "baseline_mean": 1.0,
+        "best_variant": "a",
+        "candidates": {
+          "b": {
+            "baseline_mean": 1.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 1.0,
+            "verdict": "no_effect"
+          },
+          "c": {
+            "baseline_mean": 1.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.06666666666666667,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 1.0,
+            "verdict": "no_effect"
+          },
+          "d": {
+            "baseline_mean": 1.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 1.0,
+            "verdict": "no_effect"
+          }
+        },
+        "verdict": "no_effect"
+      }
+    },
+    "what-can-this-server-do": {
+      "strong": {
+        "baseline_mean": 1.0,
+        "best_variant": "a",
+        "candidates": {
+          "b": {
+            "baseline_mean": 1.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 1.0,
+            "verdict": "no_effect"
+          },
+          "c": {
+            "baseline_mean": 1.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 1.0,
+            "verdict": "no_effect"
+          },
+          "d": {
+            "baseline_mean": 1.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 1.0,
+            "verdict": "no_effect"
+          }
+        },
+        "verdict": "no_effect"
+      },
+      "weak": {
+        "baseline_mean": 1.0,
+        "best_variant": "a",
+        "candidates": {
+          "b": {
+            "baseline_mean": 1.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 1.0,
+            "verdict": "no_effect"
+          },
+          "c": {
+            "baseline_mean": 1.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 1.0,
+            "verdict": "no_effect"
+          },
+          "d": {
+            "baseline_mean": 1.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 1.0,
+            "verdict": "no_effect"
+          }
+        },
+        "verdict": "no_effect"
+      }
+    },
+    "what-does-this-routine-touch": {
+      "strong": {
+        "baseline_mean": 0.6666666666666666,
+        "best_variant": "a",
+        "candidates": {
+          "b": {
+            "baseline_mean": 0.6666666666666666,
+            "delta": -0.6666666666666666,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 1.0,
+            "treatment_mean": 0.0,
+            "verdict": "no_effect"
+          },
+          "c": {
+            "baseline_mean": 0.6666666666666666,
+            "delta": -0.3333333333333333,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 1.0,
+            "treatment_mean": 0.3333333333333333,
+            "verdict": "no_effect"
+          },
+          "d": {
+            "baseline_mean": 0.6666666666666666,
+            "delta": -0.6666666666666666,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 1.0,
+            "treatment_mean": 0.0,
+            "verdict": "no_effect"
+          }
+        },
+        "verdict": "no_effect"
+      },
+      "weak": {
+        "baseline_mean": 1.0,
+        "best_variant": "a",
+        "candidates": {
+          "b": {
+            "baseline_mean": 1.0,
+            "delta": -0.6666666666666667,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 0.3333333333333333,
+            "verdict": "no_effect"
+          },
+          "c": {
+            "baseline_mean": 1.0,
+            "delta": -1.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 0.0,
+            "verdict": "no_effect"
+          },
+          "d": {
+            "baseline_mean": 1.0,
+            "delta": -0.33333333333333337,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 0.0,
+            "treatment_mean": 0.6666666666666666,
+            "verdict": "no_effect"
+          }
+        },
+        "verdict": "no_effect"
+      }
+    },
+    "where-does-this-text-appear": {
+      "strong": {
+        "baseline_mean": 0.6666666666666666,
+        "best_variant": "a",
+        "candidates": {
+          "b": {
+            "baseline_mean": 0.6666666666666666,
+            "delta": null,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 1.0,
+            "treatment_mean": null,
+            "verdict": "no_effect"
+          },
+          "c": {
+            "baseline_mean": 0.6666666666666666,
+            "delta": -0.6666666666666666,
+            "neighbor_precision_delta": 0.2222222222222222,
+            "neighbor_precision_regression": false,
+            "spread": 1.0,
+            "treatment_mean": 0.0,
+            "verdict": "no_effect"
+          },
+          "d": {
+            "baseline_mean": 0.6666666666666666,
+            "delta": 0.33333333333333337,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": 1.0,
+            "treatment_mean": 1.0,
+            "verdict": "no_effect"
+          }
+        },
+        "verdict": "no_effect"
+      },
+      "weak": {
+        "baseline_mean": 1.0,
+        "best_variant": "a",
+        "candidates": {
+          "b": {
+            "baseline_mean": 1.0,
+            "delta": -1.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": null,
+            "treatment_mean": 0.0,
+            "verdict": "no_effect"
+          },
+          "c": {
+            "baseline_mean": 1.0,
+            "delta": null,
+            "neighbor_precision_delta": 0.1111111111111111,
+            "neighbor_precision_regression": false,
+            "spread": null,
+            "treatment_mean": null,
+            "verdict": "no_effect"
+          },
+          "d": {
+            "baseline_mean": 1.0,
+            "delta": 0.0,
+            "neighbor_precision_delta": 0.0,
+            "neighbor_precision_regression": false,
+            "spread": null,
+            "treatment_mean": 1.0,
+            "verdict": "no_effect"
+          }
+        },
+        "verdict": "no_effect"
+      }
+    }
+  },
+  "prediction_diff": {
+    "hits": [
+      {
+        "id": "g1-d-fixes-callers-search-confusion",
+        "observed": "under D, mean `search` first calls on the callers task = 0.0; `callers` first calls on the search task A=0.0 -> D=0.0"
+      },
+      {
+        "id": "g3-control-null",
+        "observed": {
+          "b|strong": "no_effect",
+          "b|weak": "no_effect",
+          "c|strong": "no_effect",
+          "c|weak": "no_effect",
+          "d|strong": "no_effect",
+          "d|weak": "no_effect"
+        }
+      },
+      {
+        "id": "g4-native-first-is-wording-insensitive",
+        "observed": {
+          "a": 0.22222222222222224,
+          "b": 0.3543956043956044,
+          "c": 0.36349206349206353,
+          "d": 0.3412698412698412
+        }
+      },
+      {
+        "id": "g5-c-is-a-null",
+        "observed": {
+          "strong": {
+            "delta": -0.11904761904761907,
+            "spread": 0.06666666666666665,
+            "verdict": "no_effect"
+          },
+          "weak": {
+            "delta": -0.2155067155067154,
+            "spread": 0.3076923076923077,
+            "verdict": "no_effect"
+          }
+        }
+      },
+      {
+        "id": "g6-hallucination-rate-low",
+        "observed": {
+          "a|strong": 0.0,
+          "a|weak": 0.0,
+          "b|strong": 0.0,
+          "b|weak": 0.0,
+          "c|strong": 0.0,
+          "c|weak": 0.0,
+          "d|strong": 0.0,
+          "d|weak": 0.0
+        }
+      },
+      {
+        "id": "per_task:is-the-corpus-ready",
+        "observed": "best variant per model: strong=a(no_effect), weak=a(no_effect)",
+        "predicted": "a"
+      },
+      {
+        "id": "per_task:pre-commit-change-quality",
+        "observed": "best variant per model: strong=a(no_effect), weak=a(no_effect)",
+        "predicted": "a"
+      },
+      {
+        "id": "per_task:what-can-this-server-do",
+        "observed": "best variant per model: strong=a(no_effect), weak=a(no_effect)",
+        "predicted": "a"
+      },
+      {
+        "id": "per_task:control-corpus-readiness",
+        "observed": "best variant per model: strong=a(no_effect), weak=a(no_effect)",
+        "predicted": "none"
+      }
+    ],
+    "misses": [
+      {
+        "claim": "The weak tier gains more from the best variant than the strong tier does, mirroring the output epic's weak-tier-gains-most result: (best_variant - A) on weak exceeds (best_variant - A) on strong by at least one task's worth of rate.",
+        "hypothesis": "see the named hypothesis in the Markdown analysis",
+        "id": "g2-weak-tier-gains-most",
+        "observed": "best-arm gain weak=-0.09554334554334543 strong=-0.05238095238095242"
+      },
+      {
+        "claim": "confirmed-call-sites-for-one-routine: best variant d",
+        "hypothesis": "predicted variant did not clear the spread; the arms that did were ['a']",
+        "id": "per_task:confirmed-call-sites-for-one-routine",
+        "observed": "best variant per model: strong=a(no_effect), weak=a(no_effect)",
+        "predicted": "d"
+      },
+      {
+        "claim": "where-does-this-text-appear: best variant d",
+        "hypothesis": "predicted variant did not clear the spread; the arms that did were ['a']",
+        "id": "per_task:where-does-this-text-appear",
+        "observed": "best variant per model: strong=a(no_effect), weak=a(no_effect)",
+        "predicted": "d"
+      },
+      {
+        "claim": "locate-by-path-fragment: best variant d",
+        "hypothesis": "predicted variant did not clear the spread; the arms that did were ['a']",
+        "id": "per_task:locate-by-path-fragment",
+        "observed": "best variant per model: strong=a(no_effect), weak=a(no_effect)",
+        "predicted": "d"
+      },
+      {
+        "claim": "hydrate-identifiers-from-a-prior-lookup: best variant d",
+        "hypothesis": "predicted variant did not clear the spread; the arms that did were ['a']",
+        "id": "per_task:hydrate-identifiers-from-a-prior-lookup",
+        "observed": "best variant per model: strong=a(no_effect), weak=a(no_effect)",
+        "predicted": "d"
+      },
+      {
+        "claim": "package-a-handoff-manifest: best variant d",
+        "hypothesis": "predicted variant did not clear the spread; the arms that did were ['a']",
+        "id": "per_task:package-a-handoff-manifest",
+        "observed": "best variant per model: strong=a(no_effect), weak=a(no_effect)",
+        "predicted": "d"
+      },
+      {
+        "claim": "full-metadata-from-a-bare-name: best variant d",
+        "hypothesis": "predicted variant did not clear the spread; the arms that did were ['a']",
+        "id": "per_task:full-metadata-from-a-bare-name",
+        "observed": "best variant per model: strong=a(no_effect), weak=a(no_effect)",
+        "predicted": "d"
+      },
+      {
+        "claim": "index-internals-breakdown: best variant d",
+        "hypothesis": "predicted variant did not clear the spread; the arms that did were ['a']",
+        "id": "per_task:index-internals-breakdown",
+        "observed": "best variant per model: strong=a(no_effect), weak=a(no_effect)",
+        "predicted": "d"
+      },
+      {
+        "claim": "browse-one-file-walkthrough: best variant b",
+        "hypothesis": "predicted variant did not clear the spread; the arms that did were ['a', 'd']",
+        "id": "per_task:browse-one-file-walkthrough",
+        "observed": "best variant per model: strong=d(lift), weak=a(no_effect)",
+        "predicted": "b"
+      },
+      {
+        "claim": "machine-readable-declaration-list: best variant b",
+        "hypothesis": "predicted variant did not clear the spread; the arms that did were ['a']",
+        "id": "per_task:machine-readable-declaration-list",
+        "observed": "best variant per model: strong=a(no_effect), weak=a(no_effect)",
+        "predicted": "b"
+      },
+      {
+        "claim": "collect-author-markers: best variant b",
+        "hypothesis": "predicted variant did not clear the spread; the arms that did were ['a']",
+        "id": "per_task:collect-author-markers",
+        "observed": "best variant per model: strong=a(no_effect), weak=a(no_effect)",
+        "predicted": "b"
+      },
+      {
+        "claim": "what-does-this-routine-touch: best variant d",
+        "hypothesis": "predicted variant did not clear the spread; the arms that did were ['a']",
+        "id": "per_task:what-does-this-routine-touch",
+        "observed": "best variant per model: strong=a(no_effect), weak=a(no_effect)",
+        "predicted": "d"
+      },
+      {
+        "claim": "repo-shape-first-look: best variant d",
+        "hypothesis": "predicted variant did not clear the spread; the arms that did were ['a']",
+        "id": "per_task:repo-shape-first-look",
+        "observed": "best variant per model: strong=a(no_effect), weak=a(no_effect)",
+        "predicted": "d"
+      }
+    ],
+    "summary": {
+      "hits": 9,
+      "misses": 13
+    }
+  },
+  "predictions_commit_time": "2026-09-06T20:43:08Z",
+  "provider_failures": {
+    "empty_answer": 23,
+    "no_tool_call": 11,
+    "provider_timeout": 1
+  },
+  "records": 384,
+  "reps": 3,
+  "schema": "toolcalling_selection_analysis_v1",
+  "version": 1
+}
