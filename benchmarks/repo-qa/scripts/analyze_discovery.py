@@ -68,6 +68,20 @@ def load_run(run_dir):
     return rows
 
 
+def _token_total(value):
+    """Agent rows carry `tokens` as a nested object; tool rows carry None.
+
+    Only the flat counters are billable spend -- the nested cache read/write
+    block is not tokens either arm paid for, and summing it would report a
+    cache-heavy arm as the expensive one.
+    """
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return sum(v for v in value.values() if isinstance(v, (int, float)))
+    return value
+
+
 def _mean(values):
     return round(sum(values) / len(values), 6) if values else None
 
@@ -105,8 +119,9 @@ def _arm_summary(rows):
         summary[name] = _mean([r["score"][key] for r in graded])
     for name, key in (("mean_tool_calls", "tool_calls"), ("mean_tokens", "tokens"),
                       ("mean_wall_seconds", "wall_seconds")):
-        values = [r[key] for r in rows if r.get(key) is not None]
-        summary[name] = _mean(values)
+        values = [_token_total(r[key]) if key == "tokens" else r[key]
+                  for r in rows if r.get(key) is not None]
+        summary[name] = _mean([v for v in values if v is not None])
     return summary
 
 
