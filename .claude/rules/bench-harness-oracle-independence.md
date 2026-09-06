@@ -275,3 +275,66 @@ that could prove an LCI loss — had no teeth at the agent level.
   default binary, so the two levels exercised different builds (filed
   `01M1W01483B3PBGDF58B75CA49`).
 <!-- written_at: 2026-09-06T19:00:00Z  source_event: task:01KXQ2V3PW91QTTQ1NTZXH7PR6, comment:01M1VZMG8NK4DZ54NG45XCHDF8 (outOfScopeDefectsReported), comment:01M1W0MNSG8YRWW3GJA934BVMS, task:01M1W0147178Z2PZNZ6ZQQQBRR, task:01M1W01483B3PBGDF58B75CA49 -->
+
+### 8a. The same rule applies to a snapshot of a LIVE surface — and a count derived from it is a hidden second copy
+
+Rule 8's artefact is gitignored and derived. Its sibling is the opposite shape and fails
+the same way: `comprehension/surface/tool-surface.json` is a committed snapshot of a
+surface the binary serves on demand. It was pinned 2026-07-17; the server gained
+`callers` on 2026-09-02 (`01ba88f`); nothing compared the two, so for four days every
+bench built on it measured a 14-tool surface that no longer existed — including the
+selection matrix for the very tool whose mis-selection motivates the tool-calling epic.
+Nothing failed. Green throughout.
+
+- **Any committed snapshot of a live surface carries a freshness gate that runs whenever
+  the producer is present.** Present-and-different is a failure; only absent is a skip
+  (rule 8.3). Cheap here: `lci mcp` answers `tools/list` in ~10 ms with no indexing, so
+  the live compare adds nothing meaningful to the suite
+  (`test_manifest_equals_the_live_tools_list`, proven RED against the stale manifest at
+  `be36bd3` before the refresh).
+- **A count hard-coded from a snapshot is a second, undeclared copy of it.** The
+  comprehension A/B bank asserted a width of `28`. That constant is precisely how a
+  surface addition read green: the derived invariant is `2 x live tool count`. Derive
+  every such number from the snapshot; a literal that happens to equal it today is a
+  latent lie.
+- **Grep for readers before refreshing a snapshot, and budget for all of them.** The
+  reviewer's blocker named 3 consumers; there were 5 — the toolcalling mock,
+  `tool-cases/chi.json`, the format-variants bank, `live-captures.json`, and the
+  hard-coded bank width — three of them owned by a different epic. The under-count cost
+  the coordinator a second scope widening mid-rewind. `grep -rl <snapshot> benchmarks/`
+  is the first step of the refresh, not a discovery made during it.
+<!-- written_at: 2026-09-06T20:00:00Z  source_event: task:01KXSHA3NRNK2JB9T43F3X5NYY, comment:01M1W1JHMNFK283DJ9NXZM6SY3, comment:01M1W2W200F212FTW2YZFFBYD1, git:cca526d, git:be36bd3, git:01ba88f -->
+
+### 10a. The mirror: an answer key that names a tool as CORRECT must quote that tool's own contract text
+
+Rule 10 bars an unprobed claim of absence. The same bar governs the positive claim, and
+this epic paid for it: the selection bank's baseline descriptions were hand-written
+prose, and three tasks were keyed to capabilities the prose invented — `context` as a
+line window (live: it saves and hydrates handoff manifests, and has no line parameter),
+`git_analysis` as authorship history (live: duplication, naming and complexity over
+changed code), `debug_info` as a per-path parse record (live: index internals). Each
+task stated a need NO live tool serves, so under the live-description arm it had no
+correct answer and would have scored a model wrong for correctly finding no fit. The
+three were deleted, not relabelled (`09abd89`).
+
+- **A paraphrased contract is an invented one.** The arm that claims to measure the real
+  surface is the live descriptions VERBATIM, pinned by a test. Neutral or reworded
+  phrasings are variants, and a variant is what the experiment manipulates — never what
+  it baselines against.
+- **Require a verbatim fragment, not a review.** Each task carries
+  `answer_key_evidence`: a substring of its correct tool's live description, gated by
+  test. This makes invention inexpressible rather than detectable — there is no fragment
+  to cite for a capability no description claims. Pair it with the discrimination case
+  in both directions (rule 2): `test_evidence_gate_rejects_an_invented_capability` and
+  `test_verbatim_gate_catches_a_reworded_baseline`.
+- **When two tools are genuinely near-duplicates, discriminate on the live CONTRACT, not
+  on payload width.** `inspect_symbol` returns all metadata including callers, so
+  "everything about one symbol" fit it and `get_context` equally; the contracts differ
+  only in input — object ids from a prior result versus a bare name — so that is the only
+  discriminator that survives contact with the real surface.
+- **Real surface redundancy will read as model confusion.** `code_insight mode=git_analyze`
+  and `git_analysis` run the same `git::Analyzer` (`src/mcp/handlers_analysis.cpp:682`).
+  A rationale asserting one "has no notion of what changed" is false; the answer key
+  holds on description specificity alone. Record such cells as surface redundancy before
+  the results slice reads them as a selection failure.
+<!-- written_at: 2026-09-06T20:00:00Z  source_event: task:01KXSHA3NRNK2JB9T43F3X5NYY, comment:01M1W1JHMNFK283DJ9NXZM6SY3, comment:01M1W2W200F212FTW2YZFFBYD1, comment:01M1W384M3JE6V2CT2378GCVKN, git:09abd89, git:5b97c51 -->
