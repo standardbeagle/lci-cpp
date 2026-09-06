@@ -620,5 +620,140 @@ class RealBankOracleTest(unittest.TestCase):
                 self.assertIn(gate.Reason.MANIFEST_ABSENT, first["diagnostic"])
 
 
+# ---------------------------------------------------------------------------
+# answer-key mechanism (S3.3b): {edits_root}/{python} argv tokens, the sidecar
+# patch loader, and task-JSON-driven patch/suite defaults
+# ---------------------------------------------------------------------------
+
+
+def _forged_corpus(root, seed=7):
+    """A minimal forged-corpus layout: manifest + tree with one OLD file."""
+    seed_dir = os.path.join(root, "pocketbase", f"seed-{seed}")
+    tree = os.path.join(seed_dir, "tree")
+    os.makedirs(os.path.join(tree, "apis"))
+    with open(os.path.join(tree, "apis", "handler.go"), "w") as fh:
+        fh.write("OLD handler body\n")
+    with open(os.path.join(seed_dir, "manifest.json"), "w") as fh:
+        json.dump(
+            {
+                "schema": "exploration_corpus_manifest_v1",
+                "corpus_id": "pocketbase",
+                "seed": seed,
+                "path_map": {},
+                "decoys": [],
+                "status": "ready",
+            },
+            fh,
+        )
+    return tree
+
+
+def _answer_key_task():
+    task = _edit_task()
+    # The probe argv names NO target path and uses the {python} token; the
+    # target lives in the probe body (here, the -c payload).
+    task["behavior"]["command"] = [
+        "{python}", "-c",
+        "import sys; sys.exit(0 if 'NEW' in open('apis/handler.go').read() else 1)",
+    ]
+    task["oracle_patch"] = {
+        "path": "patches/pocketbase/t-oracle.json",
+        "format": "edit_oracle_patch_v1",
+    }
+    task["existing_suite"] = {"command": ["{python}", "-c", "pass"]}
+    return task
+
+
+class AnswerKeyMechanismTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.edits_root = os.path.join(self._tmp.name, "edits")
+        os.makedirs(os.path.join(self.edits_root, "patches", "pocketbase"))
+        self.corpus_root = os.path.join(self._tmp.name, "corpora")
+        _forged_corpus(self.corpus_root)
+        self._orig_edits_root = gate.EDITS_ROOT
+        gate.EDITS_ROOT = self.edits_root
+        self.addCleanup(setattr, gate, "EDITS_ROOT", self._orig_edits_root)
+
+    def _write_sidecar(self, files, task_id="t-oracle"):
+        path = os.path.join(
+            self.edits_root, "patches", "pocketbase", "t-oracle.json"
+        )
+        with open(path, "w") as fh:
+            json.dump(
+                {"schema": "edit_oracle_patch_v1", "task_id": task_id,
+                 "files": files},
+                fh,
+            )
+        return path
+
+    def test_resolve_argv_substitutes_edits_root_and_python(self):
+        out = gate.resolve_argv(
+            ["{python}", "{edits_root}/patches/pb/t.probe.py", "plain"]
+        )
+        self.assertEqual(out[0], sys.executable)
+        self.assertEqual(
+            out[1],
+            os.path.join(self.edits_root, "patches/pb/t.probe.py"),
+        )
+        self.assertEqual(out[2], "plain")
+
+    def test_sidecar_patch_loads_and_applies(self):
+        # One file write + one None deletion round-trip through apply_patch.
+        tree = os.path.join(self._tmp.name, "tree")
+        os.makedirs(tree)
+        with open(os.path.join(tree, "keep.go"), "w") as fh:
+            fh.write("old\n")
+        with open(os.path.join(tree, "dead.go"), "w") as fh:
+            fh.write("dead\n")
+        sidecar = self._write_sidecar({"keep.go": "new\n", "dead.go": None})
+        patch = gate.load_oracle_patch_file(sidecar)
+        self.assertEqual(patch, {"keep.go": "new\n", "dead.go": None})
+        touched = gate.apply_patch(tree, patch)
+        self.assertEqual(touched, ["dead.go", "keep.go"])
+        with open(os.path.join(tree, "keep.go")) as fh:
+            self.assertEqual(fh.read(), "new\n")
+        self.assertFalse(os.path.exists(os.path.join(tree, "dead.go")))
+
+    def test_evaluate_task_in_corpus_reads_sidecar_when_patch_arg_omitted(self):
+        self._write_sidecar({"apis/handler.go": "NEW handler body\n"})
+        out = gate.evaluate_task_in_corpus(
+            _answer_key_task(), self.corpus_root
+        )
+        self.assertEqual(
+            out["discrimination"]["reason"], gate.Reason.DISCRIMINATES,
+            msg=out["diagnostic"],
+        )
+        # existing_suite.command defaulted from the task JSON, {python}
+        # resolved, suite green on the patched tree.
+        self.assertEqual(
+            out["existing_suite"]["reason"], gate.Reason.SUITE_GREEN,
+            msg=out["existing_suite"]["detail"],
+        )
+        self.assertEqual(
+            out["existing_suite"]["run"]["argv"][0], sys.executable
+        )
+        self.assertEqual(
+            out["changed_path"]["reason"], gate.Reason.WITHIN_SCOPE
+        )
+
+    def test_evaluate_task_in_corpus_without_sidecar_is_oracle_patch_absent(self):
+        task = _answer_key_task()
+        # No sidecar file on disk: the reference exists but the answer key
+        # does not, so the gate fails closed ORACLE_PATCH_ABSENT.
+        out = gate.evaluate_task_in_corpus(task, self.corpus_root)
+        self.assertFalse(out["passed"])
+        self.assertEqual(
+            out["changed_path"]["reason"], gate.Reason.ORACLE_PATCH_ABSENT
+        )
+        # And a task that declares no oracle_patch reference at all likewise.
+        del task["oracle_patch"]
+        out = gate.evaluate_task_in_corpus(task, self.corpus_root)
+        self.assertEqual(
+            out["changed_path"]["reason"], gate.Reason.ORACLE_PATCH_ABSENT
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
