@@ -19,9 +19,8 @@
   },
   "behavior": {
     "command": [
-      "pnpm",
-      "-w",
-      "test"
+      "node",
+      "{edits_root}/patches/next.js/nx-api-1.probe.js"
     ],
     "assertion": "the helper imports as a named function export",
     "discrimination": {
@@ -69,5 +68,16 @@
     ],
     "resolved": true,
     "notes": "ann-quill additionally proposed a third exemplar; adjudicated down to the two both annotators agreed were clearest. All final exemplars are attested live and conforming by both annotators."
+  },
+  "oracle_patch": {
+    "path": "patches/next.js/nx-api-1.json",
+    "format": "edit_oracle_patch_v1"
+  },
+  "existing_suite": {
+    "command": [
+      "node",
+      "{edits_root}/patches/next.js/existing-suite.js"
+    ],
+    "notes": "no node_modules in the forged tree (pnpm -w test is the e2e browser suite); this parses every .ts/.tsx under packages/next/src/lib and packages/next/src/build with the TypeScript parser and fails on any syntactic diagnostic; measured wall-clock on the forged seed-7 tree: ~4.5s for 391 files, well under DEFAULT_TIMEOUT=120"
   }
 }

@@ -1,0 +1,1 @@
+{"schema": "edit_oracle_patch_v1", "task_id": "nx-module-1", "files": {"packages/next/src/build/webpack/config/blocks/css/loaders/index.ts": "export { getGlobalCssLoader } from './global'\nexport { getCssModuleLoader } from './modules'\n"}}
