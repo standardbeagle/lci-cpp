@@ -277,5 +277,70 @@ class SignTestTests(AnalyzerFixture):
         self.assertAlmostEqual(sign["two_sided_p"], 0.03125, places=5)
 
 
+SIGN_THRESHOLD = {
+    "metric": "mean_precision", "comparison": "treatment_minus_baseline",
+    "operator": ">=", "value": 0.2,
+    "additional_requirement": {"kind": "sign_test_p", "value": 0.05,
+                               "description": "requires >= 11/13 wins"},
+    "falsified_if": "delta < 0.20 OR the sign test does not reach p<0.05.",
+}
+UNANIMOUS_THRESHOLD = {
+    "metric": "mean_recall", "comparison": "treatment_minus_baseline",
+    "operator": ">=", "value": 0.2,
+    "additional_requirement": {"kind": "unanimous_cells", "value": 3,
+                               "description": "unanimous over all 3 cells"},
+}
+
+
+class RegistryVerdictTests(AnalyzerFixture):
+    """A met effect size is NOT a confirmed prediction when the registry also
+    pre-registered a significance gate. `falsified_if` names both."""
+
+    def _run(self, threshold, per_cell):
+        rows = []
+        for slug, (t, b) in per_cell.items():
+            rows += [_row("fam", "treatment", "tool", slug, t, threshold=threshold),
+                     _row("fam", "baseline", "tool", slug, b, threshold=threshold)]
+        runs = [self.write_run("r%d" % i, rows) for i in range(2)]
+        return ad.analyze(
+            self.registry([family("fam", "lci_wins", threshold=threshold,
+                                  n=len(per_cell))]),
+            self.cohorts([]), runs)["families"]["fam"]["levels"]["tool"]
+
+    def test_effect_met_but_sign_test_missed_is_not_confirmed(self):
+        # 4 treatment wins, 2 baseline wins: big mean gap, p = 0.6875
+        level = self._run(SIGN_THRESHOLD, {
+            "a": (1.0, 0.0), "b": (1.0, 0.0), "c": (1.0, 0.0), "d": (1.0, 0.0),
+            "e": (0.0, 1.0), "f": (0.0, 1.0),
+        })
+        self.assertTrue(level["threshold_met"])
+        self.assertFalse(level["additional_requirement"]["met"])
+        self.assertEqual(level["registry_verdict"],
+                         "effect_met_significance_not_reached")
+
+    def test_effect_and_sign_test_both_met_is_confirmed(self):
+        level = self._run(SIGN_THRESHOLD, {
+            "a": (1.0, 0.0), "b": (1.0, 0.0), "c": (1.0, 0.0),
+            "d": (1.0, 0.0), "e": (1.0, 0.0), "f": (1.0, 0.0),
+        })
+        self.assertTrue(level["additional_requirement"]["met"])
+        self.assertEqual(level["registry_verdict"], "confirmed")
+
+    def test_effect_missed_is_falsified_regardless_of_significance(self):
+        level = self._run(SIGN_THRESHOLD, {
+            "a": (0.5, 0.45), "b": (0.5, 0.45), "c": (0.5, 0.45),
+            "d": (0.5, 0.45), "e": (0.5, 0.45), "f": (0.5, 0.45),
+        })
+        self.assertFalse(level["threshold_met"])
+        self.assertEqual(level["registry_verdict"], "falsified")
+
+    def test_unanimity_requirement_fails_on_one_dissenting_cell(self):
+        level = self._run(UNANIMOUS_THRESHOLD, {
+            "a": (1.0, 0.0), "b": (1.0, 0.0), "c": (0.0, 1.0),
+        })
+        self.assertFalse(level["additional_requirement"]["met"])
+        self.assertEqual(level["additional_requirement"]["kind"], "unanimous_cells")
+
+
 if __name__ == "__main__":
     unittest.main()
