@@ -14,14 +14,15 @@ provider used).
 At the tool level LCI separates from the baseline by a wide margin — and it separates
 **just as hard, or harder, in the parity controls as in the hypothesis family it was
 supposed to win.** At the agent level, where the baseline can actually filter what grep
-returns, the gap collapses into the run-to-run noise.
+returns, the gap falls to +0.037 precision — far below the registered +0.20, and the same
+size as the run-to-run range (0.029) across the two independent agent runs.
 
 Two numbers carry the whole report:
 
 | | hypothesis family<br>`callers_call_site_high` | matched easy control<br>`control_callers_call_site_control` |
 |---|---|---|
 | **tool** level Δ precision | **+0.227** (10/13, p=0.092) | **+0.423** (9/9, p=0.0039) |
-| **agent** level Δ precision | **+0.037**, spread ±0.029 | **−0.028**, spread ±0.389 |
+| **agent** level Δ precision | **+0.037**, run-to-run range 0.029 | **−0.028**, run-to-run range 0.389 |
 
 `PREDICTIONS.md` wrote the falsification clause in advance:
 
@@ -155,12 +156,12 @@ the product on real data, and it is the most actionable line in this report.
 Never averaged. The tool level asks *is LCI correct*; the agent level asks *does an agent
 gain from it* — which is the product claim.
 
-| Family | tool Δ | agent Δ | agent spread | reading |
+| Family | tool Δ | agent Δ | agent spread (max−min across runs) | reading |
 |---|---|---|---|---|
-| `callers_call_site_high` | +0.227 precision | **+0.037** | ±0.029 | the tool-level gap does not survive an agent that can filter |
-| `control_callers_call_site_control` | +0.423 precision | **−0.028** | ±0.389 | **tool-correct, no agent lift** (LCI tool-level f1 0.86) |
-| `control_literal_string_search` | −0.160 f1 | −0.026 | ±0.055 | grep's tool-level edge also shrinks under an agent |
-| `transitive_callers_depth2` | +0.151 recall | −0.238 | ±0.475 | inside variance in both directions; uninterpretable at n=3 |
+| `callers_call_site_high` | +0.227 precision | **+0.037** | 0.029 | the tool-level gap does not survive an agent that can filter |
+| `control_callers_call_site_control` | +0.423 precision | **−0.028** | 0.389 | **tool-correct, no agent lift** (LCI tool-level f1 0.86) |
+| `control_literal_string_search` | −0.160 f1 | −0.026 | 0.055 | grep's tool-level edge also shrinks under an agent |
+| `transitive_callers_depth2` | +0.151 recall | −0.238 | 0.475 | inside variance in both directions; uninterpretable at n=3 |
 | `token_budgeted_completion` | 0.0 pp DNF | 0.0 pp DNF | 0.0 | no DNF in either arm at n=3 |
 
 `control_callers_call_site_control` is the sweep's one **tool-correct / no-agent-lift**
@@ -174,14 +175,19 @@ treated as an instrument question before it is treated as a prompting question.*
 
 | Family | arm | tool calls | tokens | wall (s) | DNF |
 |---|---|---|---|---|---|
-| `callers_call_site_high` | LCI | 16.2 | 262 611 | 109 | 0 % |
-| | grep | 12.2 | 160 566 | 80 | 0 % |
-| `control_literal_string_search` | LCI | 6.7 | 173 272 | 154 | **16.7 %** |
-| | grep | 2.5 | 56 936 | 200 | **50.0 %** |
-| `transitive_callers_depth2` | LCI | 11.8 | 254 964 | 221 | **50.0 %** |
-| | grep | 8.5 | 166 018 | 256 | **66.7 %** |
-| `token_budgeted_completion` | LCI | **4.3** | **77 726** | 47 | 0 % |
-| | grep | **16.3** | **404 130** | 105 | 0 % |
+| `callers_call_site_high` | LCI | 16.2 | 34 035 | 109 | 0 % |
+| | grep | 12.2 | 22 550 | 80 | 0 % |
+| `control_literal_string_search` | LCI | 6.7 | 30 164 | 154 | **16.7 %** |
+| | grep | 2.5 | 14 975 | 200 | **50.0 %** |
+| `transitive_callers_depth2` | LCI | 11.8 | 30 579 | 221 | **50.0 %** |
+| | grep | 8.5 | 18 287 | 256 | **66.7 %** |
+| `token_budgeted_completion` | LCI | **4.3** | **11 820** | 47 | 0 % |
+| | grep | **16.3** | **32 236** | 105 | 0 % |
+
+Tokens are **billable only** — input + output + reasoning, as `analyze_discovery.py`
+sums them. `bench.py` also emits flat `cache_read` / `cache_write` counters; on these
+rows they are ~85 % of the raw object and neither arm pays for them, so counting them
+would report the cache-warm arm as the expensive one. They are not reported here.
 
 Two things are visible and they point in opposite directions:
 
@@ -190,8 +196,8 @@ Two things are visible and they point in opposite directions:
   tiers' only reproducible win (DNF 10.8 % → 6.5 %). At n=3 per family it is **direction
   only** — the registry itself computed that detecting a 4 pp DNF gap needs n≈900 per arm.
 - **Token cost is not consistently lower.** On the budget-constrained family the LCI arm
-  used **5.2× fewer tokens and 3.8× fewer calls**; on the callers family it used **1.6×
-  more** of both. The registered mechanism ("answers arrive in fewer, denser calls") holds
+  used **2.7× fewer billable tokens and 3.8× fewer calls**; on the callers family it used
+  **1.5× more** of both. The registered mechanism ("answers arrive in fewer, denser calls") holds
   where the task is a lookup and inverts where the agent has to reconcile LCI's output
   against the files.
 
@@ -238,7 +244,7 @@ caller.
 one call, so neither performs a second round; recall is 0.177 and 0.026 — both answering a
 depth-1 question against a depth-2 key. This is a known harness limitation
 (`01M1VSHDWG8QQ27S8XM8FMA7HH`), not a measurement. At the agent level the sign flips
-(−0.238) with a spread of ±0.475 — pure noise at n=3. **The prediction is neither confirmed
+(−0.238) with a run-to-run range of 0.475 — pure noise at n=3. **The prediction is neither confirmed
 nor falsified; it is untested**, and the +0.151 is not banked.
 
 ### Miss 4 — `token_budgeted_completion` (tool): predicted **LCI wins on DNF**, measured **0.0 % vs 0.0 %**
@@ -249,7 +255,7 @@ whose metric is undefined at one of the two levels should declare the level it a
 Running its 48 cells at the tool level consumed a large share of the sweep's oracle budget
 to produce a structurally guaranteed row.
 
-### Miss 5 — `callers_call_site_high` (agent): predicted **LCI wins**, measured **+0.037 inside ±0.029 spread**
+### Miss 5 — `callers_call_site_high` (agent): predicted **LCI wins**, measured **+0.037 against a 0.029 run-to-run range**
 
 *Why it was wrong:* the epic's central hypothesis was argued from what grep *returns*. An
 agent does not stop at what grep returns — it reads the hits. Once the baseline is allowed
@@ -257,7 +263,7 @@ the reading step, 89 % of the tool-level gap disappears. **The hypothesis was re
 hypothesis about tool output, and it was being sold as a hypothesis about agent
 performance.**
 
-### Miss 6 — `control_literal_string_search` (agent): predicted **grep wins**, measured **parity** (−0.026, spread ±0.055)
+### Miss 6 — `control_literal_string_search` (agent): predicted **grep wins**, measured **parity** (−0.026, run-to-run range 0.055)
 
 *Why it was wrong:* two reasons, and the second is an instrument defect. First, at the
 agent level both arms score badly (0.235 / 0.261) because exhaustive literal enumeration is
@@ -299,7 +305,7 @@ arms are near-zero (0.100 / 0.006). Recorded, not read. Its two cells are also
   needs a bigger or different corpus" — not a beachhead.**
 - That directional consistency is undermined from inside: the matched easy control wins
   *harder* and unanimously, so whatever is being measured is not the registered mechanism.
-- The gap does not survive contact with an agent (+0.037 against ±0.029 spread).
+- The gap does not survive contact with an agent (+0.037 against a 0.029 run-to-run range).
 - The only confirmed separation in the sweep runs the other way (grep wins on literal
   search).
 
@@ -323,7 +329,7 @@ arms are near-zero (0.100 / 0.006). Recorded, not read. Its two cells are also
    is the one registered mechanism this sweep never tested at all.
 5. **Chase completion, not accuracy.** The only LCI-positive signal that appears twice,
    with a prior behind it, is completion rate (16.7 % vs 50.0 % and 50.0 % vs 66.7 % DNF)
-   and call/token cost on lookup-shaped tasks (5.2× fewer tokens). Both are underpowered
+   and call/token cost on lookup-shaped tasks (2.7× fewer billable tokens). Both are underpowered
    here by design. A bench built around *finishing within budget* rather than *set-wise
    accuracy* would be measuring the thing that has actually reproduced across tiers.
 6. **Only then, scale the corpus.** PocketBase holds few high-noise and few many-implementor
@@ -380,7 +386,7 @@ That diagnosis is the deliverable.
     # analysis over N independent runs
     /usr/bin/python3 scripts/analyze_discovery.py \
       --runs .work/discovery/tool-run1,...,.work/discovery/agent-runB \
-      --not-run 'shadowed_definition=cohorts.json publishes no receiver_type; build_plan raises' \
+      --not-run 'shadowed_definition=cohorts.json publishes no receiver_type field; discovery/runner/cells.py build_plan raises rather than substituting an empty string (D2b 01KXRGGQ3T8JZMM0QEKE756XBD)' \
       --out discovery/analysis
 
 Sweep results live under `benchmarks/repo-qa/.work/discovery/` and are **gitignored** — they
