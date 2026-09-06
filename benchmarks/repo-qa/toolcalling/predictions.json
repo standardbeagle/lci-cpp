@@ -1,0 +1,83 @@
+{
+  "schema": "toolcalling_selection_predictions_v1",
+  "version": 1,
+  "written_at": "2026-09-06T20:50:00Z",
+  "written_by": "E2.4 (task 01KXSHA3QKT5RDT4F08RA08H1N), committed BEFORE any grid record",
+  "boundary": "This registry predicts TOOL SELECTION against a mock MCP that returns deterministic stubs. It says nothing about whether the real tool then produces a correct answer (epic 1) and nothing about end-to-end performance versus grep (discovery epic).",
+  "grid": {
+    "tasks": 16,
+    "variants": ["a", "b", "c", "d"],
+    "variant_meaning": {
+      "a": "live verbatim (the shipped LCI descriptions) - the baseline every delta is taken against",
+      "b": "task-framed ('Use when you need ...'), same facts, no neighbor contrast",
+      "c": "example-augmented (baseline text plus one example invocation)",
+      "d": "disambiguated (baseline text plus an explicit 'Unlike <neighbor>, ...' contrast)"
+    },
+    "models": {
+      "weak": "opencode-go/deepseek-v4-flash",
+      "strong": "opencode-go/glm-5.2"
+    },
+    "models_verified": "`opencode models` (opencode 1.18.26, 2026-09-06) lists both ids; both are free-tier. No paid provider is used.",
+    "cells_per_rep": 128,
+    "reps_planned": 3,
+    "reps_note": "Reps are separate ledgers. If 3 x 128 live cells is not reachable in wall-clock on the free fleet, reps are reduced and the reduction is stated in the analysis; tasks and variants are never reduced."
+  },
+  "decision_rule": {
+    "unit": "correct-first-call rate = correct_first_call / denominator, per (variant, model, tier); non-selection outcomes (provider_*, exit_*, no_tool_call, hallucinated_tool, empty_answer) are excluded from the denominator and reported separately.",
+    "spread": "run-to-run spread for a cell = max(rate) - min(rate) across reps of variant A in the same (model, tier) stratum.",
+    "lift": "A variant is credited with a lift over A only if BOTH hold: (1) mean(rate_variant) - mean(rate_A) > spread_A, and (2) neighbor precision does not fall: the rate at which the tool is wrongly called first on the OTHER tasks that name it as a confusable neighbor does not rise by more than spread_A.",
+    "regression_flag": "A recall gain that arrives with a neighbor-precision loss is reported as a REGRESSION, never as a win.",
+    "null": "A gap that does not exceed the run-to-run spread is reported as no effect, not as a small lift."
+  },
+  "global_predictions": [
+    {
+      "id": "g1-d-fixes-callers-search-confusion",
+      "claim": "Variant D reduces the search<->callers confusion seen in the E2.3 smoke: on task confirmed-call-sites-for-one-routine the first-call column `search` drops to zero under D, and on task where-does-this-text-appear the column `callers` does not rise.",
+      "falsified_if": "D still shows any `search` first call on the callers task, or D raises `callers` first calls on the search task above spread."
+    },
+    {
+      "id": "g2-weak-tier-gains-most",
+      "claim": "The weak tier gains more from the best variant than the strong tier does, mirroring the output epic's weak-tier-gains-most result: (best_variant - A) on weak exceeds (best_variant - A) on strong by at least one task's worth of rate.",
+      "falsified_if": "The strong tier's gain equals or exceeds the weak tier's, or the weak tier's gain does not exceed spread at all."
+    },
+    {
+      "id": "g3-control-null",
+      "claim": "The control task control-corpus-readiness shows NO variant effect: every variant selects index_stats at the same rate within spread, on both models.",
+      "falsified_if": "Any variant moves the control task's correct rate by more than spread. That would mean the instrument responds to wording where no ambiguity exists, and every other delta becomes suspect."
+    },
+    {
+      "id": "g4-native-first-is-wording-insensitive",
+      "claim": "native:* first calls (the strong model opening with bash/read, seen in every E2.3 strong cell) are the dominant non-correct column on the strong tier and do NOT fall under any variant: description wording cannot compete with a built-in tool the model already trusts.",
+      "falsified_if": "Any variant lowers the strong tier's native:* column by more than spread."
+    },
+    {
+      "id": "g5-c-is-a-null",
+      "claim": "Variant C (example invocations) does not lift selection over A beyond spread on either tier: an example teaches ARGUMENT shape, not which tool to reach for.",
+      "falsified_if": "C beats A by more than spread on either tier."
+    },
+    {
+      "id": "g6-hallucination-rate-low",
+      "claim": "hallucinated:* first calls stay under 5% of attempted cells on both tiers and are not moved by variant.",
+      "falsified_if": "Any (variant, model) cell exceeds 5% hallucinated first calls."
+    }
+  ],
+  "per_task": [
+    {"task_id": "confirmed-call-sites-for-one-routine", "correct_tool": "callers", "tier": "confusable", "best_variant": "d", "weak_gains_more": true, "rationale": "D names inspect_symbol and search as the contrast; the smoke's mis-selection went to exactly those."},
+    {"task_id": "where-does-this-text-appear", "correct_tool": "search", "tier": "confusable", "best_variant": "d", "weak_gains_more": true, "rationale": "D contrasts search against find_files (paths vs content), the neighbor most likely to steal this prompt."},
+    {"task_id": "locate-by-path-fragment", "correct_tool": "find_files", "tier": "confusable", "best_variant": "d", "weak_gains_more": true, "rationale": "Mirror of the search task; the same contrast sentence has to work in both directions or it is only moving mass around."},
+    {"task_id": "hydrate-identifiers-from-a-prior-lookup", "correct_tool": "get_context", "tier": "confusable", "best_variant": "d", "weak_gains_more": true, "rationale": "get_context vs context is a NAME collision, not a capability gap; only D says which is which."},
+    {"task_id": "package-a-handoff-manifest", "correct_tool": "context", "tier": "confusable", "best_variant": "d", "weak_gains_more": true, "rationale": "Same collision, other direction. If D lifts one and sinks the other the pair is a regression, not a win."},
+    {"task_id": "full-metadata-from-a-bare-name", "correct_tool": "inspect_symbol", "tier": "confusable", "best_variant": "d", "weak_gains_more": true, "rationale": "inspect_symbol is the neighbor D warns AGAINST on the callers task; the risk is D suppressing it here."},
+    {"task_id": "index-internals-breakdown", "correct_tool": "debug_info", "tier": "confusable", "best_variant": "d", "weak_gains_more": true, "rationale": "debug_info vs index_stats is only separable by the explicit contrast D adds."},
+    {"task_id": "is-the-corpus-ready", "correct_tool": "index_stats", "tier": "confusable", "best_variant": "a", "weak_gains_more": false, "rationale": "Baseline A already leads with 'diagnose index not ready'; predicted null, no variant beats A beyond spread."},
+    {"task_id": "browse-one-file-walkthrough", "correct_tool": "browse_file", "tier": "confusable", "best_variant": "b", "weak_gains_more": true, "rationale": "The task framing ('use when you want to read one file') is the discriminator; there is no strong neighbor to contrast with."},
+    {"task_id": "machine-readable-declaration-list", "correct_tool": "list_symbols", "tier": "confusable", "best_variant": "b", "weak_gains_more": true, "rationale": "'Use when you need a machine-readable list' matches the prompt's own framing more than a contrast does."},
+    {"task_id": "collect-author-markers", "correct_tool": "semantic_annotations", "tier": "confusable", "best_variant": "b", "weak_gains_more": true, "rationale": "Rarely-reached tool; the win, if any, is being framed as a task rather than named as a feature."},
+    {"task_id": "what-does-this-routine-touch", "correct_tool": "side_effects", "tier": "confusable", "best_variant": "d", "weak_gains_more": true, "rationale": "get_context swallows this prompt unless the contrast is explicit."},
+    {"task_id": "repo-shape-first-look", "correct_tool": "code_insight", "tier": "confusable", "best_variant": "d", "weak_gains_more": false, "rationale": "code_insight is a neighbor on four other tasks; D must lift it here WITHOUT raising it elsewhere. Predicted the hardest net-positivity case in the bank."},
+    {"task_id": "pre-commit-change-quality", "correct_tool": "git_analysis", "tier": "confusable", "best_variant": "a", "weak_gains_more": false, "rationale": "'git' in the prompt and in the tool name; predicted already near ceiling under A."},
+    {"task_id": "what-can-this-server-do", "correct_tool": "info", "tier": "confusable", "best_variant": "a", "weak_gains_more": false, "rationale": "Predicted null: a meta-question about the server is not a wording problem."},
+    {"task_id": "control-corpus-readiness", "correct_tool": "index_stats", "tier": "control", "best_variant": "none", "weak_gains_more": false, "rationale": "CONTROL. Predicted null on every variant and both models; this is the validity gate, not a hypothesis."}
+  ],
+  "expected_misses": "Predictions are pre-registered to be falsified. The analysis diffs every claim above mechanically and leads with the misses; a registry that only confirmed itself would be evidence of nothing."
+}
