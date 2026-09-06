@@ -343,23 +343,65 @@ class RegistryVerdictTests(AnalyzerFixture):
 
 
 class TokenAccountingTests(AnalyzerFixture):
-    def test_agent_token_dicts_are_totalled_not_summed_as_objects(self):
-        """bench.py reports tokens as {input, output, reasoning, cache}."""
+    """Fixtures here are copied from a REAL bench.py row, not from a model of it.
+
+    Source row: `.work/discovery/agent-runA/
+    callers_call_site_high__treatment__agent__core_base_go_OnRecordAuthRequest_L1067C21.json`
+    emits `tokens` as FLAT keys -- input/output/reasoning/cache_read/cache_write
+    (bench.py flattens opencode's nested `cache` block at the step_finish sink).
+    An earlier fixture invented a nested `{"cache": {...}}` object bench.py never
+    produces, so it could not catch cache traffic being counted as billable spend
+    (bench-harness-oracle-independence rule 5).
+    """
+
+    REAL_ROW_TOKENS = {"cache_read": 191837, "cache_write": 0,
+                       "input": 35819, "output": 1755, "reasoning": 6094}
+
+    def _means(self, treatment_tokens, baseline_tokens):
         rows = [
-            _row("fam", "treatment", "agent", "s1", 1.0,
-                 tokens={"input": 100, "output": 10, "reasoning": 5,
-                         "cache": {"read": 999, "write": 0}}),
-            _row("fam", "baseline", "agent", "s1", 1.0,
-                 tokens={"input": 200, "output": 20, "reasoning": 0,
-                         "cache": {"read": 0, "write": 0}}),
+            _row("fam", "treatment", "agent", "s1", 1.0, tokens=treatment_tokens),
+            _row("fam", "baseline", "agent", "s1", 1.0, tokens=baseline_tokens),
         ]
         run = self.write_run("r1", rows)
         out = ad.analyze(self.registry([family("fam", "lci_wins")]),
                          self.cohorts([]), [run])
         arms = out["families"]["fam"]["levels"]["agent"]["arms"]
-        # nested cache counters are not billable output; only the flat ones count
-        self.assertEqual(arms["treatment"]["mean_tokens"], 115)
-        self.assertEqual(arms["baseline"]["mean_tokens"], 220)
+        return arms["treatment"]["mean_tokens"], arms["baseline"]["mean_tokens"]
+
+    def test_flat_cache_counters_are_excluded_from_billable_tokens(self):
+        treatment, baseline = self._means(
+            dict(self.REAL_ROW_TOKENS),
+            {"cache_read": 0, "cache_write": 0,
+             "input": 200, "output": 20, "reasoning": 0},
+        )
+        self.assertEqual(treatment, 35819 + 1755 + 6094)
+        self.assertEqual(baseline, 220)
+
+    def test_cache_heavy_arm_is_not_reported_as_the_expensive_one(self):
+        """Discrimination: cache traffic must not flip which arm reads cheaper."""
+        cheap_but_cache_heavy = {"input": 100, "output": 10, "reasoning": 5,
+                                 "cache_read": 500000, "cache_write": 1000}
+        expensive_no_cache = {"input": 900, "output": 90, "reasoning": 10,
+                              "cache_read": 0, "cache_write": 0}
+        treatment, baseline = self._means(cheap_but_cache_heavy, expensive_no_cache)
+        self.assertEqual(treatment, 115)
+        self.assertEqual(baseline, 1000)
+        self.assertLess(treatment, baseline)
+
+    def test_unrecognised_token_key_fails_loud(self):
+        """A new bench.py counter must not be silently summed as billable."""
+        with self.assertRaises(ValueError) as caught:
+            self._means({"input": 1, "output": 1, "reasoning": 0,
+                         "cache_read": 0, "cache_write": 0, "thinking": 7},
+                        dict(self.REAL_ROW_TOKENS))
+        self.assertIn("thinking", str(caught.exception))
+
+    def test_nested_cache_object_is_no_longer_accepted_silently(self):
+        """The shape the old fixture invented is not a shape bench.py emits."""
+        with self.assertRaises(ValueError):
+            self._means({"input": 100, "output": 10, "reasoning": 5,
+                         "cache": {"read": 999, "write": 0}},
+                        dict(self.REAL_ROW_TOKENS))
 
 
 if __name__ == "__main__":
