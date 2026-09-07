@@ -85,7 +85,7 @@ bool is_sentinel_expression(std::string_view text) {
 // The member/method names that keep an error's full diagnostic payload. A
 // projection NOT in this list, taken on a language whose errors carry more
 // than a message, is lossy.
-bool is_full_fidelity_accessor(std::string_view name, std::string_view ext) {
+bool is_full_fidelity_accessor(std::string_view name, LangId lang) {
     // Stack and cause chains, every language that has them.
     for (std::string_view full :
          {"stack", "stacktrace", "getstacktrace", "printstacktrace",
@@ -96,9 +96,9 @@ bool is_full_fidelity_accessor(std::string_view name, std::string_view ext) {
     }
     // .NET's ToString() renders message + stack + every InnerException, so it
     // loses nothing. JS's toString() is "Error: msg" — same spelling, lossy,
-    // so it falls through to is_message_accessor below.
-    if (name == "tostring" &&
-        (ext == ".cs" || ext == ".fs" || ext == ".vb")) {
+    // so it falls through to is_message_accessor below. Only C# has a
+    // grammar here; F#/VB extensions carry no parser and never reach this.
+    if (name == "tostring" && lang == LangId::CSharp) {
         return true;
     }
     // Python's traceback module renders the chain; Ruby's full_message too.
@@ -124,9 +124,9 @@ bool is_message_accessor(std::string_view name) {
 // stack, no cause, unless the code wrapped with %w. C++'s std::exception is
 // `what()` and nothing else. Calling those lossy would demand data the
 // language never produced.
-bool errors_are_message_only(std::string_view ext) {
-    return ext == ".go" || ext == ".c" || ext == ".cc" || ext == ".cpp" ||
-           ext == ".cxx" || ext == ".h" || ext == ".hpp" || ext == ".zig";
+bool errors_are_message_only(LangId lang, LangFamily family) {
+    return lang == LangId::Go || lang == LangId::Zig ||
+           family == LangFamily::kCFamily;
 }
 
 }  // namespace
@@ -215,12 +215,12 @@ CauseFidelity UnifiedExtractor::cause_fidelity(TSNode args,
                         std::tolower(static_cast<unsigned char>(c)));
                 }
                 if (!accessor.empty()) {
-                    if (is_full_fidelity_accessor(accessor, ext_)) {
+                    if (is_full_fidelity_accessor(accessor, lang_)) {
                         here = CauseFidelity::Full;
                     } else if (is_message_accessor(accessor)) {
                         // Where the error type IS its message, taking the
                         // message loses nothing that ever existed.
-                        here = errors_are_message_only(ext_)
+                        here = errors_are_message_only(lang_, family_)
                                    ? CauseFidelity::Full
                                    : CauseFidelity::Lossy;
                     }
@@ -585,7 +585,7 @@ void UnifiedExtractor::process_catch_site(TSNode node,
                 return true;
             }
             // C++ logs through a stream: `std::cerr << "..." << e.what()`.
-            if (t == "binary_expression" && ext_ != ".py") {
+            if (t == "binary_expression" && lang_ != LangId::Python) {
                 std::string_view text = node_text(n);
                 if (text.find("<<") != std::string_view::npos &&
                     (text.compare(0, 9, "std::cerr") == 0 ||
