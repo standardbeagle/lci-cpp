@@ -1181,6 +1181,47 @@ TEST_F(ServerTest, TreeMissingFunctionNameReturns400) {
               std::string::npos);
 }
 
+TEST_F(ServerTest, WrongTypedJsonFieldsReturn400Not500) {
+    // Every field-reading endpoint must reject a wrong-typed JSON body with
+    // a 400 JSON error. Pre-fix these threw nlohmann::json::type_error out
+    // of the handler and httplib answered 500 with an empty body.
+    auto post_status = [&](const std::string& path,
+                           const nlohmann::json& body) {
+        auto cli = make_client();
+        auto res = cli.Post(path, body.dump(), "application/json");
+        EXPECT_TRUE(res) << path;
+        if (!res) return 0;
+        // The error body must itself be JSON carrying an "error" field.
+        auto j = nlohmann::json::parse(res->body, nullptr, false);
+        EXPECT_FALSE(j.is_discarded()) << path << " body: " << res->body;
+        if (!j.is_discarded()) {
+            EXPECT_TRUE(j.contains("error")) << path << " body: " << res->body;
+        }
+        return res->status;
+    };
+    // Non-object bodies.
+    EXPECT_EQ(post_status("/symbol", nlohmann::json::array({1})), 400);
+    // Wrong-typed scalar fields, one per endpoint plus the nullable and
+    // pagination fields of /list-symbols and /browse-file.
+    EXPECT_EQ(post_status("/symbol", {{"symbol_id", "abc"}}), 400);
+    EXPECT_EQ(post_status("/fileinfo", {{"file_id", "abc"}}), 400);
+    EXPECT_EQ(post_status("/tree", {{"function_name", 42}}), 400);
+    EXPECT_EQ(post_status("/tree",
+                          {{"function_name", "Add"}, {"max_depth", "deep"}}),
+              400);
+    EXPECT_EQ(post_status("/list-symbols", {{"exported", "yes"}}), 400);
+    EXPECT_EQ(post_status("/list-symbols", {{"min_complexity", "high"}}), 400);
+    EXPECT_EQ(post_status("/list-symbols", {{"max", "lots"}}), 400);
+    EXPECT_EQ(post_status("/inspect-symbol", {{"name", 42}}), 400);
+    EXPECT_EQ(post_status("/browse-file", {{"file_id", "abc"}}), 400);
+    EXPECT_EQ(post_status("/browse-file",
+                          {{"file", "main.go"}, {"max", "lots"}}),
+              400);
+    EXPECT_EQ(post_status("/browse-file",
+                          {{"file", "main.go"}, {"show_stats", "yes"}}),
+              400);
+}
+
 TEST_F(ServerTest, TreeChildNodesHavePositiveDepth) {
     auto j = post("/tree", {{"function_name", "Add"}, {"max_depth", 10}});
     ASSERT_TRUE(j.contains("tree"));
