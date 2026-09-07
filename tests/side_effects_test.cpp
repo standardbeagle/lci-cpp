@@ -1,8 +1,19 @@
 #include <gtest/gtest.h>
 
+#include <filesystem>
+#include <fstream>
+
+#include <nlohmann/json.hpp>
+
+#include <lci/analysis/side_effect_analyzer.h>
+#include <lci/config.h>
 #include <lci/context_manifest.h>
 #include <lci/graph_types.h>
+#include <lci/indexing/master_index.h>
+#include <lci/mcp/handlers_side_effects.h>
 #include <lci/side_effects.h>
+
+#include "unique_temp.h"
 
 namespace lci {
 namespace {
@@ -399,6 +410,44 @@ TEST(AccessLevelTest, ToStringCoversAllVariants) {
     EXPECT_EQ(to_string(AccessLevel::Protected), "protected");
     EXPECT_EQ(to_string(AccessLevel::Internal), "internal");
     EXPECT_EQ(to_string(AccessLevel::Package), "package");
+}
+
+// ---------------------------------------------------------------------------
+// handle_side_effects: empty analyzer must fail loud, not fabricate
+// ---------------------------------------------------------------------------
+
+// Karpathy #6 (no fabricated data): summary mode over an analyzer with zero
+// per-function records must surface an explicit analysis_unavailable error.
+// The pre-fix code counted callable symbols in the index and reported
+// pure_count == total (an invented 100% purity ratio).
+TEST(SideEffectsHandlerTest, EmptyAnalyzerYieldsAnalysisUnavailable) {
+    auto dir = lci::test::unique_temp_dir("lci_se_empty_test_");
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    {
+        std::ofstream f(dir / "main.go");
+        f << "package main\n\nfunc main() {}\n\nfunc helper() {}\n";
+    }
+
+    Config config;
+    config.project.root = dir.string();
+    MasterIndex indexer(config);
+    ASSERT_TRUE(indexer.index_directory(dir.string()));
+
+    SideEffectAnalyzer analyzer("go");  // zero records: nothing analyzed
+    nlohmann::json params = {{"mode", "summary"}};
+    auto result = mcp::handle_side_effects(params, analyzer, &indexer);
+    ASSERT_FALSE(result.is_error) << result.text;
+    auto j = nlohmann::json::parse(result.text);
+
+    ASSERT_TRUE(j.contains("error")) << j.dump();
+    EXPECT_EQ(j["error"].get<std::string>(), "analysis_unavailable");
+    // No invented purity: the summary must not claim every function is pure.
+    if (j.contains("summary") && j["summary"].contains("purity_ratio")) {
+        EXPECT_NE(j["summary"]["purity_ratio"].get<double>(), 1.0);
+    }
+
+    std::filesystem::remove_all(dir);
 }
 
 }  // namespace
