@@ -850,6 +850,7 @@ ToolResult handle_browse_file(const nlohmann::json& params,
     FileID target_fid = 0;
     std::string target_path;
     bool found = false;
+    std::vector<std::string> ambiguous_paths;
 
     if (file_id_param > 0) {
         target_fid = static_cast<FileID>(file_id_param);
@@ -860,6 +861,12 @@ ToolResult handle_browse_file(const nlohmann::json& params,
     if (!found && !file_pattern.empty()) {
         const std::string& proj_root = indexer.config().project.root;
         auto file_ids = indexer.get_all_file_ids();
+        // Collect EVERY match, then pick the lexicographically smallest
+        // relative path. get_all_file_ids() iterates a hash-keyed structure
+        // whose order varies per process — breaking at the first hit made a
+        // basename collision ("index.ts" in two dirs) answer with a
+        // different file per process (karpathy #4: determinism).
+        std::vector<std::pair<std::string, FileID>> candidates;
         for (auto fid : file_ids) {
             auto fp = indexer.get_file_path(fid);
             if (fp.empty()) continue;
@@ -868,10 +875,20 @@ ToolResult handle_browse_file(const nlohmann::json& params,
                 path_matches_glob(
                     std::string(relative_to_root(fp, proj_root)),
                     file_pattern)) {
-                target_fid = fid;
-                target_path = fp;
-                found = true;
-                break;
+                candidates.emplace_back(
+                    std::string(relative_to_root(fp, proj_root)), fid);
+            }
+        }
+        if (!candidates.empty()) {
+            std::sort(candidates.begin(), candidates.end());
+            target_fid = candidates.front().second;
+            target_path = indexer.get_file_path(target_fid);
+            found = true;
+            if (candidates.size() > 1) {
+                ambiguous_paths.reserve(candidates.size());
+                for (const auto& [rel, fid] : candidates) {
+                    ambiguous_paths.push_back(rel);
+                }
             }
         }
     }
@@ -933,6 +950,13 @@ ToolResult handle_browse_file(const nlohmann::json& params,
         target_path, indexer.config().project.root));
     response["file"]["file_id"] = static_cast<int>(target_fid);
     response["file"]["language"] = language_from_path(target_path);
+    if (!ambiguous_paths.empty()) {
+        response["ambiguous"] = std::move(ambiguous_paths);
+        response["ambiguous_hint"] =
+            "multiple files match; the lexicographically smallest "
+            "root-relative path was chosen — pass a longer path prefix or "
+            "file_id to pick another";
+    }
     response["symbols"] = std::move(symbols_json);
     response["total"] = total;
     if (total > 0) {
