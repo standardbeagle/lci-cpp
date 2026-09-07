@@ -1555,5 +1555,61 @@ TEST(IndexProfile, StageBreakdown) {
                 pr.second);
 }
 
+// ---------------------------------------------------------------------------
+// Extension routing: every dispatch in the extractor must go through the
+// case-insensitive language_map classification, not raw ext string compares.
+// Extensions like .mjs/.pyi/.hh parse and emit symbols but produced ZERO
+// references / type relations / side effects when dispatch compared raw
+// extension strings.
+// ---------------------------------------------------------------------------
+
+bool has_reference(const ExtractionResults& r, ReferenceType type,
+                   std::string_view name) {
+    for (const auto& ref : r.references) {
+        if (ref.type == type && ref.referenced_name == name) return true;
+    }
+    return false;
+}
+
+TEST(LanguageExtractionTest, MjsEmitsReferences) {
+    constexpr std::string_view src = R"(
+function helper() {}
+export function f() { helper(); }
+)";
+    auto r = extract(Language::JavaScript, ".mjs", src, "mod.mjs");
+    EXPECT_NE(find_symbol(r, "helper"), nullptr);
+    EXPECT_TRUE(has_reference(r, ReferenceType::Call, "helper"));
+}
+
+TEST(LanguageExtractionTest, PyiImportProducesReferences) {
+    constexpr std::string_view src = "import os\n";
+    auto r = extract(Language::Python, ".pyi", src, "stub.pyi");
+    // The import must route to the Python import extractor (previously it
+    // fell into extract_js_import, which reads a `source` field the Python
+    // grammar does not have).
+    bool saw_os_import = false;
+    for (const auto& imp : r.imports) {
+        if (imp.path == "os") saw_os_import = true;
+    }
+    EXPECT_TRUE(saw_os_import);
+    EXPECT_FALSE(r.references.empty());
+}
+
+TEST(LanguageExtractionTest, HhHeaderEmitsReferences) {
+    constexpr std::string_view src = R"(
+inline void helper() {}
+inline void f() { helper(); }
+)";
+    auto r = extract(Language::Cpp, ".hh", src, "lib.hh");
+    EXPECT_TRUE(has_reference(r, ReferenceType::Call, "helper"));
+}
+
+TEST(LanguageExtractionTest, ExtensionMatchIsCaseInsensitive) {
+    constexpr std::string_view src = "def helper():\n    pass\n\ndef f():\n    helper()\n";
+    auto r = extract(Language::Python, ".PY", src, "MOD.PY");
+    EXPECT_NE(find_symbol(r, "helper"), nullptr);
+    EXPECT_TRUE(has_reference(r, ReferenceType::Call, "helper"));
+}
+
 }  // namespace
 }  // namespace lci::parser
