@@ -112,3 +112,25 @@ proactively: `git worktree add ../lci-cpp-<slug> <branch>`, implement there, and
 every command step's `cwd` at the worktree. A branch switch of the shared checkout is
 never in a task's `fileScope` and never needs to be.
 <!-- written_at: 2026-09-06T17:00:00Z  source_event: task:01KXQ2V3P299T64XZ6BXS2QMH1, comment:01M1VQREGZM95YZ2VP0E96VN9S, comment:01M1VQV19V92QMV155QYPZMJ4X, git:945e50a -->
+
+## 5. A planning artefact that later slices depend on is COMMITTED in the planning commit — never referenced by session-scratchpad path
+
+A session scratchpad (`/tmp/claude-*/.../scratchpad/`) is purged between sessions.
+An epic body that points at one for a load-bearing artefact has no copy of it once
+the planning session ends, and every downstream slice inherits the loss.
+
+Evidence: the review-drain epic (`01M1NCA90N4VPDKP4XR42SE8V8`) named
+`/tmp/.../scratchpad/review-draft.md` as the only copy of its 47-finding review
+draft. By the time S0 (`01M1NCSJ31ZEV9XGETA6VAF8CK`) ran, the file was gone
+(`find /tmp/claude-1000 -name 'review-draft*'` empty, `git log --all -- docs/reviews/*`
+empty). S0's first criterion had to be rewritten mid-flight (coordinator decision
+`01M1WR81BGRDGG78KWDQ6TK9AM`) and its first commit `0d99447` spent on reconstructing
+the document from the epic + child bodies instead of on the slice's actual subject.
+
+Rule: any artefact a task body cites as a source — review draft, port map, decision
+record, corpus manifest — is committed under `docs/` (e.g. `docs/reviews/`,
+`docs/plans/`) in the same commit that creates the tasks, and cited by repo-relative
+path. A task body containing an absolute `/tmp` path is a planning defect: fix it at
+planning time, not at drain time. Scratchpad paths are legitimate only for material
+no other session needs.
+<!-- written_at: 2026-09-07T04:00:00Z  source_event: task:01M1NCSJ31ZEV9XGETA6VAF8CK, comment:01M1WR81BGRDGG78KWDQ6TK9AM, git:0d99447 -->

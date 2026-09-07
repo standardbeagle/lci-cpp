@@ -64,6 +64,21 @@ LCI's reason to exist is sub-millisecond semantic code search with 79.8% context
 - File IDs, symbol IDs, scan order, output ordering — deterministic across runs and across machines for the same corpus.
 - No reliance on hash-iteration order in user-visible output. Sort before emit.
 - Reference iter-3 (`a1964b2`): three latent concurrency bugs were perf+correctness wins simultaneously. Race-free is faster than race-with-retry.
+- **Parallel arrays derived from one byte stream are produced by ONE step function, never two
+  hand-written walkers.** Two walkers over the same grammar drift on the inputs nobody wrote a
+  test for — and the drift is silent: indices that address each other stop lining up, and a
+  prefilter certifies present data absent. `src/core/trigram.cpp` held exactly that pair:
+  `to_code_points_into` skipped an invalid UTF-8 lead byte while `compute_byte_offsets_into`
+  did not, so `code_points[i]`/`byte_offsets[i]` desynced and one Latin-1 `0xC0-0xEF` byte
+  swallowed the following ASCII — `TrigramBloom::build` omitted real trigrams and
+  `Narrowing::certifies_absent` certified a present substring absent. Fixed by giving both
+  walkers one shared `utf8_seq_step` (`38ffb4e`, RED `99a2628`).
+  The acceptance shape: a test pinning EQUAL LENGTHS from both producers, with one case per
+  invalid-input class — bad lead byte, truncated sequence, bad continuation, overlong encoding.
+  Same certified-absence class as `bench-harness-oracle-independence.md` §5 (mirror-written
+  soundness check) and the `search-certified-absence-narrowing` memory; that rule covers two
+  checks over one grammar, this one covers two producers over one stream.
+  <!-- written_at: 2026-09-07T04:00:00Z  source_event: task:01M1NCSJ31ZEV9XGETA6VAF8CK, git:99a2628, git:38ffb4e, comment:01M1WX8DTZ08X1ZS4HYP05FKB1 -->
 
 ### 5. No mocking the database
 - Integration tests hit the real indexer + real corpus.
