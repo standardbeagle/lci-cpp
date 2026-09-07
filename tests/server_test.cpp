@@ -2,6 +2,7 @@
 
 #include <lci/config.h>
 #include <lci/indexing/master_index.h>
+#include <lci/mcp/runtime.h>
 #include <lci/search/search_engine.h>
 #include <lci/server/server.h>
 #include <lci/server/request_decode.h>
@@ -1729,6 +1730,87 @@ TEST_F(ServerTest, ReindexAcceptsProjectRoot) {
                    !s["indexing_active"].get<bool>();
         },
         std::chrono::milliseconds(10000)));
+}
+
+// -- /mcp queue bound (S4) ------------------------------------------------------
+//
+// The /mcp bridge parks one worker per stdio client inside the handler for
+// the whole index warmup. With the default worker pool (8 threads, unbounded
+// queue) >=8 parked bridge calls mute /ping and /shutdown.
+
+TEST(ServerLifecycleTest, PingAnswersWhileMcpCallsParkedOnWarmup) {
+    TempDir tmp;
+    tmp.write_file("a.go",
+                   "package main\nfunc Add(a, b int) int { return a + b }\n");
+    Config config;
+    config.project.root = tmp.path().string();
+    MasterIndex indexer(config);
+    indexer.index_directory(config.project.root);
+    SearchEngine engine(indexer);
+    IndexServer server(config, indexer, &engine);
+    server.set_socket_path(test::next_test_server_address());
+
+    // Hold the warmup latch: every /mcp dispatch parks its worker on it,
+    // exactly like `lci mcp` bridge calls during the initial index.
+    mcp::WarmupLatch warmup;
+    std::atomic<int> entered{0};
+    server.set_mcp_dispatcher([&](const std::string&) {
+        entered.fetch_add(1, std::memory_order_release);
+        std::string err;
+        warmup.wait(err);
+        return std::string("{}");
+    });
+    ASSERT_TRUE(server.start());
+    const std::string addr = server.socket_path();
+
+    constexpr int kParked = 16;
+    std::vector<std::thread> bridges;
+    bridges.reserve(kParked);
+    for (int i = 0; i < kParked; ++i) {
+        bridges.emplace_back([&] {
+            auto cli = test::make_test_http_client(addr);
+            cli.set_read_timeout(std::chrono::seconds{30});
+            (void)cli.Post("/mcp", "{}", "application/json");
+        });
+    }
+    // Wait for the bridge calls to park: the fixed pool admits all 16 into
+    // workers; the broken 8-thread pool saturates and the rest queue. Either
+    // way `entered` settles once every worker is parked on the latch.
+    ASSERT_TRUE(wait_until(
+        [&] { return entered.load(std::memory_order_acquire) >= 1; },
+        std::chrono::milliseconds(10000)))
+        << "bridge calls never reached the dispatcher";
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    const int parked = entered.load(std::memory_order_acquire);
+
+    // The BROKEN pool queues /ping behind the parked bridge calls until the
+    // latch releases; the releaser bounds that wait so the pre-fix run also
+    // terminates (latency ~= 2s, over the 1s bound). The fixed pool has
+    // workers free and answers immediately.
+    std::thread releaser([&] {
+        std::this_thread::sleep_for(std::chrono::seconds(2));
+        warmup.finish({});
+    });
+    const auto t0 = std::chrono::steady_clock::now();
+    int ping_status = -1;
+    {
+        auto cli = test::make_test_http_client(addr);
+        cli.set_read_timeout(std::chrono::seconds{30});
+        auto res = cli.Post("/ping", "{}", "application/json");
+        if (res) ping_status = res->status;
+    }
+    const auto elapsed = std::chrono::steady_clock::now() - t0;
+    releaser.join();
+
+    for (auto& t : bridges) {
+        t.join();
+    }
+    EXPECT_TRUE(server.shutdown());
+
+    EXPECT_EQ(ping_status, 200);
+    EXPECT_LT(elapsed, std::chrono::seconds(1))
+        << "/ping must not wait behind " << parked
+        << " /mcp bridge calls parked on warmup";
 }
 
 }  // namespace
