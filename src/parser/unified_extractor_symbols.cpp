@@ -114,7 +114,7 @@ void UnifiedExtractor::extract_function(TSNode node,
 
     // Kotlin function_declaration is fieldless: the name is a simple_identifier
     // child rather than a `name` field.
-    if (name.empty() && ext_ == ".kt") {
+    if (name.empty() && lang_ == LangId::Kotlin) {
         TSNode n = first_named_child_typed(node, "simple_identifier");
         if (!ts_node_is_null(n)) name = node_text(n);
     }
@@ -141,7 +141,8 @@ void UnifiedExtractor::extract_function(TSNode node,
     sym.end_column = static_cast<int>(end.column) + 1;
     sym.parameter_count = count_parameter_names(node);
     sym.visibility = effective_visibility(node);
-    sym.test_scaffold = ext_ == ".rs" && is_rust_test_scaffold(node);
+    sym.test_scaffold =
+        lang_ == LangId::Rust && is_rust_test_scaffold(node);
     symbols_.push_back(std::move(sym));
 }
 
@@ -178,7 +179,7 @@ bool UnifiedExtractor::is_rust_test_scaffold(TSNode node) {
 // vocabulary because they all counted as exported).
 SymbolVisibility UnifiedExtractor::effective_visibility(TSNode node) {
     SymbolVisibility v = scan_declared_visibility(node);
-    if (ext_ == ".rs") {
+    if (lang_ == LangId::Rust) {
         if (is_rust_test_scaffold(node)) return SymbolVisibility::Private;
         if (v == SymbolVisibility::Default) return SymbolVisibility::Private;
     }
@@ -259,7 +260,8 @@ void UnifiedExtractor::extract_method(TSNode node,
     sym.end_column = static_cast<int>(end.column) + 1;
     sym.parameter_count = count_parameter_names(node);
     sym.visibility = effective_visibility(node);
-    sym.test_scaffold = ext_ == ".rs" && is_rust_test_scaffold(node);
+    sym.test_scaffold =
+        lang_ == LangId::Rust && is_rust_test_scaffold(node);
     symbols_.push_back(std::move(sym));
 }
 
@@ -319,7 +321,8 @@ void UnifiedExtractor::extract_rust_method(TSNode node) {
     sym.end_column = static_cast<int>(end.column) + 1;
     sym.parameter_count = count_parameter_names(node);
     sym.visibility = effective_visibility(node);
-    sym.test_scaffold = ext_ == ".rs" && is_rust_test_scaffold(node);
+    sym.test_scaffold =
+        lang_ == LangId::Rust && is_rust_test_scaffold(node);
     symbols_.push_back(std::move(sym));
 }
 
@@ -373,7 +376,7 @@ void UnifiedExtractor::extract_class(TSNode node,
     TSNode name_node = ts_node_child_by_field_name(
         node, "name", static_cast<uint32_t>(std::strlen("name")));
     // Kotlin class_declaration is fieldless: the name is a type_identifier child.
-    if (ts_node_is_null(name_node) && ext_ == ".kt")
+    if (ts_node_is_null(name_node) && lang_ == LangId::Kotlin)
         name_node = first_named_child_typed(node, "type_identifier");
     if (ts_node_is_null(name_node)) return;
     std::string_view name = node_text(name_node);
@@ -1107,8 +1110,7 @@ void UnifiedExtractor::count_complexity_point(TSNode node,
 // ---------------------------------------------------------------------------
 
 bool UnifiedExtractor::is_c_family() const {
-    return ext_ == ".c" || ext_ == ".h" || ext_ == ".cpp" || ext_ == ".hpp" ||
-           ext_ == ".cc" || ext_ == ".hh" || ext_ == ".cxx" || ext_ == ".hxx";
+    return family_ == LangFamily::kCFamily;
 }
 
 TSNode UnifiedExtractor::declarator_identifier(TSNode declarator) {

@@ -38,8 +38,8 @@ void UnifiedExtractor::record_lvalue_write(TSNode lvalue, int line, int column) 
     // explicit `global` statement). Without registration every such write
     // classified as a global write — guzzle reported global_writes=725 with
     // zero `global` statements in the codebase (2026-08-26 re-panel).
-    bool assignment_declares =
-        ext_ == ".py" || ext_ == ".php" || ext_ == ".rb";
+    bool assignment_declares = lang_ == LangId::Python ||
+                               lang_ == LangId::PHP || lang_ == LangId::Ruby;
     TSNode n = lvalue;
     // Descend member / subscript / selector expressions to the base identifier
     // that owns the mutation (a.b.c = x mutates `a`; arr[i] = x mutates `arr`).
@@ -55,7 +55,7 @@ void UnifiedExtractor::record_lvalue_write(TSNode lvalue, int line, int column) 
                 // was peeled — `a.b = x` mutates an existing object). Ruby
                 // spells globals with a `$` sigil, so those stay global.
                 if (assignment_declares && guard == 0 &&
-                    !(ext_ == ".rb" && id.front() == '$')) {
+                    !(lang_ == LangId::Ruby && id.front() == '$')) {
                     side_effects_->add_local_variable(id, line);
                 }
                 side_effects_->record_access(id, {}, AccessType::Write, line,
@@ -99,7 +99,7 @@ void UnifiedExtractor::register_function_signature(TSNode node,
     // Go error-return: `func f() error` / `func f() (T, error)`. The result
     // field's text carrying the `error` type is the precise signature-level
     // signal that this function participates in Go error propagation.
-    if (ext_ == ".go") {
+    if (lang_ == LangId::Go) {
         TSNode result = field(node, "result");
         if (!ts_node_is_null(result)) {
             std::string_view rt = node_text(result);
@@ -110,7 +110,7 @@ void UnifiedExtractor::register_function_signature(TSNode node,
     }
 
     // Zig error-union return: `fn f() !void`.
-    if (ext_ == ".zig") {
+    if (lang_ == LangId::Zig) {
         std::string_view sig = node_text(node);
         auto paren = sig.find(')');
         auto brace = sig.find('{');
@@ -289,7 +289,7 @@ void UnifiedExtractor::process_side_effect_node(
     // as a variable_declaration with NO const/var keyword — there is no
     // assignment_expression node to hook. A keyword-less declaration whose
     // first child is an lvalue expression is an assignment.
-    if (ext_ == ".zig" && node_type == "variable_declaration") {
+    if (lang_ == LangId::Zig && node_type == "variable_declaration") {
         bool declares = false;
         uint32_t nc = ts_node_child_count(node);
         for (uint32_t i = 0; i < nc && i < 2; ++i) {
@@ -331,7 +331,7 @@ void UnifiedExtractor::process_side_effect_node(
             }
             p = ts_node_parent(p);
         }
-        if (ext_ == ".go") process_go_error_drop(node, node_type);
+        if (lang_ == LangId::Go) process_go_error_drop(node, node_type);
         TSNode left = field(node, "left");
         if (ts_node_is_null(left)) left = ts_node_named_child(node, 0);
         if (ts_node_is_null(left)) return;
@@ -357,7 +357,7 @@ void UnifiedExtractor::process_side_effect_node(
     }
 
     // Go-specific side effects.
-    if (ext_ == ".go") {
+    if (lang_ == LangId::Go) {
         if (node_type == "send_statement") {
             side_effects_->record_channel_op(line);
             return;
@@ -404,7 +404,7 @@ void UnifiedExtractor::process_side_effect_node(
     }
 
     // Kotlin: throw is a jump_expression whose first token is `throw`.
-    if (ext_ == ".kt" && node_type == "jump_expression") {
+    if (lang_ == LangId::Kotlin && node_type == "jump_expression") {
         std::string_view txt = node_text(node);
         if (iprefix(txt, "throw")) {
             side_effects_->record_throw({}, line, column);
@@ -413,7 +413,7 @@ void UnifiedExtractor::process_side_effect_node(
     }
 
     // Zig error propagation / cleanup guards.
-    if (ext_ == ".zig") {
+    if (lang_ == LangId::Zig) {
         if (node_type == "try_expression" || node_type == "try") {
             side_effects_->record_error_return(line);
             return;
@@ -425,7 +425,7 @@ void UnifiedExtractor::process_side_effect_node(
     }
 
     // JavaScript/TypeScript-specific.
-    if (ext_ == ".js" || ext_ == ".jsx" || ext_ == ".ts" || ext_ == ".tsx") {
+    if (is_js_ts()) {
         if (node_type == "update_expression") {
             TSNode arg = field(node, "argument");
             if (ts_node_is_null(arg)) arg = ts_node_named_child(node, 0);
@@ -443,7 +443,7 @@ void UnifiedExtractor::process_side_effect_node(
     }
 
     // Python-specific.
-    if (ext_ == ".py") {
+    if (lang_ == LangId::Python) {
         if (node_type == "raise_statement") {
             side_effects_->record_throw({}, line, column);
             return;
@@ -458,7 +458,7 @@ void UnifiedExtractor::process_side_effect_node(
     }
 
     // Rust-specific: panic-family macros are precise throw sites.
-    if (ext_ == ".rs") {
+    if (lang_ == LangId::Rust) {
         if (node_type == "macro_invocation") {
             TSNode name_node = field(node, "macro");
             if (!ts_node_is_null(name_node)) {
@@ -500,11 +500,11 @@ void UnifiedExtractor::process_side_effect_node(
 
         // Go `panic(...)` / Ruby `raise ...` are precise throw sites, not
         // ordinary calls.
-        if (ext_ == ".go" && callee == "panic") {
+        if (lang_ == LangId::Go && callee == "panic") {
             side_effects_->record_throw("panic", line, column);
             return;
         }
-        if (ext_ == ".rb" && callee == "raise") {
+        if (lang_ == LangId::Ruby && callee == "raise") {
             side_effects_->record_throw({}, line, column);
             return;
         }

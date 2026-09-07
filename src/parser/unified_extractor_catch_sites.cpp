@@ -269,7 +269,7 @@ void UnifiedExtractor::process_catch_site(TSNode node,
         // Kotlin: a catch whose only content is the anonymous `null` token
         // (`catch (e: E) { null }`) has no statements node at all. The
         // block's value is the sentinel; it is not an empty catch.
-        if (ts_node_is_null(body) && ext_ == ".kt") {
+        if (ts_node_is_null(body) && lang_ == LangId::Kotlin) {
             uint32_t nc = ts_node_child_count(node);
             for (uint32_t i = 0; i < nc; ++i) {
                 TSNode c = ts_node_child(node, i);
@@ -435,7 +435,8 @@ void UnifiedExtractor::process_catch_site(TSNode node,
         // Kotlin's try is an expression too: `catch (e: E) { null }`.
         // Kotlin's `null` is an anonymous token, so the last child of any
         // kind is inspected by text.
-        if ((ext_ == ".rb" || ext_ == ".kt") && ts_node_child_count(body) > 0) {
+        if ((lang_ == LangId::Ruby || lang_ == LangId::Kotlin) &&
+            ts_node_child_count(body) > 0) {
             TSNode last = ts_node_child(body, ts_node_child_count(body) - 1);
             // Skip the closing brace / trailing comments.
             for (uint32_t i = ts_node_child_count(body); i > 0; --i) {
@@ -526,7 +527,7 @@ void UnifiedExtractor::process_catch_site(TSNode node,
         walk_subtree(body, [&](TSNode n) {
             std::string_view t = get_node_type(n);
             if (is_throw_node(t) ||
-                (ext_ == ".kt" && t == "jump_expression" &&
+                (lang_ == LangId::Kotlin && t == "jump_expression" &&
                  iprefix(node_text(n), "throw"))) {
                 site.has_rethrow = true;
                 // A bare `raise` (Python re-raise) or a rethrow mentioning the
@@ -546,7 +547,7 @@ void UnifiedExtractor::process_catch_site(TSNode node,
                 }
                 return true;
             }
-            if (ext_ == ".rb" && t == "call") {
+            if (lang_ == LangId::Ruby && t == "call") {
                 TSNode m = field(n, "method");
                 if (!ts_node_is_null(m) && node_text(m) == "raise") {
                     site.has_rethrow = true;
@@ -616,7 +617,7 @@ void UnifiedExtractor::process_catch_site(TSNode node,
                 // `console.log` qualifies via its qualifier as well.
                 bool log = is_log_callee(bare) ||
                            is_log_qualifier(parts.qualifier);
-                if (ext_ == ".rb" && bare == "raise") return true;  // handled
+                if (lang_ == LangId::Ruby && bare == "raise") return true;  // handled
                 // How much of the caught error travels into this call?
                 // Logging and propagation are tracked apart: `console.error(e)`
                 // reports the error, it does not hand it to anyone, which is

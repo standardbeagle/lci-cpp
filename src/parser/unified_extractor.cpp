@@ -150,11 +150,14 @@ void UnifiedExtractor::init(std::string_view content, FileID file_id,
                             std::string_view ext, std::string_view path) {
     content_ = content;
     file_id_ = file_id;
-    // Treat Cython (.pyx/.pxd) as the Python dialect so every downstream
-    // `ext_ == ".py"` branch (imports, references, type relationships,
-    // side effects) fires. The real path is retained in path_ so extract()
-    // can still recognise Cython for cpdef/cdef recovery.
-    ext_ = (ext == ".pyx" || ext == ".pxd") ? std::string_view(".py") : ext;
+    // Routing identity comes from the language_map table (case-insensitive;
+    // .pyx/.pxd classify as Python, .mjs/.cjs as JavaScript, .hh/.hxx as
+    // Cpp), so every downstream dispatch fires for the full alias set. The
+    // real path is retained in path_ so extract() can still recognise
+    // Cython for cpdef/cdef recovery.
+    ext_ = ext;
+    lang_ = language_info(ext).language;
+    family_ = language_info(ext).family;
     path_ = path;
     ref_id_ = 1;
     current_level_ = 0;
@@ -235,7 +238,7 @@ void UnifiedExtractor::extract(TSTree* tree) {
         // language_map's table, not parser::to_string: verified identical
         // names for every parser-supported language, and it is the
         // canonical index-wide naming (see FileScanner::detect_language).
-        file_scope.language_id = language_info(ext_).language;
+        file_scope.language_id = lang_;
     }
     scopes_.push_back(std::move(file_scope));
 
@@ -498,7 +501,7 @@ bool UnifiedExtractor::swaps_local_type_env(std::string_view t) const {
     // Go closures (func_literal) inherit the enclosing function's env by
     // design — process_go_reference only seeds on function_declaration /
     // method_declaration, which cannot nest.
-    if (ext_ == ".go" && t == "func_literal") return false;
+    if (lang_ == LangId::Go && t == "func_literal") return false;
     return is_function_node(t) || t == "singleton_method" ||
            t == "constructor_declaration";
 }
@@ -646,7 +649,7 @@ bool UnifiedExtractor::process_scope_node(TSNode node,
         TSNode n = ts_node_child_by_field_name(
             node, "name", static_cast<uint32_t>(std::strlen("name")));
         // Kotlin class_declaration is fieldless (type_identifier child).
-        if (ts_node_is_null(n) && ext_ == ".kt")
+        if (ts_node_is_null(n) && lang_ == LangId::Kotlin)
             n = first_named_child_typed(node, "type_identifier");
         if (!ts_node_is_null(n)) name = std::string(node_text(n));
 
@@ -697,7 +700,8 @@ bool UnifiedExtractor::process_scope_node(TSNode node,
         scope_type = ScopeType::Class;
         name = std::string(node_text(n));
 
-    } else if (ext_ == ".zig" && node_type == "variable_declaration") {
+    } else if (lang_ == LangId::Zig &&
+               node_type == "variable_declaration") {
         // Zig: `const A = struct { ... };`. The container is an initializer of a
         // variable_declaration; name the Class scope after the const identifier
         // so member fns get an owning-type entry. Plain vars (no struct/union
@@ -894,7 +898,7 @@ void UnifiedExtractor::process_symbol_node(TSNode node,
         extract_namespace(node);
 
     } else if (node_type == "namespace_definition") {
-        if (ext_ == ".php" || ext_ == ".phtml") {
+        if (lang_ == LangId::PHP) {
             extract_php_namespace(node);
         } else {
             extract_cpp_namespace(node);
@@ -938,19 +942,20 @@ void UnifiedExtractor::process_symbol_node(TSNode node,
         if (is_c_family()) extract_cpp_local_declaration(node);
 
     } else if (node_type == "const_declaration") {
-        if (ext_ == ".go") {
+        if (lang_ == LangId::Go) {
             extract_go_variable(node, node_type);
-        } else if (ext_ == ".php" || ext_ == ".phtml") {
+        } else if (lang_ == LangId::PHP) {
             extract_php_const(node);
         }
 
     // === ZIG STRUCTS ===
-    } else if (node_type == "variable_declaration" && ext_ == ".zig") {
+    } else if (node_type == "variable_declaration" &&
+               lang_ == LangId::Zig) {
         extract_zig_struct(node);
 
     // === IMPORTS ===
     } else if (node_type == "import_statement") {
-        if (ext_ == ".py") {
+        if (lang_ == LangId::Python) {
             extract_python_import(node);
         } else {
             extract_js_import(node);
@@ -963,11 +968,11 @@ void UnifiedExtractor::process_symbol_node(TSNode node,
         extract_go_import(node, node_type);
 
     } else if (node_type == "import_declaration") {
-        if (ext_ == ".java") {
+        if (lang_ == LangId::Java) {
             extract_java_import(node);
-        } else if (ext_ == ".go") {
+        } else if (lang_ == LangId::Go) {
             extract_go_import(node, node_type);
-        } else if (ext_ == ".kt" || ext_ == ".kts") {
+        } else if (lang_ == LangId::Kotlin) {
             extract_kotlin_import(node);
         }
 
@@ -1009,7 +1014,7 @@ void UnifiedExtractor::process_symbol_node(TSNode node,
         extract_csharp_property(node);
 
     } else if (node_type == "field_declaration") {
-        if (ext_ == ".cs") {
+        if (lang_ == LangId::CSharp) {
             extract_csharp_field(node);
         } else {
             extract_field(node);

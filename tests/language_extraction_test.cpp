@@ -1589,7 +1589,8 @@ TEST(LanguageExtractionTest, PyiImportProducesReferences) {
     // grammar does not have).
     bool saw_os_import = false;
     for (const auto& imp : r.imports) {
-        if (imp.path == "os") saw_os_import = true;
+        // extract_python_import records the full statement text as the path.
+        if (imp.path == "import os") saw_os_import = true;
     }
     EXPECT_TRUE(saw_os_import);
     EXPECT_FALSE(r.references.empty());

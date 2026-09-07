@@ -21,11 +21,6 @@ bool is_self_receiver(std::string_view recv) {
            recv == "*this" || recv == "(*this)";
 }
 
-bool is_cpp_family_extension(std::string_view ext) {
-    return ext == ".c" || ext == ".cpp" || ext == ".cc" || ext == ".cxx" ||
-           ext == ".h" || ext == ".hpp";
-}
-
 TSNode pick_cpp_reference_leaf(TSNode node) {
     if (ts_node_is_null(node)) return node;
 
@@ -114,28 +109,27 @@ std::string py_bare_type(std::string_view t) {
 
 void UnifiedExtractor::process_reference_node(TSNode node,
                                               std::string_view node_type) {
-    if (ext_ == ".go") {
+    if (lang_ == LangId::Go) {
         process_go_reference(node, node_type);
-    } else if (ext_ == ".js" || ext_ == ".jsx" || ext_ == ".ts" ||
-               ext_ == ".tsx") {
+    } else if (is_js_ts()) {
         process_js_reference(node, node_type);
-    } else if (ext_ == ".py") {
+    } else if (lang_ == LangId::Python) {
         process_python_reference(node, node_type);
-    } else if (ext_ == ".java") {
+    } else if (lang_ == LangId::Java) {
         process_java_reference(node, node_type);
-    } else if (ext_ == ".cs") {
+    } else if (lang_ == LangId::CSharp) {
         process_csharp_reference(node, node_type);
-    } else if (ext_ == ".rs") {
+    } else if (lang_ == LangId::Rust) {
         process_rust_reference(node, node_type);
-    } else if (ext_ == ".php") {
+    } else if (lang_ == LangId::PHP) {
         process_php_reference(node, node_type);
-    } else if (ext_ == ".kt" || ext_ == ".kts") {
+    } else if (lang_ == LangId::Kotlin) {
         process_kotlin_reference(node, node_type);
-    } else if (ext_ == ".rb") {
+    } else if (lang_ == LangId::Ruby) {
         process_ruby_reference(node, node_type);
-    } else if (ext_ == ".zig") {
+    } else if (lang_ == LangId::Zig) {
         process_zig_reference(node, node_type);
-    } else if (is_cpp_family_extension(ext_)) {
+    } else if (family_ == LangFamily::kCFamily) {
         // Local type env (SCIP base case): this -> enclosing class; `T x;` /
         // `T x = ...` declarations. C++ method calls already resolve by bare
         // name (pick_cpp_reference_leaf returns the field), so this only adds

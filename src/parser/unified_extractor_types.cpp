@@ -12,14 +12,13 @@ namespace lci::parser {
 
 void UnifiedExtractor::process_type_relationships(
     TSNode node, std::string_view node_type) {
-    if (ext_ == ".go") {
+    if (lang_ == LangId::Go) {
         process_go_type_relationships(node, node_type);
-    } else if (ext_ == ".js" || ext_ == ".jsx" || ext_ == ".ts" ||
-               ext_ == ".tsx") {
+    } else if (is_js_ts()) {
         process_js_type_relationships(node, node_type);
-    } else if (ext_ == ".py") {
+    } else if (lang_ == LangId::Python) {
         process_python_type_relationships(node, node_type);
-    } else if (ext_ == ".php") {
+    } else if (lang_ == LangId::PHP) {
         process_php_type_relationships(node, node_type);
     }
 }

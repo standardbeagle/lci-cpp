@@ -9,6 +9,7 @@
 #include <absl/container/flat_hash_map.h>
 #include <absl/container/flat_hash_set.h>
 
+#include <lci/language_map.h>
 #include <lci/reference.h>
 #include <lci/scope.h>
 #include <lci/side_effects.h>
@@ -322,6 +323,18 @@ class UnifiedExtractor {
     FileID file_id_{};
     std::string_view ext_;
     std::string_view path_;
+    // Canonical language identity/family from language_map (the single
+    // routing table), set once in init(). Every per-language dispatch in the
+    // extractor reads these — never raw ext_ comparisons — so case-variant
+    // and alias extensions (.mjs, .pyi, .hh, .PY, ...) route identically to
+    // grammar selection.
+    LangId lang_{LangId::Unknown};
+    LangFamily family_{LangFamily::kUnknown};
+
+    /// JavaScript or TypeScript (the two LangIds sharing the JS handlers).
+    bool is_js_ts() const {
+        return lang_ == LangId::JavaScript || lang_ == LangId::TypeScript;
+    }
 
     // Output collections (pre-allocated for reuse)
     std::vector<Symbol> symbols_;
