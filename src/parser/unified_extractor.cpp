@@ -49,6 +49,29 @@ bool cpp_specifier_has_body(TSNode node) {
     return !ts_node_is_null(body);
 }
 
+// True when a function_definition node is directly in a class body and is
+// therefore a METHOD, not a free Function. Python: a block under a
+// class_definition (climbing through decorated_definition wrappers). C/C++:
+// a field_declaration_list (the class/struct/union specifier body). The old
+// in_class_body_ flag spanned the whole class subtree, so a Python def
+// nested inside a method read as Method and a C++ in-class
+// function_definition (class_specifier was never flagged) read as Function.
+bool function_definition_is_method(TSNode node) {
+    TSNode p = ts_node_parent(node);
+    while (!ts_node_is_null(p) &&
+           std::string_view(ts_node_type(p)) == "decorated_definition") {
+        p = ts_node_parent(p);
+    }
+    if (ts_node_is_null(p)) return false;
+    std::string_view pt(ts_node_type(p));
+    if (pt == "block") {
+        TSNode gp = ts_node_parent(p);
+        return !ts_node_is_null(gp) &&
+               std::string_view(ts_node_type(gp)) == "class_definition";
+    }
+    return pt == "field_declaration_list";
+}
+
 bool is_ident_char(char c) {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
            (c >= '0' && c <= '9') || c == '_';
@@ -163,7 +186,6 @@ void UnifiedExtractor::init(std::string_view content, FileID file_id,
     current_level_ = 0;
     in_import_context_ = false;
     in_trait_or_impl_body_ = false;
-    in_class_body_ = false;
     has_current_func_ = false;
     se_func_depth_ = 0;
     se_guard_depth_ = 0;
@@ -194,7 +216,6 @@ void UnifiedExtractor::reset() {
     current_level_ = 0;
     in_import_context_ = false;
     in_trait_or_impl_body_ = false;
-    in_class_body_ = false;
     visit_depth_ = 0;
     depth_limit_hit_ = false;
 
@@ -451,13 +472,6 @@ void UnifiedExtractor::visit_node(TSNode node) {
         in_trait_or_impl_body_ = true;
     }
 
-    // Track class body context
-    bool was_class = in_class_body_;
-    if (node_type == "class_definition" || node_type == "class_declaration" ||
-        node_type == "class_body" || node_type == "class") {
-        in_class_body_ = true;
-    }
-
     // === RECURSE INTO CHILDREN ===
     uint32_t child_count = ts_node_child_count(node);
     for (uint32_t i = 0; i < child_count; ++i) {
@@ -474,11 +488,6 @@ void UnifiedExtractor::visit_node(TSNode node) {
     if (node_type == "trait_item" || node_type == "impl_item") {
         in_trait_or_impl_body_ = was_trait_impl;
     }
-    if (node_type == "class_definition" || node_type == "class_declaration" ||
-        node_type == "class_body" || node_type == "class") {
-        in_class_body_ = was_class;
-    }
-
     // Pop scope
     if (pushed_scope) {
         scope_stack_.pop_back();
@@ -834,8 +843,8 @@ void UnifiedExtractor::process_symbol_node(TSNode node,
         extract_function(node, node_type);
 
     } else if (node_type == "function_definition") {
-        if (in_class_body_) {
-            extract_python_method(node);
+        if (function_definition_is_method(node)) {
+            extract_function_definition_method(node);
         } else {
             extract_function(node, node_type);
         }

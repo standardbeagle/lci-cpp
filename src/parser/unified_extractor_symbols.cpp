@@ -265,14 +265,12 @@ void UnifiedExtractor::extract_method(TSNode node,
     symbols_.push_back(std::move(sym));
 }
 
-void UnifiedExtractor::extract_python_method(TSNode node) {
+void UnifiedExtractor::extract_function_definition_method(TSNode node) {
     TSPoint start = ts_node_start_point(node);
     TSPoint end = ts_node_end_point(node);
 
-    TSNode name_node = ts_node_child_by_field_name(
-        node, "name", static_cast<uint32_t>(std::strlen("name")));
-    if (ts_node_is_null(name_node)) return;
-    std::string_view name = node_text(name_node);
+    // Python's name field; C/C++ declarator peel — one shared resolver.
+    std::string_view name = extract_function_name(node, "function_definition");
     if (name.empty()) return;
 
     BlockBoundary block;
