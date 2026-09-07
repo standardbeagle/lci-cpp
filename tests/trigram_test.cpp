@@ -773,6 +773,49 @@ TEST(TrigramBloomTest, AsciiPackedAndByteHashesAgree) {
               TrigramBloom::hash_bytes("fun"));
 }
 
+TEST(TrigramBloom, NonUtf8LeadByteDoesNotSwallowAscii) {
+    // "caf\xE9 latte" in Latin-1: 0xE9 is a 3-byte UTF-8 LEAD shape but the
+    // following bytes are ASCII, not continuations. The decoder must reject
+    // the sequence and step one byte; historically it consumed 0xE9,' ','l'
+    // as one code point, so the "lat" trigram was never inserted into the
+    // bloom and narrow() certified a PRESENT substring absent.
+    const char bytes[] = {'c', 'a', 'f', '\xE9', ' ',
+                          'l', 'a', 't', 't', 'e'};
+    const std::string_view content(bytes, sizeof(bytes));
+    TrigramIndex index;
+    index.set_file_bloom(FileID{5}, TrigramBloom::build(content));
+    auto n = index.narrow("latte", /*case_insensitive=*/false);
+    ASSERT_TRUE(n.informative());
+    EXPECT_FALSE(n.certifies_absent(FileID{5}))
+        << "'latte' is present in the content; the bloom must not certify "
+           "it absent";
+}
+
+TEST(Utf8Walkers, CodePointsAndByteOffsetsStayParallelOnInvalidInput) {
+    // Both walkers must emit one entry per accepted code point and skip the
+    // same bytes, so code_points.size() == byte_offsets.size() on any input.
+    {
+        // Lone continuation byte, then ASCII.
+        const char bytes[] = {'\x80', 'a', 'b', 'c'};
+        const std::string_view s(bytes, sizeof(bytes));
+        std::vector<uint32_t> code_points;
+        std::vector<size_t> byte_offsets;
+        to_code_points_into(s, code_points);
+        compute_byte_offsets_into(s, byte_offsets);
+        EXPECT_EQ(code_points.size(), byte_offsets.size());
+    }
+    {
+        // Truncated 3-byte sequence at end of input.
+        const char bytes[] = {'a', 'b', '\xE4', '\xB8'};
+        const std::string_view s(bytes, sizeof(bytes));
+        std::vector<uint32_t> code_points;
+        std::vector<size_t> byte_offsets;
+        to_code_points_into(s, code_points);
+        compute_byte_offsets_into(s, byte_offsets);
+        EXPECT_EQ(code_points.size(), byte_offsets.size());
+    }
+}
+
 TEST(TrigramIndexNarrowTest, BloomCertifiesBulkIndexedFiles) {
     // Bulk shape: bloom installed, NO incremental map data for the file.
     TrigramIndex index;

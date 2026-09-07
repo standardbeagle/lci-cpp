@@ -335,6 +335,20 @@ class TrigramIndex {
 
 // -- Free functions for trigram extraction ------------------------------------
 
+/// Converts a UTF-8 string_view to Unicode code points, appended into a
+/// caller-owned buffer (cleared first). Invalid lead bytes, truncated
+/// sequences and bad continuations advance ONE byte and emit nothing.
+void to_code_points_into(std::string_view s, std::vector<uint32_t>& result);
+
+/// Computes the byte offset of each code point produced by
+/// to_code_points_into, appended into a caller-owned buffer (cleared
+/// first). Steps by the exact same per-position rule as
+/// to_code_points_into, so offsets[i] is always the byte offset of
+/// code_points[i] — the two vectors are equal-length on ANY input,
+/// including invalid UTF-8.
+void compute_byte_offsets_into(std::string_view s,
+                               std::vector<size_t>& offsets);
+
 /// Returns true if all bytes are ASCII (< 128).
 bool is_pure_ascii(std::string_view content);
 

@@ -6,7 +6,6 @@
 #include <string>
 
 namespace lci {
-namespace {
 
 /// Converts a UTF-8 string_view to Unicode code points, appended into a
 /// caller-owned buffer. The buffer is cleared first; passing a reused buffer
@@ -49,6 +48,8 @@ void to_code_points_into(std::string_view s, std::vector<uint32_t>& result) {
     }
 }
 
+namespace {
+
 /// Returns the byte length of a single code point encoded in UTF-8.
 int utf8_char_len(uint8_t first_byte) {
     if (first_byte < 0x80) return 1;
@@ -88,6 +89,8 @@ void append_code_point(std::string& out, uint32_t cp) {
     }
 }
 
+}  // namespace
+
 /// Computes byte offsets for each code point in a UTF-8 string, appended into
 /// a caller-owned buffer (cleared first) so a reused buffer skips a per-call
 /// heap allocation.
@@ -100,6 +103,8 @@ void compute_byte_offsets_into(std::string_view s, std::vector<size_t>& offsets)
         i += static_cast<size_t>(utf8_char_len(static_cast<uint8_t>(s[i])));
     }
 }
+
+namespace {
 
 /// Lowercase ASCII character.
 char ascii_lower(char c) {
