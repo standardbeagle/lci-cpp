@@ -569,6 +569,101 @@ TEST(BrowseFileDeterminismTest, AmbiguousBasenameResolvesSmallestPath) {
     std::filesystem::remove_all(dir);
 }
 
+// A `file` filter carrying a wildcard must actually glob. Before this,
+// path_matches_glob only did equality / basename / suffix, so
+// `file="svc/*.go"` matched nothing: list_symbols answered an empty list
+// and browse_file answered found=false, both silently (karpathy #6). The
+// contract pinned here is wildcard_match's, the one find_files already
+// ships (src/mcp/handlers_find_files.cpp): '*' matches any run of
+// characters INCLUDING '/', '?' matches exactly one.
+class ExploreGlobFilterTest : public ::testing::Test {
+  protected:
+    void SetUp() override {
+        dir_ = lci::test::unique_temp_dir("lci_explore_glob_test_");
+        std::filesystem::remove_all(dir_);
+        std::filesystem::create_directories(dir_ / "svc" / "deep");
+        std::filesystem::create_directories(dir_ / "other");
+        write(dir_ / "svc" / "alpha.go",
+              "package svc\n\nfunc AlphaOne() int { return 1 }\n");
+        write(dir_ / "svc" / "beta.go",
+              "package svc\n\nfunc BetaOne() int { return 2 }\n");
+        write(dir_ / "svc" / "deep" / "nested.go",
+              "package deep\n\nfunc NestedOne() int { return 3 }\n");
+        write(dir_ / "other" / "gamma.go",
+              "package other\n\nfunc GammaOne() int { return 4 }\n");
+
+        Config config;
+        config.project.root = dir_.string();
+        indexer_ = std::make_unique<MasterIndex>(config);
+        indexer_->index_directory(dir_.string());
+    }
+
+    void TearDown() override {
+        indexer_.reset();
+        std::filesystem::remove_all(dir_);
+    }
+
+    static void write(const std::filesystem::path& p,
+                      const std::string& content) {
+        std::ofstream out(p);
+        out << content;
+    }
+
+    std::vector<std::string> list_names(const std::string& file_filter) {
+        nlohmann::json params;
+        params["file"] = file_filter;
+        params["kind"] = "all";
+        params["max"] = 200;
+        auto result = handle_list_symbols(params, *indexer_);
+        EXPECT_FALSE(result.is_error) << result.text;
+        auto j = nlohmann::json::parse(result.text);
+        std::vector<std::string> names;
+        for (const auto& s : j["symbols"]) {
+            names.push_back(s["name"].get<std::string>());
+        }
+        std::sort(names.begin(), names.end());
+        return names;
+    }
+
+    std::filesystem::path dir_;
+    std::unique_ptr<MasterIndex> indexer_;
+};
+
+TEST_F(ExploreGlobFilterTest, ListSymbolsGlobMatchesEveryFileInDirectory) {
+    auto names = list_names("svc/*.go");
+    // '*' spans '/', so the nested file is in scope too — that is
+    // wildcard_match's shipped contract, not an invention here.
+    EXPECT_NE(std::find(names.begin(), names.end(), "AlphaOne"), names.end())
+        << ::testing::PrintToString(names);
+    EXPECT_NE(std::find(names.begin(), names.end(), "BetaOne"), names.end())
+        << ::testing::PrintToString(names);
+    EXPECT_NE(std::find(names.begin(), names.end(), "NestedOne"), names.end())
+        << ::testing::PrintToString(names);
+    // Non-matching directory contributes nothing.
+    EXPECT_EQ(std::find(names.begin(), names.end(), "GammaOne"), names.end())
+        << ::testing::PrintToString(names);
+}
+
+TEST_F(ExploreGlobFilterTest, ListSymbolsQuestionMarkMatchesOneCharacter) {
+    auto names = list_names("svc/?lpha.go");
+    EXPECT_EQ(names, (std::vector<std::string>{"AlphaOne"}));
+}
+
+TEST_F(ExploreGlobFilterTest, ListSymbolsPlainNameKeepsBasenameBehaviour) {
+    auto names = list_names("alpha.go");
+    EXPECT_EQ(names, (std::vector<std::string>{"AlphaOne"}));
+}
+
+TEST_F(ExploreGlobFilterTest, BrowseFileResolvesAGlob) {
+    nlohmann::json params;
+    params["file"] = "svc/al*.go";
+    auto result = handle_browse_file(params, *indexer_);
+    ASSERT_FALSE(result.is_error) << result.text;
+    auto j = nlohmann::json::parse(result.text);
+    ASSERT_TRUE(j.contains("file")) << j.dump();
+    EXPECT_EQ(j["file"]["path"].get<std::string>(), "svc/alpha.go");
+}
+
 // Unread params must not sit in the schema as silent no-ops: a param the
 // handler never reads (browse_file show_imports, inspect_symbol max_depth)
 // is removed from the schema, and the server's unknown-param guard then
