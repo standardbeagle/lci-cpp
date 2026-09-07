@@ -362,6 +362,14 @@ void UnifiedExtractor::visit_node(TSNode node) {
     absl::flat_hash_map<std::string, std::string> saved_env;
     if (env_boundary) saved_env = local_var_types_;
 
+    // Kotlin class_declaration clears the class-property env on entry
+    // (process_kotlin_reference); a local class inside a method must not
+    // erase the ENCLOSING class's property types for the rest of the file.
+    const bool kotlin_prop_boundary =
+        lang_ == LangId::Kotlin && node_type == "class_declaration";
+    absl::flat_hash_map<std::string, std::string> saved_props;
+    if (kotlin_prop_boundary) saved_props = kotlin_property_types_;
+
     // === COMPLEXITY TRACKING ===
     PositionKey func_key{};
     bool is_func = false;
@@ -509,6 +517,7 @@ void UnifiedExtractor::visit_node(TSNode node) {
 
     // Restore the enclosing function's local type env (see entry snapshot).
     if (env_boundary) local_var_types_ = std::move(saved_env);
+    if (kotlin_prop_boundary) kotlin_property_types_ = std::move(saved_props);
 
     --visit_depth_;
 }
@@ -587,9 +596,9 @@ std::string_view UnifiedExtractor::extract_function_name(
     TSNode decl = ts_node_child_by_field_name(
         node, "declarator", static_cast<uint32_t>(std::strlen("declarator")));
     if (!ts_node_is_null(decl)) {
-        TSNode name_node = cpp_function_declarator_name(node);
-        if (!ts_node_is_null(name_node)) {
-            return node_text(name_node);
+        TSNode peeled = cpp_function_declarator_name(node);
+        if (!ts_node_is_null(peeled)) {
+            return node_text(peeled);
         }
     }
 
