@@ -46,6 +46,20 @@ bool optional_field(const nlohmann::json& body, const char* name, T& value,
     return true;
 }
 
+/// Optional string field: present-but-not-a-string is a client error
+/// (400), absent or explicit null keeps `value` unchanged.
+inline bool optional_string(const nlohmann::json& body, const char* name,
+                            std::string& value, std::string& error) {
+    auto it = body.find(name);
+    if (it == body.end() || it->is_null()) return true;
+    if (!it->is_string()) {
+        error = std::string(name) + " must be a string";
+        return false;
+    }
+    value = it->get<std::string>();
+    return true;
+}
+
 inline bool pattern(const nlohmann::json& body, std::string& value,
                     std::string& error) {
     if (!body.is_object()) {

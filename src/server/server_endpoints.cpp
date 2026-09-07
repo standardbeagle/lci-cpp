@@ -305,9 +305,50 @@ void IndexServer::handle_reindex(const httplib::Request& req,
         body = nlohmann::json::object();
     }
 
-    std::string root_path = body.value("path", "");
+    // The path is client-controlled and an accepted request tears down and
+    // rebuilds the live index, so validate it BEFORE touching any state:
+    // wrong type or non-object body is a 400, a nonexistent path is a 400
+    // (it used to "succeed" by publishing an EMPTY engine with ready:true),
+    // and anything outside the project root is a 400 (the server must never
+    // replace the project's index with an arbitrary directory's).
+    if (!body.is_object()) {
+        error_response(res, 400, "JSON body must be an object");
+        return;
+    }
+    std::string root_path;
+    std::string decode_error;
+    if (!server_request::optional_string(body, "path", root_path,
+                                         decode_error)) {
+        error_response(res, 400, decode_error);
+        return;
+    }
     if (root_path.empty()) {
         root_path = config_.project.root;
+    }
+    {
+        std::error_code ec;
+        const auto target = std::filesystem::weakly_canonical(root_path, ec);
+        if (ec || !std::filesystem::exists(target)) {
+            error_response(res, 400,
+                           "reindex path does not exist: " + root_path);
+            return;
+        }
+        const auto root =
+            std::filesystem::weakly_canonical(config_.project.root, ec);
+        if (ec) {
+            error_response(res, 500, "project root is not resolvable");
+            return;
+        }
+        std::error_code rel_ec;
+        const auto rel = std::filesystem::relative(target, root, rel_ec);
+        // Outside the root iff the relative path escapes via a leading "..".
+        if (rel_ec || (!rel.empty() && *rel.begin() == "..")) {
+            error_response(res, 400,
+                           "reindex path is outside the project root: " +
+                               root_path);
+            return;
+        }
+        root_path = target.string();
     }
 
     // Atomically cancel any prior in-flight indexing run and install
@@ -325,14 +366,23 @@ void IndexServer::handle_reindex(const httplib::Request& req,
     // successor thread covers it.
     indexing_active_.store(true, std::memory_order_release);
     swap_indexing_thread(std::thread([this, root_path] {
+        // Keep the previous engine aside so a failed run can restore it:
+        // publishing a half-built engine over a cleared index reported
+        // ready:true for an index that was never built.
+        SearchEngine* prev_engine = nullptr;
+        std::unique_ptr<SearchEngine> prev_owned;
         {
             std::unique_lock engine_lock(mu_);
+            prev_engine = search_engine_;
+            prev_owned = std::move(owned_search_engine_);
             search_engine_ = nullptr;
-            owned_search_engine_.reset();
         }
 
-        indexer_->clear();
-        indexer_->index_directory(root_path);
+        // No indexer_->clear() here: index_directory() opens its own bulk
+        // window and keeps the previously published generation readable
+        // for the whole run; a pre-clear publishes empty snapshots up
+        // front (the caller-audit defect from karpathy-principles rule 3).
+        const bool indexed = indexer_->index_directory(root_path);
 
         // Bail out (without clearing indexing_active_) if a successor
         // reindex superseded us — the successor is responsible for
@@ -340,6 +390,23 @@ void IndexServer::handle_reindex(const httplib::Request& req,
         // server is shutting down, clear the flag so /status is
         // accurate during the brief window before the server exits.
         if (indexer_->stop_requested()) {
+            return;
+        }
+        if (!indexed) {
+            // CAS lost to another bulk run (an externally managed index
+            // building under its owner): restore the previously published
+            // engine and say so, loudly.
+            std::fprintf(stderr,
+                         "lci-server: reindex of %s did not run (another "
+                         "bulk run holds the index); keeping the previous "
+                         "engine\n",
+                         root_path.c_str());
+            {
+                std::unique_lock engine_lock(mu_);
+                owned_search_engine_ = std::move(prev_owned);
+                search_engine_ = prev_engine;
+            }
+            indexing_active_.store(false, std::memory_order_release);
             return;
         }
         if (!running_.load(std::memory_order_acquire)) {
