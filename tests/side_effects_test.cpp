@@ -3,6 +3,9 @@
 #include <filesystem>
 #include <fstream>
 
+#include <sys/wait.h>
+#include <unistd.h>
+
 #include <nlohmann/json.hpp>
 
 #include <lci/analysis/side_effect_analyzer.h>
@@ -448,6 +451,95 @@ TEST(SideEffectsHandlerTest, EmptyAnalyzerYieldsAnalysisUnavailable) {
     }
 
     std::filesystem::remove_all(dir);
+}
+
+// ---------------------------------------------------------------------------
+// handle_side_effects: capped modes must be deterministic
+// ---------------------------------------------------------------------------
+
+// Runs one side_effects query in a fresh child process (fresh absl hash salt
+// -> fresh flat_hash_map iteration order) and returns the raw response text.
+static std::string run_impure_query_in_child() {
+    int fds[2];
+    if (pipe(fds) != 0) return {};
+    pid_t pid = fork();
+    if (pid == 0) {
+        // Child: build the fixture fresh, run the handler, write the text.
+        close(fds[0]);
+        SideEffectAnalyzer analyzer("go");
+        // 10 impure functions (global writes) spread over 4 files.
+        for (int i = 0; i < 10; ++i) {
+            char name[32];
+            snprintf(name, sizeof(name), "impureFn%d", i);
+            char file[32];
+            snprintf(file, sizeof(file), "file%d.go", i % 4);
+            int line = 10 + i;
+            analyzer.begin_function(name, file, line, line + 5);
+            analyzer.record_access("globalVar", {}, AccessType::Write,
+                                   line + 1, 1);
+            analyzer.end_function();
+        }
+        nlohmann::json params = {{"mode", "impure"}, {"max_results", 3}};
+        auto result = mcp::handle_side_effects(params, analyzer, nullptr);
+        const std::string& text = result.text;
+        size_t off = 0;
+        while (off < text.size()) {
+            ssize_t n = write(fds[1], text.data() + off, text.size() - off);
+            if (n <= 0) break;
+            off += static_cast<size_t>(n);
+        }
+        _exit(0);
+    }
+    close(fds[1]);
+    std::string out;
+    char buf[4096];
+    ssize_t n;
+    while ((n = read(fds[0], buf, sizeof(buf))) > 0) {
+        out.append(buf, static_cast<size_t>(n));
+    }
+    close(fds[0]);
+    int status = 0;
+    waitpid(pid, &status, 0);
+    return out;
+}
+
+// Karpathy #4 (determinism): mode=impure with max_results=3 on 10 impure
+// functions must return the SAME 3 results in every process. The pre-fix code
+// iterated analyzer.results() (flat_hash_map) and stopped at the cap, so the
+// emitted subset depended on per-process hash order.
+TEST(SideEffectsHandlerTest, ImpureModeDeterministicAcrossProcesses) {
+    std::string reference;
+    for (int run = 0; run < 5; ++run) {
+        std::string text = run_impure_query_in_child();
+        ASSERT_FALSE(text.empty()) << "child process produced no output";
+        if (run == 0) {
+            reference = text;
+        } else {
+            EXPECT_EQ(text, reference) << "run " << run << " diverged";
+        }
+    }
+
+    // And the emitted rows are the (path, line)-sorted first three.
+    auto j = nlohmann::json::parse(reference);
+    ASSERT_EQ(j["total_count"].get<int>(), 10);
+    const auto& results = j["results"];
+    ASSERT_EQ(results.size(), 3u);
+    for (size_t i = 1; i < results.size(); ++i) {
+        const auto& a = results[i - 1];
+        const auto& b = results[i];
+        auto key_a = std::make_pair(a["file_path"].get<std::string>(),
+                                    a["line"].get<int>());
+        auto key_b = std::make_pair(b["file_path"].get<std::string>(),
+                                    b["line"].get<int>());
+        EXPECT_LT(key_a, key_b);
+    }
+    // Exact sorted head: file0.go lines 10 and 14, then file1.go line 11.
+    EXPECT_EQ(results[0]["file_path"].get<std::string>(), "file0.go");
+    EXPECT_EQ(results[0]["line"].get<int>(), 10);
+    EXPECT_EQ(results[1]["file_path"].get<std::string>(), "file0.go");
+    EXPECT_EQ(results[1]["line"].get<int>(), 14);
+    EXPECT_EQ(results[2]["file_path"].get<std::string>(), "file1.go");
+    EXPECT_EQ(results[2]["line"].get<int>(), 11);
 }
 
 }  // namespace
