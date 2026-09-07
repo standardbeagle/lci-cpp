@@ -24,6 +24,9 @@
 #include "unique_temp.h"
 
 #ifndef _WIN32
+#include <fcntl.h>
+#include <sys/file.h>
+#include <sys/stat.h>
 #include <sys/un.h>
 #include <unistd.h>
 #endif
@@ -1180,6 +1183,51 @@ TEST_F(ServerTest, TreeMissingFunctionNameReturns400) {
     EXPECT_NE(j["error"].get<std::string>().find("function_name"),
               std::string::npos);
 }
+
+#ifndef _WIN32
+TEST_F(ServerTest, SocketLockSymlinkIsNotFollowed) {
+    // The sidecar .lock must be opened with O_NOFOLLOW: a pre-planted
+    // symlink at the lock path must not let the server open (and flock)
+    // an attacker-chosen target. Observable: pre-fix the server holds a
+    // flock on the symlink's target, so LOCK_EX|LOCK_NB from here fails;
+    // post-fix the target is never opened.
+    server_->shutdown();
+    std::error_code ec;
+    std::filesystem::remove(socket_path_, ec);
+    std::filesystem::remove(socket_path_ + ".lock", ec);
+
+    const auto target = tmp_.path() / "lock-target";
+    { std::ofstream f(target); f << "x"; }
+    std::filesystem::create_symlink(target, socket_path_ + ".lock");
+
+    ASSERT_TRUE(server_->start());
+
+    int tfd = ::open(target.c_str(), O_RDWR | O_CLOEXEC);
+    ASSERT_GE(tfd, 0);
+    EXPECT_EQ(::flock(tfd, LOCK_EX | LOCK_NB), 0)
+        << "server followed the .lock symlink and flocked its target";
+    ::close(tfd);
+}
+
+TEST_F(ServerTest, SocketModeIsOwnerOnlyUnderPermissiveUmask) {
+    // The socket mode is the only guard keeping other local users off the
+    // server. Even with a permissive process umask the bound socket must
+    // never carry group/other bits.
+    const mode_t old_umask = ::umask(0);
+    server_->shutdown();
+    std::error_code ec;
+    std::filesystem::remove(socket_path_, ec);
+    std::filesystem::remove(socket_path_ + ".lock", ec);
+    ASSERT_TRUE(server_->start());
+    ::umask(old_umask);
+
+    struct stat st {};
+    ASSERT_EQ(::stat(socket_path_.c_str(), &st), 0);
+    EXPECT_EQ(st.st_mode & 077, 0)
+        << "socket is reachable by group/other users: "
+        << std::oct << (st.st_mode & 0777);
+}
+#endif
 
 TEST_F(ServerTest, WrongTypedJsonFieldsReturn400Not500) {
     // Every field-reading endpoint must reject a wrong-typed JSON body with
