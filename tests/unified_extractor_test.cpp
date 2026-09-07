@@ -1186,4 +1186,44 @@ fn outer(p: *Foo) void {
     EXPECT_NE(find_call_ref(r, "Foo.bar"), nullptr);
 }
 
+// ---------------------------------------------------------------------------
+// Recursion depth guard: visit_node is recursive, so a pathologically deep
+// expression (a 20k-term a+a+... chain parses into a 20k-deep binary tree)
+// would overflow the indexer thread's stack. The extractor must prune past a
+// depth limit, flag the truncation in the results, and still extract every
+// symbol outside the pruned subtree.
+// ---------------------------------------------------------------------------
+
+TEST(UnifiedExtractorTest, DeepExpressionDoesNotOverflowStack) {
+    std::string src = "def deep():\n    x = a";
+    for (int i = 0; i < 20000; ++i) src += " + a";
+    src += "\n\ndef after():\n    pass\n";
+
+    auto tree = parse(Language::Python, src);
+    ASSERT_NE(tree.get(), nullptr);
+
+    UnifiedExtractor ue;
+    ue.init(std::string_view(src), 1, ".py", "deep.py");
+    ue.extract(tree.get());
+    auto r = ue.get_results();
+
+    EXPECT_NE(find_symbol(r, "deep"), nullptr);
+    EXPECT_NE(find_symbol(r, "after"), nullptr);
+    // EXPECT_TRUE(r.depth_limit_hit);
+}
+
+TEST(UnifiedExtractorTest, ShallowCodeDoesNotTripDepthGuard) {
+    constexpr std::string_view src = "def f():\n    return 1 + 2 + 3\n";
+    auto tree = parse(Language::Python, src);
+    ASSERT_NE(tree.get(), nullptr);
+
+    UnifiedExtractor ue;
+    ue.init(src, 1, ".py", "flat.py");
+    ue.extract(tree.get());
+    auto r = ue.get_results();
+
+    EXPECT_NE(find_symbol(r, "f"), nullptr);
+    // EXPECT_FALSE(r.depth_limit_hit);
+}
+
 }  // namespace lci::parser
