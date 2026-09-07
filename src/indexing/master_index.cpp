@@ -306,17 +306,13 @@ bool MasterIndex::index_directory(const std::string& root) {
     }
 
     auto progress = pipeline.get_progress();
-    // INVARIANT: a bulk reindex must never run concurrently with the
-    // incremental writers (index_file/update_file/remove_file). Those take
-    // snapshot_mu_, but this bulk publish holds only bulk_mu_, and the bulk
-    // window above clear()s every sub-index — so a concurrent incremental
-    // write's per-index entries would be silently clobbered here, diverging
-    // state across indexes. The server
-    // enforces this by wiring: reindex is serialized by is_indexing_/bulk_mu_
-    // and no watch/incremental path is active alongside it. If watch-mode is
-    // ever wired to write concurrently, this whole bulk clear→publish span must
-    // become mutually exclusive with the snapshot_mu_ writers (not just this
-    // store); a lock here alone would leave the sub-index/ID divergence unfixed.
+    // INVARIANT (enforced): a bulk reindex never runs concurrently with the
+    // incremental writers. index_file/update_file/remove_file acquire
+    // bulk_mu_ BEFORE snapshot_mu_, so an incremental write waits out this
+    // whole clear->publish span instead of landing in the sub-index staging
+    // generations, where the clear()s above would silently clobber it and
+    // diverge state across indexes. Lock order is bulk_mu_ -> snapshot_mu_
+    // everywhere; no path takes snapshot_mu_ and then bulk_mu_.
     publish_snapshot(std::move(new_snapshot));
 
     // New generation is live: drop content entries that did not survive it
@@ -513,6 +509,12 @@ std::string generic_path(std::string p) {
 }  // namespace
 
 bool MasterIndex::index_file(const std::string& path_arg) {
+    // bulk_mu_ first: the bulk clear->publish span in index_directory must
+    // never observe a concurrent incremental write (see the INVARIANT at
+    // publish_snapshot below). An incremental write waits out the whole
+    // bulk window; callers that cannot block (the efsw callback thread)
+    // must route through a debouncer instead of calling this directly.
+    std::lock_guard<std::mutex> bulk_lock(bulk_mu_);
     const std::string path = generic_path(path_arg);
     if (path.empty()) return false;
     if (!std::filesystem::exists(path)) return false;
@@ -558,6 +560,8 @@ bool MasterIndex::index_file(const std::string& path_arg) {
 
 bool MasterIndex::update_file(const std::string& path_arg,
                               std::string_view content) {
+    // bulk_mu_ first: mutual exclusion with the bulk window (see index_file).
+    std::lock_guard<std::mutex> bulk_lock(bulk_mu_);
     const std::string path = generic_path(path_arg);
     if (path.empty() || content.empty()) return false;
     if (!std::filesystem::exists(path)) return false;
@@ -599,6 +603,8 @@ bool MasterIndex::update_file(const std::string& path_arg,
 }
 
 bool MasterIndex::remove_file(const std::string& path_arg) {
+    // bulk_mu_ first: mutual exclusion with the bulk window (see index_file).
+    std::lock_guard<std::mutex> bulk_lock(bulk_mu_);
     const std::string path = generic_path(path_arg);
     // snapshot_mu_ serializes the whole composite write and spans the file_map
     // lookup so two concurrent removals can't both act on the same id. RCU

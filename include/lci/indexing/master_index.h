@@ -78,8 +78,12 @@ class SideEffectAnalyzer;
 
 /// Thread safety:
 ///   - load_snapshot() is lock-free.
-///   - index_directory() holds bulk_mu_ (blocks other bulk ops, not reads).
-///   - index_file / update_file / remove_file hold snapshot_mu_ and per-index write locks.
+///   - index_directory() holds bulk_mu_ for its whole run (blocks other bulk
+///     ops and the single-file writers, not reads).
+///   - index_file / update_file / remove_file acquire bulk_mu_ BEFORE
+///     snapshot_mu_: an incremental write waits out a bulk run's whole
+///     clear->publish window rather than racing it (the INVARIANT in
+///     master_index.cpp). Lock order is bulk_mu_ -> snapshot_mu_.
 ///   - clear() holds both mu_ and snapshot_mu_.
 class MasterIndex {
   public:
