@@ -473,6 +473,29 @@ records by hand.
   every status (filed `01M1W6858497HAM3W5QZ6QRGGV`).
 <!-- written_at: 2026-09-06T20:30:00Z  source_event: task:01KXSHA3Q1QCHM8T68WS6MS1NC, comment:01M1W63EGNJXC9XMVWAF0ZXXMK (fixedInPlace: resume ledger froze provider failures), git:cc113ae, code:benchmarks/repo-qa/scripts/bench.py:253 -->
 
+### 13a. A resume key that hashes a config file WHOLESALE makes that file's most volatile field the most expensive one to edit
+
+The cell digest exists to invalidate paid records when the experiment changes. Hashing the
+whole manifest overshoots: it also invalidates them when something that is not part of the
+experiment changes. The model roster is the canonical case — adding one model to a
+manifest that `cell_identity` hashes whole re-keys every cell of every model, so the
+cheapest possible extension costs a full re-run of work already paid for.
+
+- **Split identity-bearing fields from roster fields.** The manifest freezes what the
+  pre-registration protects — prompt, facts, shapes, thresholds, grading schema. The
+  roster of subjects the grid is swept over lives in its own file and reaches the grid as
+  an argument. R2 kept `models.json` out of `manifest_digest` and every R1 cell key stayed
+  byte-identical (pinned by
+  `test_scorecard_cells_are_identical_to_r1_cells_for_a_shared_model`), while `model` —
+  already an identity field — separated the new cells.
+- **The split is only safe when the swept axis is itself an identity field.** Otherwise a
+  roster edit silently re-points cells that keep their keys. Check that before splitting.
+- **The roster then carries no freeze guarantee, so give it its own validation rule.**
+  R2's `load_models` refuses a model with an empty `id_probe` (rule 10b), so the citation
+  cannot rot out of the file.
+- Same wholesale-digest shape is unaudited in `scripts/bench.py` and `selection_ab.py`.
+<!-- written_at: 2026-09-07T02:00:00Z  source_event: task:01KXXJK6TY8NE7NW8VB8E7610P, comment:01M1WQTRRZXE4XBNRDF2SXTF21 (decisions[0]), comment:01M1WR4Y8GHK74GD2TESDQ8MDT (passPatterns[0]), git:10a1be9 -->
+
 ## 14. The competitor for a tool call is the agent's OWN native toolset, not a neighbouring MCP tool
 
 Rule 12 proved the arms were non-disjoint; this is what the surviving native tools then do
@@ -552,9 +575,21 @@ the key.
   wrapped, re-expressed, wrong value, wrong unit. This is rule 6's granularity axis applied
   to the phrase envelope; a two-case test that samples one side of the key is the hole both
   rounds fell through.
+- **ENVELOPE classes are a separate axis from phrasing classes, and a third real model will
+  find them.** Phrasing varies the words; the envelope varies what surrounds a byte-perfect
+  answer — a ```json markdown fence, leading prose ("Here is the JSON:"), trailing
+  commentary, a code block with no language tag. R2's first strong-tier real run hit exactly
+  this: glm-5.2 returned valid JSON inside a fence, `parse_answer` recorded
+  `malformed_answer`, and that one cell of 12 dropped strong-tier shape_17 completion to
+  91.7% and set `interpretation_valid=false`. A formatting habit had been graded as a
+  comprehension result. Pin one cell per envelope class alongside the phrasing classes, and
+  decide BEFORE paid cells whether an envelope is stripped or is itself the thing scored —
+  because widening the parser afterwards changes the grading rule and, by the clause below,
+  invalidates every record already paid for (filed `01M1WR3HQ0HNKNT83ZEZ6FFSXM`: strip the
+  fence under a bumped `grading_schema`, then re-run).
 - **Changing the grading rule invalidates paid records by construction** — bump the schema
   id inside the cell digest and rerun rather than rescoring in place, so no scorecard mixes
   rules.
 - **No number without a validated instrument** (karpathy-principles rule 1). A published
   rate whose grader has never met a real answer measures the grader.
-<!-- written_at: 2026-09-07T01:30:00Z  source_event: task:01KXW2BBMSM5K3NBZE4M1PW5T2, comment:01M1WKKNKEZVZ3XRPYQ913PCRZ (decisions+lessons, exact-match withdrawal), comment:01M1WKZBHXXV4Z2TV0DHCCRC8X (systemicObservations, costGate fix-now: 2 withdrawals / 3 harnesses), comment:01M1WP2E2JFP1P7X4TGYAHZ5DR (lessons: shape classes), git:93b750c, git:f866fc9 -->
+<!-- written_at: 2026-09-07T01:30:00Z  source_event: task:01KXW2BBMSM5K3NBZE4M1PW5T2, comment:01M1WKKNKEZVZ3XRPYQ913PCRZ (decisions+lessons, exact-match withdrawal), comment:01M1WKZBHXXV4Z2TV0DHCCRC8X (systemicObservations, costGate fix-now: 2 withdrawals / 3 harnesses), comment:01M1WP2E2JFP1P7X4TGYAHZ5DR (lessons: shape classes), git:93b750c, git:f866fc9; envelope clause: task:01KXXJK6TY8NE7NW8VB8E7610P, comment:01M1WQTRRZXE4XBNRDF2SXTF21 (lessons[1]), follow-up:01M1WR3HQ0HNKNT83ZEZ6FFSXM -->
