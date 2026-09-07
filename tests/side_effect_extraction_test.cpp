@@ -2671,4 +2671,34 @@ TEST_F(SideEffectExtraction, CppPointerReturnFunctionKeyMatchesSymbolName) {
     EXPECT_EQ(info->function_name, "compute");
 }
 
+// Dropped-error detail truncation must land on a UTF-8 boundary: cutting a
+// 2-byte sequence in half produced mojibake in every downstream report.
+// The é below (0xC3 0xA9) straddles detail bytes 56-57, exactly where the
+// old fixed 57-byte cut landed.
+TEST_F(SideEffectExtraction, DroppedErrorDetailCutsOnUtf8Boundary) {
+    // `_ = fmt.Println("` is 17 bytes; 38 a's put the é lead byte at
+    // statement offset 55 (detail offset 56).
+    const std::string stmt =
+        "_ = fmt.Println(\"" + std::string(38, 'a') + "\xc3\xa9\")";
+    ASSERT_EQ(static_cast<unsigned char>(stmt[55]), 0xC3);
+    const std::string src = "package p\n"
+                            "\n"
+                            "import \"fmt\"\n"
+                            "\n"
+                            "func f() {\n"
+                            "\t" +
+                            stmt + "\n"
+                            "}\n";
+    const auto* info = analyze(Language::Go, ".go", src, "f");
+    ASSERT_NE(info, nullptr);
+    const EhFinding* dropped = nullptr;
+    for (const auto& f : info->error_findings) {
+        if (f.signal == EhSignal::DroppedError) dropped = &f;
+    }
+    ASSERT_NE(dropped, nullptr);
+    // Truncated at the last full character: 56 bytes of detail (backtick +
+    // 55 statement bytes), then the ellipsis.
+    EXPECT_EQ(dropped->detail, "`" + stmt.substr(0, 55) + "...`");
+}
+
 }  // namespace lci
