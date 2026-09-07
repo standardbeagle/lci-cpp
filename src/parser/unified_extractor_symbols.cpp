@@ -91,9 +91,9 @@ void UnifiedExtractor::extract_function(TSNode node,
     // extracted the NAME "f(size_t bytes)" — a symbol no reference can
     // ever resolve to by name. Shared peel: cpp_function_declarator_name.
     if (name.empty()) {
-        TSNode name_node = cpp_function_declarator_name(node);
-        if (!ts_node_is_null(name_node)) {
-            name = node_text(name_node);
+        TSNode peeled = cpp_function_declarator_name(node);
+        if (!ts_node_is_null(peeled)) {
+            name = node_text(peeled);
         }
     }
 
