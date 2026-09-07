@@ -1140,14 +1140,15 @@ class A {
 }
 
 TEST(KotlinExtractor, ReceiverTypeSurvivesNestedFunction) {
-    // The local `fun inner` clears the local type env; the local `class
-    // Inner` clears the class-property env. Both must be restored on exit or
-    // `p.bar()` loses its receiver type.
+    // `p` is a CLASS PROPERTY, so only kotlin_property_types_ carries its
+    // type into m(); the local `class Inner` clears that env on entry and
+    // must restore it on exit or `p.bar()` loses its receiver type. The
+    // local `fun inner` likewise swaps the local var env.
     constexpr std::string_view src = R"(
 class Foo { fun bar() {} }
 class A {
+    val p = Foo()
     fun m() {
-        val p = Foo()
         fun inner() {}
         class Inner
         p.bar()
