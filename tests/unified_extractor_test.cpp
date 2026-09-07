@@ -1042,4 +1042,148 @@ TEST(UnifiedExtractorTest, CppLocalsAndParametersExtracted) {
     EXPECT_LT(total->line, compute->end_line);
 }
 
+// ---------------------------------------------------------------------------
+// Local type env must survive a nested function/arrow/closure: entering the
+// nested function swaps in a fresh env, and EXITING it must restore the
+// enclosing one. Before the fix the env was cleared on entry and never
+// restored, so every receiver-typed call after the nested function degraded
+// to a bare name / foreign_receiver.
+// ---------------------------------------------------------------------------
+
+TEST(JsExtractor, ReceiverTypeSurvivesNestedArrow) {
+    constexpr std::string_view src = R"(
+class Foo { bar() {} }
+class A {
+    m(p: Foo) {
+        [1].forEach(x => x);
+        p.bar();
+    }
+}
+)";
+    auto tree = parse(Language::TypeScript, src);
+    ASSERT_NE(tree.get(), nullptr);
+
+    UnifiedExtractor ue;
+    ue.init(src, 1, ".ts", "a.ts");
+    ue.extract(tree.get());
+    auto r = ue.get_results();
+
+    EXPECT_NE(find_call_ref(r, "Foo.bar"), nullptr);
+}
+
+TEST(PythonExtractor, ReceiverTypeSurvivesNestedDef) {
+    constexpr std::string_view src = R"(
+class Foo:
+    def bar(self):
+        pass
+
+class A:
+    def m(self, p: Foo):
+        def inner():
+            pass
+        p.bar()
+)";
+    auto tree = parse(Language::Python, src);
+    ASSERT_NE(tree.get(), nullptr);
+
+    UnifiedExtractor ue;
+    ue.init(src, 1, ".py", "a.py");
+    ue.extract(tree.get());
+    auto r = ue.get_results();
+
+    EXPECT_NE(find_call_ref(r, "Foo.bar"), nullptr);
+}
+
+TEST(RustExtractor, ReceiverTypeSurvivesNestedFn) {
+    constexpr std::string_view src = R"(
+struct Foo;
+impl Foo { fn bar(&self) {} }
+struct A;
+impl A {
+    fn m(&self, p: Foo) {
+        fn inner() {}
+        p.bar();
+    }
+}
+)";
+    auto tree = parse(Language::Rust, src);
+    ASSERT_NE(tree.get(), nullptr);
+
+    UnifiedExtractor ue;
+    ue.init(src, 1, ".rs", "a.rs");
+    ue.extract(tree.get());
+    auto r = ue.get_results();
+
+    EXPECT_NE(find_call_ref(r, "Foo.bar"), nullptr);
+}
+
+TEST(PhpExtractor, ReceiverTypeSurvivesNestedFunction) {
+    constexpr std::string_view src = R"(<?php
+class Foo { public function bar() {} }
+class A {
+    public function m() {
+        $p = new Foo();
+        function inner() {}
+        $p->bar();
+    }
+}
+)";
+    auto tree = parse(Language::PHP, src);
+    if (!tree) GTEST_SKIP() << "PHP parser unavailable";
+
+    UnifiedExtractor ue;
+    ue.init(src, 1, ".php", "a.php");
+    ue.extract(tree.get());
+    auto r = ue.get_results();
+
+    EXPECT_NE(find_call_ref(r, "Foo.bar"), nullptr);
+}
+
+TEST(KotlinExtractor, ReceiverTypeSurvivesNestedFunction) {
+    // The local `fun inner` clears the local type env; the local `class
+    // Inner` clears the class-property env. Both must be restored on exit or
+    // `p.bar()` loses its receiver type.
+    constexpr std::string_view src = R"(
+class Foo { fun bar() {} }
+class A {
+    fun m() {
+        val p = Foo()
+        fun inner() {}
+        class Inner
+        p.bar()
+    }
+}
+)";
+    auto tree = parse(Language::Kotlin, src);
+    if (!tree) GTEST_SKIP() << "Kotlin parser unavailable";
+
+    UnifiedExtractor ue;
+    ue.init(src, 1, ".kt", "a.kt");
+    ue.extract(tree.get());
+    auto r = ue.get_results();
+
+    EXPECT_NE(find_call_ref(r, "Foo.bar"), nullptr);
+}
+
+TEST(ZigExtractor, ReceiverTypeSurvivesNestedContainerFn) {
+    // A local container's `fn` is a nested function_declaration: entering it
+    // swaps the local type env, and `p.bar()` after it must still resolve.
+    constexpr std::string_view src = R"(
+const Foo = struct { pub fn bar(self: *Foo) void {} };
+fn outer(p: *Foo) void {
+    const Inner = struct { fn zap() void {} };
+    p.bar();
+}
+)";
+    auto tree = parse(Language::Zig, src);
+    if (!tree) GTEST_SKIP() << "Zig parser unavailable";
+
+    UnifiedExtractor ue;
+    ue.init(src, 1, ".zig", "a.zig");
+    ue.extract(tree.get());
+    auto r = ue.get_results();
+
+    EXPECT_NE(find_call_ref(r, "Foo.bar"), nullptr);
+}
+
 }  // namespace lci::parser
