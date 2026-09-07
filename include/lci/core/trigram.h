@@ -11,7 +11,6 @@
 #include <absl/container/flat_hash_map.h>
 #include <absl/container/flat_hash_set.h>
 
-#include <lci/alloc/slab_allocator.h>
 #include <lci/core/atomic_shared_ptr.h>
 #include <lci/types.h>
 
@@ -258,9 +257,6 @@ class TrigramIndex {
     /// Sets bulk indexing mode (skips cache during indexing).
     void set_bulk_indexing(bool enabled);
 
-    /// Returns the slab allocator for use by merge pipelines.
-    SlabAllocator<FileLocation>& get_allocator();
-
     /// Returns the underlying sharded storage.
     ShardedTrigramStorage& sharded_storage();
 
@@ -304,8 +300,6 @@ class TrigramIndex {
     /// happens on close, avoiding a per-file snapshot clone across a
     /// bulk reindex (same shape as PostingsIndex's bulk window).
     std::shared_ptr<Snapshot> staging_;
-
-    SlabAllocator<FileLocation> location_allocator_;
 
     int cleanup_threshold_{100};
 

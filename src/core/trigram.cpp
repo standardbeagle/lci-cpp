@@ -435,8 +435,7 @@ void ShardedTrigramStorage::clear() {
 // -- TrigramIndex -------------------------------------------------------------
 
 TrigramIndex::TrigramIndex()
-    : location_allocator_(kTrigramTierConfigs),
-      sharded_storage_(256) {
+    : sharded_storage_(256) {
     snapshot_.store(std::make_shared<const Snapshot>(),
                     std::memory_order_release);
 }
@@ -471,7 +470,6 @@ void TrigramIndex::clear() {
         snap.blooms.clear();
     });
     sharded_storage_.clear();
-    location_allocator_.reset_stats();
 }
 
 int TrigramIndex::predict_trigram_count(int content_size) const {
@@ -958,10 +956,6 @@ void TrigramIndex::set_bulk_indexing(bool enabled) {
         snapshot_.store(std::move(staging_), std::memory_order_release);
         staging_ = nullptr;
     }
-}
-
-SlabAllocator<FileLocation>& TrigramIndex::get_allocator() {
-    return location_allocator_;
 }
 
 ShardedTrigramStorage& TrigramIndex::sharded_storage() {

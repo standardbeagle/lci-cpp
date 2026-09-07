@@ -43,7 +43,6 @@ add_executable(lci_tests
     kdl_test.cpp
     gitignore_test.cpp
     error_string_pool_test.cpp
-    slab_allocator_test.cpp
     file_content_store_test.cpp
     line_scanner_file_service_test.cpp
     parser_pool_test.cpp
