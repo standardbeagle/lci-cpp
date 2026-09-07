@@ -144,3 +144,18 @@ and ccache make this cheap — see the worktree shared-dep-cache note), and run 
 `--gtest_filter`. Re-running the RED test in the working tree proves nothing once the fix
 is present, and stashing the fix pollutes a tree another session may hold.
 <!-- written_at: 2026-09-07T06:30:00Z  source_event: task:01M1NCSJ315Z7470JQWY24DF1V, review verdict 01M1X3JC399NZE2SXAV2WRJB5W -->
+
+## 7. A rewind's scope widening must cover every file the fix hint IMPLIES, headers included
+
+The reviewer's `scopeChanges.new_scope` lists the files named in the blocker
+(`watcher.cpp`, `master_index.cpp`, `master_index_test.cpp`). A fix that changes a locking
+contract also changes the header that DOCUMENTS it, and that header is not in the list —
+S3's attempt-2 scope gate took three attempts, the third only to admit
+`include/lci/indexing/master_index.h` for the invariant comment beside the widened lock.
+
+Rule: when writing `new_scope` at rewind, include the declaring header for any signature,
+lock-order, or invariant comment the fix hint touches. At drain time, a scope failure whose
+only excess path is the header of an in-scope `.cpp` is a scope-authoring miss, not a
+discipline breach — widen and re-evaluate rather than routing the doc edit elsewhere.
+
+<!-- written_at: 2026-09-07T16:10:00Z  source_event: task:01M1NCSJ31A8XHPC7NKJEGS7RV, comment:01M1XARQG97QQRBYFEC4M06YBJ (scopeChanges.new_scope), comment:01M1Y9F94319CA8P3SN338J7ZA (scope a3), git:734ced3 -->

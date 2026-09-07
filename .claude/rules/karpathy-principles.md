@@ -59,6 +59,35 @@ LCI's reason to exist is sub-millisecond semantic code search with 79.8% context
   `index_directory()`, so the HTTP `/reindex` path never saw the fix (filed:
   `01M1PA4DNHVBWX1749E3KQJA5N`). Out-of-scope means do-not-edit, never do-not-read.
   <!-- written_at: 2026-09-04T14:00:00Z  source_event: task:01M1NCSJ31P21DT2VVB2H0DSKS, comment:01M1PA20HWVVR13XS0BHX3ETHM -->
+- **Mutual exclusion with the bulk window is STRUCTURAL — a liveness CHECK before a write is a
+  TOCTOU, and a documented INVARIANT names the mechanism you must implement.**
+  `master_index.cpp:309-319` already said the bulk clear->publish span must exclude the
+  `snapshot_mu_` writers if watch mode were ever wired. The first wiring answered it with
+  `MasterIndex::is_indexing()` on ONE of three write arms (`WatchPipeline::on_rebuild`), leaving
+  `on_event`'s Remove and new-path arms unguarded: `/reindex` can open its window between the check
+  and `update_file`, the incremental write lands in the staging generations, and the commit path's
+  `clear()` either wipes it or publishes the file's symbols and postings twice. The fix is one lock
+  line per writer — `index_file`/`update_file`/`remove_file` take `bulk_mu_` (blocking) BEFORE
+  `snapshot_mu_` (`734ced3`). Lock order is `bulk_mu_ -> snapshot_mu_` everywhere; `clear()` takes
+  `snapshot_mu_` only, so nothing inverts it, and read paths stay lock-free.
+  **Corollary: the thread that receives OS events must never be the one that blocks.** Once the
+  writers can wait out a whole reindex, an inline `remove_file`/`index_file` on the efsw callback
+  thread overflows the inotify queue. Route every such event through the debouncer/timer thread —
+  the callback only inserts into a deduplicating pending-path set and kicks the timer (`9fe0243`,
+  path-only events keyed under a `FileID{0}` sentinel). Any NEW `MasterIndex` write caller (MCP
+  edit tools, CLI incremental index) inherits both halves.
+  <!-- written_at: 2026-09-07T16:10:00Z  source_event: task:01M1NCSJ31A8XHPC7NKJEGS7RV, comment:01M1XARQG97QQRBYFEC4M06YBJ, comment:01M1XAS4V93FV6DWZQX0HTQM2W, git:734ced3, git:9fe0243 -->
+- **A TSan-clean run over tests that never overlap the two paths proves nothing; the RED test must
+  PARK the other thread inside the window via a test hook.** Attempt 1 reported 96/96 TSan-clean
+  and still shipped the TOCTOU, because no test ran `index_directory` and `update_file`
+  concurrently. `MasterIndexTest.UpdateDuringBulkWindowSurvivesExactlyOnce` (`d7362e4`) parks the
+  bulk thread in `set_post_parse_hook`, signals, runs `update_file`, and joins — deterministic
+  3/3 FAIL on a detached worktree at the pre-fix sha, stable pass after. Sleep-and-hope makes the
+  overlap a scheduler accident; a bounded give-up in the hook keeps the FIXED code (which now
+  blocks on `bulk_mu_`) from deadlocking the test. Shape for any "these two paths are mutually
+  exclusive" claim: hook the slow path at its window boundary, signal from the hook, race the
+  call, join.
+  <!-- written_at: 2026-09-07T16:10:00Z  source_event: task:01M1NCSJ31A8XHPC7NKJEGS7RV, comment:01M1XCPF5M9AKWQY8TMAEJD37H, comment:01M1Y9DE31CFD1CETYMFJKRX7S, git:d7362e4 -->
 
 ### 4. Determinism is non-negotiable
 - File IDs, symbol IDs, scan order, output ordering — deterministic across runs and across machines for the same corpus.
