@@ -1503,5 +1503,165 @@ TEST(ServerReaperTest, ShutdownEndpointStopsServer) {
                            std::chrono::milliseconds(3000)));
 }
 
+// -- Shutdown gate (S4) ---------------------------------------------------------
+//
+// One gate, one stop: /shutdown's deferred trigger, the reaper's self-stop,
+// and the owner's shutdown() all converge on stop_listener_once().
+
+TEST(ServerLifecycleTest, ShutdownEndpointThenOwnerShutdownStopsOnce) {
+    // POST /shutdown, then the owner calls shutdown() immediately — the
+    // trigger thread's ~100ms delay makes the two race on purpose. httplib's
+    // stop() is not idempotent (a second call trips its
+    // assert(svr_sock_ != INVALID_SOCKET) in a debug build), so every call
+    // site must pass through stop_listener_once(). The callback count pins
+    // the gate observably in any build type.
+    for (int i = 0; i < 20; ++i) {
+        TempDir tmp;
+        tmp.write_file("a.go", "package main\nfunc Add(a, b int) int { return a + b }\n");
+        Config config;
+        config.project.root = tmp.path().string();
+        MasterIndex indexer(config);
+        SearchEngine engine(indexer);
+
+        std::atomic<int> self_stops{0};
+        IndexServer server(config, indexer, &engine);
+        server.set_socket_path(test::next_test_server_address());
+        server.set_self_stop_callback(
+            [&self_stops](const char*) { self_stops.fetch_add(1); });
+        ASSERT_TRUE(server.start()) << "iteration " << i;
+
+        auto cli = test::make_test_http_client(server.socket_path());
+        auto res = cli.Post("/shutdown", "{}", "application/json");
+        ASSERT_TRUE(res) << "iteration " << i;
+        EXPECT_EQ(res->status, 200);
+
+        // Race the deferred trigger thread: owner teardown must converge
+        // with the endpoint's self-stop without a second svr_.stop().
+        EXPECT_TRUE(server.shutdown()) << "iteration " << i;
+        EXPECT_FALSE(server.is_running());
+        EXPECT_EQ(self_stops.load(), 1)
+            << "iteration " << i
+            << ": /shutdown must fire the self-stop callback exactly once";
+    }
+}
+
+TEST(ServerLifecycleTest, ShutdownEndpointCallbackOnceAndRestartRearms) {
+    // Two concurrent /shutdown requests must coalesce into one self-stop
+    // notification, and start() must re-arm the trigger so a restarted
+    // server still honours /shutdown.
+    TempDir tmp;
+    tmp.write_file("a.go", "package main\n");
+    Config config;
+    config.project.root = tmp.path().string();
+    MasterIndex indexer(config);
+    SearchEngine engine(indexer);
+    IndexServer server(config, indexer, &engine);
+    server.set_socket_path(test::next_test_server_address());
+
+    std::atomic<int> self_stops{0};
+    server.set_self_stop_callback(
+        [&self_stops](const char*) { self_stops.fetch_add(1); });
+    ASSERT_TRUE(server.start());
+
+    std::thread a([&] {
+        auto cli = test::make_test_http_client(server.socket_path());
+        (void)cli.Post("/shutdown", "{}", "application/json");
+    });
+    std::thread b([&] {
+        auto cli = test::make_test_http_client(server.socket_path());
+        (void)cli.Post("/shutdown", "{}", "application/json");
+    });
+    a.join();
+    b.join();
+
+    EXPECT_TRUE(wait_until([&] { return !server.is_running(); },
+                           std::chrono::milliseconds(3000)));
+    EXPECT_TRUE(server.shutdown());
+    EXPECT_EQ(self_stops.load(), 1)
+        << "concurrent /shutdown requests must notify exactly once";
+
+    // Restart: the gate re-arms and a second /shutdown actually stops.
+    ASSERT_TRUE(server.start());
+    EXPECT_TRUE(server.is_running());
+    {
+        auto cli = test::make_test_http_client(server.socket_path());
+        auto res = cli.Post("/shutdown", "{}", "application/json");
+        ASSERT_TRUE(res);
+        EXPECT_EQ(res->status, 200);
+    }
+    EXPECT_TRUE(wait_until([&] { return !server.is_running(); },
+                           std::chrono::milliseconds(3000)))
+        << "a restarted server must honour /shutdown again";
+    EXPECT_TRUE(server.shutdown());
+    EXPECT_EQ(self_stops.load(), 2);
+}
+
+TEST(ServerLifecycleTest, ShutdownConvergesWhileBulkReindexParked) {
+    // /shutdown issued while a bulk reindex holds the bulk window must
+    // converge in bounded time. The shutdown gate orders
+    // cancel_indexing -> stop_watch_pipeline -> stop_listener_once: the
+    // watch pipeline's debouncer timer blocks on bulk_mu_ for the whole
+    // bulk window, so stopping the watch pipeline BEFORE cancelling the
+    // reindex parks teardown until the run finishes on its own.
+    TempDir tmp;
+    tmp.write_file("a.go", "package main\nfunc Before() {}\n");
+    Config config;
+    config.project.root = tmp.path().string();
+    config.index.watch_mode = true;
+    config.index.watch_debounce_ms = 50;
+    MasterIndex indexer(config);
+    indexer.index_directory(config.project.root);
+    SearchEngine engine(indexer);
+    IndexServer server(config, indexer, &engine);
+    server.set_socket_path(test::next_test_server_address());
+    ASSERT_TRUE(server.start());
+
+    // Park the /reindex bulk window. Bounded give-up: the FIXED gate
+    // cancels the run (request_stop), which this hook observes; the broken
+    // order waits out the whole give-up instead of cancelling.
+    std::atomic<bool> in_window{false};
+    indexer.set_post_parse_hook([&] {
+        in_window.store(true, std::memory_order_release);
+        const auto give_up =
+            std::chrono::steady_clock::now() + std::chrono::seconds{30};
+        while (!indexer.stop_requested() &&
+               std::chrono::steady_clock::now() < give_up) {
+            std::this_thread::yield();
+        }
+    });
+
+    {
+        auto cli = test::make_test_http_client(server.socket_path());
+        auto res = cli.Post("/reindex",
+                            nlohmann::json{{"path", config.project.root}}
+                                .dump(),
+                            "application/json");
+        ASSERT_TRUE(res);
+        ASSERT_EQ(res->status, 200);
+    }
+    ASSERT_TRUE(wait_until(
+        [&] { return in_window.load(std::memory_order_acquire); },
+        std::chrono::milliseconds(10000)))
+        << "reindex never reached the parked bulk window";
+
+    // A file change during the parked window sends the debouncer timer
+    // thread into a bulk_mu_ wait — the exact interlock the gate order
+    // must break by cancelling the bulk run first.
+    tmp.write_file("b.go", "package main\nfunc After() {}\n");
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+
+    {
+        auto cli = test::make_test_http_client(server.socket_path());
+        (void)cli.Post("/shutdown", "{}", "application/json");
+    }
+
+    auto done = std::async(std::launch::async,
+                           [&] { return server.shutdown(); });
+    EXPECT_EQ(done.wait_for(std::chrono::seconds(10)),
+              std::future_status::ready)
+        << "shutdown must cancel the parked bulk run, not wait it out";
+    indexer.set_post_parse_hook(nullptr);
+}
+
 }  // namespace
 }  // namespace lci
