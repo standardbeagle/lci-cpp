@@ -7,40 +7,63 @@
 
 namespace lci {
 
+namespace {
+
+/// Validated step length of the UTF-8 sequence starting at s[i]: 1 for
+/// ASCII, 2-4 for a well-formed multi-byte sequence, and 1 for any invalid
+/// unit — a continuation byte in lead position, a truncated sequence, or a
+/// bad continuation byte. Both UTF-8 walkers below step by exactly this
+/// function, so code_points[i] and byte_offsets[i] stay parallel on ANY
+/// input, and a Latin-1 byte in lead position (e.g. 0xE9 followed by
+/// ASCII) is rejected as a one-byte unit instead of swallowing the
+/// following ASCII bytes into a bogus multi-byte code point.
+int utf8_seq_step(std::string_view s, size_t i) {
+    const auto b0 = static_cast<uint8_t>(s[i]);
+    if (b0 < 0x80) return 1;
+    int len;
+    if ((b0 & 0xE0) == 0xC0) {
+        len = 2;
+    } else if ((b0 & 0xF0) == 0xE0) {
+        len = 3;
+    } else if ((b0 & 0xF8) == 0xF0) {
+        len = 4;
+    } else {
+        return 1;  // Continuation byte or 0xF8+ lead: invalid.
+    }
+    if (i + static_cast<size_t>(len) > s.size()) return 1;  // Truncated.
+    for (int j = 1; j < len; ++j) {
+        if ((static_cast<uint8_t>(s[i + static_cast<size_t>(j)]) & 0xC0) !=
+            0x80) {
+            return 1;  // Bad continuation.
+        }
+    }
+    return len;
+}
+
+}  // namespace
+
 /// Converts a UTF-8 string_view to Unicode code points, appended into a
 /// caller-owned buffer. The buffer is cleared first; passing a reused buffer
 /// (e.g. thread-local scratch) avoids a fresh per-call heap allocation.
+/// Invalid one-byte units (see utf8_seq_step) are skipped.
 void to_code_points_into(std::string_view s, std::vector<uint32_t>& result) {
     result.clear();
     result.reserve(s.size());
 
     size_t i = 0;
     while (i < s.size()) {
-        auto b0 = static_cast<uint8_t>(s[i]);
-        uint32_t cp = 0;
-        int len = 0;
-
-        if (b0 < 0x80) {
-            cp = b0;
-            len = 1;
-        } else if ((b0 & 0xE0) == 0xC0) {
-            cp = b0 & 0x1F;
-            len = 2;
-        } else if ((b0 & 0xF0) == 0xE0) {
-            cp = b0 & 0x0F;
-            len = 3;
-        } else if ((b0 & 0xF8) == 0xF0) {
-            cp = b0 & 0x07;
-            len = 4;
-        } else {
+        const auto b0 = static_cast<uint8_t>(s[i]);
+        const int len = utf8_seq_step(s, i);
+        if (len == 1) {
+            if (b0 < 0x80) result.push_back(b0);
             ++i;
             continue;
         }
 
-        if (i + static_cast<size_t>(len) > s.size()) break;
-
+        uint32_t cp = b0 & (0x7Fu >> len);  // 2->0x1F, 3->0x0F, 4->0x07
         for (int j = 1; j < len; ++j) {
-            cp = (cp << 6) | (static_cast<uint8_t>(s[i + static_cast<size_t>(j)]) & 0x3F);
+            cp = (cp << 6) |
+                 (static_cast<uint8_t>(s[i + static_cast<size_t>(j)]) & 0x3F);
         }
 
         result.push_back(cp);
@@ -49,15 +72,6 @@ void to_code_points_into(std::string_view s, std::vector<uint32_t>& result) {
 }
 
 namespace {
-
-/// Returns the byte length of a single code point encoded in UTF-8.
-int utf8_char_len(uint8_t first_byte) {
-    if (first_byte < 0x80) return 1;
-    if ((first_byte & 0xE0) == 0xC0) return 2;
-    if ((first_byte & 0xF0) == 0xE0) return 3;
-    if ((first_byte & 0xF8) == 0xF0) return 4;
-    return 1;
-}
 
 /// Returns true if a Unicode code point is alphanumeric or underscore.
 bool is_alpha_num_unicode(uint32_t cp) {
@@ -91,16 +105,24 @@ void append_code_point(std::string& out, uint32_t cp) {
 
 }  // namespace
 
-/// Computes byte offsets for each code point in a UTF-8 string, appended into
-/// a caller-owned buffer (cleared first) so a reused buffer skips a per-call
-/// heap allocation.
+/// Computes the byte offset of each code point to_code_points_into emits,
+/// appended into a caller-owned buffer (cleared first) so a reused buffer
+/// skips a per-call heap allocation. Steps by the same utf8_seq_step rule
+/// and skips the same invalid one-byte units, so the result is always the
+/// same length as to_code_points_into's.
 void compute_byte_offsets_into(std::string_view s, std::vector<size_t>& offsets) {
     offsets.clear();
     offsets.reserve(s.size());
     size_t i = 0;
     while (i < s.size()) {
+        const auto b0 = static_cast<uint8_t>(s[i]);
+        const int len = utf8_seq_step(s, i);
+        if (len == 1 && b0 >= 0x80) {
+            ++i;  // Invalid one-byte unit: skipped, as in to_code_points_into.
+            continue;
+        }
         offsets.push_back(i);
-        i += static_cast<size_t>(utf8_char_len(static_cast<uint8_t>(s[i])));
+        i += static_cast<size_t>(len);
     }
 }
 
