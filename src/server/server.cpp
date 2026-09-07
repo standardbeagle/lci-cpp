@@ -1119,6 +1119,17 @@ void IndexServer::register_handlers() {
     svr_.set_write_timeout(kSocketTimeoutSec, 0);
     svr_.set_keep_alive_max_count(kKeepAliveMaxRequests);
 
+    // Bounded worker pool: see kMaxQueuedRequests / kMinServerWorkerThreads
+    // in server.h. The /mcp handler parks its worker on the warmup latch for
+    // the whole initial index; the default pool (8 workers, unbounded queue)
+    // mutes /ping and /shutdown under >=8 concurrent bridge calls.
+    svr_.new_task_queue = [] {
+        return new httplib::ThreadPool(
+            std::max<size_t>(std::thread::hardware_concurrency(),
+                             kMinServerWorkerThreads),
+            kMaxQueuedRequests);
+    };
+
     // /ping is excluded from activity stamping so liveness probes (client
     // discovery, peer eviction scans) don't keep an otherwise-unused server
     // alive forever.

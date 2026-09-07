@@ -289,6 +289,23 @@ struct StatsResponse {
 
 // -- IndexServer --------------------------------------------------------------
 
+/// Concurrency caps for the HTTP listener's task queue.
+///
+/// The /mcp bridge parks one worker per stdio client inside the handler for
+/// the whole index warmup (WarmupLatch::wait), so the worker pool must
+/// outnumber the largest plausible set of parked bridge calls or /ping and
+/// /shutdown go mute behind them — observed: >=8 parked bridge calls during
+/// indexing silenced both on the default 8-worker pool.
+///
+/// kMaxQueuedRequests is THE concurrency cap: connections waiting for a
+/// worker beyond it are refused at enqueue (httplib closes the socket —
+/// fail fast) instead of queueing without bound.
+/// kMinServerWorkerThreads sizes the pool at twice the cap so a full cap's
+/// worth of parked long-poles still leaves workers free for liveness
+/// traffic; the actual pool is max(hardware_concurrency, this).
+inline constexpr size_t kMaxQueuedRequests = 32;
+inline constexpr size_t kMinServerWorkerThreads = 2 * kMaxQueuedRequests;
+
 /// HTTP server on a Unix domain socket providing 15 REST endpoints.
 ///
 /// Wraps a MasterIndex and optional SearchEngine, exposing index queries
