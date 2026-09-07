@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <map>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <nlohmann/json.hpp>
@@ -54,6 +55,12 @@ inline bool is_absolute_scope(const std::string& p) {
     if (p.front() == '/') return true;
     return std::filesystem::path(p).is_absolute();
 }
+
+/// Wildcard glob match: '*' matches any run of characters (including '/'),
+/// '?' matches exactly one. Allocation-free two-pointer scan with star
+/// backtracking; no std::regex (this runs per file on read paths).
+/// Defined in handlers_find_files.cpp; also used by explore's `file` filter.
+bool wildcard_match(std::string_view str, std::string_view pat);
 
 /// get_context param canonicalization, shared with tool registration.
 bool normalize_context_params(nlohmann::json& params);

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <lci/core/callers_report.h>
@@ -11,6 +12,7 @@
 #include <lci/indexing/master_index.h>
 #include <lci/language_map.h>
 #include <lci/mcp/handlers_core.h>  // similar_symbol_suggestions
+#include <lci/mcp/handlers_core_shared.h>  // wildcard_match
 #include <lci/mcp/validation.h>
 #include <lci/search/search_engine.h>  // relative_to_root
 #include <lci/symbol.h>
@@ -21,13 +23,6 @@ namespace mcp {
 // -- Helpers ------------------------------------------------------------------
 
 namespace {
-
-/// Converts a string to lowercase.
-std::string to_lower(std::string s) {
-    std::transform(s.begin(), s.end(), s.begin(),
-                   [](unsigned char c) { return std::tolower(c); });
-    return s;
-}
 
 /// Splits a comma-separated string into trimmed tokens.
 std::vector<std::string> parse_list(const std::string& s) {
@@ -52,13 +47,6 @@ bool list_contains(const std::string& list, const std::string& item) {
         if (tok == item) return true;
     }
     return false;
-}
-
-/// Clamps an integer to a range.
-int clamp_int(int value, int lo, int hi) {
-    if (value < lo) return lo;
-    if (value > hi) return hi;
-    return value;
 }
 
 /// Classifies programming language from file extension via the central
@@ -179,14 +167,23 @@ std::vector<std::string> decode_variable_flags(uint8_t flags) {
     return result;
 }
 
-/// Simple glob match: checks if pattern matches path or basename.
-bool path_matches_glob(const std::string& path, const std::string& pattern) {
+/// `file` filter match: a pattern carrying a wildcard is delegated to the
+/// shared wildcard_match (the same matcher find_files ships), so
+/// `file="src/*.ts"` selects every matching file instead of silently
+/// selecting none. A plain name keeps the historical equality / basename /
+/// path-suffix resolution that browse_file's ambiguity handling relies on.
+/// string_view throughout: this runs per file on the list_symbols read path.
+bool path_matches_glob(std::string_view path, std::string_view pattern) {
     if (pattern.empty()) return true;
+    if (pattern.find_first_of("*?") != std::string_view::npos) {
+        return wildcard_match(path, pattern);
+    }
     // Exact match
     if (path == pattern) return true;
     // Basename match
     auto slash = path.rfind('/');
-    auto basename = (slash == std::string::npos) ? path : path.substr(slash + 1);
+    auto basename =
+        (slash == std::string_view::npos) ? path : path.substr(slash + 1);
     if (basename == pattern) return true;
     // Suffix match (e.g., "server.go" matches "internal/mcp/server.go")
     if (path.size() > pattern.size() &&
@@ -786,8 +783,8 @@ ToolResult handle_inspect_symbol(const nlohmann::json& params,
                 auto fp = indexer.get_file_path(sym->symbol.file_id);
                 if (!path_matches_glob(fp, file_filter) &&
                     !path_matches_glob(
-                        std::string(relative_to_root(
-                            fp, indexer.config().project.root)),
+                        relative_to_root(fp,
+                                         indexer.config().project.root),
                         file_filter)) {
                     continue;
                 }
@@ -906,9 +903,8 @@ ToolResult handle_browse_file(const nlohmann::json& params,
             if (fp.empty()) continue;
             // Search results emit root-relative paths — accept both forms.
             if (path_matches_glob(fp, file_pattern) ||
-                path_matches_glob(
-                    std::string(relative_to_root(fp, proj_root)),
-                    file_pattern)) {
+                path_matches_glob(relative_to_root(fp, proj_root),
+                                  file_pattern)) {
                 candidates.emplace_back(
                     std::string(relative_to_root(fp, proj_root)), fid);
             }

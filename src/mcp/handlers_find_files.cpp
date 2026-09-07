@@ -34,11 +34,6 @@ namespace lci {
 namespace mcp {
 
 
-namespace {
-
-/// Wildcard glob: '*' matches any run of chars (including '/'), '?' matches one.
-/// Allocation-free two-pointer scan with star-backtracking; no std::regex (this
-/// runs per-file on the find_files read path).
 bool wildcard_match(std::string_view str, std::string_view pat) {
     size_t s = 0, p = 0, star = std::string_view::npos, s_after_star = 0;
     while (s < str.size()) {
@@ -59,8 +54,6 @@ bool wildcard_match(std::string_view str, std::string_view pat) {
     return p == pat.size();
 }
 
-
-}  // namespace
 
 // -- handle_find_files --------------------------------------------------------
 
