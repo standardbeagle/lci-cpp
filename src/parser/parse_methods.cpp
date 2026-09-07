@@ -1,4 +1,5 @@
 #include <lci/parser/parser.h>
+#include "unified_extractor_internal.h"
 #include <lci/parser/unified_extractor.h>
 
 #include <tree_sitter/api.h>
@@ -556,8 +557,10 @@ void UnifiedExtractor::extract_kotlin_object(TSNode node) {
     TSPoint start = ts_node_start_point(node);
     TSPoint end = ts_node_end_point(node);
 
-    TSNode name_node = ts_node_child_by_field_name(
-        node, "name", static_cast<uint32_t>(std::strlen("name")));
+    // tree-sitter-kotlin is fieldless: no `name` field exists — the object
+    // name is the type_identifier child (same recovery class_declaration
+    // uses for its scope name).
+    TSNode name_node = first_named_child_typed(node, "type_identifier");
     if (ts_node_is_null(name_node)) return;
     std::string_view name = node_text(name_node);
     if (name.empty()) return;
