@@ -393,6 +393,7 @@ bool IndexServer::start() {
         return false;  // already running
     }
     listener_stop_issued_.store(false, std::memory_order_release);
+    self_stop_notified_.store(false, std::memory_order_release);
 
     {
         std::lock_guard lock(shutdown_mu_);
@@ -673,6 +674,15 @@ void IndexServer::stop_listener_once() {
 bool IndexServer::shutdown_locked() {
     running_.store(false, std::memory_order_release);
 
+    // Shutdown gate order: cancel_indexing -> stop_watch_pipeline ->
+    // stop_listener_once. A bulk reindex holds MasterIndex::bulk_mu_ for
+    // its whole run and the watch pipeline's debounce timer blocks on it,
+    // so stopping the pipeline before cancelling the run parks teardown
+    // until the bulk window closes on its own; cancelling first lets the
+    // timer thread (and the indexing thread) drain immediately.
+    cancel_indexing_thread();
+    stop_watch_pipeline(this);
+
     stop_listener_once();
 
     if (listen_thread_.joinable()) {
@@ -691,17 +701,6 @@ bool IndexServer::shutdown_locked() {
         shutdown_cv_.notify_all();
         reaper_thread_.join();
     }
-
-    // Stop the watch path before cancelling indexing: its debounce timer
-    // and efsw worker call into indexer_, and a rebuild must never land
-    // between the cancellation request and the join below.
-    stop_watch_pipeline(this);
-
-    // Cooperatively cancel any in-flight indexing and join its thread
-    // before continuing teardown. Without this, a long-running indexing
-    // run could outlive the server (use-after-free on indexer_,
-    // owned_indexer_, mu_, etc.).
-    cancel_indexing_thread();
 
 #ifndef _WIN32
     // Remove the socket file (Unix domain socket only) — but only if the
@@ -992,6 +991,14 @@ std::vector<ServerInstance> list_server_instances(
 }
 
 void IndexServer::request_self_stop(const char* reason) {
+    // Exactly once per listen: the reaper, the /shutdown trigger, and a
+    // racing owner teardown may all arrive here; the callback commonly
+    // exits the process, so a second delivery is a defect, not redundancy.
+    bool expected = false;
+    if (!self_stop_notified_.compare_exchange_strong(
+            expected, true, std::memory_order_acq_rel)) {
+        return;
+    }
     std::fprintf(stderr, "Index server exiting: %s\n", reason);
     running_.store(false, std::memory_order_release);
     // Stop accepting immediately: an owner that never polls is_running()

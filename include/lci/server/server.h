@@ -486,6 +486,13 @@ class IndexServer {
     // start(); invoked from request_self_stop with the stop reason.
     std::function<void(const char*)> self_stop_cb_;
 
+    // request_self_stop is reachable from three threads (reaper policies,
+    // the /shutdown trigger, owner teardown paths), and the callback it
+    // fires typically exits the process — firing it twice would double-
+    // report and double-exit. CAS gate: first caller wins, the rest are
+    // redundant by construction. start() re-arms it for the next listen.
+    std::atomic<bool> self_stop_notified_{false};
+
     void reaper_loop(bool root_existed_at_start);
     void touch_activity();
     void publish_registry_entry();

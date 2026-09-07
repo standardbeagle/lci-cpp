@@ -254,21 +254,15 @@ void IndexServer::handle_shutdown(const httplib::Request& req,
     if (shutdown_triggered_.compare_exchange_strong(expected, true)) {
         shutdown_trigger_ = std::thread([this, force] {
             std::this_thread::sleep_for(std::chrono::milliseconds{100});
-            // Clear running_ too: the CLI serve loop exits on
-            // !is_running(), and before this /shutdown only flipped
-            // shutdown_requested_ (observed by wait(), which the CLI
-            // does not call) — a remote /shutdown left the process
-            // serving forever. Peer eviction depends on this working.
-            running_.store(false, std::memory_order_release);
-            // Stop accepting now, whether or not any owner polls
-            // is_running() — an embedded server with no watching owner
-            // must not keep serving after promising to shut down.
-            svr_.stop();
-            {
-                std::lock_guard lock(shutdown_mu_);
-                shutdown_requested_ = true;
-            }
-            shutdown_cv_.notify_all();
+            // The single self-stop gate: clears running_ (the CLI serve
+            // loop exits on !is_running()), stops the listener through
+            // stop_listener_once(), raises shutdown_requested_, and fires
+            // self_stop_cb_ so an owner that cannot poll (the MCP-host
+            // stdio loop blocked in getline) exits instead of keeping the
+            // full index resident as a zombie. A bare svr_.stop() here
+            // raced owner teardown into httplib's debug assert and left
+            // the callback unfired.
+            request_self_stop("remote shutdown requested");
             if (force) {
                 // force means "guarantee this process dies": arm a watchdog
                 // that exits hard after a grace window. A healthy server
