@@ -1,6 +1,6 @@
 # Recorded provider streams
 
-Real `opencode run --format json` stdout, captured so the hermetic tests are
+Real `opencode run --format json` stdout (opencode 1.18.26), captured so the hermetic tests are
 shaped by the provider's actual event stream rather than by hand-written data
 authored from the same mental model as the parser.
 
@@ -8,10 +8,11 @@ authored from the same mental model as the parser.
 |---|---|---|---|
 | `opencode-go-deepseek-v4-flash.file-lines.shape_17.jsonl` | 2026-09-06 | `opencode-go/deepseek-v4-flash` | `file-lines` / `shape_17` |
 | `opencode-go-deepseek-v4-flash.file-lines.shape_42.jsonl` | 2026-09-06 | `opencode-go/deepseek-v4-flash` | `file-lines` / `shape_42` |
+| `opencode-go-glm-5.2.file-lines.shape_42.jsonl` | 2026-09-06 | `opencode-go/glm-5.2` | `file-lines` / `shape_42` |
 
 Capture conditions: the tool-denied, corpus-free git workspace built by
 `opencode_runner.empty_git_workspace`, prompt from `response_shape_ab.PROMPT`
-at the committed manifest/task digests. Both cells returned `answered`.
+at the committed manifest/task digests. All cells returned `answered`. The glm-5.2 cell answered `30 seconds` (terser than the bank's expected `timeout is 30 seconds`) and is the review-attempt-1 falsifier of one-directional answer containment.
 
 These streams carry shapes no fixture author reliably invents: hyphenated part
 types (`step-start`, `step-finish`), a `tokens` block nesting a `cache`
