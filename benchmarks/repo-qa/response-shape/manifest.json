@@ -1,7 +1,7 @@
 {
   "schema": "lci.response-shape.manifest.v1",
-  "analysis_revision": "paired-task-v1",
-  "grading_schema": "atomic-evidence-v2-containment",
+  "analysis_revision": "paired-task-v2",
+  "grading_schema": "atomic-value-v3",
   "models": [
     {"id": "opencode-go/deepseek-v4-flash", "tier": "weak"},
     {"id": "opencode-go/glm-5.2", "tier": "strong"}
