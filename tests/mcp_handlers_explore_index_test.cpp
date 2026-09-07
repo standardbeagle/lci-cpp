@@ -266,6 +266,64 @@ TEST_F(ExploreIndexTestFixture, ListSymbolsMaxClamped) {
     EXPECT_LE(j["showing"].get<int>(), 500);
 }
 
+// Pins the exact filter semantics of list_symbols so the hoisted-filter
+// refactor (params read once, allocation-free compares) cannot drift the
+// result set: each case asserts the full name multiset, not a count.
+TEST_F(ExploreIndexTestFixture, ListSymbolsFilterSemanticsPinned) {
+    auto names_of = [&](const nlohmann::json& params) {
+        auto result = handle_list_symbols(params, *indexer_);
+        EXPECT_FALSE(result.is_error) << result.text;
+        auto j = nlohmann::json::parse(result.text);
+        std::vector<std::string> names;
+        for (const auto& s : j["symbols"]) {
+            names.push_back(s["name"].get<std::string>());
+        }
+        std::sort(names.begin(), names.end());
+        return names;
+    };
+
+    // Case-insensitive substring on name.
+    EXPECT_EQ(names_of({{"kind", "all"}, {"name", "handle"}, {"max", 500}}),
+              (std::vector<std::string>{"HandleRequest"}));
+    EXPECT_EQ(names_of({{"kind", "all"}, {"name", "PATH"}, {"max", 500}}),
+              (std::vector<std::string>{"processPath"}));
+
+    // Receiver filter: case-insensitive equality on the receiver type.
+    EXPECT_EQ(
+        names_of({{"kind", "all"}, {"receiver", "server"}, {"max", 500}}),
+        (std::vector<std::string>{"Start"}));
+    EXPECT_EQ(
+        names_of({{"kind", "all"}, {"receiver", "nosuch"}, {"max", 500}}),
+        (std::vector<std::string>{}));
+
+    // Exported visibility filter, both directions.
+    EXPECT_EQ(names_of({{"kind", "var"}, {"exported", true}, {"max", 500}}),
+              (std::vector<std::string>{"MaxConnections"}));
+    auto unexported_funcs =
+        names_of({{"kind", "func"}, {"exported", false}, {"max", 500}});
+    EXPECT_EQ(unexported_funcs,
+              (std::vector<std::string>{"helperFunc", "processPath"}));
+
+    // Parameter-count filter.
+    EXPECT_EQ(names_of({{"kind", "func"}, {"min_params", 2}, {"max", 500}}),
+              (std::vector<std::string>{"HandleRequest"}));
+
+    // Flag filter: no symbol in this fixture carries the method flag
+    // (the Go extractor records receivers via receiver_type, not
+    // function_flags) — pin the observed empty result so the refactor
+    // cannot silently change flag semantics either.
+    EXPECT_EQ(
+        names_of({{"kind", "func"}, {"flags", "method"}, {"max", 500}}),
+        (std::vector<std::string>{}));
+
+    // Combined filters intersect.
+    EXPECT_EQ(names_of({{"kind", "func"},
+                        {"name", "o"},
+                        {"exported", false},
+                        {"max", 500}}),
+              (std::vector<std::string>{"processPath"}));
+}
+
 // =============================================================================
 // inspect_symbol tests
 // =============================================================================
