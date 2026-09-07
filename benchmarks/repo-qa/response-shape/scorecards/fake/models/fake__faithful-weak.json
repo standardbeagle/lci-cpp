@@ -1,0 +1,41 @@
+{
+  "complete": true,
+  "model": "fake/faithful-weak",
+  "schema": "lci.response-shape.model-scorecard.v1",
+  "shapes": {
+    "shape_17": {
+      "cache_read_tokens": 0.0,
+      "cache_write_tokens": 0.0,
+      "completion": 1.0,
+      "correctness": 1.0,
+      "evidence_use": 1.0,
+      "failures": 0,
+      "hallucination": 0.0,
+      "input_tokens": 2157.0,
+      "latency_seconds": 0.0,
+      "omissions": 0.0,
+      "omissions_excluded_missing_field": 0,
+      "output_tokens": 49.0,
+      "planned": 12,
+      "reasoning_tokens": 101.0,
+      "usable": 12
+    },
+    "shape_42": {
+      "cache_read_tokens": 0.0,
+      "cache_write_tokens": 0.0,
+      "completion": 1.0,
+      "correctness": 1.0,
+      "evidence_use": 1.0,
+      "failures": 0,
+      "hallucination": 0.0,
+      "input_tokens": 2157.0,
+      "latency_seconds": 0.0,
+      "omissions": 0.0,
+      "omissions_excluded_missing_field": 0,
+      "output_tokens": 49.0,
+      "planned": 12,
+      "reasoning_tokens": 101.0,
+      "usable": 12
+    }
+  }
+}

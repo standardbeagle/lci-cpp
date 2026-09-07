@@ -270,21 +270,32 @@ def execute(provider, manifest, task, arm, model, repetition, out):
     else: rec["completion"]=False
     write_atomic(path,rec); return rec
 
-def planned_grid(manifest,tasks):
+def grid_models(manifest, models=None):
+    """The model roster this grid runs, defaulting to the frozen manifest's own.
+
+    A caller-supplied roster (R2's models.json) does NOT enter the manifest, and
+    so does not enter `manifest_digest`: a cell for a model already in the frozen
+    manifest keeps the byte-identical cell key it had under R1, and an R1 record
+    stays reusable. Only `model` -- already an identity field -- distinguishes
+    the added cells.
+    """
+    return list(models) if models else [m["id"] for m in manifest["models"]]
+
+def planned_grid(manifest,tasks,models=None):
     jobs=[]
     for task in tasks:
-        for model in [m["id"] for m in manifest["models"]]:
+        for model in grid_models(manifest,models):
             for rep in range(1,manifest["repetitions"]+1):
                 jobs.extend((task,arm,model,rep) for arm in arm_order(task["id"],model,rep,manifest["arm_mapping"]))
     return jobs
 
-def run_grid(provider, manifest, tasks, out):
-    return [execute(provider,manifest,task,arm,model,rep,out) for task,arm,model,rep in planned_grid(manifest,tasks)]
+def run_grid(provider, manifest, tasks, out, models=None):
+    return [execute(provider,manifest,task,arm,model,rep,out) for task,arm,model,rep in planned_grid(manifest,tasks,models)]
 
-def plan_run_report(provider, manifest, tasks, out):
+def plan_run_report(provider, manifest, tasks, out, models=None, classes=None):
     """Plan, run and report in one call — the single entry point `--report` uses."""
-    out=Path(out); records=run_grid(provider,manifest,tasks,out/"cells")
-    report=analysis.analyze(manifest,tasks,records)
+    out=Path(out); records=run_grid(provider,manifest,tasks,out/"cells",models)
+    report=analysis.analyze(manifest,tasks,records,models=models,classes=classes)
     replay_common.write_atomic(out/"analysis.json", json.dumps(report,indent=2,sort_keys=True)+"\n")
     replay_common.write_atomic(out/"report.md", analysis.markdown(report))
     return {"cells":len(records),"out":str(out),"report":report}

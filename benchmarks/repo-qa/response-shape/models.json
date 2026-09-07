@@ -1,0 +1,18 @@
+{
+  "schema": "lci.response-shape.models.v1",
+  "classes": ["weak", "strong"],
+  "models": [
+    {
+      "id": "opencode-go/deepseek-v4-flash",
+      "tier": "weak",
+      "cost": "free",
+      "id_probe": "opencode models | grep opencode-go/deepseek-v4-flash (opencode 1.18.26, 2026-09-07): present"
+    },
+    {
+      "id": "opencode-go/glm-5.2",
+      "tier": "strong",
+      "cost": "free",
+      "id_probe": "opencode models | grep opencode-go/glm-5.2 (opencode 1.18.26, 2026-09-07): present"
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "schema": "lci.response-shape.models.v1",
+  "classes": ["weak", "strong"],
+  "models": [
+    {
+      "id": "fake/faithful-weak",
+      "tier": "weak",
+      "cost": "free",
+      "recording": "opencode-go-deepseek-v4-flash.file-lines.shape_17.jsonl",
+      "behaviour": "faithful",
+      "id_probe": "hermetic fake; stream envelope is the named committed recording, captured 2026-09-06 from opencode 1.18.26"
+    },
+    {
+      "id": "fake/terse-weak",
+      "tier": "weak",
+      "cost": "free",
+      "recording": "opencode-go-deepseek-v4-flash.file-lines.shape_42.jsonl",
+      "behaviour": "terse",
+      "id_probe": "hermetic fake; stream envelope is the named committed recording, captured 2026-09-06 from opencode 1.18.26"
+    },
+    {
+      "id": "fake/wrapped-strong",
+      "tier": "strong",
+      "cost": "free",
+      "recording": "opencode-go-glm-5.2.file-lines.shape_42.jsonl",
+      "behaviour": "wrapped",
+      "id_probe": "hermetic fake; stream envelope is the named committed recording, captured 2026-09-06 from opencode 1.18.26"
+    }
+  ]
+}

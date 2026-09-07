@@ -21,8 +21,13 @@ def metrics(items):
         "omissions":mean(with_omissions,lambda x:x["score"]["omission_count"]),
         "omissions_excluded_missing_field":len(usable)-len(with_omissions),
         "latency_seconds":mean(usable,lambda x:float(x.get("wall_seconds",0))),
-        "input_tokens":mean(usable,lambda x:float(token(x).get("input",0))),
-        "output_tokens":mean(usable,lambda x:float(token(x).get("output",0)))}
+        # Every token stream is its own flat key. Cache reads/writes are neither
+        # produced nor billed like input/output tokens, so folding them in would
+        # publish a number with no unit; they are reported beside, never inside.
+        **{f"{key}_tokens":mean(usable,lambda x,k=key:float(token(x).get(k,0)))
+           for key in TOKEN_STREAMS}}
+
+TOKEN_STREAMS = ("input","output","reasoning","cache_read","cache_write")
 
 SUPPORTED_ANALYSIS_REVISIONS = {"paired-task-v2"}
 ARM_ROLE_BASELINE = "compact"
@@ -36,6 +41,33 @@ def arm_roles(manifest):
     """Which opaque arm is the baseline (A) and which the treatment (B)."""
     roles={role:arm for arm,role in manifest["arm_mapping"].items()}
     return roles[ARM_ROLE_BASELINE], roles[ARM_ROLE_TREATMENT]
+
+def check_record_schemas(manifest, records):
+    """Refuse a ledger that mixes grading rules instead of pooling it.
+
+    Rule 16: changing the grading rule invalidates paid records by construction.
+    A record graded under an older `grading_schema` (or analysed under an older
+    `analysis_revision`) is not a slightly-stale row -- it answers a different
+    question -- so a mixed ledger fails loud and is re-run, never rescored in
+    place or averaged with current rows.
+    """
+    for field in ("grading_schema","analysis_revision"):
+        want=manifest.get(field)
+        seen={rec.get(field) for rec in records}
+        if seen-{want}:
+            raise ValueError(f"mixed {field} in ledger: expected {want!r}, found {sorted(x for x in seen if x!=want)!r}")
+
+def verify_rollup_coverage(report):
+    """A class rollup may summarise models; it may never hide one.
+
+    The whole point of a rollup is to be read INSTEAD of the rows, so a member
+    silently missing from one turns a bad model into a better class average.
+    Every roster model must appear in the per-model table and under its class.
+    """
+    listed=set(report["models"])
+    covered={m for rollup in report["class_rollups"].values() for m in rollup["members"]}
+    if covered!=listed:
+        raise ValueError(f"class rollup hides models: {sorted(listed-covered) or sorted(covered-listed)}")
 
 def usable(rec): return bool(rec) and rec.get("status")=="answered" and isinstance(rec.get("score"),dict)
 
@@ -104,11 +136,13 @@ def paired_analysis(by_key, manifest, tasks, classes):
             "by_model":{model:paired_group(by_key,manifest,tasks,[model]) for model in sorted(classes)},
             "by_tier":{tier:paired_group(by_key,manifest,tasks,sorted(models)) for tier,models in sorted(tiers.items())}}
 
-def analyze(manifest,tasks,records):
+def analyze(manifest,tasks,records,models=None,classes=None):
     revision=manifest.get("analysis_revision")
     if revision not in SUPPORTED_ANALYSIS_REVISIONS:
         raise ValueError(f"unsupported analysis_revision {revision!r}; this analyzer implements {sorted(SUPPORTED_ANALYSIS_REVISIONS)}")
-    expected={(t["id"],a,m["id"],r) for t in tasks for a in manifest["arm_mapping"] for m in manifest["models"] for r in range(1,manifest["repetitions"]+1)}
+    check_record_schemas(manifest,records)
+    roster=list(models) if models else [m["id"] for m in manifest["models"]]
+    expected={(t["id"],a,m,r) for t in tasks for a in manifest["arm_mapping"] for m in roster for r in range(1,manifest["repetitions"]+1)}
     by_key={}
     for rec in records:
         key=(rec["task"],rec["arm"],rec["model"],rec["repetition"])
@@ -116,7 +150,8 @@ def analyze(manifest,tasks,records):
         if key not in expected: raise ValueError(f"unexpected cell: {key}")
         by_key[key]=rec
     missing=sorted(expected-set(by_key)); groups=defaultdict(list)
-    classes={m["id"]:m.get("tier","unclassified") for m in manifest["models"]}
+    declared={m["id"]:m.get("tier","unclassified") for m in manifest["models"]}
+    classes={model:(classes or declared).get(model,"unclassified") for model in roster}
     for (_,arm,model,_),rec in by_key.items(): groups[(model,arm)].append(rec)
     cells={f"{model}|{arm}":metrics(items) for (model,arm),items in sorted(groups.items())}
     models={model:{arm:cells.get(f"{model}|{arm}",metrics([])) for arm in manifest["arm_mapping"]} for model in classes}
@@ -125,21 +160,40 @@ def analyze(manifest,tasks,records):
     failures=defaultdict(int)
     for rec in records:
         if rec.get("status")!="answered": failures[rec.get("status","unknown")]+=1
-    return {"schema":"lci.response-shape.scorecard.v1","complete":not missing,"missing":missing,"cells":cells,"models":models,
+    graded=sum(1 for rec in by_key.values() if usable(rec))
+    accounting={"planned":len(expected),"recorded":len(by_key),"graded":graded,
+                "failed":len(by_key)-graded,"missing":len(missing)}
+    # Fail loud rather than publish a scorecard whose columns cannot be traced
+    # back to the planned grid: a silently dropped cell reads as a model result.
+    accounting["reconciled"]=(accounting["recorded"]+accounting["missing"]==accounting["planned"]
+                              and accounting["graded"]+accounting["failed"]==accounting["recorded"])
+    if not accounting["reconciled"]:
+        raise ValueError(f"cell accounting does not reconcile: {accounting}")
+    report={"schema":"lci.response-shape.scorecard.v1","complete":not missing,"missing":missing,"cells":cells,"models":models,"accounting":accounting,
         "analysis_revision":revision,"practical_rule":manifest["practical_rule"],
         "paired":paired_analysis(by_key,manifest,tasks,classes),
-        "class_rollups":{f"{c}|{a}":metrics(v) for (c,a),v in sorted(class_groups.items())},
+        "class_rollups":{f"{c}|{a}":{**metrics(v),"members":sorted({r["model"] for r in v})}
+                         for (c,a),v in sorted(class_groups.items())},
         "failures":dict(sorted(failures.items())),"interpretation_valid":not missing and not failures}
+    verify_rollup_coverage(report)
+    return report
 
 def markdown(report):
     pct=lambda x:"—" if x is None else f"{100*x:.1f}%"
     num=lambda x:"—" if x is None else f"{x:.2f}"
     lines=["# Response-format comprehension scorecard","",f"Complete: **{'yes' if report['complete'] else 'no'}**  ",f"Interpretation valid: **{'yes' if report['interpretation_valid'] else 'no'}**","",
-        "| Model | Shape | Cells | Correct | Evidence | Hallucination | Omissions | Completion | Latency (s) | Tokens in/out |","|---|---|---:|---:|---:|---:|---:|---:|---:|---:|"]
+        "| Model | Shape | Cells | Correct | Evidence | Hallucination | Omissions | Completion | Latency (s) | Tokens in/out/reasoning | Tokens cache read/write |","|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|"]
     for model,arms in report["models"].items():
-        for arm,m in arms.items(): lines.append(f"| {model} | {arm} | {m['usable']}/{m['planned']} | {pct(m['correctness'])} | {pct(m['evidence_use'])} | {pct(m['hallucination'])} | {num(m['omissions'])} | {pct(m['completion'])} | {num(m['latency_seconds'])} | {num(m['input_tokens'])}/{num(m['output_tokens'])} |")
-    lines += ["","## Model-class rollups",""]
-    for key,m in report["class_rollups"].items(): lines.append(f"- `{key}`: correctness {pct(m['correctness'])}, evidence {pct(m['evidence_use'])}, completion {pct(m['completion'])}")
+        for arm,m in arms.items(): lines.append(f"| {model} | {arm} | {m['usable']}/{m['planned']} | {pct(m['correctness'])} | {pct(m['evidence_use'])} | {pct(m['hallucination'])} | {num(m['omissions'])} | {pct(m['completion'])} | {num(m['latency_seconds'])} | {num(m['input_tokens'])}/{num(m['output_tokens'])}/{num(m['reasoning_tokens'])} | {num(m['cache_read_tokens'])}/{num(m['cache_write_tokens'])} |")
+    acct=report.get("accounting")
+    if acct:
+        lines += ["","## Cell accounting","",
+            f"planned {acct['planned']} = recorded {acct['recorded']} + missing {acct['missing']}; "
+            f"recorded = graded {acct['graded']} + failed {acct['failed']}. "
+            f"Reconciled: **{'yes' if acct['reconciled'] else 'no'}**"]
+    lines += ["","## Model-class rollups","",
+        "Rollups summarise the rows above and never replace them; each names its members."]
+    for key,m in report["class_rollups"].items(): lines.append(f"- `{key}` ({', '.join('`'+x+'`' for x in m['members'])}): correctness {pct(m['correctness'])}, evidence {pct(m['evidence_use'])}, completion {pct(m['completion'])}")
     paired=report.get("paired")
     if paired:
         lines += ["",f"## Paired effects (Arm B `{paired['arm_b']}` minus Arm A `{paired['arm_a']}`)","",
@@ -160,6 +214,21 @@ def markdown(report):
         lines += ["",f"> {paired['caveat']}"]
     if report["failures"]: lines += ["","## Failures","",*(f"- `{k}`: {v}" for k,v in report["failures"].items())]
     return "\n".join(lines)+"\n"
+
+def write_scorecards(directory,report):
+    """Write the JSON + Markdown scorecards, refusing an untrustworthy report.
+
+    An incomplete or unreconciled grid has holes that read as model results, so
+    it does not get published; re-run the missing cells instead.
+    """
+    if not report["complete"] or not report["accounting"]["reconciled"]:
+        raise ValueError(f"refusing to write a scorecard for an incomplete grid: "
+                         f"{report['accounting']}, missing {report['missing'][:5]}")
+    directory=Path(directory); directory.mkdir(parents=True,exist_ok=True)
+    (directory/"analysis.json").write_text(json.dumps(report,indent=2,sort_keys=True)+"\n")
+    (directory/"report.md").write_text(markdown(report))
+    write_model_scorecards(directory/"models",report)
+    return directory
 
 def write_model_scorecards(directory,report):
     directory.mkdir(parents=True,exist_ok=True)

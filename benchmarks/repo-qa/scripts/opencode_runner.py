@@ -43,7 +43,10 @@ def classify_failure(message: str) -> str | None:
 def parse_events(lines: list[str]) -> tuple[str, dict]:
     texts: dict[str, list[str]] = {}
     order: list[str] = []
-    usage = {"input": 0, "output": 0, "reasoning": 0}
+    # Cache reads/writes are counted on their OWN keys and never folded into
+    # input/output: a cache_read token is not billed or produced like an input
+    # token, so summing them would publish a token figure that means nothing.
+    usage = {"input": 0, "output": 0, "reasoning": 0, "cache_read": 0, "cache_write": 0}
     provider_error = None
     malformed_event = False
     for line in lines:
@@ -75,8 +78,11 @@ def parse_events(lines: list[str]) -> tuple[str, dict]:
             tokens = part.get("tokens") or {}
             if not isinstance(tokens, dict):
                 tokens = {}
+            cache = tokens.get("cache") if isinstance(tokens.get("cache"), dict) else {}
+            flat = {**tokens, "cache_read": cache.get("read", 0),
+                    "cache_write": cache.get("write", 0)}
             for key in usage:
-                value = tokens.get(key, 0) or 0
+                value = flat.get(key, 0) or 0
                 if not isinstance(value, (int, float)) or isinstance(value, bool):
                     malformed_event = True
                     continue
