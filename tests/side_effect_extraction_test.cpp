@@ -2656,4 +2656,19 @@ TEST_F(SideEffectExtraction, PhpFileBuiltinsAreIo) {
     EXPECT_NE(info->categories & side_effect::kIO, 0u);
 }
 
+// Pointer-return C++ function: the side-effect context key must be the
+// symbol name ("compute"), not the unpeeled declarator text
+// ("compute(int x)") — symbol and side-effect paths must share one
+// declarator peel so the two keys can never diverge.
+TEST_F(SideEffectExtraction, CppPointerReturnFunctionKeyMatchesSymbolName) {
+    const auto* info = analyze(Language::Cpp, ".cpp",
+                               "void* compute(int x) {\n"
+                               "    if (x < 0) throw -1;\n"
+                               "    return nullptr;\n"
+                               "}\n",
+                               "compute");
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(info->function_name, "compute");
+}
+
 }  // namespace lci
