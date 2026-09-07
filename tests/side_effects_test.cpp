@@ -12,6 +12,7 @@
 #include <lci/config.h>
 #include <lci/context_manifest.h>
 #include <lci/graph_types.h>
+#include <lci/idcodec.h>
 #include <lci/indexing/master_index.h>
 #include <lci/mcp/handlers_side_effects.h>
 #include <lci/side_effects.h>
@@ -541,6 +542,92 @@ TEST(SideEffectsHandlerTest, ImpureModeDeterministicAcrossProcesses) {
     EXPECT_EQ(results[1]["line"].get<int>(), 14);
     EXPECT_EQ(results[2]["file_path"].get<std::string>(), "file0.go");
     EXPECT_EQ(results[2]["line"].get<int>(), 18);
+}
+
+// ---------------------------------------------------------------------------
+// handle_side_effects symbol mode: file_path disambiguation + symbol_id
+// ---------------------------------------------------------------------------
+
+// Two files each defining `dup` with distinct side-effect records; symbol
+// mode must honor file_path and symbol_id instead of taking the first
+// find_symbols_by_name hit.
+class SideEffectsSymbolModeTest : public ::testing::Test {
+  protected:
+    void SetUp() override {
+        dir_ = lci::test::unique_temp_dir("lci_se_symbol_test_");
+        std::filesystem::remove_all(dir_);
+        std::filesystem::create_directories(dir_);
+        // `dup` sits on line 3 in both files.
+        const char* src = "package a\n\nfunc dup() int { return 1 }\n";
+        {
+            std::ofstream fa(dir_ / "a.go");
+            fa << src;
+        }
+        {
+            std::ofstream fb(dir_ / "b.go");
+            fb << src;
+        }
+
+        Config config;
+        config.project.root = dir_.string();
+        indexer_ = std::make_unique<MasterIndex>(config);
+        ASSERT_TRUE(indexer_->index_directory(dir_.string()));
+
+        analyzer_ = std::make_unique<SideEffectAnalyzer>("go");
+        for (const char* f : {"a.go", "b.go"}) {
+            auto abs = (dir_ / f).string();
+            analyzer_->begin_function("dup", abs, 3, 3);
+            // Distinct markers: a.go writes a global (impure), b.go is pure.
+            if (f[0] == 'a') {
+                analyzer_->record_access("g", {}, AccessType::Write, 3, 1);
+            }
+            analyzer_->end_function();
+        }
+
+        // Locate the SymbolID of the b.go definition.
+        auto rt_snap = indexer_->ref_tracker().pin();
+        auto syms = rt_snap->find_symbols_by_name("dup");
+        ASSERT_EQ(syms.size(), 2u);
+        for (const auto& s : syms) {
+            auto path = indexer_->get_file_path(s->symbol.file_id);
+            if (path.size() >= 4 &&
+                path.compare(path.size() - 4, 4, "b.go") == 0) {
+                b_symbol_id_ = encode_symbol_id(s->id);
+            }
+        }
+        ASSERT_FALSE(b_symbol_id_.empty());
+    }
+
+    void TearDown() override {
+        indexer_.reset();
+        std::filesystem::remove_all(dir_);
+    }
+
+    std::filesystem::path dir_;
+    std::unique_ptr<MasterIndex> indexer_;
+    std::unique_ptr<SideEffectAnalyzer> analyzer_;
+    std::string b_symbol_id_;
+};
+
+TEST_F(SideEffectsSymbolModeTest, FilePathDisambiguates) {
+    nlohmann::json params = {{"mode", "symbol"},
+                             {"symbol_name", "dup"},
+                             {"file_path", "b.go"}};
+    auto result = mcp::handle_side_effects(params, *analyzer_, indexer_.get());
+    ASSERT_FALSE(result.is_error) << result.text;
+    auto j = nlohmann::json::parse(result.text);
+    ASSERT_EQ(j["results"].size(), 1u) << j.dump();
+    EXPECT_EQ(j["results"][0]["file_path"].get<std::string>(), "b.go");
+    EXPECT_TRUE(j["results"][0]["is_pure"].get<bool>());
+}
+
+TEST_F(SideEffectsSymbolModeTest, SymbolIdSelectsExactSymbol) {
+    nlohmann::json params = {{"mode", "symbol"}, {"symbol_id", b_symbol_id_}};
+    auto result = mcp::handle_side_effects(params, *analyzer_, indexer_.get());
+    ASSERT_FALSE(result.is_error) << result.text;
+    auto j = nlohmann::json::parse(result.text);
+    ASSERT_EQ(j["results"].size(), 1u) << j.dump();
+    EXPECT_EQ(j["results"][0]["file_path"].get<std::string>(), "b.go");
 }
 
 }  // namespace
