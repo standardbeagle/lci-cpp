@@ -1612,5 +1612,23 @@ TEST(LanguageExtractionTest, ExtensionMatchIsCaseInsensitive) {
     EXPECT_TRUE(has_reference(r, ReferenceType::Call, "helper"));
 }
 
+TEST(LanguageExtractionTest, KotlinObjectDeclarationEmitsSymbol) {
+    // tree-sitter-kotlin exposes no `name` field on object_declaration; the
+    // name must be recovered from the type_identifier child (the same
+    // fieldless-grammar pattern class_declaration already uses).
+    constexpr std::string_view src = R"(
+object Database {
+    fun connect() {}
+}
+)";
+    auto r = extract(Language::Kotlin, ".kt", src, "db.kt");
+    if (r.symbols.empty() && r.references.empty() && r.blocks.empty()) {
+        GTEST_SKIP() << "Kotlin parser unavailable";
+    }
+    const Symbol* db = find_symbol(r, "Database");
+    ASSERT_NE(db, nullptr);
+    EXPECT_EQ(db->type, SymbolType::Object);
+}
+
 }  // namespace
 }  // namespace lci::parser
