@@ -7,6 +7,8 @@
 
 #include "unique_temp.h"
 
+#include <atomic>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <stdexcept>
@@ -622,6 +624,66 @@ TEST(MasterIndexTest, ConcurrentReadsWhileUpdating) {
     for (auto& t : readers) t.join();
 
     EXPECT_EQ(1, mi.file_count());
+}
+
+// Pins the master_index.cpp bulk-window INVARIANT (B1): an incremental
+// update_file issued while index_directory holds the open bulk window must
+// survive the window's clear->publish span exactly once. Without structural
+// exclusion (single-file ops taking bulk_mu_), the update lands in the
+// sub-index staging generations and the commit path's clear() wipes it --
+// the file keeps its pre-update symbols.
+TEST(MasterIndexTest, UpdateDuringBulkWindowSurvivesExactlyOnce) {
+    TempDir dir;
+    dir.write_file("a.go", "package main\nfunc alpha() {}\n");
+    dir.write_file("b.go", "package main\nfunc beta() {}\n");
+    dir.write_file("target.go", "package main\nfunc targetBefore() {}\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex index(cfg);
+    ASSERT_TRUE(index.index_directory(dir.path().string()));
+
+    // Park the bulk thread inside the open window -- post scan+parse,
+    // before the commit path's clear->publish -- so the incremental update
+    // below provably overlaps the bulk run. The wait is bounded: once the
+    // exclusion is structural the update BLOCKS on bulk_mu_ until the
+    // window closes, so the hook must release on its own.
+    std::atomic<bool> in_window{false};
+    std::atomic<bool> update_done{false};
+    index.set_post_parse_hook([&] {
+        in_window.store(true, std::memory_order_release);
+        const auto give_up =
+            std::chrono::steady_clock::now() + std::chrono::seconds{2};
+        while (!update_done.load(std::memory_order_acquire) &&
+               std::chrono::steady_clock::now() < give_up) {
+            std::this_thread::yield();
+        }
+    });
+
+    std::thread bulk([&] { index.index_directory(dir.path().string()); });
+    while (!in_window.load(std::memory_order_acquire)) {
+        std::this_thread::yield();
+    }
+
+    const std::string target_path = (dir.path() / "target.go").string();
+    std::thread update([&] {
+        index.update_file(target_path,
+                          "package main\nfunc targetAfter() {}\n");
+        update_done.store(true, std::memory_order_release);
+    });
+
+    update.join();
+    bulk.join();
+
+    auto rt_snap = index.ref_tracker().pin();
+    size_t after_count = 0;
+    for (const auto& es : rt_snap->find_symbols_by_name("targetAfter")) {
+        if (es) ++after_count;
+    }
+    EXPECT_EQ(after_count, 1u)
+        << "incremental update clobbered or duplicated by the bulk window";
+    EXPECT_TRUE(rt_snap->find_symbols_by_name("targetBefore").empty());
+    EXPECT_EQ(index.file_count(), 3);
 }
 
 // -- Sub-index access tests ---------------------------------------------------
