@@ -1663,5 +1663,73 @@ TEST(ServerLifecycleTest, ShutdownConvergesWhileBulkReindexParked) {
     indexer.set_post_parse_hook(nullptr);
 }
 
+// -- /reindex validation (S4) ---------------------------------------------------
+//
+// The reindex path is client-controlled; an unvalidated path yielded an
+// empty engine with ready:true (nonexistent root indexed "successfully") or
+// rebuilt an arbitrary directory outside the project.
+
+TEST_F(ServerTest, ReindexRejectsPathOutsideProjectRoot) {
+    TempDir outside;
+    outside.write_file("x.go", "package main\n");
+    auto cli = make_client();
+    auto res = cli.Post("/reindex",
+                        nlohmann::json{{"path", outside.path().string()}}
+                            .dump(),
+                        "application/json");
+    ASSERT_TRUE(res);
+    EXPECT_EQ(res->status, 400);
+    auto j = nlohmann::json::parse(res->body);
+    EXPECT_TRUE(j.contains("error"));
+
+    // Ready state untouched by the rejected request.
+    auto status = get("/status");
+    EXPECT_TRUE(status["ready"].get<bool>());
+}
+
+TEST_F(ServerTest, ReindexRejectsNonexistentPath) {
+    auto cli = make_client();
+    auto res = cli.Post(
+        "/reindex",
+        nlohmann::json{{"path", (tmp_.path() / "no-such-dir").string()}}
+            .dump(),
+        "application/json");
+    ASSERT_TRUE(res);
+    EXPECT_EQ(res->status, 400)
+        << "a nonexistent path must not start an empty reindex";
+    auto j = nlohmann::json::parse(res->body);
+    EXPECT_TRUE(j.contains("error"));
+
+    // Ready state unchanged: before the fix this published an EMPTY engine
+    // with ready:true.
+    auto status = get("/status");
+    EXPECT_TRUE(status["ready"].get<bool>());
+    EXPECT_GT(status["file_count"].get<int>(), 0);
+}
+
+TEST_F(ServerTest, ReindexRejectsNonStringPath) {
+    auto cli = make_client();
+    auto res = cli.Post("/reindex", R"({"path": 123})", "application/json");
+    ASSERT_TRUE(res);
+    EXPECT_EQ(res->status, 400);
+}
+
+TEST_F(ServerTest, ReindexAcceptsProjectRoot) {
+    auto cli = make_client();
+    auto res = cli.Post("/reindex",
+                        nlohmann::json{{"path", config_.project.root}}.dump(),
+                        "application/json");
+    ASSERT_TRUE(res);
+    EXPECT_EQ(res->status, 200);
+    // Let the reindex finish before teardown cancels it mid-run.
+    EXPECT_TRUE(wait_until(
+        [&] {
+            auto s = get("/status");
+            return s.contains("indexing_active") &&
+                   !s["indexing_active"].get<bool>();
+        },
+        std::chrono::milliseconds(10000)));
+}
+
 }  // namespace
 }  // namespace lci
