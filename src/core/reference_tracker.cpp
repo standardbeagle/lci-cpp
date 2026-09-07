@@ -760,11 +760,19 @@ void ReferenceTracker::remove_file(FileID file_id) {
             if (auto it = s.incoming_refs.find(sym_id);
                 it != s.incoming_refs.end()) {
                 for (uint64_t ref_id : it->second) {
-                    if (const StoredRef* r = find_mutable_ref(s, ref_id)) {
+                    if (StoredRef* r = find_mutable_ref(s, ref_id)) {
                         if (r->source_symbol != 0) {
                             remove_from_outgoing_refs(s, r->source_symbol,
                                                       ref_id);
                         }
+                        // Unresolve, don't just unlink: refs in OTHER files
+                        // keep their slot (only this file's own refs die
+                        // wholesale below), and a stale target_symbol would
+                        // both dangle past the removal and suppress
+                        // re-resolution — process_all_references only binds
+                        // refs whose target_symbol is 0. Zeroing makes the
+                        // watch path's remove→re-add cycle re-bind the edge.
+                        r->target_symbol = 0;
                     }
                 }
                 s.incoming_refs.erase(it);
