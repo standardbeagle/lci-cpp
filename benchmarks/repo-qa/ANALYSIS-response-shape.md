@@ -31,7 +31,10 @@ old table is invalid by construction and the grid must be rerun under
 
 Four real cells: both arms of the `file-lines` task on both models, in the
 tool-denied corpus-free workspace. Records under
-`.work/response-shape-smoke/` (gitignored).
+`.work/response-shape-smoke/` (gitignored). The smoke ran with `timeout_seconds`
+lowered to 180 for the session, so its records carry a different `manifest_digest`
+than the committed manifest (600) and will not be reused by a real grid run; that
+is the frozen-timeout rule working as designed, not a ledger defect.
 
 | Model | Arm | Status | Correct | Answer recall | Evidence recall | Hallucinated | Wall (s) |
 |---|---|---|---|---|---|---|---|
