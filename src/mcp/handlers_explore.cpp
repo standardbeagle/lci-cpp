@@ -198,6 +198,67 @@ bool path_matches_glob(const std::string& path, const std::string& pattern) {
     return false;
 }
 
+/// Case-insensitive substring test; needle must already be lowercase.
+/// Allocation-free (karpathy #2): runs per symbol on the list_symbols read
+/// path, so lowering a copy of the symbol name per call is not acceptable.
+bool contains_ci(std::string_view haystack, std::string_view needle_lower) {
+    if (needle_lower.empty()) return true;
+    if (needle_lower.size() > haystack.size()) return false;
+    auto it = std::search(
+        haystack.begin(), haystack.end(), needle_lower.begin(),
+        needle_lower.end(), [](char a, char b) {
+            return std::tolower(static_cast<unsigned char>(a)) == b;
+        });
+    return it != haystack.end();
+}
+
+/// Case-insensitive equality; `lower` must already be lowercase.
+bool equals_ci(std::string_view s, std::string_view lower) {
+    if (s.size() != lower.size()) return false;
+    for (size_t i = 0; i < s.size(); ++i) {
+        if (std::tolower(static_cast<unsigned char>(s[i])) != lower[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/// Emits the refs section shared by explore and inspect responses:
+/// ref counts plus the dynamic-dispatch honesty fields (the no-guess
+/// policy builds no edge for interface/trait-mediated calls, so
+/// incoming_refs is a lower bound whenever same-name call sites stayed
+/// unresolved — say so).
+void append_refs_section(nlohmann::json& j, const EnhancedSymbol& sym,
+                         ReferenceTracker& tracker) {
+    j["incoming_refs"] = static_cast<int>(sym.incoming_ref_count);
+    j["outgoing_refs"] = static_cast<int>(sym.outgoing_ref_count);
+    bool callable = sym.symbol.type == SymbolType::Function ||
+                    sym.symbol.type == SymbolType::Method ||
+                    sym.symbol.type == SymbolType::Constructor;
+    if (callable) {
+        auto snap = tracker.pin();
+        auto st = snap->classify_same_name_calls(sym.symbol.name);
+        // dynamic_callers: sites that call this NAME through an unknown
+        // receiver (interface/virtual/duck) — real callers the static
+        // graph cannot attribute. unresolved_callers: bare-name sites
+        // whose target is not in the index (external/missing).
+        if (st.dynamic > 0) j["dynamic_callers"] = st.dynamic;
+        if (st.unresolved > 0) j["unresolved_callers"] = st.unresolved;
+        if (st.total() > 0) {
+            j["unresolved_same_name_calls"] = st.total();  // back-compat
+            j["refs_note"] =
+                "incoming_refs is a lower bound: " +
+                std::to_string(st.dynamic) +
+                " dynamic-dispatch and " +
+                std::to_string(st.unresolved) +
+                " unresolved same-name call site(s) are not in the "
+                "static graph";
+        }
+        int dyn_out = snap->count_dynamic_calls_out(sym.id);
+        if (dyn_out > 0) j["dynamic_calls_out"] = dyn_out;
+    }
+}
+
 struct SymbolWithFile {
     const EnhancedSymbol* sym;
     std::string file_path;
@@ -279,36 +340,7 @@ nlohmann::json build_explore_symbol(const EnhancedSymbol& sym,
     }
 
     if (includes_has(includes, "refs")) {
-        j["incoming_refs"] = static_cast<int>(sym.incoming_ref_count);
-        j["outgoing_refs"] = static_cast<int>(sym.outgoing_ref_count);
-        // Dynamic-dispatch honesty: the no-guess policy builds no edge for
-        // interface/trait-mediated calls, so incoming_refs is a lower bound.
-        // Say so whenever same-name call sites stayed unresolved.
-        bool callable = sym.symbol.type == SymbolType::Function ||
-                        sym.symbol.type == SymbolType::Method ||
-                        sym.symbol.type == SymbolType::Constructor;
-        if (callable) {
-            auto snap = tracker.pin();
-            auto st = snap->classify_same_name_calls(sym.symbol.name);
-            // dynamic_callers: sites that call this NAME through an unknown
-            // receiver (interface/virtual/duck) — real callers the static
-            // graph cannot attribute. unresolved_callers: bare-name sites
-            // whose target is not in the index (external/missing).
-            if (st.dynamic > 0) j["dynamic_callers"] = st.dynamic;
-            if (st.unresolved > 0) j["unresolved_callers"] = st.unresolved;
-            if (st.total() > 0) {
-                j["unresolved_same_name_calls"] = st.total();  // back-compat
-                j["refs_note"] =
-                    "incoming_refs is a lower bound: " +
-                    std::to_string(st.dynamic) +
-                    " dynamic-dispatch and " +
-                    std::to_string(st.unresolved) +
-                    " unresolved same-name call site(s) are not in the "
-                    "static graph";
-            }
-            int dyn_out = snap->count_dynamic_calls_out(sym.id);
-            if (dyn_out > 0) j["dynamic_calls_out"] = dyn_out;
-        }
+        append_refs_section(j, sym, tracker);
     }
 
     if (includes_has(includes, "callers")) {
@@ -345,10 +377,6 @@ nlohmann::json build_inspect_result(const EnhancedSymbol& sym,
     j["is_exported"] = sym.is_exported;
     j["complexity"] = sym.complexity;
     j["parameter_count"] = static_cast<int>(sym.parameter_count);
-
-    if (!sym.receiver_type.empty()) {
-        j["receiver_type"] = sym.receiver_type;
-    }
 
     if (!sym.receiver_type.empty()) {
         j["receiver_type"] = sym.receiver_type;
@@ -411,36 +439,7 @@ nlohmann::json build_inspect_result(const EnhancedSymbol& sym,
     }
 
     if (includes_has(includes, "refs")) {
-        j["incoming_refs"] = static_cast<int>(sym.incoming_ref_count);
-        j["outgoing_refs"] = static_cast<int>(sym.outgoing_ref_count);
-        // Dynamic-dispatch honesty: the no-guess policy builds no edge for
-        // interface/trait-mediated calls, so incoming_refs is a lower bound.
-        // Say so whenever same-name call sites stayed unresolved.
-        bool callable = sym.symbol.type == SymbolType::Function ||
-                        sym.symbol.type == SymbolType::Method ||
-                        sym.symbol.type == SymbolType::Constructor;
-        if (callable) {
-            auto snap = tracker.pin();
-            auto st = snap->classify_same_name_calls(sym.symbol.name);
-            // dynamic_callers: sites that call this NAME through an unknown
-            // receiver (interface/virtual/duck) — real callers the static
-            // graph cannot attribute. unresolved_callers: bare-name sites
-            // whose target is not in the index (external/missing).
-            if (st.dynamic > 0) j["dynamic_callers"] = st.dynamic;
-            if (st.unresolved > 0) j["unresolved_callers"] = st.unresolved;
-            if (st.total() > 0) {
-                j["unresolved_same_name_calls"] = st.total();  // back-compat
-                j["refs_note"] =
-                    "incoming_refs is a lower bound: " +
-                    std::to_string(st.dynamic) +
-                    " dynamic-dispatch and " +
-                    std::to_string(st.unresolved) +
-                    " unresolved same-name call site(s) are not in the "
-                    "static graph";
-            }
-            int dyn_out = snap->count_dynamic_calls_out(sym.id);
-            if (dyn_out > 0) j["dynamic_calls_out"] = dyn_out;
-        }
+        append_refs_section(j, sym, tracker);
     }
 
 
@@ -449,72 +448,109 @@ nlohmann::json build_inspect_result(const EnhancedSymbol& sym,
     return j;
 }
 
-/// Returns true if the symbol matches list_symbols filter criteria.
+/// list_symbols filter set, parsed ONCE from the request params. The
+/// per-symbol predicate below runs on the read path over every indexed
+/// symbol — re-reading the JSON params and re-lowering the needles per
+/// symbol (the old shape) paid three JSON lookups plus string copies per
+/// candidate (karpathy #2: no allocation in per-symbol loops).
+struct ListFilters {
+    std::vector<SymbolType> kinds;  // empty = all
+    bool has_exported = false;
+    bool want_exported = false;
+    std::string name_lower;      // empty = unset; pre-lowered needle
+    std::string receiver_lower;  // empty = unset; pre-lowered needle
+    bool has_min_complexity = false;
+    int min_complexity = 0;
+    bool has_max_complexity = false;
+    int max_complexity = 0;
+    bool has_min_params = false;
+    int min_params = 0;
+    bool has_max_params = false;
+    int max_params = 0;
+    std::vector<std::string> flags_lower;  // pre-lowered tokens
+};
+
+ListFilters make_list_filters(const nlohmann::json& params,
+                              const std::string& kind_str) {
+    ListFilters f;
+    f.kinds = parse_symbol_kinds(kind_str);
+    if (params.contains("exported")) {
+        f.has_exported = true;
+        f.want_exported = params["exported"].get<bool>();
+    }
+    f.name_lower = to_lower(params.value("name", ""));
+    f.receiver_lower = to_lower(params.value("receiver", ""));
+    if (params.contains("min_complexity")) {
+        f.has_min_complexity = true;
+        f.min_complexity = params["min_complexity"].get<int>();
+    }
+    if (params.contains("max_complexity")) {
+        f.has_max_complexity = true;
+        f.max_complexity = params["max_complexity"].get<int>();
+    }
+    if (params.contains("min_params")) {
+        f.has_min_params = true;
+        f.min_params = params["min_params"].get<int>();
+    }
+    if (params.contains("max_params")) {
+        f.has_max_params = true;
+        f.max_params = params["max_params"].get<int>();
+    }
+    for (auto& flag : parse_list(params.value("flags", ""))) {
+        f.flags_lower.push_back(to_lower(flag));
+    }
+    return f;
+}
+
+/// Returns true if the symbol matches the pre-parsed filter set.
+/// Allocation-free: all case-insensitive compares run on string_views
+/// against needles lowered once in make_list_filters.
 bool matches_list_filters(const EnhancedSymbol& sym,
-                          const std::vector<SymbolType>& kinds,
-                          const nlohmann::json& params) {
+                          const ListFilters& f) {
     // Anonymous symbols (empty name) are unaddressable closures/lambdas — they
     // can't be inspected or referenced by name, so they're noise in the "ls for
     // code". Under the default name sort they'd also sort first ("" precedes
     // every name), burying the real symbols. Drop them outright.
     if (sym.symbol.name.empty()) return false;
 
-    if (!kind_matches(sym.symbol.type, kinds)) return false;
+    if (!kind_matches(sym.symbol.type, f.kinds)) return false;
 
-    // Exported filter
-    if (params.contains("exported")) {
-        bool want_exported = params["exported"].get<bool>();
-        if (want_exported && !sym.is_exported) return false;
-        if (!want_exported && sym.is_exported) return false;
+    if (f.has_exported) {
+        if (f.want_exported && !sym.is_exported) return false;
+        if (!f.want_exported && sym.is_exported) return false;
     }
 
-    // Name substring filter (case-insensitive)
-    auto name_filter = params.value("name", "");
-    if (!name_filter.empty()) {
-        if (to_lower(sym.symbol.name).find(to_lower(name_filter)) ==
-            std::string::npos) {
-            return false;
-        }
-    }
-
-    // Receiver filter
-    auto receiver = params.value("receiver", "");
-    if (!receiver.empty()) {
-        if (to_lower(sym.receiver_type) != to_lower(receiver)) return false;
-    }
-
-    // Complexity filters
-    if (params.contains("min_complexity") &&
-        sym.complexity < params["min_complexity"].get<int>()) {
-        return false;
-    }
-    if (params.contains("max_complexity") &&
-        sym.complexity > params["max_complexity"].get<int>()) {
+    if (!f.name_lower.empty() &&
+        !contains_ci(sym.symbol.name, f.name_lower)) {
         return false;
     }
 
-    // Parameter count filters
-    if (params.contains("min_params") &&
-        static_cast<int>(sym.parameter_count) <
-            params["min_params"].get<int>()) {
-        return false;
-    }
-    if (params.contains("max_params") &&
-        static_cast<int>(sym.parameter_count) >
-            params["max_params"].get<int>()) {
+    if (!f.receiver_lower.empty() &&
+        !equals_ci(sym.receiver_type, f.receiver_lower)) {
         return false;
     }
 
-    // Flag filters
-    auto flags_str = params.value("flags", "");
-    if (!flags_str.empty()) {
-        for (const auto& flag : parse_list(flags_str)) {
-            auto low = to_lower(flag);
-            if (low == "async" && !sym.is_async_func()) return false;
-            if (low == "variadic" && !sym.is_variadic_func()) return false;
-            if (low == "generator" && !sym.is_generator_func()) return false;
-            if (low == "method" && !sym.is_method_func()) return false;
-        }
+    if (f.has_min_complexity && sym.complexity < f.min_complexity) {
+        return false;
+    }
+    if (f.has_max_complexity && sym.complexity > f.max_complexity) {
+        return false;
+    }
+
+    if (f.has_min_params &&
+        static_cast<int>(sym.parameter_count) < f.min_params) {
+        return false;
+    }
+    if (f.has_max_params &&
+        static_cast<int>(sym.parameter_count) > f.max_params) {
+        return false;
+    }
+
+    for (const auto& low : f.flags_lower) {
+        if (low == "async" && !sym.is_async_func()) return false;
+        if (low == "variadic" && !sym.is_variadic_func()) return false;
+        if (low == "generator" && !sym.is_generator_func()) return false;
+        if (low == "method" && !sym.is_method_func()) return false;
     }
 
     return true;
@@ -636,8 +672,8 @@ ToolResult handle_list_symbols(const nlohmann::json& params,
 
     auto& tracker = indexer.ref_tracker();
     auto rt_snap = tracker.pin();
-    auto kinds = parse_symbol_kinds(kind_str);
     auto includes = parse_explore_includes(params.value("include", ""));
+    const ListFilters filters = make_list_filters(params, kind_str);
 
     const auto page = normalize_page(params);
     const int max_results = page.max;
@@ -665,7 +701,7 @@ ToolResult handle_list_symbols(const nlohmann::json& params,
 
         auto symbols = rt_snap->get_file_enhanced_symbols(fid);
         for (const auto& sym : symbols) {
-            if (sym && matches_list_filters(*sym, kinds, params)) {
+            if (sym && matches_list_filters(*sym, filters)) {
                 all_symbols.push_back({sym.get(), rel});
             }
         }
