@@ -36,6 +36,25 @@ inline TSNode field(TSNode node, const char* name) {
         node, name, static_cast<uint32_t>(std::strlen(name)));
 }
 
+/// Digs through pointer/reference declarator wrappers on a C/C++ function
+/// node's `declarator` field down to the name token: `void* f(size_t)` wraps
+/// the function_declarator in a pointer_declarator, and without peeling the
+/// extracted "name" is the whole `f(size_t)` text. ONE peel shared by the
+/// symbol and side-effect paths so their per-function keys cannot diverge.
+/// Returns the null node when the shape does not resolve.
+inline TSNode cpp_function_declarator_name(TSNode fn_node) {
+    TSNode decl = field(fn_node, "declarator");
+    while (!ts_node_is_null(decl)) {
+        std::string_view dt(ts_node_type(decl));
+        if (dt != "pointer_declarator" && dt != "reference_declarator")
+            break;
+        decl = field(decl, "declarator");
+    }
+    if (ts_node_is_null(decl)) return decl;
+    TSNode inner = field(decl, "declarator");
+    return ts_node_is_null(inner) ? decl : inner;
+}
+
 // Identifier-shaped node types across the grammars we register params from.
 inline bool is_identifier_type(std::string_view t) {
     return t == "identifier" || t == "simple_identifier" ||

@@ -89,26 +89,11 @@ void UnifiedExtractor::extract_function(TSNode node,
     // return types wrap the function_declarator in pointer_declarator /
     // reference_declarator layers; without peeling them, `void* f(size_t)`
     // extracted the NAME "f(size_t bytes)" — a symbol no reference can
-    // ever resolve to by name.
+    // ever resolve to by name. Shared peel: cpp_function_declarator_name.
     if (name.empty()) {
-        TSNode decl = ts_node_child_by_field_name(
-            node, "declarator",
-            static_cast<uint32_t>(std::strlen("declarator")));
-        while (!ts_node_is_null(decl)) {
-            std::string_view dt(ts_node_type(decl));
-            if (dt != "pointer_declarator" && dt != "reference_declarator")
-                break;
-            decl = ts_node_child_by_field_name(
-                decl, "declarator",
-                static_cast<uint32_t>(std::strlen("declarator")));
-        }
-        if (!ts_node_is_null(decl)) {
-            TSNode inner = ts_node_child_by_field_name(
-                decl, "declarator",
-                static_cast<uint32_t>(std::strlen("declarator")));
-            if (!ts_node_is_null(inner)) {
-                name = node_text(inner);
-            }
+        TSNode name_node = cpp_function_declarator_name(node);
+        if (!ts_node_is_null(name_node)) {
+            name = node_text(name_node);
         }
     }
 

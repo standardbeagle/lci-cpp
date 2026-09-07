@@ -582,17 +582,16 @@ std::string_view UnifiedExtractor::extract_function_name(
         return node_text(name_node);
     }
 
-    // C/C++ style: declarator -> declarator
+    // C/C++ style: declarator -> declarator, peeling pointer/reference
+    // wrappers (shared with the symbol path via cpp_function_declarator_name
+    // so the side-effect function key equals the symbol name).
     TSNode decl = ts_node_child_by_field_name(
         node, "declarator", static_cast<uint32_t>(std::strlen("declarator")));
     if (!ts_node_is_null(decl)) {
-        TSNode inner = ts_node_child_by_field_name(
-            decl, "declarator",
-            static_cast<uint32_t>(std::strlen("declarator")));
-        if (!ts_node_is_null(inner)) {
-            return node_text(inner);
+        TSNode name_node = cpp_function_declarator_name(node);
+        if (!ts_node_is_null(name_node)) {
+            return node_text(name_node);
         }
-        return node_text(decl);
     }
 
     // Kotlin: function_declaration has no `name` field — the first
