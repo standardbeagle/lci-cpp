@@ -176,4 +176,29 @@ class ResponseShapeABTest(unittest.TestCase):
             self.assertTrue((out/"report.md").exists())
             self.assertIn("Response-format comprehension scorecard",(out/"report.md").read_text())
 
+    def test_containment_credits_added_context_but_rejects_a_changed_value(self):
+        """Both directions, per the oracle-independence rule's discrimination clause.
+
+        The permissive direction is the whole point of containment; without the
+        strict direction it would decay into a blanket accept.
+        """
+        task=[x for x in self.tasks if x["id"]=="file-lines"][0]
+        base={"evidence":["config/runtime.toml:12"],"claims":["timeout is 30 seconds"]}
+        # the REAL recorded answer: extra context, same fact
+        paraphrase={**base,"answers":["The configured timeout is 30 seconds"]}
+        score=ab.score_answer(task,paraphrase)
+        self.assertTrue(score["correct"]); self.assertFalse(score["hallucinated"])
+        # a changed VALUE must still fail, with the omission named
+        wrong={**base,"answers":["The configured timeout is 99 seconds"],"claims":["timeout is 99 seconds"]}
+        score=ab.score_answer(task,wrong)
+        self.assertFalse(score["correct"]); self.assertTrue(score["hallucinated"])
+        self.assertEqual(score["omissions"],["timeout is 30 seconds"])
+        # an unrelated extra answer costs precision, so padding cannot buy credit
+        padded={**base,"answers":["The configured timeout is 30 seconds","the cache is disabled"]}
+        score=ab.score_answer(task,padded)
+        self.assertFalse(score["correct"]); self.assertLess(score["answer_precision"],1.0)
+        # evidence stays EXACT: a file:line is an identifier, not prose
+        near={**paraphrase,"evidence":["config/runtime.toml:12 (timeout)"]}
+        self.assertEqual(ab.score_answer(task,near)["evidence_recall"],0)
+
 if __name__=="__main__": unittest.main()

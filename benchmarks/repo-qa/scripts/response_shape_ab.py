@@ -8,6 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import replay_common
 
+import analyze_response_shape_ab as analysis
 import opencode_runner as runner
 classify_failure=runner.classify_failure
 empty_git_workspace=runner.empty_git_workspace
@@ -84,15 +85,43 @@ def parse_answer(text):
 
 def _norm(xs): return {replay_common.normalize_term(x) for x in xs}
 
+def _covers(text, term):
+    """A free-text model answer carries `term` when it CONTAINS the fact verbatim.
+
+    Exact set equality graded phrasing, not correctness: a real cell answering
+    "The configured timeout is 30 seconds" against the expected
+    "timeout is 30 seconds" scored incorrect AND hallucinated, because the
+    extra words made the string unequal. Containment credits the added context
+    while still rejecting a changed VALUE ("timeout is 99 seconds" does not
+    contain the expected term), which the discrimination tests pin in both
+    directions. Evidence identifiers stay exact — a file:line is not prose.
+    """
+    return term in text
+
+def _matched(predicted, truth):
+    """Split predicted/truth into matched sets under containment."""
+    hit_truth={t for t in truth if any(_covers(p,t) for p in predicted)}
+    hit_pred={p for p in predicted if any(_covers(p,t) for t in truth)}
+    return hit_pred, hit_truth
+
+def _rates(predicted, truth):
+    if not predicted and not truth: return 1.0, 1.0
+    hit_pred, hit_truth=_matched(predicted, truth)
+    precision=len(hit_pred)/len(predicted) if predicted else 0.0
+    recall=len(hit_truth)/len(truth) if truth else 0.0
+    return precision, recall
+
 def score_answer(task, answer):
     predicted, expected=_norm(answer["answers"]),_norm(task["expected_answers"])
     evidence, required=_norm(answer["evidence"]),_norm(task["required_evidence"])
     supported=_norm(task["facts"] + task["expected_answers"] + task["required_evidence"])
-    claims=_norm(answer["claims"]); unsupported=sorted(claims-supported)
-    answer_precision, answer_recall = replay_common.set_precision_recall(predicted, expected)
+    claims=_norm(answer["claims"])
+    unsupported=sorted(c for c in claims if not any(_covers(c,s) or _covers(s,c) for s in supported))
+    answer_precision, answer_recall = _rates(predicted, expected)
     evidence_precision, evidence_recall = replay_common.set_precision_recall(evidence, required)
-    omissions=sorted(expected-predicted)
-    return {"correct": predicted==expected, "answer_precision": answer_precision,
+    _, hit_expected=_matched(predicted, expected)
+    omissions=sorted(expected-hit_expected)
+    return {"correct": not omissions and answer_precision==1.0, "answer_precision": answer_precision,
             "answer_recall": answer_recall,
             "evidence_precision": evidence_precision,
             "evidence_recall": evidence_recall,
@@ -112,6 +141,34 @@ class DeterministicModelProvider:
         del prompt, arm, model, timeout
         answer={"answers":task["expected_answers"],"evidence":task["required_evidence"],"claims":task["expected_answers"]}
         return {"status":"answered","answer":canonical(answer),"tokens":{"input":len(task["facts"]),"output":len(answer["answers"])+len(answer["evidence"])},"wall_seconds":0.001}
+
+class RecordedStreamProvider:
+    """Replay a REAL recorded `opencode run --format json` stream.
+
+    The hand-written fake proves the harness's own branching; it cannot prove
+    the harness survives the provider's actual wire shape, because a fixture
+    authored beside the parser inherits the parser's blind spots. This adapter
+    feeds a committed capture through the SAME `parse_events` the live provider
+    uses, so a provider-side shape change (hyphenated part types, a nested
+    token block) fails a hermetic test instead of a paid grid run.
+
+    See response-shape/recordings/README.md for capture provenance.
+    """
+
+    def __init__(self, recording):
+        self.recording=Path(recording)
+        self.lines=self.recording.read_text().splitlines()
+
+    def run(self, *, prompt, task, arm, model, timeout):
+        del prompt, task, arm, model, timeout
+        answer, metadata = parse_events(self.lines)
+        status = "answered" if answer.strip() else "empty_answer"
+        return {"status":status,"answer":answer,"wall_seconds":0.0,
+                "recording":self.recording.name,
+                "failure_reason":None if status=="answered" else status,
+                "tokens":metadata["tokens"],"provider_error":metadata["provider_error"],
+                "malformed_event":metadata["malformed_event"]}
+
 
 class OpenCodeProvider:
     """Run isolated, tool-disabled OpenCode cells in one per-run workspace.
@@ -181,16 +238,26 @@ def planned_grid(manifest,tasks):
 def run_grid(provider, manifest, tasks, out):
     return [execute(provider,manifest,task,arm,model,rep,out) for task,arm,model,rep in planned_grid(manifest,tasks)]
 
+def plan_run_report(provider, manifest, tasks, out):
+    """Plan, run and report in one call — the single entry point `--report` uses."""
+    out=Path(out); records=run_grid(provider,manifest,tasks,out/"cells")
+    report=analysis.analyze(manifest,tasks,records)
+    replay_common.write_atomic(out/"analysis.json", json.dumps(report,indent=2,sort_keys=True)+"\n")
+    replay_common.write_atomic(out/"report.md", analysis.markdown(report))
+    return {"cells":len(records),"out":str(out),"report":report}
+
+
 def main():
-    p=argparse.ArgumentParser(); p.add_argument("--out",type=Path,required=True); p.add_argument("--manifest",type=Path,default=MANIFEST); p.add_argument("--tasks",type=Path,default=TASKS); p.add_argument("--dry-run",action="store_true"); p.add_argument("--fake-provider",action="store_true"); p.add_argument("--run-provider",action="store_true"); p.add_argument("--opencode",default="opencode")
+    p=argparse.ArgumentParser(); p.add_argument("--out",type=Path,required=True); p.add_argument("--manifest",type=Path,default=MANIFEST); p.add_argument("--tasks",type=Path,default=TASKS); p.add_argument("--dry-run",action="store_true"); p.add_argument("--fake-provider",action="store_true"); p.add_argument("--run-provider",action="store_true"); p.add_argument("--opencode",default="opencode"); p.add_argument("--report",action="store_true",help="plan, run and write analysis.json + report.md in one command")
     args=p.parse_args(); manifest,tasks=load_inputs(args.manifest,args.tasks); jobs=planned_grid(manifest,tasks)
     if args.dry_run:
         print(json.dumps({"cells":len(jobs),"order":[[t["id"],a,m,r] for t,a,m,r in jobs]},sort_keys=True)); return 0
-    if args.fake_provider:
-        records=run_grid(DeterministicModelProvider(),manifest,tasks,args.out)
-        print(json.dumps({"cells":len(records),"out":str(args.out)},sort_keys=True)); return 0
-    if args.run_provider:
-        records=run_grid(OpenCodeProvider(args.opencode),manifest,tasks,args.out)
+    provider=DeterministicModelProvider() if args.fake_provider else OpenCodeProvider(args.opencode) if args.run_provider else None
+    if provider is not None:
+        if args.report:
+            result=plan_run_report(provider,manifest,tasks,args.out)
+            print(json.dumps({"cells":result["cells"],"out":result["out"],"complete":result["report"]["complete"]},sort_keys=True)); return 0
+        records=run_grid(provider,manifest,tasks,args.out)
         print(json.dumps({"cells":len(records),"out":str(args.out)},sort_keys=True)); return 0
     p.error("real provider execution is intentionally guarded; configure and invoke a provider adapter explicitly")
 if __name__=="__main__": raise SystemExit(main())
