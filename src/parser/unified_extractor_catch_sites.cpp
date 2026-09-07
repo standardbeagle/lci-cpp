@@ -748,7 +748,21 @@ void UnifiedExtractor::process_go_error_drop(TSNode node,
     int line = line_of(node);
     std::string detail = "`" + std::string(node_text(node)) + "`";
     if (detail.size() > 60) {
-        detail.resize(57);
+        // Truncate on a UTF-8 boundary: the fixed byte cut otherwise splits
+        // a multi-byte sequence and the finding renders as mojibake.
+        size_t cut = 0;
+        for (size_t i = 0; i < 57;) {
+            auto c = static_cast<unsigned char>(detail[i]);
+            size_t len = (c < 0x80)        ? 1
+                         : (c & 0xE0) == 0xC0 ? 2
+                         : (c & 0xF0) == 0xE0 ? 3
+                         : (c & 0xF8) == 0xF0 ? 4
+                                              : 1;  // invalid byte: advance 1
+            if (i + len > 57) break;
+            i += len;
+            cut = i;
+        }
+        detail.resize(cut);
         detail += "...`";
     }
     // Inside a defer the discard is the cleanup idiom (`defer func() { _ =
