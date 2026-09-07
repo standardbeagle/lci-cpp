@@ -358,8 +358,8 @@ void reap_stale_sockets(const std::string& own_sock) {
         if (unix_socket_alive(path)) continue;
 
         const std::string lock_path = path + ".lock";
-        int lfd = ::open(lock_path.c_str(), O_CREAT | O_RDWR | O_CLOEXEC,
-                         0600);
+        int lfd = ::open(lock_path.c_str(),
+                         O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0600);
         if (lfd < 0) continue;
         if (::flock(lfd, LOCK_EX | LOCK_NB) != 0) {
             ::close(lfd);  // a starting server owns this path
@@ -390,6 +390,7 @@ bool IndexServer::start() {
         return false;  // already running
     }
     listener_stop_issued_.store(false, std::memory_order_release);
+    listener_bind_failed_.store(false, std::memory_order_release);
     self_stop_notified_.store(false, std::memory_order_release);
 
     {
@@ -409,8 +410,12 @@ bool IndexServer::start() {
     // The kernel drops flock on process death, so no stale-pid handling.
     {
         const std::string lock_path = sock + ".lock";
-        int fd = ::open(lock_path.c_str(), O_CREAT | O_RDWR | O_CLOEXEC,
-                        0600);
+        // O_NOFOLLOW: the lock path lives in a world-writable temp dir;
+        // a pre-planted symlink must not let us open (and flock) an
+        // attacker-chosen target. ELOOP degrades to the probe-only
+        // guard below rather than refusing to serve.
+        int fd = ::open(lock_path.c_str(),
+                        O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0600);
         if (fd >= 0 && ::flock(fd, LOCK_EX | LOCK_NB) != 0) {
             // Zombie-holder grace: a live process can hold the lock while
             // serving NOTHING — its socket unlinked out from under it (the
@@ -565,19 +570,25 @@ bool IndexServer::start() {
     listen_thread_ = std::thread([this, win_port] {
         if (!svr_.bind_to_port("127.0.0.1", win_port)) {
             running_.store(false, std::memory_order_release);
+            listener_bind_failed_.store(true, std::memory_order_release);
             return;
         }
         svr_.listen_after_bind();
     });
 
     bool ready = false;
-    for (int i = 0; i < 50; ++i) {
+    for (;;) {
         if (svr_.is_running()) {
             ready = true;
             break;
         }
-        if (!running_.load(std::memory_order_acquire)) break;
+        if (listener_bind_failed_.load(std::memory_order_acquire)) break;
         std::this_thread::sleep_for(std::chrono::milliseconds{10});
+    }
+    if (!ready && listen_thread_.joinable()) {
+        // The listener thread has finished (bind failed); join it here so
+        // shutdown_locked's join is a no-op and never parks on startup.
+        listen_thread_.join();
     }
 #else
     // On Unix, listen on a Unix domain socket.
@@ -587,10 +598,18 @@ bool IndexServer::start() {
         std::error_code ec2;
         std::filesystem::remove(sock, ec2);
 
+        // Bind under a restrictive umask so the socket is never reachable
+        // by group/other users, not even in the window between bind and
+        // the chmod below (the socket lives in a world-writable temp
+        // dir).
+        const mode_t old_umask = ::umask(0077);
         // For AF_UNIX, port is ignored but must be non-zero to avoid
         // getsockname() fallback in bind_internal().
-        if (!svr_.bind_to_port(sock, 80)) {
+        const bool bound = svr_.bind_to_port(sock, 80);
+        ::umask(old_umask);
+        if (!bound) {
             running_.store(false, std::memory_order_release);
+            listener_bind_failed_.store(true, std::memory_order_release);
             return;
         }
 
@@ -603,6 +622,7 @@ bool IndexServer::start() {
                          "Error: cannot restrict socket permissions on %s\n",
                          sock.c_str());
             running_.store(false, std::memory_order_release);
+            listener_bind_failed_.store(true, std::memory_order_release);
             return;
         }
 
@@ -620,13 +640,19 @@ bool IndexServer::start() {
     });
 
     bool ready = false;
-    for (int i = 0; i < 50; ++i) {
+    for (;;) {
         if (svr_.is_running()) {
             ready = true;
             break;
         }
-        if (!running_.load(std::memory_order_acquire)) break;
+        if (listener_bind_failed_.load(std::memory_order_acquire)) break;
         std::this_thread::sleep_for(std::chrono::milliseconds{10});
+    }
+    if (!ready && listen_thread_.joinable()) {
+        // The listener thread has finished (bind/chmod failed); join it
+        // here so shutdown_locked's join is a no-op and a failed start
+        // never hangs behind a listener that is still starting.
+        listen_thread_.join();
     }
 #endif
 

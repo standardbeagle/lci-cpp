@@ -453,6 +453,12 @@ class IndexServer {
     // httplib's assert. stop_listener_once() gates the real stop on this
     // flag; start() re-arms it for the next listen.
     std::atomic<bool> listener_stop_issued_{false};
+    // Set by the listen thread when bind/setup has conclusively failed
+    // (thread is about to return). start()'s readiness wait blocks on
+    // svr_.is_running() OR this flag instead of a fixed 500ms poll, so a
+    // failed start joins an already-finished listener instead of racing
+    // a slow one, and a slow-but-successful bind is never given up on.
+    std::atomic<bool> listener_bind_failed_{false};
     std::atomic<bool> indexing_active_{false};
     // Write-side only: serialises the owned_search_engine_ handoff between
     // the indexing thread and set_search_engine. Readers never take it.
