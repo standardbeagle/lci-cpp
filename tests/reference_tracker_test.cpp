@@ -2382,5 +2382,51 @@ TEST(ReferenceTrackerTest, CollectCallersExcludesVariableDefinitionsFromList) {
     EXPECT_EQ(result.definitions[0]->symbol.type, SymbolType::Function);
 }
 
+// Pins the remove_file inbound-dangle fix: removing file B must zero
+// target_symbol on references in OTHER files that resolve to B's symbols.
+// Before the fix the inbound ref kept its (now dangling) target, and
+// process_all_references — which only resolves refs with target_symbol == 0
+// — never re-bound it when B came back, so the cross-file edge dangled
+// forever while call_resolution_totals counted it as resolved.
+TEST(ReferenceTracker, RemoveFileUnresolvesInboundRefs) {
+    ReferenceTracker rt;
+
+    // B.ts defines f; A.ts calls f().
+    rt.process_file(2, "B.ts",
+                    std::vector<Symbol>{
+                        make_sym("f", SymbolType::Function, 2, 1, 5)},
+                    {}, {});
+    std::vector<Reference> refs = {make_call(1, "f", 3)};
+    rt.process_file(1, "A.ts",
+                    std::vector<Symbol>{
+                        make_sym("caller", SymbolType::Function, 1, 1, 10)},
+                    refs, {});
+    rt.process_all_references();
+
+    auto a_ref_target = [&]() -> SymbolID {
+        auto snap = rt.pin();
+        auto it = snap->refs_by_file.find(FileID{1});
+        if (it == snap->refs_by_file.end() || it->second.empty()) {
+            return SymbolID{0};
+        }
+        return it->second[0].target_symbol;
+    };
+    ASSERT_NE(a_ref_target(), SymbolID{0})
+        << "setup: the cross-file call did not resolve";
+
+    rt.remove_file(2);
+    EXPECT_EQ(a_ref_target(), SymbolID{0})
+        << "remove_file(B) left A's ref pointing at a dead symbol";
+
+    // B is re-added (the watch path re-indexes it); the ref must re-resolve.
+    rt.process_file(2, "B.ts",
+                    std::vector<Symbol>{
+                        make_sym("f", SymbolType::Function, 2, 1, 5)},
+                    {}, {});
+    rt.process_all_references();
+    EXPECT_NE(a_ref_target(), SymbolID{0})
+        << "re-added B was not re-bound to A's inbound call";
+}
+
 }  // namespace
 }  // namespace lci
