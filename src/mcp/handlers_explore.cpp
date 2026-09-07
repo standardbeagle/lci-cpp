@@ -334,8 +334,7 @@ nlohmann::json build_explore_symbol(const EnhancedSymbol& sym,
 nlohmann::json build_inspect_result(const EnhancedSymbol& sym,
                                     const std::string& file_path,
                                     const std::vector<std::string>& includes,
-                                    MasterIndex& indexer,
-                                    int max_depth) {
+                                    MasterIndex& indexer) {
     auto& tracker = indexer.ref_tracker();
     nlohmann::json j;
     j["name"] = sym.symbol.name;
@@ -721,7 +720,6 @@ ToolResult handle_inspect_symbol(const nlohmann::json& params,
     auto& tracker = indexer.ref_tracker();
     auto rt_snap = tracker.pin();
     auto includes = parse_inspect_includes(params.value("include", ""));
-    int max_depth = clamp_int(params.value("max_depth", 3), 1, 10);
 
     std::vector<ReferenceTracker::Snapshot::SymbolHandle> matched;
 
@@ -774,7 +772,7 @@ ToolResult handle_inspect_symbol(const nlohmann::json& params,
         auto fp = indexer.get_file_path(sym->symbol.file_id);
         std::string rel(relative_to_root(fp, indexer.config().project.root));
         symbols_json.push_back(
-            build_inspect_result(*sym, rel, includes, indexer, max_depth));
+            build_inspect_result(*sym, rel, includes, indexer));
     }
 
     nlohmann::json response;
@@ -1085,9 +1083,7 @@ void register_explore_handlers(McpServer& server, MasterIndex* indexer) {
           {"include", "string",
            "Sections: signature, doc, callers, callees, type_hierarchy, "
            "scope, refs, annotations, flags, all. Default: all",
-           ""},
-          {"max_depth", "integer",
-           "Max depth for hierarchy traversal (default: 3)", ""}},
+           ""}},
          {}},
         [indexer](const nlohmann::json& p) -> ToolResult {
             if (!indexer) {
@@ -1107,7 +1103,7 @@ void register_explore_handlers(McpServer& server, MasterIndex* indexer) {
         {"browse_file",
          "📂 Browse all symbols in a file - the outline view. Shows the "
          "complete symbol table for a specific file with filtering, "
-         "sorting, optional imports and stats. The outline is source-derived; "
+         "sorting, and optional stats. The outline is source-derived; "
          "do not open the file merely to verify symbol names, signatures, or "
          "line numbers already shown. See 'info browse_file'.",
          {{"file", "string",
@@ -1122,7 +1118,6 @@ void register_explore_handlers(McpServer& server, MasterIndex* indexer) {
           {"max", "integer", "Max symbols (default: 100)", ""},
           {"include", "string",
            "Same as list_symbols. Default: signature,ids", ""},
-          {"show_imports", "boolean", "Include import list", ""},
           {"show_stats", "boolean",
            "Include file-level statistics (symbol counts, avg complexity)",
            ""}},
