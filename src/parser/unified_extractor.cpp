@@ -171,6 +171,12 @@ std::vector<Symbol> scan_cython_callables(std::string_view content,
 
 void UnifiedExtractor::init(std::string_view content, FileID file_id,
                             std::string_view ext, std::string_view path) {
+    // One extractor may be reused across files (pool contract): every
+    // per-file collection and traversal state resets here, not only in
+    // reset(), or file N inherits file N-1's symbols/refs/type env.
+    // Callers attach the side-effect sink AFTER init (pipeline, tests), so
+    // reset()'s sink clear is safe here.
+    reset();
     content_ = content;
     file_id_ = file_id;
     // Routing identity comes from the language_map table (case-insensitive;
@@ -182,15 +188,6 @@ void UnifiedExtractor::init(std::string_view content, FileID file_id,
     lang_ = language_info(ext).language;
     family_ = language_info(ext).family;
     path_ = path;
-    ref_id_ = 1;
-    current_level_ = 0;
-    in_import_context_ = false;
-    in_trait_or_impl_body_ = false;
-    has_current_func_ = false;
-    se_func_depth_ = 0;
-    se_guard_depth_ = 0;
-    se_branch_id_ = 0;
-    lines_initialized_ = false;
 }
 
 void UnifiedExtractor::reset() {
@@ -198,6 +195,8 @@ void UnifiedExtractor::reset() {
     file_id_ = 0;
     ext_ = {};
     path_ = {};
+    lang_ = LangId::Unknown;
+    family_ = LangFamily::kUnknown;
 
     symbols_.clear();
     blocks_.clear();
