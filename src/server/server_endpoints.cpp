@@ -166,7 +166,14 @@ void IndexServer::handle_symbol(const httplib::Request& req,
         return;
     }
 
-    uint64_t symbol_id = body.value("symbol_id", uint64_t{0});
+    uint64_t symbol_id = 0;
+    std::string decode_error;
+    if (!server_request::require_object(body, decode_error) ||
+        !server_request::optional_field(body, "symbol_id", symbol_id,
+                                        decode_error)) {
+        error_response(res, 400, decode_error);
+        return;
+    }
     if (symbol_id == 0) {
         error_response(res, 400, "symbol_id is required");
         return;
@@ -204,7 +211,15 @@ void IndexServer::handle_fileinfo(const httplib::Request& req,
         return;
     }
 
-    auto file_id = static_cast<FileID>(body.value("file_id", 0u));
+    unsigned file_id_raw = 0;
+    std::string decode_error;
+    if (!server_request::require_object(body, decode_error) ||
+        !server_request::optional_field(body, "file_id", file_id_raw,
+                                        decode_error)) {
+        error_response(res, 400, decode_error);
+        return;
+    }
+    auto file_id = static_cast<FileID>(file_id_raw);
     if (file_id == 0) {
         error_response(res, 400, "file_id is required");
         return;
@@ -463,13 +478,21 @@ void IndexServer::handle_tree(const httplib::Request& req,
         return;
     }
 
-    auto function_name = body.value("function_name", "");
+    std::string function_name;
+    int max_depth = 0;
+    std::string decode_error;
+    if (!server_request::require_object(body, decode_error) ||
+        !server_request::optional_string(body, "function_name",
+                                         function_name, decode_error) ||
+        !server_request::optional_field(body, "max_depth", max_depth,
+                                        decode_error)) {
+        error_response(res, 400, decode_error);
+        return;
+    }
     if (function_name.empty()) {
         error_response(res, 400, "function_name is required");
         return;
     }
-
-    int max_depth = body.value("max_depth", 0);
 
     // Find the symbol by name
     auto rt_snap = indexer_->ref_tracker().pin();

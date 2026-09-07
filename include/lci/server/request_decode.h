@@ -26,23 +26,50 @@ struct LimitedPattern {
     int max_results{100};
 };
 
+/// Every field-reading endpoint gates on this first: a parsed body that
+/// is not a JSON object is a client error (400), not a type_error
+/// escaping into httplib (500).
+inline bool require_object(const nlohmann::json& body, std::string& error) {
+    if (!body.is_object()) {
+        error = "JSON body must be an object";
+        return false;
+    }
+    return true;
+}
+
 template <typename T>
 bool optional_field(const nlohmann::json& body, const char* name, T& value,
                     std::string& error) {
     auto it = body.find(name);
     if (it == body.end()) return true;
-    if constexpr (std::is_same_v<T, int>) {
-        if (!it->is_number_integer()) {
-            error = std::string(name) + " must be an integer";
-            return false;
-        }
-    } else if constexpr (std::is_same_v<T, bool>) {
+    if constexpr (std::is_same_v<T, bool>) {
         if (!it->is_boolean()) {
             error = std::string(name) + " must be a boolean";
             return false;
         }
+    } else if constexpr (std::is_integral_v<T>) {
+        if (!it->is_number_integer()) {
+            error = std::string(name) + " must be an integer";
+            return false;
+        }
+    } else {
+        static_assert(std::is_same_v<T, int>,
+                      "optional_field supports integral and bool types");
     }
     value = it->get<T>();
+    return true;
+}
+
+/// Optional nullable field: absent or explicit null leaves `value`
+/// empty; present with the wrong type is a client error (false+error).
+template <typename T>
+bool optional_nullable_field(const nlohmann::json& body, const char* name,
+                             std::optional<T>& value, std::string& error) {
+    auto it = body.find(name);
+    if (it == body.end() || it->is_null()) return true;
+    T v{};
+    if (!optional_field(body, name, v, error)) return false;
+    value = v;
     return true;
 }
 

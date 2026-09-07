@@ -133,33 +133,51 @@ void IndexServer::handle_list_symbols(const httplib::Request& req,
         return;
     }
 
-    auto kind_str = body.value("kind", "");
-    auto kinds = parse_symbol_kinds(kind_str);
-    auto file_filter = body.value("file", "");
-    auto name_filter = body.value("name", "");
-    auto receiver_filter = body.value("receiver", "");
+    std::string kind_str, file_filter, name_filter, receiver_filter;
+    std::string sort_key;
     std::optional<bool> exported_filter;
-    if (body.contains("exported") && !body["exported"].is_null()) {
-        exported_filter = body["exported"].get<bool>();
-    }
     std::optional<int> min_complexity, max_complexity;
     std::optional<int> min_params, max_params;
-    if (body.contains("min_complexity") && !body["min_complexity"].is_null()) {
-        min_complexity = body["min_complexity"].get<int>();
+    int page_max = 0, page_offset = 0;
+    std::string decode_error;
+    if (!server_request::require_object(body, decode_error) ||
+        !server_request::optional_string(body, "kind", kind_str,
+                                         decode_error) ||
+        !server_request::optional_string(body, "file", file_filter,
+                                         decode_error) ||
+        !server_request::optional_string(body, "name", name_filter,
+                                         decode_error) ||
+        !server_request::optional_string(body, "receiver", receiver_filter,
+                                         decode_error) ||
+        !server_request::optional_string(body, "sort", sort_key,
+                                         decode_error) ||
+        !server_request::optional_nullable_field(body, "exported",
+                                                 exported_filter,
+                                                 decode_error) ||
+        !server_request::optional_nullable_field(body, "min_complexity",
+                                                 min_complexity,
+                                                 decode_error) ||
+        !server_request::optional_nullable_field(body, "max_complexity",
+                                                 max_complexity,
+                                                 decode_error) ||
+        !server_request::optional_nullable_field(body, "min_params",
+                                                 min_params, decode_error) ||
+        !server_request::optional_nullable_field(body, "max_params",
+                                                 max_params, decode_error) ||
+        // Validated as integers here so normalize_page's value() reads
+        // below can never throw a type_error into httplib.
+        !server_request::optional_field(body, "max", page_max,
+                                        decode_error) ||
+        !server_request::optional_field(body, "offset", page_offset,
+                                        decode_error)) {
+        error_response(res, 400, decode_error);
+        return;
     }
-    if (body.contains("max_complexity") && !body["max_complexity"].is_null()) {
-        max_complexity = body["max_complexity"].get<int>();
-    }
-    if (body.contains("min_params") && !body["min_params"].is_null()) {
-        min_params = body["min_params"].get<int>();
-    }
-    if (body.contains("max_params") && !body["max_params"].is_null()) {
-        max_params = body["max_params"].get<int>();
-    }
+
+    auto kinds = parse_symbol_kinds(kind_str);
     const auto page = normalize_page(body);
     const int max_results = page.max;
     const int offset = page.offset;
-    const auto sort_key = body.value("sort", "");
 
     auto all_file_ids = indexer_->get_all_file_ids();
     // Sort by file_id ascending for deterministic output ordering.
@@ -329,6 +347,22 @@ void IndexServer::handle_inspect_symbol(const httplib::Request& req,
         return;
     }
 
+    std::string id_str, name_str, file_filter, type_filter, include_raw;
+    std::string decode_error;
+    if (!server_request::require_object(body, decode_error) ||
+        !server_request::optional_string(body, "id", id_str, decode_error) ||
+        !server_request::optional_string(body, "name", name_str,
+                                         decode_error) ||
+        !server_request::optional_string(body, "file", file_filter,
+                                         decode_error) ||
+        !server_request::optional_string(body, "type", type_filter,
+                                         decode_error) ||
+        !server_request::optional_string(body, "include", include_raw,
+                                         decode_error)) {
+        error_response(res, 400, decode_error);
+        return;
+    }
+
     std::vector<ReferenceTracker::Snapshot::SymbolHandle> matched;
 
     // Pin the RCU snapshot for the lifetime of every pointer pulled from the
@@ -337,7 +371,6 @@ void IndexServer::handle_inspect_symbol(const httplib::Request& req,
     auto rt_snap = indexer_->ref_tracker().pin();
 
     // Try by ID first
-    auto id_str = body.value("id", "");
     if (!id_str.empty()) {
         auto decoded = decode_symbol_id(id_str);
         if (decoded.has_value()) {
@@ -350,14 +383,11 @@ void IndexServer::handle_inspect_symbol(const httplib::Request& req,
     }
 
     // Try by name if no ID match
-    auto name_str = body.value("name", "");
     if (matched.empty() && !name_str.empty()) {
         matched = rt_snap->find_symbols_by_name(name_str);
     }
 
     // Apply disambiguators (file, type)
-    auto file_filter = body.value("file", "");
-    auto type_filter = body.value("type", "");
     if (!file_filter.empty() || !type_filter.empty()) {
         auto type_kinds = parse_symbol_kinds(type_filter);
 
@@ -380,7 +410,6 @@ void IndexServer::handle_inspect_symbol(const httplib::Request& req,
         matched = filtered;
     }
 
-    auto include_raw = body.value("include", "");
     const bool include_signature =
         include_raw == "all" || include_raw == "signature" ||
         include_raw.find("signature") != std::string::npos;
@@ -518,19 +547,44 @@ void IndexServer::handle_browse_file(const httplib::Request& req,
         return;
     }
 
+    std::optional<int> file_id_raw;
+    std::string file_str, kind_str;
+    std::optional<bool> exported_filter;
+    int max_results = 100;
+    bool show_imports = false, show_stats = false;
+    std::string decode_error;
+    if (!server_request::require_object(body, decode_error) ||
+        !server_request::optional_nullable_field(body, "file_id",
+                                                 file_id_raw, decode_error) ||
+        !server_request::optional_string(body, "file", file_str,
+                                         decode_error) ||
+        !server_request::optional_string(body, "kind", kind_str,
+                                         decode_error) ||
+        !server_request::optional_nullable_field(body, "exported",
+                                                 exported_filter,
+                                                 decode_error) ||
+        !server_request::optional_field(body, "max", max_results,
+                                        decode_error) ||
+        !server_request::optional_field(body, "show_imports", show_imports,
+                                        decode_error) ||
+        !server_request::optional_field(body, "show_stats", show_stats,
+                                        decode_error)) {
+        error_response(res, 400, decode_error);
+        return;
+    }
+
     FileID target_fid = 0;
     std::string target_path;
     bool found = false;
 
     // Try by file_id first
-    if (body.contains("file_id") && !body["file_id"].is_null()) {
-        target_fid = static_cast<FileID>(body["file_id"].get<int>());
+    if (file_id_raw.has_value()) {
+        target_fid = static_cast<FileID>(*file_id_raw);
         target_path = indexer_->get_file_path(target_fid);
         if (!target_path.empty()) found = true;
     }
 
     // Try by file path
-    auto file_str = body.value("file", "");
     if (!found && !file_str.empty()) {
         auto all_ids = indexer_->get_all_file_ids();
         for (auto fid : all_ids) {
@@ -562,13 +616,7 @@ void IndexServer::handle_browse_file(const httplib::Request& req,
         return;
     }
 
-    auto kind_str = body.value("kind", "");
     auto kinds = parse_symbol_kinds(kind_str);
-    std::optional<bool> exported_filter;
-    if (body.contains("exported") && !body["exported"].is_null()) {
-        exported_filter = body["exported"].get<bool>();
-    }
-    int max_results = body.value("max", 100);
     if (max_results <= 0) max_results = 100;
 
     auto rt_snap = indexer_->ref_tracker().pin();
@@ -629,7 +677,7 @@ void IndexServer::handle_browse_file(const httplib::Request& req,
     j["total"] = total;
 
     // Optional imports
-    if (body.value("show_imports", false)) {
+    if (show_imports) {
         auto fc = indexer_->file_content_store().get_file(target_fid);
         // Imports are stored on FileInfo which isn't directly accessible
         // from the current C++ API. Return empty for now.
@@ -637,7 +685,7 @@ void IndexServer::handle_browse_file(const httplib::Request& req,
     }
 
     // Optional stats
-    if (body.value("show_stats", false)) {
+    if (show_stats) {
         int func_count = 0;
         int type_count = 0;
         int exported_count = 0;
