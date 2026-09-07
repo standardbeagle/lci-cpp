@@ -127,6 +127,14 @@ class UnifiedExtractor {
     // Returns cached type or queries and caches it.
     std::string_view get_node_type(TSNode node);
 
+    // True when entering this node swaps in a fresh local type env (a
+    // function/method definition in every language whose reference handler
+    // clears local_var_types_). visit_node snapshots the enclosing env on
+    // entry and restores it on exit so a nested function/arrow/closure
+    // cannot clobber the enclosing function's receiver types. Go's
+    // func_literal is excluded: closures deliberately inherit the env.
+    bool swaps_local_type_env(std::string_view node_type) const;
+
     // Returns true if the node type represents a function definition.
     static bool is_function_node(std::string_view node_type);
 

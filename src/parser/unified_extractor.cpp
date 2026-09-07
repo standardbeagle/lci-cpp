@@ -302,6 +302,15 @@ void UnifiedExtractor::visit_node(TSNode node) {
     // heap alloc accommodating the prior (since-removed) vector cache.
     std::string_view node_type = get_node_type(node);
 
+    // Local type env boundary: the per-language reference handlers clear and
+    // re-seed local_var_types_ on function entry. Snapshot the enclosing env
+    // here and restore it after the subtree, or a nested function/arrow/
+    // closure clobbers the enclosing function's receiver types and every
+    // later `param.method()` degrades to a bare name / foreign_receiver.
+    const bool env_boundary = swaps_local_type_env(node_type);
+    absl::flat_hash_map<std::string, std::string> saved_env;
+    if (env_boundary) saved_env = local_var_types_;
+
     // === COMPLEXITY TRACKING ===
     PositionKey func_key{};
     bool is_func = false;
@@ -458,6 +467,9 @@ void UnifiedExtractor::visit_node(TSNode node) {
             side_effects_->end_function();
         }
     }
+
+    // Restore the enclosing function's local type env (see entry snapshot).
+    if (env_boundary) local_var_types_ = std::move(saved_env);
 }
 
 // ---------------------------------------------------------------------------
@@ -481,6 +493,15 @@ std::string_view UnifiedExtractor::get_node_type(TSNode node) {
 // ---------------------------------------------------------------------------
 // Node classification helpers
 // ---------------------------------------------------------------------------
+
+bool UnifiedExtractor::swaps_local_type_env(std::string_view t) const {
+    // Go closures (func_literal) inherit the enclosing function's env by
+    // design — process_go_reference only seeds on function_declaration /
+    // method_declaration, which cannot nest.
+    if (ext_ == ".go" && t == "func_literal") return false;
+    return is_function_node(t) || t == "singleton_method" ||
+           t == "constructor_declaration";
+}
 
 bool UnifiedExtractor::is_function_node(std::string_view t) {
     return t == "function_declaration" || t == "function_definition" ||
