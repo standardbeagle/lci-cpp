@@ -533,13 +533,14 @@ TEST(SideEffectsHandlerTest, ImpureModeDeterministicAcrossProcesses) {
                                     b["line"].get<int>());
         EXPECT_LT(key_a, key_b);
     }
-    // Exact sorted head: file0.go lines 10 and 14, then file1.go line 11.
+    // Exact sorted head: file0.go lines 10, 14, 18 (i%4 spreads the 10
+    // functions across file0..file3, lines 10..19).
     EXPECT_EQ(results[0]["file_path"].get<std::string>(), "file0.go");
     EXPECT_EQ(results[0]["line"].get<int>(), 10);
     EXPECT_EQ(results[1]["file_path"].get<std::string>(), "file0.go");
     EXPECT_EQ(results[1]["line"].get<int>(), 14);
-    EXPECT_EQ(results[2]["file_path"].get<std::string>(), "file1.go");
-    EXPECT_EQ(results[2]["line"].get<int>(), 11);
+    EXPECT_EQ(results[2]["file_path"].get<std::string>(), "file0.go");
+    EXPECT_EQ(results[2]["line"].get<int>(), 18);
 }
 
 }  // namespace

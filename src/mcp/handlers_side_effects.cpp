@@ -211,6 +211,27 @@ int clamp(int value, int lo, int hi) {
     return value;
 }
 
+/// Collects analyzer records matching `keep`, sorted by (file_path,
+/// start_line). analyzer.results() is a flat_hash_map whose iteration order
+/// varies per process; every capped emission must sort before it truncates
+/// (karpathy #4: never hash-iteration order in user-visible output).
+template <typename Keep>
+std::vector<const SideEffectInfo*> sorted_results(
+    const SideEffectAnalyzer& analyzer, Keep keep) {
+    std::vector<const SideEffectInfo*> out;
+    out.reserve(analyzer.results().size());
+    for (const auto& [key, info] : analyzer.results()) {
+        if (keep(info)) out.push_back(&info);
+    }
+    std::sort(out.begin(), out.end(),
+              [](const SideEffectInfo* a, const SideEffectInfo* b) {
+                  if (a->file_path != b->file_path)
+                      return a->file_path < b->file_path;
+                  return a->start_line < b->start_line;
+              });
+    return out;
+}
+
 }  // namespace
 
 // -- handle_semantic_annotations ----------------------------------------------
@@ -470,18 +491,18 @@ ToolResult side_effect_file_query(const nlohmann::json& params,
     std::string want_rel(relative_to_root(file_path, root));
 
     nlohmann::json results = nlohmann::json::array();
-    int total = 0;
-    int shown = 0;
-    for (const auto& [key, info] : analyzer.results()) {
-        if (std::string(relative_to_root(info.file_path, root)) != want_rel)
-            continue;
-        ++total;
-        if (shown < max_results) {
-            results.push_back(side_effect_to_json(info, include_reasons,
-                                                  include_transitive,
-                                                  include_confidence, root));
-            ++shown;
-        }
+    auto matched = sorted_results(analyzer, [&](const SideEffectInfo& info) {
+        return relative_to_root(info.file_path, root) == want_rel;
+    });
+    const int total = static_cast<int>(matched.size());
+    const int shown = std::min(total, max_results);
+    results.get_ref<nlohmann::json::array_t&>().reserve(
+        static_cast<size_t>(shown));
+    for (int i = 0; i < shown; ++i) {
+        results.push_back(side_effect_to_json(*matched[static_cast<size_t>(i)],
+                                              include_reasons,
+                                              include_transitive,
+                                              include_confidence, root));
     }
 
     nlohmann::json response;
@@ -510,18 +531,18 @@ ToolResult side_effect_purity_query(const nlohmann::json& params,
     int max_results = clamp(params.value("max_results", 100), 1, 10000);
 
     nlohmann::json results = nlohmann::json::array();
-    int total = 0;
-    int shown = 0;
-    for (const auto& [key, info] : analyzer.results()) {
-        if (info.is_pure == want_pure) {
-            ++total;
-            if (shown < max_results) {
-                results.push_back(side_effect_to_json(
-                    info, include_reasons, include_transitive,
-                    include_confidence, root));
-                ++shown;
-            }
-        }
+    auto matched = sorted_results(analyzer, [&](const SideEffectInfo& info) {
+        return info.is_pure == want_pure;
+    });
+    const int total = static_cast<int>(matched.size());
+    const int shown = std::min(total, max_results);
+    results.get_ref<nlohmann::json::array_t&>().reserve(
+        static_cast<size_t>(shown));
+    for (int i = 0; i < shown; ++i) {
+        results.push_back(side_effect_to_json(*matched[static_cast<size_t>(i)],
+                                              include_reasons,
+                                              include_transitive,
+                                              include_confidence, root));
     }
 
     nlohmann::json response;
@@ -563,18 +584,19 @@ ToolResult side_effect_category_query(const nlohmann::json& params,
     int max_results = clamp(params.value("max_results", 100), 1, 10000);
 
     nlohmann::json results = nlohmann::json::array();
-    int total = 0;
-    int shown = 0;
-    for (const auto& [key, info] : analyzer.results()) {
+    auto matched = sorted_results(analyzer, [&](const SideEffectInfo& info) {
         uint32_t combined = info.categories | info.transitive_categories;
-        if ((combined & bit) == 0) continue;
-        ++total;
-        if (shown < max_results) {
-            results.push_back(side_effect_to_json(info, include_reasons,
-                                                  include_transitive,
-                                                  include_confidence, root));
-            ++shown;
-        }
+        return (combined & bit) != 0;
+    });
+    const int total = static_cast<int>(matched.size());
+    const int shown = std::min(total, max_results);
+    results.get_ref<nlohmann::json::array_t&>().reserve(
+        static_cast<size_t>(shown));
+    for (int i = 0; i < shown; ++i) {
+        results.push_back(side_effect_to_json(*matched[static_cast<size_t>(i)],
+                                              include_reasons,
+                                              include_transitive,
+                                              include_confidence, root));
     }
 
     nlohmann::json response;
