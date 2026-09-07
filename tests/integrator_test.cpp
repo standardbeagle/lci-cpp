@@ -185,6 +185,36 @@ TEST(FileIntegratorTest, IntegratesTrigramsIntoIndex) {
     EXPECT_EQ(integrator.id_to_path(FileID{1}), "/src/main.go");
 }
 
+// Pins the symbol-less-file fix: merge_symbols used to bail out on
+// `file.symbols.empty()`, silently dropping the file's references, scopes
+// and imports. A file with references but no symbols must still contribute
+// those references to the tracker.
+TEST(FileIntegratorTest, SymbolessFileStillContributesReferences) {
+    TrigramIndex trigram_idx;
+    ReferenceTracker ref_tracker;
+    PostingsIndex postings_idx;
+
+    FileIntegrator integrator(&trigram_idx, &ref_tracker, &postings_idx);
+
+    auto pf = make_processed_file(FileID{1}, "/src/caller.go", trigram_idx,
+                                  "package main");
+    Reference ref;
+    ref.type = ReferenceType::Call;
+    ref.referenced_name = "helper";
+    ref.line = 3;
+    ref.column = 5;
+    pf.references.push_back(ref);
+
+    integrator.integrate_file(pf);
+
+    auto snap = ref_tracker.pin();
+    auto it = snap->refs_by_file.find(FileID{1});
+    ASSERT_NE(it, snap->refs_by_file.end())
+        << "symbol-less file's references were dropped at integration";
+    ASSERT_EQ(it->second.size(), 1u);
+    EXPECT_FALSE(it->second[0].dead);
+}
+
 TEST(FileIntegratorTest, IntegratesSymbols) {
     TrigramIndex trigram_idx;
     ReferenceTracker ref_tracker;

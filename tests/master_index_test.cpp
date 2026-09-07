@@ -1149,5 +1149,27 @@ TEST(MasterIndexTest, ThrowDuringReindexUnwindsIndexingStateAndAllowsRetry) {
     EXPECT_FALSE(mi.ref_tracker().pin()->find_symbols_by_name("AlphaSymbol").empty());
 }
 
+// Pins the same-FileID re-integration fix: indexing an already-indexed
+// path went through FileIntegrator::integrate_file with the file's
+// EXISTING id, and the stale-data removal only fired when the id CHANGED
+// — so every symbol (and trigram location) was duplicated on the second
+// index. Exactly one symbol per definition must survive.
+TEST(MasterIndexTest, IndexFileTwiceKeepsOneSymbolPerDefinition) {
+    TempDir dir;
+    dir.write_file("m.go", "package main\nfunc Alpha() {}\n");
+
+    Config cfg;
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+
+    const std::string path = (dir.path() / "m.go").string();
+    ASSERT_TRUE(mi.index_file(path));
+    ASSERT_TRUE(mi.index_file(path));
+
+    auto snap = mi.ref_tracker().pin();
+    EXPECT_EQ(snap->find_symbols_by_name("Alpha").size(), 1u)
+        << "re-indexing an already-indexed path duplicated its symbols";
+}
+
 }  // namespace
 }  // namespace lci
