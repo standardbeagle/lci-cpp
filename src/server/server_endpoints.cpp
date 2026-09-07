@@ -106,11 +106,8 @@ void IndexServer::handle_ping(const httplib::Request& /*req*/,
 void IndexServer::handle_status(const httplib::Request& /*req*/,
                                  httplib::Response& res) {
     bool active = indexing_active_.load(std::memory_order_acquire);
-    bool ready = false;
-    {
-        std::shared_lock lock(mu_);
-        ready = search_engine_ != nullptr;
-    }
+    const bool ready =
+        search_engine_.load(std::memory_order_acquire) != nullptr;
 
     int fc = 0;
     int sc = 0;
@@ -373,9 +370,9 @@ void IndexServer::handle_reindex(const httplib::Request& req,
         std::unique_ptr<SearchEngine> prev_owned;
         {
             std::unique_lock engine_lock(mu_);
-            prev_engine = search_engine_;
+            prev_engine = search_engine_.load(std::memory_order_acquire);
             prev_owned = std::move(owned_search_engine_);
-            search_engine_ = nullptr;
+            search_engine_.store(nullptr, std::memory_order_release);
         }
 
         // No indexer_->clear() here: index_directory() opens its own bulk
@@ -404,7 +401,7 @@ void IndexServer::handle_reindex(const httplib::Request& req,
             {
                 std::unique_lock engine_lock(mu_);
                 owned_search_engine_ = std::move(prev_owned);
-                search_engine_ = prev_engine;
+                search_engine_.store(prev_engine, std::memory_order_release);
             }
             indexing_active_.store(false, std::memory_order_release);
             return;
@@ -418,7 +415,8 @@ void IndexServer::handle_reindex(const httplib::Request& req,
         {
             std::unique_lock engine_lock(mu_);
             owned_search_engine_ = std::move(engine);
-            search_engine_ = owned_search_engine_.get();
+            search_engine_.store(owned_search_engine_.get(),
+                                 std::memory_order_release);
         }
         indexing_active_.store(false, std::memory_order_release);
     }));

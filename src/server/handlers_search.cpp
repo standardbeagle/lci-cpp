@@ -52,11 +52,10 @@ void IndexServer::handle_search(const httplib::Request& req,
     // loudly instead. Reuses the existing `error` field which Client::search
     // already surfaces to the CLI as a nonzero-exit error.
     if (!request->paths.empty()) {
-        std::vector<std::string> unmatched;
-        {
-            std::shared_lock lock(mu_);
-            unmatched = indexer_->scopes_without_indexed_match(request->paths);
-        }
+        // Lock-free read: MasterIndex serves this from its RCU-published
+        // snapshot, same as the search below — no mu_ on the read path.
+        std::vector<std::string> unmatched =
+            indexer_->scopes_without_indexed_match(request->paths);
         if (!unmatched.empty()) {
             std::string joined;
             for (size_t i = 0; i < unmatched.size(); ++i) {
@@ -82,11 +81,9 @@ void IndexServer::handle_search(const httplib::Request& req,
     // OR across entries). Empty leaves search unscoped (unchanged behavior).
     opts.path_scopes = request->paths;
 
-    std::vector<SearchResult> results;
-    {
-        std::shared_lock lock(mu_);
-        results = indexer_->search_with_options(request->pattern, opts);
-    }
+    // RCU read, same pin discipline as /callers: no shared_lock on mu_.
+    std::vector<SearchResult> results =
+        indexer_->search_with_options(request->pattern, opts);
 
     int max_res = opts.max_results;
     if (static_cast<int>(results.size()) > max_res) {
@@ -160,11 +157,9 @@ void IndexServer::handle_definition(const httplib::Request& req,
         return;
     }
 
-    std::vector<SearchResult> results;
-    {
-        std::shared_lock lock(mu_);
-        results = indexer_->search_definitions(request->pattern);
-    }
+    // RCU read: no shared_lock on mu_ (see /callers).
+    std::vector<SearchResult> results =
+        indexer_->search_definitions(request->pattern);
 
     if (static_cast<int>(results.size()) > request->max_results) {
         results.resize(static_cast<size_t>(request->max_results));
@@ -266,11 +261,9 @@ void IndexServer::handle_references(const httplib::Request& req,
     opts.max_results = request->max_results;
     opts.max_context_lines = 5;
 
-    std::vector<SearchResult> results;
-    {
-        std::shared_lock lock(mu_);
-        results = indexer_->search_with_options(request->pattern, opts);
-    }
+    // RCU read: no shared_lock on mu_ (see /callers).
+    std::vector<SearchResult> results =
+        indexer_->search_with_options(request->pattern, opts);
 
     if (static_cast<int>(results.size()) > request->max_results) {
         results.resize(static_cast<size_t>(request->max_results));

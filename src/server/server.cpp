@@ -299,10 +299,7 @@ void IndexServer::enable_instance_registry(const std::string& dir) {
 }
 
 void IndexServer::set_search_engine(SearchEngine* engine) {
-    {
-        std::unique_lock lock(mu_);
-        search_engine_ = engine;
-    }
+    search_engine_.store(engine, std::memory_order_release);
     // Publishing a live engine means the external index build finished;
     // clearing one means a rebuild is in flight again.
     indexing_active_.store(engine == nullptr, std::memory_order_release);
@@ -496,7 +493,8 @@ bool IndexServer::start() {
     // requested) leaves `indexing_active_` set so the superseding
     // /reindex thread is responsible for clearing it; a clean shutdown
     // clears the flag so /status reports accurately.
-    if (owned_indexer_ && !search_engine_) {
+    if (owned_indexer_ &&
+        search_engine_.load(std::memory_order_acquire) == nullptr) {
         indexing_active_.store(true, std::memory_order_release);
         swap_indexing_thread(std::thread([this] {
             indexer_->index_directory(config_.project.root);
@@ -513,7 +511,8 @@ bool IndexServer::start() {
             {
                 std::unique_lock engine_lock(mu_);
                 owned_search_engine_ = std::move(engine);
-                search_engine_ = owned_search_engine_.get();
+                search_engine_.store(owned_search_engine_.get(),
+                                     std::memory_order_release);
             }
             indexing_active_.store(false, std::memory_order_release);
 
@@ -523,7 +522,7 @@ bool IndexServer::start() {
             // /reindex) is in flight.
             start_watch_pipeline(this, config_, *indexer_);
         }));
-    } else if (search_engine_ == nullptr) {
+    } else if (search_engine_.load(std::memory_order_acquire) == nullptr) {
         // Externally-owned index with no engine yet: the owner is building
         // the index and will publish via set_search_engine(). Report the
         // build as active so /status is truthful and the idle reaper does
@@ -1259,8 +1258,10 @@ void IndexServer::error_response(httplib::Response& res, int status,
 }
 
 bool IndexServer::require_ready(httplib::Response& res) {
-    std::shared_lock lock(mu_);
-    if (search_engine_ == nullptr) {
+    // Lock-free readiness gate: the engine pointer is an atomic
+    // publication flag; index reads below it go through MasterIndex's RCU
+    // snapshots (see /callers), so no handler on the read path takes mu_.
+    if (search_engine_.load(std::memory_order_acquire) == nullptr) {
         error_response(res, 503, "index not ready - still indexing");
         return false;
     }

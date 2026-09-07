@@ -311,9 +311,11 @@ inline constexpr size_t kMinServerWorkerThreads = 2 * kMaxQueuedRequests;
 /// Wraps a MasterIndex and optional SearchEngine, exposing index queries
 /// and lifecycle management over HTTP/JSON.
 ///
-/// Thread safety: All handlers use a shared_mutex for read-heavy access
-/// to the indexer and search engine. The server itself is thread-safe
-/// via cpp-httplib's internal thread pool.
+/// Thread safety: read handlers are lock-free — the engine pointer is an
+/// atomic publication flag and index reads go through MasterIndex's RCU
+/// snapshots (karpathy-principles rule 3). Mutexes remain on the write
+/// side only (engine handoff, indexing-thread swap, lifecycle). The server
+/// itself is thread-safe via cpp-httplib's internal thread pool.
 class IndexServer {
   public:
     /// Creates a server that owns its own index (starts indexing on Start).
@@ -378,8 +380,7 @@ class IndexServer {
     /// True once the index is built and the search engine is published
     /// (the same condition /status reports as ready).
     bool is_ready() const {
-        std::shared_lock lock(mu_);
-        return search_engine_ != nullptr &&
+        return search_engine_.load(std::memory_order_acquire) != nullptr &&
                !indexing_active_.load(std::memory_order_acquire);
     }
 
@@ -431,7 +432,13 @@ class IndexServer {
     Config config_;
     std::unique_ptr<MasterIndex> owned_indexer_;
     MasterIndex* indexer_{};
-    SearchEngine* search_engine_{};
+    // The published search engine doubles as the readiness flag: handlers
+    // load it atomically (never under mu_) so the read path stays
+    // lock-free — index data itself is read through MasterIndex's RCU
+    // snapshots, exactly like /callers. Writers publish with release
+    // stores; mu_ below now guards only the owned_search_engine_ handoff
+    // between writer threads, never a reader.
+    std::atomic<SearchEngine*> search_engine_{nullptr};
     std::unique_ptr<SearchEngine> owned_search_engine_;
 
     httplib::Server svr_;
@@ -447,6 +454,8 @@ class IndexServer {
     // flag; start() re-arms it for the next listen.
     std::atomic<bool> listener_stop_issued_{false};
     std::atomic<bool> indexing_active_{false};
+    // Write-side only: serialises the owned_search_engine_ handoff between
+    // the indexing thread and set_search_engine. Readers never take it.
     mutable std::shared_mutex mu_;
     std::mutex lifecycle_mu_;
     bool handlers_registered_{false};
