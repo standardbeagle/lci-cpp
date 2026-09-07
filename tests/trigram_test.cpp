@@ -1,7 +1,19 @@
 #include <gtest/gtest.h>
 
 #include <lci/core/reference_tracker.h>
+
+// The duplicate-location assertion below needs TrigramIndex's per-trigram
+// location vectors, which are private RCU-snapshot internals. Pre-include
+// every header trigram.h pulls in (guards armed), then widen `private`
+// for trigram.h alone — the header is outside this task's editable scope,
+// so no test-only accessor can be added there.
+#include <absl/container/flat_hash_map.h>
+#include <absl/container/flat_hash_set.h>
+#include <lci/core/atomic_shared_ptr.h>
+#include <lci/types.h>
+#define private public
 #include <lci/core/trigram.h>
+#undef private
 
 #include <algorithm>
 #include <chrono>
@@ -868,6 +880,31 @@ TEST(TrigramIndexNarrowTest, AsciiPatternProbesUnicodeIndexedFiles) {
     auto n = index.narrow("needle", false);
     ASSERT_TRUE(n.informative());
     EXPECT_FALSE(n.certifies_absent(FileID{1}));
+}
+
+// Pins the incremental re-index duplication fix: index_file on an already
+// indexed file must REPLACE its locations, not append a second full set.
+// The old code erased the file from invalidated_files without purging its
+// old locations (cleanup_snapshot only ran from remove_file past 100
+// invalidations), so every watch-path update doubled the file's postings.
+TEST(TrigramIndexIncrementalTest, ReindexReplacesLocations) {
+    constexpr uint32_t kCom =
+        (uint32_t('c') << 16) | (uint32_t('o') << 8) | uint32_t('m');
+    const std::string_view content = "func compute_value() {}\n";
+
+    TrigramIndex once;
+    once.index_file(FileID{1}, content);
+    const size_t after_one =
+        once.load_snapshot()->ascii_trigrams.at(kCom).locations.size();
+    ASSERT_EQ(after_one, 1u) << "setup: expected exactly one \"com\"";
+
+    TrigramIndex twice;
+    twice.index_file(FileID{1}, content);
+    twice.index_file(FileID{1}, content);
+    const size_t after_two =
+        twice.load_snapshot()->ascii_trigrams.at(kCom).locations.size();
+    EXPECT_EQ(after_two, after_one)
+        << "re-indexing appended a duplicate set of locations";
 }
 
 }  // namespace
