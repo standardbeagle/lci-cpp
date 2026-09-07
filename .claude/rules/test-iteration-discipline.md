@@ -89,3 +89,33 @@ latency assertion is a load artifact, not a regression: confirm by re-running th
 one filter in isolation, then force per
 `worktree-isolation-and-goldens.md` rule 3. Do not spend a gate attempt on it.
 <!-- written_at: 2026-09-05T23:30:00Z  source_event: task:01M1NCSJ31EQ7WZ9GEEB8CDCY5, workflow-step:ctest-full-gate attempt2+attempt3, comment:01M1SS0ETX44R3301Z74V07SSM, memory:contention-robust-perf-tests -->
+
+### 6a. Force only when the diff provably cannot REACH the timed path; adjacency demands a pre/post A/B
+
+Rule 6 lets you charge a lone latency failure to host load. That shortcut is only sound when
+the slice's diff is nowhere near the timed subsystem. S4 was the adjacent case: it rewrote the
+`/search` handler's lock path, and `FastapiSearchUnder5ms` failed at load 26 with its best-of-5
+cluster sitting ON the bound (9485-10096 us against 10000 us), not far above it. A rerun would
+have proved nothing either way.
+
+The triage that settled it, and the recipe to repeat:
+
+1. **Read what the test actually times.** Here `ctx.search -> MasterIndex::search_with_options`
+   runs IN-PROCESS (`tests/integration/real_project_performance_test.cpp:95-111`,
+   `tests/helpers/real_project_helpers.h:217-229`) with no `IndexServer`, socket or HTTP in the
+   timed window — so a server-handler diff cannot reach it. State the reachability argument by
+   naming the timed call chain and the diff's paths, not by asserting orthogonality.
+2. **Interleave pre/post, do not batch.** Detach a worktree at the pre-slice sha, build both,
+   and alternate runs so both binaries see the same load. Report min AND median:
+   pre-S4 `c9b7e32` min 5651 / median 7720 us vs main min 5456 / median 7099 us, load 17.3-17.7,
+   and both >10 ms samples landed on the PRE-slice binary. A post-slice binary that is faster on
+   both statistics closes the question; a batched A/B cannot, because load drifts between batches.
+3. **Record the numbers in the force reason.** `forced_v1` with "it's rule 6" and no bisect is
+   the shortcut this clause exists to stop.
+
+Build note for step 2: the harness low-memory guard killed the bisect build three times while a
+sibling `rustc` peak ran. `setsid nohup <build> &` survives it — a detached build is the only one
+that finishes under a contended host, and a foreground build under those conditions is a wasted
+20-minute cycle, not a signal.
+
+`source_event: task-01M1NCSJ31JA7K2WZJY5DGASHZ, ctest-full-gate attempt1 (2727/2728) -> attempt2 forced_v1, comment 01M1YRESKBG0JB47FFJ3BDZFRN, git c9b7e32..120fe3b, 2026-09-07`

@@ -95,6 +95,16 @@ Distinguish two dirty-tree shapes on task resume, they need opposite fixes:
   (work-evidence over renewal liveness) both apply only once the lease is
   confirmed dead.
 
+- **A capped/timed-out agent attempt produces the same shape and recovers the same way.** S4's
+  first ACP attempt hit the 7200 s cap mid-refactor with six commits landed and a 4-file, +45/-44
+  in-scope diff uncommitted. Two halves of the fix: (a) the coordinator reopens as
+  `transient_environment` and PREPENDS a resume block to the task content naming every landed sha
+  with its subject, the uncommitted paths with their `--stat`, and the criteria still outstanding
+  — a resume without it re-derives or redoes work; (b) the implementer commits each criterion's
+  GREEN before opening the next one, so a cap loses at most one criterion instead of a refactor.
+  Attempt 2 opened by re-reading the `git diff`, running the targeted tests, and committing the
+  residue as `5b05997` before touching anything new; that is the correct order under this rule.
+
 `source_event: task-01KXEEH7RD3D03VN6EP8ZZEP0F ("S1 — Forge deterministic mutated exploration corpora"), workflow 01KXH30SW9CRPTKQ1CPPV89SRJ bench-unit-tests attempt1 (failed, ImportError, 2026-07-14T19:52) -> attempt2 (passed, 2026-07-14T20:48), comment 01KXH65CHP9GDD5670RMVSCY3X, 2026-07-14/15`
 
 ## 5. Never `git checkout` the shared primary checkout onto a feature branch — add a worktree instead
@@ -159,3 +169,27 @@ only excess path is the header of an in-scope `.cpp` is a scope-authoring miss, 
 discipline breach — widen and re-evaluate rather than routing the doc edit elsewhere.
 
 <!-- written_at: 2026-09-07T16:10:00Z  source_event: task:01M1NCSJ31A8XHPC7NKJEGS7RV, comment:01M1XARQG97QQRBYFEC4M06YBJ (scopeChanges.new_scope), comment:01M1Y9F94319CA8P3SN338J7ZA (scope a3), git:734ced3 -->
+
+## 7. A criterion whose RED needs a hook the code does not expose is closed by inspection plus a disclosed guard test — never by a test that would have passed anyway, silently
+
+Rule 6 says prove RED in a fresh worktree. Some criteria have no deterministic RED at all: S4's
+"umask(077) before bind" guards the window between `bind_to_port` and the later `chmod`, and
+observing a socket's mode inside that window needs a hook httplib does not offer. The shipped
+`SocketModeIsOwnerOnlyUnderPermissiveUmask` passes on the pre-fix tree via that later `chmod`.
+
+That is acceptable, under three conditions, and unacceptable without them:
+
+1. **The implementer DISCLOSES it at commit time and in the task comment** — naming which test is
+   a true RED and which is a guard that passes pre-fix, and why no RED exists. Here `d622ca9`
+   carried both: `SocketLockSymlinkIsNotFollowed` is a true RED (pre-fix the server flocked the
+   symlink's target); the umask test is the disclosed guard.
+2. **The reviewer records the acceptance-by-inspection in the verdict**, naming what was inspected
+   (`umask(0077)` scoped around `bind_to_port` and restored) — so the exception is auditable
+   instead of inferred from a green suite.
+3. **The guard test still ships.** It pins the window closed against a future edit that reopens it,
+   which is the only thing it can do. A criterion with neither a RED nor a guard is unproven.
+
+An undisclosed guard test is the failure this rule exists to stop: it reads exactly like a RED in
+the log, and the next reader has no way to tell the difference.
+
+`source_event: task-01M1NCSJ31JA7K2WZJY5DGASHZ, comment 01M1YN2KMVDWG69MFYKE2ZWYQ4, verdict 01M1YV33SDYRC4FYQA2NVNPMGW (umaskDecision), git d622ca9/120fe3b, 2026-09-07`

@@ -50,6 +50,17 @@ LCI's reason to exist is sub-millisecond semantic code search with 79.8% context
   reader sees "not found", and search silently degrades to scan-all. Clear inside the bulk
   window / on the commit path, never before it opens.
   <!-- written_at: 2026-09-04T14:00:00Z  source_event: task:01M1NCSJ31P21DT2VVB2H0DSKS, git:15f8f52, git:8acde22 -->
+- **A criterion states the INVARIANT, not the mechanism — and the audit that picks the mechanism
+  comes first.** S4's criterion read "the engine pointer is obtained via the same RCU pin
+  `/callers` uses". The reviewer's audit found `search_engine_` is never dereferenced by any
+  handler (`grep` for `->` uses on it: 0) — it is a readiness flag, index reads already travel
+  `indexer_`'s RCU snapshots, so an atomic pointer was the correct tool and an RCU pin would have
+  been ceremony around a bool. The criterion had over-specified a mechanism the code did not need,
+  and satisfying it literally would have been the wrong change. Write the invariant instead — "no
+  reader can observe a freed engine, and no read handler takes a mutex" — and before choosing
+  between an atomic, an RCU pin, or a lock, grep for whether the shared thing is DEREFERENCED or
+  merely TESTED. A flag needs publication ordering; a graph needs a pin.
+  <!-- written_at: 2026-09-07T21:30:00Z  source_event: task:01M1NCSJ31JA7K2WZJY5DGASHZ, comment:01M1YV33SDYRC4FYQA2NVNPMGW, git:5b05997 -->
 - **Audit every caller of an API you change, including the read-only ones your `fileScope`
   excludes.** A caller that pre-clears, pre-locks, or pre-resets before calling the fixed API
   cancels the fix for that path, and the fix ships looking complete. Two callers of the same
