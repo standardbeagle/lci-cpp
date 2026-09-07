@@ -914,6 +914,26 @@ TEST_F(SideEffectExtraction, CppWhatIsFullFidelity) {
     EXPECT_EQ(count_findings(empty->error_findings, EhSignal::EmptyCatch), 1);
 }
 
+// The C-family verdict must come from the language table, not the raw
+// extension string: a header spelling (.hh) of the same TU must grade
+// `record(e.what())` exactly like the .cpp spelling.
+TEST_F(SideEffectExtraction, HeaderExtensionKeepsCppCauseFidelity) {
+    constexpr std::string_view src =
+        "void f() {\n"
+        "  try { g(); } catch (const std::exception& e) { record(e.what()); "
+        "}\n"
+        "}\n";
+    for (const char* ext :
+         {".cpp", ".cc", ".cxx", ".h", ".hpp", ".hh", ".hxx"}) {
+        const auto* info = analyze(Language::Cpp, ext, src, "f");
+        ASSERT_NE(info, nullptr) << ext;
+        EXPECT_EQ(count_findings(info->error_findings,
+                                 EhSignal::LossyPropagation),
+                  0)
+            << ext << " must route through the same C-family fidelity table";
+    }
+}
+
 // Logging is graded the same way: the bare error prints a stack, the message
 // prints a sentence. Both swallow; one is diagnosable.
 TEST_F(SideEffectExtraction, LoggingTheMessageCostsMoreThanLoggingTheError) {
