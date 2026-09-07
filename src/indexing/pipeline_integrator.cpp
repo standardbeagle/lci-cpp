@@ -71,9 +71,12 @@ void FileIntegrator::integrate(BoundedQueue<ProcessedFile>& results) {
 void FileIntegrator::integrate_file(ProcessedFile& file) {
     FileID file_id = file.file_id;
 
-    // Check if this is an update - remove stale data first.
+    // Check if this is an update - remove stale data first. The id-equality
+    // check that used to guard this skipped the purge on same-FileID
+    // re-integration (MasterIndex::index_file on an already-indexed path
+    // reuses the path-stable id), duplicating every symbol and posting.
     auto it = file_map_.find(file.path);
-    if (it != file_map_.end() && it->second != file_id) {
+    if (it != file_map_.end()) {
         remove_stale_data(it->second);
     }
 
@@ -138,8 +141,9 @@ void FileIntegrator::merge_trigrams(ProcessedFile& file) {
 }
 
 void FileIntegrator::merge_symbols(ProcessedFile& file) {
-    if (file.symbols.empty()) return;
-
+    // NOT gated on file.symbols.empty(): a symbol-less file still carries
+    // references, scopes and imports, and dropping them here silently
+    // removed every cross-file edge its call sites should have built.
     if (ref_tracker_ != nullptr) {
         // Process imports first, then symbols + references + scopes.
         if (file_content_store_ != nullptr) {
