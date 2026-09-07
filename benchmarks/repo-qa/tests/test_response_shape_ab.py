@@ -56,9 +56,10 @@ class ResponseShapeABTest(unittest.TestCase):
         self.assertNotEqual(one["cell_key"],two["cell_key"])
         with tempfile.TemporaryDirectory() as d:
             path=Path(d)/"x.json"; path.write_text("bad")
-            with self.assertRaises(RuntimeError): ab.reusable(path,one)
-            path.write_text(json.dumps({**one,"status":"provider_timeout","answer":"","score":None})); self.assertFalse(ab.reusable(path,one))
-            stale={**one,"fixture_digest":"sha256:stale"}; path.write_text(json.dumps({**stale,"status":"answered","answer":"{}","score":{}})); self.assertFalse(ab.reusable(path,one))
+            retryable=self.manifest["retryable_statuses"]
+            with self.assertRaises(RuntimeError): ab.reusable(path,one,retryable)
+            path.write_text(json.dumps({**one,"status":"provider_timeout","answer":"","score":None})); self.assertFalse(ab.reusable(path,one,retryable))
+            stale={**one,"fixture_digest":"sha256:stale"}; path.write_text(json.dumps({**stale,"status":"answered","answer":"{}","score":{}})); self.assertFalse(ab.reusable(path,one,retryable))
 
     def test_retry_preserves_failed_attempt(self):
         task=self.tasks[0]; model=self.manifest["models"][0]["id"]
@@ -176,6 +177,60 @@ class ResponseShapeABTest(unittest.TestCase):
             self.assertTrue((out/"report.md").exists())
             self.assertIn("Response-format comprehension scorecard",(out/"report.md").read_text())
 
+    def test_atomic_expected_answers_grade_the_fact_not_the_phrase(self):
+        """The real glm-5.2 cell answered "30 seconds"; the phrase envelope called it an omission.
+
+        Recording: response-shape/recordings/opencode-go-glm-5.2.file-lines.shape_42.jsonl.
+        Grading the ATOMIC value (number + unit) makes the terse form correct while a
+        changed value or a changed unit still fails, in both directions.
+        """
+        task=[x for x in self.tasks if x["id"]=="file-lines"][0]
+        base={"evidence":["config/runtime.toml:12"],"claims":["the configured timeout is 30 seconds"]}
+        for phrasing in ("30 seconds","The configured timeout is 30 seconds","timeout: 30 seconds"):
+            self.assertTrue(ab.score_answer(task,{**base,"answers":[phrasing]})["correct"],phrasing)
+        wrong_value=ab.score_answer(task,{**base,"answers":["99 seconds"]})
+        self.assertFalse(wrong_value["correct"]); self.assertEqual(wrong_value["omissions"],["30 seconds"])
+        wrong_unit=ab.score_answer(task,{**base,"answers":["30 minutes"]})
+        self.assertFalse(wrong_unit["correct"]); self.assertEqual(wrong_unit["omissions"],["30 seconds"])
+
+    def test_accepted_forms_are_declared_in_the_bank_not_inferred_by_the_grader(self):
+        task=[x for x in self.tasks if x["id"]=="negative-match"][0]
+        atoms=ab.expected_atoms(task)
+        self.assertEqual([label for label,_ in atoms],["no matches"])
+        self.assertIn("0 matches",atoms[0][1])
+        ok={"answers":["0 matches found"],"evidence":["searched src/**"],"claims":["no matches"]}
+        self.assertTrue(ab.score_answer(task,ok)["correct"])
+        # an undeclared near-form is NOT credited: the bank, not the grader, owns synonymy
+        self.assertFalse(ab.score_answer(task,{**ok,"answers":["nothing turned up"]})["correct"])
+
+    def test_bank_rejects_an_expected_answer_absent_from_the_rendered_facts(self):
+        bank={"tasks":json.loads(json.dumps(self.tasks))}
+        bank["tasks"][3]["expected_answers"]=[{"value":"45 seconds"}]
+        with self.assertRaisesRegex(ValueError,"expected answer"): ab.validate_bank(self.manifest,bank)
+
+    def test_grading_schema_is_bumped_for_the_atomic_rule(self):
+        self.assertEqual(self.manifest["grading_schema"],"atomic-value-v3")
+
+    def test_resume_retries_only_the_declared_retryable_statuses(self):
+        """§13: the skip predicate reads the OUTCOME, and the manifest names which are retryable."""
+        task=self.tasks[0]; model=self.manifest["models"][0]["id"]
+        good=json.dumps({"answers":["src/widget.cc:18"],"evidence":["src/widget.cc:18"],"claims":["src/widget.cc:18"]})
+        def seed(out,status):
+            ab.execute(ab.FakeProvider({(task["id"],"shape_17",model):{"status":status,"answer":"","failure_reason":status}}),
+                       self.manifest,task,"shape_17",model,1,out)
+        for status in self.manifest["retryable_statuses"]:
+            with tempfile.TemporaryDirectory() as d:
+                out=Path(d); seed(out,status)
+                rec=ab.execute(ab.FakeProvider({(task["id"],"shape_17",model):good}),self.manifest,task,"shape_17",model,1,out)
+                self.assertEqual(rec["status"],"answered",status)
+        for status in ("malformed_answer","empty_answer","harness_error","exit_3"):
+            with tempfile.TemporaryDirectory() as d:
+                out=Path(d); seed(out,status)
+                provider=ab.FakeProvider({(task["id"],"shape_17",model):good})
+                rec=ab.execute(provider,self.manifest,task,"shape_17",model,1,out)
+                self.assertEqual(rec["status"],status,status)
+                self.assertEqual(provider.calls,[],"a terminal status must not re-call the provider")
+
     def test_containment_credits_added_context_but_rejects_a_changed_value(self):
         """Both directions, per the oracle-independence rule's discrimination clause.
 
@@ -192,7 +247,7 @@ class ResponseShapeABTest(unittest.TestCase):
         wrong={**base,"answers":["The configured timeout is 99 seconds"],"claims":["timeout is 99 seconds"]}
         score=ab.score_answer(task,wrong)
         self.assertFalse(score["correct"]); self.assertTrue(score["hallucinated"])
-        self.assertEqual(score["omissions"],["timeout is 30 seconds"])
+        self.assertEqual(score["omissions"],["30 seconds"])
         # an unrelated extra answer costs precision, so padding cannot buy credit
         padded={**base,"answers":["The configured timeout is 30 seconds","the cache is disabled"]}
         score=ab.score_answer(task,padded)
