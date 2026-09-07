@@ -12,6 +12,7 @@
 #include <lci/search/search_engine.h>
 #include <lci/core/graph_propagator.h>
 #include <lci/core/semantic_annotator.h>
+#include <lci/idcodec.h>
 #include <lci/indexing/master_index.h>
 #include <lci/mcp/validation.h>
 #include <lci/symbol.h>
@@ -415,23 +416,64 @@ ToolResult side_effect_symbol_query(const nlohmann::json& params,
                                     MasterIndex* indexer,
                                     std::string_view root) {
     auto symbol_name = params.value("symbol_name", "");
+    auto symbol_id = params.value("symbol_id", "");
     auto file_path = params.value("file_path", "");
 
-    if (symbol_name.empty() && file_path.empty()) {
+    if (symbol_name.empty() && symbol_id.empty() && file_path.empty()) {
         return make_error_response(
             "side_effects",
-            "symbol mode requires 'symbol_name' or 'file_path' with symbol lookup");
+            "symbol mode requires 'symbol_name', 'symbol_id', or "
+            "'file_path' with symbol lookup");
     }
 
     bool include_reasons = params.value("include_reasons", false);
     bool include_transitive = params.value("include_transitive", false);
     bool include_confidence = params.value("include_confidence", false);
 
-    // Search by symbol name through the index's reference tracker
-    if (!symbol_name.empty() && indexer) {
-        auto& ref = indexer->ref_tracker();
-        auto rt_snap = ref.pin();
+    if (!indexer) {
+        return make_error_response(
+            "side_effects", "symbol lookup requires an index");
+    }
+
+    auto& ref = indexer->ref_tracker();
+    auto rt_snap = ref.pin();
+
+    const EnhancedSymbol* resolved = nullptr;
+    ReferenceTracker::Snapshot::SymbolHandle handle;
+
+    // symbol_id is the exact address — honor it first (the schema advertises
+    // it; object ids from list_symbols/inspect_symbol are meant to be used).
+    if (!symbol_id.empty()) {
+        auto decoded = decode_symbol_id(symbol_id);
+        if (!decoded) {
+            return make_error_response(
+                "side_effects", "invalid symbol_id: " + symbol_id);
+        }
+        handle = rt_snap->get_enhanced_symbol(*decoded);
+        if (!handle) {
+            return make_unavailable_response(
+                "side_effects", "symbol_id not found: " + symbol_id,
+                "the id may be stale; re-run list_symbols or inspect_symbol "
+                "to get a current object_id");
+        }
+        resolved = handle.get();
+    } else if (!symbol_name.empty()) {
         auto symbols = rt_snap->find_symbols_by_name(symbol_name);
+        // file_path disambiguates same-name definitions: keep only the
+        // symbols whose file matches (compared root-relative, like file
+        // mode, so both spellings work).
+        if (!file_path.empty()) {
+            std::string want_rel(relative_to_root(file_path, root));
+            std::vector<ReferenceTracker::Snapshot::SymbolHandle> in_file;
+            for (const auto& s : symbols) {
+                if (relative_to_root(
+                        indexer->get_file_path(s->symbol.file_id), root) ==
+                    want_rel) {
+                    in_file.push_back(s);
+                }
+            }
+            symbols = std::move(in_file);
+        }
         if (symbols.empty()) {
             // Lookup miss: a definitive negative answer, not a tool error
             // (matches inspect_symbol's found=false shape).
@@ -440,9 +482,13 @@ ToolResult side_effect_symbol_query(const nlohmann::json& params,
                 "check the spelling, or use search/list_symbols to locate "
                 "the symbol");
         }
-        const auto& sym = symbols[0];
-        auto path = indexer->get_file_path(sym->symbol.file_id);
-        auto* info = analyzer.get_result(path, sym->symbol.line);
+        handle = symbols[0];
+        resolved = handle.get();
+    }
+
+    if (resolved) {
+        auto path = indexer->get_file_path(resolved->symbol.file_id);
+        auto* info = analyzer.get_result(path, resolved->symbol.line);
         if (!info) {
             // Stay loud without the error flag: we resolved the symbol but
             // the analyzer holds no side-effect record — a bare empty results
@@ -450,9 +496,9 @@ ToolResult side_effect_symbol_query(const nlohmann::json& params,
             // + reason says exactly why, without signaling a code failure.
             return make_unavailable_response(
                 "side_effects",
-                "symbol '" + symbol_name + "' resolved at " +
+                "symbol '" + resolved->symbol.name + "' resolved at " +
                     std::string(relative_to_root(path, root)) + ":" +
-                    std::to_string(sym->symbol.line) +
+                    std::to_string(resolved->symbol.line) +
                     " but has no side-effect record (not a function/method, "
                     "or the analyzer is unpopulated for this corpus)",
                 "try side_effects {\"mode\":\"summary\"}");
@@ -468,7 +514,8 @@ ToolResult side_effect_symbol_query(const nlohmann::json& params,
     }
 
     return make_error_response(
-        "side_effects", "symbol lookup requires an index with 'symbol_name'");
+        "side_effects",
+        "symbol lookup requires 'symbol_name' or 'symbol_id'");
 }
 
 ToolResult side_effect_file_query(const nlohmann::json& params,
