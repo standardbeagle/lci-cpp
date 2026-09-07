@@ -1,9 +1,12 @@
 #include <lci/indexing/watcher.h>
 
 #include <filesystem>
+#include <fstream>
 #include <string>
 
 #include <efsw/efsw.hpp>
+
+#include <lci/indexing/master_index.h>
 
 namespace lci {
 namespace fs = std::filesystem;
@@ -241,6 +244,118 @@ WatchStats FileWatcher::get_stats() const {
         .last_event_time = last_event_time_,
         .is_active = running_.load(std::memory_order_relaxed),
     };
+}
+
+// -- WatchPipeline -------------------------------------------------------------
+
+WatchPipeline::WatchPipeline(const Config& config, MasterIndex& index)
+    : config_(config),
+      index_(index),
+      watcher_(config),
+      rebuilder_(std::chrono::milliseconds{config.index.watch_debounce_ms}) {
+    watcher_.set_callback(
+        [this](const std::string& path, FileEventType type) {
+            on_event(path, type);
+        });
+    rebuilder_.set_callback(
+        [this](const std::vector<FileID>& file_ids) { on_rebuild(file_ids); });
+}
+
+WatchPipeline::~WatchPipeline() {
+    stop();
+}
+
+bool WatchPipeline::start() {
+    if (!config_.index.watch_mode) return false;
+    // A fresh watch starts from a clean deletion set — every file the
+    // index currently holds is alive by construction.
+    deleted_.clear();
+    return watcher_.start(config_.project.root);
+}
+
+void WatchPipeline::stop() {
+    // Watcher first: no new events may be scheduled once the debouncer is
+    // drained. DebouncedRebuilder::shutdown joins its timer thread; the
+    // FileWatcher dtor (via stop) joins efsw's worker.
+    watcher_.stop();
+    rebuilder_.shutdown();
+}
+
+void WatchPipeline::on_event(const std::string& path, FileEventType type) {
+    if (type == FileEventType::Remove) {
+        // Drop any pending debounced rebuild for the path — the file is
+        // gone, its rebuild would read nothing.
+        {
+            std::lock_guard lock(paths_mu_);
+            // (iterator-returning erase is not available on flat_hash_map
+            // in this absl version, hence erase_if over the tiny map.)
+            absl::erase_if(scheduled_paths_, [&](const auto& entry) {
+                return entry.second == path;
+            });
+        }
+        const FileID fid = index_.path_to_id(path);
+        if (fid != FileID{0}) {
+            deleted_.mark_deleted(fid);
+            index_.remove_file(path);
+        }
+        return;
+    }
+
+    const FileID fid = index_.path_to_id(path);
+    if (fid == FileID{0}) {
+        // New path: no FileID to debounce on, and batching by id 0 would
+        // collapse distinct new files into one rebuild. Index directly.
+        index_.index_file(path);
+        return;
+    }
+    {
+        std::lock_guard lock(paths_mu_);
+        scheduled_paths_[fid] = path;
+    }
+    rebuilder_.schedule_rebuild(fid);
+}
+
+void WatchPipeline::on_rebuild(const std::vector<FileID>& file_ids) {
+    // Never write incrementally while a bulk reindex holds the window: its
+    // clear→publish span would clobber these writes (the master_index.cpp
+    // INVARIANT). Reschedule — the debounce delay throttles the retry —
+    // and let the bulk run's own tree scan cover the change.
+    if (index_.is_indexing()) {
+        for (FileID fid : file_ids) rebuilder_.schedule_rebuild(fid);
+        return;
+    }
+
+    for (FileID fid : file_ids) {
+        std::string path;
+        {
+            std::lock_guard lock(paths_mu_);
+            auto it = scheduled_paths_.find(fid);
+            if (it == scheduled_paths_.end()) continue;
+            path = std::move(it->second);
+            scheduled_paths_.erase(it);
+        }
+
+        std::error_code ec;
+        if (!fs::exists(path, ec) || ec) {
+            // Vanished between event and rebuild: same handling as Remove.
+            deleted_.mark_deleted(fid);
+            index_.remove_file(path);
+            continue;
+        }
+        if (index_.path_to_id(path) == FileID{0}) {
+            // Removed from the index while the rebuild was pending (e.g. a
+            // racing full reindex): treat as a fresh add.
+            index_.index_file(path);
+            continue;
+        }
+
+        std::ifstream in(path, std::ios::binary);
+        if (!in) continue;
+        std::string content((std::istreambuf_iterator<char>(in)),
+                            std::istreambuf_iterator<char>());
+        if (!in.good() && !in.eof()) continue;
+        index_.update_file(path, content);
+    }
 }
 
 }  // namespace lci

@@ -3,6 +3,7 @@
 #include <lci/config.h>
 #include <lci/indexing/debounced_rebuilder.h>
 #include <lci/indexing/deleted_file_tracker.h>
+#include <lci/indexing/master_index.h>
 #include <lci/indexing/watcher.h>
 
 #include "unique_temp.h"
@@ -587,6 +588,97 @@ TEST(FileWatcherTest, DoubleStopIsSafe) {
     ASSERT_TRUE(watcher.start(tmp.path().string()));
     watcher.stop();
     watcher.stop();  // Should not crash or hang
+}
+
+// =============================================================================
+// WatchPipeline wiring tests
+// =============================================================================
+
+// Pins the watch-path wiring: with watch_mode on, editing an indexed file
+// must make its new symbols visible through the index within the debounce
+// window (plus margin) WITHOUT any manual reindex. Before the wiring, the
+// watcher/rebuilder had no caller outside tests and the server served
+// stale results until /reindex.
+TEST(FileWatcherTest, WiredPipelineIndexesNewFunctionWithoutReindex) {
+    TempDir tmp;
+    tmp.write_file("a.ts", "export function alpha() {}\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = tmp.path().string();
+    cfg.index.watch_mode = true;
+    cfg.index.watch_debounce_ms = 100;
+
+    MasterIndex index(cfg);
+    ASSERT_TRUE(index.index_directory(tmp.path().string()));
+    ASSERT_FALSE(
+        index.ref_tracker().pin()->find_symbols_by_name("alpha").empty())
+        << "setup: the initial index did not extract alpha";
+
+    WatchPipeline pipeline(cfg, index);
+    ASSERT_TRUE(pipeline.start());
+
+    tmp.write_file("a.ts",
+                   "export function alpha() {}\n"
+                   "export function wired_beta() {}\n");
+
+    // Deadline-based poll: debounce window + 2 s, no /reindex call.
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::milliseconds{100} +
+                          std::chrono::seconds{2};
+    bool found = false;
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (!index.ref_tracker()
+                 .pin()
+                 ->find_symbols_by_name("wired_beta")
+                 .empty()) {
+            found = true;
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds{25});
+    }
+    pipeline.stop();
+    EXPECT_TRUE(found)
+        << "watch path did not index the new function in time";
+}
+
+// A delete event must remove the file's symbols without a reindex, and
+// record the file in the pipeline's DeletedFileTracker.
+TEST(FileWatcherTest, WiredPipelineRemovesDeletedFile) {
+    TempDir tmp;
+    tmp.write_file("gone.ts", "export function ephemeral() {}\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = tmp.path().string();
+    cfg.index.watch_mode = true;
+    cfg.index.watch_debounce_ms = 100;
+
+    MasterIndex index(cfg);
+    ASSERT_TRUE(index.index_directory(tmp.path().string()));
+    const FileID fid =
+        index.path_to_id((tmp.path() / "gone.ts").generic_string());
+    ASSERT_NE(fid, FileID{0});
+
+    WatchPipeline pipeline(cfg, index);
+    ASSERT_TRUE(pipeline.start());
+
+    fs::remove(tmp.path() / "gone.ts");
+
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds{3};
+    bool gone = false;
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (index.ref_tracker()
+                .pin()
+                ->find_symbols_by_name("ephemeral")
+                .empty()) {
+            gone = true;
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds{25});
+    }
+    pipeline.stop();
+    EXPECT_TRUE(gone) << "deleted file's symbols survived the watch remove";
+    EXPECT_TRUE(pipeline.deleted_files().is_deleted(fid));
 }
 
 }  // namespace
