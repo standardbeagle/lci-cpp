@@ -593,3 +593,28 @@ the key.
 - **No number without a validated instrument** (karpathy-principles rule 1). A published
   rate whose grader has never met a real answer measures the grader.
 <!-- written_at: 2026-09-07T01:30:00Z  source_event: task:01KXW2BBMSM5K3NBZE4M1PW5T2, comment:01M1WKKNKEZVZ3XRPYQ913PCRZ (decisions+lessons, exact-match withdrawal), comment:01M1WKZBHXXV4Z2TV0DHCCRC8X (systemicObservations, costGate fix-now: 2 withdrawals / 3 harnesses), comment:01M1WP2E2JFP1P7X4TGYAHZ5DR (lessons: shape classes), git:93b750c, git:f866fc9; envelope clause: task:01KXXJK6TY8NE7NW8VB8E7610P, comment:01M1WQTRRZXE4XBNRDF2SXTF21 (lessons[1]), follow-up:01M1WR3HQ0HNKNT83ZEZ6FFSXM -->
+
+## 8. A criterion must state the INTENT plus a behavioural discrimination test — never a literal grep
+
+Two shapes of "proven" collapsed in the same slice, and both are the mirror-blindness of
+rules 5/6 moved from code into acceptance and into review claims:
+
+- **Grep-as-criterion.** S8's criterion read "`grep -n 'ext_ ==' src/parser` returns
+  nothing". It was satisfied while `ext_ !=` comparisons and helper *parameters* carrying
+  extension strings still routed catch-site fidelity by extension: an identical
+  `catch (const std::exception& e) { record(e.what()); }` scored `LossyPropagation=0` in
+  a `.cpp` and `=1` in a `.hh`. A grep is a smell detector; it cannot express the
+  invariant. Write the criterion as the intent ("every language dispatch reads the enum
+  set established in `init()`") **and** a discrimination test over two members of one
+  family that must produce identical output (`.hh` vs `.cpp`, `.mjs` vs `.js`). Keep the
+  grep as a secondary hint only.
+- **"Unobservable" is a claim that needs its failed probe cited.** The implementer
+  declared the Kotlin `kotlin_property_types_` clear-without-restore unobservable; the
+  reviewer wrote a four-line probe that observed it (a class property's receiver type
+  lost across a local class). The shipped test's own comment claimed to cover the path
+  while its fixture used a **local `val`**, which by construction cannot reach the
+  class-property map. So: a no-observable-effect claim must name the probe that failed to
+  observe it, and a test claiming to cover a path must use a fixture that provably
+  exercises that path — check the fixture against the state the fix touches, not against
+  the test's name.
+<!-- written_at: 2026-09-07T06:30:00Z  source_event: task:01M1NCSJ315Z7470JQWY24DF1V (review verdict 01M1X3JC399NZE2SXAV2WRJB5W, rewind attempt1->attempt2), git:df7c68a, git:f8ecd85, git:3c56505, git:71989f2 -->

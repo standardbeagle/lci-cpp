@@ -134,3 +134,13 @@ path. A task body containing an absolute `/tmp` path is a planning defect: fix i
 planning time, not at drain time. Scratchpad paths are legitimate only for material
 no other session needs.
 <!-- written_at: 2026-09-07T04:00:00Z  source_event: task:01M1NCSJ31ZEV9XGETA6VAF8CK, comment:01M1WR81BGRDGG78KWDQ6TK9AM, git:0d99447 -->
+
+## 6. Verify a RED test in a fresh detached worktree, not in the tree that holds the fix
+
+Standard C++ review shape when checking that a pinned RED test really fails without the
+fix: `git worktree add --detach <scratchpad>/red-<slug> <pre-fix-sha>`, cherry-pick the
+RED commit alone, build only `lci_tests` (the shared `FETCHCONTENT_BASE_DIR` dep cache
+and ccache make this cheap — see the worktree shared-dep-cache note), and run the single
+`--gtest_filter`. Re-running the RED test in the working tree proves nothing once the fix
+is present, and stashing the fix pollutes a tree another session may hold.
+<!-- written_at: 2026-09-07T06:30:00Z  source_event: task:01M1NCSJ315Z7470JQWY24DF1V, review verdict 01M1X3JC399NZE2SXAV2WRJB5W -->
