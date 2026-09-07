@@ -1226,4 +1226,83 @@ TEST(UnifiedExtractorTest, ShallowCodeDoesNotTripDepthGuard) {
     EXPECT_FALSE(r.depth_limit_hit);
 }
 
+// ---------------------------------------------------------------------------
+// Method vs Function classification must follow the node's actual parentage,
+// not a flag spanning the whole class subtree: a Python def nested inside a
+// method is a Function, and a C++ function_definition inside a class/struct
+// body is a Method.
+// ---------------------------------------------------------------------------
+
+TEST(UnifiedExtractorTest, PythonNestedDefIsFunctionNotMethod) {
+    constexpr std::string_view src = R"(
+class A:
+    def m(self):
+        def inner():
+            pass
+        inner()
+)";
+    auto tree = parse(Language::Python, src);
+    ASSERT_NE(tree.get(), nullptr);
+
+    UnifiedExtractor ue;
+    ue.init(src, 1, ".py", "a.py");
+    ue.extract(tree.get());
+    auto r = ue.get_results();
+
+    const Symbol* m = find_symbol(r, "m");
+    ASSERT_NE(m, nullptr);
+    EXPECT_EQ(m->type, SymbolType::Method);
+    const Symbol* inner = find_symbol(r, "inner");
+    ASSERT_NE(inner, nullptr);
+    EXPECT_EQ(inner->type, SymbolType::Function);
+}
+
+TEST(UnifiedExtractorTest, PythonDecoratedMethodStaysMethod) {
+    constexpr std::string_view src = R"(
+class B:
+    @property
+    def x(self):
+        return 1
+)";
+    auto tree = parse(Language::Python, src);
+    ASSERT_NE(tree.get(), nullptr);
+
+    UnifiedExtractor ue;
+    ue.init(src, 1, ".py", "b.py");
+    ue.extract(tree.get());
+    auto r = ue.get_results();
+
+    const Symbol* x = find_symbol(r, "x");
+    ASSERT_NE(x, nullptr);
+    EXPECT_EQ(x->type, SymbolType::Method);
+}
+
+TEST(UnifiedExtractorTest, CppInClassFunctionDefinitionIsMethod) {
+    constexpr std::string_view src = R"(
+struct S {
+    void m() {}
+    int n() { return 1; }
+};
+
+void free_fn() {}
+)";
+    auto tree = parse(Language::Cpp, src);
+    ASSERT_NE(tree.get(), nullptr);
+
+    UnifiedExtractor ue;
+    ue.init(src, 1, ".cpp", "s.cpp");
+    ue.extract(tree.get());
+    auto r = ue.get_results();
+
+    const Symbol* m = find_symbol(r, "m");
+    ASSERT_NE(m, nullptr);
+    EXPECT_EQ(m->type, SymbolType::Method);
+    const Symbol* n = find_symbol(r, "n");
+    ASSERT_NE(n, nullptr);
+    EXPECT_EQ(n->type, SymbolType::Method);
+    const Symbol* free_fn = find_symbol(r, "free_fn");
+    ASSERT_NE(free_fn, nullptr);
+    EXPECT_EQ(free_fn->type, SymbolType::Function);
+}
+
 }  // namespace lci::parser
