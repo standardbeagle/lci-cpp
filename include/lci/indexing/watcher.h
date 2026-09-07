@@ -15,6 +15,7 @@
 #include <lci/indexing/pipeline_scanner.h>
 
 #include <absl/container/flat_hash_map.h>
+#include <absl/container/flat_hash_set.h>
 
 namespace lci {
 
@@ -105,20 +106,23 @@ class FileWatcher {
 /// index_file/update_file/remove_file writes, so a running server serves
 /// fresh results without a manual /reindex.
 ///
-/// Event policy:
-///   - Remove: applied immediately (cheap, and delete events carry no
-///     content to coalesce); the file id is also recorded in a
-///     DeletedFileTracker snapshot.
-///   - Create/Write/Rename of a NOT-yet-indexed path: applied immediately
-///     via index_file (a new path has no FileID to debounce on).
+/// Event policy (all writes run on the DebouncedRebuilder's timer thread —
+/// the efsw callback thread never touches the index, because the
+/// single-file write APIs acquire MasterIndex::bulk_mu_ and would block on
+/// a bulk reindex window for minutes, overflowing the inotify queue):
+///   - Remove: the path is queued in pending_paths_ (batched under
+///     kPathBatchId); at rebuild time the file id is recorded in a
+///     DeletedFileTracker snapshot and the file removed from the index.
+///   - Create/Write/Rename of a NOT-yet-indexed path: queued in
+///     pending_paths_, then applied via index_file (a new path has no
+///     FileID to debounce on).
 ///   - Write/Rename of an indexed path: debounced per FileID, then applied
 ///     via update_file with content read from disk.
 ///
-/// While a bulk reindex is in flight (MasterIndex::is_indexing) rebuilds
-/// are rescheduled, never applied: the bulk window's clear→publish would
-/// clobber a concurrent incremental write (see the INVARIANT comment in
-/// master_index.cpp). The bulk run re-scans the tree anyway, so deferred
-/// events that it already covered are harmless rewrites.
+/// Mutual exclusion with a bulk reindex is structural, not checked here:
+/// MasterIndex's single-file writers acquire bulk_mu_ and wait out the
+/// bulk clear->publish window (see the INVARIANT in master_index.cpp), so
+/// rebuilds are applied, never rescheduled or dropped.
 ///
 /// Exclude/gitignore rules from the Config (.lci.kdl) are enforced by the
 /// FileWatcher itself before any event reaches this pipeline.
@@ -142,8 +146,17 @@ class WatchPipeline {
     const DeletedFileTracker& deleted_files() const { return deleted_; }
 
   private:
+    /// Sentinel FileID scheduling a drain of pending_paths_: Remove and
+    /// new-path events have no (stable) FileID to debounce on, so they
+    /// share one batch slot. Real FileIDs start at 1.
+    static constexpr FileID kPathBatchId{0};
+
     void on_event(const std::string& path, FileEventType type);
     void on_rebuild(const std::vector<FileID>& file_ids);
+    /// Reconciles one queued path against disk and index (remove / fresh
+    /// add / update). Runs on the debouncer timer thread; may block on
+    /// MasterIndex::bulk_mu_.
+    void apply_path(const std::string& path);
 
     const Config& config_;
     MasterIndex& index_;
@@ -155,6 +168,9 @@ class WatchPipeline {
     // FileID; the path is needed to reload content when the batch fires.
     std::mutex paths_mu_;
     absl::flat_hash_map<FileID, std::string> scheduled_paths_;
+    /// Paths queued without a FileID (Remove events, not-yet-indexed
+    /// paths), drained when the kPathBatchId batch fires.
+    absl::flat_hash_set<std::string> pending_paths_;
 };
 
 }  // namespace lci

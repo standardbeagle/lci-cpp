@@ -282,6 +282,11 @@ void WatchPipeline::stop() {
 }
 
 void WatchPipeline::on_event(const std::string& path, FileEventType type) {
+    // Runs on efsw's callback thread, which must never block on an index
+    // write: index_file/update_file/remove_file take bulk_mu_ and so wait
+    // out a whole bulk reindex window. Only the DebouncedRebuilder's timer
+    // thread ever applies writes, so every event — Remove and new-path
+    // included — is queued here and reconciled in on_rebuild.
     if (type == FileEventType::Remove) {
         // Drop any pending debounced rebuild for the path — the file is
         // gone, its rebuild would read nothing.
@@ -292,20 +297,21 @@ void WatchPipeline::on_event(const std::string& path, FileEventType type) {
             absl::erase_if(scheduled_paths_, [&](const auto& entry) {
                 return entry.second == path;
             });
+            pending_paths_.insert(path);
         }
-        const FileID fid = index_.path_to_id(path);
-        if (fid != FileID{0}) {
-            deleted_.mark_deleted(fid);
-            index_.remove_file(path);
-        }
+        rebuilder_.schedule_rebuild(kPathBatchId);
         return;
     }
 
     const FileID fid = index_.path_to_id(path);
     if (fid == FileID{0}) {
         // New path: no FileID to debounce on, and batching by id 0 would
-        // collapse distinct new files into one rebuild. Index directly.
-        index_.index_file(path);
+        // collapse distinct new files into one rebuild. Queue by path.
+        {
+            std::lock_guard lock(paths_mu_);
+            pending_paths_.insert(path);
+        }
+        rebuilder_.schedule_rebuild(kPathBatchId);
         return;
     }
     {
@@ -315,17 +321,48 @@ void WatchPipeline::on_event(const std::string& path, FileEventType type) {
     rebuilder_.schedule_rebuild(fid);
 }
 
-void WatchPipeline::on_rebuild(const std::vector<FileID>& file_ids) {
-    // Never write incrementally while a bulk reindex holds the window: its
-    // clear→publish span would clobber these writes (the master_index.cpp
-    // INVARIANT). Reschedule — the debounce delay throttles the retry —
-    // and let the bulk run's own tree scan cover the change.
-    if (index_.is_indexing()) {
-        for (FileID fid : file_ids) rebuilder_.schedule_rebuild(fid);
+// Reconcile one queued path against the disk and the index. Runs on the
+// debouncer timer thread, which may block on bulk_mu_.
+void WatchPipeline::apply_path(const std::string& path) {
+    const FileID fid = index_.path_to_id(path);
+    std::error_code ec;
+    if (!fs::exists(path, ec) || ec) {
+        // Removed (or vanished between event and rebuild).
+        if (fid != FileID{0}) {
+            deleted_.mark_deleted(fid);
+            index_.remove_file(path);
+        }
+        return;
+    }
+    if (fid == FileID{0}) {
+        // New path (or removed from the index while the event was pending):
+        // fresh add.
+        index_.index_file(path);
         return;
     }
 
+    std::ifstream in(path, std::ios::binary);
+    if (!in) return;
+    std::string content((std::istreambuf_iterator<char>(in)),
+                        std::istreambuf_iterator<char>());
+    if (!in.good() && !in.eof()) return;
+    index_.update_file(path, content);
+}
+
+void WatchPipeline::on_rebuild(const std::vector<FileID>& file_ids) {
     for (FileID fid : file_ids) {
+        if (fid == kPathBatchId) {
+            // Path-keyed batch: Remove and new-path events. Drain under the
+            // lock, reconcile outside it.
+            absl::flat_hash_set<std::string> paths;
+            {
+                std::lock_guard lock(paths_mu_);
+                paths.swap(pending_paths_);
+            }
+            for (const auto& path : paths) apply_path(path);
+            continue;
+        }
+
         std::string path;
         {
             std::lock_guard lock(paths_mu_);
@@ -334,27 +371,7 @@ void WatchPipeline::on_rebuild(const std::vector<FileID>& file_ids) {
             path = std::move(it->second);
             scheduled_paths_.erase(it);
         }
-
-        std::error_code ec;
-        if (!fs::exists(path, ec) || ec) {
-            // Vanished between event and rebuild: same handling as Remove.
-            deleted_.mark_deleted(fid);
-            index_.remove_file(path);
-            continue;
-        }
-        if (index_.path_to_id(path) == FileID{0}) {
-            // Removed from the index while the rebuild was pending (e.g. a
-            // racing full reindex): treat as a fresh add.
-            index_.index_file(path);
-            continue;
-        }
-
-        std::ifstream in(path, std::ios::binary);
-        if (!in) continue;
-        std::string content((std::istreambuf_iterator<char>(in)),
-                            std::istreambuf_iterator<char>());
-        if (!in.good() && !in.eof()) continue;
-        index_.update_file(path, content);
+        apply_path(path);
     }
 }
 
