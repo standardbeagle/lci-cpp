@@ -1305,4 +1305,45 @@ void free_fn() {}
     EXPECT_EQ(free_fn->type, SymbolType::Function);
 }
 
+TEST(UnifiedExtractorTest, InitResetsAllPerFileState) {
+    // One extractor reused across two files (the parser-pool contract):
+    // init() must reset every per-file collection — symbols, references,
+    // scopes, handled_nodes_, local_var_types_, lines_ — or file 2 inherits
+    // file 1's output.
+    constexpr std::string_view src1 = R"(
+class Foo { bar() {} }
+function helper() {}
+function f() { let x = new Foo(); x.bar(); helper(); }
+)";
+    auto tree1 = parse(Language::JavaScript, src1);
+    ASSERT_NE(tree1.get(), nullptr);
+
+    UnifiedExtractor ue;
+    ue.init(src1, 1, ".js", "a.js");
+    ue.extract(tree1.get());
+    auto r1 = ue.get_results();
+    ASSERT_NE(find_symbol(r1, "helper"), nullptr);
+    ASSERT_FALSE(r1.references.empty());
+
+    constexpr std::string_view src2 = "function g() { h(); }\n";
+    auto tree2 = parse(Language::JavaScript, src2);
+    ASSERT_NE(tree2.get(), nullptr);
+    ue.init(src2, 2, ".js", "b.js");
+    ue.extract(tree2.get());
+    auto r2 = ue.get_results();
+
+    EXPECT_NE(find_symbol(r2, "g"), nullptr);
+    EXPECT_EQ(find_symbol(r2, "helper"), nullptr);
+    EXPECT_EQ(find_symbol(r2, "Foo"), nullptr);
+    for (const auto& ref : r2.references) {
+        EXPECT_NE(ref.referenced_name, "helper");
+        EXPECT_EQ(ref.referenced_name.find("Foo"), std::string::npos)
+            << ref.referenced_name;
+        EXPECT_EQ(ref.file_id, 2u);
+    }
+    for (const auto& sym : r2.symbols) {
+        EXPECT_EQ(sym.file_id, 2u) << sym.name;
+    }
+}
+
 }  // namespace lci::parser
