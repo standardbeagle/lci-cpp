@@ -592,35 +592,6 @@ ToolResult side_effect_category_query(const nlohmann::json& params,
     return make_json_response(response);
 }
 
-// Counts callable symbols (functions, methods, constructors) across the index.
-// Used as the honest fallback when SideEffectAnalyzer.results() is empty — e.g.
-// a corpus whose languages the AST side-effect pass + callee-name heuristic
-// could not classify (unsupported grammar, all files skipped). The analyzer is
-// now wired into the MCP pipeline (populate_side_effects_from_ast +
-// populate_from_index in cli/mcp.cpp), so this path is reached only when that
-// wiring produced no records; it defaults unobserved functions to pure to match
-// the propagator's behaviour.
-int count_callable_symbols_in_index(const MasterIndex& indexer) {
-    int total = 0;
-    const auto& ref = indexer.ref_tracker();
-    auto rt_snap = ref.pin();
-    for (FileID fid : indexer.get_all_file_ids()) {
-        for (const auto& es : rt_snap->get_file_enhanced_symbols(fid)) {
-            if (!es) continue;
-            switch (es->symbol.type) {
-                case SymbolType::Function:
-                case SymbolType::Method:
-                case SymbolType::Constructor:
-                    ++total;
-                    break;
-                default:
-                    break;
-            }
-        }
-    }
-    return total;
-}
-
 ToolResult side_effect_summary(SideEffectAnalyzer& analyzer,
                                MasterIndex* indexer) {
     int total = 0;
@@ -649,17 +620,22 @@ ToolResult side_effect_summary(SideEffectAnalyzer& analyzer,
         if (combined & side_effect::kExternalCall) ++with_external;
     }
 
-    // Fallback: the AST side-effect pass + callee-name heuristic produced no
-    // per-function records (a corpus whose languages neither path could
-    // classify). Fall through to a function-count default so summary mode
-    // reports total_count honestly — matches Go's propagator-defaults-to-pure
-    // behaviour observed on parity corpora. Per-function purity data stays
-    // empty (results=null); only the aggregate counts in `summary` are
-    // populated. NOT a silent fallback — documented in MODULE_MAP.md
-    // (Decision: side_effects summary fallback, FIX-D.1.B / TwJuY55J9KM1).
-    if (total == 0 && indexer != nullptr) {
-        total = count_callable_symbols_in_index(*indexer);
-        pure_count = total;  // Go defaults unobserved functions to pure.
+    // Fail loud on empty analysis (Karpathy #6, no fabricated data): an
+    // analyzer with zero records means the side-effect pass produced nothing
+    // for this corpus. Report the unavailability explicitly — never invent a
+    // purity ratio from the index's callable count (that would claim 100%
+    // pure for functions nobody analyzed).
+    if (total == 0) {
+        nlohmann::json response;
+        response["results"] = nullptr;
+        response["total_count"] = 0;
+        response["mode"] = "summary";
+        response["error"] = "analysis_unavailable";
+        response["hint"] =
+            "no per-function side-effect data for this corpus; the "
+            "side-effect analyzer produced no records (unsupported languages "
+            "or the analysis pass has not run)";
+        return make_json_response(response);
     }
 
     nlohmann::json summary;
