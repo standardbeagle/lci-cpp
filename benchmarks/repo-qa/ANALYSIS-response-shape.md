@@ -1,22 +1,54 @@
-# Response-format comprehension scorecard
+# Response-format A/B — status
 
-Complete: **yes**  
-Interpretation valid: **no**
+**No result yet. The previously published scorecard is withdrawn.**
 
-| Model | Shape | Cells | Correct | Evidence | Hallucination | Omissions | Completion | Latency (s) | Tokens in/out |
-|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| opencode/deepseek-v4-flash-free | shape_17 | 12/12 | 66.7% | 66.7% | 91.7% | 0.33 | 100.0% | 9.93 | 0.00/0.00 |
-| opencode/deepseek-v4-flash-free | shape_42 | 12/12 | 58.3% | 58.3% | 100.0% | 0.33 | 100.0% | 11.28 | 0.00/0.00 |
-| opencode-go/glm-5.2 | shape_17 | 9/12 | 55.6% | 55.6% | 77.8% | 0.44 | 75.0% | 78.97 | 0.00/0.00 |
-| opencode-go/glm-5.2 | shape_42 | 8/12 | 50.0% | 62.5% | 87.5% | 0.50 | 66.7% | 72.10 | 0.00/0.00 |
+## Why the earlier scorecard is withdrawn
 
-## Model-class rollups
+The table that stood here reported 92-100% hallucination and 50-67% correctness.
+Both figures were grader artifacts, not model behavior.
 
-- `strong|shape_17`: correctness 55.6%, evidence 55.6%, completion 75.0%
-- `strong|shape_42`: correctness 50.0%, evidence 62.5%, completion 66.7%
-- `weak|shape_17`: correctness 66.7%, evidence 66.7%, completion 100.0%
-- `weak|shape_42`: correctness 58.3%, evidence 58.3%, completion 100.0%
+Answers were matched by exact string equality after case/whitespace
+normalization. A real recorded cell answered `The configured timeout is 30
+seconds` where the bank expected `timeout is 30 seconds`; the extra words made
+the strings unequal, so the same answer was scored incorrect AND counted as an
+unsupported claim. Every correctly-answering cell that added any context was
+penalized twice.
 
-## Failures
+The run also named `opencode/deepseek-v4-flash-free` as the weak model. That id
+is not in `opencode models`, so the weak rows could not have come from the model
+the manifest claims.
 
-- `malformed_answer`: 7
+Both defects are fixed (`atomic-evidence-v2-containment`, verified model ids).
+Because `grading_schema` is part of the cell identity, every record behind the
+old table is invalid by construction and the grid must be rerun.
+
+## Smoke evidence (2026-09-06)
+
+Two real cells, one per arm, `file-lines` task, `opencode-go/deepseek-v4-flash`,
+in the tool-denied corpus-free workspace. Streams committed under
+`response-shape/recordings/`.
+
+| Arm | Status | Correct | Evidence recall | Hallucinated |
+|---|---|---|---|---|
+| `shape_17` (compact) | answered | yes | 1.0 | no |
+| `shape_42` (labeled) | answered | yes | 1.0 | yes (see below) |
+
+Two cells decide nothing about the treatment. They prove the harness runs
+end-to-end against a live provider and scores the result.
+
+## Blockers and known limits
+
+- **The strong model is unreachable.** `opencode-go/glm-5.2` is listed by
+  `opencode models` but three independent attempts hung to timeout with empty
+  stdout and empty stderr, including a bare `opencode run` outside the harness.
+  This is provider-side. The grid cannot run its strong tier until it clears.
+- **Restructured prose still reads as a hallucination.** Containment credits a
+  fact wrapped in extra words; it does not credit the same fact re-expressed.
+  The `shape_42` claim `The timeout source is config/runtime.toml at line 12`
+  is fully supported by the bank's facts yet was flagged. Loosening further
+  (token overlap) risks a blanket accept, so the hallucination metric is
+  currently an UPPER bound and must not be read as a rate until this is
+  resolved. It is the one metric whose non-inferiority bound the design doc
+  makes decision-relevant.
+- No grid has been run under the corrected schema. Do not change any production
+  response shape on the strength of anything in this file.
