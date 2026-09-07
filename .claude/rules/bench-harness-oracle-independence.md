@@ -210,6 +210,19 @@ supplier or be deleted. And a prose note explaining WHY an experiment holds some
 constant is a load-bearing claim about code that may sit outside `fileScope` — verify it
 against the file that ships it (here the mock, one directory away; corrected in
 `df522f6`, real-schema mock filed as `01M1W40XF2E0HKT05SS51A5PJ2`).
+
+One level up from a vacuous assertion is a declaration nothing reads at all. Two of R1's
+three review blockers were this single shape: `manifest.retryable_statuses` and
+`practical_rule` were pre-registered, believed load-bearing, and had zero readers
+(`grep -c` over `scripts/`: 0 each), so the resume path retried every non-final status and
+the analyzer applied no decision rule while the manifest claimed both. A pre-registration
+no code consults pins nothing, and the decision rule then gets argued post hoc — the exact
+failure pre-registration exists to prevent. **Every declared policy field in a bench
+manifest needs at least one reader and a test that changes behaviour when the field
+changes**; grep for readers before pinning a field, and make an unsupported revision label
+raise rather than sit beside code that disagrees with it (fixed here in `f866fc9`;
+repo-wide manifest-key-to-consumer test filed separately).
+<!-- written_at: 2026-09-07T01:30:00Z  source_event: task:01KXW2BBMSM5K3NBZE4M1PW5T2, comment:01M1WKZBHXXV4Z2TV0DHCCRC8X (systemicObservations: 3 unread keys, costGate verdict file), comment:01M1WP2E2JFP1P7X4TGYAHZ5DR (lessons), git:f866fc9 -->
 <!-- written_at: 2026-09-06T20:10:00Z  source_event: task:01KXSHA3PEAEHXDQ7XZVXW3186, comment:01M1W402AFKB7SPSJJRNKYQ04B (advisory), comment:01M1W4D8JFVZ2MNBNABD5AKSEP, git:df522f6 -->
 
 <!-- written_at: 2026-09-06T16:00:00Z  source_event: task:01M1VMC1DEDYTPXRYNK1VA2CG5, comment:01M1VP25HW4D70S1FAWYD6T5EE, comment:01M1VPMW3R09KB2Q35BDC99FGZ, git:2701344, git:6ef7208, git:87f9e6c -->
@@ -505,3 +518,43 @@ ceiling (baseline correct in every rep).
   registered — editing a decision rule after seeing the data is the failure this discipline
   exists to prevent.
 <!-- written_at: 2026-09-06T23:55:00Z  source_event: task:01KXSHA3QKT5RDT4F08RA08H1N, comment:01M1WHMYBBF9XDKQ9KDRBBWMYW (lessons: floor-pinned-baseline hole), comment:01M1WHWNM6ECEJ2TP6X1QF5CHE (passPatterns + suggestions), follow-up:01M1WHXFH8C1HGJQT8FHWS0F16 -->
+
+## 16. The GRADER is an instrument: validate it on one real recorded answer per model tier before any scorecard is published
+
+Rules 1-7 protect a validator from the transformer it mirrors. A free-text answer grader
+has the same disease with a worse blast radius, because its output is a published number.
+R1's response-shape harness carried 18 green hermetic tests and a committed scorecard
+reporting a 92-100% hallucination rate across models — a uniform rate across models is the
+signature of a construction artifact, not a model property. The first real recorded stream
+falsified it: exact set-match scored `The configured timeout is 30 seconds` against the
+key `timeout is 30 seconds` as BOTH incorrect and hallucinated. Every fixture had been
+authored beside the grader, so every fixture agreed with it. The scorecard was withdrawn
+(`93b750c`), not footnoted.
+
+The fix then failed the same way a second time in one task. Containment, validated against
+the one verbose stream that had falsified exact-match, inherited that stream's shape: the
+next real model (glm-5.2) answered *tersely* — `30 seconds` — and was scored an omission on
+the first strong-tier cell, blocking review attempt 1. A both-directions discrimination test
+per rule 5 existed and still passed, because both directions were sampled from one side of
+the key.
+
+- **One real recorded cell per MODEL TIER before a grader is declared corrected**, and per
+  arm. Rule 7's "every real corpus, not one" on the model axis: two rounds here each smoked
+  a single model and each shipped a defect the second model exposed immediately. The
+  four-cell grid (2 arms x 2 tiers) cost the same order of time and $0.
+- **A correctness metric that can flip on phrasing is not a correctness metric.** Fix the
+  ANSWER KEY's shape, not the matcher's tolerance: expected answers hold the atomic value
+  (`30 seconds`) plus bank-declared `accepted_forms`, evidence identifiers stay exact, and a
+  `validate_answer_key` ties every atom to the rendered facts so the key cannot drift back
+  into prose. Synonymy then becomes a reviewable bank edit instead of a grader heuristic
+  that decays into blanket accept (`f866fc9`, `grading_schema` atomic-value-v3).
+- **Enumerate the answer SHAPE classes, not a positive and a negative** — terse,
+  wrapped, re-expressed, wrong value, wrong unit. This is rule 6's granularity axis applied
+  to the phrase envelope; a two-case test that samples one side of the key is the hole both
+  rounds fell through.
+- **Changing the grading rule invalidates paid records by construction** — bump the schema
+  id inside the cell digest and rerun rather than rescoring in place, so no scorecard mixes
+  rules.
+- **No number without a validated instrument** (karpathy-principles rule 1). A published
+  rate whose grader has never met a real answer measures the grader.
+<!-- written_at: 2026-09-07T01:30:00Z  source_event: task:01KXW2BBMSM5K3NBZE4M1PW5T2, comment:01M1WKKNKEZVZ3XRPYQ913PCRZ (decisions+lessons, exact-match withdrawal), comment:01M1WKZBHXXV4Z2TV0DHCCRC8X (systemicObservations, costGate fix-now: 2 withdrawals / 3 harnesses), comment:01M1WP2E2JFP1P7X4TGYAHZ5DR (lessons: shape classes), git:93b750c, git:f866fc9 -->
