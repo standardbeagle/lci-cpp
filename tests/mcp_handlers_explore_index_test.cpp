@@ -511,6 +511,43 @@ TEST(BrowseFileDeterminismTest, AmbiguousBasenameResolvesSmallestPath) {
     std::filesystem::remove_all(dir);
 }
 
+// Unread params must not sit in the schema as silent no-ops: a param the
+// handler never reads (browse_file show_imports, inspect_symbol max_depth)
+// is removed from the schema, and the server's unknown-param guard then
+// rejects it loudly (karpathy #6) instead of accepting and ignoring it.
+TEST_F(ExploreIndexTestFixture, UnreadParamsRejectedByUnknownParamGuard) {
+    Config config;
+    config.project.root = tmp_dir_.string();
+    McpServer server(config, *indexer_, nullptr);
+    register_explore_handlers(server, indexer_.get());
+
+    auto call = [&](const std::string& tool, const nlohmann::json& args) {
+        nlohmann::json req = {{"jsonrpc", "2.0"},
+                              {"id", 1},
+                              {"method", "tools/call"},
+                              {"params",
+                               {{"name", tool}, {"arguments", args}}}};
+        return nlohmann::json::parse(server.dispatch_wire(req.dump()));
+    };
+
+    auto expect_unknown_param = [&](const nlohmann::json& resp,
+                                    const std::string& param) {
+        ASSERT_TRUE(resp.contains("result")) << resp.dump();
+        ASSERT_TRUE(resp["result"].value("isError", false)) << resp.dump();
+        const auto text =
+            resp["result"]["content"][0]["text"].get<std::string>();
+        EXPECT_NE(text.find("unknown parameter"), std::string::npos) << text;
+        EXPECT_NE(text.find(param), std::string::npos) << text;
+    };
+
+    expect_unknown_param(
+        call("browse_file", {{"file", "main.go"}, {"show_imports", true}}),
+        "show_imports");
+    expect_unknown_param(
+        call("inspect_symbol", {{"name", "Server"}, {"max_depth", 2}}),
+        "max_depth");
+}
+
 // =============================================================================
 // index_stats tests
 // =============================================================================
