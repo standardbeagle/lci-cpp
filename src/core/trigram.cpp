@@ -593,8 +593,49 @@ bool has_high_entropy_section(std::string_view content) {
     return false;
 }
 
+namespace {
+
+/// Removes every location belonging to `file_id` from a trigram map and
+/// erases entries left empty. Generic over the ascii (uint32 key) and
+/// unicode (string key) maps. Only called on the writer's private clone.
+template <typename TrigramMap>
+void drop_file_locations(TrigramMap& trigrams, FileID file_id) {
+    std::vector<typename TrigramMap::key_type> empty_keys;
+    for (auto& [key, entry] : trigrams) {
+        auto& locs = entry.locations;
+        locs.erase(std::remove_if(locs.begin(), locs.end(),
+                                  [file_id](const FileLocation& loc) {
+                                      return loc.file_id == file_id;
+                                  }),
+                   locs.end());
+        if (locs.empty()) empty_keys.push_back(key);
+    }
+    for (const auto& key : empty_keys) trigrams.erase(key);
+}
+
+/// Re-index guard: a file this snapshot already tracks (indexed here, or
+/// removed and awaiting cleanup) still has its old locations in the maps.
+/// Incremental index_file must REPLACE them — appending again duplicated
+/// the file's whole trigram set on every watch-path update, because
+/// cleanup_snapshot only ran from remove_file past the invalidation
+/// threshold. Purges BOTH maps: a re-saved file may have crossed the
+/// pure-ASCII boundary, so its old locations can live in either.
+/// Templated because TrigramIndex::Snapshot is a private nested type.
+template <typename SnapshotT>
+void drop_file_locations_if_stale(SnapshotT& snap, FileID file_id) {
+    if (!snap.covered_files.contains(file_id) &&
+        !snap.invalidated_files.contains(file_id)) {
+        return;
+    }
+    drop_file_locations(snap.ascii_trigrams, file_id);
+    drop_file_locations(snap.unicode_trigrams, file_id);
+}
+
+}  // namespace
+
 void TrigramIndex::mark_unfiltered(FileID file_id) {
     mutate_snapshot([&](Snapshot& snap) {
+        drop_file_locations_if_stale(snap, file_id);
         snap.invalidated_files.erase(file_id);
         snap.unfiltered_files.insert(file_id);
         // An unfiltered file carries no trigram data; narrow() must never
@@ -632,6 +673,7 @@ void TrigramIndex::index_file(FileID file_id, std::string_view content) {
             ascii_scratch.emplace_back(offset, trigram);
         });
         mutate_snapshot([&](Snapshot& snap) {
+            drop_file_locations_if_stale(snap, file_id);
             snap.invalidated_files.erase(file_id);
             snap.unfiltered_files.erase(file_id);
             snap.covered_files.insert(file_id);
@@ -653,6 +695,7 @@ void TrigramIndex::index_file(FileID file_id, std::string_view content) {
                 unicode_scratch.emplace_back(offset, std::move(trigram_str));
             });
         mutate_snapshot([&](Snapshot& snap) {
+            drop_file_locations_if_stale(snap, file_id);
             snap.invalidated_files.erase(file_id);
             snap.unfiltered_files.erase(file_id);
             snap.covered_files.insert(file_id);
@@ -670,6 +713,7 @@ void TrigramIndex::index_file_with_trigrams(
     FileID file_id,
     const absl::flat_hash_map<uint32_t, std::vector<uint32_t>>& trigrams) {
     mutate_snapshot([&](Snapshot& snap) {
+        drop_file_locations_if_stale(snap, file_id);
         snap.invalidated_files.erase(file_id);
         snap.unfiltered_files.erase(file_id);
         snap.covered_files.insert(file_id);
