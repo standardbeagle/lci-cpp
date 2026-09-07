@@ -1209,7 +1209,7 @@ TEST(UnifiedExtractorTest, DeepExpressionDoesNotOverflowStack) {
 
     EXPECT_NE(find_symbol(r, "deep"), nullptr);
     EXPECT_NE(find_symbol(r, "after"), nullptr);
-    // EXPECT_TRUE(r.depth_limit_hit);
+    EXPECT_TRUE(r.depth_limit_hit);
 }
 
 TEST(UnifiedExtractorTest, ShallowCodeDoesNotTripDepthGuard) {
@@ -1223,7 +1223,7 @@ TEST(UnifiedExtractorTest, ShallowCodeDoesNotTripDepthGuard) {
     auto r = ue.get_results();
 
     EXPECT_NE(find_symbol(r, "f"), nullptr);
-    // EXPECT_FALSE(r.depth_limit_hit);
+    EXPECT_FALSE(r.depth_limit_hit);
 }
 
 }  // namespace lci::parser

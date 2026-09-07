@@ -195,6 +195,8 @@ void UnifiedExtractor::reset() {
     in_import_context_ = false;
     in_trait_or_impl_body_ = false;
     in_class_body_ = false;
+    visit_depth_ = 0;
+    depth_limit_hit_ = false;
 
     complexity_stack_.clear();
     has_current_func_ = false;
@@ -280,8 +282,17 @@ void UnifiedExtractor::extract(TSTree* tree) {
 }
 
 ExtractionResults UnifiedExtractor::get_results() const {
-    return {symbols_,      blocks_,       imports_,     scopes_,
-            references_,   declarations_, complexity_, field_types_};
+    return {symbols_,     blocks_,       imports_,     scopes_,
+            references_,  declarations_, complexity_, field_types_,
+            depth_limit_hit_};
+}
+
+ExtractionResults UnifiedExtractor::take_results() {
+    return {std::move(symbols_),      std::move(blocks_),
+            std::move(imports_),      std::move(scopes_),
+            std::move(references_),   std::move(declarations_),
+            std::move(complexity_),   std::move(field_types_),
+            depth_limit_hit_};
 }
 
 std::pair<std::string_view, std::string_view>
@@ -298,6 +309,23 @@ UnifiedExtractor::lookup_declaration(int line, int column) const {
 
 void UnifiedExtractor::visit_node(TSNode node) {
     if (ts_node_is_null(node)) return;
+
+    // Recursion depth guard. Deep expression nesting (a 20k-term a+a+...
+    // chain is a ~20k-deep binary tree) overflows the thread stack before
+    // any extraction runs; prune the subtree, flag it in the results, and
+    // log once per file — never silently.
+    if (visit_depth_ >= kMaxVisitDepth) {
+        if (!depth_limit_hit_) {
+            depth_limit_hit_ = true;
+            fprintf(stderr,
+                    "lci: extractor depth guard (%d) exceeded in %.*s; "
+                    "subtree pruned\n",
+                    kMaxVisitDepth, static_cast<int>(path_.size()),
+                    path_.data());
+        }
+        return;
+    }
+    ++visit_depth_;
 
     // get_node_type returns a view into tree-sitter's interned static
     // symbol table — stable for the lifetime of the parser/language.
@@ -473,6 +501,8 @@ void UnifiedExtractor::visit_node(TSNode node) {
 
     // Restore the enclosing function's local type env (see entry snapshot).
     if (env_boundary) local_var_types_ = std::move(saved_env);
+
+    --visit_depth_;
 }
 
 // ---------------------------------------------------------------------------

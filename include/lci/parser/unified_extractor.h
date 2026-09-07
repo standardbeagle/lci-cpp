@@ -76,6 +76,10 @@ struct ExtractionResults {
         declarations;
     std::vector<std::pair<PositionKey, int>> complexity;
     std::vector<::lci::FieldType> field_types;
+    /// True when the visit_node depth guard pruned a subtree (pathologically
+    /// deep expression nesting). Symbols/refs under the pruned subtree are
+    /// absent; everything outside it is intact. A diagnostic is also logged.
+    bool depth_limit_hit = false;
 };
 
 /// Performs all AST extraction in a single tree walk.
@@ -106,6 +110,11 @@ class UnifiedExtractor {
 
     /// Returns all extraction results.
     ExtractionResults get_results() const;
+
+    /// Move-returning accessor: drains the result vectors out of the
+    /// extractor (zero copies) for callers that consume them immediately,
+    /// e.g. the indexing pipeline's per-file processing.
+    ExtractionResults take_results();
 
     /// Routes per-function side-effect facts (writes, throws, calls, channel
     /// ops) discovered during the tree walk into `sink`. When null (the
@@ -358,6 +367,14 @@ class UnifiedExtractor {
     bool in_import_context_{};
     bool in_trait_or_impl_body_{};
     bool in_class_body_{};
+
+    // Recursion guard for visit_node: deep expression nesting (a long
+    // a+a+... chain is a left-leaning binary tree) would otherwise overflow
+    // the indexer thread's stack. 512 frames is far beyond real code and
+    // far inside an 8 MiB stack at visit_node's frame size.
+    static constexpr int kMaxVisitDepth = 512;
+    int visit_depth_{};
+    bool depth_limit_hit_{};
 
     // Side-effect sink (optional). When set, the tree walk drives the
     // SideEffectAnalyzer per-function lifecycle. se_func_depth_ tracks function
