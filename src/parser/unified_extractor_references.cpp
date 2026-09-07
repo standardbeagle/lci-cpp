@@ -212,7 +212,7 @@ void UnifiedExtractor::process_reference_node(TSNode node,
                         func, "field", static_cast<uint32_t>(5));
                     if (!ts_node_is_null(arg) && !ts_node_is_null(fld)) {
                         auto recv = node_text(arg);
-                        auto lv = local_var_types_.find(std::string(recv));
+                        auto lv = local_var_types_.find(recv);
                         if (lv != local_var_types_.end() &&
                             !lv->second.empty()) {
                             cref.referenced_name =
@@ -268,7 +268,7 @@ void UnifiedExtractor::process_reference_node(TSNode node,
             if (handled_nodes_.contains(reinterpret_cast<uintptr_t>(node.id)))
                 return;
             std::string_view id = node_text(node);
-            if (id.empty() || local_var_types_.contains(std::string(id)))
+            if (id.empty() || local_var_types_.contains(id))
                 return;
             TSNode parent = ts_node_parent(node);
             if (ts_node_is_null(parent)) return;
@@ -478,8 +478,7 @@ void UnifiedExtractor::process_go_reference(TSNode node,
                     bool qualified = false;
                     const char* ot = ts_node_type(operand);
                     if (ot && std::string_view(ot) == "identifier") {
-                        auto it = local_var_types_.find(
-                            std::string(node_text(operand)));
+                        auto it = local_var_types_.find(node_text(operand));
                         if (it != local_var_types_.end() &&
                             !it->second.empty()) {
                             cref.referenced_name =
@@ -501,8 +500,7 @@ void UnifiedExtractor::process_go_reference(TSNode node,
                             !ts_node_is_null(inner_fld) &&
                             std::string_view(ts_node_type(inner_op)) ==
                                 "identifier") {
-                            auto it = local_var_types_.find(
-                                std::string(node_text(inner_op)));
+                            auto it = local_var_types_.find(node_text(inner_op));
                             if (it != local_var_types_.end() &&
                                 !it->second.empty()) {
                                 cref.referenced_name =
@@ -560,7 +558,7 @@ void UnifiedExtractor::process_go_reference(TSNode node,
         // identifier that names nothing builds no edge.
         if (is_handled(node)) return;
         std::string_view id = node_text(node);
-        if (id.empty() || local_var_types_.contains(std::string(id))) return;
+        if (id.empty() || local_var_types_.contains(id)) return;
         TSNode parent = ts_node_parent(node);
         if (ts_node_is_null(parent)) return;
         std::string_view pt = ts_node_type(parent);
@@ -661,7 +659,7 @@ void UnifiedExtractor::process_js_reference(TSNode node,
                     func, "object", static_cast<uint32_t>(6));
                 if (!ts_node_is_null(obj)) {
                     auto recv = node_text(obj);
-                    auto it = local_var_types_.find(std::string(recv));
+                    auto it = local_var_types_.find(recv);
                     if (it != local_var_types_.end() && !it->second.empty()) {
                         cref.referenced_name =
                             it->second + "." + std::string(node_text(prop));
@@ -782,7 +780,7 @@ void UnifiedExtractor::process_python_reference(TSNode node,
                     bool qualified = false;
                     const char* ot = ts_node_type(obj);
                     if (ot && std::string_view(ot) == "identifier") {
-                        auto it = local_var_types_.find(std::string(recv));
+                        auto it = local_var_types_.find(recv);
                         if (it != local_var_types_.end() &&
                             !it->second.empty()) {
                             cref.referenced_name =
@@ -826,7 +824,7 @@ namespace {
 void qualify_and_push(std::vector<Reference>& out, Reference cref,
                       const absl::flat_hash_map<std::string, std::string>& env,
                       std::string_view recv_text, std::string_view method_text) {
-    auto it = env.find(std::string(recv_text));
+    auto it = env.find(recv_text);
     if (it != env.end() && !it->second.empty()) {
         cref.referenced_name =
             it->second + "." + std::string(method_text);
@@ -1281,8 +1279,8 @@ void UnifiedExtractor::process_kotlin_reference(TSNode node,
                 ts_node_is_null(recv) ? std::string_view() : node_text(recv);
             // Class-property receiver: the type survives across methods in
             // kotlin_property_types_ (local_var_types_ clears per function).
-            if (!rt.empty() && !local_var_types_.contains(std::string(rt))) {
-                auto pit = kotlin_property_types_.find(std::string(rt));
+            if (!rt.empty() && !local_var_types_.contains(rt)) {
+                auto pit = kotlin_property_types_.find(rt);
                 if (pit != kotlin_property_types_.end() &&
                     !pit->second.empty()) {
                     cref.referenced_name =
@@ -1462,7 +1460,7 @@ void UnifiedExtractor::process_zig_reference(TSNode node,
                 create_call_reference(mem, node);
             if (!ts_node_is_null(obj) &&
                 std::string_view(ts_node_type(obj)) == "identifier") {
-                auto ai = zig_module_aliases_.find(std::string(node_text(obj)));
+                auto ai = zig_module_aliases_.find(node_text(obj));
                 if (ai != zig_module_aliases_.end()) {
                     cref.referenced_name =
                         ai->second + "." + std::string(node_text(mem));
