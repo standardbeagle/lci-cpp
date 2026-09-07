@@ -17,6 +17,9 @@
 #include <fstream>
 #include <string>
 
+#include <sys/wait.h>
+#include <unistd.h>
+
 namespace lci {
 namespace mcp {
 namespace {
@@ -423,6 +426,89 @@ TEST_F(ExploreIndexTestFixture, BrowseFileSortByName) {
         EXPECT_LE(syms[i - 1]["name"].get<std::string>(),
                   syms[i]["name"].get<std::string>());
     }
+}
+
+// =============================================================================
+// browse_file basename determinism
+// =============================================================================
+
+// Runs browse_file for "util.go" against a two-candidate corpus in a fresh
+// child process (fresh absl hash salt -> fresh get_all_file_ids order) and
+// returns the raw response text. Returns empty on child failure.
+static std::string run_browse_ambiguous_in_child(const std::string& root) {
+    int fds[2];
+    if (pipe(fds) != 0) return {};
+    pid_t pid = fork();
+    if (pid == 0) {
+        close(fds[0]);
+        Config config;
+        config.project.root = root;
+        MasterIndex indexer(config);
+        if (!indexer.index_directory(root)) _exit(1);
+        nlohmann::json params = {{"file", "util.go"}};
+        auto result = handle_browse_file(params, indexer);
+        const std::string& text = result.text;
+        size_t off = 0;
+        while (off < text.size()) {
+            ssize_t n = write(fds[1], text.data() + off, text.size() - off);
+            if (n <= 0) break;
+            off += static_cast<size_t>(n);
+        }
+        _exit(0);
+    }
+    close(fds[1]);
+    std::string out;
+    char buf[4096];
+    ssize_t n;
+    while ((n = read(fds[0], buf, sizeof(buf))) > 0) {
+        out.append(buf, static_cast<size_t>(n));
+    }
+    close(fds[0]);
+    int status = 0;
+    waitpid(pid, &status, 0);
+    return out;
+}
+
+// Karpathy #4 (determinism): a bare basename matching two files must resolve
+// to the lexicographically smallest relative path with an explicit
+// `ambiguous` list — identically in every process. The pre-fix code broke at
+// the first hit in get_all_file_ids() hash order, so the answer depended on
+// the per-process hash salt.
+TEST(BrowseFileDeterminismTest, AmbiguousBasenameResolvesSmallestPath) {
+    auto dir = lci::test::unique_temp_dir("lci_browse_ambig_test_");
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir / "zeta");
+    std::filesystem::create_directories(dir / "alpha");
+    const char* src = "package p\n\nfunc helper() int { return 1 }\n";
+    {
+        std::ofstream f(dir / "zeta" / "util.go");
+        f << src;
+    }
+    {
+        std::ofstream f(dir / "alpha" / "util.go");
+        f << src;
+    }
+
+    std::string reference;
+    for (int run = 0; run < 5; ++run) {
+        std::string text = run_browse_ambiguous_in_child(dir.string());
+        ASSERT_FALSE(text.empty()) << "child process produced no output";
+        if (run == 0) {
+            reference = text;
+        } else {
+            EXPECT_EQ(text, reference) << "run " << run << " diverged";
+        }
+    }
+
+    auto j = nlohmann::json::parse(reference);
+    EXPECT_EQ(j["file"]["path"].get<std::string>(), "alpha/util.go");
+    ASSERT_TRUE(j.contains("ambiguous")) << j.dump();
+    std::vector<std::string> ambig;
+    for (const auto& p : j["ambiguous"]) ambig.push_back(p.get<std::string>());
+    EXPECT_EQ(ambig, (std::vector<std::string>{"alpha/util.go",
+                                               "zeta/util.go"}));
+
+    std::filesystem::remove_all(dir);
 }
 
 // =============================================================================
