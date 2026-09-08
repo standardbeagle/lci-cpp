@@ -442,6 +442,26 @@ TEST(LayerAnalyzer, ClassifyUnknownToUtility) {
     EXPECT_EQ(LayerAnalyzer::classify_symbol_to_layer(sym), "Utility Layer");
 }
 
+// Keyword matching is on whole identifier words, never substrings:
+// "build" carries "ui", "catalog" carries "log". Hand-computed against the
+// keyword table: none of these names contain a keyword as a whole word.
+TEST(LayerAnalyzer, SubstringKeywordDoesNotMatch) {
+    auto sym = make_sym("buildIndex", SymbolType::Variable);
+    EXPECT_EQ(LayerAnalyzer::classify_symbol_to_layer(sym), "Utility Layer");
+    auto sym2 = make_sym("guideUser", SymbolType::Variable);
+    EXPECT_EQ(LayerAnalyzer::classify_symbol_to_layer(sym2), "Utility Layer");
+    auto sym3 = make_sym("catalog", SymbolType::Variable);
+    EXPECT_EQ(LayerAnalyzer::classify_symbol_to_layer(sym3), "Utility Layer");
+}
+
+// Positive control: a keyword as a whole camel word still classifies
+// through the fallback scan.
+TEST(LayerAnalyzer, WholeWordKeywordStillMatches) {
+    auto sym = make_sym("widgetPanel", SymbolType::Variable);
+    EXPECT_EQ(LayerAnalyzer::classify_symbol_to_layer(sym),
+              "Presentation Layer");
+}
+
 // ===========================================================================
 // LayerAnalyzer - detect_patterns
 // ===========================================================================
@@ -795,6 +815,25 @@ TEST(ModuleAnalyzer, ClassifyBroadenedBuckets) {
     // No keyword still means General.
     EXPECT_EQ(ModuleAnalyzer::classify_module_by_path("internal/daemon"),
               "General");
+}
+
+// Path keyword matching is on whole path-segment words: "latest.ts" carries
+// "test" only as a substring, "guide/" carries "ui" only as a substring.
+TEST(ModuleAnalyzer, SubstringKeywordDoesNotMatch) {
+    EXPECT_EQ(ModuleAnalyzer::classify_module_by_path("src/latest.ts"),
+              "General");
+    EXPECT_EQ(ModuleAnalyzer::classify_module_by_path("src/guide"),
+              "General");
+    EXPECT_EQ(ModuleAnalyzer::classify_module_by_path("src/builder"),
+              "General");
+}
+
+// Positive controls: whole segment words still classify.
+TEST(ModuleAnalyzer, WholeWordKeywordStillMatches) {
+    EXPECT_EQ(ModuleAnalyzer::classify_module_by_path("src/ui"), "UI");
+    EXPECT_EQ(ModuleAnalyzer::classify_module_by_path("src/test"), "Test");
+    EXPECT_EQ(ModuleAnalyzer::classify_module_by_path("src/latest/test"),
+              "Test");
 }
 
 // ===========================================================================
