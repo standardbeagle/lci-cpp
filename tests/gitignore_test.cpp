@@ -17,12 +17,24 @@
 
 #include <gtest/gtest.h>
 
+#include "unique_temp.h"
+
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <map>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#ifndef _WIN32
+#include <sys/wait.h>
+#endif
+
 namespace lci {
 namespace {
+
+namespace fs = std::filesystem;
 
 // Build a parser from an in-memory list of pattern lines, mirroring the
 // shape of a .gitignore file but bypassing the filesystem.
@@ -297,6 +309,168 @@ TEST(GitignoreParser, UnterminatedCharacterClassIsLiteral) {
     auto p = parser_from_patterns({"a[bc*"});
     EXPECT_TRUE(p.should_ignore("a[bcd", /*is_dir=*/false));
     EXPECT_FALSE(p.should_ignore("ab", /*is_dir=*/false));
+}
+
+// --- Parity with real git ----------------------------------------------------
+//
+// The expected answers below are NOT hand-written: each row runs real
+// `git check-ignore` over a temp fixture repo (git init, write .gitignore +
+// the probed file, run git) and compares the parser's verdict against
+// git's. The matcher under test shares no code with the oracle
+// (bench-harness-oracle-independence).
+
+namespace {
+
+bool git_available() {
+    return std::system("git --version > /dev/null 2>&1") == 0;
+}
+
+// Runs `git check-ignore` inside `repo` for `path`. Returns 1 = git ignores
+// it, 0 = git does not, -1 = git itself failed.
+int git_check_ignore(const fs::path& repo, const std::string& path) {
+    std::string cmd = "git -C \"" + repo.string() +
+                      "\" check-ignore -q -- \"" + path + "\"";
+    int rc = std::system(cmd.c_str());
+    if (rc == -1) return -1;
+#ifdef _WIN32
+    return rc;  // system() returns the exit code directly
+#else
+    if (WIFEXITED(rc)) {
+        int code = WEXITSTATUS(rc);
+        if (code == 0) return 1;
+        if (code == 1) return 0;
+    }
+    return -1;
+#endif
+}
+
+struct GitignoreOracleRow {
+    std::string gitignore_line;  // single line written to .gitignore
+    std::string path;            // repo-relative path to probe
+    bool is_dir;
+};
+
+void run_oracle_rows(const std::vector<GitignoreOracleRow>& rows) {
+    // Group rows by .gitignore line so each fixture carries exactly one
+    // pattern, matching how the parser fixture is built.
+    std::map<std::string, std::vector<GitignoreOracleRow>> by_line;
+    for (const auto& r : rows) by_line[r.gitignore_line].push_back(r);
+
+    for (const auto& [line, probes] : by_line) {
+        auto dir = lci::test::unique_temp_dir("lci_gitignore_oracle_");
+        fs::create_directories(dir);
+        {
+            std::ofstream f(dir / ".gitignore");
+            f << line << "\n";
+        }
+        ASSERT_EQ(std::system(("git -C \"" + dir.string() +
+                               "\" init -q")
+                                  .c_str()),
+                  0);
+        for (const auto& probe : probes) {
+            fs::path p = dir / probe.path;
+            if (probe.is_dir) {
+                fs::create_directories(p);
+            } else {
+                fs::create_directories(p.parent_path());
+                std::ofstream(p) << "x";
+            }
+            int git_verdict = git_check_ignore(dir, probe.path);
+            ASSERT_NE(git_verdict, -1)
+                << "git check-ignore failed for " << probe.path;
+            GitignoreParser parser;
+            ASSERT_TRUE(parser.load_gitignore(dir.string()));
+            EXPECT_EQ(parser.should_ignore(probe.path, probe.is_dir),
+                      git_verdict == 1)
+                << "pattern '" << line << "' vs path '" << probe.path
+                << "' (git says " << (git_verdict == 1) << ")";
+        }
+        std::error_code ec;
+        fs::remove_all(dir, ec);
+    }
+}
+
+}  // namespace
+
+TEST(GitignoreGitParity, MatchesRealGitCheckIgnore) {
+    if (!git_available()) GTEST_SKIP() << "git not on PATH";
+    run_oracle_rows({
+        // Interior slash anchors the pattern to the .gitignore directory:
+        // doc/*.txt must NOT swallow x/doc/a.txt.
+        {"doc/*.txt", "doc/a.txt", false},
+        {"doc/*.txt", "x/doc/a.txt", false},
+        // A leading-slash directory pattern is anchored: /build/ must not
+        // match src/build/x.c.
+        {"/build/", "build/x.c", false},
+        {"/build/", "src/build/x.c", false},
+        // A wildcard directory pattern must match files inside matching
+        // directories at any depth.
+        {"*.egg-info/", "foo.egg-info/bar.py", false},
+        {"*.egg-info/", "pkg/foo.egg-info/bar.py", false},
+        {"*.egg-info/", "bar.py", false},
+        // git keeps leading whitespace: the pattern names a file whose name
+        // begins with a space.
+        {" leading.txt", " leading.txt", false},
+        {" leading.txt", "leading.txt", false},
+        // Backslash escapes a leading '#': pattern matches file "#literal".
+        {"\\#literal", "#literal", false},
+        {"\\#literal", "x/#literal", false},
+    });
+}
+
+// --- Nested .gitignore files ---------------------------------------------------
+
+TEST(GitignoreParser, NestedGitignoreAppliesToItsSubtree) {
+    auto dir = lci::test::unique_temp_dir("lci_gitignore_nested_");
+    fs::create_directories(dir / "sub/x");
+    fs::create_directories(dir / "sub/y");
+    {
+        std::ofstream f(dir / ".gitignore");
+        f << "*.tmp\n";
+    }
+    {
+        std::ofstream f(dir / "sub/x/.gitignore");
+        f << "*.log\n";
+    }
+    GitignoreParser p;
+    ASSERT_TRUE(p.load_gitignore(dir.string()));
+
+    // Root pattern applies everywhere.
+    EXPECT_TRUE(p.should_ignore("a.tmp", false));
+    EXPECT_TRUE(p.should_ignore("sub/y/a.tmp", false));
+    // Nested pattern applies only inside sub/x.
+    EXPECT_TRUE(p.should_ignore("sub/x/a.log", false));
+    EXPECT_TRUE(p.should_ignore("sub/x/deep/a.log", false));
+    EXPECT_FALSE(p.should_ignore("sub/y/a.log", false));
+    EXPECT_FALSE(p.should_ignore("a.log", false));
+
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+}
+
+// Nested .gitignore rules override the parent's (git precedence: deeper
+// files win), so a negation in the subtree re-includes what the root
+// ignored.
+TEST(GitignoreParser, NestedGitignoreOverridesParent) {
+    auto dir = lci::test::unique_temp_dir("lci_gitignore_nested_");
+    fs::create_directories(dir / "sub");
+    {
+        std::ofstream f(dir / ".gitignore");
+        f << "*.log\n";
+    }
+    {
+        std::ofstream f(dir / "sub/.gitignore");
+        f << "!keep.log\n";
+    }
+    GitignoreParser p;
+    ASSERT_TRUE(p.load_gitignore(dir.string()));
+
+    EXPECT_TRUE(p.should_ignore("a.log", false));
+    EXPECT_TRUE(p.should_ignore("sub/debug.log", false));
+    EXPECT_FALSE(p.should_ignore("sub/keep.log", false));
+
+    std::error_code ec;
+    fs::remove_all(dir, ec);
 }
 
 // --- Shared glob entry point ------------------------------------------------
