@@ -119,3 +119,31 @@ that finishes under a contended host, and a foreground build under those conditi
 20-minute cycle, not a signal.
 
 `source_event: task-01M1NCSJ31JA7K2WZJY5DGASHZ, ctest-full-gate attempt1 (2727/2728) -> attempt2 forced_v1, comment 01M1YRESKBG0JB47FFJ3BDZFRN, git c9b7e32..120fe3b, 2026-09-07`
+
+## 7. A slice that edits an MCP tool schema or description must run the bench tool-surface gate — ctest cannot see it
+
+Rule 4 makes a repo-wide output-contract change grep `tests/integration/goldens/`. The
+same reasoning reaches one gate further out: `benchmarks/repo-qa/comprehension/surface/tool-surface.json`
+is a committed snapshot of the live `tools/list` surface (see
+`bench-harness-oracle-independence.md` rule 8a), it has 14 readers under `benchmarks/`,
+and it is asserted by a **pytest** suite that no ctest target runs.
+
+Evidence: S6's `7949bc6` removed `browse_file.show_imports` and `inspect_symbol.max_depth`
+from the schemas. Scope, build, the full 2739-test ctest gate and the review all passed;
+`pytest benchmarks/repo-qa/tests/test_tool_surface.py` has been RED on `main` ever since
+(1 failed / 11 passed), and every tool-calling bench built on that snapshot measures a
+surface the binary no longer serves. Only the reviewer's own probe found it
+(filed `01M1Z59FVM4540T15VX7TTBMJD`).
+
+Rule: any slice touching an `add_tool` schema or description runs
+`pytest benchmarks/repo-qa/tests/test_tool_surface.py` as a pre-gate, next to the
+`lci_integration_suite` pre-gate of rule 5, and re-pins the snapshot plus
+`docs/TOOLS.md` in the same commit — or names the follow-up. Green ctest is not evidence
+about a contract whose consumers live outside ctest.
+
+Follow-up (not done here — it is a worktrack template change, not a repo edit): the
+`cpp-acp-slice` template should gain this pytest command step for schema-touching slices,
+or the C++ gate should acquire a ctest entry that shells the bench suite so the two
+cannot diverge silently.
+
+`source_event: task-01M1NCSJ31XWSRVAPP3A3YQX5Z, review_annotation_v1 01M1Z5AMKTBAS9AGVRMQDYQSEN (systemicObservations, frequency 14), verdict 01M1Z5A8SSSFQWW6DTJNC6HTJ8 advisory, git:7949bc6, follow-up 01M1Z59FVM4540T15VX7TTBMJD, 2026-09-07`

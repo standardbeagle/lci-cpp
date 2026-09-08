@@ -193,3 +193,34 @@ An undisclosed guard test is the failure this rule exists to stop: it reads exac
 the log, and the next reader has no way to tell the difference.
 
 `source_event: task-01M1NCSJ31JA7K2WZJY5DGASHZ, comment 01M1YN2KMVDWG69MFYKE2ZWYQ4, verdict 01M1YV33SDYRC4FYQA2NVNPMGW (umaskDecision), git d622ca9/120fe3b, 2026-09-07`
+
+## 7. An INTEGRATION-POINTS claim that a symbol is reusable from the slice's scope must be PROBED at planning time, and the declaring header listed in `fileScope`
+
+Rule 5 governs an artefact a task body cites. This is the same failure for a SYMBOL a
+task body cites: S6's body said "the wildcard_match already in handlers_core — reuse it,
+do not write a second matcher", and the file scope was written around that sentence.
+`wildcard_match` was in fact defined in an anonymous namespace at
+`src/mcp/handlers_find_files.cpp:37` with no declaration in any header, so it was
+unreachable from every file the slice was allowed to touch. The ACP implementer stopped
+on that criterion correctly — the only alternatives were duplicating the matcher or
+editing out-of-scope files — and the criterion cost a coordinator scope widening by two
+files (`include/lci/mcp/handlers_core_shared.h`, `src/mcp/handlers_find_files.cpp`) plus
+a second implementer dispatch after the ACP attempts were exhausted.
+
+This is the presence-side twin of `bench-harness-oracle-independence.md` rule 10 (an
+absence claim must cite its probe): a REACHABILITY claim is load-bearing because the
+whole scope is designed around it, so it carries the same evidence bar.
+
+Rule: before writing "reuse X" into a task body, run the probe — `lci def <symbol>` or
+`grep -rn '<symbol>' include/` — and record what it found. If the definition sits in an
+anonymous namespace or a `.cpp` with no declaration, the slice's scope MUST include the
+header that will declare it and the TU that defines it, or the promotion must be its own
+preparatory slice. An unprobed "already exists in <module>" is a planning defect that
+surfaces only after the implementer has spent its attempts.
+
+Corollary paid for in the same slice: promoting a helper into a shared header can break
+the build through ambiguous overloads, because handler TUs carry private copies of that
+header's inline helpers (`to_lower`, `clamp_int` in `handlers_explore.cpp`). Deleting the
+local copy is part of the promotion, not a surprise.
+
+`source_event: task-01M1NCSJ31XWSRVAPP3A3YQX5Z, acp-implement attempt2 (passed end_turn, criterion 1 stopped), comment 01M1Z2Z4Y1T9NS7Q6A099ZHWKV (coordinator decision), comment 01M1Z39J8Z42QFZ5FEVKWX89HV (task_annotation lessons), commits 6b127d5/04457f3, 2026-09-07`

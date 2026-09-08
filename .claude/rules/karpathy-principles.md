@@ -119,6 +119,16 @@ LCI's reason to exist is sub-millisecond semantic code search with 79.8% context
   soundness check) and the `search-certified-absence-narrowing` memory; that rule covers two
   checks over one grammar, this one covers two producers over one stream.
   <!-- written_at: 2026-09-07T04:00:00Z  source_event: task:01M1NCSJ31ZEV9XGETA6VAF8CK, git:99a2628, git:38ffb4e, comment:01M1WX8DTZ08X1ZS4HYP05FKB1 -->
+- **A hash-order determinism RED runs in SEPARATE PROCESSES.** The abseil hash salt is
+  per-process, so N repetitions of a `flat_hash_map` walk inside one process return the
+  same order every time and the test passes against the defect. Fork a child per run that
+  rebuilds the fixture and index, runs the handler, and pipes the raw response back; the
+  parent compares the texts. Proven discriminating, not flaky: in a detached worktree at
+  the pre-fix sha, `ImpureModeDeterministicAcrossProcesses` failed 3/3 runs, and
+  `browse_file`'s five-process test pinned both the lexicographically smallest pick and
+  the `ambiguous` list. Applies to any output ordered by a hash-keyed container
+  (`get_all_file_ids`, `SideEffectAnalyzer::results()`).
+  <!-- written_at: 2026-09-08T00:15:00Z  source_event: task:01M1NCSJ31XWSRVAPP3A3YQX5Z, comment:01M1Z5AMKTBAS9AGVRMQDYQSEN (passPatterns), comment:01M1Z5A8SSSFQWW6DTJNC6HTJ8 (evidence.redProof), git:af9e5bb, git:5a11aca -->
 
 ### 5. No mocking the database
 - Integration tests hit the real indexer + real corpus.
