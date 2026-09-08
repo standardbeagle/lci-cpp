@@ -9,6 +9,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <lci/core/subprocess.h>
 #include <lci/git/analyzer.h>
 #include <lci/git/frequency_analyzer.h>
 #include <lci/git/pattern_detector.h>
@@ -539,6 +540,152 @@ TEST(GitProvider, CommitFilesOnRootCommit) {
     EXPECT_FALSE(scope.empty())
         << "commit-scope line ranges must be non-empty for a root commit";
 
+    fs::remove_all(repo);
+}
+
+// Same root-commit hole as CommitFilesOnRootCommit, one layer down: the
+// numstat branch of diff-tree also lacks --root, so a single-commit repo's
+// diff stats came back all zero.
+TEST(GitProvider, DiffStatsNonZeroOnRootCommit) {
+    namespace fs = std::filesystem;
+    fs::path repo = fs::temp_directory_path() /
+                    ("lci_git_root_stats_" +
+                     std::to_string(std::chrono::steady_clock::now()
+                                        .time_since_epoch()
+                                        .count()));
+    fs::create_directories(repo);
+    // 2 lines + 3 lines: the reference counts come from the fixture bytes,
+    // not from any code under test.
+    std::ofstream(repo / "a.go") << "package main\nfunc A() {}\n";
+    std::ofstream(repo / "b.go") << "package main\nfunc B() {}\nfunc C() {}\n";
+    ASSERT_TRUE(lci::test::run_git(repo, "init -q"));
+    ASSERT_TRUE(lci::test::run_git(repo, "add -A"));
+    ASSERT_TRUE(lci::test::run_git(
+        repo,
+        "-c user.email=fixture@lci.test -c user.name=lci-fixture "
+        "-c commit.gpgsign=false commit -q -m fixture"));
+
+    Provider p;
+    ASSERT_TRUE(Provider::create(repo.string(), p));
+
+    AnalysisParams params = AnalysisParams::defaults();
+    params.scope = AnalysisScope::Commit;
+    DiffStats stats;
+    ASSERT_TRUE(p.get_diff_stats(params, stats));
+    EXPECT_EQ(stats.total_added, 5);
+    EXPECT_EQ(stats.total_deleted, 0);
+
+    fs::remove_all(repo);
+}
+
+// The base ref of a root commit is the empty tree, whose object id depends on
+// the repo's object format. The hardcoded SHA-1 id
+// (4b825dc642cb6eb9a060e54bf8d69288fbee4904) does not exist in a SHA-256
+// repository, so every base-side content read against it failed. Reference:
+// `git hash-object -t tree /dev/null` in the fixture repo itself.
+TEST(GitProvider, RootCommitBaseRefMatchesRepoObjectFormat) {
+    namespace fs = std::filesystem;
+    fs::path repo = fs::temp_directory_path() /
+                    ("lci_git_sha256_" +
+                     std::to_string(std::chrono::steady_clock::now()
+                                        .time_since_epoch()
+                                        .count()));
+    fs::create_directories(repo);
+    ASSERT_TRUE(lci::test::run_git(repo, "init -q --object-format=sha256"));
+    std::ofstream(repo / "a.go") << "package main\nfunc A() {}\n";
+    ASSERT_TRUE(lci::test::run_git(repo, "add -A"));
+    ASSERT_TRUE(lci::test::run_git(
+        repo,
+        "-c user.email=fixture@lci.test -c user.name=lci-fixture "
+        "-c commit.gpgsign=false commit -q -m fixture"));
+
+    // Independent reference: raw git, asked for the empty tree id in THIS
+    // repo's object format.
+    std::string empty_tree;
+    ASSERT_TRUE(lci::subprocess::run_capture(
+        {"git", "-C", repo.string(), "hash-object", "-t", "tree",
+         "/dev/null"},
+        "", empty_tree));
+    while (!empty_tree.empty() &&
+           (empty_tree.back() == '\n' || empty_tree.back() == '\r')) {
+        empty_tree.pop_back();
+    }
+    ASSERT_EQ(empty_tree.size(), 64u) << "SHA-256 empty tree id expected";
+
+    Provider p;
+    ASSERT_TRUE(Provider::create(repo.string(), p));
+    AnalysisParams params = AnalysisParams::defaults();
+    params.scope = AnalysisScope::Commit;
+    std::string base;
+    ASSERT_TRUE(p.get_base_ref(params, base));
+    EXPECT_EQ(base, empty_tree);
+
+    // And the base ref must be usable: reading the file's base content at
+    // the empty tree fails because the file does not exist there, but the
+    // tree itself must resolve (rev-parse).
+    std::string resolved;
+    EXPECT_TRUE(lci::subprocess::run_capture(
+        {"git", "-C", repo.string(), "rev-parse", "--verify", "--quiet",
+         base + "^{tree}}"},
+        "", resolved));
+
+    fs::remove_all(repo);
+}
+
+// --since was formatted in UTC WITHOUT the trailing Z, and git parses a
+// zone-less ISO date in LOCAL time: under TZ=UTC+14 the cutoff slid 14h and
+// commits inside the window vanished / outside it appeared. Reference: the
+// fixture's commit date is fixed via GIT_COMMITTER_DATE, so the expected
+// membership of each window is known exactly.
+TEST(GitFrequency, SinceIsInterpretedAsUtcRegardlessOfLocalTz) {
+    namespace fs = std::filesystem;
+    fs::path repo = fs::temp_directory_path() /
+                    ("lci_git_since_" +
+                     std::to_string(std::chrono::steady_clock::now()
+                                        .time_since_epoch()
+                                        .count()));
+    fs::create_directories(repo);
+    std::ofstream(repo / "a.go") << "package main\nfunc A() {}\n";
+    ASSERT_TRUE(lci::test::run_git(repo, "init -q"));
+    ASSERT_TRUE(lci::test::run_git(repo, "add -A"));
+    // Fixed commit instant: 2026-01-15T12:00:00Z = epoch 1768478400. Both
+    // dates pinned via the environment (children of std::system inherit).
+    constexpr int64_t kCommitEpoch = 1768478400;
+    setenv("GIT_AUTHOR_DATE", "1768478400 +0000", 1);
+    setenv("GIT_COMMITTER_DATE", "1768478400 +0000", 1);
+    ASSERT_TRUE(lci::test::run_git(
+        repo,
+        "-c user.email=fixture@lci.test -c user.name=lci-fixture "
+        "-c commit.gpgsign=false commit -q -m fixture"));
+    unsetenv("GIT_AUTHOR_DATE");
+    unsetenv("GIT_COMMITTER_DATE");
+
+    // Worst-case zone: UTC+14 (Kiritimati).
+    std::string saved_tz;
+    if (const char* tz = std::getenv("TZ")) saved_tz = tz;
+    setenv("TZ", "Pacific/Kiritimati", 1);
+    tzset();
+
+    Provider p;
+    ASSERT_TRUE(Provider::create(repo.string(), p));
+    HistoryProvider history(p);
+
+    std::vector<CommitInfo> commits;
+    // Window ending just AFTER the commit: must contain it.
+    ASSERT_TRUE(history.get_commit_history(kCommitEpoch - 60, commits));
+    EXPECT_EQ(commits.size(), 1u)
+        << "commit at T must be inside a since=T-60 window under any TZ";
+    commits.clear();
+    ASSERT_TRUE(history.get_commit_history(kCommitEpoch + 60, commits));
+    EXPECT_TRUE(commits.empty())
+        << "commit at T must be outside a since=T+60 window under any TZ";
+
+    if (saved_tz.empty()) {
+        unsetenv("TZ");
+    } else {
+        setenv("TZ", saved_tz.c_str(), 1);
+    }
+    tzset();
     fs::remove_all(repo);
 }
 
