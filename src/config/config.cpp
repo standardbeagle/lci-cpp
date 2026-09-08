@@ -909,9 +909,19 @@ ConfigResult load_config_from(const fs::path& kdl_path,
     } else {
         cfg.project.root = expand_tilde(cfg.project.root);
         if (!fs::path(cfg.project.root).is_absolute()) {
-            cfg.project.root =
-                fs::weakly_canonical(fs::path(project_root) / cfg.project.root)
-                    .string();
+            // error_code overload: weakly_canonical throws on an unreadable
+            // path component (EACCES), and an exception escaping
+            // load_config terminates callers that treat it as noexcept.
+            std::error_code canon_ec;
+            auto canon = fs::weakly_canonical(
+                fs::path(project_root) / cfg.project.root, canon_ec);
+            if (canon_ec) {
+                return {{},
+                        "cannot resolve project root '" + cfg.project.root +
+                            "': " + canon_ec.message(),
+                        std::move(warnings)};
+            }
+            cfg.project.root = canon.string();
         }
     }
 
