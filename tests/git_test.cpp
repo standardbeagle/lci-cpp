@@ -767,6 +767,91 @@ TEST(GitAnalysis, MnemonicPrefixAndQuotedPathStillScopesChangedSymbols) {
     fs::remove_all(repo);
 }
 
+// file_pattern used to be expanded through ls-files into one argv entry per
+// matching file: a large repo's "*.ts" overflowed ARG_MAX (E2BIG; 32KB on
+// Windows) and the whole hotspots report failed. The pattern must reach git
+// as a single native pathspec. Reference: a fake git earlier in PATH records
+// the exact argv the KERNEL delivered — not anything the code under test
+// computed.
+TEST(GitFrequency, FilePatternReachesGitAsOnePathspecArg) {
+    namespace fs = std::filesystem;
+    auto stamp = std::to_string(
+        std::chrono::steady_clock::now().time_since_epoch().count());
+    fs::path base = fs::temp_directory_path() / ("lci_git_pathspec_" + stamp);
+    fs::path repo = base / "repo";
+    fs::create_directories(repo);
+    ASSERT_TRUE(lci::test::run_git(repo, "init -q"));
+    // 5000 tracked .go files: the old expansion put 5000 entries in argv.
+    for (int i = 0; i < 5000; ++i) {
+        std::ofstream(repo / ("f" + std::to_string(i) + ".go"))
+            << "package main\n";
+    }
+    ASSERT_TRUE(lci::test::run_git(repo, "add -A"));
+    ASSERT_TRUE(lci::test::run_git(
+        repo,
+        "-c user.email=fixture@lci.test -c user.name=lci-fixture "
+        "-c commit.gpgsign=false commit -q -m fixture"));
+
+    // Fake git: logs subcommand + argc + every argument, then execs the
+    // real git so results stay real.
+    std::string real_git;
+    ASSERT_TRUE(lci::subprocess::run_capture({"which", "git"}, "", real_git));
+    while (!real_git.empty() &&
+           (real_git.back() == '\n' || real_git.back() == '\r')) {
+        real_git.pop_back();
+    }
+    fs::path bindir = base / "bin";
+    fs::create_directories(bindir);
+    fs::path argv_log = base / "argv.log";
+    {
+        std::ofstream shim(bindir / "git");
+        shim << "#!/bin/sh\n"
+             << "printf '%s' \"$1\" >> \"" << argv_log.string() << "\"\n"
+             << "printf ' argc=%s' \"$#\" >> \"" << argv_log.string() << "\"\n"
+             << "for a in \"$@\"; do printf ' [%s]' \"$a\"; done >> \""
+             << argv_log.string() << "\"\n"
+             << "printf '\\n' >> \"" << argv_log.string() << "\"\n"
+             << "exec " << real_git << " \"$@\"\n";
+        fs::permissions(bindir / "git", fs::perms::owner_all,
+                        fs::perm_options::add);
+    }
+    std::string saved_path = std::getenv("PATH") ? std::getenv("PATH") : "";
+    setenv("PATH", (bindir.string() + ":" + saved_path).c_str(), 1);
+
+    Provider p;
+    bool created = Provider::create(repo.string(), p);
+    std::vector<CommitInfo> commits;
+    std::string notice;
+    bool ok = false;
+    if (created) {
+        HistoryProvider history(p);
+        ok = history.get_repo_history(0, "*.go", commits, &notice);
+    }
+
+    setenv("PATH", saved_path.c_str(), 1);
+    ASSERT_TRUE(created);
+    ASSERT_TRUE(ok) << notice;
+    EXPECT_FALSE(commits.empty());
+
+    // Read the kernel-delivered argv of the `log` invocation.
+    std::ifstream log(argv_log);
+    std::string line;
+    bool found_log = false;
+    while (std::getline(log, line)) {
+        if (line.rfind("log ", 0) == 0) {
+            found_log = true;
+            EXPECT_NE(line.find("[*.go]"), std::string::npos)
+                << "pattern must be one verbatim pathspec arg: " << line;
+            // Bounded argv: subcommand + a handful of flags, never one arg
+            // per matched file.
+            EXPECT_LT(line.size(), 2000u) << line.substr(0, 200);
+        }
+    }
+    EXPECT_TRUE(found_log);
+
+    fs::remove_all(base);
+}
+
 TEST(GitFrequency, SinceIsInterpretedAsUtcRegardlessOfLocalTz) {
     namespace fs = std::filesystem;
     fs::path repo = fs::temp_directory_path() /
