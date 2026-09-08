@@ -2,7 +2,9 @@
 
 #include <lci/core/subprocess.h>
 
+#include <chrono>
 #include <filesystem>
+#include <thread>
 
 namespace lci {
 namespace {
@@ -67,6 +69,34 @@ TEST(SubprocessTest, SpawnDetachedReturnsTrue) {
 TEST(SubprocessTest, SpawnDetachedMissingBinaryReturnsFalse) {
     EXPECT_FALSE(subprocess::spawn_detached({"lci-no-such-binary-xyzzy"}));
 }
+
+#if !defined(_WIN32)
+TEST(SubprocessTest, ConcurrentRunCaptureLeaksNoFdsIntoOtherChild) {
+    // Reference value: the KERNEL's fd table for the second child
+    // (/proc/self/fd), not any output of run_capture logic. While a 2s
+    // sleeper's run_capture holds its pipe read end in the parent, a second
+    // run_capture child must inherit nothing beyond stdio: without
+    // close-on-exec pipe ends the sleeper's read end shows up as an extra
+    // fd in the second child. `ls` itself holds one transient fd (the
+    // directory stream), so a clean table lists exactly 0,1,2,3.
+    std::string slow_out;
+    std::thread slow([&] {
+        EXPECT_TRUE(subprocess::run_capture({"sleep", "2"}, "", slow_out));
+    });
+    // Let the sleeper's run_capture create its pipe and spawn before the
+    // second run_capture starts, so its read end is open in the parent.
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    std::string listing;
+    ASSERT_TRUE(
+        subprocess::run_capture({"ls", "/proc/self/fd"}, "", listing));
+    slow.join();
+    int entries = 0;
+    for (size_t pos = 0; pos < listing.size(); ++pos) {
+        if (listing[pos] == '\n') ++entries;
+    }
+    EXPECT_EQ(entries, 4) << listing;
+}
+#endif
 
 }  // namespace
 }  // namespace lci
