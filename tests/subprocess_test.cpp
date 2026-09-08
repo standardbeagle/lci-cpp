@@ -79,6 +79,21 @@ TEST(SubprocessTest, ConcurrentRunCaptureLeaksNoFdsIntoOtherChild) {
     // close-on-exec pipe ends the sleeper's read end shows up as an extra
     // fd in the second child. `ls` itself holds one transient fd (the
     // directory stream), so a clean table lists exactly 0,1,2,3.
+    // Baseline with no concurrent run_capture: whatever fds the test
+    // harness itself inherited (ctest pipes, etc.) show up here, so the
+    // comparison below isolates exactly the leak.
+    auto count_fds = [] {
+        std::string listing;
+        EXPECT_TRUE(
+            subprocess::run_capture({"ls", "/proc/self/fd"}, "", listing));
+        int entries = 0;
+        for (char c : listing) {
+            if (c == '\n') ++entries;
+        }
+        return entries;
+    };
+    const int baseline = count_fds();
+
     std::string slow_out;
     std::thread slow([&] {
         EXPECT_TRUE(subprocess::run_capture({"sleep", "2"}, "", slow_out));
@@ -86,15 +101,10 @@ TEST(SubprocessTest, ConcurrentRunCaptureLeaksNoFdsIntoOtherChild) {
     // Let the sleeper's run_capture create its pipe and spawn before the
     // second run_capture starts, so its read end is open in the parent.
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
-    std::string listing;
-    ASSERT_TRUE(
-        subprocess::run_capture({"ls", "/proc/self/fd"}, "", listing));
+    const int concurrent = count_fds();
     slow.join();
-    int entries = 0;
-    for (size_t pos = 0; pos < listing.size(); ++pos) {
-        if (listing[pos] == '\n') ++entries;
-    }
-    EXPECT_EQ(entries, 4) << listing;
+    EXPECT_EQ(concurrent, baseline)
+        << "a concurrent run_capture's pipe ends leaked into this child";
 }
 #endif
 
