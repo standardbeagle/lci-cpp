@@ -23,13 +23,16 @@ inline std::string format_rfc3339_nano_local(
     std::tm tm{};
     portable::localtime_local(t, tm);
 
-    // Compute local zone offset from UTC.
-    std::tm utm{};
-    portable::gmtime_utc(t, utm);
-    // Difference in seconds: treat both tms as if UTC for difftime.
-    std::time_t lt = std::mktime(&tm);
-    std::time_t ut = std::mktime(&utm);
-    long offset = static_cast<long>(lt - ut);
+    // Local zone offset from UTC in seconds. The old approach ran mktime()
+    // on a gmtime tm (tm_isdst=0), which is off by one hour whenever the
+    // local zone observes DST at that date. tm_gmtoff is filled in by
+    // localtime_r (POSIX.1-2024); on Windows _mkgmtime interprets the local
+    // tm as UTC seconds, and the difference from t is the offset.
+#if defined(_WIN32)
+    long offset = static_cast<long>(_mkgmtime(&tm) - t);
+#else
+    long offset = static_cast<long>(tm.tm_gmtoff);
+#endif
     char sign = offset < 0 ? '-' : '+';
     long abs_off = offset < 0 ? -offset : offset;
     int oh = static_cast<int>(abs_off / 3600);

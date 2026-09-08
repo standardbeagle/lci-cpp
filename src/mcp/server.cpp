@@ -244,8 +244,6 @@ nlohmann::json McpServer::handle_request(const nlohmann::json& request) {
 }
 
 nlohmann::json McpServer::handle_initialize(const nlohmann::json& request) {
-    initialized_ = true;
-
     // Version negotiation (MCP lifecycle): echo the client's requested
     // protocol version when we support it, else answer with our newest.
     auto params = request.value("params", nlohmann::json::object());

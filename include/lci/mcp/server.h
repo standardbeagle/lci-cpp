@@ -248,7 +248,6 @@ class McpServer {
     std::vector<RegisteredTool> registered_tools_;
     std::function<bool(std::string& error)> readiness_gate_;
     std::atomic<bool> running_{false};
-    bool initialized_{false};
 
     /// Builds the ordered tools/list wire envelope (field order locked by
     /// mcp_server_test; shared by the stdio path and dispatch_wire).

@@ -521,6 +521,11 @@ void register_index_handlers(McpServer& server, MasterIndex* indexer) {
            "Maximum findings to return per category (default: 20)", ""}},
          {}},
         [indexer](const nlohmann::json& p) -> ToolResult {
+            if (!indexer) {
+                return make_unavailable_response(
+                    "git_analysis", "index not available",
+                    "retry shortly; the server is still starting or indexing");
+            }
             return handle_git_analysis(p, *indexer);
         }
         // exclusive (default): shells out to git and analyzes working-tree
