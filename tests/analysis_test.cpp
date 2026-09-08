@@ -6,6 +6,7 @@
 #include <absl/container/flat_hash_map.h>
 
 #include <lci/analysis/coupling_analyzer.h>
+#include <lci/analysis/entry_signatures.h>
 #include <lci/analysis/feature_analyzer.h>
 #include <lci/analysis/ci_vocabulary_analyzer.h>
 #include <lci/analysis/layer_analyzer.h>
@@ -13,8 +14,15 @@
 #include <lci/analysis/naming_analyzer.h>
 #include <lci/analysis/scope_set.h>
 #include <lci/analysis/english_words.h>
+#include <lci/config.h>
 #include <lci/reference.h>
 #include <lci/semantic/synonym_table.h>
+
+#include "unique_temp.h"
+
+#include <algorithm>
+#include <filesystem>
+#include <fstream>
 
 namespace lci {
 namespace {
@@ -1657,6 +1665,40 @@ TEST(ScopeSet, ParsesUnifiedDiffNewSideRanges) {
     EXPECT_FALSE(s.contains_file("gone.go"));
     // Pure hunk deletion anchors to the boundary line.
     EXPECT_TRUE(s.contains_lines("del.go", 6, 6));
+}
+
+// ===========================================================================
+// entry_signatures: packages/* scan must skip non-directory entries and
+// sample in a deterministic (sorted) order. The fixture mixes 70 regular
+// files with one real package dir; the pre-fix loop broke on the FIRST
+// non-directory entry, so it only found the package when the directory
+// happened to iterate first (filesystem hash order — on the authoring
+// filesystem the dir iterated 55th of 71, RED pre-fix; the mechanism pinned
+// is the fixed behaviour: skip files, sort, then sample).
+// ===========================================================================
+TEST(EntrySignatures, NonDirectoryEntriesAreSkipped) {
+    auto dir = lci::test::unique_temp_dir("lci_entry_sig_");
+    std::filesystem::create_directories(dir / "packages");
+    for (int i = 0; i < 70; ++i) {
+        std::ofstream o(dir / "packages" /
+                        ("f" + std::to_string(i / 10) + std::to_string(i % 10) +
+                         ".txt"));
+        o << "not a package\n";
+    }
+    std::filesystem::create_directories(dir / "packages" / "trpc_pkg");
+    {
+        std::ofstream o(dir / "packages" / "trpc_pkg" / "package.json");
+        o << R"({"name": "trpc"})";
+    }
+
+    InsightConfig insight;
+    auto hints = analysis::resolve_entry_hints(insight, dir.string(), nullptr);
+    EXPECT_EQ(hints.confidence, "framework");
+    EXPECT_NE(std::find(hints.pins.begin(), hints.pins.end(), "initTRPC"),
+              hints.pins.end());
+
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
 }
 
 }  // namespace
