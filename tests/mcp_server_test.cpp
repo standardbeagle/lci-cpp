@@ -9,6 +9,8 @@
 #include <lci/mcp/server.h>
 #include <lci/mcp/time_format.h>
 
+#include "portable_env.h"
+
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -477,6 +479,12 @@ TEST_F(McpStdioTest, GitAnalysisNullIndexerReturnsUnavailable) {
 // 0, which is off by one hour whenever the local zone observes DST at that
 // date. Pin both seasons under America/New_York.
 TEST(TimeFormat, UtcOffsetRespectsDst) {
+#ifdef _WIN32
+    // The MSVC CRT parses TZ as "tzn[+|-]hh[dzn]", not an IANA zone name, so
+    // "America/New_York" yields no DST rule there. The _mkgmtime offset path
+    // in time_format.h is therefore NOT pinned on Windows by this test.
+    GTEST_SKIP() << "IANA TZ names are not honoured by the MSVC CRT";
+#endif
     const char* old_tz = std::getenv("TZ");
     std::string saved = old_tz ? old_tz : "";
     setenv("TZ", "America/New_York", 1);
