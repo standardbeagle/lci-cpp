@@ -144,6 +144,16 @@ void McpServer::write_message(const nlohmann::json& msg) {
 // -- Request handling ---------------------------------------------------------
 
 nlohmann::json McpServer::handle_request(const nlohmann::json& request) {
+    // A batch (array) or scalar frame is not a JSON-RPC request object on
+    // this transport: answer -32600 with a null id instead of letting it
+    // fall through to "Method not found".
+    if (!request.is_object()) {
+        return {{"jsonrpc", "2.0"},
+                {"id", nullptr},
+                {"error", {{"code", -32600},
+                           {"message", "invalid request: not a request "
+                                       "object"}}}};
+    }
     // Type-guarded read: value("method", "") throws type_error.302 when the
     // key exists with a non-string value, and an escaped throw here kills
     // the whole server (found by fuzz_mcp_dispatch). The run loop's catch
@@ -191,6 +201,17 @@ nlohmann::json McpServer::handle_request(const nlohmann::json& request) {
     } else if (method == "tools/call") {
         auto params = request.value("params", nlohmann::json::object());
         auto tool_name = params.value("name", "");
+
+        // Non-object "arguments" is a caller mistake, not an internal
+        // failure: reject -32602 here instead of enqueueing a call whose
+        // handler would fail with type_error.306 ("Internal error").
+        if (auto ait = params.find("arguments");
+            ait != params.end() && !ait->is_object()) {
+            response["error"] = {{"code", -32602},
+                                 {"message", "invalid params: arguments must "
+                                             "be an object"}};
+            return response;
+        }
 
         auto it = std::find_if(
             registered_tools_.begin(), registered_tools_.end(),
@@ -546,6 +567,18 @@ std::string McpServer::dispatch_wire(const std::string& line) {
         return {};  // matches the stdio loop: unparseable frames are dropped
     }
 
+    // A batch (array) or scalar frame is not a JSON-RPC request object on
+    // this transport: answer -32600 with a null id instead of letting it
+    // fall through to "Method not found".
+    if (!request.is_object()) {
+        return dump_json_lossy(
+            {{"jsonrpc", "2.0"},
+             {"id", nullptr},
+             {"error", {{"code", -32600},
+                        {"message", "invalid request: not a request "
+                                    "object"}}}});
+    }
+
     std::string method;
     if (auto it = request.find("method");
         it != request.end() && it->is_string()) {
@@ -577,6 +610,15 @@ std::string McpServer::dispatch_wire(const std::string& line) {
                              "invalid request: params must be an object"}}}});
         }
         auto params = request.value("params", nlohmann::json::object());
+        if (auto ait = params.find("arguments");
+            ait != params.end() && !ait->is_object()) {
+            return dump_json_lossy(
+                {{"jsonrpc", "2.0"},
+                 {"id", id},
+                 {"error", {{"code", -32602},
+                            {"message", "invalid params: arguments must be "
+                                        "an object"}}}});
+        }
         if (auto nit = params.find("name");
             nit != params.end() && !nit->is_string()) {
             return dump_json_lossy(
