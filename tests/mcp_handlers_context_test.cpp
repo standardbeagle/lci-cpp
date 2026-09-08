@@ -466,6 +466,28 @@ TEST_F(ContextHandlerFixture, AppendModeAddsRefs) {
     EXPECT_EQ(j2["ref_count"], 2);
 }
 
+// append=true used to swallow every load_manifest_from_file error (bad JSON,
+// failed validation) and then OVERWRITE the manifest with just the new refs —
+// a silent destroy-on-corrupt. A corrupt existing manifest must fail the call
+// and leave the file byte-identical.
+TEST_F(ContextHandlerFixture, AppendToCorruptManifestErrorsAndLeavesFile) {
+    const std::string corrupt = "{ this is not json !!!";
+    write_file(temp_dir_ / "corrupt.json", corrupt);
+
+    nlohmann::json params = {
+        {"operation", "save"},
+        {"to_file", "corrupt.json"},
+        {"append", true},
+        {"refs", {{{"f", "main.go"}, {"s", "main"}}}}};
+    auto r = handle_context(params, *indexer_, temp_dir_.string());
+    EXPECT_TRUE(r.is_error) << r.text;
+
+    std::ifstream in(temp_dir_ / "corrupt.json", std::ios::binary);
+    std::string content((std::istreambuf_iterator<char>(in)),
+                        std::istreambuf_iterator<char>());
+    EXPECT_EQ(content, corrupt) << "append must not overwrite a corrupt file";
+}
+
 // =============================================================================
 // ExpansionEngine tests
 // =============================================================================
