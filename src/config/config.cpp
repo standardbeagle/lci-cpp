@@ -951,7 +951,9 @@ ConfigResult load_config_from(const fs::path& kdl_path,
         return {{}, kdl_path.string() + ": " + verr, std::move(warnings)};
     }
 
-    return {std::move(cfg), {}, std::move(warnings)};
+    ConfigResult result{std::move(cfg), {}, std::move(warnings), {}};
+    result.source = kdl_path.string();
+    return result;
 }
 
 }  // namespace

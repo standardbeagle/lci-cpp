@@ -202,6 +202,10 @@ struct ConfigResult {
     /// than rejected so a newer config file still loads on an older binary.
     /// Callers that face a human should print these.
     std::vector<std::string> warnings;
+    /// The file the config was loaded from; empty when the result came from
+    /// defaults (no file on disk). Lets `lci config validate` name the file
+    /// its verdict refers to.
+    std::string source;
     bool ok() const { return error.empty(); }
 };
 
