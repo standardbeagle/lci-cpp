@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <cmath>
 #include <functional>
 #include <vector>
 
@@ -140,6 +141,33 @@ TEST(CallGraph, BetweennessMatchesHandComputedValues) {
     EXPECT_DOUBLE_EQ(bc[2], 2.0 / 6.0);
     EXPECT_DOUBLE_EQ(bc[0], 0.0);
     EXPECT_DOUBLE_EQ(bc[3], 0.0);
+}
+
+// A layered diamond of 40 levels: each level has two nodes, both calling
+// both nodes of the next level. Shortest-path multiplicities double per
+// level (sigma = 2^level), overflowing a 32-bit int at level 32; the count
+// must be wide enough that every centrality stays finite and non-negative.
+TEST(CallGraph, BetweennessLayeredDiamondDoesNotOverflow) {
+    constexpr int kLevels = 40;
+    std::vector<SymbolID> nodes;
+    absl::flat_hash_map<SymbolID, std::vector<SymbolID>> edges;
+    for (int l = 0; l < kLevels; ++l) {
+        SymbolID a = 2 * l + 1, b = 2 * l + 2;
+        nodes.push_back(a);
+        nodes.push_back(b);
+        if (l + 1 < kLevels) {
+            SymbolID na = 2 * (l + 1) + 1, nb = 2 * (l + 1) + 2;
+            edges[a] = {na, nb};
+            edges[b] = {na, nb};
+        }
+    }
+    auto g = make_graph(nodes, edges);
+    auto bc = g.betweenness();
+    ASSERT_EQ(bc.size(), nodes.size());
+    for (size_t i = 0; i < bc.size(); ++i) {
+        EXPECT_TRUE(std::isfinite(bc[i])) << "node " << i;
+        EXPECT_GE(bc[i], 0.0) << "node " << i;
+    }
 }
 
 // Determinism: same graph, same labels + modularity across runs.
