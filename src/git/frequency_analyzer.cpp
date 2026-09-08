@@ -484,10 +484,15 @@ bool HistoryProvider::get_repo_history(int64_t since_epoch,
         return get_commit_history(since_epoch, out);
     }
 
-    // Expand the pattern to matching files. run_git execs argv directly, so
-    // git (not a shell) does the globbing.
-    std::string output;
-    if (!provider_.run_git({"ls-files", "--", std::string(pattern)}, output)) {
+    // One bounded ls-files (a single pathspec arg) only to tell "pattern
+    // matched nothing" apart from "no commits in window" — the two read
+    // identically as an empty history. The pattern itself goes to `log` as
+    // a native pathspec below: expanding matches into argv grew unbounded
+    // with the repo (E2BIG past ARG_MAX; 32KB on Windows) and failed the
+    // whole hotspots report.
+    std::string listing;
+    if (!provider_.run_git({"ls-files", "--", std::string(pattern)},
+                           listing)) {
         // A failed ls-files used to fall back to FULL-repo history, which is
         // the opposite of what the caller asked for: a hotspot report scoped
         // to one pattern silently became a whole-repo report, with no way to
@@ -495,17 +500,7 @@ bool HistoryProvider::get_repo_history(int64_t since_epoch,
         return false;
     }
 
-    std::vector<std::string> files;
-    size_t start = 0;
-    while (start < output.size()) {
-        auto nl = output.find('\n', start);
-        if (nl == std::string::npos) nl = output.size();
-        auto line = output.substr(start, nl - start);
-        if (!line.empty()) files.push_back(std::move(line));
-        start = nl + 1;
-    }
-
-    if (files.empty()) {
+    if (listing.find_first_not_of(" \t\r\n") == std::string::npos) {
         // Zero matches is a legitimate answer, not a reason to widen the
         // scope. Return an empty history and say why.
         out.clear();
@@ -515,7 +510,9 @@ bool HistoryProvider::get_repo_history(int64_t since_epoch,
         }
         return true;
     }
-    return get_commit_history(since_epoch, out, files);
+    // After "--", git treats each entry as a pathspec, with exactly the
+    // matching semantics ls-files just used — one arg, any glob.
+    return get_commit_history(since_epoch, out, {std::string(pattern)});
 }
 
 bool parse_commit_history(std::string_view output,
