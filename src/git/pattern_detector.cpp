@@ -295,7 +295,10 @@ std::vector<AntiPattern> PatternDetector::detect_switch_factories(
 
     std::vector<AntiPattern> patterns;
 
-    static const RE2 switch_re(R"(switch\s+[^{]*\{)", quiet_opts());
+    // [^{\n] not [^{]: the scan must not slide across newlines — a `switch`
+    // whose condition never opens a brace would otherwise match a `{` many
+    // lines later and report a phantom factory at the wrong line.
+    static const RE2 switch_re(R"(switch\s+[^{\n]*\{)", quiet_opts());
     static const RE2 select_re(R"(select\s*\{)", quiet_opts());
 
     auto process_matches = [&](const RE2& re, const char* label) {

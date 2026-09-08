@@ -442,14 +442,18 @@ std::string Provider::get_target_ref(const AnalysisParams& params) const {
 }
 
 bool Provider::list_all_files(std::vector<std::string>& out) const {
+    // -z: NUL-terminated raw path bytes. Without it, a newline in a file
+    // name split into two bogus entries and core.quotePath C-quoted any
+    // non-ASCII name into a string that matches nothing on disk.
     std::string output;
-    if (!run_git({"ls-files", "--"}, output)) return false;
+    if (!run_git({"ls-files", "-z", "--"}, output)) return false;
 
-    std::vector<std::string_view> lines;
-    split_lines(output, lines);
-    out.reserve(lines.size());
-    for (const auto& line : lines) {
-        out.emplace_back(line);
+    size_t pos = 0;
+    while (pos < output.size()) {
+        size_t end = output.find('\0', pos);
+        if (end == std::string::npos) end = output.size();
+        if (end > pos) out.emplace_back(output.substr(pos, end - pos));
+        pos = end + 1;
     }
     return true;
 }
