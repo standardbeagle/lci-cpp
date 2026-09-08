@@ -142,7 +142,10 @@ void GraphPropagator::propagate_label(
             } else {
                 switch (rule.mode) {
                     case PropagationMode::Reachability:
-                        should_update = false;
+                        // Ties break to the smallest source id: first-
+                        // writer-wins made the winner a function of the
+                        // per-process hash salt.
+                        should_update = value.source < it->second.source;
                         break;
                     case PropagationMode::Accumulation:
                         should_update = true;
