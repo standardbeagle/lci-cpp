@@ -15,6 +15,13 @@
 #include <fstream>
 #include <string>
 
+#ifndef _WIN32
+#include <sys/wait.h>
+#include <unistd.h>
+#endif
+
+#include <iostream>
+
 namespace lci {
 namespace {
 
@@ -452,6 +459,96 @@ TEST(GraphPropagatorTest, EmptyLabelsForUnseededSymbol) {
     auto labels = gp.get_labels(999);
     EXPECT_TRUE(labels.empty());
 }
+
+#ifndef _WIN32
+// Reachability ties must resolve to the smallest source id, not the first
+// writer in hash order. A child process indexes 8 callees all called by one
+// hub, seeds all 8 with "critical" (default config: Reachability upstream),
+// and prints hub's winning source plus the minimum seed id. The parent
+// compares 5 separate processes: pre-fix the winner follows the per-process
+// absl hash salt, post-fix it is always the minimum.
+std::string run_reachability_tie_in_child() {
+    int fds[2];
+    if (pipe(fds) != 0) return {};
+    pid_t pid = fork();
+    if (pid == 0) {
+        close(fds[0]);
+        dup2(fds[1], STDOUT_FILENO);
+        close(fds[1]);
+
+        auto dir = lci::test::unique_temp_dir("lci_gp_tie_");
+        std::filesystem::create_directories(dir);
+        {
+            std::ofstream o(dir / "tie.go");
+            o << "package main\n\n";
+            for (int i = 0; i < 8; ++i)
+                o << "func seed" << i << "() {}\n\n";
+            o << "func hub() {\n";
+            for (int i = 0; i < 8; ++i) o << "\tseed" << i << "()\n";
+            o << "}\n";
+        }
+        Config config;
+        config.project.root = dir.string();
+        MasterIndex indexer(config);
+        indexer.index_directory(dir.string());
+
+        GraphPropagator gp(&indexer.ref_tracker());
+        auto snap = indexer.ref_tracker().pin();
+        SymbolID min_id = ~SymbolID{0};
+        for (int i = 0; i < 8; ++i) {
+            auto sym = snap->find_symbol_by_name("seed" + std::to_string(i));
+            if (!sym) _exit(2);
+            min_id = std::min(min_id, sym->id);
+            gp.seed_label(sym->id, "critical", 1.0);
+        }
+        auto hub = snap->find_symbol_by_name("hub");
+        if (!hub) _exit(2);
+        gp.propagate();
+        auto labels = gp.get_labels(hub->id);
+        for (const auto& l : labels) {
+            if (l.label == "critical")
+                std::cout << "source=" << l.source << " min=" << min_id
+                          << "\n";
+        }
+        std::cout.flush();
+        std::error_code ec;
+        std::filesystem::remove_all(dir, ec);
+        _exit(0);
+    }
+    close(fds[1]);
+    std::string out;
+    char buf[4096];
+    ssize_t n;
+    while ((n = read(fds[0], buf, sizeof(buf))) > 0)
+        out.append(buf, static_cast<size_t>(n));
+    close(fds[0]);
+    int status = 0;
+    waitpid(pid, &status, 0);
+    return out;
+}
+
+TEST(GraphPropagatorTest, ReachabilityTieBreaksToSmallestSource) {
+    std::string reference;
+    for (int run = 0; run < 5; ++run) {
+        std::string text = run_reachability_tie_in_child();
+        ASSERT_FALSE(text.empty()) << "child produced no output";
+        if (run == 0) {
+            reference = text;
+        } else {
+            EXPECT_EQ(text, reference) << "run " << run << " diverged";
+        }
+    }
+    // The winner is the smallest seed id, parsed independently of any
+    // propagator output shape beyond the child's own report.
+    auto src_pos = reference.find("source=");
+    auto min_pos = reference.find("min=");
+    ASSERT_NE(src_pos, std::string::npos);
+    ASSERT_NE(min_pos, std::string::npos);
+    SymbolID winner = std::stoull(reference.substr(src_pos + 7));
+    SymbolID expected = std::stoull(reference.substr(min_pos + 4));
+    EXPECT_EQ(winner, expected);
+}
+#endif  // !_WIN32
 
 // ===========================================================================
 // SemanticAnnotator
