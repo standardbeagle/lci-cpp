@@ -5,6 +5,12 @@
 #include <fstream>
 #include <string>
 
+#if !defined(_WIN32)
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#endif
+
 #include "helpers/test_git.h"
 
 #include <nlohmann/json.hpp>
@@ -851,6 +857,99 @@ TEST(GitFrequency, FilePatternReachesGitAsOnePathspecArg) {
 
     fs::remove_all(base);
 }
+
+#if !defined(_WIN32)
+// Hotspots (and collisions/ownership) were sorted on the score alone from
+// flat_hash_map iteration order; with every score tied, the emitted order
+// followed the per-process abseil hash salt. Each child below is a SEPARATE
+// process (own salt) that rebuilds the same fixture and prints the report;
+// the parent byte-compares the five outputs. A loop in one process would
+// prove nothing — one process, one salt.
+TEST(GitFrequency, HotspotsReportByteIdenticalAcrossProcesses) {
+    namespace fs = std::filesystem;
+    fs::path base = fs::temp_directory_path() /
+                    ("lci_git_det_" +
+                     std::to_string(std::chrono::steady_clock::now()
+                                        .time_since_epoch()
+                                        .count()));
+    fs::create_directories(base);
+
+    std::vector<std::string> outputs;
+    for (int run = 0; run < 5; ++run) {
+        fs::path out_file = base / ("run" + std::to_string(run) + ".txt");
+        pid_t pid = fork();
+        ASSERT_NE(pid, -1);
+        if (pid == 0) {
+            // Child: fresh process, fresh hash salt. Build the fixture from
+            // scratch so nothing is inherited from the parent's mappings.
+            fs::path repo = base / ("repo" + std::to_string(run));
+            fs::create_directories(repo);
+            bool ok = lci::test::run_git(repo, "init -q");
+            // 40 files, one commit, one change each: every volatility
+            // score ties, so output order is total-order tiebreak or hash
+            // order — there is no third option.
+            for (int i = 0; i < 40; ++i) {
+                std::ofstream(repo / ("m" + std::to_string(i) + ".go"))
+                    << "package main\nfunc F" << i << "() {}\n";
+            }
+            ok = ok && lci::test::run_git(repo, "add -A");
+            ok = ok && lci::test::run_git(
+                repo,
+                "-c user.email=fixture@lci.test -c user.name=lci-fixture "
+                "-c commit.gpgsign=false commit -q -m fixture");
+            std::string text;
+            Provider p;
+            ok = ok && Provider::create(repo.string(), p);
+            if (ok) {
+                FrequencyAnalyzer analyzer(p);
+                ChangeFrequencyParams params;
+                params.min_changes = 1;
+                params.top_n = 50;
+                ChangeFrequencyReport report;
+                ok = analyzer.analyze(params, report);
+                if (ok) {
+                    for (const auto& h : report.hotspots) {
+                        text += h.file_path;
+                        text += '\n';
+                    }
+                    text += "--collisions--\n";
+                    for (const auto& c : report.collisions) {
+                        text += c.path;
+                        text += '\n';
+                    }
+                    text += "--ownership--\n";
+                    for (const auto& o : report.ownership) {
+                        text += o.module_path;
+                        text += '\n';
+                        text += o.primary_owner.author_email;
+                        text += '\n';
+                    }
+                    text += "--contributor--\n";
+                    text += report.summary.most_active_contributor;
+                    text += '\n';
+                }
+            }
+            std::ofstream(out_file, std::ios::binary) << (ok ? text : "FAIL");
+            std::_Exit(ok ? 0 : 2);
+        }
+        int status = 0;
+        ASSERT_EQ(waitpid(pid, &status, 0), pid);
+        ASSERT_TRUE(WIFEXITED(status) && WEXITSTATUS(status) == 0)
+            << "child run " << run << " failed";
+        std::ifstream ifs(out_file, std::ios::binary);
+        outputs.emplace_back(std::istreambuf_iterator<char>(ifs),
+                             std::istreambuf_iterator<char>());
+        ASSERT_NE(outputs.back(), "FAIL");
+        ASSERT_FALSE(outputs.back().empty());
+    }
+
+    for (size_t i = 1; i < outputs.size(); ++i) {
+        EXPECT_EQ(outputs[i], outputs[0])
+            << "run " << i << " differs from run 0 (hash-order leak)";
+    }
+    fs::remove_all(base);
+}
+#endif
 
 TEST(GitFrequency, SinceIsInterpretedAsUtcRegardlessOfLocalTz) {
     namespace fs = std::filesystem;
