@@ -6,9 +6,11 @@
 #include <algorithm>
 #include <cctype>
 #include <charconv>
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -36,7 +38,17 @@ bool get_string(const KdlNode& n, std::string& out) {
 
 bool get_int(const KdlNode& n, int& out) {
     for (const auto& a : n.args) {
-        if (a.kind == TokenKind::Number) { out = static_cast<int>(a.num_val); return true; }
+        if (a.kind == TokenKind::Number) {
+            // Range- and integrality-checked: a bare static_cast<int>(double)
+            // is UB out of range and truncates fractions silently.
+            if (a.num_val < std::numeric_limits<int>::min() ||
+                a.num_val > std::numeric_limits<int>::max() ||
+                std::trunc(a.num_val) != a.num_val) {
+                return false;
+            }
+            out = static_cast<int>(a.num_val);
+            return true;
+        }
     }
     return false;
 }
@@ -76,9 +88,20 @@ bool set_int(const KdlNode& n, std::string_view path, int& dst,
 
 bool set_int64(const KdlNode& n, std::string_view path, int64_t& dst,
                std::string& error) {
-    int v = 0;
-    if (get_int(n, v)) {
-        dst = v;
+    // Reads the double directly: routing through `int` first wraps values
+    // above INT_MAX (max_file_size 4294968296 became 1000 and validated).
+    for (const auto& a : n.args) {
+        if (a.kind != TokenKind::Number) continue;
+        // 2^63 is not exactly representable; the bounds below keep the cast
+        // inside the exactly-representable, defined range.
+        constexpr double kI64Min = -9223372036854775808.0;
+        constexpr double kI64Max = 9223372036854775808.0;  // 2^63, exclusive
+        if (a.num_val < kI64Min || a.num_val >= kI64Max ||
+            std::trunc(a.num_val) != a.num_val) {
+            error = std::string(path) + ": expected an integer argument";
+            return false;
+        }
+        dst = static_cast<int64_t>(a.num_val);
         return true;
     }
     error = std::string(path) + ": expected an integer argument";
@@ -211,7 +234,9 @@ bool apply_index(Config& cfg, const KdlNode& node, std::string& error,
                 return false;
             }
         } else if (child.name == "data_file_token_cap") {
-            get_int(child, cfg.index.data_file_token_cap);
+            if (!set_int(child, "index.data_file_token_cap",
+                         cfg.index.data_file_token_cap, error))
+                return false;
         } else if (child.name == "max_total_size_mb") {
             if (!set_int64(child, "index.max_total_size_mb",
                            cfg.index.max_total_size_mb, error))
