@@ -612,12 +612,21 @@ ToolResult handle_context_load(const nlohmann::json& params,
 
         total_tokens += hr.tokens;
         result.stats.refs_loaded++;
-        result.stats.symbols_hydrated++;
+        // A line-range-only ref hydrates no symbol.
+        if (!ref.symbol.empty()) {
+            result.stats.symbols_hydrated++;
+        }
 
-        // Apply expansions
+        // Apply expansions. The admitted ref may overshoot the budget by its
+        // own size (checked before hydration, bounded by one ref); clamp the
+        // expansion budget at zero so apply_expansions never sees a negative
+        // remaining_tokens.
+        std::vector<HydratedRef> expanded_refs;
         if (!ref.expansions.empty()) {
+            int remaining = max_tokens - total_tokens;
+            if (remaining < 0) remaining = 0;
             auto exp_result = engine.apply_expansions(
-                ref, hr.ref, format, max_tokens - total_tokens, project_root);
+                ref, hr.ref, format, remaining, project_root);
             if (!exp_result.error.empty()) {
                 result.warnings.push_back("Failed to expand " + ref.file +
                                           ":" + ref.symbol + ": " +
@@ -626,10 +635,14 @@ ToolResult handle_context_load(const nlohmann::json& params,
                 total_tokens += exp_result.tokens;
                 result.stats.expansions_applied +=
                     static_cast<int>(ref.expansions.size());
+                expanded_refs = std::move(exp_result.expanded);
             }
         }
 
         result.refs.push_back(std::move(hr.ref));
+        for (auto& er : expanded_refs) {
+            result.refs.push_back(std::move(er));
+        }
     }
 
     result.stats.tokens_approx = total_tokens;

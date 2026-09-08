@@ -52,9 +52,12 @@ class ExpansionEngine {
                                     const std::string& project_root);
 
     /// Applies expansion directives (callers, callees, etc.) to a reference.
-    /// Returns additional token count consumed, and error string.
+    /// Returns additional token count consumed, the hydrated expansion refs
+    /// (callers/callees/... — emitted by the caller into the response), and
+    /// error string.
     struct ExpansionResult {
         int tokens{};
+        std::vector<HydratedRef> expanded;
         std::string error;
     };
     ExpansionResult apply_expansions(const ContextRef& ref,

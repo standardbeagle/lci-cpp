@@ -242,9 +242,10 @@ ExpansionEngine::ExpansionResult ExpansionEngine::apply_expansions(
     const ContextRef& ref, HydratedRef& hydrated, FormatType format,
     int remaining_tokens, const std::string& project_root) {
     if (ref.expansions.empty()) {
-        return {0, {}};
+        return {};
     }
 
+    ExpansionResult out;
     int total_tokens = 0;
 
     for (const auto& directive : ref.expansions) {
@@ -280,14 +281,16 @@ ExpansionEngine::ExpansionResult ExpansionEngine::apply_expansions(
         for (const auto& er : expanded) {
             total_tokens += static_cast<int>(er.source.size()) / 4;
         }
-        // Store expanded refs is skipped here since HydratedRef doesn't have
-        // an Expanded map in the C++ types. The expanded refs are returned
-        // as part of the hydrated context warnings/stats instead.
-        // In a future iteration, HydratedRef could be extended with a map.
-        (void)expanded;
+        // Emit the expansion content: the caller appends these to the
+        // hydrated context so the charged tokens correspond to emitted
+        // source.
+        out.expanded.insert(out.expanded.end(),
+                            std::make_move_iterator(expanded.begin()),
+                            std::make_move_iterator(expanded.end()));
     }
 
-    return {total_tokens, {}};
+    out.tokens = total_tokens;
+    return out;
 }
 
 // -- Expansion helpers --------------------------------------------------------
@@ -334,7 +337,7 @@ std::vector<HydratedRef> hydrate_symbol_ids(
 }  // namespace
 
 std::vector<HydratedRef> ExpansionEngine::expand_callers(
-    const ContextRef& ref, int /*depth*/, int remaining_tokens,
+    const ContextRef& ref, int depth, int remaining_tokens,
     const std::string& project_root, FormatType format) {
     if (ref.symbol.empty()) return {};
 
@@ -343,16 +346,32 @@ std::vector<HydratedRef> ExpansionEngine::expand_callers(
     auto sym = rt_snap->find_symbol_by_name(ref.symbol);
     if (!sym) return {};
 
-    auto caller_ids = tracker.get_caller_symbols(sym->id);
+    // Level-order walk up to `depth` hops, deduped, so "callers:2" reaches
+    // callers-of-callers. seen is the BFS dedup set; hydrate_symbol_ids gets
+    // its own visited set seeded with only the start symbol.
+    absl::flat_hash_set<SymbolID> seen;
+    seen.insert(sym->id);
+    std::vector<SymbolID> ordered;
+    std::vector<SymbolID> frontier = tracker.get_caller_symbols(sym->id);
+    for (int d = 0; d < depth && !frontier.empty(); ++d) {
+        std::vector<SymbolID> next;
+        for (auto id : frontier) {
+            if (!seen.insert(id).second) continue;
+            ordered.push_back(id);
+            auto up = tracker.get_caller_symbols(id);
+            next.insert(next.end(), up.begin(), up.end());
+        }
+        frontier = std::move(next);
+    }
+
     absl::flat_hash_set<SymbolID> visited;
     visited.insert(sym->id);
-
-    return hydrate_symbol_ids(*this, caller_ids, tracker, index_,
+    return hydrate_symbol_ids(*this, ordered, tracker, index_,
                               remaining_tokens, project_root, format, visited);
 }
 
 std::vector<HydratedRef> ExpansionEngine::expand_callees(
-    const ContextRef& ref, int /*depth*/, int remaining_tokens,
+    const ContextRef& ref, int depth, int remaining_tokens,
     const std::string& project_root, FormatType format) {
     if (ref.symbol.empty()) return {};
 
@@ -361,11 +380,24 @@ std::vector<HydratedRef> ExpansionEngine::expand_callees(
     auto sym = rt_snap->find_symbol_by_name(ref.symbol);
     if (!sym) return {};
 
-    auto callee_ids = tracker.get_callee_symbols(sym->id);
+    absl::flat_hash_set<SymbolID> seen;
+    seen.insert(sym->id);
+    std::vector<SymbolID> ordered;
+    std::vector<SymbolID> frontier = tracker.get_callee_symbols(sym->id);
+    for (int d = 0; d < depth && !frontier.empty(); ++d) {
+        std::vector<SymbolID> next;
+        for (auto id : frontier) {
+            if (!seen.insert(id).second) continue;
+            ordered.push_back(id);
+            auto down = tracker.get_callee_symbols(id);
+            next.insert(next.end(), down.begin(), down.end());
+        }
+        frontier = std::move(next);
+    }
+
     absl::flat_hash_set<SymbolID> visited;
     visited.insert(sym->id);
-
-    return hydrate_symbol_ids(*this, callee_ids, tracker, index_,
+    return hydrate_symbol_ids(*this, ordered, tracker, index_,
                               remaining_tokens, project_root, format, visited);
 }
 
