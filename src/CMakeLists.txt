@@ -75,12 +75,6 @@ add_library(lci_lib STATIC
     core/context_lookup_semantic.cpp
     core/context_lookup_usage.cpp
     core/context_lookup_ai.cpp
-    symbollinker/linker_engine.cpp
-    symbollinker/go_linker.cpp
-    symbollinker/js_linker.cpp
-    symbollinker/python_linker.cpp
-    symbollinker/csharp_linker.cpp
-    symbollinker/php_linker.cpp
     server/server.cpp
     server/server_endpoints.cpp
     server/server_endpoints_symbols.cpp

@@ -24,11 +24,11 @@
     "score_abs": 0.0,
     "timed_max_ms": 60000
   },
-  "expect_exit": 0,
+  "expect_exit": 1,
   "text_normalize": {
     "strip_lines": [
       "Last Updated:"
     ]
   },
-  "_rationale": "Discrimination test for the incremental snapshot delta (src/cli/debug.cpp run_debug_info). The fixture ships a committed prior manifest (.lci/debug-snapshot.json) recording a.go (current hash -> unchanged), b.go (stale hash -> modified) and a phantom d.go (absent on disk -> removed); c.go exists on disk but not in the manifest (-> added). A single `debug info --incremental` run therefore emits exactly the {added c.go, modified b.go, removed d.go} delta and omits the unchanged a.go. git_fixture materializes the tree into a throwaway temp git repo, so the snapshot rewrite the run performs at exit is discarded (no source pollution). Change signal is size+FNV-1a content hash, not mtime, precisely so the committed manifest survives a checkout/copy. Without the delta logic the command lists all files and this golden fails."
+  "_rationale": "S9: debug subcommands print only numbers from the running server /status; with no server they exit non-zero after printing \"server not running\" (the previous hardcoded-zero output was fabricated)."
 }

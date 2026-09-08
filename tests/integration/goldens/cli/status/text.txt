@@ -1,15 +1,1 @@
-Lightning Code Index Server Status
-==================================
-
-Status: Ready
-
-Index Statistics:
-  Files indexed:    4
-  Symbols indexed:  6
-  Index size:       0 bytes
-
-Server Runtime:
-  Threads:          0
-
-Memory Usage:
-  RSS:              0.0 MB
+Status: not running

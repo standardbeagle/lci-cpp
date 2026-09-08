@@ -3,18 +3,20 @@
 #include <chrono>
 #include <ctime>
 #include <cstdio>
-#include <fstream>
+#include <filesystem>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
 #include <string>
 
 #include <nlohmann/json.hpp>
+#include <lci/server/server.h>
 
-#if !defined(_WIN32)
-#  include <sys/resource.h>
-#  include <unistd.h>
-#endif
+// S9: `lci status` reports the SERVER's numbers. The previous implementation
+// read the CLI's own /proc/self for the "Server Runtime" threads/RSS lines
+// (measuring the short-lived client, not the server) and auto-spawned a
+// server when none was running instead of reporting "not running". Both are
+// gone: no server -> print "not running", exit 0, spawn nothing.
 
 namespace lci {
 namespace cli {
@@ -54,48 +56,6 @@ std::string format_uptime_seconds(double seconds) {
     return out.str();
 }
 
-// Reads VmRSS / Threads from /proc/self/status. Returns {rss_kb,
-// threads}; either may be 0 if unavailable. Linux + WSL; macOS/Windows
-// covered separately below.
-struct ProcRuntime {
-    long rss_kb{};
-    int threads{};
-};
-
-ProcRuntime read_proc_runtime() {
-    ProcRuntime r;
-#if defined(__linux__)
-    std::ifstream f("/proc/self/status");
-    std::string line;
-    while (std::getline(f, line)) {
-        if (line.rfind("VmRSS:", 0) == 0) {
-            std::istringstream ss(line.substr(6));
-            ss >> r.rss_kb;
-        } else if (line.rfind("Threads:", 0) == 0) {
-            std::istringstream ss(line.substr(8));
-            ss >> r.threads;
-        }
-    }
-#elif !defined(_WIN32)
-    // BSD / macOS fallback: getrusage gives ru_maxrss (kilobytes on
-    // Linux, bytes on macOS — but we only build this branch off-Linux).
-    struct rusage ru{};
-    if (getrusage(RUSAGE_SELF, &ru) == 0) {
-#  if defined(__APPLE__)
-        r.rss_kb = ru.ru_maxrss / 1024;
-#  else
-        r.rss_kb = ru.ru_maxrss;
-#  endif
-    }
-    // Thread count not portable here; leave 0.
-#endif
-    return r;
-}
-
-double rss_mb(const ProcRuntime& r) {
-    return static_cast<double>(r.rss_kb) / 1024.0;
-}
-
 }  // namespace
 
 int run_status(const GlobalFlags& flags, bool json_output, bool verbose) {
@@ -105,16 +65,25 @@ int run_status(const GlobalFlags& flags, bool json_output, bool verbose) {
         return 1;
     }
 
-    std::string conn_err;
-    auto client = ensure_server_running(cfg, conn_err);
-    if (!client) {
-        std::cerr << "Error: failed to connect to server: " << conn_err
-                  << "\n";
-        return 1;
+    std::filesystem::path root = cfg.project.root.empty()
+                                     ? std::filesystem::path(".")
+                                     : std::filesystem::path(cfg.project.root);
+    Client client(get_socket_path_for_root(root.string()));
+    if (!client.is_server_running()) {
+        // Query, not supervisor: report and exit 0 without spawning.
+        if (json_output) {
+            nlohmann::json report;
+            report["status"] = "not running";
+            report["ready"] = false;
+            std::cout << report.dump(2) << "\n";
+        } else {
+            std::printf("Status: not running\n");
+        }
+        return 0;
     }
 
     std::string stats_err;
-    auto stats = client->get_stats(stats_err);
+    auto stats = client.get_stats(stats_err);
     if (!stats) {
         std::cerr << "Error: failed to get server stats: " << stats_err
                   << "\n";
@@ -122,15 +91,12 @@ int run_status(const GlobalFlags& flags, bool json_output, bool verbose) {
     }
 
     std::string status_err;
-    auto status = client->get_status(status_err);
+    auto status = client.get_status(status_err);
     if (!status) {
         std::cerr << "Error: failed to get server status: " << status_err
                   << "\n";
         return 1;
     }
-
-    auto runtime = read_proc_runtime();
-    double rss = rss_mb(runtime);
 
     if (json_output) {
         nlohmann::json report;
@@ -139,12 +105,10 @@ int run_status(const GlobalFlags& flags, bool json_output, bool verbose) {
         report["symbol_count"] = stats->symbol_count;
         report["index_size_bytes"] = stats->index_size_bytes;
         report["build_duration_ms"] = stats->build_duration_ms;
-        // C++-native runtime metrics. Go reports goroutines + heap; C++
-        // reports threads + RSS. Different runtimes — fields named to
-        // reflect what's actually measured rather than faking Go's shape
-        // with zeros (the prior behavior).
-        report["num_threads"] = runtime.threads;
-        report["memory_rss_mb"] = rss;
+        // Server-side runtime metrics from the server's own /stats (C++
+        // reports threads + RSS where Go reports goroutines + heap).
+        report["num_threads"] = stats->num_threads;
+        report["memory_rss_mb"] = stats->memory_rss_mb;
         report["timestamp"] = iso_timestamp_now();
         report["uptime_seconds"] = format_uptime_seconds(stats->uptime_seconds);
         report["search_count"] = stats->search_count;
@@ -178,10 +142,10 @@ int run_status(const GlobalFlags& flags, bool json_output, bool verbose) {
     std::printf("\nServer Runtime:\n");
     std::printf("  Uptime:           %s\n",
                 format_seconds(stats->uptime_seconds).c_str());
-    std::printf("  Threads:          %d\n", runtime.threads);
+    std::printf("  Threads:          %d\n", stats->num_threads);
 
     std::printf("\nMemory Usage:\n");
-    std::printf("  RSS:              %.1f MB\n", rss);
+    std::printf("  RSS:              %.1f MB\n", stats->memory_rss_mb);
 
     if (stats->search_count > 0 || verbose) {
         std::printf("\nSearch Statistics:\n");

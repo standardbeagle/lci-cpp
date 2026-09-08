@@ -8,14 +8,14 @@
 //
 // One authoritative table consulted by every classification site (search
 // engine is_code, reference_tracker export/family gating, import_resolver,
-// git naming conventions, parser grammar selection, symbollinker can_handle,
+// git naming conventions, parser grammar selection, extractor can_handle,
 // mcp language summary). Adding an extension edits ONLY this table instead of
 // the ~8 hard-coded lists that used to drift (.pyw/.pyi/.pyx/.pxd appeared in
 // some, not others).
 //
 // LAYERING: this header lives at the foundation level (top-level lci namespace,
 // depends on nothing but <cstdint>/<string_view>) so every layer -- core,
-// parser, git, search, symbollinker, mcp -- may include it. It deliberately
+// parser, git, search, mcp -- may include it. It deliberately
 // returns a foundation-owned canonical LangId / LangFamily rather than the
 // parser or git Language enums: returning those would force a foundation ->
 // parser / foundation -> git dependency edge (core must not depend on parser).

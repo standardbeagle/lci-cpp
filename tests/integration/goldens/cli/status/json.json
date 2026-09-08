@@ -1,11 +1,4 @@
 {
-  "avg_search_time_ms": 0,
-  "build_duration_ms": 4,
-  "file_count": 4,
-  "index_size_bytes": 0,
-  "memory_rss_mb": 0,
-  "num_threads": 0,
-  "ready": true,
-  "search_count": 0,
-  "symbol_count": 6
+  "ready": false,
+  "status": "not running"
 }

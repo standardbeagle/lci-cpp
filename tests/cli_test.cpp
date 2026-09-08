@@ -3557,8 +3557,12 @@ TEST(CliStatusTest, ThreadsAndRssMatchServerStatusJson) {
         << "text Threads: must be the server's /status value, not the CLI's "
            "own /proc/self\njson: "
         << json_out << "\ntext: " << text_out;
-    // Text prints RSS with %.1f; allow one display rounding step.
-    EXPECT_NEAR(text_rss_mb, server_rss_mb, 0.06)
+    // Text prints RSS with %.1f and the two invocations are sequential, so
+    // the live server's RSS can drift between them; the tolerance covers
+    // display rounding plus drift, while remaining far tighter than the
+    // CLI-vs-server gap the bug produced (16 MB client vs hundreds of MB
+    // server).
+    EXPECT_NEAR(text_rss_mb, server_rss_mb, 8.0)
         << "text RSS: must be the server's /status value\njson: " << json_out
         << "\ntext: " << text_out;
 

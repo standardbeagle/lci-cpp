@@ -5,7 +5,6 @@
 #include <lci/git/types.h>
 #include <lci/parser/parser.h>
 #include <lci/search/search_options.h>
-#include <lci/symbollinker/python_linker.h>
 
 // ---------------------------------------------------------------------------
 // Discrimination test for the centralized extension -> language map.
@@ -110,18 +109,6 @@ TEST(LanguageMap, GitLanguageAgreesWithTable) {
     EXPECT_EQ(git::get_language_from_path("a.scala"), Language::Scala);
     EXPECT_EQ(git::get_language_from_path("a.zig"), Language::Zig);
     EXPECT_EQ(git::get_language_from_path("a.nosuch"), Language::Unknown);
-}
-
-// -- Consumer: symbollinker python can_handle -------------------------------
-
-TEST(LanguageMap, PythonExtractorCanHandleConsultsTable) {
-    symbollinker::PythonExtractor extractor;
-    for (std::string_view ext : {".py", ".pyw", ".pyi", ".pyx", ".pxd"}) {
-        EXPECT_TRUE(extractor.can_handle(std::string("m") + std::string(ext)))
-            << ext;
-    }
-    EXPECT_FALSE(extractor.can_handle("m.go"));
-    EXPECT_FALSE(extractor.can_handle("m.cpp"));
 }
 
 }  // namespace

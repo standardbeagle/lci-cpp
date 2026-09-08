@@ -22,8 +22,11 @@
     "score_abs": 0.0,
     "timed_max_ms": 60000
   },
-  "expect_exit": 0,
+  "expect_exit": 1,
   "text_normalize": {
-    "strip_lines": ["Last Updated:"]
-  }
+    "strip_lines": [
+      "Last Updated:"
+    ]
+  },
+  "_rationale": "S9: debug subcommands print only numbers from the running server /status; with no server they exit non-zero after printing \"server not running\" (the previous hardcoded-zero output was fabricated)."
 }

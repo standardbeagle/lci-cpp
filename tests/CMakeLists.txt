@@ -63,10 +63,6 @@ add_executable(lci_tests
     error_handling_analyzer_test.cpp
     side_effect_analyzer_test.cpp
     side_effect_extraction_test.cpp
-    linker_engine_test.cpp
-    go_js_linker_test.cpp
-    python_csharp_linker_test.cpp
-    php_integration_linker_test.cpp
     codebase_intelligence_test.cpp
     path_classifier_test.cpp
     analysis_test.cpp

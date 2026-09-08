@@ -17,7 +17,7 @@
     "exit"
   ],
   "parse": "json",
-  "_rationale": "QA-discovered schema drift. Go emits `timestamp`, `memory_alloc_mb`, `memory_total_mb`, `memory_heap_mb`, and `num_goroutines`; C++ emits `memory_rss_mb` and `num_threads` instead. This red test keeps the mismatch visible until the status JSON contract is aligned.",
+  "_rationale": "S9: lci status is a query, not a supervisor: with no server running it prints \"not running\" and exits 0 without spawning one.",
   "tiers": {
     "ignore": [
       "timestamp",
