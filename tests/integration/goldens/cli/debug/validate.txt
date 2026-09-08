@@ -1,4 +1,1 @@
-Validating index server
-Root Path: ${CORPUS}
-
-server not running
+debug validate: unavailable — no server-side consistency check exists in the C++ port; the previous unconditional pass verdict was fabricated (S9)

@@ -24,18 +24,7 @@
   },
   "expect_exit": 1,
   "text_normalize": {
-    "strip_emoji_prefix": true,
-    "strip_lines": [
-      "Incremental Mode:",
-      "Building index...",
-      "Linking symbols"
-    ],
-    "replace": [
-      {
-        "pattern": "^Root Path: \\.$",
-        "with": "Root Path: ${CORPUS}"
-      }
-    ]
+    "strip_emoji_prefix": true
   },
-  "_rationale": "S9: debug subcommands print only numbers from the running server /status; with no server they exit non-zero after printing \"server not running\" (the previous hardcoded-zero output was fabricated)."
+  "_rationale": "S9: no server-side consistency check exists (/status never emits an error field on a 200, so the old 'All consistency checks passed!' verdict was unconditional and fabricated). debug validate is a fail-fast stub: it prints the unavailability message and exits 1, whether or not a server is running."
 }

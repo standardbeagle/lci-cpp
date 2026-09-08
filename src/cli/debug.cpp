@@ -141,50 +141,19 @@ int run_debug_info(const GlobalFlags& flags, bool verbose, bool incremental) {
 }
 
 // -- debug validate -----------------------------------------------------------
+//
+// There is no server-side consistency check in the C++ port: /status never
+// emits an `error` field on a 200 (server_endpoints.cpp), so the previous
+// `status->error.empty()` branch printed "All consistency checks passed!"
+// for EVERY reachable server — an unconditional, fabricated verdict
+// (karpathy-principles rule 6). Fail fast like deps/graph instead of
+// inventing a check.
 
-int run_debug_validate(const GlobalFlags& flags, bool incremental) {
-    Config cfg;
-    if (std::string err = load_config_with_overrides(flags, cfg); !err.empty()) {
-        std::cerr << "Error: " << err << "\n";
-        return 1;
-    }
-
-    const std::string socket_path =
-        get_socket_path_for_root(display_root(cfg).string());
-    Client client(socket_path);
-
-    std::printf("Validating index server\n");
-    std::printf("Root Path: %s\n", cfg.project.root.c_str());
-    if (incremental) {
-        std::fprintf(stderr,
-                     "Note: --incremental: server-side consistency check "
-                     "is mode-agnostic in C++ port; output is identical to "
-                     "full-mode for now.\n");
-    }
-    std::printf("\n");
-
-    if (!client.is_server_running()) {
-        std::printf("server not running\n");
-        return 1;
-    }
-    std::string status_err;
-    auto status = client.get_status(status_err);
-    if (!status) {
-        std::fprintf(stderr, "Error: failed to get server status: %s\n",
-                     status_err.c_str());
-        return 1;
-    }
-
-    std::printf("Running consistency checks...\n");
-    if (status->error.empty()) {
-        std::printf("All consistency checks passed!\n");
-        return 0;
-    }
-
-    std::printf("Found consistency issue: %s\n", status->error.c_str());
+int run_debug_validate(const GlobalFlags& /*flags*/, bool /*incremental*/) {
     std::printf(
-        "\nRecommendation: Review the issues above and check your "
-        "configuration.\n");
+        "debug validate: unavailable — no server-side consistency check "
+        "exists in the C++ port; the previous unconditional pass verdict "
+        "was fabricated (S9)\n");
     return 1;
 }
 
