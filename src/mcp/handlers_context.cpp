@@ -445,8 +445,19 @@ ToolResult handle_context_save(const nlohmann::json& params,
                 "'to_file' must resolve inside the project root: " + to_file);
         }
         ContextManifest existing;
-        auto load_err = load_manifest_from_file(full_path, existing);
-        if (load_err.empty()) {
+        std::error_code ec;
+        if (std::filesystem::exists(full_path, ec) && !ec) {
+            // The file exists but cannot be parsed/validated: refuse the
+            // append instead of silently overwriting the manifest with only
+            // the new refs (a corrupt manifest is a user problem to surface,
+            // not to destroy).
+            auto load_err = load_manifest_from_file(full_path, existing);
+            if (!load_err.empty()) {
+                return make_error_response(
+                    "context",
+                    "cannot append: existing manifest is unreadable: " +
+                        load_err);
+            }
             // Merge: prepend existing refs
             existing.refs.insert(existing.refs.end(),
                                  manifest.refs.begin(),
@@ -456,7 +467,7 @@ ToolResult handle_context_save(const nlohmann::json& params,
             }
             manifest.refs = std::move(existing.refs);
         }
-        // If file doesn't exist, that's fine for append
+        // A missing file is fine for append — it behaves like a fresh save.
     }
 
     auto stats = compute_manifest_stats(manifest);
