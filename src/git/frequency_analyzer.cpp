@@ -433,12 +433,15 @@ HistoryProvider::HistoryProvider(Provider& provider) : provider_(provider) {}
 bool HistoryProvider::get_commit_history(int64_t since_epoch,
                                          std::vector<CommitInfo>& out,
                                          const std::vector<std::string>& paths) {
-    // Format since as ISO date for git --since.
+    // Format since as ISO date for git --since, in UTC WITH the trailing Z:
+    // git parses a zone-less ISO date in LOCAL time, which slides the cutoff
+    // by the host's UTC offset (up to +/-14h) and silently includes/excludes
+    // a half-day of history.
     time_t t = static_cast<time_t>(since_epoch);
     struct tm tm_buf {};
     portable::gmtime_utc(t, tm_buf);
     char since_str[32];
-    std::strftime(since_str, sizeof(since_str), "%Y-%m-%dT%H:%M:%S", &tm_buf);
+    std::strftime(since_str, sizeof(since_str), "%Y-%m-%dT%H:%M:%SZ", &tm_buf);
 
     std::vector<std::string> args = {
         "log", "--numstat",

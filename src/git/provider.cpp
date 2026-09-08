@@ -308,7 +308,8 @@ bool Provider::get_diff_stats(const AnalysisParams& params, DiffStats& out) cons
             std::string ref = params.base_ref;
             if (ref.empty()) ref = "HEAD";
             if (!is_safe_ref(ref)) return false;
-            args = {"diff-tree", "--no-commit-id", "--numstat", "-r", ref, "--"};
+            args = {"diff-tree", "--root", "--no-commit-id", "--numstat",
+                    "-r", ref, "--"};
             break;
         }
         case AnalysisScope::Range: {
@@ -406,8 +407,15 @@ bool Provider::get_parent_commit(std::string_view commit, std::string& out) cons
                   std::string(commit) + "^^{commit}"},
                  parent)) {
         // The commit resolves but has no parent: a genuine root commit.
-        // Diff against the empty tree.
-        out = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+        // Diff against the empty tree — whose object id depends on the
+        // repo's object format, so ask git instead of hardcoding the
+        // SHA-1 id (which does not exist in a SHA-256 repository).
+        if (!run_git({"hash-object", "-t", "tree", "/dev/null"}, out)) {
+            return false;
+        }
+        while (!out.empty() && (out.back() == '\n' || out.back() == '\r')) {
+            out.pop_back();
+        }
         return true;
     }
 
