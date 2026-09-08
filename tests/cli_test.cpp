@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -15,6 +16,7 @@
 #include <lci/core/subprocess.h>
 #include <lci/language_map.h>
 #include <lci/search/search_options.h>
+#include <lci/server/server.h>
 
 #include "../src/cli/ast_filters.h"
 #include "../src/cli/grep_filters.h"
@@ -3406,6 +3408,163 @@ TEST(MemProfileTest, SizeTCountsFormatWithZu) {
     const size_t n = 42;
     std::snprintf(buf, sizeof(buf), "%zu", n);
     EXPECT_STREQ(buf, "42");
+}
+
+// -- S9: debug/status must report only numbers from the running server -------
+//
+// These tests drive the built `lci` binary. The defects they pin: `debug
+// info` printed hardcoded zeros as measurements, and `status` read the CLI's
+// own /proc/self instead of the server and auto-spawned one when absent.
+
+// Starts (or reuses) the index server for `root` by running one search, so
+// the follow-up debug/status invocation observes a populated index.
+void ensure_lci_server_indexed(const std::filesystem::path& lci_bin,
+                               const std::filesystem::path& root) {
+    write_corpus_file(root, "main.go",
+                      "package main\n\nfunc main() { helper() }\n\nfunc "
+                      "helper() {}\n");
+    std::string out;
+    ASSERT_TRUE(run_lci_search(lci_bin, root,
+                               {lci_bin.string(), "search", "helper"}, out))
+        << out;
+}
+
+TEST(CliDebugInfoTest, NeverPrintsFabricatedZerosAgainstPopulatedIndex) {
+    namespace fs = std::filesystem;
+    const auto lci_bin =
+        portable::executable_path().parent_path().parent_path() / "src" /
+        "lci";
+    ASSERT_TRUE(fs::exists(lci_bin)) << lci_bin;
+    const auto root = lci::test::unique_temp_dir("lci_s9_debug_zeros_");
+    fs::create_directories(root);
+    ensure_lci_server_indexed(lci_bin, root);
+
+    std::string out;
+    ASSERT_TRUE(run_lci_search(lci_bin, root,
+                               {lci_bin.string(), "debug", "info"}, out))
+        << out;
+    // Hardcoded-zero fabrication banned outright: these strings must never
+    // appear against a populated index.
+    EXPECT_EQ(out.find("Total Symbols: 0"), std::string::npos) << out;
+    EXPECT_EQ(out.find("0 files processed"), std::string::npos) << out;
+
+    shutdown_lci_server(lci_bin, root);
+    std::error_code ec;
+    fs::remove_all(root, ec);
+}
+
+TEST(CliDebugInfoTest, NoServerExitsNonZeroWithServerNotRunning) {
+    namespace fs = std::filesystem;
+    const auto lci_bin =
+        portable::executable_path().parent_path().parent_path() / "src" /
+        "lci";
+    ASSERT_TRUE(fs::exists(lci_bin)) << lci_bin;
+    const auto root = lci::test::unique_temp_dir("lci_s9_debug_nosrv_");
+    fs::create_directories(root);
+
+    std::string out;
+    EXPECT_FALSE(run_lci_search(lci_bin, root,
+                                {lci_bin.string(), "debug", "info"}, out))
+        << out;
+    EXPECT_NE(out.find("server not running"), std::string::npos) << out;
+
+    std::error_code ec;
+    fs::remove_all(root, ec);
+}
+
+TEST(CliDebugExportTest, NoServerExitsNonZeroWithServerNotRunning) {
+    namespace fs = std::filesystem;
+    const auto lci_bin =
+        portable::executable_path().parent_path().parent_path() / "src" /
+        "lci";
+    ASSERT_TRUE(fs::exists(lci_bin)) << lci_bin;
+    const auto root = lci::test::unique_temp_dir("lci_s9_export_nosrv_");
+    fs::create_directories(root);
+
+    std::string out;
+    EXPECT_FALSE(run_lci_search(
+        lci_bin, root,
+        {lci_bin.string(), "debug", "export", "-o",
+         (root / "export.json").string()},
+        out))
+        << out;
+    EXPECT_NE(out.find("server not running"), std::string::npos) << out;
+    // A zeroed "local snapshot" record must not be written either.
+    EXPECT_FALSE(fs::exists(root / "export.json"));
+
+    std::error_code ec;
+    fs::remove_all(root, ec);
+}
+
+TEST(CliStatusTest, NoServerPrintsNotRunningAndSpawnsNothing) {
+    namespace fs = std::filesystem;
+    const auto lci_bin =
+        portable::executable_path().parent_path().parent_path() / "src" /
+        "lci";
+    ASSERT_TRUE(fs::exists(lci_bin)) << lci_bin;
+    const auto root = lci::test::unique_temp_dir("lci_s9_status_nosrv_");
+    fs::create_directories(root);
+
+    const std::string socket_path =
+        lci::get_socket_path_for_root(fs::absolute(root).string());
+    std::error_code ec;
+    fs::remove(socket_path, ec);  // no stale socket from an earlier run
+
+    std::string out;
+    EXPECT_TRUE(run_lci_search(lci_bin, root,
+                               {lci_bin.string(), "status"}, out))
+        << out;
+    EXPECT_NE(out.find("not running"), std::string::npos) << out;
+    // `lci status` is a query, not a supervisor: it must not spawn a server.
+    EXPECT_FALSE(fs::exists(socket_path))
+        << "status spawned a server socket at " << socket_path;
+
+    fs::remove_all(root, ec);
+}
+
+TEST(CliStatusTest, ThreadsAndRssMatchServerStatusJson) {
+    namespace fs = std::filesystem;
+    const auto lci_bin =
+        portable::executable_path().parent_path().parent_path() / "src" /
+        "lci";
+    ASSERT_TRUE(fs::exists(lci_bin)) << lci_bin;
+    const auto root = lci::test::unique_temp_dir("lci_s9_status_srv_");
+    fs::create_directories(root);
+    ensure_lci_server_indexed(lci_bin, root);
+
+    std::string json_out;
+    ASSERT_TRUE(run_lci_search(
+        lci_bin, root, {lci_bin.string(), "status", "--json"}, json_out))
+        << json_out;
+    const auto report = nlohmann::json::parse(json_out);
+    ASSERT_TRUE(report.contains("num_threads")) << json_out;
+    ASSERT_TRUE(report.contains("memory_rss_mb")) << json_out;
+    const int server_threads = report["num_threads"].get<int>();
+    const double server_rss_mb = report["memory_rss_mb"].get<double>();
+
+    std::string text_out;
+    ASSERT_TRUE(run_lci_search(lci_bin, root,
+                               {lci_bin.string(), "status"}, text_out))
+        << text_out;
+    const auto threads_pos = text_out.find("Threads:");
+    ASSERT_NE(threads_pos, std::string::npos) << text_out;
+    const int text_threads = std::atoi(text_out.c_str() + threads_pos + 8);
+    const auto rss_pos = text_out.find("RSS:");
+    ASSERT_NE(rss_pos, std::string::npos) << text_out;
+    const double text_rss_mb = std::atof(text_out.c_str() + rss_pos + 4);
+
+    EXPECT_EQ(text_threads, server_threads)
+        << "text Threads: must be the server's /status value, not the CLI's "
+           "own /proc/self\njson: "
+        << json_out << "\ntext: " << text_out;
+    // Text prints RSS with %.1f; allow one display rounding step.
+    EXPECT_NEAR(text_rss_mb, server_rss_mb, 0.06)
+        << "text RSS: must be the server's /status value\njson: " << json_out
+        << "\ntext: " << text_out;
+
+    shutdown_lci_server(lci_bin, root);
+    std::error_code ec;
+    fs::remove_all(root, ec);
 }
 
 }  // namespace
