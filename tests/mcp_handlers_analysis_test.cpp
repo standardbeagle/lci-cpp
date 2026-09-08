@@ -989,6 +989,36 @@ TEST_F(CodeInsightTest, UnifiedModeWorks) {
     EXPECT_NE(result.text.find("== STATISTICS =="), std::string::npos);
 }
 
+// The LCF header's tokens= was a pre-computed lcf_token_count(...) guess made
+// BEFORE the body existed (or a hardcoded 20/100) — a multi-section unified
+// output claimed tokens=~370 regardless of content. The header must state
+// the real token estimate of the emitted body (chars/4, the convention
+// hydrate_reference uses) within 10%.
+TEST_F(CodeInsightTest, LcfHeaderTokensMatchEmittedBody) {
+    for (const char* mode : {"unified", "overview", "structure",
+                             "statistics"}) {
+        nlohmann::json params;
+        params["mode"] = mode;
+        auto result = handle_code_insight(params, *engine_, *indexer_);
+        ASSERT_FALSE(result.is_error) << mode << ": " << result.text;
+
+        const std::string& text = result.text;
+        auto hdr_end = text.find("\n---\n");
+        ASSERT_NE(hdr_end, std::string::npos) << mode << ": no header";
+        auto tok = text.find("\ntokens=");
+        ASSERT_NE(tok, std::string::npos) << mode;
+        ASSERT_LT(tok, hdr_end) << mode << ": tokens= not in the header";
+        int claimed = std::stoi(text.substr(tok + 8));
+        size_t body_chars = text.size() - (hdr_end + 5);
+        int real = static_cast<int>(body_chars / 4);
+        double lo = real * 0.9, hi = real * 1.1 + 1;
+        EXPECT_GE(claimed, static_cast<int>(lo))
+            << mode << ": claimed=" << claimed << " real=" << real;
+        EXPECT_LE(claimed, static_cast<int>(hi))
+            << mode << ": claimed=" << claimed << " real=" << real;
+    }
+}
+
 // D1 enforcement: attribute-tagged files (test/example/vendored/...) are
 // excluded from EVERY code_insight analysis section — entry points, health,
 // load-bearing, modules, vocabulary — and the exclusion is labeled in
