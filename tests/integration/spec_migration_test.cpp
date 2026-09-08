@@ -414,7 +414,7 @@ INSTANTIATE_TEST_SUITE_P(
 // ---------------------------------------------------------------------------
 // The index/* and probes/* parametrized suites were removed with S9 (decision
 // D3): their specs drove `lci debug deps|graph|export`, whose engine was the
-// deleted src/symbollinker tree. `debug info|validate` coverage now lives in
+// deleted symbol-linker tree. `debug info|validate` coverage now lives in
 // tests/integration/cli/debug/ against the server's /status.
 // ---------------------------------------------------------------------------
 
