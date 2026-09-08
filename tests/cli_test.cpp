@@ -16,6 +16,7 @@
 #include <lci/core/subprocess.h>
 #include <lci/language_map.h>
 #include <lci/search/search_options.h>
+#include <lci/server/client.h>
 #include <lci/server/server.h>
 
 #include "../src/cli/ast_filters.h"
@@ -3558,15 +3559,18 @@ TEST(CliStatusTest, ThreadsAndRssMatchServerStatusJson) {
     fs::create_directories(root);
     ensure_lci_server_indexed(lci_bin, root);
 
-    std::string json_out;
-    ASSERT_TRUE(run_lci_search(
-        lci_bin, root, {lci_bin.string(), "status", "--json"}, json_out))
-        << json_out;
-    const auto report = nlohmann::json::parse(json_out);
-    ASSERT_TRUE(report.contains("num_threads")) << json_out;
-    ASSERT_TRUE(report.contains("memory_rss_mb")) << json_out;
-    const int server_threads = report["num_threads"].get<int>();
-    const double server_rss_mb = report["memory_rss_mb"].get<double>();
+    // Reference values come from the SERVER ITSELF, queried in-process over
+    // its socket — never through the CLI under test. The previous version
+    // compared the text against `lci status --json`, which is
+    // non-discriminating: pre-S9 both code paths read the CLI's own
+    // /proc/self numbers, so the old test PASSED on the buggy binary.
+    lci::Client client(
+        lci::get_socket_path_for_root(fs::absolute(root).string()));
+    std::string stats_err;
+    const auto stats = client.get_stats(stats_err);
+    ASSERT_TRUE(stats.has_value()) << stats_err;
+    const int server_threads = stats->num_threads;
+    const double server_rss_mb = stats->memory_rss_mb;
 
     std::string text_out;
     ASSERT_TRUE(run_lci_search(lci_bin, root,
@@ -3580,17 +3584,16 @@ TEST(CliStatusTest, ThreadsAndRssMatchServerStatusJson) {
     const double text_rss_mb = std::atof(text_out.c_str() + rss_pos + 4);
 
     EXPECT_EQ(text_threads, server_threads)
-        << "text Threads: must be the server's /status value, not the CLI's "
-           "own /proc/self\njson: "
-        << json_out << "\ntext: " << text_out;
-    // Text prints RSS with %.1f and the two invocations are sequential, so
-    // the live server's RSS can drift between them; the tolerance covers
-    // display rounding plus drift, while remaining far tighter than the
-    // CLI-vs-server gap the bug produced (16 MB client vs hundreds of MB
-    // server).
+        << "text Threads: must be the server's /stats value, not the CLI's "
+           "own /proc/self\nserver threads: "
+        << server_threads << "\ntext: " << text_out;
+    // Text prints RSS with %.1f and the live server's RSS can drift between
+    // the in-process query and the CLI run; the tolerance covers display
+    // rounding plus drift, while remaining far tighter than the CLI-vs-server
+    // gap the bug produced (16 MB client vs hundreds of MB server).
     EXPECT_NEAR(text_rss_mb, server_rss_mb, 8.0)
-        << "text RSS: must be the server's /status value\njson: " << json_out
-        << "\ntext: " << text_out;
+        << "text RSS: must be the server's /stats value\nserver rss: "
+        << server_rss_mb << "\ntext: " << text_out;
 
     shutdown_lci_server(lci_bin, root);
     std::error_code ec;
