@@ -190,9 +190,10 @@ std::vector<double> CallGraph::betweenness() const {
 
     // Brandes' algorithm (directed, unweighted). For each source s: BFS to count
     // shortest-path multiplicities sigma, then accumulate dependencies in
-    // reverse-BFS order.
-    std::vector<int> sigma(n), dist(n);
-    std::vector<double> delta(n);
+    // reverse-BFS order. sigma is double: multiplicities grow exponentially
+    // on layered-diamond DAGs (2^levels) and overflow an int at depth 32.
+    std::vector<double> sigma(n), delta(n);
+    std::vector<int> dist(n);
     std::vector<std::vector<int>> preds(n);
     std::vector<int> order;
     order.reserve(n);
@@ -230,8 +231,7 @@ std::vector<double> CallGraph::betweenness() const {
         for (auto it = order.rbegin(); it != order.rend(); ++it) {
             int w = *it;
             for (int v : preds[w]) {
-                delta[v] += (static_cast<double>(sigma[v]) / sigma[w]) *
-                            (1.0 + delta[w]);
+                delta[v] += (sigma[v] / sigma[w]) * (1.0 + delta[w]);
             }
             if (w != s) bc[w] += delta[w];
         }
