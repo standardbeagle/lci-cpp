@@ -429,7 +429,17 @@ spot, exactly as rule 6's synthetic leak-check fixtures did. So:
   assignment can never fire under the fixture set, the fixture set is incomplete — assert
   the positive case for every branch the parser has, not only the ones the author expected
   to take.
+- **The rule is not bench-only: it governs every parser of an external tool's output in the
+  product tree.** S10's `git log -z` parser is the same shape — a hand-imagined byte layout
+  would have missed that git 2.43 prefixes the first numstat entry with `'\n'` after the NUL
+  header run, and emits a rename as an empty path followed by old-NUL-new-NUL. The reviewer
+  captured the raw layout from `git 2.43` itself before accepting the parser, and separately
+  confirmed the fixture's expected values came from the fixture repo and its config rather
+  than from the parser under test. Both checks belong to review of any tool-output parser:
+  capture the producer's bytes at its named version, and prove the expectations have a source
+  outside the code being validated.
 <!-- written_at: 2026-09-06T20:30:00Z  source_event: task:01KXSHA3Q1QCHM8T68WS6MS1NC, comment:01M1W63EGNJXC9XMVWAF0ZXXMK (fixedInPlace: first_call_native never assigned; fixture event() now carries part.type=tool), git:cc113ae; recurrence: rule 6 (leak-gate fixtures), rule 9 (per-arm rendering fixtures) -->
+<!-- written_at: 2026-09-08T08:30:00Z  source_event: task:01M1NCSJ31H91WK6XGBGSTVK9X, verdict:01M200MSXF1QTF9TF31ZTTXVMK (rawGit evidence), git:ea8fc0f, git:af9ee58 -->
 
 ### 8b. A "Reproducing" recipe in a committed report is a declaration about a derived artefact — execute it and cmp against the committed output
 

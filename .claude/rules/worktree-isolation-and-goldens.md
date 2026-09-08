@@ -180,6 +180,9 @@ Two more things the S9 RED proof cost, both cheap to avoid:
   fails pre-fix by 12 MB of RSS. This is `karpathy-principles.md` rule 4's two-producers /
   one-stream class applied to a CLI test: a test whose claim is "this value comes from X, not
   from the process itself" must obtain X independently.
+- **Build the RED worktree detached and at `-j2` while a sibling session holds the host.** S10's
+  reviewer lost a `-j6` build to the host memory guard (killed mid-link); the same target built
+  fine detached at `-j2`. The RED proof needs one binary, not a fast one.
 - **Paste the per-test `[  FAILED  ]` lines, never a count.** "RED: all N fail" is a
   load-bearing claim and only the gtest output proves it; the false count is exactly what hid
   the non-discriminating test through a whole review cycle.
@@ -224,7 +227,23 @@ That is acceptable, under three conditions, and unacceptable without them:
 An undisclosed guard test is the failure this rule exists to stop: it reads exactly like a RED in
 the log, and the next reader has no way to tell the difference.
 
+Sibling shape, same discipline: the criterion's failure SCENARIO is unreproducible while the
+DEFECT is real. S10's criterion (a) asked for "two concurrent `run_capture`, one child sleeps
+2 s, the other returns in < 1 s". Pre-fix, `posix_spawn` file actions closed both ends in the
+spawning child and the parent closed the write end immediately, so only the READ end leaked —
+a pure fd leak with no blocking, and the 2 s shape needed a microsecond window that never
+reproduced. The implementer pinned the MECHANISM instead with an independent kernel-observable
+(`/proc/self/fd` count against an ambient baseline: 5 vs 4 pre-fix, deterministic under load)
+and disclosed the substitution with its reason; the reviewer verified the mechanism claim
+against the PRE-FIX code rather than re-litigating the scenario prose. Rule: when a scenario
+cannot be made to fail, do not weaken it into a test that passes either way — pin the leaked
+or corrupted resource with an observable outside the code under test, disclose the swap at
+commit time and in the task comment, and have the reviewer check the substitution against the
+pre-fix source. A concurrency criterion whose window is narrower than the scheduler is a
+scenario, not a test.
+
 `source_event: task-01M1NCSJ31JA7K2WZJY5DGASHZ, comment 01M1YN2KMVDWG69MFYKE2ZWYQ4, verdict 01M1YV33SDYRC4FYQA2NVNPMGW (umaskDecision), git d622ca9/120fe3b, 2026-09-07`
+<!-- written_at: 2026-09-08T08:30:00Z  source_event: task:01M1NCSJ31H91WK6XGBGSTVK9X, verdict:01M200MSXF1QTF9TF31ZTTXVMK (deviation1), comment:01M200N3D0KANTKHFM9CVEG0QW (passPatterns[0]), git:d55a5ad, git:711c8a8, git:76bd21e -->
 
 ## 7. An INTEGRATION-POINTS claim that a symbol is reusable from the slice's scope must be PROBED at planning time, and the declaring header listed in `fileScope`
 
@@ -268,4 +287,10 @@ S7 carried 8 criteria over 20 files and finished in ONE attempt: 168 tool calls,
 a 120-min cap, 14 commits (`9ff5f32..15f8dc7`) in RED/GREEN pairs, `end_turn`, every
 criterion green. The ordering was written into the step's prompt, not left to the agent.
 
+S10 repeated it: 7 criteria over 10 files, ONE attempt — 150 tool calls, 76 min, 15 commits
+(`d55a5ad..76bd21e`) in RED/GREEN pairs plus three cleanups, `end_turn`, full gate 2649/2649
+with no force. Its one extra knob was `stall_seconds` raised to 1500, because several criteria
+build and run a real git fixture repo between tool calls.
+
 `source_event: task-01M1NCSJ31DY6Q4ZBK6RS627E0, acp-implement attempt1 (passed, end_turn, duration_ms 4888849 of timeout_seconds 7200), workflow 01M1Z5DNT8FXBCPK0RPND7A615 specJson ORDER OF WORK, comment 01M1ZCE5QJSVEX6AGJNB86FWRZ, 2026-09-08`
+<!-- written_at: 2026-09-08T08:30:00Z  source_event: task:01M1NCSJ31H91WK6XGBGSTVK9X, comment:01M200Q2G3Z4K5851DJ71FAJVF (coordinator checkpoint), git:d55a5ad..76bd21e -->
