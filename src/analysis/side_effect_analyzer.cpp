@@ -697,6 +697,9 @@ uint32_t classify_callee_category(std::string_view callee) {
         // bare "read"/"write"/"remove"/"create"/"stat" stay unlisted.
         "mkdir", "rmdir",  "removeall", "readfile", "writefile", "readdir",
         "walkdir", "chmod", "chown", "symlink", "truncate",
+        // Leading-camel compounds the boundary rule cannot reach through
+        // the stem: os.MkdirAll / os.OpenFile / io.ReadAll.
+        "mkdirall", "openfile", "readall",
         // PHP filesystem/stream builtins (battery audit: file_put_contents
         // in FileCookieJar::save carried no io). "file" covers the
         // file_get/put_contents/exists family; unlink is the posix delete.
