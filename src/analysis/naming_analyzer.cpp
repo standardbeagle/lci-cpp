@@ -127,12 +127,12 @@ bool is_common_english(const std::string& word) {
 }
 
 // Bounded Levenshtein distance; returns limit+1 as soon as the distance
-// provably exceeds `limit`. Words here are short (< 32 chars).
+// provably exceeds `limit`. Rows are sized from the input (heap scratch):
+// token length is unbounded, so fixed stack buffers overflow (S11 crit. 10).
 int edit_distance_capped(std::string_view a, std::string_view b, int limit) {
     int la = static_cast<int>(a.size()), lb = static_cast<int>(b.size());
     if (std::abs(la - lb) > limit) return limit + 1;
-    // Single reused row; sizes are tiny so stack buffer suffices.
-    int prev[64], curr[64];
+    std::vector<int> prev(size_t(lb) + 1), curr(size_t(lb) + 1);
     for (int j = 0; j <= lb; ++j) prev[j] = j;
     for (int i = 1; i <= la; ++i) {
         curr[0] = i;
@@ -143,7 +143,7 @@ int edit_distance_capped(std::string_view a, std::string_view b, int limit) {
             row_min = std::min(row_min, curr[j]);
         }
         if (row_min > limit) return limit + 1;
-        std::copy(curr, curr + lb + 1, prev);
+        std::copy(curr.begin(), curr.end(), prev.begin());
     }
     return prev[lb];
 }
