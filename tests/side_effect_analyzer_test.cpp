@@ -380,6 +380,47 @@ TEST(CalleeWordBoundary, BoundaryMatchesStillClassify) {
     EXPECT_NE(categories_of("eval") & side_effect::kDynamicCall, 0u);
 }
 
+// Leading-camel stdlib compounds must keep the category the pre-word-boundary
+// tree (e190aa7) assigned them: Node's fs *Sync family is io, Go's
+// ListenAndServe / DialContext are network. The word-boundary rule refuses a
+// bare prefix, so each compound needs the decoration-suffix path.
+TEST(CalleeWordBoundary, LeadingCamelStdlibCompoundsKeepTheirCategory) {
+    auto categories_of = [](const char* callee) {
+        SideEffectAnalyzer sa("javascript");
+        sa.begin_function("f", "f.js", 1, 5);
+        sa.record_function_call(callee, {}, false, 2, 1);
+        return sa.end_function().categories;
+    };
+    for (const char* callee : {"readFileSync", "writeFileSync", "readdirSync",
+                               "closeSync", "mkdirSync", "openSync",
+                               "unlinkSync", "appendFileSync"}) {
+        EXPECT_NE(categories_of(callee) & side_effect::kIO, 0u) << callee;
+    }
+    for (const char* callee : {"MkdirAll", "OpenFile", "ReadAll"}) {
+        EXPECT_NE(categories_of(callee) & side_effect::kIO, 0u) << callee;
+    }
+    for (const char* callee : {"ListenAndServe", "DialContext"}) {
+        EXPECT_NE(categories_of(callee) & side_effect::kNetwork, 0u) << callee;
+    }
+}
+
+// The decoration-suffix path must not decay into prefix matching: one negative
+// per IO/network verb whose compound is a different word sense.
+TEST(CalleeWordBoundary, CompoundRuleDoesNotDecayIntoPrefixMatching) {
+    auto categories_of = [](const char* callee) {
+        SideEffectAnalyzer sa("javascript");
+        sa.begin_function("f", "f.js", 1, 5);
+        sa.record_function_call(callee, {}, false, 2, 1);
+        return sa.end_function().categories;
+    };
+    for (const char* callee :
+         {"openAccount", "closeModal", "readMemory", "writeBuffer",
+          "listenerCount", "dialogTitle", "querySelector", "login", "closest",
+          "listener", "opener", "acceptsType"}) {
+        EXPECT_EQ(categories_of(callee), side_effect::kNone) << callee;
+    }
+}
+
 TEST(SideEffectAnalyzerTest, NullContextSafe) {
     SideEffectAnalyzer sa("go");
     // No begin_function called - all these should be no-ops
