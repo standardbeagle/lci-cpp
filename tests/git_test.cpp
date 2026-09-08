@@ -637,6 +637,71 @@ TEST(GitProvider, RootCommitBaseRefMatchesRepoObjectFormat) {
 // commits inside the window vanished / outside it appeared. Reference: the
 // fixture's commit date is fixed via GIT_COMMITTER_DATE, so the expected
 // membership of each window is known exactly.
+TEST(GitFrequency, CommitHistoryParsesPipeInAuthorAndQuotedPath) {
+    // Reference values are the fixture's raw bytes: the author name we
+    // configured ("A|B" — a literal pipe), the pinned commit epoch from
+    // GIT_COMMITTER_DATE, and the UTF-8 file name we wrote. A `|`-separated
+    // --format shifts every field when the author contains a pipe (the
+    // timestamp parse then fails to 0), and without -z git C-quotes the
+    // non-ASCII path so it never equals the real file name.
+    namespace fs = std::filesystem;
+    fs::path repo = fs::temp_directory_path() /
+                    ("lci_git_pipe_" +
+                     std::to_string(std::chrono::steady_clock::now()
+                                        .time_since_epoch()
+                                        .count()));
+    fs::create_directories(repo);
+    std::ofstream(repo / "caf\xC3\xA9" ".go")
+        << "package main\nfunc A() {}\n";
+    ASSERT_TRUE(lci::test::run_git(repo, "init -q"));
+    ASSERT_TRUE(lci::test::run_git(repo, "add -A"));
+    setenv("GIT_AUTHOR_DATE", "1768478400 +0000", 1);
+    setenv("GIT_COMMITTER_DATE", "1768478400 +0000", 1);
+    ASSERT_TRUE(lci::test::run_git(
+        repo,
+        "-c user.email=a@b -c 'user.name=A|B' "
+        "-c commit.gpgsign=false commit -q -m msg1"));
+    ASSERT_TRUE(lci::test::run_git(repo, "mv caf\xC3\xA9.go na\xC3\xAFve.go"));
+    ASSERT_TRUE(lci::test::run_git(
+        repo,
+        "-c user.email=a@b -c 'user.name=A|B' "
+        "-c commit.gpgsign=false commit -q -m msg2"));
+    unsetenv("GIT_AUTHOR_DATE");
+    unsetenv("GIT_COMMITTER_DATE");
+
+    // Independent reference: raw git for the head hash.
+    std::string head;
+    ASSERT_TRUE(lci::subprocess::run_capture(
+        {"git", "-C", repo.string(), "rev-parse", "HEAD"}, "", head));
+    while (!head.empty() && (head.back() == '\n' || head.back() == '\r')) {
+        head.pop_back();
+    }
+
+    Provider p;
+    ASSERT_TRUE(Provider::create(repo.string(), p));
+    HistoryProvider history(p);
+    std::vector<CommitInfo> commits;
+    ASSERT_TRUE(history.get_commit_history(0, commits));
+    ASSERT_EQ(commits.size(), 2u);
+
+    const CommitInfo& c0 = commits[0];  // newest first
+    EXPECT_EQ(c0.hash, head);
+    EXPECT_EQ(c0.author_name, "A|B");
+    EXPECT_EQ(c0.author_email, "a@b");
+    EXPECT_EQ(c0.timestamp_epoch, 1768478400);
+    EXPECT_EQ(c0.message, "msg2");
+    ASSERT_EQ(c0.file_changes.size(), 1u);
+    EXPECT_EQ(c0.file_changes[0].path, "na\xC3\xAFve.go");
+    EXPECT_EQ(c0.file_changes[0].old_path, "caf\xC3\xA9.go");
+
+    const CommitInfo& c1 = commits[1];
+    EXPECT_EQ(c1.timestamp_epoch, 1768478400);
+    ASSERT_EQ(c1.file_changes.size(), 1u);
+    EXPECT_EQ(c1.file_changes[0].path, "caf\xC3\xA9.go");
+
+    fs::remove_all(repo);
+}
+
 TEST(GitFrequency, SinceIsInterpretedAsUtcRegardlessOfLocalTz) {
     namespace fs = std::filesystem;
     fs::path repo = fs::temp_directory_path() /
