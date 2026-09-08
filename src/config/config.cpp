@@ -517,19 +517,33 @@ Config make_kdl_base_config() {
 bool parse_attributes_node(const KdlNode& node, std::vector<AttrDef>& defs,
                            std::vector<PathAttrRule>& rules,
                            std::string& error) {
+    // Re-quote a string value for the re-emitted document: the lexer
+    // unescapes on the way in, so the text form must escape '"' and '\\'
+    // again or the re-parse sees a corrupted document.
+    auto emit_quoted = [](std::string& out, std::string_view v) {
+        out += '"';
+        for (char c : v) {
+            if (c == '"' || c == '\\') out += '\\';
+            out += c;
+        }
+        out += '"';
+    };
     std::string text = "attributes {\n";
     for (const auto& attr : node.children) {
         text += "  " + attr.name;
         for (const auto& p : attr.props) {
             text += " " + p.key + "=";
             if (p.value.kind == TokenKind::String) {
-                text += "\"" + p.value.text + "\"";
+                emit_quoted(text, p.value.text);
             } else {
                 text += p.value.text;
             }
         }
         for (const auto& a : attr.args) {
-            if (a.kind == TokenKind::String) text += " \"" + a.text + "\"";
+            if (a.kind == TokenKind::String) {
+                text += " ";
+                emit_quoted(text, a.text);
+            }
         }
         if (!attr.children.empty()) {
             text += " {\n";
@@ -537,7 +551,8 @@ bool parse_attributes_node(const KdlNode& node, std::vector<AttrDef>& defs,
                 text += "    " + child.name;
                 for (const auto& a : child.args) {
                     if (a.kind == TokenKind::String) {
-                        text += " \"" + a.text + "\"";
+                        text += " ";
+                        emit_quoted(text, a.text);
                     }
                 }
                 text += "\n";
