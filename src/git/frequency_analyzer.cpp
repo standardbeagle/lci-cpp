@@ -415,8 +415,11 @@ void FrequencyCache::maybe_cleanup() {
         for (const auto& [key, entry] : entries_) {
             by_age.emplace_back(key, entry.created_at);
         }
-        std::sort(by_age.begin(), by_age.end(),
-                  [](const auto& a, const auto& b) { return a.second < b.second; });
+    std::sort(by_age.begin(), by_age.end(),
+              [](const auto& a, const auto& b) {
+                  if (a.second != b.second) return a.second < b.second;
+                  return a.first < b.first;
+              });
         int to_remove = static_cast<int>(entries_.size()) - max_entries_;
         for (int i = 0; i < to_remove && i < static_cast<int>(by_age.size()); ++i) {
             entries_.erase(by_age[static_cast<size_t>(i)].first);
@@ -796,7 +799,9 @@ bool FrequencyAnalyzer::analyze_file(std::string_view file_path,
     }
     std::sort(contributors.begin(), contributors.end(),
               [](const auto& a, const auto& b) {
-                  return a.change_count > b.change_count;
+                  if (a.change_count != b.change_count)
+                      return a.change_count > b.change_count;
+                  return a.author_email < b.author_email;
               });
 
     out.file_path = std::string(file_path);
@@ -928,7 +933,9 @@ void FrequencyAnalyzer::aggregate_by_file(
         }
         std::sort(stats.contributors.begin(), stats.contributors.end(),
                   [](const auto& a, const auto& b) {
-                      return a.change_count > b.change_count;
+                      if (a.change_count != b.change_count)
+                          return a.change_count > b.change_count;
+                      return a.author_email < b.author_email;
                   });
     }
 }
@@ -947,11 +954,14 @@ void FrequencyAnalyzer::find_hotspots(
         }
     }
 
+    // Total order: tied volatility breaks by path so the top_n cut keeps
+    // the same files on every run regardless of hash iteration order.
     std::sort(out.begin(), out.end(), [](const auto& a, const auto& b) {
         double va = 0, vb = 0;
         for (const auto& [_, m] : a.metrics) { va = m.volatility_score; break; }
         for (const auto& [_, m] : b.metrics) { vb = m.volatility_score; break; }
-        return va > vb;
+        if (va != vb) return va > vb;
+        return a.file_path < b.file_path;
     });
 
     if (static_cast<int>(out.size()) > top_n) {
@@ -989,7 +999,9 @@ void FrequencyAnalyzer::find_collisions(
     }
 
     std::sort(out.begin(), out.end(), [](const auto& a, const auto& b) {
-        return a.collision_score > b.collision_score;
+        if (a.collision_score != b.collision_score)
+            return a.collision_score > b.collision_score;
+        return a.path < b.path;
     });
 }
 
@@ -1040,7 +1052,9 @@ void FrequencyAnalyzer::calculate_ownership(
         }
         std::sort(list.begin(), list.end(),
                   [](const auto& a, const auto& b) {
-                      return a.change_count > b.change_count;
+                      if (a.change_count != b.change_count)
+                          return a.change_count > b.change_count;
+                      return a.author_email < b.author_email;
                   });
 
         if (!list.empty()) module.primary_owner = list[0];
@@ -1054,7 +1068,9 @@ void FrequencyAnalyzer::calculate_ownership(
     }
 
     std::sort(out.begin(), out.end(), [](const auto& a, const auto& b) {
-        return a.total_changes > b.total_changes;
+        if (a.total_changes != b.total_changes)
+            return a.total_changes > b.total_changes;
+        return a.module_path < b.module_path;
     });
 }
 
@@ -1071,7 +1087,9 @@ std::string find_most_active_contributor(
     int max_count = 0;
     std::string max_email;
     for (const auto& [email, count] : counts) {
-        if (count > max_count) {
+        // Ties resolve to the lexicographically smallest email — never to
+        // hash iteration order, which is salted per process.
+        if (count > max_count || (count == max_count && email < max_email)) {
             max_count = count;
             max_email = email;
         }

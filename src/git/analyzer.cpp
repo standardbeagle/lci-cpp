@@ -432,8 +432,19 @@ void Analyzer::find_duplicates(const std::vector<SymbolInfo>& new_symbols,
         }
     }
 
+    // Total order: a resize(max_findings) after this sort must keep the
+    // SAME findings on every run, so ties on similarity break by location.
     std::sort(out.begin(), out.end(), [](const auto& a, const auto& b) {
-        return a.similarity > b.similarity;
+        if (a.similarity != b.similarity) return a.similarity > b.similarity;
+        if (a.new_code.file_path != b.new_code.file_path)
+            return a.new_code.file_path < b.new_code.file_path;
+        if (a.new_code.start_line != b.new_code.start_line)
+            return a.new_code.start_line < b.new_code.start_line;
+        if (a.existing_code.file_path != b.existing_code.file_path)
+            return a.existing_code.file_path < b.existing_code.file_path;
+        if (a.existing_code.start_line != b.existing_code.start_line)
+            return a.existing_code.start_line < b.existing_code.start_line;
+        return a.existing_code.symbol_name < b.existing_code.symbol_name;
     });
 
     int max_findings = params.max_findings > 0 ? params.max_findings : 20;
@@ -577,8 +588,16 @@ void Analyzer::check_naming(const std::vector<SymbolInfo>& new_symbols,
                                            index_.config().project.root);
     naming_findings_from_report(report, changed, out);
 
+    // Total order: severity ties break by symbol location so the
+    // resize(max_findings) cut is deterministic.
     std::sort(out.begin(), out.end(), [](const auto& a, const auto& b) {
-        return severity_rank(a.severity) > severity_rank(b.severity);
+        int ra = severity_rank(a.severity), rb = severity_rank(b.severity);
+        if (ra != rb) return ra > rb;
+        if (a.new_symbol.file_path != b.new_symbol.file_path)
+            return a.new_symbol.file_path < b.new_symbol.file_path;
+        if (a.new_symbol.line != b.new_symbol.line)
+            return a.new_symbol.line < b.new_symbol.line;
+        return a.new_symbol.name < b.new_symbol.name;
     });
 
     int max_findings = params.max_findings > 0 ? params.max_findings : 20;
@@ -723,8 +742,16 @@ void Analyzer::check_metrics(const std::vector<SymbolInfo>& new_symbols,
         }
     }
 
+    // Total order: severity ties break by symbol location so the
+    // resize(max_findings) cut is deterministic.
     std::sort(out.begin(), out.end(), [](const auto& a, const auto& b) {
-        return severity_rank(a.severity) > severity_rank(b.severity);
+        int ra = severity_rank(a.severity), rb = severity_rank(b.severity);
+        if (ra != rb) return ra > rb;
+        if (a.symbol.file_path != b.symbol.file_path)
+            return a.symbol.file_path < b.symbol.file_path;
+        if (a.symbol.line != b.symbol.line)
+            return a.symbol.line < b.symbol.line;
+        return a.symbol.name < b.symbol.name;
     });
 
     int max_findings = params.max_findings > 0 ? params.max_findings : 20;
