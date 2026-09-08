@@ -13,6 +13,8 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdlib>
+#include <fstream>
+#include <map>
 #include <mutex>
 #include <set>
 #include <thread>
@@ -499,6 +501,100 @@ TEST(TimeFormat, UtcOffsetRespectsDst) {
         unsetenv("TZ");
     }
     tzset();
+}
+
+// -- Schema vs reader audit ------------------------------------------------------
+// Every parameter advertised in a tool's inputSchema must have a reader in the
+// handler's source — an advertised-but-unread parameter is a lie the client
+// plans around (karpathy #6). The table maps each tool to the source files its
+// handler chain reads params from; a property name must appear as a quoted
+// string in at least one of them (params.value("x") / contains("x") / ["x"]).
+// Aliases are exempt by design (accepted-but-undocumented, ToolDefinition doc).
+TEST_F(McpServerTest, EverySchemaParameterHasAReader) {
+    namespace fs = std::filesystem;
+    fs::path mcp_src =
+        fs::path(__FILE__).parent_path().parent_path() / "src" / "mcp";
+    ASSERT_TRUE(fs::is_directory(mcp_src)) << mcp_src;
+
+    auto read_src = [&](const char* name) {
+        std::ifstream in(mcp_src / name, std::ios::binary);
+        EXPECT_TRUE(in.good()) << name;
+        return std::string(std::istreambuf_iterator<char>(in),
+                           std::istreambuf_iterator<char>());
+    };
+
+    const std::map<std::string, std::vector<const char*>> tool_sources = {
+        {"info", {"handlers_core.cpp"}},
+        {"search", {"handlers_search.cpp"}},
+        {"get_context", {"handlers_get_context.cpp", "handlers_core.cpp"}},
+        {"find_files", {"handlers_find_files.cpp", "handlers_core.cpp"}},
+        {"browse_file", {"handlers_explore.cpp"}},
+        {"list_symbols", {"handlers_explore.cpp"}},
+        {"callers", {"handlers_explore.cpp"}},
+        {"inspect_symbol", {"handlers_explore.cpp"}},
+        {"code_insight", {"handlers_analysis.cpp", "insight_sections.cpp"}},
+        {"context", {"handlers_context.cpp", "context_manifest_expander.cpp"}},
+        {"debug_info", {"handlers_index.cpp"}},
+        {"git_analysis", {"handlers_index.cpp"}},
+        {"index_stats", {"handlers_index.cpp"}},
+        {"semantic_annotations", {"handlers_side_effects.cpp"}},
+        {"side_effects", {"handlers_side_effects.cpp"}},
+    };
+
+    // Exceptions: advertised but unread, each with a reason. Keep empty
+    // unless the fix is genuinely out of the current task's file scope.
+    const std::set<std::pair<std::string, std::string>> allowlist = {
+        // list_symbols' handler lives in handlers_explore.cpp, outside this
+        // change's file scope; offset pagination is advertised but never
+        // applied there. Follow-up: wire or drop it.
+        {"list_symbols", "offset"},
+    };
+
+    for (size_t i = 0; i < server_->tool_count(); ++i) {
+        const auto& def = server_->tool_at(i);
+        auto it = tool_sources.find(def.name);
+        ASSERT_TRUE(it != tool_sources.end())
+            << "tool " << def.name << " missing from the audit table";
+        std::string src;
+        for (const char* f : it->second) src += read_src(f);
+        for (const auto& prop : def.properties) {
+            if (allowlist.count({def.name, prop.name})) continue;
+            // Reader shapes, not schema-table entries: value("x"),
+            // contains("x"), find("x"), params["x"], p["x"]. A bare quoted
+            // name also appears in the schema definition itself, and a bare
+            // ["x"] matches OUTPUT writes (ctx["line"] = ...), so neither
+            // proves anything.
+            const std::string& n = prop.name;
+            bool read =
+                src.find("value(\"" + n + "\"") != std::string::npos ||
+                src.find("contains(\"" + n + "\"") != std::string::npos ||
+                src.find("find(\"" + n + "\"") != std::string::npos ||
+                src.find("params[\"" + n + "\"]") != std::string::npos ||
+                src.find("p[\"" + n + "\"]") != std::string::npos;
+            EXPECT_TRUE(read)
+                << "tool " << def.name << " advertises '" << prop.name
+                << "' but no handler reads it — wire it or drop it from the "
+                   "schema";
+        }
+    }
+}
+
+// get_context reads symbol+path for its auto-search workflow hint, but the
+// dispatch-level unknown-parameter guard rejected both keys before the
+// handler ever ran — the hint was unreachable. They are registered as
+// accepted aliases so the hint can fire.
+TEST_F(McpStdioTest, GetContextSymbolPathHintPassesTheGuard) {
+    auto responses = exchange({
+        make_request("initialize", 1),
+        make_request("tools/call", 2,
+                     {{"name", "get_context"},
+                      {"arguments",
+                       {{"symbol", "Foo"}, {"path", "bar.go"}}}}),
+    });
+    ASSERT_EQ(responses.size(), 2u);
+    auto text =
+        responses[1]["result"]["content"][0]["text"].get<std::string>();
+    EXPECT_EQ(text.find("unknown parameter"), std::string::npos) << text;
 }
 
 TEST_F(McpStdioTest, ToolsList) {
