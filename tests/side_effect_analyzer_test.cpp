@@ -351,7 +351,7 @@ TEST(CalleeWordBoundary, BoundaryMatchesStillClassify) {
     EXPECT_NE(categories_of("fopen") & side_effect::kIO, 0u);
     EXPECT_NE(categories_of("file_put_contents") & side_effect::kIO, 0u);
     EXPECT_NE(categories_of("fetch") & side_effect::kNetwork, 0u);
-    EXPECT_NE(categories_of("throwIfFatal") & side_effect::kThrow, 0u);
+    EXPECT_NE(categories_of("maybeThrow") & side_effect::kThrow, 0u);
     EXPECT_NE(categories_of("eval") & side_effect::kDynamicCall, 0u);
 }
 

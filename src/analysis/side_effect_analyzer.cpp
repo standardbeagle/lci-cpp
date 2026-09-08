@@ -626,19 +626,39 @@ namespace {
 // prefix). Source: Go's classifyKnownCallee with a few cross-language
 // additions for Python/JS/TS coverage on the real-project corpora.
 uint32_t classify_callee_category(std::string_view callee) {
-    auto lower_starts_with = [&](std::string_view name, std::string_view prefix) {
-        if (name.size() < prefix.size()) return false;
-        for (size_t i = 0; i < prefix.size(); ++i) {
-            char a = static_cast<char>(
-                std::tolower(static_cast<unsigned char>(name[i])));
-            if (a != prefix[i]) return false;
+    // Word-boundary match (kw entries are lowercase): a keyword matches only
+    // as the whole identifier, as a snake_case-bounded segment
+    // (`db_query`, `query_db`, `db_query_now`), or as a camelCase tail word
+    // (`executeQuery`). A bare prefix never matches — `querySelector` is a
+    // DOM read, `login` is not `log`, `closest` is not `close`
+    // (stdlib-name collision class, 2026-08-30 sweep).
+    auto matches_keyword = [](std::string_view name, std::string_view kw) {
+        if (kw.empty() || name.size() < kw.size()) return false;
+        for (size_t pos = 0; pos + kw.size() <= name.size(); ++pos) {
+            size_t i = 0;
+            for (; i < kw.size(); ++i) {
+                char a = static_cast<char>(
+                    std::tolower(static_cast<unsigned char>(name[pos + i])));
+                if (a != kw[i]) break;
+            }
+            if (i < kw.size()) continue;
+            size_t end = pos + kw.size();
+            bool right_boundary = end == name.size() || name[end] == '_';
+            if (pos == 0 && right_boundary) return true;
+            if (pos > 0 && name[pos - 1] == '_' && right_boundary) return true;
+            if (pos > 0 && end == name.size() &&
+                std::isupper(static_cast<unsigned char>(name[pos])))
+                return true;
         }
-        return true;
+        return false;
     };
 
     // I/O: print, log, write, read, scan, open, close, fopen, etc.
-    static constexpr std::string_view io_prefixes[] = {
-        "print", "fprint", "puts",  "fputs", "printf", "fprintf",
+    // Compound spellings that carry the keyword as a leading camel word
+    // (`println`, `fprintf`) need their own entry — leading camel words do
+    // not match under the boundary rule.
+    static constexpr std::string_view io_keywords[] = {
+        "print", "println", "fprint", "puts",  "fputs", "printf", "fprintf",
         "scanf", "fscanf", "fopen", "fread", "fwrite", "open",
         "close", "log",    "logger",
         // Filesystem verbs (pocketbase audit: os.MkdirAll / os.RemoveAll
@@ -647,41 +667,41 @@ uint32_t classify_callee_category(std::string_view callee) {
         "mkdir", "rmdir",  "removeall", "readfile", "writefile", "readdir",
         "walkdir", "chmod", "chown", "symlink", "truncate",
         // PHP filesystem/stream builtins (battery audit: file_put_contents
-        // in FileCookieJar::save carried no io). "file_" covers the
+        // in FileCookieJar::save carried no io). "file" covers the
         // file_get/put_contents/exists family; unlink is the posix delete.
-        "file_", "fput", "fget", "unlink", "tempnam", "tmpfile"};
-    for (auto p : io_prefixes) {
-        if (lower_starts_with(callee, p)) return side_effect::kIO;
+        "file", "fput", "fget", "unlink", "tempnam", "tmpfile"};
+    for (auto kw : io_keywords) {
+        if (matches_keyword(callee, kw)) return side_effect::kIO;
     }
 
     // Network: send, recv, fetch, dial, listen, accept, connect,
     // http.Get/Post/etc.
-    static constexpr std::string_view net_prefixes[] = {
+    static constexpr std::string_view net_keywords[] = {
         "send", "recv", "fetch", "dial", "listen", "accept",
         "connect", "request", "httpget", "httppost"};
-    for (auto p : net_prefixes) {
-        if (lower_starts_with(callee, p)) return side_effect::kNetwork;
+    for (auto kw : net_keywords) {
+        if (matches_keyword(callee, kw)) return side_effect::kNetwork;
     }
 
     // Database: query, exec, prepare, execute, transaction
-    static constexpr std::string_view db_prefixes[] = {
+    static constexpr std::string_view db_keywords[] = {
         "query", "execute", "prepare", "transaction", "commit",
         "rollback"};
-    for (auto p : db_prefixes) {
-        if (lower_starts_with(callee, p)) return side_effect::kDatabase;
+    for (auto kw : db_keywords) {
+        if (matches_keyword(callee, kw)) return side_effect::kDatabase;
     }
 
     // Throw/panic/raise
-    static constexpr std::string_view throw_prefixes[] = {
+    static constexpr std::string_view throw_keywords[] = {
         "panic", "raise", "throw", "abort"};
-    for (auto p : throw_prefixes) {
-        if (lower_starts_with(callee, p)) return side_effect::kThrow;
+    for (auto kw : throw_keywords) {
+        if (matches_keyword(callee, kw)) return side_effect::kThrow;
     }
 
     // Dynamic / reflective
-    static constexpr std::string_view dynamic_prefixes[] = {"eval", "exec"};
-    for (auto p : dynamic_prefixes) {
-        if (lower_starts_with(callee, p)) return side_effect::kDynamicCall;
+    static constexpr std::string_view dynamic_keywords[] = {"eval", "exec"};
+    for (auto kw : dynamic_keywords) {
+        if (matches_keyword(callee, kw)) return side_effect::kDynamicCall;
     }
 
     return side_effect::kNone;
