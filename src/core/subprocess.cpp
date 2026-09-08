@@ -80,7 +80,11 @@ HANDLE spawn(const std::vector<std::string>& argv, const std::string& cwd,
     si.hStdError = null_dev;
 
     DWORD flags = CREATE_NO_WINDOW;
-    if (detached) flags |= DETACHED_PROCESS;
+    if (detached) {
+        // A daemon launched from a job-object host (CI runners, some
+        // IDEs) must outlive the job, not be killed when it tears down.
+        flags |= DETACHED_PROCESS | CREATE_BREAKAWAY_FROM_JOB;
+    }
 
     PROCESS_INFORMATION pi{};
     BOOL ok = CreateProcessW(nullptr, cmd.data(), nullptr, nullptr,
@@ -104,7 +108,12 @@ bool run_capture(const std::vector<std::string>& argv, const std::string& cwd,
     sa.bInheritHandle = TRUE;
     HANDLE rd = nullptr, wr = nullptr;
     if (!CreatePipe(&rd, &wr, &sa, 0)) return false;
-    SetHandleInformation(rd, HANDLE_FLAG_INHERIT, 0);  // parent end stays ours
+    // Inheritance is per-handle on Windows: only the write end is the
+    // child's stdout, so only it keeps HANDLE_FLAG_INHERIT. The read end
+    // is explicitly cleared — with bInheritHandles=TRUE below, every
+    // inheritable handle in this process (including OTHER run_capture
+    // pipes) would otherwise leak into this child.
+    SetHandleInformation(rd, HANDLE_FLAG_INHERIT, 0);
 
     HANDLE proc = spawn(argv, cwd, wr, /*detached=*/false);
     CloseHandle(wr);
@@ -190,7 +199,19 @@ bool run_capture(const std::vector<std::string>& argv, const std::string& cwd,
     if (argv.empty()) return false;
 
     int fds[2];
+    // Close-on-exec on BOTH ends: a concurrent run_capture (or any other
+    // spawn in this process) must not inherit this pipe. Without it the
+    // other child holds an fd it never closes — a leaked write end blocks
+    // this read until the unrelated child exits, a leaked read end is a
+    // pure fd leak. dup2 in the spawn actions clears CLOEXEC on the
+    // child's stdout copy, so the intended inheritance still works.
+#if defined(__linux__)
+    if (pipe2(fds, O_CLOEXEC) != 0) return false;
+#else
     if (pipe(fds) != 0) return false;
+    fcntl(fds[0], F_SETFD, FD_CLOEXEC);
+    fcntl(fds[1], F_SETFD, FD_CLOEXEC);
+#endif
 
     posix_spawn_file_actions_t fa;
     posix_spawn_file_actions_init(&fa);
