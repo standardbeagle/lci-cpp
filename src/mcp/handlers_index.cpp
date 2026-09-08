@@ -441,8 +441,6 @@ void register_index_handlers(McpServer& server, MasterIndex* indexer) {
           {"include_memory", "boolean",
            "Include memory usage statistics (default: false for summary)",
            ""},
-          {"include_watch_mode", "boolean",
-           "Include file watcher status (default: false for summary)", ""},
           {"include_components", "boolean",
            "Include per-component health (default: false for summary)",
            ""}},

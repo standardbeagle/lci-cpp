@@ -299,32 +299,20 @@ void register_core_handlers(McpServer& server, MasterIndex* indexer,
           {"name", "string", "Symbol name for direct lookup (alternative "
                              "to id)",
            ""},
-          {"file_id", "integer", "File ID to narrow name lookup scope", ""},
-          {"line", "integer", "Line number", ""},
-          {"column", "integer", "Column number", ""},
           {"mode", "string", "Lookup mode", ""},
-          {"include_full_symbol", "boolean", "Include full symbol info", ""},
           {"include_call_hierarchy", "boolean",
            "Include call hierarchy", ""},
-          {"include_all_references", "boolean",
-           "Include references", ""},
-          {"include_dependencies", "boolean",
-           "Include dependencies", ""},
-          {"include_file_context", "boolean",
-           "Include file context", ""},
-          {"include_quality_metrics", "boolean",
-           "Include quality metrics", ""},
           {"max_depth", "integer", "Max depth", ""},
           {"include_ai_text", "boolean", "Include AI text", ""},
           {"confidence_threshold", "number",
            "Confidence threshold", ""},
-          {"exclude_test_files", "boolean",
-           "Exclude test files", ""},
           {"include_sections", "array", "Include sections", "string"},
           {"exclude_sections", "array", "Exclude sections", "string"}},
          {},
-         // Legacy id aliases normalize_context_params() rewrites to `id`.
-         {"symbol_id", "object_id", "object_ids", "oid"}},
+         // Legacy id aliases normalize_context_params() rewrites to `id`;
+         // symbol/path trigger the handler's auto-search workflow hint
+         // (the guard would otherwise reject the hint's own inputs).
+         {"symbol_id", "object_id", "object_ids", "oid", "symbol", "path"}},
         [indexer, analyzer](const nlohmann::json& p) -> ToolResult {
             if (!indexer) {
                 return make_unavailable_response(

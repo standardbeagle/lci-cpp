@@ -2280,7 +2280,6 @@ void register_analysis_handlers(McpServer& server,
            "— every attribute that activates analysis), \"all\", one "
            "attribute name, or a list (e.g. [\"test\",\"benchmark\"])",
            ""},
-          {"tier", "integer", "Analysis tier", ""},
           {"analysis", "string",
            "Detailed analysis: modules, layers, features, terms, errors, "
            "resources, clones (corpus-wide duplicate code), deadcode "
@@ -2289,7 +2288,6 @@ void register_analysis_handlers(McpServer& server,
            "(blast radius of a git change set), annotate (the @lci: "
            "annotation path driver: what to mark and with which marker)",
            ""},
-          {"metrics", "array", "Metrics to include", "string"},
           {"min_lines", "integer",
            "analysis=clones: minimum normalized body lines for a function "
            "to count (default 6)",
@@ -2299,7 +2297,6 @@ void register_analysis_handlers(McpServer& server,
            "(default 0.9)",
            ""},
           {"target", "string", "analysis=annotate: which annotation dimension (all, entry, domain, hotpath, deadcode)", ""},
-          {"focus", "string", "Analysis focus", ""},
           {"flow", "boolean",
            "analysis=deadcode: emit the @lci: annotation worklist (elements "
            "needing a used/dead decision) instead of the candidate lists",
@@ -2314,13 +2311,7 @@ void register_analysis_handlers(McpServer& server,
            "git_analyze: target ref for range (defaults to HEAD)", ""},
           {"time_window", "string",
            "git_hotspots: 7d, 30d (default), 90d, or 1y", ""},
-          {"file_pattern", "string", "git_hotspots: glob filter", ""},
-          {"languages", "array",
-           "Filter by programming languages (e.g., [\"go\"], "
-           "[\"typescript\", \"javascript\"], [\"csharp\"]). "
-           "Case-insensitive with aliases (e.g., 'ts' for TypeScript, "
-           "'cs' for C#).",
-           "string"}},
+          {"file_pattern", "string", "git_hotspots: glob filter", ""}},
          {},
          {"detailed_mode"}},
         [ci_engine, indexer, analyzer, propagator, annotator](
