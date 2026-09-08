@@ -48,6 +48,18 @@ Evidence: `ecd810c` (column becomes a 0-based byte offset repo-wide) and `f3662c
 `ctest-full-gate` failed on them (attempt 1, 2698 tests, 2 failed), costing a build +
 full-suite cycle and a re-pin commit (`5ebad10`).
 
+
+When the gate finds it anyway, the coordinator repairs it directly rather than reopening
+the implementation step: re-pin the golden itself, widen the task's `fileScope` by that one
+file, and re-run `lci_integration_tests` STANDALONE on the same build as the gate. A
+standalone pass on the unchanged binary is equivalent evidence to a second full `ctest`, so
+rule 2's "exactly one full run" still holds. S7 did this for
+`tests/integration/goldens/mcp/code_insight/basic.json` (`2c2ac87`, fabricated `tokens=90`
+-> honest `tokens=225` after `0f12c41` changed what the LCF header means): 155/155
+standalone, no second gate attempt spent.
+
+`source_event (coordinator-repair clause): task-01M1NCSJ31DY6Q4ZBK6RS627E0, ctest-full-gate attempt1, comment 01M1ZB0TG3KXVW680C33J68FQW, commits 0f12c41/2c2ac87, 2026-09-08`
+
 Rule: when a slice changes what any emitted field MEANS — not just its value —
 `grep -rl '<field>' tests/integration/goldens/` before declaring the slice done, and
 either re-pin in the same commit or name the goldens you are deferring. Do not rely
@@ -147,3 +159,25 @@ or the C++ gate should acquire a ctest entry that shells the bench suite so the 
 cannot diverge silently.
 
 `source_event: task-01M1NCSJ31XWSRVAPP3A3YQX5Z, review_annotation_v1 01M1Z5AMKTBAS9AGVRMQDYQSEN (systemicObservations, frequency 14), verdict 01M1Z5A8SSSFQWW6DTJNC6HTJ8 advisory, git:7949bc6, follow-up 01M1Z59FVM4540T15VX7TTBMJD, 2026-09-07`
+
+## 8. Any test that touches process environment or libc time/locale state uses `tests/helpers/portable_env.h` and skips on `_WIN32` — the Linux gate cannot see a Windows compile error
+
+`ctest --test-dir build/release` proves nothing about MSVC. The Windows CI leg builds and
+runs the FULL `lci_tests` binary (`.github/workflows/ci.yml:210-228`), so one unguarded
+POSIX call in any test file reddens it long after the slice has closed — and the vendor
+implementer, which builds Linux-only, cannot observe it at all.
+
+S7's DST test called `setenv`/`unsetenv`/`tzset` bare and set `TZ=America/New_York`. The
+MSVC CRT provides none of those three and reads `TZ` only as `tzn[+|-]hh[dzn]`, never an
+IANA zone name, so the leg would not have compiled and could not have computed the
+assertion if it had. The reviewer caught it by reading the CI file, not by running a test,
+and fixed it in place (`cdd2883`): include the existing shim and `GTEST_SKIP()` on `_WIN32`
+with the platform reason stated.
+
+Rule: `setenv` / `unsetenv` / `tzset` / `setlocale` in a test go through
+`tests/helpers/portable_env.h`. Where the behaviour itself is unavailable on the platform
+(an IANA zone name here), skip with the reason rather than asserting something the CRT
+cannot produce. A reviewer of any test-touching slice checks this against the CI file —
+green Linux is not evidence.
+
+`source_event: task-01M1NCSJ31DY6Q4ZBK6RS627E0, review-panel attempt1 advisory + comment 01M1ZCCSRXAE8WY63KJY0EJRVP (systemic, fix-now), commit cdd2883, .github/workflows/ci.yml:210-228, 2026-09-08`

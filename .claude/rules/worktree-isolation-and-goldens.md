@@ -153,6 +153,13 @@ RED commit alone, build only `lci_tests` (the shared `FETCHCONTENT_BASE_DIR` dep
 and ccache make this cheap — see the worktree shared-dep-cache note), and run the single
 `--gtest_filter`. Re-running the RED test in the working tree proves nothing once the fix
 is present, and stashing the fix pollutes a tree another session may hold.
+
+Remove it with `git worktree remove` when done, and know the hazard that follows: a
+worktree configured against the shared `FETCHCONTENT_BASE_DIR` leaves `*-build` Makefiles
+in `~/.cache/lci-cpp-deps/release/` pointing at its now-deleted path, so the NEXT session's
+build fails resolving paths under the dead worktree. Fix: delete the `*-build` dirs (keep
+`*-src`) and reconfigure. S7's implementer spent part of its window doing exactly that for
+12 dep build dirs.
 <!-- written_at: 2026-09-07T06:30:00Z  source_event: task:01M1NCSJ315Z7470JQWY24DF1V, review verdict 01M1X3JC399NZE2SXAV2WRJB5W -->
 
 ## 7. A rewind's scope widening must cover every file the fix hint IMPLIES, headers included
@@ -224,3 +231,16 @@ header's inline helpers (`to_lower`, `clamp_int` in `handlers_explore.cpp`). Del
 local copy is part of the promotion, not a surprise.
 
 `source_event: task-01M1NCSJ31XWSRVAPP3A3YQX5Z, acp-implement attempt2 (passed end_turn, criterion 1 stopped), comment 01M1Z2Z4Y1T9NS7Q6A099ZHWKV (coordinator decision), comment 01M1Z39J8Z42QFZ5FEVKWX89HV (task_annotation lessons), commits 6b127d5/04457f3, 2026-09-07`
+
+## 8. Order a multi-criterion slice cheap-and-deterministic first, and commit each RED and each GREEN before the next criterion
+
+An ACP implementer runs under a hard wall-clock cap. When the dispatch prompt orders the
+criteria itself — cheap deterministic fixes first, the measured/perf criterion last — and
+requires a commit at each RED and each GREEN before the next criterion is touched, a
+timeout loses one criterion instead of the slice.
+
+S7 carried 8 criteria over 20 files and finished in ONE attempt: 168 tool calls, 81 min of
+a 120-min cap, 14 commits (`9ff5f32..15f8dc7`) in RED/GREEN pairs, `end_turn`, every
+criterion green. The ordering was written into the step's prompt, not left to the agent.
+
+`source_event: task-01M1NCSJ31DY6Q4ZBK6RS627E0, acp-implement attempt1 (passed, end_turn, duration_ms 4888849 of timeout_seconds 7200), workflow 01M1Z5DNT8FXBCPK0RPND7A615 specJson ORDER OF WORK, comment 01M1ZCE5QJSVEX6AGJNB86FWRZ, 2026-09-08`
