@@ -846,6 +846,21 @@ TEST_F(KdlConfigTest, UnreadableRootComponentIsAnErrorNotTerminate) {
 #endif
 }
 
+TEST_F(KdlConfigTest, SourceNamesTheLoadedFile) {
+    // S12's `lci config validate` must print which file a verdict refers to;
+    // the loader records it here. Defaults-only loads have no source.
+    write_kdl("project {\n  name \"sourced\"\n}\n");
+    auto result = load_config(temp_dir_.string());
+    ASSERT_TRUE(result.ok()) << result.error;
+    EXPECT_EQ(result.source, (temp_dir_ / ".lci.kdl").string());
+}
+
+TEST(LoadConfigTest, DefaultsLoadHasNoSource) {
+    auto result = load_config("/nonexistent/path/that/does/not/exist");
+    ASSERT_TRUE(result.ok());
+    EXPECT_TRUE(result.source.empty());
+}
+
 TEST_F(KdlConfigTest, LoadConfigValidatesRanges) {
     // validate_config used to run only for `lci config show`, so an
     // out-of-range value reached the indexer unchecked.
