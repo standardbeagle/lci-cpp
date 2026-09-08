@@ -81,16 +81,30 @@ PurityLevel compute_purity_level(uint32_t categories, bool has_unresolved) {
 // scored pure while calling os.MkdirAll).
 namespace {
 uint32_t classify_callee_category(std::string_view callee);
+
+// results_ key: file:line:column. The column distinguishes functions that
+// share a start line (minified JS / one-liners); callers without column
+// information pass 0.
+std::string make_result_key(std::string_view file, int line, int column) {
+    std::string key(file);
+    key += ':';
+    key += std::to_string(line);
+    key += ':';
+    key += std::to_string(column);
+    return key;
 }
+}  // namespace
 
 
 void SideEffectAnalyzer::begin_function(std::string_view name,
                                         std::string_view file,
-                                        int start_line, int end_line) {
+                                        int start_line, int end_line,
+                                        int start_column) {
     current_func_storage_ = FunctionAnalysisContext{};
     current_func_storage_.name = std::string(name);
     current_func_storage_.file = std::string(file);
     current_func_storage_.start_line = start_line;
+    current_func_storage_.start_column = start_column;
     current_func_storage_.end_line = end_line;
     current_func_ = &current_func_storage_;
 }
@@ -229,8 +243,8 @@ SideEffectInfo SideEffectAnalyzer::end_function() {
     compute_purity_score(info);
 
     // Store
-    std::string key = ctx.file + ":" + std::to_string(ctx.start_line) + ":0";
-    results_[key] = info;
+    results_[make_result_key(ctx.file, ctx.start_line, ctx.start_column)] =
+        info;
 
     current_func_ = nullptr;
     return info;
@@ -431,9 +445,9 @@ void SideEffectAnalyzer::record_channel_op(int line) {
 }
 
 const SideEffectInfo* SideEffectAnalyzer::get_result(std::string_view file,
-                                                     int line) const {
-    std::string key = std::string(file) + ":" + std::to_string(line) + ":0";
-    auto it = results_.find(key);
+                                                     int line,
+                                                     int column) const {
+    auto it = results_.find(make_result_key(file, line, column));
     return it != results_.end() ? &it->second : nullptr;
 }
 
@@ -466,8 +480,9 @@ void SideEffectAnalyzer::populate_from_index(const MasterIndex& indexer) {
                 cats |= classify_callee_category(callee);
             }
 
-            std::string key = file_path + ":" +
-                              std::to_string(es->symbol.line) + ":0";
+            // Column 0: must match the AST pass key, and the extractor
+            // (out of this slice's scope) does not yet pass start columns.
+            std::string key = make_result_key(file_path, es->symbol.line, 0);
 
             // If the AST pass already recorded precise local effects for this
             // function (param / receiver / global writes, throws, channel ops),
@@ -530,8 +545,8 @@ void SideEffectAnalyzer::propagate_transitive(const MasterIndex& indexer) {
         std::string file_path = indexer.get_file_path(fid);
         for (const auto& es : rt_snap->get_file_enhanced_symbols(fid)) {
             if (!es) continue;
-            std::string key =
-                file_path + ":" + std::to_string(es->symbol.line) + ":0";
+            // Column 0: see populate_from_index.
+            std::string key = make_result_key(file_path, es->symbol.line, 0);
             auto it = results_.find(key);
             if (it != results_.end()) by_symbol[es->id] = &it->second;
         }

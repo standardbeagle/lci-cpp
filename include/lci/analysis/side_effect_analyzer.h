@@ -25,6 +25,7 @@ struct FunctionAnalysisContext {
     std::string name;
     std::string file;
     int start_line{};
+    int start_column{};
     int end_line{};
 
     absl::flat_hash_map<std::string, int> parameters;
@@ -74,8 +75,11 @@ class SideEffectAnalyzer {
 
     // -- Function lifecycle ---------------------------------------------------
 
+    // `start_column` distinguishes functions that share a start line
+    // (minified JS, one-liners); the result key is file:line:column.
+    // Callers without column information pass 0 (the pre-fix behaviour).
     void begin_function(std::string_view name, std::string_view file,
-                        int start_line, int end_line);
+                        int start_line, int end_line, int start_column = 0);
     SideEffectInfo end_function();
 
     /// Per-file suppression directives (see finding_suppressions.h). Set by
@@ -141,7 +145,8 @@ class SideEffectAnalyzer {
     const absl::flat_hash_map<std::string, SideEffectInfo>& results() const {
         return results_;
     }
-    const SideEffectInfo* get_result(std::string_view file, int line) const;
+    const SideEffectInfo* get_result(std::string_view file, int line,
+                                     int column = 0) const;
 
     /// Moves the accumulated per-function records out, leaving this
     /// analyzer empty and reusable. Used by the index pipeline's
