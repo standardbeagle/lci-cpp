@@ -10,6 +10,8 @@
 #include <nlohmann/json.hpp>
 
 #include <lci/core/subprocess.h>
+#include <lci/config.h>
+#include <lci/indexing/master_index.h>
 #include <lci/git/analyzer.h>
 #include <lci/git/frequency_analyzer.h>
 #include <lci/git/pattern_detector.h>
@@ -698,6 +700,69 @@ TEST(GitFrequency, CommitHistoryParsesPipeInAuthorAndQuotedPath) {
     EXPECT_EQ(c1.timestamp_epoch, 1768478400);
     ASSERT_EQ(c1.file_changes.size(), 1u);
     EXPECT_EQ(c1.file_changes[0].path, "caf\xC3\xA9.go");
+
+    fs::remove_all(repo);
+}
+
+// diff.mnemonicPrefix repaints the ---/+++ headers as i//w//c/ (never b/),
+// and core.quotePath C-quotes the non-ASCII name — so the +++ path matched
+// neither the -z name-status path nor any parsed symbol's file_path, the
+// change-scope filter dropped every symbol, and git_analysis reported zero.
+TEST(GitAnalysis, MnemonicPrefixAndQuotedPathStillScopesChangedSymbols) {
+    namespace fs = std::filesystem;
+    fs::path repo = fs::temp_directory_path() /
+                    ("lci_git_mnemonic_" +
+                     std::to_string(std::chrono::steady_clock::now()
+                                        .time_since_epoch()
+                                        .count()));
+    fs::create_directories(repo);
+    ASSERT_TRUE(lci::test::run_git(repo, "init -q"));
+    ASSERT_TRUE(lci::test::run_git(repo, "config diff.mnemonicPrefix true"));
+    std::ofstream(repo / "caf\xC3\xA9" ".go")
+        << "package main\nfunc Original() int { return 1 }\n";
+    ASSERT_TRUE(lci::test::run_git(repo, "add -A"));
+    ASSERT_TRUE(lci::test::run_git(
+        repo,
+        "-c user.email=fixture@lci.test -c user.name=lci-fixture "
+        "-c commit.gpgsign=false commit -q -m one"));
+    std::ofstream(repo / "caf\xC3\xA9" ".go")
+        << "package main\nfunc Original() int { return 2 }\n";
+    ASSERT_TRUE(lci::test::run_git(repo, "add -A"));
+    ASSERT_TRUE(lci::test::run_git(
+        repo,
+        "-c user.email=fixture@lci.test -c user.name=lci-fixture "
+        "-c commit.gpgsign=false commit -q -m two"));
+
+    // Independent reference: raw git says HEAD's diff touches exactly the
+    // UTF-8 path, and its diff headers really are mnemonic/quoted (the
+    // defect's precondition — otherwise this test discriminates nothing).
+    std::string name_status;
+    ASSERT_TRUE(lci::subprocess::run_capture(
+        {"git", "-C", repo.string(), "diff-tree", "--root",
+         "--no-commit-id", "--name-status", "-z", "-r", "HEAD", "--"},
+        "", name_status));
+    ASSERT_NE(name_status.find("caf\xC3\xA9.go"), std::string::npos);
+    std::string raw_diff;
+    ASSERT_TRUE(lci::subprocess::run_capture(
+        {"git", "-C", repo.string(), "diff", "HEAD~1..HEAD", "--"},
+        "", raw_diff));
+    ASSERT_EQ(raw_diff.find("+++ b/"), std::string::npos)
+        << "diff.mnemonicPrefix must be in effect for this test to bite";
+
+    Provider p;
+    ASSERT_TRUE(Provider::create(repo.string(), p));
+    Config cfg = make_default_config();
+    cfg.project.root = repo.string();
+    MasterIndex index(cfg);
+    Analyzer analyzer(p, index);
+
+    AnalysisParams params = AnalysisParams::defaults();
+    params.scope = AnalysisScope::Commit;  // base_ref empty -> HEAD
+    AnalysisReport report;
+    ASSERT_TRUE(analyzer.analyze(params, report));
+    EXPECT_EQ(report.summary.symbols_modified, 1)
+        << "the changed function in café.go must survive change-scoping";
+    EXPECT_EQ(report.summary.files_changed, 1);
 
     fs::remove_all(repo);
 }
