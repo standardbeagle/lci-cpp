@@ -7,10 +7,12 @@
 #include <lci/mcp/handlers_explore.h>
 #include <lci/mcp/handlers_index.h>
 #include <lci/mcp/server.h>
+#include <lci/mcp/time_format.h>
 
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdlib>
 #include <mutex>
 #include <set>
 #include <thread>
@@ -449,6 +451,54 @@ TEST_F(McpStdioTest, BatchArrayFrameIsInvalidRequest) {
     });
     ASSERT_EQ(responses.size(), 1u);
     EXPECT_EQ(responses[0]["error"]["code"], -32600);
+}
+
+// git_analysis's registration lambda dereferenced `indexer` without the
+// null guard its four sibling tools have: with a null-dep server (or before
+// the index exists) the call segfaulted instead of answering unavailable.
+TEST_F(McpStdioTest, GitAnalysisNullIndexerReturnsUnavailable) {
+    auto wire = server_->dispatch_wire(
+        R"({"jsonrpc":"2.0","id":1,"method":"tools/call",)"
+        R"("params":{"name":"git_analysis","arguments":{}}})");
+    ASSERT_FALSE(wire.empty());
+    auto resp = nlohmann::json::parse(wire);
+    ASSERT_TRUE(resp.contains("result"));
+    EXPECT_FALSE(resp["result"].value("isError", false));
+    auto payload = nlohmann::json::parse(
+        resp["result"]["content"][0]["text"].get<std::string>());
+    EXPECT_EQ(payload.value("available", true), false);
+}
+
+// -- time_format ---------------------------------------------------------------
+
+// The UTC offset was computed via mktime() on a gmtime tm whose tm_isdst is
+// 0, which is off by one hour whenever the local zone observes DST at that
+// date. Pin both seasons under America/New_York.
+TEST(TimeFormat, UtcOffsetRespectsDst) {
+    const char* old_tz = std::getenv("TZ");
+    std::string saved = old_tz ? old_tz : "";
+    setenv("TZ", "America/New_York", 1);
+    tzset();
+
+    using namespace std::chrono;
+    // 2026-07-15T12:00:00Z -> EDT is UTC-4.
+    auto july = sys_seconds{sys_days{year{2026} / July / 15}} + hours{12};
+    auto july_s = format_rfc3339_nano_local(july);
+    EXPECT_NE(july_s.find("T08:00:00"), std::string::npos) << july_s;
+    EXPECT_NE(july_s.find("-04:00"), std::string::npos) << july_s;
+
+    // 2026-01-15T12:00:00Z -> EST is UTC-5.
+    auto jan = sys_seconds{sys_days{year{2026} / January / 15}} + hours{12};
+    auto jan_s = format_rfc3339_nano_local(jan);
+    EXPECT_NE(jan_s.find("T07:00:00"), std::string::npos) << jan_s;
+    EXPECT_NE(jan_s.find("-05:00"), std::string::npos) << jan_s;
+
+    if (old_tz) {
+        setenv("TZ", saved.c_str(), 1);
+    } else {
+        unsetenv("TZ");
+    }
+    tzset();
 }
 
 TEST_F(McpStdioTest, ToolsList) {
