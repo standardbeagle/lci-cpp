@@ -1,5 +1,6 @@
 #include <lci/analysis/coupling_analyzer.h>
 #include <lci/analysis/layer_analyzer.h>
+#include <lci/analysis/word_match.h>
 #include <lci/core/text.h>
 
 #include <algorithm>
@@ -113,10 +114,12 @@ std::string LayerAnalyzer::classify_symbol_to_layer(const EnhancedSymbol& sym) {
             return "Domain Layer";
     }
 
-    // Fallback: keyword scan.
+    // Fallback: keyword scan on whole identifier words — a substring hit
+    // ("ui" in "build", "log" in "catalog") is not a signal.
     for (const auto& entry : kLayerKeywords) {
         for (auto kw : entry.keywords) {
-            if (contains(name, kw)) return std::string(entry.layer);
+            if (analysis::contains_word(sym.symbol.name, kw))
+                return std::string(entry.layer);
         }
     }
 

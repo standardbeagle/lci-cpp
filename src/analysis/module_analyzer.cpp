@@ -2,6 +2,7 @@
 
 #include <lci/analysis/call_graph.h>
 #include <lci/analysis/coupling_analyzer.h>
+#include <lci/analysis/word_match.h>
 #include <lci/core/text.h>
 
 #include <algorithm>
@@ -17,10 +18,6 @@
 namespace lci {
 
 namespace {
-
-bool contains(std::string_view haystack, std::string_view needle) {
-    return haystack.find(needle) != std::string_view::npos;
-}
 
 // Prefix-based cohesion for a set of symbols.
 double prefix_cohesion(const std::vector<const EnhancedSymbol*>& syms) {
@@ -495,54 +492,46 @@ ModuleAnalysis ModuleAnalyzer::analyze_graph(
 }
 
 std::string ModuleAnalyzer::classify_module_by_path(std::string_view path) {
-    std::string lower = text::ascii_lower(path);
-
-    if (contains(lower, "api") || contains(lower, "controller") ||
-        contains(lower, "handler"))
-        return "API Layer";
-    if (contains(lower, "service") || contains(lower, "business") ||
-        contains(lower, "logic"))
-        return "Service Layer";
-    if (contains(lower, "model") || contains(lower, "entity") ||
-        contains(lower, "data"))
-        return "Data Layer";
-    if (contains(lower, "repository") || contains(lower, "dao"))
-        return "Repository Layer";
-    if (contains(lower, "util") || contains(lower, "helper"))
-        return "Utility";
-    if (contains(lower, "test") || contains(lower, "spec"))
-        return "Test";
-    if (contains(lower, "config") || contains(lower, "setting"))
-        return "Configuration";
-    if (contains(lower, "middleware") || contains(lower, "filter"))
-        return "Middleware";
-    // Broadened from the original five-bucket set: a four-repo field run
-    // (2026-08-26) showed every module of every corpus reporting "General",
-    // which made the type column dead weight.
-    if (contains(lower, "cmd") || contains(lower, "entrypoint"))
-        return "Entry Point";
-    if (contains(lower, "migration") || contains(lower, "storage") ||
-        contains(lower, "store") || contains(lower, "database"))
-        return "Data Layer";
-    if (contains(lower, "endpoint") || contains(lower, "route") ||
-        contains(lower, "http") || contains(lower, "server") ||
-        contains(lower, "rpc"))
-        return "API Layer";
-    if (contains(lower, "website") || contains(lower, "frontend") ||
-        contains(lower, "webapp") || contains(lower, "/ui") ||
-        lower.rfind("ui/", 0) == 0 || contains(lower, "pages") ||
-        contains(lower, "components") || contains(lower, "views"))
-        return "UI";
-    if (contains(lower, "parser") || contains(lower, "lexer") ||
-        contains(lower, "compil") || contains(lower, "interpret") ||
-        contains(lower, "evaluat") || contains(lower, "grammar"))
-        return "Language Core";
-    if (contains(lower, "auth"))
-        return "Auth";
-    if (contains(lower, "docs") || contains(lower, "doc/"))
-        return "Docs";
-    if (contains(lower, "script") || contains(lower, "tool"))
-        return "Tooling";
+    // Whole-word matching over path segments (words split on separators and
+    // camel boundaries): "latest.ts" is not a test, "guide/" is not UI.
+    // Stems that used to catch compounds by substring ("compil",
+    // "evaluat", ...) are spelled out as the words they meant.
+    struct Bucket {
+        std::string_view label;
+        std::initializer_list<std::string_view> words;
+    };
+    static const Bucket buckets[] = {
+        {"API Layer", {"api", "controller", "handler"}},
+        {"Service Layer", {"service", "business", "logic"}},
+        {"Data Layer", {"model", "entity", "data"}},
+        {"Repository Layer", {"repository", "dao"}},
+        {"Utility", {"util", "helper"}},
+        {"Test", {"test", "tests", "spec"}},
+        {"Configuration", {"config", "setting", "settings"}},
+        {"Middleware", {"middleware", "filter"}},
+        // Broadened from the original five-bucket set: a four-repo field run
+        // (2026-08-26) showed every module of every corpus reporting
+        // "General", which made the type column dead weight.
+        {"Entry Point", {"cmd", "entrypoint"}},
+        {"Data Layer",
+         {"migration", "migrations", "storage", "store", "database"}},
+        {"API Layer", {"endpoint", "route", "http", "server", "rpc"}},
+        {"UI",
+         {"website", "frontend", "webapp", "ui", "pages", "components",
+          "views"}},
+        {"Language Core",
+         {"parser", "lexer", "compile", "compiler", "compilation",
+          "interpret", "interpreter", "evaluate", "evaluator", "evaluation",
+          "grammar"}},
+        {"Auth", {"auth"}},
+        {"Docs", {"docs", "doc"}},
+        {"Tooling", {"script", "scripts", "tool"}},
+    };
+    for (const auto& bucket : buckets) {
+        for (auto word : bucket.words) {
+            if (analysis::contains_word(path, word)) return std::string(bucket.label);
+        }
+    }
 
     return "General";
 }
