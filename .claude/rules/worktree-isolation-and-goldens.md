@@ -294,3 +294,20 @@ build and run a real git fixture repo between tool calls.
 
 `source_event: task-01M1NCSJ31DY6Q4ZBK6RS627E0, acp-implement attempt1 (passed, end_turn, duration_ms 4888849 of timeout_seconds 7200), workflow 01M1Z5DNT8FXBCPK0RPND7A615 specJson ORDER OF WORK, comment 01M1ZCE5QJSVEX6AGJNB86FWRZ, 2026-09-08`
 <!-- written_at: 2026-09-08T08:30:00Z  source_event: task:01M1NCSJ31H91WK6XGBGSTVK9X, comment:01M200Q2G3Z4K5851DJ71FAJVF (coordinator checkpoint), git:d55a5ad..76bd21e -->
+
+Third data point, and it sets a size ceiling: S11 carried 10 criteria over 20 files and did
+NOT fit. Its ACP attempt 1 ran the ordering correctly — cheap deterministic criteria first,
+a commit at each RED and each GREEN — and still hit the 2 h cap mid-way through criterion
+10's ASan probe, having landed 19 commits (`3afa248..b13892d` plus the criterion-10 RED
+`b61e5e3`). Attempt 2 finished the one remaining criterion in 8 minutes from a RESUME body
+that listed what had already landed. Nothing was lost, because the ordering held; the slice
+simply exceeded one attempt.
+
+So the ordering rule buys graceful degradation, not unlimited size. With S7 (8 criteria,
+81 min of 120) and S10 (7 criteria, 76 min) fitting and S11 (10) not, a planner should cap an
+ACP slice at about 8 criteria and split beyond that. When an attempt does run out, the
+RESUME body is the recovery: name every criterion already landed with its commit range and
+"do NOT redo", leave only the remainder, and inline the exact command for any probe the next
+attempt must run.
+
+<!-- written_at: 2026-09-08T12:00:00Z  source_event: task:01M1NCSJ31593067Q5NPTV6D1X, comment:01M20CBY8TV1VHA8X3K212DHPZ (coordinator checkpoint), task content (RESUME preamble), git:3afa248..b13892d, git:aefcd1e -->

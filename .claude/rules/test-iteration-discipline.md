@@ -189,3 +189,89 @@ cannot produce. A reviewer of any test-touching slice checks this against the CI
 green Linux is not evidence.
 
 `source_event: task-01M1NCSJ31DY6Q4ZBK6RS627E0, review-panel attempt1 advisory + comment 01M1ZCCSRXAE8WY63KJY0EJRVP (systemic, fix-now), commit cdd2883, .github/workflows/ci.yml:210-228, 2026-09-08`
+
+## 7. A change to a classification or matching RULE ships with a before/after diff over the real corpora, and the RED pins BOTH directions
+
+Rules 4 and 5 cover a changed output *value* meeting stale goldens. This is the tier above:
+a change to the rule that DECIDES a category. Tightening one is not a subtraction of false
+positives — it moves a boundary, and the true positives on the other side of it leave
+silently, with every unit test still green because the tests name only the false positives
+the change was written to remove.
+
+S11 hit this twice on one function. `d0d05b7`/`85260f0` replaced bare prefix matching in
+`classify_callee_category` with a word-boundary rule, tested against exactly the named FPs
+(`querySelector`, `login`, `closest`, `listener`). The same rule refuses every leading-camel
+compound, so Node's `fs` `*Sync` family (`readFileSync` 306 sites, `writeFileSync` 80,
+`readdirSync` 58, `closeSync` 40, `mkdirSync` 37, `openSync`/`unlinkSync` 20 each in
+next.js) and Go `ListenAndServe`/`DialContext` flipped from io/network to pure. `aac3e5e`
+re-enumerated only the three compounds a hand audit had happened to name
+(`MkdirAll`/`OpenFile`/`ReadAll`), leaving the `*Sync` family open. Review attempt 1 found
+it and rewound. The rewind fix `052fc16` then replaced the enumeration with a rule — strip
+one known decoration suffix (`sync|all|file|context|andserve`) and re-run the SAME boundary
+matcher on the case-preserved stem — and review attempt 2 found that the new rule readmits a
+smaller FP class (`<x>RequestContext` -> network, 9 next.js sites; `TestRecordQueryAll` ->
+database), filed as `01M20BVY4HEWZKBA1E638GKHY7`.
+
+Both classes were found the same way, and by the reviewer, not the test suite: a small
+replica of the matcher run over the identifiers in
+`benchmarks/repo-qa/.work/exploration`, boundary-only versus boundary-plus-stem, listing
+every identifier whose category CHANGED. Seconds to run; the named-callee table (13
+positives, 6 negatives) could not express either finding.
+
+Rule, for any keyword/pattern/classification change under `src/analysis` (side-effect
+categories, layer and module keywords, path gates):
+
+- **Run the matcher replica over the real corpora before and after, and report the counts
+  by category, both directions** — items that gained a category and items that lost one.
+  A tightening with no reported losses has not been checked; it has been assumed.
+- **The RED pins both directions in one test.** Positives kept (with the pre-fix reference
+  values read from the pre-fix tree, `git show <sha>:<file>`, not from the current
+  classifier) and false positives removed. A one-directional RED re-ships the regression —
+  it is what shipped `aac3e5e`.
+- **Prefer a rule over an exception list whenever the exceptions form a family.** A keyword
+  table with a per-case exception list invites exactly this defect: the list holds whatever
+  the last audit happened to see. A decoration suffix is a spelling habit, not a new word
+  sense, so the stem carries the verb's meaning and the whole family closes at once. Pin one
+  NEGATIVE per verb the rule touches (`openAccount`, `closeModal`, `readMemory`,
+  `writeBuffer`, `listenerCount`, `dialogTitle`) so decay back into prefix matching is
+  inexpressible rather than merely discouraged.
+- **Re-run the corpus diff on the replacement rule too.** The principled rule is not exempt;
+  it is where the second FP class came from.
+- Watch the case-sensitivity seam: the boundary matcher's camel-tail arm keys on an
+  uppercase byte, so any preprocessing that lowercases the callee before matching quietly
+  disables it (`appendFileSync` -> `file` is lost).
+
+The corpus-diff replica is not yet a committed script — it was written twice, by hand, by
+the reviewer. Committing it under `benchmarks/` or `tests/` and naming it in the slice's
+acceptance is the standing follow-up.
+
+<!-- written_at: 2026-09-08T12:00:00Z  source_event: task:01M1NCSJ31593067Q5NPTV6D1X, comment:01M20AYRNZ36VC843M9MPEW08V (review a1 fail), comment:01M20AZ957KBX43CBB9FW3K1TX (failPatterns systemic), comment:01M20B7XQYYZ2PGBE4BR0MMZ3M (task_annotation decisions), comment:01M20CB1M1D693MTC4WCYSC0ZH (review a2 systemicObservations), git:85260f0, git:d0d05b7, git:aac3e5e, git:9c7a718, git:052fc16 -->
+
+## 8. When a sanitizer preset is broken by a dependency, prove the memory-safety criterion with a standalone driver over the exact TU
+
+`cmake --preset sanitizer` cannot compile abseil under this host's GCC (pre-existing absl
+constexpr failure; filed `01M20CE5HNBGD4DEM9RH34ZA52`). A memory-safety acceptance criterion
+that names the preset is then unsatisfiable, and the cost of fixing the dependency is not the
+slice's to pay.
+
+Recipe, proven on S11 criterion 10 and reproduced independently by the reviewer from the
+recorded command:
+
+1. Write a driver `.cpp` that `#include`s the implementation `.cpp` itself, so a function in
+   an anonymous namespace is reachable in the same TU.
+2. `g++ -std=c++20 -fsanitize=address -I include -I build/release/generated` plus `-isystem`
+   for each dep source tree, linking `build/release/src/liblci_lib.a` and the release dep
+   archives inside `-Wl,--start-group ... --end-group`.
+3. Run it against the PRE-fix source (`git show <red-sha>^:<file> > /tmp/...` and include
+   that copy) AND against HEAD. Post the exact command and BOTH outputs as a task comment.
+4. If the pre-fix run does NOT report a violation, say so plainly. A bounded buffer stands on
+   its own; an invented sanitizer report does not.
+
+Here the pre-fix run confirmed a previously UNVERIFIED root-cause claim — `AddressSanitizer:
+stack-buffer-overflow, WRITE of size 4 in edit_distance_capped`, frame object `prev`
+(naming_analyzer.cpp:135) `[160,416)` overflowed at offset 416 — and HEAD ran clean. A
+root-cause the task marks unverified is a hypothesis; this is how it becomes evidence, and
+the standalone driver costs minutes against the hours of fixing a dependency under
+`-fsanitize`.
+
+<!-- written_at: 2026-09-08T12:00:00Z  source_event: task:01M1NCSJ31593067Q5NPTV6D1X, comment:01M2088YG2JX0N4MPKG62XXKND (ASan evidence), comment:01M20AZ957KBX43CBB9FW3K1TX (passPatterns), git:b61e5e3, git:aefcd1e, task:01M20CE5HNBGD4DEM9RH34ZA52 -->
