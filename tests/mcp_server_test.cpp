@@ -406,6 +406,51 @@ TEST_F(McpStdioTest, DispatchWireNonObjectToolsCallParamsIsInvalidRequest) {
     EXPECT_EQ(resp2["error"]["code"], -32600);
 }
 
+// dispatch_wire must reject non-object "arguments" with -32602 (invalid
+// params): the unknown-parameter guard in handle_tools_call only runs when
+// arguments.is_object(), so a string/array used to reach the handler and
+// surface as 'Internal error: type_error.306' — an internal error for a
+// caller mistake. A batch (array) frame is not a valid JSON-RPC request on
+// this transport and must answer -32600 with a null id, not fall through to
+// 'Method not found'.
+TEST_F(McpStdioTest, DispatchWireNonObjectArgumentsIsInvalidParams) {
+    auto wire = server_->dispatch_wire(
+        R"({"jsonrpc":"2.0","id":9,"method":"tools/call",)"
+        R"("params":{"name":"info","arguments":"x"}})");
+    ASSERT_FALSE(wire.empty());
+    auto resp = nlohmann::json::parse(wire);
+    EXPECT_EQ(resp["id"], 9);
+    ASSERT_TRUE(resp.contains("error"));
+    EXPECT_EQ(resp["error"]["code"], -32602);
+
+    auto wire2 = server_->dispatch_wire(
+        R"({"jsonrpc":"2.0","id":10,"method":"tools/call",)"
+        R"("params":{"name":"info","arguments":[1,2]}})");
+    ASSERT_FALSE(wire2.empty());
+    auto resp2 = nlohmann::json::parse(wire2);
+    EXPECT_EQ(resp2["id"], 10);
+    ASSERT_TRUE(resp2.contains("error"));
+    EXPECT_EQ(resp2["error"]["code"], -32602);
+}
+
+TEST_F(McpStdioTest, BatchArrayFrameIsInvalidRequest) {
+    auto wire = server_->dispatch_wire(
+        R"([{"jsonrpc":"2.0","id":1,"method":"ping"}])");
+    ASSERT_FALSE(wire.empty());
+    auto resp = nlohmann::json::parse(wire);
+    EXPECT_TRUE(resp["id"].is_null());
+    ASSERT_TRUE(resp.contains("error"));
+    EXPECT_EQ(resp["error"]["code"], -32600);
+
+    // The stdio path (handle_request via run()) must reject the same shape.
+    auto responses = exchange({
+        nlohmann::json::parse(
+            R"([{"jsonrpc":"2.0","id":1,"method":"ping"}])"),
+    });
+    ASSERT_EQ(responses.size(), 1u);
+    EXPECT_EQ(responses[0]["error"]["code"], -32600);
+}
+
 TEST_F(McpStdioTest, ToolsList) {
     auto responses = exchange({
         make_request("initialize", 1),
