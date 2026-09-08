@@ -129,6 +129,14 @@ Build note for step 2: the harness low-memory guard killed the bisect build thre
 sibling `rustc` peak ran. `setsid nohup <build> &` survives it — a detached build is the only one
 that finishes under a contended host, and a foreground build under those conditions is a wasted
 20-minute cycle, not a signal.
+S9 extends this to the GATE itself: the same low-memory guard killed an in-harness
+`ctest --output-on-failure -j4` with 34 GB free, and the run only completed detached
+(`setsid nohup ctest ... > <scratchpad>/s9-final-gate.log &`, 2641/2641, exit 0). And an ACP
+implementer's stall detector counts its own build wall-clock as silence — S9's attempt 2 was
+killed `agent_stalled` after 15 minutes of a RED-proof worktree build under host load ~100,
+having landed 3 of 4 items. A coordinator dispatching a slice that must build a second tree
+either raises `stall_seconds` or tells the agent to detach the build.
+<!-- written_at: 2026-09-08T06:30:00Z  source_event: task:01M1NCSJ31SW3FZE4FG0QRE1QY, comment:01M1ZRCHSGT80ECVZXWB5FVWT8, comment:01M1ZPJDTF2B1KF9K7Z4HZ0E65 -->
 
 `source_event: task-01M1NCSJ31JA7K2WZJY5DGASHZ, ctest-full-gate attempt1 (2727/2728) -> attempt2 forced_v1, comment 01M1YRESKBG0JB47FFJ3BDZFRN, git c9b7e32..120fe3b, 2026-09-07`
 

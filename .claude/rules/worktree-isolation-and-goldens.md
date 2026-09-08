@@ -160,6 +160,31 @@ in `~/.cache/lci-cpp-deps/release/` pointing at its now-deleted path, so the NEX
 build fails resolving paths under the dead worktree. Fix: delete the `*-build` dirs (keep
 `*-src`) and reconfigure. S7's implementer spent part of its window doing exactly that for
 12 dep build dirs.
+Since S9 the repair is one line: `cmake --preset release` in the PRIMARY checkout, confirmed
+by `grep -l <worktree-slug> ~/.cache/lci-cpp-deps/release/*-build/Makefile | wc -l` = 0. It is
+the mandatory second half of the procedure, not a follow-up — S9 paid it twice in one task
+(the ACP implementer and the reviewer each re-pointed 11 Makefiles).
+
+Two more things the S9 RED proof cost, both cheap to avoid:
+
+- **Carry the helpers the slice introduced.** The RED commit's cherry-pick conflicts when the
+  test calls a helper the same slice added (`ensure_lci_server_indexed`, added in `f893f10`),
+  and the first build then fails on an undeclared identifier. Copy the test AND every
+  slice-introduced helper it calls, inside the same namespace. Three builds were wasted across
+  two actors here before this was understood.
+- **The RED's reference value must come from a source OUTSIDE the binary under test.** S9's
+  `CliStatusTest.ThreadsAndRssMatchServerStatusJson` compared `lci status` text against `lci
+  status --json`; pre-fix both read the CLI's own `/proc/self`, so the two agreed and the RED
+  passed on the pre-fix binary — the commit claimed 5/5 RED, the truth was 4/5. Rewritten to
+  read the server in-process via `lci::Client(get_socket_path_for_root(root)).get_stats()`, it
+  fails pre-fix by 12 MB of RSS. This is `karpathy-principles.md` rule 4's two-producers /
+  one-stream class applied to a CLI test: a test whose claim is "this value comes from X, not
+  from the process itself" must obtain X independently.
+- **Paste the per-test `[  FAILED  ]` lines, never a count.** "RED: all N fail" is a
+  load-bearing claim and only the gtest output proves it; the false count is exactly what hid
+  the non-discriminating test through a whole review cycle.
+
+<!-- written_at: 2026-09-08T06:30:00Z  source_event: task:01M1NCSJ31SW3FZE4FG0QRE1QY, comment:01M1ZK4ESZB6KNSY4KX6NZ4C7K (review a1 failPatterns), comment:01M1ZSXHPQBR9C1AG1MMVXZ32T (review a2 systemicObservations), comment:01M1ZQE8Q3DNGRDYR35N8SNR4M (b2_red_result), git:b8e9a27 -->
 <!-- written_at: 2026-09-07T06:30:00Z  source_event: task:01M1NCSJ315Z7470JQWY24DF1V, review verdict 01M1X3JC399NZE2SXAV2WRJB5W -->
 
 ## 7. A rewind's scope widening must cover every file the fix hint IMPLIES, headers included

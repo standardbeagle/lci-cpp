@@ -139,6 +139,15 @@ LCI's reason to exist is sub-millisecond semantic code search with 79.8% context
 - No silent fallbacks. No "implemented but returns empty" stubs (the `handle_git_analyze` pattern — return a clear error, not zeroed output).
 - Errors at boundaries: parse failure, missing file, unsupported language → propagate. Do not paper over.
 - A skipped corner is a bug filed in Dart with a `loop-fix` tag and the exact missing surface named. Never quietly ignored.
+- **A pass/fail VERDICT is a number too: it must be falsifiable by a real check, or the command
+  exits non-zero.** `lci debug validate` printed "All consistency checks passed!" for every
+  reachable server because it branched on `status->error.empty()` and
+  `IndexServer::handle_status` never writes an `error` field on a 200 — the branch was
+  unconditional, so the verdict could not be false. A rewrite that keeps the branch keeps the
+  fabrication; S9 replaced it with a fail-fast stub that names the missing server-side check and
+  exits 1. Before printing any verdict derived from a field, grep the PRODUCER for a writer of
+  that field: no writer means no verdict.
+  <!-- written_at: 2026-09-08T06:30:00Z  source_event: task:01M1NCSJ31SW3FZE4FG0QRE1QY, comment:01M1ZK3ZM9X9EVWY6WK03KCDWX (review a1 blocker 1), git:c9d5d20, git:e8d0029 -->
 
 ### 7. No "we'll optimize later"
 - Optimize on the path you're already touching. Future-you will not remember why this hot path is slow.
