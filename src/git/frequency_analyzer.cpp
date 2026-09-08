@@ -444,8 +444,8 @@ bool HistoryProvider::get_commit_history(int64_t since_epoch,
     std::strftime(since_str, sizeof(since_str), "%Y-%m-%dT%H:%M:%SZ", &tm_buf);
 
     std::vector<std::string> args = {
-        "log", "--numstat",
-        "--format=%H|%an|%ae|%at|%s",
+        "log", "--numstat", "-z",
+        "--format=%H%x00%an%x00%ae%x00%at%x00%s",
         std::string("--since=") + since_str,
         "--no-merges",
     };
@@ -456,10 +456,10 @@ bool HistoryProvider::get_commit_history(int64_t since_epoch,
     }
 
     // Reuse Provider::run_git — it argv-execs git in the repo root with no
-    // shell at all (subprocess::run_capture), so the
-    // `--format=%H|%an|%ae|%at|%s` placeholders (the `|` in particular)
-    // reach git literally; there is no shell to parse them as pipes and no
-    // quoting involved.
+    // shell at all (subprocess::run_capture). Fields are NUL-separated
+    // (%x00) and -z makes numstat paths raw bytes, so author names or file
+    // names containing '|', spaces, quotes, or non-ASCII bytes cannot shift
+    // the parse the way a |-separated, core.quotePath-mangled stream did.
     std::string output;
     // A non-zero git exit means the history is incomplete (bad ref, broken
     // pipe, mid-stream failure). Fail rather than parse a truncated stream and
@@ -520,99 +520,98 @@ bool HistoryProvider::get_repo_history(int64_t since_epoch,
 
 bool parse_commit_history(std::string_view output,
                           std::vector<CommitInfo>& out) {
-    CommitInfo* current = nullptr;
-
+    // Consumes `git log --numstat -z --format=%H%x00%an%x00%ae%x00%at%x00%s`.
+    // Byte layout per commit (verified against git 2.43):
+    //   hash \0 name \0 email \0 ts \0 subject \0
+    //   then numstat entries, the first prefixed with a '\n':
+    //     "A\tD\tpath" \0                 — add/modify/delete
+    //     "A\tD\t" \0 old \0 new \0       — rename/copy (empty path field)
+    // An empty commit has no entries and no '\n'; the next header follows
+    // its subject NUL directly. NUL cannot appear in any field value, so
+    // splitting on it is unambiguous — unlike the old |-separated format,
+    // where a '|' in the author name shifted every later field.
     size_t pos = 0;
-    while (pos < output.size()) {
-        auto nl = output.find('\n', pos);
-        if (nl == std::string_view::npos) nl = output.size();
-        auto line = output.substr(pos, nl - pos);
-        pos = nl + 1;
-
-        if (line.empty()) continue;
-
-        // Check if this is a commit header: hash|name|email|timestamp|message.
-        if (line.find('|') != std::string_view::npos) {
-            // Count pipes.
-            int pipes = 0;
-            for (char c : line) {
-                if (c == '|') ++pipes;
-            }
-            if (pipes >= 3 && line.size() >= 40) {
-                // Parse as commit header.
-                auto p1 = line.find('|');
-                auto hash = line.substr(0, p1);
-                if (hash.size() >= 40) {
-                    // NOTE: do not "save the previous commit" here. `current`
-                    // already points AT the previous commit inside `out` — it
-                    // was pushed when its own header was parsed. Re-pushing it
-                    // appended a moved-from husk, so N commits produced 2N-1
-                    // entries: every churn statistic was inflated and each
-                    // husk's empty author became a phantom contributor.
-                    CommitInfo ci;
-                    ci.hash = std::string(hash);
-
-                    auto rest = line.substr(p1 + 1);
-                    auto p2 = rest.find('|');
-                    ci.author_name = std::string(rest.substr(0, p2));
-                    rest = rest.substr(p2 + 1);
-
-                    auto p3 = rest.find('|');
-                    ci.author_email = std::string(rest.substr(0, p3));
-                    rest = rest.substr(p3 + 1);
-
-                    auto p4 = rest.find('|');
-                    auto ts_str = rest.substr(0, p4);
-                    int64_t ts = 0;
-                    std::from_chars(ts_str.data(), ts_str.data() + ts_str.size(), ts);
-                    ci.timestamp_epoch = ts;
-
-                    if (p4 != std::string_view::npos) {
-                        ci.message = std::string(rest.substr(p4 + 1));
-                    }
-
-                    out.push_back(std::move(ci));
-                    current = &out.back();
-                    continue;
-                }
+    auto next_field = [&](std::string_view& field) {
+        if (pos >= output.size()) return false;
+        size_t end = output.find('\0', pos);
+        if (end == std::string_view::npos) end = output.size();
+        field = output.substr(pos, end - pos);
+        pos = end + 1;
+        return true;
+    };
+    auto is_hash = [](std::string_view f) {
+        if (f.size() != 40 && f.size() != 64) return false;
+        for (char c : f) {
+            if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) {
+                return false;
             }
         }
+        return true;
+    };
 
-        // Parse numstat line: added\tdeleted\tpath.
-        if (current && !line.empty()) {
-            auto tab1 = line.find('\t');
-            if (tab1 == std::string_view::npos) continue;
-            auto tab2 = line.find('\t', tab1 + 1);
-            if (tab2 == std::string_view::npos) continue;
-
-            int added = 0, deleted = 0;
-            auto added_str = line.substr(0, tab1);
-            auto deleted_str = line.substr(tab1 + 1, tab2 - tab1 - 1);
-            auto path = line.substr(tab2 + 1);
-
-            if (added_str != "-") {
-                std::from_chars(added_str.data(), added_str.data() + added_str.size(), added);
-            }
-            if (deleted_str != "-") {
-                std::from_chars(deleted_str.data(),
-                                deleted_str.data() + deleted_str.size(), deleted);
-            }
-
-            FileChange fc;
-            std::string path_str(path);
-
-            // Handle renames.
-            if (path_str.find(" => ") != std::string::npos) {
-                parse_rename_path(path_str, fc.path, fc.old_path);
-            } else {
-                fc.path = std::move(path_str);
-            }
-
-            fc.lines_added = added;
-            fc.lines_deleted = deleted;
-            fc.status = determine_change_status(added, deleted, fc.old_path);
-            current->file_changes.push_back(std::move(fc));
+    CommitInfo* current = nullptr;
+    bool first_entry_of_commit = false;
+    std::string_view field;
+    while (next_field(field)) {
+        if (first_entry_of_commit && !field.empty() && field.front() == '\n') {
+            field.remove_prefix(1);
         }
+        first_entry_of_commit = false;
+        if (field.empty()) continue;
+
+        if (is_hash(field)) {
+            CommitInfo ci;
+            ci.hash = std::string(field);
+            std::string_view name, email, ts, subject;
+            if (!next_field(name) || !next_field(email) || !next_field(ts) ||
+                !next_field(subject)) {
+                break;  // truncated stream: keep what parsed cleanly
+            }
+            ci.author_name = std::string(name);
+            ci.author_email = std::string(email);
+            std::from_chars(ts.data(), ts.data() + ts.size(),
+                            ci.timestamp_epoch);
+            ci.message = std::string(subject);
+            out.push_back(std::move(ci));
+            current = &out.back();
+            first_entry_of_commit = true;
+            continue;
+        }
+
+        // Numstat entry: added \t deleted \t path.
+        if (current == nullptr) continue;
+        auto tab1 = field.find('\t');
+        if (tab1 == std::string_view::npos) continue;
+        auto tab2 = field.find('\t', tab1 + 1);
+        if (tab2 == std::string_view::npos) continue;
+
+        int added = 0, deleted = 0;
+        auto added_str = field.substr(0, tab1);
+        auto deleted_str = field.substr(tab1 + 1, tab2 - tab1 - 1);
+        auto path = field.substr(tab2 + 1);
+        if (added_str != "-") {
+            std::from_chars(added_str.data(),
+                            added_str.data() + added_str.size(), added);
+        }
+        if (deleted_str != "-") {
+            std::from_chars(deleted_str.data(),
+                            deleted_str.data() + deleted_str.size(), deleted);
+        }
+
+        FileChange fc;
+        if (path.empty()) {
+            // Rename/copy: old and new paths are the next two NUL fields.
+            std::string_view old_p, new_p;
+            if (!next_field(old_p) || !next_field(new_p)) break;
+            fc.old_path = std::string(old_p);
+            fc.path = std::string(new_p);
+        } else {
+            fc.path = std::string(path);
+        }
+        fc.lines_added = added;
+        fc.lines_deleted = deleted;
+        fc.status = determine_change_status(added, deleted, fc.old_path);
+        current->file_changes.push_back(std::move(fc));
     }
 
     return true;

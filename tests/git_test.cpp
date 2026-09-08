@@ -1299,14 +1299,14 @@ TEST(ChurnFilter, SkipDefaults) {
 
 namespace {
 
-// Two commits, each with one numstat line, in the exact shape
-// `git log --format=%H|%an|%ae|%at|%s --numstat` emits.
-constexpr const char* kTwoCommitLog =
-    "1111111111111111111111111111111111111111|Ann|ann@example.com|1700000000|first\n"
-    "10\t2\tsrc/a.go\n"
-    "\n"
-    "2222222222222222222222222222222222222222|Bob|bob@example.com|1700000100|second\n"
-    "3\t4\tsrc/b.go\n";
+// Two commits, each with one numstat entry, in the exact shape
+// `git log --numstat -z --format=%H%x00%an%x00%ae%x00%at%x00%s` emits:
+// NUL-terminated header fields, then '\n'-prefixed numstat entries.
+constexpr char kTwoCommitLog[] =
+    "1111111111111111111111111111111111111111\0Ann\0ann@example.com\0"
+    "1700000000\0first\0\n10\t2\tsrc/a.go\0"
+    "2222222222222222222222222222222222222222\0Bob\0bob@example.com\0"
+    "1700000100\0second\0\n3\t4\tsrc/b.go\0";
 
 }  // namespace
 
@@ -1315,7 +1315,8 @@ TEST(CommitHistoryParse, HeaderCountEqualsCommitCount) {
     // header, so N commits yielded 2N-1 entries. Every churn statistic was
     // inflated and the moved-from husks became phantom empty-name authors.
     std::vector<CommitInfo> commits;
-    ASSERT_TRUE(parse_commit_history(kTwoCommitLog, commits));
+    ASSERT_TRUE(parse_commit_history(
+        std::string_view{kTwoCommitLog, sizeof(kTwoCommitLog) - 1}, commits));
     ASSERT_EQ(commits.size(), 2u);
 
     EXPECT_EQ(commits[0].author_name, "Ann");
@@ -1338,11 +1339,12 @@ TEST(CommitHistoryParse, HeaderCountEqualsCommitCount) {
 }
 
 TEST(CommitHistoryParse, SingleCommitYieldsOne) {
+    constexpr char kLog[] =
+        "3333333333333333333333333333333333333333\0Cy\0cy@example.com\0"
+        "1700000200\0only\0\n1\t1\tx.go\0";
     std::vector<CommitInfo> commits;
     ASSERT_TRUE(parse_commit_history(
-        "3333333333333333333333333333333333333333|Cy|cy@example.com|1700000200|only\n"
-        "1\t1\tx.go\n",
-        commits));
+        std::string_view{kLog, sizeof(kLog) - 1}, commits));
     EXPECT_EQ(commits.size(), 1u);
 }
 
