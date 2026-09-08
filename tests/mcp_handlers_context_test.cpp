@@ -488,6 +488,56 @@ TEST_F(ContextHandlerFixture, AppendToCorruptManifestErrorsAndLeavesFile) {
     EXPECT_EQ(content, corrupt) << "append must not overwrite a corrupt file";
 }
 
+// apply_expansions used to hydrate callers/callees and then discard them
+// ((void)expanded), charging tokens for content that never reached the
+// response. A 'callers' directive must surface the caller's source in the
+// hydrated refs: main() calls handleRequest(), so expanding handleRequest
+// must emit main.
+TEST_F(ContextHandlerFixture, ExpansionCallersEmitContent) {
+    nlohmann::json manifest = {
+        {"refs",
+         {{{"f", "handler.go"},
+           {"s", "handleRequest"},
+           {"x", nlohmann::json::array({"callers"})}}}}};
+    nlohmann::json params = {{"operation", "load"},
+                             {"from_string", manifest.dump()}};
+    auto result = handle_context(params, *indexer_, temp_dir_.string());
+    ASSERT_FALSE(result.is_error) << result.text;
+
+    auto j = nlohmann::json::parse(result.text);
+    bool found_caller = false;
+    for (const auto& r : j["refs"]) {
+        if (r.value("symbol", "") == "main") found_caller = true;
+    }
+    EXPECT_TRUE(found_caller) << "callers expansion must emit content: "
+                              << j.dump();
+}
+
+// The budget was checked only before hydrating the NEXT ref, so the last
+// admitted ref could overshoot arbitrarily and max_tokens - total_tokens
+// went negative into apply_expansions. With max_tokens=1 the first ref is
+// admitted (overshoot bounded by that one ref), the second is truncated,
+// and expansions receive a zero — never negative — budget, emitting nothing.
+TEST_F(ContextHandlerFixture, TokenBudgetTruncatesAndNeverGoesNegative) {
+    nlohmann::json manifest = {
+        {"refs",
+         {{{"f", "main.go"},
+           {"s", "main"},
+           {"x", nlohmann::json::array({"callers"})}},
+          {{"f", "handler.go"}, {"s", "handleRequest"}}}}};
+    nlohmann::json params = {{"operation", "load"},
+                             {"from_string", manifest.dump()},
+                             {"max_tokens", 1}};
+    auto result = handle_context(params, *indexer_, temp_dir_.string());
+    ASSERT_FALSE(result.is_error) << result.text;
+
+    auto j = nlohmann::json::parse(result.text);
+    EXPECT_TRUE(j["stats"]["truncated"].get<bool>()) << j.dump();
+    EXPECT_EQ(j["stats"]["refs_loaded"], 1) << j.dump();
+    // Zero remaining budget: no expansion refs admitted.
+    EXPECT_EQ(j["refs"].size(), 1u) << j.dump();
+}
+
 // =============================================================================
 // ExpansionEngine tests
 // =============================================================================
