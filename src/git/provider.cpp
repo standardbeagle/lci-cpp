@@ -264,17 +264,19 @@ bool Provider::get_changed_scope(const AnalysisParams& params,
     std::vector<std::string> args;
     switch (params.scope) {
         case AnalysisScope::Staged:
-            args = {"diff", "--cached", "-U0", "--no-renames", "--"};
+            args = {"diff", "--cached", "-U0", "--no-renames",
+                    "--no-prefix", "--"};
             break;
         case AnalysisScope::WIP:
-            args = {"diff", "HEAD", "-U0", "--no-renames", "--"};
+            args = {"diff", "HEAD", "-U0", "--no-renames", "--no-prefix",
+                    "--"};
             break;
         case AnalysisScope::Commit: {
             std::string ref = params.base_ref;
             if (ref.empty()) ref = "HEAD";
             if (!is_safe_ref(ref)) return false;
             args = {"diff-tree", "--root", "--no-commit-id", "-U0",
-                    "--no-renames", "-r", "-p", ref, "--"};
+                    "--no-renames", "--no-prefix", "-r", "-p", ref, "--"};
             break;
         }
         case AnalysisScope::Range: {
@@ -284,7 +286,8 @@ bool Provider::get_changed_scope(const AnalysisParams& params,
             if (!is_safe_ref(params.base_ref) || !is_safe_ref(target))
                 return false;
             std::string range_spec = params.base_ref + ".." + target;
-            args = {"diff", "-U0", "--no-renames", range_spec, "--"};
+            args = {"diff", "-U0", "--no-renames", "--no-prefix",
+                    range_spec, "--"};
             break;
         }
     }

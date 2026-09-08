@@ -199,9 +199,58 @@ ScopeSet scope_from_symbols(
     return s;
 }
 
+namespace {
+
+// Undoes git's core.quotePath C-style quoting of diff header paths:
+// "caf\303\251.go" -> café.go. Returns the input unchanged when it is not a
+// quoted string. Output appends to `out`; returns the view to use.
+std::string_view unquote_git_path(std::string_view p, std::string& scratch) {
+    if (p.size() < 2 || p.front() != '"' || p.back() != '"') return p;
+    scratch.clear();
+    scratch.reserve(p.size() - 2);
+    for (size_t i = 1; i + 1 < p.size(); ++i) {
+        char c = p[i];
+        if (c == '\\' && i + 1 < p.size() - 1) {
+            char e = p[++i];
+            switch (e) {
+                case 'a': scratch += '\a'; break;
+                case 'b': scratch += '\b'; break;
+                case 't': scratch += '\t'; break;
+                case 'n': scratch += '\n'; break;
+                case 'v': scratch += '\v'; break;
+                case 'f': scratch += '\f'; break;
+                case 'r': scratch += '\r'; break;
+                case '\\': scratch += '\\'; break;
+                case '"': scratch += '"'; break;
+                default:
+                    if (e >= '0' && e <= '7') {
+                        // Up to 3 octal digits total.
+                        int v = e - '0';
+                        for (int k = 0; k < 2 && i + 1 < p.size() - 1 &&
+                                        p[i + 1] >= '0' && p[i + 1] <= '7';
+                             ++k) {
+                            v = v * 8 + (p[++i] - '0');
+                        }
+                        scratch += static_cast<char>(v);
+                    } else {
+                        // Unknown escape: keep both bytes verbatim.
+                        scratch += '\\';
+                        scratch += e;
+                    }
+            }
+        } else {
+            scratch += c;
+        }
+    }
+    return scratch;
+}
+
+}  // namespace
+
 ScopeSet scope_from_unified_diff(std::string_view diff_text) {
     ScopeSet s;
     std::string current_file;
+    std::string unquote_scratch;
     size_t pos = 0;
     while (pos < diff_text.size()) {
         size_t eol = diff_text.find('\n', pos);
@@ -213,8 +262,12 @@ ScopeSet scope_from_unified_diff(std::string_view diff_text) {
             if (target == "/dev/null") {
                 current_file.clear();  // pure deletion: nothing on new side
             } else {
+                // Producers pass --no-prefix, but strip a leading b/ from
+                // callers that still emit one. core.quotePath C-quoting is
+                // undone so "caf\303\251.go" matches the -z name-status
+                // path (raw bytes) and the parsed symbols' file_path.
                 if (target.rfind("b/", 0) == 0) target.remove_prefix(2);
-                current_file.assign(target);
+                current_file.assign(unquote_git_path(target, unquote_scratch));
             }
         } else if (line.rfind("@@", 0) == 0 && !current_file.empty()) {
             // "@@ -a[,b] +c[,d] @@": new-side start c, count d (default 1).
