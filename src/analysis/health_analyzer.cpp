@@ -87,10 +87,9 @@ bool HealthAnalyzer::is_test_helper_function(std::string_view name) {
 // directory and basename patterns behind this used to live here as a private
 // list; they are shipped attribute rules now, so a project's own `.lci.kdl`
 // reaches this gate like every other.
-bool HealthAnalyzer::is_test_helper_path(std::string_view path) {
-    PathClassifier classifier;
-    return !classifier.registry().activates(classifier.classify(path),
-                                            Capability::Analysis);
+bool HealthAnalyzer::is_test_helper_path(std::string_view path) const {
+    return !classifier_.registry().activates(classifier_.classify(path),
+                                             Capability::Analysis);
 }
 
 // ---------------------------------------------------------------------------

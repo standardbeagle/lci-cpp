@@ -666,6 +666,103 @@ TEST(HealthAnalyzer, SmellCountsAgreeWithComplexityDistribution) {
     EXPECT_EQ(counts["high-complexity"], cm.distribution["high"]);
 }
 
+TEST(HealthAnalyzer, HighComplexityFuncsAreTopTenByCc) {
+    // 12 high-cc functions in ascending cc order; the report must hold the
+    // TOP 10 by complexity (descending), not the first 10 in file order.
+    // Reference values are the hand-computed top-10: cc 41 down to 32.
+    std::vector<EnhancedSymbol> syms(12);
+    std::vector<const EnhancedSymbol*> ptrs;
+    for (int i = 0; i < 12; i++) {
+        syms[i].symbol.name = "hot_" + std::to_string(i);
+        syms[i].symbol.type = SymbolType::Function;
+        syms[i].symbol.line = i * 10 + 1;
+        syms[i].symbol.end_line = i * 10 + 5;
+        syms[i].complexity = 30 + i;  // 30..41 ascending
+        ptrs.push_back(&syms[i]);
+    }
+    FileSymbolData fsd;
+    fsd.path = "src/foo.go";
+    fsd.symbols = ptrs;
+
+    HealthAnalyzer ha;
+    auto cm = ha.calculate_complexity_from_files({fsd});
+    ASSERT_EQ(cm.high_complexity_funcs.size(), 10u);
+    for (size_t i = 0; i < 10; ++i) {
+        EXPECT_DOUBLE_EQ(cm.high_complexity_funcs[i].complexity, 41.0 - i)
+            << "rank " << i;
+    }
+}
+
+TEST(HealthAnalyzer, DebtComponentsTieBreakByPath) {
+    // Six files over the debt threshold with EQUAL counts: the top-5 cut
+    // must follow a total order (count desc, path asc), never hash order.
+    constexpr int kFiles = 6;
+    std::vector<std::vector<EnhancedSymbol>> syms(
+        kFiles, std::vector<EnhancedSymbol>(6));
+    std::vector<FileSymbolData> files(kFiles);
+    const char* names[kFiles] = {"f.go", "e.go", "d.go",
+                                 "c.go", "b.go", "a.go"};
+    for (int f = 0; f < kFiles; ++f) {
+        for (int i = 0; i < 6; ++i) {
+            auto& s = syms[f][i];
+            s.symbol.name = "debt_" + std::to_string(f) + "_" +
+                            std::to_string(i);
+            s.symbol.type = SymbolType::Function;
+            s.symbol.line = i * 10 + 1;
+            s.symbol.end_line = i * 10 + 5;
+            s.complexity = 20;  // > kComplexityModerate
+            files[f].symbols.push_back(&s);
+        }
+        files[f].path = names[f];
+    }
+
+    HealthAnalyzer ha;
+    auto components = ha.identify_debt_components(files);
+    std::vector<std::string> expected = {"a.go (6 issues)", "b.go (6 issues)",
+                                         "c.go (6 issues)", "d.go (6 issues)",
+                                         "e.go (6 issues)"};
+    EXPECT_EQ(components, expected);
+}
+
+// A project's own `.lci.kdl` attributes must reach the health gate: a path
+// the project tags `test` is excluded from high_complexity_funcs exactly
+// like a builtin test path.
+TEST(HealthAnalyzer, ConfigTestAttrExcludesFileFromHealthGate) {
+    std::vector<AttrDef> defs;
+    std::vector<PathAttrRule> rules;
+    std::string error;
+    ASSERT_TRUE(parse_attributes_block(R"(attributes { test "bench/" })",
+                                       defs, rules, error))
+        << error;
+    auto reg = PathAttrRegistry::with_config(defs, rules, error);
+
+    EnhancedSymbol bench_sym;
+    bench_sym.symbol.name = "hugebench";
+    bench_sym.symbol.type = SymbolType::Function;
+    bench_sym.symbol.line = 1;
+    bench_sym.symbol.end_line = 50;
+    bench_sym.complexity = 40;
+
+    EnhancedSymbol prod_sym;
+    prod_sym.symbol.name = "realhot";
+    prod_sym.symbol.type = SymbolType::Function;
+    prod_sym.symbol.line = 1;
+    prod_sym.symbol.end_line = 50;
+    prod_sym.complexity = 39;
+
+    FileSymbolData bench;
+    bench.path = "bench/huge.go";
+    bench.symbols = {&bench_sym};
+    FileSymbolData prod;
+    prod.path = "src/real.go";
+    prod.symbols = {&prod_sym};
+
+    HealthAnalyzer ha(reg);
+    auto cm = ha.calculate_complexity_from_files({bench, prod});
+    ASSERT_EQ(cm.high_complexity_funcs.size(), 1u);
+    EXPECT_EQ(cm.high_complexity_funcs[0].name, "realhot");
+}
+
 TEST(HealthAnalyzer, LongFunctionSmellOnlyForFunctionsAndMethods) {
     // A trait/class/type declaration spanning many lines is not a long
     // function — kind gate required (guzzle flagged ClientTrait).

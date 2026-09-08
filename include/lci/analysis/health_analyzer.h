@@ -5,6 +5,7 @@
 #include <vector>
 
 #include <lci/analysis/codebase_intelligence_types.h>
+#include <lci/path_classifier.h>
 #include <lci/symbol.h>
 
 namespace lci {
@@ -15,7 +16,12 @@ namespace lci {
 /// Ported from Go: codebase_intelligence_health.go
 class HealthAnalyzer {
   public:
+    /// Without a registry the classifier uses the shipped ruleset; pass the
+    /// indexer's attr_registry() so a project's `.lci.kdl` attributes reach
+    /// the health gate (e.g. a project-tagged `test` path is excluded).
     HealthAnalyzer() = default;
+    explicit HealthAnalyzer(const PathAttrRegistry& registry)
+        : classifier_(registry) {}
 
     /// Calculates complexity metrics from file data.
     ComplexityMetrics calculate_complexity_from_files(
@@ -90,8 +96,9 @@ class HealthAnalyzer {
         std::vector<CodeSmellEntry> smells, int max_count);
 
   private:
+    PathClassifier classifier_;
     static bool is_test_helper_function(std::string_view name);
-    static bool is_test_helper_path(std::string_view path);
+    bool is_test_helper_path(std::string_view path) const;
 };
 
 }  // namespace lci
