@@ -3472,6 +3472,32 @@ TEST(CliDebugInfoTest, NoServerExitsNonZeroWithServerNotRunning) {
     fs::remove_all(root, ec);
 }
 
+TEST(CliDebugValidateTest, NeverClaimsAllChecksPassedAgainstPopulatedIndex) {
+    namespace fs = std::filesystem;
+    const auto lci_bin =
+        portable::executable_path().parent_path().parent_path() / "src" /
+        "lci";
+    ASSERT_TRUE(fs::exists(lci_bin)) << lci_bin;
+    const auto root = lci::test::unique_temp_dir("lci_s9_validate_srv_");
+    fs::create_directories(root);
+    ensure_lci_server_indexed(lci_bin, root);
+
+    std::string out;
+    // The pre-fix command printed "All consistency checks passed!" for EVERY
+    // reachable server: it branched on status->error.empty(), and /status
+    // never emits an error field on a 200, so the verdict was unconditional
+    // — fabricated. The command must fail fast instead.
+    EXPECT_FALSE(run_lci_search(lci_bin, root,
+                                {lci_bin.string(), "debug", "validate"}, out))
+        << out;
+    EXPECT_EQ(out.find("All consistency checks passed"), std::string::npos)
+        << out;
+
+    shutdown_lci_server(lci_bin, root);
+    std::error_code ec;
+    fs::remove_all(root, ec);
+}
+
 TEST(CliDebugExportTest, NoServerExitsNonZeroWithServerNotRunning) {
     namespace fs = std::filesystem;
     const auto lci_bin =
