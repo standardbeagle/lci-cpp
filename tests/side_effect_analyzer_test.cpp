@@ -550,6 +550,120 @@ TEST(GraphPropagatorTest, ReachabilityTieBreaksToSmallestSource) {
 }
 #endif  // !_WIN32
 
+#ifndef _WIN32
+// propagate_transitive iterated by_symbol in salted hash order, so a
+// function reached by two impure chains recorded its impurity_reasons in a
+// per-process order. The child indexes a small corpus, runs populate +
+// propagate, and dumps every result (sorted by result key) with its
+// reasons; the parent byte-compares five separate processes.
+std::string run_fixpoint_dump_in_child() {
+    int fds[2];
+    if (pipe(fds) != 0) return {};
+    pid_t pid = fork();
+    if (pid == 0) {
+        close(fds[0]);
+        dup2(fds[1], STDOUT_FILENO);
+        close(fds[1]);
+
+        auto dir = lci::test::unique_temp_dir("lci_se_fixpoint_");
+        std::filesystem::create_directories(dir);
+        {
+            std::ofstream o(dir / "chain.go");
+            o << "package main\n\n"
+                 "func ioA() {\n\tprintln(\"a\")\n}\n\n"
+                 "func ioB() {\n\tprintln(\"b\")\n}\n\n"
+                 "func ioC() {\n\tprintln(\"c\")\n}\n\n"
+                 "func mid1() {\n\tioA()\n}\n\n"
+                 "func mid2() {\n\tioB()\n\tioC()\n}\n\n"
+                 "func top() {\n\tmid1()\n\tmid2()\n}\n\n"
+                 "func apex() {\n\ttop()\n\tmid2()\n}\n";
+        }
+        Config config;
+        config.project.root = dir.string();
+        MasterIndex indexer(config);
+        indexer.index_directory(dir.string());
+
+        SideEffectAnalyzer analyzer("generic");
+        analyzer.populate_from_index(indexer);
+        analyzer.propagate_transitive(indexer);
+
+        std::vector<std::string> keys;
+        keys.reserve(analyzer.results().size());
+        for (const auto& [k, v] : analyzer.results()) keys.push_back(k);
+        std::sort(keys.begin(), keys.end());
+        for (const auto& k : keys) {
+            const auto& info = analyzer.results().at(k);
+            std::cout << k << "|" << info.function_name << "|"
+                      << info.categories << "|" << info.transitive_categories
+                      << "|";
+            for (const auto& r : info.impurity_reasons) std::cout << r << ";";
+            std::cout << "\n";
+        }
+        std::cout.flush();
+        std::error_code ec;
+        std::filesystem::remove_all(dir, ec);
+        _exit(0);
+    }
+    close(fds[1]);
+    std::string out;
+    char buf[4096];
+    ssize_t n;
+    while ((n = read(fds[0], buf, sizeof(buf))) > 0)
+        out.append(buf, static_cast<size_t>(n));
+    close(fds[0]);
+    int status = 0;
+    waitpid(pid, &status, 0);
+    return out;
+}
+
+TEST(TransitivePropagation, FixpointOutputStableAcrossProcesses) {
+    std::string reference;
+    for (int run = 0; run < 5; ++run) {
+        std::string text = run_fixpoint_dump_in_child();
+        ASSERT_FALSE(text.empty()) << "child produced no output";
+        if (run == 0) {
+            reference = text;
+        } else {
+            EXPECT_EQ(text, reference) << "run " << run << " diverged";
+        }
+    }
+}
+
+// A chain longer than the 100-iteration fixpoint cap must surface the
+// truncation instead of silently dropping the tail. Chain g0 -> ... -> g149
+// (g149 does the IO): one hop per iteration when callers sort before
+// callees, so the fixpoint needs more iterations than the cap.
+TEST(TransitivePropagation, FixpointTruncationIsReported) {
+    constexpr int kChain = 150;
+    auto dir = lci::test::unique_temp_dir("lci_se_trunc_");
+    std::filesystem::create_directories(dir);
+    {
+        std::ofstream o(dir / "chain.go");
+        o << "package main\n\n";
+        for (int i = 0; i < kChain; ++i) {
+            if (i + 1 == kChain) {
+                o << "func g" << i << "() {\n\tprintln(\"x\")\n}\n\n";
+            } else {
+                o << "func g" << i << "() {\n\tg" << (i + 1) << "()\n}\n\n";
+            }
+        }
+    }
+    Config config;
+    config.project.root = dir.string();
+    MasterIndex indexer(config);
+    indexer.index_directory(dir.string());
+
+    SideEffectAnalyzer analyzer("generic");
+    analyzer.populate_from_index(indexer);
+    analyzer.propagate_transitive(indexer);
+
+    EXPECT_TRUE(analyzer.fixpoint_truncated());
+
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+}
+#endif  // !_WIN32
+
 // ===========================================================================
 // SemanticAnnotator
 // ===========================================================================

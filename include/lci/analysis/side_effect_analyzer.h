@@ -193,12 +193,18 @@ class SideEffectAnalyzer {
     /// SideEffectPropagator.Propagate (internal/core/side_effect_propagation.go).
     void propagate_transitive(const class MasterIndex& indexer);
 
+    /// True when the last propagate_transitive hit its iteration cap before
+    /// converging — the transitive assessment is partial and must not be
+    /// reported silently. False before the first run or when converged.
+    bool fixpoint_truncated() const { return fixpoint_truncated_; }
+
     /// Direct write to results_ — used by populate_from_index above and
     /// future callers that build SideEffectInfo outside the
     /// begin_function/end_function lifecycle.
     void add_result(std::string key, SideEffectInfo info);
 
   private:
+    bool fixpoint_truncated_{};
     AccessTarget classify_target(std::string_view identifier) const;
     std::string build_target_string(std::string_view identifier,
                                     const std::vector<std::string>& field_path,
