@@ -7,33 +7,84 @@
 namespace lci {
 
 bool GitignoreParser::load_gitignore(const std::string& root_path) {
-    auto gitignore_path = std::filesystem::path(root_path) / ".gitignore";
+    return load_dir(root_path, "");
+}
+
+// Reads dir/.gitignore, then recurses into subdirectories so nested
+// .gitignore files apply to their own subtrees. Patterns from deeper files
+// are appended after their parents', and should_ignore's last-match-wins
+// scan then gives deeper files precedence — git's rule. Directories already
+// ignored by the patterns loaded so far are not descended into: git does
+// not read .gitignore files inside ignored directories either (their
+// contents are excluded regardless), and skipping them keeps the walk out
+// of node_modules-scale trees.
+bool GitignoreParser::load_dir(const std::string& dir_path,
+                               const std::string& base) {
+    namespace fs = std::filesystem;
+    bool ok = true;
+
+    auto gitignore_path = fs::path(dir_path) / ".gitignore";
     std::ifstream file(gitignore_path);
-    if (!file.is_open()) return true;  // Missing .gitignore is not an error
-
-    std::string line;
-    while (std::getline(file, line)) {
-        // Trim trailing whitespace
-        while (!line.empty() && (line.back() == ' ' || line.back() == '\t' ||
-                                 line.back() == '\r'))
-            line.pop_back();
-        // Trim leading whitespace
-        auto first = line.find_first_not_of(" \t");
-        if (first == std::string::npos) continue;
-        line = line.substr(first);
-
-        if (line.empty() || line[0] == '#') continue;
-        add_pattern(line);
+    if (file.is_open()) {
+        std::string line;
+        while (std::getline(file, line)) {
+            add_pattern(line, base);
+        }
+        ok = !file.bad();
     }
-    return !file.bad();
+
+    std::error_code ec;
+    if (!fs::is_directory(dir_path, ec)) return true;  // nothing to load
+    fs::directory_iterator it(dir_path, fs::directory_options::skip_permission_denied, ec);
+    if (ec) return false;
+    for (const auto& entry : it) {
+        if (!entry.is_directory(ec) || entry.is_symlink(ec)) continue;
+        const std::string name = entry.path().filename().string();
+        if (name == ".git") continue;
+        std::string child_base =
+            base.empty() ? name : base + "/" + name;
+        if (should_ignore(child_base, /*is_dir=*/true)) continue;
+        if (!load_dir(entry.path().string(), child_base)) ok = false;
+    }
+    return ok;
 }
 
-void GitignoreParser::add_pattern(std::string_view line) {
-    if (line.empty() || line[0] == '#') return;
-    patterns_.push_back(parse_pattern(line));
+void GitignoreParser::add_pattern(std::string_view line,
+                                  std::string_view base) {
+    // Line processing mirrors gitignore(5):
+    //  - trailing whitespace is stripped unless backslash-escaped
+    //  - leading whitespace is KEPT (it is part of the pattern)
+    //  - a leading '#' starts a comment unless backslash-escaped
+    //  - backslash escapes the following character
+    std::string text(line);
+    while (!text.empty() &&
+           (text.back() == ' ' || text.back() == '\t' || text.back() == '\r')) {
+        // Count preceding backslashes: an odd run escapes this space.
+        size_t backslashes = 0;
+        for (size_t i = text.size() - 1; i-- > 0 && text[i] == '\\';)
+            ++backslashes;
+        if (backslashes % 2 == 1) break;
+        text.pop_back();
+    }
+
+    std::string unescaped;
+    unescaped.reserve(text.size());
+    bool first_was_escaped = false;
+    for (size_t i = 0; i < text.size(); ++i) {
+        if (text[i] == '\\' && i + 1 < text.size()) {
+            if (unescaped.empty()) first_was_escaped = true;
+            unescaped += text[++i];
+            continue;
+        }
+        unescaped += text[i];
+    }
+    if (unescaped.empty()) return;
+    if (!first_was_escaped && unescaped[0] == '#') return;
+    patterns_.push_back(parse_pattern(unescaped, base));
 }
 
-GitignorePattern GitignoreParser::parse_pattern(std::string_view line) const {
+GitignorePattern GitignoreParser::parse_pattern(std::string_view line,
+                                                std::string_view base) const {
     GitignorePattern pat;
     std::string text(line);
 
@@ -49,13 +100,18 @@ GitignorePattern GitignoreParser::parse_pattern(std::string_view line) const {
         text.pop_back();
     }
 
-    // Absolute (leading /)
+    // Anchored to the base directory: a leading `/` anchors explicitly, and
+    // git anchors ANY pattern with an interior slash too — `doc/*.txt`
+    // matches doc/a.txt but not x/doc/a.txt. Only slash-free patterns float.
     if (!text.empty() && text[0] == '/') {
-        pat.absolute = true;
         text = text.substr(1);
+        pat.absolute = true;
+    } else if (text.find('/') != std::string::npos) {
+        pat.absolute = true;
     }
 
     pat.pattern = text;
+    pat.base = std::string(base);
     pat.type = analyze_pattern(text, pat.prefix, pat.suffix);
 
     if (pat.type == PatternType::Wildcard) {
@@ -150,57 +206,61 @@ bool GitignoreParser::should_ignore(std::string_view path,
     return ignored;
 }
 
+// Matches `rel` (path relative to the pattern's base directory): anchored
+// patterns must match the whole path; slash-free patterns float to any
+// depth, i.e. match any suffix after a component boundary.
+bool GitignoreParser::match_rel(const GitignorePattern& pat,
+                                std::string_view rel) const {
+    if (pat.absolute) return fast_match(pat, rel);
+    if (fast_match(pat, rel)) return true;
+    for (size_t i = 0; i < rel.size(); ++i) {
+        if (rel[i] == '/' && i + 1 < rel.size()) {
+            if (fast_match(pat, rel.substr(i + 1))) return true;
+        }
+    }
+    return false;
+}
+
 bool GitignoreParser::matches_pattern(const GitignorePattern& pat,
                                       std::string_view path,
                                       bool is_dir) const {
+    // A pattern from a nested .gitignore applies only under its directory.
+    std::string_view rel = path;
+    if (!pat.base.empty()) {
+        if (rel.size() <= pat.base.size() ||
+            rel.compare(0, pat.base.size(), pat.base) != 0 ||
+            rel[pat.base.size()] != '/') {
+            return false;
+        }
+        rel.remove_prefix(pat.base.size() + 1);
+    }
+
     // Literal prefilter (Wildcard only): substring presence is required
     // wherever the pattern would match — full path or any suffix — so one
     // find() replaces the glob matcher and the per-suffix retry loop for
     // the common non-matching file.
     if (!pat.literal.empty() &&
-        path.find(pat.literal) == std::string_view::npos) {
+        rel.find(pat.literal) == std::string_view::npos) {
         return false;
     }
-    // Directory-only patterns match directories and files inside them
+
+    // Directory-only patterns match a directory whose whole path (anchored)
+    // or basename-at-any-depth (floating) equals the pattern, plus every
+    // file UNDER such a directory. The file case walks ancestor components
+    // and matches each through the same anchored/float rule, so wildcard
+    // directory patterns (*.egg-info/) match their contents and anchored
+    // ones (/build/) refuse src/build/x.c.
     if (pat.directory) {
-        if (is_dir) {
-            if (fast_match(pat, path)) return true;
-        }
-        // Check if the file lives inside a matching directory. The pattern
-        // must cover a WHOLE path component: a plain substring search lets
-        // `build/` swallow `prebuild/foo.go` and `rebuild/foo.go`, silently
-        // dropping first-party sources from the index. Walk component starts
-        // instead — allocation-free, unlike building a `pattern + "/"` key.
-        const std::string_view needle = pat.pattern;
-        if (!needle.empty()) {
-            size_t pos = 0;
-            while (pos + needle.size() < path.size()) {
-                if (path.compare(pos, needle.size(), needle) == 0 &&
-                    path[pos + needle.size()] == '/') {
-                    return true;
-                }
-                auto slash = path.find('/', pos);
-                if (slash == std::string_view::npos) break;
-                pos = slash + 1;
+        if (is_dir && match_rel(pat, rel)) return true;
+        for (size_t i = 0; i < rel.size(); ++i) {
+            if (rel[i] == '/' && match_rel(pat, rel.substr(0, i))) {
+                return true;
             }
         }
-        return fast_match(pat, path);
+        return false;
     }
 
-    if (pat.absolute) {
-        return fast_match(pat, path);
-    }
-
-    // Relative pattern: match full path or any suffix
-    if (fast_match(pat, path)) return true;
-
-    // Try matching against each path suffix
-    for (size_t i = 0; i < path.size(); ++i) {
-        if (path[i] == '/' && i + 1 < path.size()) {
-            if (fast_match(pat, path.substr(i + 1))) return true;
-        }
-    }
-    return false;
+    return match_rel(pat, rel);
 }
 
 bool GitignoreParser::fast_match(const GitignorePattern& pat,
@@ -336,16 +396,15 @@ std::vector<std::string> GitignoreParser::get_exclusion_patterns() const {
     std::vector<std::string> result;
     for (const auto& pat : patterns_) {
         if (pat.negate) continue;
+        // A pattern from a nested .gitignore is relative to its directory;
+        // expressed against the root it becomes anchored there.
+        std::string p = pat.pattern;
+        if (!pat.base.empty()) p = pat.base + "/" + p;
+        const bool anchored = pat.absolute || !pat.base.empty();
         if (pat.directory) {
-            if (pat.absolute)
-                result.push_back(pat.pattern + "/**");
-            else
-                result.push_back("**/" + pat.pattern + "/**");
+            result.push_back(anchored ? p + "/**" : "**/" + p + "/**");
         } else {
-            if (pat.absolute)
-                result.push_back(pat.pattern);
-            else
-                result.push_back("**/" + pat.pattern);
+            result.push_back(anchored ? p : "**/" + p);
         }
     }
     return result;
