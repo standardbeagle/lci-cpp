@@ -144,6 +144,17 @@ TEST(KdlTest, QuotedNodeNamesDoNotConsumeSiblings) {
     EXPECT_EQ("*.zig", nodes[0].children[1].name);
 }
 
+// A stray top-level `}` used to end parsing silently — everything after it
+// in .lci.kdl was dropped without a diagnostic. It is a parse error and the
+// message carries the line of the offending brace.
+TEST(KdlTest, StrayTopLevelRBraceIsAParseError) {
+    std::string error;
+    kdl::parse("a \"one\"\n}\nb \"two\"\n", error);
+    ASSERT_FALSE(error.empty());
+    EXPECT_NE(error.find("line 2"), std::string::npos) << error;
+    EXPECT_NE(error.find("}"), std::string::npos) << error;
+}
+
 TEST(KdlTest, CollectsEveryStringArgument) {
     auto nodes = parse_ok(R"(dir "vendor" "node_modules" "third_party")");
     ASSERT_EQ(1u, nodes.size());
