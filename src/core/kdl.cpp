@@ -204,7 +204,10 @@ class Parser {
   public:
     explicit Parser(std::string_view src) : lex_(src) { advance(); }
 
-    std::vector<Node> parse_document() {
+    // `top_level` distinguishes the document root from a child block: a
+    // `}` closes a block but is an error at the root — stopping silently
+    // there would drop the rest of the file without a diagnostic.
+    std::vector<Node> parse_document(bool top_level = false) {
         std::vector<Node> nodes;
         while (cur_.kind != TokenKind::Eof && cur_.kind != TokenKind::RBrace) {
             if (cur_.kind == TokenKind::Error) {
@@ -218,6 +221,10 @@ class Parser {
             } else {
                 advance();  // skip unexpected tokens
             }
+        }
+        if (top_level && cur_.kind == TokenKind::RBrace) {
+            error_ = "line " + std::to_string(cur_.line) +
+                     ": unexpected '}' with no open block";
         }
         return nodes;
     }
@@ -347,7 +354,7 @@ const Node* Node::child(std::string_view name) const {
 
 std::vector<Node> parse(std::string_view source, std::string& error) {
     Parser parser(source);
-    auto nodes = parser.parse_document();
+    auto nodes = parser.parse_document(/*top_level=*/true);
     error = parser.error();
     return nodes;
 }
