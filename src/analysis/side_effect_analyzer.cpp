@@ -684,6 +684,39 @@ uint32_t classify_callee_category(std::string_view callee) {
         return false;
     };
 
+    // Leading-camel stdlib compounds: <verb><decoration>, where the
+    // decoration is a stdlib spelling habit rather than a new word sense
+    // (fs.readFileSync, os.OpenFile, io.ReadAll, http.Server.ListenAndServe,
+    // net.Dialer.DialContext). The boundary rule cannot reach the leading
+    // word, so strip one known decoration and re-run the SAME boundary rule
+    // on the stem. Enumerating every compound instead would leave the family
+    // open (306 readFileSync call sites in the next.js corpus scored pure
+    // when only the pocketbase compounds were listed).
+    static constexpr std::string_view compound_suffixes[] = {
+        "sync", "all", "file", "context", "andserve"};
+    std::string_view stem;
+    for (auto sfx : compound_suffixes) {
+        if (callee.size() <= sfx.size()) continue;
+        size_t at = callee.size() - sfx.size();
+        size_t i = 0;
+        for (; i < sfx.size(); ++i) {
+            if (static_cast<char>(std::tolower(
+                    static_cast<unsigned char>(callee[at + i]))) != sfx[i])
+                break;
+        }
+        if (i == sfx.size()) {
+            stem = callee.substr(0, at);
+            break;
+        }
+    }
+    auto matches_any = [&](const auto& keywords) {
+        for (auto kw : keywords) {
+            if (matches_keyword(callee, kw)) return true;
+            if (!stem.empty() && matches_keyword(stem, kw)) return true;
+        }
+        return false;
+    };
+
     // I/O: print, log, write, read, scan, open, close, fopen, etc.
     // Compound spellings that carry the keyword as a leading camel word
     // (`println`, `fprintf`) need their own entry — leading camel words do
@@ -704,39 +737,29 @@ uint32_t classify_callee_category(std::string_view callee) {
         // in FileCookieJar::save carried no io). "file" covers the
         // file_get/put_contents/exists family; unlink is the posix delete.
         "file", "fput", "fget", "unlink", "tempnam", "tmpfile"};
-    for (auto kw : io_keywords) {
-        if (matches_keyword(callee, kw)) return side_effect::kIO;
-    }
+    if (matches_any(io_keywords)) return side_effect::kIO;
 
     // Network: send, recv, fetch, dial, listen, accept, connect,
     // http.Get/Post/etc.
     static constexpr std::string_view net_keywords[] = {
         "send", "recv", "fetch", "dial", "listen", "accept",
         "connect", "request", "httpget", "httppost"};
-    for (auto kw : net_keywords) {
-        if (matches_keyword(callee, kw)) return side_effect::kNetwork;
-    }
+    if (matches_any(net_keywords)) return side_effect::kNetwork;
 
     // Database: query, exec, prepare, execute, transaction
     static constexpr std::string_view db_keywords[] = {
         "query", "execute", "prepare", "transaction", "commit",
         "rollback"};
-    for (auto kw : db_keywords) {
-        if (matches_keyword(callee, kw)) return side_effect::kDatabase;
-    }
+    if (matches_any(db_keywords)) return side_effect::kDatabase;
 
     // Throw/panic/raise
     static constexpr std::string_view throw_keywords[] = {
         "panic", "raise", "throw", "abort"};
-    for (auto kw : throw_keywords) {
-        if (matches_keyword(callee, kw)) return side_effect::kThrow;
-    }
+    if (matches_any(throw_keywords)) return side_effect::kThrow;
 
     // Dynamic / reflective
     static constexpr std::string_view dynamic_keywords[] = {"eval", "exec"};
-    for (auto kw : dynamic_keywords) {
-        if (matches_keyword(callee, kw)) return side_effect::kDynamicCall;
-    }
+    if (matches_any(dynamic_keywords)) return side_effect::kDynamicCall;
 
     return side_effect::kNone;
 }
