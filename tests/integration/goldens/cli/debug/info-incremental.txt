@@ -1,0 +1,1 @@
+debug info: --incremental is not supported — debug info reports the running server's /status numbers only

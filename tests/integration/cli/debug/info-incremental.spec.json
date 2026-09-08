@@ -30,5 +30,5 @@
       "Last Updated:"
     ]
   },
-  "_rationale": "S9: debug subcommands print only numbers from the running server /status; with no server they exit non-zero after printing \"server not running\" (the previous hardcoded-zero output was fabricated)."
+  "_rationale": "S9: `debug info --incremental` is refused because debug reports only the running server's /status numbers, and there is no incremental view of those. The refusal is printed on STDOUT (not stderr) so it is the command's visible answer and this stdout-capturing golden pins real text instead of an empty file; the exit stays 1 because no data was produced."
 }

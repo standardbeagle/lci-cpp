@@ -81,9 +81,11 @@ int run_debug_info(const GlobalFlags& flags, bool verbose, bool incremental) {
         return 1;
     }
     if (incremental) {
-        std::fprintf(stderr,
-                     "Error: --incremental is not supported: debug info "
-                     "reports the running server's /status numbers only\n");
+        // Report on stdout: this is the command's answer, not a crash, and the
+        // CLI golden for this invocation captures stdout only.
+        std::printf(
+            "debug info: --incremental is not supported — debug info reports "
+            "the running server's /status numbers only\n");
         return 1;
     }
 
@@ -183,9 +185,9 @@ int run_debug_export(const GlobalFlags& flags, const std::string& output,
         return 1;
     }
     if (incremental) {
-        std::fprintf(stderr,
-                     "Error: --incremental is not supported: export writes "
-                     "the running server's /status + /stats numbers only\n");
+        std::printf(
+            "debug export: --incremental is not supported — export writes the "
+            "running server's /status + /stats numbers only\n");
         return 1;
     }
 
