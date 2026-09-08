@@ -4,6 +4,7 @@
 #include <lci/analysis/coupling_analyzer.h>
 #include <lci/analysis/word_match.h>
 #include <lci/core/text.h>
+#include <lci/git/analyzer.h>
 
 #include <algorithm>
 #include <cctype>
@@ -103,17 +104,6 @@ ModuleAnalysis ModuleAnalyzer::analyze_graph(
     absl::flat_hash_map<SymbolID, NodeMeta> meta;
     // Repo-relative file paths throughout: findings must print the path a
     // reader can open, not the absolute checkout location.
-    auto rel_of = [&](std::string_view path) {
-        if (!project_root.empty() && path.size() > project_root.size() &&
-            path.substr(0, project_root.size()) == project_root) {
-            size_t start = project_root.size();
-            if (start < path.size() &&
-                (path[start] == '/' || path[start] == '\\'))
-                ++start;
-            return std::string(path.substr(start));
-        }
-        return std::string(path);
-    };
     for (const auto& file : files) {
         if (!CouplingAnalyzer::is_code_file(file.path)) continue;
         std::string pkg =
@@ -125,7 +115,7 @@ ModuleAnalysis ModuleAnalyzer::analyze_graph(
                 t != SymbolType::Constructor)
                 continue;
             nodes.push_back(sym->id);
-            meta[sym->id] = {pkg, rel_of(file.path)};
+            meta[sym->id] = {pkg, git::normalize_rel(file.path, std::string(project_root))};
         }
     }
 

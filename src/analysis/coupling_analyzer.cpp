@@ -1,6 +1,7 @@
 #include <lci/analysis/coupling_analyzer.h>
 
 #include <lci/reference.h>
+#include <lci/git/analyzer.h>
 #include <lci/core/text.h>
 #include <absl/container/flat_hash_set.h>
 
@@ -48,15 +49,8 @@ bool CouplingAnalyzer::is_code_file(std::string_view path) {
 
 std::string CouplingAnalyzer::get_package_name(std::string_view file_path,
                                                 std::string_view project_root) {
-    std::string rel(file_path);
-    if (!project_root.empty() && file_path.size() > project_root.size() &&
-        file_path.substr(0, project_root.size()) == project_root) {
-        size_t start = project_root.size();
-        if (start < file_path.size() && (file_path[start] == '/' || file_path[start] == '\\')) {
-            ++start;
-        }
-        rel = std::string(file_path.substr(start));
-    }
+    std::string rel =
+        git::normalize_rel(std::string(file_path), std::string(project_root));
 
     auto dir = std::filesystem::path(rel).parent_path().string();
     if (dir.empty() || dir == ".") return "(root)";

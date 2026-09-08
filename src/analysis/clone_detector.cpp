@@ -9,6 +9,7 @@
 #include <absl/hash/hash.h>
 
 #include <lci/analysis/code_similarity.h>
+#include <lci/git/analyzer.h>
 
 namespace lci {
 
@@ -44,15 +45,6 @@ int count_lines(std::string_view s) {
     if (s.empty()) return 0;
     return static_cast<int>(std::count(s.begin(), s.end(), '\n')) +
            (s.back() == '\n' ? 0 : 1);
-}
-
-std::string lexical_rel(std::string_view path, std::string_view root) {
-    if (!root.empty() && path.size() > root.size() &&
-        path.substr(0, root.size()) == root &&
-        (path[root.size()] == '/' || path[root.size()] == '\\')) {
-        return std::string(path.substr(root.size() + 1));
-    }
-    return std::string(path);
 }
 
 struct Candidate {
@@ -95,7 +87,7 @@ CloneReport CloneDetector::analyze(MasterIndex& index,
         }
         auto content = index.file_content_store().get_content(fid);
         if (content.empty()) continue;
-        std::string rel = lexical_rel(index.get_file_path(fid), project_root);
+        std::string rel = git::normalize_rel(index.get_file_path(fid), std::string(project_root));
 
         for (const auto& sym : rt_snap->get_file_enhanced_symbols(fid)) {
             if (sym == nullptr) continue;

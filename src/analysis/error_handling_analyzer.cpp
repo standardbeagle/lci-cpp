@@ -4,6 +4,7 @@
 #include <lci/analysis/coupling_analyzer.h>
 #include <lci/analysis/side_effect_analyzer.h>
 #include <lci/core/reference_tracker.h>
+#include <lci/git/analyzer.h>
 #include <lci/idcodec.h>
 #include <lci/indexing/master_index.h>
 
@@ -18,14 +19,6 @@
 namespace lci {
 
 namespace {
-
-std::string rel_path(std::string_view path, std::string_view root) {
-    if (!root.empty() && path.rfind(root, 0) == 0) {
-        path.remove_prefix(root.size());
-        while (!path.empty() && path.front() == '/') path.remove_prefix(1);
-    }
-    return std::string(path);
-}
 
 int severity_rank(std::string_view sev) {
     if (sev == "high") return 2;
@@ -108,7 +101,7 @@ ErrorHandlingAnalyzer::Result ErrorHandlingAnalyzer::analyze(
     const auto& results = analyzer.results();
     for (FileID fid : indexer.get_all_file_ids()) {
         std::string file_path = indexer.get_file_path(fid);
-        std::string rel = rel_path(file_path, project_root);
+        std::string rel = git::normalize_rel(file_path, std::string(project_root));
         // The file's stored attribute decides, through the same registry
         // every other tool reads. This used to be a private substring list
         // ("test", "mock", "/libs/", ...) that knew nothing about the shipped
