@@ -316,6 +316,45 @@ TEST(SideEffectAnalyzerTest, ResultsStoredByFileAndLine) {
     EXPECT_EQ(sa.get_result("a.go", 99), nullptr);
 }
 
+// Callee-name classification must match on a whole identifier or a
+// camel/snake word boundary, never on a bare prefix: JS `querySelector` is a
+// DOM read (not a database call), `login` is not `log`, `closest` is not
+// `close`, `listener` is not `listen`. Reference values are hand-computed
+// from the word-boundary rule, not from any classifier output.
+TEST(CalleeWordBoundary, StdlibNameCollisionsAreNotClassified) {
+    for (const char* callee :
+         {"querySelector", "login", "logic", "closest", "closure", "listener",
+          "opener", "acceptsType", "evaluateExpression"}) {
+        SideEffectAnalyzer sa("javascript");
+        sa.begin_function("f", "f.js", 1, 5);
+        sa.record_function_call(callee, {}, false, 2, 1);
+        auto info = sa.end_function();
+        EXPECT_EQ(info.categories, side_effect::kNone) << callee;
+    }
+}
+
+// Positive controls for the same rule: whole identifier, snake-bounded
+// segment, and camel-boundary tail word all still classify.
+TEST(CalleeWordBoundary, BoundaryMatchesStillClassify) {
+    auto categories_of = [](const char* callee) {
+        SideEffectAnalyzer sa("go");
+        sa.begin_function("f", "f.go", 1, 5);
+        sa.record_function_call(callee, {}, false, 2, 1);
+        return sa.end_function().categories;
+    };
+    EXPECT_NE(categories_of("query") & side_effect::kDatabase, 0u);
+    EXPECT_NE(categories_of("db_query") & side_effect::kDatabase, 0u);
+    EXPECT_NE(categories_of("executeQuery") & side_effect::kDatabase, 0u);
+    EXPECT_NE(categories_of("log") & side_effect::kIO, 0u);
+    EXPECT_NE(categories_of("log_request") & side_effect::kIO, 0u);
+    EXPECT_NE(categories_of("println") & side_effect::kIO, 0u);
+    EXPECT_NE(categories_of("fopen") & side_effect::kIO, 0u);
+    EXPECT_NE(categories_of("file_put_contents") & side_effect::kIO, 0u);
+    EXPECT_NE(categories_of("fetch") & side_effect::kNetwork, 0u);
+    EXPECT_NE(categories_of("throwIfFatal") & side_effect::kThrow, 0u);
+    EXPECT_NE(categories_of("eval") & side_effect::kDynamicCall, 0u);
+}
+
 TEST(SideEffectAnalyzerTest, NullContextSafe) {
     SideEffectAnalyzer sa("go");
     // No begin_function called - all these should be no-ops
