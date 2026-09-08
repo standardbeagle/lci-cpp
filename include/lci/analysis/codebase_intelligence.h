@@ -10,6 +10,7 @@
 #include <absl/container/flat_hash_map.h>
 
 #include <lci/analysis/codebase_intelligence_types.h>
+#include <lci/analysis/health_analyzer.h>
 #include <lci/path_classifier.h>
 #include <lci/types.h>
 
@@ -74,6 +75,11 @@ inline constexpr double kImportanceThresholdEnhanced = 25.0;
 class CodebaseIntelligenceEngine {
   public:
     CodebaseIntelligenceEngine() = default;
+    /// `attr_registry` (typically the indexer's attr_registry()) carries a
+    /// project's `.lci.kdl` attributes into the health gate; without it the
+    /// shipped ruleset alone applies. Must outlive the engine.
+    explicit CodebaseIntelligenceEngine(const PathAttrRegistry* attr_registry)
+        : attr_registry_(attr_registry) {}
 
     /// Validates a mode string. Returns true if the mode is recognized.
     static bool is_valid_mode(std::string_view mode);
@@ -163,6 +169,15 @@ class CodebaseIntelligenceEngine {
 
 
   private:
+    const PathAttrRegistry* attr_registry_{};
+
+    /// HealthAnalyzer over the engine's registry (shipped ruleset when the
+    /// engine was default-constructed).
+    HealthAnalyzer make_health_analyzer() const {
+        return attr_registry_ ? HealthAnalyzer(*attr_registry_)
+                              : HealthAnalyzer();
+    }
+
     /// Extracts critical functions sorted by importance.
     std::vector<FunctionSignature> extract_critical_functions(
         const std::vector<FileSymbolData>& files, int max_results) const;

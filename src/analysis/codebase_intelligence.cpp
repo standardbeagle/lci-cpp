@@ -231,7 +231,7 @@ CodebaseIntelligenceResponse CodebaseIntelligenceEngine::build_overview(
 
     if (params.include.health_dashboard) {
         auto health = std::make_unique<HealthDashboard>();
-        HealthAnalyzer ha;
+        HealthAnalyzer ha = make_health_analyzer();
         health->complexity = ha.calculate_complexity_from_files(files);
         health->hotspots = ha.identify_hotspots_from_files(files);
         double debt_ratio = ha.calculate_tech_debt_ratio_from_files(files);
@@ -320,7 +320,7 @@ CodebaseIntelligenceResponse CodebaseIntelligenceEngine::build_statistics(
     const std::function<std::vector<SymbolID>(SymbolID)>& targets_of) const {
     CodebaseIntelligenceResponse response;
 
-    HealthAnalyzer ha;
+    HealthAnalyzer ha = make_health_analyzer();
     ComplexityMetrics complexity = ha.calculate_complexity_from_files(files);
 
     // Health dashboard kept for callers that read it via analyze() (mirrors

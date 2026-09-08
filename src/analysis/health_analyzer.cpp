@@ -122,8 +122,7 @@ ComplexityMetrics HealthAnalyzer::calculate_complexity_from_files(
                 distribution["medium"]++;
             } else {
                 distribution["high"]++;
-                if (static_cast<int>(high_funcs.size()) < 10 &&
-                    !is_test_helper_path(file.path) &&
+                if (!is_test_helper_path(file.path) &&
                     !is_test_helper_function(sym->symbol.name)) {
                     FunctionInfo fi;
                     fi.object_id = encode_symbol_id(sym->id);
@@ -160,6 +159,18 @@ ComplexityMetrics HealthAnalyzer::calculate_complexity_from_files(
         p75 = sorted[sorted.size() * 3 / 4];
         p90 = sorted[sorted.size() * 9 / 10];
     }
+
+    // The report shows the TOP 10 by complexity: collect all candidates,
+    // then cut on a total order (cc desc, then name/location asc) so the
+    // selection does not depend on file iteration order.
+    std::sort(high_funcs.begin(), high_funcs.end(),
+              [](const FunctionInfo& a, const FunctionInfo& b) {
+                  if (a.complexity != b.complexity)
+                      return a.complexity > b.complexity;
+                  if (a.name != b.name) return a.name < b.name;
+                  return a.location < b.location;
+              });
+    if (high_funcs.size() > 10) high_funcs.resize(10);
 
     ComplexityMetrics result;
     result.average_cc = avg;
@@ -425,7 +436,8 @@ std::vector<std::string> HealthAnalyzer::identify_debt_components(
     }
     std::sort(debts.begin(), debts.end(),
               [](const FileDebt& a, const FileDebt& b) {
-                  return a.count > b.count;
+                  if (a.count != b.count) return a.count > b.count;
+                  return a.path < b.path;  // total order: no hash-order ties
               });
 
     std::vector<std::string> components;
