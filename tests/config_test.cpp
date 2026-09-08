@@ -14,6 +14,10 @@
 
 #include "portable_env.h"
 
+#ifndef _WIN32
+#include <unistd.h>
+#endif
+
 namespace lci {
 namespace {
 
@@ -821,6 +825,25 @@ TEST_F(KdlConfigTest, NonIntegerNumberIsAnError) {
     ASSERT_FALSE(result.ok());
     EXPECT_NE(result.error.find("max_file_count"), std::string::npos)
         << result.error;
+}
+
+TEST_F(KdlConfigTest, UnreadableRootComponentIsAnErrorNotTerminate) {
+#ifdef _WIN32
+    GTEST_SKIP() << "POSIX permission bits do not block traversal on Windows";
+#else
+    if (::geteuid() == 0) GTEST_SKIP() << "root bypasses permission checks";
+    // fs::weakly_canonical on a root with an unreadable component threw
+    // std::filesystem::filesystem_error out of load_config; load_config is
+    // noexcept-by-contract for its callers, so this ended in std::terminate.
+    fs::path blocked = temp_dir_ / "blocked";
+    fs::create_directories(blocked / "sub");
+    write_kdl("project {\n  root \"blocked/sub\"\n}\n");
+    fs::permissions(blocked, fs::perms::none);
+    auto result = load_config(temp_dir_.string());
+    fs::permissions(blocked, fs::perms::owner_all);
+    ASSERT_FALSE(result.ok());
+    EXPECT_FALSE(result.error.empty());
+#endif
 }
 
 TEST_F(KdlConfigTest, LoadConfigValidatesRanges) {
