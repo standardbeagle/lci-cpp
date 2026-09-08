@@ -49,6 +49,47 @@
 namespace lci {
 namespace mcp {
 
+// -- SameNameCallGrouping -----------------------------------------------------
+
+SameNameCallGrouping SameNameCallGrouping::build(
+    const ReferenceTracker::Snapshot& snap) {
+    SameNameCallGrouping g;
+    g.by_tail_.reserve(snap.ref_names.size());
+    for (const auto& [fid, vec] : snap.refs_by_file) {
+        for (const auto& r : vec) {
+            if (r.dead || r.type != ReferenceType::Call) continue;
+            // Same split as Snapshot::classify_same_name_calls: a call
+            // resolved to a bodiless declaration is dynamic dispatch; an
+            // unresolved foreign-receiver call is dynamic; a bare
+            // unresolved name is unresolved. Resolved-to-body calls are not
+            // counted.
+            int Stats::* bucket;
+            if (r.target_symbol != 0) {
+                const auto* tsym = snap.symbols.get(r.target_symbol);
+                if (tsym == nullptr || !tsym->symbol.declaration_only) {
+                    continue;
+                }
+                bucket = &Stats::dynamic;
+            } else if (r.foreign_receiver) {
+                bucket = &Stats::dynamic;
+            } else {
+                bucket = &Stats::unresolved;
+            }
+            std::string_view spelling = snap.ref_names[r.name_id];
+            auto dot = spelling.rfind('.');
+            std::string_view tail = dot == std::string_view::npos
+                                        ? spelling
+                                        : spelling.substr(dot + 1);
+            auto it = g.by_tail_.find(tail);
+            if (it == g.by_tail_.end()) {
+                it = g.by_tail_.emplace(tail, Stats{}).first;
+            }
+            ++(it->second.*bucket);
+        }
+    }
+    return g;
+}
+
 using namespace insight;
 
 // -- Helpers for code_insight LCF emission -----------------------------------
@@ -550,6 +591,9 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                     int dyn;
                 };
                 std::vector<DynOnly> dyn_only;
+                // One pass over the snapshot, then O(1) per candidate —
+                // classify_same_name_calls per symbol is O(symbols x refs).
+                auto same_name = SameNameCallGrouping::build(*rt_snap);
                 for (const auto& f : files_data) {
                     std::string rel = git::normalize_rel(f.path, project_root);
                     for (const auto* sym : f.symbols) {
@@ -566,8 +610,7 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                         if (dout > 0) hubs.push_back({sym->symbol.name, loc, dout});
                         if (sym->incoming_ref_count == 0 &&
                             !sym->symbol.declaration_only) {
-                            auto st = rt_snap->classify_same_name_calls(
-                                sym->symbol.name);
+                            auto st = same_name.lookup(sym->symbol.name);
                             if (st.dynamic > 0)
                                 dyn_only.push_back(
                                     {sym->symbol.name, loc, st.dynamic});
@@ -1490,6 +1533,10 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
             {
                 auto snap = indexer.load_snapshot();
                 auto rt_snap = indexer.ref_tracker().pin();
+                // One pass over the snapshot; the per-candidate loop below
+                // does O(1) lookups instead of a full ref scan per symbol
+                // (O(candidates x refs) before — karpathy #7).
+                auto same_name = SameNameCallGrouping::build(*rt_snap);
                 auto fids = indexer.get_all_file_ids();
                 std::sort(fids.begin(), fids.end());
                 // Constructors are invoked through their TYPE, not by a
@@ -1548,8 +1595,7 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                         bool confirmed = d == Disp::Confirmed;
                         if (!confirmed && sym->incoming_ref_count > 0) continue;
                         if (!confirmed && entry_names.contains(nm)) continue;
-                        int dyn = rt_snap->classify_same_name_calls(
-                                      sym->symbol.name).dynamic;
+                        int dyn = same_name.lookup(sym->symbol.name).dynamic;
                         dead.push_back({sym->symbol.name, rel,
                                         static_cast<int>(sym->symbol.line),
                                         std::string(to_string(t)), dyn});
@@ -1609,6 +1655,9 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
             {
                 auto snap = indexer.load_snapshot();
                 auto rt_snap = indexer.ref_tracker().pin();
+                // One pass over the snapshot; the per-candidate loops below
+                // do O(1) lookups instead of a full ref scan per symbol.
+                auto same_name = SameNameCallGrouping::build(*rt_snap);
                 auto fids = indexer.get_all_file_ids();
                 std::sort(fids.begin(), fids.end());
 
@@ -1695,12 +1744,12 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                                 for (const auto& r :
                                      rt_snap->get_symbol_references(
                                          sym->id, "incoming")) {
-                                    if (r.source_symbol == sym->id) continue;
-                                    if (r.file_id == fid &&
-                                        r.line >= sym->symbol.line &&
-                                        r.line <= sym->symbol.end_line &&
-                                        r.line == sym->symbol.line)
-                                        continue;
+                                     if (r.source_symbol == sym->id) continue;
+                                     // Skip the symbol's own name occurrence
+                                     // on its declaration line.
+                                     if (r.file_id == fid &&
+                                         r.line == sym->symbol.line)
+                                         continue;
                                     ++real_incoming;
                                 }
                             }
@@ -1723,8 +1772,7 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                             if (!confirmed_dead &&
                                 iface_method_names.contains(nm))
                                 continue;
-                            int dynp =
-                                rt_snap->classify_same_name_calls(nm).dynamic;
+                            int dynp = same_name.lookup(nm).dynamic;
                             dead_private.push_back(
                                 {nm, rel, ln, std::string(to_string(t)),
                                  dynp});
@@ -1744,8 +1792,7 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                                      std::move(reason)});
                             }
                         } else if (type_like) {
-                            int dynt =
-                                rt_snap->classify_same_name_calls(nm).dynamic;
+                            int dynt = same_name.lookup(nm).dynamic;
                             dead_types.push_back(
                                 {nm, rel, ln, std::string(to_string(t)),
                                  dynt});

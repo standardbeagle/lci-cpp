@@ -1,10 +1,13 @@
 #pragma once
 
 #include <string>
+#include <string_view>
 #include <vector>
 
+#include <absl/container/flat_hash_map.h>
 #include <nlohmann/json.hpp>
 
+#include <lci/core/reference_tracker.h>
 #include <lci/mcp/server.h>
 
 namespace lci {
@@ -41,6 +44,36 @@ void register_analysis_handlers(McpServer& server,
 /// to stderr on failure — never silent).
 std::string write_error_report_capture(MasterIndex& indexer,
                                        SideEffectAnalyzer* analyzer);
+
+// -- Same-name call grouping --------------------------------------------------
+
+/// Precomputed name -> {dynamic, unresolved} call-site split over one
+/// ReferenceTracker snapshot. Replaces per-candidate
+/// Snapshot::classify_same_name_calls calls (each a full scan of every
+/// reference) with ONE pass over the snapshot plus O(1) lookups — unified and
+/// deadcode modes classify per zero-in-degree candidate, which was
+/// O(candidates x refs) on large corpora.
+///
+/// Keys are the tail of each interned call-site spelling (text after the
+/// last '.'), which reproduces classify_same_name_calls' matching rule for
+/// bare-name queries: spelling == name, or a qualified "Recv.name" spelling.
+class SameNameCallGrouping {
+  public:
+    using Stats = ReferenceTracker::Snapshot::SameNameCallStats;
+
+    /// One pass over the snapshot's live Call references.
+    static SameNameCallGrouping build(const ReferenceTracker::Snapshot& snap);
+
+    /// The split for a bare symbol name; zeros when no same-name call site
+    /// exists.
+    Stats lookup(std::string_view name) const {
+        auto it = by_tail_.find(name);
+        return it == by_tail_.end() ? Stats{} : it->second;
+    }
+
+  private:
+    absl::flat_hash_map<std::string, Stats> by_tail_;
+};
 
 // -- Handler functions (exposed for testing) ----------------------------------
 // semantic_annotations / side_effects live in handlers_side_effects.h.
