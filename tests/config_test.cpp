@@ -795,6 +795,34 @@ TEST_F(KdlConfigTest, TildeInProjectRootExpandsAgainstHome) {
     EXPECT_EQ(result.config.project.root.find('~'), std::string::npos);
 }
 
+TEST_F(KdlConfigTest, OutOfRangeInt64IsAnErrorNotAWrap) {
+    // 4294968296 used to go through static_cast<int>(double): it wrapped to
+    // 1000 and validated, silently applying a 1KB max_file_size.
+    write_kdl("index {\n  max_file_size 4294968296\n}\n");
+    auto result = load_config(temp_dir_.string());
+    ASSERT_FALSE(result.ok());
+    EXPECT_NE(result.error.find("max_file_size"), std::string::npos)
+        << result.error;
+}
+
+TEST_F(KdlConfigTest, OutOfRangeIntIsAnErrorNotUB) {
+    // A double that exceeds INT_MAX makes double->int conversion UB; it must
+    // be rejected as a validation error instead.
+    write_kdl("index {\n  max_file_count 99999999999\n}\n");
+    auto result = load_config(temp_dir_.string());
+    ASSERT_FALSE(result.ok());
+    EXPECT_NE(result.error.find("max_file_count"), std::string::npos)
+        << result.error;
+}
+
+TEST_F(KdlConfigTest, NonIntegerNumberIsAnError) {
+    write_kdl("index {\n  max_file_count 1.5\n}\n");
+    auto result = load_config(temp_dir_.string());
+    ASSERT_FALSE(result.ok());
+    EXPECT_NE(result.error.find("max_file_count"), std::string::npos)
+        << result.error;
+}
+
 TEST_F(KdlConfigTest, LoadConfigValidatesRanges) {
     // validate_config used to run only for `lci config show`, so an
     // out-of-range value reached the indexer unchecked.
