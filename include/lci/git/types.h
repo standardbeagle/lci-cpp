@@ -129,8 +129,6 @@ struct SymbolInfo {
     int complexity{};
     int lines_of_code{};
     int nesting_depth{};
-    bool is_pure{};
-    std::vector<std::string> side_effects;
     std::string content;
 };
 
@@ -270,7 +268,6 @@ enum class MetricsIssueType : uint8_t {
     LongFunction,
     DeepNesting,
     ComplexityGrew,
-    PurityLost,
     ImpureFunction,
 };
 
@@ -281,7 +278,6 @@ constexpr std::string_view to_string(MetricsIssueType t) {
         case MetricsIssueType::LongFunction: return "long_function";
         case MetricsIssueType::DeepNesting: return "deep_nesting";
         case MetricsIssueType::ComplexityGrew: return "complexity_grew";
-        case MetricsIssueType::PurityLost: return "purity_lost";
         case MetricsIssueType::ImpureFunction: return "impure_function";
     }
     return "unknown";
@@ -304,8 +300,6 @@ struct SymbolMetrics {
     int complexity{};
     int lines_of_code{};
     int nesting_depth{};
-    bool is_pure{};
-    std::vector<std::string> side_effects;
 };
 
 // ============================================================================

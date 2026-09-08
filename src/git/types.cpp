@@ -416,8 +416,6 @@ FindingSeverity determine_metrics_severity(MetricsIssueType issue_type,
                        : FindingSeverity::Warning;
         case MetricsIssueType::ComplexityGrew:
             return FindingSeverity::Warning;
-        case MetricsIssueType::PurityLost:
-            return FindingSeverity::Warning;
         case MetricsIssueType::ImpureFunction:
             return FindingSeverity::Info;
     }

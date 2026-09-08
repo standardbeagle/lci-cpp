@@ -268,8 +268,6 @@ TEST(GitResults, DetermineMetricsSeverity) {
 
     EXPECT_EQ(determine_metrics_severity(MetricsIssueType::ComplexityGrew, m, t),
               FindingSeverity::Warning);
-    EXPECT_EQ(determine_metrics_severity(MetricsIssueType::PurityLost, m, t),
-              FindingSeverity::Warning);
     EXPECT_EQ(determine_metrics_severity(MetricsIssueType::ImpureFunction, m, t),
               FindingSeverity::Info);
 }
@@ -1228,7 +1226,6 @@ TEST(GitTypes, MetricsIssueTypeToString) {
     EXPECT_EQ(to_string(MetricsIssueType::LongFunction), "long_function");
     EXPECT_EQ(to_string(MetricsIssueType::DeepNesting), "deep_nesting");
     EXPECT_EQ(to_string(MetricsIssueType::ComplexityGrew), "complexity_grew");
-    EXPECT_EQ(to_string(MetricsIssueType::PurityLost), "purity_lost");
     EXPECT_EQ(to_string(MetricsIssueType::ImpureFunction), "impure_function");
 }
 

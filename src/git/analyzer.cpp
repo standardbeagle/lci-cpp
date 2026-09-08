@@ -661,7 +661,7 @@ void Analyzer::check_metrics(const std::vector<SymbolInfo>& new_symbols,
         }
 
         SymbolMetrics new_m{sym.complexity, sym.lines_of_code,
-                            sym.nesting_depth, sym.is_pure, sym.side_effects};
+                            sym.nesting_depth};
 
         if (sym.complexity > thresholds.high_complexity) {
             MetricsFinding f;
@@ -728,16 +728,6 @@ void Analyzer::check_metrics(const std::vector<SymbolInfo>& new_symbols,
                     f.suggestion = "Consider refactoring to maintain or reduce complexity";
                     out.push_back(std::move(f));
                 }
-            }
-            if (es.is_pure && !sym.is_pure) {
-                MetricsFinding f;
-                f.severity = FindingSeverity::Warning;
-                f.description = "Function '" + sym.name + "' lost purity";
-                f.symbol = sym;
-                f.issue_type = MetricsIssueType::PurityLost;
-                f.issue = "Previously pure function now has side effects";
-                f.suggestion = "Keep pure functions pure or extract impure operations";
-                out.push_back(std::move(f));
             }
         }
     }
