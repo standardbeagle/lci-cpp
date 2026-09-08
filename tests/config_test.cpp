@@ -1034,6 +1034,21 @@ synonyms {
     EXPECT_FALSE(result.ok());
 }
 
+// The attributes block is re-emitted as KDL text for the shared ruleset
+// parser; the re-emission used to wrap string values in quotes without
+// escaping, so a pattern containing '"' or '\' corrupted the document.
+TEST_F(KdlConfigTest, AttributePatternsWithQuotesAndBackslashesRoundTrip) {
+    write_kdl("attributes {\n"
+              "    test \"src/\\\"quoted\\\"/\"\n"
+              "    vendored \"win\\\\dir\\\\\"\n"
+              "}\n");
+    auto result = load_config(temp_dir_.string());
+    ASSERT_TRUE(result.ok()) << result.error;
+    ASSERT_EQ(result.config.attributes.size(), 2u);
+    EXPECT_EQ(result.config.attributes[0].pattern, "src/\"quoted\"/");
+    EXPECT_EQ(result.config.attributes[1].pattern, "win\\dir\\");
+}
+
 TEST_F(KdlConfigTest, ParsesAttributesSection) {
     write_kdl(R"(
 attributes {
