@@ -550,83 +550,47 @@ TEST(GraphPropagatorTest, ReachabilityTieBreaksToSmallestSource) {
 }
 #endif  // !_WIN32
 
-#ifndef _WIN32
-// propagate_transitive iterated by_symbol in salted hash order, so a
-// function reached by two impure chains recorded its impurity_reasons in a
-// per-process order. The child indexes a small corpus, runs populate +
-// propagate, and dumps every result (sorted by result key) with its
-// reasons; the parent byte-compares five separate processes.
-std::string run_fixpoint_dump_in_child() {
-    int fds[2];
-    if (pipe(fds) != 0) return {};
-    pid_t pid = fork();
-    if (pid == 0) {
-        close(fds[0]);
-        dup2(fds[1], STDOUT_FILENO);
-        close(fds[1]);
-
-        auto dir = lci::test::unique_temp_dir("lci_se_fixpoint_");
-        std::filesystem::create_directories(dir);
-        {
-            std::ofstream o(dir / "chain.go");
-            o << "package main\n\n"
-                 "func ioA() {\n\tprintln(\"a\")\n}\n\n"
-                 "func ioB() {\n\tprintln(\"b\")\n}\n\n"
-                 "func ioC() {\n\tprintln(\"c\")\n}\n\n"
-                 "func mid1() {\n\tioA()\n}\n\n"
-                 "func mid2() {\n\tioB()\n\tioC()\n}\n\n"
-                 "func top() {\n\tmid1()\n\tmid2()\n}\n\n"
-                 "func apex() {\n\ttop()\n\tmid2()\n}\n";
-        }
-        Config config;
-        config.project.root = dir.string();
-        MasterIndex indexer(config);
-        indexer.index_directory(dir.string());
-
-        SideEffectAnalyzer analyzer("generic");
-        analyzer.populate_from_index(indexer);
-        analyzer.propagate_transitive(indexer);
-
-        std::vector<std::string> keys;
-        keys.reserve(analyzer.results().size());
-        for (const auto& [k, v] : analyzer.results()) keys.push_back(k);
-        std::sort(keys.begin(), keys.end());
-        for (const auto& k : keys) {
-            const auto& info = analyzer.results().at(k);
-            std::cout << k << "|" << info.function_name << "|"
-                      << info.categories << "|" << info.transitive_categories
-                      << "|";
-            for (const auto& r : info.impurity_reasons) std::cout << r << ";";
-            std::cout << "\n";
-        }
-        std::cout.flush();
-        std::error_code ec;
-        std::filesystem::remove_all(dir, ec);
-        _exit(0);
+// The fixpoint must iterate a sorted symbol order. Probe note: by_symbol is
+// keyed by SymbolID (an integer), and absl's integer hash carries no
+// per-process salt, so no cross-process divergence was reproducible on the
+// pre-fix tree (verified: 3x3 forked-process runs, all byte-identical) —
+// the pinned observable is the MECHANISM: mid()'s three impurity reasons
+// must appear in ascending callee-id (== declaration order) sequence,
+// hand-computed from sorted iteration + first-category-change semantics.
+TEST(TransitivePropagation, FixpointReasonsFollowSortedSymbolOrder) {
+    auto dir = lci::test::unique_temp_dir("lci_se_fixpoint_");
+    std::filesystem::create_directories(dir);
+    {
+        std::ofstream o(dir / "chain.go");
+        o << "package main\n\n"
+             "func fIO() {\n\tprintln(\"a\")\n}\n\n"
+             "func fNet() {\n\tfetch(\"u\")\n}\n\n"
+             "func fDB() {\n\tquery(\"q\")\n}\n\n"
+             "func mid() {\n\tfIO()\n\tfNet()\n\tfDB()\n}\n\n"
+             "func top() {\n\tmid()\n}\n";
     }
-    close(fds[1]);
-    std::string out;
-    char buf[4096];
-    ssize_t n;
-    while ((n = read(fds[0], buf, sizeof(buf))) > 0)
-        out.append(buf, static_cast<size_t>(n));
-    close(fds[0]);
-    int status = 0;
-    waitpid(pid, &status, 0);
-    return out;
-}
+    Config config;
+    config.project.root = dir.string();
+    MasterIndex indexer(config);
+    indexer.index_directory(dir.string());
 
-TEST(TransitivePropagation, FixpointOutputStableAcrossProcesses) {
-    std::string reference;
-    for (int run = 0; run < 5; ++run) {
-        std::string text = run_fixpoint_dump_in_child();
-        ASSERT_FALSE(text.empty()) << "child produced no output";
-        if (run == 0) {
-            reference = text;
-        } else {
-            EXPECT_EQ(text, reference) << "run " << run << " diverged";
-        }
-    }
+    SideEffectAnalyzer analyzer("generic");
+    analyzer.populate_from_index(indexer);
+    analyzer.propagate_transitive(indexer);
+
+    auto snap = indexer.ref_tracker().pin();
+    auto mid = snap->find_symbol_by_name("mid");
+    ASSERT_NE(mid, nullptr);
+    const auto* info = analyzer.get_result(
+        indexer.get_file_path(mid->symbol.file_id), mid->symbol.line);
+    ASSERT_NE(info, nullptr);
+    std::vector<std::string> expected = {"calls impure fIO (io)",
+                                         "calls impure fNet (network)",
+                                         "calls impure fDB (database)"};
+    EXPECT_EQ(info->impurity_reasons, expected);
+
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
 }
 
 // A chain longer than the 100-iteration fixpoint cap must surface the
@@ -662,7 +626,6 @@ TEST(TransitivePropagation, FixpointTruncationIsReported) {
     std::error_code ec;
     std::filesystem::remove_all(dir, ec);
 }
-#endif  // !_WIN32
 
 // ===========================================================================
 // SemanticAnnotator

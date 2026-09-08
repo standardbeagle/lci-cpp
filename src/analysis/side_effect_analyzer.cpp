@@ -571,12 +571,25 @@ void SideEffectAnalyzer::propagate_transitive(const MasterIndex& indexer) {
     // Fixpoint: push each symbol's effects upstream to its callers' transitive
     // set until nothing changes. Confidence at a caller is the best (highest,
     // i.e. shortest-hop) decayed value across incoming impure paths. Bounded
-    // iterations guard against cycles.
+    // iterations guard against cycles. Iteration follows a sorted symbol
+    // order: by_symbol is a salted hash map, and its order leaked into
+    // impurity_reasons (and the iteration count itself, since updates are
+    // visible within a sweep). Hitting the cap is reported, not silent.
+    std::vector<SymbolID> sorted_symbols;
+    sorted_symbols.reserve(by_symbol.size());
+    for (const auto& [sid, info] : by_symbol) {
+        (void)info;
+        sorted_symbols.push_back(sid);
+    }
+    std::sort(sorted_symbols.begin(), sorted_symbols.end());
+
     constexpr int kMaxIterations = 100;
     bool changed = true;
-    for (int iter = 0; changed && iter < kMaxIterations; ++iter) {
+    int iter = 0;
+    for (; changed && iter < kMaxIterations; ++iter) {
         changed = false;
-        for (auto& [sid, info] : by_symbol) {
+        for (SymbolID sid : sorted_symbols) {
+            SideEffectInfo* info = by_symbol.find(sid)->second;
             uint32_t combined = info->categories | info->transitive_categories;
             uint32_t to_propagate = categories_to_propagate(combined);
             if (to_propagate == 0) continue;
@@ -617,6 +630,9 @@ void SideEffectAnalyzer::propagate_transitive(const MasterIndex& indexer) {
             }
         }
     }
+
+    // changed == true here means the loop left the cap with work pending.
+    fixpoint_truncated_ = changed;
 
     // Recompute the combined purity assessment (Go updatePurityAssessment).
     for (auto& [sid, info] : by_symbol) {
