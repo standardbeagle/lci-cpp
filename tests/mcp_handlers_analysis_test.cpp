@@ -16,9 +16,11 @@
 #include "test_git.h"
 #include "unique_temp.h"
 
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <string>
 
 namespace lci {
@@ -2172,6 +2174,132 @@ TEST(RegisterAnalysisHandlers, NullAnnotatorReturnsError) {
     // The last 3 tools should be our handlers
     size_t count = server.tool_count();
     ASSERT_GE(count, 3u);
+}
+
+// =============================================================================
+// SameNameCallGrouping — precomputed same-name call split
+// =============================================================================
+
+namespace {
+
+Symbol snc_sym(const std::string& name, SymbolType type, int line,
+               bool decl_only = false) {
+    Symbol s;
+    s.name = name;
+    s.type = type;
+    s.file_id = 1;
+    s.line = line;
+    s.column = 0;
+    s.end_line = line;
+    s.end_column = 80;
+    s.declaration_only = decl_only;
+    return s;
+}
+
+}  // namespace
+
+// The grouping must answer exactly what Snapshot::classify_same_name_calls
+// answers for bare-name queries, including the qualified-spelling
+// ("Recv.name") suffix rule and the resolved-to-declaration dynamic case.
+TEST(SameNameCallGrouping, MatchesClassifySameNameCalls) {
+    ReferenceTracker rt;
+    std::vector<Symbol> symbols = {
+        snc_sym("DeclFunc", SymbolType::Function, 1, /*decl_only=*/true),
+        snc_sym("RealFunc", SymbolType::Function, 5),
+        snc_sym("caller", SymbolType::Function, 10),
+    };
+    std::vector<Reference> refs;
+    auto add_call = [&](const std::string& name, int line, bool foreign) {
+        Reference r;
+        r.type = ReferenceType::Call;
+        r.referenced_name = name;
+        r.file_id = 1;
+        r.line = line;
+        r.column = 0;
+        r.foreign_receiver = foreign;
+        refs.push_back(std::move(r));
+    };
+    add_call("DeclFunc", 11, false);    // resolves to decl-only -> dynamic
+    add_call("recv.Dyn", 12, true);     // qualified foreign -> dynamic
+    add_call("other.Dyn", 13, true);    // same tail, another receiver
+    add_call("Bare", 14, false);        // unresolved
+    add_call("RealFunc", 15, false);    // resolves to a body -> not counted
+    std::vector<ScopeInfo> scopes;
+    rt.process_file(1, "f.go", symbols, refs, scopes);
+    rt.process_all_references();
+
+    auto snap = rt.pin();
+    auto grouping = SameNameCallGrouping::build(*snap);
+    for (const char* name : {"DeclFunc", "Dyn", "Bare", "RealFunc",
+                             "caller", "absent"}) {
+        auto want = snap->classify_same_name_calls(name);
+        auto got = grouping.lookup(name);
+        EXPECT_EQ(got.dynamic, want.dynamic) << name;
+        EXPECT_EQ(got.unresolved, want.unresolved) << name;
+    }
+    // And the grouping is non-trivially populated (not degenerate-equal).
+    EXPECT_EQ(grouping.lookup("DeclFunc").dynamic, 1);
+    EXPECT_EQ(grouping.lookup("Dyn").dynamic, 2);
+    EXPECT_EQ(grouping.lookup("Bare").unresolved, 1);
+}
+
+// The quadratic this replaces: unified/deadcode modes classified every
+// zero-in-degree candidate with classify_same_name_calls, a full scan of all
+// refs per call — O(candidates x refs). With the precomputed grouping the
+// per-candidate cost is O(1) after one O(refs) build, so 10x the candidates
+// on the same 200k-ref snapshot must cost well under 10x the time
+// (best-of-3; a scaling RATIO, never an absolute bound).
+TEST(SameNameCallGrouping, ScalesWithSnapshotSizeNotCandidates) {
+    ReferenceTracker rt;
+    rt.set_bulk_indexing(true);
+    constexpr int kCandidates = 2000;
+    constexpr int kRefs = 200000;
+    std::vector<Symbol> symbols;
+    symbols.reserve(kCandidates);
+    for (int i = 0; i < kCandidates; ++i) {
+        symbols.push_back(
+            snc_sym("cand" + std::to_string(i), SymbolType::Function, i + 1));
+    }
+    std::vector<Reference> refs;
+    refs.reserve(kRefs);
+    for (int i = 0; i < kRefs; ++i) {
+        Reference r;
+        r.type = ReferenceType::Call;
+        r.referenced_name = "cand" + std::to_string(i % kCandidates);
+        r.file_id = 1;
+        r.line = i + 1;
+        r.column = 0;
+        r.foreign_receiver = (i % 3 == 0);
+        refs.push_back(std::move(r));
+    }
+    std::vector<ScopeInfo> scopes;
+    rt.process_file(1, "big.go", symbols, refs, scopes);
+    rt.set_bulk_indexing(false);
+    auto snap = rt.pin();
+
+    // What the deadcode/unified loops do per run: build the grouping once,
+    // then classify each zero-in-degree candidate.
+    auto run = [&](int n_candidates) {
+        auto t0 = std::chrono::steady_clock::now();
+        auto g = SameNameCallGrouping::build(*snap);
+        long long total = 0;
+        for (int i = 0; i < n_candidates; ++i) {
+            total += g.lookup("cand" + std::to_string(i)).total();
+        }
+        auto t1 = std::chrono::steady_clock::now();
+        EXPECT_GT(total, 0);  // the lookups saw real data
+        return std::chrono::duration<double>(t1 - t0).count();
+    };
+    auto best_of = [&](int n) {
+        double best = std::numeric_limits<double>::max();
+        for (int rep = 0; rep < 3; ++rep) best = std::min(best, run(n));
+        return best;
+    };
+    double t200 = best_of(200);
+    double t2000 = best_of(2000);
+    EXPECT_LT(t2000, t200 * 10.0)
+        << "2000 candidates took " << (t2000 / t200)
+        << "x the 200-candidate time on the same 200k-ref snapshot";
 }
 
 }  // namespace
