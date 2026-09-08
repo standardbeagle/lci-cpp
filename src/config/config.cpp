@@ -942,7 +942,10 @@ std::string validate_config(Config& cfg) {
         return "index.data_file_token_cap cannot be negative (0 disables)";
     }
 
-    if (cfg.performance.max_memory_mb < 100) {
+    // 0 means "auto" (substituted below) and must reach that substitution;
+    // only nonzero values below the floor are rejected.
+    if (cfg.performance.max_memory_mb != 0 &&
+        cfg.performance.max_memory_mb < 100) {
         return "performance.max_memory_mb must be at least 100";
     }
     if (cfg.performance.max_goroutines < 0) {
