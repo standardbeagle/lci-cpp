@@ -4,6 +4,9 @@
 #include <fstream>
 #include <sstream>
 
+#include <algorithm>
+#include <vector>
+
 #include <absl/container/flat_hash_set.h>
 #include <nlohmann/json.hpp>
 
@@ -94,11 +97,17 @@ ProjectIdentities collect_identities(const std::string& root) {
         std::error_code ec;
         fs::path pkgs = fs::path(root) / "packages";
         if (fs::is_directory(pkgs, ec)) {
-            int scanned = 0;
+            // Skip non-directory entries (a stray file broke the scan at
+            // whatever position the filesystem handed it out) and sample in
+            // sorted order so the 64-package cap is deterministic.
+            std::vector<fs::path> dirs;
             for (const auto& e : fs::directory_iterator(pkgs, ec)) {
-                if (!e.is_directory(ec) || ++scanned > 64) break;
-                std::string text =
-                    read_small_file(e.path() / "package.json");
+                if (e.is_directory(ec)) dirs.push_back(e.path());
+            }
+            std::sort(dirs.begin(), dirs.end());
+            if (dirs.size() > 64) dirs.resize(64);
+            for (const auto& p : dirs) {
+                std::string text = read_small_file(p / "package.json");
                 if (text.empty()) continue;
                 auto j = nlohmann::json::parse(text, nullptr, false);
                 if (!j.is_discarded() && j.is_object() &&
