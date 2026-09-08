@@ -316,6 +316,24 @@ TEST(SideEffectAnalyzerTest, ResultsStoredByFileAndLine) {
     EXPECT_EQ(sa.get_result("a.go", 99), nullptr);
 }
 
+// Two functions starting on the same line (JS minified / one-liner style)
+// must not overwrite each other: the result key carries the start column.
+TEST(SideEffectAnalyzerTest, TwoFunctionsOnOneLineGetDistinctKeys) {
+    SideEffectAnalyzer sa("javascript");
+    sa.begin_function("first", "a.js", 1, 1, 4);
+    sa.end_function();
+    sa.begin_function("second", "a.js", 1, 1, 30);
+    sa.end_function();
+
+    EXPECT_EQ(sa.results().size(), 2u);
+    const auto* a = sa.get_result("a.js", 1, 4);
+    const auto* b = sa.get_result("a.js", 1, 30);
+    ASSERT_NE(a, nullptr);
+    ASSERT_NE(b, nullptr);
+    EXPECT_EQ(a->function_name, "first");
+    EXPECT_EQ(b->function_name, "second");
+}
+
 // Callee-name classification must match on a whole identifier or a
 // camel/snake word boundary, never on a bare prefix: JS `querySelector` is a
 // DOM read (not a database call), `login` is not `log`, `closest` is not
