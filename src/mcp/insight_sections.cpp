@@ -39,6 +39,8 @@ std::string fmt1(double v) {
 //   modules*20 + dep_edges*15 + (health?50) + entry*15 + (stats?50) + 20.
 // `n_modules` is the post-truncation count (<=15) the repo map actually
 // emits, matching Go (the formatter runs after budget truncation).
+// NOTE: header tokens= is rewritten by finalize_lcf from the emitted body
+// (chars/4); any estimate passed at header-emission time is a placeholder.
 int lcf_token_count(int n_modules, int n_dep_edges, bool has_health,
                     int n_entry, bool has_stats) {
     int est = n_modules * 20 + n_dep_edges * 15 + n_entry * 15 + 20;
@@ -915,6 +917,26 @@ void emit_object_ids_hint(std::ostringstream& out) {
 std::string finalize_lcf(std::ostringstream& out) {
     std::string s = out.str();
     if (!s.empty() && s.back() == '\n') s.pop_back();
+
+    // Honest token count. The header is necessarily written before the body
+    // exists, so emitters leave an estimate placeholder in tokens= — rewrite
+    // it here with the real estimate of the emitted body: chars/4 over
+    // everything after the header's "---" terminator, the same convention
+    // ExpansionEngine::hydrate_reference uses. A header that can drift from
+    // its payload is a fabricated number (karpathy #6).
+    auto hdr_end = s.find("\n---\n");
+    if (hdr_end != std::string::npos) {
+        auto tok = s.find("\ntokens=");
+        if (tok != std::string::npos && tok < hdr_end) {
+            size_t val_begin = tok + 8;
+            size_t val_end = s.find('\n', val_begin);
+            if (val_end != std::string::npos) {
+                size_t body_chars = s.size() - (hdr_end + 5);
+                s.replace(val_begin, val_end - val_begin,
+                          std::to_string(body_chars / 4));
+            }
+        }
+    }
     return s;
 }
 

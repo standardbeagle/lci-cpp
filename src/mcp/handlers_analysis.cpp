@@ -423,7 +423,7 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
             });
         const auto& sr = *resp.statistics_report;
         emit_lcf_header_scoped(out, scope.label, "statistics", 1,
-                        lcf_token_count(0, 0, false, 0, true));
+                        0);  // placeholder: finalize_lcf rewrites tokens= from the body
         emit_statistics(out, sr.complexity, sr.coupling, sr.cohesion,
                         sr.quality, sr.purity_ratio);
     } else if (mode == "structure") {
@@ -471,7 +471,6 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
             return make_error_response("code_insight", d.result.error);
         }
         const auto* hd = d.result.response.health_dashboard.get();
-        int n_map = std::min(static_cast<int>(d.modules.modules.size()), 15);
         bool objids = (hd && (!hd->detailed_smells.empty() ||
                               !hd->problematic_symbols.empty())) ||
                       !d.naming.outliers.empty();
@@ -489,7 +488,7 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                                                 project_root, scope.allowed);
         }
         emit_lcf_header_scoped(out, scope.label, "unified", 1,
-                        lcf_token_count(n_map, 0, hd != nullptr, 0, true));
+                        0);  // placeholder: finalize_lcf rewrites tokens= from the body
         emit_summary(out, files_data, file_paths, project_root, file_count,
                      symbol_count, &corpus.excluded, &indexer.attr_registry(),
                      eh ? &*eh : nullptr);
@@ -654,7 +653,7 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
         // a code failure to agent callers) — still no fake zeros.
         git::Provider provider;
         if (!git::Provider::create(project_root, provider)) {
-            emit_lcf_header(out, mode, 1, lcf_token_count(0, 0, false, 0, true));
+            emit_lcf_header(out, mode, 1, 0);  // placeholder: finalize_lcf rewrites tokens= from the body
             out << "== GIT ==\n"
                 << "available=false\n"
                 << "reason=not a git repository: "
@@ -668,7 +667,7 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
         // gate). Tracked monorepo subdirs pass.
         if (provider.repo_root() != project_root &&
             !provider.tracks_any(project_root)) {
-            emit_lcf_header(out, mode, 1, lcf_token_count(0, 0, false, 0, true));
+            emit_lcf_header(out, mode, 1, 0);  // placeholder: finalize_lcf rewrites tokens= from the body
             out << "== GIT ==\n"
                 << "available=false\n"
                 << "reason=project root is untracked in the enclosing git "
@@ -705,7 +704,7 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                           "(shallow clones lack parents)";
                 return make_error_response("code_insight", detail);
             }
-            emit_lcf_header(out, mode, 1, lcf_token_count(0, 0, false, 0, true));
+            emit_lcf_header(out, mode, 1, 0);  // placeholder: finalize_lcf rewrites tokens= from the body
             emit_git_changes(out, report, project_root);
         } else {  // git_hotspots
             git::ChangeFrequencyParams fp = git::ChangeFrequencyParams::defaults();
@@ -718,7 +717,7 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
             if (!freq.analyze(fp, report))
                 return make_error_response("code_insight",
                                            "git frequency analysis failed");
-            emit_lcf_header(out, mode, 1, lcf_token_count(0, 0, false, 0, true));
+            emit_lcf_header(out, mode, 1, 0);  // placeholder: finalize_lcf rewrites tokens= from the body
             emit_git_hotspots(out, report, win, project_root);
 
             // == RISK MATRIX == — churn x complexity, the "refactor here
@@ -861,9 +860,7 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                            static_cast<int>(rep.classes.size())
                     << " smaller classes (raise max_results)\n";
             }
-            std::string body = out.str();
-            if (!body.empty() && body.back() == '\n') body.pop_back();
-            return ToolResult{std::move(body), false};
+            return ToolResult{finalize_lcf(out), false};
         }
 
         if (detailed_mode == "impact") {
@@ -1021,9 +1018,7 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                     out << "  ... and " << affected.size() - al
                         << " more\n";
             }
-            std::string body = out.str();
-            if (!body.empty() && body.back() == '\n') body.pop_back();
-            return ToolResult{std::move(body), false};
+            return ToolResult{finalize_lcf(out), false};
         }
 
         if (detailed_mode == "security") {
@@ -1190,9 +1185,7 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
             if (cands.size() > lim)
                 out << "  ... and " << cands.size() - lim
                     << " more (raise max_results)\n";
-            std::string body = out.str();
-            if (!body.empty() && body.back() == '\n') body.pop_back();
-            return ToolResult{std::move(body), false};
+            return ToolResult{finalize_lcf(out), false};
         }
 
         if (detailed_mode == "annotate") {
@@ -1416,9 +1409,7 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
             }
 
             out << "total_pending=" << pending << "\n";
-            std::string body = out.str();
-            if (!body.empty() && body.back() == '\n') body.pop_back();
-            return ToolResult{std::move(body), false};
+            return ToolResult{finalize_lcf(out), false};
         }
 
         auto is_c_family_path = [](std::string_view rel) {
@@ -1929,9 +1920,7 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                     out << "(nothing pending — every candidate is either "
                            "annotated or resolved)\n";
             }
-            std::string body = out.str();
-            if (!body.empty() && body.back() == '\n') body.pop_back();
-            return ToolResult{std::move(body), false};
+            return ToolResult{finalize_lcf(out), false};
         }
 
         if (detailed_mode == "errors" || detailed_mode == "resources") {
@@ -1976,9 +1965,7 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
             } else {
                 emit_resource_management(out, eh.resources, kAll);
             }
-            std::string body = out.str();
-            if (!body.empty() && body.back() == '\n') body.pop_back();
-            return ToolResult{std::move(body), false};
+            return ToolResult{finalize_lcf(out), false};
         }
 
         CodebaseIntelligenceParams dp;
@@ -2162,7 +2149,6 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
             return make_error_response("code_insight", d.result.error);
         }
         const auto* hd = d.result.response.health_dashboard.get();
-        int n_map = std::min(static_cast<int>(d.modules.modules.size()), 15);
         bool objids = (hd && (!hd->detailed_smells.empty() ||
                               !hd->problematic_symbols.empty())) ||
                       !d.naming.outliers.empty();
@@ -2177,7 +2163,7 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                                                 project_root, scope.allowed);
         }
         emit_lcf_header_scoped(out, scope.label, "overview", 1,
-                        lcf_token_count(n_map, 0, hd != nullptr, 0, false));
+                        0);  // placeholder: finalize_lcf rewrites tokens= from the body
         emit_summary(out, files_data, file_paths, project_root, file_count,
                      symbol_count, &corpus.excluded, &indexer.attr_registry(),
                      eh ? &*eh : nullptr);
