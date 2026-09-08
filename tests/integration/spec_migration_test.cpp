@@ -412,51 +412,11 @@ INSTANTIATE_TEST_SUITE_P(
     });
 
 // ---------------------------------------------------------------------------
-// Parametrized integration suite for index/*: walks tests/integration/index/
-// recursively for *.spec.json files. Same pattern as IntegrationCliSpec /
-// IntegrationHttpSpec — adding a new index case is just dropping a new
-// <name>.spec.json + goldens/index/<name>.json into the tree. Two of the
-// three parity index descriptors (lci-cpp-repo, lci-go-repo) are
-// intentionally not migrated because their corpora are live git checkouts;
-// see tests/integration/index/KNOWN_DIVERGENCE.md for rationale.
+// The index/* and probes/* parametrized suites were removed with S9 (decision
+// D3): their specs drove `lci debug deps|graph|export`, whose engine was the
+// deleted src/symbollinker tree. `debug info|validate` coverage now lives in
+// tests/integration/cli/debug/ against the server's /status.
 // ---------------------------------------------------------------------------
-
-class IntegrationIndexSpec : public ::testing::TestWithParam<SpecCase> {};
-
-TEST_P(IntegrationIndexSpec, MatchesGolden) {
-    ExpectSpecMatches(GetParam());
-}
-
-INSTANTIATE_TEST_SUITE_P(
-    All,
-    IntegrationIndexSpec,
-    ::testing::ValuesIn(DiscoverIntegrationSpecsFromTestsDir("index")),
-    [](const ::testing::TestParamInfo<SpecCase>& param_info) {
-        return SpecCaseInstanceName(param_info.param);
-    });
-
-// ---------------------------------------------------------------------------
-// Parametrized integration suite for probes/*: walks
-// tests/integration/probes/ recursively for *.spec.json files. Same pattern
-// as IntegrationCliSpec / IntegrationHttpSpec / IntegrationIndexSpec —
-// adding a new probe is just dropping a new <name>.spec.json + matching
-// golden into the tree. Replaces the explicit SpecMigrationTest.ProbesGraph
-// anchor that lived here through migrations 3/8 - 5/8.
-// ---------------------------------------------------------------------------
-
-class IntegrationProbesSpec : public ::testing::TestWithParam<SpecCase> {};
-
-TEST_P(IntegrationProbesSpec, MatchesGolden) {
-    ExpectSpecMatches(GetParam());
-}
-
-INSTANTIATE_TEST_SUITE_P(
-    All,
-    IntegrationProbesSpec,
-    ::testing::ValuesIn(DiscoverIntegrationSpecsFromTestsDir("probes")),
-    [](const ::testing::TestParamInfo<SpecCase>& param_info) {
-        return SpecCaseInstanceName(param_info.param);
-    });
 
 // ---------------------------------------------------------------------------
 // Parametrized integration suite for mcp/*: walks tests/integration/mcp/
