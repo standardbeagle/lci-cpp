@@ -906,6 +906,36 @@ EnhancedSymbol make_ref_sym(std::string name, int fan_in, SymbolID id) {
 }
 }  // namespace
 
+// A 200-char dictionary word and a 200-char rare word at edit distance 1:
+// the edit-distance buffers were fixed int[64] stack arrays ("words here
+// are short (< 32 chars)" — unenforced), so this overflows the stack. The
+// RED is an ASan stack-buffer-overflow; the functional expectation (the
+// correction is still found) is the GREEN in every build.
+TEST(NamingAnalyzer, LongTokenDoesNotOverflowEditDistance) {
+    auto table = SynonymTable::build_default();
+    std::string dict_word(200, 'a');
+    std::string rare_word = dict_word;
+    rare_word[100] = 'b';
+
+    auto d1 = make_ref_sym("run" + dict_word, 2, 1);
+    auto d2 = make_ref_sym("run" + dict_word, 2, 2);
+    auto d3 = make_ref_sym("run" + dict_word, 2, 3);
+    auto r1 = make_ref_sym("run" + rare_word, 2, 4);
+    auto f = make_file("src/x.go", {&d1, &d2, &d3, &r1});
+
+    NamingAnalyzer na;
+    auto rep = na.analyze({f}, table, "");
+
+    bool found = false;
+    for (const auto& o : rep.outliers) {
+        if (o.name == "run" + rare_word) {
+            found = true;
+            EXPECT_EQ(o.reason, "misspelling");
+        }
+    }
+    EXPECT_TRUE(found) << "rare 200-char token got no correction";
+}
+
 TEST(NamingAnalyzer, FlagsUnknownVerbHighFanIn) {
     auto table = SynonymTable::build_default();
     auto frob = make_ref_sym("frobnicate", 3, 1);
