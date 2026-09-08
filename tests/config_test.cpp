@@ -805,6 +805,16 @@ TEST_F(KdlConfigTest, LoadConfigValidatesRanges) {
         << result.error;
 }
 
+TEST_F(KdlConfigTest, MaxMemoryMbZeroMeansAuto) {
+    // The 0-means-auto default for max_memory_mb ran AFTER the <100 range
+    // check, so the documented "0 = auto" value was rejected before the
+    // default could apply.
+    write_kdl("performance {\n  max_memory_mb 0\n}\n");
+    auto result = load_config(temp_dir_.string());
+    ASSERT_TRUE(result.ok()) << result.error;
+    EXPECT_GT(result.config.performance.max_memory_mb, 0);
+}
+
 TEST_F(KdlConfigTest, LoadConfigAppliesSmartDefaults) {
     write_kdl("performance {\n  max_goroutines 0\n}\n");
     auto result = load_config(temp_dir_.string());
