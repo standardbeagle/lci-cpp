@@ -536,7 +536,9 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
         emit_repository_map(out, d.modules.modules);
         emit_entry_points(out, d.result.response.entry_points.get(),
                           project_root);
-        if (hd) emit_health(out, *hd, &d.purity);
+        if (hd) emit_health(out, *hd, &d.purity,
+                            analyzer && analyzer->fixpoint_truncated(),
+                            SideEffectAnalyzer::kMaxPropagationIterations);
         if (eh) {
             emit_error_handling(out, eh->errors, 5);
             emit_resource_management(out, eh->resources, 5);
@@ -660,8 +662,7 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                             const auto* se = analyzer->get_result(
                                 f.path, sym->symbol.line);
                             if (se == nullptr) continue;
-                            if (se->categories & (side_effect::kDynamicCall |
-                                                  side_effect::kReflection))
+                            if (se->categories & side_effect::kDynamicCall)
                                 escapes.push_back(
                                     sym->symbol.name + " (" + rel + ":" +
                                     std::to_string(sym->symbol.line) + ")");
@@ -2217,7 +2218,9 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
         emit_repository_map(out, d.modules.modules);
         emit_entry_points(out, d.result.response.entry_points.get(),
                           project_root);
-        if (hd) emit_health(out, *hd, &d.purity);
+        if (hd) emit_health(out, *hd, &d.purity,
+                            analyzer && analyzer->fixpoint_truncated(),
+                            SideEffectAnalyzer::kMaxPropagationIterations);
         if (eh) {
             emit_error_handling(out, eh->errors, 5);
             emit_resource_management(out, eh->resources, 5);
@@ -2317,9 +2320,9 @@ void register_analysis_handlers(McpServer& server,
     server.add_tool(
         {"code_insight",
          "🎯 Comprehensive codebase intelligence system for AI agents. "
-         "Provides high-level overview (79.8% context reduction), detailed "
-         "analysis (2-4x accuracy improvement), code statistics, and git "
-         "analysis. Modes: overview, detailed, statistics, unified, "
+         "Provides a high-level overview, detailed analysis, code "
+         "statistics, and git analysis, more compact than reading source "
+         "directly. Modes: overview, detailed, statistics, unified, "
          "structure, git_analyze, git_hotspots. See 'info code_insight'.",
          {{"mode", "string", "Analysis mode", ""},
           {"attributes", "string",

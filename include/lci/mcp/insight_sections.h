@@ -125,7 +125,9 @@ std::string git_rel(std::string_view path, std::string_view root);
 void emit_repository_map(std::ostringstream& out,
                          const std::vector<ModuleBoundary>& mods);
 void emit_health(std::ostringstream& out, const HealthDashboard& hd,
-                 const PuritySummary* purity);
+                 const PuritySummary* purity,
+                 bool fixpoint_truncated = false,
+                 int fixpoint_max_iterations = 0);
 void emit_modules(std::ostringstream& out, const ModuleAnalysis& ma);
 void emit_statistics(std::ostringstream& out, const ComplexityMetrics& cm,
                      const CouplingMetrics& cp, const CohesionMetrics& ch,

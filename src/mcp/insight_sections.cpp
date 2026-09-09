@@ -80,7 +80,8 @@ void emit_repository_map(std::ostringstream& out,
 // == HEALTH == — score, complexity, smell summary + detail, problematic
 // symbols, purity. Object IDs ([o=XX]) come from analyzer-populated fields.
 void emit_health(std::ostringstream& out, const HealthDashboard& hd,
-                 const PuritySummary* purity) {
+                 const PuritySummary* purity, bool fixpoint_truncated,
+                 int fixpoint_max_iterations) {
     // Unit-labeled: HEALTH is 0-10 while STATISTICS maintainability is
     // 0-100; unlabeled they read as one inconsistent scale.
     out << "== HEALTH ==\n"
@@ -158,6 +159,13 @@ void emit_health(std::ostringstream& out, const HealthDashboard& hd,
         }
         out << "  query: side_effects {\"mode\": \"impure\", "
                "\"include_reasons\": true}\n";
+        // Finding 7: fixpoint_truncated() previously had no reader — a
+        // partial transitive-purity pass must not read as converged.
+        if (fixpoint_truncated) {
+            out << "  fixpoint_truncated=true (hit cap of "
+                << fixpoint_max_iterations
+                << " propagation iterations; results above are partial)\n";
+        }
     }
     out << "---\n";
 }
