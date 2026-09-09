@@ -669,7 +669,7 @@ int main(int argc, char* argv[]) {
 
     std::string config_init_format = "kdl";
     config_init_cmd->add_option("-f,--format", config_init_format,
-                                "Output format: kdl, yaml, json");
+                                "Output format: kdl");
 
     std::string config_init_output;
     config_init_cmd->add_option("-o,--output", config_init_output,
@@ -695,7 +695,7 @@ int main(int argc, char* argv[]) {
 
     std::string config_show_format = "table";
     config_show_cmd->add_option("-f,--format", config_show_format,
-                                "Output format: kdl, yaml, json, table");
+                                "Output format: table, json");
 
     config_show_cmd->callback([&]() {
         std::exit(run_config_show(gflags, config_show_format));

@@ -38,8 +38,7 @@ int run_config_init(const GlobalFlags& /*flags*/, const std::string& format,
     // instead of producing a file that cannot work.
     if (format == "yaml") {
         std::cerr << "Error: yaml config is not supported — lci only reads "
-                     "KDL. Use -f kdl (or -f json for a machine-readable "
-                     "dump).\n";
+                     "KDL. Use -f kdl.\n";
         return 1;
     }
 
@@ -47,8 +46,6 @@ int run_config_init(const GlobalFlags& /*flags*/, const std::string& format,
     if (output.empty()) {
         if (format == "kdl") {
             output = ".lci.kdl";
-        } else if (format == "json") {
-            output = ".lci.kdl.json";
         } else {
             std::cerr << "Error: unsupported format: " << format << "\n";
             return 1;
@@ -131,41 +128,22 @@ search {
     enable_fuzzy true              // Enable fuzzy matching
 }
 
-// Include specific file patterns (extends defaults)
+// Include specific file patterns (REPLACES the built-in defaults;
+// an include section, once present, must name at least one pattern)
 include {
     "*.rs"                         // Rust files
     "*.zig"                        // Zig files
     "*.lua"                        // Lua scripts
 }
 
-// Exclude specific patterns (extends defaults)
-// Note: All hidden directories (.*/) are excluded by default
+// Exclude specific patterns (REPLACES the ~110 built-in default excludes).
+// Note: all hidden directories (.*/) are skipped regardless of this list.
 exclude {
     "**/my-large-data/**"          // Project-specific exclusions
     "**/*.generated.ts"            // Generated TypeScript
 }
 )";
         }
-    } else if (format == "json") {
-        nlohmann::json cfg;
-        cfg["version"] = 1;
-        cfg["project"]["name"] = "my-project";
-        cfg["project"]["root"] = ".";
-        cfg["index"]["max_file_size"] = 10 * 1024 * 1024;
-        cfg["index"]["max_total_size_mb"] = 500;
-        cfg["index"]["max_file_count"] = 10000;
-        cfg["index"]["follow_symlinks"] = false;
-        cfg["index"]["smart_size_control"] = true;
-        cfg["index"]["priority_mode"] = "recent";
-        cfg["performance"]["max_memory_mb"] = 500;
-        cfg["performance"]["max_goroutines"] = 8;
-        cfg["performance"]["debounce_ms"] = 100;
-        cfg["search"]["max_results"] = 100;
-        cfg["search"]["max_context_lines"] = 50;
-        cfg["search"]["enable_fuzzy"] = true;
-        cfg["include"] = {"*.go", "*.js", "*.jsx", "*.ts", "*.tsx", "*.py"};
-        cfg["exclude"] = {"**/.*/**", "**/node_modules/**", "**/vendor/**"};
-        content = cfg.dump(2) + "\n";
     } else {
         std::cerr << "Error: unsupported format: " << format << "\n";
         return 1;
@@ -196,6 +174,11 @@ exclude {
 }
 
 int run_config_show(const GlobalFlags& flags, const std::string& format) {
+    if (format != "table" && format != "json") {
+        std::cerr << "Error: unsupported format: " << format
+                  << " (supported: table, json)\n";
+        return 1;
+    }
     Config cfg;
     if (std::string err = load_config_with_overrides(flags, cfg); !err.empty()) {
         std::cerr << "Error: " << err << "\n";

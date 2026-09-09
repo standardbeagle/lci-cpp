@@ -83,7 +83,7 @@ std::string load_config_with_overrides(const GlobalFlags& flags, Config& out) {
             !has_git_root_at_or_above(fs::path(root_dir))) {
             return "no .lci.kdl in the current directory and no git "
                    "repository above it; refusing to index the whole cwd. "
-                   "Run `lci init` to create a config here, or pass "
+                   "Run `lci config init` to create a config here, or pass "
                    "--root / -c.";
         }
     }

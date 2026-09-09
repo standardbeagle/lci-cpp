@@ -421,23 +421,17 @@ TEST(CliConfigInitTest, YamlFormatIsRejected) {
     EXPECT_EQ(run_config_init(flags, "yaml", "", false, false), 1);
 }
 
-TEST(CliConfigInitTest, JsonFormatCreatesValidJson) {
+TEST(CliConfigInitTest, JsonFormatIsRejected) {
+    // `config init -f json` used to write a ".lci.kdl.json" file the loader
+    // never reads back. Removed: KDL is the only config format.
     std::string test_file =
         (std::filesystem::temp_directory_path() / "lci_test_config_init.json")
             .string();
     std::remove(test_file.c_str());
 
     GlobalFlags flags;
-    int rc = run_config_init(flags, "json", test_file, false, false);
-    EXPECT_EQ(rc, 0);
-
-    std::ifstream ifs(test_file);
-    ASSERT_TRUE(ifs.good());
-    nlohmann::json j;
-    EXPECT_NO_THROW(ifs >> j);
-    EXPECT_TRUE(j.contains("project"));
-    EXPECT_TRUE(j.contains("index"));
-    std::remove(test_file.c_str());
+    EXPECT_EQ(run_config_init(flags, "json", test_file, false, false), 1);
+    EXPECT_FALSE(std::filesystem::exists(test_file));
 }
 
 TEST(CliConfigInitTest, RefusesOverwriteWithoutForce) {
@@ -488,6 +482,15 @@ TEST(CliConfigShowTest, JsonFormatReturnsZero) {
     GlobalFlags flags;
     int rc = run_config_show(flags, "json");
     EXPECT_EQ(rc, 0);
+}
+
+TEST(CliConfigShowTest, UnsupportedFormatFails) {
+    // Help text used to advertise "kdl, yaml, json, table" while the
+    // implementation only ever emitted json or table (silently falling
+    // through to table for anything else). Fail fast instead.
+    GlobalFlags flags;
+    EXPECT_EQ(run_config_show(flags, "yaml"), 1);
+    EXPECT_EQ(run_config_show(flags, "kdl"), 1);
 }
 
 // -- nested subcommand + global flag fallthrough ------------------------------
