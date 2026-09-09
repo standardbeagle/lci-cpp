@@ -280,7 +280,10 @@ struct StatsResponse {
     int64_t index_size_bytes{};
     int64_t build_duration_ms{};
     double memory_rss_mb{};
-    int num_threads{};
+    /// Live thread count for the server process, or -1 when the platform
+    /// offers no cheap way to read it (never a fabricated stand-in like
+    /// hardware_concurrency()).
+    int num_threads = -1;
     double uptime_seconds{};
     int64_t search_count{};
     double avg_search_time_ms{};
@@ -525,7 +528,7 @@ class IndexServer {
     // redundant by construction. start() re-arms it for the next listen.
     std::atomic<bool> self_stop_notified_{false};
 
-    void reaper_loop(bool root_existed_at_start);
+    void reaper_loop();
     void touch_activity();
     void publish_registry_entry();
     bool write_registry_file();

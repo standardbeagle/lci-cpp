@@ -107,7 +107,9 @@ int run_status(const GlobalFlags& flags, bool json_output, bool verbose) {
         report["build_duration_ms"] = stats->build_duration_ms;
         // Server-side runtime metrics from the server's own /stats (C++
         // reports threads + RSS where Go reports goroutines + heap).
-        report["num_threads"] = stats->num_threads;
+        if (stats->num_threads >= 0) {
+            report["num_threads"] = stats->num_threads;
+        }
         report["memory_rss_mb"] = stats->memory_rss_mb;
         report["timestamp"] = iso_timestamp_now();
         report["uptime_seconds"] = format_uptime_seconds(stats->uptime_seconds);
@@ -142,7 +144,11 @@ int run_status(const GlobalFlags& flags, bool json_output, bool verbose) {
     std::printf("\nServer Runtime:\n");
     std::printf("  Uptime:           %s\n",
                 format_seconds(stats->uptime_seconds).c_str());
-    std::printf("  Threads:          %d\n", stats->num_threads);
+    if (stats->num_threads >= 0) {
+        std::printf("  Threads:          %d\n", stats->num_threads);
+    } else {
+        std::printf("  Threads:          unavailable\n");
+    }
 
     std::printf("\nMemory Usage:\n");
     std::printf("  RSS:              %.1f MB\n", stats->memory_rss_mb);

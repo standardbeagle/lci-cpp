@@ -61,15 +61,6 @@ std::filesystem::path display_root(const Config& cfg) {
     return ec ? std::filesystem::path(".") : cwd;
 }
 
-int debug_removed_linker_command(const char* name) {
-    std::printf(
-        "debug %s: unavailable — the symbol-linker dependency engine was "
-        "removed (S9); it was a second, stale extractor reachable only from "
-        "this command\n",
-        name);
-    return 1;
-}
-
 }  // namespace
 
 // -- debug info ---------------------------------------------------------------
@@ -117,7 +108,11 @@ int run_debug_info(const GlobalFlags& flags, bool verbose, bool incremental) {
         std::printf("Build duration: %lld ms\n",
                     static_cast<long long>(snap.stats.build_duration_ms));
         std::printf("Uptime: %.3f s\n", snap.stats.uptime_seconds);
-        std::printf("Threads: %d\n", snap.stats.num_threads);
+        if (snap.stats.num_threads >= 0) {
+            std::printf("Threads: %d\n", snap.stats.num_threads);
+        } else {
+            std::printf("Threads: unavailable\n");
+        }
         std::printf("RSS: %.1f MB\n", snap.stats.memory_rss_mb);
         std::printf("Searches: %lld\n",
                     static_cast<long long>(snap.stats.search_count));
@@ -157,22 +152,6 @@ int run_debug_validate(const GlobalFlags& /*flags*/, bool /*incremental*/) {
         "exists in the C++ port; the previous unconditional pass verdict "
         "was fabricated (S9)\n");
     return 1;
-}
-
-// -- debug deps / graph -------------------------------------------------------
-//
-// The dependency graph was computed by the old symbol-linker tree, deleted in S9 (its
-// resolution was wrong: Go imports always external, PHP namespaces mapped to
-// directories, SymbolID collisions past 10k symbols). The subcommand
-// registrations live in cli/main.cpp (S12 scope); until S12 removes them the
-// entry points fail fast instead of fabricating a graph.
-
-int run_debug_deps(const GlobalFlags& /*flags*/, bool /*verbose*/) {
-    return debug_removed_linker_command("deps");
-}
-
-int run_debug_graph(const GlobalFlags& /*flags*/, const std::string& /*output*/) {
-    return debug_removed_linker_command("graph");
 }
 
 // -- debug export -------------------------------------------------------------

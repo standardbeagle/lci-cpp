@@ -76,6 +76,27 @@ double get_rss_mb() {
 #endif
 }
 
+// Live thread count for THIS process, or -1 when the platform offers no
+// cheap way to read it. hardware_concurrency() is the CPU count, not the
+// number of threads this process actually has running (HTTP worker pool,
+// watcher, indexer helpers) -- reporting it under a "Threads:" label is a
+// fabricated measurement (karpathy-principles rule 6). On Linux each thread
+// (including the main one) owns an entry under /proc/self/task/.
+int live_thread_count() {
+#if defined(__linux__)
+    std::error_code ec;
+    int count = 0;
+    for (auto it = std::filesystem::directory_iterator("/proc/self/task", ec);
+         !ec && it != std::filesystem::directory_iterator(); it.increment(ec)) {
+        ++count;
+    }
+    if (ec || count == 0) return -1;
+    return count;
+#else
+    return -1;
+#endif
+}
+
 }  // namespace
 
 // -- Endpoint: /ping ----------------------------------------------------------
@@ -459,7 +480,11 @@ void IndexServer::handle_stats(const httplib::Request& /*req*/,
         static_cast<int64_t>(indexer_->index_size_bytes());
     j["build_duration_ms"] = stats.indexing_time_ns / 1'000'000;
     j["memory_rss_mb"] = get_rss_mb();
-    j["num_threads"] = static_cast<int>(std::thread::hardware_concurrency());
+    // Field is omitted (not zeroed) when the platform has no cheap live
+    // thread count -- see live_thread_count().
+    if (int threads = live_thread_count(); threads >= 0) {
+        j["num_threads"] = threads;
+    }
     j["uptime_seconds"] = uptime;
     json_response(res, j);
 }
@@ -508,9 +533,12 @@ void IndexServer::handle_tree(const httplib::Request& req,
     auto tree = indexer_->ref_tracker().build_function_tree(
         sym->id, max_depth > 0 ? max_depth : 10);
 
-    // Serialize tree recursively. Mirrors Go's tree node shape, which
-    // includes annotations / safety / impact fields (left null/zero in
-    // the C++ port until the analyzers that produce them are wired in).
+    // Serialize tree recursively. Go's tree node shape also carried
+    // node_type/dependent_count/edit_risk_score/impact_radius/annotations/
+    // safety_notes/stability_tags; no analyzer in the C++ port ever computes
+    // them, so they were emitted as hardcoded 0/null (karpathy-principles
+    // rule 6, fabricated measurement) and are dropped rather than kept as
+    // stubs.
     std::function<int(const FunctionTreeNode&)> count_nodes;
     count_nodes = [&](const FunctionTreeNode& node) -> int {
         int n = 1;
@@ -547,14 +575,7 @@ void IndexServer::handle_tree(const httplib::Request& req,
             node.file_id != 0
                 ? rel_tree_path(indexer_->get_file_path(node.file_id))
                 : "";
-        nj["node_type"] = 0;
         nj["dependency_count"] = static_cast<int>(node.children.size());
-        nj["dependent_count"] = 0;
-        nj["edit_risk_score"] = 0;
-        nj["impact_radius"] = 0;
-        nj["annotations"] = nullptr;
-        nj["safety_notes"] = nullptr;
-        nj["stability_tags"] = nullptr;
 
         nlohmann::json children = nlohmann::json::array();
         for (const auto& child : node.children) {

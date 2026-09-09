@@ -246,7 +246,9 @@ std::optional<StatsResponse> Client::get_stats(std::string& error) {
     stats.index_size_bytes = j->value("index_size_bytes", int64_t{0});
     stats.build_duration_ms = j->value("build_duration_ms", int64_t{0});
     stats.memory_rss_mb = j->value("memory_rss_mb", 0.0);
-    stats.num_threads = j->value("num_threads", 0);
+    // -1 sentinel: the server omits num_threads on platforms with no cheap
+    // live thread count. Distinct from a genuine 0.
+    stats.num_threads = j->value("num_threads", -1);
     stats.uptime_seconds = j->value("uptime_seconds", 0.0);
     stats.search_count = j->value("search_count", int64_t{0});
     stats.avg_search_time_ms = j->value("avg_search_time_ms", 0.0);
