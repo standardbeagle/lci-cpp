@@ -565,12 +565,25 @@ std::vector<EnhancedSymbol> ReferenceTracker::process_file(
             Symbol sm = sym;
             sm.file_id = file_id;
 
+            // A function-local variable is never API surface, whatever the
+            // language or spelling: compute_is_exported's default branch
+            // (C/C++, Java, Kotlin, Rust, C#, PHP, Zig) assumes exported
+            // for everything since it looks only at path + name, so every
+            // local in those languages was mis-marked [exported] (the
+            // extractor never wrote visibility for locals either, so the
+            // visibility check below cannot catch this case).
+            bool is_local_variable =
+                sm.type == SymbolType::Variable && !scope_chain.empty() &&
+                (scope_chain.back().type == ScopeType::Function ||
+                 scope_chain.back().type == ScopeType::Method);
+
             // Declared visibility beats the name heuristic: a `private
             // function` is not API whatever its spelling (before the
             // extractor wrote visibility, every PHP/C#/Java private method
             // counted as exported).
             bool is_exported =
-                sm.visibility == SymbolVisibility::Private ||
+                is_local_variable ||
+                        sm.visibility == SymbolVisibility::Private ||
                         sm.visibility == SymbolVisibility::Protected ||
                         sm.visibility == SymbolVisibility::Internal
                     ? false

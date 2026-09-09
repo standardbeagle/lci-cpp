@@ -2428,5 +2428,38 @@ TEST(ReferenceTracker, RemoveFileUnresolvesInboundRefs) {
         << "re-added B was not re-bound to A's inbound call";
 }
 
+// C/C++ (and Java/Kotlin/Rust/C#/PHP/Zig) have no capitalization or
+// underscore convention compute_is_exported can read, so its default
+// branch assumes exported -- but a function-local variable is never API
+// surface regardless of language. Before the fix, `lci symbols` marked
+// every C++ local [exported] (probe: src/core/callers_report.cpp:34/106).
+TEST(ReferenceTrackerTest, CppLocalVariableIsNeverExported) {
+    ReferenceTracker rt;
+
+    std::vector<Symbol> symbols = {
+        make_sym("build_site_list", SymbolType::Function, 1, 1, 10),
+        make_sym("arr", SymbolType::Variable, 1, 2, 2),
+    };
+    std::vector<Reference> refs;
+    std::vector<ScopeInfo> scopes = {
+        ScopeInfo{ScopeType::Function, "build_site_list", "build_site_list",
+                 1, 10, 0, LangId::Unknown, {}},
+    };
+
+    auto enhanced = rt.process_file(1, "callers_report.cpp", symbols, refs,
+                                    scopes);
+    ASSERT_EQ(enhanced.size(), 2u);
+    EXPECT_TRUE(enhanced[0].is_exported)
+        << "top-level C++ function should default to exported";
+
+    const EnhancedSymbol* local = nullptr;
+    for (const auto& es : enhanced) {
+        if (es.symbol.name == "arr") local = &es;
+    }
+    ASSERT_NE(local, nullptr);
+    EXPECT_FALSE(local->is_exported)
+        << "function-local variable must never be marked exported";
+}
+
 }  // namespace
 }  // namespace lci
