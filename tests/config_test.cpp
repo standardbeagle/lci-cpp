@@ -575,44 +575,46 @@ exclude "**/real_projects/**"
 }
 
 // ---------------------------------------------------------------------------
-// .lci.kdl file-load default contract: when a config file IS loaded, Go's
-// parseKDL (internal/config/kdl_config.go) builds its base Config from a
-// struct literal that OMITS several index/performance fields, so they take
-// Go's zero value — NOT the richer no-file defaults from config.go's Load().
-// A .lci.kdl with no `index` block must therefore yield respect_gitignore
-// false, watch_mode false, watch_debounce_ms 0 (Go zero values), even though
-// make_default_config() (the no-file path) has them true/true/300.
-// Repro: Go `config show` prints "Respect .gitignore: false" for a .lci.kdl
-// that only has a `performance` block; C++ printed true before this fix.
+// .lci.kdl file-load default contract: the Go reference binary is retired,
+// and make_kdl_base_config used to force a Go-parity base
+// (watch_mode=false, watch_debounce_ms=0, max_goroutines=4) onto every
+// project that had a .lci.kdl file, even one that never mentions those
+// keys. That silently disabled watch mode for any project with a config
+// file. A .lci.kdl with no `index`/`performance` block now yields the SAME
+// struct defaults as the no-file path.
 // ---------------------------------------------------------------------------
-TEST_F(KdlConfigTest, FileWithoutIndexBlockUsesGoZeroValueIndexDefaults) {
+TEST_F(KdlConfigTest, FileWithoutIndexBlockKeepsStructDefaults) {
     // A .lci.kdl with only a performance block — no `index` block at all.
     write_kdl("performance {\n  max_goroutines 8\n}\n");
     auto result = load_config(temp_dir_.string());
     ASSERT_TRUE(result.ok()) << result.error;
 
-    // Go's parseKDL leaves respect_gitignore at the struct default (true)
-    // when the KDL omits the field — empirically verified against the Go
-    // binary (see commit ec91211, iter-24). Only watch_mode and
-    // watch_debounce_ms zero-value through the omit path.
-    EXPECT_TRUE(result.config.index.respect_gitignore)
-        << "Go emits respect_gitignore true when a .lci.kdl is loaded "
-           "without an explicit respect_gitignore field";
-    EXPECT_FALSE(result.config.index.watch_mode)
-        << "Go's parseKDL literal omits watch_mode -> zero value false";
-    EXPECT_EQ(result.config.index.watch_debounce_ms, 0)
-        << "Go's parseKDL literal omits watch_debounce_ms -> zero value 0";
+    EXPECT_TRUE(result.config.index.respect_gitignore);
+    EXPECT_TRUE(result.config.index.watch_mode)
+        << "a project with a .lci.kdl that never mentions watch_mode must "
+           "still default to watch mode ON, same as the no-file path";
+    EXPECT_EQ(result.config.index.watch_debounce_ms, 300);
 
-    // Fields present in Go's parseKDL literal keep their literal values.
     EXPECT_EQ(result.config.index.max_file_size, 10 * 1024 * 1024);
     EXPECT_EQ(result.config.index.max_total_size_mb, 500);
     EXPECT_EQ(result.config.index.max_file_count, 50000);
     EXPECT_FALSE(result.config.index.follow_symlinks);
-    EXPECT_TRUE(result.config.index.smart_size_control);
-    EXPECT_EQ(result.config.index.priority_mode, "recent");
 
-    // performance: max_goroutines came from the file (8).
+    // performance: max_goroutines came from the file (8); the default
+    // (0 = auto-detect) is untouched by loading a project file.
     EXPECT_EQ(result.config.performance.max_goroutines, 8);
+}
+
+TEST_F(KdlConfigTest, ProjectFileWithoutWatchModeKeyStaysWatchModeOn) {
+    // Regression pin for the removed Go-parity base layer: any .lci.kdl,
+    // even one with an index block that never mentions watch_mode, keeps
+    // watch mode on by default.
+    write_kdl("index {\n  max_file_count 1000\n}\n");
+    auto result = load_config(temp_dir_.string());
+    ASSERT_TRUE(result.ok()) << result.error;
+    EXPECT_TRUE(result.config.index.watch_mode);
+    EXPECT_EQ(result.config.index.watch_debounce_ms, 300);
+    EXPECT_EQ(result.config.performance.max_goroutines, 0);
 }
 
 TEST_F(KdlConfigTest, FileWithExplicitIndexBlockStillHonorsFileValues) {
