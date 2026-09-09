@@ -1,0 +1,4 @@
+interface:
+  display_name: "lci Feature Map"
+  short_description: "Route to the lci feature-area skill for code lookup or product comparison"
+  default_prompt: "Use $lci-feature-map to find which lci feature-area skill covers this question, then follow it."

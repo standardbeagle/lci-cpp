@@ -1,0 +1,4 @@
+interface:
+  display_name: "LCI Symbol Navigation"
+  short_description: "Map and compare lci symbol lookup: def, refs, callers, tree, symbols, inspect, browse"
+  default_prompt: "Use $lci-symbol-navigation to locate the code behind an lci symbol-navigation surface or to compare lci navigation against another tool."

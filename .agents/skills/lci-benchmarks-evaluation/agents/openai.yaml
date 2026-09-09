@@ -1,0 +1,4 @@
+interface:
+  display_name: "LCI Benchmarks and Evaluation"
+  short_description: "Map lci measurement surfaces and run product comparisons"
+  default_prompt: "Use $lci-benchmarks-evaluation to locate how lci is measured and to run an honest comparison against another tool."

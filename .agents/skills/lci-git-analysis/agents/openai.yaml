@@ -1,0 +1,4 @@
+interface:
+  display_name: "LCI Git Analysis"
+  short_description: "Map and compare lci's git change analysis (git-analyze, git_analysis, git_hotspots)"
+  default_prompt: "Use $lci-git-analysis to locate the git change-analysis code paths or compare lci's git analysis against other tools."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "LCI Indexing Pipeline"
+  short_description: "Map and compare the lci indexing pipeline: scan, gitignore, parse, RCU publish, watch, memory"
+  default_prompt: "Use $lci-indexing-pipeline to locate indexing/reindex/watch/memory code in lci and compare it honestly against other code indexers."

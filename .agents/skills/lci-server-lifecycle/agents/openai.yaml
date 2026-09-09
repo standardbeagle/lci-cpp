@@ -1,0 +1,4 @@
+interface:
+  display_name: "LCI Server Lifecycle"
+  short_description: "Map lci's per-root index server, socket, registry and reaper"
+  default_prompt: "Use $lci-server-lifecycle to find the server lifecycle code, probe a running server, or compare lci's daemon model with other tools."

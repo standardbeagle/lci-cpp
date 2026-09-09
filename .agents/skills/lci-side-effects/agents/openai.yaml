@@ -1,0 +1,4 @@
+interface:
+  display_name: "LCI Side Effects"
+  short_description: "Map and compare lci purity, side-effect and @lci: annotation analysis"
+  default_prompt: "Use $lci-side-effects to locate the purity / side_effects / semantic_annotations code paths and compare them honestly against other analyzers."

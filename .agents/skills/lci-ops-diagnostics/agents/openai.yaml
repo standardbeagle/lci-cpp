@@ -1,0 +1,4 @@
+interface:
+  display_name: "LCI Ops Diagnostics"
+  short_description: "Map lci install, update, diagnostics, profiling, packaging"
+  default_prompt: "Use $lci-ops-diagnostics to locate the install/update/diagnostics/packaging code and compare lci's footprint with other tools."

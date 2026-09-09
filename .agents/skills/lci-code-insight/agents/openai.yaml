@@ -1,0 +1,4 @@
+interface:
+  display_name: "LCI Code Insight"
+  short_description: "Map and compare lci's code_insight codebase-intelligence report"
+  default_prompt: "Use $lci-code-insight to locate code_insight code paths, probe a mode, or compare the report against another analysis tool."

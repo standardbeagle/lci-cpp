@@ -1,0 +1,4 @@
+interface:
+  display_name: "LCI Config"
+  short_description: "Map and compare lci's .lci.kdl configuration surface"
+  default_prompt: "Use $lci-config to find the code behind a .lci.kdl key, env var, or ignore rule, or to compare lci's configuration model with another tool's."

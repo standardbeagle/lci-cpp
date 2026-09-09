@@ -1,0 +1,4 @@
+interface:
+  display_name: "LCI Get Context"
+  short_description: "Map and compare lci's agent-oriented context delivery (get_context, context manifests)"
+  default_prompt: "Use $lci-get-context to locate the get_context / context manifest code paths, their pinned Go-port traps, and to compare lci's context delivery against other tools."

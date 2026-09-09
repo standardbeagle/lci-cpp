@@ -1,0 +1,4 @@
+interface:
+  display_name: "LCI Search"
+  short_description: "Map and compare lci content search (search, grep, trigram, ranking)"
+  default_prompt: "Use $lci-search to locate the code behind lci search/grep and to compare it honestly against other code search tools."

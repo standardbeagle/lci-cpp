@@ -1,0 +1,4 @@
+interface:
+  display_name: "LCI MCP Server"
+  short_description: "Navigate and compare lci's MCP protocol layer"
+  default_prompt: "Use $lci-mcp-server to locate the MCP transport, registration, dispatch and bridge code, or to compare lci's MCP layer against other code MCP servers."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "LCI Parsing and Languages"
+  short_description: "Map lci's tree-sitter parser, extractor and per-language coverage"
+  default_prompt: "Use $lci-parsing-languages to locate the parser/extractor code for a language and check what lci extracts for it."
