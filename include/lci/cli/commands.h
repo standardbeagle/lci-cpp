@@ -308,17 +308,11 @@ int run_debug_info(const GlobalFlags& flags, bool verbose, bool incremental);
 /// `incremental` runs incremental-mode consistency checks (matches Go).
 int run_debug_validate(const GlobalFlags& flags, bool incremental);
 
-/// debug deps subcommand. Returns 0 on success, non-zero on error.
-int run_debug_deps(const GlobalFlags& flags, bool verbose);
-
 /// debug export subcommand. Returns 0 on success, non-zero on error.
 /// `incremental` exports the incremental-index delta instead of the full
 /// snapshot (matches Go).
 int run_debug_export(const GlobalFlags& flags, const std::string& output,
                      bool verbose, bool incremental);
-
-/// debug graph subcommand. Returns 0 on success, non-zero on error.
-int run_debug_graph(const GlobalFlags& flags, const std::string& output);
 
 // -- debug memprofile ---------------------------------------------------------
 

@@ -750,18 +750,6 @@ int main(int argc, char* argv[]) {
         std::exit(run_debug_validate(gflags, debug_validate_incremental));
     });
 
-    auto* debug_deps_cmd =
-        debug_cmd->add_subcommand("deps", "Analyze dependency graph")
-            ->alias("dependencies");
-
-    bool debug_deps_verbose = false;
-    debug_deps_cmd->add_flag("-v,--verbose", debug_deps_verbose,
-                             "Show detailed dependency information");
-
-    debug_deps_cmd->callback([&]() {
-        std::exit(run_debug_deps(gflags, debug_deps_verbose));
-    });
-
     auto* debug_export_cmd =
         debug_cmd
             ->add_subcommand("export", "Export debug information to JSON")
@@ -785,20 +773,6 @@ int main(int argc, char* argv[]) {
         std::exit(run_debug_export(gflags, debug_export_output,
                                    debug_export_verbose,
                                    debug_export_incremental));
-    });
-
-    auto* debug_graph_cmd =
-        debug_cmd
-            ->add_subcommand("graph",
-                             "Export dependency graph in DOT format")
-            ->alias("g");
-
-    std::string debug_graph_output = "dependency-graph.dot";
-    debug_graph_cmd->add_option("-o,--output", debug_graph_output,
-                                "Output file for dependency graph");
-
-    debug_graph_cmd->callback([&]() {
-        std::exit(run_debug_graph(gflags, debug_graph_output));
     });
 
     auto* debug_memprofile_cmd =
