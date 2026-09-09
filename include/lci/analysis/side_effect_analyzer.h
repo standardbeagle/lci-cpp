@@ -14,9 +14,7 @@ namespace lci {
 
 /// Configuration for side effect analysis behavior.
 struct SideEffectAnalyzerConfig {
-    bool trust_annotations{true};
     bool strict_mode{true};
-    bool track_field_access{true};
     int max_accesses_per_function{1000};
 };
 
@@ -197,6 +195,11 @@ class SideEffectAnalyzer {
     /// converging — the transitive assessment is partial and must not be
     /// reported silently. False before the first run or when converged.
     bool fixpoint_truncated() const { return fixpoint_truncated_; }
+
+    /// Iteration cap propagate_transitive enforces (finding 7: surfaced
+    /// alongside fixpoint_truncated() so a consumer can report "hit the
+    /// cap at N iterations" rather than a bare boolean).
+    static constexpr int kMaxPropagationIterations = 100;
 
     /// Direct write to results_ — used by populate_from_index above and
     /// future callers that build SideEffectInfo outside the

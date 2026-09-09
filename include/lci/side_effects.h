@@ -18,7 +18,6 @@ inline constexpr uint32_t kParamWrite = 1 << 0;
 inline constexpr uint32_t kReceiverWrite = 1 << 1;
 inline constexpr uint32_t kGlobalWrite = 1 << 2;
 inline constexpr uint32_t kClosureWrite = 1 << 3;
-inline constexpr uint32_t kFieldWrite = 1 << 4;
 
 // I/O effects
 inline constexpr uint32_t kIO = 1 << 5;
@@ -28,24 +27,21 @@ inline constexpr uint32_t kNetwork = 1 << 7;
 // Control flow effects
 inline constexpr uint32_t kThrow = 1 << 8;
 inline constexpr uint32_t kChannel = 1 << 9;
-inline constexpr uint32_t kAsync = 1 << 10;
 
 // Uncertainty markers (conservative flags)
 inline constexpr uint32_t kExternalCall = 1 << 11;
 inline constexpr uint32_t kDynamicCall = 1 << 12;
-inline constexpr uint32_t kReflection = 1 << 13;
 inline constexpr uint32_t kUncertain = 1 << 14;
-inline constexpr uint32_t kIndirectWrite = 1 << 15;
 
 // Aggregate masks
 inline constexpr uint32_t kWriteMask = kParamWrite | kReceiverWrite | kGlobalWrite |
-                                       kClosureWrite | kFieldWrite | kIndirectWrite;
+                                       kClosureWrite;
 inline constexpr uint32_t kIOMask = kIO | kDatabase | kNetwork;
-inline constexpr uint32_t kUncertaintyMask = kExternalCall | kDynamicCall | kReflection |
+inline constexpr uint32_t kUncertaintyMask = kExternalCall | kDynamicCall |
                                              kUncertain;
 
 /// Total number of individual side effect category flags.
-inline constexpr int kCategoryCount = 16;
+inline constexpr int kCategoryCount = 12;
 }  // namespace side_effect
 
 /// Purity classification of a function (1-5 scale).

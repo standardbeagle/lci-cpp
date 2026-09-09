@@ -20,16 +20,13 @@ std::vector<std::string> categories_to_strings(uint32_t cat) {
     if (cat & side_effect::kReceiverWrite) result.emplace_back("receiver_write");
     if (cat & side_effect::kGlobalWrite) result.emplace_back("global_write");
     if (cat & side_effect::kClosureWrite) result.emplace_back("closure_write");
-    if (cat & side_effect::kFieldWrite) result.emplace_back("field_write");
     if (cat & side_effect::kIO) result.emplace_back("io");
     if (cat & side_effect::kDatabase) result.emplace_back("database");
     if (cat & side_effect::kNetwork) result.emplace_back("network");
     if (cat & side_effect::kThrow) result.emplace_back("throw");
     if (cat & side_effect::kChannel) result.emplace_back("channel");
-    if (cat & side_effect::kAsync) result.emplace_back("async");
     if (cat & side_effect::kExternalCall) result.emplace_back("external_call");
     if (cat & side_effect::kDynamicCall) result.emplace_back("dynamic_call");
-    if (cat & side_effect::kReflection) result.emplace_back("reflection");
     if (cat & side_effect::kUncertain) result.emplace_back("uncertain");
     return result;
 }
@@ -66,7 +63,7 @@ PurityLevel compute_purity_level(uint32_t categories, bool has_unresolved) {
     if (categories & side_effect::kGlobalWrite) {
         return PurityLevel::ModuleGlobal;
     }
-    if (categories & (side_effect::kReceiverWrite | side_effect::kFieldWrite)) {
+    if (categories & side_effect::kReceiverWrite) {
         return PurityLevel::ObjectState;
     }
     if (categories & side_effect::kParamWrite) {
@@ -85,6 +82,16 @@ uint32_t classify_callee_category(std::string_view callee);
 // results_ key: file:line:column. The column distinguishes functions that
 // share a start line (minified JS / one-liners); callers without column
 // information pass 0.
+//
+// TODO(finding 6, src/parser/unified_extractor.cpp:391): the AST pass's
+// begin_function() call site never passes start_column, so today every
+// caller of make_result_key (the AST pass here, and populate_from_index /
+// propagate_transitive below via the index) keys on column 0 uniformly —
+// consistent, but blind to same-line distinct functions until the parser
+// side supplies a real column. When it does, populate_from_index and
+// propagate_transitive must read es->symbol.column (or equivalent) instead
+// of the hardcoded 0 below, keeping the (file,line,column) key exact rather
+// than falling back to a line-only key.
 std::string make_result_key(std::string_view file, int line, int column) {
     std::string key(file);
     key += ':';
@@ -250,9 +257,28 @@ SideEffectInfo SideEffectAnalyzer::end_function() {
     return info;
 }
 
+namespace {
+// Finding 13: a by-reference/pointer parameter declarator can carry the
+// C/C++ sigil in either the registered name (add_parameter, from the
+// signature) or the write-site identifier (record_access, from the lvalue
+// base) but not necessarily both — a mismatch there falls through
+// classify_target straight to AccessTarget::Global (`apply_context_lookup_mode(
+// nlohmann::json& params)` then reports "writes to global 'params'" for a
+// write to the parameter itself). Normalize both sides the same way so a
+// reference/pointer parameter matches regardless of which side kept the
+// sigil.
+std::string_view strip_ref_ptr_sigils(std::string_view name) {
+    while (!name.empty() &&
+          (name.front() == '*' || name.front() == '&' || name.front() == ' '))
+        name.remove_prefix(1);
+    return name;
+}
+}  // namespace
+
 void SideEffectAnalyzer::add_parameter(std::string_view name, int index) {
     if (current_func_)
-        current_func_->parameters[std::string(name)] = index;
+        current_func_->parameters[std::string(strip_ref_ptr_sigils(name))] =
+            index;
 }
 
 void SideEffectAnalyzer::set_receiver(std::string_view name,
@@ -583,7 +609,7 @@ void SideEffectAnalyzer::propagate_transitive(const MasterIndex& indexer) {
     }
     std::sort(sorted_symbols.begin(), sorted_symbols.end());
 
-    constexpr int kMaxIterations = 100;
+    constexpr int kMaxIterations = SideEffectAnalyzer::kMaxPropagationIterations;
     bool changed = true;
     int iter = 0;
     for (; changed && iter < kMaxIterations; ++iter) {
@@ -775,7 +801,7 @@ AccessTarget SideEffectAnalyzer::classify_target(
     if (!current_func_) return AccessTarget::Unknown;
 
     auto& ctx = *current_func_;
-    std::string id(identifier);
+    std::string id(strip_ref_ptr_sigils(identifier));
 
     if (ctx.parameters.contains(id)) return AccessTarget::Parameter;
 

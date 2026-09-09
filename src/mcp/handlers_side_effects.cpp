@@ -27,39 +27,70 @@ namespace {
 // categories_to_strings is shared via side_effects.h (also used by
 // get_context purity emission) — no local duplicate.
 
+/// Canonical (name, bit) table for `side_effects {"mode":"category"}`. The
+/// error message below enumerates this same table so it cannot drift from
+/// what the lookup actually accepts (finding 9).
+struct CategoryEntry {
+    std::string_view canonical_name;
+    uint32_t bit;
+};
+constexpr CategoryEntry kCategoryTable[] = {
+    {"param_write", side_effect::kParamWrite},
+    {"receiver_write", side_effect::kReceiverWrite},
+    {"global_write", side_effect::kGlobalWrite},
+    {"closure_write", side_effect::kClosureWrite},
+    {"io", side_effect::kIO},
+    {"database", side_effect::kDatabase},
+    {"network", side_effect::kNetwork},
+    {"throw", side_effect::kThrow},
+    {"channel", side_effect::kChannel},
+    {"external_call", side_effect::kExternalCall},
+    {"dynamic_call", side_effect::kDynamicCall},
+    {"uncertain", side_effect::kUncertain},
+};
+
 /// Maps a category name string to a side_effect bitfield constant.
 uint32_t category_name_to_bit(std::string_view name) {
     // Normalise to lowercase
     std::string lower(name);
     std::transform(lower.begin(), lower.end(), lower.begin(),
                    [](unsigned char c) { return std::tolower(c); });
+    // Accept a few common spelling variants of the canonical name.
+    std::string collapsed;
+    collapsed.reserve(lower.size());
+    for (char c : lower) {
+        if (c == '-') continue;
+        collapsed += (c == '_') ? '_' : c;
+    }
 
-    if (lower == "param_write" || lower == "paramwrite" || lower == "param-write")
-        return side_effect::kParamWrite;
-    if (lower == "receiver_write" || lower == "receiverwrite" || lower == "receiver-write")
-        return side_effect::kReceiverWrite;
-    if (lower == "global_write" || lower == "globalwrite" || lower == "global-write" || lower == "global")
-        return side_effect::kGlobalWrite;
-    if (lower == "closure_write" || lower == "closurewrite" || lower == "closure-write" || lower == "closure")
-        return side_effect::kClosureWrite;
-    if (lower == "field_write" || lower == "fieldwrite" || lower == "field-write")
-        return side_effect::kFieldWrite;
-    if (lower == "io") return side_effect::kIO;
-    if (lower == "database" || lower == "db") return side_effect::kDatabase;
-    if (lower == "network" || lower == "net") return side_effect::kNetwork;
-    if (lower == "throw" || lower == "throws" || lower == "panic")
-        return side_effect::kThrow;
-    if (lower == "channel" || lower == "chan") return side_effect::kChannel;
-    if (lower == "async") return side_effect::kAsync;
-    if (lower == "external_call" || lower == "externalcall" || lower == "external-call" || lower == "external")
-        return side_effect::kExternalCall;
-    if (lower == "dynamic_call" || lower == "dynamiccall" || lower == "dynamic-call" || lower == "dynamic")
-        return side_effect::kDynamicCall;
-    if (lower == "reflection" || lower == "reflect")
-        return side_effect::kReflection;
-    if (lower == "uncertain" || lower == "unknown")
-        return side_effect::kUncertain;
+    if (lower == "global") return side_effect::kGlobalWrite;
+    if (lower == "closure") return side_effect::kClosureWrite;
+    if (lower == "db") return side_effect::kDatabase;
+    if (lower == "net") return side_effect::kNetwork;
+    if (lower == "throws" || lower == "panic") return side_effect::kThrow;
+    if (lower == "chan") return side_effect::kChannel;
+    if (lower == "external") return side_effect::kExternalCall;
+    if (lower == "dynamic") return side_effect::kDynamicCall;
+    if (lower == "unknown") return side_effect::kUncertain;
+
+    for (const auto& entry : kCategoryTable) {
+        std::string no_sep(entry.canonical_name);
+        no_sep.erase(std::remove(no_sep.begin(), no_sep.end(), '_'), no_sep.end());
+        if (lower == entry.canonical_name || collapsed == no_sep) return entry.bit;
+    }
     return side_effect::kNone;
+}
+
+/// Builds "the valid category list" clause for the unknown-category error,
+/// enumerated straight from kCategoryTable so it cannot drift from what
+/// category_name_to_bit actually accepts.
+std::string valid_category_names() {
+    std::string out;
+    for (size_t i = 0; i < std::size(kCategoryTable); ++i) {
+        if (i != 0) out += ", ";
+        out += kCategoryTable[i].canonical_name;
+    }
+    return out;
 }
 
 /// Builds a JSON object from a SideEffectInfo entry.
@@ -395,7 +426,7 @@ ToolResult handle_semantic_annotations(const nlohmann::json& raw_params,
         if (total_ann == 0) {
             response["hint"] =
                 "no @lci: semantic annotations exist in this corpus; add "
-                "`@lci:label=...` comments above symbols to populate them";
+                "`@lci:label[...]` comments above symbols to populate them";
         } else {
             response["hint"] =
                 "no symbols matched " + what + "; the index holds " +
@@ -620,9 +651,8 @@ ToolResult side_effect_category_query(const nlohmann::json& params,
     if (bit == side_effect::kNone) {
         return make_error_response(
             "side_effects",
-            "unknown category: " + category +
-            " (valid: param_write, global_write, io, network, throw, "
-            "channel, external_call)");
+            "unknown category: " + category + " (valid: " +
+            valid_category_names() + ")");
     }
 
     bool include_reasons = params.value("include_reasons", false);
@@ -724,6 +754,15 @@ ToolResult side_effect_summary(SideEffectAnalyzer& analyzer,
     response["total_count"] = total;
     response["mode"] = "summary";
     response["summary"] = std::move(summary);
+
+    // Finding 7: fixpoint_truncated() previously had no reader anywhere —
+    // surface it here so a caller can tell a partial transitive assessment
+    // from a converged one instead of silently trusting an incomplete run.
+    if (analyzer.fixpoint_truncated()) {
+        response["fixpoint_truncated"] = true;
+        response["fixpoint_max_iterations"] =
+            SideEffectAnalyzer::kMaxPropagationIterations;
+    }
 
     // Error-handling + resource rollups (JSON twin of the code_insight
     // sections; the natural err-lookup ingestion path).

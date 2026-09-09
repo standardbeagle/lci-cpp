@@ -142,6 +142,36 @@ TEST(SideEffectAnalyzerTest, ParameterMutationDetected) {
     EXPECT_FALSE(info.impurity_reasons.empty());
 }
 
+// Finding 13: a reference/pointer parameter must classify as a param write,
+// never a global write, regardless of which side (the signature
+// registration or the write-site lvalue) still carries the C/C++ '&'/'*'
+// sigil. Mirrors `apply_context_lookup_mode(nlohmann::json& params)`
+// mutating `params` in place.
+TEST(SideEffectAnalyzerTest, ReferenceParameterWriteIsParamNotGlobal) {
+    SideEffectAnalyzer sa("cpp");
+    sa.begin_function("apply_context_lookup_mode", "handlers_get_context.cpp",
+                      100, 145);
+    sa.add_parameter("&params", 0);  // signature keeps the reference sigil
+    sa.record_access("params", {"max_depth"}, AccessType::Write, 110, 8);
+    auto info = sa.end_function();
+
+    EXPECT_NE(info.categories & side_effect::kParamWrite, 0u)
+        << "reference parameter write must classify as a param write";
+    EXPECT_EQ(info.categories & side_effect::kGlobalWrite, 0u)
+        << "must NOT be reported as a global write to 'params'";
+}
+
+TEST(SideEffectAnalyzerTest, PointerParameterWriteSiteKeepsSigil) {
+    SideEffectAnalyzer sa("cpp");
+    sa.begin_function("mutate_ptr", "file.cpp", 5, 9);
+    sa.add_parameter("out", 0);  // signature strips the sigil
+    sa.record_access("*out", {}, AccessType::Write, 6, 3);
+    auto info = sa.end_function();
+
+    EXPECT_NE(info.categories & side_effect::kParamWrite, 0u);
+    EXPECT_EQ(info.categories & side_effect::kGlobalWrite, 0u);
+}
+
 TEST(SideEffectAnalyzerTest, ReceiverWriteDetected) {
     SideEffectAnalyzer sa("go");
     sa.begin_function("SetName", "type.go", 10, 13);

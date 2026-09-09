@@ -29,27 +29,23 @@ TEST(SideEffectCategoryTest, NoneIsZero) {
     EXPECT_EQ(side_effect::kNone, 0u);
 }
 
-TEST(SideEffectCategoryTest, All16FlagsHaveUniqueBitPositions) {
+TEST(SideEffectCategoryTest, AllFlagsHaveUniqueBitPositions) {
     EXPECT_EQ(side_effect::kParamWrite, 1u << 0);
     EXPECT_EQ(side_effect::kReceiverWrite, 1u << 1);
     EXPECT_EQ(side_effect::kGlobalWrite, 1u << 2);
     EXPECT_EQ(side_effect::kClosureWrite, 1u << 3);
-    EXPECT_EQ(side_effect::kFieldWrite, 1u << 4);
     EXPECT_EQ(side_effect::kIO, 1u << 5);
     EXPECT_EQ(side_effect::kDatabase, 1u << 6);
     EXPECT_EQ(side_effect::kNetwork, 1u << 7);
     EXPECT_EQ(side_effect::kThrow, 1u << 8);
     EXPECT_EQ(side_effect::kChannel, 1u << 9);
-    EXPECT_EQ(side_effect::kAsync, 1u << 10);
     EXPECT_EQ(side_effect::kExternalCall, 1u << 11);
     EXPECT_EQ(side_effect::kDynamicCall, 1u << 12);
-    EXPECT_EQ(side_effect::kReflection, 1u << 13);
     EXPECT_EQ(side_effect::kUncertain, 1u << 14);
-    EXPECT_EQ(side_effect::kIndirectWrite, 1u << 15);
 }
 
-TEST(SideEffectCategoryTest, CategoryCountIs16) {
-    EXPECT_EQ(side_effect::kCategoryCount, 16);
+TEST(SideEffectCategoryTest, CategoryCountIs12) {
+    EXPECT_EQ(side_effect::kCategoryCount, 12);
 }
 
 TEST(SideEffectCategoryTest, BitwiseOrCombinesFlags) {
@@ -68,8 +64,7 @@ TEST(SideEffectCategoryTest, BitwiseAndDetectsFlags) {
 
 TEST(SideEffectCategoryTest, WriteMaskCoversAllWriteFlags) {
     uint32_t expected = side_effect::kParamWrite | side_effect::kReceiverWrite |
-                        side_effect::kGlobalWrite | side_effect::kClosureWrite |
-                        side_effect::kFieldWrite | side_effect::kIndirectWrite;
+                        side_effect::kGlobalWrite | side_effect::kClosureWrite;
     EXPECT_EQ(side_effect::kWriteMask, expected);
 }
 
@@ -80,19 +75,18 @@ TEST(SideEffectCategoryTest, IOMaskCoversAllIOFlags) {
 
 TEST(SideEffectCategoryTest, UncertaintyMaskCoversAllUncertaintyFlags) {
     uint32_t expected = side_effect::kExternalCall | side_effect::kDynamicCall |
-                        side_effect::kReflection | side_effect::kUncertain;
+                        side_effect::kUncertain;
     EXPECT_EQ(side_effect::kUncertaintyMask, expected);
 }
 
 TEST(SideEffectCategoryTest, AllFlagsFitInUint32) {
     uint32_t all = side_effect::kParamWrite | side_effect::kReceiverWrite |
                    side_effect::kGlobalWrite | side_effect::kClosureWrite |
-                   side_effect::kFieldWrite | side_effect::kIO | side_effect::kDatabase |
+                   side_effect::kIO | side_effect::kDatabase |
                    side_effect::kNetwork | side_effect::kThrow | side_effect::kChannel |
-                   side_effect::kAsync | side_effect::kExternalCall | side_effect::kDynamicCall |
-                   side_effect::kReflection | side_effect::kUncertain |
-                   side_effect::kIndirectWrite;
-    EXPECT_EQ(all, 0xFFFFu);
+                   side_effect::kExternalCall | side_effect::kDynamicCall |
+                   side_effect::kUncertain;
+    EXPECT_EQ(all, 0x5BEFu);
     static_assert(sizeof(uint32_t) == 4);
 }
 
