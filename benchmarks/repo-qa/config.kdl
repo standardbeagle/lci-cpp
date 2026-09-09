@@ -5,7 +5,7 @@
 
 defaults {
     opencode-bin "opencode"
-    lci-bin "/home/beagle/work/core/lci-cpp/build/src/lci"
+    lci-bin "/home/beagle/work/core/lci-cpp/build/release/src/lci"
     corpus-root "/home/beagle/work/core/lci-cpp/real_projects"
     // Judge history: copilot sonnet-5 rejects sustained use; sonnet-4.6 was
     // solid for 700+ judgments then began mass-timing-out alongside all

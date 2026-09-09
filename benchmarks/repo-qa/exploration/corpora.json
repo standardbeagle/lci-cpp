@@ -24,6 +24,7 @@
     {
       "id": "scikit-learn",
       "source_path": "/home/beagle/work/core/lci-cpp/real_projects/python/scikit-learn",
+      "source_path_note": "not present on this host; clone via `git clone https://github.com/scikit-learn/scikit-learn.git` and checkout `pinned_commit` into this path before running the forge",
       "pinned_commit": "0885712e436b07cd04d60e955101aaf6a8cbb709",
       "reference_forge_version": "1",
       "reference_tree_hash": {
@@ -120,6 +121,7 @@
     {
       "id": "next.js",
       "source_path": "/home/beagle/work/core/lci-cpp/real_projects/typescript/next.js",
+      "source_path_note": "not present on this host; clone via `git clone https://github.com/vercel/next.js.git` and checkout `pinned_commit` into this path before running the forge",
       "pinned_commit": "97532172c065ca2b49dd79d1fa44c3a0b864065b",
       "reference_forge_version": "1",
       "reference_tree_hash": {
