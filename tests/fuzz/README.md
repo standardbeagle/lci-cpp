@@ -14,9 +14,11 @@ each fuzz executable only adds the libFuzzer driver (`-fsanitize=fuzzer`).
 | `fuzz_trigram_extract` | ASCII/Unicode trigram extraction |
 | `fuzz_search_input` | search query validation + execution |
 | `fuzz_symbol_extract` | tree-sitter symbol extraction across 13 languages |
-| `fuzz_mcp_dispatch` | full MCP stdio/JSON-RPC boundary → all 14 tools + arg guard |
+| `fuzz_mcp_dispatch` | full MCP stdio/JSON-RPC boundary → all 15 tools + arg guard |
 | `fuzz_find_files` | glob / substring / path / Levenshtein-fuzzy path matcher |
 | `fuzz_get_context` | object-ID base-63 codec + param normalization + call hierarchy |
+| `fuzz_config_kdl` | `.lci.kdl` project config parser |
+| `fuzz_query_parser` | `lci search` advanced-query tokenizer + `path_matches_glob` backtracking matcher |
 
 ## Build
 
