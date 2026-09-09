@@ -33,15 +33,6 @@ using namespace std::chrono_literals;
 // ---------------------------------------------------------------------------
 
 /// Skips the current test if the real project is not available.
-#define SKIP_IF_NO_REAL_PROJECT(lang, name)                                 \
-    do {                                                                    \
-        auto _rp = testing::find_real_project((lang), (name));              \
-        if (!_rp) {                                                         \
-            GTEST_SKIP() << "Real project not found: " << (lang) << "/"    \
-                         << (name)                                          \
-                         << ". Run ./scripts/add-real-projects.sh";        \
-        }                                                                   \
-    } while (0)
 
 // ---------------------------------------------------------------------------
 // Test: indexing real projects completes successfully

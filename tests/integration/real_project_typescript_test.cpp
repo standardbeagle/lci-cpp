@@ -19,16 +19,6 @@
 namespace lci {
 namespace {
 
-#define SKIP_IF_NO_REAL_PROJECT(lang, name)                                 \
-    do {                                                                    \
-        auto _rp = testing::find_real_project((lang), (name));              \
-        if (!_rp) {                                                         \
-            GTEST_SKIP() << "Real project not found: " << (lang) << "/"    \
-                         << (name)                                          \
-                         << ". Run scripts/add-real-projects.sh --minimal";\
-        }                                                                   \
-    } while (0)
-
 class RealProjectTypescriptTest : public ::testing::Test {};
 
 // Smoke: trpc indexes at all. Tree-sitter-typescript grammar must be

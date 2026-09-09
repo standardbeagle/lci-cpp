@@ -485,3 +485,16 @@ inline RealProjectContext setup_real_project(const fs::path& project_path,
 
 }  // namespace testing
 }  // namespace lci
+
+/// Skips the current test when the named real-project corpus is not present
+/// locally (cloned via scripts/add-real-projects.sh --minimal). Defined once
+/// here rather than copied per test file (test-iteration-discipline rule 7).
+#define SKIP_IF_NO_REAL_PROJECT(lang, name)                                  \
+    do {                                                                     \
+        auto _rp = ::lci::testing::find_real_project((lang), (name));        \
+        if (!_rp) {                                                          \
+            GTEST_SKIP() << "Real project not found: " << (lang) << "/"      \
+                         << (name)                                           \
+                         << ". Run scripts/add-real-projects.sh --minimal";  \
+        }                                                                    \
+    } while (0)

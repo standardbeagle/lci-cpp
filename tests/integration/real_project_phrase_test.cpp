@@ -19,15 +19,6 @@ namespace {
 
 namespace fs = std::filesystem;
 
-#define SKIP_IF_NO_REAL_PROJECT(lang, name)                                 \
-    do {                                                                    \
-        auto _rp = testing::find_real_project((lang), (name));              \
-        if (!_rp) {                                                         \
-            GTEST_SKIP() << "Real project not found: " << (lang) << "/"    \
-                         << (name)                                          \
-                         << ". Run ./scripts/add-real-projects.sh";        \
-        }                                                                   \
-    } while (0)
 
 // ---------------------------------------------------------------------------
 // Test: multi-word phrase matching on real projects
