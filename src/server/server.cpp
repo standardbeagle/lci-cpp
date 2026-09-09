@@ -97,11 +97,14 @@ uint32_t current_user_id() {
 
 /// Own ANONYMOUS RSS in MB from /proc/self/status; -1 when unavailable
 /// (non-Linux or unreadable). Used by the reaper's RSS self-cap.
-/// RssAnon, not VmRSS, deliberately: since the content store retains
-/// file-backed mmaps, VmRSS counts page-cache pages the kernel reclaims
-/// on its own under pressure -- they cannot OOM the host, so they must
-/// not trip the cap. Anonymous memory is what kills machines. Falls back
-/// to VmRSS on kernels without the RssAnon field.
+/// RssAnon, not VmRSS, deliberately: file content is copied into per-file
+/// heap vectors at index time (include/lci/core/file_content_store.h) --
+/// there is no retained mmap -- so nearly all of the index's memory is
+/// already anonymous. VmRSS also counts this process's own executable and
+/// shared-library file-backed pages, which the kernel can reclaim under
+/// pressure and which do not track corpus size; RssAnon isolates the heap
+/// growth the cap actually needs to bound. Falls back to VmRSS on kernels
+/// without the RssAnon field.
 long read_own_rss_mb() {
 #if defined(__linux__)
     std::FILE* f = std::fopen("/proc/self/status", "r");
