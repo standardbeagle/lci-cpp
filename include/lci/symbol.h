@@ -119,11 +119,10 @@ struct EnhancedSymbol {
     // Function-specific metadata (compact bitfield representation)
     uint8_t parameter_count{};
     uint8_t function_flags{};
-    // NOTE: receiver_type is currently written by NO extractor, yet it is
-    // load-bearing API surface: the /list-symbols receiver filter
-    // (server.cpp, handlers_explore.cpp) compares against it, so with no
-    // writer that filter silently matches nothing -- a half-built feature,
-    // tracked as a finding, not a deletable field.
+    // NOTE: receiver_type is written by ReferenceTracker::derive_receiver_type
+    // (src/core/reference_tracker.cpp), which backfills it for every method
+    // symbol during reference resolution. The /list-symbols receiver filter
+    // (server.cpp, handlers_explore.cpp) compares against it.
     std::string receiver_type;
     // No annotations vector: never written by any extractor or enricher,
     // and every reader was guarded on !empty() (dead branches, deleted).
