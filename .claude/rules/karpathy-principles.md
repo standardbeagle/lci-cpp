@@ -6,7 +6,7 @@ Performance discipline for the LCI C++ port. Speed is a feature. The Go binary i
 
 **No lazy slowdowns. No cutting corners.**
 
-LCI's reason to exist is sub-millisecond semantic code search with 79.8% context reduction vs Grep. Every regression on parity or latency negates the project's value. Treat perf as correctness — a green test that ran 10× too slow is a red test.
+LCI's reason to exist is semantic code search fast enough for interactive use, aiming to cut the context an agent must read compared with Grep. Every regression on parity or latency negates the project's value. Treat perf as correctness — a green test that ran 10× too slow is a red test.
 
 ## Hard Rules
 
