@@ -13,6 +13,8 @@ namespace lci {
 class MasterIndex;
 class SearchEngine;
 class SideEffectAnalyzer;
+class GraphPropagator;
+class SemanticAnnotator;
 
 namespace mcp {
 
@@ -31,9 +33,15 @@ nlohmann::json similar_symbol_suggestions(
 /// optionally a SearchEngine. If the index is null, handlers return errors.
 /// `analyzer` (optional) supplies side-effect/purity data to get_context; when
 /// null, purity is omitted (Go nil-propagator parity).
+/// `propagator`/`sem_annotator` (optional) wire the rich (full/section)
+/// get_context path to GraphPropagator/SemanticAnnotator so
+/// propagation_labels/criticality/annotator fields are populated
+/// (finding 2) — when null, those fields are omitted exactly as before.
 void register_core_handlers(McpServer& server, MasterIndex* indexer,
                             SearchEngine* search_engine,
-                            SideEffectAnalyzer* analyzer = nullptr);
+                            SideEffectAnalyzer* analyzer = nullptr,
+                            GraphPropagator* propagator = nullptr,
+                            SemanticAnnotator* sem_annotator = nullptr);
 
 // -- Handler functions (exposed for testing) ----------------------------------
 
@@ -62,7 +70,9 @@ ToolResult handle_search(const nlohmann::json& params,
 /// non-null, function/method contexts gain a `purity` block (Go getPurityInfo).
 ToolResult handle_get_context(const nlohmann::json& params,
                               MasterIndex& indexer,
-                              const SideEffectAnalyzer* analyzer = nullptr);
+                              const SideEffectAnalyzer* analyzer = nullptr,
+                              GraphPropagator* propagator = nullptr,
+                              SemanticAnnotator* sem_annotator = nullptr);
 
 /// Handles the "find_files" tool: searches file paths in the index
 /// using substring and case-insensitive matching.

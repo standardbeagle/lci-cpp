@@ -56,15 +56,20 @@ void McpRuntime::warmup(MasterIndex& index) {
     // purity propagates: any caller of an impure function is itself
     // impure unless its own purity overrides. Decay mode keeps strength
     // bounded so deep call chains don't blow up.
+    // Finding 11: matching by (name, start_line) misses every anonymous
+    // function/closure — SideEffectInfo carries no name for those, so
+    // find_symbols_by_name("") never resolves them and they silently never
+    // seed the propagator. Match by (file, line) instead: walk each impure
+    // result's own file's enhanced symbols and compare start_line directly,
+    // which needs no name at all.
     auto rt_snap = index.ref_tracker().pin();
     for (const auto& [key, info] : side_effects.results()) {
-        if (!info.is_pure) {
-            for (const auto& es :
-                 rt_snap->find_symbols_by_name(info.function_name)) {
-                if (es &&
-                    static_cast<int>(es->symbol.line) == info.start_line) {
-                    propagator.seed_label(es->id, "impure", 1.0);
-                }
+        if (info.is_pure) continue;
+        FileID fid = index.path_to_id(info.file_path);
+        if (fid == FileID{0}) continue;
+        for (const auto& es : rt_snap->get_file_enhanced_symbols(fid)) {
+            if (es && static_cast<int>(es->symbol.line) == info.start_line) {
+                propagator.seed_label(es->id, "impure", 1.0);
             }
         }
     }
@@ -91,7 +96,8 @@ void McpRuntime::warmup(MasterIndex& index) {
 void register_all_handlers(McpServer& server, MasterIndex* index,
                            SearchEngine* search_engine, McpRuntime* runtime) {
     register_core_handlers(server, index, search_engine,
-                           &runtime->side_effects);
+                           &runtime->side_effects, &runtime->propagator,
+                           &runtime->annotator);
     register_explore_handlers(server, index);
     register_index_handlers(server, index);
     register_analysis_handlers(server, index, &runtime->annotator,

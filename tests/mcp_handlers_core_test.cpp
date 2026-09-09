@@ -4,6 +4,7 @@
 #include <lci/config.h>
 #include <lci/core/context_lookup.h>
 #include <lci/core/context_lookup_types.h>
+#include <lci/core/graph_propagator.h>
 #include <lci/core/reference_tracker.h>
 #include <lci/core/semantic_annotator.h>
 #include <lci/idcodec.h>
@@ -494,6 +495,46 @@ TEST_F(GetContextPurityTest, PurityOmittedWithoutAnalyzer) {
     auto json = nlohmann::json::parse(result.text);
     ASSERT_FALSE(json["contexts"].empty());
     EXPECT_FALSE(json["contexts"][0].contains("purity"));
+}
+
+// Finding 2: the rich (mode=full) get_context path never called
+// engine.set_graph_propagator/set_semantic_annotator even though McpRuntime
+// seeds a real GraphPropagator at warmup, so propagation_labels/
+// criticality_analysis silently stayed empty in production. Seed a
+// propagator directly (skipping the annotator dependency) and require
+// handle_get_context to surface it when passed through.
+TEST_F(GetContextPurityTest, RichRequestSurfacesPropagationLabelsWhenWired) {
+    auto snapshot = indexer_->ref_tracker().pin();
+    auto sym = snapshot->find_symbol_by_name("Adder");
+    ASSERT_TRUE(sym);
+
+    GraphPropagator propagator(&indexer_->ref_tracker());
+    propagator.seed_label(sym->id, "critical", 1.0);
+    propagator.propagate();
+
+    // The rich (mode=full) path only populates `matches` off the `name`
+    // param (handlers_get_context.cpp:434) — an `id`-only request takes a
+    // separate object-id-decode branch that never reaches it. Use `name`
+    // so this test exercises the same rich path a real full-mode caller
+    // hits.
+    nlohmann::json params;
+    params["name"] = "Adder";
+    params["mode"] = "full";
+    auto result = handle_get_context(params, *indexer_, /*analyzer=*/nullptr,
+                                     &propagator, /*sem_annotator=*/nullptr);
+    ASSERT_FALSE(result.is_error) << result.text;
+    auto json = nlohmann::json::parse(result.text);
+    ASSERT_TRUE(json.contains("context")) << result.text;
+    const auto& sc = json["context"]["semantic_context"];
+    ASSERT_TRUE(sc.contains("propagation_labels")) << result.text;
+    ASSERT_FALSE(sc["propagation_labels"].empty())
+        << "propagation_labels must be non-empty once a seeded propagator "
+           "is wired through handle_get_context: " << result.text;
+    bool found_critical = false;
+    for (const auto& label : sc["propagation_labels"]) {
+        if (label.value("label", "") == "critical") found_critical = true;
+    }
+    EXPECT_TRUE(found_critical) << result.text;
 }
 
 TEST_F(HandlersFixture, SearchMissingPatternErrors) {

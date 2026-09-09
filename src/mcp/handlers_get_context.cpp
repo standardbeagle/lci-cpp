@@ -19,7 +19,9 @@
 
 #include <lci/analysis/side_effect_analyzer.h>
 #include <lci/core/context_lookup.h>
+#include <lci/core/graph_propagator.h>
 #include <lci/core/reference_tracker.h>
+#include <lci/core/semantic_annotator.h>
 #include <lci/idcodec.h>
 #include <lci/indexing/master_index.h>
 #include <lci/mcp/schemas/search.h>  // generated: kSEARCH_SCHEMA
@@ -332,7 +334,9 @@ void resolve_object_id(std::string_view id, MasterIndex& indexer,
 
 ToolResult handle_get_context(const nlohmann::json& params,
                               MasterIndex& indexer,
-                              const SideEffectAnalyzer* analyzer) {
+                              const SideEffectAnalyzer* analyzer,
+                              GraphPropagator* propagator,
+                              SemanticAnnotator* sem_annotator) {
     // Step 0: Alias normalization. `symbol_id`, `object_id`, `object_ids`,
     // `oid` all map to `id`. Go parity (handlers.go:2075 NormalizeContextParams).
     nlohmann::json p = params;
@@ -555,6 +559,12 @@ ToolResult handle_get_context(const nlohmann::json& params,
                 ContextLookupEngine engine(indexer);
                 engine.set_max_context_depth(max_depth);
                 engine.set_include_ai_text(p.value("include_ai_text", true));
+                // Finding 2: without this, propagation_labels/criticality/
+                // annotator fields are always empty in production even
+                // though McpRuntime seeds and runs a propagator at warmup.
+                if (propagator) engine.set_graph_propagator(propagator);
+                if (sem_annotator)
+                    engine.set_semantic_annotator(sem_annotator);
                 if (p.contains("confidence_threshold")) {
                     engine.set_confidence_threshold(
                         p["confidence_threshold"].get<double>());

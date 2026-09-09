@@ -19,7 +19,9 @@
 
 #include <lci/analysis/side_effect_analyzer.h>
 #include <lci/core/context_lookup.h>
+#include <lci/core/graph_propagator.h>
 #include <lci/core/reference_tracker.h>
+#include <lci/core/semantic_annotator.h>
 #include <lci/idcodec.h>
 #include <lci/indexing/master_index.h>
 #include <lci/mcp/schemas/search.h>  // generated: kSEARCH_SCHEMA
@@ -193,7 +195,9 @@ ToolResult handle_info(const nlohmann::json& params,
 
 void register_core_handlers(McpServer& server, MasterIndex* indexer,
                             SearchEngine* search_engine,
-                            SideEffectAnalyzer* analyzer) {
+                            SideEffectAnalyzer* analyzer,
+                            GraphPropagator* propagator,
+                            SemanticAnnotator* sem_annotator) {
     // Register the "info" tool (definition + real handler)
     server.add_tool(
         {"info",
@@ -313,13 +317,15 @@ void register_core_handlers(McpServer& server, MasterIndex* indexer,
          // symbol/path trigger the handler's auto-search workflow hint
          // (the guard would otherwise reject the hint's own inputs).
          {"symbol_id", "object_id", "object_ids", "oid", "symbol", "path"}},
-        [indexer, analyzer](const nlohmann::json& p) -> ToolResult {
+        [indexer, analyzer, propagator, sem_annotator](
+            const nlohmann::json& p) -> ToolResult {
             if (!indexer) {
                 return make_unavailable_response(
                     "get_context", "index not available",
                     "retry shortly; the server is still starting or indexing");
             }
-            return handle_get_context(p, *indexer, analyzer);
+            return handle_get_context(p, *indexer, analyzer, propagator,
+                                      sem_annotator);
         }
         // exclusive (default): the context-lookup engine + SideEffectAnalyzer
         // path is unaudited for concurrent reads — not proven snapshot-only.
