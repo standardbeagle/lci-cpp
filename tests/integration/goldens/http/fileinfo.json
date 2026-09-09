@@ -1,3 +1,6 @@
 {
-  "file_info": {}
+  "file_info": {
+    "path": "${CORPUS}/a.go",
+    "symbol_count": 1
+  }
 }
