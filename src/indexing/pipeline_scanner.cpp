@@ -159,9 +159,18 @@ void FileScanner::walk_directory(
         if (entry.is_directory(ec)) {
             if (ec) continue;
 
-            // Skip hidden directories
+            // Skip hidden directories, UNLESS an explicit include pattern
+            // names this hidden path — otherwise `--include`/`include {}`
+            // can never reach ".github/**" or similar, no matter what the
+            // user writes. "Names it" means the pattern text mentions the
+            // directory's own name (rel_path or dirname), not the bare
+            // wildcard-all default (an empty inclusions_ list, which the
+            // hidden-dir skip must still win against).
             auto dirname = entry.path().filename().string();
-            if (!dirname.empty() && dirname[0] == '.') continue;
+            if (!dirname.empty() && dirname[0] == '.' &&
+                !hidden_path_explicitly_included(rel_path, dirname)) {
+                continue;
+            }
 
             // Check gitignore for directory
             if (config_.index.respect_gitignore &&
@@ -255,6 +264,18 @@ bool FileScanner::should_include(std::string_view rel_path) const {
     if (inclusions_.empty()) return true;
     for (const auto& pattern : inclusions_) {
         if (matches_compiled(pattern, rel_path)) return true;
+    }
+    return false;
+}
+
+bool FileScanner::hidden_path_explicitly_included(
+    std::string_view rel_path, std::string_view dirname) const {
+    if (inclusions_.empty()) return false;
+    for (const auto& pattern : inclusions_) {
+        if (pattern.pattern.find(rel_path) != std::string::npos ||
+            pattern.pattern.find(dirname) != std::string::npos) {
+            return true;
+        }
     }
     return false;
 }

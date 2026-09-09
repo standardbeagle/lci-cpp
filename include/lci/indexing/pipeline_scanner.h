@@ -101,6 +101,16 @@ class FileScanner {
     /// Returns true if the path matches an inclusion pattern (or no inclusions set).
     bool should_include(std::string_view rel_path) const;
 
+    /// True when a hidden directory (dotfile-style, name starts with '.')
+    /// is explicitly named by a configured include pattern, so the
+    /// unconditional hidden-dir skip in walk_directory should not apply to
+    /// it. "Explicitly named" means the pattern text mentions the
+    /// directory itself (its rel_path or bare name) — the default
+    /// wildcard-all case (no include patterns configured) must NOT count,
+    /// or every hidden directory would reappear with no config at all.
+    bool hidden_path_explicitly_included(std::string_view rel_path,
+                                         std::string_view dirname) const;
+
     /// Returns true if a regular file should be processed.
     bool should_process_file(const std::filesystem::path& path,
                              std::string_view rel_path,
