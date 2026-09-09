@@ -52,6 +52,59 @@ std::string strip_v(const std::string& tag) {
     return tag;
 }
 
+// Split "MAJOR.MINOR.PATCH[-PRERELEASE]" into {major, minor, patch,
+// prerelease}. Missing or non-numeric numeric components read as 0.
+struct SemVer {
+    long major = 0;
+    long minor = 0;
+    long patch = 0;
+    std::string prerelease;
+};
+
+long parse_component(const std::string& s) {
+    try {
+        return std::stol(s);
+    } catch (const std::exception&) {
+        return 0;
+    }
+}
+
+SemVer parse_semver(const std::string& version) {
+    std::string v = strip_v(version);
+    SemVer out;
+    std::string core = v;
+    auto dash = v.find('-');
+    if (dash != std::string::npos) {
+        core = v.substr(0, dash);
+        out.prerelease = v.substr(dash + 1);
+    }
+    std::istringstream stream(core);
+    std::string part;
+    if (std::getline(stream, part, '.')) out.major = parse_component(part);
+    if (std::getline(stream, part, '.')) out.minor = parse_component(part);
+    if (std::getline(stream, part, '.')) out.patch = parse_component(part);
+    return out;
+}
+
+}  // namespace
+
+int compare_versions(const std::string& a, const std::string& b) {
+    SemVer va = parse_semver(a);
+    SemVer vb = parse_semver(b);
+    if (va.major != vb.major) return va.major < vb.major ? -1 : 1;
+    if (va.minor != vb.minor) return va.minor < vb.minor ? -1 : 1;
+    if (va.patch != vb.patch) return va.patch < vb.patch ? -1 : 1;
+    // Same major.minor.patch: a release (empty prerelease) outranks any of
+    // its own pre-release tags; two pre-releases compare lexicographically.
+    if (va.prerelease.empty() && vb.prerelease.empty()) return 0;
+    if (va.prerelease.empty()) return 1;
+    if (vb.prerelease.empty()) return -1;
+    if (va.prerelease == vb.prerelease) return 0;
+    return va.prerelease < vb.prerelease ? -1 : 1;
+}
+
+namespace {
+
 // Run a command, capturing stdout. Returns false if the process could not be
 // started or exited non-zero. stderr is discarded (not captured).
 bool run_capture(const std::vector<std::string>& argv, std::string& out) {
@@ -456,11 +509,17 @@ int run_update(const UpdateConfig& cfg) {
     }
 
     std::string latest = strip_v(tag);
-    bool up_to_date = (latest == cfg.current_version);
+    int cmp = compare_versions(cfg.current_version, latest);
+    bool up_to_date = (cmp == 0);
+    bool local_is_newer = (cmp > 0);
 
     if (cfg.check_only) {
         if (up_to_date) {
             std::cout << "lci is up to date (" << cfg.current_version << ").\n";
+        } else if (local_is_newer) {
+            std::cout << "lci (" << cfg.current_version
+                      << ") is newer than the latest release (" << latest
+                      << "); nothing to do.\n";
         } else {
             std::cout << "Update available: " << cfg.current_version << " -> "
                       << latest << "\nRun: lci update\n";
@@ -471,6 +530,13 @@ int run_update(const UpdateConfig& cfg) {
     if (up_to_date && !cfg.force) {
         std::cout << "lci is already up to date (" << cfg.current_version
                   << "). Use --force to reinstall.\n";
+        return 0;
+    }
+
+    if (local_is_newer && !cfg.force) {
+        std::cout << "lci (" << cfg.current_version
+                  << ") is newer than the latest release (" << latest
+                  << "); nothing to do. Use --force to reinstall anyway.\n";
         return 0;
     }
 
