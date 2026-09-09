@@ -322,7 +322,38 @@ TEST(ServerLifecycleTest, SelfStopInvokesCallbackWhenRootDeleted) {
     // Reaper ticks every 500ms; 10s is a generous ceiling, not a wait.
     ASSERT_EQ(stopped_reason.wait_for(std::chrono::seconds(10)),
               std::future_status::ready);
-    EXPECT_EQ(stopped_reason.get(), "project root deleted");
+    EXPECT_EQ(stopped_reason.get(), "project root missing");
+    EXPECT_FALSE(server.is_running());
+    EXPECT_TRUE(server.shutdown());
+}
+
+TEST(ServerLifecycleTest, SelfStopInvokesCallbackWhenRootNeverExisted) {
+    // A server started against a root that was never created (not merely
+    // deleted after start) must exit the same way: there is no index it
+    // could ever have served. Regression for the reaper only checking
+    // root existence at start() and never re-checking a root that started
+    // absent.
+    TempDir tmp;
+    auto root = tmp.path() / "never-created";
+
+    Config config;
+    config.project.root = root.string();
+    MasterIndex indexer(config);
+    SearchEngine engine(indexer);
+    IndexServer server(config, indexer, &engine);
+    server.set_socket_path(test::next_test_server_address());
+
+    std::promise<std::string> stopped;
+    auto stopped_reason = stopped.get_future();
+    server.set_self_stop_callback([&stopped](const char* reason) {
+        stopped.set_value(reason);
+    });
+
+    ASSERT_TRUE(server.start());
+
+    ASSERT_EQ(stopped_reason.wait_for(std::chrono::seconds(10)),
+              std::future_status::ready);
+    EXPECT_EQ(stopped_reason.get(), "project root missing");
     EXPECT_FALSE(server.is_running());
     EXPECT_TRUE(server.shutdown());
 }
@@ -1119,13 +1150,17 @@ TEST_F(ServerTest, TreeRootNodeFullShape) {
     ASSERT_TRUE(tree.contains("root"));
     auto& root = tree["root"];
     // Required keys on every node.
-    for (const auto* key : {"name", "line", "depth", "file_path",
-                             "node_type", "dependency_count",
-                             "dependent_count", "edit_risk_score",
-                             "impact_radius", "annotations",
-                             "safety_notes", "stability_tags",
-                             "children"}) {
+    for (const auto* key :
+         {"name", "line", "depth", "file_path", "dependency_count",
+          "children"}) {
         EXPECT_TRUE(root.contains(key)) << "missing key: " << key;
+    }
+    // Stub fields with no analyzer backing them were removed, not left as
+    // fabricated 0/null (karpathy-principles rule 6).
+    for (const auto* key :
+         {"node_type", "dependent_count", "edit_risk_score", "impact_radius",
+          "annotations", "safety_notes", "stability_tags"}) {
+        EXPECT_FALSE(root.contains(key)) << "stub key still present: " << key;
     }
 
     EXPECT_EQ(root["name"].get<std::string>(), "Add");

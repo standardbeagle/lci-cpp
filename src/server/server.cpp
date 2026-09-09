@@ -665,17 +665,12 @@ bool IndexServer::start() {
         return false;
     }
 
-    // Lifecycle reaper: idle-exit, root-deletion exit, and (registry
-    // enabled) startup eviction of least-recently-active peers. Root
-    // deletion is only enforced for a root that existed when we started,
-    // so a server deliberately pointed at a not-yet-created path doesn't
-    // kill itself.
-    std::error_code root_ec;
-    const bool root_existed =
-        !config_.project.root.empty() &&
-        std::filesystem::exists(config_.project.root, root_ec);
-    reaper_thread_ = std::thread(
-        [this, root_existed] { reaper_loop(root_existed); });
+    // Lifecycle reaper: idle-exit, root-gone exit, and (registry enabled)
+    // startup eviction of least-recently-active peers. Root-gone covers both
+    // a root deleted after start and a root that never existed at all --
+    // there is no useful index to serve either way, and self-exit is
+    // transparent (the client respawns on the next command).
+    reaper_thread_ = std::thread([this] { reaper_loop(); });
 
     return true;
 }
@@ -1049,7 +1044,7 @@ void IndexServer::request_self_stop(const char* reason) {
     }
 }
 
-void IndexServer::reaper_loop(bool root_existed_at_start) {
+void IndexServer::reaper_loop() {
     // Startup eviction runs here, off the start() critical path: it pings
     // every registered peer, which is milliseconds each but unbounded in
     // count.
@@ -1069,10 +1064,10 @@ void IndexServer::reaper_loop(bool root_existed_at_start) {
             }
         }
 
-        if (root_existed_at_start) {
+        if (!config_.project.root.empty()) {
             std::error_code ec;
             if (!std::filesystem::exists(config_.project.root, ec)) {
-                request_self_stop("project root deleted");
+                request_self_stop("project root missing");
                 return;
             }
         }
