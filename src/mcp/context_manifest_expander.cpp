@@ -192,6 +192,37 @@ ExpansionEngine::ExtractResult ExpansionEngine::extract_symbol_source(
     return {std::move(source), {start, end}, std::move(info), {}};
 }
 
+namespace {
+// Finding 3: format="outline" lists the file's own symbols (name + line)
+// rather than any single symbol's body — a directory-listing-shaped view,
+// not a source excerpt.
+std::string build_file_outline(MasterIndex& index, const std::string& file_path) {
+    auto fid = index.path_to_id(file_path);
+    if (fid == 0) return "";
+    auto& tracker = index.ref_tracker();
+    auto rt_snap = tracker.pin();
+    auto symbols = rt_snap->get_file_enhanced_symbols(fid);
+    std::vector<const EnhancedSymbol*> sorted;
+    sorted.reserve(symbols.size());
+    for (const auto& es : symbols) {
+        if (es) sorted.push_back(es.get());
+    }
+    std::sort(sorted.begin(), sorted.end(), [](const auto* a, const auto* b) {
+        return a->symbol.line < b->symbol.line;
+    });
+    std::string out;
+    for (const auto* es : sorted) {
+        if (!out.empty()) out += '\n';
+        out += std::to_string(es->symbol.line);
+        out += ": ";
+        out += to_string(es->symbol.type);
+        out += ' ';
+        out += es->symbol.name;
+    }
+    return out;
+}
+}  // namespace
+
 // -- hydrate_reference --------------------------------------------------------
 
 ExpansionEngine::HydrateResult ExpansionEngine::hydrate_reference(
@@ -204,6 +235,15 @@ ExpansionEngine::HydrateResult ExpansionEngine::hydrate_reference(
     hr.note = ref.note;
 
     auto file_path = resolve_path(ref.file, project_root);
+
+    if (format == FormatType::Outline) {
+        hr.source = build_file_outline(index_, file_path);
+        if (hr.source.empty()) {
+            return {{}, 0, "no symbols found for outline: " + ref.file};
+        }
+        int tokens = static_cast<int>(hr.source.size()) / 4;
+        return {std::move(hr), tokens, {}};
+    }
 
     if (!ref.symbol.empty()) {
         // Case 1: Symbol name provided
@@ -219,6 +259,7 @@ ExpansionEngine::HydrateResult ExpansionEngine::hydrate_reference(
         hr.symbol_type = info.symbol_type;
         hr.signature = info.signature;
         hr.is_exported = info.is_exported;
+        if (format == FormatType::Signatures) extract_signature_only(hr);
     } else if (ref.has_line_range) {
         // Case 2: Only line range
         auto [source, err] = extract_source_by_lines(

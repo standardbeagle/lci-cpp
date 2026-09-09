@@ -743,21 +743,21 @@ void register_context_handlers(McpServer& server, MasterIndex* indexer) {
             nlohmann::ordered_json end_p;
             end_p["type"] = "integer";
             end_p["description"] = "End line (1-indexed)";
-            l["properties"]["end"] = std::move(end_p);
+            l["properties"]["e"] = std::move(end_p);
 
             nlohmann::ordered_json start_p;
             start_p["type"] = "integer";
             start_p["description"] = "Start line (1-indexed)";
-            l["properties"]["start"] = std::move(start_p);
+            l["properties"]["s"] = std::move(start_p);
         }
         l["type"] = "object";
-        l["description"] = "Line range {start, end} (optional)";
+        l["description"] = "Line range {s, e} (optional)";
         props["l"] = std::move(l);
 
         nlohmann::ordered_json note;
         note["type"] = "string";
         note["description"] = "Architect annotation (free-form text)";
-        props["note"] = std::move(note);
+        props["n"] = std::move(note);
 
         nlohmann::ordered_json role;
         role["type"] = "string";

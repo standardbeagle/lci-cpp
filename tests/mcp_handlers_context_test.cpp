@@ -584,6 +584,47 @@ TEST_F(ContextHandlerFixture, HydrateReferenceEmptyRefFails) {
     EXPECT_FALSE(result.error.empty());
 }
 
+// Finding 3: format=signatures/outline were parsed but silently ignored
+// (context_manifest_expander.cpp always returned the full body regardless
+// of `format`). Implemented: signatures returns just the declaration line,
+// outline lists the file's own symbols instead of any one symbol's body.
+TEST_F(ContextHandlerFixture, HydrateReferenceSignaturesFormatReturnsOneLine) {
+    ExpansionEngine engine(*indexer_);
+
+    ContextRef ref;
+    ref.file = "utils.go";
+    ref.symbol = "parseInput";
+
+    auto result = engine.hydrate_reference(ref, FormatType::Signatures,
+                                           temp_dir_.string());
+    ASSERT_TRUE(result.error.empty()) << result.error;
+    EXPECT_EQ(result.ref.source.find('\n'), std::string::npos)
+        << "signatures format must not include the function body: "
+        << result.ref.source;
+    EXPECT_NE(result.ref.source.find("parseInput"), std::string::npos)
+        << result.ref.source;
+    EXPECT_EQ(result.ref.source.find("return"), std::string::npos)
+        << "body statement leaked into signatures output: "
+        << result.ref.source;
+}
+
+TEST_F(ContextHandlerFixture, HydrateReferenceOutlineFormatListsFileSymbols) {
+    ExpansionEngine engine(*indexer_);
+
+    ContextRef ref;
+    ref.file = "handler.go";
+
+    auto result = engine.hydrate_reference(ref, FormatType::Outline,
+                                           temp_dir_.string());
+    ASSERT_TRUE(result.error.empty()) << result.error;
+    EXPECT_NE(result.ref.source.find("handleRequest"), std::string::npos)
+        << result.ref.source;
+    // Outline is a listing, never the function's own body statement.
+    EXPECT_EQ(result.ref.source.find("parseInput(\"hello\")"),
+             std::string::npos)
+        << result.ref.source;
+}
+
 }  // namespace
 }  // namespace mcp
 }  // namespace lci
