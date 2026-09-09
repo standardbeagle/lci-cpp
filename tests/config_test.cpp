@@ -45,7 +45,6 @@ TEST(DefaultConfigTest, HasExpectedDefaults) {
     EXPECT_EQ(cfg.performance.max_memory_mb, 500);
     EXPECT_EQ(cfg.performance.debounce_ms, 100);
     EXPECT_EQ(cfg.performance.indexing_timeout_sec, 120);
-    EXPECT_EQ(cfg.performance.startup_delay_ms, 1500);
 
     EXPECT_EQ(cfg.search.max_results, 100);
     // enable_fuzzy: default true for Go schema parity; not yet wired
@@ -54,37 +53,6 @@ TEST(DefaultConfigTest, HasExpectedDefaults) {
     EXPECT_EQ(cfg.search.max_context_lines, 100);
     EXPECT_TRUE(cfg.search.merge_file_results);
     EXPECT_FALSE(cfg.search.ensure_complete_stmt);
-    EXPECT_TRUE(cfg.search.include_leading_comments);
-
-    EXPECT_TRUE(cfg.search.ranking.enabled);
-    EXPECT_DOUBLE_EQ(cfg.search.ranking.code_file_boost, 50.0);
-    EXPECT_DOUBLE_EQ(cfg.search.ranking.doc_file_penalty, -20.0);
-    EXPECT_DOUBLE_EQ(cfg.search.ranking.config_file_boost, 10.0);
-    EXPECT_FALSE(cfg.search.ranking.require_symbol);
-    EXPECT_DOUBLE_EQ(cfg.search.ranking.non_symbol_penalty, -30.0);
-
-    EXPECT_TRUE(cfg.feature_flags.enable_memory_limits);
-    EXPECT_TRUE(cfg.feature_flags.enable_graceful_degradation);
-    EXPECT_FALSE(cfg.feature_flags.enable_relationship_analysis);
-}
-
-// ---------------------------------------------------------------------------
-// Semantic scoring defaults
-// ---------------------------------------------------------------------------
-TEST(DefaultConfigTest, SemanticScoringDefaults) {
-    auto cfg = make_default_config();
-
-    EXPECT_DOUBLE_EQ(cfg.semantic_scoring.exact_weight, 1.0);
-    EXPECT_DOUBLE_EQ(cfg.semantic_scoring.substring_weight, 0.9);
-    EXPECT_DOUBLE_EQ(cfg.semantic_scoring.annotation_weight, 0.85);
-    EXPECT_DOUBLE_EQ(cfg.semantic_scoring.fuzzy_weight, 0.70);
-    EXPECT_DOUBLE_EQ(cfg.semantic_scoring.stemming_weight, 0.55);
-    EXPECT_DOUBLE_EQ(cfg.semantic_scoring.name_split_weight, 0.40);
-    EXPECT_DOUBLE_EQ(cfg.semantic_scoring.abbreviation_weight, 0.25);
-    EXPECT_DOUBLE_EQ(cfg.semantic_scoring.fuzzy_threshold, 0.7);
-    EXPECT_EQ(cfg.semantic_scoring.stem_min_length, 3);
-    EXPECT_EQ(cfg.semantic_scoring.max_results, 10);
-    EXPECT_DOUBLE_EQ(cfg.semantic_scoring.min_score, 0.2);
 }
 
 // ---------------------------------------------------------------------------
@@ -515,7 +483,6 @@ performance {
     max_memory_mb 1024
     max_goroutines 8
     debounce_ms 200
-    startup_delay_ms 500
 }
 )");
     auto result = load_config(temp_dir_.string());
@@ -523,27 +490,40 @@ performance {
     EXPECT_EQ(result.config.performance.max_memory_mb, 1024);
     EXPECT_EQ(result.config.performance.max_goroutines, 8);
     EXPECT_EQ(result.config.performance.debounce_ms, 200);
-    EXPECT_EQ(result.config.performance.startup_delay_ms, 500);
 }
 
-TEST_F(KdlConfigTest, ParsesSearchRankingSection) {
+TEST_F(KdlConfigTest, ParsesSearchSection) {
     write_kdl(R"(
 search {
     max_results 50
     enable_fuzzy false
-    ranking {
-        enabled true
-        code_file_boost 75.0
-        doc_file_penalty -10.0
-    }
 }
 )");
     auto result = load_config(temp_dir_.string());
     ASSERT_TRUE(result.ok());
     EXPECT_EQ(result.config.search.max_results, 50);
     EXPECT_FALSE(result.config.search.enable_fuzzy);
-    EXPECT_DOUBLE_EQ(result.config.search.ranking.code_file_boost, 75.0);
-    EXPECT_DOUBLE_EQ(result.config.search.ranking.doc_file_penalty, -10.0);
+}
+
+TEST_F(KdlConfigTest, SearchRankingBlockIsAnUnknownKeyWarning) {
+    // search.ranking.* (SearchRankingConfig) had no production reader
+    // anywhere and was deleted; an old .lci.kdl that still has a `ranking`
+    // block gets the standard unknown-key warning, not a parse error, so
+    // it keeps loading on the newer binary.
+    write_kdl(R"(
+search {
+    ranking {
+        enabled true
+    }
+}
+)");
+    auto result = load_config(temp_dir_.string());
+    ASSERT_TRUE(result.ok()) << result.error;
+    bool warned = false;
+    for (const auto& w : result.warnings) {
+        if (w.find("ranking") != std::string::npos) warned = true;
+    }
+    EXPECT_TRUE(warned);
 }
 
 TEST_F(KdlConfigTest, ParsesComments) {
@@ -614,7 +594,11 @@ TEST_F(KdlConfigTest, ProjectFileWithoutWatchModeKeyStaysWatchModeOn) {
     ASSERT_TRUE(result.ok()) << result.error;
     EXPECT_TRUE(result.config.index.watch_mode);
     EXPECT_EQ(result.config.index.watch_debounce_ms, 300);
-    EXPECT_EQ(result.config.performance.max_goroutines, 0);
+    // load_config runs validate_config, which substitutes the 0 (auto)
+    // default for max_goroutines with the host's hardware concurrency —
+    // just confirm it was substituted (host-dependent, so not pinned to a
+    // literal value) rather than left at the removed Go-parity constant.
+    EXPECT_GT(result.config.performance.max_goroutines, 0);
 }
 
 TEST_F(KdlConfigTest, FileWithExplicitIndexBlockStillHonorsFileValues) {
@@ -1249,6 +1233,41 @@ performance {
     EXPECT_EQ(result.config.performance.max_goroutines, 2);
 }
 
+TEST_F(UserConfigTest, UserIncludeSurvivesWithNoProjectFile) {
+    write_user_config(R"(
+include {
+    "*.rs"
+}
+)");
+    auto result = load_config(project_dir_.string());
+    ASSERT_TRUE(result.error.empty()) << result.error;
+    ASSERT_EQ(result.config.include.size(), 1u);
+    EXPECT_EQ(result.config.include[0], "*.rs");
+}
+
+TEST_F(UserConfigTest, ProjectIncludeExtendsRatherThanDropsUserInclude) {
+    // A project file used to unconditionally clear include/exclude before
+    // applying its own, so the user's ~/.config/lci/config.kdl include
+    // list vanished the instant any project .lci.kdl existed — even one
+    // that set its own include section. It should layer instead: the
+    // project's patterns plus the user's, not the project's alone.
+    write_user_config(R"(
+include {
+    "*.rs"
+}
+)");
+    write_project_kdl(R"(
+include {
+    "*.zig"
+}
+)");
+    auto result = load_config(project_dir_.string());
+    ASSERT_TRUE(result.error.empty()) << result.error;
+    ASSERT_EQ(result.config.include.size(), 2u);
+    EXPECT_EQ(result.config.include[0], "*.zig");
+    EXPECT_EQ(result.config.include[1], "*.rs");
+}
+
 TEST_F(UserConfigTest, ProjectFileOverridesUserDefaults) {
     write_user_config(R"(
 index {
@@ -1349,6 +1368,72 @@ insight {
     ::unsetenv("LCI_ERROR_REPORT");
     ASSERT_FALSE(bad.ok());
     EXPECT_NE(bad.error.find("bogus"), std::string::npos) << bad.error;
+}
+
+// ---------------------------------------------------------------------------
+// FileScanner: an explicit include pattern naming a hidden directory must
+// reach it, even though hidden directories are skipped unconditionally by
+// default (pipeline_scanner.cpp).
+// ---------------------------------------------------------------------------
+
+TEST(FileScannerHiddenDirTest, DefaultSkipsHiddenDirectories) {
+    auto root = lci::test::unique_temp_dir("lci_hidden_dir_default_");
+    fs::create_directories(root / ".github" / "workflows");
+    {
+        std::ofstream f(root / ".github" / "workflows" / "ci.yml");
+        f << "name: ci\n";
+    }
+    {
+        std::ofstream f(root / "visible.txt");
+        f << "hi\n";
+    }
+
+    Config cfg = make_default_config();
+    cfg.project.root = root.string();
+    FileScanner scanner(cfg);
+    auto result = scanner.scan(/*apply_budget=*/false);
+
+    bool saw_hidden = false;
+    for (const auto& t : result.tasks) {
+        if (t.path.find(".github") != std::string::npos) saw_hidden = true;
+    }
+    EXPECT_FALSE(saw_hidden)
+        << "hidden directories are skipped unconditionally by default";
+
+    std::error_code ec;
+    fs::remove_all(root, ec);
+}
+
+TEST(FileScannerHiddenDirTest, ExplicitIncludeReachesHiddenDirectory) {
+    auto root = lci::test::unique_temp_dir("lci_hidden_dir_include_");
+    fs::create_directories(root / ".github" / "workflows");
+    {
+        std::ofstream f(root / ".github" / "workflows" / "ci.yml");
+        f << "name: ci\n";
+    }
+
+    Config cfg = make_default_config();
+    cfg.project.root = root.string();
+    cfg.include = {".github/**"};
+    // Isolate the hidden-dir-skip behavior under test from the unrelated
+    // "**/.*/**" default exclude pattern, which would otherwise re-hide
+    // the same directory through a different mechanism.
+    cfg.exclude.clear();
+    FileScanner scanner(cfg);
+    auto result = scanner.scan(/*apply_budget=*/false);
+
+    bool saw_hidden = false;
+    for (const auto& t : result.tasks) {
+        if (t.path.find(".github/workflows/ci.yml") != std::string::npos) {
+            saw_hidden = true;
+        }
+    }
+    EXPECT_TRUE(saw_hidden)
+        << "include { \".github/**\" } must reach the hidden directory "
+           "it names, not just be defeated by the unconditional skip";
+
+    std::error_code ec;
+    fs::remove_all(root, ec);
 }
 
 }  // namespace

@@ -295,9 +295,13 @@ bool apply_performance(Config& cfg, const KdlNode& node, std::string& error,
             if (!set_int(child, "performance.debounce_ms",
                          cfg.performance.debounce_ms, error))
                 return false;
-        } else if (child.name == "startup_delay_ms") {
-            if (!set_int(child, "performance.startup_delay_ms",
-                         cfg.performance.startup_delay_ms, error))
+        } else if (child.name == "parallel_file_workers") {
+            if (!set_int(child, "performance.parallel_file_workers",
+                         cfg.performance.parallel_file_workers, error))
+                return false;
+        } else if (child.name == "indexing_timeout_sec") {
+            if (!set_int(child, "performance.indexing_timeout_sec",
+                         cfg.performance.indexing_timeout_sec, error))
                 return false;
         } else {
             warn_unknown(warnings, "performance", child.name);
@@ -364,44 +368,14 @@ bool apply_insight(Config& cfg, const KdlNode& node, std::string& error,
     return true;
 }
 
-bool apply_ranking(SearchRankingConfig& ranking, const KdlNode& node,
-                   std::string& error, std::vector<std::string>* warnings) {
-    for (const auto& child : node.children) {
-        if (child.name == "enabled") {
-            if (!set_bool(child, "search.ranking.enabled", ranking.enabled,
-                          error))
-                return false;
-        } else if (child.name == "code_file_boost") {
-            if (!set_double(child, "search.ranking.code_file_boost",
-                            ranking.code_file_boost, error))
-                return false;
-        } else if (child.name == "doc_file_penalty") {
-            if (!set_double(child, "search.ranking.doc_file_penalty",
-                            ranking.doc_file_penalty, error))
-                return false;
-        } else if (child.name == "config_file_boost") {
-            if (!set_double(child, "search.ranking.config_file_boost",
-                            ranking.config_file_boost, error))
-                return false;
-        } else if (child.name == "require_symbol") {
-            if (!set_bool(child, "search.ranking.require_symbol",
-                          ranking.require_symbol, error))
-                return false;
-        } else if (child.name == "non_symbol_penalty") {
-            if (!set_double(child, "search.ranking.non_symbol_penalty",
-                            ranking.non_symbol_penalty, error))
-                return false;
-        } else {
-            warn_unknown(warnings, "search.ranking", child.name);
-        }
-    }
-    return true;
-}
-
 bool apply_search(Config& cfg, const KdlNode& node, std::string& error,
                   std::vector<std::string>* warnings) {
     for (const auto& child : node.children) {
-        if (child.name == "max_results") {
+        if (child.name == "default_context_lines") {
+            if (!set_int(child, "search.default_context_lines",
+                         cfg.search.default_context_lines, error))
+                return false;
+        } else if (child.name == "max_results") {
             if (!set_int(child, "search.max_results", cfg.search.max_results,
                          error))
                 return false;
@@ -420,13 +394,6 @@ bool apply_search(Config& cfg, const KdlNode& node, std::string& error,
         } else if (child.name == "ensure_complete_stmt") {
             if (!set_bool(child, "search.ensure_complete_stmt",
                           cfg.search.ensure_complete_stmt, error))
-                return false;
-        } else if (child.name == "include_leading_comments") {
-            if (!set_bool(child, "search.include_leading_comments",
-                          cfg.search.include_leading_comments, error))
-                return false;
-        } else if (child.name == "ranking") {
-            if (!apply_ranking(cfg.search.ranking, child, error, warnings))
                 return false;
         } else {
             warn_unknown(warnings, "search", child.name);
@@ -573,11 +540,6 @@ bool apply_kdl_nodes(Config& cfg, const std::vector<KdlNode>& nodes,
             }
         }
         else if (node.name == "exclude") cfg.exclude = collect_strings(node);
-        else if (node.name == "propagation_config_dir") {
-            if (!set_string(node, "propagation_config_dir",
-                            cfg.propagation_config_dir, error))
-                return false;
-        }
         else if (node.name == "attributes") {
             // Same block the shipped ruleset is written in, read by the same
             // parser (see include/lci/path_classifier.h): shorthand patterns
@@ -624,7 +586,9 @@ fs::path user_config_path() {
 // malformed user file is an error (fail fast — silently ignoring it would
 // leave the user believing their defaults apply).
 bool overlay_user_config(Config& cfg, std::string& error,
-                         std::vector<std::string>* warnings = nullptr) {
+                         std::vector<std::string>* warnings = nullptr,
+                         bool* had_include = nullptr,
+                         bool* had_exclude = nullptr) {
     fs::path path = user_config_path();
     if (path.empty()) return true;
     std::error_code ec;
@@ -645,6 +609,23 @@ bool overlay_user_config(Config& cfg, std::string& error,
     if (!parse_error.empty()) {
         error = "failed to parse " + path.string() + ": " + parse_error;
         return false;
+    }
+    // The caller in the project-file path needs to know whether the USER
+    // file actually named include/exclude, as opposed to `cfg` simply
+    // still holding the struct defaults it started from — otherwise
+    // layering a project's include/exclude "on top of the user's" would
+    // really be layering it on top of the ~110 built-in default excludes
+    // every time, defeating the documented "project exclude replaces the
+    // defaults" contract.
+    if (had_include != nullptr || had_exclude != nullptr) {
+        for (const auto& node : nodes) {
+            if (had_include != nullptr && node.name == "include") {
+                *had_include = true;
+            }
+            if (had_exclude != nullptr && node.name == "exclude") {
+                *had_exclude = true;
+            }
+        }
     }
     if (!apply_kdl_nodes(cfg, nodes, error, warnings)) {
         error = path.string() + ": " + error;
@@ -677,18 +658,59 @@ Config parse_kdl_content(const std::string& content, std::string& error,
     Config cfg = make_default_config();
     // User-level defaults sit between the KDL base and the project file:
     // scalar fields (index budgets, performance caps) survive unless the
-    // project file overrides them. include/exclude are cleared below per
-    // the long-standing project-file contract, so user include/exclude
-    // apply only in the no-project-file path.
+    // project file overrides them.
     std::string user_err;
-    if (!overlay_user_config(cfg, user_err, warnings)) {
+    bool user_had_include = false;
+    bool user_had_exclude = false;
+    if (!overlay_user_config(cfg, user_err, warnings, &user_had_include,
+                             &user_had_exclude)) {
         error = user_err;
         return cfg;
     }
+    // include/exclude used to be unconditionally cleared here, so a
+    // project file dropped the user's ~/.config/lci/config.kdl
+    // include/exclude entirely — even a project file that never mentions
+    // either key. Now the project file LAYERS: a project `include`/
+    // `exclude` section extends the user's OWN list (project entries
+    // first, so a project's own patterns are the ones a reader sees
+    // first). If the user file never set include/exclude, cfg.include/
+    // exclude are still just the struct defaults (the ~110 built-in
+    // excludes) — that's not something to "extend", it's what a
+    // project's own exclude section already correctly replaces.
+    std::vector<std::string> user_include =
+        user_had_include ? std::move(cfg.include) : std::vector<std::string>{};
+    std::vector<std::string> user_exclude =
+        user_had_exclude ? std::move(cfg.exclude) : std::vector<std::string>{};
     cfg.include.clear();
     cfg.exclude.clear();
 
     if (!apply_kdl_nodes(cfg, nodes, error, warnings)) return cfg;
+
+    auto extend_unique = [](std::vector<std::string>& base,
+                            const std::vector<std::string>& more) {
+        for (const auto& v : more) {
+            if (std::find(base.begin(), base.end(), v) == base.end()) {
+                base.push_back(v);
+            }
+        }
+    };
+    if (cfg.include.empty()) {
+        cfg.include = std::move(user_include);
+    } else {
+        extend_unique(cfg.include, user_include);
+    }
+    if (cfg.exclude.empty()) {
+        if (user_had_exclude) {
+            cfg.exclude = std::move(user_exclude);
+        } else {
+            // Neither the project nor the user file set an exclude
+            // section: fall back to the ~110 built-in defaults, same as
+            // the no-project-file path.
+            cfg.exclude = make_default_config().exclude;
+        }
+    } else {
+        extend_unique(cfg.exclude, user_exclude);
+    }
 
     return cfg;
 }

@@ -43,6 +43,10 @@ struct IndexConfig {
     // or tighten excludes than run partial.
     std::string overflow_policy = "reduced";
     bool follow_symlinks = false;
+    // Parsed and stored, but no production reader exists outside config
+    // code itself (grep-confirmed) — kept rather than deleted because
+    // tests/helpers/real_project_helpers.h (out of this slice's file
+    // scope) still assigns them. Tracked as dead in docs/reviews.
     bool smart_size_control = true;
     std::string priority_mode = "recent";
     bool respect_gitignore = true;
@@ -53,10 +57,12 @@ struct IndexConfig {
 struct PerformanceConfig {
     int max_memory_mb = 500;
     int max_goroutines = 0;                          // 0 = auto-detect
+    // Parsed and stored, but no production reader outside config code
+    // (grep-confirmed) — kept because tests/helpers/real_project_helpers.h
+    // (out of this slice's file scope) still assigns it.
     int debounce_ms = 100;
     int parallel_file_workers = 0;                   // 0 = auto-detect
     int indexing_timeout_sec = 120;
-    int startup_delay_ms = 1500;
 };
 
 struct ServerConfig {
@@ -80,64 +86,24 @@ struct ServerConfig {
     int max_rss_mb = 4096;
 };
 
-struct SemanticConfig {
-    int batch_size = 100;
-    int channel_size = 1000;
-    int min_stem_length = 3;
-    int cache_size = 1000;
-};
-
-struct SemanticScoringConfig {
-    double exact_weight = 1.0;
-    double substring_weight = 0.9;
-    double annotation_weight = 0.85;
-    double fuzzy_weight = 0.70;
-    double stemming_weight = 0.55;
-    double name_split_weight = 0.40;
-    double abbreviation_weight = 0.25;
-    double fuzzy_threshold = 0.7;
-    int stem_min_length = 3;
-    int max_results = 10;
-    double min_score = 0.2;
-};
-
-inline constexpr double kDefaultCodeFileBoost = 50.0;
-inline constexpr double kDefaultDocFilePenalty = -20.0;
-inline constexpr double kDefaultConfigFileBoost = 10.0;
-inline constexpr double kDefaultNonSymbolPenalty = -30.0;
-
-struct SearchRankingConfig {
-    bool enabled = true;
-    double code_file_boost = kDefaultCodeFileBoost;
-    double doc_file_penalty = kDefaultDocFilePenalty;
-    double config_file_boost = kDefaultConfigFileBoost;
-    bool require_symbol = false;
-    double non_symbol_penalty = kDefaultNonSymbolPenalty;
-};
-
+// default_context_lines is the only field with a real consumer path
+// (SearchEngine's context-line default). search.ranking.* (the former
+// SearchRankingConfig), SemanticConfig, SemanticScoringConfig and
+// FeatureFlagsConfig had no production reader anywhere outside config
+// code and no test-file consumer either — deleted rather than kept "for
+// later" (karpathy-principles.md: dead code is deleted, not stubbed).
+// The remaining fields below (max_results, max_context_lines,
+// enable_fuzzy, merge_file_results, ensure_complete_stmt) are equally
+// unread in production, but tests/helpers/real_project_helpers.h and
+// three other test files outside this slice's file scope still assign
+// them, so deleting them here would break builds this slice cannot fix.
 struct SearchConfig {
     int default_context_lines = 0;
     int max_results = 100;
-    // NOTE: parsed and stored for parity with Go's config schema
-    // (internal/config/config.go field EnableFuzzy), but NOT currently
-    // consumed by the C++ search engine. Setting it has no behavioral
-    // effect today. Tracked under Dart task qkbC8BBuW14H — either wire
-    // through to a real fuzzy-scoring path or remove from both schemas.
-    bool enable_fuzzy = true;
     int max_context_lines = 100;
+    bool enable_fuzzy = true;
     bool merge_file_results = true;
     bool ensure_complete_stmt = false;
-    bool include_leading_comments = true;
-    SearchRankingConfig ranking;
-};
-
-struct FeatureFlagsConfig {
-    bool enable_memory_limits = true;
-    bool enable_graceful_degradation = true;
-    bool enable_relationship_analysis = false;
-    bool enable_performance_monitoring = true;
-    bool enable_detailed_error_logging = true;
-    bool enable_feature_flag_logging = true;
 };
 
 /// code_insight analysis gates. The error-handling / resource-management
@@ -169,13 +135,9 @@ struct Config {
     IndexConfig index;
     PerformanceConfig performance;
     ServerConfig server;
-    SemanticConfig semantic;
-    SemanticScoringConfig semantic_scoring;
     SearchConfig search;
-    FeatureFlagsConfig feature_flags;
     std::vector<std::string> include;
     std::vector<std::string> exclude;
-    std::string propagation_config_dir;
     /// Synonym groups for semantic search. Defaults to the built-in curated
     /// dev-verb set (SynonymTable::build_default); a `.lci.kdl` `synonyms`
     /// block can add/override/clear groups.
