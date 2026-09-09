@@ -512,6 +512,72 @@ TEST_F(CodeInsightTest, SideEffectsSymbolEmitsRootRelativePath) {
     EXPECT_EQ(fp, "main.go");
 }
 
+// Results are keyed file:line:column so two functions on the same line
+// (or a method indented inside a class, at a non-zero start column) don't
+// collide (a4431b9). A call site that still queries get_result with the
+// default column 0 misses every symbol not starting at column 0.
+class SideEffectsIndentedMethodTest : public ::testing::Test {
+  protected:
+    void SetUp() override {
+        temp_dir_ = lci::test::unique_temp_dir("lci_side_effects_indent_");
+        std::filesystem::create_directories(temp_dir_);
+        std::ofstream out(temp_dir_ / "svc.py");
+        out << "class Service:\n"
+               "    def touch_disk(self):\n"
+               "        open('/tmp/x').read()\n";
+        out.close();
+
+        Config config;
+        config.project.root = temp_dir_.string();
+        indexer_ = std::make_unique<MasterIndex>(config);
+        analyzer_ = std::make_unique<SideEffectAnalyzer>("generic");
+        // Matches the real server wiring (runtime.cpp): the sink must be
+        // set BEFORE index_directory so the AST pass's real-column results
+        // land in the analyzer, then the heuristic pass augments them.
+        indexer_->set_side_effect_sink(analyzer_.get());
+        indexer_->index_directory(temp_dir_.string());
+        analyzer_->populate_from_index(*indexer_);
+    }
+
+    void TearDown() override {
+        analyzer_.reset();
+        indexer_.reset();
+        std::error_code ec;
+        std::filesystem::remove_all(temp_dir_, ec);
+    }
+
+    std::filesystem::path temp_dir_;
+    std::unique_ptr<MasterIndex> indexer_;
+    std::unique_ptr<SideEffectAnalyzer> analyzer_;
+};
+
+TEST_F(SideEffectsIndentedMethodTest, SymbolModeFindsMethodAtNonZeroColumn) {
+    nlohmann::json params;
+    params["mode"] = "symbol";
+    params["symbol_name"] = "touch_disk";
+    auto result = handle_side_effects(params, *analyzer_, indexer_.get());
+    ASSERT_FALSE(result.is_error) << result.text;
+    auto json = nlohmann::json::parse(result.text);
+    ASSERT_EQ(json.value("available", true), true)
+        << "reason: " << json.value("reason", std::string());
+    ASSERT_EQ(json["total_count"].get<int>(), 1);
+}
+
+// A stale column-0 key on ANY writer (populate_from_index, propagate_transitive
+// or the three MCP query call sites) versus the real start column on the
+// extractor's AST-pass key produces two disjoint entries for the SAME
+// function: one carrying the precise AST-derived record, one a duplicate
+// heuristic-only record shadowing it at column 0. Fixing every writer/reader
+// to the real column collapses this back to exactly one record per function.
+TEST_F(SideEffectsIndentedMethodTest, NoDuplicateRecordForIndentedMethod) {
+    int matches = 0;
+    for (const auto& [key, info] : analyzer_->results()) {
+        if (info.function_name == "touch_disk") ++matches;
+    }
+    EXPECT_EQ(matches, 1) << "touch_disk has more than one SideEffectInfo "
+                             "record -- a column-0 vs real-column key split";
+}
+
 TEST_F(CodeInsightTest, InvalidModeReturnsError) {
     nlohmann::json params;
     params["mode"] = "nonexistent_mode";
