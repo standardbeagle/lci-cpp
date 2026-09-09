@@ -30,8 +30,13 @@ struct GlobalFlags {
 // -- Config loading with CLI overrides ----------------------------------------
 
 /// Loads configuration from disk and applies global flag overrides.
-/// Returns an error message on failure (empty on success).
-std::string load_config_with_overrides(const GlobalFlags& flags, Config& out);
+/// Returns an error message on failure (empty on success). When `source` is
+/// non-null, it is set to the file the config was actually loaded from
+/// (ConfigResult::source) so a caller like `lci config validate` can name it
+/// instead of echoing the raw --config flag, which may be empty even when a
+/// project .lci.kdl was found and loaded.
+std::string load_config_with_overrides(const GlobalFlags& flags, Config& out,
+                                        std::string* source = nullptr);
 
 // -- Server management -------------------------------------------------------
 

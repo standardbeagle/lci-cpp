@@ -265,7 +265,9 @@ int run_config_show(const GlobalFlags& flags, const std::string& format) {
 
 int run_config_validate(const GlobalFlags& flags) {
     Config cfg;
-    if (std::string err = load_config_with_overrides(flags, cfg); !err.empty()) {
+    std::string source;
+    if (std::string err = load_config_with_overrides(flags, cfg, &source);
+        !err.empty()) {
         std::fprintf(stderr, "Configuration validation failed: %s\n",
                      err.c_str());
         return 1;
@@ -297,7 +299,22 @@ int run_config_validate(const GlobalFlags& flags) {
     // warning described behavior the server never had.
 
     std::printf("Configuration file is valid\n");
-    std::printf("Config source: %s\n", flags.config_path.c_str());
+    std::string display_source = source;
+    if (!source.empty()) {
+        // ConfigResult::source is an absolute path (config.cpp resolves
+        // <root>/.lci.kdl before returning it). Show it relative to the
+        // cwd when possible so the output stays stable across checkouts
+        // instead of leaking the invoking machine's absolute path.
+        std::error_code rel_ec;
+        auto rel = fs::relative(source, fs::current_path(), rel_ec);
+        if (!rel_ec && !rel.empty()) {
+            display_source = rel.string();
+        }
+    }
+    std::printf(
+        "Config source: %s\n",
+        display_source.empty() ? "(defaults, no config file)"
+                               : display_source.c_str());
     std::printf("Settings: %d files max, %dMB memory limit, %lldMB index "
                 "limit\n",
                 cfg.index.max_file_count, cfg.performance.max_memory_mb,

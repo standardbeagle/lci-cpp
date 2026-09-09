@@ -45,7 +45,8 @@ bool has_git_root_at_or_above(const fs::path& dir) {
 
 // -- Config loading -----------------------------------------------------------
 
-std::string load_config_with_overrides(const GlobalFlags& flags, Config& out) {
+std::string load_config_with_overrides(const GlobalFlags& flags, Config& out,
+                                        std::string* source) {
     const bool root_from_cwd = flags.root.empty();
     std::string root_dir = root_from_cwd ? fs::current_path().string()
                                          : flags.root;
@@ -101,6 +102,9 @@ std::string load_config_with_overrides(const GlobalFlags& flags, Config& out) {
                      warning.c_str());
     }
     out = std::move(result.config);
+    if (source != nullptr) {
+        *source = result.source;
+    }
 
     if (!flags.include.empty()) {
         out.include = flags.include;
