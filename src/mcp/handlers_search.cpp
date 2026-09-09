@@ -22,6 +22,7 @@
 #include <lci/core/reference_tracker.h>
 #include <lci/idcodec.h>
 #include <lci/indexing/master_index.h>
+#include <lci/language_map.h>
 #include <lci/mcp/schemas/search.h>  // generated: kSEARCH_SCHEMA
 #include <lci/mcp/validation.h>
 #include <lci/scope.h>
@@ -99,58 +100,72 @@ nlohmann::json scope_chain_to_breadcrumbs(const EnhancedSymbol& sym) {
 
 }  // namespace
 
-/// Language-name → file-extension table, shared by the `languages[]`
+/// Language-name -> file-extension table, shared by the `languages[]`
 /// include filter, the `filter` token translation, and find_files'
-/// `filter` (declared in handlers_core_shared.h). Same table as Go
-/// languageToExtensions (handlers.go:926); lowercase keys + aliases so
-/// callers can pass "ts", "TypeScript", "typescript" interchangeably.
+/// `filter` (declared in handlers_core_shared.h). Extensions for every
+/// language that has a canonical LangId are pulled live from kLangMap
+/// (include/lci/language_map.h) instead of a second hard-coded list, so
+/// e.g. "cpp" always carries whatever headers kLangMap classifies as C++
+/// (.h included, per kLangMap's deliberate ambiguous-header convention)
+/// and "python" always carries .pyx/.pxd. Languages with no LangId
+/// (markup/config/shell/etc, and a few languages lci does not parse) keep
+/// their own hard-coded extension list -- kLangMap has nothing to read
+/// for those names.
 const std::map<std::string, std::vector<std::string>>& language_ext_table() {
-    static const std::map<std::string, std::vector<std::string>> kTable = {
-        {"go", {"go"}},
-        {"javascript", {"js", "jsx", "mjs", "cjs"}},
-        {"typescript", {"ts", "tsx", "mts", "cts"}},
-        {"python", {"py", "pyw", "pyi"}},
-        {"java", {"java"}},
-        {"rust", {"rs"}},
-        {"c++", {"cpp", "cc", "cxx", "hpp", "hxx", "h++"}},
-        {"cpp", {"cpp", "cc", "cxx", "hpp", "hxx", "h++"}},
-        {"c", {"c", "h"}},
-        {"c#", {"cs"}},
-        {"csharp", {"cs"}},
-        {"php", {"php", "phtml"}},
-        {"ruby", {"rb", "rake", "gemspec"}},
-        {"swift", {"swift"}},
-        {"kotlin", {"kt", "kts"}},
-        {"scala", {"scala", "sc"}},
-        {"vue", {"vue"}},
-        {"svelte", {"svelte"}},
-        {"dart", {"dart"}},
-        {"zig", {"zig"}},
-        {"shell", {"sh", "bash", "zsh"}},
-        {"html", {"html", "htm"}},
-        {"css", {"css", "scss", "sass", "less"}},
-        {"sql", {"sql"}},
-        {"markdown", {"md", "markdown"}},
-        {"json", {"json"}},
-        {"yaml", {"yaml", "yml"}},
-        {"xml", {"xml"}},
-        {"lua", {"lua"}},
-        {"r", {"r"}},
-        {"perl", {"pl", "pm"}},
-        {"haskell", {"hs", "lhs"}},
-        {"elixir", {"ex", "exs"}},
-        {"erlang", {"erl", "hrl"}},
-        {"clojure", {"clj", "cljs", "cljc"}},
-        {"ocaml", {"ml", "mli"}},
-        {"f#", {"fs", "fsi", "fsx"}},
-        // Common aliases for short forms.
-        {"ts", {"ts", "tsx", "mts", "cts"}},
-        {"js", {"js", "jsx", "mjs", "cjs"}},
-        {"py", {"py", "pyw", "pyi"}},
-        {"rb", {"rb", "rake", "gemspec"}},
-        {"cs", {"cs"}},
-        {"kt", {"kt", "kts"}},
-    };
+    static const std::map<std::string, std::vector<std::string>> kTable = [] {
+        std::map<std::string, std::vector<std::string>> table;
+
+        // Group kLangMap's extensions by LangId (dropping the leading dot).
+        std::map<LangId, std::vector<std::string>> by_lang;
+        for (const auto& entry : detail::kLangMap) {
+            if (entry.language == LangId::Unknown) continue;
+            by_lang[entry.language].emplace_back(entry.ext.substr(1));
+        }
+        for (const auto& [id, exts] : by_lang) {
+            table[std::string(to_string(id))] = exts;
+        }
+
+        // Name aliases onto the same kLangMap-derived extension lists.
+        auto alias = [&](const std::string& name, LangId id) {
+            auto it = by_lang.find(id);
+            if (it != by_lang.end()) table[name] = it->second;
+        };
+        alias("c++", LangId::Cpp);
+        alias("csharp", LangId::CSharp);
+        alias("c#", LangId::CSharp);
+        alias("ts", LangId::TypeScript);
+        alias("js", LangId::JavaScript);
+        alias("py", LangId::Python);
+        alias("rb", LangId::Ruby);
+        alias("cs", LangId::CSharp);
+        alias("kt", LangId::Kotlin);
+
+        // Languages/formats with no canonical LangId: kLangMap either
+        // omits them entirely or -- for lua/r/perl/haskell/elixir/erlang/
+        // clojure/vue -- resolves them to LangId::Unknown, which cannot
+        // distinguish one name from another. Kept as an explicit list.
+        table["vue"] = {"vue"};
+        table["dart"] = {"dart"};
+        table["shell"] = {"sh", "bash", "zsh"};
+        table["html"] = {"html", "htm"};
+        table["css"] = {"css", "scss", "sass", "less"};
+        table["sql"] = {"sql"};
+        table["markdown"] = {"md", "markdown"};
+        table["json"] = {"json"};
+        table["yaml"] = {"yaml", "yml"};
+        table["xml"] = {"xml"};
+        table["lua"] = {"lua"};
+        table["r"] = {"r"};
+        table["perl"] = {"pl", "pm"};
+        table["haskell"] = {"hs", "lhs"};
+        table["elixir"] = {"ex", "exs"};
+        table["erlang"] = {"erl", "hrl"};
+        table["clojure"] = {"clj", "cljs", "cljc"};
+        table["ocaml"] = {"ml", "mli"};
+        table["f#"] = {"fs", "fsi", "fsx"};
+
+        return table;
+    }();
     return kTable;
 }
 

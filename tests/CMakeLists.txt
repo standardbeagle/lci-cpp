@@ -75,6 +75,7 @@ add_executable(lci_tests
     mcp_handlers_analysis_test.cpp
     mcp_handlers_explore_index_test.cpp
     mcp_handlers_context_test.cpp
+    mcp_handlers_search_test.cpp
     cli_test.cpp
     git_test.cpp
     updater_test.cpp
