@@ -491,7 +491,7 @@ set(CPACK_PACKAGE_CONTACT "andy@standardbeagle.com")
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
     set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
 endif()
-set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/standardbeagle/lci")
+set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/standardbeagle/lci-cpp")
 
 install(TARGETS lci RUNTIME DESTINATION bin COMPONENT lci_runtime)
 
@@ -515,12 +515,14 @@ endif()
 
 # DEB-specific
 set(CPACK_DEBIAN_PACKAGE_SECTION "devel")
-set(CPACK_DEBIAN_PACKAGE_DEPENDS "libc6 (>= 2.35)")
+set(CPACK_DEBIAN_PACKAGE_DEPENDS
+    "libc6 (>= 2.35), libstdc++6 (>= 12), libssl3 (>= 3.0.0), zlib1g, libbrotli1")
 set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "amd64")
 
 # RPM-specific
 set(CPACK_RPM_PACKAGE_LICENSE "MIT")
 set(CPACK_RPM_PACKAGE_GROUP "Development/Tools")
-set(CPACK_RPM_PACKAGE_REQUIRES "glibc >= 2.35")
+set(CPACK_RPM_PACKAGE_REQUIRES
+    "glibc >= 2.35, libstdc++ >= 12, openssl-libs >= 3.0.0, zlib, brotli")
 
 include(CPack)
