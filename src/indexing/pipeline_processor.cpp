@@ -107,7 +107,13 @@ void run_unified_extraction(ProcessedFile& result,
     extractor.init(content, result.file_id, ext, path);
     if (side_effect_sink) extractor.set_side_effect_sink(side_effect_sink);
     extractor.extract(tree.get());
-    auto extracted = extractor.take_results();
+    // Must stay get_results(): extractor.lookup_declaration() below reads
+    // declarations_ directly off the still-live extractor, and
+    // take_results() moves declarations_ out from under it (regression
+    // caught by the lci_integration_suite golden mismatch on
+    // mcp_get_context_semantic_ai -- signature/doc_comment silently went
+    // empty for every symbol once declarations_ was moved away).
+    auto extracted = extractor.get_results();
 
     // Build a position-keyed metadata index so the integrator can enrich
     // EnhancedSymbol records (complexity, signature, doc comment) without
