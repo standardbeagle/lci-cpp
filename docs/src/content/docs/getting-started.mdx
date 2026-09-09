@@ -30,7 +30,7 @@ import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
     Both detect your OS/arch, download the matching release binary, and
     install it (`/usr/local/bin` or `~/.local/bin` on Unix;
     `%LOCALAPPDATA%\Programs\lci` on Windows). Override with `LCI_PREFIX`;
-    pin a version with `LCI_VERSION=0.6.0`.
+    pin a version with `LCI_VERSION=0.10.1`.
   </TabItem>
   <TabItem label="npm">
     ```sh
@@ -51,14 +51,14 @@ import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
   <TabItem label="Release artifact">
     ```sh
     # Linux: tarball or Debian package
-    curl -fLO https://github.com/standardbeagle/lci-cpp/releases/download/v0.6.0/lci-0.6.0-Linux.tar.gz
-    tar -xzf lci-0.6.0-Linux.tar.gz
-    sudo install lci-0.6.0-Linux/bin/lci /usr/local/bin/
+    curl -fLO https://github.com/standardbeagle/lci-cpp/releases/download/v0.10.1/lci-0.10.1-Linux.tar.gz
+    tar -xzf lci-0.10.1-Linux.tar.gz
+    sudo install lci-0.10.1-Linux/bin/lci /usr/local/bin/
 
     # or
-    sudo dpkg -i lci-0.6.0-Linux.deb
+    sudo dpkg -i lci-0.10.1-Linux.deb
 
-    lci --version   # 0.6.0
+    lci --version   # 0.10.1
     lci search "myFunction"
     ```
   </TabItem>
@@ -69,7 +69,7 @@ import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
 ```sh
 lci update            # self-update to the latest release
 lci update --check    # report current vs latest without installing
-lci update --version 0.6.0   # install a specific release
+lci update --version 0.10.1   # install a specific release
 ```
 
 `lci update` works regardless of how lci was installed. Package-manager
@@ -92,13 +92,14 @@ Install and package the build:
 ```sh
 cd build/release
 sudo cmake --install .
-cpack -G TGZ    # produces lci-0.6.0-Linux.tar.gz
-cpack -G DEB    # produces lci-0.6.0-Linux.deb
+cpack -G TGZ    # produces lci-0.10.1-Linux.tar.gz
+cpack -G DEB    # produces lci-0.10.1-Linux.deb
 ```
 
-The CPack output contains only `bin/lci` (~28 MB stripped). Tree-sitter
-grammars are statically linked; runtime dependencies are libc + libstdc++ +
-libssl + brotli (all standard on modern Linux).
+The CPack output contains only `bin/lci`. Tree-sitter grammars are
+statically linked; the binary dynamically links libc, libstdc++, libssl
+(via libcrypto), zlib, and brotli — the Debian package declares only
+`libc6 (>= 2.35)` since the rest ship on modern Linux by default.
 
 ### Running the test suite
 
@@ -118,3 +119,24 @@ lci search "myFunction"
 
 Full CLI reference: `lci --help` or `lci <command> --help`, or see
 [CLI Usage](/lci-cpp/cli-usage/).
+
+## Synonyms
+
+`.lci.kdl` accepts a top-level `synonyms` block that widens semantic search
+expansion. Children are `group <words…>` (treat the listed words as
+synonyms of each other), `clear <word>` (drop a word from any group), and a
+leading `clear-all` (discard the built-in table before applying the rest of
+the block):
+
+```kdl
+synonyms {
+    clear-all
+    group "get" "fetch" "retrieve"
+    group "delete" "remove" "del"
+    clear "add"
+}
+```
+
+An unrecognized child name is a config error. Synonym expansion only
+applies when `search`'s `semantic` option is on (the default) and no
+explicit `patterns` were given.

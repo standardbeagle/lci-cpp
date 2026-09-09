@@ -27,7 +27,12 @@ separator); pass `-E, --regex` for RE2 regex.
 Notable flags: `-i/--case-insensitive`, `-j/--json`, `-E/--regex`,
 `-w/--word-regexp`, `-l/--files-with-matches`, `--count`, `--max-count`,
 `--rank-by relevance|recency|file-type`, `--comments-only`, `--code-only`,
-`--strings-only`, `--context-filter function|class|top-level`.
+`--strings-only`, `--context-filter function|class|top-level`,
+`--invert-match` (show non-matching lines), `--patterns` (repeatable,
+OR'd with the positional pattern), `--group` (per-file output: path once,
+total count, per-term counts, line numbers — for OR queries like `A|B` or
+`--patterns`), `--template-strings` (with `--strings-only`, also match
+template strings such as `` sql`` `` / `` gql`` ``).
 
 ```sh
 lci search "myFunction"
@@ -63,8 +68,7 @@ Analyzes working-set changes for duplicates, naming, and complexity.
 
 ```sh
 lci server [-d/--daemon] [--foreground]   # alias: srv — start the persistent index server
-lci status [-j/--json] [-v/--verbose]     # alias: st — show index server status
-lci stats                                  # runtime metrics
+lci status [-j/--json] [-v/--verbose]     # alias: st — index health + runtime metrics
 lci shutdown [-f/--force]                  # alias: stop
 ```
 
@@ -88,7 +92,7 @@ integration. See [MCP Server](/lci-cpp/mcp-server/).
 ```sh
 lci update                    # self-update to the latest release
 lci update --check            # report current vs latest without installing
-lci update --version 0.6.0    # install a specific release
+lci update --version 0.10.1    # install a specific release
 lci update --force            # reinstall even when already up to date
 ```
 

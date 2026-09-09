@@ -1,6 +1,6 @@
 # MCP Tools Reference
 
-`lci mcp` runs a Model Context Protocol server over stdio. It exposes **14
+`lci mcp` runs a Model Context Protocol server over stdio. It exposes **15
 tools** to AI assistants. This document describes each tool exactly as
 implemented.
 
@@ -44,6 +44,7 @@ caller mistakes (bad parameters) and genuine internal failures.
 | [`list_symbols`](#list_symbols) | JSON | Enumerate + filter symbols (the "ls" for code) |
 | [`inspect_symbol`](#inspect_symbol) | JSON | Deep inspect one symbol |
 | [`browse_file`](#browse_file) | JSON | Symbol outline for a file |
+| [`callers`](#callers) | JSON | Resolved call sites for a symbol |
 | [`index_stats`](#index_stats) | JSON | Index status + health |
 | [`debug_info`](#debug_info) | JSON | Deep diagnostics |
 | [`semantic_annotations`](#semantic_annotations) | JSON | Query `@lci:` labels / categories |
@@ -71,15 +72,16 @@ No errors; unknown tool names fall back to the overview.
 
 ## search
 
-Sub-millisecond in-memory content search (not file paths). Multi-layer:
-literal match → optional synonym expansion → regex fallback. Results carry
-the enclosing symbol's metadata.
+In-memory content search (not file paths), designed for fast interactive use.
+Multi-layer: literal match → optional synonym expansion → regex fallback.
+Results are grouped per file, each hit carrying the enclosing symbol's
+metadata.
 
 | Param | Type | Default | Description |
 |-------|------|---------|-------------|
 | `pattern` | string | — | Search pattern (required unless `patterns` set). Literal, or regex with `flags=rx`. Case-insensitive by default. |
 | `patterns` | string | (empty) | Comma-separated patterns for OR search; overrides semantic expansion. |
-| `max` | integer | 50 | Max results, clamped [1, 100]. |
+| `max` | integer | 15 | Max results, clamped [1, 100]. |
 | `output` | string | `line` | `line` (1 ctx line), `ctx` (5), `ctx:N`, `full` (10), `files`, `count`. |
 | `flags` | string | (empty) | Comma list: `cs` case-sensitive, `wb` word-boundary, `nt` no-tests, `nc` no-comments, `iv` invert, `rx` regex. |
 | `include` | string | (empty) | Add-ons for strong matches (score ≥ 0.5): `breadcrumbs`, `refs`, `object_ids`/`ids`, `safety`, `deps`. Unknown token → error. |
@@ -89,12 +91,17 @@ the enclosing symbol's metadata.
 | `languages` | array | (empty) | Language filter (aliases ok), e.g. `["go","python"]`. |
 | `filter` | string | (empty) | Exclude-pattern for files. |
 
-**Output** (default): `{results[], total_matches, showing, max_results}`. Each
-result: `result_id`, `file`, `line`, `column`, `match`, `score`, `object_id`,
-`symbol_name`, `symbol_type`, `is_exported`, optional `references`
-{`incoming_count`,`outgoing_count`}, optional `breadcrumbs[]`, optional
-`context_lines[]`. `output=files` → `{files[], total_matches, unique_files}`.
-`output=count` → `{total_matches, unique_files, counts{}}`.
+**Output** (default): `{results[], other_files{}, showing, total_matches}`.
+`results[]` groups hits per file: `{file, hits[]}`. Each hit: `line`, `match`
+(omitted when every hit shares one uniform match, hoisted to top-level
+`match` instead), and — deduped across consecutive hits inside the same
+symbol — `sym`, `type`, `id` (object ID), `exported`, `callers`
+(incoming-reference count), optional `signature`, optional `references`
+{`incoming_count`,`outgoing_count`}, optional `breadcrumbs[]`, and `text`
+(trimmed matched source line) or `ctx[]` when `output` requests full
+context. Non-code files with hits collapse into `other_files{path: count}`
+instead of a `results[]` entry. `output=files` → `{files[], total_matches,
+unique_files}`. `output=count` → `{total_matches, unique_files, counts{}}`.
 
 **Notable**: case-insensitive by default; regex auto-fallback (0.7 score
 penalty) when a pattern *looks* regex-y; `refs`/`breadcrumbs` only attach to
@@ -142,11 +149,11 @@ hierarchy and purity. `id` and `name` are mutually exclusive.
 | Param | Type | Default | Description |
 |-------|------|---------|-------------|
 | `id` | string | (empty) | Comma-separated object IDs. Aliases: `symbol_id`, `object_id`, `object_ids`, `oid`. Accepts `oid=VE,tG` form. |
-| `name` | string | (empty) | Symbol name (enables name path + call hierarchy). Needs non-empty `mode`. |
+| `name` | string | (empty) | Symbol name (enables name path + call hierarchy). Works with or without `mode`; `mode` only tunes depth/sections. |
 | `mode` | string | (empty) | `full` (depth 5, ai text), `quick` (depth 2, sections relationships+structure), `relationships`, `semantic`, `usage`, `variables`. |
 | `include_call_hierarchy` | boolean | false | Callers/callees/call_tree (name path only). |
 | `max_depth` | int | 1 (or mode preset) | Call-tree depth, clamped [1, 10]. |
-| `include_sections` / `exclude_sections` | array | — | `relationships`/`callers` honored; others omitted (engine not ported). |
+| `include_sections` / `exclude_sections` | array | — | Whitelist/blacklist of `relationships`, `variables`, `semantic`, `structure`, `usage`, `ai`. |
 | `symbol` + `path` | string | (empty) | Auto-search path: if both set with no `id`, returns a workflow hint, not context. |
 
 **Output** (id path): `{count, contexts[], errors[]}`. Each context:
@@ -187,8 +194,9 @@ only (warn once on stderr).
 **save output**: `{saved | manifest, stats{ref_count,file_count,total_lines}, ref_count, file_count}`.
 **load output**: `{task, refs[] (with source, symbol_type, signature, is_exported, is_external), stats{refs_loaded,symbols_hydrated,tokens_approx,expansions_applied,truncated}, warnings[]}`.
 
-Expansion directives in `x`: `callees[:N]`, `callers`, `implementations`,
-`tests`, `pattern` — applied within the remaining token budget.
+Expansion directives in `x`: `callers[:N]`, `callees[:N]`, `implementations`,
+`interface`, `siblings`, `tests`, `doc`, `signature` — applied within the
+remaining token budget. Unknown directives are skipped.
 
 **Errors**: empty `refs`; no `to_file`/`to_string`; no `from_file`/`from_string`;
 file not found; invalid JSON / manifest; invalid `operation`.
@@ -238,7 +246,6 @@ Deep inspection of one symbol by name or ID.
 | `file` | string | (empty) | Glob disambiguator. |
 | `type` | string | (empty) | Symbol-type disambiguator. |
 | `include` | string | `all` | `signature`, `doc`, `callers`, `callees`, `type_hierarchy`, `scope`, `refs`, `annotations`, `flags`, `all`. |
-| `max_depth` | integer | 3 | Type-hierarchy depth, clamped [1, 10]. |
 
 **Output**: `{symbols[], count}`. Each symbol: `name`, `object_id`, `type`,
 `file`, `line`, `is_exported`, `complexity`, `parameter_count`; conditionally
@@ -272,10 +279,40 @@ Symbol outline for a single file, with optional stats.
 `max_complexity`, `avg_complexity` (computed over the whole file, not the
 filtered subset).
 
-**Errors**: neither `file` nor `file_id`. (`show_imports` is accepted but
-currently unused.)
+**Errors**: neither `file` nor `file_id`.
 
 **Not applicable**: file not found (`found: false` + `hint`); index
+unavailable.
+
+---
+
+## callers
+
+Resolved call-graph query for a symbol — confirmed callers grouped by
+enclosing function, with call-site lines and counts. Not a text scan;
+dynamic-dispatch and unresolved call sites are listed separately, never
+mixed into confirmed callers.
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `name` | string | — | Required. Exact symbol name. |
+| `max` | integer | 50 | Max caller groups, clamped [1, 1000]. Sets `truncated=true` when the cap is hit. |
+
+**Output**: `{symbol, definitions[], callers[], total_callers,
+total_call_sites, truncated, dynamic_call_sites[]?, dynamic_count?,
+unresolved_call_sites[]?, unresolved_count?}`. `definitions[]`: `name`,
+`type`, `file_path`, `line`. `callers[]` is grouped by enclosing function
+(file-scope call sites group per file under `caller: "<file scope>"`):
+`caller`, `caller_type` (omitted for file scope), `file_path`, `line`
+(caller's declaration line), `call_lines[]`, `call_count`. Groups sort by
+`file_path`, then `line`, then `caller`. `dynamic_call_sites[]` /
+`unresolved_call_sites[]` (when non-empty) each carry `caller?`, `file_path`,
+`line` for sites that could not be attributed to a confirmed caller.
+
+**Errors**: missing `name`.
+
+**Not applicable**: no callable definition of `name` found — returns
+`hint` plus `similar_symbols[]` when a fuzzy near-miss exists; index
 unavailable.
 
 ---
@@ -434,13 +471,18 @@ session-startup workhorse.
 | Param | Type | Default | Description |
 |-------|------|---------|-------------|
 | `mode` | string | `overview` | `overview`, `detailed`, `statistics`, `unified`, `structure`, `git_analyze`, `git_hotspots`. |
-| `analysis` | string | `modules` | For `detailed`: `modules`, `layers`, `features`, `terms`. |
+| `attributes` | string | `shipping` | Which files to analyze, by file attribute: `shipping` (every attribute that activates analysis), `all`, one attribute name, or a list, e.g. `["test","benchmark"]`. |
+| `analysis` | string | `modules` | For `detailed`: `modules`, `layers`, `features`, `terms`, `errors`, `resources`, `clones`, `deadcode`, `security`, `impact`, `annotate`. Rejects any other value, including `languages`. |
+| `min_lines` | integer | 6 | `analysis=clones`: minimum normalized body lines for a function to count. |
+| `threshold` | number | 0.9 | `analysis=clones`: structural similarity threshold, 0-1. |
+| `target` | string | (empty) | `analysis=annotate`: which annotation dimension — `all`, `entry`, `domain`, `hotpath`, `deadcode`. |
+| `flow` | boolean | false | `analysis=deadcode`: emit the `@lci:` annotation worklist (elements needing a used/dead decision) instead of the candidate lists. |
 | `scope` | string | `staged` | For `git_analyze`: `staged`, `wip`, `commit`, `range`. |
 | `base_ref` / `target_ref` | string | (empty) | For `git_analyze` range. |
 | `time_window` | string | `30d` | For `git_hotspots`: `7d`/`30d`/`90d`/`1y`. |
 | `file_pattern` | string | (empty) | For `git_hotspots`: glob filter. |
 | `max_results` | integer | 50 | Passed to the engine. |
-| `languages` | array | — | Language filter (aliases). |
+| `languages` | array | — | Language filter (aliases). Not a valid `analysis` value — `code_insight` has no `languages` analysis mode. |
 
 **Modes / sections**
 
@@ -468,13 +510,18 @@ session-startup workhorse.
   + `== DEPENDENCIES ==` + STATISTICS + VOCABULARY + NEXT STEPS.
 - **structure** → `== STRUCTURE ==` (dirs/files/symbols/depth, types by ext,
   code/test/config/doc categories, top dirs).
-- **detailed** (`analysis=`) → `== MODULES ==` / `== LAYERS ==` /
-  `== FEATURES ==` / `== TERMS ==`.
+- **detailed** (`analysis=`) → one of 11 sub-reports: `modules`, `layers`,
+  `features`, `terms`, `errors`, `resources`, `clones` (corpus-wide
+  duplicate code), `deadcode` (unused code; `flow=true` emits the `@lci:`
+  annotation worklist instead), `security` (dangerous-sink candidates by
+  entry reach), `impact` (blast radius of a git change set), `annotate`
+  (the `@lci:` annotation path driver). An unrecognized `analysis` value,
+  including `languages`, is an error.
 - **git_analyze** → `== GIT CHANGES ==` (scope, files_changed, added/modified/
   deleted, risk; findings duplicates/naming/metrics; top recommendation; top-5
   metrics issues by file:line). Real `git::Analyzer` data.
 - **git_hotspots** → `== GIT HOTSPOTS ==` (window, files_analyzed, commits,
-  hotspots, anti_patterns; top-8 churned files; top-5 collision zones). Real
+  hotspots; top-8 churned files; top-5 collision zones). Real
   `git::FrequencyAnalyzer` data over a rolling time window (time-volatile).
 
 > The git modes surface real data that the original Go formatter computed but

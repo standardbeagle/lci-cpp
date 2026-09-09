@@ -1,12 +1,12 @@
 ---
 title: MCP Server
-description: Connect lci to an AI assistant over the Model Context Protocol — 14 tools over stdio.
+description: Connect lci to an AI assistant over the Model Context Protocol — 15 tools over stdio.
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
 `lci mcp` runs a [Model Context Protocol](https://modelcontextprotocol.io)
-server over stdio. It exposes **14 tools** to AI assistants for searching and
+server over stdio. It exposes **15 tools** to AI assistants for searching and
 understanding a codebase without loading whole files into context.
 
 ## Starting the server
@@ -41,6 +41,7 @@ for example in a Claude Code / Claude Desktop-style config:
 | `list_symbols` | JSON | Enumerate + filter symbols (the "ls" for code) |
 | `inspect_symbol` | JSON | Deep inspect one symbol |
 | `browse_file` | JSON | Symbol outline for a file |
+| `callers` | JSON | Resolved call sites for a symbol |
 | `index_stats` | JSON | Index status + health |
 | `debug_info` | JSON | Deep diagnostics |
 | `semantic_annotations` | JSON | Query `@lci:` labels / categories |
@@ -138,7 +139,8 @@ entirely; without `search` they stay indexed but never appear in results.
 }
 ```
 
-`search` is sub-millisecond in-memory content search (not file paths):
+`search` is in-memory content search (not file paths), designed for fast
+interactive use:
 literal match → optional synonym expansion → regex fallback (`flags=rx`).
 Results carry the enclosing symbol's metadata (`object_id`, `symbol_name`,
 `symbol_type`, `is_exported`).

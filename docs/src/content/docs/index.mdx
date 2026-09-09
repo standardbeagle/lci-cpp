@@ -1,6 +1,6 @@
 ---
 title: lci
-description: Lightning Code Index — sub-millisecond semantic code search over large corpora. 13 languages, CLI + HTTP + Unix socket + MCP server for AI assistants.
+description: Lightning Code Index — semantic code search over large corpora, built for interactive use. 13 languages, CLI + HTTP + Unix socket + MCP server for AI assistants.
 template: splash
 head:
   - tag: meta
@@ -16,7 +16,7 @@ head:
       rel: canonical
       href: https://dev.standardbeagle.com/lci-cpp/
 hero:
-  tagline: Sub-millisecond semantic code search. Built for AI assistants.
+  tagline: Semantic code search built for AI assistants.
   actions:
     - text: Get Started
       link: /lci-cpp/getting-started/
@@ -32,13 +32,14 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
 
 ## What is lci?
 
-**Lightning Code Index (lci)** is the C++ implementation of lci — sub-millisecond
-semantic code search over large corpora, with ~80% context reduction versus Grep.
+**Lightning Code Index (lci)** is the C++ implementation of lci — semantic
+code search over large corpora, aiming to be fast enough for interactive use
+and to cut the context an AI assistant has to read compared with grep.
 It parses 13 languages with tree-sitter and exposes the index through a CLI, an
 MCP server for AI assistants, and an HTTP server over a Unix domain socket.
 
 <CardGrid>
-  <Card title="Sub-millisecond search" icon="rocket">
+  <Card title="Fast search" icon="rocket">
     Literal match, optional synonym expansion, and regex fallback — over an
     in-memory trigram index. Results carry the enclosing symbol's metadata.
   </Card>
@@ -47,7 +48,7 @@ MCP server for AI assistants, and an HTTP server over a Unix domain socket.
     Kotlin, Zig, and Ruby via vendored tree-sitter grammars.
   </Card>
   <Card title="MCP-native" icon="magnifier">
-    `lci mcp` exposes 14 tools to AI assistants over stdio — search, symbol
+    `lci mcp` exposes 15 tools to AI assistants over stdio — search, symbol
     lookup, code insight, git analysis, and more.
   </Card>
   <Card title="Four surfaces" icon="laptop">
@@ -76,12 +77,12 @@ lci git-analyze
 | `lci git-analyze` | analyze working-set changes for duplicates, naming, complexity |
 | `lci mcp` | MCP server over stdio for AI assistants |
 | `lci server` | long-running HTTP server over a Unix socket; per-corpus daemon |
-| `lci status`, `lci stats` | index health + runtime metrics |
+| `lci status` | index health + runtime metrics |
 
 <CardGrid>
   <Card title="Indexer pipeline" icon="setting">
-    scanner → parser pool (tree-sitter) → trigram bucketer (256-way sharded) →
-    merger → search engine.
+    scanner → parser pool (tree-sitter) → per-file extraction and per-file
+    trigram bloom → integrator → search engine.
   </Card>
   <Card title="Lock-free hot path" icon="approve-check-circle">
     RCU-style atomic snapshot for reads; mutex only on the write/indexing
