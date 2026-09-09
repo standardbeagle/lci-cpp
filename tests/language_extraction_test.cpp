@@ -509,7 +509,16 @@ TEST(LanguageExtractionTest, CppTrailingNamespaceCommentIsNotADocComment) {
 
     auto* sym = find_symbol(r, "build_report");
     ASSERT_NE(sym, nullptr);
-    EXPECT_TRUE(sym->doc_comment.empty());
+
+    // Doc comments live in ExtractionResults::declarations, keyed by the
+    // declaration node's 0-based (row, column) -- Symbol::line/column are
+    // the same position 1-based.
+    PositionKey key{sym->line - 1, sym->column - 1};
+    auto it = r.declarations.find(key);
+    ASSERT_NE(it, r.declarations.end())
+        << "build_report should still have a declaration-metadata entry "
+           "(for its signature), just no doc comment";
+    EXPECT_TRUE(it->second.doc_comment.empty());
 }
 
 TEST(LanguageExtractionTest, CppReferences) {
