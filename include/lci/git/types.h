@@ -421,59 +421,5 @@ std::string generate_top_recommendation(const std::vector<DuplicateFinding>& dup
                                         const std::vector<NamingFinding>& naming_issues,
                                         const std::vector<MetricsFinding>& metrics_issues);
 
-// ============================================================================
-// Anti-Pattern Types (used by pattern_detector)
-// ============================================================================
-
-/// Categorizes conflict-prone code patterns.
-enum class AntiPatternType : uint8_t {
-    RegistrationFunction,
-    EnumAggregation,
-    GodObject,
-    BarrelFile,
-    SwitchFactory,
-    ConfigAggregation,
-};
-
-/// Returns the string name for an AntiPatternType value.
-constexpr std::string_view to_string(AntiPatternType t) {
-    switch (t) {
-        case AntiPatternType::RegistrationFunction: return "registration_function";
-        case AntiPatternType::EnumAggregation: return "enum_aggregation";
-        case AntiPatternType::GodObject: return "god_object";
-        case AntiPatternType::BarrelFile: return "barrel_file";
-        case AntiPatternType::SwitchFactory: return "switch_factory";
-        case AntiPatternType::ConfigAggregation: return "config_aggregation";
-    }
-    return "unknown";
-}
-
-/// Indicates how problematic a pattern is.
-enum class AntiPatternSeverity : uint8_t {
-    High,
-    Medium,
-    Low,
-};
-
-/// Returns the string name for an AntiPatternSeverity value.
-constexpr std::string_view to_string(AntiPatternSeverity s) {
-    switch (s) {
-        case AntiPatternSeverity::High: return "high";
-        case AntiPatternSeverity::Medium: return "medium";
-        case AntiPatternSeverity::Low: return "low";
-    }
-    return "unknown";
-}
-
-/// Represents a detected conflict-prone code pattern.
-struct AntiPattern {
-    AntiPatternType type{AntiPatternType::GodObject};
-    std::string description;
-    std::string location;
-    AntiPatternSeverity severity{AntiPatternSeverity::Low};
-    std::string suggestion;
-    absl::flat_hash_map<std::string, int> metrics;
-};
-
 }  // namespace git
 }  // namespace lci

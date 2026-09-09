@@ -446,8 +446,7 @@ void emit_git_hotspots(std::ostringstream& out,
     out << "window=" << to_string(window)
         << " files_analyzed=" << s.total_files_analyzed
         << " commits=" << s.total_commits_analyzed
-        << " hotspots=" << s.hotspots_found
-        << " anti_patterns=" << s.anti_patterns_found << "\n";
+        << " hotspots=" << s.hotspots_found << "\n";
 
     if (!r.hotspots.empty()) {
         out << "hotspots:\n";
@@ -472,6 +471,18 @@ void emit_git_hotspots(std::ostringstream& out,
                 << " score=" << fmt2(c.collision_score)
                 << " contributors=" << c.contributors.size()
                 << " severity=" << to_string(c.severity) << "\n";
+        }
+    }
+    if (!r.ownership.empty()) {
+        out << "ownership:\n";
+        size_t lim = std::min(r.ownership.size(), size_t{5});
+        for (size_t i = 0; i < lim; ++i) {
+            const auto& m = r.ownership[i];
+            out << "  " << git_rel(m.module_path, root)
+                << " changes=" << m.total_changes
+                << " files=" << m.file_count
+                << " owner=" << m.primary_owner.author_email
+                << " secondary=" << m.secondary_owners.size() << "\n";
         }
     }
     out << "---\n";

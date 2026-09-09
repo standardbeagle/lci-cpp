@@ -115,7 +115,6 @@ add_library(lci_lib STATIC
     update/updater.cpp
     git/types.cpp
     git/provider.cpp
-    git/pattern_detector.cpp
     git/analyzer.cpp
     git/serialize.cpp
     git/frequency_analyzer.cpp

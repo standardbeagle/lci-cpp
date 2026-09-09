@@ -11,7 +11,6 @@
 
 #include <absl/container/flat_hash_map.h>
 
-#include <lci/git/pattern_detector.h>
 #include <lci/git/provider.h>
 #include <lci/git/types.h>
 
@@ -121,7 +120,6 @@ struct FileChangeFrequency {
     std::string file_path;
     absl::flat_hash_map<TimeWindow, FrequencyMetrics> metrics;
     std::vector<ContributorActivity> contributors;
-    std::vector<AntiPattern> anti_patterns;
     int line_count{};
 };
 
@@ -197,7 +195,6 @@ struct ChangeFrequencySummary {
     int total_commits_analyzed{};
     int hotspots_found{};
     int collision_zones{};
-    int anti_patterns_found{};
     std::string highest_churn;
     std::string most_active_contributor;
 };
@@ -219,7 +216,6 @@ struct ChangeFrequencyReport {
     ChangeFrequencySummary summary;
     std::vector<FileChangeFrequency> hotspots;
     std::vector<CollisionZone> collisions;
-    std::vector<AntiPattern> anti_patterns;
     std::vector<SymbolChangeFrequency> symbol_details;
     std::vector<ModuleOwnership> ownership;
     ChangeFrequencyMetadata metadata;
@@ -236,66 +232,6 @@ bool should_exclude_from_churn(std::string_view file_path,
                                const std::vector<std::string>& include_patterns,
                                const std::vector<std::string>& exclude_patterns,
                                bool skip_defaults);
-
-// ============================================================================
-// Frequency Cache
-// ============================================================================
-
-/// Lightweight in-memory cache with TTL for frequency analysis results.
-class FrequencyCache {
-  public:
-    explicit FrequencyCache(int64_t ttl_seconds = 600);
-
-    /// Retrieves a cached file frequency, or returns false.
-    bool get_file_frequency(std::string_view file_path, TimeWindow window,
-                            FileChangeFrequency& out) const;
-
-    /// Stores a file frequency result.
-    void set_file_frequency(std::string_view file_path, TimeWindow window,
-                            const FileChangeFrequency& freq);
-
-    /// Retrieves a cached report, or returns false.
-    bool get_report(std::string_view pattern, TimeWindow window,
-                    ChangeFrequencyReport& out) const;
-
-    /// Stores a full report.
-    void set_report(std::string_view pattern, TimeWindow window,
-                    const ChangeFrequencyReport& report);
-
-    /// Removes all cached data for a file.
-    void invalidate_file(std::string_view file_path);
-
-    /// Removes all entries.
-    void clear();
-
-    struct Stats {
-        uint64_t hits{};
-        uint64_t misses{};
-        double hit_rate{};
-        int entry_count{};
-    };
-
-    Stats stats() const;
-
-  private:
-    struct Entry {
-        std::variant<FileChangeFrequency, ChangeFrequencyReport> data;
-        int64_t expires_at{};
-        int64_t created_at{};
-    };
-
-    static std::string cache_key(std::string_view prefix, std::string_view path,
-                                 TimeWindow window);
-
-    mutable std::mutex mu_;
-    absl::flat_hash_map<std::string, Entry> entries_;
-    int64_t ttl_seconds_;
-    int max_entries_{1000};
-    mutable uint64_t hits_{};
-    mutable uint64_t misses_{};
-
-    void maybe_cleanup();
-};
 
 // ============================================================================
 // Free utility functions (testable)
@@ -371,19 +307,8 @@ class FrequencyAnalyzer {
     bool analyze(const ChangeFrequencyParams& params,
                  ChangeFrequencyReport& out);
 
-    /// Analyzes a single file for the given time window.
-    bool analyze_file(std::string_view file_path, TimeWindow window,
-                      FileChangeFrequency& out);
-
-    /// Checks collision risk for a specific file.
-    bool get_collision_risk(std::string_view file_path, CollisionZone& out);
-
-    /// Provides access to the cache for external invalidation.
-    FrequencyCache& cache() { return cache_; }
-
   private:
     HistoryProvider history_;
-    FrequencyCache cache_;
 
     void aggregate_by_file(
         const std::vector<CommitInfo>& commits, TimeWindow window,
