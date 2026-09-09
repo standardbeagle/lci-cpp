@@ -188,6 +188,33 @@ int run_git_analyze(const GlobalFlags& flags, const std::string& scope,
         }
     }
 
+    if (report.contains("metrics_issues") &&
+        report["metrics_issues"].is_array()) {
+        auto& issues = report["metrics_issues"];
+        if (!issues.empty()) {
+            std::printf("\nMetrics Issues\n");
+            std::printf("--------------\n");
+            for (const auto& issue : issues) {
+                std::string severity = issue.value("severity", "");
+                for (auto& c : severity)
+                    c = static_cast<char>(std::toupper(c));
+                std::printf("[%s] %s\n", severity.c_str(),
+                            issue.value("issue_type", "").c_str());
+                if (issue.contains("symbol")) {
+                    std::printf(
+                        "  Symbol: %s (%s:%d)\n",
+                        issue["symbol"].value("name", "").c_str(),
+                        issue["symbol"].value("file_path", "").c_str(),
+                        issue["symbol"].value("line", 0));
+                }
+                std::printf("  Issue: %s\n",
+                            issue.value("issue", "").c_str());
+                std::printf("  -> %s\n",
+                            issue.value("suggestion", "").c_str());
+            }
+        }
+    }
+
     if (report.contains("metadata")) {
         auto& meta = report["metadata"];
         std::printf("\nAnalysis: %s -> %s (%dms)\n",

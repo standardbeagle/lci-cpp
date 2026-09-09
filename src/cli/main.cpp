@@ -844,7 +844,7 @@ int main(int argc, char* argv[]) {
 
     std::vector<std::string> ga_focus;
     ga_cmd->add_option("-f,--focus", ga_focus,
-                       "Focus analysis: duplicates, naming");
+                       "Focus analysis: duplicates, naming, metrics");
 
     double ga_threshold = 0.8;
     ga_cmd->add_option("--threshold", ga_threshold,
