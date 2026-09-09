@@ -1,0 +1,53 @@
+{
+  "duplicates": [
+    {
+      "existing_code": {
+        "symbol_name": "ComputeTotalTwo"
+      },
+      "new_code": {
+        "symbol_name": "ComputeTotal"
+      },
+      "type": "structural"
+    },
+    {
+      "existing_code": {
+        "symbol_name": "ComputeTotal"
+      },
+      "new_code": {
+        "symbol_name": "ComputeTotalTwo"
+      },
+      "type": "structural"
+    }
+  ],
+  "metadata": {
+    "scope": "commit"
+  },
+  "metrics_issues": [
+    {
+      "description": "Function 'Huge' is too long (134 lines)",
+      "issue": "Function has 134 lines, exceeding threshold of 100",
+      "issue_type": "long_function",
+      "new_metrics": {
+        "complexity": 1,
+        "lines_of_code": 134,
+        "nesting_depth": 0
+      },
+      "severity": "warning",
+      "suggestion": "Extract parts of this function into smaller helper functions",
+      "symbol": {
+        "complexity": 1,
+        "end_line": 136,
+        "file_path": "huge.go",
+        "line": 3,
+        "lines_of_code": 134,
+        "name": "Huge",
+        "type": "function"
+      }
+    }
+  ],
+  "summary": {
+    "duplicates_found": 2,
+    "files_changed": 4,
+    "metrics_issues_found": 1
+  }
+}

@@ -1,0 +1,64 @@
+{
+  "id": "cli/git/git-analyze-commit",
+  "golden": "goldens/cli/git/git-analyze-commit.json",
+  "mode": "cli",
+  "corpus": "git-fixture",
+  "git_fixture": "integration/cli/git/fixture",
+  "go_binary": "${LCI_GO}",
+  "cpp_binary": "${LCI_CPP}",
+  "invocation": {
+    "args": [
+      "git-analyze",
+      "--json",
+      "--scope",
+      "commit"
+    ],
+    "cwd": "${CORPUS}"
+  },
+  "capture": [
+    "stdout",
+    "exit"
+  ],
+  "parse": "json",
+  "tiers": {
+    "stable": [
+      "summary.files_changed",
+      "summary.metrics_issues_found",
+      "summary.duplicates_found",
+      "metrics_issues[].issue_type",
+      "metrics_issues[].symbol.name",
+      "duplicates[].type",
+      "duplicates[].new_code.symbol_name",
+      "duplicates[].existing_code.symbol_name",
+      "metadata.scope"
+    ],
+    "ignore": [
+      "metadata.analysis_time_ms",
+      "metadata.analyzed_at",
+      "metadata.base_ref",
+      "metadata.target_ref",
+      "summary.risk_score",
+      "summary.symbols_added",
+      "summary.symbols_modified",
+      "summary.symbols_deleted",
+      "summary.naming_issues_found",
+      "summary.top_recommendation",
+      "duplicates[].description",
+      "duplicates[].similarity",
+      "duplicates[].suggestion",
+      "duplicates[].severity",
+      "duplicates[].new_code.file_path",
+      "duplicates[].new_code.start_line",
+      "duplicates[].new_code.end_line",
+      "duplicates[].existing_code.file_path",
+      "duplicates[].existing_code.start_line",
+      "duplicates[].existing_code.end_line"
+    ]
+  },
+  "tolerances": {
+    "score_abs": 0.0,
+    "timed_max_ms": 60000
+  },
+  "expect_exit": 0,
+  "_rationale": "The other cli/git spec (`--scope wip`) is envelope-only by construction: MaterializeGitFixture always leaves a clean tree, so wip's `git diff HEAD` is deterministically empty. `--scope commit` (default base_ref HEAD) instead diffs the fixture's single root commit via `diff-tree --root`, so the whole fixture is read as Added. The fixture's `huge.go` defines a 130-line function, past the fixed long_function threshold (100 lines) unconditionally, and `duplicate.go` defines two functions with identical bodies and different names, above the 0.8 structural-similarity threshold -- both independent of the live index's other contents, so both findings are deterministic across hosts and runs. Stable tier pins that both findings exist and names the symbols; ref/severity/line-number detail that would churn on unrelated fixture edits stays in ignore."
+}

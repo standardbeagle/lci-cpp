@@ -1,0 +1,63 @@
+{
+  "id": "http/git-analyze-commit",
+  "golden": "goldens/http/git-analyze-commit.json",
+  "mode": "http",
+  "corpus": "git-fixture",
+  "git_fixture": "integration/cli/git/fixture",
+  "go_binary": "${LCI_GO}",
+  "cpp_binary": "${LCI_CPP}",
+  "invocation": {
+    "args": ["/git-analyze"],
+    "stdin": "{\"scope\":\"commit\"}",
+    "cwd": "${CORPUS}"
+  },
+  "capture": ["stdout", "exit"],
+  "parse": "json",
+  "tiers": {
+    "stable": [
+      "report.summary.files_changed",
+      "report.summary.metrics_issues_found",
+      "report.summary.duplicates_found",
+      "report.metrics_issues[].issue_type",
+      "report.metrics_issues[].symbol.name",
+      "report.duplicates[].type",
+      "report.duplicates[].new_code.symbol_name",
+      "report.duplicates[].existing_code.symbol_name",
+      "report.metadata.scope"
+    ],
+    "ignore": [
+      "pid",
+      "start_time",
+      "version",
+      "uptime_ms",
+      "elapsed_ms",
+      "request_id",
+      "timestamp",
+      "schema_version",
+      "report.metadata.analysis_time_ms",
+      "report.metadata.analyzed_at",
+      "report.metadata.base_ref",
+      "report.metadata.target_ref",
+      "report.summary.risk_score",
+      "report.summary.symbols_added",
+      "report.summary.symbols_modified",
+      "report.summary.symbols_deleted",
+      "report.summary.naming_issues_found",
+      "report.summary.top_recommendation",
+      "report.naming_issues",
+      "report.duplicates[].description",
+      "report.duplicates[].similarity",
+      "report.duplicates[].suggestion",
+      "report.duplicates[].severity",
+      "report.duplicates[].new_code.file_path",
+      "report.duplicates[].new_code.start_line",
+      "report.duplicates[].new_code.end_line",
+      "report.duplicates[].existing_code.file_path",
+      "report.duplicates[].existing_code.start_line",
+      "report.duplicates[].existing_code.end_line"
+    ]
+  },
+  "tolerances": {"score_abs": 0.05, "timed_max_ms": 60000},
+  "expect_exit": 200,
+  "_rationale": "The existing http/git-analyze spec runs against the shared 'multi-lang' corpus (which sits inside the live lci-cpp checkout) with scope=wip, so every summary field is in the ignore tier -- envelope-only, per its own rationale. This spec uses the same isolated git_fixture as cli/git/git-analyze-commit with scope=commit (root-commit diff-tree), so the fixture's 130-line huge.go function and duplicate.go's two identical-body functions deterministically produce real metrics and duplicate findings, both pinned in the stable tier."
+}

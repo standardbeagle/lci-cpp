@@ -1,0 +1,23 @@
+{
+  "id": "mcp/git_analysis/commit-finding",
+  "golden": "goldens/mcp/git_analysis/commit-finding.json",
+  "mode": "mcp",
+  "corpus": "git-fixture",
+  "git_fixture": "integration/cli/git/fixture",
+  "go_binary": "${LCI_GO}",
+  "cpp_binary": "${LCI_CPP}",
+  "invocation": {
+    "args": ["mcp"],
+    "stdin": "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"git_analysis\",\"arguments\":{\"scope\":\"commit\"}}}",
+    "cwd": "${CORPUS}"
+  },
+  "capture": ["stdout", "exit"],
+  "parse": "json",
+  "_rationale": "The existing mcp/git_analysis golden (invalid-scope) only proves dispatch reaches real validation -- it has no positive-path coverage. This spec uses the isolated git_fixture (same fixture as cli/git/git-analyze-commit and http/git-analyze-commit) with scope=commit, whose root-commit diff reads duplicate.go's two identical-body functions as Added. The harness's inner-text normalization (tests/integration/spec_runner.cpp NormalizeMcpInnerText) unconditionally masks 'summary' and 'metrics_issues' from every MCP golden (release-noise guard), so this spec cannot pin the metrics finding the CLI/HTTP siblings pin -- but it does NOT mask 'duplicates', so the real structural-duplicate finding survives normalization and is pinned here byte-for-byte (whole result.content[].text compare, same pattern as invalid-scope.json).",
+  "tiers": {
+    "stable": ["result.content[].type", "result.content[].text", "result.isError"],
+    "ignore": ["id", "jsonrpc", "result.meta.elapsed_ms", "result.meta.server_pid"]
+  },
+  "tolerances": {"score_abs": 0.05, "timed_max_ms": 60000},
+  "expect_exit": 0
+}
