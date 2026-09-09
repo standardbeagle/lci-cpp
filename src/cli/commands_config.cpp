@@ -190,20 +190,68 @@ int run_config_show(const GlobalFlags& flags, const std::string& format) {
     }
 
     if (format == "json") {
+        // The full effective config: this used to omit server, insight,
+        // synonyms, attributes, and three index budget fields, so `config
+        // show -f json` could not answer "what will actually run" for
+        // anything past the original 13 keys.
         nlohmann::json j;
+        j["version"] = cfg.version;
         j["project"]["name"] = cfg.project.name;
         j["project"]["root"] = cfg.project.root;
         j["index"]["max_file_size"] = cfg.index.max_file_size;
+        j["index"]["max_parse_file_size"] = cfg.index.max_parse_file_size;
+        j["index"]["data_file_token_cap"] = cfg.index.data_file_token_cap;
         j["index"]["max_total_size_mb"] = cfg.index.max_total_size_mb;
         j["index"]["max_file_count"] = cfg.index.max_file_count;
+        j["index"]["overflow_policy"] = cfg.index.overflow_policy;
         j["index"]["smart_size_control"] = cfg.index.smart_size_control;
         j["index"]["priority_mode"] = cfg.index.priority_mode;
         j["index"]["follow_symlinks"] = cfg.index.follow_symlinks;
         j["index"]["respect_gitignore"] = cfg.index.respect_gitignore;
+        j["index"]["watch_mode"] = cfg.index.watch_mode;
+        j["index"]["watch_debounce_ms"] = cfg.index.watch_debounce_ms;
         j["performance"]["max_memory_mb"] = cfg.performance.max_memory_mb;
+        j["performance"]["max_goroutines"] = cfg.performance.max_goroutines;
         j["performance"]["debounce_ms"] = cfg.performance.debounce_ms;
+        j["performance"]["parallel_file_workers"] =
+            cfg.performance.parallel_file_workers;
+        j["performance"]["indexing_timeout_sec"] =
+            cfg.performance.indexing_timeout_sec;
+        j["server"]["idle_timeout_sec"] = cfg.server.idle_timeout_sec;
+        j["server"]["max_instances"] = cfg.server.max_instances;
+        j["server"]["max_rss_mb"] = cfg.server.max_rss_mb;
+        j["insight"]["error_report"] = cfg.insight.error_report;
+        j["insight"]["entry_points"] = cfg.insight.entry_points;
+        j["search"]["default_context_lines"] =
+            cfg.search.default_context_lines;
+        j["search"]["max_results"] = cfg.search.max_results;
+        j["search"]["max_context_lines"] = cfg.search.max_context_lines;
+        j["search"]["enable_fuzzy"] = cfg.search.enable_fuzzy;
+        j["search"]["merge_file_results"] = cfg.search.merge_file_results;
+        j["search"]["ensure_complete_stmt"] = cfg.search.ensure_complete_stmt;
         j["include"] = cfg.include;
         j["exclude"] = cfg.exclude;
+        // SynonymTable exposes no group-listing accessor (only lookups and
+        // a count) — report the count rather than skip the section.
+        j["synonyms"]["group_count"] = cfg.synonyms.group_count();
+        for (const auto& def : cfg.attribute_defs) {
+            nlohmann::json d;
+            d["name"] = def.name;
+            d["rank"] = def.rank;
+            d["dirs"] = def.dirs;
+            d["globs"] = def.globs;
+            d["contents"] = def.contents;
+            j["attributes"]["definitions"].push_back(std::move(d));
+        }
+        for (const auto& rule : cfg.attributes) {
+            nlohmann::json r;
+            r["attr"] = rule.attr;
+            r["pattern"] = rule.pattern;
+            j["attributes"]["patterns"].push_back(std::move(r));
+        }
+        if (!j.contains("attributes")) {
+            j["attributes"] = nlohmann::json::object();
+        }
         std::cout << j.dump(2) << "\n";
         return 0;
     }
