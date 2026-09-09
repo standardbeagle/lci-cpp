@@ -1,3 +1,4 @@
+#include <lci/analysis/side_effect_analyzer.h>
 #include <lci/parser/parser.h>
 #include <lci/parser/unified_extractor.h>
 
@@ -1652,6 +1653,32 @@ object Database {
     const Symbol* db = find_symbol(r, "Database");
     ASSERT_NE(db, nullptr);
     EXPECT_EQ(db->type, SymbolType::Object);
+}
+
+// Two one-line functions on distinct columns of the same line must not
+// collide in the side-effect analyzer's file:line:column-keyed result map.
+// unified_extractor.cpp's begin_function() call omitted the start column
+// (always passed 0), so both functions' results landed under the same key
+// and the second silently clobbered the first.
+TEST(LanguageExtractionTest, CppOneLinerFunctionsOnSameLineDoNotCollide) {
+    constexpr std::string_view src =
+        "void first() { int x = 1; } void second() { int y = 2; }\n";
+
+    auto tree = parse(Language::Cpp, src);
+    ASSERT_NE(tree, nullptr);
+
+    SideEffectAnalyzer analyzer("cpp");
+    UnifiedExtractor ue;
+    ue.init(src, 1, ".cpp", "oneliners.cpp");
+    ue.set_side_effect_sink(&analyzer);
+    ue.extract(tree.get());
+
+    auto results = analyzer.take_results();
+    EXPECT_EQ(results.size(), 2u)
+        << "expected two distinct side-effect entries (one per function), "
+           "got "
+        << results.size()
+        << " -- the second one-liner's column-0 key clobbered the first's";
 }
 
 }  // namespace

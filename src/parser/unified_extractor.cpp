@@ -387,9 +387,10 @@ void UnifiedExtractor::visit_node(TSNode node) {
             if (se_func_depth_ == 0) {
                 std::string_view fname = extract_function_name(node, node_type);
                 int start_line = static_cast<int>(start.row) + 1;
+                int start_column = static_cast<int>(start.column) + 1;
                 int end_line = static_cast<int>(ts_node_end_point(node).row) + 1;
                 side_effects_->begin_function(fname, path_, start_line,
-                                              end_line);
+                                              end_line, start_column);
                 register_function_signature(node, node_type);
             }
             ++se_func_depth_;
