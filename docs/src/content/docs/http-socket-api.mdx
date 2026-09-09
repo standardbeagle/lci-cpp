@@ -46,9 +46,18 @@ additionally accept `GET` with no body. Responses are `application/json`.
 | `POST /list-symbols` | Enumerate + filter symbols |
 | `POST /inspect-symbol` | Deep inspect one symbol |
 | `POST /browse-file` | Symbol outline for a file |
+| `POST /callers` | Resolved call sites for a symbol |
+| `POST /mcp` | Generic MCP JSON-RPC bridge (`lci mcp` forwards stdio frames here so bridged clients share this server's warmed index); `501` if this server has no MCP hosting enabled |
 | `GET /ping` | Liveness check, no body |
 | `GET /status` | Server status, no body |
 | `GET /stats` | Runtime metrics, no body |
+
+`/definition` and `/references` are text searches (`search_definitions` /
+the equivalent reference scan) resolved after the fact against the symbol
+table for kind and signature — they do not walk the call/reference graph.
+`/callers`, `/tree`, and `/inspect-symbol` use resolved graph edges (the
+reference tracker's confirmed call sites, or the type hierarchy) instead of
+searching text.
 
 ## Talking to it directly
 
@@ -68,12 +77,31 @@ On Windows, the same request goes over the loopback TCP port instead of
 
 - `lci server` / `lci server --daemon` starts the daemon; `--foreground`
   forces it to stay attached to the terminal (for debugging).
-- `lci status` / `lci stats` query a running server without going through
-  the CLI's own indexing path.
-- `lci shutdown [--force]` stops it; `/shutdown` does the same over HTTP.
+- `lci status` queries a running server without going through the CLI's own
+  indexing path.
+- `lci shutdown [--force]` stops the server for the current project root;
+  `lci shutdown --all` stops every server this user is running. `/shutdown`
+  does the equivalent for a single server over HTTP.
+- `lci servers` lists every index server this user is running and the root
+  each one serves — the socket/port name hashes the root, so the filesystem
+  alone cannot tell you.
 - CLI subcommands that need index state (`search`, `def`, `refs`, `tree`,
   …) start the server on demand if one isn't already running for that
   project root, then reuse it for subsequent calls.
+
+### Reaper policies
+
+A standalone server bounds its own lifetime under a `server` block in
+`.lci.kdl`: `idle_timeout_sec` (default `1800`) exits it after that long with
+no real request (`/ping` doesn't count); `max_instances` (default `8`) makes
+a starting server ask the least-recently-active servers beyond that cap to
+stop; `max_rss_mb` (default `4096`) is a self-cap — the server sheds cache
+and, if still over, exits rather than grow past that RSS (`0` disables); and
+independent of all three, a server always exits within about 500 ms of its
+indexed root being deleted. `lci shutdown` / `lci servers` read the instance
+registry these policies publish into. The index server embedded in `lci mcp`
+registers there too, but with its idle timeout disabled — the MCP client
+owns that process's lifetime.
 
 Indexing is in-memory only — there is no disk persistence today, so the
 index is rebuilt on every server start (or via `POST /reindex`).
