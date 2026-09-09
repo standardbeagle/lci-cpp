@@ -93,7 +93,6 @@ struct ProcessedFile {
     std::vector<FieldType> field_types;  // struct/class field types
     std::vector<ScopeInfo> scopes;
     std::vector<ProcessedSymbolMetadata> symbol_metadata;
-    BucketedTrigramResult bucketed_trigrams;
     std::vector<ProcessedToken> postings_tokens;  // worker-built
     std::vector<int> line_offsets;
     std::string language;

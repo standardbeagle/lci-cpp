@@ -6,8 +6,6 @@
 #include <lci/indexing/pipeline_integrator.h>
 #include <lci/indexing/pipeline_processor.h>
 #include <lci/indexing/pipeline_types.h>
-#include <lci/indexing/trigram_merger.h>
-
 #include <string>
 #include <thread>
 #include <vector>
@@ -20,151 +18,13 @@ namespace {
 ProcessedFile make_processed_file(FileID file_id, const std::string& path,
                                   TrigramIndex& trigram_idx,
                                   std::string_view content) {
+    (void)trigram_idx;
+    (void)content;
     ProcessedFile pf;
     pf.file_id = file_id;
     pf.path = path;
     pf.stage = "completed";
-
-    // Bucket trigrams from content.
-    if (content.size() >= 3) {
-        auto bucketed = trigram_idx.create_bucketed_result(file_id);
-        auto bytes = reinterpret_cast<const uint8_t*>(content.data());
-        for (size_t i = 0; i + 2 < content.size(); ++i) {
-            uint32_t trigram = (uint32_t(bytes[i]) << 16) |
-                               (uint32_t(bytes[i + 1]) << 8) |
-                               uint32_t(bytes[i + 2]);
-            uint16_t bucket_id = trigram_idx.get_bucket_for_trigram(trigram);
-            bucketed.buckets[bucket_id].trigrams[trigram].push_back(
-                static_cast<uint32_t>(i));
-        }
-        pf.bucketed_trigrams = std::move(bucketed);
-    }
-
     return pf;
-}
-
-// -- TrigramMergerPipeline tests ----------------------------------------------
-
-TEST(TrigramMergerPipelineTest, MergesTrigramsLockFree) {
-    TrigramIndex trigram_idx;
-    TrigramMergerPipeline merger(trigram_idx, 4);
-    merger.start();
-
-    // Create bucketed trigram data for two files.
-    std::string_view content_a = "func main() {}";
-    std::string_view content_b = "var result = 0";
-
-    auto bucketed_a = trigram_idx.create_bucketed_result(FileID{1});
-    {
-        auto bytes = reinterpret_cast<const uint8_t*>(content_a.data());
-        for (size_t i = 0; i + 2 < content_a.size(); ++i) {
-            uint32_t tri = (uint32_t(bytes[i]) << 16) |
-                           (uint32_t(bytes[i + 1]) << 8) |
-                           uint32_t(bytes[i + 2]);
-            uint16_t bid = trigram_idx.get_bucket_for_trigram(tri);
-            bucketed_a.buckets[bid].trigrams[tri].push_back(
-                static_cast<uint32_t>(i));
-        }
-    }
-    auto bucketed_b = trigram_idx.create_bucketed_result(FileID{2});
-    {
-        auto bytes = reinterpret_cast<const uint8_t*>(content_b.data());
-        for (size_t i = 0; i + 2 < content_b.size(); ++i) {
-            uint32_t tri = (uint32_t(bytes[i]) << 16) |
-                           (uint32_t(bytes[i + 1]) << 8) |
-                           uint32_t(bytes[i + 2]);
-            uint16_t bid = trigram_idx.get_bucket_for_trigram(tri);
-            bucketed_b.buckets[bid].trigrams[tri].push_back(
-                static_cast<uint32_t>(i));
-        }
-    }
-
-    EXPECT_TRUE(merger.submit(std::move(bucketed_a)));
-    EXPECT_TRUE(merger.submit(std::move(bucketed_b)));
-
-    merger.shutdown();
-
-    // Verify data was merged into storage.
-    auto& storage = merger.storage();
-    bool found_data = false;
-    for (int i = 0; i < storage.get_bucket_count(); ++i) {
-        auto& bucket = storage.get_bucket_by_id(i);
-        if (!bucket.trigrams.empty()) {
-            found_data = true;
-            break;
-        }
-    }
-    EXPECT_TRUE(found_data);
-    EXPECT_FALSE(merger.has_failures());
-}
-
-TEST(TrigramMergerPipelineTest, ShutdownIsIdempotent) {
-    TrigramIndex trigram_idx;
-    TrigramMergerPipeline merger(trigram_idx, 2);
-    merger.start();
-    merger.shutdown();
-    merger.shutdown();  // Must not crash.
-    EXPECT_EQ(merger.get_failed_file_count(), 0);
-}
-
-TEST(TrigramMergerPipelineTest, RejectsAfterShutdown) {
-    TrigramIndex trigram_idx;
-    TrigramMergerPipeline merger(trigram_idx, 2);
-    merger.start();
-    merger.shutdown();
-
-    auto bucketed = trigram_idx.create_bucketed_result(FileID{1});
-    EXPECT_FALSE(merger.submit(BucketedTrigramResult(bucketed)));
-}
-
-TEST(TrigramMergerPipelineTest, GetStatsReportsUsage) {
-    TrigramIndex trigram_idx;
-    TrigramMergerPipeline merger(trigram_idx, 4);
-    merger.start();
-
-    auto stats = merger.get_stats();
-    EXPECT_EQ(stats.merger_count, 4);
-    EXPECT_GT(stats.buffer_capacity, 0);
-
-    merger.shutdown();
-}
-
-TEST(TrigramMergerPipelineTest, MultipleFilesParallel) {
-    TrigramIndex trigram_idx;
-    TrigramMergerPipeline merger(trigram_idx, 4);
-    merger.start();
-
-    // Submit 20 files from multiple threads.
-    constexpr int kFilesPerThread = 5;
-    constexpr int kThreads = 4;
-    std::vector<std::thread> threads;
-    threads.reserve(kThreads);
-
-    for (int t = 0; t < kThreads; ++t) {
-        threads.emplace_back([&, t] {
-            for (int f = 0; f < kFilesPerThread; ++f) {
-                FileID fid{static_cast<uint32_t>(t * kFilesPerThread + f + 1)};
-                std::string content =
-                    "package p" + std::to_string(t) + std::to_string(f);
-                auto bucketed = trigram_idx.create_bucketed_result(fid);
-                auto bytes =
-                    reinterpret_cast<const uint8_t*>(content.data());
-                for (size_t i = 0; i + 2 < content.size(); ++i) {
-                    uint32_t tri = (uint32_t(bytes[i]) << 16) |
-                                   (uint32_t(bytes[i + 1]) << 8) |
-                                   uint32_t(bytes[i + 2]);
-                    uint16_t bid = trigram_idx.get_bucket_for_trigram(tri);
-                    bucketed.buckets[bid].trigrams[tri].push_back(
-                        static_cast<uint32_t>(i));
-                }
-                merger.submit(BucketedTrigramResult(bucketed));
-            }
-        });
-    }
-
-    for (auto& thr : threads) thr.join();
-    merger.shutdown();
-    EXPECT_FALSE(merger.has_failures());
 }
 
 // -- FileIntegrator tests -----------------------------------------------------
@@ -424,26 +284,6 @@ TEST(FileIntegratorTest, PathToIdAndIdToPath) {
 
     EXPECT_EQ(integrator.path_to_id("/tracked.go"), FileID{5});
     EXPECT_EQ(integrator.id_to_path(FileID{5}), "/tracked.go");
-}
-
-TEST(FileIntegratorTest, MergerPipelineIntegration) {
-    TrigramIndex trigram_idx;
-    ReferenceTracker ref_tracker;
-    PostingsIndex postings_idx;
-
-    FileIntegrator integrator(&trigram_idx, &ref_tracker, &postings_idx);
-    integrator.enable_merger_pipeline(4);
-
-    auto pf = make_processed_file(
-        FileID{1}, "/merged.go", trigram_idx, "package merged\nfunc Merge() {}\n");
-    integrator.integrate_file(pf);
-
-    auto stats = integrator.get_merger_stats();
-    EXPECT_EQ(stats.merger_count, 4);
-
-    integrator.disable_merger_pipeline();
-
-    EXPECT_EQ(integrator.file_count(), 1);
 }
 
 TEST(FileIntegratorTest, IntegratesWithPostingsIndex) {

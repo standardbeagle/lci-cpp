@@ -12,7 +12,6 @@
 #include <lci/core/trigram.h>
 #include <lci/indexing/pipeline_processor.h>
 #include <lci/indexing/pipeline_types.h>
-#include <lci/indexing/trigram_merger.h>
 #include <lci/types.h>
 
 namespace lci {
@@ -42,17 +41,6 @@ class FileIntegrator {
 
     void set_file_content_store(FileContentStore* store);
     void set_symbol_location_index(SymbolLocationIndex* index);
-
-    // -- Merger pipeline control ---------------------------------------------
-
-    /// Enables the lock-free trigram merger pipeline with the given worker count.
-    void enable_merger_pipeline(int merger_count);
-
-    /// Disables and shuts down the merger pipeline.
-    void disable_merger_pipeline();
-
-    /// Returns merger pipeline statistics, or default stats if disabled.
-    MergerStats get_merger_stats() const;
 
     // -- Integration ---------------------------------------------------------
 
@@ -91,9 +79,6 @@ class FileIntegrator {
     PostingsIndex* postings_index_;
     FileContentStore* file_content_store_{};
     SymbolLocationIndex* symbol_location_index_{};
-
-    std::unique_ptr<TrigramMergerPipeline> merger_pipeline_;
-    bool use_merger_pipeline_{};
 
     absl::flat_hash_map<std::string, FileID> file_map_;
     absl::flat_hash_map<FileID, std::string> reverse_file_map_;

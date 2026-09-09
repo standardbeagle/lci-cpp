@@ -27,66 +27,6 @@ struct TrigramEntry {
     std::vector<FileLocation> locations;
 };
 
-/// A single shard (bucket) of the trigram index.
-/// Each bucket holds its own trigram map, enabling parallel access
-/// across different buckets without contention.
-struct TrigramBucket {
-    absl::flat_hash_map<uint32_t, TrigramEntry> trigrams;
-};
-
-/// Pre-bucketed trigram data from a single file for one bucket.
-struct BucketedTrigramData {
-    absl::flat_hash_map<uint32_t, std::vector<uint32_t>> trigrams;
-};
-
-/// Pre-bucketed trigram result for a single file across all buckets.
-struct BucketedTrigramResult {
-    FileID file_id{};
-    std::vector<BucketedTrigramData> buckets;
-};
-
-/// 256-bucket sharded trigram storage for lock-free parallel merging.
-///
-/// Each bucket can be updated independently. During bulk indexing,
-/// different worker threads process different bucket ranges without
-/// contention.
-class ShardedTrigramStorage {
-  public:
-    explicit ShardedTrigramStorage(uint16_t bucket_count = 256);
-
-    /// Returns the bucket for a given trigram hash (read-only access).
-    const TrigramBucket& get_bucket(uint32_t trigram_hash) const;
-
-    /// Returns a mutable bucket by ID (for merge operations).
-    TrigramBucket& get_bucket_by_id(int bucket_id);
-
-    /// Returns the total number of buckets.
-    int get_bucket_count() const;
-
-    /// Merges pre-bucketed trigrams for a specific bucket range.
-    /// Thread-safe when different threads process non-overlapping ranges.
-    void merge_bucket_data_for_worker(
-        const BucketedTrigramResult& result,
-        int bucket_start, int bucket_end);
-
-    /// Merges all buckets from a pre-bucketed result.
-    void merge_bucketed_trigrams(const BucketedTrigramResult& result);
-
-    /// Searches for a trigram across the appropriate bucket.
-    std::vector<FileLocation> search_trigram(uint32_t trigram_hash) const;
-
-    /// Removes all occurrences of a file from all buckets.
-    void remove_file(FileID file_id);
-
-    /// Removes all trigrams from all buckets.
-    void clear();
-
-  private:
-    std::vector<TrigramBucket> buckets_;
-    uint16_t bucket_count_;
-    uint32_t bucket_mask_;
-};
-
 /// Trigram index supporting ASCII (bit-shifted uint32) and Unicode
 /// (string-keyed) trigrams with 256-bucket sharded storage and
 /// a 5-minute LRU search cache.
@@ -155,15 +95,6 @@ class TrigramIndex {
     /// Estimates trigram count for pre-allocation.
     int predict_trigram_count(int content_size) const;
 
-    /// Returns the bucket ID for a trigram hash.
-    uint16_t get_bucket_for_trigram(uint32_t trigram_hash) const;
-
-    /// Returns the total number of sharding buckets.
-    int get_bucket_count() const;
-
-    /// Creates a properly-sized bucketed result structure.
-    BucketedTrigramResult create_bucketed_result(FileID file_id) const;
-
     /// Indexes a file directly from raw content. Trigram-hostile content
     /// (see is_trigram_hostile) is not trigram-indexed; the file is added
     /// to the unfiltered set instead so candidate search still returns it.
@@ -179,9 +110,6 @@ class TrigramIndex {
     void index_file_with_trigrams(
         FileID file_id,
         const absl::flat_hash_map<uint32_t, std::vector<uint32_t>>& trigrams);
-
-    /// Indexes a file using pre-bucketed trigrams.
-    void index_file_with_bucketed_trigrams(const BucketedTrigramResult& result);
 
     /// Installs a file's trigram bloom (bulk-pipeline feed; the worker
     /// builds it in parallel, the integrator installs it here). Clears any
@@ -257,20 +185,13 @@ class TrigramIndex {
     /// Sets bulk indexing mode (skips cache during indexing).
     void set_bulk_indexing(bool enabled);
 
-    /// Returns the underlying sharded storage.
-    ShardedTrigramStorage& sharded_storage();
-
   private:
     /// Immutable read-side state, swapped atomically (RCU). Readers load
     /// the shared_ptr once and operate on the frozen snapshot with zero
     /// locks; writers clone-mutate-publish under write_mu_. Mirrors
     /// FileContentStore's snapshot model.
     ///
-    /// sharded_storage_ is intentionally NOT part of the snapshot: it is
-    /// written only by the bulk merge path (index_file_with_bucketed_trigrams
-    /// / the merger pipeline) and never read by the search path
-    /// (search_trigram has no callers), so it carries no read-vs-write race
-    /// and needs no snapshot. ascii_trigrams / unicode_trigrams are written
+    /// ascii_trigrams / unicode_trigrams are written
     /// only by the incremental index_file path, so cloning them on each
     /// incremental write is cheap (they stay empty during bulk indexing).
     struct Snapshot {
@@ -302,11 +223,6 @@ class TrigramIndex {
     std::shared_ptr<Snapshot> staging_;
 
     int cleanup_threshold_{100};
-
-    uint16_t bucket_count_{256};
-    uint32_t bucket_mask_{255};
-
-    ShardedTrigramStorage sharded_storage_;
 
     /// Loads the current published read snapshot (lock-free).
     std::shared_ptr<const Snapshot> load_snapshot() const;
@@ -378,11 +294,5 @@ absl::flat_hash_map<int, uint32_t> extract_simple_trigrams(
 /// Extracts Unicode trigrams as (byte_offset -> string) pairs.
 absl::flat_hash_map<int, std::string> extract_unicode_trigrams(
     std::string_view content);
-
-/// Distributes extracted trigrams into buckets for parallel merging.
-BucketedTrigramResult bucket_trigrams(
-    FileID file_id,
-    const absl::flat_hash_map<int, uint32_t>& trigrams,
-    int bucket_count);
 
 }  // namespace lci

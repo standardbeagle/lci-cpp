@@ -1,13 +1,11 @@
 add_library(lci_lib STATIC
     config/config.cpp
     error.cpp
-    string_pool.cpp
     core/file_content_store.cpp
     core/file_service.cpp
     core/line_scanner.cpp
     core/trigram.cpp
     core/symbol_store.cpp
-    core/trigram_bucketing.cpp
     core/callers_report.cpp
     core/reference_tracker.cpp
     core/import_resolver.cpp
@@ -32,7 +30,6 @@ add_library(lci_lib STATIC
     indexing/pipeline_scanner.cpp
     indexing/pipeline_processor.cpp
     indexing/pipeline_integrator.cpp
-    indexing/trigram_merger.cpp
     indexing/pipeline_progress.cpp
     indexing/pipeline.cpp
     indexing/master_index.cpp

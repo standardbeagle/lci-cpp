@@ -686,11 +686,6 @@ TEST(FileProcessorTest, BucketsTrigrams) {
     ProcessedFile r;
     ASSERT_TRUE(result_queue.pop(r));
     EXPECT_EQ(r.stage, "completed");
-    // Workers no longer bucket per-occurrence trigrams: the only consumer
-    // (ShardedTrigramStorage) had no production readers and the build cost
-    // drove RSS past 26 GB on large corpora. The result must stay empty so
-    // nothing downstream re-grows that feed by accident.
-    EXPECT_TRUE(r.bucketed_trigrams.buckets.empty());
 }
 
 TEST(FileProcessorTest, BackPressureWithSmallQueue) {

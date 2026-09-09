@@ -22,29 +22,6 @@ void FileIntegrator::set_symbol_location_index(SymbolLocationIndex* index) {
     symbol_location_index_ = index;
 }
 
-void FileIntegrator::enable_merger_pipeline(int merger_count) {
-    if (trigram_index_ == nullptr) return;
-    merger_pipeline_ = std::make_unique<TrigramMergerPipeline>(
-        *trigram_index_, merger_count);
-    merger_pipeline_->start();
-    use_merger_pipeline_ = true;
-}
-
-void FileIntegrator::disable_merger_pipeline() {
-    if (merger_pipeline_) {
-        merger_pipeline_->shutdown();
-        merger_pipeline_.reset();
-    }
-    use_merger_pipeline_ = false;
-}
-
-MergerStats FileIntegrator::get_merger_stats() const {
-    if (merger_pipeline_) {
-        return merger_pipeline_->get_stats();
-    }
-    return MergerStats{};
-}
-
 void FileIntegrator::integrate(BoundedQueue<ProcessedFile>& results) {
     // Drain the whole queue, then integrate in ascending file_id order.
     // Worker results arrive in scheduling order; integrating on arrival
@@ -65,7 +42,6 @@ void FileIntegrator::integrate(BoundedQueue<ProcessedFile>& results) {
                   return a.file_id < b.file_id;
               });
     for (auto& f : buffered) integrate_file(f);
-    disable_merger_pipeline();
 }
 
 void FileIntegrator::integrate_file(ProcessedFile& file) {
@@ -125,19 +101,6 @@ void FileIntegrator::merge_trigrams(ProcessedFile& file) {
         trigram_index_->mark_unfiltered(file.file_id);
     }
 
-    if (file.bucketed_trigrams.buckets.empty()) return;
-
-    if (use_merger_pipeline_ && merger_pipeline_) {
-        // Move the per-file bucketed map into the merger queue instead
-        // of copying it. file.bucketed_trigrams is dead after merge_*
-        // returns (subsequent merges don't read it). perf record showed
-        // submit's const-ref + internal copy ctor accounting for ~1%
-        // of indexing wall on top of the broader heap churn.
-        merger_pipeline_->submit(std::move(file.bucketed_trigrams));
-    } else {
-        trigram_index_->index_file_with_bucketed_trigrams(
-            file.bucketed_trigrams);
-    }
 }
 
 void FileIntegrator::merge_symbols(ProcessedFile& file) {

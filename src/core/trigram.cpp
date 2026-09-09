@@ -343,99 +343,9 @@ std::shared_ptr<const TrigramBloom> TrigramBloom::build(
     return bloom;
 }
 
-// -- ShardedTrigramStorage ----------------------------------------------------
-
-ShardedTrigramStorage::ShardedTrigramStorage(uint16_t bucket_count)
-    : bucket_count_(bucket_count),
-      bucket_mask_(static_cast<uint32_t>(bucket_count) - 1) {
-    buckets_.resize(bucket_count);
-}
-
-const TrigramBucket& ShardedTrigramStorage::get_bucket(uint32_t trigram_hash) const {
-    return buckets_[trigram_hash & bucket_mask_];
-}
-
-TrigramBucket& ShardedTrigramStorage::get_bucket_by_id(int bucket_id) {
-    return buckets_[static_cast<size_t>(bucket_id)];
-}
-
-int ShardedTrigramStorage::get_bucket_count() const {
-    return static_cast<int>(bucket_count_);
-}
-
-void ShardedTrigramStorage::merge_bucket_data_for_worker(
-    const BucketedTrigramResult& result,
-    int bucket_start, int bucket_end) {
-    int limit = std::min(bucket_end, static_cast<int>(result.buckets.size()));
-    for (int bid = bucket_start; bid < limit; ++bid) {
-        const auto& bucket_data = result.buckets[static_cast<size_t>(bid)];
-        if (bucket_data.trigrams.empty()) continue;
-
-        auto& bucket = buckets_[static_cast<size_t>(bid)];
-
-        // Reserve destination hash map capacity for the incoming trigrams
-        // to skip mid-loop rehashing. cheap upper bound: existing size +
-        // incoming distinct count (some will collide but capacity is just
-        // a hint).
-        bucket.trigrams.reserve(bucket.trigrams.size() +
-                                bucket_data.trigrams.size());
-
-        for (const auto& [trigram_hash, offsets] : bucket_data.trigrams) {
-            auto& entry = bucket.trigrams[trigram_hash];
-
-            // Reserve before append to skip the geometric realloc that
-            // resize() does when capacity < old + needed.
-            size_t old_len = entry.locations.size();
-            entry.locations.reserve(old_len + offsets.size());
-            entry.locations.resize(old_len + offsets.size());
-
-            for (size_t j = 0; j < offsets.size(); ++j) {
-                entry.locations[old_len + j] = {result.file_id, offsets[j]};
-            }
-        }
-    }
-}
-
-void ShardedTrigramStorage::merge_bucketed_trigrams(
-    const BucketedTrigramResult& result) {
-    merge_bucket_data_for_worker(
-        result, 0, static_cast<int>(result.buckets.size()));
-}
-
-std::vector<FileLocation> ShardedTrigramStorage::search_trigram(
-    uint32_t trigram_hash) const {
-    const auto& bucket = get_bucket(trigram_hash);
-    auto it = bucket.trigrams.find(trigram_hash);
-    if (it == bucket.trigrams.end()) return {};
-
-    return it->second.locations;
-}
-
-void ShardedTrigramStorage::remove_file(FileID file_id) {
-    for (auto& bucket : buckets_) {
-        std::vector<uint32_t> keys_to_remove;
-        for (auto& [key, entry] : bucket.trigrams) {
-            remove_file_locations(entry.locations, file_id);
-            if (entry.locations.empty()) {
-                keys_to_remove.push_back(key);
-            }
-        }
-        for (auto key : keys_to_remove) {
-            bucket.trigrams.erase(key);
-        }
-    }
-}
-
-void ShardedTrigramStorage::clear() {
-    for (auto& bucket : buckets_) {
-        bucket.trigrams.clear();
-    }
-}
-
 // -- TrigramIndex -------------------------------------------------------------
 
-TrigramIndex::TrigramIndex()
-    : sharded_storage_(256) {
+TrigramIndex::TrigramIndex() {
     snapshot_.store(std::make_shared<const Snapshot>(),
                     std::memory_order_release);
 }
@@ -469,7 +379,6 @@ void TrigramIndex::clear() {
         snap.covered_files.clear();
         snap.blooms.clear();
     });
-    sharded_storage_.clear();
 }
 
 int TrigramIndex::predict_trigram_count(int content_size) const {
@@ -479,21 +388,6 @@ int TrigramIndex::predict_trigram_count(int content_size) const {
     if (predicted < 8) return 8;
     if (predicted > 1000) return 1000;
     return predicted;
-}
-
-uint16_t TrigramIndex::get_bucket_for_trigram(uint32_t trigram_hash) const {
-    return static_cast<uint16_t>(trigram_hash & bucket_mask_);
-}
-
-int TrigramIndex::get_bucket_count() const {
-    return static_cast<int>(bucket_count_);
-}
-
-BucketedTrigramResult TrigramIndex::create_bucketed_result(FileID file_id) const {
-    BucketedTrigramResult result;
-    result.file_id = file_id;
-    result.buckets.resize(bucket_count_);
-    return result;
 }
 
 bool is_trigram_hostile(std::string_view content) {
@@ -729,21 +623,6 @@ void TrigramIndex::index_file_with_trigrams(
             }
         }
     });
-}
-
-void TrigramIndex::index_file_with_bucketed_trigrams(
-    const BucketedTrigramResult& result) {
-    // sharded_storage_ is outside the snapshot (bulk write-only, no search
-    // reader); only the invalidation set is part of the read snapshot. On
-    // the bulk path the invalidation set is normally empty, so skip the COW
-    // entirely unless this file is actually pending invalidation — avoids a
-    // per-file snapshot clone across a full reindex.
-    if (load_snapshot()->invalidated_files.contains(result.file_id)) {
-        mutate_snapshot([&](Snapshot& snap) {
-            snap.invalidated_files.erase(result.file_id);
-        });
-    }
-    sharded_storage_.merge_bucketed_trigrams(result);
 }
 
 void TrigramIndex::remove_file(FileID file_id) {
@@ -1000,10 +879,6 @@ void TrigramIndex::set_bulk_indexing(bool enabled) {
         snapshot_.store(std::move(staging_), std::memory_order_release);
         staging_ = nullptr;
     }
-}
-
-ShardedTrigramStorage& TrigramIndex::sharded_storage() {
-    return sharded_storage_;
 }
 
 void TrigramIndex::cleanup_snapshot(Snapshot& snap) {
