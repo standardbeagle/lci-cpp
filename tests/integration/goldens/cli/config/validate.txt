@@ -1,3 +1,3 @@
 Configuration file is valid
-Config source: .lci.kdl
+Config source: (defaults, no config file)
 Settings: 50000 files max, 500MB memory limit, 500MB index limit

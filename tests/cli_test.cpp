@@ -2728,10 +2728,10 @@ TEST(GroupRowsByFile, EmptyInput) {
 // pre-fix tree. They are grouped by the GREEN commit that fixes them.
 
 // -- no cwd auto-index: running a server-backed command from a directory with
-// no .lci.kdl and no git root must fail naming `lci init` instead of spawning
-// a server that silently indexes the whole cwd.
+// no .lci.kdl and no git root must fail naming `lci config init` instead of
+// spawning a server that silently indexes the whole cwd.
 
-TEST(CliConfigGuardTest, CwdWithoutConfigOrGitRootFailsNamingLciInit) {
+TEST(CliConfigGuardTest, CwdWithoutConfigOrGitRootFailsNamingConfigInit) {
     namespace fs = std::filesystem;
     auto dir = lci::test::unique_temp_dir("lci_cli_no_config_");
     fs::create_directories(dir);
@@ -2747,7 +2747,7 @@ TEST(CliConfigGuardTest, CwdWithoutConfigOrGitRootFailsNamingLciInit) {
 
     EXPECT_FALSE(err.empty()) << "cwd without .lci.kdl/git root must not "
                                  "auto-index; got a valid config";
-    EXPECT_NE(err.find("lci init"), std::string::npos) << err;
+    EXPECT_NE(err.find("lci config init"), std::string::npos) << err;
 
     std::error_code ec;
     fs::remove_all(dir, ec);
