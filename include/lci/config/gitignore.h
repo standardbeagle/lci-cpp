@@ -58,7 +58,12 @@ class GitignoreParser {
     /// every nested .gitignore, each applying to its own subtree (deeper
     /// files override shallower ones, as in git). Ignored directories are
     /// not descended into. Returns false on read error (missing .gitignore
-    /// files are not an error).
+    /// files are not an error). Also loads `.git/info/exclude` (repo-local,
+    /// not committed) and the user's global excludes file (`core.excludesFile`
+    /// from `.git/config`, or the git default of
+    /// `$XDG_CONFIG_HOME/git/ignore` / `~/.config/git/ignore`) — same
+    /// precedence order git itself uses: global, then repo-wide
+    /// info/exclude, then tracked .gitignore files root-to-leaf.
     bool load_gitignore(const std::string& root_path);
 
     /// Adds a single pattern line (for programmatic use and testing).
@@ -81,6 +86,13 @@ class GitignoreParser {
     std::vector<GitignorePattern> patterns_;
 
     bool load_dir(const std::string& dir_path, const std::string& base);
+    /// Reads one plain gitignore-syntax file (no directory recursion) into
+    /// patterns_ at base "". Missing file is not an error.
+    bool load_flat_file(const std::string& file_path);
+    /// Resolves and loads the user's global excludes file: `core.excludesFile`
+    /// from `<root>/.git/config` if set (expanding `~`), else the git
+    /// default `$XDG_CONFIG_HOME/git/ignore` / `~/.config/git/ignore`.
+    void load_global_excludes(const std::string& root_path);
     GitignorePattern parse_pattern(std::string_view line,
                                    std::string_view base) const;
     PatternType analyze_pattern(std::string_view pattern,

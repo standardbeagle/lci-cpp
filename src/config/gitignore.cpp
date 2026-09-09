@@ -1,5 +1,7 @@
 #include <lci/config/gitignore.h>
 
+#include <cctype>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -7,7 +9,99 @@
 namespace lci {
 
 bool GitignoreParser::load_gitignore(const std::string& root_path) {
+    // git's own precedence, low to high: the user's global excludes file,
+    // then the repo-local (untracked) .git/info/exclude, then every tracked
+    // .gitignore root-to-leaf. should_ignore is last-match-wins, so loading
+    // in this order gives a tracked .gitignore the final say, same as git.
+    load_global_excludes(root_path);
+    load_flat_file(
+        (std::filesystem::path(root_path) / ".git" / "info" / "exclude")
+            .string());
     return load_dir(root_path, "");
+}
+
+bool GitignoreParser::load_flat_file(const std::string& file_path) {
+    std::ifstream file(file_path);
+    if (!file.is_open()) return true;  // missing file is not an error
+    std::string line;
+    while (std::getline(file, line)) {
+        add_pattern(line, "");
+    }
+    return !file.bad();
+}
+
+void GitignoreParser::load_global_excludes(const std::string& root_path) {
+    namespace fs = std::filesystem;
+    std::string excludes_path;
+
+    // core.excludesFile from <root>/.git/config, read directly rather than
+    // shelling out to `git config` — this runs on every index load and must
+    // not pay a process spawn for it.
+    std::ifstream git_config(fs::path(root_path) / ".git" / "config");
+    if (git_config.is_open()) {
+        std::string line;
+        bool in_core_section = false;
+        while (std::getline(git_config, line)) {
+            size_t start = line.find_first_not_of(" \t");
+            if (start == std::string::npos) continue;
+            std::string trimmed = line.substr(start);
+            if (!trimmed.empty() && trimmed.front() == '[') {
+                in_core_section =
+                    trimmed.rfind("[core]", 0) == 0 ||
+                    trimmed.rfind("[core ", 0) == 0;
+                continue;
+            }
+            if (!in_core_section) continue;
+            // Match "excludesfile = <path>", case-insensitive key, ':' or
+            // '=' separator, per git-config(1) syntax.
+            std::string lower_key;
+            size_t sep = trimmed.find_first_of("=:");
+            if (sep == std::string::npos) continue;
+            std::string key = trimmed.substr(0, sep);
+            while (!key.empty() &&
+                   (key.back() == ' ' || key.back() == '\t'))
+                key.pop_back();
+            lower_key.reserve(key.size());
+            for (char c : key)
+                lower_key += static_cast<char>(
+                    std::tolower(static_cast<unsigned char>(c)));
+            if (lower_key != "excludesfile") continue;
+            std::string value = trimmed.substr(sep + 1);
+            size_t v_start = value.find_first_not_of(" \t");
+            if (v_start == std::string::npos) continue;
+            value = value.substr(v_start);
+            size_t v_end = value.find_last_not_of(" \t\r\n");
+            if (v_end != std::string::npos) value.resize(v_end + 1);
+            if (!value.empty() && value.front() == '"' &&
+                value.back() == '"' && value.size() >= 2) {
+                value = value.substr(1, value.size() - 2);
+            }
+            excludes_path = value;
+        }
+    }
+
+    if (!excludes_path.empty() && excludes_path.front() == '~') {
+        const char* home = std::getenv("HOME");
+        if (home != nullptr && *home != '\0') {
+            excludes_path = std::string(home) + excludes_path.substr(1);
+        }
+    }
+
+    if (excludes_path.empty()) {
+        // git's own default when core.excludesFile is unset.
+        if (const char* xdg = std::getenv("XDG_CONFIG_HOME");
+            xdg != nullptr && *xdg != '\0') {
+            excludes_path = (fs::path(xdg) / "git" / "ignore").string();
+        } else if (const char* home = std::getenv("HOME");
+                  home != nullptr && *home != '\0') {
+            excludes_path =
+                (fs::path(home) / ".config" / "git" / "ignore").string();
+        }
+    }
+
+    if (!excludes_path.empty()) {
+        load_flat_file(excludes_path);
+    }
 }
 
 // Reads dir/.gitignore, then recurses into subdirectories so nested
