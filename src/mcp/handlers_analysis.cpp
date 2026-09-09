@@ -660,7 +660,7 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                                 t2 != SymbolType::Constructor)
                                 continue;
                             const auto* se = analyzer->get_result(
-                                f.path, sym->symbol.line);
+                                f.path, sym->symbol.line, sym->symbol.column);
                             if (se == nullptr) continue;
                             if (se->categories & side_effect::kDynamicCall)
                                 escapes.push_back(

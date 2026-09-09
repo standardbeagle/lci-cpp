@@ -506,9 +506,8 @@ void SideEffectAnalyzer::populate_from_index(const MasterIndex& indexer) {
                 cats |= classify_callee_category(callee);
             }
 
-            // Column 0: must match the AST pass key, and the extractor
-            // (out of this slice's scope) does not yet pass start columns.
-            std::string key = make_result_key(file_path, es->symbol.line, 0);
+            std::string key = make_result_key(file_path, es->symbol.line,
+                                              es->symbol.column);
 
             // If the AST pass already recorded precise local effects for this
             // function (param / receiver / global writes, throws, channel ops),
@@ -571,8 +570,8 @@ void SideEffectAnalyzer::propagate_transitive(const MasterIndex& indexer) {
         std::string file_path = indexer.get_file_path(fid);
         for (const auto& es : rt_snap->get_file_enhanced_symbols(fid)) {
             if (!es) continue;
-            // Column 0: see populate_from_index.
-            std::string key = make_result_key(file_path, es->symbol.line, 0);
+            std::string key = make_result_key(file_path, es->symbol.line,
+                                              es->symbol.column);
             auto it = results_.find(key);
             if (it != results_.end()) by_symbol[es->id] = &it->second;
         }

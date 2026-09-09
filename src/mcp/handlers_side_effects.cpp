@@ -519,7 +519,8 @@ ToolResult side_effect_symbol_query(const nlohmann::json& params,
 
     if (resolved) {
         auto path = indexer->get_file_path(resolved->symbol.file_id);
-        auto* info = analyzer.get_result(path, resolved->symbol.line);
+        auto* info = analyzer.get_result(path, resolved->symbol.line,
+                                          resolved->symbol.column);
         if (!info) {
             // Stay loud without the error flag: we resolved the symbol but
             // the analyzer holds no side-effect record — a bare empty results

@@ -567,29 +567,41 @@ class SideEffectsSymbolModeTest : public ::testing::Test {
         indexer_ = std::make_unique<MasterIndex>(config);
         ASSERT_TRUE(indexer_->index_directory(dir_.string()));
 
+        // Results are keyed file:line:column (the extractor now supplies
+        // the real start column), so the manually-recorded records here
+        // must use the SAME column the extractor assigned `dup` in each
+        // file or get_result's real-column lookup misses them.
+        auto rt_snap = indexer_->ref_tracker().pin();
+        auto syms = rt_snap->find_symbols_by_name("dup");
+        ASSERT_EQ(syms.size(), 2u);
+        int a_column = -1;
+        int b_column = -1;
+        for (const auto& s : syms) {
+            auto path = indexer_->get_file_path(s->symbol.file_id);
+            if (path.size() >= 4 &&
+                path.compare(path.size() - 4, 4, "b.go") == 0) {
+                b_symbol_id_ = encode_symbol_id(s->id);
+                b_column = s->symbol.column;
+            } else if (path.size() >= 4 &&
+                       path.compare(path.size() - 4, 4, "a.go") == 0) {
+                a_column = s->symbol.column;
+            }
+        }
+        ASSERT_FALSE(b_symbol_id_.empty());
+        ASSERT_GE(a_column, 0);
+        ASSERT_GE(b_column, 0);
+
         analyzer_ = std::make_unique<SideEffectAnalyzer>("go");
         for (const char* f : {"a.go", "b.go"}) {
             auto abs = (dir_ / f).string();
-            analyzer_->begin_function("dup", abs, 3, 3);
+            int column = (f[0] == 'a') ? a_column : b_column;
+            analyzer_->begin_function("dup", abs, 3, 3, column);
             // Distinct markers: a.go writes a global (impure), b.go is pure.
             if (f[0] == 'a') {
                 analyzer_->record_access("g", {}, AccessType::Write, 3, 1);
             }
             analyzer_->end_function();
         }
-
-        // Locate the SymbolID of the b.go definition.
-        auto rt_snap = indexer_->ref_tracker().pin();
-        auto syms = rt_snap->find_symbols_by_name("dup");
-        ASSERT_EQ(syms.size(), 2u);
-        for (const auto& s : syms) {
-            auto path = indexer_->get_file_path(s->symbol.file_id);
-            if (path.size() >= 4 &&
-                path.compare(path.size() - 4, 4, "b.go") == 0) {
-                b_symbol_id_ = encode_symbol_id(s->id);
-            }
-        }
-        ASSERT_FALSE(b_symbol_id_.empty());
     }
 
     void TearDown() override {

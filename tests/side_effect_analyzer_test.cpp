@@ -653,7 +653,8 @@ TEST(TransitivePropagation, FixpointReasonsFollowSortedSymbolOrder) {
     auto mid = snap->find_symbol_by_name("mid");
     ASSERT_NE(mid, nullptr);
     const auto* info = analyzer.get_result(
-        indexer.get_file_path(mid->symbol.file_id), mid->symbol.line);
+        indexer.get_file_path(mid->symbol.file_id), mid->symbol.line,
+        mid->symbol.column);
     ASSERT_NE(info, nullptr);
     std::vector<std::string> expected = {"calls impure fIO (io)",
                                          "calls impure fNet (network)",
@@ -1036,7 +1037,8 @@ TEST(TransitivePropagation, ImpurityFlowsUpstreamThroughCallGraph) {
         auto sym = snapshot->find_symbol_by_name(name);
         if (!sym) return nullptr;
         return analyzer.get_result(
-            indexer.get_file_path(sym->symbol.file_id), sym->symbol.line);
+            indexer.get_file_path(sym->symbol.file_id), sym->symbol.line,
+            sym->symbol.column);
     };
 
     // Before propagation: only leaf() is impure (local IO); mid/top are pure.
@@ -1102,7 +1104,8 @@ TEST(TransitivePropagation, ConfidenceDecaysToMinConfidenceFloor) {
         auto sym = snapshot->find_symbol_by_name(name);
         EXPECT_NE(sym, nullptr) << name;
         const auto* info = analyzer.get_result(
-            indexer.get_file_path(sym->symbol.file_id), sym->symbol.line);
+            indexer.get_file_path(sym->symbol.file_id), sym->symbol.line,
+            sym->symbol.column);
         EXPECT_NE(info, nullptr) << name;
         return info ? info->transitive_confidence : -1.0;
     };
