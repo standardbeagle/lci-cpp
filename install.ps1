@@ -87,8 +87,10 @@ try {
             throw "checksum mismatch for $($asset.name) (expected $expected, got $actual)"
         }
         Write-Output 'Verified checksum.'
+    } elseif ($env:LCI_INSTALL_SKIP_VERIFY -eq '1') {
+        Write-Warning 'release has no SHA256SUMS; LCI_INSTALL_SKIP_VERIFY=1 set, skipping integrity check'
     } else {
-        Write-Warning 'release has no SHA256SUMS; skipping integrity check'
+        throw 'release has no SHA256SUMS asset; refusing to install an unverified download (set LCI_INSTALL_SKIP_VERIFY=1 to override)'
     }
 
     tar -xf $tarball -C $tmp

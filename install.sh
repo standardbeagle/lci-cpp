@@ -119,24 +119,31 @@ sha256_of() {
     fi
 }
 
-if [ -n "$sums_url" ]; then
-    if http_get "$sums_url" > "$tmp/SHA256SUMS" 2>/dev/null; then
-        # Exact filename field match — avoid regex/suffix false positives.
-        expected="$(awk -v n="$asset_name" '$2==n {print $1; exit}' "$tmp/SHA256SUMS")"
-        if [ -z "$expected" ]; then
-            err "SHA256SUMS has no entry for $asset_name"
-        fi
-        actual="$(sha256_of "$tarball")" \
-            || err "no sha256 tool (sha256sum/shasum) found to verify the download"
-        if [ "$actual" != "$expected" ]; then
-            err "checksum mismatch for $asset_name (expected $expected, got $actual)"
-        fi
-        printf 'Verified checksum.\n'
+# Verification is mandatory: an unverified download is installed sight
+# unseen. Skip ONLY with the explicit opt-out LCI_INSTALL_SKIP_VERIFY=1 (same
+# contract as the self-updater's refusal in src/update/updater.cpp).
+if [ -z "$sums_url" ]; then
+    if [ "${LCI_INSTALL_SKIP_VERIFY:-}" = "1" ]; then
+        printf 'warning: release has no SHA256SUMS; LCI_INSTALL_SKIP_VERIFY=1 set, skipping integrity check\n' >&2
     else
-        printf 'warning: could not fetch SHA256SUMS; skipping integrity check\n' >&2
+        err "release has no SHA256SUMS asset; refusing to install an unverified download (set LCI_INSTALL_SKIP_VERIFY=1 to override)"
     fi
+elif http_get "$sums_url" > "$tmp/SHA256SUMS" 2>/dev/null; then
+    # Exact filename field match — avoid regex/suffix false positives.
+    expected="$(awk -v n="$asset_name" '$2==n {print $1; exit}' "$tmp/SHA256SUMS")"
+    if [ -z "$expected" ]; then
+        err "SHA256SUMS has no entry for $asset_name"
+    fi
+    actual="$(sha256_of "$tarball")" \
+        || err "no sha256 tool (sha256sum/shasum) found to verify the download"
+    if [ "$actual" != "$expected" ]; then
+        err "checksum mismatch for $asset_name (expected $expected, got $actual)"
+    fi
+    printf 'Verified checksum.\n'
+elif [ "${LCI_INSTALL_SKIP_VERIFY:-}" = "1" ]; then
+    printf 'warning: could not fetch SHA256SUMS; LCI_INSTALL_SKIP_VERIFY=1 set, skipping integrity check\n' >&2
 else
-    printf 'warning: release has no SHA256SUMS; skipping integrity check\n' >&2
+    err "could not fetch SHA256SUMS from $sums_url; refusing to install an unverified download (set LCI_INSTALL_SKIP_VERIFY=1 to override)"
 fi
 
 tar -xzf "$tarball" -C "$tmp" || err "failed to extract archive"
