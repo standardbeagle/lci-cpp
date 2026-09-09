@@ -1021,11 +1021,23 @@ std::string UnifiedExtractor::extract_doc_comment(TSNode node) {
     if (ts_node_is_null(prev)) return {};
 
     std::string_view prev_type = get_node_type(prev);
-    if (prev_type == "comment" || prev_type == "line_comment" ||
-        prev_type == "block_comment") {
-        return std::string(node_text(prev));
+    if (prev_type != "comment" && prev_type != "line_comment" &&
+        prev_type != "block_comment") {
+        return {};
     }
-    return {};
+
+    // A comment that starts on the same line its OWN preceding sibling ends
+    // is a trailing comment on that prior construct (e.g. `}  // namespace`
+    // closing a namespace/block), not a doc comment for `node`. Without this
+    // check that trailing comment gets misattributed as node's doc comment.
+    TSNode before_comment = ts_node_prev_sibling(prev);
+    if (!ts_node_is_null(before_comment)) {
+        uint32_t before_end_row = ts_node_end_point(before_comment).row;
+        uint32_t comment_start_row = ts_node_start_point(prev).row;
+        if (before_end_row == comment_start_row) return {};
+    }
+
+    return std::string(node_text(prev));
 }
 
 // ---------------------------------------------------------------------------

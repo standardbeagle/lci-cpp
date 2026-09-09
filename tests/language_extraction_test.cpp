@@ -487,6 +487,30 @@ TEST(LanguageExtractionTest, Cpp) {
     EXPECT_GE(r.imports.size(), 2u);
 }
 
+// A `}  // namespace foo` closing-brace comment is a TRAILING comment on the
+// namespace, not a leading doc comment for whatever follows it. Before the
+// fix, extract_doc_comment took the immediately preceding sibling
+// unconditionally and attributed that trailing comment to the next
+// function's doc_comment.
+constexpr std::string_view kCppTrailingNamespaceCommentSrc = R"(
+namespace ns {
+int helper() { return 0; }
+}  // namespace ns
+
+int build_report() {
+    return helper();
+}
+)";
+
+TEST(LanguageExtractionTest, CppTrailingNamespaceCommentIsNotADocComment) {
+    auto r = extract(Language::Cpp, ".cpp", kCppTrailingNamespaceCommentSrc,
+                     "report.cpp");
+
+    auto* sym = find_symbol(r, "build_report");
+    ASSERT_NE(sym, nullptr);
+    EXPECT_TRUE(sym->doc_comment.empty());
+}
+
 TEST(LanguageExtractionTest, CppReferences) {
     constexpr std::string_view kCppRefsSrc = R"(class SlabAllocator {};
 
