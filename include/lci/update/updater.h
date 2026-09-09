@@ -56,6 +56,17 @@ bool is_safe_asset_name(const std::string& name);
 // which is what makes the download safe to stage on a multi-user host.
 std::filesystem::path make_private_workdir();
 
+// Pure: numeric semver compare of two "MAJOR.MINOR.PATCH[-PRERELEASE]"
+// strings (an optional leading 'v'/'V' is ignored). Returns <0 if `a` < `b`,
+// 0 if equal, >0 if `a` > `b`. Compares major/minor/patch as integers (so
+// "0.10.1" > "0.7.0"), then treats a release as greater than any of its own
+// pre-release tags (e.g. "1.0.0" > "1.0.0-rc1"); two pre-release strings
+// compare lexicographically. A missing/non-numeric component is treated as
+// 0 (least surprising fallback for a malformed tag), never as a fatal error
+// — the caller distinguishes "can't tell" only if it inspects the strings
+// itself.
+int compare_versions(const std::string& a, const std::string& b);
+
 // Pure: find the expected lowercase-hex SHA-256 for `asset_name` in a
 // SHA256SUMS body ("<hash>  <filename>" per line). Empty if absent or the
 // matched token is not a valid 64-char hex digest.

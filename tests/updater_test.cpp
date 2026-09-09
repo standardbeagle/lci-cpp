@@ -11,6 +11,7 @@ using lci::update::Arch;
 using lci::update::Asset;
 using lci::update::Os;
 using lci::update::Platform;
+using lci::update::compare_versions;
 using lci::update::make_private_workdir;
 using lci::update::select_asset;
 
@@ -215,4 +216,33 @@ TEST(UpdaterDetect, DetectPlatformIsConsistent) {
     Platform p = lci::update::detect_platform();
     // On the CI/dev host this must resolve to a real, supported triple.
     EXPECT_NE(p.os, Os::Unsupported);
+}
+
+// -- compare_versions -------------------------------------------------------
+//
+// String equality treated "0.10.1" != "0.7.0" as an upgrade because "0.10.1"
+// sorts before "0.7.0" lexicographically -- a real downgrade offer. These pin
+// numeric compare instead.
+
+TEST(UpdaterCompareVersions, NumericNotLexicographic) {
+    // "0.10.1" > "0.7.0" numerically, even though '1' < '7' lexicographically.
+    EXPECT_GT(compare_versions("0.10.1", "0.7.0"), 0);
+    EXPECT_LT(compare_versions("0.7.0", "0.10.1"), 0);
+}
+
+TEST(UpdaterCompareVersions, EqualVersionsCompareEqual) {
+    EXPECT_EQ(compare_versions("0.10.1", "0.10.1"), 0);
+    EXPECT_EQ(compare_versions("v0.10.1", "0.10.1"), 0);
+}
+
+TEST(UpdaterCompareVersions, MajorMinorPatchOrdering) {
+    EXPECT_LT(compare_versions("1.0.0", "2.0.0"), 0);
+    EXPECT_LT(compare_versions("1.2.0", "1.3.0"), 0);
+    EXPECT_LT(compare_versions("1.2.3", "1.2.4"), 0);
+    EXPECT_GT(compare_versions("2.0.0", "1.9.9"), 0);
+}
+
+TEST(UpdaterCompareVersions, ReleaseIsGreaterThanItsOwnPrerelease) {
+    EXPECT_GT(compare_versions("1.0.0", "1.0.0-rc1"), 0);
+    EXPECT_LT(compare_versions("1.0.0-rc1", "1.0.0"), 0);
 }
