@@ -197,7 +197,7 @@ bool Analyzer::parse_changed_files(const std::vector<ChangedFile>& files,
         parser::UnifiedExtractor extractor;
         extractor.init(content, FileID{1}, ext, file.path);
         extractor.extract(tree.get());
-        auto extracted = extractor.get_results();
+        auto extracted = extractor.take_results();
 
         for (const auto& sym : extracted.symbols) {
             auto type = std::string(to_string(sym.type));

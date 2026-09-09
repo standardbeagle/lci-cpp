@@ -107,7 +107,7 @@ void run_unified_extraction(ProcessedFile& result,
     extractor.init(content, result.file_id, ext, path);
     if (side_effect_sink) extractor.set_side_effect_sink(side_effect_sink);
     extractor.extract(tree.get());
-    auto extracted = extractor.get_results();
+    auto extracted = extractor.take_results();
 
     // Build a position-keyed metadata index so the integrator can enrich
     // EnhancedSymbol records (complexity, signature, doc comment) without
