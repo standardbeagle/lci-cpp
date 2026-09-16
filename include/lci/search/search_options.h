@@ -51,6 +51,12 @@ inline constexpr double kWordBoundaryBonus = 50.0;
 inline constexpr double kLineStartBonus = 25.0;
 inline constexpr double kExactCaseBonus = 20.0;
 inline constexpr double kBaseMatchScore = 100.0;
+inline constexpr double kAdditionalPatternCoverageBoost = 0.15;
+inline constexpr double kPatternCoverageBoostCap = 0.5;
+// A compound identifier must outrank a line-start keyword plus a separate
+// exact term. With current match-quality bounds, +100% is the smallest round
+// multiplier that preserves that ordering across code-file positions.
+inline constexpr double kIdentifierCoverageBoost = 1.0;
 
 // -- File classification ------------------------------------------------------
 

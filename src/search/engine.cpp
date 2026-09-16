@@ -1,4 +1,5 @@
 #include <lci/search/search_engine.h>
+#include <lci/semantic/name_splitter.h>
 #include <lci/search/symbol_type_alias.h>
 
 #include <lci/core/reference_tracker.h>
@@ -192,15 +193,15 @@ const SynonymTable& default_synonym_table() {
 
 std::vector<std::string> expand_pattern_semantic(std::string_view pattern,
                                                  const SynonymTable& table,
-                                                 std::vector<bool>& synonym_flags) {
+                                                 std::vector<SearchPatternMetadata>& metadata) {
     std::vector<std::string> out;
-    synonym_flags.clear();
+    metadata.clear();
     out.reserve(kMaxSynonymExpansion);
 
     // 1. Base set: original pattern first, then >2-char split words for
     //    multi-word queries (mirrors the no-synonym overload). Not synonyms.
     out.emplace_back(pattern);
-    synonym_flags.push_back(false);
+    metadata.push_back({false, false});
 
     std::vector<std::string> words;
     split_on_spaces(pattern, words);
@@ -218,7 +219,7 @@ std::vector<std::string> expand_pattern_semantic(std::string_view pattern,
             if (w.size() <= 2) continue;
             if (seen.insert(w).second) {
                 out.push_back(w);
-                synonym_flags.push_back(false);
+                metadata.push_back({true, false});
                 retained.push_back(std::move(w));
             }
         }
@@ -236,11 +237,56 @@ std::vector<std::string> expand_pattern_semantic(std::string_view pattern,
             if (out.size() >= kMaxSynonymExpansion) break;
             if (seen.insert(syn).second) {
                 out.push_back(syn);
-                synonym_flags.push_back(true);
+                metadata.push_back({true, true});
             }
         }
     }
     return out;
+}
+
+bool identifier_contains_all_terms(
+    std::string_view line, const std::vector<std::string>& terms) {
+    if (terms.size() < 2) return false;
+
+    static const NameSplitter splitter;
+    size_t start = 0;
+    while (start < line.size()) {
+        while (start < line.size()) {
+            const auto c = static_cast<unsigned char>(line[start]);
+            if (std::isalnum(c) || c == '_') break;
+            ++start;
+        }
+        size_t end = start;
+        while (end < line.size()) {
+            const auto c = static_cast<unsigned char>(line[end]);
+            if (!std::isalnum(c) && c != '_') break;
+            ++end;
+        }
+        if (end > start) {
+            auto words = splitter.split_to_set(line.substr(start, end - start));
+            const bool covers = std::all_of(
+                terms.begin(), terms.end(), [&](const std::string& term) {
+                    return words.contains(to_lower_copy(term));
+                });
+            if (covers) return true;
+        }
+        start = end + (end < line.size() ? 1 : 0);
+    }
+    return false;
+}
+
+static std::string_view line_at_1_based(std::string_view content, int line) {
+    if (line < 1) return {};
+    size_t start = 0;
+    for (int current = 1; current < line; ++current) {
+        start = content.find('\n', start);
+        if (start == std::string_view::npos) return {};
+        ++start;
+    }
+    size_t end = content.find('\n', start);
+    if (end == std::string_view::npos) end = content.size();
+    if (end > start && content[end - 1] == '\r') --end;
+    return content.substr(start, end - start);
 }
 
 
@@ -608,22 +654,22 @@ std::vector<SearchResult> SearchEngine::search(
 std::vector<SearchResult> SearchEngine::search(
     const std::vector<std::string>& patterns,
     const SearchOptions& options, SearchStats* stats) const {
-    static const std::vector<bool> kNoFlags;
-    return search(patterns, kNoFlags, options, stats);
+    static const std::vector<SearchPatternMetadata> kNoMetadata;
+    return search(patterns, kNoMetadata, options, stats);
 }
 
 std::vector<SearchResult> SearchEngine::search(
     const std::vector<std::string>& patterns,
-    const std::vector<bool>& synonym_flags,
+    const std::vector<SearchPatternMetadata>& metadata,
     const SearchOptions& options, SearchStats* stats) const {
 
     if (patterns.empty()) return {};
     if (patterns.size() == 1) {
-        if (!synonym_flags.empty() && synonym_flags[0]) {
+        if (!metadata.empty() && metadata[0].case_insensitive) {
             SearchOptions po = options;
             po.case_insensitive = true;
             auto rs = search(patterns[0], po, stats);
-            for (auto& r : rs) r.from_synonym = true;
+            for (auto& r : rs) r.from_synonym = metadata[0].synonym;
             return rs;
         }
         return search(patterns[0], options, stats);
@@ -632,9 +678,8 @@ std::vector<SearchResult> SearchEngine::search(
     struct ResultKey {
         FileID file_id;
         int line;
-        std::string match;
         bool operator==(const ResultKey& o) const {
-            return file_id == o.file_id && line == o.line && match == o.match;
+            return file_id == o.file_id && line == o.line;
         }
     };
     struct ResultKeyHash {
@@ -642,8 +687,6 @@ std::vector<SearchResult> SearchEngine::search(
             // FNV-ish mix; deterministic across runs.
             size_t h = std::hash<uint64_t>()(static_cast<uint64_t>(k.file_id));
             h ^= std::hash<int>()(k.line) + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2);
-            h ^= std::hash<std::string>()(k.match) + 0x9e3779b97f4a7c15ULL +
-                 (h << 6) + (h >> 2);
             return h;
         }
     };
@@ -654,7 +697,9 @@ std::vector<SearchResult> SearchEngine::search(
     };
 
     absl::flat_hash_map<ResultKey, Slot, ResultKeyHash> acc;
-    acc.reserve(static_cast<size_t>(options.max_results) * patterns.size());
+    if (options.max_results > 0) {
+        acc.reserve(static_cast<size_t>(options.max_results) * patterns.size());
+    }
 
     // Per-pattern search uses the SAME options (use_regex / filter / etc.).
     SearchOptions per_opts = options;
@@ -664,10 +709,25 @@ std::vector<SearchResult> SearchEngine::search(
 
     bool any_sub_hit_cap = false;
     for (size_t i = 0; i < patterns.size(); ++i) {
-        // Synonym-injected patterns force case-insensitive so an expanded
-        // `signin` matches code `signIn` regardless of the base query's flag.
+        bool duplicate_pattern = false;
+        for (size_t j = 0; j < i; ++j) {
+            const auto left = i < metadata.size() ? metadata[i]
+                                                  : SearchPatternMetadata{};
+            const auto right = j < metadata.size() ? metadata[j]
+                                                    : SearchPatternMetadata{};
+            if (patterns[i] == patterns[j] &&
+                left.case_insensitive == right.case_insensitive &&
+                left.synonym == right.synonym) {
+                duplicate_pattern = true;
+                break;
+            }
+        }
+        if (duplicate_pattern) continue;
+
+        // Semantic split terms and synonyms use concept matching, so an
+        // expanded `dialog` matches the identifier component in ExportDialog.
         SearchOptions p_opts = per_opts;
-        if (i < synonym_flags.size() && synonym_flags[i]) {
+        if (i < metadata.size() && metadata[i].case_insensitive) {
             p_opts.case_insensitive = true;
         }
         SearchStats sub_stats;
@@ -682,22 +742,23 @@ std::vector<SearchResult> SearchEngine::search(
                 stats->error = sub_stats.error;
             }
         }
-        const bool is_synonym = i < synonym_flags.size() && synonym_flags[i];
+        const bool is_synonym = i < metadata.size() && metadata[i].synonym;
         for (auto& r : rs) {
             r.from_synonym = is_synonym;
-            ResultKey k{r.file_id, r.line, r.match_text};
+            ResultKey k{r.file_id, r.line};
             auto it = acc.find(k);
             if (it == acc.end()) {
                 acc.emplace(std::move(k), Slot{std::move(r), 1});
             } else {
                 ++it->second.pattern_count;
+                const bool all_synonyms =
+                    it->second.result.from_synonym && r.from_synonym;
                 if (r.score > it->second.result.score) {
-                    it->second.result.score = r.score;
+                    it->second.result = std::move(r);
                 }
                 // A row reached by BOTH an original and an expanded pattern is
                 // an original-pattern hit: the caller's own word found it.
-                it->second.result.from_synonym =
-                    it->second.result.from_synonym && r.from_synonym;
+                it->second.result.from_synonym = all_synonyms;
             }
         }
     }
@@ -706,17 +767,42 @@ std::vector<SearchResult> SearchEngine::search(
     // is intentionally NOT applied here — engine scores are not normalized to
     // [0,1] in C++ (kBaseMatchScore = 100). The boost is multiplicative on the
     // already-scored value, matching Go's relative behavior.
-    constexpr double kCoveragePerWord = 0.15;
-    constexpr double kCoverageCap = 0.5;
+    std::vector<std::string> identifier_terms;
+    for (size_t i = 0; i < patterns.size() && i < metadata.size(); ++i) {
+        if (metadata[i].case_insensitive && !metadata[i].synonym &&
+            patterns[i].find_first_of(" \t\r\n") == std::string::npos) {
+            identifier_terms.push_back(patterns[i]);
+        }
+    }
 
     std::vector<SearchResult> out;
     out.reserve(acc.size());
+    auto file_snapshot = identifier_terms.empty() ? nullptr : index_.load_snapshot();
+    absl::flat_hash_map<FileID, std::string> reloaded_content;
     for (auto& [_, slot] : acc) {
         if (slot.pattern_count > 1) {
             double extra = static_cast<double>(slot.pattern_count - 1) *
-                           kCoveragePerWord;
-            if (extra > kCoverageCap) extra = kCoverageCap;
+                           kAdditionalPatternCoverageBoost;
+            if (extra > kPatternCoverageBoostCap) {
+                extra = kPatternCoverageBoostCap;
+            }
             slot.result.score *= (1.0 + extra);
+        }
+        if (!identifier_terms.empty()) {
+            auto line = index_.file_content_store().get_line_view(
+                slot.result.file_id, slot.result.line - 1);
+            if (line.empty()) {
+                auto [it, inserted] = reloaded_content.try_emplace(
+                    slot.result.file_id);
+                if (inserted) {
+                    it->second = index_.reload_evicted_content(
+                        *file_snapshot, slot.result.file_id);
+                }
+                line = line_at_1_based(it->second, slot.result.line);
+            }
+            if (identifier_contains_all_terms(line, identifier_terms)) {
+                slot.result.score *= (1.0 + kIdentifierCoverageBoost);
+            }
         }
         out.emplace_back(std::move(slot.result));
     }

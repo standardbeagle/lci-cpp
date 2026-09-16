@@ -73,7 +73,7 @@ No errors; unknown tool names fall back to the overview.
 ## search
 
 In-memory content search (not file paths), designed for fast interactive use.
-Multi-layer: literal match → optional synonym expansion → regex fallback.
+Multi-layer: literal match → semantic term and synonym expansion → regex fallback.
 Results are grouped per file, each hit carrying the enclosing symbol's
 metadata.
 
@@ -87,7 +87,7 @@ metadata.
 | `include` | string | (empty) | Add-ons for strong matches (score ≥ 0.5): `breadcrumbs`, `refs`, `object_ids`/`ids`, `safety`, `deps`. Unknown token → error. |
 | `symbol_types` | string | (empty) | Comma list filter, e.g. `function,class`. |
 | `max_per_file` | integer | 0 | Cap matches per file (0 = no cap). |
-| `semantic` | boolean | true | Synonym fan-out on multi-word patterns when `patterns` empty. |
+| `semantic` | boolean | true | Split-term and synonym fan-out when `patterns` is empty. Split terms match case-insensitively so `export dialog` finds `ExportDialog`. |
 | `languages` | array | (empty) | Language filter (aliases ok), e.g. `["go","python"]`. |
 | `filter` | string | (empty) | Exclude-pattern for files. |
 
@@ -102,6 +102,29 @@ symbol — `sym`, `type`, `id` (object ID), `exported`, `callers`
 context. Non-code files with hits collapse into `other_files{path: count}`
 instead of a `results[]` entry. `output=files` → `{files[], total_matches,
 unique_files}`. `output=count` → `{total_matches, unique_files, counts{}}`.
+
+### Semantic ranking
+
+For `semantic=true`, an input such as `export dialog` searches the original
+phrase plus the individual terms. Results are merged by file and line. A line
+matching both terms ranks above lines matching only `export` or only `dialog`.
+When one identifier contains every term as camelCase, PascalCase, or
+snake_case components, it receives an additional identifier-coverage boost.
+The expected order is therefore:
+
+1. `ExportDialog`, `exportDialog`, or `export_dialog`
+2. A line containing separate `export` and `dialog` identifiers
+3. A line containing only one term
+
+For example, given files containing `ExportDialog`, `export const dialog`,
+and `export const unrelated`, `search {"pattern":"export dialog"}` returns
+the file containing `ExportDialog` first. The compound matches both split
+terms case-insensitively and receives both line coverage and identifier
+coverage; the separate-term line receives line coverage only.
+
+Synonym matches remain lower priority than matches on words supplied by the
+caller. `patterns=` is an explicit OR query and does not apply semantic-term or
+identifier-coverage ranking.
 
 **Notable**: case-insensitive by default; regex auto-fallback (0.7 score
 penalty) when a pattern *looks* regex-y; `refs`/`breadcrumbs` only attach to

@@ -593,15 +593,17 @@ ToolResult handle_search(const nlohmann::json& params,
         return indexer.search_with_options(p, o);
     };
     auto run_multi = [&](const std::vector<std::string>& ps,
-                         const std::vector<bool>& ci_flags,
+                         const std::vector<SearchPatternMetadata>& metadata,
                          const SearchOptions& o) {
-        if (search_engine) return search_engine->search(ps, ci_flags, o, &stats);
-        // Fallback for older indexers: OR-merge manually, honoring the
-        // per-pattern case-insensitive override for synonym-injected patterns.
+        if (search_engine) return search_engine->search(ps, metadata, o, &stats);
+        // Fallback for older indexers: OR-merge manually, honoring each
+        // semantic pattern's case-insensitive matching metadata.
         std::vector<SearchResult> agg;
         for (size_t i = 0; i < ps.size(); ++i) {
             SearchOptions po = o;
-            if (i < ci_flags.size() && ci_flags[i]) po.case_insensitive = true;
+            if (i < metadata.size() && metadata[i].case_insensitive) {
+                po.case_insensitive = true;
+            }
             auto rs = indexer.search_with_options(ps[i], po);
             agg.insert(agg.end(),
                        std::make_move_iterator(rs.begin()),
@@ -617,13 +619,13 @@ ToolResult handle_search(const nlohmann::json& params,
     } else if (options.semantic) {
         // Synonym-aware expansion: query terms fan out to their equivalence
         // groups (login<->signin, delete/remove/erase). Synonym-injected
-        // patterns are flagged so they match case-insensitively.
+        // semantic patterns carry their own matching metadata.
         const SynonymTable& syn = search_engine ? search_engine->synonyms()
                                                  : default_synonym_table();
-        std::vector<bool> syn_flags;
-        auto expanded = expand_pattern_semantic(pattern, syn, syn_flags);
+        std::vector<SearchPatternMetadata> metadata;
+        auto expanded = expand_pattern_semantic(pattern, syn, metadata);
         if (expanded.size() > 1) {
-            results = run_multi(expanded, syn_flags, options);
+            results = run_multi(expanded, metadata, options);
         } else {
             results = run(pattern, options);
         }

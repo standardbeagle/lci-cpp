@@ -36,6 +36,11 @@ void split_on_spaces(std::string_view input, std::vector<std::string>& out);
 /// queries. Single-word patterns return one-element vector.
 std::vector<std::string> expand_pattern_semantic(std::string_view pattern);
 
+struct SearchPatternMetadata {
+    bool case_insensitive{false};
+    bool synonym{false};
+};
+
 /// Maximum number of patterns expand_pattern_semantic may emit once synonyms
 /// are injected. Group sizes are ~3-5, so single-word queries stay well under;
 /// the cap only bites on multi-word queries (design §4). No silent unbounded
@@ -44,14 +49,19 @@ inline constexpr std::size_t kMaxSynonymExpansion = 16;
 
 /// Synonym-aware expansion. Starts from the word-split set (original pattern
 /// first, then >2-char split words), then appends synonyms_of() for each
-/// retained word, deduped against what's already present. `synonym_flags` is
-/// resized to match the returned vector: true marks a synonym-injected pattern
-/// so the engine can force case-insensitive matching on it (synonyms are
-/// word-concepts, not literal strings). Total output capped at
-/// kMaxSynonymExpansion.
+/// retained word, deduped against what's already present. `metadata` is
+/// resized to match the returned vector. Split terms and synonyms are matched
+/// case-insensitively because they represent concepts rather than literal
+/// spellings; synonym provenance remains explicit for ranking. Total output
+/// is capped at kMaxSynonymExpansion.
 std::vector<std::string> expand_pattern_semantic(std::string_view pattern,
                                                  const SynonymTable& table,
-                                                 std::vector<bool>& synonym_flags);
+                                                 std::vector<SearchPatternMetadata>& metadata);
+
+/// True when one identifier in `line` contains every query term as a distinct
+/// camelCase, PascalCase, or snake_case component.
+bool identifier_contains_all_terms(
+    std::string_view line, const std::vector<std::string>& terms);
 
 // -- Context extractor --------------------------------------------------------
 
@@ -131,19 +141,17 @@ class SearchEngine {
 
     /// Multi-pattern search (OR-merge + dedup + per-file coverage boost).
     /// Mirrors Go's searchAndDeduplicate (handlers.go:1372). Each pattern is
-    /// run with the same SearchOptions; results keyed by file+line+match.
+    /// run with the same SearchOptions; results keyed by file+line.
     /// Score boost: +0.15 per additional matching pattern, cap +0.5.
     std::vector<SearchResult> search(const std::vector<std::string>& patterns,
                                      const SearchOptions& options,
                                      SearchStats* stats = nullptr) const;
 
-    /// Multi-pattern search with a per-pattern case-insensitive override.
-    /// `synonym_flags[i] == true` forces case_insensitive for patterns[i] (so
-    /// a synonym-injected `signin` matches code `signIn` even when the base
-    /// query is case-sensitive). Flags shorter than patterns are treated as
-    /// false. Otherwise identical to the two-arg overload.
+    /// Multi-pattern search with per-pattern matching metadata. Semantic split
+    /// terms and synonyms match case-insensitively; synonym provenance remains
+    /// separate so ranking can still prefer words supplied by the caller.
     std::vector<SearchResult> search(const std::vector<std::string>& patterns,
-                                     const std::vector<bool>& synonym_flags,
+                                     const std::vector<SearchPatternMetadata>& metadata,
                                      const SearchOptions& options,
                                      SearchStats* stats = nullptr) const;
 

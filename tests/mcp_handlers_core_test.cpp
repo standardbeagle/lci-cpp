@@ -1846,6 +1846,39 @@ TEST_F(HandlersFixture, SearchPatternsCsvOrMerges) {
     EXPECT_GE(json["total_matches"].get<int>(), 2);
 }
 
+TEST(McpSearchRanking, CompoundIdentifierRanksBeforePartialMatches) {
+    auto temp = lci::test::unique_temp_dir("lci_mcp_rank_test_");
+    std::filesystem::create_directories(temp);
+    auto write = [&](const std::string& name, const std::string& content) {
+        std::ofstream out(temp / name);
+        out << content;
+    };
+    write("a_export.ts", "export const unrelated = 1;\n");
+    write("b_dialog.ts", "const dialog = 1;\n");
+    write("c_separate.ts", "export const dialog = 1;\n");
+    write("z_compound.ts", "function ExportDialog() {}\n");
+
+    Config config;
+    config.project.root = temp.string();
+    MasterIndex index(config);
+    ASSERT_TRUE(index.index_directory(temp.string()));
+    SearchEngine engine(index);
+
+    nlohmann::json params;
+    params["pattern"] = "export dialog";
+    params["semantic"] = true;
+    params["max"] = 4;
+    auto result = handle_search(params, index, &engine);
+    ASSERT_FALSE(result.is_error) << result.text;
+    auto json = nlohmann::json::parse(result.text);
+    ASSERT_FALSE(json["results"].empty()) << result.text;
+    EXPECT_EQ("z_compound.ts", json["results"][0]["file"])
+        << "the MCP rendering must preserve the engine's top-ranked file";
+
+    std::error_code ec;
+    std::filesystem::remove_all(temp, ec);
+}
+
 TEST_F(HandlersFixture, SearchIncludeUnsupportedRejected) {
     nlohmann::json params;
     params["pattern"] = "handle";
@@ -2102,15 +2135,17 @@ TEST(SearchHelpers, ExpandPatternSemanticSingleWordOnlyReturnsOne) {
 
 TEST(SearchHelpers, ExpandPatternSynonymsSingleWordExpands) {
     auto table = SynonymTable::build_default();
-    std::vector<bool> flags;
+    std::vector<SearchPatternMetadata> flags;
     auto out = expand_pattern_semantic("delete", table, flags);
     ASSERT_EQ(out.size(), flags.size());
     EXPECT_EQ(out[0], "delete");   // original first
-    EXPECT_FALSE(flags[0]);
+    EXPECT_FALSE(flags[0].case_insensitive);
+    EXPECT_FALSE(flags[0].synonym);
     EXPECT_GT(out.size(), 1u);     // synonyms appended
     bool has_remove = false, has_erase = false;
     for (size_t i = 1; i < out.size(); ++i) {
-        EXPECT_TRUE(flags[i]) << "synonym-injected pattern must be flagged";
+        EXPECT_TRUE(flags[i].synonym)
+            << "synonym-injected pattern must be flagged";
         if (out[i] == "remove") has_remove = true;
         if (out[i] == "erase") has_erase = true;
     }
@@ -2120,7 +2155,7 @@ TEST(SearchHelpers, ExpandPatternSynonymsSingleWordExpands) {
 
 TEST(SearchHelpers, ExpandPatternSynonymsRespectsCap) {
     auto table = SynonymTable::build_default();
-    std::vector<bool> flags;
+    std::vector<SearchPatternMetadata> flags;
     auto out = expand_pattern_semantic(
         "add delete update get set find", table, flags);
     EXPECT_LE(out.size(), kMaxSynonymExpansion);
@@ -2130,12 +2165,12 @@ TEST(SearchHelpers, ExpandPatternSynonymsRespectsCap) {
 
 TEST(SearchHelpers, ExpandPatternSynonymsNonGroupWordStaysSingle) {
     auto table = SynonymTable::build_default();
-    std::vector<bool> flags;
+    std::vector<SearchPatternMetadata> flags;
     auto out = expand_pattern_semantic("singleton", table, flags);
     EXPECT_EQ(out.size(), 1u);
     EXPECT_EQ(out[0], "singleton");
     ASSERT_EQ(flags.size(), 1u);
-    EXPECT_FALSE(flags[0]);
+    EXPECT_FALSE(flags[0].synonym);
 }
 
 // =============================================================================

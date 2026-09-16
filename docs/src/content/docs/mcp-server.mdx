@@ -141,7 +141,11 @@ entirely; without `search` they stay indexed but never appear in results.
 
 `search` is in-memory content search (not file paths), designed for fast
 interactive use:
-literal match → optional synonym expansion → regex fallback (`flags=rx`).
+literal match → semantic term and synonym expansion → regex fallback
+(`flags=rx`). Multiword semantic queries merge hits by source line and rank
+full term coverage above single-term matches. Identifiers containing every
+term rank highest: `export dialog` puts `ExportDialog`, `exportDialog`, and
+`export_dialog` ahead of separate or partial matches.
 Results carry the enclosing symbol's metadata (`object_id`, `symbol_name`,
 `symbol_type`, `is_exported`).
 

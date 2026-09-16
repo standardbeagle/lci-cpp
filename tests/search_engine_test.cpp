@@ -102,6 +102,21 @@ TEST(SearchPureFunctions, CalculateMatchQuality) {
     EXPECT_GT(q, kBaseMatchScore);
 }
 
+TEST(SearchPureFunctions, IdentifierCoverageRecognizesCommonCodeStyles) {
+    const std::vector<std::string> terms{"export", "dialog"};
+    EXPECT_TRUE(identifier_contains_all_terms("ExportDialog", terms));
+    EXPECT_TRUE(identifier_contains_all_terms("exportDialog", terms));
+    EXPECT_TRUE(identifier_contains_all_terms("export_dialog", terms));
+}
+
+TEST(SearchPureFunctions, IdentifierCoverageRejectsTermsInSeparateIdentifiers) {
+    const std::vector<std::string> terms{"export", "dialog"};
+    EXPECT_FALSE(identifier_contains_all_terms(
+        "export const value = dialog;", terms));
+    EXPECT_FALSE(identifier_contains_all_terms("ExportDialogue", terms));
+    EXPECT_FALSE(identifier_contains_all_terms("DialogExporter", terms));
+}
+
 TEST(SearchPureFunctions, SearchBinaryLineOffset) {
     std::vector<int> offsets = {0, 4, 8};
     EXPECT_EQ(1, search_binary_line_offset(offsets, 0));
@@ -831,6 +846,155 @@ TEST(SearchEngineRanking, ExactWordMatchOutranksSubstringMatch) {
     EXPECT_GT(results[0].score, results[1].score);
 }
 
+TEST(SearchEngineRanking, MultiTermCoverageMergesDifferentMatchTextOnOneLine) {
+    TempDir dir;
+    dir.write_file("ranking.ts",
+        "export const unrelated = 1;\n"
+        "const dialog = 2;\n"
+        "export const dialog = 3;\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    SearchEngine engine(mi);
+    SearchOptions opts;
+    std::vector<std::string> patterns{"export dialog", "export", "dialog"};
+    std::vector<SearchPatternMetadata> metadata{
+        {false, false}, {true, false}, {true, false}};
+    auto results = engine.search(patterns, metadata, opts);
+
+    ASSERT_EQ(3u, results.size());
+    EXPECT_EQ(3, results[0].line);
+    EXPECT_GT(results[0].score, results[1].score);
+    EXPECT_EQ(1u, std::count_if(results.begin(), results.end(),
+        [](const SearchResult& result) { return result.line == 3; }))
+        << "one source line must remain one ranked result even when distinct "
+           "query terms match different text";
+}
+
+TEST(SearchEngineRanking, IdentifierCoverageOutranksSeparateTerms) {
+    TempDir dir;
+    dir.write_file("ranking.ts",
+        "export const dialog = 1;\n"
+        "function ExportDialog() {}\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    SearchEngine engine(mi);
+    SearchOptions opts;
+    std::vector<std::string> patterns{"export dialog", "export", "dialog"};
+    std::vector<SearchPatternMetadata> metadata{
+        {false, false}, {true, false}, {true, false}};
+    auto results = engine.search(patterns, metadata, opts);
+
+    ASSERT_EQ(2u, results.size());
+    EXPECT_EQ(2, results[0].line)
+        << "ExportDialog must outrank a line that contains the same terms in "
+           "separate identifiers";
+    EXPECT_GT(results[0].score, results[1].score);
+}
+
+TEST(SearchEngineRanking, IdentifierCoverageSurvivesCommonTermCapCrowding) {
+    TempDir dir;
+    std::string source;
+    for (int i = 0; i < 30; ++i) {
+        source += "export const unrelated" + std::to_string(i) + " = 1;\n";
+    }
+    source += "function ExportDialog() {}\n";
+    dir.write_file("ranking.ts", source);
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    SearchEngine engine(mi);
+    SearchOptions opts;
+    opts.max_results = 5;
+    std::vector<std::string> patterns{"export dialog", "export", "dialog"};
+    std::vector<SearchPatternMetadata> metadata{
+        {false, false}, {true, false}, {true, false}};
+    auto results = engine.search(patterns, metadata, opts);
+
+    ASSERT_EQ(5u, results.size());
+    EXPECT_EQ(31, results[0].line);
+    EXPECT_EQ("Dialog", results[0].match_text);
+}
+
+TEST(SearchEngineRanking, CoverageKeepsPayloadFromHighestScoringTerm) {
+    TempDir dir;
+    dir.write_file("ranking.ts", "const myexport = dialog;\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    SearchEngine engine(mi);
+    SearchOptions opts;
+    std::vector<std::string> patterns{"export dialog", "export", "dialog"};
+    std::vector<SearchPatternMetadata> metadata{
+        {false, false}, {true, false}, {true, false}};
+    auto results = engine.search(patterns, metadata, opts);
+
+    ASSERT_EQ(1u, results.size());
+    EXPECT_EQ("dialog", results[0].match_text);
+    EXPECT_EQ(17, results[0].column);
+}
+
+TEST(SearchEngineRanking, DuplicatePatternsDoNotCreateCoverageBoost) {
+    TempDir dir;
+    dir.write_file("ranking.ts", "export const value = 1;\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    SearchEngine engine(mi);
+    SearchOptions opts;
+    auto single = engine.search("export", opts);
+    auto duplicate = engine.search(
+        std::vector<std::string>{"export", "export"}, opts);
+
+    ASSERT_EQ(1u, single.size());
+    ASSERT_EQ(1u, duplicate.size());
+    EXPECT_DOUBLE_EQ(single[0].score, duplicate[0].score);
+}
+
+TEST(SearchEngineRanking, EvictedContentKeepsIdentifierCoverageRanking) {
+    TempDir dir;
+    dir.write_file("ranking.ts",
+        "export const dialog = 1;\n"
+        "function ExportDialog() {}\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    SearchEngine engine(mi);
+    SearchOptions opts;
+    std::vector<std::string> patterns{"export dialog", "export", "dialog"};
+    std::vector<SearchPatternMetadata> metadata{
+        {false, false}, {true, false}, {true, false}};
+
+    auto resident = engine.search(patterns, metadata, opts);
+    ASSERT_EQ(2u, resident.size());
+    mi.file_content_store().invalidate_file_by_id(resident[0].file_id);
+
+    auto evicted = engine.search(patterns, metadata, opts);
+    ASSERT_EQ(2u, evicted.size());
+    EXPECT_EQ(2, evicted[0].line)
+        << "LRU state must not change semantic ranking";
+    EXPECT_DOUBLE_EQ(resident[0].score, evicted[0].score);
+}
+
 // Criterion 7: a file whose bytes were evicted from the content store is still
 // a search candidate (process_file reloads it into a request-local buffer), but
 // the context extractor re-fetched the content from the store BY ID and got
@@ -1173,9 +1337,9 @@ TEST(SearchEngineRanking, SynonymHitRanksBelowOriginalPatternHit) {
 
     // patterns[0] is what the user typed; patterns[1] is synonym-expanded.
     std::vector<std::string> patterns{"login", "signin"};
-    std::vector<bool> synonym_flags{false, true};
+    std::vector<SearchPatternMetadata> metadata{{false, false}, {true, true}};
 
-    auto results = engine.search(patterns, synonym_flags, opts);
+    auto results = engine.search(patterns, metadata, opts);
     ASSERT_EQ(2u, results.size());
 
     EXPECT_EQ(1, results[0].line)
