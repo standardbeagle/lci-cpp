@@ -43,3 +43,9 @@ docs/.astro/
 .work/
 .xdg-cache-home/
 .xdg-data-home/
+
+# tman shims and run logs
+/.tman/
+/test
+/test.ps1
+/test.cmd
