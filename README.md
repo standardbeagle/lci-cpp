@@ -31,23 +31,6 @@ Both detect your OS/arch, download the matching release binary, and install
 it (`/usr/local/bin` or `~/.local/bin` on Unix; `%LOCALAPPDATA%\Programs\lci`
 on Windows). Override with `LCI_PREFIX`; pin a version with `LCI_VERSION=0.10.1`.
 
-### Via npm
-
-```sh
-npm install -g @standardbeagle/lci
-lci --version
-```
-
-### Via uv / pip
-
-```sh
-uv tool install lci-cli      # or: pipx install lci-cli
-lci --version
-```
-
-The npm and uv packages download the prebuilt binary for your platform — no
-compiler required.
-
 ### Updating
 
 ```sh
@@ -56,9 +39,7 @@ lci update --check    # report current vs latest without installing
 lci update --version 0.10.1   # install a specific release
 ```
 
-`lci update` works regardless of how lci was installed. Package-manager
-users can also run `npm update -g @standardbeagle/lci` or
-`uv tool upgrade lci-cli`.
+`lci update` works regardless of how lci was installed.
 
 ### From a release artifact
 
