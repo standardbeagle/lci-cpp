@@ -245,6 +245,7 @@ class UnifiedExtractor {
     void extract_php_namespace(TSNode node);
     void extract_php_use(TSNode node);
     void extract_php_const(TSNode node);
+    void extract_php_property(TSNode node);
     // C/C++
     void extract_struct_specifier(TSNode node);
     void extract_enum_specifier(TSNode node);

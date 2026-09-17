@@ -888,6 +888,11 @@ void UnifiedExtractor::extract_constructor(TSNode node) {
 void UnifiedExtractor::extract_property(TSNode node) {
     TSNode name_node = ts_node_child_by_field_name(
         node, "name", static_cast<uint32_t>(std::strlen("name")));
+    if (ts_node_is_null(name_node)) {
+        name_node = ts_node_child_by_field_name(
+            node, "property",
+            static_cast<uint32_t>(std::strlen("property")));
+    }
     if (ts_node_is_null(name_node)) return;
     std::string_view name = node_text(name_node);
     if (name.empty()) return;
@@ -915,6 +920,27 @@ void UnifiedExtractor::extract_field(TSNode node) {
         if (ct == "field_identifier" || ct == "identifier") {
             name = node_text(child);
             break;
+        }
+    }
+    if (name.empty()) {
+        // Java and C# wrap field names in variable_declarator nodes. Prefer
+        // that node's `name` field over an arbitrary descendant identifier,
+        // which could be the declared type instead.
+        std::vector<TSNode> stack{node};
+        while (!stack.empty() && name.empty()) {
+            TSNode current = stack.back();
+            stack.pop_back();
+            if (get_node_type(current) == "variable_declarator") {
+                TSNode name_node = ts_node_child_by_field_name(
+                    current, "name",
+                    static_cast<uint32_t>(std::strlen("name")));
+                if (!ts_node_is_null(name_node)) name = node_text(name_node);
+                continue;
+            }
+            const uint32_t child_count = ts_node_child_count(current);
+            for (uint32_t i = 0; i < child_count; ++i) {
+                stack.push_back(ts_node_child(current, i));
+            }
         }
     }
     if (name.empty()) return;

@@ -277,6 +277,7 @@ TEST(LanguageConstructConformance, JavaScript) {
     constexpr std::string_view source = R"(import value from "./dep.js";
 export class Base { ping() { return value; } }
 export class Service extends Base {
+  status = "ready";
   constructor() { super(); }
   run() { return this.ping(); }
 }
@@ -289,6 +290,7 @@ let enabled = true;
     expect_graph(graph,
                  {{"Base", SymbolType::Class},
                   {"Service", SymbolType::Class},
+                  {"status", SymbolType::Property},
                   {"ping", SymbolType::Method},
                   {"run", SymbolType::Method},
                   {"build", SymbolType::Function},
@@ -309,6 +311,7 @@ type Identifier = string | number;
 enum State { Ready, Done }
 class Base { ping(): number { return dep(); } }
 class Service extends Base implements Runnable {
+  private count: number = 0;
   constructor(public id: Identifier) { super(); }
   run(): number { return this.ping(); }
 }
@@ -322,6 +325,7 @@ const arrow = (id: Identifier): Service => build(id);
                   {"State", SymbolType::Enum},
                   {"Base", SymbolType::Class},
                   {"Service", SymbolType::Class},
+                  {"count", SymbolType::Property},
                   {"run", SymbolType::Method},
                   {"build", SymbolType::Function},
                   {"arrow", SymbolType::Function}},
@@ -420,6 +424,7 @@ enum State { READY, DONE }
 record Point(int x) {}
 class Base { int ping() { return 1; } }
 class Service extends Base implements Runnable {
+  private int count;
   Service() {}
   public int run() { return ping(); }
 }
@@ -433,6 +438,7 @@ class Factory { Service build() { return new Service(); } }
                   {"Point", SymbolType::Record},
                   {"Base", SymbolType::Class},
                   {"Service", SymbolType::Class},
+                  {"count", SymbolType::Field},
                   {"Service", SymbolType::Constructor},
                   {"run", SymbolType::Method}},
                  {{"Service.ping", ReferenceType::Call},
@@ -490,6 +496,7 @@ class Base {}
 class Service extends Base implements Runnable {
     use Helper;
     public const LIMIT = 4;
+    private int $count = 0;
     public function __construct() {}
     public function run(): int { return $this->help(); }
 }
@@ -504,6 +511,7 @@ function build(): Service { return new Service(); }
                   {"Base", SymbolType::Class},
                   {"Service", SymbolType::Class},
                   {"LIMIT", SymbolType::Constant},
+                  {"count", SymbolType::Property},
                   {"run", SymbolType::Method},
                   {"build", SymbolType::Function}},
                  {{"Base", ReferenceType::Extends},

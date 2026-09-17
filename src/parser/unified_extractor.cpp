@@ -992,7 +992,20 @@ void UnifiedExtractor::process_symbol_node(TSNode node,
 
     // === VARIABLES ===
     } else if (node_type == "variable_declarator") {
-        if (!is_arrow_function_declarator(node)) {
+        TSNode parent = ts_node_parent(node);
+        TSNode grandparent = ts_node_is_null(parent) ? TSNode{}
+                                                    : ts_node_parent(parent);
+        const std::string_view parent_type =
+            ts_node_is_null(parent) ? std::string_view{} : get_node_type(parent);
+        const std::string_view grandparent_type =
+            ts_node_is_null(grandparent) ? std::string_view{}
+                                         : get_node_type(grandparent);
+        const bool owned_by_field =
+            parent_type == "field_declaration" ||
+            grandparent_type == "field_declaration" ||
+            parent_type == "event_field_declaration" ||
+            grandparent_type == "event_field_declaration";
+        if (!owned_by_field && !is_arrow_function_declarator(node)) {
             extract_variable(node);
         }
 
@@ -1081,11 +1094,16 @@ void UnifiedExtractor::process_symbol_node(TSNode node,
 
     // === PROPERTIES/FIELDS ===
     } else if (node_type == "property_definition" ||
-               node_type == "public_field_definition") {
+               node_type == "public_field_definition" ||
+               node_type == "field_definition") {
         extract_property(node);
 
     } else if (node_type == "property_declaration") {
-        extract_csharp_property(node);
+        if (lang_ == LangId::CSharp) {
+            extract_csharp_property(node);
+        } else if (lang_ == LangId::PHP) {
+            extract_php_property(node);
+        }
 
     } else if (node_type == "field_declaration") {
         if (lang_ == LangId::CSharp) {

@@ -262,6 +262,32 @@ void UnifiedExtractor::extract_csharp_field(TSNode node) {
 // PHP extraction
 // ---------------------------------------------------------------------------
 
+void UnifiedExtractor::extract_php_property(TSNode node) {
+    const TSPoint start = ts_node_start_point(node);
+    const TSPoint end = ts_node_end_point(node);
+    const uint32_t count = ts_node_child_count(node);
+    for (uint32_t i = 0; i < count; ++i) {
+        TSNode child = ts_node_child(node, i);
+        if (get_node_type(child) != "property_element") continue;
+        TSNode name_node = ts_node_child_by_field_name(
+            child, "name", static_cast<uint32_t>(std::strlen("name")));
+        if (ts_node_is_null(name_node)) continue;
+        std::string_view name = node_text(name_node);
+        if (!name.empty() && name.front() == '$') name.remove_prefix(1);
+        if (name.empty()) continue;
+
+        Symbol sym;
+        sym.name = std::string(name);
+        sym.type = SymbolType::Property;
+        sym.file_id = file_id_;
+        sym.line = static_cast<int>(start.row) + 1;
+        sym.column = static_cast<int>(start.column) + 1;
+        sym.end_line = static_cast<int>(end.row) + 1;
+        sym.end_column = static_cast<int>(end.column) + 1;
+        symbols_.push_back(std::move(sym));
+    }
+}
+
 void UnifiedExtractor::extract_php_trait(TSNode node) {
     TSPoint start = ts_node_start_point(node);
     TSPoint end = ts_node_end_point(node);
