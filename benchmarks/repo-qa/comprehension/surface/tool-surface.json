@@ -11,7 +11,7 @@
         "Execute",
         "Start"
       ],
-      "description": "📂 Browse all symbols in a file - the outline view. Shows the complete symbol table for a specific file with filtering, sorting, optional imports and stats. The outline is source-derived; do not open the file merely to verify symbol names, signatures, or line numbers already shown. See 'info browse_file'.",
+      "description": "📂 Browse all symbols in a file - the outline view. Shows the complete symbol table for a specific file with filtering, sorting, and optional stats. The outline is source-derived; do not open the file merely to verify symbol names, signatures, or line numbers already shown. See 'info browse_file'.",
       "input_schema": {
         "properties": {
           "exported": {
@@ -41,10 +41,6 @@
           "path": {
             "description": "Alias for 'file'",
             "type": "string"
-          },
-          "show_imports": {
-            "description": "Include import list",
-            "type": "boolean"
           },
           "show_stats": {
             "description": "Include file-level statistics (symbol counts, avg complexity)",
@@ -94,7 +90,7 @@
       "answer": [
         "447"
       ],
-      "description": "🎯 Comprehensive codebase intelligence system for AI agents. Provides high-level overview (79.8% context reduction), detailed analysis (2-4x accuracy improvement), code statistics, and git analysis. Modes: overview, detailed, statistics, unified, structure, git_analyze, git_hotspots. See 'info code_insight'.",
+      "description": "🎯 Comprehensive codebase intelligence system for AI agents. Provides a high-level overview, detailed analysis, code statistics, and git analysis, more compact than reading source directly. Modes: overview, detailed, statistics, unified, structure, git_analyze, git_hotspots. See 'info code_insight'.",
       "input_schema": {
         "properties": {
           "analysis": {
@@ -117,27 +113,9 @@
             "description": "analysis=deadcode: emit the @lci: annotation worklist (elements needing a used/dead decision) instead of the candidate lists",
             "type": "boolean"
           },
-          "focus": {
-            "description": "Analysis focus",
-            "type": "string"
-          },
-          "languages": {
-            "description": "Filter by programming languages (e.g., [\"go\"], [\"typescript\", \"javascript\"], [\"csharp\"]). Case-insensitive with aliases (e.g., 'ts' for TypeScript, 'cs' for C#).",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
           "max_results": {
             "description": "Maximum results (keep small to avoid token overload)",
             "type": "integer"
-          },
-          "metrics": {
-            "description": "Metrics to include",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
           },
           "min_lines": {
             "description": "analysis=clones: minimum normalized body lines for a function to count (default 6)",
@@ -162,10 +140,6 @@
           "threshold": {
             "description": "analysis=clones: structural similarity threshold 0-1 (default 0.9)",
             "type": "number"
-          },
-          "tier": {
-            "description": "Analysis tier",
-            "type": "integer"
           },
           "time_window": {
             "description": "git_hotspots: 7d, 30d (default), 90d, or 1y",
@@ -235,20 +209,20 @@
                   "type": "string"
                 },
                 "l": {
-                  "description": "Line range {start, end} (optional)",
+                  "description": "Line range {s, e} (optional)",
                   "properties": {
-                    "end": {
+                    "e": {
                       "description": "End line (1-indexed)",
                       "type": "integer"
                     },
-                    "start": {
+                    "s": {
                       "description": "Start line (1-indexed)",
                       "type": "integer"
                     }
                   },
                   "type": "object"
                 },
-                "note": {
+                "n": {
                   "description": "Architect annotation (free-form text)",
                   "type": "string"
                 },
@@ -391,10 +365,6 @@
       "description": "📋 Get detailed context for specific code objects. Use the 'id' parameter with object IDs from search results. The returned signature, file path, line numbers, callers/callees, references, source_excerpt, and snippets are intended to replace opening the source file; read files only when this context is missing the exact lines you must quote. See 'info get_context' for examples.",
       "input_schema": {
         "properties": {
-          "column": {
-            "description": "Column number",
-            "type": "integer"
-          },
           "confidence_threshold": {
             "description": "Confidence threshold",
             "type": "number"
@@ -406,14 +376,6 @@
             },
             "type": "array"
           },
-          "exclude_test_files": {
-            "description": "Exclude test files",
-            "type": "boolean"
-          },
-          "file_id": {
-            "description": "File ID to narrow name lookup scope",
-            "type": "integer"
-          },
           "id": {
             "description": "Concise object ID(s) from search results (e.g., \"VE\" or \"VE,tG\" for multiple)",
             "type": "string"
@@ -422,28 +384,8 @@
             "description": "Include AI text",
             "type": "boolean"
           },
-          "include_all_references": {
-            "description": "Include references",
-            "type": "boolean"
-          },
           "include_call_hierarchy": {
             "description": "Include call hierarchy",
-            "type": "boolean"
-          },
-          "include_dependencies": {
-            "description": "Include dependencies",
-            "type": "boolean"
-          },
-          "include_file_context": {
-            "description": "Include file context",
-            "type": "boolean"
-          },
-          "include_full_symbol": {
-            "description": "Include full symbol info",
-            "type": "boolean"
-          },
-          "include_quality_metrics": {
-            "description": "Include quality metrics",
             "type": "boolean"
           },
           "include_sections": {
@@ -452,10 +394,6 @@
               "type": "string"
             },
             "type": "array"
-          },
-          "line": {
-            "description": "Line number",
-            "type": "integer"
           },
           "max_depth": {
             "description": "Max depth",
@@ -537,10 +475,6 @@
             "description": "Include memory usage statistics (default: false for summary)",
             "type": "boolean"
           },
-          "include_watch_mode": {
-            "description": "Include file watcher status (default: false for summary)",
-            "type": "boolean"
-          },
           "mode": {
             "description": "Query mode: 'summary' (default), 'detailed', 'progress', 'health'",
             "type": "string"
@@ -594,10 +528,6 @@
           "include": {
             "description": "Sections: signature, doc, callers, callees, type_hierarchy, scope, refs, annotations, flags, all. Default: all",
             "type": "string"
-          },
-          "max_depth": {
-            "description": "Max depth for hierarchy traversal (default: 3)",
-            "type": "integer"
           },
           "name": {
             "description": "Symbol name (exact match; may return multiple if ambiguous)",
