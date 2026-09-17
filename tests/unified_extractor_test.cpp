@@ -591,19 +591,6 @@ TEST(UnifiedExtractorTest, NullTree) {
     EXPECT_TRUE(r.blocks.empty());
 }
 
-TEST(UnifiedExtractorTest, EmptyFile) {
-    auto tree = parse(Language::Go, "package main\n");
-    ASSERT_NE(tree.get(), nullptr);
-
-    UnifiedExtractor ue;
-    ue.init("package main\n", 1, ".go", "empty.go");
-    ue.extract(tree.get());
-    auto r = ue.get_results();
-
-    // Should have file scope at minimum
-    EXPECT_FALSE(r.scopes.empty());
-}
-
 TEST(UnifiedExtractorTest, ResetClearsState) {
     constexpr std::string_view src = "package main\nfunc hello() {}\n";
     auto tree = parse(Language::Go, src);

@@ -923,12 +923,12 @@ void UnifiedExtractor::process_symbol_node(TSNode node,
         extract_type_declaration(node);
 
     } else if (node_type == "type_alias_declaration" ||
-               node_type == "type_alias") {
+               node_type == "type_alias" ||
+               node_type == "alias_declaration") {
         extract_type_alias(node);
 
     // === STRUCTS ===
     } else if (node_type == "struct_item" ||
-               node_type == "struct_expression" ||
                node_type == "struct_declaration") {
         extract_struct(node);
 

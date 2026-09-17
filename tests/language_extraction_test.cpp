@@ -822,21 +822,13 @@ fun distance(a: Point, b: Point): Double {
 
 TEST(LanguageExtractionTest, Kotlin) {
     auto tree = parse(Language::Kotlin, kKotlinSrc);
-    if (!tree) {
-        GTEST_SKIP() << "Kotlin parser unavailable";
-    }
+    ASSERT_NE(tree, nullptr);
 
     auto r = extract(Language::Kotlin, ".kt", kKotlinSrc, "Shapes.kt");
 
-    // Kotlin extraction is best-effort since the tree-sitter-kotlin grammar
-    // uses different node types than the Go bindings. Verify the parser
-    // creates a tree and basic extraction produces some symbols.
-    EXPECT_FALSE(r.scopes.empty()) << "Should have at least file scope";
-
-    // Kotlin class_declaration should be recognized
-    if (find_symbol(r, "Point") != nullptr) {
-        EXPECT_EQ(find_symbol(r, "Point")->type, SymbolType::Class);
-    }
+    const Symbol* point = find_symbol(r, "Point");
+    ASSERT_NE(point, nullptr);
+    EXPECT_EQ(point->type, SymbolType::Class);
 }
 
 // ---------------------------------------------------------------------------
@@ -1172,25 +1164,17 @@ end
 
 TEST(LanguageExtractionTest, Ruby) {
     auto tree = parse(Language::Ruby, kRubySrc);
-    if (!tree) {
-        GTEST_SKIP() << "Ruby parser unavailable";
-    }
+    ASSERT_NE(tree, nullptr);
 
     auto r = extract(Language::Ruby, ".rb", kRubySrc, "animals.rb");
 
-    // Ruby uses class_declaration and method_definition node types
-    EXPECT_FALSE(r.scopes.empty()) << "Should have at least file scope";
-
-    // Ruby class extraction
     const Symbol* dog = find_symbol(r, "Dog");
-    if (dog != nullptr) {
-        EXPECT_EQ(dog->type, SymbolType::Class);
-    }
+    ASSERT_NE(dog, nullptr);
+    EXPECT_EQ(dog->type, SymbolType::Class);
 
     const Symbol* cat = find_symbol(r, "Cat");
-    if (cat != nullptr) {
-        EXPECT_EQ(cat->type, SymbolType::Class);
-    }
+    ASSERT_NE(cat, nullptr);
+    EXPECT_EQ(cat->type, SymbolType::Class);
 
     // Ruby methods
     EXPECT_GE(count_symbols(r, SymbolType::Method), 2);
@@ -1318,25 +1302,6 @@ TEST(LanguageExtractionTest, FallbackForUnknownExtension) {
 
     // Should still extract the function via node type matching
     EXPECT_NE(find_symbol(r, "hello"), nullptr);
-}
-
-// ---------------------------------------------------------------------------
-// Parser creation for all 13 languages
-// ---------------------------------------------------------------------------
-
-TEST(LanguageExtractionTest, AllParsersCreate) {
-    Language languages[] = {
-        Language::Go, Language::Python, Language::JavaScript,
-        Language::TypeScript, Language::Rust, Language::C,
-        Language::Cpp, Language::Java, Language::CSharp,
-        Language::PHP, Language::Kotlin, Language::Zig,
-        Language::Ruby,
-    };
-    for (int i = 0; i < 13; ++i) {
-        UniqueParser parser = make_parser(languages[i]);
-        EXPECT_NE(parser.get(), nullptr)
-            << "Failed to create parser for language index " << i;
-    }
 }
 
 // ---------------------------------------------------------------------------

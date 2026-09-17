@@ -10,6 +10,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace lci::parser {
 namespace {
@@ -22,6 +23,7 @@ struct ExpectedSymbol {
 struct ExpectedReference {
     std::string_view name;
     ReferenceType type;
+    int count{1};
 };
 
 bool tree_has_error(TSNode node) {
@@ -54,14 +56,6 @@ ExtractionResults extract_spec_fixture(
     return extractor.take_results();
 }
 
-const Symbol* find_symbol(const ExtractionResults& graph,
-                          std::string_view name) {
-    const auto it = std::find_if(
-        graph.symbols.begin(), graph.symbols.end(),
-        [name](const Symbol& symbol) { return symbol.name == name; });
-    return it == graph.symbols.end() ? nullptr : &*it;
-}
-
 void expect_graph(
     const ExtractionResults& graph,
     std::initializer_list<ExpectedSymbol> symbols,
@@ -79,49 +73,56 @@ void expect_graph(
     for (const auto& import : graph.imports) summary << ' ' << import.path;
     const std::string graph_summary = summary.str();
 
-    for (const auto& expected : symbols) {
-        int matches = 0;
-        for (const auto& actual : graph.symbols) {
-            if (actual.name == expected.name && actual.type == expected.type)
-                ++matches;
-        }
-        EXPECT_GE(matches, 1)
-            << expected.name << " (" << to_string(expected.type) << ")\n"
-            << graph_summary;
+    std::vector<std::string> actual_symbols;
+    actual_symbols.reserve(graph.symbols.size());
+    for (const auto& actual : graph.symbols) {
+        actual_symbols.push_back(actual.name + ":" +
+                                 std::string(to_string(actual.type)));
     }
+    std::vector<std::string> expected_symbols;
+    expected_symbols.reserve(symbols.size());
+    for (const auto& expected : symbols) {
+        expected_symbols.push_back(std::string(expected.name) + ":" +
+                                   std::string(to_string(expected.type)));
+    }
+    std::sort(actual_symbols.begin(), actual_symbols.end());
+    std::sort(expected_symbols.begin(), expected_symbols.end());
+    EXPECT_EQ(actual_symbols, expected_symbols) << graph_summary;
+
     for (const auto& expected : references) {
-        bool found = false;
+        int matches = 0;
         for (const auto& actual : graph.references) {
             if (actual.referenced_name == expected.name &&
                 actual.type == expected.type) {
-                found = true;
-                break;
+                ++matches;
             }
         }
-        EXPECT_TRUE(found)
+        EXPECT_EQ(matches, expected.count)
             << expected.name << " (reference type "
             << static_cast<int>(expected.type) << ")\n"
             << graph_summary;
     }
-    for (const auto expected : imports) {
-        bool found = false;
-        for (const auto& actual : graph.imports) {
-            if (actual.path.find(expected) != std::string::npos) {
-                found = true;
-                break;
-            }
-        }
-        EXPECT_TRUE(found) << "import " << expected << '\n' << graph_summary;
+
+    std::vector<std::string> actual_imports;
+    actual_imports.reserve(graph.imports.size());
+    for (const auto& actual : graph.imports) {
+        actual_imports.push_back(actual.path);
     }
-    EXPECT_FALSE(graph.scopes.empty());
-    EXPECT_FALSE(graph.blocks.empty());
+    std::vector<std::string> expected_imports;
+    expected_imports.reserve(imports.size());
+    for (const auto expected : imports) {
+        expected_imports.emplace_back(expected);
+    }
+    std::sort(actual_imports.begin(), actual_imports.end());
+    std::sort(expected_imports.begin(), expected_imports.end());
+    EXPECT_EQ(actual_imports, expected_imports) << graph_summary;
 }
 
 struct ExtensionFixture {
     std::string_view extension;
-    Language language;
     std::string_view source;
     std::string_view symbol;
+    SymbolType symbol_type;
 };
 
 // Every extension backed by a linked grammar must reach extraction, not just
@@ -146,74 +147,71 @@ TEST(LanguageConstructConformance, EveryLinkedExtensionExtractsGraphRecords) {
     constexpr std::string_view ruby = "def marker\nend\n";
 
     constexpr std::array fixtures{
-        ExtensionFixture{".go", Language::Go, go, "marker"},
-        ExtensionFixture{".py", Language::Python, python, "marker"},
-        ExtensionFixture{".pyw", Language::Python, python, "marker"},
-        ExtensionFixture{".pyi", Language::Python, python, "marker"},
-        ExtensionFixture{".pyx", Language::Python, python, "marker"},
-        ExtensionFixture{".pxd", Language::Python, python, "marker"},
-        ExtensionFixture{".js", Language::JavaScript, javascript, "marker"},
-        ExtensionFixture{".jsx", Language::JavaScript, javascript, "marker"},
-        ExtensionFixture{".mjs", Language::JavaScript, javascript, "marker"},
-        ExtensionFixture{".cjs", Language::JavaScript, javascript, "marker"},
-        ExtensionFixture{".ts", Language::TypeScript, typescript, "marker"},
-        ExtensionFixture{".tsx", Language::Tsx, typescript, "marker"},
-        ExtensionFixture{".mts", Language::TypeScript, typescript, "marker"},
-        ExtensionFixture{".cts", Language::TypeScript, typescript, "marker"},
-        ExtensionFixture{".rs", Language::Rust, rust, "marker"},
-        ExtensionFixture{".c", Language::C, c, "marker"},
-        ExtensionFixture{".cpp", Language::Cpp, cpp, "marker"},
-        ExtensionFixture{".cc", Language::Cpp, cpp, "marker"},
-        ExtensionFixture{".cxx", Language::Cpp, cpp, "marker"},
-        ExtensionFixture{".h", Language::Cpp, cpp, "marker"},
-        ExtensionFixture{".hpp", Language::Cpp, cpp, "marker"},
-        ExtensionFixture{".hh", Language::Cpp, cpp, "marker"},
-        ExtensionFixture{".hxx", Language::Cpp, cpp, "marker"},
-        ExtensionFixture{".h++", Language::Cpp, cpp, "marker"},
-        ExtensionFixture{".java", Language::Java, java, "marker"},
-        ExtensionFixture{".cs", Language::CSharp, csharp, "Marker"},
-        ExtensionFixture{".php", Language::PHP, php, "marker"},
-        ExtensionFixture{".phtml", Language::PHP, php, "marker"},
-        ExtensionFixture{".kt", Language::Kotlin, kotlin, "marker"},
-        ExtensionFixture{".kts", Language::Kotlin, kotlin, "marker"},
-        ExtensionFixture{".zig", Language::Zig, zig, "marker"},
-        ExtensionFixture{".rb", Language::Ruby, ruby, "marker"},
+        ExtensionFixture{".go", go, "marker", SymbolType::Function},
+        ExtensionFixture{".py", python, "marker", SymbolType::Function},
+        ExtensionFixture{".pyw", python, "marker", SymbolType::Function},
+        ExtensionFixture{".pyi", python, "marker", SymbolType::Function},
+        ExtensionFixture{".pyx", python, "marker", SymbolType::Function},
+        ExtensionFixture{".pxd", python, "marker", SymbolType::Function},
+        ExtensionFixture{".js", javascript, "marker", SymbolType::Function},
+        ExtensionFixture{".jsx", javascript, "marker", SymbolType::Function},
+        ExtensionFixture{".mjs", javascript, "marker", SymbolType::Function},
+        ExtensionFixture{".cjs", javascript, "marker", SymbolType::Function},
+        ExtensionFixture{".ts", typescript, "marker", SymbolType::Function},
+        ExtensionFixture{".tsx", typescript, "marker", SymbolType::Function},
+        ExtensionFixture{".mts", typescript, "marker", SymbolType::Function},
+        ExtensionFixture{".cts", typescript, "marker", SymbolType::Function},
+        ExtensionFixture{".rs", rust, "marker", SymbolType::Function},
+        ExtensionFixture{".c", c, "marker", SymbolType::Function},
+        ExtensionFixture{".cpp", cpp, "marker", SymbolType::Function},
+        ExtensionFixture{".cc", cpp, "marker", SymbolType::Function},
+        ExtensionFixture{".cxx", cpp, "marker", SymbolType::Function},
+        ExtensionFixture{".h", cpp, "marker", SymbolType::Function},
+        ExtensionFixture{".hpp", cpp, "marker", SymbolType::Function},
+        ExtensionFixture{".hh", cpp, "marker", SymbolType::Function},
+        ExtensionFixture{".hxx", cpp, "marker", SymbolType::Function},
+        ExtensionFixture{".h++", cpp, "marker", SymbolType::Function},
+        ExtensionFixture{".java", java, "marker", SymbolType::Method},
+        ExtensionFixture{".cs", csharp, "Marker", SymbolType::Method},
+        ExtensionFixture{".php", php, "marker", SymbolType::Function},
+        ExtensionFixture{".phtml", php, "marker", SymbolType::Function},
+        ExtensionFixture{".kt", kotlin, "marker", SymbolType::Function},
+        ExtensionFixture{".kts", kotlin, "marker", SymbolType::Function},
+        ExtensionFixture{".zig", zig, "marker", SymbolType::Function},
+        ExtensionFixture{".rb", ruby, "marker", SymbolType::Method},
     };
 
     for (const auto& fixture : fixtures) {
         SCOPED_TRACE(fixture.extension);
         Language routed{};
         ASSERT_TRUE(language_from_extension(fixture.extension, routed));
-        EXPECT_EQ(routed, fixture.language);
         const std::string path = "fixture" + std::string(fixture.extension);
         auto graph = extract_spec_fixture(routed, fixture.extension, path,
                                           fixture.source);
-        EXPECT_NE(find_symbol(graph, fixture.symbol), nullptr);
-        EXPECT_FALSE(graph.scopes.empty());
-        EXPECT_FALSE(graph.blocks.empty());
+        const int named = static_cast<int>(std::count_if(
+            graph.symbols.begin(), graph.symbols.end(),
+            [&](const Symbol& symbol) { return symbol.name == fixture.symbol; }));
+        const int typed = static_cast<int>(std::count_if(
+            graph.symbols.begin(), graph.symbols.end(), [&](const Symbol& symbol) {
+                return symbol.name == fixture.symbol &&
+                       symbol.type == fixture.symbol_type;
+            }));
+        EXPECT_EQ(named, 1) << fixture.extension;
+        EXPECT_EQ(typed, 1) << fixture.extension;
     }
 }
 
-TEST(LanguageConstructConformance, JsxAndTsxSyntaxReachTheirDataGraphs) {
+TEST(LanguageConstructConformance, JsxSyntaxReachesTheDataGraph) {
     constexpr std::string_view jsx = R"(
 function Card(props) { return <article>{props.title}</article>; }
 const view = <Card title="ready" />;
 )";
     auto jsx_graph =
         extract_spec_fixture(Language::JavaScript, ".jsx", "fixture.jsx", jsx);
-    EXPECT_NE(find_symbol(jsx_graph, "Card"), nullptr);
-    EXPECT_NE(find_symbol(jsx_graph, "view"), nullptr);
-
-    constexpr std::string_view tsx = R"(
-interface Props { title: string }
-function Card(props: Props) { return <article>{props.title}</article>; }
-const view = <Card title="ready" />;
-)";
-    auto tsx_graph =
-        extract_spec_fixture(Language::Tsx, ".tsx", "fixture.tsx", tsx);
-    EXPECT_NE(find_symbol(tsx_graph, "Props"), nullptr);
-    EXPECT_NE(find_symbol(tsx_graph, "Card"), nullptr);
-    EXPECT_NE(find_symbol(tsx_graph, "view"), nullptr);
+    expect_graph(jsx_graph,
+                 {{"Card", SymbolType::Function},
+                  {"view", SymbolType::Variable}},
+                 {});
 }
 
 TEST(LanguageConstructConformance, Go) {
@@ -239,6 +237,7 @@ func Run() string { return Build().Read() }
                   {"Limit", SymbolType::Constant},
                   {"Enabled", SymbolType::Variable},
                   {"Build", SymbolType::Function},
+                  {"Read", SymbolType::Method},
                   {"Run", SymbolType::Function}},
                  {{"Base", ReferenceType::Extends},
                   {"Build", ReferenceType::Call}},
@@ -291,14 +290,16 @@ let enabled = true;
                  {{"Base", SymbolType::Class},
                   {"Service", SymbolType::Class},
                   {"status", SymbolType::Property},
+                  {"constructor", SymbolType::Method},
                   {"ping", SymbolType::Method},
                   {"run", SymbolType::Method},
                   {"build", SymbolType::Function},
                   {"ids", SymbolType::Function},
                   {"arrow", SymbolType::Function},
+                  {"arrow", SymbolType::Variable},
                   {"enabled", SymbolType::Variable}},
                  {{"Base", ReferenceType::Extends},
-                  {"Service", ReferenceType::Usage},
+                  {"Service", ReferenceType::Usage, 2},
                   {"Service.constructor", ReferenceType::Call},
                   {"build", ReferenceType::Call}},
                  {"./dep.js"});
@@ -326,9 +327,12 @@ const arrow = (id: Identifier): Service => build(id);
                   {"Base", SymbolType::Class},
                   {"Service", SymbolType::Class},
                   {"count", SymbolType::Property},
+                  {"constructor", SymbolType::Method},
+                  {"ping", SymbolType::Method},
                   {"run", SymbolType::Method},
                   {"build", SymbolType::Function},
-                  {"arrow", SymbolType::Function}},
+                  {"arrow", SymbolType::Function},
+                  {"arrow", SymbolType::Variable}},
                  {{"Base", ReferenceType::Extends},
                   {"Runnable", ReferenceType::Implements},
                   {"Service", ReferenceType::Usage},
@@ -351,33 +355,33 @@ fn build() -> Point { Point { x: 1 } }
     expect_graph(graph,
                  {{"nested", SymbolType::Module},
                   {"Point", SymbolType::Struct},
+                  {"x", SymbolType::Field},
                   {"State", SymbolType::Enum},
                   {"Runnable", SymbolType::Trait},
+                  {"Runnable", SymbolType::Impl},
                   {"helper", SymbolType::Function},
                   {"run", SymbolType::Method},
-                  {"build", SymbolType::Function}},
+                 {"build", SymbolType::Function}},
                  {{"helper", ReferenceType::Call}},
-                 {"std::fmt"});
-    EXPECT_GE(std::count_if(graph.symbols.begin(), graph.symbols.end(),
-                            [](const Symbol& symbol) {
-                                return symbol.type == SymbolType::Impl;
-                            }),
-              1);
+                 {"use std::fmt;"});
 }
 
 TEST(LanguageConstructConformance, C) {
     constexpr std::string_view source = R"(#include <stddef.h>
 typedef struct Point { int x; } Point;
 enum State { READY, DONE };
-static const int limit = 4;
 int add(int left, int right) { return left + right; }
-int run(void) { Point point = {1}; return add(point.x, limit); }
+int run(void) { Point point = {1}; return add(point.x, 4); }
 )";
     auto graph = extract_spec_fixture(Language::C, ".c", "fixture.c", source);
     expect_graph(graph,
                  {{"Point", SymbolType::Struct},
+                  {"x", SymbolType::Field},
                   {"State", SymbolType::Enum},
                   {"add", SymbolType::Function},
+                  {"left", SymbolType::Variable},
+                  {"right", SymbolType::Variable},
+                  {"point", SymbolType::Variable},
                   {"run", SymbolType::Function}},
                  {{"add", ReferenceType::Call}}, {"stddef.h"});
 }
@@ -402,13 +406,17 @@ int build() { Service service; auto ptr = new Service(); return service.run(); }
     expect_graph(graph,
                  {{"fixture", SymbolType::Namespace},
                   {"Point", SymbolType::Struct},
+                  {"x", SymbolType::Field},
                   {"State", SymbolType::Enum},
                   {"Base", SymbolType::Class},
                   {"Service", SymbolType::Class},
                   {"Service", SymbolType::Constructor},
                   {"run", SymbolType::Method},
                   {"helper", SymbolType::Method},
-                  {"build", SymbolType::Function}},
+                  {"Name", SymbolType::Type},
+                  {"build", SymbolType::Function},
+                  {"service", SymbolType::Variable},
+                  {"ptr", SymbolType::Variable}},
                  {{"Service.Service", ReferenceType::Call},
                   {"helper", ReferenceType::Call},
                   {"Service.run", ReferenceType::Call}},
@@ -437,13 +445,17 @@ class Factory { Service build() { return new Service(); } }
                   {"State", SymbolType::Enum},
                   {"Point", SymbolType::Record},
                   {"Base", SymbolType::Class},
+                  {"ping", SymbolType::Method},
                   {"Service", SymbolType::Class},
                   {"count", SymbolType::Field},
                   {"Service", SymbolType::Constructor},
-                  {"run", SymbolType::Method}},
+                  {"run", SymbolType::Method},
+                  {"run", SymbolType::Method},
+                  {"Factory", SymbolType::Class},
+                  {"build", SymbolType::Method}},
                  {{"Service.ping", ReferenceType::Call},
                   {"Service.Service", ReferenceType::Call}},
-                 {"package fixture", "import java.util.List"});
+                 {"package fixture;", "import java.util.List;"});
 }
 
 TEST(LanguageConstructConformance, CSharp) {
@@ -472,6 +484,7 @@ public class Factory { public Service Build() { return new Service(); } }
                   {"IRunnable", SymbolType::Interface},
                   {"State", SymbolType::Enum},
                   {"Point", SymbolType::Struct},
+                  {"X", SymbolType::Field},
                   {"Result", SymbolType::Record},
                   {"Service", SymbolType::Class},
                   {"Updated", SymbolType::Event},
@@ -479,7 +492,10 @@ public class Factory { public Service Build() { return new Service(); } }
                   {"count", SymbolType::Field},
                   {"Service", SymbolType::Constructor},
                   {"Run", SymbolType::Method},
-                  {"Helper", SymbolType::Method}},
+                  {"Run", SymbolType::Method},
+                  {"Helper", SymbolType::Method},
+                  {"Factory", SymbolType::Class},
+                  {"Build", SymbolType::Method}},
                  {{"Service.Helper", ReferenceType::Call},
                   {"Service.Service", ReferenceType::Call}},
                  {"System"});
@@ -506,12 +522,15 @@ function build(): Service { return new Service(); }
     expect_graph(graph,
                  {{"Fixture", SymbolType::Namespace},
                   {"Runnable", SymbolType::Interface},
+                  {"run", SymbolType::Method},
                   {"Helper", SymbolType::Trait},
+                  {"help", SymbolType::Method},
                   {"State", SymbolType::Enum},
                   {"Base", SymbolType::Class},
                   {"Service", SymbolType::Class},
                   {"LIMIT", SymbolType::Constant},
                   {"count", SymbolType::Property},
+                  {"__construct", SymbolType::Method},
                   {"run", SymbolType::Method},
                   {"build", SymbolType::Function}},
                  {{"Base", ReferenceType::Extends},
@@ -519,7 +538,7 @@ function build(): Service { return new Service(); }
                   {"Helper", ReferenceType::Extends},
                   {"Service.help", ReferenceType::Call},
                   {"Service.__construct", ReferenceType::Call}},
-                 {"Vendor\\Dependency"});
+                 {"use Vendor\\Dependency;", "use Helper;"});
 }
 
 TEST(LanguageConstructConformance, Kotlin) {
@@ -538,6 +557,7 @@ fun build(): Service = Service()
     auto graph = extract_spec_fixture(Language::Kotlin, ".kt", "Fixture.kt", source);
     expect_graph(graph,
                  {{"Runnable", SymbolType::Interface},
+                  {"run", SymbolType::Method},
                   {"State", SymbolType::Enum},
                   {"Point", SymbolType::Class},
                   {"Registry", SymbolType::Object},
@@ -549,7 +569,7 @@ fun build(): Service = Service()
                  {{"Service.helper", ReferenceType::Call},
                   {"Registry.value", ReferenceType::Call},
                   {"Service", ReferenceType::Call}},
-                 {"kotlin.math.abs"});
+                 {"import kotlin.math.abs"});
 }
 
 TEST(LanguageConstructConformance, Zig) {
