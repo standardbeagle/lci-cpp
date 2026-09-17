@@ -5,6 +5,7 @@
 #include <tree_sitter/api.h>
 
 #include <algorithm>
+#include <array>
 #include <initializer_list>
 #include <sstream>
 #include <string>
@@ -51,6 +52,14 @@ ExtractionResults extract_spec_fixture(
     extractor.init(source, 1, extension, path);
     extractor.extract(tree.get());
     return extractor.take_results();
+}
+
+const Symbol* find_symbol(const ExtractionResults& graph,
+                          std::string_view name) {
+    const auto it = std::find_if(
+        graph.symbols.begin(), graph.symbols.end(),
+        [name](const Symbol& symbol) { return symbol.name == name; });
+    return it == graph.symbols.end() ? nullptr : &*it;
 }
 
 void expect_graph(
@@ -106,6 +115,105 @@ void expect_graph(
     }
     EXPECT_FALSE(graph.scopes.empty());
     EXPECT_FALSE(graph.blocks.empty());
+}
+
+struct ExtensionFixture {
+    std::string_view extension;
+    Language language;
+    std::string_view source;
+    std::string_view symbol;
+};
+
+// Every extension backed by a linked grammar must reach extraction, not just
+// agree with language_map.h. This catches routing regressions where a file is
+// classified as code but silently produces no graph records.
+TEST(LanguageConstructConformance, EveryLinkedExtensionExtractsGraphRecords) {
+    constexpr std::string_view go = "package fixture\nfunc marker() {}\n";
+    constexpr std::string_view python = "def marker():\n    pass\n";
+    constexpr std::string_view javascript = "function marker() {}\n";
+    constexpr std::string_view typescript =
+        "function marker(value: number): number { return value; }\n";
+    constexpr std::string_view rust = "fn marker() {}\n";
+    constexpr std::string_view c = "void marker(void) {}\n";
+    constexpr std::string_view cpp = "namespace fixture { void marker() {} }\n";
+    constexpr std::string_view java =
+        "class Fixture { void marker() {} }\n";
+    constexpr std::string_view csharp =
+        "class Fixture { void Marker() {} }\n";
+    constexpr std::string_view php = "<?php function marker() {}\n";
+    constexpr std::string_view kotlin = "fun marker() = Unit\n";
+    constexpr std::string_view zig = "fn marker() void {}\n";
+    constexpr std::string_view ruby = "def marker\nend\n";
+
+    constexpr std::array fixtures{
+        ExtensionFixture{".go", Language::Go, go, "marker"},
+        ExtensionFixture{".py", Language::Python, python, "marker"},
+        ExtensionFixture{".pyw", Language::Python, python, "marker"},
+        ExtensionFixture{".pyi", Language::Python, python, "marker"},
+        ExtensionFixture{".pyx", Language::Python, python, "marker"},
+        ExtensionFixture{".pxd", Language::Python, python, "marker"},
+        ExtensionFixture{".js", Language::JavaScript, javascript, "marker"},
+        ExtensionFixture{".jsx", Language::JavaScript, javascript, "marker"},
+        ExtensionFixture{".mjs", Language::JavaScript, javascript, "marker"},
+        ExtensionFixture{".cjs", Language::JavaScript, javascript, "marker"},
+        ExtensionFixture{".ts", Language::TypeScript, typescript, "marker"},
+        ExtensionFixture{".tsx", Language::Tsx, typescript, "marker"},
+        ExtensionFixture{".mts", Language::TypeScript, typescript, "marker"},
+        ExtensionFixture{".cts", Language::TypeScript, typescript, "marker"},
+        ExtensionFixture{".rs", Language::Rust, rust, "marker"},
+        ExtensionFixture{".c", Language::C, c, "marker"},
+        ExtensionFixture{".cpp", Language::Cpp, cpp, "marker"},
+        ExtensionFixture{".cc", Language::Cpp, cpp, "marker"},
+        ExtensionFixture{".cxx", Language::Cpp, cpp, "marker"},
+        ExtensionFixture{".h", Language::Cpp, cpp, "marker"},
+        ExtensionFixture{".hpp", Language::Cpp, cpp, "marker"},
+        ExtensionFixture{".hh", Language::Cpp, cpp, "marker"},
+        ExtensionFixture{".hxx", Language::Cpp, cpp, "marker"},
+        ExtensionFixture{".h++", Language::Cpp, cpp, "marker"},
+        ExtensionFixture{".java", Language::Java, java, "marker"},
+        ExtensionFixture{".cs", Language::CSharp, csharp, "Marker"},
+        ExtensionFixture{".php", Language::PHP, php, "marker"},
+        ExtensionFixture{".phtml", Language::PHP, php, "marker"},
+        ExtensionFixture{".kt", Language::Kotlin, kotlin, "marker"},
+        ExtensionFixture{".kts", Language::Kotlin, kotlin, "marker"},
+        ExtensionFixture{".zig", Language::Zig, zig, "marker"},
+        ExtensionFixture{".rb", Language::Ruby, ruby, "marker"},
+    };
+
+    for (const auto& fixture : fixtures) {
+        SCOPED_TRACE(fixture.extension);
+        Language routed{};
+        ASSERT_TRUE(language_from_extension(fixture.extension, routed));
+        EXPECT_EQ(routed, fixture.language);
+        const std::string path = "fixture" + std::string(fixture.extension);
+        auto graph = extract_spec_fixture(routed, fixture.extension, path,
+                                          fixture.source);
+        EXPECT_NE(find_symbol(graph, fixture.symbol), nullptr);
+        EXPECT_FALSE(graph.scopes.empty());
+        EXPECT_FALSE(graph.blocks.empty());
+    }
+}
+
+TEST(LanguageConstructConformance, JsxAndTsxSyntaxReachTheirDataGraphs) {
+    constexpr std::string_view jsx = R"(
+function Card(props) { return <article>{props.title}</article>; }
+const view = <Card title="ready" />;
+)";
+    auto jsx_graph =
+        extract_spec_fixture(Language::JavaScript, ".jsx", "fixture.jsx", jsx);
+    EXPECT_NE(find_symbol(jsx_graph, "Card"), nullptr);
+    EXPECT_NE(find_symbol(jsx_graph, "view"), nullptr);
+
+    constexpr std::string_view tsx = R"(
+interface Props { title: string }
+function Card(props: Props) { return <article>{props.title}</article>; }
+const view = <Card title="ready" />;
+)";
+    auto tsx_graph =
+        extract_spec_fixture(Language::Tsx, ".tsx", "fixture.tsx", tsx);
+    EXPECT_NE(find_symbol(tsx_graph, "Props"), nullptr);
+    EXPECT_NE(find_symbol(tsx_graph, "Card"), nullptr);
+    EXPECT_NE(find_symbol(tsx_graph, "view"), nullptr);
 }
 
 TEST(LanguageConstructConformance, Go) {
