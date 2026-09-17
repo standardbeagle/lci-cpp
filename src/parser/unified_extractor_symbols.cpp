@@ -109,16 +109,31 @@ void UnifiedExtractor::extract_function(TSNode node,
         return;
     }
 
+    bool is_member = false;
+    if (lang_ == LangId::Kotlin || lang_ == LangId::Zig) {
+        for (auto it = scope_stack_.rbegin(); it != scope_stack_.rend(); ++it) {
+            if (it->scope_type == ScopeType::Class ||
+                it->scope_type == ScopeType::Interface ||
+                it->scope_type == ScopeType::Struct) {
+                is_member = true;
+                break;
+            }
+            if (it->scope_type == ScopeType::Function ||
+                it->scope_type == ScopeType::Method)
+                break;
+        }
+    }
+
     BlockBoundary block;
     block.start = static_cast<int>(start.row);
     block.end = static_cast<int>(end.row);
-    block.type = BlockType::Function;
+    block.type = is_member ? BlockType::Method : BlockType::Function;
     block.name = std::string(name);
     blocks_.push_back(std::move(block));
 
     Symbol sym;
     sym.name = std::string(name);
-    sym.type = SymbolType::Function;
+    sym.type = is_member ? SymbolType::Method : SymbolType::Function;
     sym.file_id = file_id_;
     sym.line = static_cast<int>(start.row) + 1;
     sym.column = static_cast<int>(start.column) + 1;
@@ -365,16 +380,36 @@ void UnifiedExtractor::extract_class(TSNode node,
     std::string_view name = node_text(name_node);
     if (name.empty()) return;
 
+    SymbolType symbol_type = SymbolType::Class;
+    BlockType block_type = BlockType::Class;
+    if (lang_ == LangId::Kotlin) {
+        const uint32_t count = ts_node_child_count(node);
+        for (uint32_t i = 0; i < count; ++i) {
+            const std::string_view child_type =
+                get_node_type(ts_node_child(node, i));
+            if (child_type == "interface") {
+                symbol_type = SymbolType::Interface;
+                block_type = BlockType::Interface;
+                break;
+            }
+            if (child_type == "enum") {
+                symbol_type = SymbolType::Enum;
+                block_type = BlockType::Enum;
+                break;
+            }
+        }
+    }
+
     BlockBoundary block;
     block.start = static_cast<int>(start.row);
     block.end = static_cast<int>(end.row);
-    block.type = BlockType::Class;
+    block.type = block_type;
     block.name = std::string(name);
     blocks_.push_back(std::move(block));
 
     Symbol sym;
     sym.name = std::string(name);
-    sym.type = SymbolType::Class;
+    sym.type = symbol_type;
     sym.file_id = file_id_;
     sym.line = static_cast<int>(start.row) + 1;
     sym.column = static_cast<int>(start.column) + 1;

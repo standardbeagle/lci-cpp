@@ -700,9 +700,31 @@ bool UnifiedExtractor::process_scope_node(TSNode node,
             n = first_named_child_typed(node, "type_identifier");
         if (!ts_node_is_null(n)) name = std::string(node_text(n));
 
+    } else if (node_type == "object_declaration" &&
+               lang_ == LangId::Kotlin) {
+        scope_type = ScopeType::Class;
+        TSNode n = first_named_child_typed(node, "type_identifier");
+        if (!ts_node_is_null(n)) name = std::string(node_text(n));
+
     } else if (node_type == "type_declaration") {
         scope_type = ScopeType::Class;
         name = std::string(extract_go_type_name(node));
+
+    } else if (node_type == "variable_declaration" &&
+               lang_ == LangId::Zig) {
+        bool aggregate = false;
+        uint32_t count = ts_node_child_count(node);
+        for (uint32_t i = 0; i < count; ++i) {
+            TSNode child = ts_node_child(node, i);
+            std::string_view child_type = get_node_type(child);
+            if (child_type == "identifier" && name.empty())
+                name = std::string(node_text(child));
+            else if (child_type == "struct_declaration" ||
+                     child_type == "union_declaration")
+                aggregate = true;
+        }
+        if (!aggregate || name.empty()) return false;
+        scope_type = ScopeType::Struct;
 
     } else if (node_type == "struct_specifier" ||
                node_type == "class_specifier" ||
@@ -866,7 +888,7 @@ void UnifiedExtractor::process_symbol_node(TSNode node,
 
     } else if (node_type == "method_definition" ||
                node_type == "method_declaration" ||
-               node_type == "method") {
+               node_type == "method" || node_type == "singleton_method") {
         extract_method(node, node_type);
 
     } else if (node_type == "arrow_function" ||
@@ -900,7 +922,8 @@ void UnifiedExtractor::process_symbol_node(TSNode node,
     } else if (node_type == "type_declaration") {
         extract_type_declaration(node);
 
-    } else if (node_type == "type_alias_declaration") {
+    } else if (node_type == "type_alias_declaration" ||
+               node_type == "type_alias") {
         extract_type_alias(node);
 
     // === STRUCTS ===
@@ -1022,6 +1045,9 @@ void UnifiedExtractor::process_symbol_node(TSNode node,
         } else if (lang_ == LangId::Kotlin) {
             extract_kotlin_import(node);
         }
+
+    } else if (node_type == "import_header" && lang_ == LangId::Kotlin) {
+        extract_kotlin_import(node);
 
     } else if (node_type == "package_declaration") {
         extract_package_declaration(node);

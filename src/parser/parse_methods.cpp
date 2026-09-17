@@ -355,6 +355,8 @@ void UnifiedExtractor::extract_php_const(TSNode node) {
         if (ct == "const_element") {
             TSNode cname = ts_node_child_by_field_name(
                 child, "name", static_cast<uint32_t>(std::strlen("name")));
+            if (ts_node_is_null(cname))
+                cname = first_named_child_typed(child, "name");
             if (ts_node_is_null(cname)) continue;
 
             TSPoint start = ts_node_start_point(node);
@@ -383,7 +385,7 @@ void UnifiedExtractor::extract_zig_struct(TSNode node) {
     // The identifier child holds the name, and a struct_declaration child
     // (or union_declaration) holds the body.
     std::string_view name;
-    bool is_struct = false;
+    SymbolType symbol_type = SymbolType::Variable;
 
     uint32_t count = ts_node_child_count(node);
     for (uint32_t i = 0; i < count; ++i) {
@@ -392,11 +394,13 @@ void UnifiedExtractor::extract_zig_struct(TSNode node) {
         if (ct == "identifier" && name.empty()) {
             name = node_text(child);
         } else if (ct == "struct_declaration" || ct == "union_declaration") {
-            is_struct = true;
+            symbol_type = SymbolType::Struct;
+        } else if (ct == "enum_declaration") {
+            symbol_type = SymbolType::Enum;
         }
     }
 
-    if (name.empty() || !is_struct) return;
+    if (name.empty() || symbol_type == SymbolType::Variable) return;
 
     TSPoint start = ts_node_start_point(node);
     TSPoint end = ts_node_end_point(node);
@@ -404,13 +408,14 @@ void UnifiedExtractor::extract_zig_struct(TSNode node) {
     BlockBoundary block;
     block.start = static_cast<int>(start.row);
     block.end = static_cast<int>(end.row);
-    block.type = BlockType::Struct;
+    block.type = symbol_type == SymbolType::Enum ? BlockType::Enum
+                                                 : BlockType::Struct;
     block.name = std::string(name);
     blocks_.push_back(std::move(block));
 
     Symbol sym;
     sym.name = std::string(name);
-    sym.type = SymbolType::Struct;
+    sym.type = symbol_type;
     sym.file_id = file_id_;
     sym.line = static_cast<int>(start.row) + 1;
     sym.column = static_cast<int>(start.column) + 1;

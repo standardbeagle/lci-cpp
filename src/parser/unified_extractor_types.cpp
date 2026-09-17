@@ -213,6 +213,19 @@ void UnifiedExtractor::process_js_type_relationships(
             for (uint32_t j = 0; j < hcount; ++j) {
                 TSNode hchild = ts_node_child(child, j);
                 std::string_view ht = get_node_type(hchild);
+                if (ht == "identifier" || ht == "member_expression") {
+                    Reference ref;
+                    ref.id = ref_id_++;
+                    ref.file_id = file_id_;
+                    TSPoint sp = ts_node_start_point(hchild);
+                    ref.line = static_cast<int>(sp.row) + 1;
+                    ref.column = static_cast<int>(sp.column) + 1;
+                    ref.type = ReferenceType::Extends;
+                    ref.strength = RefStrength::Tight;
+                    ref.referenced_name = std::string(node_text(hchild));
+                    references_.push_back(std::move(ref));
+                    continue;
+                }
                 if (ht == "extends_clause" || ht == "implements_clause") {
                     ReferenceType rt = (ht == "extends_clause")
                                            ? ReferenceType::Extends
