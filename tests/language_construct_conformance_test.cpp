@@ -161,7 +161,7 @@ def helper():
                   {"run", SymbolType::Method},
                   {"helper", SymbolType::Function}},
                  {{"Base", ReferenceType::Extends},
-                  {"make", ReferenceType::Call}},
+                  {"Service.make", ReferenceType::Call}},
                  {"import pathlib", "from collections import abc"});
 }
 
@@ -189,6 +189,7 @@ let enabled = true;
                   {"enabled", SymbolType::Variable}},
                  {{"Base", ReferenceType::Extends},
                   {"Service", ReferenceType::Usage},
+                  {"Service.constructor", ReferenceType::Call},
                   {"build", ReferenceType::Call}},
                  {"./dep.js"});
 }
@@ -219,6 +220,7 @@ const arrow = (id: Identifier): Service => build(id);
                  {{"Base", ReferenceType::Extends},
                   {"Runnable", ReferenceType::Implements},
                   {"Service", ReferenceType::Usage},
+                  {"Service.constructor", ReferenceType::Call},
                   {"build", ReferenceType::Call}},
                  {"./dep"});
 }
@@ -276,12 +278,12 @@ enum class State { Ready, Done };
 class Base { public: virtual int run() = 0; };
 class Service : public Base {
  public:
-  Service() = default;
+  Service() {}
   int run() override { return helper(); }
   static int helper() { return 1; }
 };
 using Name = std::string;
-int build() { Service service; return service.run(); }
+int build() { Service service; auto ptr = new Service(); return service.run(); }
 }
 )";
     auto graph = extract_spec_fixture(Language::Cpp, ".cpp", "fixture.cpp", source);
@@ -291,10 +293,12 @@ int build() { Service service; return service.run(); }
                   {"State", SymbolType::Enum},
                   {"Base", SymbolType::Class},
                   {"Service", SymbolType::Class},
+                  {"Service", SymbolType::Constructor},
                   {"run", SymbolType::Method},
                   {"helper", SymbolType::Method},
                   {"build", SymbolType::Function}},
-                 {{"helper", ReferenceType::Call},
+                 {{"Service.Service", ReferenceType::Call},
+                  {"helper", ReferenceType::Call},
                   {"Service.run", ReferenceType::Call}},
                  {"string"});
 }
@@ -311,6 +315,7 @@ class Service extends Base implements Runnable {
   Service() {}
   public int run() { return ping(); }
 }
+class Factory { Service build() { return new Service(); } }
 )";
     auto graph = extract_spec_fixture(Language::Java, ".java", "Fixture.java", source);
     expect_graph(graph,
@@ -322,7 +327,8 @@ class Service extends Base implements Runnable {
                   {"Service", SymbolType::Class},
                   {"Service", SymbolType::Constructor},
                   {"run", SymbolType::Method}},
-                 {{"Service.ping", ReferenceType::Call}},
+                 {{"Service.ping", ReferenceType::Call},
+                  {"Service.Service", ReferenceType::Call}},
                  {"package fixture", "import java.util.List"});
 }
 
@@ -342,6 +348,7 @@ public class Service : IRunnable {
   public int Run() { return Helper(); }
   private int Helper() { return count; }
 }
+public class Factory { public Service Build() { return new Service(); } }
 }
 )";
     auto graph = extract_spec_fixture(Language::CSharp, ".cs", "Fixture.cs", source);
@@ -359,7 +366,9 @@ public class Service : IRunnable {
                   {"Service", SymbolType::Constructor},
                   {"Run", SymbolType::Method},
                   {"Helper", SymbolType::Method}},
-                 {{"Service.Helper", ReferenceType::Call}}, {"System"});
+                 {{"Service.Helper", ReferenceType::Call},
+                  {"Service.Service", ReferenceType::Call}},
+                 {"System"});
 }
 
 TEST(LanguageConstructConformance, PHP) {
@@ -392,7 +401,8 @@ function build(): Service { return new Service(); }
                  {{"Base", ReferenceType::Extends},
                   {"Runnable", ReferenceType::Implements},
                   {"Helper", ReferenceType::Extends},
-                  {"Service.help", ReferenceType::Call}},
+                  {"Service.help", ReferenceType::Call},
+                  {"Service.__construct", ReferenceType::Call}},
                  {"Vendor\\Dependency"});
 }
 
@@ -421,13 +431,15 @@ fun build(): Service = Service()
                   {"helper", SymbolType::Method},
                   {"build", SymbolType::Function}},
                  {{"Service.helper", ReferenceType::Call},
-                  {"value", ReferenceType::Call},
+                  {"Registry.value", ReferenceType::Call},
                   {"Service", ReferenceType::Call}},
                  {"kotlin.math.abs"});
 }
 
 TEST(LanguageConstructConformance, Zig) {
     constexpr std::string_view source = R"(const std = @import("std");
+const helper = @import("helpers/math.zig");
+const sibling = @import("analysis.zig");
 const Point = struct {
     x: i32,
     fn value(self: Point) i32 { return self.x; }
@@ -445,7 +457,8 @@ pub fn run() i32 { const point = Point{ .x = 1 }; return point.value(); }
                   {"Payload", SymbolType::Struct},
                   {"build", SymbolType::Function},
                   {"run", SymbolType::Function}},
-                 {{"Point.value", ReferenceType::Call}});
+                 {{"Point.value", ReferenceType::Call}},
+                 {"std", "helpers/math.zig", "analysis.zig"});
 }
 
 TEST(LanguageConstructConformance, Ruby) {
@@ -458,7 +471,7 @@ module Fixture
   end
   class Service < Base
     def self.build
-      new
+      Service.new
     end
     def run
       self.ping
@@ -479,7 +492,8 @@ end
                   {"run", SymbolType::Method},
                   {"helper", SymbolType::Method}},
                  {{"Service.ping", ReferenceType::Call},
-                  {"build", ReferenceType::Call}});
+                  {"Service.build", ReferenceType::Call},
+                  {"Service.initialize", ReferenceType::Call}});
 }
 
 }  // namespace

@@ -379,6 +379,40 @@ void UnifiedExtractor::extract_php_const(TSNode node) {
 // Zig extraction
 // ---------------------------------------------------------------------------
 
+void UnifiedExtractor::extract_zig_import(TSNode node) {
+    const uint32_t count = ts_node_named_child_count(node);
+    for (uint32_t i = 0; i < count; ++i) {
+        TSNode child = ts_node_named_child(node, i);
+        if (get_node_type(child) != "builtin_function") continue;
+
+        TSNode builtin{};
+        TSNode arguments{};
+        const uint32_t child_count = ts_node_named_child_count(child);
+        for (uint32_t j = 0; j < child_count; ++j) {
+            TSNode part = ts_node_named_child(child, j);
+            std::string_view part_type = get_node_type(part);
+            if (part_type == "builtin_identifier") builtin = part;
+            if (part_type == "arguments") arguments = part;
+        }
+        if (ts_node_is_null(builtin) || node_text(builtin) != "@import" ||
+            ts_node_is_null(arguments) ||
+            ts_node_named_child_count(arguments) == 0)
+            continue;
+
+        std::string_view literal = node_text(ts_node_named_child(arguments, 0));
+        if (literal.size() < 2 || literal.front() != '"' ||
+            literal.back() != '"')
+            continue;
+
+        Import import;
+        import.path = std::string(literal.substr(1, literal.size() - 2));
+        import.file_id = file_id_;
+        import.line = static_cast<int>(ts_node_start_point(node).row) + 1;
+        imports_.push_back(std::move(import));
+        return;
+    }
+}
+
 void UnifiedExtractor::extract_zig_struct(TSNode node) {
     // Zig structs are declared via variable_declaration:
     //   const MyStruct = struct { ... };

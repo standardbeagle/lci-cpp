@@ -548,14 +548,15 @@ std::vector<ImportBinding> ImportResolver::extract_zig_imports(
     if (path.size() <= 4 || path.substr(path.size() - 4) != ".zig")
         return bindings;  // package import (std, deps) — no local edge
     auto slash = path.rfind('/');
-    if (slash == std::string_view::npos) return bindings;  // sibling file
-    std::string_view dir = path.substr(0, slash);
+    std::string_view dir = slash == std::string_view::npos
+                               ? std::string_view{}
+                               : path.substr(0, slash);
     while (dir.size() >= 3 && dir.substr(0, 3) == "../")
         dir = dir.substr(3);
-    if (dir.empty() || dir == "..") return bindings;
+    if (dir == "..") return bindings;
     ImportBinding b;
-    b.source_file = std::string(dir);
-    auto stem = path.substr(slash + 1);
+    b.source_file = dir.empty() ? std::string(path) : std::string(dir);
+    auto stem = slash == std::string_view::npos ? path : path.substr(slash + 1);
     stem = stem.substr(0, stem.size() - 4);
     b.imported_name = std::string(stem);
     bindings.push_back(std::move(b));

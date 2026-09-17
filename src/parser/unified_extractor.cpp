@@ -1021,6 +1021,7 @@ void UnifiedExtractor::process_symbol_node(TSNode node,
     // === ZIG STRUCTS ===
     } else if (node_type == "variable_declaration" &&
                lang_ == LangId::Zig) {
+        extract_zig_import(node);
         extract_zig_struct(node);
 
     // === IMPORTS ===

@@ -272,17 +272,18 @@ void UnifiedExtractor::extract_function_definition_method(TSNode node) {
     // Python's name field; C/C++ declarator peel — one shared resolver.
     std::string_view name = extract_function_name(node, "function_definition");
     if (name.empty()) return;
+    const bool is_constructor = name == enclosing_class_name();
 
     BlockBoundary block;
     block.start = static_cast<int>(start.row);
     block.end = static_cast<int>(end.row);
-    block.type = BlockType::Method;
+    block.type = is_constructor ? BlockType::Constructor : BlockType::Method;
     block.name = std::string(name);
     blocks_.push_back(std::move(block));
 
     Symbol sym;
     sym.name = std::string(name);
-    sym.type = SymbolType::Method;
+    sym.type = is_constructor ? SymbolType::Constructor : SymbolType::Method;
     sym.file_id = file_id_;
     sym.line = static_cast<int>(start.row) + 1;
     sym.column = static_cast<int>(start.column) + 1;

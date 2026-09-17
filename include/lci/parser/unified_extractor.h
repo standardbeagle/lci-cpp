@@ -257,6 +257,7 @@ class UnifiedExtractor {
     void extract_kotlin_object(TSNode node);
     void extract_kotlin_import(TSNode node);
     // Zig
+    void extract_zig_import(TSNode node);
     void extract_zig_struct(TSNode node);
     // Ruby
 

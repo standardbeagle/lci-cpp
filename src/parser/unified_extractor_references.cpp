@@ -105,6 +105,45 @@ std::string py_bare_type(std::string_view t) {
     return std::string(t);
 }
 
+bool is_explicit_type_receiver(std::string_view text) {
+    if (text.empty()) return false;
+    size_t start = text.find_last_of(".:\\");
+    if (start == std::string_view::npos)
+        start = 0;
+    else
+        ++start;
+    return start < text.size() && text[start] >= 'A' && text[start] <= 'Z';
+}
+
+std::string explicit_receiver_type(std::string_view text) {
+    size_t start = text.find_last_of(".:\\");
+    if (start != std::string_view::npos) text.remove_prefix(start + 1);
+    return std::string(text);
+}
+
+bool is_declared_type_receiver(const std::vector<Symbol>& symbols,
+                               std::string_view text) {
+    if (!is_explicit_type_receiver(text)) return false;
+    const std::string name = explicit_receiver_type(text);
+    for (const auto& symbol : symbols) {
+        if (symbol.name != name) continue;
+        switch (symbol.type) {
+            case SymbolType::Class:
+            case SymbolType::Interface:
+            case SymbolType::Type:
+            case SymbolType::Struct:
+            case SymbolType::Enum:
+            case SymbolType::Record:
+            case SymbolType::Object:
+            case SymbolType::Trait:
+                return true;
+            default:
+                break;
+        }
+    }
+    return false;
+}
+
 }  // namespace
 
 void UnifiedExtractor::process_reference_node(TSNode node,
@@ -166,7 +205,16 @@ void UnifiedExtractor::process_reference_node(TSNode node,
             }
         }
 
-        if (node_type == "call_expression") {
+        if (node_type == "new_expression") {
+            TSNode type = ts_node_child_by_field_name(
+                node, "type", static_cast<uint32_t>(4));
+            if (!ts_node_is_null(type)) {
+                std::string owner = go_bare_type(node_text(type));
+                Reference cref = create_call_reference(type, node);
+                cref.referenced_name = owner + "." + owner;
+                references_.push_back(std::move(cref));
+            }
+        } else if (node_type == "call_expression") {
             TSNode func = ts_node_child_by_field_name(
                 node, "function",
                 static_cast<uint32_t>(std::strlen("function")));
@@ -639,7 +687,16 @@ void UnifiedExtractor::process_js_reference(TSNode node,
         }
     }
 
-    if (node_type == "call_expression") {
+    if (node_type == "new_expression") {
+        TSNode ctor = ts_node_child_by_field_name(
+            node, "constructor", static_cast<uint32_t>(11));
+        if (!ts_node_is_null(ctor)) {
+            Reference cref = create_call_reference(ctor, node);
+            cref.referenced_name =
+                js_bare_type(node_text(ctor)) + ".constructor";
+            references_.push_back(std::move(cref));
+        }
+    } else if (node_type == "call_expression") {
         TSNode func = ts_node_child_by_field_name(
             node, "function",
             static_cast<uint32_t>(std::strlen("function")));
@@ -663,6 +720,9 @@ void UnifiedExtractor::process_js_reference(TSNode node,
                     if (it != local_var_types_.end() && !it->second.empty()) {
                         cref.referenced_name =
                             it->second + "." + std::string(node_text(prop));
+                    } else if (is_declared_type_receiver(symbols_, recv)) {
+                        cref.referenced_name = js_bare_type(recv) + "." +
+                                               std::string(node_text(prop));
                     } else if (!is_self_receiver(recv)) {
                         // Array.isArray / observer.next: a call through an
                         // unknown non-self receiver is never direct recursion
@@ -791,6 +851,12 @@ void UnifiedExtractor::process_python_reference(TSNode node,
                     // super().__call__ / cfg.createContext-style calls: an
                     // unknown non-self receiver is never direct recursion
                     // and must not be name-guessed.
+                    if (!qualified &&
+                        is_declared_type_receiver(symbols_, recv)) {
+                        cref.referenced_name = py_bare_type(recv) + "." +
+                                               std::string(node_text(attr));
+                        qualified = true;
+                    }
                     if (!qualified && !is_self_receiver(recv))
                         cref.foreign_receiver = true;
                 }
@@ -823,11 +889,15 @@ void UnifiedExtractor::process_python_reference(TSNode node,
 namespace {
 void qualify_and_push(std::vector<Reference>& out, Reference cref,
                       const absl::flat_hash_map<std::string, std::string>& env,
+                      const std::vector<Symbol>& symbols,
                       std::string_view recv_text, std::string_view method_text) {
     auto it = env.find(recv_text);
     if (it != env.end() && !it->second.empty()) {
         cref.referenced_name =
             it->second + "." + std::string(method_text);
+    } else if (is_declared_type_receiver(symbols, recv_text)) {
+        cref.referenced_name = explicit_receiver_type(recv_text) + "." +
+                               std::string(method_text);
     } else if (!is_self_receiver(recv_text)) {
         // Explicit receiver of unknown type: never direct recursion, and
         // resolution must not guess a target from the bare name alone.
@@ -882,7 +952,16 @@ void UnifiedExtractor::process_java_reference(TSNode node,
         return;
     }
 
-    if (node_type == "method_invocation") {
+    if (node_type == "object_creation_expression") {
+        TSNode type = ts_node_child_by_field_name(
+            node, "type", static_cast<uint32_t>(4));
+        if (!ts_node_is_null(type)) {
+            std::string owner = js_bare_type(node_text(type));
+            Reference cref = create_call_reference(type, node);
+            cref.referenced_name = owner + "." + owner;
+            references_.push_back(std::move(cref));
+        }
+    } else if (node_type == "method_invocation") {
         TSNode name = ts_node_child_by_field_name(node, "name",
                                                   static_cast<uint32_t>(4));
         if (ts_node_is_null(name)) return;
@@ -892,8 +971,8 @@ void UnifiedExtractor::process_java_reference(TSNode node,
                                                  static_cast<uint32_t>(6));
         std::string_view recv = ts_node_is_null(obj) ? std::string_view("this")
                                                       : node_text(obj);
-        qualify_and_push(references_, std::move(cref), local_var_types_, recv,
-                         node_text(name));
+        qualify_and_push(references_, std::move(cref), local_var_types_, symbols_,
+                         recv, node_text(name));
     }
 }
 
@@ -960,7 +1039,16 @@ void UnifiedExtractor::process_csharp_reference(TSNode node,
         return;
     }
 
-    if (node_type == "invocation_expression") {
+    if (node_type == "object_creation_expression") {
+        TSNode type = ts_node_child_by_field_name(
+            node, "type", static_cast<uint32_t>(4));
+        if (!ts_node_is_null(type)) {
+            std::string owner = js_bare_type(node_text(type));
+            Reference cref = create_call_reference(type, node);
+            cref.referenced_name = owner + "." + owner;
+            references_.push_back(std::move(cref));
+        }
+    } else if (node_type == "invocation_expression") {
         TSNode func = ts_node_child_by_field_name(node, "function",
                                                   static_cast<uint32_t>(8));
         if (ts_node_is_null(func)) return;
@@ -974,13 +1062,13 @@ void UnifiedExtractor::process_csharp_reference(TSNode node,
                 create_call_reference(nm, node);
             std::string_view recv =
                 ts_node_is_null(ex) ? std::string_view("this") : node_text(ex);
-            qualify_and_push(references_, std::move(cref), local_var_types_, recv,
-                             node_text(nm));
+            qualify_and_push(references_, std::move(cref), local_var_types_,
+                             symbols_, recv, node_text(nm));
         } else if (std::string_view(ts_node_type(func)) == "identifier") {
             qualify_and_push(
                 references_,
                 create_call_reference(func, node),
-                local_var_types_, "this", node_text(func));
+                local_var_types_, symbols_, "this", node_text(func));
         }
     }
 }
@@ -1068,8 +1156,8 @@ void UnifiedExtractor::process_rust_reference(TSNode node,
                 create_call_reference(fld, node);
             std::string_view recv =
                 ts_node_is_null(val) ? std::string_view() : node_text(val);
-            qualify_and_push(references_, std::move(cref), local_var_types_, recv,
-                             node_text(fld));
+            qualify_and_push(references_, std::move(cref), local_var_types_,
+                             symbols_, recv, node_text(fld));
         } else if (std::string_view(ts_node_type(func)) == "identifier") {
             references_.push_back(
                 create_call_reference(func, node));
@@ -1110,7 +1198,19 @@ void UnifiedExtractor::process_php_reference(TSNode node,
         return;
     }
 
-    if (node_type == "member_call_expression" ||
+    if (node_type == "object_creation_expression") {
+        uint32_t n = ts_node_named_child_count(node);
+        for (uint32_t i = 0; i < n; ++i) {
+            TSNode type = ts_node_named_child(node, i);
+            std::string_view tt(ts_node_type(type));
+            if (tt != "name" && tt != "qualified_name") continue;
+            Reference cref = create_call_reference(type, node);
+            cref.referenced_name = go_bare_type(node_text(type)) +
+                                   ".__construct";
+            references_.push_back(std::move(cref));
+            break;
+        }
+    } else if (node_type == "member_call_expression" ||
         node_type == "nullsafe_member_call_expression") {
         TSNode obj = ts_node_child_by_field_name(node, "object",
                                                  static_cast<uint32_t>(6));
@@ -1121,8 +1221,8 @@ void UnifiedExtractor::process_php_reference(TSNode node,
             create_call_reference(nm, node);
         std::string_view recv =
             ts_node_is_null(obj) ? std::string_view() : node_text(obj);
-        qualify_and_push(references_, std::move(cref), local_var_types_, recv,
-                         node_text(nm));
+        qualify_and_push(references_, std::move(cref), local_var_types_, symbols_,
+                         recv, node_text(nm));
     } else if (node_type == "scoped_call_expression") {
         // `self::m()` / `static::m()` / `ClassName::m()` / `parent::m()`.
         // These previously emitted NO call reference at all, so PHP static
@@ -1289,13 +1389,19 @@ void UnifiedExtractor::process_kotlin_reference(TSNode node,
                     return;
                 }
             }
-            qualify_and_push(references_, std::move(cref), local_var_types_, rt,
-                             node_text(m));
+            if (is_declared_type_receiver(symbols_, rt)) {
+                cref.referenced_name = js_bare_type(rt) + "." +
+                                       std::string(node_text(m));
+                references_.push_back(std::move(cref));
+                return;
+            }
+            qualify_and_push(references_, std::move(cref), local_var_types_,
+                             symbols_, rt, node_text(m));
         } else if (ft == "simple_identifier") {
             qualify_and_push(
                 references_,
                 create_call_reference(first, node),
-                local_var_types_, "this", node_text(first));
+                local_var_types_, symbols_, "this", node_text(first));
         }
     }
 }
@@ -1337,15 +1443,33 @@ void UnifiedExtractor::process_ruby_reference(TSNode node,
         if (ts_node_is_null(mm) ||
             std::string_view(ts_node_type(mm)) != "identifier")
             return;
-        if (node_text(mm) == "new") return;  // constructor, not a call edge
         TSNode recv = ts_node_child_by_field_name(node, "receiver",
                                                   static_cast<uint32_t>(8));
+        if (node_text(mm) == "new") {
+            std::string owner;
+            if (!ts_node_is_null(recv))
+                owner = go_bare_type(node_text(recv));
+            else
+                owner = enclosing_class_name();
+            if (!owner.empty()) {
+                Reference cref = create_call_reference(mm, node);
+                cref.referenced_name = owner + ".initialize";
+                references_.push_back(std::move(cref));
+            }
+            return;
+        }
         Reference cref =
             create_call_reference(mm, node);
         std::string_view rt =
             ts_node_is_null(recv) ? std::string_view("self") : node_text(recv);
-        qualify_and_push(references_, std::move(cref), local_var_types_, rt,
-                         node_text(mm));
+        if (is_declared_type_receiver(symbols_, rt)) {
+            cref.referenced_name = explicit_receiver_type(rt) + "." +
+                                   std::string(node_text(mm));
+            references_.push_back(std::move(cref));
+            return;
+        }
+        qualify_and_push(references_, std::move(cref), local_var_types_, symbols_,
+                         rt, node_text(mm));
     }
 }
 
@@ -1480,7 +1604,7 @@ void UnifiedExtractor::process_zig_reference(TSNode node,
                 return;
             }
             qualify_and_push(references_, std::move(cref), local_var_types_,
-                             node_text(obj), node_text(mem));
+                             symbols_, node_text(obj), node_text(mem));
         } else if (std::string_view(ts_node_type(func)) == "identifier") {
             references_.push_back(
                 create_call_reference(func, node));

@@ -1243,10 +1243,12 @@ TEST(ImportResolverTest, ExtractZigImports) {
         "const completions = @import(\"features/completions.zig\");\n"
         "const std = @import(\"std\");\n"
         "const sibling = @import(\"analysis.zig\");\n");
-    ASSERT_EQ(d.bindings.size(), 1u)
-        << "only the directory-carrying import is cross-package evidence";
+    ASSERT_EQ(d.bindings.size(), 2u)
+        << "both directory and sibling .zig imports are graph evidence";
     EXPECT_EQ(d.bindings[0].source_file, "features");
     EXPECT_EQ(d.bindings[0].imported_name, "completions");
+    EXPECT_EQ(d.bindings[1].source_file, "analysis.zig");
+    EXPECT_EQ(d.bindings[1].imported_name, "analysis");
 }
 
 TEST(ImportResolverTest, NoEvidenceReturnsUndecided) {
