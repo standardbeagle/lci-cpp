@@ -1,0 +1,4 @@
+{
+  "maxScope": 5,
+  "rationale": "A context slice spans handler source, manifest types, expansion declarations and tests; final delivery adds docs, both skill mirrors, lifecycle tests and the tool-surface snapshot. Five narrow paths cover these layers without allowing unrelated behaviors."
+}
