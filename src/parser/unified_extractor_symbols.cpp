@@ -37,13 +37,14 @@ uint8_t UnifiedExtractor::count_parameter_names(TSNode node) {
         }
     }
     if (ts_node_is_null(params)) {
-        // Kotlin's grammar is fieldless: the container is a named CHILD of
-        // type function_value_parameters. Without it every Kotlin function
-        // counted 0 parameters, so arity-preferring resolution never fired.
+        // Kotlin and Zig grammars are fieldless: their parameter containers
+        // are named children rather than a `parameters` field. Without this
+        // fallback arity-preferring resolution sees every callable as arity 0.
         uint32_t n = ts_node_named_child_count(node);
         for (uint32_t i = 0; i < n; ++i) {
             TSNode c = ts_node_named_child(node, i);
-            if (get_node_type(c) == "function_value_parameters") {
+            std::string_view type = get_node_type(c);
+            if (type == "function_value_parameters" || type == "parameters") {
                 params = c;
                 break;
             }
@@ -1045,7 +1046,10 @@ void UnifiedExtractor::process_declaration_node(TSNode node,
 std::string UnifiedExtractor::extract_signature(TSNode node,
                                                 std::string_view node_type) {
     if (node_type != "function_declaration" &&
-        node_type != "method_declaration") {
+        node_type != "function_definition" && node_type != "function_item" &&
+        node_type != "method_declaration" &&
+        node_type != "method_definition" && node_type != "method" &&
+        node_type != "singleton_method") {
         return {};
     }
 

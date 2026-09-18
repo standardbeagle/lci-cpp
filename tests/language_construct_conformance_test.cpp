@@ -125,6 +125,107 @@ struct ExtensionFixture {
     SymbolType symbol_type;
 };
 
+struct CommonCallableFixture {
+    Language language;
+    std::string_view extension;
+    std::string_view source;
+    std::string_view callable;
+    SymbolType symbol_type;
+};
+
+// Functions are the common unit consumed by callers, complexity, context,
+// and side-effect analysis. Keep this matrix deliberately uniform: each
+// fixture uses the language's ordinary two-parameter callable syntax, one
+// branch, and one call. Besides recognizing the declaration, extraction must
+// populate every graph channel downstream features rely on.
+TEST(LanguageConstructConformance, CommonCallablesPopulateEveryGraphChannel) {
+    constexpr std::array fixtures{
+        CommonCallableFixture{Language::Go, ".go",
+            "package fixture\nfunc helper(v int) int { return v }\nfunc choose(a, b int) int { if a > b { return helper(a) }; return b }\n",
+            "choose", SymbolType::Function},
+        CommonCallableFixture{Language::Python, ".py",
+            "def helper(v):\n    return v\n\ndef choose(a, b):\n    if a > b:\n        return helper(a)\n    return b\n",
+            "choose", SymbolType::Function},
+        CommonCallableFixture{Language::JavaScript, ".js",
+            "function helper(v) { return v; }\nfunction choose(a, b) { if (a > b) return helper(a); return b; }\n",
+            "choose", SymbolType::Function},
+        CommonCallableFixture{Language::TypeScript, ".ts",
+            "function helper(v: number): number { return v; }\nfunction choose(a: number, b: number): number { if (a > b) return helper(a); return b; }\n",
+            "choose", SymbolType::Function},
+        CommonCallableFixture{Language::Rust, ".rs",
+            "fn helper(v: i32) -> i32 { v }\nfn choose(a: i32, b: i32) -> i32 { if a > b { helper(a) } else { b } }\n",
+            "choose", SymbolType::Function},
+        CommonCallableFixture{Language::C, ".c",
+            "int helper(int v) { return v; }\nint choose(int a, int b) { if (a > b) return helper(a); return b; }\n",
+            "choose", SymbolType::Function},
+        CommonCallableFixture{Language::Cpp, ".cpp",
+            "int helper(int v) { return v; }\nint choose(int a, int b) { if (a > b) return helper(a); return b; }\n",
+            "choose", SymbolType::Function},
+        CommonCallableFixture{Language::Java, ".java",
+            "class Fixture { int helper(int v) { return v; } int choose(int a, int b) { if (a > b) return helper(a); return b; } }\n",
+            "choose", SymbolType::Method},
+        CommonCallableFixture{Language::CSharp, ".cs",
+            "class Fixture { int Helper(int v) { return v; } int Choose(int a, int b) { if (a > b) return Helper(a); return b; } }\n",
+            "Choose", SymbolType::Method},
+        CommonCallableFixture{Language::PHP, ".php",
+            "<?php function helper(int $v): int { return $v; } function choose(int $a, int $b): int { if ($a > $b) return helper($a); return $b; }\n",
+            "choose", SymbolType::Function},
+        CommonCallableFixture{Language::Kotlin, ".kt",
+            "fun helper(v: Int): Int = v\nfun choose(a: Int, b: Int): Int { if (a > b) return helper(a); return b }\n",
+            "choose", SymbolType::Function},
+        CommonCallableFixture{Language::Zig, ".zig",
+            "fn helper(v: i32) i32 { return v; }\nfn choose(a: i32, b: i32) i32 { if (a > b) return helper(a); return b; }\n",
+            "choose", SymbolType::Function},
+        CommonCallableFixture{Language::Ruby, ".rb",
+            "def helper(v)\n  v\nend\ndef choose(a, b)\n  return helper(a) if a > b\n  b\nend\n",
+            "choose", SymbolType::Method},
+    };
+
+    for (const auto& fixture : fixtures) {
+        SCOPED_TRACE(fixture.extension);
+        const std::string path = "common" + std::string(fixture.extension);
+        auto graph = extract_spec_fixture(fixture.language, fixture.extension,
+                                          path, fixture.source);
+
+        const auto symbol = std::find_if(
+            graph.symbols.begin(), graph.symbols.end(), [&](const Symbol& item) {
+                return item.name == fixture.callable &&
+                       item.type == fixture.symbol_type;
+            });
+        ASSERT_NE(symbol, graph.symbols.end());
+        EXPECT_EQ(symbol->parameter_count, 2);
+
+        EXPECT_TRUE(std::any_of(
+            graph.blocks.begin(), graph.blocks.end(), [&](const BlockBoundary& block) {
+                return block.name == fixture.callable;
+            })) << "callable body is missing from the block graph";
+        EXPECT_TRUE(std::any_of(
+            graph.scopes.begin(), graph.scopes.end(), [&](const ScopeInfo& scope) {
+                return scope.name == fixture.callable &&
+                       (scope.type == ScopeType::Function ||
+                        scope.type == ScopeType::Method);
+            })) << "callable is missing from the scope graph";
+
+        const PositionKey declaration_key{symbol->line - 1,
+                                           symbol->column - 1};
+        const auto declaration = graph.declarations.find(declaration_key);
+        ASSERT_NE(declaration, graph.declarations.end());
+        EXPECT_FALSE(declaration->second.signature.empty());
+
+        EXPECT_TRUE(std::any_of(
+            graph.complexity.begin(), graph.complexity.end(),
+            [&](const auto& item) {
+                return item.first.line == symbol->line &&
+                       item.first.column == symbol->column && item.second >= 2;
+            })) << "branching callable is missing complexity metadata";
+        EXPECT_TRUE(std::any_of(
+            graph.references.begin(), graph.references.end(),
+            [](const Reference& reference) {
+                return reference.type == ReferenceType::Call;
+            })) << "nested call is missing from the reference graph";
+    }
+}
+
 // Every extension backed by a linked grammar must reach extraction, not just
 // agree with language_map.h. This catches routing regressions where a file is
 // classified as code but silently produces no graph records.

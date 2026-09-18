@@ -576,7 +576,9 @@ bool UnifiedExtractor::is_loop_node(std::string_view t) {
 
 bool UnifiedExtractor::is_declaration_node(std::string_view t) {
     return t == "function_declaration" || t == "method_declaration" ||
-           t == "function_definition" || t == "method_definition" ||
+           t == "function_definition" || t == "function_item" ||
+           t == "method_definition" || t == "method" ||
+           t == "singleton_method" ||
            t == "class_declaration" || t == "class_definition" ||
            t == "type_declaration" || t == "interface_declaration" ||
            t == "struct_declaration" || t == "enum_declaration" ||
@@ -791,11 +793,17 @@ bool UnifiedExtractor::process_scope_node(TSNode node,
         name = std::string(zname);
 
     } else if (node_type == "function_declaration" ||
-               node_type == "function_definition") {
-        scope_type = ScopeType::Function;
-        TSNode n = ts_node_child_by_field_name(
-            node, "name", static_cast<uint32_t>(std::strlen("name")));
-        if (!ts_node_is_null(n)) name = std::string(node_text(n));
+               node_type == "function_definition" ||
+               node_type == "function_item") {
+        TSNode parent = ts_node_parent(node);
+        scope_type = node_type == "function_item" &&
+                             !ts_node_is_null(parent) &&
+                             get_node_type(parent) == "declaration_list" &&
+                             !ts_node_is_null(ts_node_parent(parent)) &&
+                             get_node_type(ts_node_parent(parent)) == "impl_item"
+                         ? ScopeType::Method
+                         : ScopeType::Function;
+        name = std::string(extract_function_name(node, node_type));
 
     } else if (node_type == "method_definition" ||
                node_type == "method_declaration" ||
