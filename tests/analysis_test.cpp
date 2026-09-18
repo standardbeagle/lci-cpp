@@ -963,6 +963,52 @@ TEST(NamingAnalyzer, DoesNotFlagStandardVerb) {
     EXPECT_TRUE(rep.outliers.empty());
 }
 
+TEST(NamingAnalyzer, FrameworkComponentMayLeadWithDomainNoun) {
+    auto table = SynonymTable::build_default();
+    auto component = make_ref_sym("QuuxPanel", 3, 1);
+    auto f = make_file("src/QuuxPanel.tsx", {&component});
+
+    NamingAnalyzer na;
+    auto report = na.analyze({f}, table, "");
+    EXPECT_TRUE(report.outliers.empty());
+}
+
+TEST(NamingAnalyzer, ComponentFunctionExtensionsAreConfigurable) {
+    auto table = SynonymTable::build_default();
+    auto component = make_ref_sym("QuuxPanel", 3, 1);
+    auto f = make_file("src/QuuxPanel.tsx", {&component});
+    NamingConfig config;
+    config.component_function_extensions = {".jsx"};
+
+    NamingAnalyzer na;
+    auto report = na.analyze({f}, table, "", {}, config);
+    ASSERT_EQ(report.outliers.size(), 1u);
+    EXPECT_EQ(report.outliers.front().name, "QuuxPanel");
+}
+
+TEST(NamingAnalyzer, NextServerTypeScriptKeepsVerbRule) {
+    auto table = SynonymTable::build_default();
+    auto server_function = make_ref_sym("QuuxRepository", 3, 1);
+    auto f = make_file("src/server/repository.ts", {&server_function});
+
+    NamingAnalyzer na;
+    auto report = na.analyze({f}, table, "");
+    ASSERT_EQ(report.outliers.size(), 1u);
+    EXPECT_EQ(report.outliers.front().name, "QuuxRepository");
+    EXPECT_EQ(report.outliers.front().reason, "unknown-verb");
+}
+
+TEST(NamingAnalyzer, LowerCamelFunctionStillRequiresLeadingVerb) {
+    auto table = SynonymTable::build_default();
+    auto function = make_ref_sym("quuxPanel", 3, 1);
+    auto f = make_file("src/panel.tsx", {&function});
+
+    NamingAnalyzer na;
+    auto report = na.analyze({f}, table, "");
+    ASSERT_EQ(report.outliers.size(), 1u);
+    EXPECT_EQ(report.outliers.front().name, "quuxPanel");
+}
+
 // 2026-08-30 sweep vocabulary FP classes. Established technical terms must
 // not flag as obscure/misspelling (okhttp: jvm/bom/idn/localhost; zls:
 // comptime, a Zig keyword; sinatra: etag/scss/csp, haml->html, yajl->yaml,
@@ -1772,4 +1818,3 @@ TEST(EntrySignatures, NonDirectoryEntriesAreSkipped) {
 
 }  // namespace
 }  // namespace lci
-

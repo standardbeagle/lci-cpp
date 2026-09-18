@@ -128,6 +128,13 @@ search {
     enable_fuzzy true              // Enable fuzzy matching
 }
 
+// Frameworks such as React, Preact, Solid, Qwik, Vue, and Svelte use
+// PascalCase noun names for function components. Replace this list when a
+// project uses that convention in other file types.
+naming {
+    component_function_extensions ".js" ".jsx" ".mjs" ".cjs" ".tsx" ".vue" ".svelte"
+}
+
 // Include specific file patterns (REPLACES the built-in defaults;
 // an include section, once present, must name at least one pattern)
 include {
@@ -222,6 +229,8 @@ int run_config_show(const GlobalFlags& flags, const std::string& format) {
         j["server"]["max_rss_mb"] = cfg.server.max_rss_mb;
         j["insight"]["error_report"] = cfg.insight.error_report;
         j["insight"]["entry_points"] = cfg.insight.entry_points;
+        j["naming"]["component_function_extensions"] =
+            cfg.naming.component_function_extensions;
         j["search"]["default_context_lines"] =
             cfg.search.default_context_lines;
         j["search"]["max_results"] = cfg.search.max_results;
@@ -295,6 +304,14 @@ int run_config_show(const GlobalFlags& flags, const std::string& format) {
     std::printf("  Max context lines: %d\n", cfg.search.max_context_lines);
     std::printf("  Enable fuzzy:      %s\n",
                 cfg.search.enable_fuzzy ? "true" : "false");
+    std::printf("\n");
+
+    std::printf("Naming Settings:\n");
+    std::printf("  Component-function extensions (%zu):\n",
+                cfg.naming.component_function_extensions.size());
+    for (const auto& extension : cfg.naming.component_function_extensions) {
+        std::printf("    %s\n", extension.c_str());
+    }
     std::printf("\n");
 
     std::printf("Include Patterns (%zu):\n", cfg.include.size());

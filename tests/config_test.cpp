@@ -53,6 +53,16 @@ TEST(DefaultConfigTest, HasExpectedDefaults) {
     EXPECT_EQ(cfg.search.max_context_lines, 100);
     EXPECT_TRUE(cfg.search.merge_file_results);
     EXPECT_FALSE(cfg.search.ensure_complete_stmt);
+
+    EXPECT_NE(std::find(cfg.naming.component_function_extensions.begin(),
+                        cfg.naming.component_function_extensions.end(), ".tsx"),
+              cfg.naming.component_function_extensions.end());
+    EXPECT_NE(std::find(cfg.naming.component_function_extensions.begin(),
+                        cfg.naming.component_function_extensions.end(), ".svelte"),
+              cfg.naming.component_function_extensions.end());
+    EXPECT_EQ(std::find(cfg.naming.component_function_extensions.begin(),
+                        cfg.naming.component_function_extensions.end(), ".ts"),
+              cfg.naming.component_function_extensions.end());
 }
 
 // ---------------------------------------------------------------------------
@@ -367,6 +377,29 @@ class KdlConfigTest : public ::testing::Test {
         f << content;
     }
 };
+
+TEST_F(KdlConfigTest, ReplacesComponentFunctionExtensions) {
+    write_kdl(R"(
+naming {
+    component_function_extensions ".jsx" ".CUSTOM"
+}
+)");
+    auto result = load_config(temp_dir_.string());
+    ASSERT_TRUE(result.ok()) << result.error;
+    EXPECT_EQ(result.config.naming.component_function_extensions,
+              (std::vector<std::string>{".jsx", ".custom"}));
+}
+
+TEST_F(KdlConfigTest, RejectsInvalidComponentFunctionExtension) {
+    write_kdl(R"(
+naming {
+    component_function_extensions "tsx"
+}
+)");
+    auto result = load_config(temp_dir_.string());
+    EXPECT_FALSE(result.ok());
+    EXPECT_NE(result.error.find("beginning with '.'"), std::string::npos);
+}
 
 TEST_F(KdlConfigTest, ParsesProjectSection) {
     write_kdl(R"(

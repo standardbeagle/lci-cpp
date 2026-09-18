@@ -140,3 +140,23 @@ synonyms {
 An unrecognized child name is a config error. Synonym expansion only
 applies when `search`'s `semantic` option is on (the default) and no
 explicit `patterns` were given.
+
+## Framework naming conventions
+
+The naming analyzer allows PascalCase function components in JavaScript, TSX,
+Vue, and Svelte files by default. This covers the component naming used by
+React, Preact, Solid, Qwik, Vue, and Svelte without disabling checks for
+misspellings or obscure terms elsewhere in the name. Plain `.ts`, `.mts`, and
+`.cts` server files retain the normal verb-led function checks.
+
+Replace the default extension list in `.lci.kdl` when a project uses
+PascalCase noun-named functions in other file types:
+
+```kdl
+naming {
+    component_function_extensions ".jsx" ".tsx" ".custom"
+}
+```
+
+Extensions are case-insensitive and must begin with a dot. Declaring the key
+replaces the built-in list instead of extending it.

@@ -368,6 +368,38 @@ bool apply_insight(Config& cfg, const KdlNode& node, std::string& error,
     return true;
 }
 
+bool apply_naming(Config& cfg, const KdlNode& node, std::string& error,
+                  std::vector<std::string>* warnings) {
+    for (const auto& child : node.children) {
+        if (child.name == "component_function_extensions") {
+            std::vector<std::string> extensions;
+            for (const auto& arg : child.args) {
+                if (arg.kind != TokenKind::String || arg.text.empty() ||
+                    arg.text.front() != '.') {
+                    error = "naming.component_function_extensions: expected one "
+                            "or more quoted extensions beginning with '.'";
+                    return false;
+                }
+                std::string extension = arg.text;
+                std::transform(extension.begin(), extension.end(),
+                               extension.begin(), [](unsigned char c) {
+                                   return static_cast<char>(std::tolower(c));
+                               });
+                extensions.push_back(std::move(extension));
+            }
+            if (extensions.empty()) {
+                error = "naming.component_function_extensions: expected one or "
+                        "more quoted extensions";
+                return false;
+            }
+            cfg.naming.component_function_extensions = std::move(extensions);
+        } else {
+            warn_unknown(warnings, "naming", child.name);
+        }
+    }
+    return true;
+}
+
 bool apply_search(Config& cfg, const KdlNode& node, std::string& error,
                   std::vector<std::string>* warnings) {
     for (const auto& child : node.children) {
@@ -561,7 +593,9 @@ bool apply_kdl_nodes(Config& cfg, const std::vector<KdlNode>& nodes,
             }
             cfg.synonyms = std::move(result.value());
         }
-        else {
+        else if (node.name == "naming") {
+            if (!apply_naming(cfg, node, error, warnings)) return false;
+        } else {
             warn_unknown(warnings, "", node.name);
         }
     }

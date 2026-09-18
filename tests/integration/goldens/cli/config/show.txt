@@ -25,6 +25,16 @@ Search Settings:
   Max context lines: 100
   Enable fuzzy:      true
 
+Naming Settings:
+  Component-function extensions (7):
+    .js
+    .jsx
+    .mjs
+    .cjs
+    .tsx
+    .vue
+    .svelte
+
 Include Patterns (0):
 
 Exclude Patterns (100):

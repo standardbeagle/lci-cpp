@@ -186,6 +186,15 @@ bool is_function_like(SymbolType t) {
     return t == SymbolType::Function || t == SymbolType::Method;
 }
 
+bool allows_noun_leading_function(const NamingConfig& config,
+                                  std::string_view extension,
+                                  std::string_view name) {
+    if (name.empty() || name.front() < 'A' || name.front() > 'Z') return false;
+    return std::find(config.component_function_extensions.begin(),
+                     config.component_function_extensions.end(), extension) !=
+           config.component_function_extensions.end();
+}
+
 }  // namespace
 
 bool NamingAnalyzer::is_common_word(std::string_view word) {
@@ -195,7 +204,8 @@ bool NamingAnalyzer::is_common_word(std::string_view word) {
 NamingReport NamingAnalyzer::analyze(
     const std::vector<FileSymbolData>& files, const SynonymTable& synonyms,
     std::string_view project_root,
-    const std::function<std::string_view(FileID)>& content_of) const {
+    const std::function<std::string_view(FileID)>& content_of,
+    const NamingConfig& config) const {
     (void)project_root;
     NameSplitter splitter;
     NamingReport report;
@@ -454,6 +464,8 @@ NamingReport NamingAnalyzer::analyze(
         // (a zero-fan-in exported misspelling like SupressNotFound is exactly
         // what an agent will fail to search for).
         bool low_importance = fan_in < 2 && !c.sym->is_exported;
+        const bool noun_leading = allows_noun_leading_function(
+            config, c.ext, c.sym->symbol.name);
 
         std::string odd_term, reason;
         std::vector<std::string> suggested;
@@ -464,7 +476,10 @@ NamingReport NamingAnalyzer::analyze(
         // fan-in 1 and hid behind the importance gate for three audit
         // rounds); wholly unreferenced private symbols still skip.
         if (low_importance && fan_in < 1) continue;
-        for (const auto& t : c.tokens) {
+        for (size_t token_index = 0; token_index < c.tokens.size();
+             ++token_index) {
+            const auto& t = c.tokens[token_index];
+            if (noun_leading && token_index == 0) continue;
             if (!is_alpha_word(t, 4)) continue;
             if (is_common_english(t)) continue;
             if (!synonyms.synonyms_of(t).empty()) continue;
@@ -524,7 +539,8 @@ NamingReport NamingAnalyzer::analyze(
             auto vf = token_freq.find(verb);
             int verb_freq = vf != token_freq.end() ? vf->second : 0;
 
-            if (!verb_known && is_alpha_word(verb, 3) && verb_freq <= 2 &&
+            if (!noun_leading && !verb_known && is_alpha_word(verb, 3) &&
+                verb_freq <= 2 &&
                 fan_in < kLibraryVerbFanIn) {
                 odd_term = verb;
                 reason = "unknown-verb";
@@ -543,7 +559,10 @@ NamingReport NamingAnalyzer::analyze(
                     return c.sym->symbol.name.find(upper) !=
                            std::string::npos;
                 };
-                for (const auto& t : c.tokens) {
+                for (size_t token_index = 0; token_index < c.tokens.size();
+                     ++token_index) {
+                    const auto& t = c.tokens[token_index];
+                    if (noun_leading && token_index == 0) continue;
                     if (!is_alpha_word(t, 4)) continue;
                     if (is_common_english(t)) continue;
                     if (!synonyms.synonyms_of(t).empty()) continue;

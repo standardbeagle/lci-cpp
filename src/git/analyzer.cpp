@@ -585,7 +585,8 @@ void Analyzer::check_naming(const std::vector<SymbolInfo>& new_symbols,
         files.push_back(std::move(fsd));
     }
     auto report = NamingAnalyzer().analyze(files, index_.config().synonyms,
-                                           index_.config().project.root);
+                                           index_.config().project.root,
+                                           {}, index_.config().naming);
     naming_findings_from_report(report, changed, out);
 
     // Total order: severity ties break by symbol location so the

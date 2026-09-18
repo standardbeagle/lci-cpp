@@ -436,7 +436,8 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
             files_data, indexer.config().synonyms, project_root,
             [&indexer](FileID fid) -> std::string_view {
                 return indexer.file_content_store().get_content(fid);
-            });
+            },
+            indexer.config().naming);
         return d;
     };
 

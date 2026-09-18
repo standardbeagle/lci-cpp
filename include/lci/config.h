@@ -127,6 +127,16 @@ struct InsightConfig {
     std::vector<std::string> entry_points;
 };
 
+/// Naming conventions that vary by language and framework. Extensions are
+/// lowercase and include the leading dot. A PascalCase function in one of
+/// `component_function_extensions` may lead with a noun (React/Vue/Svelte-style
+/// components) without being reported as an unknown verb. Other naming
+/// checks, including misspellings and obscure inner tokens, still apply.
+struct NamingConfig {
+    std::vector<std::string> component_function_extensions{
+        ".js", ".jsx", ".mjs", ".cjs", ".tsx", ".vue", ".svelte"};
+};
+
 /// Complete LCI configuration.
 struct Config {
     int version = 1;
@@ -136,6 +146,7 @@ struct Config {
     PerformanceConfig performance;
     ServerConfig server;
     SearchConfig search;
+    NamingConfig naming;
     std::vector<std::string> include;
     std::vector<std::string> exclude;
     /// Synonym groups for semantic search. Defaults to the built-in curated

@@ -8,6 +8,7 @@
 #include <functional>
 
 #include <lci/analysis/codebase_intelligence_types.h>
+#include <lci/config.h>
 #include <lci/semantic/synonym_table.h>
 #include <lci/symbol.h>
 
@@ -136,7 +137,8 @@ class NamingAnalyzer {
     NamingReport analyze(
         const std::vector<FileSymbolData>& files, const SynonymTable& synonyms,
         std::string_view project_root,
-        const std::function<std::string_view(FileID)>& content_of = {}) const;
+        const std::function<std::string_view(FileID)>& content_of = {},
+        const NamingConfig& config = {}) const;
 
     /// Parses the initializer callee out of one declaration line, starting
     /// the scan after `name_col` (1-based column of the variable name).
