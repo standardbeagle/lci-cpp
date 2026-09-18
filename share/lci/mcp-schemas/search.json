@@ -27,7 +27,7 @@
         },
         "output": {
             "type": "string",
-            "description": "Output format: 'line', 'ctx', 'ctx:N', 'full', 'files', 'count'."
+            "description": "Output format: 'line', 'ctx', 'ctx:N', 'full', 'files', 'count', or 'graph' for a compact Graphify-style node response."
         },
         "filter": {
             "type": "string",

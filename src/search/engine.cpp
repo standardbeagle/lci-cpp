@@ -696,6 +696,13 @@ std::vector<SearchResult> SearchEngine::search(
         int pattern_count{1};
     };
 
+    auto append_match = [](std::vector<std::string>& matches,
+                           const std::string& match) {
+        if (std::find(matches.begin(), matches.end(), match) == matches.end()) {
+            matches.push_back(match);
+        }
+    };
+
     absl::flat_hash_map<ResultKey, Slot, ResultKeyHash> acc;
     if (options.max_results > 0) {
         acc.reserve(static_cast<size_t>(options.max_results) * patterns.size());
@@ -745,6 +752,7 @@ std::vector<SearchResult> SearchEngine::search(
         const bool is_synonym = i < metadata.size() && metadata[i].synonym;
         for (auto& r : rs) {
             r.from_synonym = is_synonym;
+            append_match(r.match_texts, r.match_text);
             ResultKey k{r.file_id, r.line};
             auto it = acc.find(k);
             if (it == acc.end()) {
@@ -754,7 +762,16 @@ std::vector<SearchResult> SearchEngine::search(
                 const bool all_synonyms =
                     it->second.result.from_synonym && r.from_synonym;
                 if (r.score > it->second.result.score) {
+                    auto matches = std::move(it->second.result.match_texts);
+                    for (const auto& match : r.match_texts) {
+                        append_match(matches, match);
+                    }
                     it->second.result = std::move(r);
+                    it->second.result.match_texts = std::move(matches);
+                } else {
+                    for (const auto& match : r.match_texts) {
+                        append_match(it->second.result.match_texts, match);
+                    }
                 }
                 // A row reached by BOTH an original and an expanded pattern is
                 // an original-pattern hit: the caller's own word found it.

@@ -671,7 +671,7 @@ TEST_F(HandlersFixture, SearchWithFlags) {
 // Compact grouped shape: results[] is one entry per file (root-relative
 // path emitted once) with hits[] rows carrying line numbers. A literal
 // search repeats the identical matched text on every row, so it is emitted
-// once at the top level as "match" and per-hit rows omit it. Symbol
+// once at the top level as the "match" array and per-hit rows omit it. Symbol
 // enrichment (sym/type/id) appears on the first hit inside each enclosing
 // symbol; column/score were dropped (agents never used them — ordering
 // already encodes rank).
@@ -683,7 +683,8 @@ TEST_F(HandlersFixture, SearchEmitsCompactShape) {
     auto json = nlohmann::json::parse(result.text);
     ASSERT_TRUE(json["results"].is_array());
     ASSERT_FALSE(json["results"].empty());
-    EXPECT_EQ(json["match"].get<std::string>(), "main");
+    ASSERT_TRUE(json["match"].is_array());
+    EXPECT_EQ(json["match"], nlohmann::json::array({"main"}));
     for (const auto& group : json["results"]) {
         EXPECT_TRUE(group.contains("file"));
         auto file = group["file"].get<std::string>();
@@ -763,6 +764,24 @@ TEST_F(HandlersFixture, SearchTopHitsCarryText) {
         }
     }
     EXPECT_TRUE(any_text) << "top-ranked hit should carry its source line";
+}
+
+TEST_F(HandlersFixture, SearchGraphOutputUsesGraphifyStyleNodes) {
+    nlohmann::json params;
+    params["pattern"] = "handleRequest";
+    params["output"] = "graph";
+    auto result = handle_search(params, *indexer_, search_engine_.get());
+    ASSERT_FALSE(result.is_error);
+    auto json = nlohmann::json::parse(result.text);
+    EXPECT_EQ(json["mode"], "graph");
+    EXPECT_EQ(json["traversal"], "ranked-search");
+    ASSERT_EQ(json["start"], nlohmann::json::array({"handleRequest"}));
+    ASSERT_FALSE(json["nodes"].empty()) << result.text;
+    const auto& node = json["nodes"][0];
+    EXPECT_TRUE(node.contains("label"));
+    EXPECT_TRUE(node.contains("src"));
+    EXPECT_TRUE(node.contains("loc"));
+    EXPECT_TRUE(node["matches"].is_array());
 }
 
 // Zero-result searches fail loud: hint text plus fuzzy near-miss symbol

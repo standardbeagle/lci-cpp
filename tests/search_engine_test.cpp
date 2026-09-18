@@ -868,6 +868,8 @@ TEST(SearchEngineRanking, MultiTermCoverageMergesDifferentMatchTextOnOneLine) {
     ASSERT_EQ(3u, results.size());
     EXPECT_EQ(3, results[0].line);
     EXPECT_GT(results[0].score, results[1].score);
+    EXPECT_EQ(results[0].match_texts,
+              (std::vector<std::string>{"export", "dialog"}));
     EXPECT_EQ(1u, std::count_if(results.begin(), results.end(),
         [](const SearchResult& result) { return result.line == 3; }))
         << "one source line must remain one ranked result even when distinct "
@@ -897,6 +899,8 @@ TEST(SearchEngineRanking, IdentifierCoverageOutranksSeparateTerms) {
         << "ExportDialog must outrank a line that contains the same terms in "
            "separate identifiers";
     EXPECT_GT(results[0].score, results[1].score);
+    EXPECT_EQ(results[0].match_texts,
+              (std::vector<std::string>{"Export", "Dialog"}));
 }
 
 TEST(SearchEngineRanking, IdentifierCoverageSurvivesCommonTermCapCrowding) {

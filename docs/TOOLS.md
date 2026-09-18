@@ -82,7 +82,7 @@ metadata.
 | `pattern` | string | — | Search pattern (required unless `patterns` set). Literal, or regex with `flags=rx`. Case-insensitive by default. |
 | `patterns` | string | (empty) | Comma-separated patterns for OR search; overrides semantic expansion. |
 | `max` | integer | 15 | Max results, clamped [1, 100]. |
-| `output` | string | `line` | `line` (1 ctx line), `ctx` (5), `ctx:N`, `full` (10), `files`, `count`. |
+| `output` | string | `line` | `line` (1 ctx line), `ctx` (5), `ctx:N`, `full` (10), `files`, `count`, `graph` (compact Graphify-style nodes). |
 | `flags` | string | (empty) | Comma list: `cs` case-sensitive, `wb` word-boundary, `nt` no-tests, `nc` no-comments, `iv` invert, `rx` regex. |
 | `include` | string | (empty) | Add-ons for strong matches (score ≥ 0.5): `breadcrumbs`, `refs`, `object_ids`/`ids`, `safety`, `deps`. Unknown token → error. |
 | `symbol_types` | string | (empty) | Comma list filter, e.g. `function,class`. |
@@ -102,6 +102,9 @@ symbol — `sym`, `type`, `id` (object ID), `exported`, `callers`
 context. Non-code files with hits collapse into `other_files{path: count}`
 instead of a `results[]` entry. `output=files` → `{files[], total_matches,
 unique_files}`. `output=count` → `{total_matches, unique_files, counts{}}`.
+`output=graph` → `{mode:"graph", traversal:"ranked-search", start[],
+nodes[]}` where each node carries `label`, `src`, `loc`, and indexed symbol
+metadata when a search hit belongs to a symbol.
 
 ### Semantic ranking
 

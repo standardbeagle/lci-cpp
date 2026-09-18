@@ -227,6 +227,11 @@ struct SearchResult {
     /// numeric relationship. Always false on the single-pattern path.
     /// Declared last so the existing aggregate initializations stay valid.
     bool from_synonym{false};
+
+    /// Distinct matched substrings that contributed to this ranked source
+    /// line. Single-pattern searches leave this empty and callers use
+    /// `match_text`; multi-pattern searches populate it in query order.
+    std::vector<std::string> match_texts;
 };
 
 // -- Search-specific pure helper functions ------------------------------------

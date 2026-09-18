@@ -749,6 +749,50 @@ ToolResult handle_search(const nlohmann::json& params,
         return make_json_response(response);
     }
 
+    // Graph mode mirrors the compact, flat node inventory that makes
+    // Graphify useful for first-pass navigation. Search rank is the traversal
+    // here: unlike Graphify, lci does not pretend these rows came from a BFS.
+    // The response stays structured so MCP clients do not need to parse
+    // presentation text before feeding an object id to get_context.
+    if (output == "graph") {
+        auto rt_snap = indexer.ref_tracker().pin();
+        nlohmann::json nodes = nlohmann::json::array();
+        nodes.get_ref<nlohmann::json::array_t&>().reserve(results.size());
+        for (const auto& r : results) {
+            nlohmann::json node;
+            node["src"] = rel(r.path);
+            node["loc"] = "L" + std::to_string(r.line);
+            node["matches"] = r.match_texts.empty()
+                                  ? std::vector<std::string>{r.match_text}
+                                  : r.match_texts;
+            auto sym = rt_snap->get_symbol_at_line(r.file_id, r.line);
+            if (sym != nullptr) {
+                std::string label(sym->symbol.name);
+                const auto kind = sym->symbol.type;
+                if (kind == SymbolType::Function || kind == SymbolType::Method ||
+                    kind == SymbolType::Constructor) {
+                    label += "()";
+                }
+                node["label"] = std::move(label);
+                node["kind"] = std::string(to_string(kind));
+                node["id"] = encode_symbol_id(sym->id);
+            } else {
+                node["label"] = std::filesystem::path(r.path).filename().string();
+            }
+            nodes.push_back(std::move(node));
+        }
+        nlohmann::json response;
+        response["mode"] = "graph";
+        response["traversal"] = "ranked-search";
+        response["start"] = options.pattern_list.empty()
+                                ? nlohmann::json::array({pattern})
+                                : nlohmann::json(options.pattern_list);
+        response["nodes"] = std::move(nodes);
+        response["showing"] = shown;
+        attach_truncation(response);
+        return make_json_response(response);
+    }
+
     // Build standard results, grouped by file to eliminate repeated path
     // strings (the dominant payload cost measured in the repo-QA benchmark).
     // Detail is tiered by match strength:
@@ -767,11 +811,19 @@ ToolResult handle_search(const nlohmann::json& params,
     // pointer valid across a concurrent reindex publish for every iteration.
     auto rt_snap = ref_tracker.pin();
 
-    // Shared match text: literal searches repeat the identical matched
-    // substring on every row — emit it once at the top level.
+    auto matches_for = [](const SearchResult& result) {
+        if (!result.match_texts.empty()) return result.match_texts;
+        return std::vector<std::string>{result.match_text};
+    };
+
+    // Shared matches: literal searches repeat the identical one-element
+    // array on every row, so emit it once at the top level.
     bool uniform_match = !results.empty();
+    const auto first_matches =
+        results.empty() ? std::vector<std::string>{}
+                        : matches_for(results.front());
     for (const auto& r : results) {
-        if (r.match_text != results.front().match_text) {
+        if (matches_for(r) != first_matches) {
             uniform_match = false;
             break;
         }
@@ -848,7 +900,7 @@ ToolResult handle_search(const nlohmann::json& params,
         for (const SearchResult* r : g.hits) {
             nlohmann::json h;
             h["line"] = r->line;
-            if (!uniform_match) h["match"] = r->match_text;
+            if (!uniform_match) h["match"] = matches_for(*r);
 
             // Enclosing-symbol enrichment, deduped: consecutive hits inside
             // the same symbol repeat nothing. O(1) hash lookup per row
@@ -922,7 +974,7 @@ ToolResult handle_search(const nlohmann::json& params,
     }
 
     nlohmann::json response;
-    if (uniform_match) response["match"] = results.front().match_text;
+    if (uniform_match) response["match"] = first_matches;
     response["results"] = std::move(file_array);
     if (!other_files.empty()) response["other_files"] = std::move(other_files);
     response["showing"] = shown;

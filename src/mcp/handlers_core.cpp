@@ -234,7 +234,7 @@ void register_core_handlers(McpServer& server, MasterIndex* indexer,
           {"max", "integer", "Maximum results (default: 15, max: 100)", ""},
           {"output", "string",
            "Output format: 'line' (default), 'ctx:N' (N context lines), "
-           "'full', 'files', 'count'",
+           "'full', 'files', 'count', 'graph' (Graphify-style nodes)",
            ""},
           {"path", "string",
            "Root-relative scope: directory prefix ('src/http') or glob "
