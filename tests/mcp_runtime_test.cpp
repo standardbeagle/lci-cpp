@@ -7,6 +7,7 @@
 #include <lci/config.h>
 #include <lci/core/reference_tracker.h>
 #include <lci/indexing/master_index.h>
+#include <lci/mcp/handlers_analysis.h>
 #include <lci/mcp/runtime.h>
 #include <lci/types.h>
 
@@ -87,6 +88,80 @@ TEST(McpRuntimeSeedingTest, SeedsOnlyTheImpureSymbolNotItsCrossFileNamesake) {
     EXPECT_FALSE(pure_marked)
         << "the empty Handler in bar/ must NOT inherit foo/'s impure "
            "seeding just because it shares a name and start line";
+
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+}
+
+// Build a Go source whose one function has a deliberately high cyclomatic
+// complexity (many `if` branches) so it lands in high_complexity_funcs (cc
+// threshold 20), with a caller-chosen name and package.
+static std::string high_cc_go_function(std::string_view pkg,
+                                       std::string_view name) {
+    std::string s = "package " + std::string(pkg) + "\n\nfunc " +
+                    std::string(name) + "(x int) int {\n\ts := 0\n";
+    for (int i = 1; i <= 30; ++i) {
+        s += "\tif x > " + std::to_string(i) + " { s += x }\n";
+    }
+    s += "\treturn s\n}\n";
+    return s;
+}
+
+// S11 follow-up (criterion 1): McpRuntime::ci_engine was default-constructed,
+// so HealthAnalyzer ran on the builtin PathClassifier and a project's
+// `.lci.kdl` `test` attribute never reached the code_insight health gate. The
+// directory `micro/` is unknown to the shipped ruleset, so the builtin
+// classifier scores it as production (fallback, activates Analysis) and its
+// function stays in high_complexity; only the project's own
+// `attributes { test "micro/" }` can exclude it. Pre-wiring, the shipped-only
+// classifier left it in; with the engine carrying the index's attr registry it
+// is dropped, while the production twin (identical cc) is still reported. This
+// exercises the production McpRuntime object, not a hand-built engine, so it
+// pins the wiring rather than the mechanism.
+TEST(McpRuntimeAttrRegistryTest, CiEngineReceivesProjectAttributesIntoHealthGate) {
+    auto dir = lci::test::unique_temp_dir("lci_runtime_attr_");
+    std::filesystem::create_directories(dir / "micro");
+    std::filesystem::create_directories(dir / "prod");
+    std::ofstream(dir / ".lci.kdl") << "attributes {\n    test \"micro/\"\n}\n";
+    std::ofstream(dir / "micro" / "hot.go") << high_cc_go_function("micro", "MicroComplex");
+    std::ofstream(dir / "prod" / "hot.go") << high_cc_go_function("main", "ProdComplex");
+
+    auto loaded = load_config(dir.string());
+    ASSERT_TRUE(loaded.ok()) << loaded.error;
+    loaded.config.project.root = dir.string();
+    MasterIndex indexer(loaded.config);
+    indexer.index_directory(dir.string());
+
+    // The gate genuinely sees the project rule: micro/hot.go must be tagged
+    // `test` by the index's own registry, else the test asserts nothing.
+    {
+        PathAttrId id{};
+        ASSERT_TRUE(indexer.attr_registry().find("test", id));
+        EXPECT_FALSE(indexer.attr_registry().activates(id, Capability::Analysis))
+            << "`test` must exclude its files from the analysis gate";
+    }
+
+    McpRuntime runtime(indexer);
+
+    // attributes=all keeps the config-tagged file in the analyzed set (the
+    // shipping-scope gate would drop it before health sees it), so the only
+    // thing that can exclude it from high_complexity is the health analyzer's
+    // own project-aware gate — which is exactly the ci_engine wiring under
+    // test. With the builtin classifier it stays; with the project registry it
+    // is dropped, while the untouched production twin remains.
+    nlohmann::json params;
+    params["mode"] = "statistics";
+    params["attributes"] = "all";
+    auto result = handle_code_insight(params, runtime.ci_engine, indexer);
+    ASSERT_FALSE(result.is_error) << result.text;
+    EXPECT_NE(result.text.find("ProdComplex"), std::string::npos)
+        << "production high-cc function must remain in high_complexity:\n"
+        << result.text;
+    EXPECT_EQ(result.text.find("MicroComplex"), std::string::npos)
+        << "a function the project tags `test` must be excluded from the "
+           "health high-complexity list even under attributes=all (the config "
+           "never reached the health gate):\n"
+        << result.text;
 
     std::error_code ec;
     std::filesystem::remove_all(dir, ec);
