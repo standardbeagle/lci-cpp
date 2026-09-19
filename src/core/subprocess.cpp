@@ -90,6 +90,20 @@ HANDLE spawn(const std::vector<std::string>& argv, const std::string& cwd,
     BOOL ok = CreateProcessW(nullptr, cmd.data(), nullptr, nullptr,
                              /*bInheritHandles=*/TRUE, flags, nullptr,
                              wcwd.empty() ? nullptr : wcwd.c_str(), &si, &pi);
+    // CreateProcess contract: CREATE_BREAKAWAY_FROM_JOB fails with
+    // ERROR_ACCESS_DENIED when the caller runs inside a job object that does
+    // not grant JOB_OBJECT_LIMIT_BREAKAWAY_OK. CI runners and some IDEs put the
+    // CLI in exactly such a job, so an unconditional breakaway flag made every
+    // detached daemon spawn fail outright and the CLI could not autostart its
+    // server. Retry once with the flag cleared (DETACHED_PROCESS kept): the
+    // daemon then stays job-bound — killed when the job tears down — which
+    // beats not starting at all. Any other failure is returned as-is.
+    if (!ok && detached && GetLastError() == ERROR_ACCESS_DENIED) {
+        flags &= ~CREATE_BREAKAWAY_FROM_JOB;
+        ok = CreateProcessW(nullptr, cmd.data(), nullptr, nullptr,
+                            /*bInheritHandles=*/TRUE, flags, nullptr,
+                            wcwd.empty() ? nullptr : wcwd.c_str(), &si, &pi);
+    }
     if (null_dev != INVALID_HANDLE_VALUE) CloseHandle(null_dev);
     if (!ok) return nullptr;
     CloseHandle(pi.hThread);
