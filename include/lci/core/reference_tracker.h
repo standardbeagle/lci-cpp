@@ -296,7 +296,16 @@ class PostingsIndex {
         /// double-index guard is per-file via reverse_keys, so the hash
         /// bought nothing.
         std::vector<std::vector<std::pair<FileID, int>>> postings;
-        absl::flat_hash_map<FileID, std::vector<uint32_t>> reverse_keys;
+        /// Per-file token bookkeeping: token_id -> the index of this
+        /// file's entry within postings[token_id]. Storing the position
+        /// makes remove_file and the reindex guard O(tokens-per-file):
+        /// they swap-pop the exact slot instead of scanning the posting
+        /// vector (a hot token in 5000 files was a 5000-step linear
+        /// erase per removal). The moved entry's owning file updates its
+        /// own position in one hash op, so postings stay position-accurate
+        /// across removals.
+        absl::flat_hash_map<FileID, absl::flat_hash_map<uint32_t, uint32_t>>
+            reverse_keys;
         /// Files indexed with a capped token set. Unioned into every
         /// find() result — see find() for why the superset is mandatory.
         absl::flat_hash_set<FileID> partial_files;
@@ -314,6 +323,13 @@ class PostingsIndex {
     /// bulk window is open, otherwise clone-mutate-publish.
     template <class Fn>
     void write_snapshot(Fn&& fn);
+
+    /// Removes postings[token_id][pos] by swap-pop: the vector's last entry
+    /// moves into the hole and its owner's recorded position is repaired in
+    /// one hash lookup, so a removal costs O(1) regardless of how many
+    /// files share the token. Caller must be inside write_snapshot.
+    static void erase_posting_at(Snapshot& snap, uint32_t token_id,
+                                 uint32_t pos);
 
     static bool is_token_char(uint8_t b);
     static bool is_all_ascii(std::string_view s);

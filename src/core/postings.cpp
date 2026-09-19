@@ -172,6 +172,21 @@ std::vector<PostingsToken> PostingsIndex::tokenize_content(
     return result;
 }
 
+void PostingsIndex::erase_posting_at(Snapshot& snap, uint32_t token_id,
+                                     uint32_t pos) {
+    auto& vec = snap.postings[token_id];
+    const uint32_t last = static_cast<uint32_t>(vec.size()) - 1;
+    if (pos != last) {
+        vec[pos] = vec[last];
+        const FileID moved_file = vec[pos].first;
+        // Invariant: a file has an entry in postings[t] iff t is in its
+        // reverse map. at() throws on violation -- fail fast, never
+        // silently insert a phantom position.
+        snap.reverse_keys.at(moved_file).at(token_id) = pos;
+    }
+    vec.pop_back();
+}
+
 void PostingsIndex::index_file_pretokenized(FileID file_id,
                                             std::vector<PostingsToken> tokens,
                                             bool truncated) {
@@ -183,22 +198,19 @@ void PostingsIndex::index_file_pretokenized(FileID file_id,
         // Double-index guard, per FILE not per entry: a re-index without
         // a prior remove would append duplicate postings, so clear the
         // file's old entries first. The normal pipeline removes stale
-        // data before re-integrating, making this a no-op there.
+        // data before re-integrating, making this a no-op there. Each
+        // removal is a swap-pop at the recorded position -- O(tokens),
+        // independent of how many files share each token.
         if (auto rk = snap.reverse_keys.find(file_id);
             rk != snap.reverse_keys.end()) {
-            for (uint32_t id : rk->second) {
-                auto& vec = snap.postings[id];
-                for (auto it = vec.begin(); it != vec.end(); ++it) {
-                    if (it->first == file_id) {
-                        vec.erase(it);
-                        break;
-                    }
-                }
+            for (const auto& [token_id, pos] : rk->second) {
+                erase_posting_at(snap, token_id, pos);
             }
+            snap.reverse_keys.erase(rk);
         }
 
-        std::vector<uint32_t> ids;
-        ids.reserve(tokens.size());
+        auto& refs = snap.reverse_keys[file_id];
+        refs.reserve(tokens.size());
         for (auto& pt : tokens) {
             // Intern: move the string in only on first sight; every later
             // appearance of this token, in any file, costs 4 bytes.
@@ -209,10 +221,10 @@ void PostingsIndex::index_file_pretokenized(FileID file_id,
             const uint32_t id = it->second;
             // tokenize dedups per file and the guard above cleared any
             // prior entries, so a plain append cannot duplicate.
-            snap.postings[id].emplace_back(file_id, pt.offset);
-            ids.push_back(id);
+            auto& vec = snap.postings[id];
+            refs.emplace(id, static_cast<uint32_t>(vec.size()));
+            vec.emplace_back(file_id, pt.offset);
         }
-        snap.reverse_keys[file_id] = std::move(ids);
     });
 }
 
@@ -230,14 +242,8 @@ void PostingsIndex::remove_file(FileID file_id) {
         auto rk_it = snap.reverse_keys.find(file_id);
         if (rk_it == snap.reverse_keys.end()) return;
 
-        for (uint32_t id : rk_it->second) {
-            auto& vec = snap.postings[id];
-            for (auto it = vec.begin(); it != vec.end(); ++it) {
-                if (it->first == file_id) {
-                    vec.erase(it);
-                    break;
-                }
-            }
+        for (const auto& [token_id, pos] : rk_it->second) {
+            erase_posting_at(snap, token_id, pos);
             // The id + interned string stay even when postings empty --
             // see the Snapshot comment.
         }
