@@ -262,11 +262,10 @@ ScopeSet scope_from_unified_diff(std::string_view diff_text) {
             if (target == "/dev/null") {
                 current_file.clear();  // pure deletion: nothing on new side
             } else {
-                // Producers pass --no-prefix, but strip a leading b/ from
-                // callers that still emit one. core.quotePath C-quoting is
-                // undone so "caf\303\251.go" matches the -z name-status
-                // path (raw bytes) and the parsed symbols' file_path.
-                if (target.rfind("b/", 0) == 0) target.remove_prefix(2);
+                // Producers pass --no-prefix (get_changed_scope), so target
+                // is the bare repo-relative path. core.quotePath C-quoting is
+                // undone so "caf\303\251.go" matches the -z name-status path
+                // (raw bytes) and the parsed symbols' file_path.
                 current_file.assign(unquote_git_path(target, unquote_scratch));
             }
         } else if (line.rfind("@@", 0) == 0 && !current_file.empty()) {
