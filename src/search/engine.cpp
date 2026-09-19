@@ -1044,8 +1044,23 @@ void SearchEngine::process_file(
     // vector copy on the hot path — and discarded it.)
     std::vector<BlockBoundary> blocks;
 
+    // Comment-exclusion needs block-comment state the per-line predicate lacks:
+    // a continuation line (" * prose") is indistinguishable from a continued
+    // expression ("* stats.confidence);") on its own. Scan the file once (only
+    // when the flag is on) to get the byte spans of every /* */ block; both
+    // filter loops then classify a line by containment with a monotonic cursor,
+    // O(lines + spans) and no per-line allocation (Karpathy rule 2).
+    std::vector<CommentByteRange> comment_spans;
+    if (options.exclude_comments) {
+        comment_spans = scan_block_comment_ranges(content_sv, file_lang);
+    }
+
     // Deduplicate by line within this file.
     absl::flat_hash_set<int> seen_lines;
+
+    // Monotonic cursor into comment_spans for the match loop (lines are
+    // visited in ascending order via cursor_line_start).
+    size_t comment_span_pos = 0;
 
     // Incremental line cursor. find_matches emits matches with strictly
     // ascending start offsets, so the line number and line start of the next
@@ -1094,6 +1109,7 @@ void SearchEngine::process_file(
 
         int line_no = 1;
         int line_start = 0;
+        size_t span_pos = 0;
         for (int i = 0; i <= content_len; ++i) {
             bool at_end = (i == content_len);
             if (!at_end && content_sv[static_cast<size_t>(i)] != '\n') continue;
@@ -1106,7 +1122,9 @@ void SearchEngine::process_file(
             if (!matching_lines.contains(line_no)) {
                 auto text = line_text_at(line_start);
                 if (!options.exclude_comments ||
-                    !line_is_comment_only(text, file_lang)) {
+                    !line_is_comment_only_with_spans(
+                        content_sv, line_start, i, file_lang, comment_spans,
+                        span_pos)) {
                     SearchContext ctx;
                     if (options.max_context_lines > 0) {
                         ctx = context_extractor_.extract(
@@ -1144,11 +1162,16 @@ void SearchEngine::process_file(
         seen_lines.insert(line);
 
         // A comment-only line is dropped; a code line with a TRAILING comment
-        // is kept, matching the CLI's rule.
-        if (options.exclude_comments &&
-            line_is_comment_only(line_text_at(cursor_line_start),
-                                 file_lang)) {
-            continue;
+        // is kept, matching the CLI's rule. Block-comment continuation lines
+        // need the enclosing span, so classify with the per-file block spans.
+        if (options.exclude_comments) {
+            const int line_end =
+                search_line_end(content_sv, cursor_line_start);
+            if (line_is_comment_only_with_spans(
+                    content_sv, cursor_line_start, line_end, file_lang,
+                    comment_spans, comment_span_pos)) {
+                continue;
+            }
         }
 
         int col = match_start - cursor_line_start;

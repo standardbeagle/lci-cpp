@@ -252,18 +252,59 @@ bool is_word_character(char c);
 
 /// Returns true if `line` carries nothing but a comment, judged for `lang`.
 ///
-/// Backs SearchOptions::exclude_comments. THE single comment-classification
-/// rule: the MCP path (`flags=nc`) and the CLI (`--exclude-comments`,
-/// src/cli/grep_filters.cpp apply_exclude_comments) both call this function,
-/// and tests/cli_test.cpp pins their line-for-line agreement. A line is
-/// comment-only when its trimmed form OPENS with `//` or `/*`, opens with
-/// `#` in a language where `#` is unambiguously a comment (Python, Ruby;
-/// PHP excluding `#[` attributes), or is exactly `*/`. A code line with a
-/// TRAILING comment — `int x = 1; /* note */` — is NOT comment-only and is
-/// kept; so is a `"*/"` string literal. Accepted residual: prose that merely
-/// closes or continues a block comment is kept, because one line is not
-/// enough to decide and the asymmetric-safe direction is to keep.
+/// THE per-line comment-classification rule. Backs SearchOptions::exclude_comments
+/// and the CLI (`--exclude-comments`, src/cli/grep_filters.cpp
+/// apply_exclude_comments), and tests/cli_test.cpp pins their line-for-line
+/// agreement ON THE SINGLE-LINE PATH. A line is comment-only when its trimmed
+/// form OPENS with `//` or `/*`, opens with `#` in a language where `#` is
+/// unambiguously a comment (Python, Ruby; PHP excluding `#[` attributes), or is
+/// exactly `*/`. A code line with a TRAILING comment — `int x = 1; /* note */` —
+/// is NOT comment-only and is kept; so is a `"*/"` string literal.
+///
+/// Accepted residual OF THIS PER-LINE PREDICATE: a block-comment CONTINUATION
+/// (" * prose") cannot be separated from a continued expression
+/// ("* stats.confidence);") from one line alone, so it is kept. The MCP/HTTP
+/// search path closes that residual by consulting enclosing block state — see
+/// line_is_comment_only_with_spans; the CLI single-line grep path still uses
+/// this predicate directly and keeps the residual.
 bool line_is_comment_only(std::string_view line, LangId lang);
+
+/// A half-open byte range [start,end) inside file content that is one C-style
+/// block comment (`/* ... */`). Produced sorted and non-overlapping by
+/// scan_block_comment_ranges, so a line's comment-membership is a monotonic
+/// walk rather than a per-line re-scan.
+struct CommentByteRange {
+    int start{};
+    int end{};
+};
+
+/// Returns the byte ranges of every CLOSED C-style block comment in `content`,
+/// ascending and non-overlapping. Empty for languages with no `/* */` blocks
+/// (Python, Ruby) and for `LangId::Unknown`. `//` line comments and string /
+/// char literals are skipped while scanning, so a `/*` or `*/` inside them
+/// never opens or closes a block; an UNTERMINATED `/*` is not recorded, so a
+/// stray opener cannot swallow the rest of the file (fail toward keeping code).
+/// One forward pass, no per-line allocation; the result is deterministic for a
+/// given `content`.
+std::vector<CommentByteRange> scan_block_comment_ranges(std::string_view content,
+                                                        LangId lang);
+
+/// Per-line comment classification that also knows a line sits INSIDE an open
+/// block comment, which the per-line `line_is_comment_only` cannot decide.
+/// Returns true when the line carries nothing but a comment: either
+/// `line_is_comment_only` on its text, or its trimmed bytes fall wholly inside
+/// one of `spans` (the continuation case). A line with code before the block
+/// opener (`int x = 1; /* … */`) is NOT comment-only — its trimmed start lies
+/// before the span.
+///
+/// `spans` must be sorted ascending. `span_pos` is a caller-held cursor into
+/// it, advanced monotonically; callers MUST query lines in ascending
+/// line_start order (both search filter loops do). No allocation per line.
+bool line_is_comment_only_with_spans(std::string_view content,
+                                     int line_start, int line_end,
+                                     LangId lang,
+                                     const std::vector<CommentByteRange>& spans,
+                                     size_t& span_pos);
 
 /// Returns true if there is a word boundary at the given position.
 bool is_word_boundary(std::string_view content, int pos);

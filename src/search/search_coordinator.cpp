@@ -138,16 +138,136 @@ bool line_is_comment_only(std::string_view line, LangId lang) {
     //   - A '#' line in the HTML body of a .php/.phtml template, i.e. outside
     //     any <?php block, is literal output rather than a comment.
     //   - The block-comment continuation described above.
-    // All three need to know what encloses the line, so they belong to the
-    // parse-based replacement rather than a further heuristic clause.
+    // All three need to know what encloses the line, so they are not decidable
+    // by THIS per-line predicate.
     //
-    // Deciding the continuation case properly needs the enclosing comment
-    // span, which the index does not retain: tree-sitter comment nodes are
-    // visited only to skip them, no byte range is stored, ExtractionResults
-    // carries no comment ranges, and the TSTree is freed at the end of the
-    // per-file parse. Closing this needs index-side plumbing, tracked
-    // separately.
+    // The continuation case IS decided at the search layer, not here:
+    // line_is_comment_only_with_spans carries C-style /* */ block state across
+    // a file's lines (a single forward scan of the content the search filter
+    // already holds) and drops a line that lies wholly inside an open block,
+    // while leaving a leading-'*' line outside any block as code. The two
+    // remaining residuals (a marker inside a multi-line string literal) stay
+    // kept, which is the safe direction.
     return false;
+}
+
+namespace {
+// Languages that use C-style /* */ block comments. Python and Ruby do not
+// (they have only '#' line comments), and Unknown covers text/Markdown where
+// block-comment state is meaningless. Everything else in the table (Go, JS/TS,
+// Rust, C/C++, Java, C#, PHP, Kotlin, Zig, Swift, Scala, Svelte) does.
+bool uses_c_block_comments(LangId lang) {
+    switch (lang) {
+        case LangId::Unknown:
+        case LangId::Python:
+        case LangId::Ruby:
+            return false;
+        default:
+            return true;
+    }
+}
+}  // namespace
+
+std::vector<CommentByteRange> scan_block_comment_ranges(
+    std::string_view content, LangId lang) {
+    std::vector<CommentByteRange> spans;
+    if (!uses_c_block_comments(lang)) return spans;
+
+    const size_t n = content.size();
+    size_t i = 0;
+    while (i < n) {
+        const char c = content[i];
+        // Line comment: consume to end of line. A /* or */ inside it is inert.
+        if (c == '/' && i + 1 < n && content[i + 1] == '/') {
+            i += 2;
+            while (i < n && content[i] != '\n') ++i;
+            continue;
+        }
+        // Block comment: record [start, close+2). An unterminated opener is
+        // NOT recorded, so it can never hide a later real line of code.
+        if (c == '/' && i + 1 < n && content[i + 1] == '*') {
+            const size_t start = i;
+            size_t j = i + 2;
+            bool closed = false;
+            while (j + 1 < n) {
+                if (content[j] == '*' && content[j + 1] == '/') {
+                    j += 2;
+                    closed = true;
+                    break;
+                }
+                ++j;
+            }
+            if (closed) {
+                spans.push_back(CommentByteRange{static_cast<int>(start),
+                                                 static_cast<int>(j)});
+                i = j;
+            } else {
+                i += 2;  // skip the opener text, keep scanning for real code
+            }
+            continue;
+        }
+        // String / char literal: consume to the matching quote honouring
+        // backslash escapes, stopping at a newline so an unterminated literal
+        // cannot hide a later /* opener across lines.
+        if (c == '"' || c == '\'') {
+            const char q = c;
+            size_t j = i + 1;
+            while (j < n) {
+                const char d = content[j];
+                if (d == '\n') break;
+                if (d == '\\') {
+                    j += 2;
+                    continue;
+                }
+                if (d == q) {
+                    ++j;
+                    break;
+                }
+                ++j;
+            }
+            i = j;
+            continue;
+        }
+        ++i;
+    }
+    return spans;
+}
+
+bool line_is_comment_only_with_spans(std::string_view content,
+                                     int line_start, int line_end,
+                                     LangId lang,
+                                     const std::vector<CommentByteRange>& spans,
+                                     size_t& span_pos) {
+    if (line_start < 0) line_start = 0;
+    const int len = static_cast<int>(content.size());
+    if (line_end > len) line_end = len;
+    if (line_is_comment_only(content.substr(line_start, line_end - line_start),
+                             lang)) {
+        return true;
+    }
+    if (spans.empty()) return false;
+
+    // Trimmed byte bounds of the line.
+    int lo = line_start;
+    int hi = line_end;
+    while (lo < hi && std::isspace(static_cast<unsigned char>(content[lo]))) {
+        ++lo;
+    }
+    while (hi > lo &&
+           std::isspace(static_cast<unsigned char>(content[hi - 1]))) {
+        --hi;
+    }
+    if (lo >= hi) return false;  // whitespace-only: not comment-only
+
+    // Advance the caller's monotonic cursor past spans that end before lo,
+    // then test containment. Only ever increments, so ascending line queries
+    // keep the whole walk O(lines + spans).
+    while (span_pos < spans.size() && spans[span_pos].end <= lo) {
+        ++span_pos;
+    }
+    if (span_pos >= spans.size()) return false;
+    const CommentByteRange& s = spans[span_pos];
+    return s.start <= lo && hi <= s.end;
 }
 
 bool is_word_character(char c) {
