@@ -2,6 +2,8 @@
 
 #include <lci/config.h>
 #include <lci/context_manifest.h>
+#include <lci/core/context_lookup.h>
+#include <lci/idcodec.h>
 #include <lci/indexing/master_index.h>
 #include <lci/mcp/context_manifest_expander.h>
 #include <lci/mcp/handlers_context.h>
@@ -11,9 +13,17 @@
 
 #include "unique_temp.h"
 
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <string>
+#ifndef _WIN32
+#include <algorithm>
+#include <cstdio>
+#include <cstdlib>
+#include <sys/wait.h>
+#include <unistd.h>
+#endif
 
 namespace lci {
 namespace mcp {
@@ -1184,6 +1194,276 @@ TEST_F(ContextResolutionFixture, SelectorlessRefBecomesInvalidRefEntry) {
     EXPECT_EQ(j["unresolved"][0]["reason"], "invalid_ref");
     EXPECT_EQ(j["unresolved"][0]["role"], "junk");
 }
+
+// =============================================================================
+// get_context relationships/semantic reads (task 01M1NCXFB391TT0BCYWX6JYT44)
+//
+// The semantic section's entry-point dependency scan used to walk every
+// file's symbols and BFS by NAME from every discovered entry point on EVERY
+// get_context request (O(corpus) per call, hash-order dependent), and the
+// relationships section mixed live-tracker call-graph ids with the pinned
+// snapshot's ids. These three tests pin the fixed contract: cost independent
+// of file count, order identical across fresh processes, and every id read
+// from the caller-pinned snapshot.
+// =============================================================================
+
+namespace {
+
+constexpr const char* kCoreGoFiles[] = {
+    // main.go -> handler_core -> leaf_fn (the reachability chain).
+    "package main\n\nfunc main() {\n\thandler_core()\n}\n",
+    "package main\n\nfunc handler_core() {\n\tleaf_fn()\n}\n",
+    "package main\n\nfunc leaf_fn() int {\n\treturn 1\n}\n"};
+
+// Writes `filler_count` Go files with 15 plain (non-entry-named) functions
+// each, plus the 3-file core call chain. The core symbol graph is identical
+// for any filler_count, so get_context cost on leaf_fn must be flat in
+// filler_count once the per-request corpus walk is gone.
+void write_entry_corpus(const std::filesystem::path& dir, int filler_count) {
+    std::filesystem::create_directories(dir);
+    const char* names[] = {"main.go", "handler.go", "leaf.go"};
+    for (int i = 0; i < 3; ++i) {
+        std::ofstream f(dir / names[i]);
+        f << kCoreGoFiles[i];
+    }
+    for (int fi = 0; fi < filler_count; ++fi) {
+        std::ofstream f(dir / ("filler_" + std::to_string(fi) + ".go"));
+        f << "package f" << fi << "\n";
+        for (int fn = 0; fn < 15; ++fn) {
+            f << "func fill_" << fi << "_" << fn << "() int { return " << fn
+              << " }\n";
+        }
+    }
+}
+
+CodeObjectID oid_for(const ReferenceTracker::Snapshot& snap,
+                     const std::string& name) {
+    auto syms = snap.find_symbols_by_name(name);
+    EXPECT_EQ(syms.size(), 1u) << name;
+    CodeObjectID oid;
+    oid.file_id = syms.front()->symbol.file_id;
+    oid.name = name;
+    oid.type = syms.front()->symbol.type;
+    oid.symbol_id = encode_symbol_id(syms.front()->id);
+    return oid;
+}
+
+// get_context on `leaf_fn` in a corpus of `filler_count` filler files.
+double best_of_get_context_leaf(int filler_count, int reps) {
+    auto dir = lci::test::unique_temp_dir("lci_ctx_scale_");
+    write_entry_corpus(dir, filler_count);
+    Config config;
+    config.project.root = dir.string();
+    MasterIndex indexer(config);
+    if (!indexer.index_directory(dir.string())) return -1.0;
+
+    ContextLookupEngine engine(indexer);
+    auto snap = indexer.ref_tracker().pin();
+    if (snap == nullptr) return -1.0;
+    auto oid = oid_for(*snap, "leaf_fn");
+    bool ok = false;
+    engine.get_context(oid, ok);  // warm-up (lazy paths)
+    if (!ok) return -1.0;
+
+    double best = 1e30;
+    for (int i = 0; i < reps; ++i) {
+        auto t0 = std::chrono::steady_clock::now();
+        auto ctx = engine.get_context(oid, ok);
+        auto t1 = std::chrono::steady_clock::now();
+        EXPECT_TRUE(ok);
+        EXPECT_GT(ctx.semantic_context.entry_point_dependencies.size(), 0u)
+            << "fixture must produce entry-point dependencies";
+        double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+        best = std::min(best, ms);
+    }
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    return best;
+}
+
+}  // namespace
+
+// 10x the files (same core symbol graph) must not cost 2x the get_context
+// latency. Baseline fails: find_all_entry_points scanned every file per call.
+TEST(ContextPerfTest, GetContextScalingRatioFlatInFileCount) {
+    constexpr int kReps = 5;
+    double small = best_of_get_context_leaf(40, kReps);
+    double large = best_of_get_context_leaf(400, kReps);
+    ASSERT_GT(small, 0.0);
+    ASSERT_GT(large, 0.0);
+    EXPECT_LT(large, small * 2.0)
+        << "get_context on a 10x-file corpus (same symbol) cost "
+        << large << "ms vs " << small
+        << "ms: per-request cost still scales with corpus size";
+}
+
+// entry_point_dependencies order must be identical across 5 fresh processes
+// (abseil salt is per-process: an in-process repetition cannot catch a
+// hash-order dependency — every child execs the test binary with a fixture
+// dir and a pipe fd in the environment, and the parent diffs the raw JSON).
+#ifndef _WIN32
+
+namespace {
+
+// 20 files, each with one handler-named function calling `dispatch`: all 20
+// reach the target with equal 0.8 confidence, so emission order is decided
+// solely by the corpus-walk order of the (hash-ordered) file map.
+void write_handler_corpus(const std::filesystem::path& dir) {
+    std::filesystem::create_directories(dir);
+    {
+        std::ofstream f(dir / "dispatch.go");
+        f << "package p\n\nfunc dispatch() int { return 1 }\n";
+    }
+    for (int i = 0; i < 20; ++i) {
+        std::string n = std::to_string(i);
+        if (i < 10) n = "0" + n;
+        std::ofstream f(dir / ("handler_" + n + ".go"));
+        f << "package p\n\nfunc handler_" + n +
+             "() int { return dispatch() }\n";
+    }
+}
+
+std::string run_get_context_child_body(const std::filesystem::path& dir) {
+    Config config;
+    config.project.root = dir.string();
+    MasterIndex indexer(config);
+    if (!indexer.index_directory(dir.string())) return {};
+    ContextLookupEngine engine(indexer);
+    auto snap = indexer.ref_tracker().pin();
+    if (!snap) return {};
+    auto oid = oid_for(*snap, "dispatch");
+    bool ok = false;
+    auto ctx = engine.get_context(oid, ok);
+    if (!ok) return {};
+    return nlohmann::json(ctx_json_array(
+               ctx.semantic_context.entry_point_dependencies)).dump();
+}
+
+struct GctxChildRunner {
+    GctxChildRunner() {
+        const char* dir = std::getenv("LCI_GCTX_CHILD_DIR");
+        const char* fd = std::getenv("LCI_GCTX_CHILD_FD");
+        if (dir == nullptr || fd == nullptr) return;
+        int out_fd = std::atoi(fd);
+        std::string text = run_get_context_child_body(dir);
+        size_t off = 0;
+        while (off < text.size()) {
+            ssize_t n = write(out_fd, text.data() + off, text.size() - off);
+            if (n <= 0) break;
+            off += static_cast<size_t>(n);
+        }
+        _exit(0);
+    }
+} g_gctx_child_runner;
+
+std::string child_get_context_output(const std::filesystem::path& dir) {
+    int fds[2];
+    if (pipe(fds) != 0) return {};
+    pid_t pid = fork();
+    if (pid == 0) {
+        close(fds[0]);
+        dup2(fds[1], STDOUT_FILENO);  // fd number survives below via env
+        char fdbuf[16];
+        snprintf(fdbuf, sizeof(fdbuf), "%d", STDOUT_FILENO);
+        // STDOUT_FILENO==1 only after dup2; use the fixed number.
+        setenv("LCI_GCTX_CHILD_DIR", dir.string().c_str(), 1);
+        setenv("LCI_GCTX_CHILD_FD", fdbuf, 1);
+        char exe[4096];
+        ssize_t len = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
+        if (len <= 0) _exit(1);
+        exe[len] = '\0';
+        char* argv[] = {exe, nullptr};
+        execv(exe, argv);
+        _exit(1);
+    }
+    close(fds[1]);
+    std::string out;
+    char buf[4096];
+    ssize_t n;
+    while ((n = read(fds[0], buf, sizeof(buf))) > 0) {
+        out.append(buf, static_cast<size_t>(n));
+    }
+    close(fds[0]);
+    int status = 0;
+    waitpid(pid, &status, 0);
+    return out;
+}
+
+}  // namespace
+
+TEST(ContextDeterminismTest, EntryPointDependenciesOrderAcrossProcesses) {
+    std::string reference;
+    for (int run = 0; run < 5; ++run) {
+        auto dir = lci::test::unique_temp_dir("lci_ctx_det_");
+        write_handler_corpus(dir);
+        std::string text = child_get_context_output(dir);
+        std::error_code ec;
+        std::filesystem::remove_all(dir, ec);
+        ASSERT_FALSE(text.empty()) << "child " << run << " produced nothing";
+        if (run == 0) {
+            reference = text;
+        } else {
+            EXPECT_EQ(text, reference) << "process " << run << " diverged";
+        }
+    }
+    auto j = nlohmann::json::parse(reference);
+    ASSERT_EQ(j.size(), 20u) << j.dump();
+    for (size_t i = 1; i < j.size(); ++i) {
+        EXPECT_LE(j[i - 1]["entry_point_id"]["name"].get<std::string>(),
+                  j[i]["entry_point_id"]["name"].get<std::string>())
+            << "rows must be emitted in sorted order, not hash order";
+    }
+}
+
+// All relationship ids come from the pinned snapshot: mutating the live
+// tracker after pinning (dropping a caller's call edge via update_file) must
+// not change the result of a second get_context on the same pin.
+TEST(ContextPinnedSnapshotTest, RelationshipsReadPinnedSnapshotNotLiveTracker) {
+    auto dir = lci::test::unique_temp_dir("lci_ctx_pin_");
+    std::filesystem::create_directories(dir);
+    {
+        std::ofstream f(dir / "a.go");
+        f << "package p\n\nfunc helper() int { return 3 }\n\n"
+             "func target() int {\n\treturn helper()\n}\n";
+    }
+    {
+        std::ofstream f(dir / "b.go");
+        f << "package p\n\nfunc caller() int {\n\treturn target()\n}\n";
+    }
+    Config config;
+    config.project.root = dir.string();
+    MasterIndex indexer(config);
+    ASSERT_TRUE(indexer.index_directory(dir.string()));
+
+    ContextLookupEngine engine(indexer);
+    auto snap = indexer.ref_tracker().pin();
+    ASSERT_TRUE(snap != nullptr);
+    auto oid = oid_for(*snap, "target");
+
+    bool ok = false;
+    auto r1 = engine.get_context(oid, ok, snap);
+    ASSERT_TRUE(ok);
+    ASSERT_FALSE(r1.direct_relationships.caller_functions.empty())
+        << "fixture needs a resolved caller of target";
+    ASSERT_FALSE(r1.direct_relationships.called_functions.empty());
+
+    // Mutate the LIVE tracker: rewrite b.go so its call edge to target is
+    // gone. The pinned snapshot must keep answering as if it had never moved.
+    ASSERT_TRUE(indexer.update_file(
+        (dir / "b.go").string(),
+        "package p\n\nfunc caller() int {\n\treturn 1\n}\n"));
+
+    auto r2 = engine.get_context(oid, ok, snap);
+    ASSERT_TRUE(ok);
+    EXPECT_EQ(r1.direct_relationships.to_json().dump(),
+              r2.direct_relationships.to_json().dump())
+        << "relationships read the live tracker, not the pinned snapshot";
+
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+}
+
+#endif  // !_WIN32
 
 }  // namespace
 }  // namespace mcp
