@@ -1082,6 +1082,40 @@ void IndexServer::reaper_loop() {
         // client respawns the server on the next command, and a corpus
         // that genuinely exceeds the cap becomes a VISIBLE repeated-exit
         // config decision instead of silent degradation.
+        //
+        // HEADROOM after S2/D2 -- the cap now counts content, not just index
+        // structures. The measure (read_own_rss_mb) is RssAnon. Since S2
+        // (a9bf1ac) the content store OWNS each file's bytes as an anonymous
+        // std::vector<uint8_t> (include/lci/core/file_content_store.h) plus a
+        // uint32 line-offset vector -- there is no retained mmap -- so corpus
+        // text lands in RssAnon in full, not as evictable page cache as it did
+        // pre-D2. S2 measured the shift on the small self-repo: 172.8 -> 282.8
+        // MB RssAnon, +110 MB (+63.7%), warm 3x each side; the number that
+        // matters is the ratio, and it scales with corpus size.
+        //
+        // Arithmetic (ESTIMATE, dominant term only): content store anon ~= 1x
+        // on-disk corpus text bytes (line offsets add ~4 B/line; std::vector
+        // growth can hold up to ~2x capacity -- both ignored). Against the
+        // shipped default cap of 4096 MB (config.h ServerConfig::max_rss_mb):
+        //   50% of cap  = 2048 MB  ->  content alone at ~2 GB corpus
+        //   100% of cap = 4096 MB  ->  content alone at ~4 GB corpus
+        // These are CONTENT ONLY. The trigram/postings/symbol index and
+        // per-request temporaries are further anonymous consumers, so the
+        // real corpus that trips the cap is BELOW these figures; ~2 GB of
+        // source is already halfway consumed by content before any index.
+        //
+        // VERDICT on the 4096 default (left UNCHANGED -- a cap change is the
+        // user's decision, see criterion): after D2 the same number protects
+        // against a SMALLER corpus than before, because content is now inside
+        // the measured set. That is the control working as designed (content
+        // growth can OOM a host exactly like index growth), not a regression
+        // -- but the pre-D2 mental model ("4096 bounds the index, content is
+        // evictable") is now false. If 2-4 GB corpora are expected to index
+        // on memory-constrained hosts, LOWER the default so the visible
+        // repeated-exit fires before the host does; a value near 2048 MB
+        // makes content alone at 50% of cap the whole ceiling, which is
+        // arguably too tight for index+transients. Recommend 4096 stand until
+        // a real corpus is measured against it.
         if (config_.server.max_rss_mb > 0) {
             const long rss_mb = read_own_rss_mb();
             if (rss_mb > config_.server.max_rss_mb) {
