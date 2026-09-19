@@ -34,6 +34,26 @@ void SymbolStore::set(SymbolID id, EnhancedSymbol symbol) {
     auto it = index_.find(id);
     if (it != index_.end()) {
         auto idx = static_cast<size_t>(it->second);
+        // Update path: the secondary-index buckets are keyed only by
+        // (file_id, name), so a re-set that keeps both -- what
+        // apply_enrichment does for every symbol of every file -- must
+        // not touch them at all. The old unconditional remove-then-add
+        // made one erase-remove pass over the same-name bucket per
+        // symbol: quadratic when thousands of symbols share a name
+        // (constructor/get/render), and it ran on the serial integrator
+        // thread. Only a key change (or a type change, which only
+        // affects the counters) needs index work.
+        const bool keys_stable =
+            data_[idx].symbol.file_id == symbol.symbol.file_id &&
+            data_[idx].symbol.name == symbol.symbol.name;
+        if (keys_stable) {
+            if (data_[idx].symbol.type != symbol.symbol.type) {
+                update_stats_remove(data_[idx]);
+                update_stats_add(symbol);
+            }
+            data_[idx] = std::move(symbol);
+            return;
+        }
         update_stats_remove(data_[idx]);
         remove_from_secondary_indices(id, data_[idx]);
         data_[idx] = std::move(symbol);
@@ -280,7 +300,12 @@ void SymbolLocationIndex::index_file_symbols(
         if (i < enhanced_symbols.size()) {
             symbol_id = enhanced_symbols[i].id;
         } else {
-            symbol_id = (static_cast<uint64_t>(sym.line) << 32) |
+            // Synthetic fallback. The high bit is reserved (see
+            // kSyntheticSymbolIdBit) so this can never alias a real
+            // sequential ReferenceTracker SymbolID; the prior packing
+            // silently collided once line/column indices grew.
+            symbol_id = kSyntheticSymbolIdBit |
+                        (static_cast<uint64_t>(sym.line) << 32) |
                         (static_cast<uint64_t>(sym.column) << 16) |
                         static_cast<uint64_t>(i);
         }
