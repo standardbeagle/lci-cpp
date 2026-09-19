@@ -18,10 +18,13 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
+from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import benchlib as bl
+import opencode_runner
 
 PROMPT_TEMPLATE = (
     "Answer the following question about the codebase in the current "
@@ -43,7 +46,10 @@ MCP tools over grep/find/cat for code questions:
 - `lci_find_files` — locate files by name/pattern
 - `lci_semantic_annotations` — query project/domain annotations when present
 
-Fall back to bash/read only when the LCI tools cannot answer.
+Fall back to `Read` only when the LCI tools cannot answer. The native `grep`,
+`glob`, and `bash` tools are disabled in this configuration, so every lexical
+question must be answered through the LCI semantic surface — there is no
+shell-based grep/find escape hatch.
 """
 
 
@@ -54,6 +60,65 @@ SLIM_DISABLED = [
     "info", "inspect_symbol", "semantic_annotations", "side_effects",
 ]
 
+# The registered agent-level arms (discovery/predictions.json arms.treatment /
+# arms.baseline) are DISJOINT: the treatment arm is "LCI MCP + Read, no Grep,
+# no Glob" and the baseline is "Glob, Grep, Read" with no LCI MCP. Neither arm
+# is a superset of the other, so BOTH must ship an opencode `tools` map that
+# denies every native tool the registry does not list for it. Without this the
+# treatment cells measured "LCI in addition to grep" and
+# `control_literal_string_search` could never prove an LCI loss (D5 review,
+# task 01KXQ2V3PW91QTTQ1NTZXH7PR6).
+#
+# The native tool ids are those of the installed opencode (verified against
+# 1.18.31: `strings` on the binary carries the quoted ids, and the shipped
+# tools docs list bash/edit/write/read/grep/glob/lsp/apply_patch/skill/
+# todowrite/webfetch/websearch/question plus the `task` subagent tool). The
+# config `tools` map translates each key straight into a permission of the
+# same name, so an id opencode does not know is an inert deny — over-listing
+# costs nothing; under-listing re-opens an escape hatch, so a drift between
+# this surface and a registry list fails tests/test_bench.py.
+#
+# Bash decision (corrected): the registry grants the BASELINE only
+# ["Glob", "Grep", "Read"] — it does NOT grant bash (an earlier comment here
+# claimed it did; the registry says otherwise). bash is a trivial escape hatch
+# back to grep/find/curl, so arm_tools denies bash for BOTH arms, along with
+# every other unlisted native tool (task, websearch, skill, todowrite, write,
+# edit, apply_patch, question, webfetch, lsp for the treatment; edit, write,
+# apply_patch, task, websearch, skill, todowrite, question, webfetch, lsp for
+# the baseline). Read stays enabled only where the registry lists it.
+NATIVE_TOOL_IDS = (
+    "apply_patch", "bash", "edit", "glob", "grep", "lsp", "question", "read",
+    "skill", "task", "todowrite", "webfetch", "websearch", "write",
+)
+
+ARMS_PATH = os.path.join(bl.BENCH_ROOT, "discovery", "predictions.json")
+
+
+def _load_arms(path=ARMS_PATH):
+    with open(path) as f:
+        return json.load(f)["arms"]
+
+
+ARMS = _load_arms()
+
+
+def arm_tools(arm):
+    """Derived opencode `tools` map for a registered arm name.
+
+    Denies every native tool the arm's registry list does not grant. `mcp__*`
+    entries are MCP (non-native) tools and do not participate: the LCI MCP
+    server itself is enabled per-variant, and lci-slim's auxiliary denials are
+    layered on top by workspace_config.
+    """
+    allowed = {t.lower() for t in ARMS[arm]["tools"] if not t.startswith("mcp__")}
+    unknown = allowed - set(NATIVE_TOOL_IDS)
+    if unknown:
+        raise ValueError(
+            f"arms.{arm}.tools lists native tools {sorted(unknown)} that are not in "
+            f"NATIVE_TOOL_IDS (verified against the installed opencode); refusing to "
+            f"silently grant a tool no one audited")
+    return {name: False for name in NATIVE_TOOL_IDS if name not in allowed}
+
 
 def workspace_config(variant, lci_bin):
     cfg = {
@@ -63,8 +128,18 @@ def workspace_config(variant, lci_bin):
     }
     if variant in ("lci", "lci-slim", "lci-ann"):
         cfg["mcp"]["lci"] = {"type": "local", "command": [lci_bin, "mcp"], "enabled": True}
-    if variant == "lci-slim":
-        cfg["tools"] = {f"lci_{name}": False for name in SLIM_DISABLED}
+        # Disjointness: force the treatment arm onto the registered surface —
+        # Read plus the LCI MCP tools, nothing native else.
+        cfg["tools"] = arm_tools("treatment")
+        if variant == "lci-slim":
+            cfg["tools"].update({f"lci_{name}": False for name in SLIM_DISABLED})
+    elif variant == "base":
+        # The baseline is no longer "whatever the host grants": its surface is
+        # the registry's Glob/Grep/Read, and everything else native is denied.
+        cfg["tools"] = arm_tools("baseline")
+    else:
+        raise ValueError(f"unknown variant {variant!r}: every bench variant must map "
+                         f"to a registered arm (base, lci, lci-slim, lci-ann)")
     return cfg
 
 
@@ -178,20 +253,77 @@ def parse_events(lines):
     }
 
 
+def arm_environment(ws, state_root):
+    """Launch environment for one cell: the shared isolation contract PLUS the
+    removal of the host re-anchor vectors it does not cover, with opencode's
+    writable state anchored OUTSIDE the measured corpus.
+
+    opencode_runner.isolated_environment sets OPENCODE_CONFIG, PWD and all four
+    XDG base dirs to paths under the directory it is given. That directory must
+    NOT be the workspace: doing so writes opencode's own
+    `<ws>/.xdg-{config,state,data,cache}` dirs — including the run log — INSIDE
+    the copy the arms answer from, so a base-arm lexical query can match the
+    harness's own generated log (the pre-fix results/arm-disjointness-smoke
+    base answer cited `.xdg-data-home/opencode/log/opencode.log`). Instead call
+    it against an EXTERNAL per-cell `state_root` (opencode writes its config/
+    state/data/cache/log there, and the credential/model metadata are seeded
+    there too), then re-point the two variables that must read from the corpus
+    back INTO `ws`:
+
+      * OPENCODE_CONFIG -> <ws>/opencode.json (the variant's own arm config)
+      * PWD             -> <ws>              (opencode + node trust $PWD)
+
+    It inherits everything else, and opencode 1.18.31 honors three more host
+    variables:
+
+      * OPENCODE_CONFIG_DIR re-anchors the *global* config directory wherever
+        it points, bypassing XDG_CONFIG_HOME entirely. When bench is launched
+        from inside an opencode session (the normal case for this repo: a
+        worktrack agent shells out to bench.py), it points at the session's
+        global config — whose `"permission": {"*": "allow"}` merges over the
+        arm's derived `tools` map and silently re-grants native grep to the
+        treatment arm. Verified live on 1.18.31: with the variable inherited,
+        an lci-arm cell ordered to call grep completed the call; with it
+        dropped, the same cell answered TOOL_UNAVAILABLE with zero native
+        calls in the transcript.
+      * OPENCODE / OPENCODE_CLIENT mark the child as an ACP client of the
+        parent session — a different runtime surface than a plain batch run.
+
+    An arm's tool surface is only trustworthy if nothing inherited can widen
+    it, so all three are dropped here. (opencode_runner is the better long-term
+    home for this, but the scope of this fix is bench.py's cells.)
+    """
+    environment = opencode_runner.isolated_environment(Path(state_root))
+    environment["OPENCODE_CONFIG"] = os.path.join(ws, "opencode.json")
+    environment["PWD"] = ws
+    for variable in ("OPENCODE_CONFIG_DIR", "OPENCODE", "OPENCODE_CLIENT"):
+        environment.pop(variable, None)
+    return environment
+
+
 def run_one(cfg, ws, model_id, question, timeout):
     prompt = PROMPT_TEMPLATE.format(question=question["question"])
     cmd = [cfg.defaults["opencode-bin"], "run", "--format", "json", "-m", model_id, prompt]
-    start = time.time()
-    try:
-        proc = subprocess.run(
-            cmd, cwd=ws, capture_output=True, text=True, timeout=timeout,
-        )
-        status = "ok" if proc.returncode == 0 else f"exit_{proc.returncode}"
-        lines = proc.stdout.splitlines()
-    except subprocess.TimeoutExpired as ex:
-        status = "timeout"
-        lines = (ex.stdout or "").splitlines() if isinstance(ex.stdout, str) else []
-    wall = round(time.time() - start, 2)
+    # Every agent-level cell must launch through arm_environment (the shared
+    # isolated_environment contract + the host re-anchor drops above), not a
+    # hand-rolled dict(os.environ): any inherited vector that re-merges a host
+    # `*: allow` collapses the treatment arm back onto the baseline's lexical
+    # mechanism and silently invalidates the cell. The per-cell state root is a
+    # throwaway OUTSIDE the workspace (opencode's writable state lives there and
+    # is deleted with it), so nothing the run creates can contaminate the copy.
+    with tempfile.TemporaryDirectory(prefix="bench-state-") as state_root:
+        env = arm_environment(ws, state_root)
+        start = time.time()
+        try:
+            proc = subprocess.run(
+                cmd, cwd=ws, env=env, capture_output=True, text=True, timeout=timeout,
+            )
+            status = "ok" if proc.returncode == 0 else f"exit_{proc.returncode}"
+            lines = proc.stdout.splitlines()
+        except subprocess.TimeoutExpired as ex:
+            status = "timeout"
+            lines = (ex.stdout or "").splitlines() if isinstance(ex.stdout, str) else []
+        wall = round(time.time() - start, 2)
     parsed = parse_events(lines)
     if status == "ok" and not parsed["answer"]:
         status = "empty_answer"
