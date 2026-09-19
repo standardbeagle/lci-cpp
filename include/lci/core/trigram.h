@@ -119,6 +119,18 @@ class TrigramIndex {
     /// Total bytes held by per-file blooms (index_size_bytes census).
     size_t bloom_bytes() const;
 
+    /// Number of stored locations for the ASCII trigram key
+    /// ((b0 << 16) | (b1 << 8) | b2), 0 when the trigram is absent.
+    /// The dedup-by-file query APIs (find_candidates, narrow) cannot
+    /// observe per-trigram multiplicity — this is the census hook for
+    /// index-size tests that must see duplicated or purged postings.
+    size_t location_count(uint32_t ascii_trigram) const {
+        auto snap = load_snapshot();
+        auto it = snap->ascii_trigrams.find(ascii_trigram);
+        return it == snap->ascii_trigrams.end() ? 0
+                                                : it->second.locations.size();
+    }
+
     /// Marks a file as invalidated (lazy removal).
     void remove_file(FileID file_id);
 
