@@ -531,6 +531,20 @@ TEST_F(McpServerTest, EverySchemaParameterHasAReader) {
                            std::istreambuf_iterator<char>());
     };
 
+    // Shared helpers the handler chain calls for some params. The reader for
+    // list_symbols' max/offset lives in lci/pagination.h (normalize_page),
+    // outside src/mcp/ — so list_symbols also scans it. Keeps the audit honest
+    // about params applied through a delegated helper.
+    auto read_root = [&](const char* rel) {
+        fs::path p = fs::path(__FILE__).parent_path().parent_path() / rel;
+        std::ifstream in(p, std::ios::binary);
+        EXPECT_TRUE(in.good()) << rel;
+        return std::string(std::istreambuf_iterator<char>(in),
+                           std::istreambuf_iterator<char>());
+    };
+    const std::map<std::string, std::vector<const char*>> tool_helpers = {
+        {"list_symbols", {"include/lci/pagination.h"}},
+    };
     const std::map<std::string, std::vector<const char*>> tool_sources = {
         {"info", {"handlers_core.cpp"}},
         {"search", {"handlers_search.cpp"}},
@@ -549,14 +563,10 @@ TEST_F(McpServerTest, EverySchemaParameterHasAReader) {
         {"side_effects", {"handlers_side_effects.cpp"}},
     };
 
-    // Exceptions: advertised but unread, each with a reason. Keep empty
-    // unless the fix is genuinely out of the current task's file scope.
-    const std::set<std::pair<std::string, std::string>> allowlist = {
-        // list_symbols' handler lives in handlers_explore.cpp, outside this
-        // change's file scope; offset pagination is advertised but never
-        // applied there. Follow-up: wire or drop it.
-        {"list_symbols", "offset"},
-    };
+    // Exceptions: advertised but unread, each with a reason. Kept empty — every
+    // advertised param has a reader (directly or via a shared helper that this
+    // audit scans; see the read_src path resolution below).
+    const std::set<std::pair<std::string, std::string>> allowlist = {};
 
     for (size_t i = 0; i < server_->tool_count(); ++i) {
         const auto& def = server_->tool_at(i);
@@ -565,6 +575,9 @@ TEST_F(McpServerTest, EverySchemaParameterHasAReader) {
             << "tool " << def.name << " missing from the audit table";
         std::string src;
         for (const char* f : it->second) src += read_src(f);
+        auto hit = tool_helpers.find(def.name);
+        if (hit != tool_helpers.end())
+            for (const char* h : hit->second) src += read_root(h);
         for (const auto& prop : def.properties) {
             if (allowlist.count({def.name, prop.name})) continue;
             // Reader shapes, not schema-table entries: value("x"),
