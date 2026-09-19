@@ -107,13 +107,12 @@ void run_unified_extraction(ProcessedFile& result,
     extractor.init(content, result.file_id, ext, path);
     if (side_effect_sink) extractor.set_side_effect_sink(side_effect_sink);
     extractor.extract(tree.get());
-    // Must stay get_results(): extractor.lookup_declaration() below reads
-    // declarations_ directly off the still-live extractor, and
-    // take_results() moves declarations_ out from under it (regression
-    // caught by the lci_integration_suite golden mismatch on
-    // mcp_get_context_semantic_ai -- signature/doc_comment silently went
-    // empty for every symbol once declarations_ was moved away).
-    auto extracted = extractor.get_results();
+    // Drain the extractor instead of copying. `extracted` is consumed
+    // immediately below (every field is std::move'd or read once), so the
+    // copying accessor's per-file deep copy of symbols/blocks/imports/scopes/
+    // references/declarations/complexity/field_types was pure waste on the
+    // indexing hot path; take_results() move-returns them.
+    auto extracted = extractor.take_results();
 
     // Build a position-keyed metadata index so the integrator can enrich
     // EnhancedSymbol records (complexity, signature, doc comment) without
@@ -140,10 +139,14 @@ void run_unified_extraction(ProcessedFile& result,
         if (cx_it != complexity_by_position.end()) {
             meta.complexity = cx_it->second;
         }
-        auto [signature, doc_comment] =
-            extractor.lookup_declaration(sym.line, sym.column);
-        meta.signature.assign(signature);
-        meta.doc_comment.assign(doc_comment);
+        // Declarations were drained into `extracted` above, so the lookup reads
+        // the owned map (same 0-based key as the extractor's old accessor).
+        auto dit = extracted.declarations.find(
+            parser::PositionKey{sym.line - 1, sym.column - 1});
+        if (dit != extracted.declarations.end()) {
+            meta.signature.assign(dit->second.signature);
+            meta.doc_comment.assign(dit->second.doc_comment);
+        }
         result.symbol_metadata.push_back(std::move(meta));
     }
 
