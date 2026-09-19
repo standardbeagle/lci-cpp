@@ -1755,22 +1755,29 @@ TEST(ScopeSet, PopulatorsGlobRegexSymbols) {
 }
 
 TEST(ScopeSet, ParsesUnifiedDiffNewSideRanges) {
+    // Producers pass --no-prefix (src/git/provider.cpp get_changed_scope), so
+    // the --- / +++ headers carry the bare repo-relative path, not a/ b/.
     const char* diff =
-        "diff --git a/src/a.go b/src/a.go\n"
-        "--- a/src/a.go\n"
-        "+++ b/src/a.go\n"
+        "diff --git src/a.go src/a.go\n"
+        "--- src/a.go\n"
+        "+++ src/a.go\n"
         "@@ -10,2 +12,3 @@ func x() {\n"
         "+one\n+two\n+three\n"
         "@@ -40 +45 @@\n"
         "+line\n"
-        "diff --git a/gone.go b/gone.go\n"
-        "--- a/gone.go\n"
+        "diff --git gone.go gone.go\n"
+        "--- gone.go\n"
         "+++ /dev/null\n"
         "@@ -1,9 +0,0 @@\n"
-        "diff --git a/del.go b/del.go\n"
-        "--- a/del.go\n"
-        "+++ b/del.go\n"
-        "@@ -7,3 +6,0 @@\n";
+        "diff --git del.go del.go\n"
+        "--- del.go\n"
+        "+++ del.go\n"
+        "@@ -7,3 +6,0 @@\n"
+        "diff --git b/real.go b/real.go\n"
+        "--- b/real.go\n"
+        "+++ b/real.go\n"
+        "@@ -1 +1,2 @@\n"
+        "-x\n+x2\n";
     auto s = scope_from_unified_diff(diff);
     EXPECT_TRUE(s.contains_lines("src/a.go", 12, 12));
     EXPECT_TRUE(s.contains_lines("src/a.go", 14, 14));
@@ -1780,6 +1787,14 @@ TEST(ScopeSet, ParsesUnifiedDiffNewSideRanges) {
     EXPECT_FALSE(s.contains_file("gone.go"));
     // Pure hunk deletion anchors to the boundary line.
     EXPECT_TRUE(s.contains_lines("del.go", 6, 6));
+    // A real file living under a b/ directory must keep its leading b/.
+    // --no-prefix emits "+++ b/real.go" for the path b/real.go; stripping a
+    // leading b/ here would truncate it to real.go and silently drop its
+    // symbols from git_analysis.
+    EXPECT_TRUE(s.contains_file("b/real.go"));
+    EXPECT_TRUE(s.contains_lines("b/real.go", 1, 1));
+    EXPECT_TRUE(s.contains_lines("b/real.go", 2, 2));
+    EXPECT_FALSE(s.contains_file("real.go"));
 }
 
 // ===========================================================================
