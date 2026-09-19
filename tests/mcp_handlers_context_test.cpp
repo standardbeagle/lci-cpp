@@ -784,15 +784,296 @@ TEST_F(ContextResolutionFixture, PureLineRangeRefIsFlaggedLiteral) {
     EXPECT_EQ(j["refs"][0]["line_range_literal"], true) << j.dump();
 }
 
-// A well-formed manifest with an unsupported version fails explicitly.
-TEST_F(ContextResolutionFixture, UnsupportedVersionFailsExplicitly) {
+// A well-formed manifest with an unsupported version is reported as structured
+// unresolved entries (original selectors + roles preserved), never a bare
+// prose error and never a silent hydration.
+TEST_F(ContextResolutionFixture, UnsupportedVersionIsStructuredUnresolved) {
     auto j = load({{"v", "9.9"},
-                   {"r", {{{"f", "dup_a.go"}, {"s", "Dup"}}}}});
-    ASSERT_TRUE(j.contains("__error__"))
-        << "v=9.9 must not be silently hydrated: " << j.dump();
-    EXPECT_NE(j["__error__"].get<std::string>().find("version"),
-              std::string::npos)
-        << j["__error__"];
+                   {"r", {{{"f", "dup_a.go"}, {"s", "Dup"}, {"role", "primary"}}}}});
+    ASSERT_FALSE(j.contains("__error__")) << j.dump();
+    EXPECT_EQ(j["refs"].size(), 0u) << "v=9.9 must not hydrate: " << j.dump();
+    ASSERT_EQ(j["unresolved"].size(), 1u) << j.dump();
+    EXPECT_EQ(j["unresolved"][0]["reason"], "unsupported_version");
+    EXPECT_EQ(j["unresolved"][0]["file"], "dup_a.go");
+    EXPECT_EQ(j["unresolved"][0]["role"], "primary");
+    EXPECT_EQ(j["stats"]["unresolved_count"], 1) << j.dump();
+}
+
+// A top-level version of the wrong type (numeric) is malformed input and fails
+// explicitly — it must never be read as "absent" and default to a supported
+// version (which would silently hydrate under a misread schema).
+TEST_F(ContextResolutionFixture, NumericVersionFailsExplicitly) {
+    nlohmann::json params = {
+        {"operation", "load"},
+        {"from_string", R"({"v":99,"r":[{"f":"dup_a.go","s":"Dup"}]})"}};
+    auto r = handle_context(params, *indexer_, temp_dir_.string());
+    EXPECT_TRUE(r.is_error)
+        << "a non-string version must fail, not default to 1.0: " << r.text;
+}
+
+// A per-ref selector of the wrong type (a line bound that is a string) is
+// isolated as invalid_ref; the well-formed sibling ref still hydrates and the
+// malformed selector + role survive in the unresolved entry.
+TEST_F(ContextResolutionFixture, MalformedRefIsolatedNotWholeLoadAbort) {
+    auto j = load({{"r",
+                    {{{"f", "dup_a.go"}, {"s", "Dup"}, {"role", "primary"}},
+                     {{"f", "ghost.go"},
+                      {"s", "GhostOnly"},
+                      {"l", {{"s", "bad"}, {"e", 2}}},
+                      {"role", "broken"}}}}});
+    ASSERT_FALSE(j.contains("__error__"))
+        << "a bad selector must not abort the load: " << j.dump();
+    EXPECT_EQ(j["refs"].size(), 1u) << j.dump();
+    EXPECT_EQ(j["refs"][0]["file"], "dup_a.go");
+    ASSERT_EQ(j["unresolved"].size(), 1u) << j.dump();
+    EXPECT_EQ(j["unresolved"][0]["reason"], "invalid_ref");
+    EXPECT_EQ(j["unresolved"][0]["file"], "ghost.go");
+    EXPECT_EQ(j["unresolved"][0]["symbol"], "GhostOnly");
+    EXPECT_EQ(j["unresolved"][0]["role"], "broken");
+}
+
+// A wrong-typed file selector must NOT be silently dropped — dropping it would
+// turn a file-scoped identity into a global symbol-only lookup (cross-file
+// substitution). It is isolated as invalid_ref with the symbol retained.
+TEST_F(ContextResolutionFixture, WrongTypedFileSelectorIsInvalidRefNotGlobal) {
+    auto j = load({{"r", {{{"f", 123}, {"s", "Dup"}, {"role", "contract"}}}}});
+    ASSERT_FALSE(j.contains("__error__")) << j.dump();
+    EXPECT_EQ(j["refs"].size(), 0u)
+        << "a bad file type must not degrade to a global Dup match: "
+        << j.dump();
+    ASSERT_EQ(j["unresolved"].size(), 1u) << j.dump();
+    EXPECT_EQ(j["unresolved"][0]["reason"], "invalid_ref");
+    EXPECT_EQ(j["unresolved"][0]["symbol"], "Dup");
+    EXPECT_EQ(j["unresolved"][0]["role"], "contract");
+}
+
+// -- format=outline must not bypass symbol identity resolution (B1) ----------
+
+TEST_F(ContextResolutionFixture, OutlineIgnoresSymbolThatIsNotInFile) {
+    ExpansionEngine engine(*indexer_);
+    ContextRef ref;
+    ref.file = "ghost.go";  // no Dup here; the other files have one
+    ref.symbol = "Dup";
+    auto result =
+        engine.hydrate_reference(ref, FormatType::Outline, temp_dir_.string());
+    EXPECT_NE(result.reason, RefResolution::Resolved)
+        << "outline must not return a full-file listing labelled with a symbol "
+           "that is not in this file: "
+        << result.ref.source;
+    EXPECT_TRUE(result.ref.source.empty()) << result.ref.source;
+}
+
+TEST_F(ContextResolutionFixture, OutlineMissingSymbolIsUnresolved) {
+    nlohmann::json manifest = {
+        {"r", {{{"f", "ghost.go"}, {"s", "DefinitelyAbsent"}}}}};
+    nlohmann::json params = {{"operation", "load"},
+                             {"format", "outline"},
+                             {"from_string", manifest.dump()}};
+    auto result = handle_context(params, *indexer_, temp_dir_.string());
+    ASSERT_FALSE(result.is_error) << result.text;
+    auto j = nlohmann::json::parse(result.text);
+    EXPECT_EQ(j["refs"].size(), 0u) << j.dump();
+    ASSERT_EQ(j["unresolved"].size(), 1u) << j.dump();
+    EXPECT_EQ(j["unresolved"][0]["reason"], "missing_symbol") << j.dump();
+}
+
+// =============================================================================
+// Expansion source identity (B5): the same file-scoped, never-substitute,
+// never-guess rule as hydration must apply to expansion directives.
+// =============================================================================
+
+class ContextExpansionFixture : public ::testing::Test {
+  protected:
+    void SetUp() override {
+        temp_dir_ = lci::test::unique_temp_dir("lci_ctx_expand_");
+        std::filesystem::create_directories(temp_dir_);
+        // An ambiguous type name in one file (two same-name interfaces): an
+        // expansion directive must not pick one of them.
+        write_file(temp_dir_ / "two_iface.go",
+                   "package p\n"
+                   "\n"
+                   "type Widget interface{ A() }\n"
+                   "\n"
+                   "type Widget interface{ B() }\n");
+        // A helper that exists in another file only: expanding it from this
+        // file must never borrow the other file's definitions.
+        write_file(temp_dir_ / "elsewhere.go",
+                   "package p\n"
+                   "\n"
+                   "type Widget interface{ Z() }\n");
+        Config config;
+        config.project.root = temp_dir_.string();
+        indexer_ = std::make_unique<MasterIndex>(config);
+        indexer_->index_directory(temp_dir_.string());
+    }
+    void TearDown() override {
+        indexer_.reset();
+        std::error_code ec;
+        std::filesystem::remove_all(temp_dir_, ec);
+    }
+    static void write_file(const std::filesystem::path& path,
+                           const std::string& content) {
+        std::ofstream out(path);
+        out << content;
+    }
+    std::filesystem::path temp_dir_;
+    std::unique_ptr<MasterIndex> indexer_;
+};
+
+// An ambiguous same-file symbol with an expansion directive resolves to
+// unresolved (ambiguous_symbol) — the identity gate runs before expansion, so
+// no single candidate is silently chosen.
+TEST_F(ContextExpansionFixture, AmbiguousExpansionSourceIsNeverAGuess) {
+    ExpansionEngine engine(*indexer_);
+    ContextRef ref;
+    ref.file = "two_iface.go";
+    ref.symbol = "Widget";
+    ref.expansions = {"implementations"};
+    auto result =
+        engine.hydrate_reference(ref, FormatType::Full, temp_dir_.string());
+    EXPECT_EQ(result.reason, RefResolution::AmbiguousSymbol)
+        << "Widget is ambiguous in two_iface.go; hydration must report it, "
+           "not pick one, so apply_expansions never sees a guessed source";
+    auto applied = engine.apply_expansions(
+        ref, result.ref, FormatType::Full, 100000, temp_dir_.string());
+    EXPECT_TRUE(applied.expanded.empty())
+        << "an ambiguous source must expand to nothing";
+}
+
+// -- Actual MCP server tools/call dispatch (B6) ------------------------------
+//
+// The prior context tests called handle_context directly. These drive the real
+// JSON-RPC transport: a registered tool invoked through McpServer::dispatch_wire
+// with a tools/call frame, so the wire error envelope and the compact-key
+// contract are exercised end to end.
+
+class ContextWireFixture : public ::testing::Test {
+  protected:
+    void SetUp() override {
+        temp_dir_ = lci::test::unique_temp_dir("lci_ctx_wire_");
+        std::filesystem::create_directories(temp_dir_);
+        write_file(temp_dir_ / "dup_a.go",
+                   "package p\n\nfunc Dup() int { return 1 }\n");
+        write_file(temp_dir_ / "dup_b.go",
+                   "package p\n\nfunc Dup() int { return 2 }\n");
+        write_file(temp_dir_ / "ghost.go",
+                   "package p\n\nfunc GhostOnly() int { return 7 }\n");
+        Config config;
+        config.project.root = temp_dir_.string();
+        indexer_ = std::make_unique<MasterIndex>(config);
+        indexer_->index_directory(temp_dir_.string());
+        server_ = std::make_unique<McpServer>(config, *indexer_, nullptr);
+        register_context_handlers(*server_, indexer_.get());
+    }
+    void TearDown() override {
+        server_.reset();
+        indexer_.reset();
+        std::error_code ec;
+        std::filesystem::remove_all(temp_dir_, ec);
+    }
+    static void write_file(const std::filesystem::path& path,
+                           const std::string& content) {
+        std::ofstream out(path);
+        out << content;
+    }
+    // Builds a real tools/call frame for the `context` tool and returns the
+    // parsed {payload, isError} of the JSON-RPC response.
+    struct WireResult {
+        nlohmann::json payload;
+        bool is_error{};
+    };
+    WireResult call(nlohmann::json arguments) {
+        nlohmann::json frame = {
+            {"jsonrpc", "2.0"},
+            {"id", 1},
+            {"method", "tools/call"},
+            {"params", {{"name", "context"}, {"arguments", arguments}}}};
+        auto raw = server_->dispatch_wire(frame.dump());
+        WireResult out;
+        auto resp = nlohmann::json::parse(raw);
+        out.is_error = resp.contains("result") &&
+                       resp["result"].value("isError", false);
+        if (out.is_error) {
+            out.payload = nlohmann::json{
+                "__error__",
+                resp["result"]["content"][0]["text"].get<std::string>()};
+        } else {
+            out.payload = nlohmann::json::parse(
+                resp["result"]["content"][0]["text"].get<std::string>());
+        }
+        return out;
+    }
+    WireResult load(nlohmann::json manifest) {
+        return call({{"operation", "load"},
+                     {"from_string", manifest.dump()}});
+    }
+    std::filesystem::path temp_dir_;
+    std::unique_ptr<MasterIndex> indexer_;
+    std::unique_ptr<McpServer> server_;
+};
+
+TEST_F(ContextWireFixture, WireNoCrossFileSubstitution) {
+    auto r = load({{"r", {{{"f", "ghost.go"}, {"s", "Dup"}, {"role", "contract"}}}}});
+    ASSERT_FALSE(r.is_error);
+    EXPECT_EQ(r.payload["refs"].size(), 0u);
+    ASSERT_EQ(r.payload["unresolved"].size(), 1u) << r.payload.dump();
+    EXPECT_EQ(r.payload["unresolved"][0]["reason"], "missing_symbol");
+    auto dumped = r.payload.dump();
+    EXPECT_EQ(dumped.find("return 1"), std::string::npos);
+    EXPECT_EQ(dumped.find("return 2"), std::string::npos);
+}
+
+TEST_F(ContextWireFixture, WireOutlineAbsentSymbolIsUnresolved) {
+    auto r = call({{"operation", "load"},
+                   {"format", "outline"},
+                   {"from_string",
+                    nlohmann::json{{"r",
+                                    {{{"f", "ghost.go"},
+                                      {"s", "DefinitelyAbsent"}}}}}
+                        .dump()}});
+    ASSERT_FALSE(r.is_error);
+    EXPECT_EQ(r.payload["refs"].size(), 0u)
+        << "outline must not mask a missing symbol with a file listing: "
+        << r.payload.dump();
+    ASSERT_EQ(r.payload["unresolved"].size(), 1u);
+    EXPECT_EQ(r.payload["unresolved"][0]["reason"], "missing_symbol");
+}
+
+TEST_F(ContextWireFixture, WireNumericVersionFailsOnWire) {
+    auto r = call({{"operation", "load"},
+                   {"from_string",
+                    R"({"v":99,"r":[{"f":"dup_a.go","s":"Dup"}]})"}});
+    EXPECT_TRUE(r.is_error)
+        << "a non-string version must be a wire error, not a default: "
+        << (r.payload.contains("__error__") ? r.payload["__error__"]
+                                             : r.payload);
+}
+
+TEST_F(ContextWireFixture, WireMalformedRefIsolated) {
+    auto r = load({{"r",
+                    {{{"f", "dup_a.go"}, {"s", "Dup"}, {"role", "primary"}},
+                     {{"f", "dup_b.go"},
+                      {"l", {{"s", "oops"}, {"e", 3}}},
+                      {"role", "bad"}}}}});
+    ASSERT_FALSE(r.is_error)
+        << "one malformed ref must not abort the whole tools/call: "
+        << r.payload.dump();
+    EXPECT_EQ(r.payload["refs"].size(), 1u) << r.payload.dump();
+    ASSERT_EQ(r.payload["unresolved"].size(), 1u);
+    EXPECT_EQ(r.payload["unresolved"][0]["reason"], "invalid_ref");
+    EXPECT_EQ(r.payload["unresolved"][0]["role"], "bad");
+}
+
+TEST_F(ContextWireFixture, WireUnsupportedVersionStructured) {
+    auto r = load({{"v", "2.5"},
+                   {"r", {{{"f", "dup_a.go"}, {"s", "Dup"}, {"role", "p"}}}}});
+    ASSERT_FALSE(r.is_error)
+        << "unsupported_version is a structured result, not a wire error: "
+        << r.payload.dump();
+    EXPECT_EQ(r.payload["refs"].size(), 0u);
+    ASSERT_EQ(r.payload["unresolved"].size(), 1u);
+    EXPECT_EQ(r.payload["unresolved"][0]["reason"], "unsupported_version");
+    EXPECT_EQ(r.payload["unresolved"][0]["role"], "p");
 }
 
 // v1.0 (and the default empty version) remain supported.

@@ -5,6 +5,7 @@
 #include <fstream>
 #include <iostream>
 #include <limits>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -118,9 +119,32 @@ nlohmann::json manifest_to_json(const ContextManifest& m) {
 // fallback. The compact contract is enforced by the parity descriptors
 // save-compact-keys.parity.json and save-verbose-keys-rejected.parity.json
 // (the latter targets the *ref* keys f/s, which never fall back).
-std::string manifest_from_json(const nlohmann::json& j,
-                               ContextManifest& out) {
+//
+// Type handling:
+//  - A top-level scalar (t/v/p) present but not a string is a fatal error: a
+//    wrong-typed version must never be read as "absent" and default to 1.0.
+//  - A per-ref selector of the wrong type (f/s/role/note, or a line-range
+//    bound that is not an integer) is isolated as an invalid_ref unresolved
+//    entry carrying the selectors that WERE well-typed, so a single bad ref
+//    never aborts the load and never silently widens a file-scoped identity
+//    into a global symbol-only lookup.
+std::string manifest_from_json(const nlohmann::json& j, ContextManifest& out,
+                               std::vector<UnresolvedRef>& invalid_out) {
     out = {};
+    invalid_out = {};
+
+    auto check_top_string = [&](const char* compact,
+                                const char* verbose) -> std::string {
+        if ((j.contains(compact) && !j[compact].is_string()) ||
+            (verbose && j.contains(verbose) && !j[verbose].is_string())) {
+            return std::string("manifest field '") + compact +
+                   "' must be a string";
+        }
+        return {};
+    };
+    if (auto e = check_top_string("t", "task"); !e.empty()) return e;
+    if (auto e = check_top_string("v", "version"); !e.empty()) return e;
+    if (auto e = check_top_string("p", "project_root"); !e.empty()) return e;
 
     read_string_keyed(j, "t", "task", out.task);
     read_string_keyed(j, "v", "version", out.version);
@@ -138,6 +162,69 @@ std::string manifest_from_json(const nlohmann::json& j,
     }
 
     for (const auto& rj : *refs_ptr) {
+        if (!rj.is_object()) {
+            UnresolvedRef bad;
+            bad.reason = RefResolution::InvalidRef;
+            invalid_out.push_back(std::move(bad));
+            continue;
+        }
+        // Well-typed string selectors are retained for the unresolved report;
+        // a present-but-wrong-typed selector invalidates the whole ref.
+        auto opt_string = [&](const char* k) -> std::optional<std::string> {
+            if (!rj.contains(k)) return std::nullopt;
+            if (!rj[k].is_string()) return std::nullopt;  // signalled below
+            return rj[k].get<std::string>();
+        };
+        const bool f_bad = rj.contains("f") && !rj["f"].is_string();
+        const bool s_bad = rj.contains("s") && !rj["s"].is_string();
+        const bool role_bad = rj.contains("role") && !rj["role"].is_string();
+        // note: compact `n` or verbose `note` must both be strings if present.
+        const bool note_bad =
+            (rj.contains("n") && !rj["n"].is_string()) ||
+            (rj.contains("note") && !rj["note"].is_string());
+        // line range: if `l` present it must be an object; its s/e (or
+        // start/end) bounds, when present, must be integers.
+        bool lines_bad = false;
+        bool has_lines = false;
+        int lstart = 0, lend = 0;
+        if (rj.contains("l")) {
+            if (!rj["l"].is_object()) {
+                lines_bad = true;
+            } else {
+                has_lines = true;
+                const auto& lj = rj["l"];
+                auto num = [&](const char* k, const char* vk, int& dst) -> bool {
+                    const char* use = lj.contains(k) ? k
+                                : (lj.contains(vk) ? vk : nullptr);
+                    if (!use) return true;
+                    if (!lj[use].is_number_integer()) return false;
+                    dst = lj[use].get<int>();
+                    return true;
+                };
+                if (!num("s", "start", lstart) || !num("e", "end", lend)) {
+                    lines_bad = true;
+                }
+            }
+        }
+
+        if (f_bad || s_bad || role_bad || note_bad || lines_bad) {
+            UnresolvedRef bad;
+            bad.reason = RefResolution::InvalidRef;
+            if (auto fv = opt_string("f")) bad.file = std::move(*fv);
+            if (auto sv = opt_string("s")) bad.symbol = std::move(*sv);
+            if (auto rv = opt_string("role")) bad.role = std::move(*rv);
+            if (auto nv = opt_string("n"))
+                bad.note = std::move(*nv);
+            else if (auto nv = opt_string("note"))
+                bad.note = std::move(*nv);
+            if (has_lines && !lines_bad) {
+                bad.lines = {lstart, lend};
+                bad.has_line_range = true;
+            }
+            invalid_out.push_back(std::move(bad));
+            continue;
+        }
+
         ContextRef r;
         // f/s are compact-only by contract; no verbose alias here — the
         // negative parity descriptor save-verbose-keys-rejected.parity.json
@@ -148,18 +235,8 @@ std::string manifest_from_json(const nlohmann::json& j,
         if (rj.contains("s") && rj["s"].is_string()) {
             r.symbol = rj["s"].get<std::string>();
         }
-        if (rj.contains("l") && rj["l"].is_object()) {
-            const auto& lj = rj["l"];
-            // Go LineRange json tags are {s, e}. Verbose {start, end}
-            // accepted as load-only fallback with one-time stderr warning.
-            if (lj.contains("s") && lj.contains("e")) {
-                r.line_range.start = lj.value("s", 0);
-                r.line_range.end = lj.value("e", 0);
-            } else if (lj.contains("start") || lj.contains("end")) {
-                warn_verbose_key_once("l.start/l.end", "l.s/l.e");
-                r.line_range.start = lj.value("start", 0);
-                r.line_range.end = lj.value("end", 0);
-            }
+        if (has_lines) {
+            r.line_range = {lstart, lend};
             r.has_line_range = true;
         }
         if (rj.contains("role") && rj["role"].is_string()) {
@@ -178,6 +255,11 @@ std::string manifest_from_json(const nlohmann::json& j,
     }
 
     return {};
+}
+
+std::string manifest_from_json(const nlohmann::json& j, ContextManifest& out) {
+    std::vector<UnresolvedRef> ignored;
+    return manifest_from_json(j, out, ignored);
 }
 
 std::string validate_manifest(const ContextManifest& m) {
@@ -344,9 +426,13 @@ std::string save_manifest_to_file(const ContextManifest& manifest,
     return {};
 }
 
-/// Loads a manifest from a file.
+/// Loads a manifest from a file. Fatal for top-level/parse problems; a
+/// per-ref selector of the wrong type is isolated into `invalid_out` (the load
+/// path) so it does not abort the whole manifest. Returns a fatal error only
+/// when nothing at all could be parsed.
 std::string load_manifest_from_file(const std::string& file_path,
-                                     ContextManifest& out) {
+                                    ContextManifest& out,
+                                    std::vector<UnresolvedRef>& invalid_out) {
     std::ifstream in(file_path, std::ios::binary);
     if (!in) {
         return "file not found: " + file_path;
@@ -362,9 +448,21 @@ std::string load_manifest_from_file(const std::string& file_path,
         return std::string("invalid manifest JSON: ") + e.what();
     }
 
-    auto err = manifest_from_json(j, out);
+    auto err = manifest_from_json(j, out, invalid_out);
     if (!err.empty()) return err;
+    if (out.refs.empty() && invalid_out.empty()) {
+        return "manifest must have at least one reference";
+    }
+    return {};
+}
 
+/// Append-oriented loader: strict, keeps the historic per-ref validation so a
+/// manifest with only malformed refs is rejected rather than silently merged.
+std::string load_manifest_from_file(const std::string& file_path,
+                                    ContextManifest& out) {
+    std::vector<UnresolvedRef> ignored;
+    auto err = load_manifest_from_file(file_path, out, ignored);
+    if (!err.empty()) return err;
     return validate_manifest(out);
 }
 
@@ -549,8 +647,11 @@ ToolResult handle_context_load(const nlohmann::json& params,
     auto format_str = params.value("format", "full");
     auto format = parse_format(format_str);
 
-    // Load manifest
+    // Load manifest. A per-ref selector of the wrong type is isolated into
+    // invalid_refs (reported unresolved, reason invalid_ref) rather than
+    // aborting the whole load; only top-level problems are fatal.
     ContextManifest manifest;
+    std::vector<UnresolvedRef> invalid_refs;
     if (!from_file.empty()) {
         auto full_path = resolve_manifest_path(from_file, project_root);
         if (full_path.empty()) {
@@ -559,7 +660,7 @@ ToolResult handle_context_load(const nlohmann::json& params,
                 "'from_file' must resolve inside the project root: " +
                     from_file);
         }
-        auto err = load_manifest_from_file(full_path, manifest);
+        auto err = load_manifest_from_file(full_path, manifest, invalid_refs);
         if (!err.empty()) {
             return make_error_response(
                 "context", "failed to load manifest from file: " + err);
@@ -573,20 +674,41 @@ ToolResult handle_context_load(const nlohmann::json& params,
                 "context",
                 std::string("failed to parse manifest string: ") + e.what());
         }
-        auto err = manifest_from_json(j, manifest);
+        auto err = manifest_from_json(j, manifest, invalid_refs);
         if (!err.empty()) {
             return make_error_response(
                 "context", "invalid manifest string: " + err);
         }
     }
 
-    // Version gate: a well-formed manifest with an unsupported schema version
-    // must fail explicitly (reason unsupported_version), never be hydrated
-    // under a misread of the format. An absent version is the default "1.0".
+    // Version gate: a well-formed manifest whose schema version is neither
+    // empty (default 1.0) nor "1.0" cannot be hydrated. Report every stored
+    // ref as structured unresolved with reason unsupported_version (original
+    // selectors and roles preserved) rather than a bare prose error, and keep
+    // a legacy warning for continuity.
     if (!manifest.version.empty() && manifest.version != "1.0") {
-        return make_error_response(
-            "context", "unsupported manifest version '" + manifest.version +
-                           "' (supported: 1.0); reason=unsupported_version");
+        HydratedContext fail;
+        fail.task = manifest.task;
+        for (const auto& r : manifest.refs) {
+            UnresolvedRef u;
+            u.file = r.file;
+            u.symbol = r.symbol;
+            u.role = r.role;
+            u.note = r.note;
+            u.lines = r.line_range;
+            u.has_line_range = r.has_line_range;
+            u.reason = RefResolution::UnsupportedVersion;
+            fail.unresolved.push_back(std::move(u));
+        }
+        for (auto& u : invalid_refs) {
+            u.reason = RefResolution::UnsupportedVersion;
+            fail.unresolved.push_back(std::move(u));
+        }
+        fail.stats.unresolved_count = static_cast<int>(fail.unresolved.size());
+        fail.warnings.push_back(
+            "unsupported manifest version '" + manifest.version +
+            "' (supported: 1.0)");
+        return make_json_response(hydrated_context_to_json(fail));
     }
 
     // Check index availability
@@ -620,6 +742,9 @@ ToolResult handle_context_load(const nlohmann::json& params,
     // Hydrate
     HydratedContext result;
     result.task = manifest.task;
+    // Parse-time invalid selectors surface as unresolved entries (preserving
+    // their original selectors/roles) alongside any that fail hydration.
+    result.unresolved = std::move(invalid_refs);
     int total_tokens = 0;
 
     ExpansionEngine engine(indexer);

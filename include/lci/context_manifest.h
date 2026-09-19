@@ -86,10 +86,12 @@ struct HydrationStats {
 /// never persistent identity.
 enum class RefResolution : uint8_t {
     Resolved = 0,
-    InvalidRef,       // no file, symbol, or line range to select on
-    MissingFile,      // named file is not in the index
-    MissingSymbol,    // file present, symbol absent (never cross-file match)
-    AmbiguousSymbol,  // >1 same-name symbol in the named file
+    InvalidRef,        // no file, symbol, or line range to select on, or a
+                       // selector field of the wrong type
+    MissingFile,       // named file is not in the index
+    MissingSymbol,     // file present, symbol absent (never cross-file match)
+    AmbiguousSymbol,   // >1 same-name symbol in the named file
+    UnsupportedVersion,  // manifest schema version is neither empty nor 1.0
 };
 
 inline const char* to_string(RefResolution r) {
@@ -99,6 +101,7 @@ inline const char* to_string(RefResolution r) {
         case RefResolution::MissingFile: return "missing_file";
         case RefResolution::MissingSymbol: return "missing_symbol";
         case RefResolution::AmbiguousSymbol: return "ambiguous_symbol";
+        case RefResolution::UnsupportedVersion: return "unsupported_version";
     }
     return "unknown";
 }

@@ -283,6 +283,17 @@ ExpansionEngine::HydrateResult ExpansionEngine::hydrate_reference(
     auto file_path = resolve_path(ref.file, project_root);
 
     if (format == FormatType::Outline) {
+        // Outline is a file-level listing, but a saved file+symbol still has to
+        // resolve by identity inside that file first: a missing file, an absent
+        // symbol, or a same-file overload set is reported unresolved, never
+        // masked by a full-file listing labelled with that symbol.
+        if (!ref.symbol.empty()) {
+            auto rs = resolve_start(file_path, ref.symbol);
+            if (rs.status != RefResolution::Resolved) {
+                return {{}, 0, "outline ref unresolved in " + ref.file,
+                        rs.status};
+            }
+        }
         hr.source = build_file_outline(index_, file_path);
         if (hr.source.empty()) {
             RefResolution reason =
@@ -542,42 +553,22 @@ std::vector<HydratedRef> ExpansionEngine::expand_implementations(
     const std::string& project_root, FormatType format) {
     if (ref.symbol.empty()) return {};
 
-    auto file_path = resolve_path(ref.file, project_root);
-    bool file_scoped = !file_path.empty();
-    FileID fid = file_scoped ? index_.path_to_id(file_path) : 0;
-    if (file_scoped && fid == 0) return {};
+    // Resolve the expansion source by the same identity rule as hydration: a
+    // file+symbol binds inside that file only, a same-file overload set is
+    // ambiguous (return nothing rather than pick one), and a missing file or
+    // symbol is never substituted from elsewhere. The targets below are then
+    // hydrated by exact SymbolID, so no same-name sibling leaks in.
+    auto rs = resolve_start(resolve_path(ref.file, project_root), ref.symbol);
+    if (rs.status != RefResolution::Resolved) return {};
 
     auto& tracker = index_.ref_tracker();
     auto rt_snap = tracker.pin();
-    auto symbols = rt_snap->find_symbols_by_name(ref.symbol);
-    if (symbols.empty()) return {};
-
-    // Prefer interface symbols; resolve strictly within the named file so a
-    // same-name type in another file is never chosen.
-    const EnhancedSymbol* target = nullptr;
-    for (const auto& s : symbols) {
-        if (file_scoped && s->symbol.file_id != fid) continue;
-        if (s->symbol.type == SymbolType::Interface) {
-            target = s.get();
-            break;
-        }
-        if (s->symbol.type == SymbolType::Class ||
-            s->symbol.type == SymbolType::Struct ||
-            s->symbol.type == SymbolType::Type) {
-            if (!target) target = s.get();
-        }
-    }
-    if (!target) {
-        for (const auto& s : symbols) {
-            if (file_scoped && s->symbol.file_id != fid) continue;
-            target = s.get();
-            break;
-        }
-    }
+    auto target = rt_snap->get_enhanced_symbol(rs.id);
     if (!target) return {};
+    SymbolID target_id = target->id;
 
-    auto impl_ids = tracker.get_implementors(target->id);
-    auto derived_ids = tracker.get_derived_types(target->id);
+    auto impl_ids = tracker.get_implementors(target_id);
+    auto derived_ids = tracker.get_derived_types(target_id);
 
     // Combine
     std::vector<SymbolID> all_ids;
@@ -586,7 +577,7 @@ std::vector<HydratedRef> ExpansionEngine::expand_implementations(
     all_ids.insert(all_ids.end(), derived_ids.begin(), derived_ids.end());
 
     absl::flat_hash_set<SymbolID> visited;
-    visited.insert(target->id);
+    visited.insert(target_id);
 
     return hydrate_symbol_ids(*this, all_ids, tracker, index_,
                               remaining_tokens, project_root, format, visited);
@@ -597,38 +588,21 @@ std::vector<HydratedRef> ExpansionEngine::expand_interface(
     const std::string& project_root, FormatType format) {
     if (ref.symbol.empty()) return {};
 
-    auto file_path = resolve_path(ref.file, project_root);
-    bool file_scoped = !file_path.empty();
-    FileID fid = file_scoped ? index_.path_to_id(file_path) : 0;
-    if (file_scoped && fid == 0) return {};
+    // Same identity rule as hydration (see expand_implementations): resolve the
+    // source uniquely inside its file; never pick one of an ambiguous set or
+    // substitute a same-name type from another file. Targets hydrate by exact
+    // SymbolID.
+    auto rs = resolve_start(resolve_path(ref.file, project_root), ref.symbol);
+    if (rs.status != RefResolution::Resolved) return {};
 
     auto& tracker = index_.ref_tracker();
     auto rt_snap = tracker.pin();
-    auto symbols = rt_snap->find_symbols_by_name(ref.symbol);
-    if (symbols.empty()) return {};
-
-    // Prefer concrete types, resolved within the named file.
-    const EnhancedSymbol* target = nullptr;
-    for (const auto& s : symbols) {
-        if (file_scoped && s->symbol.file_id != fid) continue;
-        if (s->symbol.type == SymbolType::Class ||
-            s->symbol.type == SymbolType::Struct ||
-            s->symbol.type == SymbolType::Type) {
-            target = s.get();
-            break;
-        }
-    }
-    if (!target) {
-        for (const auto& s : symbols) {
-            if (file_scoped && s->symbol.file_id != fid) continue;
-            target = s.get();
-            break;
-        }
-    }
+    auto target = rt_snap->get_enhanced_symbol(rs.id);
     if (!target) return {};
+    SymbolID target_id = target->id;
 
-    auto iface_ids = tracker.get_implemented_interfaces(target->id);
-    auto base_ids = tracker.get_base_types(target->id);
+    auto iface_ids = tracker.get_implemented_interfaces(target_id);
+    auto base_ids = tracker.get_base_types(target_id);
 
     std::vector<SymbolID> all_ids;
     all_ids.reserve(iface_ids.size() + base_ids.size());
@@ -636,7 +610,7 @@ std::vector<HydratedRef> ExpansionEngine::expand_interface(
     all_ids.insert(all_ids.end(), base_ids.begin(), base_ids.end());
 
     absl::flat_hash_set<SymbolID> visited;
-    visited.insert(target->id);
+    visited.insert(target_id);
 
     return hydrate_symbol_ids(*this, all_ids, tracker, index_,
                               remaining_tokens, project_root, format, visited);
