@@ -1677,5 +1677,71 @@ TEST(SearchFlagNoComments, KeepsPreprocessorDirectivesInCFamilyFiles) {
            "python '#' is a comment and must be dropped";
 }
 
+// The root-cause fix for this slice: a block-comment CONTINUATION line is now
+// classified comment-only and dropped, while dereferences and continued
+// expressions that merely START with '*' stay CODE. The previous rule saw one
+// line at a time and could not tell " * more prose" (inside an open /* */) from
+// "* stats.confidence);" (a continued multiplication), so it kept the
+// continuation. Carrying block-comment state across the file's lines removes
+// that ambiguity; the asymmetric-safe direction is preserved (a line outside a
+// confirmed-open block is never dropped on the strength of its first byte).
+TEST(SearchFlagNoComments, DropsBlockCommentContinuationKeepsLeadingStarCode) {
+    TempDir dir;
+    dir.write_file("a.c",
+        "/* Widget block comment\n"    // 1 comment (opens block)
+        " * Widget continuation\n"     // 2 CONTINUATION — the case this fixes
+        " */\n"                        // 3 comment (closes block)
+        "int Widget = 1;\n"            // 4 code
+        "  *Widget = ptr;\n"           // 5 code (dereference, not in a block)
+        "int n = (base\n"              // 6 code
+        "    * Widget);");             // 7 code (continued multiplication)
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+    SearchEngine engine(mi);
+
+    SearchOptions nc;
+    nc.case_insensitive = false;
+    nc.exclude_comments = true;
+    std::vector<int> lines;
+    for (const auto& r : engine.search("Widget", nc)) lines.push_back(r.line);
+    std::sort(lines.begin(), lines.end());
+
+    // Lines 1-3 are one block comment and are all dropped. Lines 4-7 are code:
+    // the trailing-`*/`-free dereference (5) and the continued multiplication
+    // (7) survive because they sit OUTSIDE any open block comment.
+    EXPECT_EQ((std::vector<int>{4, 5, 7}), lines)
+        << "block-comment opener/continuation/close must all drop; leading-"
+           "star code outside a block must survive";
+}
+
+// RED, pinned to a real file in this repo: trigram_predictor.h:49
+// ("* stats.confidence);") reads like a block-comment continuation under any
+// leading-'*' rule but is a continued multiplication. It is CODE and must
+// survive flags=nc.
+TEST(SearchFlagNoComments, KeepsContinuedMultiplicationFromRealRepoHeader) {
+    TempDir dir;
+    dir.write_file("t.h",
+        "struct S { int x; };\n"
+        "int f(int stats) {\n"
+        "  return stats\n"
+        "      * stats.confidence);\n");  // line 4: continued multiplication
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+    SearchEngine engine(mi);
+
+    SearchOptions nc;
+    nc.exclude_comments = true;
+    std::vector<int> lines;
+    for (const auto& r : engine.search("confidence", nc)) {
+        lines.push_back(r.line);
+    }
+    EXPECT_EQ((std::vector<int>{4}), lines)
+        << "a continued multiplication is CODE and must not be deleted";
+}
+
 }  // namespace
 }  // namespace lci
