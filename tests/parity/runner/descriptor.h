@@ -16,7 +16,7 @@ namespace lci::parity {
 // unqualified after the diff engine moved to tests/lib/spec_diff.
 using namespace ::spec_diff;
 
-enum class Mode { Cli, Mcp, Http, Index };
+enum class Mode { Cli, Mcp, Http };
 enum class ParseStyle { Json, Text, ExitOnly };
 
 struct Invocation {

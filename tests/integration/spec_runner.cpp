@@ -3,7 +3,6 @@
 #include "runner/descriptor.h"
 #include "runner/modes/cli.h"
 #include "runner/modes/http.h"
-#include "runner/modes/index.h"
 #include "runner/modes/mcp.h"
 #include "spec_diff/canonicalize.h"
 
@@ -48,7 +47,6 @@ using lci::parity::ParseStyle;
 using lci::parity::parse_descriptor;
 using lci::parity::run_cli;
 using lci::parity::run_http;
-using lci::parity::run_index_export;
 using lci::parity::run_mcp;
 
 fs::path TestsSourceDir() {
@@ -627,9 +625,6 @@ CapturedOutput RunCppSide(const std::string& cpp_binary,
             break;
         case Mode::Mcp:
             out = run_mcp(cpp_binary, descriptor, corpus_path);
-            break;
-        case Mode::Index:
-            out = run_index_export(cpp_binary, descriptor, corpus_path);
             break;
         default:
             throw std::runtime_error("unsupported descriptor mode");

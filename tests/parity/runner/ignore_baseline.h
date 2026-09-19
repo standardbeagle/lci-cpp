@@ -2,7 +2,7 @@
 //
 // BASE_IGNORE_NON_DETERMINISM — the canonical set of JSON paths that are
 // non-deterministic across runs / processes / wall-clock regardless of
-// which lci surface (cli/mcp/http/index) produced the output:
+// which lci surface (cli/mcp/http) produced the output:
 //
 //   * pid, start_time, uptime_ms, elapsed_ms      — per-process runtime
 //   * version, schema_version, build_id           — build metadata

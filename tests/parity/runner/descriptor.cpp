@@ -11,7 +11,6 @@ Mode parse_mode(const std::string& s) {
     if (s == "cli")   return Mode::Cli;
     if (s == "mcp")   return Mode::Mcp;
     if (s == "http")  return Mode::Http;
-    if (s == "index") return Mode::Index;
     throw std::runtime_error("invalid mode: " + s);
 }
 

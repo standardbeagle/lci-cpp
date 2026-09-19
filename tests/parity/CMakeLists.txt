@@ -2,7 +2,7 @@
 #
 # The Go reference binary has been retired — the migration is complete and LCI
 # is its own product. What remains here is C++-only test infrastructure:
-#   * lci_parity_runner_lib — the spec-driver (subprocess + cli/mcp/http/index
+#   * lci_parity_runner_lib — the spec-driver (subprocess + cli/mcp/http
 #     mode handlers) that the integration suite uses to run the C++ binary and
 #     diff its output against committed goldens.
 #   * parity_unit_tests — unit tests for the canonicalization + tier-aware diff
@@ -16,7 +16,6 @@ add_library(lci_parity_runner_lib STATIC
     runner/modes/cli.cpp
     runner/modes/mcp.cpp
     runner/modes/http.cpp
-    runner/modes/index.cpp
 )
 target_include_directories(lci_parity_runner_lib PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
