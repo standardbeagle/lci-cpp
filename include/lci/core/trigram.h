@@ -27,16 +27,6 @@ struct TrigramEntry {
     std::vector<FileLocation> locations;
 };
 
-/// Trigram index supporting ASCII (bit-shifted uint32) and Unicode
-/// (string-keyed) trigrams with 256-bucket sharded storage and
-/// a 5-minute LRU search cache.
-///
-/// Architecture:
-///   - ASCII trigrams: (b0 << 16) | (b1 << 8) | b2
-///   - Unicode trigrams: 3-rune string keys
-///   - 256 sharded buckets for lock-free parallel merging
-///   - Search cache with configurable TTL (default 5 minutes)
-///   - Lazy file invalidation with threshold-based cleanup
 /// Per-file bloom filter over the file's trigram set — the file-granular
 /// bulk trigram prefilter (the tracked follow-up from the 2026-08-04
 /// per-occurrence removal). ~1 byte per DISTINCT trigram instead of ~12
@@ -82,6 +72,15 @@ class TrigramBloom {
     uint32_t bit_mask_{};  // nbits - 1 (nbits is a power of two)
 };
 
+/// Trigram index supporting ASCII (bit-shifted uint32) and Unicode
+/// (string-keyed) trigrams, a per-file bloom prefilter for certified-absence
+/// narrowing, and lazy file invalidation with threshold-based cleanup.
+///
+/// Architecture:
+///   - ASCII trigrams: (b0 << 16) | (b1 << 8) | b2
+///   - Unicode trigrams: 3-rune string keys
+///   - Per-file bloom (TrigramBloom) installed by the bulk integrator
+///   - Lazy file invalidation with threshold-based cleanup
 class TrigramIndex {
   private:
     struct Snapshot;  // Defined in the private section below.
