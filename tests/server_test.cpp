@@ -358,6 +358,60 @@ TEST(ServerLifecycleTest, SelfStopInvokesCallbackWhenRootNeverExisted) {
     EXPECT_TRUE(server.shutdown());
 }
 
+#if defined(__linux__)
+TEST(ServerLifecycleTest, SelfStopWhenRssCapExceeded) {
+    // Pins the RSS self-cap's ACTUAL behaviour at a threshold crossing so the
+    // control cannot silently stop working: each reaper tick measures this
+    // process's own ANONYMOUS RSS (RssAnon, per read_own_rss_mb in
+    // src/server/server.cpp) against server.max_rss_mb and, if it stays over
+    // the cap after malloc_trim, self-stops with reason "rss cap exceeded".
+    //
+    // We cannot allocate a multi-GB index inside a unit test, so we drive the
+    // crossing from the threshold side: set the cap to 1 MB, which every gtest
+    // process's live heap clears by orders of magnitude and which malloc_trim
+    // cannot claw back below (the vectors holding the index, gtest, httplib
+    // and the C++ runtime are all still live). The very next reaper tick
+    // (500 ms) must therefore trip the cap.
+    //
+    // This is a REGRESSION PIN, not a defect reproduction: the cap already
+    // behaves this way, so the test is green against current code. Its value
+    // is that it breaks if a future edit swaps the measure (RssAnon -> a
+    // corpus-independent signal, inverting the D2 accounting that makes the
+    // cap meaningful), flips the comparison, moves the check behind a
+    // condition this path never satisfies, or renames the reason string.
+    // Non-vacuity is demonstrated by temporarily neutering the cap branch:
+    // with the `if (rss_mb > max_rss_mb)` guard forced false the server runs
+    // past the timeout and the ASSERT below fails.
+    TempDir tmp;
+    auto root = tmp.path() / "project";
+    std::filesystem::create_directories(root);
+
+    Config config;
+    config.project.root = root.string();
+    config.server.max_rss_mb = 1;  // below this process's own RssAnon
+
+    MasterIndex indexer(config);
+    SearchEngine engine(indexer);
+    IndexServer server(config, indexer, &engine);
+    server.set_socket_path(test::next_test_server_address());
+
+    std::promise<std::string> stopped;
+    auto stopped_reason = stopped.get_future();
+    server.set_self_stop_callback(
+        [&stopped](const char* reason) { stopped.set_value(reason); });
+
+    ASSERT_TRUE(server.start());
+
+    ASSERT_EQ(stopped_reason.wait_for(std::chrono::seconds(10)),
+              std::future_status::ready)
+        << "own anon RSS above the cap must trip the RSS self-cap on the "
+           "next reaper tick";
+    EXPECT_EQ(stopped_reason.get(), "rss cap exceeded");
+    EXPECT_FALSE(server.is_running());
+    EXPECT_TRUE(server.shutdown());
+}
+#endif
+
 TEST(ServerLifecycleTest, ConcurrentStartAndShutdownAreSerialized) {
     TempDir tmp;
     Config config;
