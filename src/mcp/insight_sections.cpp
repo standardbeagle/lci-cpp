@@ -35,20 +35,10 @@ std::string fmt1(double v) {
     return std::string(buf);
 }
 
-// LCF token estimate for the header. Mirrors Go's estimateLCFTokenCount:
-//   modules*20 + dep_edges*15 + (health?50) + entry*15 + (stats?50) + 20.
-// `n_modules` is the post-truncation count (<=15) the repo map actually
-// emits, matching Go (the formatter runs after budget truncation).
-// NOTE: header tokens= is rewritten by finalize_lcf from the emitted body
-// (chars/4); any estimate passed at header-emission time is a placeholder.
-int lcf_token_count(int n_modules, int n_dep_edges, bool has_health,
-                    int n_entry, bool has_stats) {
-    int est = n_modules * 20 + n_dep_edges * 15 + n_entry * 15 + 20;
-    if (has_health) est += 50;
-    if (has_stats) est += 50;
-    return est;
-}
-
+// The header's tokens= is a placeholder here; finalize_lcf rewrites it from
+// the emitted body (chars/4) once the sections are laid out, so any value
+// passed at emission time is discarded. (The old pre-body token estimator was
+// dead since that rewrite landed; deleted rather than kept as a fallback.)
 void emit_lcf_header(std::ostringstream& out, std::string_view mode, int tier,
                      int tokens, std::string_view scope) {
     out << "LCF/1.0\nmode=" << mode << "\ntier=" << tier << "\ntokens="

@@ -111,8 +111,6 @@ struct ImportDeps {
 };
 
 
-int lcf_token_count(int n_modules, int n_dep_edges, bool has_health,
-                    int n_entry, bool has_stats);
 void emit_lcf_header(std::ostringstream& out, std::string_view mode, int tier,
                      int tokens, std::string_view scope = {});
 inline void emit_lcf_header_scoped(std::ostringstream& out,

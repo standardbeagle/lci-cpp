@@ -1057,8 +1057,8 @@ TEST_F(CodeInsightTest, UnifiedModeWorks) {
     EXPECT_NE(result.text.find("== STATISTICS =="), std::string::npos);
 }
 
-// The LCF header's tokens= was a pre-computed lcf_token_count(...) guess made
-// BEFORE the body existed (or a hardcoded 20/100) — a multi-section unified
+// The LCF header's tokens= was once a pre-computed estimate made BEFORE the
+// body existed (or a hardcoded 20/100) — a multi-section unified
 // output claimed tokens=~370 regardless of content. The header must state
 // the real token estimate of the emitted body (chars/4, the convention
 // hydrate_reference uses) within 10%.
