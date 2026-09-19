@@ -1677,6 +1677,16 @@ TEST(PipelineLoadFailureTest, UnreadableFileSurfacedOnBatchLoadChannel) {
         << "a batch-load open failure must be reported on the load channel "
            "(operation=load) with the offending path; the pre-fix pipeline "
            "drops this channel and only the worker re-open (op=loading) fires";
+
+    // Also surfaced in the return value: load_failures() carries the path and
+    // reason so a caller can tell WHICH file failed and WHY.
+    bool return_value = false;
+    for (const auto& e : pipeline.load_failures()) {
+        if (e.file_path == bad_path && !e.message.empty()) return_value = true;
+    }
+    EXPECT_TRUE(return_value)
+        << "the offending path + reason must be readable from the run's "
+           "return value (load_failures()), not only from progress";
 }
 
 // Negative control: a fully readable corpus records no load-channel failure,
@@ -1698,7 +1708,7 @@ TEST(PipelineLoadFailureTest, ReadableCorpusHasNoLoadFailures) {
 
     for (const auto& e : pipeline.get_progress().errors)
         EXPECT_NE(e.operation, "load") << "no load failure expected: " << e.message;
-    // EXPECT_TRUE(pipeline.load_failures().empty());  // RED: enable after accessor lands
+    EXPECT_TRUE(pipeline.load_failures().empty());
 }
 
 }  // namespace
