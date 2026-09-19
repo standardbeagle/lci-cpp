@@ -658,7 +658,7 @@
             "type": "integer"
           },
           "output": {
-            "description": "Output format: 'line' (default), 'ctx:N' (N context lines), 'full', 'files', 'count'",
+            "description": "Output format: 'line' (default), 'ctx:N' (N context lines), 'full', 'files', 'count', 'graph' (Graphify-style nodes)",
             "type": "string"
           },
           "path": {
