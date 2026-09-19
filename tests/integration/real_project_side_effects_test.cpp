@@ -2,8 +2,9 @@
 //
 // Exercises SideEffectAnalyzer + GraphPropagator wiring (commit 0cb692f)
 // against chi (Go) and fastapi (Python) corpora. Verifies:
-//   - summary mode produces real per-function totals (not the zeroed
-//     count_callable_symbols_in_index fallback).
+//   - summary mode produces real per-function totals; an analyzer with zero
+//     records returns error=analysis_unavailable (7c66f2b) rather than a
+//     purity ratio fabricated from the index's callable count.
 //   - impure-prefix heuristic flags real I/O / network callees on
 //     chi's HTTP handlers and fastapi's request/response paths.
 //   - symbol-mode queries return per-function categories.

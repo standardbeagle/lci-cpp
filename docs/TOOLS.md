@@ -19,6 +19,10 @@ implemented.
 - **Errors**: failures return a structured error result
   `{"operation": "<tool>", "error": "...", "success": false}` with the
   result flagged as an error. Tools **fail fast** — no fake/zeroed payloads.
+  A parameter outside the tool's table below is rejected at dispatch with
+  `unknown parameter(s): <list>` and an allowlist, so removed parameters
+  (`browse_file.show_imports`, `inspect_symbol.max_depth`, both removed as
+  unread in S6) error loudly instead of silently returning unmodified output.
 - **Determinism**: all list output is sorted with total-order tiebreakers
   (no hash-iteration order in user-visible output).
 
