@@ -1,19 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <lci/core/reference_tracker.h>
-
-// The duplicate-location assertion below needs TrigramIndex's per-trigram
-// location vectors, which are private RCU-snapshot internals. Pre-include
-// every header trigram.h pulls in (guards armed), then widen `private`
-// for trigram.h alone — the header is outside this task's editable scope,
-// so no test-only accessor can be added there.
-#include <absl/container/flat_hash_map.h>
-#include <absl/container/flat_hash_set.h>
-#include <lci/core/atomic_shared_ptr.h>
-#include <lci/types.h>
-#define private public
 #include <lci/core/trigram.h>
-#undef private
 
 #include <algorithm>
 #include <chrono>
@@ -730,15 +718,13 @@ TEST(TrigramIndexIncrementalTest, ReindexReplacesLocations) {
 
     TrigramIndex once;
     once.index_file(FileID{1}, content);
-    const size_t after_one =
-        once.load_snapshot()->ascii_trigrams.at(kCom).locations.size();
+    const size_t after_one = once.location_count(kCom);
     ASSERT_EQ(after_one, 1u) << "setup: expected exactly one \"com\"";
 
     TrigramIndex twice;
     twice.index_file(FileID{1}, content);
     twice.index_file(FileID{1}, content);
-    const size_t after_two =
-        twice.load_snapshot()->ascii_trigrams.at(kCom).locations.size();
+    const size_t after_two = twice.location_count(kCom);
     EXPECT_EQ(after_two, after_one)
         << "re-indexing appended a duplicate set of locations";
 }
