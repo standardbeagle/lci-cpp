@@ -79,6 +79,10 @@ void Pipeline::scan_and_parse() {
     // in this per-file rewrite. Group into chunks so each chunk pays
     // one snapshot rewrite, then push the chunk's tasks to workers.
     constexpr size_t kLoadBatchSize = 256;
+    // Batch-load failures are recorded here (producer thread only), then moved
+    // into load_failures_ after the join. Each is also pushed to progress_ the
+    // moment it is seen so a concurrent reader sees the incomplete corpus live.
+    std::vector<Error> load_failures;
     std::thread producer([&] {
         std::vector<std::string> batch_paths;
         std::vector<FileTask> batch_tasks;
@@ -87,14 +91,31 @@ void Pipeline::scan_and_parse() {
 
         auto flush = [&]() {
             if (batch_paths.empty()) return true;
-            auto ids = file_service_->batch_load_from_disk(batch_paths);
+            std::vector<Error> failures;
+            auto ids = file_service_->batch_load_from_disk(batch_paths,
+                                                           &failures);
+            // Surface every load failure on progress + the return-value list,
+            // naming the path and reason; a dropped load must never read as
+            // success.
+            for (auto& err : failures) {
+                progress_.add_error(err);
+                load_failures.push_back(std::move(err));
+            }
             for (size_t i = 0; i < batch_tasks.size(); ++i) {
                 if (stop_flag_.load(std::memory_order_acquire)) return false;
                 progress_.increment_scanned();
-                // Carry the producer-assigned FileID into the task so
-                // the worker can skip the redundant load_file_from_disk
-                // snapshot copy on the inner loop.
-                if (i < ids.size()) batch_tasks[i].preloaded_id = ids[i];
+                const FileID id = i < ids.size() ? ids[i] : FileID{0};
+                if (id == 0) {
+                    // batch_load reported this path's failure above. Do not
+                    // push it to the worker: it would re-open the same file and
+                    // re-derive the same error on the "loading" channel, a
+                    // redundant disk read of a file we already know is bad.
+                    continue;
+                }
+                // Carry the producer-assigned FileID into the task so the
+                // worker can skip the redundant load_file_from_disk snapshot
+                // copy on the inner loop.
+                batch_tasks[i].preloaded_id = id;
                 if (!task_queue.push(std::move(batch_tasks[i]))) return false;
             }
             batch_paths.clear();
@@ -214,6 +235,22 @@ void Pipeline::scan_and_parse() {
 
     producer.join();
     process_thread.join();
+
+    // Publish the collected batch-load failures to the return-value channel.
+    // The run integrated the survivors (a partial-load run does publish), but
+    // the corpus is incomplete; report it loudly and let callers read
+    // load_failures() rather than assume a full index. The first offending
+    // path + reason is shown inline; the full list is on progress() and here.
+    load_failures_ = std::move(load_failures);
+    if (!load_failures_.empty()) {
+        std::fprintf(stderr,
+                     "lci: %zu file(s) failed to load — index is INCOMPLETE "
+                     "(e.g. %s: %s); see load_failures()/progress for the full "
+                     "list\n",
+                     load_failures_.size(),
+                     load_failures_.front().file_path.c_str(),
+                     load_failures_.front().message.c_str());
+    }
 }
 
 void Pipeline::integrate() {

@@ -76,6 +76,15 @@ class Pipeline {
     /// (index.overflow_policy "reject"). Callers fail the index run on it.
     const std::string& scan_error() const { return scan_error_; }
 
+    /// Per-file failures reported by FileService::batch_load_from_disk during
+    /// the producer's batch loads — files that could not be opened or exceeded
+    /// the size limit. Non-empty means the run is INCOMPLETE: it integrated the
+    /// surviving files (a partial-load run DOES publish, unlike a scan-reject),
+    /// but the index silently covers less than the whole corpus. Callers must
+    /// not treat a successful-looking run with a non-empty list as a complete
+    /// index; this is the channel that used to be dropped on the floor.
+    const std::vector<Error>& load_failures() const { return load_failures_; }
+
   private:
     Config config_;
     std::shared_ptr<FileService> file_service_;
@@ -92,6 +101,7 @@ class Pipeline {
     std::vector<ProcessedFile> buffered_;
     std::atomic<bool> stop_flag_{false};
     std::string scan_error_;
+    std::vector<Error> load_failures_;
 };
 
 }  // namespace lci
