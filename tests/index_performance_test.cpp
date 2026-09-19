@@ -18,6 +18,7 @@
 
 #include <lci/config.h>
 #include <lci/core/portable.h>
+#include <lci/core/reference_tracker.h>
 #include <lci/indexing/master_index.h>
 #include <lci/mcp/handlers_explore.h>
 
@@ -26,6 +27,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <limits>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -382,6 +384,88 @@ TEST(IndexPerformanceRequirements, PaginationRandomTraversalIsFlat) {
 #endif
     EXPECT_LT(random_cost.count(), kRandomCeilingNs)
         << "random page window cost regressed past the tripwire";
+}
+
+// ---------------------------------------------------------------------------
+// Postings remove_file is O(file's token count), not O(files sharing a token).
+//
+// On d84a94a remove_file walked every token's posting vector with a linear
+// scan + middle erase to find the removed file's entry. A token present in
+// 5000 files (e.g. "function") therefore cost ~5000 element shifts per
+// removal regardless of how few tokens the removed file has -- the S3
+// update path pays this once per reindexed file.
+//
+// Shape of the measurement: only the remove_file call is timed, and it runs
+// inside a bulk window (set_bulk_indexing) so the clone-mutate-publish RCU
+// cost -- which is proportional to the WHOLE index by design and is not
+// what this guards -- stays out of the timed region. This matches the
+// integrator path (S3 update/remove run against the staging snapshot).
+// ---------------------------------------------------------------------------
+namespace {
+
+// Index `n_files` files, each contributing the hot token "function" plus
+// `extra_tokens` distinct tokens, then best-of-5 the remove_file of one
+// representative file (re-added between reps so each timed removal starts
+// from identical state). Returns ns of the removal alone.
+long long time_remove_with_hot_token(int n_files, int extra_tokens) {
+    auto tokens_for = [](int file_idx, int extra) {
+        std::vector<PostingsToken> toks;
+        toks.push_back(PostingsToken{"function", 0});
+        for (int j = 0; j < extra; ++j) {
+            toks.push_back(PostingsToken{
+                "tok_" + std::to_string(file_idx) + "_" + std::to_string(j),
+                j});
+        }
+        return toks;
+    };
+    PostingsIndex index;
+    // Bulk window for the whole fixture: keeps the O(snapshot) RCU clone out
+    // of both the setup and the timed removals (the clone is a per-publish
+    // property of the update path, not what this test guards).
+    index.set_bulk_indexing(true);
+    for (int i = 0; i < n_files; ++i) {
+        index.index_file_pretokenized(static_cast<FileID>(i),
+                                      tokens_for(i, extra_tokens));
+    }
+    const FileID victim = static_cast<FileID>(n_files / 2);
+    long long best = std::numeric_limits<long long>::max();
+    // Warmup rep (page faults, allocator warm).
+    index.remove_file(victim);
+    index.index_file_pretokenized(victim, tokens_for(static_cast<int>(victim),
+                                                     extra_tokens));
+    for (int rep = 0; rep < 5; ++rep) {
+        auto start = std::chrono::steady_clock::now();
+        index.remove_file(victim);
+        auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                      std::chrono::steady_clock::now() - start)
+                      .count();
+        best = std::min<long long>(best, ns);
+        index.index_file_pretokenized(victim, tokens_for(static_cast<int>(victim),
+                                                         extra_tokens));
+    }
+    index.set_bulk_indexing(false);
+    return best;
+}
+
+}  // namespace
+
+TEST(IndexPerformanceRequirements, PostingsRemoveFileScalesWithTokenCountNotFileCount) {
+    // Removing a 1-token file from an index where "function" is shared by
+    // 5000 files must not cost ~5000 scans+shifts more than the same
+    // removal from a 50-file index. Pre-fix the ratio is ~50-100x (linear
+    // in the hot token's file count); post-fix it is ~1x (bounded by the
+    // removed file's own token count).
+    long long hot_5000 = time_remove_with_hot_token(5000, 0);
+    long long hot_50 = time_remove_with_hot_token(50, 0);
+    double ratio = static_cast<double>(hot_5000) /
+                   static_cast<double>(std::max<long long>(hot_50, 1));
+    std::printf("[ PostingsRemoveScaling ] files=5000:%lldns files=50:%lldns ratio=%.2f\n",
+                hot_5000, hot_50, ratio);
+    std::fflush(stdout);
+    EXPECT_LT(ratio, 5.0)
+        << "remove_file cost scaled with the number of files sharing the "
+           "hot token (linear posting-vector scan suspected): 5000-file "
+        << hot_5000 << "ns vs 50-file " << hot_50 << "ns";
 }
 
 }  // namespace

@@ -633,5 +633,107 @@ TEST(SymbolLocationIndexTest, BenchmarkPositionLookup) {
     EXPECT_LT(t_large, 200000.0) << "position lookup absurdly slow: " << t_large << "ns";
 }
 
+// ---------------------------------------------------------------------------
+// SymbolStore - set() update path complexity
+//
+// ReferenceTracker::apply_enrichment re-sets every symbol of a file after
+// building the enhanced list, i.e. calls set() with an id that already
+// exists. On d84a94a that path did an erase(remove()) over the symbol's
+// name bucket for every re-set, so one pass costs sum(bucket sizes):
+// 10x symbols sharing the same handful of names cost ~100x, quadratic on
+// the serial integrator thread. Pin: per-symbol re-set cost must not grow
+// with bucket size (ratio of per-symbol cost at 1x vs 10x symbols, the
+// same contention-robust shape as BenchmarkLookup above).
+// ---------------------------------------------------------------------------
+TEST(SymbolStoreTest, SetUpdateCostPerSymbolScalesWithCountNotBucket) {
+    auto build = [](int n) {
+        static const char* kNames[] = {"render", "get", "set", "init",
+                                       "constructor"};
+        SymbolStore store(n);
+        for (int i = 0; i < n; ++i) {
+            // One file per symbol so the file bucket stays size 1 and the
+            // measured dimension is the shared-name bucket.
+            store.set(static_cast<SymbolID>(i + 1),
+                      make_symbol(static_cast<SymbolID>(i + 1),
+                                  kNames[i % 5], SymbolType::Function,
+                                  static_cast<FileID>(i + 1), i + 1, 0,
+                                  i + 2, 0));
+        }
+        return store;
+    };
+    // One apply_enrichment-shaped pass: re-set every existing id with its
+    // current data (what apply_enrichment does for un-enriched symbols).
+    auto reset_pass = [](SymbolStore& store,
+                         std::vector<EnhancedSymbol>& snapshot) {
+        auto start = std::chrono::steady_clock::now();
+        for (auto& es : snapshot) {
+            store.set(es.id, es);
+        }
+        auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                      std::chrono::steady_clock::now() - start)
+                      .count();
+        return ns / static_cast<long long>(snapshot.size());
+    };
+    auto take_snapshot = [](SymbolStore& store) {
+        std::vector<EnhancedSymbol> v;
+        auto all = store.get_all();
+        v.assign(all.begin(), all.end());
+        return v;
+    };
+    auto best_per_symbol = [&](int n) {
+        SymbolStore store = build(n);
+        auto snap = take_snapshot(store);
+        (void)reset_pass(store, snap);  // warmup
+        long long best = std::numeric_limits<long long>::max();
+        for (int rep = 0; rep < 5; ++rep) {
+            best = std::min(best, reset_pass(store, snap));
+        }
+        EXPECT_EQ(store.stats().total_symbols, n);
+        EXPECT_EQ(static_cast<int>(store.get_symbols_by_name("render").size()),
+                  n / 5);
+        return best;
+    };
+
+    long long per_sym_1x = best_per_symbol(2000);
+    long long per_sym_10x = best_per_symbol(20000);
+    double ratio = static_cast<double>(per_sym_10x) /
+                   static_cast<double>(std::max<long long>(per_sym_1x, 1));
+    std::printf("[ SetUpdateScaling ] 1x=%lldns/sym 10x=%lldns/sym ratio=%.2f\n",
+                per_sym_1x, per_sym_10x, ratio);
+    std::fflush(stdout);
+    EXPECT_LT(ratio, 3.0)
+        << "re-set cost per symbol grew with the shared-name bucket "
+           "(quadratic apply_enrichment suspected): 1x="
+        << per_sym_1x << "ns 10x=" << per_sym_10x << "ns";
+}
+
+TEST(SymbolLocationIndexTest, SyntheticFallbackIdReservesHighBit) {
+    // index_file_symbols without enhanced symbols synthesizes ids from
+    // (line, column, i). Those must carry the reserved high bit so they
+    // can never alias a sequential ReferenceTracker SymbolID.
+    SymbolLocationIndex idx;
+    std::vector<Symbol> symbols;
+    for (int i = 0; i < 3; ++i) {
+        Symbol s;
+        s.name = "f" + std::to_string(i);
+        s.type = SymbolType::Function;
+        s.file_id = 7;
+        s.line = i * 10 + 1;
+        s.column = 0;
+        s.end_line = i * 10 + 5;
+        s.end_column = 1;
+        symbols.push_back(s);
+    }
+    idx.index_file_symbols(7, symbols, {});
+
+    for (int i = 0; i < 3; ++i) {
+        SymbolID id = idx.find_symbol_id_at_position(7, i * 10 + 2, 0);
+        ASSERT_NE(id, 0u) << "no symbol found at line " << (i * 10 + 2);
+        EXPECT_NE(id & kSyntheticSymbolIdBit, 0u)
+            << "synthetic fallback id " << id
+            << " collides with the sequential id space (high bit not set)";
+    }
+}
+
 }  // namespace
 }  // namespace lci

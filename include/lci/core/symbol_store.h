@@ -19,6 +19,12 @@
 
 namespace lci {
 
+/// Reserved high bit marking a synthetic fallback SymbolID (no
+/// ReferenceTracker id existed at position-index time). Real ids are
+/// allocated sequentially from a counter, so bit 63 is never set by them
+/// and a synthetic id can never collide with a stored symbol.
+inline constexpr uint64_t kSyntheticSymbolIdBit = 1ull << 63;
+
 /// Pre-computed statistics about the symbol store contents.
 struct SymbolStoreStats {
     int total_symbols{};
